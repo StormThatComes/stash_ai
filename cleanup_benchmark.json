@@ -1,0 +1,45 @@
+{
+  "sqlite_version": "3.53.1",
+  "markers": 2500000,
+  "extra_associations": 5000000,
+  "page_size": 2000,
+  "fixture_seconds": 5.134,
+  "scope": "Synthetic local SQLite discovery only; no Stash API mutations or network.",
+  "global_primary": {
+    "rows": 25000,
+    "queries": 13,
+    "seconds": 0.011
+  },
+  "owned_core": {
+    "rows": 25000,
+    "queries": 13,
+    "seconds": 0.0869
+  },
+  "query_plans": {
+    "primary": [
+      "SEARCH t USING INTEGER PRIMARY KEY (rowid=?)",
+      "SEARCH m USING INDEX index_scene_markers_on_primary_tag_id (primary_tag_id=? AND rowid>? AND rowid<?)",
+      "CORRELATED SCALAR SUBQUERY 1",
+      "SEARCH own USING INDEX index_scene_markers_tags_on_scene_marker_id (scene_marker_id=?)",
+      "SEARCH ot USING INTEGER PRIMARY KEY (rowid=?)"
+    ],
+    "owned_core": [
+      "SEARCH t USING INTEGER PRIMARY KEY (rowid=?)",
+      "SEARCH m USING INDEX index_scene_markers_on_primary_tag_id (primary_tag_id=? AND rowid>? AND rowid<?)",
+      "CORRELATED SCALAR SUBQUERY 1",
+      "SEARCH own USING INDEX index_scene_markers_tags_on_scene_marker_id (scene_marker_id=?)",
+      "SEARCH ot USING INTEGER PRIMARY KEY (rowid=?)"
+    ],
+    "extras_tail": [
+      "SEARCH t USING INTEGER PRIMARY KEY (rowid=?)",
+      "SEARCH mt USING INDEX index_scene_markers_tags_on_tag_id (tag_id=? AND rowid>? AND rowid<?)"
+    ]
+  },
+  "legacy_one_count": {
+    "rows": 2500000,
+    "seconds": 0.7359,
+    "completed": true
+  },
+  "legacy_matching_rows": 2500000,
+  "legacy_pages_at_1000": 2500
+}

@@ -1,0 +1,58 @@
+# --models joytag | --models wd dtq | --models oppai | --models all
+# Models run in separate passes; one model occupies GPU memory at a time.
+# Default output is shared ai: tags and same-label interval unions.
+# --models selects new inference; cached contributions from other models remain.
+# Keep tagger_sources.sqlite3; --state-db selects a durable location.
+# stash_ai.py resumes matching results/checkpoints by default in merged mode.
+# --restart requests fresh inference; omit it when resuming that new run.
+# --prefetch-batches 4 prepares four next batches; 0 disables preparation in the background.
+# --ram-budget-gb 32 / --ram-cache-gb 24 bound the shared cache; allocated on demand.
+# --prepare-workers 4 parallelizes CPU transforms only; inference remains sequential.
+# --verbose enables per-scene diagnostics; default output summarizes the collection.
+# No sprite or extracted-frame cache is written to disk.
+# --merge-only migrates existing results without model inference.
+# --output-mode separate restores the original model-prefixed output format.
+version: 1
+enabled_models: [joytag, oppai, wd, dtq]
+device: cuda  # auto prefers CUDA; cuda requires CUDA; cpu forces CPU.
+download_missing: true  # All four models, including JoyTag; --offline disables downloads.
+
+# JoyTag preserves the script's paths and JOYTAG_MODEL_PATH / JOYTAG_CODE_PATH.
+# Optional model_dir/code_dir paths can be specified here. Environment wins.
+# Relative paths are resolved beside this YAML.
+# JoyTag downloads config.json, top_tags.txt and model.safetensors from Hugging Face.
+# code_dir / JOYTAG_CODE_PATH still points to the original JoyTag Python source.
+joytag:
+  model_dir: models/joytag
+  scene_threshold: 0.40
+  marker_threshold: 0.65
+  batch_size: 16
+
+wd:
+  model_dir: models/wd-eva02-large-tagger-v3
+  scene_threshold: 0.35
+  marker_threshold: 0.65
+  batch_size: 4
+
+dtq:
+  model_dir: models/danbooru-tag-query-l16
+  scene_threshold: 0.20
+  marker_threshold: 0.65
+  batch_size: 4
+
+oppai:
+  model_dir: models/oppai-oracle-v1.1
+  scene_threshold: 0.65
+  marker_threshold: 0.80
+  batch_size: 4
+
+# All vocabulary entries/categories are eligible. No whitelist is used.
+# Thresholds are starting points, not a guarantee of accuracy for your scenes.
+# Count caps are disabled in the script (0 = unlimited); time grouping,
+# MARKER_MIN_HITS and confidence thresholds still apply.
+# WD_MODEL_PATH, DTQ_MODEL_PATH and OPPAI_MODEL_PATH override the paths above.
+# OppaiOracle uses source code op (op: tags in separate mode) and --models oppai.
+# "all" runs four models. Merged marker titles identify sources, e.g. [jt+wd+op].
+# Bundled defaults: joytag_hierarchy.yml, wd_hierarchy.yml, dtq_hierarchy.yml,
+# oppai_hierarchy.yml. Override with --hierarchy / --wd-hierarchy /
+# --dtq-hierarchy / --oppai-hierarchy, or disable with --no-hierarchy.

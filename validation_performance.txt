@@ -1,0 +1,16 @@
+Walidacja aktualizacji wydajności — 2026-09-15
+
+python -m pytest -q
+392 passed in 17.33s
+
+Wszystkie moduły Python przechodzą parsowanie AST.
+Wartości wszystkich 8 konfiguracji YAML są zgodne z poprzednią paczką.
+Zmiany stałych konfiguracji: RAM_CACHE_GB=24, RAM_BUDGET_GB=32, PREPARE_WORKERS=4.
+Pozostałe stałe, w tym połączenie, progi i ograniczenia wyników: bez zmian.
+Nie wykonywano połączeń z produkcyjnym Stash ani inferencji na rzeczywistym GPU.
+
+Porównanie offline z poprzednią paczką: identyczne SHA-256 wyników merge
+oraz filtrowania. Mediany i wszystkie czasy: performance_results.json.
+Testy wznowień, wykluczeń, trybów częściowych, cleanup SQL i podglądu: zaliczone.
+Testy wątków CPU: zachowana kolejność, odrębne kopie klatek, zwalnianie po błędzie.
+Budżet 32 GiB jest celem zarządzania cache, nie twardym limitem systemowym.

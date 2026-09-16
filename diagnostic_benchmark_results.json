@@ -1,0 +1,288 @@
+{
+  "before": {
+    "frames": 400,
+    "labels": 28,
+    "models": 4,
+    "median_seconds": 2.2833318849999955,
+    "trials": [
+      {
+        "wall_seconds": 2.3008252899999775,
+        "cpu_seconds": 2.300644141,
+        "stages": {
+          "state_read": 0.05375086600008672,
+          "occurrence_compute": 0.0002226040000437024,
+          "merge_compute": 0.877932623999925,
+          "state_write": 0.9795937220000042,
+          "merge_plan": 0.38922776699996575
+        },
+        "counts": {
+          "scene_tags_updated": 0,
+          "legacy_scene_tags_migrated": 0,
+          "markers_created": 453,
+          "markers_updated": 0,
+          "markers_deleted": 0,
+          "markers_unchanged": 0,
+          "merged_markers": 453,
+          "merged_scene_tags": 0,
+          "short_extras": 0,
+          "occurrence_markers": 0,
+          "occurrence_manual_locations": 0,
+          "cross_model_extras": 0
+        },
+        "snapshots": {
+          "markers": {
+            "json_bytes": 44153763,
+            "compressed_bytes": 1690459
+          },
+          "scene": {
+            "json_bytes": 35,
+            "compressed_bytes": 39
+          }
+        },
+        "snapshot_sha256": "e3d8def48fa2d7129ac8c1a39b140524b0cd5b5857fa0762b990b5dfe5e4a259"
+      },
+      {
+        "wall_seconds": 2.2833318849999955,
+        "cpu_seconds": 2.2831748569999997,
+        "stages": {
+          "state_read": 0.04672058700009529,
+          "occurrence_compute": 0.00026191299997435635,
+          "merge_compute": 0.8580740059999812,
+          "state_write": 0.9652445090000015,
+          "merge_plan": 0.4129345149999608
+        },
+        "counts": {
+          "scene_tags_updated": 0,
+          "legacy_scene_tags_migrated": 0,
+          "markers_created": 453,
+          "markers_updated": 0,
+          "markers_deleted": 0,
+          "markers_unchanged": 0,
+          "merged_markers": 453,
+          "merged_scene_tags": 0,
+          "short_extras": 0,
+          "occurrence_markers": 0,
+          "occurrence_manual_locations": 0,
+          "cross_model_extras": 0
+        },
+        "snapshots": {
+          "markers": {
+            "json_bytes": 44153763,
+            "compressed_bytes": 1690459
+          },
+          "scene": {
+            "json_bytes": 35,
+            "compressed_bytes": 39
+          }
+        },
+        "snapshot_sha256": "e3d8def48fa2d7129ac8c1a39b140524b0cd5b5857fa0762b990b5dfe5e4a259"
+      },
+      {
+        "wall_seconds": 2.188359821000006,
+        "cpu_seconds": 2.1881742110000006,
+        "stages": {
+          "state_read": 0.049612515999967854,
+          "occurrence_compute": 0.00033453200001076766,
+          "merge_compute": 0.9022921680000309,
+          "state_write": 0.7969270149999943,
+          "merge_plan": 0.4391127490000599
+        },
+        "counts": {
+          "scene_tags_updated": 0,
+          "legacy_scene_tags_migrated": 0,
+          "markers_created": 453,
+          "markers_updated": 0,
+          "markers_deleted": 0,
+          "markers_unchanged": 0,
+          "merged_markers": 453,
+          "merged_scene_tags": 0,
+          "short_extras": 0,
+          "occurrence_markers": 0,
+          "occurrence_manual_locations": 0,
+          "cross_model_extras": 0
+        },
+        "snapshots": {
+          "markers": {
+            "json_bytes": 44153763,
+            "compressed_bytes": 1690459
+          },
+          "scene": {
+            "json_bytes": 35,
+            "compressed_bytes": 39
+          }
+        },
+        "snapshot_sha256": "e3d8def48fa2d7129ac8c1a39b140524b0cd5b5857fa0762b990b5dfe5e4a259"
+      }
+    ]
+  },
+  "instrumented": {
+    "frames": 400,
+    "labels": 28,
+    "models": 4,
+    "median_seconds": 2.1368378610000036,
+    "trials": [
+      {
+        "wall_seconds": 1.9693556409999928,
+        "cpu_seconds": 1.9558920600000003,
+        "stages": {
+          "state_sql_read": 0.00017638499997474355,
+          "state_cache": 0.04052173600001652,
+          "state_read": 0.00024253400005136427,
+          "state_decompress": 0.0005621930000074826,
+          "state_json_decode": 0.007288095999967936,
+          "frame_index": 0.010778023000000303,
+          "marker_seeds": 0.011467547999984617,
+          "marker_build": 0.05848811500004558,
+          "marker_fusion": 0.5952681310000116,
+          "scene_fusion": 5.276000001686043e-05,
+          "occurrence_compute": 0.00026214400003254923,
+          "merge_compute": 0.009710270999903514,
+          "marker_union": 0.30935360699999137,
+          "tag_resolution": 0.0002700850000110222,
+          "scene_refresh": 1.006499996947241e-05,
+          "marker_matching": 0.00492842500000279,
+          "state_json_encode": 0.5445720889999848,
+          "state_compress": 0.30653457199997547,
+          "state_write": 0.005693252000071425,
+          "publication_prepare": 3.7185999985922535e-05,
+          "publication_mutations": 0.04299351399998841,
+          "publication_commit": 2.4706999965928844e-05,
+          "merge_plan": 0.020053843000027882
+        },
+        "counts": {
+          "scene_tags_updated": 0,
+          "legacy_scene_tags_migrated": 0,
+          "markers_created": 453,
+          "markers_updated": 0,
+          "markers_deleted": 0,
+          "markers_unchanged": 0,
+          "merged_markers": 453,
+          "merged_scene_tags": 0,
+          "short_extras": 0,
+          "occurrence_markers": 0,
+          "occurrence_manual_locations": 0,
+          "cross_model_extras": 0
+        },
+        "snapshots": {
+          "markers": {
+            "json_bytes": 44153763,
+            "compressed_bytes": 1690459
+          },
+          "scene": {
+            "json_bytes": 35,
+            "compressed_bytes": 39
+          }
+        },
+        "snapshot_sha256": "e3d8def48fa2d7129ac8c1a39b140524b0cd5b5857fa0762b990b5dfe5e4a259"
+      },
+      {
+        "wall_seconds": 2.2128767519999997,
+        "cpu_seconds": 2.2106322799999996,
+        "stages": {
+          "state_sql_read": 0.00019073600003594038,
+          "state_cache": 0.03824537999997801,
+          "state_read": 0.00025369099989802635,
+          "state_decompress": 0.0004759949999879609,
+          "state_json_decode": 0.008180706000018745,
+          "frame_index": 0.01209966699997267,
+          "marker_seeds": 0.01226604599997927,
+          "marker_build": 0.053806941000004826,
+          "marker_fusion": 0.7337159720000273,
+          "scene_fusion": 4.2382999993151316e-05,
+          "occurrence_compute": 0.0002238060000081532,
+          "merge_compute": 0.026558562000047914,
+          "marker_union": 0.3177178880000042,
+          "tag_resolution": 0.00020822299995870708,
+          "scene_refresh": 1.1006999955043284e-05,
+          "marker_matching": 0.004523607999999513,
+          "state_json_encode": 0.6362714510000274,
+          "state_compress": 0.2960388719999969,
+          "state_write": 0.003003896999985045,
+          "publication_prepare": 3.655500000832035e-05,
+          "publication_mutations": 0.043429338999999345,
+          "publication_commit": 1.7366000008678384e-05,
+          "merge_plan": 0.025450208000052044
+        },
+        "counts": {
+          "scene_tags_updated": 0,
+          "legacy_scene_tags_migrated": 0,
+          "markers_created": 453,
+          "markers_updated": 0,
+          "markers_deleted": 0,
+          "markers_unchanged": 0,
+          "merged_markers": 453,
+          "merged_scene_tags": 0,
+          "short_extras": 0,
+          "occurrence_markers": 0,
+          "occurrence_manual_locations": 0,
+          "cross_model_extras": 0
+        },
+        "snapshots": {
+          "markers": {
+            "json_bytes": 44153763,
+            "compressed_bytes": 1690459
+          },
+          "scene": {
+            "json_bytes": 35,
+            "compressed_bytes": 39
+          }
+        },
+        "snapshot_sha256": "e3d8def48fa2d7129ac8c1a39b140524b0cd5b5857fa0762b990b5dfe5e4a259"
+      },
+      {
+        "wall_seconds": 2.1368378610000036,
+        "cpu_seconds": 2.1363824090000003,
+        "stages": {
+          "state_sql_read": 0.00018424500001401611,
+          "state_cache": 0.04050960699993311,
+          "state_read": 0.00033218800012946303,
+          "state_decompress": 0.0004604119999953582,
+          "state_json_decode": 0.007665803999941545,
+          "frame_index": 0.013164344000017536,
+          "marker_seeds": 0.013487188000055994,
+          "marker_build": 0.05506227499995475,
+          "marker_fusion": 0.7460655989999623,
+          "scene_fusion": 3.7607000024308945e-05,
+          "occurrence_compute": 0.00026820300001872965,
+          "merge_compute": 0.02687247300002582,
+          "marker_union": 0.3361919000000171,
+          "tag_resolution": 0.00020315500000833708,
+          "scene_refresh": 9.685000009085343e-06,
+          "marker_matching": 0.004587523999987297,
+          "state_json_encode": 0.4876145700000052,
+          "state_compress": 0.3329287729999919,
+          "state_write": 0.003127122000023519,
+          "publication_prepare": 2.69010000124581e-05,
+          "publication_mutations": 0.042610730000035346,
+          "publication_commit": 1.708700000335739e-05,
+          "merge_plan": 0.025330708999831586
+        },
+        "counts": {
+          "scene_tags_updated": 0,
+          "legacy_scene_tags_migrated": 0,
+          "markers_created": 453,
+          "markers_updated": 0,
+          "markers_deleted": 0,
+          "markers_unchanged": 0,
+          "merged_markers": 453,
+          "merged_scene_tags": 0,
+          "short_extras": 0,
+          "occurrence_markers": 0,
+          "occurrence_manual_locations": 0,
+          "cross_model_extras": 0
+        },
+        "snapshots": {
+          "markers": {
+            "json_bytes": 44153763,
+            "compressed_bytes": 1690459
+          },
+          "scene": {
+            "json_bytes": 35,
+            "compressed_bytes": 39
+          }
+        },
+        "snapshot_sha256": "e3d8def48fa2d7129ac8c1a39b140524b0cd5b5857fa0762b990b5dfe5e4a259"
+      }
+    ]
+  }
+}

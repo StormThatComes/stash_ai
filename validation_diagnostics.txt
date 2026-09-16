@@ -1,0 +1,34 @@
+Validation: merge diagnostics, 2026-09-16
+
+Full offline regression:
+  python -m pytest -q --disable-warnings
+  450 passed in 20.08s
+
+New diagnostics coverage (12 tests, including parametrized cases):
+  - deterministic exclusive/inclusive nested stage accounting and errors
+  - named API request durations, response sizes and failures
+  - payload-free JSONL records
+  - snapshot codec byte compatibility and byte counts
+  - interruption records and file closure
+  - bounded retained scene examples and refusal to overwrite existing reports
+  - diagnostic IO failure does not fail successful merge work
+  - ordinary profiling respects publication reuse
+  - forced merge recomputes without models, preserves results and avoids redundant native writes
+  - forced dry-run preserves persistent state and native output
+  - invalid CLI combinations fail before Stash access
+
+Controlled sequential benchmark (three trials per version):
+  400 frames, 28 labels, four models, 453 final markers
+  Real temporary local SQLite snapshots, mock Stash without network latency
+  Previous version median: 2.2833318849999955 seconds
+  Instrumented version median: 2.1368378610000036 seconds
+  These results do not establish a speedup or production Stash latency.
+  Marker snapshot JSON: 44153763 bytes
+  Marker snapshot compressed: 1690459 bytes
+  Both versions and all trials produced identical compressed snapshots:
+    e3d8def48fa2d7129ac8c1a39b140524b0cd5b5857fa0762b990b5dfe5e4a259
+  Raw results: diagnostic_benchmark_results.json
+
+All existing application configuration assignments and YAML files remain unchanged.
+No real Stash access, production database access, GPU inference or model downloads.
+No changes to snapshot format or tag/marker qualification rules in this update.

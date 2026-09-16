@@ -1,0 +1,35 @@
+# Automatic postprocessing for all labels and models. No allowlist.
+version: 1
+enabled: true
+# Combine compatible models before rejecting runs with too few distinct times.
+shared_marker_frames: true
+# Include extras from models that did not detect the primary marker label.
+shared_marker_extras: true
+# A short contiguous episode can also qualify below the whole-marker coverage.
+short_marker_extras: true
+extra_short_min_hits: 3
+# Additional scene qualification from matching cached scene/frame runs.
+shared_scene_tags: true
+# One representative point for each accepted scene tag without its own marker.
+# Uses recorded times only; respects scene/core exclusions. Merged output only.
+occurrence_markers: true
+
+# Marker starts use each model's marker_threshold. Continuations can be weaker.
+marker_continue_ratio: 0.85
+marker_max_weak_seconds: 15.0
+consensus_min_models: 2
+
+# Additional tags must recur within the whole final marker interval.
+extra_min_hits: 2
+extra_min_fraction: 0.20
+
+# Scene tag: strong peak OR repeated high scores OR persistent weaker support.
+scene_support_ratio: 0.85
+scene_min_hits: 2
+scene_repeat_hits: 4
+scene_repeat_run: 3
+scene_repeat_fraction: 0.10
+# Strong peak = scene_threshold + (1 - scene_threshold) * this margin.
+scene_strong_margin: 0.50
+
+# Visual inputs are exclusively Stash VTT/sprites served over HTTP(S).

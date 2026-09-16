@@ -1,0 +1,19 @@
+Walidacja kolejnej optymalizacji merge — 2026-09-16
+
+python -m pytest -q
+406 passed in 18.12s
+
+Porównanie CPU: 400 klatek, 28 etykiet, 4 źródła; trzy powtórzenia na wersję.
+Poprzednia paczka (mediana): 1.56180363 s.
+Nowa paczka (mediana): 0.97858940 s.
+Spadek czasu: 37.3%. Identyczny hash pełnych wyników.
+Szczegóły: merge_performance_results.json.
+Nie mierzono rzeczywistego serwera Stash, całej kolekcji ani GPU.
+
+Wartości wszystkich YAML i stałe konfiguracji aplikacji: bez zmian od poprzedniej paczki.
+Testy SQL: zgodność snapshotów, użycie indeksów, brak mutacji w podglądzie,
+stronicowanie po kluczu, przełączenie na GraphQL bez duplikowania odwiedzonych scen.
+Testy indeksu: zgodność z referencyjnym skanowaniem dla zakresów, luk,
+różnych źródeł i nakładających się osi; konserwatywne liczenie cache.
+Testy publikacji: snapshot i sprawdzenie zgodności w jednej transakcji.
+Pomiary etapów: bez podwójnego doliczania czasu zagnieżdżonych wywołań.

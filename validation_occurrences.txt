@@ -1,0 +1,26 @@
+Verification: automatic occurrence markers
+
+Offline test suite, without live Stash or GPU:
+PYTHONPATH=/workspace/scratch/7efeb422483c/review_deps python -m pytest -q --disable-warnings
+438 passed in 19.69s
+
+32 new occurrence cases cover:
+- earliest sampled maximum, compact checkpoint state and legacy checkpoints;
+- retained legacy frame timestamps and missing/incompatible source data;
+- scene evidence below the marker retention floor;
+- scene/core/global exclusions and disabled/output-specific policies;
+- same-input multi-model agreement and duplicate source records;
+- idempotence, native point payloads and conversion to range markers;
+- manual locations and preservation of manual deletions during cleanup;
+- per-model witness revocation and shared scene qualification;
+- marker caps, unchanged inference identity and lazy global cleanup masks;
+- markers-only, dry-run, unchanged raw records and interrupted API recovery.
+
+CPU benchmark:
+PYTHONPATH=/workspace/scratch/7efeb422483c/review_deps python benchmark_occurrences.py --output occurrence_performance_results.json
+500 samples, 100 labels, 4 models, 5 repetitions.
+Median selection time: old_sparse_frames 0.061763 s;
+new_scene_peaks 0.001923 s; already_localized 0.000018 s.
+No claim is made about network/API time, GPU throughput or total library time.
+
+Main stash_ai.py, model settings, credentials and user exclusion lists are unchanged.

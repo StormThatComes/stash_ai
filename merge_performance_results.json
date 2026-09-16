@@ -1,0 +1,66 @@
+{
+  "baseline_version": 2,
+  "optimized_version": 3,
+  "method": "Sequential offline CPU benchmark; three repeats per version; no Stash server/GPU timing.",
+  "baseline": {
+    "frames": 400,
+    "labels": 28,
+    "sources": 4,
+    "repeats": 3,
+    "merge": {
+      "seconds": [
+        1.6351172150000366,
+        1.5435818250000466,
+        1.5618036299999858
+      ],
+      "median_seconds": 1.5618036299999858,
+      "sha256": "eba01b4e3f817c5d1f06689d3305648dcb237fb41d99d11ea4e22802eb7fdc38",
+      "contributions": 1812,
+      "markers": 453
+    },
+    "score_filter": {
+      "seconds": [
+        0.026177310999855763,
+        0.026277611000068646,
+        0.026068067000096562
+      ],
+      "median_seconds": 0.026177310999855763,
+      "shape": [
+        512,
+        20000
+      ],
+      "sha256": "cbe0b2d4734db6409c7d3b91a46b68a9b453d57d4a4cc36bd70dc162269fa57f"
+    }
+  },
+  "optimized": {
+    "frames": 400,
+    "labels": 28,
+    "sources": 4,
+    "repeats": 3,
+    "merge": {
+      "seconds": [
+        0.946603702999937,
+        0.9948287600000185,
+        0.9785893999999189
+      ],
+      "median_seconds": 0.9785893999999189,
+      "sha256": "eba01b4e3f817c5d1f06689d3305648dcb237fb41d99d11ea4e22802eb7fdc38",
+      "contributions": 1812,
+      "markers": 453
+    },
+    "score_filter": {
+      "seconds": [
+        0.02557701699993231,
+        0.027383722999957172,
+        0.02633662900007039
+      ],
+      "median_seconds": 0.02633662900007039,
+      "shape": [
+        512,
+        20000
+      ],
+      "sha256": "cbe0b2d4734db6409c7d3b91a46b68a9b453d57d4a4cc36bd70dc162269fa57f"
+    }
+  },
+  "merge_cpu_reduction_percent": 37.342353340545905
+}

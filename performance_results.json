@@ -1,0 +1,73 @@
+{
+  "environment": {
+    "python": "3.12.14",
+    "platform": "Linux x86_64",
+    "sqlite": "3.53.1"
+  },
+  "method": "Offline CPU synthetic inputs; sequential runs, three repeats, median. Not a full Stash/GPU benchmark.",
+  "baseline": {
+    "frames": 400,
+    "labels": 28,
+    "sources": 4,
+    "repeats": 3,
+    "merge": {
+      "seconds": [
+        4.919443395000144,
+        4.215266321999934,
+        4.633301425999889
+      ],
+      "median_seconds": 4.633301425999889,
+      "sha256": "eba01b4e3f817c5d1f06689d3305648dcb237fb41d99d11ea4e22802eb7fdc38",
+      "contributions": 1812,
+      "markers": 453
+    },
+    "score_filter": {
+      "seconds": [
+        0.35813908099999026,
+        0.3823339499999747,
+        0.40631879299985485
+      ],
+      "median_seconds": 0.3823339499999747,
+      "shape": [
+        512,
+        20000
+      ],
+      "sha256": "cbe0b2d4734db6409c7d3b91a46b68a9b453d57d4a4cc36bd70dc162269fa57f"
+    }
+  },
+  "optimized": {
+    "frames": 400,
+    "labels": 28,
+    "sources": 4,
+    "repeats": 3,
+    "merge": {
+      "seconds": [
+        1.5321026879998954,
+        1.5384248670000034,
+        1.6017797080000946
+      ],
+      "median_seconds": 1.5384248670000034,
+      "sha256": "eba01b4e3f817c5d1f06689d3305648dcb237fb41d99d11ea4e22802eb7fdc38",
+      "contributions": 1812,
+      "markers": 453
+    },
+    "score_filter": {
+      "seconds": [
+        0.02509932399993886,
+        0.02622013999985029,
+        0.02710892300001433
+      ],
+      "median_seconds": 0.02622013999985029,
+      "shape": [
+        512,
+        20000
+      ],
+      "sha256": "cbe0b2d4734db6409c7d3b91a46b68a9b453d57d4a4cc36bd70dc162269fa57f"
+    }
+  },
+  "equivalent": true,
+  "speedup": {
+    "merge": 3.0117177155586625,
+    "score_filter": 14.58168987664283
+  }
+}

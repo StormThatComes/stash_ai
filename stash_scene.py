@@ -1,0 +1,176 @@
+"""Additional scene qualification using positive evidence already in the cache."""
+from collections import defaultdict
+from dataclasses import asdict
+import math
+
+from stash_taggers import SOURCES
+from stash_temporal import append_interval
+
+
+def shared_scene_contributions(app, index, scene_records, policies, existing=(), metrics=None):
+    """Never average model scores or interpret unretained detections as zero.
+
+    Sparse positive evidence can prove a minimum count/run even when weaker
+    observations were not retained. An incomplete cache cannot prove absence.
+    Only matching scene/frame inference records can support a shared scene tag.
+    """
+    from stash_merge import marker_segment_signature, raw_label
+    policy = app.TEMPORAL_POLICY
+    if not policy.enabled or not policy.shared_scene_tags:
+        return []
+    scene_by_run = defaultdict(list)
+    for source, segments in scene_records.items():
+        for segment in segments:
+            signature = segment['meta'].get('inference_signature')
+            if segment['mode'] == 'scene' and signature and segment['meta'].get('origin') == 'inference':
+                scene_by_run[source, signature].append((segment, marker_segment_signature(segment)))
+    existing = {entry['tag'] for entry in existing}
+    options = dict(policy=asdict(policy), max_tags=app.MAX_TAGS,
+                   scene_exclusions={s: sorted(values) for s, values in policies.items()})
+    candidates, usable, partial = [], False, False
+    for group_key, group in index.groups.items():
+        members, frame_context, scene_context = [], defaultdict(set), defaultdict(set)
+        for source, segment, signature in group['members']:
+            meta = segment['meta']
+            threshold = meta.get('scene_threshold')
+            floor = meta.get('marker_score_floor', meta.get('marker_threshold'))
+            if any(type(value) not in (int, float) or not math.isfinite(value) or not 0 <= value <= 1
+                   for value in (threshold, floor)):
+                continue
+            matches = [(s, sig) for s, sig in scene_by_run[source, meta.get('inference_signature')]
+                       if s['meta'].get('scene_threshold') == threshold and
+                       s['meta'].get('frame_input_signature') == meta.get('frame_input_signature')]
+            if not matches:
+                continue
+            scores = defaultdict(list)
+            for scene, scene_sig in matches:
+                scene_context[source].add(scene_sig)
+                for entry in scene['items']:
+                    if entry.get('score') is not None:
+                        scores[entry['tag']].append(entry['score'])
+            members.append((source, segment, signature, threshold, floor, scores))
+            frame_context[source].add(signature)
+        if len(frame_context) < policy.consensus_min_models:
+            continue
+        usable = True
+        incomplete = any(floor > threshold * policy.scene_support_ratio + 1e-12
+                         for _, _, _, threshold, floor, _ in members)
+        partial |= incomplete
+        timeline = {}
+        for source, segment, signature, threshold, _, aggregates in members:
+            for row in segment['items']:
+                start, end = float(row['start']), float(row['end'])
+                if start < 0 or end <= start:
+                    raise ValueError('Invalid cached VTT interval for shared scene evidence.')
+                event = timeline.setdefault(start, dict(start=start, end=end, tags={}))
+                event['end'] = max(event['end'], end)
+                for label, score in row['tags']:
+                    label = raw_label(label)
+                    if label in policies[source] or score < threshold * policy.scene_support_ratio:
+                        continue
+                    own = event['tags'].setdefault(label, {}).setdefault(source,
+                        dict(max_score=score, high=False, signatures=set(), aggregates=[]))
+                    own['max_score'] = max(own['max_score'], score)
+                    own['high'] |= score >= threshold
+                    own['signatures'].add(signature)
+                    own['aggregates'].extend(aggregates[label])
+        stats = {}
+        events = [timeline[t] for t in sorted(timeline)]
+        for position, event in enumerate(events):
+            for tag, sources in event['tags'].items():
+                if tag in existing:
+                    continue
+                item = stats.setdefault(tag, dict(hits=0, high_hits=0, run=0, longest=0, last=-2,
+                    end=event['start'], intervals=[], sources={}, high_sources=set()))
+                item['run'] = item['run'] + 1 if item['last'] == position-1 and event['start'] <= item['end'] + .001 else 1
+                item['last'], item['end'] = position, event['end']
+                item['longest'] = max(item['longest'], item['run'])
+                item['hits'] += 1
+                item['high_hits'] += int(any(own['high'] for own in sources.values()))
+                append_interval(item['intervals'], event['start'], event['end'])
+                for source, values in sources.items():
+                    own = item['sources'].setdefault(source, dict(hits=0, high_hits=0, max_score=values['max_score'],
+                        score=None, signatures=set()))
+                    own['hits'] += 1
+                    own['high_hits'] += int(values['high'])
+                    own['max_score'] = max(own['max_score'], values['max_score'])
+                    own['signatures'].update(values['signatures'])
+                    if values['aggregates']:
+                        own['score'] = max([own['score']] + values['aggregates']) if own['score'] is not None else max(values['aggregates'])
+                    if values['high']:
+                        item['high_sources'].add(source)
+        for tag, item in stats.items():
+            if item['high_hits'] >= policy.scene_min_hits and len(item['high_sources']) >= policy.consensus_min_models:
+                reason, sources = 'shared_repeated_high', item['high_sources']
+            elif (item['hits'] >= policy.scene_repeat_hits and item['longest'] >= policy.scene_repeat_run and
+                  item['hits'] / len(events) >= policy.scene_repeat_fraction and
+                  len(item['sources']) >= policy.consensus_min_models):
+                reason, sources = 'shared_persistent_support', item['sources']
+            else:
+                continue
+            sources = [source for source in SOURCES if source in sources]
+            anchor = sources[0]
+            evidence = {source: {**item['sources'][source], 'signatures': sorted(item['sources'][source]['signatures'])}
+                        for source in sources}
+            meta = next(segment['meta'] for source, segment, signature, *_ in members
+                        if source == anchor and signature in evidence[anchor]['signatures'])
+            candidates.append(dict(tag=tag, source=anchor, score=evidence[anchor]['score'], meta=meta,
+                qualification=reason, derived='shared_scene_frames', source_evidence=evidence,
+                support_sources=sources, frame_group=group_key,
+                frame_context={s: sorted(values) for s, values in frame_context.items()},
+                scene_context={s: sorted(values) for s, values in scene_context.items()}, build_options=options,
+                joint_statistics=dict(hits=item['hits'], high_hits=item['high_hits'], longest_hits=item['longest'],
+                    sampled_frames=len(events), sample_fraction=item['hits']/len(events), cache_partial=incomplete)))
+    candidates.sort(key=lambda item: (-item['joint_statistics']['high_hits'], -item['joint_statistics']['hits'],
+                                     item['tag'], item['frame_group']))
+    if app.MAX_TAGS:
+        selected = list(dict.fromkeys(item['tag'] for item in candidates))[:app.MAX_TAGS]
+        candidates = [item for item in candidates if item['tag'] in selected]
+    if metrics is not None:
+        metrics['shared_scene_tags'] += len({item['tag'] for item in candidates})
+        metrics['scene_cache_partial'] += int(partial)
+        metrics['scene_cache_missing'] += int(not usable and len(scene_records) >= policy.consensus_min_models)
+    return candidates
+
+
+def cleanup_scene_support(app, store, scene_id, hits, selected, policies):
+    """Revoke only published sources, under their frozen rules and input records."""
+    from types import SimpleNamespace
+    from stash_fusion import FrameIndex
+    from stash_merge import marker_segment_signature
+    from stash_progress import digest
+    from stash_temporal import TemporalPolicy
+    cleaned, rebuilt, records = [], {}, {}
+    for hit in hits:
+        if hit.get('derived') != 'shared_scene_frames':
+            if hit['source'] not in selected or hit['tag'] not in policies[hit['source']]:
+                cleaned.append(hit)
+            continue
+        if not any(source in selected and hit['tag'] in policies[source] for source in hit['support_sources']):
+            cleaned.append(hit)
+            continue
+        key = digest([hit['build_options'], hit['frame_context'], hit['scene_context']])
+        if key not in rebuilt:
+            matching = {}
+            for kind, field in (('scene', 'scene_context'), ('markers', 'frame_context')):
+                if kind not in records:
+                    records[kind] = {source: {marker_segment_signature(segment): segment for segment in segments}
+                                     for source, segments in store.records(scene_id, kind, borrow=True).items()}
+                matching[kind] = {}
+                for source, signatures in hit[field].items():
+                    available = records[kind].get(source, {})
+                    if not set(signatures) <= set(available):
+                        raise RuntimeError('Shared scene sources changed since publication; run --merge-only before cleanup.')
+                    matching[kind][source] = [available[sig] for sig in signatures]
+            context = SimpleNamespace(**vars(app))
+            options = hit['build_options']
+            context.TEMPORAL_POLICY = TemporalPolicy.from_snapshot(options['policy'])
+            context.MAX_TAGS = options['max_tags']
+            frozen = {source: frozenset(options['scene_exclusions'][source]) |
+                      (policies[source] if source in selected else frozenset()) for source in SOURCES}
+            index = FrameIndex(context, matching['markers'], {s: frozenset() for s in SOURCES}, cache=store.cache)
+            rebuilt[key] = shared_scene_contributions(context, index, matching['scene'], frozen)
+        for candidate in rebuilt[key]:
+            if candidate['tag'] == hit['tag'] and candidate not in cleaned:
+                cleaned.append(candidate)
+    return cleaned

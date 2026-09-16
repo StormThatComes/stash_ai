@@ -1,0 +1,80 @@
+# Global output blacklist: scenes, marker cores, marker extras and hierarchy.
+# The legacy filename and excluded_scene_tags key are kept for compatibility.
+# excluded_tags is also accepted as the list key (use only one of the two).
+# Common raw labels apply to all four models; matching is exact/case-sensitive.
+# Use raw names WITHOUT ai:/jt:/wd:/dtq:/op:. Absent labels in a vocabulary are harmless.
+version: 1
+excluded_scene_tags:
+  - "closed_eyes"
+  - "rating:explicit"
+  - "rating:general"
+  - "rating:questionable"
+  - "rating:sensitive"
+  - "facial_hair"
+  - "highres"
+  - "blurry"
+  - "solo"
+  - "1boy"
+  - "1girl"
+  - "1other"
+  - "no_humans"
+  - "realistic"
+  - "photorealistic"
+  - "censored"
+  - "game_cg"
+  - "photo_(medium)"
+  - "3d"
+  - "virtual_youtuber"
+  - "uncensored"
+  - "watermark"
+  - "web_address"
+  - "english_text"
+  - "fingernails"
+  - "photoshop_(medium)"
+  - "explicit"
+  - "sex"
+  - "aqua_hair"
+  - "black_hair"
+  - "blonde_hair"
+  - "blue_hair"
+  - "brown_hair"
+  - "colored_inner_hair"
+  - "colored_pubic_hair"
+  - "dark_blue_hair"
+  - "gradient_hair"
+  - "green_hair"
+  - "grey_hair"
+  - "light_blue_hair"
+  - "light_brown_hair"
+  - "light_purple_hair"
+  - "multicolored_hair"
+  - "orange_hair"
+  - "pink_hair"
+  - "platinum_blonde_hair"
+  - "purple_hair"
+  - "rainbow_hair"
+  - "red_hair"
+  - "silver_hair"
+  - "streaked_hair"
+  - "two-tone_hair"
+  - "white_hair"
+
+by_model:
+  joytag: []
+  wd: []
+  dtq: []
+  oppai: []
+
+# Normal sync removes matching old associations even with replacement disabled.
+# Full all-model cleanup deletes globally excluded definitions in batches,
+# including their scene/extra associations and owned hierarchy edges.
+# Children with allowed names remain. Other sync/scoped cleanup modes only
+# prune now-unused excluded leaf definitions.
+# python stash_ai.py --models all --cleanup-only --dry-run
+# python stash_ai.py --models all --cleanup-only
+# This includes old model prefixes and ai: names. A blocked primary deletes its
+# marker; blocked extras are detached without changing the surviving marker.
+# by_model removes only that source's evidence; another allowed source may keep
+# the shared ai: label. Use the common list above to suppress a label everywhere.
+# --markers-only and --scene-tags-only still limit which outputs are changed.
+# Core-only exclusions remain in marker_core_exclusions.yml.
