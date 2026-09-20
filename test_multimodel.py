@@ -50,6 +50,12 @@ class Stash:
         tag=self.tag(name)
         tag["parents"]=[self.find_tag_by_id(i) for i in kwargs.get("parent_ids",[])]
         tag["description"]=kwargs.get("description")
+        tag["ignore_auto_tag"]=kwargs.get("ignore_auto_tag",False)
+        return deepcopy(tag)
+    def update_tag_organization(self,identifier,parents,ignore_auto_tag):
+        self.update_tag_parents(identifier,parents)
+        tag=next(t for t in self.tags.values() if t['id']==identifier)
+        tag['ignore_auto_tag']=ignore_auto_tag
         return deepcopy(tag)
     def update_tag_parents(self,identifier,parents):
         assert not self.dry_run
@@ -96,18 +102,22 @@ class Stash:
             return {}  # This fixture exercises the older compatible API path.
         def usage(tag):
             identifier=tag['id']
+            scenes=getattr(self,'scenes',{'1':self.scene}).values()
             children=[{'id':t['id']} for t in self.tags.values() if any(p['id']==identifier for p in t['parents'])]
             return {**deepcopy(tag),**{name:0 for name in counts},'children':children,'child_count':len(children),
-                    'scene_count':int(any(t['id']==identifier for t in self.scene['tags'])),
+                    'scene_count':sum(any(t['id']==identifier for t in s['tags']) for s in scenes),
                     'scene_marker_count':sum(any(t['id']==identifier for t in [m['primary_tag'],*m['tags']])
-                                             for m in self.scene['scene_markers'])}
+                                             for s in scenes for m in s['scene_markers']),
+                    'image_count':sum(any(t['id']==identifier for t in image['tags']) for image in getattr(self,'images',[]))}
         if 'PruneCapabilities' in query:
-            return {'tag':{'fields':[{'name':n} for n in counts|{'id','name','parents','children'}]},
+            return {'tag':{'fields':[{'name':n} for n in counts|{'id','name','description','parents','children'}]},
                     'studio':{'fields':[{'name':'tags'}]},'group':{'fields':[{'name':'tags'}]},
                     'movie':None,'mutation':{'fields':[{'name':'tagDestroy'}]}}
         if 'PruneCatalog' in query:
             f=variables['filter']; values=list(self.tags.values()); start=(f['page']-1)*f['per_page']
             return {'findTags':{'count':len(values),'tags':[usage(t) for t in values[start:start+f['per_page']]]}}
+        if 'PruneCandidates' in query:
+            return {'findTags':{'tags':[usage(t) for t in self.tags.values() if t['id'] in variables['ids']]}}
         if query.lstrip().startswith('mutation'):
             assert not self.dry_run
             tag=self.find_tag_by_id(variables['input']['id'])

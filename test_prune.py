@@ -27,7 +27,7 @@ class PruneStash:
         variables=variables or {}
         if "PruneCapabilities" in query:
             self.calls["capabilities"]+=1
-            fields=self.counts|{"id","name","children","parents","parent_count"}
+            fields=self.counts|{"id","name","description","children","parents","parent_count"}
             return {"tag":{"fields":[{"name":n} for n in fields]},
                     "studio":{"fields":[{"name":"tags"}]},"group":{"fields":[{"name":"tags"}]},
                     "movie":None,"mutation":{"fields":[{"name":"tagDestroy"}]}}

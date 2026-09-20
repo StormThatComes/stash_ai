@@ -4,6 +4,9 @@
 **Wydajność, 32 GiB RAM:** [cache merge, przygotowanie CPU i pomiary](UPGRADE_performance.md).
 **Dalsze przyspieszenie merge:** [indeks przedziałów, zbiorczy odczyt SQL i pomiary etapów](UPGRADE_merge.md).
 **Lokalizacja tagów bez markerów:** [automatyczne punkty wykrycia i obsługa starych wyników](UPGRADE_occurrences.md).
+
+**Grupy markerów:** [tagi `m:<core>` i `m:<core>:occurance` pod `ai_markers`](UPGRADE_marker_groups.md).
+Nowe markery `ai:` dostają grupę automatycznie; istniejące można uzupełnić przez `--sync-marker-groups-only`.
 **Diagnostyka wolnego merge:** [czasy per scena i operacja API, rozmiary snapshotów, wyniki pomiarów](UPGRADE_diagnostics.md).
 
 Skrypt obsługuje JoyTag, WD EVA02-Large v3, DanbooruTagQuery L/16 i OppaiOracle V1.1.
@@ -570,8 +573,8 @@ python .\stash_ai.py --merge-only --prune-empty-tags
 python .\stash_ai.py --models all --prune-empty-tags
 ```
 
-Domyślny zakres to `jt:`, `wd:`, `dtq:`, `op:` i `ai:`. Tagi spoza tych prefiksów
-pozostają. Usuwany tag musi nie mieć dzieci ani żadnego użycia w dostępnych
+Domyślny zakres to `jt:`, `wd:`, `dtq:`, `op:`, `ai:` i zarządzane grupy `m:`.
+Ręczne tagi `m:` oraz korzeń `ai_markers` pozostają. Usuwany tag musi nie mieć dzieci ani żadnego użycia w dostępnych
 licznikach Stash: scenach, markerach (głównych lub dodatkowych tagach), obrazach,
 galeriach, wykonawcach, studiach i grupach/filmach obsługiwanych przez serwer.
 Skrypt wykrywa możliwości API; brak niezbędnych liczników zatrzymuje sprzątanie.
@@ -948,7 +951,8 @@ lub obce etykiety przed zapisami do Stash.
 
 `--hierarchy PATH`, `--wd-hierarchy PATH`, `--dtq-hierarchy PATH` i
 `--oppai-hierarchy PATH` wybierają własny YAML w tym samym formacie.
-`--no-hierarchy` wyłącza synchronizację rodziców dla wybranych modeli.
+`--no-hierarchy` wyłącza synchronizację rodziców kategorii dla wybranych modeli.
+Grupy markerów nadal są bezpośrednimi dziećmi `ai_markers` i wymagają obsługi hierarchii w Stash.
 
 ```powershell
 python .\stash_ai.py --models all --validate-hierarchy

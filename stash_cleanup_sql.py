@@ -6,6 +6,7 @@ Templates are also the dry-run allowlist: no caller-supplied SQL is accepted.
 from __future__ import annotations
 
 import json
+from collections import Counter
 from time import monotonic
 
 from tqdm import tqdm
@@ -55,6 +56,10 @@ SQL = {
     'tag_check': 'SELECT id, name FROM tags WHERE id IN (SELECT value FROM json_each(?))',
     'marker_metadata': '''SELECT m.id, t.name FROM scene_markers m JOIN tags t ON t.id=m.primary_tag_id
         WHERE m.id IN (SELECT value FROM json_each(?))''',
+    'group_usage': '''SELECT mt.tag_id, count(DISTINCT mt.scene_marker_id)
+        FROM scene_markers_tags mt
+        WHERE mt.scene_marker_id IN (SELECT value FROM json_each(?))
+        AND mt.tag_id IN (SELECT value FROM json_each(?)) GROUP BY mt.tag_id''',
     'unused_candidates': '''SELECT t.id FROM tags t WHERE t.id IN (SELECT value FROM json_each(?))
         AND NOT EXISTS (SELECT 1 FROM scene_markers m WHERE m.primary_tag_id=t.id)
         AND NOT EXISTS (SELECT 1 FROM scene_markers_tags mt WHERE mt.tag_id=t.id)
@@ -79,6 +84,7 @@ class SQLCleanup:
         self.catalog = {}
         self.ids_by_name = {}
         self.preview_names, self.preview_cores = set(), {}
+        self.group_usage_delta = Counter()
 
     def tick(self):
         if self.progress is not None:
@@ -130,6 +136,8 @@ class SQLCleanup:
                 return
 
     def delete_primary(self, identifier, name, source=None):
+        from stash_marker_groups import PREFIX
+        group_ids = [int(i) for i, n in self.catalog.items() if n.startswith(PREFIX)]
         prefix, owner = (source.title_prefix, source.owner_tag) if source else ('', '')
         params = (int(identifier), name, prefix, prefix, prefix, owner)
         for rows in self.pages('primary', params, self.bounds[0]):
@@ -154,6 +162,9 @@ class SQLCleanup:
                             }''', {'id': value})['sceneMarkerDestroy']
                             if result is not True:
                                 raise RuntimeError('Marker deletion was not confirmed; rerun the same cleanup.')
+                if self.stash.dry_run and current and group_ids:
+                    for tag_id, count in self.read('group_usage', (json.dumps(current), json.dumps(group_ids))):
+                        self.group_usage_delta[str(tag_id)] -= int(count)
                 self.stats['markers_deleted'] += len(current)
                 self.tick()
 
@@ -229,7 +240,7 @@ class SQLCleanup:
                     scenes.update(str(row[1]) for row in rows)
         return scenes
 
-    def prune(self, policies=None, prefixes=None):
+    def prune(self, policies=None, prefixes=None, *, skip_marker_groups=False):
         from stash_exclusions import excluded_names
         from stash_prune import prefixes_checked, prune_tags
         names = excluded_names(policies, unused=True) if policies is not None else None
@@ -244,7 +255,8 @@ class SQLCleanup:
             return {}
         # SQL only rejects definitely-used tags. Stash still checks EVERY exposed
         # usage/child counter, including images/groups/etc., before deleting a leaf.
-        return prune_tags(self.stash, prefixes, self.report.detail, names=names, candidate_ids=sorted(candidates))
+        return prune_tags(self.stash, prefixes, self.report.detail, names=names, candidate_ids=sorted(candidates),
+                          skip_marker_groups=skip_marker_groups)
 
 
 def candidate_names(app, selected, cores, tags):
@@ -264,8 +276,9 @@ def candidate_names(app, selected, cores, tags):
 
 class SQLPreview:
     """Overlay global dry-run effects without retaining millions of marker IDs."""
-    def __init__(self, stash, app, names, cores):
+    def __init__(self, stash, app, names, cores, group_usage_delta=None):
         self.stash, self.app, self.names, self.cores = stash, app, names, cores
+        self.marker_group_usage_delta = group_usage_delta or Counter()
 
     def __getattr__(self, name):
         return getattr(self.stash, name)
@@ -347,5 +360,5 @@ def run_sql_cleanup(app, sql, store, settings, args, cores, tags, stats):
     stats['cleanup_fast_path'] = 1
     stats['cleanup_sql_path'] = 1
     stats['cleanup_candidate_scenes'] = len(candidates)
-    view = SQLPreview(sql.stash, app, names, core_names) if app.DRY_RUN else sql.stash
+    view = SQLPreview(sql.stash, app, names, core_names, sql.group_usage_delta) if app.DRY_RUN else sql.stash
     return sorted(candidates), view

@@ -132,7 +132,7 @@ def test_sync_common_tag_union_idempotence_and_manual_ownership(tmp_path):
         assert manual in stash.scene["scene_markers"]
         shared=next(m for m in stash.scene["scene_markers"] if m["seconds"]==10)
         assert shared["title"]=="[AI] common [jt+wd]"
-        assert {t["name"] for t in shared["tags"]}=={merge.AI.owner_tag}
+        assert {t["name"] for t in shared["tags"]}=={merge.AI.owner_tag, "m:common"}
         stash.writes.clear()
         merge.sync_merged(app,stash,app.TagResolver(stash,source=merge.AI),state,stash.find_scene("1"),
                           [hit("joytag"),hit("wd"),hit("oppai","unique_op")],inputs)
