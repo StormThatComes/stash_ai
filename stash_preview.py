@@ -1,7 +1,7 @@
 """Sparse copy-on-write SQLite previews. Source files are attached read-only."""
 
 TABLES = ('results', 'snapshots', 'legacy_imports', 'result_index', 'refresh_requests',
-          'checkpoints', 'checkpoint_frames', 'checkpoint_analysis')
+          'checkpoints', 'checkpoint_frames', 'checkpoint_analysis', 'recovery_publications')
 
 
 def initialize(store):

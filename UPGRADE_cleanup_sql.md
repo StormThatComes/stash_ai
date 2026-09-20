@@ -91,6 +91,12 @@ ponownie znajduje pozostałe obiekty. Nie odtwarza już skasowanych ID. Można
 zmienić rozmiar partii. Przerwany pełny cleanup poprzedniej wersji można
 dokończyć przez `--cleanup-strategy sql`, bez zmiany blacklist.
 
+Aby zamiast wznowienia **porzucić pozostałą część planu i zmienić blacklisty**,
+po zatrzymaniu procesu dodaj `--abandon-pending` do nowej komendy. Można też
+uruchomić tę opcję samodzielnie. Zmiany wykonane w Stash pozostają; wyniki
+inferencji i dane potrzebne do odzyskania własności nie są kasowane.
+Szczegóły i zgodność baz 5/6/7: [UPGRADE_abandon_pending.md](UPGRADE_abandon_pending.md).
+
 Szybki globalny cleanup ograniczony do jednego rodzaju wyjścia wprowadza maski
 zależne od rodzaju publikacji i podnosi format bazy stanu do 6. Starszy skrypt
 nie powinien być następnie używany z tą bazą. Pełny cleanup istniejącej bazy 5

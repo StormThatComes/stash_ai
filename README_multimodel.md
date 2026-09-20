@@ -7,6 +7,9 @@
 
 **Grupy markerów:** [tagi `m:<core>` i `m:<core>:occurance` pod `ai_markers`](UPGRADE_marker_groups.md).
 Nowe markery `ai:` dostają grupę automatycznie; istniejące można uzupełnić przez `--sync-marker-groups-only`.
+
+**Zmiana reguł po przerwaniu:** [`--abandon-pending`](UPGRADE_abandon_pending.md) pozwala porzucić stary plan
+cleanupu lub merge, zachowując wykonane zmiany i wyniki inferencji.
 **Diagnostyka wolnego merge:** [czasy per scena i operacja API, rozmiary snapshotów, wyniki pomiarów](UPGRADE_diagnostics.md).
 
 Skrypt obsługuje JoyTag, WD EVA02-Large v3, DanbooruTagQuery L/16 i OppaiOracle V1.1.

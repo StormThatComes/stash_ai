@@ -82,7 +82,7 @@ class StateStore(AbstractContextManager):
                     source = sqlite3.connect(self.path.as_uri() + "?mode=ro", uri=True)
                     try:
                         source_version = source.execute('PRAGMA user_version').fetchone()[0]
-                        if (source_version in (5, 6) and
+                        if (source_version in (5, 6, 7) and
                                 source.execute('PRAGMA application_id').fetchone()[0] == APPLICATION_ID):
                             # Modern schemas can be read directly; only preview
                             # changes occupy the temporary overlay.
@@ -117,7 +117,7 @@ class StateStore(AbstractContextManager):
             application = db.execute("PRAGMA application_id").fetchone()[0]
             version = db.execute("PRAGMA user_version").fetchone()[0]
             tables = db.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
-            if application not in (0, APPLICATION_ID) or version not in (0, 1, 2, 3, 4, 5, 6) or (tables and application != APPLICATION_ID):
+            if application not in (0, APPLICATION_ID) or version not in (0, 1, 2, 3, 4, 5, 6, 7) or (tables and application != APPLICATION_ID):
                 raise ValueError("Not a supported stash-taggers state DB; choose another --state-db.")
             db.executescript(f"""
                 PRAGMA application_id={APPLICATION_ID};
@@ -143,11 +143,13 @@ class StateStore(AbstractContextManager):
                 initialize(self, version)
             from stash_performance import initialize as initialize_performance
             initialize_performance(self)
+            from stash_recovery import initialize as initialize_recovery
+            initialize_recovery(self)
             from stash_preview import initialize as initialize_preview
             initialize_preview(self)
             if self.cleanup_pending and not allow_cleanup:
                 raise RuntimeError('Global cleanup is interrupted; rerun the same --models all cleanup mode '
-                                   'with the same exclusion policies before other writes.')
+                                   'with the same exclusion policies, or use --abandon-pending with current policies.')
         except BaseException:
             self.close()
             raise
@@ -330,17 +332,20 @@ class StateStore(AbstractContextManager):
     @measured('state_write')
     def publish(self, scene, snapshots):
         from stash_cleanup import stamp_snapshot
+        from stash_recovery import clear_publications
         with self.connection:
             for kind, data in snapshots.items():
                 self.cache.discard(('snapshot', str(scene), kind))
                 self.connection.execute("INSERT INTO snapshots VALUES (?,?,?,?,NULL) "
                     "ON CONFLICT(scope,scene,kind) DO UPDATE SET published=excluded.published,pending=NULL",
                     (self.scope, str(scene), kind, self.pack(stamp_snapshot(self, data))))
+                clear_publications(self, scene, kind)
 
 
     @measured('state_write')
     def commit_prepared(self, scene, kinds, *, publication=None):
         """Promote durable intent without encoding large evidence a second time."""
+        from stash_recovery import clear_publications
         with self.connection:
             for kind in kinds:
                 self.cache.discard(('snapshot', str(scene), kind))
@@ -349,6 +354,7 @@ class StateStore(AbstractContextManager):
                     (self.scope, str(scene), kind)).rowcount
                 if changed != 1:
                     raise RuntimeError('Publication intent disappeared before commit.')
+                clear_publications(self, scene, kind)
             if publication is not None:
                 from stash_performance import record_check
                 record_check(self, scene, *publication)
@@ -735,10 +741,11 @@ def sync_merged(app, stash, resolver, store, scene, scene_hits, spans, *, migrat
     from stash_occurrences import OCCURRENCE_TAG, is_occurrence
     from stash_marker_groups import for_resolver
     groups = for_resolver(app, resolver)
+    from stash_recovery import publications
     blocked_names = excluded_names(tag_policies)
     previous_ranges = []
     if app.CREATE_MARKERS and (not stash.has_end_time or not app.MARKER_USE_END_TIME):
-        for snapshot in store.snapshot(scene_id, "markers", borrow=True):
+        for snapshot in (*store.snapshot(scene_id, "markers", borrow=True), *publications(store, scene_id, 'markers')):
             if snapshot:
                 previous_ranges.extend(union_intervals(snapshot.get("contributions", []), borrow=True))
 
@@ -807,6 +814,7 @@ def sync_merged(app, stash, resolver, store, scene, scene_hits, spans, *, migrat
     migrated_scene_ids = {str(tag["id"]) for tag in current_tags if legacy_label(tag["name"])} if migrate else set()
     published, pending = store.snapshot(scene_id, "scene", borrow=True)
     owned_before = set((published or {}).get("owned_ids", [])) | set((pending or {}).get("owned_ids", []))
+    owned_before.update(i for snapshot in publications(store, scene_id, 'scene') for i in snapshot.get('owned_ids', []))
     existing_ids = {str(tag["id"]) for tag in current_tags}
     desired_ids = {ids[AI.prefix + label] for label in scene_labels if ids.get(AI.prefix + label)}
     unresolved_labels = {label for label in scene_labels if not ids.get(AI.prefix + label)}
@@ -994,8 +1002,12 @@ def _run_merged(app, settings, args, catalogs, hierarchy, core_policies, scene_p
     report = getattr(args, 'report', None) or RunReport(getattr(args, 'verbose', False), tqdm.write)
     with StateStore(args.state_db, scope_for(app.STASH_URL), app.DRY_RUN,
                     cache_bytes=int(getattr(args, 'ram_cache_gb', 0) * 2**30),
+                    allow_cleanup=getattr(args, 'abandon_pending', False),
                     memory_budget_bytes=int(getattr(args, 'ram_budget_gb', 32) * 2**30)) as store:
         store.report = report
+        if getattr(args, 'abandon_pending', False):
+            from stash_recovery import abandon
+            stats.update(abandon(store, report.write))
         stash = app.StashClient(app.DRY_RUN)
         stash.report = report
         try:
@@ -1186,7 +1198,9 @@ def cleanup_scene(app, stash, resolver, store, current, settings, selected, args
             snapshot, pending = store.snapshot(scene_id, kind, borrow=True)
             if pending is not None:
                 raise RuntimeError("An interrupted merge is pending; run --merge-only before cleanup.")
-            published[kind] = snapshot
+            from stash_recovery import reconcile
+            published[kind], recovered = reconcile(app, stash, store, current, kind, snapshot)
+            stats['publications_reconciled'] += int(recovered)
         if app.CREATE_MARKERS and published.get("markers") is None and any(
                 app.owned_marker(marker, AI) for marker in current.get("scene_markers", [])):
             raise RuntimeError("AI marker source state is missing; restore the original --state-db.")
@@ -1233,8 +1247,12 @@ def run_cleanup(app, settings, args, core_policies, scene_policies):
     full = full_scope(app, settings, args)
     wide = not args.scene_id and selected == set(SOURCES)
     with StateStore(args.state_db, scope_for(app.STASH_URL), app.DRY_RUN,
-                    cache_bytes=int(getattr(args, 'ram_cache_gb', 0) * 2**30), allow_cleanup=wide, cleanup_preview=True,
+                    cache_bytes=int(getattr(args, 'ram_cache_gb', 0) * 2**30),
+                    allow_cleanup=wide or getattr(args, 'abandon_pending', False), cleanup_preview=True,
                     memory_budget_bytes=int(getattr(args, 'ram_budget_gb', 32) * 2**30)) as store:
+        if getattr(args, 'abandon_pending', False):
+            from stash_recovery import abandon
+            stats.update(abandon(store, report.write))
         stash = app.StashClient(app.DRY_RUN)
         resolver = None
         try:
