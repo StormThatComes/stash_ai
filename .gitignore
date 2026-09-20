@@ -11,6 +11,12 @@ tagger_sources.sqlite3
 *.sqlite3-journal
 *.sqlite3-wal
 *.sqlite3-shm
+*.sqlite3.lock
+
+# Updater history, backups, process lock and configuration proposals
+.stash-ai-update/
+.stash-ai.install.lock
+*.yml.incoming
 
 # Downloaded model weights
 models/

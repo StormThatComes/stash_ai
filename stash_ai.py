@@ -45,6 +45,11 @@ writes. joytag_stash_markers.py remains a compatibility launcher.
 
 from __future__ import annotations
 
+# Re-read the entry point under the installation lock before any runtime imports.
+if __name__ == "__main__" and not globals().get("_STASH_INSTALL_LOCKED"):
+    from update_stash_ai import launch_application
+    raise SystemExit(launch_application(__file__))
+
 import argparse
 import hashlib
 import math
@@ -57,6 +62,10 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any, Iterator
 from urllib.parse import urljoin, urlparse
+
+if not globals().get("_STASH_INSTALL_LOCKED"):
+    from update_stash_ai import application_guard
+    _installation_lock = application_guard(Path(__file__).resolve().parent)
 
 DEFAULT_OUTPUT_MODE = "merged"
 DEFAULT_RESUME = True

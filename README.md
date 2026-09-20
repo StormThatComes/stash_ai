@@ -12,6 +12,7 @@ Wejście pochodzi **wyłącznie** z VTT i sprite’ów Stash. Skrypt nie otwiera
 - [Szybki start](#szybki-start)
 - [Najczęstsze komendy](#najczęstsze-komendy)
 - [Konfiguracja](#konfiguracja)
+- [Aktualizacje](#aktualizacje)
 - [Bezpieczeństwo](#bezpieczeństwo)
 - [Testy](#testy)
 - [Dokumentacja szczegółowa](#dokumentacja-szczegółowa)
@@ -101,6 +102,84 @@ python .\stash_ai.py --abandon-pending
 | `--state-db` | trwała baza źródeł (domyślnie `tagger_sources.sqlite3`) |
 
 Zachowuj `tagger_sources.sqlite3` w kopiach zapasowych. Nie zawiera obrazów ani klucza API.
+
+## Aktualizacje
+
+`update_stash_ai.py` pobiera aplikację bezpośrednio z `main` prywatnego repozytorium
+`StormThatComes/stash_ai`. Wymaga tylko Pythona 3.10+; nie wymaga Gita ani bibliotek
+modeli. Pobiera wyłącznie pliki `stash_*.py`, `joytag_stash_markers.py`, sam updater
+i pliki `*.yml` z katalogu głównego. Nie pobiera testów, benchmarków, `.github`,
+dokumentacji ani `requirements.txt` i nie uruchamia `pip`.
+
+Do pierwszego uruchomienia pobierz `update_stash_ai.py` z repozytorium po zalogowaniu
+do GitHub i umieść obok aplikacji. **Zatrzymaj wszystkie stare procesy aplikacji**:
+wersje sprzed dodania updatera nie respektują jeszcze blokady instalacji.
+Utwórz fine-grained PAT z dostępem tylko do tego repozytorium i `Contents: read`.
+Token podawaj przez `GH_TOKEN` lub `GITHUB_TOKEN`, np. z menedżera sekretów.
+Nie jest to klucz API Stash; połączenie GitHub w ChatGPT nie uwierzytelnia lokalnego skryptu.
+
+```powershell
+# GH_TOKEN powinien być już ustawiony w środowisku; nie wpisuj tokena do kodu.
+python .\update_stash_ai.py --check
+python .\update_stash_ai.py --dry-run
+
+# Pierwsza aktualizacja starej instalacji: jawna zgoda na zastąpienie nieznanego kodu.
+python .\update_stash_ai.py --force-code
+
+# Kolejne aktualizacje (zwykle bez dodatkowych flag).
+python .\update_stash_ai.py
+
+# Opcjonalnie zastąp również lokalnie zmienione YAML-e wersjami z main.
+python .\update_stash_ai.py --overwrite-configs
+
+# Po przerwaniu instalacji, offline i bez tokena.
+python .\update_stash_ai.py --recover
+```
+
+Domyślnym celem jest katalog skryptu, niezależnie od bieżącego katalogu terminala.
+Można wskazać inny istniejący katalog przez `--install-dir PATH`.
+
+| Sytuacja | Zachowanie |
+|---|---|
+| Brak pliku lub brak lokalnych zmian od ostatniej instalacji | Instalacja wersji z `main` |
+| Lokalnie zmieniony YAML / istniejący YAML bez historii | Zachowanie pliku; propozycja w `nazwa.yml.incoming` |
+| Zmieniony kod Python / istniejący kod bez historii, różny od `main` | Przerwanie przed instalacją; można użyć `--force-code` |
+| Lokalnie zmieniona propozycja `.incoming` | Przerwanie; przenieś propozycję przed ponowieniem |
+| Moduł usunięty na `main` | Usunięcie tylko kodu wcześniej zarządzanego przez updater |
+| YAML usunięty na `main` | Zachowanie lokalnej konfiguracji |
+
+Zaakceptowanie propozycji oznacza ręczne przeniesienie jej zawartości do właściwego
+YAML-a. Updater nie scala automatycznie list tagów. Zmiana `requirements.txt` jest
+sygnalizowana na podstawie metadanych; sprawdź wymagania na GitHub i dostosuj
+środowisko ręcznie, z uwzględnieniem swojej wersji Torch/CUDA/ONNX Runtime.
+
+Wszystkie pliki jednej aktualizacji pochodzą z jednego SHA `main`. Updater sprawdza
+hash każdego pobranego pliku i składnię Pythona przed instalacją. Nie wykonuje testów
+ani importów aplikacji. Nie gwarantuje to zgodności zachowanego lokalnego YAML-a
+z przyszłymi zmianami jego formatu — komunikaty `KEEP` wymagają przeglądu konfiguracji.
+
+Aplikacja trzyma wspólną blokadę instalacji od startu do zakończenia. Updater wymaga
+blokady wyłącznej; nie zatrzymuje procesów ani nie przerywa merge/cleanup.
+`--check` i `--dry-run` mogą działać równolegle z aplikacją. Blokada jest zwalniana
+przez system po zakończeniu procesu; nie usuwaj ręcznie pliku blokady.
+
+Instalację, w tym podmianę updatera, wykonuje pomocnik uruchomiony z lokalnej kopii.
+Kopie starych plików i plan pozostają w `.stash-ai-update/transactions/ID/`.
+Pojedyncze podmiany są atomowe; cała instalacja wielu plików korzysta z dziennika.
+Przerwany zapis blokuje start aplikacji do wykonania `--recover`. Odzyskiwanie
+porzuca nierozpoczęty plan, cofa rozpoczętą instalację albo finalizuje zakończoną.
+Uszkodzona kopia lub zewnętrzna zmiana pliku podczas odzyskiwania zatrzymuje operację
+i zachowuje dziennik. Jeśli główny updater nie daje się uruchomić, użyj kopii:
+
+```powershell
+python .\.stash-ai-update\transactions\ID\worker.py --install-dir . --recover
+```
+
+Nie są zmieniane modele, `.env`, SQLite ani stan pending. Odzyskiwanie instalacji
+nie cofa migracji bazy wykonanych później przez aplikację. Kopie pozostają do ręcznego
+usunięcia po sprawdzeniu aktualizacji; nie usuwaj kopii wskazanej przez aktywny dziennik.
+Kody wyjścia: `0` sukces/podgląd, `1` błąd, `2` konflikty w podglądzie, `130` przerwanie.
+Podgląd nie zapisuje aplikacji ani historii aktualizacji, ale może utworzyć pusty plik blokady.
 
 ## Bezpieczeństwo
 
