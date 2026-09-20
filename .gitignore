@@ -18,6 +18,9 @@ tagger_sources.sqlite3
 .stash-ai.install.lock
 *.yml.incoming
 
+# Ad hoc benchmark output (versioned reference measurements remain tracked)
+benchmarks/results/local_*
+
 # Downloaded model weights
 models/
 
