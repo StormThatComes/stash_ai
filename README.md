@@ -15,6 +15,8 @@ Wejście pochodzi **wyłącznie** z VTT i sprite’ów Stash. Skrypt nie otwiera
 - [Aktualizacje](#aktualizacje)
 - [Bezpieczeństwo](#bezpieczeństwo)
 - [Testy](#testy)
+- [Struktura projektu](#struktura-projektu)
+- [Benchmarki](#benchmarki)
 - [Dokumentacja szczegółowa](#dokumentacja-szczegółowa)
 
 ## Co robi
@@ -194,22 +196,59 @@ pip install -r requirements-dev.txt
 python -m pytest -q
 ```
 
-Przy pull requestach to samo odpala GitHub Actions (`.github/workflows/tests.yml`).
+Testy są w `tests/`; `pytest.ini` ustawia katalog kolekcji i ścieżkę importów.
+Wspólne makiety są w `tests/helpers/`, a współdzielone fixtures w `tests/conftest.py`.
+Można uruchomić pojedynczy plik, np. `python -m pytest -q tests/test_recovery.py`.
+Sam updater: `python -m pytest -q tests/test_updater.py` — wymaga tylko `pytest`.
+
+Przy pull requestach testy odpala GitHub Actions (`.github/workflows/tests.yml`).
 Testy mockują Stash i wagi — nie pobierają modeli.
+
+## Struktura projektu
+
+| Lokalizacja | Zawartość |
+|---|---|
+| Katalog główny | aplikacja `stash_*.py`, launchery, updater, YAML-e i requirements |
+| `tests/` | testy regresji, fixtures i wspólne pomocniki |
+| `benchmarks/` | skrypty pomiarowe offline |
+| `benchmarks/results/` | zachowane, referencyjne wyniki pomiarów |
+| `docs/` | szczegółowy podręcznik i notatki aktualizacji |
+| `docs/validation/` | historyczne raporty walidacji |
+| `.github/workflows/` | testy CI |
+
+Polecenia w dokumentacji zakładają uruchamianie z katalogu głównego repozytorium.
+Układ plików aplikacji i konfiguracji pozostaje zgodny z updaterem.
+
+## Benchmarki
+
+Pomiary wykonują się na syntetycznych danych, bez połączenia ze Stash i bez GPU.
+Po zainstalowaniu `requirements-dev.txt` można wykonać krótkie sprawdzenie:
+
+```powershell
+python -m benchmarks.benchmark_performance --frames 40 --labels 8 --repeats 1
+python -m benchmarks.benchmark_merge_pipeline --frames 40 --labels 8 --repeats 1
+python -m benchmarks.benchmark_occurrences --frames 40 --labels 8 --repeats 1
+python -m benchmarks.benchmark_cleanup_sql --markers 1000 --legacy-time-budget 1
+```
+
+Obsługiwane jest też bezpośrednie uruchomienie pliku, np.
+`python benchmarks/benchmark_occurrences.py`. Benchmarki wydajności i merge przyjmują
+`--project PATH`, aby porównać bieżący kod z wcześniejszą kopią aplikacji.
+Znaczenie wyników i większe zestawy danych opisuje [instrukcja benchmarków](benchmarks/README.md).
 
 ## Dokumentacja szczegółowa
 
 Pełny opis scalania, reguł temporalnych, RAM i wznawiania:
 
-- [README_multimodel.md](README_multimodel.md)
+- [README_multimodel.md](docs/README_multimodel.md)
 
 Notatki aktualizacji:
 
-- [UPGRADE_cleanup_sql.md](UPGRADE_cleanup_sql.md) — cleanup SQL
-- [UPGRADE_merge.md](UPGRADE_merge.md) — przyspieszenie merge
-- [UPGRADE_performance.md](UPGRADE_performance.md) — cache i 32 GiB RAM
-- [UPGRADE_occurrences.md](UPGRADE_occurrences.md) — punkty wykrycia bez markera
-- [UPGRADE_marker_groups.md](UPGRADE_marker_groups.md) — grupy `m:` pod `ai_markers` i cleanup
-- [UPGRADE_abandon_pending.md](UPGRADE_abandon_pending.md) — porzucanie przerwanych operacji i zmiana YAML-i
-- [UPGRADE_diagnostics.md](UPGRADE_diagnostics.md) — diagnostyka wolnego merge
-- [UPGRADE_exclusions.md](UPGRADE_exclusions.md) — blacklisty
+- [UPGRADE_cleanup_sql.md](docs/UPGRADE_cleanup_sql.md) — cleanup SQL
+- [UPGRADE_merge.md](docs/UPGRADE_merge.md) — przyspieszenie merge
+- [UPGRADE_performance.md](docs/UPGRADE_performance.md) — cache i 32 GiB RAM
+- [UPGRADE_occurrences.md](docs/UPGRADE_occurrences.md) — punkty wykrycia bez markera
+- [UPGRADE_marker_groups.md](docs/UPGRADE_marker_groups.md) — grupy `m:` pod `ai_markers` i cleanup
+- [UPGRADE_abandon_pending.md](docs/UPGRADE_abandon_pending.md) — porzucanie przerwanych operacji i zmiana YAML-i
+- [UPGRADE_diagnostics.md](docs/UPGRADE_diagnostics.md) — diagnostyka wolnego merge
+- [UPGRADE_exclusions.md](docs/UPGRADE_exclusions.md) — blacklisty

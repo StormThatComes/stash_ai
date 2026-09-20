@@ -22,7 +22,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: python -m pip install pytest
-      - run: python -m pytest -q test_updater.py --tb=short
+      - run: python -m pytest -q tests/test_updater.py --tb=short
 
   pytest:
     name: pytest
