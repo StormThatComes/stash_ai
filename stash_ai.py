@@ -1498,6 +1498,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="Stream per-scene wall/CPU, stage/API timings, counts and byte sizes to a new JSONL file; merged output only.")
     parser.add_argument("--force-merge", action="store_true",
                         help="Recompute even unchanged merges without rerunning models; requires --merge-only. Does not clear source state.")
+    parser.add_argument("--abandon-pending", action="store_true",
+                        help="Abandon pending merge/cleanup plans, retaining applied changes and inference. "
+                             "Alone: exit after abandonment; with --merge-only or cleanup: use current YAML policies. Honors --dry-run.")
     parser.add_argument("--cleanup-strategy", choices=("auto", "sql", "scenes", "legacy"), default="auto",
                         help="Cleanup discovery: auto uses read-only SQL when available, else scans scenes; sql requires SQL; legacy restores the old global marker filter.")
     parser.add_argument("--cleanup-page-size", type=int, default=2000,
@@ -1559,6 +1562,12 @@ def main(argv: list[str] | None = None) -> int:
         APPLY_SCENE_TAGS, CREATE_MARKERS = True, True
     hierarchy_only = args.sync_hierarchy_only or args.validate_hierarchy
     cleanup_only = args.cleanup_only or args.cleanup_markers_only or args.cleanup_scene_tags_only
+    if args.abandon_pending:
+        if (args.output_mode != 'merged' or hierarchy_only or args.download_models or args.explain_tag
+                or args.prune_empty_tags_only or args.sync_marker_groups_only or args.restart):
+            parser.error("--abandon-pending is standalone or accompanies merged --merge-only/cleanup modes.")
+        if not args.merge_only and not cleanup_only and (args.markers_only or args.scene_tags_only or args.prune_empty_tags or args.profile_merge):
+            parser.error("Standalone --abandon-pending does not publish outputs or prune tags.")
     if args.force_merge and not args.merge_only:
         parser.error("--force-merge requires --merge-only.")
     if args.profile_merge:
@@ -1586,6 +1595,12 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--prune-prefixes requires an empty-tag pruning mode.")
     if args.restart and (hierarchy_only or cleanup_only or args.download_models or args.explain_tag or args.merge_only or args.prune_empty_tags_only or args.sync_marker_groups_only):
         parser.error("--restart applies to model inference.")
+    if args.abandon_pending and not args.merge_only and not cleanup_only:
+        from stash_recovery import run_only
+        if args.scene_id:
+            parser.error("Standalone abandonment covers pending plans for this Stash/state DB; --scene-id does not apply.")
+        validate_config(scene_work=False)
+        return run_only(sys.modules[__name__], args)
     if args.sync_marker_groups_only:
         from stash_marker_groups import run_backfill
         validate_config(scene_work=False)

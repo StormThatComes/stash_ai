@@ -78,6 +78,13 @@ python .\stash_ai.py --explain-tag ai:blue_hair --scene-id 123
 # Cleanup i puste tagi
 python .\stash_ai.py --cleanup-only --dry-run
 python .\stash_ai.py --prune-empty-tags-only --dry-run
+
+# Po przerwaniu cleanupu/merge: porzuć stary plan i użyj zmienionych YAML-i
+python .\stash_ai.py --cleanup-only --abandon-pending --dry-run
+python .\stash_ai.py --cleanup-only --abandon-pending
+
+# Samo porzucenie planu, bez zapisów do Stash i bez inferencji
+python .\stash_ai.py --abandon-pending
 ```
 
 `joytag_stash_markers.py` to tylko stara nazwa launchera — używaj `stash_ai.py`.
@@ -124,5 +131,6 @@ Notatki aktualizacji:
 - [UPGRADE_performance.md](UPGRADE_performance.md) — cache i 32 GiB RAM
 - [UPGRADE_occurrences.md](UPGRADE_occurrences.md) — punkty wykrycia bez markera
 - [UPGRADE_marker_groups.md](UPGRADE_marker_groups.md) — grupy `m:` pod `ai_markers` i cleanup
+- [UPGRADE_abandon_pending.md](UPGRADE_abandon_pending.md) — porzucanie przerwanych operacji i zmiana YAML-i
 - [UPGRADE_diagnostics.md](UPGRADE_diagnostics.md) — diagnostyka wolnego merge
 - [UPGRADE_exclusions.md](UPGRADE_exclusions.md) — blacklisty

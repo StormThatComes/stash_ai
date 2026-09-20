@@ -71,7 +71,7 @@ def publication_key(app, args, hierarchy, cores, tags, stash):
     files = ('stash_ai.py', 'stash_merge.py', 'stash_temporal.py', 'stash_fusion.py',
              'stash_scene.py', 'stash_occurrences.py', 'stash_exclusions.py', 'stash_cleanup.py',
              'stash_taggers.py', 'stash_performance.py', 'stash_timeline.py', 'stash_merge_sql.py',
-             'stash_marker_groups.py')
+             'stash_marker_groups.py', 'stash_recovery.py')
     root = Path(__file__).resolve().parent
     code = hashlib.sha256(b''.join((root / name).read_bytes() for name in files)).hexdigest()
     names = ('APPLY_SCENE_TAGS', 'CREATE_MARKERS', 'CREATE_MISSING', 'MAX_TAGS',

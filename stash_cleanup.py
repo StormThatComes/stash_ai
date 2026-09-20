@@ -59,7 +59,8 @@ def begin(store, fingerprint, global_labels, core_labels, tag_ids, *, kinds=('sc
     scope = '' if set(kinds) == {'scene', 'markers'} else ('marker_' if 'markers' in kinds else 'scene_')
     if scope:
         # Old executables do not understand output-specific lazy masks.
-        store.connection.execute('PRAGMA user_version=6')
+        if store.connection.execute('PRAGMA user_version').fetchone()[0] < 6:
+            store.connection.execute('PRAGMA user_version=6')
     for kind, values in ((scope + 'global', global_labels), ('core', core_labels), (scope + 'ids', tag_ids)):
         store.cleanup_masks.setdefault(kind, {}).update(
             (str(value), store.cleanup_generation) for value in values)
@@ -78,13 +79,16 @@ def mask_snapshot(store, snapshot, kind):
     if snapshot is None or snapshot.get('cleanup_generation', 0) >= store.cleanup_generation:
         return snapshot
     generation = snapshot.get('cleanup_generation', 0)
-    active = {key: {label for label, revision in values.items() if revision > generation}
+    abandoned = getattr(store, 'abandoned_cleanups', {})
+    active = {key: {label for label, revision in values.items() if revision > generation and revision not in abandoned}
               for key, values in store.cleanup_masks.items()}
     prefix = 'marker_' if kind == 'markers' else 'scene_'
     blocked = active.get('global', set()) | active.get(prefix + 'global', set())
     cores = active.get('core', set())
     ids = active.get('ids', set()) | active.get(prefix + 'ids', set())
     result = {**snapshot, 'cleanup_generation': store.cleanup_generation}
+    if any(revision > generation and kind in kinds for revision, kinds in abandoned.items()):
+        result['recovery_required'] = True
     contributions = []
     for item in snapshot.get('contributions', []):
         if item['tag'] in blocked or (kind == 'markers' and item['tag'] in cores):
@@ -115,6 +119,7 @@ def mask_snapshot(store, snapshot, kind):
 
 
 def stamp_snapshot(store, snapshot):
+    snapshot = {key: value for key, value in snapshot.items() if key != 'recovery_required'}
     return {**snapshot, 'cleanup_generation': store.cleanup_generation} if store.cleanup_generation else snapshot
 
 
