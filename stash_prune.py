@@ -5,7 +5,7 @@ from collections import Counter, deque
 
 from tqdm import tqdm
 
-DEFAULT_PREFIXES = ("jt:", "wd:", "dtq:", "op:", "ai:")
+DEFAULT_PREFIXES = ("jt:", "wd:", "dtq:", "op:", "ai:", "m:")
 REQUIRED_COUNTS = {"scene_count", "scene_marker_count", "image_count", "gallery_count", "performer_count", "child_count"}
 
 
@@ -28,7 +28,7 @@ class PruneClient:
             mutation: __type(name: "Mutation") { fields { name } }
         }''')
         fields = {f["name"] for f in (data.get("tag") or {}).get("fields", [])}
-        required = REQUIRED_COUNTS | {"id", "name", "parents", "children"}
+        required = REQUIRED_COUNTS | {"id", "name", "description", "parents", "children"}
         for entity in ("studio", "group", "movie"):
             entity_fields = {f["name"] for f in (data.get(entity) or {}).get("fields", [])}
             if "tags" in entity_fields and not (entity == "movie" and "group_count" in fields):
@@ -37,7 +37,7 @@ class PruneClient:
             raise RuntimeError("Stash does not expose all tag usage/child counters needed for safe pruning; nothing was deleted.")
         # Include new usage counters exposed by future compatible servers too.
         self.counts = sorted(name for name in fields if name.endswith("_count") and name != "parent_count")
-        self.fields = "id name parents { id } children { id } " + " ".join(self.counts)
+        self.fields = "id name description parents { id } children { id } " + " ".join(self.counts)
 
     def catalog(self, ids=None):
         if ids is not None:
@@ -100,12 +100,15 @@ class PruneClient:
             raise RuntimeError(f"Stash did not confirm deletion of tag {identifier}; rerun to reconcile.")
 
 
-def prune_tags(stash, prefixes=None, report=print, *, names=None, candidate_ids=None):
+def prune_tags(stash, prefixes=None, report=print, *, names=None, candidate_ids=None, skip_marker_groups=False):
     prefixes = prefixes_checked(prefixes)
     # Standalone and post-merge callers use print; keep their logs above the bars.
     report = tqdm.write if report is print else report
     names = frozenset(names) if names is not None else None
     def selected(tag):
+        from stash_marker_groups import PREFIX, ROOT, managed_group
+        if tag['name'] == ROOT or (tag['name'].startswith(PREFIX) and (skip_marker_groups or not managed_group(tag))):
+            return False
         return tag["name"] in names if names is not None else tag["name"].startswith(prefixes)
     report("Pruning unused excluded tag definitions." if names is not None else
            "Empty-tag pruning, global prefixes: " + " ".join(prefixes))

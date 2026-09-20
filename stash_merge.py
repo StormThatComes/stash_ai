@@ -733,6 +733,8 @@ def sync_merged(app, stash, resolver, store, scene, scene_hits, spans, *, migrat
     report = report or getattr(store, 'report', None)
     from stash_exclusions import excluded_names
     from stash_occurrences import OCCURRENCE_TAG, is_occurrence
+    from stash_marker_groups import for_resolver
+    groups = for_resolver(app, resolver)
     blocked_names = excluded_names(tag_policies)
     previous_ranges = []
     if app.CREATE_MARKERS and (not stash.has_end_time or not app.MARKER_USE_END_TIME):
@@ -796,7 +798,10 @@ def sync_merged(app, stash, resolver, store, scene, scene_hits, spans, *, migrat
             resolver.names_by_id[str(tag['id'])] = tag['name']
     def allowed_id(identifier):
         name = resolver.name_for_id(str(identifier))
-        return name is not None and name not in blocked_names
+        return name is not None and name not in blocked_names and not groups.owns_id(identifier)
+    def manual_extra(tag):
+        return (not tag['name'].startswith(AI.prefix) and tag['name'] not in blocked_names
+                and not groups.owns(tag))
     current_tags = scene.get("tags", [])
     snapshots = {}
     migrated_scene_ids = {str(tag["id"]) for tag in current_tags if legacy_label(tag["name"])} if migrate else set()
@@ -824,6 +829,7 @@ def sync_merged(app, stash, resolver, store, scene, scene_hits, spans, *, migrat
             extras = {ids[AI.prefix + label] for label in marker["extra_tags"] if ids.get(AI.prefix + label)}
             extras.update(identifier for identifier in marker["extra_ids"] if allowed_id(identifier))
             extras.add(ids[AI.owner_tag])
+            extras.add(groups.resolve(marker['tag'], is_occurrence(marker)))
             if is_occurrence(marker) and ids.get(OCCURRENCE_TAG):
                 extras.add(ids[OCCURRENCE_TAG])
             extras.discard(primary)
@@ -848,7 +854,7 @@ def sync_merged(app, stash, resolver, store, scene, scene_hits, spans, *, migrat
             # Keep manual extras from every marker absorbed by the union, including
             # duplicates that will be deleted. A split carries them to both pieces.
             payload["tag_ids"] = sorted(set(payload["tag_ids"]) | {str(tag["id"]) for marker in related
-                for tag in marker.get("tags", []) if not tag["name"].startswith(AI.prefix) and tag['name'] not in blocked_names})
+                for tag in marker.get("tags", []) if manual_extra(tag)})
             matches = [marker for marker in same_primary if str(marker["id"]) in available
                        and overlaps(temporal_marker(marker), interval, app.MARKER_MATCH_TOLERANCE_SECONDS)]
             if not matches:
@@ -865,7 +871,7 @@ def sync_merged(app, stash, resolver, store, scene, scene_hits, spans, *, migrat
             del available[marker_id]
             # Additional manually attached tags outside the generated namespace survive.
             payload["tag_ids"] = sorted(set(payload["tag_ids"]) | {str(tag["id"]) for tag in current.get("tags", [])
-                                                                  if not tag["name"].startswith(AI.prefix) and tag['name'] not in blocked_names})
+                                                                  if manual_extra(tag)})
             if app.marker_differs(current, payload):
                 updates.append({**payload, "id": marker_id})
             else:
@@ -901,6 +907,7 @@ def sync_merged(app, stash, resolver, store, scene, scene_hits, spans, *, migrat
     stats['cross_model_extras'] = sum(bool(set(item.get('source_evidence', {})) - set(marker['sources']))
         for marker in markers for tag, item in marker.get('extra_evidence', {}).items() if tag in marker['extra_tags'])
     if stash.dry_run:
+        groups.record_preview(scene, creates, updates, deletes)
         write = report.detail if report is not None else print
         write(f"[DRY] scene {scene_id}: ai scene tags={len(desired_ids)}, markers create={len(creates)} "
               f"update={len(updates)} delete={len(deletes)}; migrate scene tags={stats['legacy_scene_tags_migrated']}.")
@@ -992,7 +999,7 @@ def _run_merged(app, settings, args, catalogs, hierarchy, core_policies, scene_p
         stash = app.StashClient(app.DRY_RUN)
         stash.report = report
         try:
-            if hierarchy:
+            if hierarchy or app.CREATE_MARKERS:
                 stash.detect_tag_hierarchy()
             if app.CREATE_MARKERS:
                 stash.detect_marker_capabilities()
@@ -1002,11 +1009,12 @@ def _run_merged(app, settings, args, catalogs, hierarchy, core_policies, scene_p
                 stash.configure_merge_reads(report, merge_only=args.merge_only)
             scenes = {}
             resolver = app.TagResolver(stash, hierarchy, source=AI, report=report.detail)
-            if hierarchy or not args.scene_id or len(args.scene_id) > 1:
+            use_catalog = bool(hierarchy or app.CREATE_MARKERS)
+            if use_catalog or not args.scene_id or len(args.scene_id) > 1:
                 resolver.preload()
             base_key = performance.publication_key(app, args, hierarchy, core_policies, scene_policies, stash)
             merge_key = (performance.digest([base_key, performance.catalog_fingerprint(resolver)])
-                         if hierarchy else base_key)
+                         if use_catalog else base_key)
             store.preload_sources()
             with stage(report, 'initial_scan'):
                 for current in tqdm(stash.iter_scenes(args.scene_id), desc="Read sources", unit="scene"):
@@ -1120,7 +1128,7 @@ def _run_merged(app, settings, args, catalogs, hierarchy, core_policies, scene_p
                         stats["errors"] += 1
                         report.issue('merge', '', scene_id, exc, app.safe_error(exc))
                     report.progress(bar, stats)
-            if hierarchy:
+            if use_catalog:
                 final_key = performance.digest([base_key, performance.catalog_fingerprint(resolver)])
                 if final_key != merge_key:
                     with store.connection:
@@ -1129,10 +1137,16 @@ def _run_merged(app, settings, args, catalogs, hierarchy, core_policies, scene_p
             app.print_hierarchy_summary(resolver)
             if args.prune_empty_tags and not stats["errors"]:
                 from stash_prune import prune_tags
-                stats.update(prune_tags(stash, args.prune_prefixes, report=report.detail))
+                # Groups use the projected marker counts below, including in dry-run.
+                stats.update(prune_tags(stash, args.prune_prefixes, report=report.detail,
+                                        skip_marker_groups=app.CREATE_MARKERS))
             elif not stats['errors']:
                 from stash_exclusions import prune_excluded_definitions
                 stats.update(prune_excluded_definitions(app, stash, scene_policies, report.detail))
+            if app.CREATE_MARKERS and not stats['errors']:
+                from stash_marker_groups import for_resolver, prune_groups
+                stats.update(prune_groups(stash, report.detail,
+                    usage_delta=for_resolver(app, resolver).usage_delta))
         finally:
             stash.close()
         report.finish('Merged' + (' (planned)' if app.DRY_RUN else ''), stats, store.cache)
@@ -1222,6 +1236,7 @@ def run_cleanup(app, settings, args, core_policies, scene_policies):
                     cache_bytes=int(getattr(args, 'ram_cache_gb', 0) * 2**30), allow_cleanup=wide, cleanup_preview=True,
                     memory_budget_bytes=int(getattr(args, 'ram_budget_gb', 32) * 2**30)) as store:
         stash = app.StashClient(app.DRY_RUN)
+        resolver = None
         try:
             scene_ids, cleanup_stash = args.scene_id or None, stash
             strategy = getattr(args, 'cleanup_strategy', 'auto')
@@ -1261,6 +1276,7 @@ def run_cleanup(app, settings, args, core_policies, scene_policies):
             if scene_ids != []:
                 if app.CREATE_MARKERS:
                     stash.detect_marker_capabilities()
+                    stash.detect_tag_hierarchy()
                 resolver = app.TagResolver(cleanup_stash, source=AI, report=report.detail)
                 bar = tqdm(cleanup_stash.iter_scenes(scene_ids), desc="Affected scene cleanup", unit="scene")
                 for current in bar:
@@ -1276,13 +1292,22 @@ def run_cleanup(app, settings, args, core_policies, scene_policies):
             if not stats['errors']:
                 if getattr(args, 'prune_empty_tags', False):
                     from stash_prune import prune_tags
-                    stats.update(sql.prune(prefixes=args.prune_prefixes) if sql is not None else
-                                 prune_tags(stash, args.prune_prefixes, report=report.detail))
+                    stats.update(sql.prune(prefixes=args.prune_prefixes, skip_marker_groups=app.CREATE_MARKERS)
+                                 if sql is not None else prune_tags(stash, args.prune_prefixes, report=report.detail,
+                                                                  skip_marker_groups=app.CREATE_MARKERS))
                 elif not stats['cleanup_fast_path'] or len({frozenset(v) for v in scene_policies.values()}) > 1:
                     if sql is not None and app.APPLY_SCENE_TAGS and app.CREATE_MARKERS:
                         stats.update(sql.prune(scoped_tags))
                     else:
                         stats.update(prune_excluded_definitions(app, stash, scoped_tags, report.detail))
+                if app.CREATE_MARKERS:
+                    from stash_marker_groups import PREFIX, for_resolver, prune_groups
+                    delta = Counter(getattr(cleanup_stash, 'marker_group_usage_delta', {}))
+                    if resolver is not None:
+                        delta.update(for_resolver(app, resolver).usage_delta)
+                    candidates = ([i for i, name in sql.catalog.items() if name.startswith(PREFIX)]
+                                  if sql is not None else None)
+                    stats.update(prune_groups(stash, report.detail, candidate_ids=candidates, usage_delta=delta))
         except Exception as exc:
             stats['errors'] += 1
             report.issue('cleanup', '', None, exc, app.safe_error(exc))

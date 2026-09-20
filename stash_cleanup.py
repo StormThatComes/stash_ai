@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from collections import Counter
 
 from tqdm import tqdm
 
@@ -268,8 +269,9 @@ class CleanupClient:
 
 class CleanupPreview:
     """Present simulated global deletions to later, scoped dry-run reconciliation."""
-    def __init__(self, stash, tags, markers):
+    def __init__(self, stash, tags, markers, group_usage_delta=None):
         self.stash, self.tags, self.markers = stash, set(tags), set(markers)
+        self.marker_group_usage_delta = group_usage_delta or Counter()
 
     def __getattr__(self, name):
         return getattr(self.stash, name)
@@ -319,11 +321,15 @@ def global_cleanup(app, client, store, core_policies, tag_policies, stats):
         return name in names or (name in core_names and app.owned_marker(marker, core_names[name]))
 
     marker_ids, scenes = set(), set()
+    group_usage_delta = Counter()
     matching_names = names | set(core_names) | marker_names
     find_ids = {identifier for identifier, name in catalog.items() if name in matching_names}
     # Complete pagination before mutation to avoid skipping rows as pages shrink.
     for marker in client.matching(find_ids, markers=True) if find_ids else ():
         if eligible(marker):
+            if client.stash.dry_run and str(marker['id']) not in marker_ids:
+                from stash_marker_groups import PREFIX
+                group_usage_delta.subtract({str(t['id']) for t in marker.get('tags', []) if t['name'].startswith(PREFIX)})
             marker_ids.add(str(marker['id']))
         elif any(tag['name'] in marker_names for tag in [marker['primary_tag'], *marker.get('tags', [])]):
             scenes.add(str(marker['scene']['id']))
@@ -338,5 +344,5 @@ def global_cleanup(app, client, store, core_policies, tag_policies, stats):
         finish(store)
     stats['cleanup_candidate_scenes'] = len(scenes)
     stats['cleanup_fast_path'] = 1
-    view = CleanupPreview(client.stash, tags, marker_ids) if client.stash.dry_run else client.stash
+    view = CleanupPreview(client.stash, tags, marker_ids, group_usage_delta) if client.stash.dry_run else client.stash
     return sorted(scenes), view

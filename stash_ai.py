@@ -589,15 +589,16 @@ class StashClient:
             required <= {field["name"] for field in (data.get(name) or {}).get(key, [])}
             for name, key, required in (
                 ("create", "inputFields", {"parent_ids", "description", "ignore_auto_tag"}),
-                ("update", "inputFields", {"parent_ids"}),
-                ("tag", "fields", {"parents", "description"}),
+                ("update", "inputFields", {"parent_ids", "ignore_auto_tag"}),
+                ("tag", "fields", {"parents", "description", "ignore_auto_tag"}),
             )
         )
         if not self.has_tag_hierarchy:
-            raise RuntimeError("Stash does not expose tag parent relationships. Update Stash or use --no-hierarchy.")
+            raise RuntimeError("Stash does not expose the required tag hierarchy/settings API. Update Stash; "
+                               "merged marker groups require hierarchy support even with --no-hierarchy.")
 
     def tag_fields(self) -> str:
-        return "id name description parents { id name description }" if self.has_tag_hierarchy else "id name"
+        return "id name description ignore_auto_tag parents { id name description }" if self.has_tag_hierarchy else "id name"
 
     def iter_tags(self) -> Iterator[dict]:
         page = 1
@@ -721,6 +722,14 @@ class StashClient:
         }''', {"input": payload})["tagCreate"]
         if not result:
             raise RuntimeError(f"Stash did not create tag {name!r}.")
+        return result
+
+    def update_tag_organization(self, tag_id: str, parent_ids: list[str], ignore_auto_tag: bool) -> dict:
+        result = self.gql('''mutation StashAIMarkerGroupTag($input: TagUpdateInput!) {
+            tagUpdate(input: $input) { ''' + self.tag_fields() + ''' }
+        }''', {"input": {"id": tag_id, "parent_ids": parent_ids, "ignore_auto_tag": ignore_auto_tag}})["tagUpdate"]
+        if not result:
+            raise RuntimeError(f"Stash did not update marker group tag {tag_id}.")
         return result
 
     def update_tag_parents(self, tag_id: str, parent_ids: list[str]) -> dict:
@@ -1498,7 +1507,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--prune-empty-tags", action="store_true",
                         help="After successful merged sync, delete unused leaf tags in the selected prefixes.")
     parser.add_argument("--prune-prefixes", nargs="+", default=None, metavar="PREFIX",
-                        help="Prefixes for empty-tag pruning (default: jt: wd: dtq: op: ai:). Global scope.")
+                        help="Prefixes for empty-tag pruning (default: jt: wd: dtq: op: ai: m:). Global scope; m: requires managed group metadata.")
     parser.add_argument("--hierarchy", type=Path, default=JOYTAG_HIERARCHY_FILE, metavar="YAML", help="JoyTag hierarchy.")
     parser.add_argument("--wd-hierarchy", type=Path, default=JOYTAG_HIERARCHY_FILE.with_name("wd_hierarchy.yml"), metavar="YAML", help="WD hierarchy; defaults to bundled wd_hierarchy.yml.")
     parser.add_argument("--dtq-hierarchy", type=Path, default=JOYTAG_HIERARCHY_FILE.with_name("dtq_hierarchy.yml"), metavar="YAML", help="DTQ hierarchy; defaults to bundled dtq_hierarchy.yml.")
@@ -1507,7 +1516,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--scene-tag-exclusions", "--tag-exclusions", dest="scene_tag_exclusions", type=Path,
                         default=SCENE_TAG_EXCLUSIONS_FILE, metavar="YAML",
                         help="Global blacklist for scene tags, marker cores/extras and hierarchy creation (legacy filename supported).")
-    parser.add_argument("--no-hierarchy", action="store_true", help="Disable parent synchronization.")
+    parser.add_argument("--no-hierarchy", action="store_true", help="Disable model/category parent synchronization; marker groups still use ai_markers.")
     parser.add_argument("--create-all-tags", action="store_true", help="With --sync-hierarchy-only, create full vocabularies.")
     outputs = parser.add_mutually_exclusive_group()
     outputs.add_argument("--markers-only", action="store_true", help="Leave scene tags unchanged; also works with --merge-only.")
@@ -1520,6 +1529,8 @@ def main(argv: list[str] | None = None) -> int:
     modes.add_argument("--cleanup-only", action="store_true", help="Apply both blacklists without inference; full all-model cleanup removes globally banned tags in batches.")
     modes.add_argument("--download-models", action="store_true", help="Download selected model assets from Hugging Face without Stash or inference.")
     modes.add_argument("--merge-only", action="store_true", help="Merge saved evidence and existing source-prefixed results without models/inference.")
+    modes.add_argument("--sync-marker-groups-only", action="store_true",
+                       help="Repair m:<core> / m:<core>:occurance groups on existing owned ai: markers; no inference or time changes.")
     modes.add_argument("--explain-tag", metavar="TAG", help="Show saved sources, scores and intervals for a raw/ai: tag; requires --scene-id; no Stash access.")
     modes.add_argument("--prune-empty-tags-only", action="store_true",
                        help="Remove unused leaf tag definitions without models/inference. Honors --dry-run.")
@@ -1540,7 +1551,7 @@ def main(argv: list[str] | None = None) -> int:
     from tqdm import tqdm
     args.report = RunReport(args.verbose, tqdm.write)
     DRY_RUN = DRY_RUN or args.dry_run
-    if args.markers_only or args.cleanup_markers_only:
+    if args.markers_only or args.cleanup_markers_only or args.sync_marker_groups_only:
         APPLY_SCENE_TAGS, CREATE_MARKERS = False, True
     elif args.scene_tags_only or args.cleanup_scene_tags_only:
         APPLY_SCENE_TAGS, CREATE_MARKERS = True, False
@@ -1551,11 +1562,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.force_merge and not args.merge_only:
         parser.error("--force-merge requires --merge-only.")
     if args.profile_merge:
-        if args.output_mode != 'merged' or hierarchy_only or cleanup_only or args.download_models or args.explain_tag or args.prune_empty_tags_only:
+        if args.output_mode != 'merged' or hierarchy_only or cleanup_only or args.download_models or args.explain_tag or args.prune_empty_tags_only or args.sync_marker_groups_only:
             parser.error("--profile-merge applies to merged tagging or --merge-only.")
         if args.profile_merge.suffix.lower() != '.jsonl' or args.profile_merge.exists():
             parser.error("--profile-merge requires a new .jsonl file; existing files are never overwritten.")
-    if (args.markers_only or args.scene_tags_only) and (hierarchy_only or cleanup_only or args.download_models or args.explain_tag or args.prune_empty_tags_only):
+    if (args.markers_only or args.scene_tags_only) and (hierarchy_only or cleanup_only or args.download_models or args.explain_tag or args.prune_empty_tags_only or args.sync_marker_groups_only):
         parser.error("--markers-only/--scene-tags-only apply to tagging or --merge-only.")
     if hierarchy_only and args.no_hierarchy:
         parser.error("Hierarchy-only modes cannot be combined with --no-hierarchy.")
@@ -1563,18 +1574,22 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("This mode operates on global/model files; --scene-id does not apply.")
     if args.create_all_tags and not args.sync_hierarchy_only:
         parser.error("--create-all-tags requires --sync-hierarchy-only.")
-    if (args.merge_only or args.explain_tag) and args.output_mode != "merged":
-        parser.error("--merge-only and --explain-tag require --output-mode merged.")
+    if (args.merge_only or args.explain_tag or args.sync_marker_groups_only) and args.output_mode != "merged":
+        parser.error("--merge-only, --explain-tag and --sync-marker-groups-only require --output-mode merged.")
     if args.explain_tag and not args.scene_id:
         parser.error("--explain-tag requires at least one --scene-id.")
     if args.prune_empty_tags_only and args.scene_id:
         parser.error("Empty-tag definitions have global scope; --scene-id does not apply to --prune-empty-tags-only.")
-    if args.prune_empty_tags and (hierarchy_only or args.download_models or args.explain_tag or args.output_mode != "merged"):
+    if args.prune_empty_tags and (hierarchy_only or args.download_models or args.explain_tag or args.output_mode != "merged" or args.sync_marker_groups_only):
         parser.error("--prune-empty-tags follows merged tagging, --merge-only or merged cleanup; use --prune-empty-tags-only otherwise.")
     if args.prune_prefixes and not (args.prune_empty_tags or args.prune_empty_tags_only):
         parser.error("--prune-prefixes requires an empty-tag pruning mode.")
-    if args.restart and (hierarchy_only or cleanup_only or args.download_models or args.explain_tag or args.merge_only or args.prune_empty_tags_only):
+    if args.restart and (hierarchy_only or cleanup_only or args.download_models or args.explain_tag or args.merge_only or args.prune_empty_tags_only or args.sync_marker_groups_only):
         parser.error("--restart applies to model inference.")
+    if args.sync_marker_groups_only:
+        from stash_marker_groups import run_backfill
+        validate_config(scene_work=False)
+        return run_backfill(sys.modules[__name__], args)
     if args.prune_empty_tags_only:
         from stash_prune import run_prune
         validate_config(scene_work=False)

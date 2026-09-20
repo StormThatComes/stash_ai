@@ -239,11 +239,11 @@ def test_pruning_follows_only_successful_merge(pipeline,monkeypatch,failure):
     calls=[]
     monkeypatch.setattr(stash_prune,"prune_tags",lambda *args,**kwargs:calls.append(args) or {})
     assert app.main([*p.args,"--prune-empty-tags"])==int(failure)
-    assert len(calls)==int(not failure)
+    assert len(calls)==2*int(not failure)  # Generic definitions and derived marker groups.
     p.stash.fail_create=False
     monkeypatch.setattr(app,"load_tagger",lambda *args:pytest.fail("merge-only loaded weights"))
     assert app.main([*p.args,"--merge-only","--prune-empty-tags"])==0
-    assert len(calls)==int(not failure)+1
+    assert len(calls)==2*int(not failure)+2
 
 
 def test_ordered_vocabulary_changes_checkpoint_identity(pipeline):

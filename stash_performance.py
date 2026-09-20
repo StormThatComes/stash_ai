@@ -70,7 +70,8 @@ def initialize(store):
 def publication_key(app, args, hierarchy, cores, tags, stash):
     files = ('stash_ai.py', 'stash_merge.py', 'stash_temporal.py', 'stash_fusion.py',
              'stash_scene.py', 'stash_occurrences.py', 'stash_exclusions.py', 'stash_cleanup.py',
-             'stash_taggers.py', 'stash_performance.py', 'stash_timeline.py', 'stash_merge_sql.py')
+             'stash_taggers.py', 'stash_performance.py', 'stash_timeline.py', 'stash_merge_sql.py',
+             'stash_marker_groups.py')
     root = Path(__file__).resolve().parent
     code = hashlib.sha256(b''.join((root / name).read_bytes() for name in files)).hexdigest()
     names = ('APPLY_SCENE_TAGS', 'CREATE_MARKERS', 'CREATE_MISSING', 'MAX_TAGS',
@@ -124,9 +125,10 @@ def record_check(store, scene, policy, fingerprint):
 
 
 def catalog_fingerprint(resolver):
-    return digest(sorted((name, str(t['id']), t.get('description'), sorted(
+    from stash_marker_groups import PREFIX, ROOT
+    return digest(sorted((name, str(t['id']), t.get('description'), t.get('ignore_auto_tag'), sorted(
         (str(p['id']), p['name'], p.get('description')) for p in t.get('parents', [])))
-        for name, t in resolver.records.items() if t and name.startswith('ai:')))
+        for name, t in resolver.records.items() if t and (name.startswith(('ai:', PREFIX)) or name == ROOT)))
 
 
 def projected_scene(scene, resolver, created, updates, deletes, final_tags):
