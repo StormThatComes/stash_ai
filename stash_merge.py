@@ -1237,14 +1237,13 @@ def cleanup_scene(app, stash, resolver, store, current, settings, selected, args
 def run_cleanup(app, settings, args, core_policies, scene_policies):
     """Global bans operate on tags; source-specific changes reconcile affected scenes."""
     from tqdm import tqdm
-    from stash_cleanup import CleanupClient, full_scope, global_cleanup
+    from stash_cleanup import CleanupClient
     from stash_exclusions import selected_policies, prune_excluded_definitions
     from stash_runtime import RunReport
     selected = {config.source.key for config in settings}
     scoped_tags = selected_policies(scene_policies, selected)
     stats = Counter()
     report = getattr(args, 'report', None) or RunReport(getattr(args, 'verbose', False), tqdm.write)
-    full = full_scope(app, settings, args)
     wide = not args.scene_id and selected == set(SOURCES)
     with StateStore(args.state_db, scope_for(app.STASH_URL), app.DRY_RUN,
                     cache_bytes=int(getattr(args, 'ram_cache_gb', 0) * 2**30),
@@ -1258,7 +1257,7 @@ def run_cleanup(app, settings, args, core_policies, scene_policies):
         try:
             scene_ids, cleanup_stash = args.scene_id or None, stash
             strategy = getattr(args, 'cleanup_strategy', 'auto')
-            client = CleanupClient(stash) if strategy in ('auto', 'sql') or (full and strategy == 'legacy') else None
+            client = CleanupClient(stash) if strategy in ('auto', 'sql') else None
             sql = None
             if strategy in ('auto', 'sql') and client.sql_available:
                 from stash_cleanup_sql import SQLCleanup
@@ -1278,12 +1277,6 @@ def run_cleanup(app, settings, args, core_policies, scene_policies):
                 scene_ids, cleanup_stash = run_sql_cleanup(app, sql, store, settings, args, core_policies, scene_policies, stats)
             elif strategy == 'sql':
                 raise RuntimeError('Stash does not expose the required SQL cleanup API. Use --cleanup-strategy scenes for compatibility.')
-            elif strategy == 'legacy' and client is not None and client.supported:
-                report.write('Global cleanup by tags; source-specific rules inspect only affected scenes.')
-                if store.cleanup_pending:
-                    stats['cleanup_resumed'] = 1
-                    report.write('Resuming interrupted global cleanup from the remaining Stash objects.')
-                scene_ids, cleanup_stash = global_cleanup(app, client, store, core_policies, scene_policies, stats)
             elif store.cleanup_pending:
                 raise RuntimeError('Global cleanup is interrupted and the required Stash API is unavailable; '
                                    'restore API access and rerun the same cleanup.')

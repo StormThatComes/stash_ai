@@ -1,4 +1,4 @@
-"""Offline API-contract, scale and recovery tests for tag-directed cleanup."""
+"""Offline API-contract, scale and recovery tests for SQL discovery and shared cleanup state."""
 from copy import deepcopy
 import sqlite3
 
@@ -9,12 +9,11 @@ import stash_ai as app
 import stash_cleanup as cleanup
 import stash_merge as merge
 from stash_taggers import WD
-from tests.helpers.stash import Stash
 from tests.helpers.evidence import span
 from tests.helpers.evidence import hit
 
 
-from tests.helpers.cleanup import FastStash
+from tests.helpers.cleanup_sql import SQLStash
 from tests.helpers.cleanup import options
 from tests.helpers.cleanup import install
 pytestmark = pytest.mark.usefixtures("reset_progress")
@@ -22,17 +21,17 @@ pytestmark = pytest.mark.usefixtures("reset_progress")
 
 @pytest.mark.parametrize('output', ['merged', 'separate'])
 def test_global_cleanup_of_9000_scenes_never_fetches_scenes_or_predictions(tmp_path, monkeypatch, capsys, output):
-    stash = FastStash()
+    stash = SQLStash()
     blocked, human = stash.tag('ai:blocked'), stash.tag('blocked')
     for i in range(1, 9001):
         stash.scenes[str(i)] = dict(id=str(i), tags=[blocked, human], scene_markers=[])
     stash.scene = stash.scenes['1']
-    stash.marker(merge.AI, 'blocked', 'global-manual', manual=True)
-    keep = stash.marker(merge.AI, 'keep', 'keep')
+    stash.marker(merge.AI, 'blocked', '1', manual=True)
+    keep = stash.marker(merge.AI, 'keep', '2')
     keep['tags'] += [stash.tag('op:blocked'), human]
     keep.update(seconds=10.125, end_seconds=63.625)
-    stash.marker(WD, 'core_only', 'owned-core')
-    stash.marker(WD, 'core_only', 'manual-core', manual=True)
+    stash.marker(WD, 'core_only', '3')
+    stash.marker(WD, 'core_only', '4', manual=True)
     parent, child = stash.tag('jt:blocked'), stash.tag('jt:allowed_child')
     child['parents'] = [deepcopy(parent)]
     stash.images.append({'tags': [parent, human]})
@@ -41,7 +40,7 @@ def test_global_cleanup_of_9000_scenes_never_fetches_scenes_or_predictions(tmp_p
     assert app.main(options(tmp_path, ['blocked'], ['core_only'], output=output)) == 0
     assert not stash.scene_reads
     assert all([t['name'] for t in s['tags']] == ['blocked'] for s in stash.scenes.values())
-    assert {m['id'] for m in stash.scene['scene_markers']} == {'keep', 'manual-core'}
+    assert {m['id'] for m in stash.scene['scene_markers']} == {'2', '4'}
     assert (keep['seconds'], keep['end_seconds']) == (10.125, 63.625)
     assert {t['name'] for t in keep['tags']} == {merge.AI.owner_tag, 'blocked'}
     assert child['name'] in stash.tags and child['parents'] == []
@@ -55,28 +54,25 @@ def test_global_cleanup_of_9000_scenes_never_fetches_scenes_or_predictions(tmp_p
 
 
 @pytest.mark.parametrize('bulk', [False, True])
-def test_pagination_finishes_before_deletion_and_deduplicates_markers(tmp_path, monkeypatch, bulk):
+def test_cursor_deletion_handles_overlapping_tags_once(tmp_path, monkeypatch, bulk):
     monkeypatch.setattr(cleanup, 'PAGE_SIZE', 3)
-    monkeypatch.setattr(cleanup, 'TAG_BATCH_SIZE', 2)
-    monkeypatch.setattr(cleanup, 'WRITE_BATCH_SIZE', 2)
-    stash = FastStash(bulk=bulk)
-    for i in range(17):
+    stash = SQLStash(bulk=bulk)
+    for i in range(1, 18):
         marker = stash.marker(merge.AI, 'ban'+str(i % 5), str(i))
         marker['tags'] += [stash.tag('op:ban'+str(j)) for j in range(5)]
     install(monkeypatch, stash)
-    assert app.main(options(tmp_path, ['ban'+str(i) for i in range(5)])) == 0
+    assert app.main([*options(tmp_path, ['ban'+str(i) for i in range(5)]),
+                     '--cleanup-page-size', '3', '--cleanup-write-batch-size', '2']) == 0
     assert not stash.scene['scene_markers']
     removed = [identifier for op, identifier in stash.writes if op == 'delete']
     assert len(removed) == len(set(removed)) == 17
-    ops = [op for op, _ in stash.calls]
     if bulk:
-        assert max(i for i, op in enumerate(ops) if op == 'CleanupMarkers') < ops.index('CleanupDeleteMarkers')
-        assert len([op for op in ops if op == 'CleanupDeleteMarkers']) == 9
+        assert all(len(v['ids']) <= 2 for op, v in stash.calls if op == 'CleanupDeleteMarkers')
     assert not stash.scene_reads
 
 
 def test_global_dry_run_changes_neither_stash_nor_existing_state(tmp_path, monkeypatch):
-    stash = FastStash(dry=True)
+    stash = SQLStash(dry=True)
     stash.marker(merge.AI, 'blocked', '1')
     stash.scene['tags'] = [stash.tag('op:blocked')]
     args = options(tmp_path, ['blocked'])
@@ -92,7 +88,7 @@ def test_global_dry_run_changes_neither_stash_nor_existing_state(tmp_path, monke
 
 @pytest.mark.parametrize('failure', ['CleanupDeleteMarkers', 'CleanupDeleteTags'])
 def test_resume_reconciles_committed_batches_without_replaying_deleted_ids(tmp_path, monkeypatch, failure):
-    stash = FastStash()
+    stash = SQLStash()
     stash.marker(merge.AI, 'blocked', '1')
     stash.scene['tags'] = [stash.tag('op:blocked')]
     stash.fail_after = failure
@@ -112,7 +108,7 @@ def test_resume_reconciles_committed_batches_without_replaying_deleted_ids(tmp_p
 
 
 def test_changed_policy_during_interrupted_cleanup_is_rejected_before_mutations(tmp_path, monkeypatch):
-    stash = FastStash(); stash.marker(merge.AI, 'blocked', '1')
+    stash = SQLStash(); stash.marker(merge.AI, 'blocked', '1')
     stash.fail_after = 'CleanupDeleteMarkers'
     install(monkeypatch, stash)
     assert app.main(options(tmp_path, ['blocked'])) == 1
@@ -123,7 +119,7 @@ def test_changed_policy_during_interrupted_cleanup_is_rejected_before_mutations(
 
 
 def test_pending_merge_blocks_global_deletion_before_first_mutation(tmp_path, monkeypatch):
-    stash = FastStash(); stash.marker(merge.AI, 'blocked', '1')
+    stash = SQLStash(); stash.marker(merge.AI, 'blocked', '1')
     install(monkeypatch, stash)
     args = options(tmp_path, ['blocked'])
     with merge.StateStore(tmp_path/'state.sqlite3', merge.scope_for(app.STASH_URL)) as store:
@@ -137,7 +133,7 @@ def test_publication_masks_are_lazy_and_unbanning_restores_raw_evidence(pipeline
     p = pipeline
     monkeypatch.setattr(app, 'DEFAULT_TEMPORAL', temporal)
     assert app.main(['--models', 'all', *p.args[2:]]) == 0
-    stash = FastStash()
+    stash = SQLStash()
     stash.tags, stash.scene = deepcopy(p.stash.tags), deepcopy(p.stash.scene)
     stash.scenes = {'1': stash.scene}
     monkeypatch.setattr(app, 'StashClient', lambda *_: stash)
@@ -173,7 +169,7 @@ def test_publication_masks_are_lazy_and_unbanning_restores_raw_evidence(pipeline
 
 
 def test_source_specific_cleanup_only_revisits_matching_scene_and_splits_bridge(tmp_path, monkeypatch):
-    stash = FastStash()
+    stash = SQLStash()
     for i in range(2, 100):
         stash.scenes[str(i)] = dict(id=str(i), tags=[stash.tag('ai:blocked')], scene_markers=[])
     with merge.StateStore(tmp_path/'state.sqlite3', merge.scope_for(app.STASH_URL)) as store:
@@ -189,11 +185,13 @@ def test_source_specific_cleanup_only_revisits_matching_scene_and_splits_bridge(
 
 
 def test_tag_renamed_after_catalog_is_not_deleted(tmp_path, monkeypatch):
-    stash = FastStash(); stash.tag('ai:blocked')
-    def rename(client):
-        tag = client.tags.pop('ai:blocked'); tag['name'] = 'ai:renamed'
-        client.tags[tag['name']] = tag
-    stash.before_batch = rename
+    stash = SQLStash(); stash.tag('ai:blocked')
+    def rename(client, key):
+        if key == 'tag_check':
+            tag = client.tags.pop('ai:blocked'); tag['name'] = 'ai:renamed'
+            client.tags[tag['name']] = tag
+            client.before_sql = None
+    stash.before_sql = rename
     install(monkeypatch, stash)
     assert app.main(options(tmp_path, ['blocked'])) == 0
     assert 'ai:renamed' in stash.tags and not stash.writes
@@ -213,7 +211,7 @@ def test_lazy_global_mask_keeps_frozen_exclusions_during_later_source_cleanup(pi
     p = pipeline
     monkeypatch.setattr(app, 'DEFAULT_TEMPORAL', True)
     assert app.main(['--models', 'all', *p.args[2:]]) == 0
-    stash = FastStash()
+    stash = SQLStash()
     stash.tags, stash.scene = deepcopy(p.stash.tags), deepcopy(p.stash.scene)
     stash.scenes = {'1': stash.scene}
     install(monkeypatch, stash)

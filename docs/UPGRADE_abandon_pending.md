@@ -67,8 +67,8 @@ i unieważnia cache publikacji. Nie wykonuje starego planu w Stash.
 Przed cleanupem sceny skrypt odczytuje aktualne markery i tagi oraz dopasowuje
 je do zachowanych publikacji. Zachowuje istniejące przedziały i dodatki,
 uwzględniając częściowe usunięcia. Zapisuje tak ustalony stan również wtedy,
-gdy nowe reguły nie wymagają zmian w Stash. Szybkie globalne ścieżki SQL/legacy
-nadal nie muszą dekodować źródeł wszystkich scen; dopasowanie jest wykonywane
+gdy nowe reguły nie wymagają zmian w Stash. Szybka globalna ścieżka SQL
+nadal nie musi dekodować źródeł wszystkich scen; dopasowanie jest wykonywane
 dopiero przy przetwarzaniu konkretnej sceny.
 
 Jeżeli marker należący do skryptu został zmieniony poza znanymi publikacjami

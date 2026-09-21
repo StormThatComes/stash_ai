@@ -237,7 +237,7 @@ def test_group_pruning_refresh_rechecks_ownership():
     assert identifier in stash.tags
 
 
-@pytest.mark.parametrize('strategy', ['sql', 'legacy', 'scenes'])
+@pytest.mark.parametrize('strategy', ['sql', 'scenes'])
 @pytest.mark.parametrize('dry', [False, True])
 @pytest.mark.parametrize('explicit_prune', [False, True])
 def test_cleanup_removes_both_groups_with_matching_dry_run_counts(tmp_path, monkeypatch, capsys, strategy, dry, explicit_prune):
@@ -262,7 +262,7 @@ def test_cleanup_removes_both_groups_with_matching_dry_run_counts(tmp_path, monk
         assert 'ai_markers' in stash.tags
 
 
-@pytest.mark.parametrize('strategy', ['sql', 'legacy', 'scenes'])
+@pytest.mark.parametrize('strategy', ['sql', 'scenes'])
 def test_scoped_cleanup_keeps_group_used_on_another_scene(tmp_path, monkeypatch, strategy):
     stash = SQLStash() if strategy == 'sql' else FastStash()
     saved_marker_sources(tmp_path)

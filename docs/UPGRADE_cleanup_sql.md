@@ -77,7 +77,7 @@ a pola relacji markera uruchamiają dalsze odczyty. Nowa ścieżka omija te kosz
 |---|---:|---|
 | `--cleanup-page-size` | 2000 | Maksymalna liczba wierszy ID w jednym SELECT; zakres 1–10000. |
 | `--cleanup-write-batch-size` | 200 | Maksymalna liczba scen/markerów w jednej mutacji; zakres 1–1000. |
-| `--cleanup-strategy` | auto | `sql`, `scenes` lub `legacy` wymusza konkretną ścieżkę. `legacy` zachowuje dawny, kosztowny filtr. |
+| `--cleanup-strategy` | auto | `auto` wybiera SQL, a bez niego przebieg po scenach. `sql` lub `scenes` wymusza konkretną ścieżkę. |
 
 Jeżeli timeout przeniesie się na **usuwanie**, użyj mniejszej partii:
 
@@ -89,7 +89,10 @@ Mutacje nie są automatycznie ponawiane: po timeoutcie serwer mógł już zapisa
 zmianę. Wznowienie tej samej komendy, z tym samym trybem, YAML i bazą stanu,
 ponownie znajduje pozostałe obiekty. Nie odtwarza już skasowanych ID. Można
 zmienić rozmiar partii. Przerwany pełny cleanup poprzedniej wersji można
-dokończyć przez `--cleanup-strategy sql`, bez zmiany blacklist.
+dokończyć przez `--cleanup-strategy sql`, bez zmiany blacklist. Strategia
+`--cleanup-strategy legacy` została usunięta; w istniejących poleceniach
+zastąp ją przez `sql` lub usuń opcję, aby użyć domyślnego `auto`. Zachowany
+format stanu pozwala wznowić również cleanup rozpoczęty przez `legacy`.
 
 Aby zamiast wznowienia **porzucić pozostałą część planu i zmienić blacklisty**,
 po zatrzymaniu procesu dodaj `--abandon-pending` do nowej komendy. Można też

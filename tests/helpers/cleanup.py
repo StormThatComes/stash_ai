@@ -9,14 +9,13 @@ from tests.helpers.stash import Stash
 
 
 class FastStash(Stash):
-    """Models Stash's primary-tag restriction, cascades and filtered pagination."""
+    """Models Stash's primary-tag restriction, cascades and tag pagination."""
     def __init__(self, dry=False, bulk=True):
         super().__init__(dry)
         self.scenes = {'1': self.scene}
         self.images = []
         self.bulk, self.calls, self.scene_reads = bulk, [], []
         self.fail_after = None
-        self.before_batch = None
         self.last_tag = 0
         self.last_marker = 1000
 
@@ -84,36 +83,11 @@ class FastStash(Stash):
         op = query.split('StashAI', 1)[1].split('(', 1)[0].split()[0]
         self.calls.append((op, deepcopy(variables)))
         if op == 'CleanupCapabilities':
-            queries = {'findTags': ['ids', 'filter'], 'findSceneMarkers': ['ids', 'filter', 'scene_marker_filter'],
-                       'findScenes': ['scene_filter', 'filter']}
             mutations = ['tagDestroy', 'sceneMarkerDestroy'] + (['tagsDestroy', 'sceneMarkersDestroy'] if self.bulk else [])
-            return dict(query={'fields': [{'name': k, 'args': [{'name': a} for a in args]} for k, args in queries.items()]},
-                mutation={'fields': [{'name': name} for name in mutations]},
-                marker_filter={'inputFields': [{'name': 'tags'}]}, scene_filter={'inputFields': [{'name': 'tags'}]},
-                criterion={'inputFields': [{'name': name} for name in ['value', 'modifier', 'depth']]})
-        if op in {'CleanupTags', 'CleanupTagBatch'}:
-            if self.before_batch and op == 'CleanupTagBatch':
-                self.before_batch(self)
-                self.before_batch = None
+            return {'mutation': {'fields': [{'name': name} for name in mutations]}}
+        if op == 'CleanupTags':
             rows = list(self.tags.values())
-            if 'ids' in variables:
-                rows = [row for row in rows if row['id'] in variables['ids']]
             key, field = 'findTags', 'tags'
-        elif op in {'CleanupMarkers', 'CleanupMarkerBatch'}:
-            rows = self.marker_rows()
-            if 'ids' in variables:
-                rows = [row for row in rows if row['id'] in variables['ids']]
-            else:
-                criterion = variables['where']['tags']
-                assert criterion['modifier'] == 'INCLUDES' and criterion['depth'] == 0
-                rows = [row for row in rows if any(tag['id'] in criterion['value']
-                        for tag in [row['primary_tag'], *row['tags']])]
-            key, field = 'findSceneMarkers', 'scene_markers'
-        elif op == 'CleanupScenes':
-            criterion = variables['where']['tags']
-            assert criterion['depth'] == 0 and criterion['modifier'] == 'INCLUDES'
-            rows = [scene for scene in self.scenes.values() if any(t['id'] in criterion['value'] for t in scene['tags'])]
-            key, field = 'findScenes', 'scenes'
         elif op == 'CleanupDeleteMarkers':
             for identifier in variables['ids']:
                 self.delete_marker(identifier)
@@ -140,7 +114,7 @@ def options(tmp_path, labels=(), cores=(), by_model=None, *, output='merged'):
     tags.write_text(yaml.safe_dump(dict(version=1, excluded_tags=list(labels), by_model=by_model or {})))
     core.write_text(yaml.safe_dump(dict(version=1, excluded_core_tags=list(cores))))
     return ['--models', 'all', '--output-mode', output, '--no-hierarchy', '--cleanup-only',
-            '--cleanup-strategy', 'legacy',
+            '--cleanup-strategy', 'auto',
             '--state-db', str(tmp_path/'state.sqlite3'), '--tag-exclusions', str(tags),
             '--marker-core-exclusions', str(core)]
 
