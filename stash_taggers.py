@@ -7,7 +7,6 @@ import json
 import math
 import os
 import shutil
-import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -49,7 +48,6 @@ IMAGENET_STD = (0.229, 0.224, 0.225)
 class ModelSettings:
     source: ModelSource
     model_dir: Path
-    code_dir: Path | None = None
     scene_threshold: float = 0.4
     marker_threshold: float = 0.65
     batch_size: int = 4
@@ -105,10 +103,7 @@ def metadata_files(source: ModelSource) -> tuple[str, ...]:
 
 def weight_files(settings: ModelSettings) -> tuple[str, ...]:
     if settings.source.key == "joytag":
-        # VisionModel supports legacy local model.pt installations as well.
-        weights = "model.pt" if ((settings.model_dir / "model.pt").is_file()
-                                 and not (settings.model_dir / "model.safetensors").is_file()) else "model.safetensors"
-        return ("config.json", weights)
+        return ("config.json", "model.safetensors")
     return ("model.onnx",)
 
 
@@ -423,13 +418,7 @@ class JoyTagger:
         self.labels, self.batch_size = vocabulary.labels, settings.batch_size
         self.prepare_image = prepare_image
         ensure_files(settings, weight_files(settings))
-        if settings.code_dir is None or not (settings.code_dir / "Models.py").is_file():
-            raise FileNotFoundError(f"JoyTag Models.py missing in {settings.code_dir}. "
-                                    "Set joytag.code_dir / JOYTAG_CODE_PATH to your JoyTag source checkout. "
-                                    "Model assets are downloaded from Hugging Face; the Python loader is separate.")
-        # Preserve the original loader's import path for lazy imports during inference.
-        sys.path.insert(0, str(settings.code_dir))
-        from Models import VisionModel
+        from stash_joytag import load_model
         selected = "cuda" if settings.device == "auto" and torch.cuda.is_available() else settings.device
         self.device = torch.device("cpu" if selected == "auto" else selected)
         if self.device.type == "cuda" and not torch.cuda.is_available():
@@ -437,7 +426,7 @@ class JoyTagger:
         if self.device.type == "cuda":
             torch.backends.cudnn.benchmark = True
             torch.backends.cuda.matmul.allow_tf32 = True
-        self.model = VisionModel.load_model(settings.model_dir)
+        self.model = load_model(settings.model_dir, len(self.labels), settings.download_missing)
         self.model.eval().to(self.device)
         print(f"Loaded JoyTag on {self.device}; {len(self.labels):,} labels, batch={self.batch_size}.")
 

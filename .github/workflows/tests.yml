@@ -46,4 +46,5 @@ jobs:
       - name: Run tests
         env:
           STASH_API_KEY: ""
+          STASH_AI_HF_SMOKE: "1"
         run: python -m pytest -q --tb=short

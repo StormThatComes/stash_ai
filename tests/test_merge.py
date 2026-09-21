@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 import yaml
 
-import joytag_stash_markers as app
+import stash_ai as app
 import stash_merge as merge
 from stash_taggers import SOURCES, JOYTAG, WD, DTQ, OPPAI, ModelSettings, Vocabulary
 from tests.helpers.stash import Stash

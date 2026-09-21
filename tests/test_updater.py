@@ -20,7 +20,8 @@ class Remote(updater.GitHub):
         self.files = files or {
             "stash_ai.py": b"print('new application')\n",
             "stash_merge.py": b"VALUE = 2\n",
-            "joytag_stash_markers.py": b"import stash_ai\n",
+            "joytag_stash_markers.py": b"RETIRED LAUNCHER",
+            "stash_refine.py": b"RETIRED MODULE",
             updater.UPDATER: Path(updater.__file__).read_bytes(),
             "tagger_models.yml": b"device: cuda\n",
             "marker_core_exclusions.yml": b"excluded_core_tags: []\n",
@@ -335,16 +336,15 @@ except UpdateError:
     assert child("write").returncode == 0  # Persistent lock file is not a stale lock.
 
 
-def test_both_launchers_stop_before_runtime_imports_when_update_pending(tmp_path):
+def test_launcher_stops_before_runtime_imports_when_update_pending(tmp_path):
     root = Path(updater.__file__).parent
-    for name in (updater.UPDATER, "stash_ai.py", "joytag_stash_markers.py"):
+    for name in (updater.UPDATER, "stash_ai.py"):
         (tmp_path / name).write_bytes((root / name).read_bytes())
     updater.journal_write(tmp_path, "a" * 32, "applying")
-    for name in ("stash_ai.py", "joytag_stash_markers.py"):
-        result = subprocess.run([sys.executable, str(tmp_path / name), "--help"],
-                                capture_output=True, text=True)
-        assert result.returncode == 1 and "--recover" in result.stderr
-        assert "ModuleNotFoundError" not in result.stderr
+    result = subprocess.run([sys.executable, str(tmp_path / "stash_ai.py"), "--help"],
+                            capture_output=True, text=True)
+    assert result.returncode == 1 and "--recover" in result.stderr
+    assert "ModuleNotFoundError" not in result.stderr
 
 
 def test_stale_bytecode_is_removed_before_new_sources(tmp_path):
@@ -409,3 +409,43 @@ def test_unavailable_helper_preserves_offline_recovery(tmp_path, monkeypatch):
     assert (tmp_path / updater.JOURNAL).exists()
     assert not (tmp_path / "stash_ai.py").exists()
     assert updater.recover(tmp_path) == 0
+
+
+@pytest.mark.parametrize("name", sorted(updater.RETIRED_FILES))
+@pytest.mark.parametrize("tracked", [False, True])
+def test_retired_files_are_removed_with_history_and_backups(tmp_path, name, tracked):
+    remote = Remote()
+    installed(tmp_path, remote)
+    old = b"# retired installation file\n"
+    (tmp_path / name).write_bytes(old)
+    if tracked:
+        state = updater.load_state(tmp_path)
+        for key in ("baseline", "upstream"):
+            state[key][name] = updater.blob_sha(old)
+        updater.atomic_write(tmp_path / updater.STATE, updater.json_bytes(state))
+    before = snapshot(tmp_path)
+    assert updater.update(tmp_path, remote, dry_run=True) == (0 if tracked else 2)
+    assert snapshot(tmp_path) == before
+    if not tracked:
+        with pytest.raises(updater.UpdateError, match="force-code"):
+            updater.update(tmp_path, remote)
+        assert snapshot(tmp_path) == before
+    assert updater.update(tmp_path, remote, force_code=not tracked) == 0
+    assert not (tmp_path / name).exists()
+    assert all(name not in updater.load_state(tmp_path)[key] for key in ("baseline", "upstream"))
+    assert old in [p.read_bytes() for p in (tmp_path / updater.META / "transactions").glob("*/old-*")]
+    assert updater.blob_sha(remote.files[name]) not in {
+        c.split("/")[-1] for c in remote.calls if c.startswith("git/blobs/")}
+
+
+def test_interrupted_retired_file_removal_can_roll_back(tmp_path):
+    remote = Remote()
+    installed(tmp_path, remote)
+    name = "joytag_stash_markers.py"
+    old = b"# old launcher\n"
+    (tmp_path / name).write_bytes(old)
+    identity, directory = stage(tmp_path, remote, force_code=True)
+    updater.journal_write(tmp_path, identity, "applying")
+    (tmp_path / name).unlink()
+    assert updater.recover(tmp_path) == 0
+    assert (tmp_path / name).read_bytes() == old

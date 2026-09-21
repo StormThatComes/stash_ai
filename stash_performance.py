@@ -112,11 +112,6 @@ def check_reason(store, scene, policy, fingerprint):
     return 'reused'
 
 
-def remember(store, scene, policy, fingerprint):
-    with store.connection:
-        record_check(store, scene, policy, fingerprint)
-
-
 def record_check(store, scene, policy, fingerprint):
     """Caller owns the transaction, including publication promotion if needed."""
     store.connection.execute('INSERT INTO merge_checks VALUES (?,?,?,?) '

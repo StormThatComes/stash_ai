@@ -69,7 +69,8 @@ def test_merge_check_invalidates_real_changes(pipeline, monkeypatch, tmp_path, c
 def test_derived_invalidation_rolls_back_with_the_transaction(tmp_path):
     with merge.StateStore(tmp_path/'state.db', 's') as state:
         state.put('1', 'wd', {'scene': dict(meta={}, items=[])})
-        performance.remember(state, '1', 'p', 'f')
+        with state.connection:
+            performance.record_check(state, '1', 'p', 'f')
         with pytest.raises(RuntimeError):
             with state.connection:
                 state.connection.execute('UPDATE results SET data=data')
@@ -102,7 +103,8 @@ def test_manual_hierarchy_change_invalidates_unchanged_scene(pipeline, monkeypat
 def test_cleanup_generation_invalidates_only_its_scope(tmp_path):
     from stash_cleanup import save_state
     with merge.StateStore(tmp_path/'state.db', 'a') as state:
-        performance.remember(state, '1', 'p', 'f')
+        with state.connection:
+            performance.record_check(state, '1', 'p', 'f')
         with state.connection:
             state.connection.execute("INSERT INTO merge_checks VALUES ('b','1','p','f')")
         state.cleanup_generation = 1
@@ -170,7 +172,8 @@ def test_preview_resumes_checkpoint_and_does_not_resurrect_deleted_source(pipeli
 def test_preview_detects_external_source_commit_even_for_fast_skip(tmp_path):
     path = tmp_path/'state.db'
     with merge.StateStore(path, 's') as state:
-        performance.remember(state, '1', 'p', 'f')
+        with state.connection:
+            performance.record_check(state, '1', 'p', 'f')
     with merge.StateStore(path, 's', True) as preview:
         assert performance.checked(preview, '1', 'p', 'f')
         with sqlite3.connect(path) as writer:
