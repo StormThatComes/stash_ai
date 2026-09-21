@@ -1319,12 +1319,11 @@ def run_cleanup(app, settings, args, core_policies, scene_policies):
                     else:
                         stats.update(prune_excluded_definitions(app, stash, scoped_tags, report.detail))
                 if app.CREATE_MARKERS:
-                    from stash_marker_groups import PREFIX, for_resolver, prune_groups
+                    from stash_marker_groups import for_resolver, prune_groups
                     delta = Counter(getattr(cleanup_stash, 'marker_group_usage_delta', {}))
                     if resolver is not None:
                         delta.update(for_resolver(app, resolver).usage_delta)
-                    candidates = ([i for i, name in sql.catalog.items() if name.startswith(PREFIX)]
-                                  if sql is not None else None)
+                    candidates = sql.marker_group_candidates(delta) if sql is not None else None
                     stats.update(prune_groups(stash, report.detail, candidate_ids=candidates, usage_delta=delta))
         except Exception as exc:
             stats['errors'] += 1
