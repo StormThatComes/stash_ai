@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 from collections import Counter, deque
+from contextlib import contextmanager
+from threading import Event, Thread
+from time import monotonic
 
 from tqdm import tqdm
 
@@ -15,6 +18,31 @@ def prefixes_checked(values):
                          len(value) < 2 or not value.endswith(":") or any(c.isspace() for c in value) for value in values):
         raise ValueError("Prune prefixes must be explicit non-empty namespaces ending with ':', e.g. op: ai:.")
     return values
+
+
+@contextmanager
+def _waiting_for_stash(progress, batch, total_batches):
+    """Refresh only the display; API calls and validation stay on the caller thread."""
+    stopped = Event()
+    started = monotonic()
+    status = f"batch={batch}/{total_batches}"
+
+    def refresh():
+        progress.set_postfix_str(f"{status}, waiting for Stash: {int(monotonic() - started)}s")
+
+    def tick():
+        while not stopped.wait(1):
+            refresh()
+
+    refresh()
+    ticker = Thread(target=tick, name="stash-prune-progress", daemon=True)
+    ticker.start()
+    try:
+        yield
+    finally:
+        stopped.set()
+        ticker.join()
+        progress.set_postfix_str(status, refresh=False)
 
 
 class PruneClient:
@@ -43,15 +71,25 @@ class PruneClient:
         if ids is not None:
             from stash_cleanup import batches
             result = {}
-            for group in batches(ids, 100):
-                response = self.stash.gql('''query StashAIPruneCandidates($ids: [ID!]!) {
-                    findTags(ids: $ids) { tags { ''' + self.fields + ''' } }
-                }''', {'ids': group})['findTags']['tags']
-                for tag in response:
-                    self.validate(tag)
-                    if str(tag['id']) not in group:
-                        raise ValueError('Unexpected prune tag IDs; stopped before mutation.')
-                    result[str(tag['id'])] = tag
+            ids = list(ids)
+            if not ids:
+                return result
+            total_batches = (len(ids) + 99) // 100
+            with tqdm(total=len(ids), desc="Check tag usage", unit="tag", dynamic_ncols=True) as progress:
+                for number, group in enumerate(batches(ids, 100), 1):
+                    with _waiting_for_stash(progress, number, total_batches):
+                        response = self.stash.gql('''query StashAIPruneCandidates($ids: [ID!]!) {
+                            findTags(ids: $ids) { tags { ''' + self.fields + ''' } }
+                        }''', {'ids': group})['findTags']['tags']
+                    for tag in response:
+                        self.validate(tag)
+                        if str(tag['id']) not in group:
+                            raise ValueError('Unexpected prune tag IDs; stopped before mutation.')
+                        result[str(tag['id'])] = tag
+                    # Missing IDs may have been deleted meanwhile; their lookup
+                    # still completed. Failed/invalid batches never advance.
+                    progress.update(len(group))
+                    progress.refresh()
             return result
         page, result = 1, {}
         with tqdm(desc="Read tag catalog", unit="tag", dynamic_ncols=True) as progress:

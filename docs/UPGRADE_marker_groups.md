@@ -66,6 +66,14 @@ nie zapisując zmian w Stash ani w bazie źródeł. Błąd publikacji lub uzupe�
 grup wstrzymuje końcowe sprzątanie grup. Cleanup tylko tagów scen nie zmienia
 grup markerów.
 
+Przed usuwaniem pustych definicji pasek `Check tag usage` pokazuje postęp
+sprawdzania wskazanych tagów. Licznik rośnie po zweryfikowaniu każdej partii
+(do 100 tagów), a podczas odczytu `waiting for Stash` odświeża czas oczekiwania
+co sekundę. Potem pojawia się dotychczasowy pasek `Prune empty tags`
+(w podglądzie: `Preview empty tags`). Działa to także bez `--verbose` i podczas
+`--dry-run`. Odświeżanie nie wysyła dodatkowych zapytań i nie skraca czasu
+odczytu liczników przez Stash.
+
 Samodzielny `--prune-empty-tags-only` również uwzględnia zarządzane `m:`
 w domyślnych prefiksach. Można ograniczyć go do grup:
 
