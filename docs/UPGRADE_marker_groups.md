@@ -66,8 +66,22 @@ nie zapisując zmian w Stash ani w bazie źródeł. Błąd publikacji lub uzupe�
 grup wstrzymuje końcowe sprzątanie grup. Cleanup tylko tagów scen nie zmienia
 grup markerów.
 
-Przed usuwaniem pustych definicji pasek `Check tag usage` pokazuje postęp
-sprawdzania wskazanych tagów. Licznik rośnie po zweryfikowaniu każdej partii
+W cleanupie SQL pasek `Find empty marker groups` najpierw sprawdza wszystkie
+grupy przez indeksowane `NOT EXISTS`. Grupy mające powiązania z markerami
+lub scenami są pomijane bez pobierania pełnych liczników użycia. Odczyty
+używają `--cleanup-page-size` (domyślnie 2000 tagów na zapytanie). Dzięki
+globalnemu wyszukiwaniu wykrywane są również starsze osierocone grupy.
+W `--dry-run` grupy tracące przypisania w planie przechodzą dalszą weryfikację,
+ponieważ SQL nadal widzi ich rzeczywiste, jeszcze nieusunięte powiązania.
+
+Następnie pasek `Check tag usage` sprawdza tylko pozostałych kandydatów.
+Nadal obowiązują pełne liczniki użycia, także przez obrazy i inne obiekty,
+własność tagu, brak dzieci oraz ponowna weryfikacja przed usunięciem.
+Jeśli nie ma kandydatów, ten etap jest pomijany. Strategie bez SQL zachowują
+pełny odczyt grup. Podsumowanie pokazuje `marker_group_tags_checked_sql`
+oraz `marker_group_tags_candidates`.
+
+Licznik `Check tag usage` rośnie po zweryfikowaniu każdej partii
 (do 100 tagów), a podczas odczytu `waiting for Stash` odświeża czas oczekiwania
 co sekundę. Potem pojawia się dotychczasowy pasek `Prune empty tags`
 (w podglądzie: `Preview empty tags`). Działa to także bez `--verbose` i podczas

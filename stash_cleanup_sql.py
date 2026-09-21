@@ -240,17 +240,44 @@ class SQLCleanup:
                     scenes.update(str(row[1]) for row in rows)
         return scenes
 
+    def unused_candidates(self, ids, *, page_size=200, progress=None):
+        """Reject definitely-used tags; native usage/ownership checks still decide deletion."""
+        candidates = set()
+        for group in batches(sorted(set(ids)), page_size):
+            found = {str(row[0]) for row in self.read('unused_candidates', (json.dumps(list(map(int, group))),))}
+            if not found <= set(group):
+                raise ValueError('Unexpected prune candidate IDs; stopped before mutation.')
+            candidates.update(found)
+            if progress is not None:
+                progress.set_postfix(candidates=len(candidates), refresh=False)
+                progress.update(len(group))
+        return candidates
+
+    def marker_group_candidates(self, usage_delta=None):
+        from stash_marker_groups import PREFIX
+        selected = {i for i, name in self.catalog.items() if name.startswith(PREFIX)}
+        if not selected:
+            return []
+        with tqdm(total=len(selected), desc='Find empty marker groups', unit='tag', dynamic_ncols=True) as bar:
+            candidates = self.unused_candidates(selected, page_size=self.page_size, progress=bar)
+        if self.stash.dry_run:
+            # SQL sees the real database, not planned removals. Let PreviewUsage
+            # check groups losing members, even when SQL still finds their tags.
+            candidates.update(i for i, change in (usage_delta or {}).items() if change < 0 and i in selected)
+        self.stats['marker_group_tags_checked_sql'] += len(selected)
+        self.stats['marker_group_tags_candidates'] += len(candidates)
+        return sorted(candidates)
+
     def prune(self, policies=None, prefixes=None, *, skip_marker_groups=False):
         from stash_exclusions import excluded_names
+        from stash_marker_groups import PREFIX
         from stash_prune import prefixes_checked, prune_tags
         names = excluded_names(policies, unused=True) if policies is not None else None
         prefixes = prefixes_checked(prefixes)
-        selected = {i for i, n in self.catalog.items() if (n in names if names is not None else n.startswith(prefixes))}
-        candidates = set()
-        for group in batches(sorted(selected), 200):
-            candidates.update(str(row[0]) for row in self.read('unused_candidates', (json.dumps(list(map(int,group))),)))
-        if not candidates <= selected:
-            raise ValueError('Unexpected prune candidate IDs; stopped before mutation.')
+        selected = {i for i, n in self.catalog.items()
+                    if (n in names if names is not None else n.startswith(prefixes))
+                    and not (skip_marker_groups and n.startswith(PREFIX))}
+        candidates = self.unused_candidates(selected)
         if not candidates:
             return {}
         # SQL only rejects definitely-used tags. Stash still checks EVERY exposed
