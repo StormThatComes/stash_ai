@@ -143,10 +143,12 @@ def model_identity(app, config, vocabulary):
         except FileNotFoundError:
             return [str(path), None, None]
     files = [stamp(config.model_dir / name) for name in (*metadata_files(config.source), *weight_files(config))]
-    if config.code_dir:
-        files.extend(stamp(path) for path in sorted(config.code_dir.glob("*.py")))
+    loader = {}
+    if config.source.key == "joytag":
+        from stash_joytag import LOADER_REVISION, LOADER_SHA256
+        loader = {"loader": {"revision": LOADER_REVISION, "sha256": LOADER_SHA256}}
     return {"format": PREDICTION_FORMAT, "source": config.source.key, "repo": config.source.repo,
-            "revision": config.source.revision, "files": files,
+            "revision": config.source.revision, "files": files, **loader,
             # Checkpoint score columns depend on label order, not just the set.
             "vocabulary": digest(vocabulary.labels), "batch_size": config.batch_size,
             "scene_threshold": config.scene_threshold, "marker_threshold": config.marker_threshold,

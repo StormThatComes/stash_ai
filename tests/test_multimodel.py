@@ -7,7 +7,7 @@ import sys
 import numpy as np
 import pytest
 import yaml
-import joytag_stash_markers as app
+import stash_ai as app
 import stash_taggers as adapters
 from stash_taggers import JOYTAG, WD, DTQ, OPPAI, SOURCES, ModelSettings, Vocabulary, load_vocabulary, select_models, validate_scores, prepare_wd, prepare_dtq, prepare_oppai, OnnxTagger
 
@@ -446,83 +446,3 @@ def test_bundled_hierarchy_migrates_old_metadata_parents_idempotently(bundled_ca
     before=deepcopy(stash.writes)
     app.TagResolver(stash,hierarchy,source=source).resolve(leaf["name"])
     assert stash.writes==before
-
-
-@pytest.fixture
-def joy_download(tmp_path,monkeypatch):
-    model_dir=tmp_path/"models"/"joytag"
-    cache=tmp_path/"cache";cache.mkdir()
-    assets={"top_tags.txt":b"blue_hair\nwatermark\n",
-            "config.json":b'{"image_size":448,"n_tags":2}',
-            "model.safetensors":b"test weights"}
-    for name,content in assets.items(): (cache/name).write_bytes(content)
-    calls=[]
-    def download(**kwargs):
-        calls.append(kwargs)
-        return str(cache/kwargs["filename"])
-    monkeypatch.setitem(sys.modules,"huggingface_hub",SimpleNamespace(hf_hub_download=download))
-    monkeypatch.delenv("JOYTAG_MODEL_PATH",raising=False)
-    monkeypatch.delenv("JOYTAG_CODE_PATH",raising=False)
-    config=tmp_path/"models.yml"
-    config.write_text("version: 1\njoytag:\n  model_dir: models/joytag\n  code_dir: missing-source\n")
-    monkeypatch.setattr(app,"StashClient",lambda _:pytest.fail("asset download contacted Stash"))
-    monkeypatch.setattr(app,"load_tagger",lambda *args:pytest.fail("asset download loaded inference"))
-    return SimpleNamespace(model_dir=model_dir,config=config,assets=assets,calls=calls)
-
-
-def test_joytag_downloads_pinned_hf_assets_and_reuses_them_offline(joy_download):
-    f=joy_download
-    args=["--models","joytag","--model-config",str(f.config),"--download-models"]
-    assert app.main(args)==0
-    assert {call["filename"] for call in f.calls}==set(f.assets)
-    assert all(call["repo_id"]=="fancyfeast/joytag" and
-               call["revision"]=="6b7f16331a6ccf0fdce37d5a9564715f6e772b22" for call in f.calls)
-    snapshots={name:((f.model_dir/name).read_bytes(),(f.model_dir/name).stat().st_mtime_ns) for name in f.assets}
-    assert {name:value[0] for name,value in snapshots.items()}==f.assets
-    f.calls.clear()
-    assert app.main(args+["--offline"])==0
-    assert not f.calls
-    assert snapshots=={name:((f.model_dir/name).read_bytes(),(f.model_dir/name).stat().st_mtime_ns) for name in f.assets}
-
-
-@pytest.mark.parametrize("missing",["top_tags.txt","config.json","model.safetensors"])
-def test_joytag_offline_missing_asset_never_downloads(joy_download,missing):
-    f=joy_download;f.model_dir.mkdir(parents=True)
-    for name,content in f.assets.items():
-        if name!=missing: (f.model_dir/name).write_bytes(content)
-    with pytest.raises(FileNotFoundError,match=missing):
-        app.main(["--models","joytag","--model-config",str(f.config),"--download-models","--offline"])
-    assert not f.calls and not (f.model_dir/missing).exists()
-
-
-@pytest.mark.parametrize("weight_name",["model.pt","model.safetensors"])
-def test_joytag_keeps_local_weights_while_downloading_missing_metadata(joy_download,weight_name):
-    f=joy_download;f.model_dir.mkdir(parents=True)
-    weights=f.model_dir/weight_name;weights.write_bytes(b"existing local weights")
-    original_time=weights.stat().st_mtime_ns
-    assert app.main(["--models","joytag","--model-config",str(f.config),"--download-models"])==0
-    assert {call["filename"] for call in f.calls}=={"top_tags.txt","config.json"}
-    assert weights.read_bytes()==b"existing local weights" and weights.stat().st_mtime_ns==original_time
-    if weight_name=="model.pt": assert not (f.model_dir/"model.safetensors").exists()
-
-
-def test_joytag_inference_prepares_hf_assets_before_original_loader(joy_download,monkeypatch,tmp_path):
-    f=joy_download
-    code=tmp_path/"code";code.mkdir();(code/"Models.py").write_text("# Loader fixture\n")
-    model=SimpleNamespace(image_size=448)
-    model.eval=lambda:model
-    model.to=lambda device:model
-    loaded=[]
-    def load_model(path):
-        assert {name:(path/name).read_bytes() for name in f.assets}==f.assets
-        loaded.append(path)
-        return model
-    monkeypatch.setitem(sys.modules,"Models",SimpleNamespace(VisionModel=SimpleNamespace(load_model=load_model)))
-    monkeypatch.setitem(sys.modules,"torch",SimpleNamespace(
-        device=lambda name:SimpleNamespace(type=name),cuda=SimpleNamespace(is_available=lambda:False)))
-    monkeypatch.setattr(sys,"path",sys.path[:])
-    settings=ModelSettings(JOYTAG,f.model_dir,code_dir=code,device="cpu")
-    tagger=adapters.JoyTagger(settings,load_vocabulary(settings),lambda image,size:image)
-    assert loaded==[f.model_dir] and tagger.labels==["blue_hair","watermark"]
-    assert {call["filename"] for call in f.calls}==set(f.assets)
-    tagger.close()

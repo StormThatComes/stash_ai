@@ -90,7 +90,7 @@ python .\stash_ai.py --cleanup-only --abandon-pending
 python .\stash_ai.py --abandon-pending
 ```
 
-`joytag_stash_markers.py` to tylko stara nazwa launchera — używaj `stash_ai.py`.
+`joytag_stash_markers.py` został usunięty — w poleceniach i harmonogramach używaj `stash_ai.py`.
 
 ## Konfiguracja
 
@@ -109,9 +109,16 @@ Zachowuj `tagger_sources.sqlite3` w kopiach zapasowych. Nie zawiera obrazów ani
 
 `update_stash_ai.py` pobiera aplikację bezpośrednio z `main` prywatnego repozytorium
 `StormThatComes/stash_ai`. Wymaga tylko Pythona 3.10+; nie wymaga Gita ani bibliotek
-modeli. Pobiera wyłącznie pliki `stash_*.py`, `joytag_stash_markers.py`, sam updater
+modeli. Pobiera wyłącznie aktualne pliki `stash_*.py`, sam updater
 i pliki `*.yml` z katalogu głównego. Nie pobiera testów, benchmarków, `.github`,
 dokumentacji ani `requirements.txt` i nie uruchamia `pip`.
+Usuwa wycofane `joytag_stash_markers.py` i `stash_refine.py`, zachowując kopie
+zapasowe. Zmienione lub nieśledzone pliki wymagają `--force-code`.
+
+JoyTag nie wymaga lokalnego checkoutu: wagi `model.safetensors` i loader pobierane
+są z przypiętych rewizji Hugging Face. Z własnego YAML usuń `joytag.code_dir`;
+`JOYTAG_CODE_PATH` nie jest już używane. Szczegóły migracji i wpływ na resume:
+[UPGRADE_compatibility_cleanup.md](docs/UPGRADE_compatibility_cleanup.md).
 
 Do pierwszego uruchomienia pobierz `update_stash_ai.py` z repozytorium po zalogowaniu
 do GitHub i umieść obok aplikacji. **Zatrzymaj wszystkie stare procesy aplikacji**:

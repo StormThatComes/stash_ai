@@ -17,11 +17,10 @@ enabled_models: [joytag, oppai, wd, dtq]
 device: cuda  # auto prefers CUDA; cuda requires CUDA; cpu forces CPU.
 download_missing: true  # All four models, including JoyTag; --offline disables downloads.
 
-# JoyTag preserves the script's paths and JOYTAG_MODEL_PATH / JOYTAG_CODE_PATH.
-# Optional model_dir/code_dir paths can be specified here. Environment wins.
-# Relative paths are resolved beside this YAML.
-# JoyTag downloads config.json, top_tags.txt and model.safetensors from Hugging Face.
-# code_dir / JOYTAG_CODE_PATH still points to the original JoyTag Python source.
+# All models download missing assets from pinned Hugging Face revisions.
+# model_dir / *_MODEL_PATH select download locations; relative paths use this YAML.
+# JoyTag uses model.safetensors and downloads its Python architecture from the
+# author's pinned HF Space into the Hugging Face cache. No code_dir is needed.
 joytag:
   model_dir: models/joytag
   scene_threshold: 0.40

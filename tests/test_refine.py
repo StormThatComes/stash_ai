@@ -2,7 +2,6 @@
 from copy import deepcopy
 from dataclasses import asdict
 import builtins
-import importlib
 import io
 import os
 from pathlib import Path
@@ -66,11 +65,6 @@ def test_removed_cli_flags_fail_before_any_model_or_stash_access(flag,monkeypatc
     monkeypatch.setattr(app,'load_model_settings',lambda *args:pytest.fail('invalid flags reached model configuration'))
     with pytest.raises(SystemExit) as error:app.main([flag])
     assert error.value.code==2
-
-
-def test_retired_module_cannot_activate_video_access():
-    with pytest.raises(RuntimeError,match='removed'):
-        importlib.import_module('stash_refine')
 
 
 @pytest.mark.parametrize('enabled',[False,True])

@@ -21,6 +21,7 @@ import uuid
 
 REPOSITORY = "StormThatComes/stash_ai"
 UPDATER = "update_stash_ai.py"
+RETIRED_FILES = frozenset({"joytag_stash_markers.py", "stash_refine.py"})
 META = ".stash-ai-update"
 STATE = META + "/state.json"
 JOURNAL = META + "/journal.json"
@@ -35,8 +36,8 @@ class UpdateError(RuntimeError):
 
 def allowed(name):
     """Root files only: never recurse into tests, workflows, models or envs."""
-    return bool(re.fullmatch(
-        r"(?:stash_[A-Za-z0-9_]+\.py|joytag_stash_markers\.py|"
+    return name not in RETIRED_FILES and bool(re.fullmatch(
+        r"(?:stash_[A-Za-z0-9_]+\.py|"
         r"update_stash_ai\.py|[A-Za-z0-9][A-Za-z0-9_.-]*\.yml)", name))
 
 
@@ -291,7 +292,7 @@ def load_state(root):
             if not isinstance(state[key], dict):
                 raise ValueError
             for name, sha in state[key].items():
-                if not allowed(name) or not SHA.fullmatch(sha):
+                if not (allowed(name) or name in RETIRED_FILES) or not SHA.fullmatch(sha):
                     raise ValueError
         if not SHA.fullmatch(state["commit"]):
             raise ValueError
@@ -325,16 +326,16 @@ def plan_update(root, state, commit, remote, requirements, *, overwrite_configs=
             continue
         actions.append({"path": name, "before": current, "after": sha})
         baseline[name] = sha
-    for name in sorted(set(baseline) - set(remote)):
+    for name in sorted((set(baseline) | RETIRED_FILES) - set(remote)):
         if name.endswith(".yml"):
             continue  # Retired configurations may still contain user settings.
         current = file_sha(safe_path(root, name))
         if current is not None:
-            if current != baseline[name] and not force_code:
+            if current != baseline.get(name) and not force_code:
                 conflicts.append(name)
                 continue
             actions.append({"path": name, "before": current, "after": None})
-        del baseline[name]
+        baseline.pop(name, None)
     next_state = {"format": 1, "commit": commit, "baseline": baseline,
                   "upstream": remote, "requirements": requirements}
     return actions, conflicts, kept, next_state
@@ -410,7 +411,7 @@ def load_transaction(root, identity=None):
             raise ValueError
         for entry in entries:
             name = entry["path"]
-            if not (name == STATE or allowed(name)
+            if not (name == STATE or allowed(name) or name in RETIRED_FILES
                     or (name.endswith(".yml.incoming") and allowed(name[:-9]))):
                 raise ValueError
             if name.casefold() in names:

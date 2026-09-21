@@ -345,10 +345,9 @@ Usunięto etap dodatkowego próbkowania, flagi `--refine-markers` /
 uruchomieniem pracy. Przy własnym pliku polityki usuń z niego klucze `refine_*`
 lub użyj zaktualizowanego `temporal_policy.yml` z paczki.
 
-Rozpakuj całą paczkę do katalogu skryptu. `stash_refine.py` jest teraz krótką
-blokadą zgodności: zastępuje dawną implementację i odrzuca każdą próbę importu.
-`tests/test_refine.py` zawiera wyłącznie testy wyłączenia tego etapu. Nadpisanie obu
-plików usuwa poprzedni kod również przy aktualizacji w istniejącym katalogu.
+Dawny moduł `stash_refine.py` został usunięty. Updater usuwa jego wycofaną
+kopię; przy ręcznej podmianie plików usuń go z katalogu aplikacji. Obsługa starych
+zapisów w bazie nadal pomija wyniki dodatkowego próbkowania wideo.
 
 Zapisane dawniej próbki wideo są pomijane. Stan ich niedokończonego przetwarzania
 jest usuwany podczas migracji bazy. Wyniki VTT/sprite’ów, statystyki scen i ich
@@ -611,9 +610,9 @@ używających tego samego pliku stanu.
 
 ## Nowe nazwy i zgodność konfiguracji
 
-Główny plik i miejsce ustawień to teraz `stash_ai.py`. Stary
-`joytag_stash_markers.py` pozostaje krótkim launcherem, więc dotychczasowe
-wywołania i zadania harmonogramu nadal działają po podmianie całej paczki.
+Główny plik i miejsce ustawień to `stash_ai.py`. Stary launcher
+`joytag_stash_markers.py` został usunięty. Zaktualizuj polecenia i zadania
+harmonogramu, aby uruchamiały `stash_ai.py`.
 Ustawienia edytuj w nowym głównym pliku i w `tagger_models.yml`.
 
 | Poprzednia nazwa | Aktualna nazwa |
@@ -642,8 +641,9 @@ do niej albo wskaż właściwy plik przez `--marker-core-exclusions`.
 Rozpakuj całą paczkę do katalogu skryptu. Pliki `stash_taggers.py`, `stash_merge.py`,
 `stash_progress.py`, `stash_prune.py`, `stash_exclusions.py`, `stash_cleanup.py`, `stash_cleanup_sql.py`, `stash_temporal.py`, `stash_fusion.py`,
 **`stash_scene.py`, `stash_runtime.py`, `stash_performance.py`, `stash_preview.py`,
-`stash_timeline.py`, `stash_merge_sql.py`** i YAML powinny pozostać
-obok `stash_ai.py`. Nadpisz także blokadę dawnego modułu `stash_refine.py`.
+`stash_timeline.py`, `stash_merge_sql.py`, `stash_joytag.py`** i YAML powinny pozostać
+obok `stash_ai.py`. Usuń wycofane `joytag_stash_markers.py` i `stash_refine.py`
+przy ręcznej aktualizacji; updater obsługuje ich usunięcie.
 Użyj istniejącego środowiska Python 3.10 lub nowszego. Nowe funkcje korzystają
 z biblioteki standardowej i dotychczasowych zależności.
 
@@ -690,9 +690,9 @@ wyłącza pobieranie, w tym w trybie `--download-models`.
 
 W `tagger_models.yml` ustawisz ścieżki, progi i wielkości paczek. Ścieżki
 względne są liczone względem katalogu YAML. Zmienne `JOYTAG_MODEL_PATH`,
-`JOYTAG_CODE_PATH`, `WD_MODEL_PATH`, `DTQ_MODEL_PATH` i `OPPAI_MODEL_PATH` mają pierwszeństwo.
-Dotychczasowe domyślne ścieżki JoyTag oraz konfiguracja połączenia Stash są
-zachowane. Połączenie można nadpisać przez `STASH_URL` i `STASH_API_KEY`.
+`WD_MODEL_PATH`, `DTQ_MODEL_PATH` i `OPPAI_MODEL_PATH` mają pierwszeństwo.
+Domyślny katalog JoyTag to `models/joytag` obok YAML. `JOYTAG_CODE_PATH`
+nie jest używane; usuń `joytag.code_dir` z własnego YAML. Połączenie można nadpisać przez `STASH_URL` i `STASH_API_KEY`.
 `--model-config PATH` wybiera inny plik konfiguracji modeli.
 
 Przesłany `config.env` dotyczy osobnego serwera AI; ten skrypt nie odczytuje
@@ -705,22 +705,22 @@ JoyTag pobiera z `fancyfeast/joytag` pliki `top_tags.txt`, `config.json` oraz
 `--download-models`, jak i przy zwykłym tagowaniu. Sama walidacja lub synchronizacja
 hierarchii potrzebuje wyłącznie słownika `top_tags.txt`.
 
-Zachowany jest dotychczasowy loader PyTorch. `joytag.code_dir` lub `JOYTAG_CODE_PATH`
-musi wskazywać istniejący katalog źródeł JoyTag z `Models.py` i jego modułami.
-Źródła są w [repozytorium autora](https://github.com/fpgaminer/joytag);
-wagi i słownik są pobierane z Hugging Face. Samo `--download-models` nie wymaga
-loadera ani ładowania PyTorch. Do inferencji kod źródłowy jest nadal potrzebny.
+Architektura PyTorch jest pobierana automatycznie z
+[HF Space autora](https://huggingface.co/spaces/fancyfeast/joytag/blob/bce35c9afc4dbe5eb71ee836939c84d4614eec96/Models.py),
+z przypiętej rewizji i z kontrolą SHA-256. Nie potrzeba checkoutu ani lokalnego
+`Models.py`. `--download-models` przygotowuje też loader w cache Hugging Face,
+bez importowania PyTorch i bez wykonywania pobranego kodu. Kod wykonywany jest
+dopiero podczas uruchamiania inferencji JoyTag.
 
-Opcjonalnie zmień katalog wag, dodając `model_dir: models/joytag` w sekcji
-`joytag` pliku `tagger_models.yml`; ustaw też `code_dir` na swój katalog źródeł.
-Bez tych zmian działają dotychczasowe ścieżki skryptu i nadpisania środowiskowe.
-Istniejący `model.pt` jest obsługiwany, jeśli nie ma obok `model.safetensors`;
-skrypt nie pobiera wtedy drugiego formatu wag. Gdy oba istnieją, oryginalny
-loader wybiera Safetensors.
+`--offline` i `download_missing: false` wymagają zarówno pobranych wag i metadanych,
+jak i loadera w cache HF. `model.pt` nie jest już obsługiwany; gdy brakuje
+`model.safetensors`, zwykłe uruchomienie pobiera wymagany format. Istniejące
+pliki wag nie są usuwane. Katalog pobierania wybiera `joytag.model_dir` lub
+`JOYTAG_MODEL_PATH`, tak samo jak w pozostałych modelach.
 
 | Model | Wagi używane przez ten skrypt |
 |---|---|
-| JoyTag | `model.safetensors`; także istniejący lokalny `model.pt` |
+| JoyTag | `model.safetensors` |
 | WD EVA02-Large v3 | `model.onnx` |
 | DanbooruTagQuery L/16 | `model.onnx` |
 | OppaiOracle V1.1 | `model.onnx` |
@@ -1087,8 +1087,8 @@ python -m pytest -q
 ```
 
 - [JoyTag: pliki modelu](https://huggingface.co/fancyfeast/joytag/tree/6b7f16331a6ccf0fdce37d5a9564715f6e772b22)
-  i [loader autora](https://github.com/fpgaminer/joytag/blob/main/Models.py):
-  pobierane są Safetensors, konfiguracja i słownik; zachowany jest lokalny loader PyTorch.
+  i [loader autora](https://huggingface.co/spaces/fancyfeast/joytag/blob/bce35c9afc4dbe5eb71ee836939c84d4614eec96/Models.py):
+  pobierane są Safetensors, konfiguracja, słownik i przypięty loader PyTorch z HF Space.
 - [WD: model](https://huggingface.co/SmilingWolf/wd-eva02-large-tagger-v3)
   i [przykład autora](https://huggingface.co/spaces/SmilingWolf/wd-tagger/blob/main/app.py):
   BGR 0–255, białe dopełnienie przed bicubic; ONNX zwraca prawdopodobieństwa.

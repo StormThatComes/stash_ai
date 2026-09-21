@@ -40,7 +40,7 @@ Pruning also rechecks newly empty parents and all available Stash usage counters
 cross-model votes and checkpoint resume apply to merged mode. --dry-run changes neither
 Stash nor persistent source state, but may download missing model assets.
 The source database admits one writer and keeps intent for retrying partial API
-writes. joytag_stash_markers.py remains a compatibility launcher.
+writes. Launch the application with stash_ai.py.
 """
 
 from __future__ import annotations
@@ -87,10 +87,6 @@ TEMPORAL_POLICY_FILE = Path(__file__).resolve().with_name("temporal_policy.yml")
 
 # ============================== CONFIG ==============================
 
-JOYTAG_MODEL_PATH = Path(os.getenv(
-    "JOYTAG_MODEL_PATH", "d:/home/.common/stash/joytags/model"
-))
-JOYTAG_CODE_PATH = Path(os.getenv("JOYTAG_CODE_PATH", str(JOYTAG_MODEL_PATH.parent)))
 STASH_URL = os.getenv("STASH_URL", "http://localhost:9999")
 STASH_API_KEY = os.getenv("STASH_API_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOiI0cmNoMG4iLCJzdWIiOiJBUElLZXkiLCJpYXQiOjE3ODg4ODI0MDl9.NjmFv7abYBiHnCbp1PwQrk8FYQ7I_A-8VA8PxhXhPog")
 
@@ -244,12 +240,6 @@ def load_exclusion_policy(path: Path, key: str) -> dict[str, frozenset[str]]:
     return {name: common | checked(additions.get(name, []), f"by_model.{name}") for name in SOURCES}
 
 
-def load_marker_core_exclusions(path: Path, labels: list[str] | None = None,
-                                source: ModelSource = JOYTAG) -> frozenset[str]:
-    # A common blacklist can include labels absent from one model's vocabulary.
-    return load_exclusion_policy(path, "excluded_core_tags")[source.key]
-
-
 def load_model_settings(path: Path, chosen: list[str] | None, device: str | None,
                         offline: bool = False) -> list[ModelSettings]:
     data = load_unique_yaml(path, "Model configuration")
@@ -262,14 +252,12 @@ def load_model_settings(path: Path, chosen: list[str] | None, device: str | None
     settings = []
     for name in SOURCES:
         values = data.get(name, {})
-        if not isinstance(values, dict) or set(values) - {"model_dir", "code_dir", "scene_threshold", "marker_threshold", "batch_size"}:
+        if not isinstance(values, dict) or set(values) - {"model_dir", "scene_threshold", "marker_threshold", "batch_size"}:
             raise ValueError(f"Invalid {name} settings in {path.name}.")
-        if name != "joytag" and "code_dir" in values:
-            raise ValueError("code_dir applies only to JoyTag.")
         if name not in selected:
             continue
         def local_path(key: str, default: Path) -> Path:
-            environment_name = f"{name.upper()}_{'CODE_PATH' if key == 'code_dir' else 'MODEL_PATH'}"
+            environment_name = f"{name.upper()}_MODEL_PATH"
             raw = os.getenv(environment_name)
             if raw is not None:
                 return Path(raw).expanduser().resolve()
@@ -280,12 +268,9 @@ def load_model_settings(path: Path, chosen: list[str] | None, device: str | None
                 raise ValueError(f"{name}.{key} must be a non-empty path.")
             value = Path(raw).expanduser()
             return value if value.is_absolute() else (path.resolve().parent / value).resolve()
-        model_dir = local_path("model_dir", JOYTAG_MODEL_PATH if name == "joytag" else path.resolve().parent / "models" / name)
-        code_default = (JOYTAG_CODE_PATH if name == "joytag" and "model_dir" not in values
-                        and not os.getenv("JOYTAG_MODEL_PATH") else model_dir.parent)
+        model_dir = local_path("model_dir", path.resolve().parent / "models" / name)
         config = ModelSettings(
             source=SOURCES[name], model_dir=model_dir,
-            code_dir=local_path("code_dir", code_default) if name == "joytag" else None,
             scene_threshold=values.get("scene_threshold", JOYTAG_DEFAULT_SCENE_THRESHOLD if name == "joytag" else
                                        {"wd": 0.35, "dtq": 0.20, "oppai": 0.65}[name]),
             marker_threshold=values.get("marker_threshold", 0.80 if name == "oppai" else DEFAULT_MARKER_THRESHOLD),
@@ -1586,6 +1571,9 @@ def main(argv: list[str] | None = None) -> int:
         for config in settings:
             load_vocabulary(config)
             ensure_files(config, weight_files(config))
+            if config.source.key == "joytag":
+                from stash_joytag import loader_path
+                loader_path(config.download_missing)
             print(f"{config.source.title}: files ready in {config.model_dir}.")
         return 0
     from stash_temporal import load_policy
