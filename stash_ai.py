@@ -1348,44 +1348,6 @@ def cleanup_scene_tags(stash: StashClient, scene: dict, exclusions: frozenset[st
     return Counter(scene_tags_updated=int(bool(removed)), scene_tags_cleaned=len(removed))
 
 
-def run_cleanup(settings: list[ModelSettings], scene_ids: list[str] | None,
-                core_policies: dict[str, frozenset[str]], scene_policies: dict[str, frozenset[str]], report=None) -> int:
-    """Needs only policies and identities, never model files or inference."""
-    from tqdm import tqdm
-    from stash_runtime import RunReport
-    report = report if report is not None else RunReport(write=tqdm.write)
-    stash = StashClient(DRY_RUN)
-    stats = Counter()
-    try:
-        if CREATE_MARKERS:
-            stash.detect_marker_capabilities()
-        bar = tqdm(stash.iter_scenes(scene_ids), desc="Tag/marker cleanup", unit="scene")
-        for scene in bar:
-            for config in settings:
-                source = config.source
-                try:
-                    # Refresh per source so later models cannot restore previously removed tags.
-                    current = stash.find_scene(str(scene["id"]))
-                    if APPLY_SCENE_TAGS:
-                        stats.update(cleanup_scene_tags(stash, current, scene_policies[source.key], source, report.detail))
-                    if CREATE_MARKERS:
-                        stats.update(cleanup_scene_marker_cores(stash, current, core_policies[source.key], report.detail,
-                                                              source, scene_policies[source.key]))
-                    stats["processed"] += 1
-                except Exception as exc:
-                    stats["errors"] += 1
-                    report.issue('cleanup', source.key, scene['id'], exc, safe_error(exc))
-            report.progress(bar, stats)
-        if not stats["errors"]:
-            from stash_exclusions import prune_excluded_definitions, selected_policies
-            stats.update(prune_excluded_definitions(sys.modules[__name__], stash,
-                selected_policies(scene_policies, {config.source.key for config in settings}), report.detail))
-    finally:
-        stash.close()
-    report.finish('Cleanup done' + (' (planned)' if DRY_RUN else ''), stats)
-    return 1 if stats["errors"] else 0
-
-
 def outputs_already_present(scene: dict, source: ModelSource) -> bool:
     tagged = any(tag["name"].startswith(source.prefix) for tag in scene.get("tags") or [])
     marked = any(owned_marker(marker, source) for marker in scene.get("scene_markers") or [])
@@ -1510,8 +1472,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--abandon-pending", action="store_true",
                         help="Abandon pending merge/cleanup plans, retaining applied changes and inference. "
                              "Alone: exit after abandonment; with --merge-only or cleanup: use current YAML policies. Honors --dry-run.")
-    parser.add_argument("--cleanup-strategy", choices=("auto", "sql", "scenes", "legacy"), default="auto",
-                        help="Cleanup discovery: auto uses read-only SQL when available, else scans scenes; sql requires SQL; legacy restores the old global marker filter.")
+    parser.add_argument("--cleanup-strategy", choices=("auto", "sql", "scenes"), default="auto",
+                        help="Cleanup discovery: auto uses read-only SQL when available, else scans scenes; sql requires SQL; scenes scans scenes directly.")
     parser.add_argument("--cleanup-page-size", type=int, default=2000,
                         help="Maximum ID rows per SQL cleanup SELECT (default: 2000; no COUNT or OFFSET).")
     parser.add_argument("--cleanup-write-batch-size", type=int, default=200,
@@ -1642,14 +1604,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.merge_only:
             return stash_merge.run_merged(app, settings, args, {}, stash_merge.combined_hierarchy(app, args, scene_policies), core_policies, scene_policies)
     if cleanup_only:
-        if args.cleanup_strategy != 'legacy':
-            from stash_merge import run_cleanup as run_full_cleanup
-            return run_full_cleanup(sys.modules[__name__], settings, args, core_policies, scene_policies)
-        from stash_cleanup import full_scope
-        if full_scope(sys.modules[__name__], settings, args):
-            from stash_merge import run_cleanup as run_full_cleanup
-            return run_full_cleanup(sys.modules[__name__], settings, args, core_policies, scene_policies)
-        return run_cleanup(settings, args.scene_id, core_policies, scene_policies, args.report)
+        from stash_merge import run_cleanup as run_full_cleanup
+        return run_full_cleanup(sys.modules[__name__], settings, args, core_policies, scene_policies)
     catalogs, hierarchies = {}, {}
     # Validate all selected vocabularies and hierarchies before any Stash writes.
     for config in settings:

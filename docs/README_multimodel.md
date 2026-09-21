@@ -874,7 +874,8 @@ Tryby ograniczone do scen lub markerów mogą zbiorczo odpinać tagi przez `REMO
 Mutacje nadal wykonuje oficjalne API, z ponowną kontrolą przed zapisem.
 Brak SQL w trybie `auto` przełącza cleanup na przebieg po scenach.
 `--cleanup-strategy sql` wymaga szybkiej ścieżki i zatrzymuje pracę, jeśli nie
-jest dostępna. Dawny globalny filtr markerów można wymusić tylko przez `legacy`.
+jest dostępna. `--cleanup-strategy scenes` wymusza przebieg po scenach.
+Dawna strategia `legacy` została usunięta.
 Szczegóły zakresów, wznowienia, rozmiarów partii i pomiaru na 2,5 mln markerów
 opisuje [UPGRADE_cleanup_sql.md](UPGRADE_cleanup_sql.md).
 

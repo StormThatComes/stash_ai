@@ -71,7 +71,7 @@ def test_standalone_abandons_without_stash_models_or_source_changes(tmp_path, mo
 
 
 @pytest.mark.parametrize('dry', [False, True])
-@pytest.mark.parametrize('strategy', ['sql', 'legacy', 'scenes'])
+@pytest.mark.parametrize('strategy', ['sql', 'scenes'])
 def test_changed_cleanup_does_not_finish_old_ban_or_restore_deleted_markers(tmp_path, monkeypatch, dry, strategy):
     stash = SQLStash(); seed(tmp_path, stash)
     before_raw = raw_results(tmp_path)
@@ -103,7 +103,7 @@ def test_changed_cleanup_does_not_finish_old_ban_or_restore_deleted_markers(tmp_
     assert raw_results(tmp_path) == before_raw
 
 
-@pytest.mark.parametrize('strategy', ['sql', 'legacy', 'scenes'])
+@pytest.mark.parametrize('strategy', ['sql', 'scenes'])
 def test_partial_extra_removal_is_observed_without_restoring_or_spreading_it(tmp_path, monkeypatch, strategy):
     stash = SQLStash()
     seed(tmp_path, stash, [span('wd', 0, 2, 'core', extras=['abc', 'def']), span('wd', 10, 12, 'core', extras=['abc', 'def'])])

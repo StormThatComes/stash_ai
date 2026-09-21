@@ -73,7 +73,7 @@ def test_dry_run_and_failure_preserve_existing_markers(source):
 
 
 @pytest.mark.parametrize("dry",[False,True])
-def test_cleanup_all_refreshes_between_sources(monkeypatch,dry):
+def test_cleanup_all_refreshes_between_sources(tmp_path,monkeypatch,dry):
     stash=Stash(dry)
     for source in SOURCES.values():
         stash.scene["tags"].append(stash.tag(source.prefix+"blocked"))
@@ -82,8 +82,11 @@ def test_cleanup_all_refreshes_between_sources(monkeypatch,dry):
     stash.marker(WD,"blocked","manual",True)
     before=deepcopy(stash.scene)
     monkeypatch.setattr(app,"StashClient",lambda _:stash)
-    policies={name:frozenset({"blocked"}) for name in SOURCES}
-    assert app.run_cleanup([ModelSettings(s,Path("missing")) for s in SOURCES.values()],["1"],policies,policies)==0
+    from tests.helpers.cleanup import options, install
+    install(monkeypatch, stash)
+    command = [*options(tmp_path, ['blocked'], ['blocked'], output='separate'),
+               '--cleanup-strategy', 'scenes', '--scene-id', '1']
+    assert app.main(command + (['--dry-run'] if dry else [])) == 0
     if dry: assert stash.scene==before and not stash.writes
     else:
         assert [t["name"] for t in stash.scene["tags"]]==["blocked"]

@@ -60,7 +60,8 @@ obrazie lub innym obiekcie pozostaje. `ai_markers` zawsze zostaje. Sprzątanie
 pustych definicji jest globalne również przy `--scene-id`; przypisania markerów
 na innych scenach pozostają bez zmian.
 
-Obsługiwane są strategie cleanupu `sql`, `legacy` i `scenes`. `--dry-run`
+Obsługiwane są strategie cleanupu `sql` i `scenes`; domyślne `auto` wybiera SQL,
+a przy jego braku przebieg po scenach. `--dry-run`
 uwzględnia planowane zmiany przypisań grup przy obliczaniu pustych tagów,
 nie zapisując zmian w Stash ani w bazie źródeł. Błąd publikacji lub uzupełnienia
 grup wstrzymuje końcowe sprzątanie grup. Cleanup tylko tagów scen nie zmienia

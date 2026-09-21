@@ -262,15 +262,51 @@ def test_sql_pruning_limits_counters_to_possible_empty_tags(tmp_path, monkeypatc
     assert any(key == 'unused_candidates' for key, _ in stash.sql_calls)
 
 
-def test_legacy_interrupted_global_cleanup_can_resume_using_sql(tmp_path, monkeypatch):
-    stash = SQLStash()
-    stash.marker(merge.AI, 'blocked', '1')
-    stash.fail_after = 'CleanupDeleteMarkers'
+@pytest.mark.parametrize('strategy', ['auto', 'sql'])
+@pytest.mark.parametrize('dry', [False, True])
+def test_legacy_interrupted_global_cleanup_can_resume_using_sql(tmp_path, monkeypatch, strategy, dry):
+    from stash_progress import digest
+    from stash_taggers import SOURCES
+
+    stash = SQLStash(dry=dry)
+    stash.marker(merge.AI, 'blocked', '2')  # Marker 1 was already deleted by legacy.
+    tag_id = stash.tags['ai:blocked']['id']
+    command = [*args(tmp_path, ['blocked']), '--cleanup-strategy', strategy]
+    path = tmp_path/'state.sqlite3'
+    with merge.StateStore(path, merge.scope_for(app.STASH_URL)) as store:
+        store.publish('1', {'markers': {'contributions': [span('wd', 0, 2, tag='blocked')]}})
+        # Persist the old full-cleanup format directly: no output_kinds in the
+        # fingerprint and no marker_/scene_ prefixes in the lazy masks.
+        fingerprint = digest({'tags': {s: ['blocked'] for s in SOURCES},
+                              'cores': {s: [] for s in SOURCES}, 'marker_blocklist': []})
+        masks = {'global': {'blocked': 1}, 'core': {}, 'ids': {tag_id: 1}}
+        with store.connection:
+            store.connection.execute('INSERT INTO cleanup_state VALUES (?,?,?,?)',
+                                     (store.scope, 1, merge.encode(masks), fingerprint))
+            store.connection.execute('PRAGMA user_version=5')
+    before = deepcopy((stash.scenes, stash.tags)), path.read_bytes(), path.stat().st_mtime_ns
     install(monkeypatch, stash)
-    command = args(tmp_path, ['blocked'])
-    assert app.main([*command,'--cleanup-strategy','legacy']) == 1
-    assert app.main(command) == 0
-    assert 'ai:blocked' not in stash.tags
+    assert app.main(command + (['--dry-run'] if dry else [])) == 0
+    if dry:
+        assert ((stash.scenes, stash.tags), path.read_bytes(), path.stat().st_mtime_ns) == before
+        assert not stash.writes
+    else:
+        assert 'ai:blocked' not in stash.tags and not stash.scene['scene_markers']
+        assert [identifier for op, identifier in stash.writes if op == 'delete'] == ['2']
+    with merge.StateStore(path, merge.scope_for(app.STASH_URL), allow_cleanup=dry) as store:
+        assert store.cleanup_generation == 1
+        assert store.cleanup_pending == (fingerprint if dry else None)
+        assert store.snapshot('1', 'markers')[0]['contributions'] == []
+
+
+def test_removed_legacy_strategy_fails_before_api_or_state_access(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(app, 'StashClient', lambda *_: pytest.fail('invalid strategy accessed Stash'))
+    command = [*args(tmp_path), '--cleanup-strategy', 'legacy']
+    with pytest.raises(SystemExit) as exc:
+        app.main(command)
+    assert exc.value.code == 2
+    assert "invalid choice: 'legacy'" in capsys.readouterr().err
+    assert not (tmp_path/'state.sqlite3').exists()
 
 
 def test_switching_output_scope_during_recovery_is_rejected(tmp_path, monkeypatch):
