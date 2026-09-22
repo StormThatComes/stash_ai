@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Selective, authenticated main-branch updater. Python 3.10+, stdlib only."""
+"""Selective, authenticated main-branch updater. Python 3.14.7, stdlib only."""
 from __future__ import annotations
 
 import argparse

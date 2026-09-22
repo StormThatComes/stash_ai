@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 r"""
 Stash AI: multi-model scene tags, source evidence and timestamped markers.
-Python 3.10+. Keep the stash_*.py modules and YAML files beside this script.
+Python 3.14.7. Keep the stash_*.py modules and YAML files beside this script.
 See README_multimodel.md for configuration, migration and all options.
 
     python stash_ai.py --models all
