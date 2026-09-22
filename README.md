@@ -38,7 +38,7 @@ Tryb `--output-mode separate` zostawia oryginalne prefiksy i nie rusza wyników 
 
 ## Wymagania
 
-- Python 3.10+
+- Python 3.14.7
 - Działający Stash z wygenerowanymi sprite’ami / VTT
 - GPU z CUDA jest zalecane; CPU działa, ale jest wolniejsze
 - zależności z `requirements.txt` (na CPU zamień `onnxruntime-gpu` na `onnxruntime`)
@@ -108,7 +108,7 @@ Zachowuj `tagger_sources.sqlite3` w kopiach zapasowych. Nie zawiera obrazów ani
 ## Aktualizacje
 
 `update_stash_ai.py` pobiera aplikację bezpośrednio z `main` prywatnego repozytorium
-`StormThatComes/stash_ai`. Wymaga tylko Pythona 3.10+; nie wymaga Gita ani bibliotek
+`StormThatComes/stash_ai`. Wymaga tylko Pythona 3.14.7; nie wymaga Gita ani bibliotek
 modeli. Pobiera wyłącznie aktualne pliki `stash_*.py`, sam updater
 i pliki `*.yml` z katalogu głównego. Nie pobiera testów, benchmarków, `.github`,
 dokumentacji ani `requirements.txt` i nie uruchamia `pip`.
@@ -209,6 +209,9 @@ Można uruchomić pojedynczy plik, np. `python -m pytest -q tests/test_recovery.
 Sam updater: `python -m pytest -q tests/test_updater.py` — wymaga tylko `pytest`.
 
 Przy pull requestach testy odpala GitHub Actions (`.github/workflows/tests.yml`).
+Docelową wersją aplikacji i updatera jest Python 3.14.7. CI używa wyłącznie tej
+wersji: pełny zestaw testów na Linux oraz testy updatera na Linux i Windows.
+Starsze wersje Pythona nie są wspierane ani testowane.
 Testy mockują Stash i wagi — nie pobierają modeli.
 
 ## Struktura projektu

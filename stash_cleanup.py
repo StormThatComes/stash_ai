@@ -9,12 +9,6 @@ from stash_taggers import SOURCES
 PAGE_SIZE = 1000
 
 
-def batches(values, size):
-    values = list(values)
-    for offset in range(0, len(values), size):
-        yield values[offset:offset + size]
-
-
 def initialize(store, previous_version):
     store.connection.executescript('''
         CREATE TABLE IF NOT EXISTS cleanup_state (

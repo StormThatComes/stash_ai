@@ -7,11 +7,12 @@ from __future__ import annotations
 
 import json
 from collections import Counter
+from itertools import batched
 from time import monotonic
 
 from tqdm import tqdm
 
-from stash_cleanup import batches, begin, finish
+from stash_cleanup import begin, finish
 from stash_taggers import SOURCES
 
 READ_OPERATION = '''mutation StashAICleanupReadSQL($sql: String!, $args: [Any]) {
@@ -141,7 +142,7 @@ class SQLCleanup:
         prefix, owner = (source.title_prefix, source.owner_tag) if source else ('', '')
         params = (int(identifier), name, prefix, prefix, prefix, owner)
         for rows in self.pages('primary', params, self.bounds[0]):
-            for group in batches([int(row[0]) for row in rows], self.write_size):
+            for group in batched((int(row[0]) for row in rows), self.write_size):
                 current = group if self.stash.dry_run else [int(row[0]) for row in
                     self.read('primary_check', (*params, json.dumps(group)))]
                 if not set(current) <= set(group):
@@ -172,7 +173,7 @@ class SQLCleanup:
         key, check, bound = ('extras', 'extra_check', self.bounds[1]) if markers else (
             'scenes', 'scene_check', self.bounds[2])
         for rows in self.pages(key, (int(identifier), name), bound):
-            for group in batches(list(dict.fromkeys(int(row[1]) for row in rows)), self.write_size):
+            for group in batched(dict.fromkeys(int(row[1]) for row in rows), self.write_size):
                 current = group if self.stash.dry_run else [int(row[0]) for row in
                     self.read(check, (int(identifier), name, json.dumps(group)))]
                 current = list(dict.fromkeys(current))
@@ -243,7 +244,7 @@ class SQLCleanup:
     def unused_candidates(self, ids, *, page_size=200, progress=None):
         """Reject definitely-used tags; native usage/ownership checks still decide deletion."""
         candidates = set()
-        for group in batches(sorted(set(ids)), page_size):
+        for group in batched(sorted(set(ids)), page_size):
             found = {str(row[0]) for row in self.read('unused_candidates', (json.dumps(list(map(int, group))),))}
             if not found <= set(group):
                 raise ValueError('Unexpected prune candidate IDs; stopped before mutation.')

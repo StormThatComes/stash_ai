@@ -641,11 +641,12 @@ do niej albo wskaż właściwy plik przez `--marker-core-exclusions`.
 Rozpakuj całą paczkę do katalogu skryptu. Pliki `stash_taggers.py`, `stash_merge.py`,
 `stash_progress.py`, `stash_prune.py`, `stash_exclusions.py`, `stash_cleanup.py`, `stash_cleanup_sql.py`, `stash_temporal.py`, `stash_fusion.py`,
 **`stash_scene.py`, `stash_runtime.py`, `stash_performance.py`, `stash_preview.py`,
-`stash_timeline.py`, `stash_merge_sql.py`, `stash_joytag.py`** i YAML powinny pozostać
+`stash_timeline.py`, `stash_merge_sql.py`, `stash_joytag.py`, `stash_domain.py`,
+`stash_client.py`, `stash_tags.py`, `stash_state_codec.py`** i YAML powinny pozostać
 obok `stash_ai.py`. Usuń wycofane `joytag_stash_markers.py` i `stash_refine.py`
 przy ręcznej aktualizacji; updater obsługuje ich usunięcie.
-Użyj istniejącego środowiska Python 3.10 lub nowszego. Nowe funkcje korzystają
-z biblioteki standardowej i dotychczasowych zależności.
+Użyj środowiska Python 3.14.7. Jest to jedyna docelowa i testowana wersja
+aplikacji oraz updatera; starsze wersje nie są wspierane.
 
 ```powershell
 python -m pip install -r requirements.txt

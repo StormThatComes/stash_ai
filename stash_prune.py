@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from collections import Counter, deque
 from contextlib import contextmanager
+from itertools import batched
 from threading import Event, Thread
 from time import monotonic
 
@@ -69,18 +70,17 @@ class PruneClient:
 
     def catalog(self, ids=None):
         if ids is not None:
-            from stash_cleanup import batches
             result = {}
             ids = list(ids)
             if not ids:
                 return result
             total_batches = (len(ids) + 99) // 100
             with tqdm(total=len(ids), desc="Check tag usage", unit="tag", dynamic_ncols=True) as progress:
-                for number, group in enumerate(batches(ids, 100), 1):
+                for number, group in enumerate(batched(ids, 100), 1):
                     with _waiting_for_stash(progress, number, total_batches):
                         response = self.stash.gql('''query StashAIPruneCandidates($ids: [ID!]!) {
                             findTags(ids: $ids) { tags { ''' + self.fields + ''' } }
-                        }''', {'ids': group})['findTags']['tags']
+                        }''', {'ids': list(group)})['findTags']['tags']
                     for tag in response:
                         self.validate(tag)
                         if str(tag['id']) not in group:
