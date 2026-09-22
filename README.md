@@ -215,7 +215,11 @@ Testy mockują Stash i wagi — nie pobierają modeli.
 
 | Lokalizacja | Zawartość |
 |---|---|
-| Katalog główny | aplikacja `stash_*.py`, launchery, updater, YAML-e i requirements |
+| Katalog główny | punkt wejścia `stash_ai.py`, moduły `stash_*.py`, updater, YAML-e i requirements |
+| `stash_domain.py` | wspólne typy: klatki, predykcje, markery i hierarchie |
+| `stash_client.py` | klient HTTP/GraphQL Stasha, pobieranie mediów i ochrona dry-run |
+| `stash_tags.py` | rozwiązywanie tagów i synchronizacja rodziców hierarchii |
+| `stash_state_codec.py` | kodowanie i odczyt skompresowanego JSON-u w bazie stanu |
 | `tests/` | testy regresji, fixtures i wspólne pomocniki |
 | `benchmarks/` | skrypty pomiarowe offline |
 | `benchmarks/results/` | zachowane, referencyjne wyniki pomiarów |

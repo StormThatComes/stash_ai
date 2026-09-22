@@ -6,6 +6,8 @@ from bisect import bisect_left
 from dataclasses import asdict, dataclass, fields, replace
 import math
 
+from stash_domain import MarkerSpec
+
 
 @dataclass(frozen=True)
 class TemporalPolicy:
@@ -190,7 +192,7 @@ def build_markers(app, frames, core_exclusions, *, threshold=None, seeds=None, i
         run = active.pop(tag)
         if run["hits"] < app.MARKER_MIN_HITS:
             return
-        finished.append(app.MarkerSpec(tag, run["start"], run["end"], run["score"], run["hits"],
+        finished.append(MarkerSpec(tag, run["start"], run["end"], run["score"], run["hits"],
             (), (), tuple(sorted(run["sources"])), run["strong_hits"]))
 
     for frame in frames:

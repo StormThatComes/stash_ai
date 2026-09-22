@@ -200,7 +200,7 @@ def run_prune(app, args):
     # The same writer lock prevents pruning against a concurrent local merge.
     from stash_merge import StateStore, scope_for
     with StateStore(args.state_db, scope_for(app.STASH_URL), app.DRY_RUN):
-        stash = app.StashClient(app.DRY_RUN)
+        stash = app.create_stash_client(app.DRY_RUN)
         try:
             stats = prune_tags(stash, args.prune_prefixes, report=args.report.detail)
         finally:

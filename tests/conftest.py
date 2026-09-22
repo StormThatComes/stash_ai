@@ -81,7 +81,7 @@ def pipeline(monkeypatch,tmp_path):
     values=np.array([[.8,.1],[.9,.3],[.2,.8],[.8,.9],[.9,.7],[.3,.9],[.9,.9],[.8,.2],[.9,.8],[.4,.9]],np.float32)
     context=SimpleNamespace(stash=stash,cues=cues,vocab=vocab,scores={key:values.copy() for key in SOURCES},
                             loaded=[],fail={},path=tmp_path/"state.sqlite3")
-    monkeypatch.setattr(app,"StashClient",lambda _:stash)
+    monkeypatch.setattr(app,"create_stash_client",lambda _:stash)
     monkeypatch.setattr(app,"load_vocabulary",lambda _:vocab)
     monkeypatch.setattr(app,"fetch_cues",lambda *args:(context.cues,len(context.cues)))
     monkeypatch.setattr(app,"iter_sprite_frames",lambda stash,paths,cues:((cue,int(cue.start)) for cue in cues))
@@ -110,7 +110,7 @@ def merge_pipeline(monkeypatch,tmp_path):
     for key,indices in {"joytag":[0,1],"wd":[1,2],"oppai":[2,3],"dtq":[4,5]}.items():
         scores[key][indices,0]=.9
     scores["oppai"][:2,1]=.92
-    monkeypatch.setattr(app,"StashClient",lambda _:stash)
+    monkeypatch.setattr(app,"create_stash_client",lambda _:stash)
     monkeypatch.setattr(app,"load_vocabulary",lambda _:vocabulary)
     monkeypatch.setattr(app,"fetch_cues",lambda *args:(cues,len(cues)))
     monkeypatch.setattr(app,"iter_sprite_frames",lambda *args:((cue,None) for cue in cues))

@@ -120,6 +120,6 @@ def options(tmp_path, labels=(), cores=(), by_model=None, *, output='merged'):
 
 
 def install(monkeypatch, stash):
-    monkeypatch.setattr(app, 'StashClient', lambda *_: stash)
+    monkeypatch.setattr(app, 'create_stash_client', lambda *_: stash)
     for name in ('load_tagger', 'load_vocabulary', 'fetch_cues', 'iter_sprite_frames'):
         monkeypatch.setattr(app, name, lambda *args: pytest.fail('cleanup accessed model or media assets'))

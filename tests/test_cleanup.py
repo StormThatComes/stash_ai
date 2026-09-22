@@ -136,7 +136,7 @@ def test_publication_masks_are_lazy_and_unbanning_restores_raw_evidence(pipeline
     stash = SQLStash()
     stash.tags, stash.scene = deepcopy(p.stash.tags), deepcopy(p.stash.scene)
     stash.scenes = {'1': stash.scene}
-    monkeypatch.setattr(app, 'StashClient', lambda *_: stash)
+    monkeypatch.setattr(app, 'create_stash_client', lambda *_: stash)
     def blobs():
         with sqlite3.connect(p.path) as db:
             return (db.execute('SELECT data FROM results ORDER BY model,kind').fetchall(),

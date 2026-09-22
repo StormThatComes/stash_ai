@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 import zlib
 
-from stash_merge import encode, decode
+from stash_state_codec import encode, decode
 from stash_taggers import metadata_files, weight_files
 
 PREDICTION_FORMAT = 2

@@ -109,7 +109,7 @@ def native_scene(db, identifier, markers=True, end=True, full=True):
 
 
 def client_for(db, *, end=True, deny=False):
-    client = app.StashClient(True)
+    client = app.create_stash_client(True)
     client.has_end_time = end
     calls = []
     def post(url, **kwargs):

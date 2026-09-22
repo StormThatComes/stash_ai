@@ -81,7 +81,7 @@ def test_cleanup_all_refreshes_between_sources(tmp_path,monkeypatch,dry):
     stash.scene["tags"].append(stash.tag("blocked"))
     stash.marker(WD,"blocked","manual",True)
     before=deepcopy(stash.scene)
-    monkeypatch.setattr(app,"StashClient",lambda _:stash)
+    monkeypatch.setattr(app,"create_stash_client",lambda _:stash)
     from tests.helpers.cleanup import options, install
     install(monkeypatch, stash)
     command = [*options(tmp_path, ['blocked'], ['blocked'], output='separate'),
@@ -110,7 +110,7 @@ def test_main_all_releases_models_and_preserves_failed_source(monkeypatch,fail_w
     stash=Stash();stash.scene["tags"].append(stash.tag("wd:old"));old=stash.marker(WD,"old","old")
     vocab=Vocabulary(["tag"],{"tag":"General"})
     cues=[app.Cue(i,i+1,"x",(0,0,1,1)) for i in range(2)]
-    monkeypatch.setattr(app,"StashClient",lambda _:stash)
+    monkeypatch.setattr(app,"create_stash_client",lambda _:stash)
     monkeypatch.setattr(app,"load_vocabulary",lambda _:vocab)
     monkeypatch.setattr(app,"fetch_cues",lambda *args:(cues,2))
     monkeypatch.setattr(app,"iter_sprite_frames",lambda *args:((cue,None) for cue in cues))
@@ -192,7 +192,7 @@ def test_scoped_policies_and_cleanup_without_model_files(tmp_path,monkeypatch):
     policies=app.load_exclusion_policy(path,"excluded_core_tags")
     assert policies["wd"]==frozenset({"common","special"}) and policies["dtq"]==frozenset({"common"})
     stash=Stash();stash.marker(WD,"watermark","delete")
-    monkeypatch.setattr(app,"StashClient",lambda _:stash)
+    monkeypatch.setattr(app,"create_stash_client",lambda _:stash)
     monkeypatch.setattr(app,"load_vocabulary",lambda _:pytest.fail("cleanup read vocabulary"))
     assert app.main(["--models","wd","--cleanup-markers-only","--offline"])==0
     assert not stash.scene["scene_markers"]
@@ -230,7 +230,7 @@ def test_preprocessing_and_only_untagged(monkeypatch):
 
 
 def test_dry_run_api_guard():
-    client=app.StashClient(True)
+    client=app.create_stash_client(True)
     try:
         with pytest.raises(RuntimeError,match="mutation attempted"): client.gql("mutation Test { x }")
     finally: client.close()
@@ -357,7 +357,7 @@ def test_oppai_modes_and_old_config_compatibility(tmp_path,oppai_files,monkeypat
     settings=app.load_model_settings(old,["oppai"],None,True)[0]
     assert settings.source.prefix=="op:" and settings.model_dir==oppai_files
     assert settings.scene_threshold==.65 and settings.marker_threshold==.80
-    monkeypatch.setattr(app,"StashClient",lambda _:pytest.fail("model-only mode contacted Stash"))
+    monkeypatch.setattr(app,"create_stash_client",lambda _:pytest.fail("model-only mode contacted Stash"))
     monkeypatch.setattr(app,"load_tagger",lambda *args:pytest.fail("model-only mode loaded weights"))
     hierarchy_path=tmp_path/"fixture_hierarchy.yml"
     hierarchy_path.write_text(yaml.safe_dump({"version":1,"root":OPPAI.title,
@@ -378,7 +378,7 @@ def test_oppai_scoped_blacklist_and_cleanup_without_assets(tmp_path,monkeypatch)
     assert policies["wd"]==frozenset({"common"})
     stash=Stash();stash.marker(OPPAI,"special","delete");stash.marker(OPPAI,"keep","keep")
     stash.marker(WD,"special","other");stash.marker(OPPAI,"special","manual",True)
-    monkeypatch.setattr(app,"StashClient",lambda _:stash)
+    monkeypatch.setattr(app,"create_stash_client",lambda _:stash)
     monkeypatch.setattr(app,"load_vocabulary",lambda _:pytest.fail("cleanup accessed model files"))
     assert app.main(["--models","oppai","--cleanup-markers-only","--marker-core-exclusions",str(policy),"--offline"])==0
     assert {m["id"] for m in stash.scene["scene_markers"]}=={"keep","other","manual"}
@@ -416,7 +416,7 @@ def test_default_hierarchies_cover_pinned_vocabularies_and_validate_without_weig
     # beside the script even when launched in another working directory.
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(app,"load_vocabulary",lambda settings:bundled_catalogs[settings.source.key][0])
-    monkeypatch.setattr(app,"StashClient",lambda _:pytest.fail("validation contacted Stash"))
+    monkeypatch.setattr(app,"create_stash_client",lambda _:pytest.fail("validation contacted Stash"))
     monkeypatch.setattr(app,"load_tagger",lambda *args:pytest.fail("validation loaded weights"))
     assert app.main(["--models","all","--validate-hierarchy","--offline"])==0
     joy= bundled_catalogs["joytag"][1]

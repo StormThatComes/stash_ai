@@ -47,7 +47,7 @@ def test_nested_timings_are_exclusive_and_failures_are_recorded(tmp_path, monkey
 def test_api_records_named_operation_bytes_and_errors_without_payloads(tmp_path, failure):
     path = tmp_path/'api.jsonl'
     report = RunReport(write=lambda _: None)
-    client = app.StashClient(False); client.report = report
+    client = app.create_stash_client(False); client.report = report
     secret = 'PAYLOAD_MUST_NEVER_ENTER_PROFILE'
     payload = {'errors': [{'message': secret}]} if failure else {'data': {'sceneMarkerCreate': {'id': '7'}}}
     body = json.dumps(payload).encode()

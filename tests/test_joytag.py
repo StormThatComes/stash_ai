@@ -54,7 +54,7 @@ def hf_assets(tmp_path, monkeypatch):
     monkeypatch.delenv("JOYTAG_MODEL_PATH", raising=False)
     config = tmp_path / "models.yml"
     config.write_text("version: 1\njoytag:\n  model_dir: models/joytag\n")
-    monkeypatch.setattr(app, "StashClient", lambda _: pytest.fail("model download accessed Stash"))
+    monkeypatch.setattr(app, "create_stash_client", lambda _: pytest.fail("model download accessed Stash"))
     return SimpleNamespace(model_dir=model_dir, cache=cache, config=config, assets=assets, requests=requests)
 
 

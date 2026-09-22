@@ -78,6 +78,7 @@ def test_old_video_yaml_is_rejected_explicitly(tmp_path,enabled):
 def test_scene_query_only_requests_sprite_and_vtt_media():
     client=app.StashClient.__new__(app.StashClient)
     client.has_end_time=True
+    client.create_markers=app.CREATE_MARKERS
     fields=client.scene_fields()
     assert 'paths { sprite vtt }' in fields
     assert 'files' not in fields and 'stream' not in fields and 'duration' not in fields
@@ -86,6 +87,8 @@ def test_scene_query_only_requests_sprite_and_vtt_media():
 def test_existing_sprite_reader_uses_only_stash_http_bytes(monkeypatch):
     monkeypatch.setattr(app,'STASH_URL','http://stash.test:9999')
     client=app.StashClient.__new__(app.StashClient)
+    client.url=app.STASH_URL
+    client.request_timeout=app.REQUEST_TIMEOUT
     with Image.new('RGB',(2,1),'white') as sprite:
         buffer=io.BytesIO();sprite.save(buffer,format='PNG');png=buffer.getvalue()
     urls={'http://stash.test:9999/thumb.vtt':b'WEBVTT\n\n00:00:00.000 --> 00:00:01.000\nsprite.png#xywh=0,0,1,1\n\n00:00:01.000 --> 00:00:02.000\nsprite.png#xywh=1,0,1,1\n',

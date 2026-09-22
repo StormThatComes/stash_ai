@@ -15,11 +15,12 @@ import math
 import os
 from pathlib import Path
 import sqlite3
-import zlib
 from urllib.parse import urlparse
 
+from stash_domain import Cue, FramePrediction, TagHierarchy
 from stash_taggers import ModelSource, SOURCES
 from stash_runtime import measured, stage
+from stash_state_codec import encode, decode
 from stash_occurrences import OCCURRENCE_TAG
 
 AI = ModelSource("ai", "AI", "ai:", "ai:marker:stash-taggers", "[AI] ", "[AI hierarchy v1]")
@@ -29,27 +30,6 @@ KINDS = ("scene", "markers")
 
 def now():
     return datetime.now(timezone.utc).isoformat()
-
-
-def encode(value, report=None):
-    with stage(report, 'state_json_encode'):
-        raw = json.dumps(value, ensure_ascii=False, allow_nan=False,
-                         sort_keys=True, separators=(",", ":")).encode("utf-8")
-    with stage(report, 'state_compress'):
-        result = zlib.compress(raw)
-    if report is not None:
-        report.record_counts(state_json_bytes_written=len(raw), state_blob_bytes_written=len(result))
-    return result
-
-
-def decode(value, report=None):
-    with stage(report, 'state_decompress'):
-        raw = zlib.decompress(value)
-    with stage(report, 'state_json_decode'):
-        result = json.loads(raw)
-    if report is not None:
-        report.record_counts(state_json_bytes_read=len(raw), state_blob_bytes_read=len(value))
-    return result
 
 
 def scope_for(url):
@@ -464,7 +444,7 @@ def combined_hierarchy(app, args, tag_policies=None):
             parents.difference_update(fallbacks)
     if set(categories) & {AI.prefix + label for label in leaves}:
         raise ValueError("A merged hierarchy category collides with a predicted tag.")
-    return app.TagHierarchy({label: tuple(sorted(parents)) for label, parents in leaves.items()},
+    return TagHierarchy({label: tuple(sorted(parents)) for label, parents in leaves.items()},
                             categories, prefix, "replace_managed", AI.hierarchy_description)
 
 
@@ -592,7 +572,7 @@ def _marker_contributions(app, records, core_policies, index, metrics, tag_polic
         for model, segments in records.items():
             for segment in segments:
                 if segment["mode"] == "frames":
-                    frames = [app.FramePrediction(app.Cue(frame["start"], frame["end"], "", (0, 0, 1, 1)),
+                    frames = [FramePrediction(Cue(frame["start"], frame["end"], "", (0, 0, 1, 1)),
                                tuple((raw_label(tag), score) for tag, score in frame["tags"]
                                      if tag not in app.MARKER_TAG_BLOCKLIST and tag not in tag_policies[model]))
                               for frame in segment["items"]]
@@ -1008,7 +988,7 @@ def _run_merged(app, settings, args, catalogs, hierarchy, core_policies, scene_p
         if getattr(args, 'abandon_pending', False):
             from stash_recovery import abandon
             stats.update(abandon(store, report.write))
-        stash = app.StashClient(app.DRY_RUN)
+        stash = app.create_stash_client(app.DRY_RUN)
         stash.report = report
         try:
             if hierarchy or app.CREATE_MARKERS:
@@ -1020,7 +1000,7 @@ def _run_merged(app, settings, args, catalogs, hierarchy, core_policies, scene_p
             if hasattr(stash, 'configure_merge_reads'):
                 stash.configure_merge_reads(report, merge_only=args.merge_only)
             scenes = {}
-            resolver = app.TagResolver(stash, hierarchy, source=AI, report=report.detail)
+            resolver = app.TagResolver(stash, hierarchy, source=AI, report=report.detail, create_missing=app.CREATE_MISSING)
             use_catalog = bool(hierarchy or app.CREATE_MARKERS)
             if use_catalog or not args.scene_id or len(args.scene_id) > 1:
                 resolver.preload()
@@ -1045,7 +1025,7 @@ def _run_merged(app, settings, args, catalogs, hierarchy, core_policies, scene_p
                                             'fingerprint': fingerprint}
                     except Exception as exc:
                         stats["errors"] += 1
-                        report.issue('read sources', '', scene_id, exc, app.safe_error(exc))
+                        report.issue('read sources', '', scene_id, exc, app.safe_error(exc, api_key=app.STASH_API_KEY))
             kinds = progress.output_kinds(app)
             inputs = progress.RunInputs(stash, store.cache, report)
             if not args.merge_only:
@@ -1078,7 +1058,7 @@ def _run_merged(app, settings, args, catalogs, hierarchy, core_policies, scene_p
                                         tagger = app.load_tagger(config, catalogs[key], app.prepare_image)
                                     except Exception as exc:
                                         stats["errors"] += 1
-                                        report.issue('load model', key, None, exc, app.safe_error(exc))
+                                        report.issue('load model', key, None, exc, app.safe_error(exc, api_key=app.STASH_API_KEY))
                                         break
                                     # Auto-download may just have supplied missing weight files.
                                     identity = progress.model_identity(app, config, catalogs[key])
@@ -1104,7 +1084,7 @@ def _run_merged(app, settings, args, catalogs, hierarchy, core_policies, scene_p
                                 stats["processed"] += 1
                             except Exception as exc:
                                 stats["errors"] += 1
-                                report.issue('inference', key, scene_id, exc, app.safe_error(exc))
+                                report.issue('inference', key, scene_id, exc, app.safe_error(exc, api_key=app.STASH_API_KEY))
                     finally:
                         if tagger is not None:
                             tagger.close()
@@ -1138,7 +1118,7 @@ def _run_merged(app, settings, args, catalogs, hierarchy, core_policies, scene_p
                     except Exception as exc:
                         sample['status'] = 'error'
                         stats["errors"] += 1
-                        report.issue('merge', '', scene_id, exc, app.safe_error(exc))
+                        report.issue('merge', '', scene_id, exc, app.safe_error(exc, api_key=app.STASH_API_KEY))
                     report.progress(bar, stats)
             if use_catalog:
                 final_key = performance.digest([base_key, performance.catalog_fingerprint(resolver)])
@@ -1168,10 +1148,10 @@ def _run_merged(app, settings, args, catalogs, hierarchy, core_policies, scene_p
 def run_hierarchy(app, args, catalogs, hierarchy, tag_policies=None):
     from stash_exclusions import policies_or_empty
     tag_policies = policies_or_empty(tag_policies)
-    stash = app.StashClient(app.DRY_RUN)
+    stash = app.create_stash_client(app.DRY_RUN)
     try:
         stash.detect_tag_hierarchy()
-        resolver = app.TagResolver(stash, hierarchy, source=AI, report=args.report.detail)
+        resolver = app.TagResolver(stash, hierarchy, source=AI, report=args.report.detail, create_missing=app.CREATE_MISSING)
         resolver.preload()
         labels = sorted({label for source, vocabulary in catalogs.items() for label in vocabulary.labels
                          if label not in tag_policies[source]})
@@ -1252,7 +1232,7 @@ def run_cleanup(app, settings, args, core_policies, scene_policies):
         if getattr(args, 'abandon_pending', False):
             from stash_recovery import abandon
             stats.update(abandon(store, report.write))
-        stash = app.StashClient(app.DRY_RUN)
+        stash = app.create_stash_client(app.DRY_RUN)
         resolver = None
         try:
             scene_ids, cleanup_stash = args.scene_id or None, stash
@@ -1268,7 +1248,7 @@ def run_cleanup(app, settings, args, core_policies, scene_policies):
                 except Exception as exc:
                     if strategy == 'sql' or store.cleanup_pending:
                         raise
-                    report.write('SQL cleanup unavailable (' + app.safe_error(exc) + '); scanning scenes instead.')
+                    report.write('SQL cleanup unavailable (' + app.safe_error(exc, api_key=app.STASH_API_KEY) + '); scanning scenes instead.')
             if sql is not None:
                 from stash_cleanup_sql import run_sql_cleanup
                 report.write('Cleanup by indexed SELECT: ID cursors, no global marker counts; writes use Stash API.')
@@ -1288,7 +1268,7 @@ def run_cleanup(app, settings, args, core_policies, scene_policies):
                 if app.CREATE_MARKERS:
                     stash.detect_marker_capabilities()
                     stash.detect_tag_hierarchy()
-                resolver = app.TagResolver(cleanup_stash, source=AI, report=report.detail)
+                resolver = app.TagResolver(cleanup_stash, source=AI, report=report.detail, create_missing=app.CREATE_MISSING)
                 bar = tqdm(cleanup_stash.iter_scenes(scene_ids), desc="Affected scene cleanup", unit="scene")
                 for current in bar:
                     scene_id = str(current["id"])
@@ -1298,7 +1278,7 @@ def run_cleanup(app, settings, args, core_policies, scene_policies):
                         stats["processed"] += 1
                     except Exception as exc:
                         stats["errors"] += 1
-                        report.issue('cleanup', '', scene_id, exc, app.safe_error(exc))
+                        report.issue('cleanup', '', scene_id, exc, app.safe_error(exc, api_key=app.STASH_API_KEY))
                     report.progress(bar, stats)
             if not stats['errors']:
                 if getattr(args, 'prune_empty_tags', False):
@@ -1320,7 +1300,7 @@ def run_cleanup(app, settings, args, core_policies, scene_policies):
                     stats.update(prune_groups(stash, report.detail, candidate_ids=candidates, usage_delta=delta))
         except Exception as exc:
             stats['errors'] += 1
-            report.issue('cleanup', '', None, exc, app.safe_error(exc))
+            report.issue('cleanup', '', None, exc, app.safe_error(exc, api_key=app.STASH_API_KEY))
         finally:
             stash.close()
         report.finish('Cleanup' + (' (planned)' if app.DRY_RUN else ''), stats, store.cache)
