@@ -266,7 +266,7 @@ def test_inspection_works_offline_without_stash_or_weights(merge_pipeline,monkey
     p=merge_pipeline
     assert app.main(p.args)==0
     capsys.readouterr()
-    monkeypatch.setattr(app,"StashClient",lambda *args:pytest.fail("inspection contacted Stash"))
+    monkeypatch.setattr(app,"create_stash_client",lambda *args:pytest.fail("inspection contacted Stash"))
     monkeypatch.setattr(app,"load_vocabulary",lambda *args:pytest.fail("inspection loaded vocabulary"))
     assert app.main([*p.args,"--explain-tag","ai:common","--offline"])==0
     output=capsys.readouterr().out

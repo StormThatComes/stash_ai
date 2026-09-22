@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from tqdm import tqdm
 
+from stash_state_codec import encode, decode
 from stash_taggers import SOURCES
 
 PAGE_SIZE = 1000
@@ -15,7 +16,6 @@ def batches(values, size):
 
 
 def initialize(store, previous_version):
-    from stash_merge import decode
     store.connection.executescript('''
         CREATE TABLE IF NOT EXISTS cleanup_state (
             scope TEXT PRIMARY KEY, generation INTEGER NOT NULL, data BLOB NOT NULL,
@@ -30,7 +30,6 @@ def initialize(store, previous_version):
 
 
 def save_state(store):
-    from stash_merge import encode
     with store.connection:
         store.connection.execute('''INSERT INTO cleanup_state VALUES (?,?,?,?)
             ON CONFLICT(scope) DO UPDATE SET generation=excluded.generation,

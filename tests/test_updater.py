@@ -105,6 +105,21 @@ def test_real_helper_selective_install_and_self_update(tmp_path):
     assert not any(c.startswith("git/blobs/") for c in remote.calls)
 
 
+def test_installed_application_loads_extracted_modules_without_runtime_dependencies(tmp_path):
+    project = Path(updater.__file__).parent
+    files = {path.name: path.read_bytes() for path in project.glob('stash_*.py')}
+    files[updater.UPDATER] = Path(updater.__file__).read_bytes()
+    assert updater.update(tmp_path, Remote(files)) == 0
+    for name in ('stash_domain.py', 'stash_client.py', 'stash_tags.py', 'stash_state_codec.py'):
+        assert (tmp_path / name).read_bytes() == files[name]
+    # The updater CI matrix installs only pytest, so --help must remain lightweight.
+    result = subprocess.run([sys.executable, str(tmp_path / 'stash_ai.py'), '--help'],
+                            cwd=tmp_path, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert '--abandon-pending' in result.stdout
+    assert '--cleanup-only' in result.stdout
+
+
 @pytest.mark.parametrize("option", ["check", "dry_run"])
 def test_previews_never_download_or_write_installation(tmp_path, option):
     (tmp_path / "tagger_models.yml").write_bytes(b"device: cpu\n")

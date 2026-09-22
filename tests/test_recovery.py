@@ -54,7 +54,7 @@ def test_standalone_abandons_without_stash_models_or_source_changes(tmp_path, mo
         store.prepare('1', {'scene': {'owned_ids': ['999'], 'contributions': [hit('wd', 'new')]}})
         cleanup.begin(store, 'old-policy', {'abc'}, set(), [stash.tags['ai:abc']['id']])
     before = raw_results(tmp_path)
-    for name in ('StashClient', 'load_model_settings', 'load_vocabulary', 'load_tagger'):
+    for name in ('create_stash_client', 'load_model_settings', 'load_vocabulary', 'load_tagger'):
         monkeypatch.setattr(app, name, lambda *a: pytest.fail('standalone accessed Stash/model assets'))
     assert app.main(command(tmp_path)) == 0
     with state(tmp_path) as store:

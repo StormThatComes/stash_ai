@@ -105,7 +105,7 @@ def test_blank_or_ambiguous_prefix_is_rejected(prefixes):
 def test_standalone_cli_needs_no_models_or_hierarchy(monkeypatch,tmp_path):
     stash=PruneStash();stash.add("op:empty")
     monkeypatch.setattr(app,"DRY_RUN",False)
-    monkeypatch.setattr(app,"StashClient",lambda _:stash)
+    monkeypatch.setattr(app,"create_stash_client",lambda _:stash)
     monkeypatch.setattr(app,"load_model_settings",lambda *args:pytest.fail("pruning loaded model configuration"))
     monkeypatch.setattr(app,"load_vocabulary",lambda *args:pytest.fail("pruning loaded vocabulary"))
     assert app.main(["--prune-empty-tags-only","--state-db",str(tmp_path/"state.sqlite3")])==0

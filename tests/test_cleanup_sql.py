@@ -300,7 +300,7 @@ def test_legacy_interrupted_global_cleanup_can_resume_using_sql(tmp_path, monkey
 
 
 def test_removed_legacy_strategy_fails_before_api_or_state_access(tmp_path, monkeypatch, capsys):
-    monkeypatch.setattr(app, 'StashClient', lambda *_: pytest.fail('invalid strategy accessed Stash'))
+    monkeypatch.setattr(app, 'create_stash_client', lambda *_: pytest.fail('invalid strategy accessed Stash'))
     command = [*args(tmp_path), '--cleanup-strategy', 'legacy']
     with pytest.raises(SystemExit) as exc:
         app.main(command)
