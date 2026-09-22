@@ -23,26 +23,26 @@ download_missing: true  # All four models, including JoyTag; --offline disables 
 # author's pinned HF Space into the Hugging Face cache. No code_dir is needed.
 joytag:
   model_dir: models/joytag
-  scene_threshold: 0.40
-  marker_threshold: 0.65
+  scene_threshold: 0.45
+  marker_threshold: 0.70
   batch_size: 16
 
 wd:
   model_dir: models/wd-eva02-large-tagger-v3
-  scene_threshold: 0.35
-  marker_threshold: 0.65
+  scene_threshold: 0.40
+  marker_threshold: 0.70
   batch_size: 4
 
 dtq:
   model_dir: models/danbooru-tag-query-l16
-  scene_threshold: 0.20
-  marker_threshold: 0.65
+  scene_threshold: 0.25
+  marker_threshold: 0.70
   batch_size: 4
 
 oppai:
   model_dir: models/oppai-oracle-v1.1
-  scene_threshold: 0.65
-  marker_threshold: 0.80
+  scene_threshold: 0.70
+  marker_threshold: 0.85
   batch_size: 4
 
 # All vocabulary entries/categories are eligible. No whitelist is used.
