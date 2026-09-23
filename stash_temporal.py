@@ -100,33 +100,38 @@ class SceneAccumulator:
         import numpy as np
         floor = self.threshold * self.policy.scene_support_ratio
         for row, cue in zip(scores, cues):
-            self.frames += 1
-            self.covered += max(0.0, cue.end - max(cue.start, self.last_end))
-            self.last_end = max(self.last_end, cue.end)
-            for index in np.flatnonzero(row >= floor):
-                index, score = int(index), float(row[index])
-                if score < floor:
-                    continue
-                item = self.items.setdefault(index, dict(hits=0, high_hits=0, max_score=0.0,
-                    seconds=0.0, run_hits=0, run_start=cue.start, last_end=cue.start,
-                    longest_hits=0, longest_seconds=0.0))
-                if (not item["hits"] or item.get("last_frame") != self.frames - 1
-                        or cue.start > item["last_end"] + 0.001):
-                    item["run_hits"], item["run_start"] = 0, cue.start
-                item["hits"] += 1
-                item["high_hits"] += int(score >= self.threshold)
-                # Keep an actual sampled time, including detections below the
-                # marker retention floor. Old checkpoints may lack this field;
-                # only an observed maximum can supply its missing timestamp.
-                if score > item["max_score"] or (score == item["max_score"] and "peak_time" not in item):
-                    item["peak_time"] = cue.start
-                item["max_score"] = max(item["max_score"], score)
-                item["seconds"] += max(0.0, cue.end - max(cue.start, item["last_end"]))
-                item["last_end"] = max(item["last_end"], cue.end)
-                item["run_hits"] += 1
-                item["last_frame"] = self.frames
-                item["longest_hits"] = max(item["longest_hits"], item["run_hits"])
-                item["longest_seconds"] = max(item["longest_seconds"], item["last_end"] - item["run_start"])
+            values = ((int(index), float(row[index])) for index in np.flatnonzero(row >= floor))
+            self.add_sparse(values, cue)
+
+    def add_sparse(self, values, cue):
+        """Consume retained observations without building a vocabulary-sized row."""
+        floor = self.threshold * self.policy.scene_support_ratio
+        self.frames += 1
+        self.covered += max(0.0, cue.end - max(cue.start, self.last_end))
+        self.last_end = max(self.last_end, cue.end)
+        for index, score in values:
+            if score < floor:
+                continue
+            item = self.items.setdefault(index, dict(hits=0, high_hits=0, max_score=0.0,
+                seconds=0.0, run_hits=0, run_start=cue.start, last_end=cue.start,
+                longest_hits=0, longest_seconds=0.0))
+            if (not item["hits"] or item.get("last_frame") != self.frames - 1
+                    or cue.start > item["last_end"] + 0.001):
+                item["run_hits"], item["run_start"] = 0, cue.start
+            item["hits"] += 1
+            item["high_hits"] += int(score >= self.threshold)
+            # Keep an actual sampled time, including detections below the
+            # marker retention floor. Old checkpoints may lack this field;
+            # only an observed maximum can supply its missing timestamp.
+            if score > item["max_score"] or (score == item["max_score"] and "peak_time" not in item):
+                item["peak_time"] = cue.start
+            item["max_score"] = max(item["max_score"], score)
+            item["seconds"] += max(0.0, cue.end - max(cue.start, item["last_end"]))
+            item["last_end"] = max(item["last_end"], cue.end)
+            item["run_hits"] += 1
+            item["last_frame"] = self.frames
+            item["longest_hits"] = max(item["longest_hits"], item["run_hits"])
+            item["longest_seconds"] = max(item["longest_seconds"], item["last_end"] - item["run_start"])
 
     def state(self):
         # A checkpoint must not share mutable counters with an unfinished batch.
@@ -157,7 +162,7 @@ def scene_reason(score, stats, threshold, policy):
     return None
 
 
-def consensus_seeds(records, policies, blocklist, policy):
+def consensus_seeds(records, policies, blocklist, policy, *, thresholds=None):
     """Only identical sampled inputs/times can vote, at most once per model."""
     if not policy.enabled:
         return {}
@@ -166,7 +171,8 @@ def consensus_seeds(records, policies, blocklist, policy):
         for segment in segments:
             meta = segment["meta"]
             identity = meta.get("frame_input_signature")
-            high = meta.get("marker_threshold")
+            from stash_thresholds import marker_threshold
+            high = marker_threshold(segment, thresholds)
             if segment["mode"] != "frames" or not identity or high is None:
                 continue
             floor = marker_floor(policy, high)
@@ -262,7 +268,9 @@ def build_markers(app, frames, core_exclusions, *, threshold=None, seeds=None, i
 
 
 def build_options(app):
-    return {"policy": asdict(app.TEMPORAL_POLICY), "settings": {name: getattr(app, name) for name in (
+    return {"policy": asdict(app.TEMPORAL_POLICY),
+        "marker_thresholds": dict(getattr(app, "MARKER_THRESHOLDS", {})),
+        "settings": {name: getattr(app, name) for name in (
         "MARKER_MIN_HITS", "MARKER_MERGE_GAP_SECONDS", "MARKER_MAX_TAGS_PER_FRAME", "MAX_MARKERS_PER_SCENE")}}
 
 

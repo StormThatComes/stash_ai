@@ -476,15 +476,19 @@ def predict_scene(tagger: Any, stash: StashClient, paths: dict, cues: list[Cue],
     if not cues:
         raise ValueError("Cannot predict a scene without VTT cues.")
     settings, labels = tagger.settings, tagger.labels
+    retain_scene = raw_scene and APPLY_SCENE_TAGS
+    scene_floor = settings.scene_threshold * (TEMPORAL_POLICY.scene_support_ratio if TEMPORAL_POLICY.enabled else 1.0)
     processed, top_scores, saved = checkpoint.restore() if checkpoint else (0, np.empty((0, len(labels)), np.float32), [])
     accumulator = (SceneAccumulator(settings.scene_threshold, TEMPORAL_POLICY,
                    checkpoint.analysis if checkpoint else None) if TEMPORAL_POLICY.enabled and APPLY_SCENE_TAGS else None)
     if accumulator is not None and accumulator.frames != processed:
         raise ValueError("Checkpoint scene statistics do not match completed cues; use --restart.")
-    if checkpoint and CREATE_MARKERS and len(saved) != processed:
+    if checkpoint and (CREATE_MARKERS or retain_scene) and len(saved) != processed:
         raise ValueError("Checkpoint frame count does not match completed cues.")
     frame_predictions = [FramePrediction(cues[index], tuple((tag, score) for tag, score in frame["tags"]))
-                         for index, frame in enumerate(saved)]
+                         for index, frame in enumerate(saved)] if CREATE_MARKERS else []
+    scene_frames = [dict(start=cues[i].start, end=cues[i].end, tags=row["scene_tags"])
+                    for i, row in enumerate(saved)] if retain_scene else []
     if processed:
         if report is not None:
             report.counts['checkpoint_resumes'] += 1
@@ -503,6 +507,10 @@ def predict_scene(tagger: Any, stash: StashClient, paths: dict, cues: list[Cue],
                     matches = select_scores(row, labels, marker_floor(TEMPORAL_POLICY, settings.marker_threshold), 0)
                     matches = [(tag, score) for tag, score in matches if tag not in MARKER_TAG_BLOCKLIST]
                     batch_frames.append(FramePrediction(cue, tuple(matches)))
+            batch_scene = [dict(start=cue.start, end=cue.end,
+                           tags=select_scores(row, labels, scene_floor, 0))
+                           for cue, row in zip(batch_cues, result)] if retain_scene else []
+            scene_frames.extend(batch_scene)
             if accumulator is not None:
                 accumulator.add(result, batch_cues)
             top_scores = next_top
@@ -510,7 +518,8 @@ def predict_scene(tagger: Any, stash: StashClient, paths: dict, cues: list[Cue],
             processed += len(batch_cues)
             if checkpoint:
                 checkpoint.record(processed, top_scores, batch_frames,
-                                  analysis=accumulator.state() if accumulator is not None else None)
+                                  analysis=accumulator.state() if accumulator is not None else None,
+                                  scene_frames=batch_scene if retain_scene else None)
     finally:
         # Save the last fully completed batch on Ctrl+C/inference/preparation errors.
         try:
@@ -524,10 +533,16 @@ def predict_scene(tagger: Any, stash: StashClient, paths: dict, cues: list[Cue],
     statistics = accumulator.statistics(labels) if accumulator is not None else {}
     if analysis is not None:
         analysis["scene_statistics"] = statistics
+        if retain_scene:
+            analysis.update(scene_frames=scene_frames, scene_score_floor=scene_floor)
     if accumulator is not None:
         predictions = [(labels[index], float(scene_scores[index])) for index in accumulator.items]
         predictions = [(tag, score) for tag, score in predictions if raw_scene or
                        (tag not in scene_exclusions and scene_reason(score, statistics[tag], settings.scene_threshold, TEMPORAL_POLICY))]
+        predictions.sort(key=lambda item: (-item[1], item[0]))
+    elif retain_scene:
+        candidates = {tag for row in scene_frames for tag, _ in row["tags"]}
+        predictions = [(tag, float(scene_scores[i])) for i, tag in enumerate(labels) if tag in candidates]
         predictions.sort(key=lambda item: (-item[1], item[0]))
     else:
         predictions = [(tag, score) for tag, score in select_scores(scene_scores, labels, settings.scene_threshold, 0)
@@ -950,6 +965,12 @@ def main(argv: list[str] | None = None) -> int:
                         help="Stream per-scene wall/CPU, stage/API timings, counts and byte sizes to a new JSONL file; merged output only.")
     parser.add_argument("--force-merge", action="store_true",
                         help="Recompute even unchanged merges without rerunning models; requires --merge-only. Does not clear source state.")
+    parser.add_argument("--rethreshold-scenes", action="store_true",
+                        help="Apply YAML scene thresholds to retained frame evidence; requires --merge-only. "
+                             "May be combined with --rethreshold-markers.")
+    parser.add_argument("--rethreshold-markers", action="store_true",
+                        help="Apply YAML marker thresholds to complete cached frames; requires --merge-only. "
+                             "Never runs inference; rejects changed scene thresholds or insufficient retention.")
     parser.add_argument("--abandon-pending", action="store_true",
                         help="Abandon pending merge/cleanup plans, retaining applied changes and inference. "
                              "Alone: exit after abandonment; with --merge-only or cleanup: use current YAML policies. Honors --dry-run.")
@@ -1020,6 +1041,10 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("--abandon-pending is standalone or accompanies merged --merge-only/cleanup modes.")
         if not args.merge_only and not cleanup_only and (args.markers_only or args.scene_tags_only or args.prune_empty_tags or args.profile_merge):
             parser.error("Standalone --abandon-pending does not publish outputs or prune tags.")
+    if args.rethreshold_scenes and (not args.merge_only or args.markers_only):
+        parser.error("--rethreshold-scenes requires --merge-only and scene output.")
+    if args.rethreshold_markers and (not args.merge_only or args.scene_tags_only):
+        parser.error("--rethreshold-markers requires --merge-only and marker output.")
     if args.force_merge and not args.merge_only:
         parser.error("--force-merge requires --merge-only.")
     if args.profile_merge:

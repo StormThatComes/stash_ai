@@ -156,7 +156,8 @@ def observations(app, group, core_policies, tag_policies=None):
     tag_policies = policies_or_empty(tag_policies)
     times = {}
     for source, segment, signature in group["members"]:
-        high = segment["meta"]["marker_threshold"]
+        from stash_thresholds import marker_threshold
+        high = marker_threshold(segment, getattr(app, "MARKER_THRESHOLDS", None))
         floor = marker_floor(app.TEMPORAL_POLICY, high)
         for row in segment["items"]:
             start, end = row["start"], row["end"]

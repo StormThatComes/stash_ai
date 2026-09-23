@@ -55,13 +55,14 @@ def initialize_progress(store, previous_version):
 
 
 def index_result(store, scene, model, kind, segments, scope=None):
+    from stash_thresholds import indexed_signature
     store.connection.execute("INSERT INTO result_index VALUES (?,?,?,?,?,?,?) "
         "ON CONFLICT(scope,scene,model,kind) DO UPDATE SET inference=excluded.inference,"
         "populated=excluded.populated,signature=excluded.signature",
         (scope or store.scope, str(scene), model, kind,
          int(any(s["meta"].get("origin") == "inference" for s in segments)),
          int(any(s["items"] for s in segments)),
-         segments[-1]["meta"].get("inference_signature") if segments else None))
+         indexed_signature(segments[-1]) if segments else None))
 
 
 def output_kinds(app):
@@ -286,9 +287,17 @@ class Checkpoint:
         self.analysis = decode(state[0]) if state else None
         return processed, top, frames
 
-    def record(self, processed, top_scores, frames, analysis=None):
+    def record(self, processed, top_scores, frames, analysis=None, *, scene_frames=None):
         self.processed, self.top_scores = processed, top_scores
-        self.pending.extend(dict(start=f.cue.start, end=f.cue.end, tags=list(f.tags)) for f in frames)
+        rows = [dict(start=f.cue.start, end=f.cue.end, tags=list(f.tags)) for f in frames]
+        if scene_frames is not None:
+            if not rows:
+                rows = [dict(start=f['start'], end=f['end'], tags=[]) for f in scene_frames]
+            if len(rows) != len(scene_frames):
+                raise ValueError('Scene/marker checkpoint timelines do not match.')
+            for row, scene in zip(rows, scene_frames):
+                row['scene_tags'] = scene['tags']
+        self.pending.extend(rows)
         self.analysis = analysis
         self.batches += 1
         if self.batches >= self.every:

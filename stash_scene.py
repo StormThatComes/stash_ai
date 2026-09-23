@@ -26,6 +26,7 @@ def shared_scene_contributions(app, index, scene_records, policies, existing=(),
                 scene_by_run[source, signature].append((segment, marker_segment_signature(segment)))
     existing = {entry['tag'] for entry in existing}
     options = dict(policy=asdict(policy), max_tags=app.MAX_TAGS,
+                   scene_thresholds=dict(getattr(app, "SCENE_THRESHOLDS", {})),
                    scene_exclusions={s: sorted(values) for s, values in policies.items()})
     candidates, usable, partial = [], False, False
     for group_key, group in index.groups.items():
@@ -154,8 +155,12 @@ def cleanup_scene_support(app, store, scene_id, hits, selected, policies):
             matching = {}
             for kind, field in (('scene', 'scene_context'), ('markers', 'frame_context')):
                 if kind not in records:
+                    available = store.records(scene_id, kind, borrow=True)
+                    if kind == 'markers':
+                        from stash_scene_cache import frame_records
+                        available = frame_records(store.records(scene_id, 'scene', borrow=True), available)
                     records[kind] = {source: {marker_segment_signature(segment): segment for segment in segments}
-                                     for source, segments in store.records(scene_id, kind, borrow=True).items()}
+                                     for source, segments in available.items()}
                 matching[kind] = {}
                 for source, signatures in hit[field].items():
                     available = records[kind].get(source, {})
@@ -166,6 +171,10 @@ def cleanup_scene_support(app, store, scene_id, hits, selected, policies):
             options = hit['build_options']
             context.TEMPORAL_POLICY = TemporalPolicy.from_snapshot(options['policy'])
             context.MAX_TAGS = options['max_tags']
+            context.SCENE_THRESHOLDS = options.get('scene_thresholds', {})
+            from stash_scene_cache import views, frame_records
+            context, matching['scene'] = views(context, matching['scene'])
+            matching['markers'] = frame_records(matching['scene'], matching['markers'])
             frozen = {source: frozenset(options['scene_exclusions'][source]) |
                       (policies[source] if source in selected else frozenset()) for source in SOURCES}
             index = FrameIndex(context, matching['markers'], {s: frozenset() for s in SOURCES}, cache=store.cache)

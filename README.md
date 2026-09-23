@@ -71,6 +71,11 @@ python .\stash_ai.py --models all --scene-id 123 --restart
 python .\stash_ai.py --merge-only --dry-run
 python .\stash_ai.py --merge-only --scene-id 123
 
+# Zastosuj progi z YAML do cache, bez modeli i pobierania sprite'ów
+python .\stash_ai.py --models all --merge-only --rethreshold-markers --dry-run
+python .\stash_ai.py --models all --merge-only --rethreshold-markers
+python .\stash_ai.py --models all --merge-only --rethreshold-scenes --rethreshold-markers
+
 # Uzupełnienie grup istniejących markerów bez inferencji i zmiany czasów
 python .\stash_ai.py --sync-marker-groups-only --scene-id 123 --dry-run --verbose
 python .\stash_ai.py --sync-marker-groups-only
@@ -91,6 +96,53 @@ python .\stash_ai.py --abandon-pending
 ```
 
 `joytag_stash_markers.py` został usunięty — w poleceniach i harmonogramach używaj `stash_ai.py`.
+
+### Zmiana progów bez inferencji
+
+`--merge-only --rethreshold-markers` odczytuje `marker_threshold` z YAML dla
+wybranych `--models` i przelicza zapisane wyniki. Możesz ograniczyć operację przez
+`--scene-id`; `--markers-only` zachowuje tagi scen. Zwykłe `--merge-only` używa
+ostatnio zastosowanych progów, więc kolejne merge nie cofają tej zmiany.
+
+Przed zastosowaniem progów sprawdzana jest cała wybrana kolekcja. Brak cache,
+importowane zakresy bez wyników klatek, zbyt wysoki próg retencji lub zmieniony
+`scene_threshold` kończą operację komunikatem z parą scena/model, bez publikacji
+do Stasha. Modele nigdy nie są uruchamiane przez tę komendę. Niedokończony merge
+trzeba wznowić albo porzucić przez `--abandon-pending`.
+
+Przy zwykłym uruchomieniu z domyślnym resume sama zmiana `marker_threshold`
+również może użyć cache: sprawdzane są model, wejściowe klatki i pozostałe
+ustawienia inferencji. Jeśli cache jest niewystarczający, działa normalna
+inferencja dla tej pary scena/model. `--restart` nadal wymusza inferencję,
+a `SKIP_EXISTING_OUTPUTS` zachowuje dotychczasową semantykę pomijania wyników.
+
+Oryginalne wyniki klatek, ich progi retencji i sygnatury pozostają w bazie.
+Podnoszenie progu nie usuwa słabszych wyników z cache; można wrócić do wcześniejszej
+wartości, jeśli zachowane dane wystarczają. Cleanup korzysta z progów zapisanych
+przy publikacji, nawet po późniejszej zmianie YAML lub polityki cache.
+
+`--merge-only --rethreshold-scenes` stosuje `scene_threshold` do zapisanych
+obserwacji klatek. Można połączyć go z `--rethreshold-markers`, żeby zastosować
+oba progi w jednej operacji. Przeliczane są statystyki trafień i serii, wspólne
+wykrycia modeli oraz Occurrence. `--scene-tags-only` pozostawia markery bez zmian.
+Zwykły resume potrafi ponownie wykorzystać te dane również po zmianie obu progów.
+
+Nowa inferencja zapisuje w rekordzie sceny skompresowane obserwacje powyżej
+`scene_threshold × scene_support_ratio` (bez temporal: `scene_threshold`),
+pełną oś próbek wraz z pustymi klatkami oraz dokładny agregat kandydatów.
+Nie zapisuje obrazów ani pełnej macierzy klatka × słownik. Dane są zachowane
+przy podnoszeniu progów; powrót jest możliwy w granicach zapisanej retencji.
+Baza będzie większa o te obserwacje; wielkość zależy od liczby wykryć i klatek.
+
+Stare rekordy bez obserwacji scen nadal działają przy dotychczasowych progach.
+Aktualizacja nie wymusza ponownej inferencji całej kolekcji. Pierwsza zmiana
+progu sceny z niepełnym cache wymaga inferencji tej pary scena/model, która
+uzupełni dane na przyszłość. Tryb `--merge-only` sam tego nie robi: zgłasza
+brak danych przed zastosowaniem progów. Starszy częściowy checkpoint zostanie
+rozpoczęty od nowa, ponieważ nie zawiera obserwacji scen do nowego formatu.
+
+Zmiana samego progu zwykłego markera nadal może zastąpić go punktem Occurrence,
+ponieważ kwalifikacja sceny ma własny próg.
 
 ## Konfiguracja
 
@@ -223,6 +275,8 @@ Testy mockują Stash i wagi — nie pobierają modeli.
 | `stash_client.py` | klient HTTP/GraphQL Stasha, pobieranie mediów i ochrona dry-run |
 | `stash_tags.py` | rozwiązywanie tagów i synchronizacja rodziców hierarchii |
 | `stash_state_codec.py` | kodowanie i odczyt skompresowanego JSON-u w bazie stanu |
+| `stash_thresholds.py` | ponowne użycie cache i progi publikacji markerów |
+| `stash_scene_cache.py` | obserwacje scen, odtwarzanie statystyk i progi scen |
 | `tests/` | testy regresji, fixtures i wspólne pomocniki |
 | `benchmarks/` | skrypty pomiarowe offline |
 | `benchmarks/results/` | zachowane, referencyjne wyniki pomiarów |
