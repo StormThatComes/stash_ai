@@ -99,15 +99,17 @@ def plan(app, store, scene, config, *, scenes=True, markers=False):
         values = []
         changed = False
         for segment in segments:
+            effective = segment.get(key, segment['meta'][meta_key])
+            if threshold == effective:
+                # Already at the target policy; leave the stored segment alone.
+                values.append(segment)
+                continue
             value = dict(segment)
             value.pop(key, None)
             if threshold != segment['meta'][meta_key]:
                 value[key] = threshold
-                changed = True
-            elif key in segment:
-                # Dropping a matching override still counts as a policy edit.
-                changed = True
             values.append(value)
+            changed = True
         if changed:
             updated[kind] = values
     if updated and any(store.snapshot(scene, k, borrow=True)[1] is not None for k in ('scene', 'markers')):
