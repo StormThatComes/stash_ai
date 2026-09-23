@@ -166,14 +166,19 @@ rewizja, progi, agregacja, skrót słownika i czas inferencji. Baza nie zawiera
 obrazów ani klucza API. Techniczny `MARKER_TAG_BLOCKLIST` filtruje klatki jeszcze
 przed zapisaniem; domyślnie jest pusty.
 
-Nie jest to cache wszystkich ocen wszystkich klatek. Zmiana `scene_threshold`,
-`scene_support_ratio`, agregacji scen lub wejściowych miniatur wymaga nowej
-inferencji. Progi markerów można zastosować bez modeli przez
+Nie jest to cache wszystkich ocen wszystkich klatek. Nowe rekordy scen zawierają
+również obserwacje klatek od progu retencji scen, wraz z pustymi próbkami.
+`--merge-only --rethreshold-scenes` pozwala dokładnie przeliczyć `scene_threshold`
+i Occurrence z tych danych. Starsze rekordy bez obserwacji wymagają jednorazowej
+inferencji przy zmianie progu; przy niezmienionym progu pozostają używane.
+Zmiana `scene_support_ratio`, agregacji scen lub wejściowych miniatur nadal
+unieważnia zwykłą sygnaturę inferencji. Progi markerów można zastosować bez modeli przez
 `--models all --merge-only --rethreshold-markers`: wymagany próg retencji musi
 mieścić się w zachowanych danych. Sprawdzane są wszystkie wybrane pary scena/model;
-braki danych lub zmieniony próg scen kończą tę operację bez publikacji do Stasha.
+braki danych lub zmieniony próg scen kończą operację samych markerów bez publikacji.
+Dodaj `--rethreshold-scenes`, żeby zastosować oba progi z kompletnego cache.
 Zwykły resume również wykrywa możliwość ponownego wykorzystania cache po samej
-zmianie `marker_threshold`, weryfikując model i wejście. Zmiana
+zmianie progów, weryfikując model, wejście i dostępność obserwacji. Zmiana
 `marker_continue_ratio` nadal unieważnia zwykłą sygnaturę inferencji; jawne
 przeliczenie markerów z cache jest możliwe tylko przy wystarczającej retencji.
 Nowy próg jest zapisywany oddzielnie od surowych wyników, a kolejne merge go

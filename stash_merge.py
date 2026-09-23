@@ -511,6 +511,8 @@ def evidence(app, store, scene_id, core_policies, scene_policies, metrics=None):
     need_scene = app.APPLY_SCENE_TAGS or (app.CREATE_MARKERS and app.TEMPORAL_POLICY.enabled
                                         and app.TEMPORAL_POLICY.occurrence_markers)
     scene_records = store.records(scene_id, 'scene', borrow=True) if need_scene else {}
+    from stash_scene_cache import views, frame_records
+    app, scene_records = views(app, scene_records)
     for model, segments in scene_records.items():
         for segment in segments:
             eligible = []
@@ -541,12 +543,14 @@ def evidence(app, store, scene_id, core_policies, scene_policies, metrics=None):
             spans = marker_contributions(app, records, core_policies, index=index, metrics=metrics, tag_policies=scene_policies)
         if need_scene:
             with stage(report, 'scene_fusion'):
-                scene_hits.extend(shared_scene_contributions(app, index, scene_records, scene_policies, scene_hits, metrics))
+                scene_frames = frame_records(scene_records, records)
+                with FrameIndex(app, scene_frames, core_policies, cache=store.cache, tag_policies=scene_policies) as scene_index:
+                    scene_hits.extend(shared_scene_contributions(app, scene_index, scene_records, scene_policies, scene_hits, metrics))
     if app.CREATE_MARKERS:
         from stash_occurrences import occurrence_contributions
         report = getattr(store, 'report', None)
         with report.measure('occurrence_compute') if report is not None else nullcontext():
-            spans.extend(occurrence_contributions(app, scene_hits, records, spans, core_policies, scene_policies, metrics))
+            spans.extend(occurrence_contributions(app, scene_hits, frame_records(scene_records, records), spans, core_policies, scene_policies, metrics))
     return sorted(scene_hits, key=lambda item: (item["tag"], item["source"])), spans
 
 
@@ -554,11 +558,12 @@ def marker_segment_signature(segment):
     # Cleanup must use exactly the evidence that supported published markers.
     from stash_performance import StoredSegment, segment_digest
     from stash_thresholds import OVERRIDE
-    if OVERRIDE not in segment:
-        return segment_digest(segment)
+    from stash_scene_cache import SCENE_OVERRIDE
     if isinstance(segment, StoredSegment) and hasattr(segment, "_evidence_digest"):
         return segment._evidence_digest
-    signature = segment_digest({k: v for k, v in segment.items() if k != OVERRIDE})
+    if OVERRIDE not in segment and SCENE_OVERRIDE not in segment:
+        return segment_digest(segment)
+    signature = segment_digest({k: v for k, v in segment.items() if k not in (OVERRIDE, SCENE_OVERRIDE)})
     if isinstance(segment, StoredSegment):
         segment._evidence_digest = signature
     return signature
@@ -970,6 +975,10 @@ def capture_outputs(app, config, vocabulary, cues, predictions, frames, analysis
                             "items": [dict(tag=tag, score=score,
                                            **({"statistics": analysis["scene_statistics"][tag]} if analysis and
                                               tag in analysis.get("scene_statistics", {}) else {})) for tag, score in predictions]}
+        if analysis is not None and 'scene_frames' in analysis:
+            outputs['scene']['frames'] = analysis['scene_frames']
+            outputs['scene']['meta'] = {**meta, 'scene_frames_format': 1,
+                'scene_score_floor': analysis['scene_score_floor']}
     if app.CREATE_MARKERS:
         outputs["markers"] = {"mode": "frames", "meta": meta, "items": [
             dict(start=frame.cue.start, end=frame.cue.end, tags=list(frame.tags)) for frame in frames]}
@@ -1045,14 +1054,18 @@ def _run_merged(app, settings, args, catalogs, hierarchy, core_policies, scene_p
                     except Exception as exc:
                         stats["errors"] += 1
                         report.issue('read sources', '', scene_id, exc, app.safe_error(exc, api_key=app.STASH_API_KEY))
-            if getattr(args, 'rethreshold_markers', False):
+            if getattr(args, 'rethreshold_markers', False) or getattr(args, 'rethreshold_scenes', False):
                 from stash_thresholds import rethreshold
                 if stats['errors']:
-                    report.finish('Marker thresholds (not applied)', stats, store.cache)
+                    report.finish('Thresholds (not applied)', stats, store.cache)
                     return 1
-                stats.update(rethreshold(app, store, scenes, settings, report))
+                if getattr(args, 'rethreshold_scenes', False):
+                    from stash_scene_cache import rethreshold as rethreshold_scenes
+                    stats.update(rethreshold_scenes(app, store, scenes, settings, report, markers=args.rethreshold_markers))
+                else:
+                    stats.update(rethreshold(app, store, scenes, settings, report))
                 if stats['errors']:
-                    report.finish('Marker thresholds (not applied)', stats, store.cache)
+                    report.finish('Thresholds (not applied)', stats, store.cache)
                     return 1
             kinds = progress.output_kinds(app)
             inputs = progress.RunInputs(stash, store.cache, report)
@@ -1084,7 +1097,7 @@ def _run_merged(app, settings, args, catalogs, hierarchy, core_policies, scene_p
                                 if args.resume and not args.restart:
                                     from stash_thresholds import reuse
                                     if reuse(app, store, scene_id, config, identity, cues, media.hashes, kinds):
-                                        stats['marker_cache_reused'] += 1
+                                        stats['threshold_cache_reused'] += 1
                                         continue
                                 if tagger is None:
                                     try:
@@ -1101,7 +1114,7 @@ def _run_merged(app, settings, args, catalogs, hierarchy, core_policies, scene_p
                                     with store.connection:
                                         progress.clear_checkpoint(store, scene_id, key)
                                 checkpoint = progress.Checkpoint(store, scene_id, key,
-                                    progress.digest({"input": signature, "kinds": kinds}), len(cues),
+                                    progress.digest({"input": signature, "kinds": kinds, "scene_frames": 1}), len(cues),
                                     len(catalogs[key].labels), args.checkpoint_batches)
                                 analysis = {}
                                 predictions, frames = app.predict_scene(tagger, media, paths, cues, raw_scene=True,

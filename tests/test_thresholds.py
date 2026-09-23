@@ -163,7 +163,7 @@ def test_failed_publication_resumes_with_saved_threshold_without_models(pipeline
         assert state.records('1', 'markers')['wd'][0][thresholds.OVERRIDE] == .85
 
 
-@pytest.mark.parametrize('change', ['scene', 'media', 'restart', 'below_floor'])
+@pytest.mark.parametrize('change', ['media', 'restart', 'below_floor'])
 def test_automatic_reuse_still_requires_matching_inputs_and_retention(pipeline, monkeypatch, change):
     p = pipeline
     configure(monkeypatch)
