@@ -101,7 +101,7 @@ def test_unsafe_selection_is_rejected_before_any_policy_or_stash_write(pipeline,
     if change in ('legacy', 'missing', 'pending'):
         with merge.StateStore(p.path, merge.scope_for(app.STASH_URL)) as state:
             if change == 'legacy':
-                state.put('1', 'wd', {'markers': dict(mode='spans', meta={'origin': 'legacy'}, items=[])})
+                state.put('1', 'wd', {'markers': dict(mode='spans', meta={'origin': 'legacy'}, items=[]))})
             elif change == 'missing':
                 with state.connection:
                     state.connection.execute("DELETE FROM results WHERE model='wd' AND kind='markers'")
@@ -201,3 +201,22 @@ def test_flag_requires_merge_with_marker_output(args):
     with pytest.raises(SystemExit) as exc:
         app.main([*args, '--rethreshold-markers'])
     assert exc.value.code == 2
+
+
+def test_indexed_signature_includes_both_threshold_overrides():
+    """Marker policy must remain visible in the progress index when scene override is also set."""
+    base = {
+        'mode': 'frames',
+        'items': [],
+        'meta': {'inference_signature': 'sig-a', 'marker_threshold': 0.7, 'scene_threshold': 0.4},
+    }
+    plain = thresholds.indexed_signature(base)
+    marker_only = thresholds.indexed_signature({**base, thresholds.OVERRIDE: 0.9})
+    scene_only = thresholds.indexed_signature({**base, 'scene_threshold_override': 0.8})
+    both = thresholds.indexed_signature({**base, thresholds.OVERRIDE: 0.9, 'scene_threshold_override': 0.8})
+    both_marker_changed = thresholds.indexed_signature(
+        {**base, thresholds.OVERRIDE: 0.95, 'scene_threshold_override': 0.8})
+    assert plain != marker_only != scene_only
+    assert both != scene_only, 'marker override must affect signature when scene override is present'
+    assert both != marker_only
+    assert both != both_marker_changed

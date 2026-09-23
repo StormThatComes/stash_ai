@@ -97,13 +97,18 @@ def plan(app, store, scene, config, *, scenes=True, markers=False):
         key, meta_key, threshold = ((SCENE_OVERRIDE, 'scene_threshold', config.scene_threshold) if kind == 'scene'
                                    else (OVERRIDE, 'marker_threshold', config.marker_threshold))
         values = []
+        changed = False
         for segment in segments:
             value = dict(segment)
             value.pop(key, None)
             if threshold != segment['meta'][meta_key]:
                 value[key] = threshold
+                changed = True
+            elif key in segment:
+                # Dropping a matching override still counts as a policy edit.
+                changed = True
             values.append(value)
-        if values != segments:
+        if changed:
             updated[kind] = values
     if updated and any(store.snapshot(scene, k, borrow=True)[1] is not None for k in ('scene', 'markers')):
         raise RuntimeError('Finish the pending merge or use --abandon-pending before changing thresholds.')
