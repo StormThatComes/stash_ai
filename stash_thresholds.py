@@ -9,6 +9,9 @@ OVERRIDE = 'marker_threshold_override'
 def indexed_signature(segment, inference=None):
     from stash_progress import digest
     signature = segment['meta'].get('inference_signature') if inference is None else inference
+    from stash_scene_cache import SCENE_OVERRIDE
+    if SCENE_OVERRIDE in segment:
+        return digest([signature, {'scene_threshold': segment[SCENE_OVERRIDE]}])
     return digest([signature, segment[OVERRIDE]]) if OVERRIDE in segment else signature
 
 
@@ -35,15 +38,17 @@ def _score(value):
     return type(value) in (int, float) and math.isfinite(value) and 0 <= value <= 1
 
 
-def validate(app, store, scene, config):
+def validate(app, store, scene, config, *, check_scene=True):
     """Reject incomplete evidence; a missing detection is never treated as zero."""
     from stash_temporal import marker_floor
     model = config.source.key
     segments = store.records(scene, 'markers', model, borrow=True).get(model, [])
     if not segments:
         raise ValueError(f'{scene}/{model}: no cached marker frames; run inference for this scene/model.')
-    for segment in store.records(scene, 'scene', model, borrow=True).get(model, []):
-        if segment['meta'].get('origin') == 'inference' and segment['meta'].get('scene_threshold') != config.scene_threshold:
+    from stash_scene_cache import scene_threshold
+    scene_segments = store.records(scene, 'scene', model, borrow=True).get(model, [])
+    for segment in scene_segments:
+        if check_scene and segment['meta'].get('origin') == 'inference' and scene_threshold(segment) != config.scene_threshold:
             raise ValueError(f'{scene}/{model}: scene_threshold changed; scene statistics require inference.')
     needed = marker_floor(app.TEMPORAL_POLICY, config.marker_threshold)
     for segment in segments:
@@ -54,7 +59,7 @@ def validate(app, store, scene, config):
         floor = meta.get('marker_score_floor', meta.get('marker_threshold'))
         if not _score(floor) or floor > needed:
             raise ValueError(f'{scene}/{model}: cache floor {floor!r} exceeds required {needed:g}; run inference.')
-        if meta.get('scene_threshold') != config.scene_threshold:
+        if check_scene and not scene_segments and meta.get('scene_threshold') != config.scene_threshold:
             raise ValueError(f'{scene}/{model}: scene_threshold changed; scene statistics require inference.')
     return segments
 
@@ -81,6 +86,9 @@ def apply(app, store, scene, config, segments=None):
 def reuse(app, store, scene, config, identity, cues, hashes, kinds):
     """Prove the original inference matches, allowing only a marker threshold edit."""
     from stash_progress import completed, digest
+    from stash_scene_cache import reuse as reuse_scenes
+    if reuse_scenes(app, store, scene, config, identity, cues, hashes, kinds):
+        return True
     if not app.CREATE_MARKERS:
         return False
     try:

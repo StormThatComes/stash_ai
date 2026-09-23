@@ -287,9 +287,17 @@ class Checkpoint:
         self.analysis = decode(state[0]) if state else None
         return processed, top, frames
 
-    def record(self, processed, top_scores, frames, analysis=None):
+    def record(self, processed, top_scores, frames, analysis=None, *, scene_frames=None):
         self.processed, self.top_scores = processed, top_scores
-        self.pending.extend(dict(start=f.cue.start, end=f.cue.end, tags=list(f.tags)) for f in frames)
+        rows = [dict(start=f.cue.start, end=f.cue.end, tags=list(f.tags)) for f in frames]
+        if scene_frames is not None:
+            if not rows:
+                rows = [dict(start=f['start'], end=f['end'], tags=[]) for f in scene_frames]
+            if len(rows) != len(scene_frames):
+                raise ValueError('Scene/marker checkpoint timelines do not match.')
+            for row, scene in zip(rows, scene_frames):
+                row['scene_tags'] = scene['tags']
+        self.pending.extend(rows)
         self.analysis = analysis
         self.batches += 1
         if self.batches >= self.every:

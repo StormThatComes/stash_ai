@@ -76,7 +76,7 @@ def test_source_content_change_invalidates_checkpoint_even_with_same_url(pipelin
     assert p.loaded[-1].seen==list(range(10))
 
 
-def test_vtt_timing_change_and_model_threshold_change_invalidate_completion(pipeline,monkeypatch):
+def test_vtt_timing_change_invalidates_but_scene_threshold_reuses_frames(pipeline,monkeypatch):
     p=pipeline
     assert app.main(p.args)==0
     p.cues=[app.Cue(c.start,c.end+.1,c.image,c.rect) for c in p.cues]
@@ -84,7 +84,7 @@ def test_vtt_timing_change_and_model_threshold_change_invalidate_completion(pipe
     original=app.load_model_settings
     from dataclasses import replace
     monkeypatch.setattr(app,"load_model_settings",lambda *args:[replace(c,scene_threshold=.77) for c in original(*args)])
-    assert app.main(p.args)==0 and len(p.loaded)==3
+    assert app.main(p.args)==0 and len(p.loaded)==2
 
 
 def test_policy_change_reuses_predictions_and_updates_outputs(pipeline,monkeypatch,tmp_path):
