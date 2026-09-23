@@ -157,7 +157,7 @@ def scene_reason(score, stats, threshold, policy):
     return None
 
 
-def consensus_seeds(records, policies, blocklist, policy):
+def consensus_seeds(records, policies, blocklist, policy, *, thresholds=None):
     """Only identical sampled inputs/times can vote, at most once per model."""
     if not policy.enabled:
         return {}
@@ -166,7 +166,8 @@ def consensus_seeds(records, policies, blocklist, policy):
         for segment in segments:
             meta = segment["meta"]
             identity = meta.get("frame_input_signature")
-            high = meta.get("marker_threshold")
+            from stash_thresholds import marker_threshold
+            high = marker_threshold(segment, thresholds)
             if segment["mode"] != "frames" or not identity or high is None:
                 continue
             floor = marker_floor(policy, high)
@@ -262,7 +263,9 @@ def build_markers(app, frames, core_exclusions, *, threshold=None, seeds=None, i
 
 
 def build_options(app):
-    return {"policy": asdict(app.TEMPORAL_POLICY), "settings": {name: getattr(app, name) for name in (
+    return {"policy": asdict(app.TEMPORAL_POLICY),
+        "marker_thresholds": dict(getattr(app, "MARKER_THRESHOLDS", {})),
+        "settings": {name: getattr(app, name) for name in (
         "MARKER_MIN_HITS", "MARKER_MERGE_GAP_SECONDS", "MARKER_MAX_TAGS_PER_FRAME", "MAX_MARKERS_PER_SCENE")}}
 
 

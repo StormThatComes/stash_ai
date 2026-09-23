@@ -950,6 +950,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="Stream per-scene wall/CPU, stage/API timings, counts and byte sizes to a new JSONL file; merged output only.")
     parser.add_argument("--force-merge", action="store_true",
                         help="Recompute even unchanged merges without rerunning models; requires --merge-only. Does not clear source state.")
+    parser.add_argument("--rethreshold-markers", action="store_true",
+                        help="Apply YAML marker thresholds to complete cached frames; requires --merge-only. "
+                             "Never runs inference; rejects changed scene thresholds or insufficient retention.")
     parser.add_argument("--abandon-pending", action="store_true",
                         help="Abandon pending merge/cleanup plans, retaining applied changes and inference. "
                              "Alone: exit after abandonment; with --merge-only or cleanup: use current YAML policies. Honors --dry-run.")
@@ -1020,6 +1023,8 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("--abandon-pending is standalone or accompanies merged --merge-only/cleanup modes.")
         if not args.merge_only and not cleanup_only and (args.markers_only or args.scene_tags_only or args.prune_empty_tags or args.profile_merge):
             parser.error("Standalone --abandon-pending does not publish outputs or prune tags.")
+    if args.rethreshold_markers and (not args.merge_only or args.scene_tags_only):
+        parser.error("--rethreshold-markers requires --merge-only and marker output.")
     if args.force_merge and not args.merge_only:
         parser.error("--force-merge requires --merge-only.")
     if args.profile_merge:

@@ -222,7 +222,6 @@ class StateStore(AbstractContextManager):
             self._put(scene, model, outputs, replace)
 
     def _put(self, scene, model, outputs, replace=None):
-        from stash_progress import index_result
         if model not in SOURCES or set(outputs) - set(KINDS):
             raise ValueError("Unknown result source or output kind.")
         for kind, segment in outputs.items():
@@ -242,13 +241,18 @@ class StateStore(AbstractContextManager):
                     return json.dumps(data, sort_keys=True, allow_nan=False)
                 current = semantic(segment)
                 keep = [previous for previous in old if semantic(previous) != current]
-            self.cache.discard(('records', str(scene), kind))
-            self.cache.discard(('sources', str(scene), kind))
-            self.cache.discard(('status', str(scene), model))
-            self.connection.execute("INSERT INTO results VALUES (?,?,?,?,?) "
-                "ON CONFLICT(scope,scene,model,kind) DO UPDATE SET data=excluded.data",
-                (self.scope, str(scene), model, kind, self.pack(keep + [segment])))
-            index_result(self, scene, model, kind, keep + [segment])
+            self.replace_records(scene, model, kind, keep + [segment])
+
+    def replace_records(self, scene, model, kind, segments):
+        """Replace a segment list inside the caller's transaction, including previews."""
+        from stash_progress import index_result
+        self.cache.discard(('records', str(scene), kind))
+        self.cache.discard(('sources', str(scene), kind))
+        self.cache.discard(('status', str(scene), model))
+        self.connection.execute("INSERT INTO results VALUES (?,?,?,?,?) "
+            "ON CONFLICT(scope,scene,model,kind) DO UPDATE SET data=excluded.data",
+            (self.scope, str(scene), model, kind, self.pack(segments)))
+        index_result(self, scene, model, kind, segments)
 
     @measured('state_read')
     def imported_legacy(self, scene, kind, *, borrow=False):
@@ -522,6 +526,8 @@ def evidence(app, store, scene_id, core_policies, scene_policies, metrics=None):
             eligible.sort(key=lambda item: (-(item["score"] if item["score"] is not None else -1), item["tag"]))
             scene_hits.extend(eligible[:app.MAX_TAGS] if app.MAX_TAGS and segment["meta"]["origin"] != "legacy" else eligible)
     records = store.records(scene_id, 'markers', borrow=True)
+    from stash_thresholds import marker_context
+    app = marker_context(app, records)
     if report is not None:
         segments = [segment for values in records.values() for segment in values]
         report.record_counts(input_models=len(records), input_segments=len(segments),
@@ -546,12 +552,22 @@ def evidence(app, store, scene_id, core_policies, scene_policies, metrics=None):
 
 def marker_segment_signature(segment):
     # Cleanup must use exactly the evidence that supported published markers.
-    from stash_performance import segment_digest
-    return segment_digest(segment)
+    from stash_performance import StoredSegment, segment_digest
+    from stash_thresholds import OVERRIDE
+    if OVERRIDE not in segment:
+        return segment_digest(segment)
+    if isinstance(segment, StoredSegment) and hasattr(segment, "_evidence_digest"):
+        return segment._evidence_digest
+    signature = segment_digest({k: v for k, v in segment.items() if k != OVERRIDE})
+    if isinstance(segment, StoredSegment):
+        segment._evidence_digest = signature
+    return signature
 
 
 def marker_contributions(app, records, core_policies, *, index=None, metrics=None, cache=None, tag_policies=None):
     from stash_fusion import FrameIndex
+    from stash_thresholds import marker_context
+    app = marker_context(app, records)
     if index is not None:
         return _marker_contributions(app, records, core_policies, index, metrics, tag_policies)
     with FrameIndex(app, records, core_policies, cache=cache, tag_policies=tag_policies) as index:
@@ -565,7 +581,8 @@ def _marker_contributions(app, records, core_policies, index, metrics, tag_polic
     effective_cores = core_policies_with_global(core_policies, tag_policies)
     report = getattr(index, 'report', None)
     with stage(report, 'marker_seeds'):
-        seeds = consensus_seeds(records, effective_cores, app.MARKER_TAG_BLOCKLIST, app.TEMPORAL_POLICY)
+        seeds = consensus_seeds(records, effective_cores, app.MARKER_TAG_BLOCKLIST, app.TEMPORAL_POLICY,
+                                thresholds=app.MARKER_THRESHOLDS)
     signatures = index.signatures
     spans = []
     with stage(report, 'marker_build'):
@@ -576,7 +593,8 @@ def _marker_contributions(app, records, core_policies, index, metrics, tag_polic
                                tuple((raw_label(tag), score) for tag, score in frame["tags"]
                                      if tag not in app.MARKER_TAG_BLOCKLIST and tag not in tag_policies[model]))
                               for frame in segment["items"]]
-                    kwargs = dict(threshold=segment["meta"].get("marker_threshold"), seeds=seeds,
+                    from stash_thresholds import marker_threshold
+                    kwargs = dict(threshold=marker_threshold(segment, app.MARKER_THRESHOLDS), seeds=seeds,
                                   identity=segment["meta"].get("frame_input_signature"))
                     defer_extras = app.TEMPORAL_POLICY.shared_marker_extras and signatures[id(segment)] in index.by_signature
                     markers, _ = (temporal_markers(app, frames, effective_cores[model], **kwargs,
@@ -660,6 +678,7 @@ def cleanup_support(app, store, scene_id, spans, selected, core_policies, tag_po
         if key not in rebuilt:
             context = SimpleNamespace(**vars(app))
             context.TEMPORAL_POLICY = TemporalPolicy.from_snapshot(options["policy"])
+            context.MARKER_THRESHOLDS = options.get("marker_thresholds", {})
             for name, value in options["settings"].items():
                 setattr(context, name, value)
             context.MARKER_TAG_BLOCKLIST = set(options["blocklist"]) | app.MARKER_TAG_BLOCKLIST
@@ -1026,6 +1045,15 @@ def _run_merged(app, settings, args, catalogs, hierarchy, core_policies, scene_p
                     except Exception as exc:
                         stats["errors"] += 1
                         report.issue('read sources', '', scene_id, exc, app.safe_error(exc, api_key=app.STASH_API_KEY))
+            if getattr(args, 'rethreshold_markers', False):
+                from stash_thresholds import rethreshold
+                if stats['errors']:
+                    report.finish('Marker thresholds (not applied)', stats, store.cache)
+                    return 1
+                stats.update(rethreshold(app, store, scenes, settings, report))
+                if stats['errors']:
+                    report.finish('Marker thresholds (not applied)', stats, store.cache)
+                    return 1
             kinds = progress.output_kinds(app)
             inputs = progress.RunInputs(stash, store.cache, report)
             if not args.merge_only:
@@ -1053,6 +1081,11 @@ def _run_merged(app, settings, args, catalogs, hierarchy, core_policies, scene_p
                                 if args.resume and progress.completed(store, scene_id, key, kinds, signature):
                                     stats["reused"] += 1
                                     continue
+                                if args.resume and not args.restart:
+                                    from stash_thresholds import reuse
+                                    if reuse(app, store, scene_id, config, identity, cues, media.hashes, kinds):
+                                        stats['marker_cache_reused'] += 1
+                                        continue
                                 if tagger is None:
                                     try:
                                         tagger = app.load_tagger(config, catalogs[key], app.prepare_image)

@@ -71,6 +71,10 @@ python .\stash_ai.py --models all --scene-id 123 --restart
 python .\stash_ai.py --merge-only --dry-run
 python .\stash_ai.py --merge-only --scene-id 123
 
+# Zastosuj marker_threshold z YAML do cache, bez modeli i pobierania sprite'ów
+python .\stash_ai.py --models all --merge-only --rethreshold-markers --dry-run
+python .\stash_ai.py --models all --merge-only --rethreshold-markers
+
 # Uzupełnienie grup istniejących markerów bez inferencji i zmiany czasów
 python .\stash_ai.py --sync-marker-groups-only --scene-id 123 --dry-run --verbose
 python .\stash_ai.py --sync-marker-groups-only
@@ -91,6 +95,35 @@ python .\stash_ai.py --abandon-pending
 ```
 
 `joytag_stash_markers.py` został usunięty — w poleceniach i harmonogramach używaj `stash_ai.py`.
+
+### Zmiana progów markerów bez inferencji
+
+`--merge-only --rethreshold-markers` odczytuje `marker_threshold` z YAML dla
+wybranych `--models` i przelicza zapisane wyniki. Możesz ograniczyć operację przez
+`--scene-id`; `--markers-only` zachowuje tagi scen. Zwykłe `--merge-only` używa
+ostatnio zastosowanych progów, więc kolejne merge nie cofają tej zmiany.
+
+Przed zastosowaniem progów sprawdzana jest cała wybrana kolekcja. Brak cache,
+importowane zakresy bez wyników klatek, zbyt wysoki próg retencji lub zmieniony
+`scene_threshold` kończą operację komunikatem z parą scena/model, bez publikacji
+do Stasha. Modele nigdy nie są uruchamiane przez tę komendę. Niedokończony merge
+trzeba wznowić albo porzucić przez `--abandon-pending`.
+
+Przy zwykłym uruchomieniu z domyślnym resume sama zmiana `marker_threshold`
+również może użyć cache: sprawdzane są model, wejściowe klatki i pozostałe
+ustawienia inferencji. Jeśli cache jest niewystarczający, działa normalna
+inferencja dla tej pary scena/model. `--restart` nadal wymusza inferencję,
+a `SKIP_EXISTING_OUTPUTS` zachowuje dotychczasową semantykę pomijania wyników.
+
+Oryginalne wyniki klatek, ich progi retencji i sygnatury pozostają w bazie.
+Podnoszenie progu nie usuwa słabszych wyników z cache; można wrócić do wcześniejszej
+wartości, jeśli zachowane dane wystarczają. Cleanup korzysta z progów zapisanych
+przy publikacji, nawet po późniejszej zmianie YAML lub polityki cache.
+
+Ten etap obejmuje **progi markerów**. Zmiana `scene_threshold` nadal wymaga
+inferencji; stare liczniki trafień nie wystarczają do dokładnego przeliczenia
+scen. Occurrence nadal opierają się na zapisanych wynikach scen — zaostrzenie
+progu zwykłego markera może zastąpić go punktem Occurrence.
 
 ## Konfiguracja
 
