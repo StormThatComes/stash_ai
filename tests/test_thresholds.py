@@ -70,6 +70,8 @@ def test_rethreshold_matches_fresh_marker_inference(pipeline, monkeypatch, tmp_p
     assert app.main([*args, '--merge-only', '--rethreshold-markers']) == 0
     with merge.StateStore(p.path, merge.scope_for(app.STASH_URL), True) as state:
         _, cached = merge.evidence(app, state, '1', policies(), policies())
+    # A separate reference DB must start with a fresh Stash fixture as well.
+    p.stash.scene['scene_markers'] = []
     assert app.main([*args, '--state-db', str(tmp_path/'fresh.sqlite3'), '--restart']) == 0
     with merge.StateStore(tmp_path/'fresh.sqlite3', merge.scope_for(app.STASH_URL), True) as state:
         _, fresh = merge.evidence(app, state, '1', policies(), policies())
@@ -130,6 +132,35 @@ def test_dry_run_and_model_selection(pipeline, monkeypatch):
     saved = records(p.path)['markers']
     assert saved['wd'][0][thresholds.OVERRIDE] == .85
     assert thresholds.OVERRIDE not in saved['dtq'][0]
+
+
+def test_preflight_rejects_missing_second_model_before_updating_first(pipeline, monkeypatch):
+    p = pipeline
+    configure(monkeypatch)
+    assert app.main(p.args) == 0
+    before = raw(p.path)
+    configure(monkeypatch, marker=.85)
+    p.stash.writes.clear()
+    assert app.main(['--models', 'wd', 'dtq', *p.args[2:], '--merge-only', '--rethreshold-markers']) == 1
+    assert raw(p.path) == before and not p.stash.writes
+
+
+def test_failed_publication_resumes_with_saved_threshold_without_models(pipeline, monkeypatch):
+    p = pipeline
+    configure(monkeypatch)
+    assert app.main(p.args) == 0
+    configure(monkeypatch, marker=.85)
+    p.stash.scene['scene_markers'] = []
+    p.stash.fail_create = True
+    fail_inference(monkeypatch)
+    assert app.main([*p.args, '--merge-only', '--rethreshold-markers']) == 1
+    with merge.StateStore(p.path, merge.scope_for(app.STASH_URL), True) as state:
+        assert state.has_pending_publications()
+    p.stash.fail_create = False
+    assert app.main(p.args) == 0
+    with merge.StateStore(p.path, merge.scope_for(app.STASH_URL), True) as state:
+        assert not state.has_pending_publications()
+        assert state.records('1', 'markers')['wd'][0][thresholds.OVERRIDE] == .85
 
 
 @pytest.mark.parametrize('change', ['scene', 'media', 'restart', 'below_floor'])

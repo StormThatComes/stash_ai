@@ -256,6 +256,7 @@ Testy mockują Stash i wagi — nie pobierają modeli.
 | `stash_client.py` | klient HTTP/GraphQL Stasha, pobieranie mediów i ochrona dry-run |
 | `stash_tags.py` | rozwiązywanie tagów i synchronizacja rodziców hierarchii |
 | `stash_state_codec.py` | kodowanie i odczyt skompresowanego JSON-u w bazie stanu |
+| `stash_thresholds.py` | ponowne użycie cache i progi publikacji markerów |
 | `tests/` | testy regresji, fixtures i wspólne pomocniki |
 | `benchmarks/` | skrypty pomiarowe offline |
 | `benchmarks/results/` | zachowane, referencyjne wyniki pomiarów |
