@@ -101,7 +101,7 @@ def test_unsafe_selection_is_rejected_before_any_policy_or_stash_write(pipeline,
     if change in ('legacy', 'missing', 'pending'):
         with merge.StateStore(p.path, merge.scope_for(app.STASH_URL)) as state:
             if change == 'legacy':
-                state.put('1', 'wd', {'markers': dict(mode='spans', meta={'origin': 'legacy'}, items=[]))})
+                state.put('1', 'wd', {'markers': dict(mode='spans', meta={'origin': 'legacy'}, items=[])})
             elif change == 'missing':
                 with state.connection:
                     state.connection.execute("DELETE FROM results WHERE model='wd' AND kind='markers'")
