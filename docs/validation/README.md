@@ -7,9 +7,9 @@ uruchamiania obecnej wersji ani bieżącym raportem CI.
 - [Cleanup SQL](cleanup_validation.txt)
 - [Merge](validation_merge.txt)
 - [Wydajność](validation_performance.txt)
-- [Occurance](validation_occurrences.txt)
+- [Occurrence](validation_occurrences.txt)
 - [Diagnostyka](validation_diagnostics.txt)
 
-Aktualne polecenia: [testy](../../README.md#testy) i
+Aktualne polecenia: [testy](../../README.md#testy-i-ci) i
 [benchmarki](../../benchmarks/README.md). Historyczne dane pomiarowe są w
 [benchmarks/results](../../benchmarks/results/README.md).

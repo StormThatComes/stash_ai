@@ -1,54 +1,74 @@
-# Szybkie sprzątanie blacklisty
+# Wykluczenia i cleanup
 
-Podmień pliki `.py` z paczki, w tym nowy `stash_cleanup.py`. Zachowaj swoje
-blacklisty YAML, ustawienia połączenia i dotychczasową bazę `tagger_sources.sqlite3`.
-Migracja bazy wyników do formatu 5 odbywa się automatycznie; nie wymaga inferencji.
+Wykluczenia są stosowane podczas normalnego merge oraz w osobnych trybach
+cleanupu bez inferencji.
+
+## Pliki
+
+`scene_tag_exclusions.yml` zawiera globalne i per-model reguły tagów scen.
+Globalny zakaz dotyczy również marker cores/extras i tworzenia hierarchii.
+
+`marker_core_exclusions.yml` wyklucza główne tagi markerów bez globalnego
+zakazu użycia etykiety w innych rolach.
+
+## Cleanup
 
 ```powershell
+python .\stash_ai.py --models all --cleanup-only --dry-run
 python .\stash_ai.py --models all --cleanup-only
 ```
 
-Jeżeli używasz innej ścieżki bazy, dodaj dotychczasowe `--state-db`.
-Podgląd: dodaj `--dry-run`. Nie dodawaj `--scene-id`, jeśli chcesz użyć
-szybkiego globalnego usuwania definicji tagów.
+Tryby częściowe:
 
-Pełny cleanup pobiera katalog tagów i wyszukuje pasujące markery przez API.
-Usuwa markery z globalnie zakazanym głównym tagiem, a następnie same tagi,
-partiami. Globalne wpisy z `scene_tag_exclusions.yml` obejmują `ai:`, `jt:`,
-`wd:`, `dtq:` i `op:`, również ręczne przypisania tych nazw i ich użycie przy
-obrazach lub innych obiektach Stash. Ręczne tagi bez prefiksów pozostają.
+```powershell
+python .\stash_ai.py --models all --cleanup-markers-only
+python .\stash_ai.py --models all --cleanup-scene-tags-only
+```
 
-Zakazany tag pomocniczy znika razem z definicją; pozostały marker zachowuje
-identyfikator, tytuł, początek i koniec. Dozwolone dzieci usuniętego tagu zostają,
-tracąc relację z usuniętym rodzicem. Lista `marker_core_exclusions.yml` nadal
-usuwa wyłącznie markery zarządzane przez skrypt, zachowując same definicje tagów.
+Cleanup nie uruchamia modeli i nie pobiera sprite'ów.
 
-Dla wspólnych wykluczeń skrypt nie odczytuje osobno wszystkich scen i nie
-przelicza wyników modeli. Wpisy zależne od modelu są obsługiwane tylko na scenach
-wyszukanych po pasujących tagach i markerach. Tryby częściowe i wybór pojedynczych
-modeli zachowują swój zakres. Starsze API bez filtrowanego wyszukiwania korzysta
-z dotychczasowej ścieżki, w której usunięto zbędne odczyty scen dla każdego modelu.
+## Globalne wykluczenie
 
-Paski postępu obejmują katalog, wyszukiwanie i usuwanie markerów/tagów.
-Podsumowanie pokazuje `cleanup_fast_path=1`, liczbę usuniętych definicji
-`blacklisted_tags_deleted` i liczbę scen wymagających dodatkowej obsługi
-`cleanup_candidate_scenes`. Przy samej wspólnej blackliście ta ostatnia wynosi 0.
+Globalny wpis może usunąć zakazany tag `ai:/jt:/wd:/dtq:/op:` ze scen i
+markerów, a w pełnym cleanupie również samą definicję tagu. Usunięcie definicji
+przez Stash usuwa jej relacje do innych obiektów.
 
-SQLite zachowuje surowe wyniki oraz kompaktowe reguły usunięć stosowane przy
-odczycie starego stanu publikacji. Nie ma masowego przepisywania snapshotów,
-pobierania sprite’ów ani dodatkowego cache obrazów.
+To zachowanie jest celowo silniejsze niż core-only. Przed dodaniem globalnej
+blacklisty upewnij się, że dana definicja nie jest potrzebna ręcznie.
 
-Przerwany globalny cleanup uruchom ponownie tą samą komendą, z tymi samymi
-blacklistami. Skrypt wyszukuje pozostałe obiekty i omija już usunięte.
-Do zakończenia cleanupu inne zapisy korzystające z tej bazy stanu są blokowane.
-Jeśli wcześniej przerwano merge, najpierw dokończ `--models all --merge-only`.
-Po zakończeniu cleanupu możesz zmienić blacklistę; zdjęcie zakazu i `--merge-only`
-pozwala odtworzyć wyniki z zachowanych wykryć, bez uruchamiania modeli.
+## Core-only
 
-Opcjonalne sprzątanie pozostałych pustych tagów po dawnych merge’ach:
+`marker_core_exclusions.yml` usuwa tylko zarządzane markery mające zakazany
+core. Definicja tagu pozostaje i może nadal działać jako dodatkowa etykieta.
+
+Ręczne markery nie są przejmowane tylko dlatego, że mają podobną nazwę tagu.
+
+## Stan i odtwarzanie
+
+Surowe evidence modeli pozostaje w `tagger_sources.sqlite3`. Cleanup zapisuje
+kompaktową informację potrzebną do prawidłowego odczytu wcześniejszych
+publikacji, bez masowego przepisywania wszystkich wyników.
+
+Po zdjęciu wykluczenia zwykły `--merge-only` może ponownie opublikować wynik z
+zachowanego evidence, jeśli nie został on ręcznie utracony w sposób, którego
+aplikacja nie potrafi odtworzyć.
+
+## Przerwanie
+
+Niedokończony cleanup należy:
+- wznowić z tymi samymi regułami; albo
+- porzucić przez `--abandon-pending` przed użyciem nowych reguł.
+
+Nie zmieniaj polityk pending cleanupu bez jednej z tych operacji.
+
+## Puste definicje
+
+Opcjonalnie:
 
 ```powershell
 python .\stash_ai.py --models all --cleanup-only --prune-empty-tags
+python .\stash_ai.py --prune-empty-tags-only --dry-run
 ```
 
-W tym dodatkowym kroku usuwane są tylko nieużywane tagi bez dzieci.
+Pruning usuwa tylko zweryfikowane nieużywane liście i respektuje zarządzane
+grupy markerów.
