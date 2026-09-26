@@ -71,6 +71,9 @@ python .\stash_ai.py --db-report
 python .\stash_ai.py --db-compact --dry-run
 python .\stash_ai.py --db-compact
 
+# Lokalny, anonimowy raport diagnostyczny do ręcznego przekazania developerowi.
+python .\stash_ai.py --anonymous-diagnostics .\stash-ai-diagnostics.json
+
 # Porzucenie niedokończonego planu merge/cleanup.
 python .\stash_ai.py --abandon-pending
 ```
@@ -113,6 +116,29 @@ scope. Nie wypisuje nazw tagów, ID scen ani zapisanych score'ów.
 Przed operacją ponownie sprawdza integralność, dostępne miejsce na dysku oraz brak
 niedokończonego merge/cleanup. `--dry-run` wykonuje tylko preflight i pokazuje
 szacunkowy odzysk z wolnych stron. Recovery evidence i checkpointy są zachowywane.
+
+### Anonimowy raport dla developera
+
+`--anonymous-diagnostics NEW.json` tworzy lokalny raport przeznaczony do
+ręcznego przejrzenia i ewentualnego przekazania developerowi. Aplikacja **nigdy
+nie wysyła go automatycznie** i odmawia nadpisania istniejącego pliku.
+
+Raport obejmuje całą wskazaną bazę stanu, ale nie eksportuje scene IDs, wartości
+`scope`, URL-i, ścieżek plików, nazw tagów, score'ów, timestampów markerów,
+sygnatur ani hashy wejścia. Nieznane nazwy modeli/rodzajów są zastępowane
+`other`, a niestandardowe tabele są raportowane tylko jako liczba.
+
+Dla optymalizacji schematu raport zawiera m.in.:
+- wersje Pythona/SQLite i rodzinę systemu operacyjnego;
+- page size/count, freelist, rozmiar DB/WAL oraz liczbę scope'ów i scen;
+- liczbę rekordów znanych tabel i rozkłady rozmiarów BLOB-ów;
+- per model/rodzaj: percentyle rozmiaru compressed JSON, compression ratio,
+  segmenty/rekord, items/segment, detekcje/klatkę i scene observations;
+- zagregowany stan checkpointów, result index i refresh requests.
+
+Raport jest pozbawiony bezpośrednich identyfikatorów i treści, ale dokładne
+agregaty rozmiaru/liczebności nadal opisują konkretną instalację. Przed
+udostępnieniem warto przejrzeć wygenerowany JSON.
 
 ## Wynik w Stash
 
