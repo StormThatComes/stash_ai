@@ -36,6 +36,7 @@ class StashClient:
         self.url = url
         self.api_key = api_key
         self.request_timeout = request_timeout
+        self.http_retries = http_retries
         self.scene_page_size = scene_page_size
         self.create_markers = create_markers
         self.dry_run = dry_run
@@ -61,13 +62,19 @@ class StashClient:
         self.api.close()
         self.media.close()
 
+    @staticmethod
+    def _read_only(query: str, variables: dict | None = None) -> bool:
+        if not query.lstrip().startswith('mutation'):
+            return True
+        from stash_cleanup_sql import is_read_only_cleanup
+        from stash_merge_sql import is_read_only_merge
+        return is_read_only_cleanup(query, variables) or is_read_only_merge(query, variables)
+
     def gql(self, query: str, variables: dict | None = None) -> dict:
         report = getattr(self, 'report', None)
         if report is None:
             return self._gql(query, variables)
-        from stash_cleanup_sql import is_read_only_cleanup
-        from stash_merge_sql import is_read_only_merge
-        read = not query.lstrip().startswith('mutation') or is_read_only_cleanup(query, variables) or is_read_only_merge(query, variables)
+        read = self._read_only(query, variables)
         # Names are from our fixed operations, never from variables or payloads.
         match = re.search(r'\b(?:query|mutation)\s+(StashAI[A-Za-z0-9_]*)\b', query)
         operation = match.group(1) if match else ('read' if read else 'write')
@@ -78,21 +85,33 @@ class StashClient:
             return self._gql(query, variables)
 
     def _gql(self, query: str, variables: dict | None = None) -> dict:
-        if self.dry_run and query.lstrip().startswith("mutation"):
-            from stash_cleanup_sql import is_read_only_cleanup
-            from stash_merge_sql import is_read_only_merge
-            if not (is_read_only_cleanup(query, variables) or is_read_only_merge(query, variables)):
-                raise RuntimeError("Internal error: mutation attempted during dry-run.")
+        read = self._read_only(query, variables)
+        if self.dry_run and query.lstrip().startswith("mutation") and not read:
+            raise RuntimeError("Internal error: mutation attempted during dry-run.")
+        from requests import ConnectionError as RequestsConnectionError, Timeout as RequestsTimeout
         from stash_runtime import stage
+        import time
         report = getattr(self, 'report', None)
-        with stage(report, 'stash_http'):
-            response = self.api.post(
-                absolute_stash_url("graphql", self.url),
-                json={"query": query, "variables": variables or {}},
-                timeout=self.request_timeout, allow_redirects=False,
-            )
-        if report is not None and isinstance(getattr(response, 'content', None), bytes):
-            report.response_size(len(response.content))
+        attempts = self.http_retries + 1 if read else 1
+        retry_statuses = {429, 500, 502, 503, 504}
+        for attempt in range(attempts):
+            try:
+                with stage(report, 'stash_http'):
+                    response = self.api.post(
+                        absolute_stash_url("graphql", self.url),
+                        json={"query": query, "variables": variables or {}},
+                        timeout=self.request_timeout, allow_redirects=False,
+                    )
+            except (RequestsConnectionError, RequestsTimeout):
+                if attempt + 1 == attempts:
+                    raise
+                time.sleep(0.5 * 2 ** attempt)
+                continue
+            if report is not None and isinstance(getattr(response, 'content', None), bytes):
+                report.response_size(len(response.content))
+            if response.status_code not in retry_statuses or attempt + 1 == attempts:
+                break
+            time.sleep(0.5 * 2 ** attempt)
         response.raise_for_status()
         if 300 <= response.status_code < 400:
             raise RuntimeError("Stash redirected GraphQL; configure STASH_URL to its final URL.")
