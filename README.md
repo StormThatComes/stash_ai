@@ -112,7 +112,7 @@ normalizuje historię przy bezpiecznym reuse cache.
 ### Zdrowie i kompaktowanie bazy stanu
 
 `--db-check` wykonuje głęboki, wyłącznie odczytowy test spójności całej bazy
-(we wszystkich scope'ach). Oprócz pełnego SQLite `quick_check` sprawdza m.in.
+(we wszystkich scope'ach). Oprócz pełnego SQLite `integrity_check` sprawdza m.in.
 zgodność `results` z `result_index` (łącznie z zapisaną sygnaturą ostatniej
 inferencji), dekodowalność trwałych BLOB-ów, dozwolone model/kind, relacje
 checkpoint/frames/analysis, wymiary checkpointów oraz generacje cleanup/recovery.
