@@ -420,6 +420,44 @@ def test_cleanup_selected_bridge_source_splits_union_and_keeps_manual_removals(m
     assert {t["name"] for t in p.stash.scene["tags"]}=={"ai:common"}
 
 
+@pytest.mark.parametrize('kind', ['scene', 'markers'])
+def test_enabling_replacement_collapses_reused_history_without_inference(merge_pipeline, monkeypatch, kind):
+    p = merge_pipeline
+    monkeypatch.setattr(app, 'REPLACE_SCENE_TAGS', False)
+    monkeypatch.setattr(app, 'REPLACE_MARKERS', False)
+    args = ['--models', 'oppai', *p.args[2:]]
+
+    assert app.main(args) == 0
+    p.scores['oppai'][:] = 0
+    assert app.main([*args, '--restart']) == 0
+
+    with merge.StateStore(p.path, merge.scope_for(app.STASH_URL), True) as state:
+        assert len(state.records('1', 'scene')['oppai']) == 2
+        assert len(state.records('1', 'markers')['oppai']) == 2
+    assert 'ai:unique_op' in {t['name'] for t in p.stash.scene['tags']}
+    assert intervals(p.stash, 'unique_op') == [(10, 30)]
+
+    monkeypatch.setattr(app, 'REPLACE_SCENE_TAGS', kind == 'scene')
+    monkeypatch.setattr(app, 'REPLACE_MARKERS', kind == 'markers')
+    monkeypatch.setattr(app, 'load_tagger', lambda *a: pytest.fail('replacement change reran inference'))
+    p.stash.writes.clear()
+
+    assert app.main(args) == 0
+
+    with merge.StateStore(p.path, merge.scope_for(app.STASH_URL), True) as state:
+        expected = {'scene': 1 if kind == 'scene' else 2,
+                    'markers': 1 if kind == 'markers' else 2}
+        assert len(state.records('1', 'scene')['oppai']) == expected['scene']
+        assert len(state.records('1', 'markers')['oppai']) == expected['markers']
+
+    if kind == 'scene':
+        assert 'ai:unique_op' not in {t['name'] for t in p.stash.scene['tags']}
+        assert intervals(p.stash, 'unique_op') == [(10, 30)]
+    else:
+        assert 'ai:unique_op' in {t['name'] for t in p.stash.scene['tags']}
+        assert intervals(p.stash, 'unique_op') == []
+
+
 def test_replacement_disabled_keeps_evidence_but_blacklists_still_apply(merge_pipeline,monkeypatch,tmp_path):
     p=merge_pipeline
     assert app.main(p.args)==0
