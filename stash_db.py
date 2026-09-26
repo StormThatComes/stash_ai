@@ -95,7 +95,7 @@ def inspect_database(path, scope):
     if not path.is_file():
         raise FileNotFoundError(f"State database does not exist: {path}")
 
-    from stash_merge import APPLICATION_ID
+    from stash_state import APPLICATION_ID
 
     with _readonly(path) as db:
         application_id = db.execute("PRAGMA application_id").fetchone()[0]
@@ -503,7 +503,7 @@ def check_database(path, scope, *, show_progress=False):
     if not path.is_file():
         raise FileNotFoundError(f"State database does not exist: {path}")
 
-    from stash_merge import APPLICATION_ID
+    from stash_state import APPLICATION_ID
 
     errors, warnings = Counter(), Counter()
     with _readonly(path) as db:
@@ -787,7 +787,7 @@ def format_report(report):
 
 
 def run_mode(args, stash_url):
-    from stash_merge import scope_for
+    from stash_state import scope_for
 
     scope = scope_for(stash_url)
     try:

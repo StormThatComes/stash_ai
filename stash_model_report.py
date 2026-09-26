@@ -12,6 +12,7 @@ from pathlib import Path
 
 from stash_occurrences import is_occurrence
 from stash_taggers import SOURCES
+from stash_state import StateStore, scope_for
 
 
 REPORT_FORMAT = 1
@@ -275,9 +276,9 @@ def run(app, args):
     try:
         if not Path(args.state_db).expanduser().is_file():
             raise FileNotFoundError(f"State database does not exist: {args.state_db}")
-        with stash_merge.StateStore(
+        with StateStore(
             args.state_db,
-            stash_merge.scope_for(app.STASH_URL),
+            scope_for(app.STASH_URL),
             True,
             cache_bytes=int(args.ram_cache_gb * 2**30),
             memory_budget_bytes=int(args.ram_budget_gb * 2**30),
