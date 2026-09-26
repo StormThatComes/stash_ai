@@ -88,6 +88,7 @@ def completed(store, scene, model, kinds, signature=None):
 
 def reuse_replacement_policy(store, scene, model, kinds, signature, replace):
     """Reuse current inference while applying replacement semantics to retained history."""
+    from stash_thresholds import indexed_signature
     matches = {}
     records = {}
     for kind in kinds:
@@ -97,9 +98,12 @@ def reuse_replacement_policy(store, scene, model, kinds, signature, replace):
                 (store.scope, str(scene), model, kind)).fetchone():
             return None
         segments = store.records(scene, kind, model, borrow=True).get(model, [])
+        # Match the effective policy as completed() does. A raw inference
+        # signature can match restored thresholds while overrides still retain
+        # the raised values; let threshold reuse reconcile those first.
         current = next((segment for segment in reversed(segments)
                         if segment['meta'].get('origin') == 'inference'
-                        and segment['meta'].get('inference_signature') == signature), None)
+                        and indexed_signature(segment) == signature), None)
         if current is None:
             return None
         records[kind] = segments

@@ -93,6 +93,41 @@ def test_automatic_raise_and_return_to_original_keep_raw_evidence(pipeline, monk
     assert app.main(p.args) == 0
 
 
+@pytest.mark.parametrize('mode,scene,marker', [
+    ('--scene-tags-only', .8, .7),
+    ('--markers-only', .4, .9),
+    (None, .8, .9),
+])
+def test_return_to_original_thresholds_after_scene_edit(pipeline, monkeypatch, mode, scene, marker):
+    p = pipeline
+    configure(monkeypatch)
+    p.scores['wd'][:, 0] = .65
+    p.scores['wd'][:, 1] = .85
+    args = [*p.args, *([mode] if mode else [])]
+    assert app.main(args) == 0
+    before = records(p.path)
+    original_tags = {t['name'] for t in p.stash.scene['tags']}
+
+    def marker_outputs():
+        return sorted((m['primary_tag']['name'], m['seconds'], m.get('end_seconds'))
+                      for m in p.stash.scene['scene_markers'])
+
+    original_markers = marker_outputs()
+    fail_inference(monkeypatch)
+    configure(monkeypatch, scene=scene, marker=marker)
+    assert app.main(args) == 0
+    assert records(p.path) != before
+
+    # A changed scene takes the replacement-history reuse path before the
+    # ordinary threshold cache path. Its original signature still matches.
+    p.stash.scene['tags'].append(p.stash.tag('manual'))
+    configure(monkeypatch)
+    assert app.main(args) == 0
+    assert records(p.path) == before
+    assert {t['name'] for t in p.stash.scene['tags']} == original_tags | {'manual'}
+    assert marker_outputs() == original_markers
+
+
 @pytest.mark.parametrize('temporal', [True, False])
 def test_rethreshold_matches_fresh_marker_inference(pipeline, monkeypatch, tmp_path, temporal):
     p = pipeline
