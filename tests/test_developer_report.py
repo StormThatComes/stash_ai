@@ -63,10 +63,13 @@ def seed(path):
     with sqlite3.connect(path) as db:
         db.execute("CREATE TABLE private_customer_name(secret TEXT)")
         db.execute("INSERT INTO private_customer_name VALUES ('do-not-export')")
+        custom = segment()
+        custom["meta"]["analysis_format"] = 77777
+        custom["meta"]["scene_frames_format"] = 88888
         db.execute(
             "INSERT INTO results(scope,scene,model,kind,data) VALUES (?,?,?,?,?)",
             ("scope-secret-alpha", "secret-extra-scene", "custom-secret-model", "custom-kind",
-             encode([segment()])),
+             encode([custom])),
         )
 
 
@@ -105,6 +108,8 @@ def test_report_is_read_only_content_free_and_cross_scope(tmp_path):
     assert ("wd", "scene") in groups
     assert ("wd", "markers") in groups
     assert ("other", "other") in groups
+    assert groups["other", "other"]["analysis_formats"] == {"other": 1}
+    assert groups["other", "other"]["scene_frame_formats"] == {"other": 1}
 
     markers = groups["wd", "markers"]
     assert markers["rows"] == 1
