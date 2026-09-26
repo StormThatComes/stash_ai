@@ -1014,8 +1014,10 @@ def main(argv: list[str] | None = None) -> int:
                        help="Report state DB health, size and aggregate evidence/cache counts without Stash or model access.")
     modes.add_argument("--db-compact", action="store_true",
                        help="Safely VACUUM the state DB while idle; refuses pending publication/cleanup plans. Honors --dry-run.")
+    modes.add_argument("--anonymous-diagnostics", type=Path, metavar="NEW.json",
+                       help="Write a local content-free developer diagnostics JSON from the state DB; never uploads it.")
     args = parser.parse_args(argv)
-    database_mode = args.db_report or args.db_compact
+    database_mode = args.db_report or args.db_compact or args.anonymous_diagnostics is not None
     if database_mode:
         if args.output_mode != "merged":
             parser.error("--db-report/--db-compact require --output-mode merged.")
@@ -1027,6 +1029,11 @@ def main(argv: list[str] | None = None) -> int:
                 or args.rethreshold_scenes or args.rethreshold_markers or args.abandon_pending
                 or args.prune_empty_tags or args.prune_prefixes or args.create_all_tags or args.no_hierarchy):
             parser.error("Database maintenance cannot be combined with tagging, threshold, cleanup or pruning modifiers.")
+        if args.anonymous_diagnostics is not None:
+            if args.dry_run:
+                parser.error("--anonymous-diagnostics is already read-only for the state DB; --dry-run does not apply.")
+            from stash_developer_report import run as run_anonymous_diagnostics
+            return run_anonymous_diagnostics(args)
         from stash_db import run_mode as run_database_mode
         return run_database_mode(args, STASH_URL)
     if args.output_mode != "merged" and (args.resume or args.restart):
