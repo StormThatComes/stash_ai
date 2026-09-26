@@ -1016,8 +1016,22 @@ def main(argv: list[str] | None = None) -> int:
                        help="Safely VACUUM the state DB while idle; refuses pending publication/cleanup plans. Honors --dry-run.")
     modes.add_argument("--anonymous-diagnostics", type=Path, metavar="NEW.json",
                        help="Write a local content-free developer diagnostics JSON from the state DB; never uploads it.")
+    modes.add_argument("--model-report", type=Path, metavar="NEW.json",
+                       help="Write an offline per-model utility and leave-one-model-out ablation report from saved evidence.")
     args = parser.parse_args(argv)
     database_mode = args.db_report or args.db_compact or args.anonymous_diagnostics is not None
+    if args.model_report is not None:
+        if args.output_mode != "merged":
+            parser.error("--model-report requires --output-mode merged.")
+        if args.models or args.device or args.offline or args.resume is not None or args.restart:
+            parser.error("--model-report uses all saved model evidence; model/inference options do not apply.")
+        if (args.markers_only or args.scene_tags_only or args.profile_merge or args.force_merge
+                or args.rethreshold_scenes or args.rethreshold_markers or args.abandon_pending
+                or args.prune_empty_tags or args.prune_prefixes or args.create_all_tags or args.no_hierarchy
+                or args.dry_run):
+            parser.error("--model-report cannot be combined with tagging, threshold, pruning or dry-run modifiers.")
+        if args.model_report.suffix.lower() != ".json" or args.model_report.exists():
+            parser.error("--model-report requires a new .json file; existing files are never overwritten.")
     if database_mode:
         if args.output_mode != "merged":
             parser.error("--db-report/--db-compact require --output-mode merged.")
@@ -1111,6 +1125,9 @@ def main(argv: list[str] | None = None) -> int:
         from stash_prune import run_prune
         validate_config(scene_work=False)
         return run_prune(sys.modules[__name__], args)
+    if args.model_report is not None:
+        from stash_model_report import run as run_model_report
+        return run_model_report(sys.modules[__name__], args)
     settings = load_model_settings(args.model_config, args.models, args.device, args.offline)
     print("Selected models: " + ", ".join(f"{item.source.title} ({item.source.prefix})" for item in settings))
     if args.download_models:
