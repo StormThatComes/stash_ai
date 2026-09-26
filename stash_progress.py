@@ -84,6 +84,27 @@ def completed(store, scene, model, kinds, signature=None):
                 else (rows[kind][0] or rows[kind][1])) for kind in kinds)
 
 
+def apply_replacement_policy(store, scene, model, kinds, replace):
+    """Collapse retained history only after the latest inference was proven reusable."""
+    targets = []
+    for kind in kinds:
+        if not replace.get(kind, True):
+            continue
+        segments = store.records(scene, kind, model, borrow=True).get(model, [])
+        if len(segments) <= 1 or segments[-1]['meta'].get('origin') != 'inference':
+            continue
+        targets.append((kind, segments[-1]))
+    if not targets:
+        return 0
+    # Never rewrite source evidence underneath an interrupted publication plan.
+    if any(store.snapshot(scene, kind, borrow=True)[1] is not None for kind in ('scene', 'markers')):
+        return 0
+    with store.connection:
+        for kind, segment in targets:
+            store.replace_records(scene, model, kind, [segment])
+    return len(targets)
+
+
 def clear_checkpoint(store, scene, model):
     from stash_preview import delete
     for table in ("checkpoints", "checkpoint_frames", "checkpoint_analysis"):
