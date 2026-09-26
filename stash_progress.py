@@ -110,11 +110,34 @@ def reuse_replacement_policy(store, scene, model, kinds, signature, replace):
         return 0
     # Never rewrite source evidence underneath an interrupted publication plan.
     if any(store.snapshot(scene, kind, borrow=True)[1] is not None for kind in ('scene', 'markers')):
-        return None
+        raise RuntimeError(f'{scene}: finish the pending merge or use --abandon-pending before changing replacement policy.')
     with store.connection:
         for kind, segment in targets:
             store.replace_records(scene, model, kind, [segment])
     return len(targets)
+
+def collapse_replacement_history(store, scene, model, kinds, replace):
+    """Apply replacement after another cache path has already proven the latest result."""
+    targets = []
+    for kind in kinds:
+        if not replace.get(kind, True):
+            continue
+        segments = store.records(scene, kind, model, borrow=True).get(model, [])
+        if len(segments) <= 1:
+            continue
+        segment = segments[-1]
+        if segment['meta'].get('origin') != 'inference':
+            return None
+        targets.append((kind, segment))
+    if not targets:
+        return 0
+    if any(store.snapshot(scene, kind, borrow=True)[1] is not None for kind in ('scene', 'markers')):
+        raise RuntimeError(f'{scene}: finish the pending merge or use --abandon-pending before changing replacement policy.')
+    with store.connection:
+        for kind, segment in targets:
+            store.replace_records(scene, model, kind, [segment])
+    return len(targets)
+
 
 def clear_checkpoint(store, scene, model):
     from stash_preview import delete
