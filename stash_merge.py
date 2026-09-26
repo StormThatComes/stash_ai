@@ -1042,7 +1042,8 @@ def _run_merged(app, settings, args, catalogs, hierarchy, core_policies, scene_p
                     try:
                         with stage(report, 'scan_fingerprint'):
                             fingerprint = performance.scene_fingerprint(current)
-                        if performance.checked(store, scene_id, merge_key, fingerprint):
+                        publication_reason = performance.check_reason(store, scene_id, merge_key, fingerprint)
+                        if publication_reason == 'reused':
                             stats['bootstrap_reused'] += 1
                         else:
                             with report.measure('bootstrap'):
@@ -1050,7 +1051,7 @@ def _run_merged(app, settings, args, catalogs, hierarchy, core_policies, scene_p
                         # Keep only input paths/ID between passes; marker bodies need
                         # no collection-sized in-memory cache and are refreshed at sync.
                         scenes[scene_id] = {"id": scene_id, "paths": current.get("paths") or {},
-                                            'fingerprint': fingerprint}
+                                            'fingerprint': fingerprint, 'publication_reason': publication_reason}
                     except Exception as exc:
                         stats["errors"] += 1
                         report.issue('read sources', '', scene_id, exc, app.safe_error(exc, api_key=app.STASH_API_KEY))
@@ -1068,6 +1069,7 @@ def _run_merged(app, settings, args, catalogs, hierarchy, core_policies, scene_p
                     report.finish('Thresholds (not applied)', stats, store.cache)
                     return 1
             kinds = progress.output_kinds(app)
+            replacement = {"scene": app.REPLACE_SCENE_TAGS, "markers": app.REPLACE_MARKERS}
             inputs = progress.RunInputs(stash, store.cache, report)
             if not args.merge_only:
                 if args.restart:
@@ -1091,12 +1093,26 @@ def _run_merged(app, settings, args, catalogs, hierarchy, core_policies, scene_p
                             try:
                                 store.cache.pressure(force=True)
                                 cues, media, signature = inputs.inspect(app, paths, identity)
+                                if args.resume and not args.restart and current['publication_reason'] != 'reused':
+                                    collapsed = progress.reuse_replacement_policy(
+                                        store, scene_id, key, kinds, signature, replacement)
+                                    if collapsed is not None:
+                                        stats["replacement_history_collapsed"] += collapsed
+                                        stats["reused"] += 1
+                                        continue
                                 if args.resume and progress.completed(store, scene_id, key, kinds, signature):
                                     stats["reused"] += 1
                                     continue
                                 if args.resume and not args.restart:
                                     from stash_thresholds import reuse
                                     if reuse(app, store, scene_id, config, identity, cues, media.hashes, kinds):
+                                        if current['publication_reason'] != 'reused':
+                                            collapsed = progress.collapse_replacement_history(
+                                                store, scene_id, key, kinds, replacement)
+                                            if collapsed is None:
+                                                raise RuntimeError(
+                                                    f'{scene_id}/{key}: threshold cache did not leave a current inference segment.')
+                                            stats["replacement_history_collapsed"] += collapsed
                                         stats['threshold_cache_reused'] += 1
                                         continue
                                 if tagger is None:
@@ -1125,8 +1141,7 @@ def _run_merged(app, settings, args, catalogs, hierarchy, core_policies, scene_p
                                     segment["meta"].update(inference_signature=signature,
                                         frame_input_signature=progress.digest({"cues": [[c.start,c.end,c.image,list(c.rect)] for c in cues],
                                                                                "media": media.hashes}))
-                                progress.finish(store, scene_id, key, outputs,
-                                    {"scene": app.REPLACE_SCENE_TAGS, "markers": app.REPLACE_MARKERS})
+                                progress.finish(store, scene_id, key, outputs, replacement)
                                 stats["processed"] += 1
                             except Exception as exc:
                                 stats["errors"] += 1

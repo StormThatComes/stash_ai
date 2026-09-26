@@ -84,6 +84,61 @@ def completed(store, scene, model, kinds, signature=None):
                 else (rows[kind][0] or rows[kind][1])) for kind in kinds)
 
 
+def reuse_replacement_policy(store, scene, model, kinds, signature, replace):
+    """Reuse current inference while applying replacement semantics to retained history."""
+    matches = {}
+    records = {}
+    for kind in kinds:
+        if store.connection.execute(
+                "SELECT 1 FROM " + store.table('refresh_requests') +
+                " WHERE scope=? AND scene=? AND model=? AND kind=?",
+                (store.scope, str(scene), model, kind)).fetchone():
+            return None
+        segments = store.records(scene, kind, model, borrow=True).get(model, [])
+        current = next((segment for segment in reversed(segments)
+                        if segment['meta'].get('origin') == 'inference'
+                        and segment['meta'].get('inference_signature') == signature), None)
+        if current is None:
+            return None
+        records[kind] = segments
+        matches[kind] = current
+
+    targets = [(kind, matches[kind]) for kind in kinds
+               if replace.get(kind, True)
+               and (len(records[kind]) != 1 or records[kind][0] != matches[kind])]
+    if not targets:
+        return 0
+    # Never rewrite source evidence underneath an interrupted publication plan.
+    if any(store.snapshot(scene, kind, borrow=True)[1] is not None for kind in ('scene', 'markers')):
+        raise RuntimeError(f'{scene}: finish the pending merge or use --abandon-pending before changing replacement policy.')
+    with store.connection:
+        for kind, segment in targets:
+            store.replace_records(scene, model, kind, [segment])
+    return len(targets)
+
+def collapse_replacement_history(store, scene, model, kinds, replace):
+    """Apply replacement after another cache path has already proven the latest result."""
+    targets = []
+    for kind in kinds:
+        if not replace.get(kind, True):
+            continue
+        segments = store.records(scene, kind, model, borrow=True).get(model, [])
+        if len(segments) <= 1:
+            continue
+        segment = segments[-1]
+        if segment['meta'].get('origin') != 'inference':
+            return None
+        targets.append((kind, segment))
+    if not targets:
+        return 0
+    if any(store.snapshot(scene, kind, borrow=True)[1] is not None for kind in ('scene', 'markers')):
+        raise RuntimeError(f'{scene}: finish the pending merge or use --abandon-pending before changing replacement policy.')
+    with store.connection:
+        for kind, segment in targets:
+            store.replace_records(scene, model, kind, [segment])
+    return len(targets)
+
+
 def clear_checkpoint(store, scene, model):
     from stash_preview import delete
     for table in ("checkpoints", "checkpoint_frames", "checkpoint_analysis"):

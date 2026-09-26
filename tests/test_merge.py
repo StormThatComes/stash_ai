@@ -11,6 +11,7 @@ import yaml
 
 import stash_ai as app
 import stash_merge as merge
+import stash_progress as progress
 from stash_taggers import SOURCES, JOYTAG, WD, DTQ, OPPAI, ModelSettings, Vocabulary
 from tests.helpers.stash import Stash
 from tests.helpers.inference import Tagger
@@ -418,6 +419,53 @@ def test_cleanup_selected_bridge_source_splits_union_and_keeps_manual_removals(m
     assert intervals(p.stash)==[(10,20),(30,40)]  # joytag and wd survive a common ban scoped to oppai.
     assert not intervals(p.stash,"extra")
     assert {t["name"] for t in p.stash.scene["tags"]}=={"ai:common"}
+
+
+@pytest.mark.parametrize('kind', ['scene', 'markers'])
+def test_enabling_replacement_collapses_reused_history_without_inference(merge_pipeline, monkeypatch, kind):
+    p = merge_pipeline
+    monkeypatch.setattr(app, 'REPLACE_SCENE_TAGS', False)
+    monkeypatch.setattr(app, 'REPLACE_MARKERS', False)
+    args = ['--models', 'oppai', *p.args[2:], '--resume']
+
+    assert app.main(args) == 0
+    p.scores['oppai'][:] = 0
+    # Force a genuinely new input signature, then keep it stable for the reuse run.
+    monkeypatch.setattr(p.stash, 'get_media', lambda url: b'changed-media')
+    assert app.main(args) == 0
+
+    config = app.load_model_settings(app.MODELS_CONFIG_FILE, ['oppai'], None)[0]
+    identity = progress.model_identity(app, config, app.load_vocabulary(config))
+    _, _, current_signature = progress.inspect_input(app, p.stash, p.stash.scene['paths'], identity)
+    with merge.StateStore(p.path, merge.scope_for(app.STASH_URL), True) as state:
+        scene_segments = state.records('1', 'scene')['oppai']
+        marker_segments = state.records('1', 'markers')['oppai']
+        assert len(scene_segments) == 2
+        assert len(marker_segments) == 2
+        assert scene_segments[-1]['meta']['inference_signature'] == current_signature
+        assert marker_segments[-1]['meta']['inference_signature'] == current_signature
+    assert 'ai:unique_op' in {t['name'] for t in p.stash.scene['tags']}
+    assert intervals(p.stash, 'unique_op') == [(10, 30)]
+
+    monkeypatch.setattr(app, 'REPLACE_SCENE_TAGS', kind == 'scene')
+    monkeypatch.setattr(app, 'REPLACE_MARKERS', kind == 'markers')
+    monkeypatch.setattr(app, 'load_tagger', lambda *a: pytest.fail('replacement change reran inference'))
+    p.stash.writes.clear()
+
+    assert app.main(args) == 0
+
+    with merge.StateStore(p.path, merge.scope_for(app.STASH_URL), True) as state:
+        expected = {'scene': 1 if kind == 'scene' else 2,
+                    'markers': 1 if kind == 'markers' else 2}
+        assert len(state.records('1', 'scene')['oppai']) == expected['scene']
+        assert len(state.records('1', 'markers')['oppai']) == expected['markers']
+
+    if kind == 'scene':
+        assert 'ai:unique_op' not in {t['name'] for t in p.stash.scene['tags']}
+        assert intervals(p.stash, 'unique_op') == [(10, 30)]
+    else:
+        assert 'ai:unique_op' in {t['name'] for t in p.stash.scene['tags']}
+        assert intervals(p.stash, 'unique_op') == []
 
 
 def test_replacement_disabled_keeps_evidence_but_blacklists_still_apply(merge_pipeline,monkeypatch,tmp_path):

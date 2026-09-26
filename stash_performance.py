@@ -85,7 +85,8 @@ def publication_key(app, args, hierarchy, cores, tags, stash):
     code = publication_code()
     names = ('APPLY_SCENE_TAGS', 'CREATE_MARKERS', 'CREATE_MISSING', 'MAX_TAGS',
              'MARKER_MIN_HITS', 'MARKER_MERGE_GAP_SECONDS', 'MARKER_MAX_TAGS_PER_FRAME',
-             'MAX_MARKERS_PER_SCENE', 'MARKER_USE_END_TIME', 'MARKER_MATCH_TOLERANCE_SECONDS')
+             'MAX_MARKERS_PER_SCENE', 'MARKER_USE_END_TIME', 'MARKER_MATCH_TOLERANCE_SECONDS',
+             'REPLACE_SCENE_TAGS', 'REPLACE_MARKERS')
     return digest(dict(code=code, policy=asdict(app.TEMPORAL_POLICY),
         settings={name: getattr(app, name) for name in names},
         blocklist=sorted(app.MARKER_TAG_BLOCKLIST),
