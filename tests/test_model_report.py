@@ -101,7 +101,11 @@ def test_ablation_report_distinguishes_redundant_and_unique_models(tmp_path):
     assert report["totals"]["markers"] == 2
 
     assert rows["wd"]["scene_tags_supported"] == 1
+    assert rows["wd"]["scene_tags_sole_source"] == 0
+    assert rows["wd"]["scene_tags_multi_model"] == 1
     assert rows["wd"]["marker_components_supported"] == 1
+    assert rows["wd"]["marker_components_sole_source"] == 0
+    assert rows["wd"]["marker_components_multi_model"] == 1
     assert rows["wd"]["scene_tags_lost"] == 0
     assert rows["wd"]["marker_components_lost"] == 0
     assert rows["wd"]["scenes_changed"] == 0
@@ -110,6 +114,8 @@ def test_ablation_report_distinguishes_redundant_and_unique_models(tmp_path):
     assert rows["dtq"]["marker_components_lost"] == 0
     assert rows["dtq"]["scenes_changed"] == 0
 
+    assert rows["joytag"]["scene_tags_sole_source"] == 1
+    assert rows["joytag"]["marker_components_sole_source"] == 1
     assert rows["joytag"]["scene_tags_lost"] == 1
     assert rows["joytag"]["marker_components_lost"] == 1
     assert rows["joytag"]["scenes_changed"] == 1
