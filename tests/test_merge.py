@@ -11,6 +11,7 @@ import yaml
 
 import stash_ai as app
 import stash_merge as merge
+import stash_progress as progress
 from stash_taggers import SOURCES, JOYTAG, WD, DTQ, OPPAI, ModelSettings, Vocabulary
 from tests.helpers.stash import Stash
 from tests.helpers.inference import Tagger
@@ -433,9 +434,16 @@ def test_enabling_replacement_collapses_reused_history_without_inference(merge_p
     monkeypatch.setattr(p.stash, 'get_media', lambda url: b'changed-media')
     assert app.main(args) == 0
 
+    config = app.load_model_settings(app.MODELS_CONFIG_FILE, ['oppai'], None)[0]
+    identity = progress.model_identity(app, config, app.load_vocabulary(config))
+    _, _, current_signature = progress.inspect_input(app, p.stash, p.stash.scene['paths'], identity)
     with merge.StateStore(p.path, merge.scope_for(app.STASH_URL), True) as state:
-        assert len(state.records('1', 'scene')['oppai']) == 2
-        assert len(state.records('1', 'markers')['oppai']) == 2
+        scene_segments = state.records('1', 'scene')['oppai']
+        marker_segments = state.records('1', 'markers')['oppai']
+        assert len(scene_segments) == 2
+        assert len(marker_segments) == 2
+        assert scene_segments[-1]['meta']['inference_signature'] == current_signature
+        assert marker_segments[-1]['meta']['inference_signature'] == current_signature
     assert 'ai:unique_op' in {t['name'] for t in p.stash.scene['tags']}
     assert intervals(p.stash, 'unique_op') == [(10, 30)]
 
