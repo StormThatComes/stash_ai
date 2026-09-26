@@ -66,6 +66,11 @@ python .\stash_ai.py --explain-tag ai:blue_hair --scene-id 123
 # Usuwanie nieużywanych definicji tagów.
 python .\stash_ai.py --prune-empty-tags-only --dry-run
 
+# Zdrowie i kompaktowanie lokalnej bazy stanu.
+python .\stash_ai.py --db-report
+python .\stash_ai.py --db-compact --dry-run
+python .\stash_ai.py --db-compact
+
 # Porzucenie niedokończonego planu merge/cleanup.
 python .\stash_ai.py --abandon-pending
 ```
@@ -95,6 +100,19 @@ do zwykłego przeliczenia merge, cleanupu ani zmiany progów.
 Domyślnie `REPLACE_SCENE_TAGS=True` i `REPLACE_MARKERS=True`. Wyłączenie
 którejś flagi zachowuje historię danego rodzaju wyniku; ponowne włączenie
 normalizuje historię przy bezpiecznym reuse cache.
+
+### Zdrowie i kompaktowanie bazy stanu
+
+`--db-report` nie łączy się ze Stash ani nie ładuje modeli. Pokazuje wersję
+schematu, wynik SQLite `quick_check`, rozmiar pliku i sidecarów WAL/SHM, wolne
+strony, zagregowane rekordy `results` według modelu/rodzaju oraz liczniki
+checkpointów, refresh requests, pending/recovery i merge checks dla bieżącego
+scope. Nie wypisuje nazw tagów, ID scen ani zapisanych score'ów.
+
+`--db-compact` wykonuje SQLite `VACUUM` pod tym samym lockiem co zwykły writer.
+Przed operacją ponownie sprawdza integralność, dostępne miejsce na dysku oraz brak
+niedokończonego merge/cleanup. `--dry-run` wykonuje tylko preflight i pokazuje
+szacunkowy odzysk z wolnych stron. Recovery evidence i checkpointy są zachowywane.
 
 ## Wynik w Stash
 
