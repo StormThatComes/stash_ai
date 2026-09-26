@@ -371,7 +371,7 @@ def build_report(path):
     if not path.is_file():
         raise FileNotFoundError(f"State database does not exist: {path}")
 
-    from stash_merge import APPLICATION_ID
+    from stash_state import APPLICATION_ID
 
     with _readonly(path) as db:
         application_id = db.execute("PRAGMA application_id").fetchone()[0]
