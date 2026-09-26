@@ -37,7 +37,7 @@ def test_report_is_read_only_and_privacy_safe(tmp_path):
     report = stash_db.inspect_database(path, scope)
 
     assert hashlib.sha256(path.read_bytes()).digest() == before
-    assert report["quick_check"] == "ok"
+    assert report["integrity_check_ok"]
     assert report["scenes"] == 1
     assert {(row["model"], row["kind"], row["scenes"]) for row in report["results"]} == {
         ("wd", "markers", 1),
