@@ -10,6 +10,11 @@ def indexed_signature(segment, inference=None):
     from stash_progress import digest
     signature = segment['meta'].get('inference_signature') if inference is None else inference
     from stash_scene_cache import SCENE_OVERRIDE
+    if SCENE_OVERRIDE in segment and OVERRIDE in segment:
+        return digest([signature, {
+            'scene_threshold': segment[SCENE_OVERRIDE],
+            'marker_threshold': segment[OVERRIDE],
+        }])
     if SCENE_OVERRIDE in segment:
         return digest([signature, {'scene_threshold': segment[SCENE_OVERRIDE]}])
     return digest([signature, segment[OVERRIDE]]) if OVERRIDE in segment else signature
