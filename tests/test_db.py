@@ -1,0 +1,131 @@
+"""State database reporting and safe compaction."""
+
+import hashlib
+import sqlite3
+
+import pytest
+
+import stash_ai as app
+import stash_db
+import stash_merge as merge
+
+
+def seed(path, scope):
+    with merge.StateStore(path, scope) as state:
+        state.put("1", "wd", {
+            "scene": {
+                "mode": "scene",
+                "meta": {"origin": "inference", "inference_signature": "scene-sig"},
+                "items": [{"tag": "blue_hair", "score": .9}],
+            },
+            "markers": {
+                "mode": "frames",
+                "meta": {"origin": "inference", "inference_signature": "marker-sig"},
+                "items": [{"start": 0.0, "end": 1.0, "tags": [["blue_hair", .9]]}],
+            },
+        })
+
+
+def test_report_is_read_only_and_privacy_safe(tmp_path):
+    path = tmp_path / "state.sqlite3"
+    scope = "scope-a"
+    seed(path, scope)
+    before = hashlib.sha256(path.read_bytes()).digest()
+
+    report = stash_db.inspect_database(path, scope)
+
+    assert hashlib.sha256(path.read_bytes()).digest() == before
+    assert report["quick_check"] == "ok"
+    assert report["scenes"] == 1
+    assert {(row["model"], row["kind"], row["scenes"]) for row in report["results"]} == {
+        ("wd", "markers", 1),
+        ("wd", "scene", 1),
+    }
+    assert report["pending_publications"] == 0
+    text = stash_db.format_report(report)
+    assert "blue_hair" not in text
+    assert "scene-sig" not in text
+    assert "marker-sig" not in text
+
+
+def test_compact_reclaims_free_pages_and_preserves_state(tmp_path):
+    path = tmp_path / "state.sqlite3"
+    scope = "scope-a"
+    seed(path, scope)
+    with sqlite3.connect(path) as db:
+        db.execute("CREATE TABLE scratch(data BLOB)")
+        db.execute("INSERT INTO scratch VALUES (randomblob(4000000))")
+        db.execute("DELETE FROM scratch")
+
+    before = stash_db.inspect_database(path, scope)
+    assert before["free_page_bytes"] > 0
+    with merge.StateStore(path, scope, True) as state:
+        expected = state.records("1", "scene"), state.records("1", "markers")
+
+    old, after = stash_db.compact_database(path, scope)
+
+    assert old["file_bytes"] == before["file_bytes"]
+    assert after["quick_check"] == "ok"
+    assert after["file_bytes"] < before["file_bytes"]
+    assert after["free_page_bytes"] <= before["free_page_bytes"]
+    with merge.StateStore(path, scope, True) as state:
+        assert (state.records("1", "scene"), state.records("1", "markers")) == expected
+
+
+def test_compact_refuses_pending_publication_or_cleanup(tmp_path):
+    path = tmp_path / "state.sqlite3"
+    scope = "scope-a"
+    seed(path, scope)
+    with merge.StateStore(path, scope) as state:
+        state.prepare("1", {"scene": {"owned_ids": [], "contributions": []}})
+
+    with pytest.raises(RuntimeError, match="Pending publication"):
+        stash_db.compact_database(path, scope)
+
+    with merge.StateStore(path, scope, allow_cleanup=True) as state:
+        with state.connection:
+            state.connection.execute(
+                "UPDATE snapshots SET pending=NULL WHERE scope=?", (scope,))
+            state.connection.execute(
+                "INSERT INTO cleanup_state VALUES (?,?,?,?) "
+                "ON CONFLICT(scope) DO UPDATE SET pending=excluded.pending",
+                (scope, 1, state.pack({}), "pending-cleanup"),
+            )
+
+    with pytest.raises(RuntimeError, match="cleanup plan"):
+        stash_db.compact_database(path, scope)
+
+
+def test_compact_dry_run_does_not_change_database(tmp_path):
+    path = tmp_path / "state.sqlite3"
+    scope = "scope-a"
+    seed(path, scope)
+    with sqlite3.connect(path) as db:
+        db.execute("CREATE TABLE scratch(data BLOB)")
+        db.execute("INSERT INTO scratch VALUES (randomblob(1000000))")
+        db.execute("DELETE FROM scratch")
+    before = path.read_bytes()
+
+    first, second = stash_db.compact_database(path, scope, dry_run=True)
+
+    assert path.read_bytes() == before
+    assert first == second
+    assert first["free_page_bytes"] > 0
+
+
+def test_db_cli_does_not_load_models_or_stash(tmp_path, monkeypatch, capsys):
+    path = tmp_path / "state.sqlite3"
+    scope = merge.scope_for(app.STASH_URL)
+    seed(path, scope)
+    monkeypatch.setattr(app, "load_model_settings", lambda *a, **k: pytest.fail("loaded model config"))
+    monkeypatch.setattr(app, "create_stash_client", lambda *a, **k: pytest.fail("connected to Stash"))
+
+    assert app.main(["--state-db", str(path), "--db-report"]) == 0
+    output = capsys.readouterr().out
+    assert "Health: ok" in output
+    assert "wd" in output
+
+    before = path.read_bytes()
+    assert app.main(["--state-db", str(path), "--db-compact", "--dry-run"]) == 0
+    assert path.read_bytes() == before
+    assert "VACUUM was not executed" in capsys.readouterr().out
