@@ -1107,10 +1107,11 @@ def _run_merged(app, settings, args, catalogs, hierarchy, core_policies, scene_p
                                     from stash_thresholds import reuse
                                     if reuse(app, store, scene_id, config, identity, cues, media.hashes, kinds):
                                         if current['publication_reason'] != 'reused':
-                                            collapsed = progress.reuse_replacement_policy(
-                                                store, scene_id, key, kinds, signature, replacement)
+                                            collapsed = progress.collapse_replacement_history(
+                                                store, scene_id, key, kinds, replacement)
                                             if collapsed is None:
-                                                continue
+                                                raise RuntimeError(
+                                                    f'{scene_id}/{key}: threshold cache did not leave a current inference segment.')
                                             stats["replacement_history_collapsed"] += collapsed
                                         stats['threshold_cache_reused'] += 1
                                         continue
