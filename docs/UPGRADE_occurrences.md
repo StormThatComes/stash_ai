@@ -1,117 +1,89 @@
-# Punkty wykrycia dla tagów scen bez markerów
+# Punkty Occurrence dla tagów scen
 
-Funkcja jest domyślnie włączona w trybie `merged`. W `temporal_policy.yml`
-odpowiada za nią `occurrence_markers: true`; `false` wyłącza dodatkowe punkty.
-`--no-temporal` również ją wyłącza. Nie wymaga listy dozwolonych tagów
-ani zmiany progów modeli. Tryb `separate` zachowuje dotychczasowe zachowanie.
+Occurrence jest domyślnie włączone w trybie `merged` przez
+`occurrence_markers: true` w `temporal_policy.yml`. `--no-temporal` również
+wyłącza tę funkcję.
 
-## Uruchomienie po aktualizacji
+## Co tworzy
 
-Rozpakuj całą paczkę do katalogu projektu. Zachowaj własne ustawienia połączenia
-i ścieżek oraz bazę `tagger_sources.sqlite3` używaną do tej pory.
+Dla zaakceptowanego tagu sceny, który nie ma własnego markera zakresowego,
+aplikacja może utworzyć jeden reprezentatywny punkt:
+
+- główny tag: `ai:<etykieta>`;
+- techniczny tag: `ai:marker:occurrence`;
+- brak czasu końcowego;
+- lokalizacja wskazuje zapisaną próbkę VTT/sprite.
+
+To nie jest lista wszystkich wystąpień i nie jest próbą wyznaczenia dokładnego
+początku zdarzenia.
+
+Ręczny marker z tym samym głównym tagiem zapewnia już lokalizację i blokuje
+tworzenie punktu; ręczny marker nie jest przez tę regułę modyfikowany.
+
+## Użycie
+
+Occurrence jest obliczane podczas zwykłego merge:
 
 ```powershell
-# Dodaj punkty na podstawie istniejących wyników, bez uruchamiania modeli:
 python .\stash_ai.py --merge-only
-
-# Opcjonalny szczegółowy podgląd jednej sceny:
 python .\stash_ai.py --merge-only --scene-id 123 --dry-run --verbose
-
-# Tylko markery, z wykorzystaniem zapisanych wyników tagowania scen:
 python .\stash_ai.py --merge-only --markers-only
 ```
 
-Zmiana ustawienia unieważnia cache publikacji, ale nie ukończone inferencje.
-Nie trzeba usuwać bazy ani wykonywać globalnego `--restart`.
+Zmiana `occurrence_markers` wpływa na publikację, ale sama w sobie nie wymaga
+nowej inferencji.
 
-## Co będzie widoczne w Stash
+## Wybór czasu
 
-- Jeden dodatkowy punkt na zaakceptowany tag AI, który nie ma własnego markera.
-- Główny tag: `ai:<etykieta>`; tytuł np. `[AI] etykieta [jt+wd] · wykrycie`.
-- Dodatkowy tag `ai:marker:occurrence` pozwala filtrować tę kategorię.
-- Marker nie ma czasu końcowego. Wskazuje próbkę, w której wykryto etykietę.
-- Ręczny marker z tym samym głównym tagiem `ai:` zapewnia już lokalizację
-  i blokuje dodanie punktu. Nie jest modyfikowany przez tę regułę.
+Tag musi najpierw przejść kwalifikację sceny. Lokalizacja jest wybierana z
+zachowanych maksimów lub obserwacji klatek.
 
-To jedno reprezentatywne miejsce, nie lista wszystkich wystąpień. Punkty
-uzupełniają markery zakresowe. Jeżeli później powstanie normalny marker danego
-tagu, punkt zostaje zastąpiony; identyfikator może być zachowany, gdy lokalizacje
-się pokrywają. Usuwany jest wtedy także dodatkowy tag kategorii punktu.
+Przy porównywaniu kandydatów brane są pod uwagę m.in.:
+- liczba modeli potwierdzających próbkę;
+- liczba zachowanych dowodów;
+- względny margines względem progu sceny;
+- wcześniejszy czas przy remisie.
 
-## Wybór lokalizacji i wykluczenia
+Wyniki modeli nie są uśredniane do wspólnego prawdopodobieństwa.
 
-Tag musi wcześniej przejść obecną kwalifikację dla sceny. Brakująca lokalizacja
-jest wyszukiwana w zapisanych maksimach lub wynikach klatek z odpowiadających
-przebiegów. Zgodność modeli liczy się tylko dla tego samego wejścia i czasu;
-duplikaty jednego modelu nie zwiększają liczby głosów.
-
-Wybór preferuje liczbę modeli przekraczających własny próg sceny, liczbę modeli
-z zachowanym potwierdzeniem, następnie względny margines wyniku ponad własny
-próg sceny. Przy remisie wygrywa wcześniejsza próbka. Margines służy wyłącznie
-do uporządkowania kandydatów: wyniki modeli nie są uśredniane i nie powstaje
-wspólne prawdopodobieństwo. Poszczególne wyniki i źródła pozostają w bazie.
-
-Obowiązują `scene_tag_exclusions.yml`, `marker_core_exclusions.yml`
-i `MARKER_TAG_BLOCKLIST`. Sam dodatkowy tag długiego markera nie zapewnia
-własnej lokalizacji; taka etykieta może dostać punkt, jeżeli nie jest wykluczona
-z głównych tagów. Dotychczasowe progi i `MARKER_MIN_HITS` dla zakresów pozostają
-bez zmian. Przy niezerowym `MAX_MARKERS_PER_SCENE` nowe punkty wypełniają tylko
-miejsce pozostałe po istniejących zakresach.
-
-Cleanup cofa wkład wykluczonych modeli, zachowując punkt wyłącznie, gdy pozostałe
-opublikowane potwierdzenia nadal go uzasadniają. Nie przesuwa punktów do nowego
-miejsca i nie odtwarza ręcznie usuniętych markerów. Dopiero zwykły merge może
-wybrać nowe reprezentatywne miejsce. Szybki cleanup SQL obsługuje punkty tak
-samo jak pozostałe markery. Surowe wyniki pozostają dostępne do kolejnego merge.
-
-## Starsze wyniki bez czasów
-
-Nowe inferencje zapisują `peak_time` obok `max_score`, także dla wykryć poniżej
-progu zapisu markerów. Jest to jedna liczba na zaobserwowany tag i model,
-zachowywana także w checkpointach. Nie zapisujemy pełnej macierzy wszystkich
-klatek i wszystkich etykiet. Nie dodano kolejnego przebiegu GPU.
-
-Dla starych wyników merge najpierw korzysta z zachowanych klatek. Jeżeli
-pozostał wyłącznie wynik zbiorczy bez lokalizacji, raport zwiększa
-`occurrence_missing_timestamps`. Skrypt nie zgaduje czasu. Konkretne źródła
-i zapisane czasy można sprawdzić lokalnie:
+Jeżeli zapisany cache nie zawiera czasu potrzebnego do lokalizacji, aplikacja nie
+zgaduje. Można sprawdzić dostępne evidence:
 
 ```powershell
 python .\stash_ai.py --explain-tag ai:nazwa_tagu --scene-id 123
+```
 
-# Tylko jeśli potrzebny czas nie został zachowany: odśwież daną scenę/model.
+Jeśli lokalizacja jest potrzebna, a cache jej nie ma, wykonaj świeżą inferencję
+konkretnej sceny/modelu:
+
+```powershell
 python .\stash_ai.py --models wd --scene-id 123 --restart
 ```
 
-`occurrence_markers` w raporcie liczy punkty w przeliczonych scenach,
-`occurrence_manual_locations` pominięcia dzięki ręcznym lokalizacjom,
-a `occurrence_limited` pominięcia przez limit liczby markerów. Niezmienione sceny
-nadal korzystają z `merge_reused`. Czas dodatkowej selekcji pokazuje
-`occurrence_compute` w podsumowaniu etapów.
+## Wykluczenia i limity
 
-Dokładność czasowa jest ograniczona próbkowaniem VTT/sprite'ów. Czas próbki
-nie jest pomiarem dokładnego początku ani długości zdarzenia.
+Occurrence respektuje:
+- `scene_tag_exclusions.yml`;
+- `marker_core_exclusions.yml`;
+- `MARKER_TAG_BLOCKLIST`;
+- `MAX_MARKERS_PER_SCENE`.
 
-## Weryfikacja
+Normalny marker zakresowy ma pierwszeństwo przed reprezentatywnym punktem tego
+samego tagu.
 
-Testy działają offline: bez połączenia z Twoim Stash i bez uruchamiania GPU.
-Wynik regresji zapisano w [validation_occurrences.txt](validation/validation_occurrences.txt).
-`benchmarks/benchmark_occurrences.py` mierzy osobno dodatkową selekcję punktów na danych
-syntetycznych. Nie jest pomiarem czasu publikacji ani całej kolekcji.
+Cleanup może usunąć lub zachować punkt na podstawie pozostałych opublikowanych
+dowodów. Nie przesuwa istniejącego punktu do nowego miejsca; nową lokalizację
+wybiera dopiero kolejny merge.
 
-Mediana pięciu prób dla 500 próbek, 100 etykiet i 4 modeli:
+## Dokładność
 
-| Dane wejściowe | Dodatkowy czas selekcji | Nowe punkty |
-|---|---:|---:|
-| Stare, pojedyncze trafienia w zapisanych klatkach | 61,8 ms | 100 |
-| Nowe zapisane maksima, bez zachowanych trafień w klatkach | 1,9 ms | 100 |
-| Wszystkie tagi mają już własną lokalizację | 0,018 ms | 0 |
+Dokładność czasu jest ograniczona częstotliwością próbek VTT/sprite. Punkt
+Occurrence oznacza reprezentatywne wykrycie, a nie dokładny timestamp zdarzenia.
 
-Surowe pomiary zawiera [occurrence_performance_results.json](../benchmarks/results/occurrence_performance_results.json). Rzeczywisty koszt
-zależy od liczby zachowanych wykryć i brakujących lokalizacji. Niezmieniony merge
-nadal pomija ten etap dzięki istniejącemu cache publikacji.
+Do syntetycznego pomiaru samej selekcji służy:
 
 ```powershell
-python -m pytest -q
 python -m benchmarks.benchmark_occurrences
 ```
+
+Benchmark nie mierzy publikacji do Stash.
