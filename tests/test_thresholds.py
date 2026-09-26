@@ -7,6 +7,8 @@ import pytest
 
 import stash_ai as app
 import stash_merge as merge
+import stash_progress as progress
+import stash_scene_cache as scene_cache
 import stash_thresholds as thresholds
 from stash_taggers import SOURCES
 from tests.helpers.evidence import paired_records, policies
@@ -32,6 +34,37 @@ def records(path):
 
 def fail_inference(monkeypatch):
     monkeypatch.setattr(app, 'load_tagger', lambda *a: pytest.fail('loaded a model'))
+
+
+def test_indexed_signature_combines_threshold_overrides_without_breaking_legacy_hashes():
+    segment = {
+        'mode': 'frames',
+        'meta': {'inference_signature': 'sig-a'},
+        'items': [],
+    }
+
+    assert thresholds.indexed_signature(segment) == 'sig-a'
+
+    marker_only = {**segment, thresholds.OVERRIDE: .9}
+    assert thresholds.indexed_signature(marker_only) == progress.digest(['sig-a', .9])
+
+    scene_only = {**segment, scene_cache.SCENE_OVERRIDE: .8}
+    assert thresholds.indexed_signature(scene_only) == progress.digest([
+        'sig-a', {'scene_threshold': .8}
+    ])
+
+    both = {
+        **segment,
+        thresholds.OVERRIDE: .9,
+        scene_cache.SCENE_OVERRIDE: .8,
+    }
+    combined = thresholds.indexed_signature(both)
+    assert combined == progress.digest([
+        'sig-a',
+        {'scene_threshold': .8, 'marker_threshold': .9},
+    ])
+    assert combined != thresholds.indexed_signature({**both, thresholds.OVERRIDE: .95})
+    assert combined != thresholds.indexed_signature({**both, scene_cache.SCENE_OVERRIDE: .85})
 
 
 def test_automatic_raise_and_return_to_original_keep_raw_evidence(pipeline, monkeypatch):
