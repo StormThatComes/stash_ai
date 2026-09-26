@@ -77,6 +77,32 @@ def serialized(report):
     return json.dumps(report, ensure_ascii=False, sort_keys=True)
 
 
+def test_distribution_memory_is_bounded_for_many_distinct_values():
+    distribution = diagnostics.Distribution()
+    for value in range(100_000):
+        distribution.add(value)
+
+    summary = distribution.summary(total=True)
+    assert len(distribution.buckets) <= distribution.MAX_BUCKETS
+    assert summary["count"] == 100_000
+    assert summary["min"] == 0
+    assert summary["max"] == 99_999
+    assert summary["total"] == 4_999_950_000
+    assert summary["mean"] == 49_999.5
+    assert summary["min"] <= summary["p50"] <= summary["p95"] <= summary["p99"] <= summary["max"]
+
+
+def test_distribution_keeps_small_percentiles_exact_and_large_singletons_exact():
+    distribution = diagnostics.Distribution()
+    for value in (0, 1, 2, 2, 3, 10_000, 10_000):
+        distribution.add(value)
+
+    assert distribution.summary()["p50"] == 2
+    single = diagnostics.Distribution()
+    single.add(10_000)
+    assert single.summary()["p50"] == single.summary()["p95"] == single.summary()["p99"] == 10_000
+
+
 def test_report_is_read_only_content_free_and_cross_scope(tmp_path):
     path = tmp_path / "descriptive-private-library-name.sqlite3"
     seed(path)
