@@ -12,6 +12,7 @@ import yaml
 import stash_ai as app
 import stash_merge as merge
 import stash_progress as progress
+import stash_performance as performance
 from stash_taggers import SOURCES, JOYTAG, WD, DTQ, OPPAI, ModelSettings, Vocabulary
 from tests.helpers.stash import Stash
 from tests.helpers.inference import Tagger
@@ -449,7 +450,21 @@ def test_enabling_replacement_collapses_reused_history_without_inference(merge_p
 
     monkeypatch.setattr(app, 'REPLACE_SCENE_TAGS', kind == 'scene')
     monkeypatch.setattr(app, 'REPLACE_MARKERS', kind == 'markers')
-    monkeypatch.setattr(app, 'load_tagger', lambda *a: pytest.fail('replacement change reran inference'))
+    reasons = []
+    original_reason = performance.check_reason
+    monkeypatch.setattr(performance, 'check_reason',
+                        lambda *a, **kw: (reasons.append(original_reason(*a, **kw)), reasons[-1])[1])
+    calls = []
+    original_reuse = progress.reuse_replacement_policy
+    def checked_reuse(store, scene, model, kinds, signature, replace):
+        calls.append(signature)
+        assert signature == current_signature
+        result = original_reuse(store, scene, model, kinds, signature, replace)
+        assert result is not None
+        return result
+    monkeypatch.setattr(progress, 'reuse_replacement_policy', checked_reuse)
+    monkeypatch.setattr(app, 'load_tagger',
+                        lambda *a: pytest.fail(f'replacement reran inference; reasons={reasons}, reuse_calls={len(calls)}'))
     p.stash.writes.clear()
 
     assert app.main(args) == 0
