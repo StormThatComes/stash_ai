@@ -252,6 +252,8 @@ def run(app, args):
     scene_policies = policies_or_empty(scene_policies)
 
     try:
+        if not Path(args.state_db).expanduser().is_file():
+            raise FileNotFoundError(f"State database does not exist: {args.state_db}")
         with stash_merge.StateStore(
             args.state_db,
             stash_merge.scope_for(app.STASH_URL),
