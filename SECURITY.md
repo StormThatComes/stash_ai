@@ -2,23 +2,27 @@
 
 ## Stash API key
 
-Do not commit a Stash API key. `stash_ai.py` currently has a hardcoded default
-for `STASH_API_KEY`. Treat that value as compromised and rotate it in Stash
-before the next run.
+`STASH_API_KEY` powinien pochodzić z environment lub lokalnego mechanizmu
+sekretów i nigdy nie powinien być commitowany do repozytorium.
 
-Replace the assignment in `stash_ai.py` with:
-
-```python
-STASH_URL = os.getenv("STASH_URL", "http://localhost:9999")
-STASH_API_KEY = os.getenv("STASH_API_KEY", "").strip()
-```
-
-Then export the new key locally (PowerShell):
+Aktualny `stash_ai.py` nadal zawiera historyczny fallback klucza API.
+Traktuj ten fallback jako **skompromitowany**. Nie używaj go do produkcyjnego
+Stash; wygeneruj nowy klucz i ustaw go jawnie:
 
 ```powershell
 $env:STASH_URL = "http://localhost:9999"
-$env:STASH_API_KEY = "<new-key>"
+$env:STASH_API_KEY = "<nowy-klucz>"
 ```
 
-Or copy `.env.example` to `.env` (gitignored) and load it in your shell.
-The client already skips the `ApiKey` header when the variable is empty.
+Samo usunięcie fallbacku z bieżącej wersji kodu nie unieważnia sekretu obecnego
+w historii Git. Klucz należy zrotować po stronie Stash.
+
+Klient pomija nagłówek `ApiKey`, gdy przekazana wartość jest pusta. Komunikaty
+błędów maskują jawnie przekazany klucz oraz typowe parametry tokenów w URL.
+
+## GitHub updater token
+
+`GH_TOKEN` / `GITHUB_TOKEN` powinien być fine-grained PAT ograniczonym do
+tego repozytorium i uprawnienia `Contents: read`. Updater nie zapisuje tokena
+do plików projektu i odrzuca przekierowania HTTP, aby nie przekazać credentiali
+innemu originowi.
