@@ -66,8 +66,9 @@ python .\stash_ai.py --explain-tag ai:blue_hair --scene-id 123
 # Usuwanie nieużywanych definicji tagów.
 python .\stash_ai.py --prune-empty-tags-only --dry-run
 
-# Zdrowie i kompaktowanie lokalnej bazy stanu.
+# Zdrowie, spójność logiczna i kompaktowanie lokalnej bazy stanu.
 python .\stash_ai.py --db-report
+python .\stash_ai.py --db-check
 python .\stash_ai.py --db-compact --dry-run
 python .\stash_ai.py --db-compact
 
@@ -109,6 +110,19 @@ którejś flagi zachowuje historię danego rodzaju wyniku; ponowne włączenie
 normalizuje historię przy bezpiecznym reuse cache.
 
 ### Zdrowie i kompaktowanie bazy stanu
+
+`--db-check` wykonuje głęboki, wyłącznie odczytowy test spójności całej bazy
+(we wszystkich scope'ach). Oprócz pełnego SQLite `quick_check` sprawdza m.in.
+zgodność `results` z `result_index` (łącznie z zapisaną sygnaturą ostatniej
+inferencji), dekodowalność trwałych BLOB-ów, dozwolone model/kind, relacje
+checkpoint/frames/analysis, wymiary checkpointów oraz generacje cleanup/recovery.
+Osierocone lub historyczne rekordy, które nie muszą oznaczać uszkodzenia, są
+raportowane jako warnings. Pending publication/cleanup i refresh requests są
+pokazywane jako stan roboczy, a nie automatycznie jako błędy.
+
+Komenda nie łączy się ze Stash, nie ładuje modeli i niczego nie naprawia ani nie
+modyfikuje. Zwraca exit code `0`, gdy nie znaleziono błędów logicznych, oraz
+`1`, gdy wykryto niespójność; same warnings nie powodują błędu.
 
 `--db-report` nie łączy się ze Stash ani nie ładuje modeli. Pokazuje wersję
 schematu, wynik SQLite `quick_check`, rozmiar pliku i sidecarów WAL/SHM, wolne
