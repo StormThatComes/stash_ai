@@ -1,19 +1,32 @@
 # Dokumentacja Stash AI
 
-Polecenia w dokumentach uruchamiaj z katalogu głównego repozytorium.
+Dokumentacja jest podzielona na bieżące instrukcje użytkownika oraz historyczne
+artefakty pomiarowe.
+
+## Bieżąca dokumentacja
 
 - [Szybki start i konfiguracja](../README.md)
-- [Pełny podręcznik](README_multimodel.md)
-- [Scalanie wyników](UPGRADE_merge.md)
-- [Cache, RAM i wydajność](UPGRADE_performance.md)
-- [Cleanup przez SQL](UPGRADE_cleanup_sql.md)
-- [Porzucanie przerwanych operacji](UPGRADE_abandon_pending.md)
+- [Aktualny podręcznik](README_multimodel.md)
+- [Cleanup SQL](UPGRADE_cleanup_sql.md)
+- [Wydajność i pamięć](UPGRADE_performance.md)
+- [Merge i szybka ścieżka](UPGRADE_merge.md)
+- [Wykluczenia i cleanup](UPGRADE_exclusions.md)
+- [Punkty Occurrence](UPGRADE_occurrences.md)
 - [Grupy markerów](UPGRADE_marker_groups.md)
-- [Markery Occurance](UPGRADE_occurrences.md)
-- [Wykluczenia tagów](UPGRADE_exclusions.md)
-- [Diagnostyka merge](UPGRADE_diagnostics.md)
-- [Uruchamianie benchmarków](../benchmarks/README.md)
-- [Historyczne raporty walidacji](validation/README.md)
+- [Porzucanie przerwanych operacji](UPGRADE_abandon_pending.md)
+- [Profilowanie merge](UPGRADE_diagnostics.md)
+- [Benchmarki](../benchmarks/README.md)
 
-Kod aplikacji, konfiguracje YAML i domyślna lokalizacja bazy pozostają w katalogu
-głównym. Dokumentacja i testy nie są pobierane przez updater.
+Nazwy plików `UPGRADE_*.md` są historyczne. Treść tych dokumentów opisuje
+aktualne zachowanie odpowiadających im funkcji, a nie instrukcję instalacji
+konkretnego starego wydania.
+
+## Historyczne artefakty
+
+Pliki w [validation/](validation/README.md) oraz zachowane wyniki w
+`benchmarks/results/` dokumentują konkretne wcześniejsze pomiary. Mogą być
+przydatne do regresji, ale wartości czasu i liczby testów nie są bieżącą
+specyfikacją projektu.
+
+Kod aplikacji, YAML-e i domyślna baza `tagger_sources.sqlite3` pozostają w
+katalogu głównym. Updater nie pobiera dokumentacji, testów ani benchmarków.
