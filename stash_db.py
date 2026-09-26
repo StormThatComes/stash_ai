@@ -189,7 +189,7 @@ def inspect_database(path, scope):
 
 
 CHECK_MESSAGES = {
-    "sqlite_quick_check": "SQLite quick_check reported a storage-level problem.",
+    "sqlite_integrity_check": "SQLite integrity_check reported a storage/index-level problem.",
     "missing_base_tables": "Core state tables are missing.",
     "missing_state_tables": "Tables used by the current application are missing; a normal writer run may need to migrate/recreate them.",
     "invalid_model": "Rows contain an unknown model key.",
@@ -290,7 +290,7 @@ def _check_results_and_index(db, tables, errors):
             errors["result_payload_invalid"] += 1
             continue
 
-        if inference is None:
+        if inference is None and "result_index" in tables:
             errors["result_missing_index"] += 1
         elif (inference not in (0, 1) or populated not in (0, 1)
               or inference != expected_inference or populated != expected_populated
@@ -483,9 +483,10 @@ def check_database(path, scope):
         # process commits through WAL while this command is running.
         db.execute("BEGIN")
         tables = _tables(db)
-        quick_check = db.execute("PRAGMA quick_check").fetchone()[0]
-        if quick_check != "ok":
-            errors["sqlite_quick_check"] += 1
+        integrity_rows = [row[0] for row in db.execute("PRAGMA integrity_check")]
+        integrity_ok = integrity_rows == ["ok"]
+        if not integrity_ok:
+            errors["sqlite_integrity_check"] += 1
 
         missing = STATE_TABLES - tables
         errors["missing_base_tables"] += len(BASE_TABLES - tables)
@@ -534,7 +535,7 @@ def check_database(path, scope):
         "path": str(path),
         "sqlite_version": sqlite3.sqlite_version,
         "schema_version": version,
-        "quick_check": quick_check,
+        "integrity_check_ok": integrity_ok,
         "ok": not error_rows,
         "errors": error_rows,
         "warnings": warning_rows,
