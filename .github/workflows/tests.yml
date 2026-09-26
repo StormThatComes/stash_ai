@@ -47,12 +47,14 @@ jobs:
         uses: astral-sh/setup-uv@v10.2.0
         with:
           enable-cache: true
-          cache-dependency-glob: requirements-dev.txt
+          cache-dependency-glob: |
+            requirements-dev.txt
+            requirements-ci-ml.txt
 
       - name: Install test dependencies
         run: |
           uv pip install --system -r requirements-dev.txt
-          uv pip install --system torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          uv pip install --system -r requirements-ci-ml.txt --index-url https://download.pytorch.org/whl/cpu
 
       - name: Run tests
         env:
