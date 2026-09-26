@@ -24,7 +24,7 @@ def safe_error(exc: Exception, api_key: str = "") -> str:
 
 
 class StashClient:
-    """Small GraphQL client with separate media retries and a write guard."""
+    """GraphQL/media client with read-only retries and a strict write guard."""
 
     def __init__(self, dry_run: bool, *, url: str, api_key: str,
                  request_timeout: float, http_retries: int, scene_page_size: int,
@@ -45,7 +45,7 @@ class StashClient:
         self.merge_reader = None
         self.merge_only_reads = False
         self.report = None
-        self.api = requests.Session()  # No POST retries, including connection retries.
+        self.api = requests.Session()  # No transport-level POST retries; _gql retries only proven read-only operations.
         self.media = requests.Session()
         if self.api_key:
             self.api.headers["ApiKey"] = self.api_key
