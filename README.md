@@ -74,6 +74,10 @@ python .\stash_ai.py --db-compact
 # Lokalny, anonimowy raport diagnostyczny do ręcznego przekazania developerowi.
 python .\stash_ai.py --anonymous-diagnostics .\stash-ai-diagnostics.json
 
+# Użyteczność modeli i leave-one-model-out ablation bez inferencji.
+python .\stash_ai.py --model-report .\model-utility.json
+python .\stash_ai.py --model-report .\model-utility-scene-123.json --scene-id 123
+
 # Porzucenie niedokończonego planu merge/cleanup.
 python .\stash_ai.py --abandon-pending
 ```
@@ -139,6 +143,27 @@ Dla optymalizacji schematu raport zawiera m.in.:
 Raport jest pozbawiony bezpośrednich identyfikatorów i treści, ale dokładne
 agregaty rozmiaru/liczebności nadal opisują konkretną instalację. Przed
 udostępnieniem warto przejrzeć wygenerowany JSON.
+
+### Model Utility / Ablation Report
+
+`--model-report NEW.json` działa wyłącznie na zapisanym evidence i nie łączy się
+ze Stash ani nie uruchamia modeli. Dla każdej sceny najpierw odtwarza normalny
+wynik wszystkich zapisanych modeli, a następnie cztery kontrfaktyczne wyniki
+`all minus one model`. Oznacza to, że po usunięciu modelu od początku
+przeliczane są consensus seeds, temporal rules, shared scene tags, marker extras
+i Occurrence — raport nie filtruje jedynie gotowych markerów.
+
+Per model raport pokazuje m.in.:
+- liczbę scen z zapisanym evidence i scen, w których pominięcie modelu zmienia wynik;
+- finalne scene tags i marker components wspierane przez model;
+- scene tags, markery, extras i Occurrence utracone po jego usunięciu;
+- markery, które pozostają, ale zmieniają zakres lub extras;
+- procent scen z evidence, w których model ma mierzalny marginalny wpływ.
+
+Zmiana samego badge'a źródeł markera, np. `[jt+wd]` na `[wd]`, nie jest liczona
+jako zmiana semantyczna. Dzięki temu raport mierzy wpływ na tagowanie, zakresy i
+extras, a nie samą obecność provenance. `--scene-id` może ograniczyć analizę
+do wybranych scen.
 
 ## Wynik w Stash
 

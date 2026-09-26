@@ -501,8 +501,12 @@ def bootstrap_legacy(app, store, scene):
         store.remember_legacy(scene_id, kind, originals)
 
 
-def evidence(app, store, scene_id, core_policies, scene_policies, metrics=None):
-    """Retain source markers and enrich them with compatible shared observations."""
+def evidence(app, store, scene_id, core_policies, scene_policies, metrics=None, *, selected_sources=None):
+    """Retain source markers and enrich them with compatible shared observations.
+
+    selected_sources is an analysis-only view used for counterfactual reports:
+    omitted sources are removed before every fusion/consensus/occurrence stage.
+    """
     from stash_temporal import scene_reason
     from stash_fusion import FrameIndex
     from stash_scene import shared_scene_contributions
@@ -511,6 +515,10 @@ def evidence(app, store, scene_id, core_policies, scene_policies, metrics=None):
     need_scene = app.APPLY_SCENE_TAGS or (app.CREATE_MARKERS and app.TEMPORAL_POLICY.enabled
                                         and app.TEMPORAL_POLICY.occurrence_markers)
     scene_records = store.records(scene_id, 'scene', borrow=True) if need_scene else {}
+    if selected_sources is not None:
+        selected_sources = frozenset(selected_sources)
+        scene_records = {source: segments for source, segments in scene_records.items()
+                         if source in selected_sources}
     from stash_scene_cache import views, frame_records
     app, scene_records = views(app, scene_records)
     for model, segments in scene_records.items():
@@ -528,6 +536,9 @@ def evidence(app, store, scene_id, core_policies, scene_policies, metrics=None):
             eligible.sort(key=lambda item: (-(item["score"] if item["score"] is not None else -1), item["tag"]))
             scene_hits.extend(eligible[:app.MAX_TAGS] if app.MAX_TAGS and segment["meta"]["origin"] != "legacy" else eligible)
     records = store.records(scene_id, 'markers', borrow=True)
+    if selected_sources is not None:
+        records = {source: segments for source, segments in records.items()
+                   if source in selected_sources}
     from stash_thresholds import marker_context
     app = marker_context(app, records)
     if report is not None:
