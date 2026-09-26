@@ -1093,18 +1093,25 @@ def _run_merged(app, settings, args, catalogs, hierarchy, core_policies, scene_p
                             try:
                                 store.cache.pressure(force=True)
                                 cues, media, signature = inputs.inspect(app, paths, identity)
+                                if args.resume and not args.restart and current['publication_reason'] != 'reused':
+                                    collapsed = progress.reuse_replacement_policy(
+                                        store, scene_id, key, kinds, signature, replacement)
+                                    if collapsed is not None:
+                                        stats["replacement_history_collapsed"] += collapsed
+                                        stats["reused"] += 1
+                                        continue
                                 if args.resume and progress.completed(store, scene_id, key, kinds, signature):
-                                    if current['publication_reason'] != 'reused':
-                                        stats["replacement_history_collapsed"] += progress.apply_replacement_policy(
-                                            store, scene_id, key, kinds, replacement)
                                     stats["reused"] += 1
                                     continue
                                 if args.resume and not args.restart:
                                     from stash_thresholds import reuse
                                     if reuse(app, store, scene_id, config, identity, cues, media.hashes, kinds):
                                         if current['publication_reason'] != 'reused':
-                                            stats["replacement_history_collapsed"] += progress.apply_replacement_policy(
-                                                store, scene_id, key, kinds, replacement)
+                                            collapsed = progress.reuse_replacement_policy(
+                                                store, scene_id, key, kinds, signature, replacement)
+                                            if collapsed is None:
+                                                continue
+                                            stats["replacement_history_collapsed"] += collapsed
                                         stats['threshold_cache_reused'] += 1
                                         continue
                                 if tagger is None:
