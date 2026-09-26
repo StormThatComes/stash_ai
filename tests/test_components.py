@@ -76,6 +76,26 @@ def test_read_only_graphql_retries_transient_failures(monkeypatch, failure):
         current.close()
 
 
+def test_allowlisted_sql_read_mutation_is_retried(monkeypatch):
+    from stash_merge_sql import OPERATION, SQL
+    current = client('http://stash.test', 'private-key')
+    calls = 0
+
+    def post(url, **kwargs):
+        nonlocal calls
+        calls += 1
+        return http_response(503 if calls == 1 else 200)
+
+    try:
+        monkeypatch.setattr(current.api, 'post', post)
+        monkeypatch.setattr(time, 'sleep', lambda *_: None)
+        variables = {'sql': SQL['tags'], 'args': ['[]']}
+        assert current.gql(OPERATION, variables) == {'ok': True}
+        assert calls == 2
+    finally:
+        current.close()
+
+
 def test_graphql_mutation_is_never_retried(monkeypatch):
     current = StashClient(False, url='http://stash.test', api_key='private-key',
                           request_timeout=30, http_retries=2, scene_page_size=100,
