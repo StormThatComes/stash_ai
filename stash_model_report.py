@@ -94,6 +94,8 @@ def _sources_for_scene(store, scene):
 
 
 def build_report(app, store, scene_ids, core_policies, scene_policies):
+    import stash_merge
+
     models = tuple(SOURCES)
     totals = Counter()
     utility = {model: Counter() for model in models}
@@ -103,7 +105,7 @@ def build_report(app, store, scene_ids, core_policies, scene_policies):
         present = _sources_for_scene(store, scene)
         source_presence.update(present)
 
-        full_hits, full_spans = app.stash_merge.evidence(
+        full_hits, full_spans = stash_merge.evidence(
             app, store, scene, core_policies, scene_policies)
         full_labels = _scene_labels(full_hits)
         full_markers = _merged_markers(full_spans)
@@ -133,7 +135,7 @@ def build_report(app, store, scene_ids, core_policies, scene_policies):
                 for marker in full_markers)
 
             selected = set(models) - {model}
-            reduced_hits, reduced_spans = app.stash_merge.evidence(
+            reduced_hits, reduced_spans = stash_merge.evidence(
                 app, store, scene, core_policies, scene_policies,
                 selected_sources=selected)
             reduced_labels = _scene_labels(reduced_hits)
@@ -241,7 +243,8 @@ def run(app, args):
     from stash_exclusions import policies_or_empty
     from stash_temporal import load_policy
 
-    app.stash_merge = stash_merge
+    app.APPLY_SCENE_TAGS = True
+    app.CREATE_MARKERS = True
     app.TEMPORAL_POLICY = load_policy(app, args.temporal_policy, not args.no_temporal)
     core_policies = app.load_exclusion_policy(args.marker_core_exclusions, "excluded_core_tags")
     scene_policies = app.load_exclusion_policy(args.scene_tag_exclusions, "excluded_scene_tags")
