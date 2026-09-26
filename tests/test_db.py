@@ -2,12 +2,14 @@
 
 import hashlib
 import sqlite3
+import zlib
 
 import pytest
 
 import stash_ai as app
 import stash_db
 import stash_merge as merge
+from stash_state_codec import encode
 
 
 def seed(path, scope):
@@ -142,3 +144,195 @@ def test_db_cli_does_not_load_models_or_stash(tmp_path, monkeypatch, capsys):
     assert app.main(["--state-db", str(path), "--db-compact", "--dry-run"]) == 0
     assert path.read_bytes() == before
     assert "VACUUM was not executed" in capsys.readouterr().out
+
+
+
+def issues(report, field="errors"):
+    return {item["code"]: item["count"] for item in report[field]}
+
+
+def test_deep_check_is_read_only_and_accepts_consistent_state(tmp_path):
+    path = tmp_path / "state.sqlite3"
+    scope = "scope-a"
+    seed(path, scope)
+    before = hashlib.sha256(path.read_bytes()).digest()
+
+    report = stash_db.check_database(path, scope)
+
+    assert hashlib.sha256(path.read_bytes()).digest() == before
+    assert report["ok"]
+    assert report["errors"] == []
+    assert report["results_checked"] == 2
+    assert report["integrity_check_ok"]
+    assert "No logical consistency problems found." in stash_db.format_check_report(report)
+
+
+def test_deep_check_detects_result_index_relationship_and_content_errors(tmp_path):
+    path = tmp_path / "state.sqlite3"
+    scope = "scope-a"
+    seed(path, scope)
+
+    with sqlite3.connect(path) as db:
+        db.execute(
+            "UPDATE result_index SET populated=0 "
+            "WHERE scope=? AND scene='1' AND model='wd' AND kind='scene'",
+            (scope,),
+        )
+        db.execute(
+            "DELETE FROM result_index "
+            "WHERE scope=? AND scene='1' AND model='wd' AND kind='markers'",
+            (scope,),
+        )
+        db.execute(
+            "INSERT INTO result_index VALUES (?,?,?,?,?,?,?)",
+            (scope, "orphan", "dtq", "scene", 0, 0, None),
+        )
+
+    report = stash_db.check_database(path, scope)
+    found = issues(report)
+
+    assert not report["ok"]
+    assert found["result_index_mismatch"] == 1
+    assert found["result_missing_index"] == 1
+    assert found["result_index_orphan"] == 1
+
+
+def test_deep_check_detects_corrupt_state_blobs_and_unknown_domains(tmp_path):
+    path = tmp_path / "state.sqlite3"
+    scope = "scope-a"
+    seed(path, scope)
+
+    with sqlite3.connect(path) as db:
+        db.execute(
+            "UPDATE results SET data=? "
+            "WHERE scope=? AND scene='1' AND model='wd' AND kind='scene'",
+            (b"not-zlib", scope),
+        )
+        db.execute(
+            "INSERT INTO snapshots VALUES (?,?,?,?,?)",
+            (scope, "1", "scene", b"not-zlib", None),
+        )
+        db.execute(
+            "INSERT INTO refresh_requests VALUES (?,?,?,?)",
+            (scope, "2", "unknown-model", "scene"),
+        )
+        db.execute(
+            "INSERT INTO legacy_imports VALUES (?,?,?,?)",
+            (scope, "2", "unknown-kind", encode([])),
+        )
+
+    report = stash_db.check_database(path, scope)
+    found = issues(report)
+
+    assert not report["ok"]
+    assert found["result_payload_invalid"] == 1
+    assert found["state_payload_invalid"] == 1
+    assert found["invalid_model"] == 1
+    assert found["invalid_kind"] == 1
+
+
+def test_deep_check_detects_checkpoint_parent_progress_and_score_corruption(tmp_path):
+    path = tmp_path / "state.sqlite3"
+    scope = "scope-a"
+    seed(path, scope)
+
+    with sqlite3.connect(path) as db:
+        db.execute(
+            "INSERT INTO checkpoints VALUES (?,?,?,?,?,?,?,?)",
+            (scope, "cp", "wd", "sig", 5, 4, 6, zlib.compress(b"bad")),
+        )
+        db.execute(
+            "INSERT INTO checkpoint_frames VALUES (?,?,?,?,?)",
+            (scope, "cp", "wd", 9, encode([])),
+        )
+        db.execute(
+            "INSERT INTO checkpoint_frames VALUES (?,?,?,?,?)",
+            (scope, "orphan", "dtq", 1, encode([])),
+        )
+        db.execute(
+            "INSERT INTO checkpoint_analysis VALUES (?,?,?,?)",
+            (scope, "orphan", "dtq", encode({})),
+        )
+
+    report = stash_db.check_database(path, scope)
+    found = issues(report)
+
+    assert not report["ok"]
+    assert found["checkpoint_dimensions"] == 1
+    assert found["checkpoint_scores"] == 1
+    assert found["checkpoint_frame_progress"] == 1
+    assert found["checkpoint_orphan_frames"] == 1
+    assert found["checkpoint_orphan_analysis"] == 1
+
+
+def test_deep_check_validates_cleanup_and_recovery_generations(tmp_path):
+    path = tmp_path / "state.sqlite3"
+    scope = "scope-a"
+    seed(path, scope)
+
+    with sqlite3.connect(path) as db:
+        db.execute(
+            "INSERT INTO cleanup_state VALUES (?,?,?,?)",
+            (scope, 1, encode({"global": {"some-tag": 2}}), None),
+        )
+        db.execute(
+            "INSERT INTO recovery_cleanups VALUES (?,?,?)",
+            (scope, 2, '["scene","invalid-kind"]'),
+        )
+
+    report = stash_db.check_database(path, scope)
+    found = issues(report)
+
+    assert not report["ok"]
+    assert found["cleanup_state_invalid"] == 1
+    assert found["recovery_cleanup_invalid"] == 1
+
+
+def test_deep_check_relation_warnings_do_not_mark_database_failed(tmp_path):
+    path = tmp_path / "state.sqlite3"
+    scope = "scope-a"
+    seed(path, scope)
+
+    with sqlite3.connect(path) as db:
+        db.execute(
+            "INSERT INTO snapshots VALUES (?,?,?,?,?)",
+            (scope, "unused", "scene", None, None),
+        )
+        db.execute(
+            "INSERT INTO legacy_imports VALUES (?,?,?,?)",
+            (scope, "unused", "markers", encode([])),
+        )
+        db.execute(
+            "INSERT INTO recovery_publications VALUES (?,?,?,?,?)",
+            (scope, "recovery-only", "scene", "op", encode({"contributions": []})),
+        )
+
+    report = stash_db.check_database(path, scope)
+    found = issues(report, "warnings")
+
+    assert report["ok"]
+    assert found["empty_snapshot_without_recovery"] == 1
+    assert found["legacy_import_without_result"] == 1
+    assert found["recovery_publication_without_snapshot"] == 1
+
+
+def test_db_check_cli_is_offline_and_returns_nonzero_for_inconsistency(tmp_path, monkeypatch, capsys):
+    path = tmp_path / "state.sqlite3"
+    scope = merge.scope_for(app.STASH_URL)
+    seed(path, scope)
+    monkeypatch.setattr(app, "load_model_settings", lambda *a, **k: pytest.fail("loaded model config"))
+    monkeypatch.setattr(app, "create_stash_client", lambda *a, **k: pytest.fail("connected to Stash"))
+
+    assert app.main(["--state-db", str(path), "--db-check"]) == 0
+    assert "State DB consistency: ok" in capsys.readouterr().out
+
+    with sqlite3.connect(path) as db:
+        db.execute(
+            "DELETE FROM result_index WHERE scope=? AND scene='1' AND model='wd' AND kind='scene'",
+            (scope,),
+        )
+
+    assert app.main(["--state-db", str(path), "--db-check"]) == 1
+    output = capsys.readouterr().out
+    assert "State DB consistency: FAILED" in output
+    assert "result_missing_index" in output
