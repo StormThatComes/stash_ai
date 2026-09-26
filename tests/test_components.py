@@ -1,7 +1,9 @@
 """Regression coverage for the extracted client, resolver and state codec."""
 from types import SimpleNamespace
+import time
 
 import pytest
+import requests
 
 from stash_client import StashClient, safe_error
 from stash_state_codec import encode, decode
@@ -38,6 +40,80 @@ def test_clients_keep_connection_and_output_settings_isolated(monkeypatch):
     finally:
         first.close()
         second.close()
+
+
+def http_response(status, data=None):
+    def raise_for_status():
+        if status >= 400:
+            raise requests.HTTPError(f'HTTP {status}')
+    return SimpleNamespace(status_code=status, content=b'', headers={},
+                           raise_for_status=raise_for_status,
+                           json=lambda: {'data': data or {'ok': True}})
+
+
+@pytest.mark.parametrize('failure', ['status', 'connection'])
+def test_read_only_graphql_retries_transient_failures(monkeypatch, failure):
+    current = client('http://stash.test', 'private-key')
+    calls = 0
+    sleeps = []
+
+    def post(url, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            if failure == 'connection':
+                raise requests.ConnectionError('temporary connection failure')
+            return http_response(503)
+        return http_response(200)
+
+    try:
+        monkeypatch.setattr(current.api, 'post', post)
+        monkeypatch.setattr(time, 'sleep', sleeps.append)
+        assert current.gql('query StashAIRead { ping }') == {'ok': True}
+        assert calls == 2
+        assert sleeps == [.5]
+    finally:
+        current.close()
+
+
+def test_graphql_mutation_is_never_retried(monkeypatch):
+    current = StashClient(False, url='http://stash.test', api_key='private-key',
+                          request_timeout=30, http_retries=2, scene_page_size=100,
+                          create_markers=True)
+    calls = 0
+
+    def post(url, **kwargs):
+        nonlocal calls
+        calls += 1
+        return http_response(503)
+
+    try:
+        monkeypatch.setattr(current.api, 'post', post)
+        monkeypatch.setattr(time, 'sleep', lambda *_: pytest.fail('mutation entered retry backoff'))
+        with pytest.raises(requests.HTTPError, match='503'):
+            current.create_marker({'scene_id': '1', 'primary_tag_id': '2', 'seconds': 1})
+        assert calls == 1
+    finally:
+        current.close()
+
+
+def test_nontransient_read_failure_is_not_retried(monkeypatch):
+    current = client('http://stash.test', 'private-key')
+    calls = 0
+
+    def post(url, **kwargs):
+        nonlocal calls
+        calls += 1
+        return http_response(400)
+
+    try:
+        monkeypatch.setattr(current.api, 'post', post)
+        monkeypatch.setattr(time, 'sleep', lambda *_: pytest.fail('400 entered retry backoff'))
+        with pytest.raises(requests.HTTPError, match='400'):
+            current.gql('query StashAIRead { ping }')
+        assert calls == 1
+    finally:
+        current.close()
 
 
 def test_media_redirect_keeps_credentials_on_configured_origin(monkeypatch):
