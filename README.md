@@ -121,8 +121,10 @@ raportowane jako warnings. Pending publication/cleanup i refresh requests są
 pokazywane jako stan roboczy, a nie automatycznie jako błędy.
 
 Komenda nie łączy się ze Stash, nie ładuje modeli i niczego nie naprawia ani nie
-modyfikuje. Zwraca exit code `0`, gdy nie znaleziono błędów logicznych, oraz
-`1`, gdy wykryto niespójność; same warnings nie powodują błędu.
+modyfikuje. Podczas głębokiego skanu pokazuje pasek postępu z aktualną fazą
+(np. SQLite integrity, results/index, state payloads, checkpoints). Zwraca exit
+code `0`, gdy nie znaleziono błędów logicznych, oraz `1`, gdy wykryto
+niespójność; same warnings nie powodują błędu.
 
 `--db-report` nie łączy się ze Stash ani nie ładuje modeli. Pokazuje wersję
 schematu, wynik SQLite `quick_check`, rozmiar pliku i sidecarów WAL/SHM, wolne
