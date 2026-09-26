@@ -1010,7 +1010,25 @@ def main(argv: list[str] | None = None) -> int:
     modes.add_argument("--explain-tag", metavar="TAG", help="Show saved sources, scores and intervals for a raw/ai: tag; requires --scene-id; no Stash access.")
     modes.add_argument("--prune-empty-tags-only", action="store_true",
                        help="Remove unused leaf tag definitions without models/inference. Honors --dry-run.")
+    modes.add_argument("--db-report", action="store_true",
+                       help="Report state DB health, size and aggregate evidence/cache counts without Stash or model access.")
+    modes.add_argument("--db-compact", action="store_true",
+                       help="Safely VACUUM the state DB while idle; refuses pending publication/cleanup plans. Honors --dry-run.")
     args = parser.parse_args(argv)
+    database_mode = args.db_report or args.db_compact
+    if database_mode:
+        if args.output_mode != "merged":
+            parser.error("--db-report/--db-compact require --output-mode merged.")
+        if args.scene_id:
+            parser.error("Database maintenance covers the state DB; --scene-id does not apply.")
+        if args.models or args.device or args.offline or args.no_temporal or args.resume is not None or args.restart:
+            parser.error("Database maintenance does not use model/inference options.")
+        if (args.markers_only or args.scene_tags_only or args.profile_merge or args.force_merge
+                or args.rethreshold_scenes or args.rethreshold_markers or args.abandon_pending
+                or args.prune_empty_tags or args.prune_prefixes or args.create_all_tags or args.no_hierarchy):
+            parser.error("Database maintenance cannot be combined with tagging, threshold, cleanup or pruning modifiers.")
+        from stash_db import run_mode as run_database_mode
+        return run_database_mode(args, STASH_URL)
     if args.output_mode != "merged" and (args.resume or args.restart):
         parser.error("--resume/--restart require --output-mode merged; separate retains its original full-inference behavior.")
     args.resume = DEFAULT_RESUME if args.resume is None else args.resume
