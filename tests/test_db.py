@@ -96,6 +96,19 @@ def test_compact_refuses_pending_publication_or_cleanup(tmp_path):
         stash_db.compact_database(path, scope)
 
 
+def test_compact_refuses_pending_plan_in_another_scope(tmp_path):
+    path = tmp_path / "state.sqlite3"
+    seed(path, "scope-a")
+    with merge.StateStore(path, "scope-b") as state:
+        state.prepare("9", {"scene": {"owned_ids": [], "contributions": []}})
+
+    report = stash_db.inspect_database(path, "scope-a")
+    assert report["scope_pending_publications"] == 0
+    assert report["pending_publications"] == 1
+    with pytest.raises(RuntimeError, match="Pending publication"):
+        stash_db.compact_database(path, "scope-a")
+
+
 def test_compact_dry_run_does_not_change_database(tmp_path):
     path = tmp_path / "state.sqlite3"
     scope = "scope-a"
