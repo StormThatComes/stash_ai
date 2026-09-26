@@ -110,7 +110,7 @@ def test_installed_application_loads_extracted_modules_without_runtime_dependenc
     files = {path.name: path.read_bytes() for path in project.glob('stash_*.py')}
     files[updater.UPDATER] = Path(updater.__file__).read_bytes()
     assert updater.update(tmp_path, Remote(files)) == 0
-    for name in ('stash_domain.py', 'stash_client.py', 'stash_tags.py', 'stash_state_codec.py'):
+    for name in ('stash_domain.py', 'stash_client.py', 'stash_tags.py', 'stash_state_codec.py', 'stash_state.py'):
         assert (tmp_path / name).read_bytes() == files[name]
     # The updater CI matrix installs only pytest, so --help must remain lightweight.
     result = subprocess.run([sys.executable, str(tmp_path / 'stash_ai.py'), '--help'],
