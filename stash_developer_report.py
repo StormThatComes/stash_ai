@@ -38,7 +38,7 @@ class Distribution:
     EXACT_MAX = 255
     LOG_BUCKETS = 32
     MAX_EXPONENT = 62  # SQLite INTEGER / practical Python container sizes are <= 2**63-1.
-    MAX_BUCKETS = (EXACT_MAX + 1) + (MAX_EXPONENT - EXACT_MAX.bit_length() + 2) * LOG_BUCKETS
+    MAX_BUCKETS = (EXACT_MAX + 1) + (MAX_EXPONENT - EXACT_MAX.bit_length() + 1) * LOG_BUCKETS
 
     def __init__(self):
         # key -> [count, minimum observed value, maximum observed value].
