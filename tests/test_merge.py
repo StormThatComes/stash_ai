@@ -429,7 +429,9 @@ def test_enabling_replacement_collapses_reused_history_without_inference(merge_p
 
     assert app.main(args) == 0
     p.scores['oppai'][:] = 0
-    assert app.main([*args, '--restart']) == 0
+    # Force a genuinely new input signature, then keep it stable for the reuse run.
+    monkeypatch.setattr(p.stash, 'get_media', lambda url: b'changed-media')
+    assert app.main(args) == 0
 
     with merge.StateStore(p.path, merge.scope_for(app.STASH_URL), True) as state:
         assert len(state.records('1', 'scene')['oppai']) == 2
