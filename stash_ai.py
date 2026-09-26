@@ -24,7 +24,7 @@ resume from the last committed batch. --restart requests fresh inference only
 for selected scenes/models/output kinds; omit it when resuming that run.
 No image files or full below-threshold score matrices are cached on disk.
 Up to four next batches are CPU-prepared in RAM; --prefetch-batches 0 disables it.
---ram-cache-gb budgets retained results/indexes (16 GiB, allocated on demand).
+--ram-cache-gb budgets retained results/indexes (24 GiB by default, allocated on demand).
 Short contiguous extra-tag episodes and shared scene tags reuse saved VTT evidence.
 Default progress summarizes the collection; --verbose enables per-scene details.
 Visual input comes exclusively from Stash VTT/sprites over HTTP(S).
@@ -126,7 +126,7 @@ MAX_FRAMES_PER_SCENE = 0  # 0 = all VTT cues. A cap can miss short events.
 JOYTAG_DEFAULT_BATCH_SIZE = 16
 SCENE_PAGE_SIZE = 100
 REQUEST_TIMEOUT = (5, 600)
-HTTP_RETRIES = 3  # Sprite/VTT GET only; GraphQL mutations are never retried.
+HTTP_RETRIES = 3  # Media GETs and read-only GraphQL retry transient failures; GraphQL writes never retry.
 
 JOYTAG_HIERARCHY_FILE = Path(__file__).resolve().with_name("joytag_hierarchy.yml")
 MARKER_CORE_EXCLUSIONS_FILE = Path(__file__).resolve().with_name("marker_core_exclusions.yml")
