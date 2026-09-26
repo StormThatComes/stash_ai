@@ -57,6 +57,79 @@ def test_cached_scene_statistics_and_occurrences_match_fresh_inference(
     assert outputs(fresh) == cached
 
 
+@pytest.mark.parametrize('scene_only', [True, False])
+def test_merge_only_support_ratio_matches_fresh_inference(pipeline, monkeypatch, tmp_path, scene_only):
+    p = pipeline
+    configure(monkeypatch)
+    p.scores['wd'][:] = .36
+    p.scores['wd'][2:4, 1] = .6
+    args = [*p.args, *(['--scene-tags-only'] if scene_only else [])]
+    assert app.main(args) == 0
+    original, baseline = saved(p.path), outputs(p.path)
+    assert {t['name'] for t in p.stash.scene['tags']} == {'ai:common', 'ai:extra'}
+    policy = tmp_path/'strict.yml'
+    policy.write_text('version: 1\nscene_support_ratio: 1.0\n')
+
+    with monkeypatch.context() as offline:
+        for name in ('load_tagger', 'load_vocabulary', 'fetch_cues'):
+            offline.setattr(app, name, lambda *a: pytest.fail('accessed inference inputs'))
+        offline.setattr(p.stash, 'get_media', lambda *a: pytest.fail('fetched media'))
+        assert app.main([*args, '--merge-only', '--temporal-policy', str(policy)]) == 0
+        cached = outputs(p.path)
+        assert {t['name'] for t in p.stash.scene['tags']} == {'ai:extra'}
+        assert cached[0][0][3]['hits'] == 2
+        assert saved(p.path) == original
+        # The projection must not discard weaker observations needed on rollback.
+        assert app.main([*args, '--merge-only']) == 0
+        assert outputs(p.path) == baseline
+
+    p.stash.scene['scene_markers'] = []
+    p.stash.scene['tags'] = []
+    fresh = tmp_path/'fresh.sqlite3'
+    assert app.main([*args, '--state-db', str(fresh), '--temporal-policy', str(policy), '--restart']) == 0
+    assert outputs(fresh) == cached
+
+
+@pytest.mark.parametrize('missing', ['below_floor', 'frames'])
+def test_support_ratio_change_rejects_incomplete_cache_before_publication(
+        pipeline, monkeypatch, tmp_path, capsys, missing):
+    p = pipeline
+    configure(monkeypatch)
+    assert app.main(p.args) == 0
+    if missing == 'frames':
+        with merge.StateStore(p.path, merge.scope_for(app.STASH_URL)) as state:
+            segment = state.records('1', 'scene')['wd'][0]
+            segment.pop('frames')
+            segment['meta'].pop('scene_frames_format')
+            segment['meta'].pop('scene_score_floor')
+            state.put('1', 'wd', {'scene': segment})
+    before = saved(p.path), deepcopy(p.stash.scene)
+    p.stash.writes.clear()
+    policy = tmp_path/'changed.yml'
+    policy.write_text(f'version: 1\nscene_support_ratio: {0.7 if missing == "below_floor" else 1.0}\n')
+    monkeypatch.setattr(app, 'load_tagger', lambda *a: pytest.fail('loaded model'))
+    assert app.main([*p.args, '--merge-only', '--temporal-policy', str(policy)]) == 1
+    assert (saved(p.path), p.stash.scene) == before and not p.stash.writes
+    assert 'run inference' in capsys.readouterr().out
+
+
+def test_support_ratio_dry_run_preserves_source_and_stash(pipeline, monkeypatch, tmp_path, capsys):
+    p = pipeline
+    configure(monkeypatch)
+    p.scores['wd'][:] = .36
+    assert app.main(p.args) == 0
+    capsys.readouterr()
+    before = p.path.read_bytes(), deepcopy(p.stash.scene)
+    p.stash.writes.clear()
+    p.stash.dry_run = True
+    policy = tmp_path/'strict.yml'
+    policy.write_text('version: 1\nscene_support_ratio: 1.0\n')
+    monkeypatch.setattr(app, 'load_tagger', lambda *a: pytest.fail('loaded model'))
+    assert app.main([*p.args, '--merge-only', '--dry-run', '--temporal-policy', str(policy)]) == 0
+    assert 'merged_scene_tags=0' in capsys.readouterr().out
+    assert (p.path.read_bytes(), p.stash.scene) == before and not p.stash.writes
+
+
 def test_both_thresholds_reuse_models_and_round_trip(pipeline, monkeypatch):
     p = pipeline
     configure(monkeypatch)

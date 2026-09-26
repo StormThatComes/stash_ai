@@ -162,6 +162,14 @@ progów, jeśli wszystkie wymagane obserwacje są dostępne.
 
 `--no-temporal` wyłącza te reguły i przywraca prostsze zachowanie bazowe.
 
+Po zmianie `scene_support_ratio`, `--merge-only` przelicza statystyki scen
+z zapisanych klatek, również bez zmiany `scene_threshold`. Surowe obserwacje
+pozostają w bazie, więc można wrócić do poprzedniej wartości. Jeśli wymagany
+próg wsparcia jest niższy niż próg retencji cache albo brakuje klatek potrzebnych
+do przeliczenia, skrypt zgłosi konieczność inferencji przed publikacją danej sceny.
+Starsze agregaty bez metadanych retencji zachowują dotychczasowe zachowanie;
+świeża inferencja uzupełnia cache potrzebny do przeliczania tych reguł.
+
 Wyniki modeli nie są uśredniane do jednego wspólnego prawdopodobieństwa. Źródła
 i pewności pozostają rozdzielone.
 
