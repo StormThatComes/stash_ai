@@ -12,6 +12,7 @@ from pathlib import Path
 
 from stash_occurrences import is_occurrence
 from stash_taggers import SOURCES
+from stash_state import StateStore, scope_for
 
 
 REPORT_FORMAT = 1
@@ -100,7 +101,6 @@ def _sources_for_scene(store, scene):
 
 def build_report(app, store, scene_ids, core_policies, scene_policies):
     import stash_merge
-from stash_state import StateStore, scope_for
 
     models = tuple(SOURCES)
     totals = Counter()
