@@ -23,7 +23,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-      - run: python -m pip install pytest
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: requirements-dev.txt
+      - run: uv pip install --system pytest
       - run: python -m pytest -q tests/test_updater.py --tb=short
 
   pytest:
@@ -39,11 +43,16 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: requirements-dev.txt
+
       - name: Install test dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements-dev.txt
-          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          uv pip install --system -r requirements-dev.txt
+          uv pip install --system torch torchvision --index-url https://download.pytorch.org/whl/cpu
 
       - name: Run tests
         env:
