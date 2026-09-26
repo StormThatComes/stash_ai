@@ -197,10 +197,12 @@ def _result_evidence_report(db, tables):
             if isinstance(meta, dict):
                 origin = meta.get("origin")
                 bucket["origins"][origin if origin in ("inference", "legacy") else "other"] += 1
-                if isinstance(meta.get("scene_frames_format"), int):
-                    bucket["scene_frame_format"][str(meta["scene_frames_format"])] += 1
-                if isinstance(meta.get("analysis_format"), int):
-                    bucket["analysis_format"][str(meta["analysis_format"])] += 1
+                scene_format = meta.get("scene_frames_format")
+                if isinstance(scene_format, int):
+                    bucket["scene_frame_format"]["1" if scene_format == 1 else "other"] += 1
+                analysis_format = meta.get("analysis_format")
+                if isinstance(analysis_format, int):
+                    bucket["analysis_format"][str(analysis_format) if analysis_format in (1, 2, 3) else "other"] += 1
 
             items = segment.get("items")
             if not isinstance(items, list):
