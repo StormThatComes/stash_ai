@@ -1012,6 +1012,8 @@ def main(argv: list[str] | None = None) -> int:
                        help="Remove unused leaf tag definitions without models/inference. Honors --dry-run.")
     modes.add_argument("--db-report", action="store_true",
                        help="Report state DB health, size and aggregate evidence/cache counts without Stash or model access.")
+    modes.add_argument("--db-check", action="store_true",
+                       help="Deep-check state DB logical consistency and compressed state without Stash or model access.")
     modes.add_argument("--db-compact", action="store_true",
                        help="Safely VACUUM the state DB while idle; refuses pending publication/cleanup plans. Honors --dry-run.")
     modes.add_argument("--anonymous-diagnostics", type=Path, metavar="NEW.json",
@@ -1019,7 +1021,7 @@ def main(argv: list[str] | None = None) -> int:
     modes.add_argument("--model-report", type=Path, metavar="NEW.json",
                        help="Write an offline per-model utility and leave-one-model-out ablation report from saved evidence.")
     args = parser.parse_args(argv)
-    database_mode = args.db_report or args.db_compact or args.anonymous_diagnostics is not None
+    database_mode = args.db_report or args.db_check or args.db_compact or args.anonymous_diagnostics is not None
     if args.model_report is not None:
         if args.output_mode != "merged":
             parser.error("--model-report requires --output-mode merged.")
@@ -1034,7 +1036,7 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("--model-report requires a new .json file; existing files are never overwritten.")
     if database_mode:
         if args.output_mode != "merged":
-            parser.error("--db-report/--db-compact require --output-mode merged.")
+            parser.error("--db-report/--db-check/--db-compact require --output-mode merged.")
         if args.scene_id:
             parser.error("Database maintenance covers the state DB; --scene-id does not apply.")
         if args.models or args.device or args.offline or args.no_temporal or args.resume is not None or args.restart:
