@@ -70,11 +70,16 @@ def _marker_delta(full, reduced):
 
 
 def _extras(markers):
-    return {(item["tag"], extra) for item in markers for extra in item.get("extra_tags", ())}
-
-
-def _supports(hit, model):
-    return hit.get("source") == model or model in hit.get("support_sources", ())
+    return {
+        (
+            item["tag"],
+            round(float(item["start"]), 3),
+            None if item["end"] is None else round(float(item["end"]), 3),
+            bool(is_occurrence(item)),
+            extra,
+        )
+        for item in markers for extra in item.get("extra_tags", ())
+    }
 
 
 def _scene_ids(store, requested=None):
