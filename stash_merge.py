@@ -18,8 +18,11 @@ from stash_taggers import ModelSource, SOURCES
 from stash_runtime import stage
 from stash_occurrences import OCCURRENCE_TAG
 from stash_state import APPLICATION_ID, KINDS, StateStore, scope_for
+from stash_state_codec import encode, decode  # compatibility re-export
 
 AI = ModelSource("ai", "AI", "ai:", "ai:marker:stash-taggers", "[AI] ", "[AI hierarchy v1]")
+
+
 def now():
     return datetime.now(timezone.utc).isoformat()
 
