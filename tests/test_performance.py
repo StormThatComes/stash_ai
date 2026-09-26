@@ -25,6 +25,19 @@ def fail(*args, **kwargs):
     pytest.fail('Unchanged data was unnecessarily recomputed or published')
 
 
+@pytest.mark.parametrize('filename', ['stash_tags.py', 'stash_domain.py'])
+def test_publication_code_tracks_tag_resolution_modules(monkeypatch, filename):
+    before = performance.publication_code()
+    read_bytes = performance.Path.read_bytes
+
+    def changed(path):
+        data = read_bytes(path)
+        return data + b'\n# changed' if path.name == filename else data
+
+    monkeypatch.setattr(performance.Path, 'read_bytes', changed)
+    assert performance.publication_code() != before
+
+
 def test_repeated_merge_avoids_decoding_evidence_and_publication(pipeline, monkeypatch, capsys):
     p = pipeline
     assert app.main(p.args) == 0
