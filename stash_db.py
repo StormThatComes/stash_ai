@@ -119,8 +119,10 @@ def inspect_database(path, scope):
         scopes = (db.execute("SELECT COUNT(DISTINCT scope) FROM results").fetchone()[0]
                   if "results" in tables else 0)
 
-        pending_publications = _count(db, tables, "snapshots", scope, "pending IS NOT NULL")
-        pending_cleanups = _count(db, tables, "cleanup_state", scope, "pending IS NOT NULL")
+        scope_pending_publications = _count(db, tables, "snapshots", scope, "pending IS NOT NULL")
+        scope_pending_cleanups = _count(db, tables, "cleanup_state", scope, "pending IS NOT NULL")
+        pending_publications = _count(db, tables, "snapshots", None, "pending IS NOT NULL")
+        pending_cleanups = _count(db, tables, "cleanup_state", None, "pending IS NOT NULL")
         recovery_publications = _count(db, tables, "recovery_publications", scope)
         recovery_cleanups = _count(db, tables, "recovery_cleanups", scope)
         checkpoints = _count(db, tables, "checkpoints", scope)
@@ -162,6 +164,8 @@ def inspect_database(path, scope):
         scoped_payload_bytes=scoped_payload,
         pending_publications=pending_publications,
         pending_cleanups=pending_cleanups,
+        scope_pending_publications=scope_pending_publications,
+        scope_pending_cleanups=scope_pending_cleanups,
         recovery_publications=recovery_publications,
         recovery_cleanups=recovery_cleanups,
         checkpoints=checkpoints,
@@ -175,7 +179,8 @@ def inspect_database(path, scope):
 def _same_logical_counts(before, after):
     fields = (
         "schema_version", "known_scopes", "scenes", "pending_publications", "pending_cleanups",
-        "recovery_publications", "recovery_cleanups", "checkpoints", "checkpoint_frames",
+        "scope_pending_publications", "scope_pending_cleanups", "recovery_publications",
+        "recovery_cleanups", "checkpoints", "checkpoint_frames",
         "refresh_requests", "merge_checks", "results", "scoped_payload_bytes",
     )
     return all(before[field] == after[field] for field in fields)
@@ -226,7 +231,10 @@ def compact_database(path, scope, *, dry_run=False):
         # between inspection and VACUUM.
         before = inspect_database(path, scope)
         _safe_to_compact(before)
-        required = max(before["live_page_bytes"], MIN_FREE_HEADROOM)
+        # SQLite VACUUM builds a replacement database beside the original.
+        # Requiring roughly one additional full DB (plus WAL/headroom) follows
+        # SQLite's documented worst-case temporary-space requirement.
+        required = before["file_bytes"] + before["wal_bytes"] + MIN_FREE_HEADROOM
         available = shutil.disk_usage(path.parent).free
         if available < required:
             raise RuntimeError(
@@ -272,11 +280,16 @@ def format_report(report):
         lines.append("  (none)")
     lines.extend([
         (
-            "State: "
-            f"pending publications={report['pending_publications']:,}, "
-            f"pending cleanups={report['pending_cleanups']:,}, "
+            "State (current scope): "
+            f"pending publications={report['scope_pending_publications']:,}, "
+            f"pending cleanups={report['scope_pending_cleanups']:,}, "
             f"recovery publications={report['recovery_publications']:,}, "
             f"recovery cleanups={report['recovery_cleanups']:,}"
+        ),
+        (
+            "Database-wide pending: "
+            f"publications={report['pending_publications']:,}, "
+            f"cleanups={report['pending_cleanups']:,}"
         ),
         (
             "Work cache: "
