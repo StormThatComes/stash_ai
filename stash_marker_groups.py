@@ -169,7 +169,8 @@ def prune_groups(stash, report=print, *, candidate_ids=None, usage_delta=None):
 def run_backfill(app, args):
     """Repair group membership on existing owned markers, without source replay."""
     from tqdm import tqdm
-    from stash_merge import AI, StateStore, scope_for
+    from stash_merge import AI
+    from stash_state import StateStore, scope_for
     from stash_occurrences import OCCURRENCE_TAG
     stats, report = Counter(), args.report
     with StateStore(args.state_db, scope_for(app.STASH_URL), app.DRY_RUN) as store:
