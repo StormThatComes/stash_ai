@@ -229,6 +229,34 @@ def _invalid_enum_count(db, tables, table, column, allowed):
     ).fetchone()[0]
 
 
+def _check_work_units(db, tables):
+    payload_specs = (
+        ("snapshots", "published"), ("snapshots", "pending"),
+        ("legacy_imports", "data"), ("cleanup_state", "data"),
+        ("checkpoint_frames", "data"), ("checkpoint_analysis", "data"),
+        ("recovery_publications", "data"),
+    )
+    total = 6  # integrity, domains, result relations, checkpoint relations, state relations, summary
+    total += _count(db, tables, "results")
+    total += _count(db, tables, "checkpoints")
+    total += _count(db, tables, "cleanup_state")
+    total += _count(db, tables, "recovery_cleanups")
+    for table, column in payload_specs:
+        if table in tables and column in _columns(db, table):
+            total += db.execute(
+                f"SELECT COUNT(*) FROM {table} WHERE {column} IS NOT NULL"
+            ).fetchone()[0]
+    return total
+
+
+def _tick(progress, amount=1, phase=None):
+    if progress is None:
+        return
+    if phase is not None:
+        progress.set_postfix_str(phase, refresh=False)
+    progress.update(amount)
+
+
 def _decoded_payload(blob, expected):
     from stash_state_codec import decode
     value = decode(blob)
@@ -250,7 +278,7 @@ def _valid_result_segments(segments, kind):
     )
 
 
-def _check_results_and_index(db, tables, errors):
+def _check_results_and_index(db, tables, errors, progress=None):
     if "results" not in tables:
         return 0
 
@@ -268,6 +296,7 @@ def _check_results_and_index(db, tables, errors):
     """
     for _, _, _, kind, blob, inference, populated, signature in db.execute(query):
         checked += 1
+        _tick(progress)
         try:
             segments = _decoded_payload(blob, list)
             if not _valid_result_segments(segments, kind):
@@ -309,7 +338,7 @@ def _check_results_and_index(db, tables, errors):
     return checked
 
 
-def _check_state_payloads(db, tables, errors):
+def _check_state_payloads(db, tables, errors, progress=None):
     specs = (
         ("snapshots", "published", dict),
         ("snapshots", "pending", dict),
@@ -325,6 +354,7 @@ def _check_state_payloads(db, tables, errors):
             continue
         for blob, in db.execute(f"SELECT {column} FROM {table} WHERE {column} IS NOT NULL"):
             checked += 1
+            _tick(progress)
             try:
                 _decoded_payload(blob, expected)
             except (TypeError, ValueError, UnicodeDecodeError, json.JSONDecodeError, zlib.error):
@@ -332,7 +362,7 @@ def _check_state_payloads(db, tables, errors):
     return checked
 
 
-def _check_checkpoints(db, tables, errors):
+def _check_checkpoints(db, tables, errors, progress=None):
     if "checkpoints" in tables:
         errors["checkpoint_dimensions"] += db.execute("""
             SELECT COUNT(*) FROM checkpoints
@@ -342,6 +372,7 @@ def _check_checkpoints(db, tables, errors):
         """).fetchone()[0]
 
         for top_rows, blob in db.execute("SELECT top_rows,top_scores FROM checkpoints"):
+            _tick(progress)
             try:
                 raw = zlib.decompress(blob)
                 valid = (
@@ -384,10 +415,11 @@ def _check_checkpoints(db, tables, errors):
             errors["checkpoint_orphan_analysis"] += _count(db, tables, "checkpoint_analysis")
 
 
-def _check_cleanup_state(db, tables, errors):
+def _check_cleanup_state(db, tables, errors, progress=None):
     generations = {}
     if "cleanup_state" in tables:
         for scope, generation, blob in db.execute("SELECT scope,generation,data FROM cleanup_state"):
+            _tick(progress)
             generations[scope] = generation
             invalid = type(generation) is not int or generation < 0
             try:
@@ -408,6 +440,7 @@ def _check_cleanup_state(db, tables, errors):
     if "recovery_cleanups" in tables:
         for scope, generation, kinds in db.execute(
                 "SELECT scope,generation,kinds FROM recovery_cleanups"):
+            _tick(progress)
             invalid = type(generation) is not int or generation <= 0
             try:
                 decoded = json.loads(kinds)
@@ -464,7 +497,7 @@ def _check_state_relations(db, tables, warnings):
                 db, tables, "recovery_publications")
 
 
-def check_database(path, scope):
+def check_database(path, scope, *, show_progress=False):
     """Deep read-only consistency check across every scope in the state DB."""
     path = Path(path).expanduser().resolve()
     if not path.is_file():
@@ -483,51 +516,88 @@ def check_database(path, scope):
         # process commits through WAL while this command is running.
         db.execute("BEGIN")
         tables = _tables(db)
-        integrity_rows = [row[0] for row in db.execute("PRAGMA integrity_check")]
-        integrity_ok = integrity_rows == ["ok"]
-        if not integrity_ok:
-            errors["sqlite_integrity_check"] += 1
+        progress = None
+        if show_progress:
+            from tqdm import tqdm
+            progress = tqdm(
+                total=_check_work_units(db, tables),
+                desc="DB check",
+                unit="item",
+                dynamic_ncols=True,
+            )
+        try:
+            if progress is not None:
+                progress.set_postfix_str("SQLite integrity", refresh=True)
+            integrity_rows = [row[0] for row in db.execute("PRAGMA integrity_check")]
+            integrity_ok = integrity_rows == ["ok"]
+            if not integrity_ok:
+                errors["sqlite_integrity_check"] += 1
+            _tick(progress)
 
-        missing = STATE_TABLES - tables
-        errors["missing_base_tables"] += len(BASE_TABLES - tables)
-        warnings["missing_state_tables"] += len(missing - BASE_TABLES)
+            missing = STATE_TABLES - tables
+            errors["missing_base_tables"] += len(BASE_TABLES - tables)
+            warnings["missing_state_tables"] += len(missing - BASE_TABLES)
 
-        enum_specs = (
-            ("results", "model", KNOWN_MODELS),
-            ("result_index", "model", KNOWN_MODELS),
-            ("refresh_requests", "model", KNOWN_MODELS),
-            ("checkpoints", "model", KNOWN_MODELS),
-            ("checkpoint_frames", "model", KNOWN_MODELS),
-            ("checkpoint_analysis", "model", KNOWN_MODELS),
-            ("results", "kind", KNOWN_KINDS),
-            ("result_index", "kind", KNOWN_KINDS),
-            ("refresh_requests", "kind", KNOWN_KINDS),
-            ("snapshots", "kind", KNOWN_KINDS),
-            ("legacy_imports", "kind", KNOWN_KINDS),
-            ("recovery_publications", "kind", KNOWN_KINDS),
-        )
-        for table, column, allowed in enum_specs:
-            count = _invalid_enum_count(db, tables, table, column, allowed)
-            errors["invalid_model" if column == "model" else "invalid_kind"] += count
+            enum_specs = (
+                ("results", "model", KNOWN_MODELS),
+                ("result_index", "model", KNOWN_MODELS),
+                ("refresh_requests", "model", KNOWN_MODELS),
+                ("checkpoints", "model", KNOWN_MODELS),
+                ("checkpoint_frames", "model", KNOWN_MODELS),
+                ("checkpoint_analysis", "model", KNOWN_MODELS),
+                ("results", "kind", KNOWN_KINDS),
+                ("result_index", "kind", KNOWN_KINDS),
+                ("refresh_requests", "kind", KNOWN_KINDS),
+                ("snapshots", "kind", KNOWN_KINDS),
+                ("legacy_imports", "kind", KNOWN_KINDS),
+                ("recovery_publications", "kind", KNOWN_KINDS),
+            )
+            if progress is not None:
+                progress.set_postfix_str("domains", refresh=True)
+            for table, column, allowed in enum_specs:
+                count = _invalid_enum_count(db, tables, table, column, allowed)
+                errors["invalid_model" if column == "model" else "invalid_kind"] += count
+            _tick(progress)
 
-        results_checked = _check_results_and_index(db, tables, errors)
-        state_payloads_checked = _check_state_payloads(db, tables, errors)
-        _check_checkpoints(db, tables, errors)
-        _check_cleanup_state(db, tables, errors)
-        _check_state_relations(db, tables, warnings)
+            if progress is not None:
+                progress.set_postfix_str("results/index", refresh=True)
+            results_checked = _check_results_and_index(db, tables, errors, progress)
+            _tick(progress)
 
-        scopes = (
-            db.execute("SELECT COUNT(DISTINCT scope) FROM results").fetchone()[0]
-            if "results" in tables else 0
-        )
-        current_scope_results = (
-            db.execute("SELECT COUNT(*) FROM results WHERE scope=?", (scope,)).fetchone()[0]
-            if "results" in tables else 0
-        )
-        pending_publications = _count(db, tables, "snapshots", None, "pending IS NOT NULL")
-        pending_cleanups = _count(db, tables, "cleanup_state", None, "pending IS NOT NULL")
-        refresh_requests = _count(db, tables, "refresh_requests")
-        checkpoints = _count(db, tables, "checkpoints")
+            if progress is not None:
+                progress.set_postfix_str("state payloads", refresh=True)
+            state_payloads_checked = _check_state_payloads(db, tables, errors, progress)
+
+            if progress is not None:
+                progress.set_postfix_str("checkpoints", refresh=True)
+            _check_checkpoints(db, tables, errors, progress)
+            _tick(progress)
+
+            if progress is not None:
+                progress.set_postfix_str("cleanup/recovery", refresh=True)
+            _check_cleanup_state(db, tables, errors, progress)
+
+            if progress is not None:
+                progress.set_postfix_str("relations", refresh=True)
+            _check_state_relations(db, tables, warnings)
+            _tick(progress)
+
+            scopes = (
+                db.execute("SELECT COUNT(DISTINCT scope) FROM results").fetchone()[0]
+                if "results" in tables else 0
+            )
+            current_scope_results = (
+                db.execute("SELECT COUNT(*) FROM results WHERE scope=?", (scope,)).fetchone()[0]
+                if "results" in tables else 0
+            )
+            pending_publications = _count(db, tables, "snapshots", None, "pending IS NOT NULL")
+            pending_cleanups = _count(db, tables, "cleanup_state", None, "pending IS NOT NULL")
+            refresh_requests = _count(db, tables, "refresh_requests")
+            checkpoints = _count(db, tables, "checkpoints")
+            _tick(progress, phase="summary")
+        finally:
+            if progress is not None:
+                progress.close()
 
     error_rows = _issue_list(errors)
     warning_rows = _issue_list(warnings)
@@ -725,7 +795,7 @@ def run_mode(args, stash_url):
             print(format_report(inspect_database(args.state_db, scope)))
             return 0
         if args.db_check:
-            report = check_database(args.state_db, scope)
+            report = check_database(args.state_db, scope, show_progress=True)
             print(format_check_report(report))
             return 0 if report["ok"] else 1
 
