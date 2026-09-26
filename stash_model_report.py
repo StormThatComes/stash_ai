@@ -110,6 +110,12 @@ def build_report(app, store, scene_ids, core_policies, scene_policies):
         full_labels = _scene_labels(full_hits)
         full_markers = _merged_markers(full_spans)
         full_extras = _extras(full_markers)
+        scene_sources = {}
+        for label in full_labels:
+            scene_sources[label] = {
+                source for hit in full_hits if hit["tag"] == label
+                for source in (hit["source"], *hit.get("support_sources", ()))
+            }
 
         totals["scenes"] += 1
         totals["scene_tags"] += len(full_labels)
@@ -125,11 +131,19 @@ def build_report(app, store, scene_ids, core_policies, scene_policies):
                 continue
 
             stats["scenes_with_evidence"] += 1
-            stats["scene_tags_supported"] += len({
-                hit["tag"] for hit in full_hits if _supports(hit, model)
-            })
+            stats["scene_tags_supported"] += sum(
+                model in sources for sources in scene_sources.values())
+            stats["scene_tags_sole_source"] += sum(
+                sources == {model} for sources in scene_sources.values())
+            stats["scene_tags_multi_model"] += sum(
+                model in sources and len(sources) > 1 for sources in scene_sources.values())
             stats["marker_components_supported"] += sum(
                 model in marker.get("sources", ()) for marker in full_markers)
+            stats["marker_components_sole_source"] += sum(
+                set(marker.get("sources", ())) == {model} for marker in full_markers)
+            stats["marker_components_multi_model"] += sum(
+                model in marker.get("sources", ()) and len(marker.get("sources", ())) > 1
+                for marker in full_markers)
             stats["occurrences_supported"] += sum(
                 is_occurrence(marker) and model in marker.get("sources", ())
                 for marker in full_markers)
@@ -173,8 +187,10 @@ def build_report(app, store, scene_ids, core_policies, scene_policies):
             "model": model,
             **{key: stats[key] for key in (
                 "scenes_total", "scenes_with_evidence", "scenes_changed", "scenes_unchanged",
-                "scene_tags_supported", "scene_tags_lost", "scene_tags_added",
-                "marker_components_supported", "marker_components_lost",
+                "scene_tags_supported", "scene_tags_sole_source", "scene_tags_multi_model",
+                "scene_tags_lost", "scene_tags_added",
+                "marker_components_supported", "marker_components_sole_source",
+                "marker_components_multi_model", "marker_components_lost",
                 "marker_components_changed", "marker_components_added",
                 "marker_exact_removed", "marker_exact_added",
                 "marker_extras_lost", "marker_extras_added",
