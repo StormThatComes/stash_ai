@@ -503,7 +503,7 @@ def check_database(path, scope, *, show_progress=False):
     if not path.is_file():
         raise FileNotFoundError(f"State database does not exist: {path}")
 
-    from stash_merge import APPLICATION_ID
+    from stash_state import APPLICATION_ID
 
     errors, warnings = Counter(), Counter()
     with _readonly(path) as db:
