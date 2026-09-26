@@ -1068,6 +1068,7 @@ def _run_merged(app, settings, args, catalogs, hierarchy, core_policies, scene_p
                     report.finish('Thresholds (not applied)', stats, store.cache)
                     return 1
             kinds = progress.output_kinds(app)
+            replacement = {"scene": app.REPLACE_SCENE_TAGS, "markers": app.REPLACE_MARKERS}
             inputs = progress.RunInputs(stash, store.cache, report)
             if not args.merge_only:
                 if args.restart:
@@ -1092,11 +1093,15 @@ def _run_merged(app, settings, args, catalogs, hierarchy, core_policies, scene_p
                                 store.cache.pressure(force=True)
                                 cues, media, signature = inputs.inspect(app, paths, identity)
                                 if args.resume and progress.completed(store, scene_id, key, kinds, signature):
+                                    stats["replacement_history_collapsed"] += progress.apply_replacement_policy(
+                                        store, scene_id, key, kinds, replacement)
                                     stats["reused"] += 1
                                     continue
                                 if args.resume and not args.restart:
                                     from stash_thresholds import reuse
                                     if reuse(app, store, scene_id, config, identity, cues, media.hashes, kinds):
+                                        stats["replacement_history_collapsed"] += progress.apply_replacement_policy(
+                                            store, scene_id, key, kinds, replacement)
                                         stats['threshold_cache_reused'] += 1
                                         continue
                                 if tagger is None:
@@ -1125,8 +1130,7 @@ def _run_merged(app, settings, args, catalogs, hierarchy, core_policies, scene_p
                                     segment["meta"].update(inference_signature=signature,
                                         frame_input_signature=progress.digest({"cues": [[c.start,c.end,c.image,list(c.rect)] for c in cues],
                                                                                "media": media.hashes}))
-                                progress.finish(store, scene_id, key, outputs,
-                                    {"scene": app.REPLACE_SCENE_TAGS, "markers": app.REPLACE_MARKERS})
+                                progress.finish(store, scene_id, key, outputs, replacement)
                                 stats["processed"] += 1
                             except Exception as exc:
                                 stats["errors"] += 1
