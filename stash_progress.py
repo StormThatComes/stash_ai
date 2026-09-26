@@ -56,13 +56,15 @@ def initialize_progress(store, previous_version):
 
 def index_result(store, scene, model, kind, segments, scope=None):
     from stash_thresholds import indexed_signature
+    inference = next((segment for segment in reversed(segments)
+                      if segment["meta"].get("origin") == "inference"), None)
     store.connection.execute("INSERT INTO result_index VALUES (?,?,?,?,?,?,?) "
         "ON CONFLICT(scope,scene,model,kind) DO UPDATE SET inference=excluded.inference,"
         "populated=excluded.populated,signature=excluded.signature",
         (scope or store.scope, str(scene), model, kind,
-         int(any(s["meta"].get("origin") == "inference" for s in segments)),
+         int(inference is not None),
          int(any(s["items"] for s in segments)),
-         indexed_signature(segments[-1]) if segments else None))
+         indexed_signature(inference) if inference is not None else None))
 
 
 def output_kinds(app):

@@ -369,12 +369,15 @@ def test_new_legacy_results_are_imported_alongside_existing_cache_once(merge_pip
     assert app.main(p.args)==0
     p.stash.scene["tags"].append(p.stash.tag("wd:extra"))
     old=p.stash.marker(WD,"common","new-separate");old.update(seconds=90,end_seconds=100)
-    monkeypatch.setattr(app,"load_tagger",lambda *args:pytest.fail("merge-only loaded weights"))
+    monkeypatch.setattr(app,"load_tagger",lambda *args:pytest.fail("cached inference loaded weights"))
     assert app.main([*p.args,"--merge-only"])==0
     assert intervals(p.stash)==[(10,50),(70,100)]
     assert "ai:extra" in {t["name"] for t in p.stash.scene["tags"]}
     with merge.StateStore(p.path,merge.scope_for(app.STASH_URL),True) as state:
         assert len(state.records("1","markers")["wd"])==2
+    # Importing a later legacy segment must not replace the reusable inference
+    # signature kept in result_index.
+    assert app.main([*p.args,"--resume"])==0
     assert app.main([*p.args,"--merge-only"])==0
     with merge.StateStore(p.path,merge.scope_for(app.STASH_URL),True) as state:
         assert len(state.records("1","markers")["wd"])==2
