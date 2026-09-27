@@ -3,14 +3,16 @@
 W katalogu głównym pozostają dwa pliki Pythona uruchamiane z linii poleceń:
 `stash_ai.py` i `update_stash_ai.py`. Launcher `stash_ai.py` przejmuje blokadę
 instalacji, a `stash_ai/cli.py` koordynuje CLI i uruchomienie pipeline.
-Algorytmy scalania i kompatybilne entry pointy pozostają w `stash_ai/merge.py`.
+Algorytmy fusion i kompatybilne entry pointy pozostają w `stash_ai/merge.py`.
 Stanowy lifecycle jednego przebiegu merged-output (scan, rethreshold, inference,
 publikacja i pruning) obsługuje `stash_ai/merge_run.py` / `MergedRun`.
-Cleanup ma osobny lifecycle w `stash_ai/merge_cleanup.py` / `CleanupRun`;
-ten moduł zawiera też re-ewaluację wcześniej opublikowanego evidence oraz
-rekonsyliację pojedynczej sceny. Pozostała logika domenowa znajduje się m.in.
-w `stash_ai/scene.py`, `stash_ai/fusion.py`, `stash_ai/temporal.py` i
-`stash_ai/occurrences.py`.
+Planowanie i publikację zmian jednej sceny rozdziela `stash_ai/merge_sync.py`;
+`MergeSyncPlan` przechowuje wyłącznie plan snapshotów i mutacji Stash, a kolejne
+funkcje obsługują przygotowanie evidence, tagi, markery i publikację. Cleanup ma
+osobny lifecycle w `stash_ai/merge_cleanup.py` / `CleanupRun`; ten moduł zawiera
+też re-ewaluację wcześniej opublikowanego evidence oraz rekonsyliację pojedynczej
+sceny. Pozostała logika domenowa znajduje się m.in. w `stash_ai/scene.py`,
+`stash_ai/fusion.py`, `stash_ai/temporal.py` i `stash_ai/occurrences.py`.
 
 `stash_ai/cli.py` pozostaje warstwą orkiestracji i kompatybilnym miejscem eksportu
 helperów używanych przez testy. Definicja opcji CLI i walidacja kombinacji flag są
