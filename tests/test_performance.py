@@ -25,8 +25,11 @@ def fail(*args, **kwargs):
     pytest.fail('Unchanged data was unnecessarily recomputed or published')
 
 
-@pytest.mark.parametrize('filename', ['stash_tags.py', 'stash_domain.py', 'stash_state.py'])
-def test_publication_code_tracks_tag_resolution_modules(monkeypatch, filename):
+@pytest.mark.parametrize('filename', [
+    'stash_tags.py', 'stash_domain.py', 'stash_state.py', 'stash_state_db.py',
+    'stash_client.py', 'stash_transport.py',
+])
+def test_publication_code_tracks_extracted_modules(monkeypatch, filename):
     before = performance.publication_code()
     read_bytes = performance.Path.read_bytes
 
