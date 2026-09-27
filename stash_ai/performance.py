@@ -73,6 +73,7 @@ PUBLICATION_CODE_FILES = (
     'taggers.py', 'tags.py', 'domain.py', 'performance.py',
     'timeline.py', 'merge_sql.py', 'marker_groups.py', 'recovery.py',
     'thresholds.py', 'scene_cache.py', 'state.py', 'state_db.py',
+    'state_results.py', 'state_publications.py',
     'client.py', 'transport.py', 'config.py', 'vtt.py', 'cli_args.py', 'cli_modes.py',
     'cleanup_sql.py', 'cleanup_sql_session.py',
 )

@@ -6,6 +6,9 @@ import pytest
 from stash_ai import progress as stash_progress
 from stash_ai import state_db as stash_state_db
 from stash_ai.state import StateStore
+from stash_ai.state_publications import PublicationStore
+from stash_ai.state_results import ResultStore
+from stash_ai.runtime import RunReport
 
 
 @pytest.mark.parametrize('stage', ['base_schema', 'feature_schema'])
@@ -82,3 +85,19 @@ def test_close_is_idempotent_and_releases_writer(tmp_path):
         connection.execute('SELECT 1')
     with StateStore(path, 'scope') as reopened:
         assert reopened.connection.execute('SELECT 1').fetchone() == (1,)
+
+
+def test_state_store_facade_delegates_components_and_preserves_timings(tmp_path):
+    with StateStore(tmp_path / 'state.sqlite3', 'scope') as state:
+        state.report = RunReport(write=lambda _: None)
+        assert isinstance(state.results, ResultStore)
+        assert isinstance(state.publications, PublicationStore)
+
+        segment = {'mode': 'scene', 'meta': {'origin': 'inference'}, 'items': []}
+        state.put('1', 'wd', {'scene': segment})
+        state.publish('1', {'scene': {'contributions': []}})
+
+        assert state.records('1', 'scene')['wd'] == [segment]
+        assert state.snapshot('1', 'scene')[0] == {'contributions': []}
+        assert state.report.timing_calls['state_write'] >= 2
+        assert state.report.timing_calls['state_read'] >= 2

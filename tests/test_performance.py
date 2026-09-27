@@ -26,7 +26,7 @@ def fail(*args, **kwargs):
 
 
 @pytest.mark.parametrize('filename', [
-    'tags.py', 'domain.py', 'state.py', 'state_db.py',
+    'tags.py', 'domain.py', 'state.py', 'state_db.py', 'state_results.py', 'state_publications.py',
     'client.py', 'transport.py', 'config.py', 'vtt.py', 'cli_args.py', 'cli_modes.py',
     'cleanup_sql.py', 'cleanup_sql_session.py',
 ])
