@@ -48,7 +48,6 @@ from __future__ import annotations
 import argparse
 import math
 import os
-import re
 import sys
 from collections import Counter, OrderedDict
 from io import BytesIO
@@ -146,8 +145,6 @@ def load_model_settings(path: Path, chosen: list[str] | None, device: str | None
 
 JOYTAG_CLIP_MEAN = [0.48145466, 0.4578275, 0.40821073]
 JOYTAG_CLIP_STD = [0.26862954, 0.26130258, 0.27577711]
-TIMESTAMP_RE = re.compile(r"(?:(\d{2,}):)?(\d{2}):(\d{2})[.,](\d{3})")
-RECT_RE = re.compile(r"(.*?)#xywh=(?:pixel:)?(\d+),(\d+),(\d+),(\d+)")
 
 
 def evenly_sample(items: list, count: int) -> list:
