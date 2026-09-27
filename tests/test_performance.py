@@ -11,11 +11,11 @@ import numpy as np
 import pytest
 from PIL import Image
 
-import stash_ai as app
-import stash_merge as merge
-import stash_performance as performance
-import stash_progress as progress
-from stash_runtime import RamCache, retained_size
+from stash_ai import cli as app
+from stash_ai import merge
+from stash_ai import performance
+from stash_ai import progress
+from stash_ai.runtime import RamCache, retained_size
 
 
 pytestmark = pytest.mark.usefixtures("reset_progress")
@@ -26,8 +26,8 @@ def fail(*args, **kwargs):
 
 
 @pytest.mark.parametrize('filename', [
-    'stash_tags.py', 'stash_domain.py', 'stash_state.py', 'stash_state_db.py',
-    'stash_client.py', 'stash_transport.py',
+    'tags.py', 'domain.py', 'state.py', 'state_db.py',
+    'client.py', 'transport.py',
 ])
 def test_publication_code_tracks_extracted_modules(monkeypatch, filename):
     before = performance.publication_code()
@@ -117,7 +117,7 @@ def test_manual_hierarchy_change_invalidates_unchanged_scene(pipeline, monkeypat
 
 
 def test_cleanup_generation_invalidates_only_its_scope(tmp_path):
-    from stash_cleanup import save_state
+    from stash_ai.cleanup import save_state
     with merge.StateStore(tmp_path/'state.db', 'a') as state:
         with state.connection:
             performance.record_check(state, '1', 'p', 'f')
@@ -295,12 +295,12 @@ def test_vectorized_score_filter_preserves_float_boundaries_and_order(threshold)
 def test_cache_accounts_cue_attributes_and_evicts_under_process_pressure(monkeypatch):
     cue = app.Cue(0, 1, 's'*10000, (0,0,1,1))
     assert retained_size(cue) > 10000
-    monkeypatch.setattr('stash_runtime.process_rss', lambda: 1000)
+    monkeypatch.setattr('stash_ai.runtime.process_rss', lambda: 1000)
     cache = RamCache(20000, rss_budget=40000)
     for i in range(10):
         cache.put(i, bytes(900))
     before = cache.size
-    monkeypatch.setattr('stash_runtime.process_rss', lambda: 39999)
+    monkeypatch.setattr('stash_ai.runtime.process_rss', lambda: 39999)
     cache.pressure(force=True)
     assert cache.size < before and cache.stats['pressure_trims'] == 1
     assert cache.rss_peak == 39999

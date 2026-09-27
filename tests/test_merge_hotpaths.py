@@ -9,13 +9,13 @@ from types import SimpleNamespace
 
 import pytest
 
-import stash_ai as app
-from stash_fusion import ObservationIndex
-from stash_merge_sql import SceneReader, OPERATION, SQL, is_read_only_merge
-from stash_performance import scene_fingerprint
-from stash_runtime import RamCache, RunReport, retained_size
-from stash_temporal import TemporalPolicy
-from stash_timeline import support_size
+from stash_ai import cli as app
+from stash_ai.fusion import ObservationIndex
+from stash_ai.merge_sql import SceneReader, OPERATION, SQL, is_read_only_merge
+from stash_ai.performance import scene_fingerprint
+from stash_ai.runtime import RamCache, RunReport, retained_size
+from stash_ai.temporal import TemporalPolicy
+from stash_ai.timeline import support_size
 
 
 @pytest.mark.parametrize('overlap', [False, True])
@@ -232,7 +232,7 @@ def test_sql_page_failure_falls_back_without_repeating_visited_scenes(database, 
 
 def test_exclusive_timers_do_not_double_count_and_survive_failures(monkeypatch):
     ticks = iter([0.,1.,4.,10.])
-    monkeypatch.setattr('stash_runtime.time.perf_counter',lambda:next(ticks))
+    monkeypatch.setattr('stash_ai.runtime.time.perf_counter',lambda:next(ticks))
     report = RunReport(write=lambda line:None)
     with pytest.raises(ValueError):
         with report.measure('merge_plan'):
@@ -243,8 +243,8 @@ def test_exclusive_timers_do_not_double_count_and_survive_failures(monkeypatch):
 
 
 def test_publication_check_and_snapshots_share_one_commit(tmp_path):
-    from stash_merge import StateStore
-    from stash_performance import checked
+    from stash_ai.merge import StateStore
+    from stash_ai.performance import checked
     with StateStore(tmp_path/'state.db','s') as state:
         state.prepare('1', {'scene': {'contributions': []}})
         statements = []

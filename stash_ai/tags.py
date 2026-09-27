@@ -4,11 +4,11 @@ from __future__ import annotations
 from collections import Counter
 from typing import TYPE_CHECKING
 
-from stash_domain import TagHierarchy
-from stash_taggers import JOYTAG, ModelSource
+from stash_ai.domain import TagHierarchy
+from stash_ai.taggers import JOYTAG, ModelSource
 
 if TYPE_CHECKING:
-    from stash_client import StashClient
+    from stash_ai.client import StashClient
 
 
 class TagResolver:

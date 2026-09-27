@@ -6,10 +6,10 @@ import json
 import numpy as np
 import pytest
 
-import stash_ai as app
-import stash_merge as merge
-from stash_temporal import TemporalPolicy
-from stash_taggers import SOURCES
+from stash_ai import cli as app
+from stash_ai import merge
+from stash_ai.temporal import TemporalPolicy
+from stash_ai.taggers import SOURCES
 from tests.helpers.evidence import segment
 
 

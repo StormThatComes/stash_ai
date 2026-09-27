@@ -13,12 +13,12 @@ import hashlib
 import json
 import math
 
-from stash_domain import Cue, FramePrediction, TagHierarchy
-from stash_taggers import ModelSource, SOURCES
-from stash_runtime import stage
-from stash_occurrences import OCCURRENCE_TAG
-from stash_state import APPLICATION_ID, KINDS, StateStore, scope_for
-from stash_state_codec import encode, decode  # compatibility re-export
+from stash_ai.domain import Cue, FramePrediction, TagHierarchy
+from stash_ai.taggers import ModelSource, SOURCES
+from stash_ai.runtime import stage
+from stash_ai.occurrences import OCCURRENCE_TAG
+from stash_ai.state import APPLICATION_ID, KINDS, StateStore, scope_for
+from stash_ai.state_codec import encode, decode  # compatibility re-export
 
 AI = ModelSource("ai", "AI", "ai:", "ai:marker:stash-taggers", "[AI] ", "[AI hierarchy v1]")
 
@@ -87,7 +87,7 @@ def union_intervals(contributions, *, borrow=False):
             component["extra_tags"] = sorted({raw_label(tag) for item in contributors for tag in item.get("extra_tags", [])}
                                              - {tag})
             component["extra_ids"] = sorted({str(i) for item in contributors for i in item.get("extra_ids", [])})
-            from stash_temporal import merged_extras
+            from stash_ai.temporal import merged_extras
             merged_extras(component)
             component["extra_tags"] = sorted({raw_label(label) for label in component["extra_tags"]})
             merged.append(component)
@@ -98,7 +98,7 @@ def combined_hierarchy(app, args, tag_policies=None):
     """Compose the four local YAMLs into one stable ai: category namespace."""
     if args.no_hierarchy:
         return None
-    from stash_exclusions import policies_or_empty
+    from stash_ai.exclusions import policies_or_empty
     tag_policies = policies_or_empty(tag_policies)
     prefix, root = "ai:category:", "ai:category:AI"
     leaves = defaultdict(set)
@@ -144,7 +144,7 @@ def bootstrap_legacy(app, store, scene):
         existing = store.sources(scene_id, kind)
         if kind == "markers" and not existing and any(app.owned_marker(marker, AI) for marker in scene.get("scene_markers", [])):
             raise RuntimeError("Merged markers exist without their source state. Restore the original --state-db before synchronization.")
-        from stash_performance import freeze
+        from stash_ai.performance import freeze
         imported = {freeze(item) for item in store.imported_legacy(scene_id, kind, borrow=True)}
         originals = []
         by_model = defaultdict(list)
@@ -190,9 +190,9 @@ def evidence(app, store, scene_id, core_policies, scene_policies, metrics=None, 
     selected_sources is an analysis-only view used for counterfactual reports:
     omitted sources are removed before every fusion/consensus/occurrence stage.
     """
-    from stash_temporal import scene_reason
-    from stash_fusion import FrameIndex
-    from stash_scene import shared_scene_contributions
+    from stash_ai.temporal import scene_reason
+    from stash_ai.fusion import FrameIndex
+    from stash_ai.scene import shared_scene_contributions
     report = getattr(store, 'report', None)
     scene_hits, spans = [], []
     need_scene = app.APPLY_SCENE_TAGS or (app.CREATE_MARKERS and app.TEMPORAL_POLICY.enabled
@@ -202,7 +202,7 @@ def evidence(app, store, scene_id, core_policies, scene_policies, metrics=None, 
         selected_sources = frozenset(selected_sources)
         scene_records = {source: segments for source, segments in scene_records.items()
                          if source in selected_sources}
-    from stash_scene_cache import views, frame_records
+    from stash_ai.scene_cache import views, frame_records
     app, scene_records = views(app, scene_records)
     for model, segments in scene_records.items():
         for segment in segments:
@@ -222,7 +222,7 @@ def evidence(app, store, scene_id, core_policies, scene_policies, metrics=None, 
     if selected_sources is not None:
         records = {source: segments for source, segments in records.items()
                    if source in selected_sources}
-    from stash_thresholds import marker_context
+    from stash_ai.thresholds import marker_context
     app = marker_context(app, records)
     if report is not None:
         segments = [segment for values in records.values() for segment in values]
@@ -241,7 +241,7 @@ def evidence(app, store, scene_id, core_policies, scene_policies, metrics=None, 
                 with FrameIndex(app, scene_frames, core_policies, cache=store.cache, tag_policies=scene_policies) as scene_index:
                     scene_hits.extend(shared_scene_contributions(app, scene_index, scene_records, scene_policies, scene_hits, metrics))
     if app.CREATE_MARKERS:
-        from stash_occurrences import occurrence_contributions
+        from stash_ai.occurrences import occurrence_contributions
         report = getattr(store, 'report', None)
         with report.measure('occurrence_compute') if report is not None else nullcontext():
             spans.extend(occurrence_contributions(app, scene_hits, frame_records(scene_records, records), spans, core_policies, scene_policies, metrics))
@@ -250,9 +250,9 @@ def evidence(app, store, scene_id, core_policies, scene_policies, metrics=None, 
 
 def marker_segment_signature(segment):
     # Cleanup must use exactly the evidence that supported published markers.
-    from stash_performance import StoredSegment, segment_digest
-    from stash_thresholds import OVERRIDE
-    from stash_scene_cache import SCENE_OVERRIDE
+    from stash_ai.performance import StoredSegment, segment_digest
+    from stash_ai.thresholds import OVERRIDE
+    from stash_ai.scene_cache import SCENE_OVERRIDE
     if isinstance(segment, StoredSegment) and hasattr(segment, "_evidence_digest"):
         return segment._evidence_digest
     if OVERRIDE not in segment and SCENE_OVERRIDE not in segment:
@@ -264,8 +264,8 @@ def marker_segment_signature(segment):
 
 
 def marker_contributions(app, records, core_policies, *, index=None, metrics=None, cache=None, tag_policies=None):
-    from stash_fusion import FrameIndex
-    from stash_thresholds import marker_context
+    from stash_ai.fusion import FrameIndex
+    from stash_ai.thresholds import marker_context
     app = marker_context(app, records)
     if index is not None:
         return _marker_contributions(app, records, core_policies, index, metrics, tag_policies)
@@ -274,8 +274,8 @@ def marker_contributions(app, records, core_policies, *, index=None, metrics=Non
 
 
 def _marker_contributions(app, records, core_policies, index, metrics, tag_policies):
-    from stash_temporal import consensus_seeds, build_options, build_markers as temporal_markers
-    from stash_exclusions import policies_or_empty, core_policies_with_global
+    from stash_ai.temporal import consensus_seeds, build_options, build_markers as temporal_markers
+    from stash_ai.exclusions import policies_or_empty, core_policies_with_global
     tag_policies = policies_or_empty(tag_policies if tag_policies is not None else getattr(index, 'tag_policies', None))
     effective_cores = core_policies_with_global(core_policies, tag_policies)
     report = getattr(index, 'report', None)
@@ -292,7 +292,7 @@ def _marker_contributions(app, records, core_policies, index, metrics, tag_polic
                                tuple((raw_label(tag), score) for tag, score in frame["tags"]
                                      if tag not in app.MARKER_TAG_BLOCKLIST and tag not in tag_policies[model]))
                               for frame in segment["items"]]
-                    from stash_thresholds import marker_threshold
+                    from stash_ai.thresholds import marker_threshold
                     kwargs = dict(threshold=marker_threshold(segment, app.MARKER_THRESHOLDS), seeds=seeds,
                                   identity=segment["meta"].get("frame_input_signature"))
                     defer_extras = app.TEMPORAL_POLICY.shared_marker_extras and signatures[id(segment)] in index.by_signature
@@ -319,10 +319,10 @@ def _marker_contributions(app, records, core_policies, index, metrics, tag_polic
                     raise ValueError("Unsupported stored marker evidence.")
                 for item in values:
                     if item["tag"] not in effective_cores[model] and item["tag"] not in app.MARKER_TAG_BLOCKLIST:
-                        from stash_fusion import prune_blocked_extras
+                        from stash_ai.fusion import prune_blocked_extras
                         spans.append(prune_blocked_extras({**item, "source": model, "meta": segment["meta"]},
                                                          app.MARKER_TAG_BLOCKLIST | tag_policies[model]))
-    from stash_fusion import enrich
+    from stash_ai.fusion import enrich
     with stage(report, 'marker_fusion'):
         return enrich(app, records, core_policies, spans, signatures, index, metrics)
 
@@ -330,15 +330,15 @@ def _marker_contributions(app, records, core_policies, index, metrics, tag_polic
 def cleanup_support(app, store, scene_id, spans, selected, core_policies, tag_policies=None):
     """Re-evaluate revoked votes, bounded by the already-published source ranges."""
     from types import SimpleNamespace
-    from stash_temporal import TemporalPolicy
-    from stash_fusion import prune_blocked_extras, refresh_clipped_evidence
-    from stash_exclusions import policies_or_empty
+    from stash_ai.temporal import TemporalPolicy
+    from stash_ai.fusion import prune_blocked_extras, refresh_clipped_evidence
+    from stash_ai.exclusions import policies_or_empty
     tag_policies = policies_or_empty(tag_policies)
     records, rebuilt, available_by_source = None, {}, {}
     cleaned = []
     for span in spans:
         if span.get('derived') == 'occurrence':
-            from stash_occurrences import cleanup_occurrence
+            from stash_ai.occurrences import cleanup_occurrence
             point = cleanup_occurrence(app, store, scene_id, span, selected, core_policies, tag_policies)
             if point is not None:
                 cleaned.append(point)
@@ -435,11 +435,11 @@ def sync_merged(app, stash, resolver, store, scene, scene_hits, spans, *, migrat
     """Reconcile only script-owned markers and recorded scene associations."""
     scene_id = str(scene["id"])
     report = report or getattr(store, 'report', None)
-    from stash_exclusions import excluded_names
-    from stash_occurrences import OCCURRENCE_TAG, is_occurrence
-    from stash_marker_groups import for_resolver
+    from stash_ai.exclusions import excluded_names
+    from stash_ai.occurrences import OCCURRENCE_TAG, is_occurrence
+    from stash_ai.marker_groups import for_resolver
     groups = for_resolver(app, resolver)
-    from stash_recovery import publications
+    from stash_ai.recovery import publications
     blocked_names = excluded_names(tag_policies)
     previous_ranges = []
     if app.CREATE_MARKERS and (not stash.has_end_time or not app.MARKER_USE_END_TIME):
@@ -641,7 +641,7 @@ def sync_merged(app, stash, resolver, store, scene, scene_hits, spans, *, migrat
     publication = None
     with stage(report, 'publication_fingerprint'):
         if publication_key is not None and not resolver.missing:
-            from stash_performance import projected_scene, scene_fingerprint
+            from stash_ai.performance import projected_scene, scene_fingerprint
             observed = projected_scene(scene, resolver, created, updates, deletes,
                                        final_ids if app.APPLY_SCENE_TAGS else existing_ids)
             if observed is None:
@@ -653,7 +653,7 @@ def sync_merged(app, stash, resolver, store, scene, scene_hits, spans, *, migrat
 
 
 def capture_outputs(app, config, vocabulary, cues, predictions, frames, analysis=None):
-    from stash_temporal import marker_floor
+    from stash_ai.temporal import marker_floor
     cue_data = [[cue.start, cue.end, cue.image, list(cue.rect)] for cue in cues]
     meta = {"origin": "inference", "captured_at": now(), "repo": config.source.repo,
             "revision": config.source.revision, "vocabulary_sha256": app.vocabulary_digest(vocabulary.labels),
@@ -680,13 +680,13 @@ def capture_outputs(app, config, vocabulary, cues, predictions, frames, analysis
 
 
 def has_outputs(app, store, scene_id, model):
-    from stash_progress import completed, output_kinds
+    from stash_ai.progress import completed, output_kinds
     return completed(store, scene_id, model, output_kinds(app))
 
 
 def run_merged(app, settings, args, catalogs, hierarchy, core_policies, scene_policies):
-    from stash_diagnostics import MergeDiagnostics
-    from stash_runtime import RunReport
+    from stash_ai.diagnostics import MergeDiagnostics
+    from stash_ai.runtime import RunReport
     from tqdm import tqdm
     report = getattr(args, 'report', None) or RunReport(getattr(args, 'verbose', False), tqdm.write)
     args.report = report
@@ -697,10 +697,10 @@ def run_merged(app, settings, args, catalogs, hierarchy, core_policies, scene_po
 
 def _run_merged(app, settings, args, catalogs, hierarchy, core_policies, scene_policies):
     from tqdm import tqdm
-    import stash_progress as progress
-    import stash_performance as performance
+    from stash_ai import progress
+    from stash_ai import performance
     stats = Counter()
-    from stash_runtime import RunReport
+    from stash_ai.runtime import RunReport
     report = getattr(args, 'report', None) or RunReport(getattr(args, 'verbose', False), tqdm.write)
     with StateStore(args.state_db, scope_for(app.STASH_URL), app.DRY_RUN,
                     cache_bytes=int(getattr(args, 'ram_cache_gb', 0) * 2**30),
@@ -708,7 +708,7 @@ def _run_merged(app, settings, args, catalogs, hierarchy, core_policies, scene_p
                     memory_budget_bytes=int(getattr(args, 'ram_budget_gb', 32) * 2**30)) as store:
         store.report = report
         if getattr(args, 'abandon_pending', False):
-            from stash_recovery import abandon
+            from stash_ai.recovery import abandon
             stats.update(abandon(store, report.write))
         stash = app.create_stash_client(app.DRY_RUN)
         stash.report = report
@@ -750,12 +750,12 @@ def _run_merged(app, settings, args, catalogs, hierarchy, core_policies, scene_p
                         stats["errors"] += 1
                         report.issue('read sources', '', scene_id, exc, app.safe_error(exc, api_key=app.STASH_API_KEY))
             if getattr(args, 'rethreshold_markers', False) or getattr(args, 'rethreshold_scenes', False):
-                from stash_thresholds import rethreshold
+                from stash_ai.thresholds import rethreshold
                 if stats['errors']:
                     report.finish('Thresholds (not applied)', stats, store.cache)
                     return 1
                 if getattr(args, 'rethreshold_scenes', False):
-                    from stash_scene_cache import rethreshold as rethreshold_scenes
+                    from stash_ai.scene_cache import rethreshold as rethreshold_scenes
                     stats.update(rethreshold_scenes(app, store, scenes, settings, report, markers=args.rethreshold_markers))
                 else:
                     stats.update(rethreshold(app, store, scenes, settings, report))
@@ -798,7 +798,7 @@ def _run_merged(app, settings, args, catalogs, hierarchy, core_policies, scene_p
                                     stats["reused"] += 1
                                     continue
                                 if args.resume and not args.restart:
-                                    from stash_thresholds import reuse
+                                    from stash_ai.thresholds import reuse
                                     if reuse(app, store, scene_id, config, identity, cues, media.hashes, kinds):
                                         if current['publication_reason'] != 'reused':
                                             collapsed = progress.collapse_replacement_history(
@@ -883,15 +883,15 @@ def _run_merged(app, settings, args, catalogs, hierarchy, core_policies, scene_p
                                                  (final_key, store.scope, merge_key))
             app.print_hierarchy_summary(resolver)
             if args.prune_empty_tags and not stats["errors"]:
-                from stash_prune import prune_tags
+                from stash_ai.prune import prune_tags
                 # Groups use the projected marker counts below, including in dry-run.
                 stats.update(prune_tags(stash, args.prune_prefixes, report=report.detail,
                                         skip_marker_groups=app.CREATE_MARKERS))
             elif not stats['errors']:
-                from stash_exclusions import prune_excluded_definitions
+                from stash_ai.exclusions import prune_excluded_definitions
                 stats.update(prune_excluded_definitions(app, stash, scene_policies, report.detail))
             if app.CREATE_MARKERS and not stats['errors']:
-                from stash_marker_groups import for_resolver, prune_groups
+                from stash_ai.marker_groups import for_resolver, prune_groups
                 stats.update(prune_groups(stash, report.detail,
                     usage_delta=for_resolver(app, resolver).usage_delta))
         finally:
@@ -901,7 +901,7 @@ def _run_merged(app, settings, args, catalogs, hierarchy, core_policies, scene_p
 
 
 def run_hierarchy(app, args, catalogs, hierarchy, tag_policies=None):
-    from stash_exclusions import policies_or_empty
+    from stash_ai.exclusions import policies_or_empty
     tag_policies = policies_or_empty(tag_policies)
     stash = app.create_stash_client(app.DRY_RUN)
     try:
@@ -922,8 +922,8 @@ def run_hierarchy(app, args, catalogs, hierarchy, tag_policies=None):
 def cleanup_scene(app, stash, resolver, store, current, settings, selected, args,
                   core_policies, scene_policies, scoped_tags, report):
     """Reconcile one affected scene; refresh only after actual writes."""
-    from stash_exclusions import excluded_names
-    from stash_scene import cleanup_scene_support
+    from stash_ai.exclusions import excluded_names
+    from stash_ai.scene import cleanup_scene_support
     scene_id, stats = str(current["id"]), Counter()
     if getattr(args, 'output_mode', 'merged') == 'merged':
         published = {}
@@ -933,7 +933,7 @@ def cleanup_scene(app, stash, resolver, store, current, settings, selected, args
             snapshot, pending = store.snapshot(scene_id, kind, borrow=True)
             if pending is not None:
                 raise RuntimeError("An interrupted merge is pending; run --merge-only before cleanup.")
-            from stash_recovery import reconcile
+            from stash_ai.recovery import reconcile
             published[kind], recovered = reconcile(app, stash, store, current, kind, snapshot)
             stats['publications_reconciled'] += int(recovered)
         if app.CREATE_MARKERS and published.get("markers") is None and any(
@@ -972,9 +972,9 @@ def cleanup_scene(app, stash, resolver, store, current, settings, selected, args
 def run_cleanup(app, settings, args, core_policies, scene_policies):
     """Global bans operate on tags; source-specific changes reconcile affected scenes."""
     from tqdm import tqdm
-    from stash_cleanup import CleanupClient
-    from stash_exclusions import selected_policies, prune_excluded_definitions
-    from stash_runtime import RunReport
+    from stash_ai.cleanup import CleanupClient
+    from stash_ai.exclusions import selected_policies, prune_excluded_definitions
+    from stash_ai.runtime import RunReport
     selected = {config.source.key for config in settings}
     scoped_tags = selected_policies(scene_policies, selected)
     stats = Counter()
@@ -985,7 +985,7 @@ def run_cleanup(app, settings, args, core_policies, scene_policies):
                     allow_cleanup=wide or getattr(args, 'abandon_pending', False), cleanup_preview=True,
                     memory_budget_bytes=int(getattr(args, 'ram_budget_gb', 32) * 2**30)) as store:
         if getattr(args, 'abandon_pending', False):
-            from stash_recovery import abandon
+            from stash_ai.recovery import abandon
             stats.update(abandon(store, report.write))
         stash = app.create_stash_client(app.DRY_RUN)
         resolver = None
@@ -995,7 +995,7 @@ def run_cleanup(app, settings, args, core_policies, scene_policies):
             client = CleanupClient(stash) if strategy in ('auto', 'sql') else None
             sql = None
             if strategy in ('auto', 'sql') and client.sql_available:
-                from stash_cleanup_sql import SQLCleanup
+                from stash_ai.cleanup_sql import SQLCleanup
                 candidate = SQLCleanup(client, args, stats, report)
                 try:
                     candidate.probe()
@@ -1005,7 +1005,7 @@ def run_cleanup(app, settings, args, core_policies, scene_policies):
                         raise
                     report.write('SQL cleanup unavailable (' + app.safe_error(exc, api_key=app.STASH_API_KEY) + '); scanning scenes instead.')
             if sql is not None:
-                from stash_cleanup_sql import run_sql_cleanup
+                from stash_ai.cleanup_sql import run_sql_cleanup
                 report.write('Cleanup by indexed SELECT: ID cursors, no global marker counts; writes use Stash API.')
                 if store.cleanup_pending:
                     stats['cleanup_resumed'] = 1
@@ -1037,7 +1037,7 @@ def run_cleanup(app, settings, args, core_policies, scene_policies):
                     report.progress(bar, stats)
             if not stats['errors']:
                 if getattr(args, 'prune_empty_tags', False):
-                    from stash_prune import prune_tags
+                    from stash_ai.prune import prune_tags
                     stats.update(sql.prune(prefixes=args.prune_prefixes, skip_marker_groups=app.CREATE_MARKERS)
                                  if sql is not None else prune_tags(stash, args.prune_prefixes, report=report.detail,
                                                                   skip_marker_groups=app.CREATE_MARKERS))
@@ -1047,7 +1047,7 @@ def run_cleanup(app, settings, args, core_policies, scene_policies):
                     else:
                         stats.update(prune_excluded_definitions(app, stash, scoped_tags, report.detail))
                 if app.CREATE_MARKERS:
-                    from stash_marker_groups import for_resolver, prune_groups
+                    from stash_ai.marker_groups import for_resolver, prune_groups
                     delta = Counter(getattr(cleanup_stash, 'marker_group_usage_delta', {}))
                     if resolver is not None:
                         delta.update(for_resolver(app, resolver).usage_delta)

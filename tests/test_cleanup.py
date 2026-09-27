@@ -5,10 +5,10 @@ import sqlite3
 import pytest
 import yaml
 
-import stash_ai as app
-import stash_cleanup as cleanup
-import stash_merge as merge
-from stash_taggers import WD
+from stash_ai import cli as app
+from stash_ai import cleanup
+from stash_ai import merge
+from stash_ai.taggers import WD
 from tests.helpers.evidence import span
 from tests.helpers.evidence import hit
 

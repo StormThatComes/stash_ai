@@ -29,7 +29,7 @@ python -m benchmarks.benchmark_performance --project C:\poprzednia_paczka\stash_
 python -m benchmarks.benchmark_merge_pipeline --project C:\poprzednia_paczka\stash_ai
 ```
 
-Wskazany katalog musi zawierać pliki aplikacji `stash_ai.py` i `stash_*.py`.
+Wskazany katalog musi zawierać launcher `stash_ai.py` i pakiet `stash_ai/`.
 Narzędzia pomiarowe oraz makieta Stash pochodzą z bieżącego repozytorium,
 więc porównanie nie wymaga testów w starej instalacji. Porównuj identyczne dane
 i parametry; przy zmianie zachowania aplikacji mogą się różnić również hashe.

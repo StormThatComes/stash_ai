@@ -68,12 +68,12 @@ def initialize(store):
 
 
 PUBLICATION_CODE_FILES = (
-    'stash_ai.py', 'stash_merge.py', 'stash_temporal.py', 'stash_fusion.py',
-    'stash_scene.py', 'stash_occurrences.py', 'stash_exclusions.py', 'stash_cleanup.py',
-    'stash_taggers.py', 'stash_tags.py', 'stash_domain.py', 'stash_performance.py',
-    'stash_timeline.py', 'stash_merge_sql.py', 'stash_marker_groups.py', 'stash_recovery.py',
-    'stash_thresholds.py', 'stash_scene_cache.py', 'stash_state.py', 'stash_state_db.py',
-    'stash_client.py', 'stash_transport.py',
+    'cli.py', 'merge.py', 'temporal.py', 'fusion.py',
+    'scene.py', 'occurrences.py', 'exclusions.py', 'cleanup.py',
+    'taggers.py', 'tags.py', 'domain.py', 'performance.py',
+    'timeline.py', 'merge_sql.py', 'marker_groups.py', 'recovery.py',
+    'thresholds.py', 'scene_cache.py', 'state.py', 'state_db.py',
+    'client.py', 'transport.py',
 )
 
 
@@ -110,7 +110,7 @@ def checked(store, scene, policy, fingerprint):
 
 
 def check_reason(store, scene, policy, fingerprint):
-    from stash_preview import check_source
+    from stash_ai.preview import check_source
     check_source(store)
     row = store.connection.execute('SELECT policy,fingerprint FROM merge_checks WHERE scope=? AND scene=?',
         (store.scope, str(scene))).fetchone()
@@ -131,7 +131,7 @@ def record_check(store, scene, policy, fingerprint):
 
 
 def catalog_fingerprint(resolver):
-    from stash_marker_groups import PREFIX, ROOT
+    from stash_ai.marker_groups import PREFIX, ROOT
     return digest(sorted((name, str(t['id']), t.get('description'), t.get('ignore_auto_tag'), sorted(
         (str(p['id']), p['name'], p.get('description')) for p in t.get('parents', [])))
         for name, t in resolver.records.items() if t and (name.startswith(('ai:', PREFIX)) or name == ROOT)))

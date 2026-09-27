@@ -7,9 +7,9 @@ import sys
 import numpy as np
 import pytest
 import yaml
-import stash_ai as app
-import stash_taggers as adapters
-from stash_taggers import JOYTAG, WD, DTQ, OPPAI, SOURCES, ModelSettings, Vocabulary, load_vocabulary, select_models, validate_scores, prepare_wd, prepare_dtq, prepare_oppai, OnnxTagger
+from stash_ai import cli as app
+from stash_ai import taggers as adapters
+from stash_ai.taggers import JOYTAG, WD, DTQ, OPPAI, SOURCES, ModelSettings, Vocabulary, load_vocabulary, select_models, validate_scores, prepare_wd, prepare_dtq, prepare_oppai, OnnxTagger
 
 
 from tests.helpers.stash import Stash

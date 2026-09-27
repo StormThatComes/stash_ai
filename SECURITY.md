@@ -5,7 +5,7 @@
 `STASH_API_KEY` powinien pochodzić z environment lub lokalnego mechanizmu
 sekretów i nigdy nie powinien być commitowany do repozytorium.
 
-Aktualny `stash_ai.py` nadal zawiera historyczny fallback klucza API.
+Aktualny `stash_ai/cli.py` nadal zawiera historyczny fallback klucza API.
 Traktuj ten fallback jako **skompromitowany**. Nie używaj go do produkcyjnego
 Stash; wygeneruj nowy klucz i ustaw go jawnie:
 

@@ -95,7 +95,7 @@ def inspect_database(path, scope):
     if not path.is_file():
         raise FileNotFoundError(f"State database does not exist: {path}")
 
-    from stash_state import APPLICATION_ID
+    from stash_ai.state import APPLICATION_ID
 
     with _readonly(path) as db:
         application_id = db.execute("PRAGMA application_id").fetchone()[0]
@@ -258,7 +258,7 @@ def _tick(progress, amount=1, phase=None):
 
 
 def _decoded_payload(blob, expected):
-    from stash_state_codec import decode
+    from stash_ai.state_codec import decode
     value = decode(blob)
     if not isinstance(value, expected):
         raise ValueError("Unexpected persisted payload shape.")
@@ -310,7 +310,7 @@ def _check_results_and_index(db, tables, errors, progress=None):
             expected_populated = int(any(segment["items"] for segment in segments))
             if current is not None:
                 if indexed_signature is None:
-                    from stash_thresholds import indexed_signature as signature_for
+                    from stash_ai.thresholds import indexed_signature as signature_for
                     indexed_signature = signature_for
                 expected_signature = indexed_signature(current)
             else:
@@ -503,7 +503,7 @@ def check_database(path, scope, *, show_progress=False):
     if not path.is_file():
         raise FileNotFoundError(f"State database does not exist: {path}")
 
-    from stash_state import APPLICATION_ID
+    from stash_ai.state import APPLICATION_ID
 
     errors, warnings = Counter(), Counter()
     with _readonly(path) as db:
@@ -787,7 +787,7 @@ def format_report(report):
 
 
 def run_mode(args, stash_url):
-    from stash_state import scope_for
+    from stash_ai.state import scope_for
 
     scope = scope_for(stash_url)
     try:

@@ -1,7 +1,7 @@
 """Shared offline helpers; no test collection or fixture registration."""
 from copy import deepcopy
 
-import stash_ai as app
+from stash_ai import cli as app
 
 
 class Stash:
@@ -71,7 +71,7 @@ class Stash:
     def detect_tag_hierarchy(self): pass
     def close(self): pass
     def gql(self,query,variables=None):
-        from stash_prune import REQUIRED_COUNTS
+        from stash_ai.prune import REQUIRED_COUNTS
         counts=REQUIRED_COUNTS|{'studio_count','group_count'}
         if 'CleanupCapabilities' in query:
             return {}  # This fixture exercises the older compatible API path.

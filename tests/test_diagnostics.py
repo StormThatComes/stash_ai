@@ -5,10 +5,10 @@ from types import SimpleNamespace
 
 import pytest
 
-import stash_ai as app
-import stash_merge as merge
-from stash_diagnostics import MergeDiagnostics
-from stash_runtime import RunReport
+from stash_ai import cli as app
+from stash_ai import merge
+from stash_ai.diagnostics import MergeDiagnostics
+from stash_ai.runtime import RunReport
 
 
 pytestmark = pytest.mark.usefixtures("reset_progress")
@@ -20,8 +20,8 @@ def records(path):
 
 def test_nested_timings_are_exclusive_and_failures_are_recorded(tmp_path, monkeypatch):
     clock = SimpleNamespace(value=0.0)
-    monkeypatch.setattr('stash_runtime.time.perf_counter', lambda: clock.value)
-    monkeypatch.setattr('stash_runtime.time.process_time', lambda: clock.value / 2)
+    monkeypatch.setattr('stash_ai.runtime.time.perf_counter', lambda: clock.value)
+    monkeypatch.setattr('stash_ai.runtime.time.process_time', lambda: clock.value / 2)
     report = RunReport(write=lambda _: None)
     path = tmp_path/'profile.jsonl'
     with MergeDiagnostics(report, path) as diagnostics:

@@ -8,10 +8,10 @@ import hashlib
 import json
 from urllib.parse import urlparse
 
-from stash_runtime import measured
-from stash_state_codec import encode, decode
-from stash_state_db import APPLICATION_ID, StateDatabase
-from stash_taggers import SOURCES
+from stash_ai.runtime import measured
+from stash_ai.state_codec import encode, decode
+from stash_ai.state_db import APPLICATION_ID, StateDatabase
+from stash_ai.taggers import SOURCES
 
 
 KINDS = ("scene", "markers")
@@ -32,7 +32,7 @@ class StateStore(AbstractContextManager):
     """
     def __init__(self, path, scope, dry_run=False, cache_bytes=0, *, allow_cleanup=False, cleanup_preview=False,
                  memory_budget_bytes=0):
-        from stash_runtime import RamCache
+        from stash_ai.runtime import RamCache
         self.cache = RamCache(cache_bytes, rss_budget=memory_budget_bytes)
         self.scope = scope
         self._database = None
@@ -46,19 +46,19 @@ class StateStore(AbstractContextManager):
             if self.preview_source:
                 self.preview_data_version = database.preview_data_version
             version = database.version
-            from stash_progress import initialize_progress
+            from stash_ai.progress import initialize_progress
             initialize_progress(self, version)
-            from stash_cleanup import initialize
+            from stash_ai.cleanup import initialize
             initialize(self, version)
             if self.preview_source:
                 self.connection.execute('INSERT INTO cleanup_state SELECT * FROM cleanup_source.cleanup_state WHERE scope=?', (self.scope,))
                 self.connection.commit()
                 initialize(self, version)
-            from stash_performance import initialize as initialize_performance
+            from stash_ai.performance import initialize as initialize_performance
             initialize_performance(self)
-            from stash_recovery import initialize as initialize_recovery
+            from stash_ai.recovery import initialize as initialize_recovery
             initialize_recovery(self)
-            from stash_preview import initialize as initialize_preview
+            from stash_ai.preview import initialize as initialize_preview
             initialize_preview(self)
             if self.cleanup_pending and not allow_cleanup:
                 raise RuntimeError('Global cleanup is interrupted; rerun the same --models all cleanup mode '
@@ -80,12 +80,12 @@ class StateStore(AbstractContextManager):
 
     def cached(self, key):
         # A transaction may still roll back: never cache its provisional view.
-        from stash_preview import check_source
+        from stash_ai.preview import check_source
         check_source(self)
         return None if self.connection.in_transaction else self.cache.get(key)
 
     def table(self, name):
-        from stash_preview import table
+        from stash_ai.preview import table
         return table(self, name)
 
     @measured('state_cache')
@@ -115,7 +115,7 @@ class StateStore(AbstractContextManager):
             # Retired video samples are never inputs. Remove them from the decoded
             # view without scanning/recompressing every scene during DB migration.
             for segments in records.values():
-                from stash_performance import StoredSegment
+                from stash_ai.performance import StoredSegment
                 for index, segment in enumerate(segments):
                     segment.pop("refinement", None)
                     segments[index] = StoredSegment(segment)
@@ -176,7 +176,7 @@ class StateStore(AbstractContextManager):
 
     def replace_records(self, scene, model, kind, segments):
         """Replace a segment list inside the caller's transaction, including previews."""
-        from stash_progress import index_result
+        from stash_ai.progress import index_result
         self.cache.discard(('records', str(scene), kind))
         self.cache.discard(('sources', str(scene), kind))
         self.cache.discard(('status', str(scene), model))
@@ -199,7 +199,7 @@ class StateStore(AbstractContextManager):
 
     @measured('state_write')
     def remember_legacy(self, scene, kind, data):
-        from stash_performance import freeze
+        from stash_ai.performance import freeze
         previous = self.imported_legacy(scene, kind, borrow=True)
         known = {freeze(item) for item in previous}
         fresh = [item for item in data if freeze(item) not in known]
@@ -220,7 +220,7 @@ class StateStore(AbstractContextManager):
             return cached if borrow else deepcopy(cached)
         rows = self.read_rows("SELECT published,pending FROM " + self.table('snapshots') + " WHERE scope=? AND scene=? AND kind=?",
                               (self.scope, str(scene), kind))
-        from stash_cleanup import mask_snapshot
+        from stash_ai.cleanup import mask_snapshot
         values = tuple(mask_snapshot(self, self.unpack(item), kind) if item is not None else None
                        for item in rows[0]) if rows else (None, None)
         self.retain(key, values)
@@ -232,7 +232,7 @@ class StateStore(AbstractContextManager):
 
     @measured('state_write')
     def prepare(self, scene, snapshots):
-        from stash_cleanup import stamp_snapshot
+        from stash_ai.cleanup import stamp_snapshot
         with self.connection:
             for kind, data in snapshots.items():
                 self.cache.discard(('snapshot', str(scene), kind))
@@ -246,8 +246,8 @@ class StateStore(AbstractContextManager):
 
     @measured('state_write')
     def publish(self, scene, snapshots):
-        from stash_cleanup import stamp_snapshot
-        from stash_recovery import clear_publications
+        from stash_ai.cleanup import stamp_snapshot
+        from stash_ai.recovery import clear_publications
         with self.connection:
             for kind, data in snapshots.items():
                 self.cache.discard(('snapshot', str(scene), kind))
@@ -260,7 +260,7 @@ class StateStore(AbstractContextManager):
     @measured('state_write')
     def commit_prepared(self, scene, kinds, *, publication=None):
         """Promote durable intent without encoding large evidence a second time."""
-        from stash_recovery import clear_publications
+        from stash_ai.recovery import clear_publications
         with self.connection:
             for kind in kinds:
                 self.cache.discard(('snapshot', str(scene), kind))
@@ -271,5 +271,5 @@ class StateStore(AbstractContextManager):
                     raise RuntimeError('Publication intent disappeared before commit.')
                 clear_publications(self, scene, kind)
             if publication is not None:
-                from stash_performance import record_check
+                from stash_ai.performance import record_check
                 record_check(self, scene, *publication)

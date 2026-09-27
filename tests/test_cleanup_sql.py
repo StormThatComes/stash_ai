@@ -7,11 +7,11 @@ from types import SimpleNamespace
 
 import pytest
 
-import stash_ai as app
-import stash_cleanup_sql as fast
-import stash_merge as merge
-from stash_cleanup import CleanupClient
-from stash_taggers import WD
+from stash_ai import cli as app
+from stash_ai import cleanup_sql as fast
+from stash_ai import merge
+from stash_ai.cleanup import CleanupClient
+from stash_ai.taggers import WD
 from tests.helpers.cleanup import FastStash
 from tests.helpers.cleanup import install
 from tests.helpers.cleanup import options
@@ -265,8 +265,8 @@ def test_sql_pruning_limits_counters_to_possible_empty_tags(tmp_path, monkeypatc
 @pytest.mark.parametrize('strategy', ['auto', 'sql'])
 @pytest.mark.parametrize('dry', [False, True])
 def test_legacy_interrupted_global_cleanup_can_resume_using_sql(tmp_path, monkeypatch, strategy, dry):
-    from stash_progress import digest
-    from stash_taggers import SOURCES
+    from stash_ai.progress import digest
+    from stash_ai.taggers import SOURCES
 
     stash = SQLStash(dry=dry)
     stash.marker(merge.AI, 'blocked', '2')  # Marker 1 was already deleted by legacy.

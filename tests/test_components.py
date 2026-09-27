@@ -5,9 +5,9 @@ import time
 import pytest
 import requests
 
-from stash_client import StashClient, safe_error
-from stash_state_codec import encode, decode
-from stash_tags import TagResolver
+from stash_ai.client import StashClient, safe_error
+from stash_ai.state_codec import encode, decode
+from stash_ai.tags import TagResolver
 
 
 def client(url, key, *, markers=True, page_size=100, timeout=30):
@@ -77,7 +77,7 @@ def test_read_only_graphql_retries_transient_failures(monkeypatch, failure):
 
 
 def test_allowlisted_sql_read_mutation_is_retried(monkeypatch):
-    from stash_merge_sql import OPERATION, SQL
+    from stash_ai.merge_sql import OPERATION, SQL
     current = client('http://stash.test', 'private-key')
     calls = 0
 

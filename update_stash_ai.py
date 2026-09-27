@@ -22,6 +22,14 @@ import uuid
 REPOSITORY = "StormThatComes/stash_ai"
 UPDATER = "update_stash_ai.py"
 RETIRED_FILES = frozenset({"joytag_stash_markers.py", "stash_refine.py"})
+LEGACY_MODULES = frozenset("stash_" + name + ".py" for name in (
+    "cleanup", "cleanup_sql", "client", "db", "developer_report", "diagnostics", "domain",
+    "exclusions", "fusion", "joytag", "marker_groups", "merge", "merge_sql", "model_report",
+    "occurrences", "performance", "preview", "progress", "prune", "recovery", "runtime",
+    "scene", "scene_cache", "state", "state_codec", "state_db", "taggers", "tags", "temporal",
+    "thresholds", "timeline", "transport",
+))
+REQUIRED_FILES = frozenset({"stash_ai.py", UPDATER, "stash_ai/__init__.py", "stash_ai/cli.py"})
 META = ".stash-ai-update"
 STATE = META + "/state.json"
 JOURNAL = META + "/journal.json"
@@ -35,10 +43,15 @@ class UpdateError(RuntimeError):
 
 
 def allowed(name):
-    """Root files only: never recurse into tests, workflows, models or envs."""
-    return name not in RETIRED_FILES and bool(re.fullmatch(
-        r"(?:stash_[A-Za-z0-9_]+\.py|"
-        r"update_stash_ai\.py|[A-Za-z0-9][A-Za-z0-9_.-]*\.yml)", name))
+    """Install entry points, package Python files and root YAML configuration."""
+    return bool(re.fullmatch(
+        r"(?:stash_ai\.py|update_stash_ai\.py|[A-Za-z0-9][A-Za-z0-9_.-]*\.yml|"
+        r"stash_ai/(?:[A-Za-z_][A-Za-z0-9_]*/)*[A-Za-z_][A-Za-z0-9_]*\.py)", name))
+
+
+def historical_file(name):
+    """Accept former flat modules in tracked history and recovery journals only."""
+    return allowed(name) or name in RETIRED_FILES or bool(re.fullmatch(r"stash_[A-Za-z0-9_]+\.py", name))
 
 
 def blob_sha(data):
@@ -185,6 +198,9 @@ def launch_application(filename):
     try:
         with InstallationLock(root):
             require_complete(root)
+            if any(not safe_path(root, name).is_file() for name in ("stash_ai/__init__.py", "stash_ai/cli.py")):
+                raise UpdateError("The stash_ai package is missing. If upgrading from the flat layout, "
+                                  "run python update_stash_ai.py once more to finish the migration.")
             runpy.run_path(str(root / "stash_ai.py"), run_name="__main__",
                            init_globals={"_STASH_INSTALL_LOCKED": True})
     except UpdateError as exc:
@@ -247,7 +263,7 @@ class GitHub:
             sha, tree_sha = commit["sha"], commit["commit"]["tree"]["sha"]
             if not SHA.fullmatch(sha) or not SHA.fullmatch(tree_sha):
                 raise ValueError
-            tree = self.get("git/trees/" + tree_sha)
+            tree = self.get("git/trees/" + tree_sha + "?recursive=1")
             if tree.get("truncated") or not isinstance(tree.get("tree"), list):
                 raise ValueError
             files, requirements = {}, None
@@ -264,8 +280,8 @@ class GitHub:
                 if name.casefold() in {n.casefold() for n in files}:
                     raise ValueError
                 files[name] = entry["sha"]
-            if not {"stash_ai.py", UPDATER}.issubset(files):
-                raise UpdateError("main does not contain the application and updater yet.")
+            if not REQUIRED_FILES.issubset(files):
+                raise UpdateError("main does not contain the complete application package and updater.")
             return sha, files, requirements
         except (KeyError, TypeError, ValueError):
             raise UpdateError("Invalid or incomplete GitHub file tree; refusing partial installation.") from None
@@ -292,7 +308,7 @@ def load_state(root):
             if not isinstance(state[key], dict):
                 raise ValueError
             for name, sha in state[key].items():
-                if not (allowed(name) or name in RETIRED_FILES) or not SHA.fullmatch(sha):
+                if not historical_file(name) or not SHA.fullmatch(sha):
                     raise ValueError
         if not SHA.fullmatch(state["commit"]):
             raise ValueError
@@ -326,7 +342,7 @@ def plan_update(root, state, commit, remote, requirements, *, overwrite_configs=
             continue
         actions.append({"path": name, "before": current, "after": sha})
         baseline[name] = sha
-    for name in sorted((set(baseline) | RETIRED_FILES) - set(remote)):
+    for name in sorted((set(baseline) | RETIRED_FILES | LEGACY_MODULES) - set(remote)):
         if name.endswith(".yml"):
             continue  # Retired configurations may still contain user settings.
         current = file_sha(safe_path(root, name))
@@ -346,12 +362,13 @@ def journal_write(root, identity, phase):
 
 
 def clear_bytecode(root, entries):
-    cache = safe_path(root, "__pycache__")
-    if not cache.exists():
-        return
     for entry in entries:
         if entry["path"].endswith(".py"):
-            for path in cache.glob(Path(entry["path"]).stem + ".*.pyc"):
+            module = Path(entry["path"])
+            cache = safe_path(root, (module.parent / "__pycache__").as_posix())
+            if not cache.exists():
+                continue
+            for path in cache.glob(module.stem + ".*.pyc"):
                 safe_path(root, path.relative_to(root).as_posix()).unlink()
 
 
@@ -411,7 +428,7 @@ def load_transaction(root, identity=None):
             raise ValueError
         for entry in entries:
             name = entry["path"]
-            if not (name == STATE or allowed(name) or name in RETIRED_FILES
+            if not (name == STATE or historical_file(name)
                     or (name.endswith(".yml.incoming") and allowed(name[:-9]))):
                 raise ValueError
             if name.casefold() in names:
@@ -443,7 +460,8 @@ def put_entry(root, entry, data):
     target = safe_path(root, entry["path"])
     if data is None:
         target.unlink(missing_ok=True)
-        sync_dir(target.parent)
+        if target.parent.exists():
+            sync_dir(target.parent)
     else:
         atomic_write(target, data, mode=0o600 if entry["path"] == STATE else entry["mode"])
 

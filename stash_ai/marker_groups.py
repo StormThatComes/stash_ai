@@ -155,7 +155,7 @@ class PreviewUsage:
 
 def prune_groups(stash, report=print, *, candidate_ids=None, usage_delta=None):
     """Only owned, globally unused leaf groups are pruned; the root is retained."""
-    from stash_prune import prune_tags
+    from stash_ai.prune import prune_tags
     if candidate_ids is None:
         candidate_ids = [str(t['id']) for t in stash.iter_tags() if t['name'].startswith(PREFIX)]
     if not candidate_ids:
@@ -169,9 +169,9 @@ def prune_groups(stash, report=print, *, candidate_ids=None, usage_delta=None):
 def run_backfill(app, args):
     """Repair group membership on existing owned markers, without source replay."""
     from tqdm import tqdm
-    from stash_merge import AI
-    from stash_state import StateStore, scope_for
-    from stash_occurrences import OCCURRENCE_TAG
+    from stash_ai.merge import AI
+    from stash_ai.state import StateStore, scope_for
+    from stash_ai.occurrences import OCCURRENCE_TAG
     stats, report = Counter(), args.report
     with StateStore(args.state_db, scope_for(app.STASH_URL), app.DRY_RUN) as store:
         if store.has_pending_publications():

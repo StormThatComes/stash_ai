@@ -8,8 +8,8 @@ import json
 from pathlib import Path
 import zlib
 
-from stash_state_codec import encode, decode
-from stash_taggers import metadata_files, weight_files
+from stash_ai.state_codec import encode, decode
+from stash_ai.taggers import metadata_files, weight_files
 
 PREDICTION_FORMAT = 2
 
@@ -55,7 +55,7 @@ def initialize_progress(store, previous_version):
 
 
 def index_result(store, scene, model, kind, segments, scope=None):
-    from stash_thresholds import indexed_signature
+    from stash_ai.thresholds import indexed_signature
     inference = next((segment for segment in reversed(segments)
                       if segment["meta"].get("origin") == "inference"), None)
     store.connection.execute("INSERT INTO result_index VALUES (?,?,?,?,?,?,?) "
@@ -88,7 +88,7 @@ def completed(store, scene, model, kinds, signature=None):
 
 def reuse_replacement_policy(store, scene, model, kinds, signature, replace):
     """Reuse current inference while applying replacement semantics to retained history."""
-    from stash_thresholds import indexed_signature
+    from stash_ai.thresholds import indexed_signature
     matches = {}
     records = {}
     for kind in kinds:
@@ -146,7 +146,7 @@ def collapse_replacement_history(store, scene, model, kinds, replace):
 
 
 def clear_checkpoint(store, scene, model):
-    from stash_preview import delete
+    from stash_ai.preview import delete
     for table in ("checkpoints", "checkpoint_frames", "checkpoint_analysis"):
         delete(store, table, scene, model)
         store.connection.execute(f"DELETE FROM {table} WHERE scope=? AND scene=? AND model=?",
@@ -170,7 +170,7 @@ def finish(store, scene, model, outputs, replace):
         store._put(scene, model, outputs, replace)
         clear_checkpoint(store, scene, model)
         for kind in outputs:
-            from stash_preview import delete
+            from stash_ai.preview import delete
             delete(store, 'refresh_requests', scene, model, kind)
             store.connection.execute("DELETE FROM refresh_requests WHERE scope=? AND scene=? AND model=? AND kind=?",
                                      (store.scope, str(scene), model, kind))
@@ -207,7 +207,7 @@ def model_identity(app, config, vocabulary):
     files = [stamp(config.model_dir / name) for name in (*metadata_files(config.source), *weight_files(config))]
     loader = {}
     if config.source.key == "joytag":
-        from stash_joytag import LOADER_REVISION, LOADER_SHA256
+        from stash_ai.joytag import LOADER_REVISION, LOADER_SHA256
         loader = {"loader": {"revision": LOADER_REVISION, "sha256": LOADER_SHA256}}
     return {"format": PREDICTION_FORMAT, "source": config.source.key, "repo": config.source.repo,
             "revision": config.source.revision, "files": files, **loader,

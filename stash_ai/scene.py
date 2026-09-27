@@ -3,8 +3,8 @@ from collections import defaultdict
 from dataclasses import asdict
 import math
 
-from stash_taggers import SOURCES
-from stash_temporal import append_interval
+from stash_ai.taggers import SOURCES
+from stash_ai.temporal import append_interval
 
 
 def shared_scene_contributions(app, index, scene_records, policies, existing=(), metrics=None):
@@ -14,7 +14,7 @@ def shared_scene_contributions(app, index, scene_records, policies, existing=(),
     observations were not retained. An incomplete cache cannot prove absence.
     Only matching scene/frame inference records can support a shared scene tag.
     """
-    from stash_merge import marker_segment_signature, raw_label
+    from stash_ai.merge import marker_segment_signature, raw_label
     policy = app.TEMPORAL_POLICY
     if not policy.enabled or not policy.shared_scene_tags:
         return []
@@ -137,10 +137,10 @@ def shared_scene_contributions(app, index, scene_records, policies, existing=(),
 def cleanup_scene_support(app, store, scene_id, hits, selected, policies):
     """Revoke only published sources, under their frozen rules and input records."""
     from types import SimpleNamespace
-    from stash_fusion import FrameIndex
-    from stash_merge import marker_segment_signature
-    from stash_progress import digest
-    from stash_temporal import TemporalPolicy
+    from stash_ai.fusion import FrameIndex
+    from stash_ai.merge import marker_segment_signature
+    from stash_ai.progress import digest
+    from stash_ai.temporal import TemporalPolicy
     cleaned, rebuilt, records = [], {}, {}
     for hit in hits:
         if hit.get('derived') != 'shared_scene_frames':
@@ -157,7 +157,7 @@ def cleanup_scene_support(app, store, scene_id, hits, selected, policies):
                 if kind not in records:
                     available = store.records(scene_id, kind, borrow=True)
                     if kind == 'markers':
-                        from stash_scene_cache import frame_records
+                        from stash_ai.scene_cache import frame_records
                         available = frame_records(store.records(scene_id, 'scene', borrow=True), available)
                     records[kind] = {source: {marker_segment_signature(segment): segment for segment in segments}
                                      for source, segments in available.items()}
@@ -172,7 +172,7 @@ def cleanup_scene_support(app, store, scene_id, hits, selected, policies):
             context.TEMPORAL_POLICY = TemporalPolicy.from_snapshot(options['policy'])
             context.MAX_TAGS = options['max_tags']
             context.SCENE_THRESHOLDS = options.get('scene_thresholds', {})
-            from stash_scene_cache import views, frame_records
+            from stash_ai.scene_cache import views, frame_records
             context, matching['scene'] = views(context, matching['scene'])
             matching['markers'] = frame_records(matching['scene'], matching['markers'])
             frozen = {source: frozenset(options['scene_exclusions'][source]) |

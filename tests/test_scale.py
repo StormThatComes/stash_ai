@@ -8,14 +8,14 @@ import threading
 import numpy as np
 import pytest
 
-import stash_ai as app
-import stash_fusion as fusion
-import stash_merge as merge
-import stash_progress as progress
-from stash_runtime import RamCache, RunReport, retained_size
-from stash_scene import shared_scene_contributions, cleanup_scene_support
-from stash_taggers import SOURCES
-from stash_temporal import SceneAccumulator, TemporalPolicy
+from stash_ai import cli as app
+from stash_ai import fusion
+from stash_ai import merge
+from stash_ai import progress
+from stash_ai.runtime import RamCache, RunReport, retained_size
+from stash_ai.scene import shared_scene_contributions, cleanup_scene_support
+from stash_ai.taggers import SOURCES
+from stash_ai.temporal import SceneAccumulator, TemporalPolicy
 from tests.helpers.evidence import segment
 from tests.helpers.evidence import frames
 

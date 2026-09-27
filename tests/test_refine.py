@@ -13,11 +13,11 @@ from types import SimpleNamespace
 from PIL import Image
 import pytest
 
-import stash_ai as app
-import stash_merge as merge
-import stash_progress as progress
-from stash_temporal import TemporalPolicy, load_policy
-from stash_taggers import SOURCES
+from stash_ai import cli as app
+from stash_ai import merge
+from stash_ai import progress
+from stash_ai.temporal import TemporalPolicy, load_policy
+from stash_ai.taggers import SOURCES
 from tests.helpers.evidence import segment
 
 

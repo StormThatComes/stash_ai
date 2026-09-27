@@ -1,6 +1,6 @@
 """Set-based Stash scene snapshots. SELECT only; native mutations stay unchanged."""
 import json
-from stash_runtime import measured
+from stash_ai.runtime import measured
 
 OPERATION = '''mutation StashAIMergeReadSQL($sql: String!, $args: [Any]) {
     querySQL(sql: $sql, args: $args) { columns rows }

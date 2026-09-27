@@ -5,12 +5,12 @@ import sqlite3
 
 import pytest
 
-import stash_ai as app
-import stash_merge as merge
-import stash_progress as progress
-import stash_scene_cache as scene_cache
-import stash_thresholds as thresholds
-from stash_taggers import SOURCES
+from stash_ai import cli as app
+from stash_ai import merge
+from stash_ai import progress
+from stash_ai import scene_cache
+from stash_ai import thresholds
+from stash_ai.taggers import SOURCES
 from tests.helpers.evidence import paired_records, policies
 
 pytestmark = pytest.mark.usefixtures('reset_temporal')

@@ -11,7 +11,7 @@ import heapq
 from itertools import groupby
 import math
 
-from stash_taggers import SOURCES
+from stash_ai.taggers import SOURCES
 
 OCCURRENCE_TAG = 'ai:marker:occurrence'
 
@@ -26,7 +26,7 @@ def _number(value, low=0.0, high=float('inf')):
 
 
 def _run(meta):
-    from stash_performance import digest
+    from stash_ai.performance import digest
     signature = meta.get('inference_signature')
     return (signature, meta.get('frame_input_signature')) if signature else ('metadata', digest(meta))
 
@@ -105,7 +105,7 @@ def occurrence_contributions(app, scene_hits, records, spans, core_policies, tag
                 yield row['start'], source, meta, signature, 'frame', values
 
     streams = [iter(sorted(peaks, key=lambda event: event[0]))]
-    from stash_merge import marker_segment_signature
+    from stash_ai.merge import marker_segment_signature
     for source, segments in records.items():
         for segment in segments:
             if segment['mode'] != 'frames':
@@ -148,7 +148,7 @@ def occurrence_contributions(app, scene_hits, records, spans, core_policies, tag
     ranked = sorted(best.values(), key=lambda item: (tuple(-v for v in item[0]), item[1]['tag']))
     limited = 0
     if app.MAX_MARKERS_PER_SCENE:
-        from stash_merge import union_intervals
+        from stash_ai.merge import union_intervals
         remaining = max(0, app.MAX_MARKERS_PER_SCENE - len(union_intervals(spans, borrow=True)))
         limited = max(0, len(ranked) - remaining)
         ranked = ranked[:remaining]
@@ -161,7 +161,7 @@ def occurrence_contributions(app, scene_hits, records, spans, core_policies, tag
 
 def cleanup_occurrence(app, store, scene_id, point, selected, cores, tags):
     """Revoke published witnesses without moving the point or adding new votes."""
-    from stash_scene import cleanup_scene_support
+    from stash_ai.scene import cleanup_scene_support
     if point['tag'] in app.MARKER_TAG_BLOCKLIST:
         return None
     hits = cleanup_scene_support(app, store, scene_id, point['scene_evidence'], selected, tags)

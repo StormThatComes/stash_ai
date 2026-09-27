@@ -4,10 +4,10 @@ import json
 
 import pytest
 
-import stash_ai as app
-import stash_cleanup_sql as fast
-import stash_marker_groups as groups
-import stash_merge as merge
+from stash_ai import cli as app
+from stash_ai import cleanup_sql as fast
+from stash_ai import marker_groups as groups
+from stash_ai import merge
 from tests.helpers.cleanup import install, options
 from tests.helpers.cleanup_sql import SQLStash
 from tests.helpers.evidence import span
