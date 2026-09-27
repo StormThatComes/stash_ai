@@ -162,6 +162,13 @@ progów, jeśli wszystkie wymagane obserwacje są dostępne.
 
 `--no-temporal` wyłącza te reguły i przywraca prostsze zachowanie bazowe.
 
+Po zmianie `marker_continue_ratio`, `--merge-only` sprawdza, czy zapisany cache
+markerów obejmuje wymagany próg kontynuacji. Jeśli próg retencji jest wyższy,
+skrypt zgłosi konieczność inferencji przed publikacją danej sceny, również
+w dry-run. Sprawdzany jest efektywny `marker_threshold`, także po rethresholdingu.
+Starsze klatki bez metadanych retencji i importowane zakresy zachowują
+dotychczasowe zachowanie.
+
 Po zmianie `scene_support_ratio`, `--merge-only` przelicza statystyki scen
 z zapisanych klatek, również bez zmiany `scene_threshold`. Surowe obserwacje
 pozostają w bazie, więc można wrócić do poprzedniej wartości. Jeśli wymagany

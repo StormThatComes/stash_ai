@@ -43,6 +43,25 @@ def _score(value):
     return type(value) in (int, float) and math.isfinite(value) and 0 <= value <= 1
 
 
+def validate_marker_cache(app, records):
+    """Check retained coverage before cached frames can build markers or votes."""
+    from stash_ai.temporal import marker_floor
+    for model, segments in records.items():
+        for segment in segments:
+            meta = segment['meta']
+            # Imported spans and old frames without retention metadata keep
+            # their existing semantics; no original support floor can be proven.
+            if segment['mode'] != 'frames' or 'marker_score_floor' not in meta:
+                continue
+            threshold = marker_threshold(segment, getattr(app, 'MARKER_THRESHOLDS', None))
+            if not _score(threshold):
+                raise ValueError(f'{model}: invalid cached marker threshold; run inference.')
+            needed = marker_floor(app.TEMPORAL_POLICY, threshold)
+            floor = meta['marker_score_floor']
+            if not _score(floor) or floor > needed:
+                raise ValueError(f'{model}: marker cache floor {floor!r} exceeds required {needed:g}; run inference.')
+
+
 def validate(app, store, scene, config, *, check_scene=True):
     """Reject incomplete evidence; a missing detection is never treated as zero."""
     from stash_ai.temporal import marker_floor
