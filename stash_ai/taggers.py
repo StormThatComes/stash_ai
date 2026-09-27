@@ -8,6 +8,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from stash_ai.vocabulary import (
+    CATEGORY_NAMES,
+    ensure_files,
+    load_oppai_vocabulary,
+    load_vocabulary,
+    metadata_files,
+    validate_labels,
+    weight_files,
+)
+
+
 
 @dataclass(frozen=True)
 class ModelSource:
@@ -84,17 +95,6 @@ def select_models(values: list[str]) -> list[str]:
     if unknown:
         raise ValueError(f"Unknown models: {', '.join(sorted(unknown))}. Choose joytag, wd, dtq, oppai, or all.")
     return list(dict.fromkeys(names))
-
-
-from stash_ai.vocabulary import (
-    CATEGORY_NAMES,
-    ensure_files,
-    load_oppai_vocabulary,
-    load_vocabulary,
-    metadata_files,
-    validate_labels,
-    weight_files,
-)
 
 
 def prepare_oppai(image: Any, size: int = 448) -> tuple[Any, Any]:
