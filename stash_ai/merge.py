@@ -276,6 +276,8 @@ def marker_contributions(app, records, core_policies, *, index=None, metrics=Non
 def _marker_contributions(app, records, core_policies, index, metrics, tag_policies):
     from stash_ai.temporal import consensus_seeds, build_options, build_markers as temporal_markers
     from stash_ai.exclusions import policies_or_empty, core_policies_with_global
+    from stash_ai.thresholds import validate_marker_cache
+    validate_marker_cache(app, records)
     tag_policies = policies_or_empty(tag_policies if tag_policies is not None else getattr(index, 'tag_policies', None))
     effective_cores = core_policies_with_global(core_policies, tag_policies)
     report = getattr(index, 'report', None)
