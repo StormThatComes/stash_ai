@@ -17,16 +17,12 @@ import struct
 import sys
 import zlib
 
-from stash_ai.db import BLOB_COLUMNS, KNOWN_VERSIONS
+from stash_ai.db.common import (
+    BLOB_COLUMNS, KNOWN_KINDS, KNOWN_MODELS, KNOWN_VERSIONS,
+    STATE_TABLES as KNOWN_TABLES, column_names, connect_readonly, table_names,
+)
 
 REPORT_FORMAT = 1
-KNOWN_MODELS = frozenset(("joytag", "wd", "dtq", "oppai"))
-KNOWN_KINDS = frozenset(("scene", "markers"))
-KNOWN_TABLES = frozenset((
-    "results", "snapshots", "legacy_imports", "result_index", "refresh_requests",
-    "checkpoints", "checkpoint_frames", "checkpoint_analysis", "cleanup_state",
-    "merge_checks", "recovery_publications", "recovery_cleanups",
-))
 
 
 class Distribution:
@@ -113,18 +109,6 @@ def _safe_kind(value):
     return value if value in KNOWN_KINDS else "other"
 
 
-def _readonly(path):
-    return sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)
-
-
-def _tables(db):
-    return {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-
-
-def _columns(db, table):
-    return {row[1] for row in db.execute(f"PRAGMA table_info({table})")}
-
-
 def _row_count(db, table):
     return db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
 
@@ -134,7 +118,7 @@ def _blob_table_report(db, tables):
     for table, configured in BLOB_COLUMNS.items():
         if table not in tables:
             continue
-        available = _columns(db, table)
+        available = column_names(db, table)
         columns = [column for column in configured if column in available]
         item = {"rows": _row_count(db, table), "blob_columns": {}}
         for column in columns:
@@ -373,13 +357,13 @@ def build_report(path):
 
     from stash_ai.state import APPLICATION_ID
 
-    with _readonly(path) as db:
+    with connect_readonly(path) as db:
         application_id = db.execute("PRAGMA application_id").fetchone()[0]
         schema_version = db.execute("PRAGMA user_version").fetchone()[0]
         if application_id != APPLICATION_ID or schema_version not in KNOWN_VERSIONS:
             raise ValueError("Not a supported stash-taggers state DB.")
 
-        tables = _tables(db)
+        tables = table_names(db)
         quick_check = db.execute("PRAGMA quick_check(1)").fetchone()[0]
         page_size = db.execute("PRAGMA page_size").fetchone()[0]
         page_count = db.execute("PRAGMA page_count").fetchone()[0]

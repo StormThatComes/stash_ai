@@ -145,6 +145,72 @@ def test_installed_application_loads_extracted_modules_without_runtime_dependenc
     assert '--cleanup-only' in result.stdout
 
 
+def database_module_installation(root):
+    files = {name: data for name, data in application_files().items()
+             if not name.startswith('stash_ai/db/')}
+    files['stash_ai/db.py'] = b'LEGACY_DATABASE_MODULE = True\n'
+    installed(root, Remote(files))
+
+
+def test_database_module_moves_to_package_and_remains_importable(tmp_path):
+    database_module_installation(tmp_path)
+    result = subprocess.run(
+        [sys.executable, '-c', 'from stash_ai.db import LEGACY_DATABASE_MODULE'],
+        cwd=tmp_path, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    cache = tmp_path / 'stash_ai/__pycache__'
+    assert list(cache.glob('db.*.pyc'))
+
+    assert updater.update(tmp_path, Remote(application_files())) == 0
+
+    assert not (tmp_path / 'stash_ai/db.py').exists()
+    assert not list(cache.glob('db.*.pyc'))
+    # Exercise the existing API through the installed package with stdlib only.
+    result = subprocess.run([sys.executable, '-c', '''
+from stash_ai.db import check_database, compact_database, inspect_database
+from stash_ai.developer_report import build_report
+for operation, args in (
+    (check_database, ('missing.sqlite3', 'scope')),
+    (compact_database, ('missing.sqlite3', 'scope')),
+    (inspect_database, ('missing.sqlite3', 'scope')),
+    (build_report, ('missing.sqlite3',)),
+):
+    try:
+        operation(*args)
+    except FileNotFoundError:
+        pass
+    else:
+        raise AssertionError('Missing database must be rejected')
+'''], cwd=tmp_path, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert not (tmp_path / 'missing.sqlite3').exists()
+
+
+def test_failed_database_package_migration_restores_module(tmp_path, monkeypatch):
+    database_module_installation(tmp_path)
+    before = snapshot(tmp_path)
+    previous_state = (tmp_path / updater.STATE).read_bytes()
+    identity, _ = stage(tmp_path, Remote(application_files()))
+    original = updater.put_entry
+
+    def fail_after_removing_module(root, entry, data):
+        original(root, entry, data)
+        if entry['path'] == 'stash_ai/db.py' and data is None:
+            raise OSError('database module migration interrupted')
+
+    monkeypatch.setattr(updater, 'put_entry', fail_after_removing_module)
+    with pytest.raises(OSError, match='database module migration interrupted'):
+        updater.apply_transaction(tmp_path, identity)
+
+    assert snapshot(tmp_path) == before
+    assert (tmp_path / updater.STATE).read_bytes() == previous_state
+    assert not (tmp_path / updater.JOURNAL).exists()
+    result = subprocess.run(
+        [sys.executable, '-c', 'from stash_ai.db import LEGACY_DATABASE_MODULE'],
+        cwd=tmp_path, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+
 def test_flat_installation_moves_modules_and_preserves_user_data(tmp_path):
     flat_installation(tmp_path)
     preserved = {'tagger_sources.sqlite3': b'cached inference', '.env': b'credentials',

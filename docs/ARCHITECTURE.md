@@ -71,6 +71,21 @@ Dry-run korzysta z tymczasowej bazy: współczesne schematy odczytuje
 przez nakładkę ze źródłem otwartym tylko do odczytu, a starsze kopiuje przed
 migracją. Format zapisanych danych i kolejność migracji pozostają bez zmian.
 
+Obsługa samodzielnych komend bazy znajduje się w pakiecie `stash_ai/db/`:
+
+| Moduł | Odpowiedzialność |
+| --- | --- |
+| `stash_ai/db/__init__.py` | Dotychczasowe importy `stash_ai.db` i dispatch komend `--db-report`, `--db-check`, `--db-compact`. |
+| `stash_ai/db/inspection.py` | Odczyt stanu i zajętości bazy oraz formatowanie raportu agregatów. |
+| `stash_ai/db/checks.py` | Głęboka kontrola BLOB-ów, indeksów, checkpointów i relacji stanu w jednej transakcji odczytu; raport błędów i ostrzeżeń. |
+| `stash_ai/db/compaction.py` | Blokada procesu, warunki bezpiecznego VACUUM i porównanie agregatów przed i po kompaktowaniu. |
+| `stash_ai/db/common.py` | Wspólne definicje obsługiwanego schematu, połączenie SQLite tylko do odczytu i helpery zapytań. |
+
+`stash_ai/developer_report.py` korzysta z definicji schematu i helperów odczytu
+z `stash_ai.db.common`; nadal odpowiada za własny format anonimowego raportu JSON
+i ograniczone pamięciowo rozkłady. Pakiet `db` nie uruchamia migracji ani nie
+zmienia protokołu blokady używanego przez `StateStore`.
+
 Updater instaluje pliki Pythona z pakietu `stash_ai/`, również z jego podkatalogów.
 Pozostaje samodzielnym skryptem stdlib, aby odzyskiwanie przerwanej aktualizacji
 działało także przy niekompletnym pakiecie. Migrację starego updatera opisuje
