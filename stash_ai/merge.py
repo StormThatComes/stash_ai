@@ -328,98 +328,9 @@ def _marker_contributions(app, records, core_policies, index, metrics, tag_polic
 
 
 def cleanup_support(app, store, scene_id, spans, selected, core_policies, tag_policies=None):
-    """Re-evaluate revoked votes, bounded by the already-published source ranges."""
-    from types import SimpleNamespace
-    from stash_ai.temporal import TemporalPolicy
-    from stash_ai.fusion import prune_blocked_extras, refresh_clipped_evidence
-    from stash_ai.exclusions import policies_or_empty
-    tag_policies = policies_or_empty(tag_policies)
-    records, rebuilt, available_by_source = None, {}, {}
-    cleaned = []
-    for span in spans:
-        if span.get('derived') == 'occurrence':
-            from stash_ai.occurrences import cleanup_occurrence
-            point = cleanup_occurrence(app, store, scene_id, span, selected, core_policies, tag_policies)
-            if point is not None:
-                cleaned.append(point)
-            continue
-        own_blocked = app.MARKER_TAG_BLOCKLIST | (tag_policies[span['source']] if span['source'] in selected else frozenset())
-        if span.get('derived') != 'shared_frames' and span['source'] in selected and (
-                span['tag'] in core_policies[span['source']] or span['tag'] in own_blocked):
-            continue
-        core_affected = any(source in selected and (span["tag"] in core_policies[source] or
-                            span["tag"] in tag_policies[source] or span["tag"] in app.MARKER_TAG_BLOCKLIST)
-                            for source in span.get("support_sources", []))
-        extra_labels = set(span.get('extra_tags', [])) | set(span.get('extra_support', {}))
-        extra_sources = set(span.get('frame_context', {})) | {span['source']}
-        extras_affected = any(extra_labels & tag_policies[source] for source in extra_sources & selected)
-        affected = core_affected or extras_affected
-        if not affected:
-            cleaned.append(prune_blocked_extras(span, app.MARKER_TAG_BLOCKLIST))
-            continue
-        if not span.get('build_options') or not span.get('evidence_signature'):
-            # Imported ranges have no frame proofs. Their extras belong to the
-            # captured source and can still be removed without loading assets.
-            cleaned.append(prune_blocked_extras(span, own_blocked))
-            continue
-        records = store.records(scene_id, "markers", borrow=True) if records is None else records
-        required = span.get("frame_context") or {**span.get("support_context", {}), span["source"]: [span["evidence_signature"]]}
-        matching = {}
-        for source, signatures in required.items():
-            if source not in available_by_source:
-                available_by_source[source] = {marker_segment_signature(s): s for s in records.get(source, [])}
-            available = available_by_source[source]
-            if not set(signatures) <= set(available):
-                raise RuntimeError("Consensus sources changed since publication; run --merge-only before cleanup.")
-            matching[source] = [available[signature] for signature in signatures]
-        options = span["build_options"]
-        key = json.dumps([options, required], sort_keys=True)
-        if key not in rebuilt:
-            context = SimpleNamespace(**vars(app))
-            context.TEMPORAL_POLICY = TemporalPolicy.from_snapshot(options["policy"])
-            context.MARKER_THRESHOLDS = options.get("marker_thresholds", {})
-            for name, value in options["settings"].items():
-                setattr(context, name, value)
-            context.MARKER_TAG_BLOCKLIST = set(options["blocklist"]) | app.MARKER_TAG_BLOCKLIST
-            policies = {source: frozenset(options["core_exclusions"][source]) |
-                        (core_policies[source] if source in selected else frozenset()) for source in SOURCES}
-            frozen_tags = {source: frozenset(options.get('tag_exclusions', {}).get(source, [])) |
-                           (tag_policies[source] if source in selected else frozenset()) for source in SOURCES}
-            # Cleanup can revoke old evidence but cannot add newly cached votes.
-            rebuilt[key] = (marker_contributions(context, matching, policies, tag_policies=frozen_tags),
-                            context, policies, matching, frozen_tags)
-        candidates, context, policies, matching, frozen_tags = rebuilt[key]
-        for item in candidates:
-            if item["tag"] != span["tag"]:
-                continue
-            if span.get("derived") != "shared_frames" and (item["source"] != span["source"] or item.get("derived")):
-                continue
-            start, end = max(span["start"], item["start"]), min(span["end"], item["end"])
-            if end <= start:
-                continue
-            clipped = {**item, "start": start, "end": end}
-            if (start, end) != (item["start"], item["end"]):
-                clipped.update(hits=None, strong_hits=None, extra_evidence=[], cleanup_clipped=True)
-                if clipped.get("derived") == "shared_frames":
-                    clipped.update(shared_hits=None, shared_strong_hits=None)
-                # Legacy proofs can only be clipped; compatible frame records
-                # below allow exact scores and hit proofs to be rebuilt.
-                clipped["extra_tags"] = sorted(set(item.get("extra_tags", [])) & set(span.get("extra_tags", [])))
-                clipped["extra_support"] = {label: dict(
-                    intervals=[[max(a,start), min(b,end)] for a,b in evidence["intervals"] if min(b,end)>max(a,start)],
-                    sample_times=[t for t in evidence["sample_times"] if start <= t < end])
-                    for label,evidence in item.get("extra_support", {}).items()}
-                if not refresh_clipped_evidence(context, clipped, matching, policies, frozen_tags):
-                    continue
-            # Cleanup only revokes published extras; a normal merge can admit
-            # additional labels freed by a changed per-frame cap.
-            new_extras = (set(clipped.get('extra_tags', [])) | set(clipped.get('extra_support', {}))) - extra_labels
-            clipped = prune_blocked_extras(clipped, new_extras)
-            clipped = prune_blocked_extras(clipped, app.MARKER_TAG_BLOCKLIST)
-            if clipped not in cleaned:
-                cleaned.append(clipped)
-    return cleaned
-
+    """Compatibility wrapper for cleanup support re-evaluation."""
+    from stash_ai.merge_cleanup import cleanup_support as _cleanup_support
+    return _cleanup_support(app, store, scene_id, spans, selected, core_policies, tag_policies)
 
 def overlaps(marker, wanted, tolerance):
     start, end = marker["seconds"], marker.get("end_seconds")
@@ -721,146 +632,15 @@ def run_hierarchy(app, args, catalogs, hierarchy, tag_policies=None):
 
 def cleanup_scene(app, stash, resolver, store, current, settings, selected, args,
                   core_policies, scene_policies, scoped_tags, report):
-    """Reconcile one affected scene; refresh only after actual writes."""
-    from stash_ai.exclusions import excluded_names
-    from stash_ai.scene import cleanup_scene_support
-    scene_id, stats = str(current["id"]), Counter()
-    if getattr(args, 'output_mode', 'merged') == 'merged':
-        published = {}
-        for kind, enabled in (("scene", app.APPLY_SCENE_TAGS), ("markers", app.CREATE_MARKERS)):
-            if not enabled:
-                continue
-            snapshot, pending = store.snapshot(scene_id, kind, borrow=True)
-            if pending is not None:
-                raise RuntimeError("An interrupted merge is pending; run --merge-only before cleanup.")
-            from stash_ai.recovery import reconcile
-            published[kind], recovered = reconcile(app, stash, store, current, kind, snapshot)
-            stats['publications_reconciled'] += int(recovered)
-        if app.CREATE_MARKERS and published.get("markers") is None and any(
-                app.owned_marker(marker, AI) for marker in current.get("scene_markers", [])):
-            raise RuntimeError("AI marker source state is missing; restore the original --state-db.")
-        hits = (published.get("scene") or {}).get("contributions", [])
-        spans = (published.get("markers") or {}).get("contributions", [])
-        clean_hits = cleanup_scene_support(app, store, scene_id, hits, selected, scene_policies)
-        clean_spans = cleanup_support(app, store, scene_id, spans, selected, core_policies, scene_policies)
-        blocked_names = excluded_names(scoped_tags)
-        forbidden_present = (app.APPLY_SCENE_TAGS and any(tag['name'] in blocked_names for tag in current.get('tags', []))) or (
-            app.CREATE_MARKERS and any(tag['name'] in blocked_names for marker in current.get('scene_markers', [])
-                                      for tag in [marker['primary_tag'], *marker.get('tags', [])]))
-        if clean_hits != hits or clean_spans != spans or forbidden_present:
-            result = sync_merged(app, stash, resolver, store, current, clean_hits, clean_spans,
-                                 migrate=False, cleanup=True, report=report, tag_policies=scoped_tags)
-            stats.update(result)
-            if not stash.dry_run and any(result[name] for name in (
-                    'scene_tags_updated', 'markers_created', 'markers_updated', 'markers_deleted')):
-                current = stash.find_scene(scene_id)
-    # Most scenes have no old source-prefixed outputs. Reading the same scene
-    # once for every configured model previously dominated no-op cleanup.
-    for config in settings:
-        result, source = Counter(), config.source
-        if app.APPLY_SCENE_TAGS:
-            result.update(app.cleanup_scene_tags(stash, current, scene_policies[source.key], source, report.detail))
-        if app.CREATE_MARKERS:
-            result.update(app.cleanup_scene_marker_cores(stash, current, core_policies[source.key], report.detail,
-                                                        source, scene_policies[source.key]))
-        stats.update(result)
-        if not stash.dry_run and any(result[name] for name in ('scene_tags_cleaned', 'markers_deleted', 'markers_updated')):
-            current = stash.find_scene(scene_id)
-    return stats
-
+    """Compatibility wrapper for one-scene cleanup reconciliation."""
+    from stash_ai.merge_cleanup import cleanup_scene as _cleanup_scene
+    return _cleanup_scene(app, stash, resolver, store, current, settings, selected, args,
+                          core_policies, scene_policies, scoped_tags, report)
 
 def run_cleanup(app, settings, args, core_policies, scene_policies):
-    """Global bans operate on tags; source-specific changes reconcile affected scenes."""
-    from tqdm import tqdm
-    from stash_ai.cleanup import CleanupClient
-    from stash_ai.exclusions import selected_policies, prune_excluded_definitions
-    from stash_ai.runtime import RunReport
-    selected = {config.source.key for config in settings}
-    scoped_tags = selected_policies(scene_policies, selected)
-    stats = Counter()
-    report = getattr(args, 'report', None) or RunReport(getattr(args, 'verbose', False), tqdm.write)
-    wide = not args.scene_id and selected == set(SOURCES)
-    with StateStore(args.state_db, scope_for(app.STASH_URL), app.DRY_RUN,
-                    cache_bytes=int(getattr(args, 'ram_cache_gb', 0) * 2**30),
-                    allow_cleanup=wide or getattr(args, 'abandon_pending', False), cleanup_preview=True,
-                    memory_budget_bytes=int(getattr(args, 'ram_budget_gb', 32) * 2**30)) as store:
-        if getattr(args, 'abandon_pending', False):
-            from stash_ai.recovery import abandon
-            stats.update(abandon(store, report.write))
-        stash = app.create_stash_client(app.DRY_RUN)
-        resolver = None
-        try:
-            scene_ids, cleanup_stash = args.scene_id or None, stash
-            strategy = getattr(args, 'cleanup_strategy', 'auto')
-            client = CleanupClient(stash) if strategy in ('auto', 'sql') else None
-            sql = None
-            if strategy in ('auto', 'sql') and client.sql_available:
-                from stash_ai.cleanup_sql import SQLCleanup
-                candidate = SQLCleanup(client, args, stats, report)
-                try:
-                    candidate.probe()
-                    sql = candidate
-                except Exception as exc:
-                    if strategy == 'sql' or store.cleanup_pending:
-                        raise
-                    report.write('SQL cleanup unavailable (' + app.safe_error(exc, api_key=app.STASH_API_KEY) + '); scanning scenes instead.')
-            if sql is not None:
-                from stash_ai.cleanup_sql import run_sql_cleanup
-                report.write('Cleanup by indexed SELECT: ID cursors, no global marker counts; writes use Stash API.')
-                if store.cleanup_pending:
-                    stats['cleanup_resumed'] = 1
-                scene_ids, cleanup_stash = run_sql_cleanup(app, sql, store, settings, args, core_policies, scene_policies, stats)
-            elif strategy == 'sql':
-                raise RuntimeError('Stash does not expose the required SQL cleanup API. Use --cleanup-strategy scenes for compatibility.')
-            elif store.cleanup_pending:
-                raise RuntimeError('Global cleanup is interrupted and the required Stash API is unavailable; '
-                                   'restore API access and rerun the same cleanup.')
-            elif not args.scene_id:
-                report.write('Cleanup scans scenes; global findSceneMarkers filtering is disabled. SQL cleanup is faster for large collections.')
-            # An empty candidate list must not be passed to iter_scenes: its empty
-            # list convention means the whole library, not zero scenes.
-            if scene_ids != []:
-                if app.CREATE_MARKERS:
-                    stash.detect_marker_capabilities()
-                    stash.detect_tag_hierarchy()
-                resolver = app.TagResolver(cleanup_stash, source=AI, report=report.detail, create_missing=app.CREATE_MISSING)
-                bar = tqdm(cleanup_stash.iter_scenes(scene_ids), desc="Affected scene cleanup", unit="scene")
-                for current in bar:
-                    scene_id = str(current["id"])
-                    try:
-                        stats.update(cleanup_scene(app, cleanup_stash, resolver, store, current, settings, selected,
-                                                   args, core_policies, scene_policies, scoped_tags, report))
-                        stats["processed"] += 1
-                    except Exception as exc:
-                        stats["errors"] += 1
-                        report.issue('cleanup', '', scene_id, exc, app.safe_error(exc, api_key=app.STASH_API_KEY))
-                    report.progress(bar, stats)
-            if not stats['errors']:
-                if getattr(args, 'prune_empty_tags', False):
-                    from stash_ai.prune import prune_tags
-                    stats.update(sql.prune(prefixes=args.prune_prefixes, skip_marker_groups=app.CREATE_MARKERS)
-                                 if sql is not None else prune_tags(stash, args.prune_prefixes, report=report.detail,
-                                                                  skip_marker_groups=app.CREATE_MARKERS))
-                elif not stats['cleanup_fast_path'] or len({frozenset(v) for v in scene_policies.values()}) > 1:
-                    if sql is not None and app.APPLY_SCENE_TAGS and app.CREATE_MARKERS:
-                        stats.update(sql.prune(scoped_tags))
-                    else:
-                        stats.update(prune_excluded_definitions(app, stash, scoped_tags, report.detail))
-                if app.CREATE_MARKERS:
-                    from stash_ai.marker_groups import for_resolver, prune_groups
-                    delta = Counter(getattr(cleanup_stash, 'marker_group_usage_delta', {}))
-                    if resolver is not None:
-                        delta.update(for_resolver(app, resolver).usage_delta)
-                    candidates = sql.marker_group_candidates(delta) if sql is not None else None
-                    stats.update(prune_groups(stash, report.detail, candidate_ids=candidates, usage_delta=delta))
-        except Exception as exc:
-            stats['errors'] += 1
-            report.issue('cleanup', '', None, exc, app.safe_error(exc, api_key=app.STASH_API_KEY))
-        finally:
-            stash.close()
-        report.finish('Cleanup' + (' (planned)' if app.DRY_RUN else ''), stats, store.cache)
-    return int(bool(stats["errors"]))
-
+    """Compatibility wrapper around the stateful cleanup orchestrator."""
+    from stash_ai.merge_cleanup import CleanupRun
+    return CleanupRun(app, settings, args, core_policies, scene_policies).run()
 
 def explain(app, args, core_policies, scene_policies):
     label = raw_label(args.explain_tag.removeprefix(AI.prefix))
