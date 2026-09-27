@@ -4,9 +4,9 @@ from dataclasses import replace
 
 import pytest
 
-import stash_ai as app
-import stash_merge as merge
-import stash_scene_cache as cache
+from stash_ai import cli as app
+from stash_ai import merge
+from stash_ai import scene_cache as cache
 from tests.helpers.evidence import policies
 
 pytestmark = pytest.mark.usefixtures('reset_temporal')

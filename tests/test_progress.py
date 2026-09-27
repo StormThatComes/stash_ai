@@ -9,10 +9,10 @@ import threading
 import numpy as np
 import pytest
 
-import stash_ai as app
-import stash_merge as merge
-import stash_progress as progress
-from stash_taggers import ModelSettings, Vocabulary, WD, SOURCES
+from stash_ai import cli as app
+from stash_ai import merge
+from stash_ai import progress
+from stash_ai.taggers import ModelSettings, Vocabulary, WD, SOURCES
 from tests.helpers.stash import Stash
 
 
@@ -188,7 +188,7 @@ def test_v1_database_is_migrated_once_without_losing_sources(tmp_path,monkeypatc
 
 @pytest.mark.parametrize("failure",[False,True])
 def test_pruning_follows_only_successful_merge(pipeline,monkeypatch,failure):
-    import stash_prune
+    from stash_ai import prune as stash_prune
     p=pipeline;p.stash.fail_create=failure
     calls=[]
     monkeypatch.setattr(stash_prune,"prune_tags",lambda *args,**kwargs:calls.append(args) or {})

@@ -42,10 +42,10 @@ def main():
         parser.error('frames, labels and repeats must be positive')
     sys.path.insert(0, str(args.project.resolve()))
     import numpy as np
-    import stash_ai as app
-    import stash_merge as merge
-    from stash_temporal import TemporalPolicy
-    from stash_taggers import SOURCES
+    from stash_ai import cli as app
+    from stash_ai import merge
+    from stash_ai.temporal import TemporalPolicy
+    from stash_ai.taggers import SOURCES
     app.TEMPORAL_POLICY = TemporalPolicy()
     app.MARKER_TAG_BLOCKLIST = set()
     app.MARKER_MIN_HITS = 2

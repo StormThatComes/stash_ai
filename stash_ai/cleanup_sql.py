@@ -12,8 +12,8 @@ from time import monotonic
 
 from tqdm import tqdm
 
-from stash_cleanup import begin, finish
-from stash_taggers import SOURCES
+from stash_ai.cleanup import begin, finish
+from stash_ai.taggers import SOURCES
 
 READ_OPERATION = '''mutation StashAICleanupReadSQL($sql: String!, $args: [Any]) {
     querySQL(sql: $sql, args: $args) { columns rows }
@@ -137,7 +137,7 @@ class SQLCleanup:
                 return
 
     def delete_primary(self, identifier, name, source=None):
-        from stash_marker_groups import PREFIX
+        from stash_ai.marker_groups import PREFIX
         group_ids = [int(i) for i, n in self.catalog.items() if n.startswith(PREFIX)]
         prefix, owner = (source.title_prefix, source.owner_tag) if source else ('', '')
         params = (int(identifier), name, prefix, prefix, prefix, owner)
@@ -255,7 +255,7 @@ class SQLCleanup:
         return candidates
 
     def marker_group_candidates(self, usage_delta=None):
-        from stash_marker_groups import PREFIX
+        from stash_ai.marker_groups import PREFIX
         selected = {i for i, name in self.catalog.items() if name.startswith(PREFIX)}
         if not selected:
             return []
@@ -270,9 +270,9 @@ class SQLCleanup:
         return sorted(candidates)
 
     def prune(self, policies=None, prefixes=None, *, skip_marker_groups=False):
-        from stash_exclusions import excluded_names
-        from stash_marker_groups import PREFIX
-        from stash_prune import prefixes_checked, prune_tags
+        from stash_ai.exclusions import excluded_names
+        from stash_ai.marker_groups import PREFIX
+        from stash_ai.prune import prefixes_checked, prune_tags
         names = excluded_names(policies, unused=True) if policies is not None else None
         prefixes = prefixes_checked(prefixes)
         selected = {i for i, n in self.catalog.items()
@@ -288,7 +288,7 @@ class SQLCleanup:
 
 
 def candidate_names(app, selected, cores, tags):
-    from stash_merge import AI
+    from stash_ai.merge import AI
     scene, primary, extra = set(), set(), set()
     for source in [AI, *(SOURCES[s] for s in selected)]:
         relevant = selected if source == AI else {source.key}
@@ -331,8 +331,8 @@ class SQLPreview:
 
 def run_sql_cleanup(app, sql, store, settings, args, cores, tags, stats):
     """Fast common bans; only source-dependent policies need scene reconciliation."""
-    from stash_merge import AI
-    from stash_progress import digest
+    from stash_ai.merge import AI
+    from stash_ai.progress import digest
     selected = {config.source.key for config in settings}
     wide = not args.scene_id and selected == set(SOURCES)
     global_labels = frozenset.intersection(*tags.values()) if wide else frozenset()

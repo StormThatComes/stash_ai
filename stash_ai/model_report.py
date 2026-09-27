@@ -10,9 +10,9 @@ from collections import Counter
 import json
 from pathlib import Path
 
-from stash_occurrences import is_occurrence
-from stash_taggers import SOURCES
-from stash_state import StateStore, scope_for
+from stash_ai.occurrences import is_occurrence
+from stash_ai.taggers import SOURCES
+from stash_ai.state import StateStore, scope_for
 
 
 REPORT_FORMAT = 1
@@ -23,7 +23,7 @@ def _scene_labels(hits):
 
 
 def _merged_markers(spans):
-    from stash_merge import union_intervals
+    from stash_ai.merge import union_intervals
     return union_intervals(spans, borrow=True)
 
 
@@ -100,7 +100,7 @@ def _sources_for_scene(store, scene):
 
 
 def build_report(app, store, scene_ids, core_policies, scene_policies):
-    import stash_merge
+    from stash_ai import merge as stash_merge
 
     models = tuple(SOURCES)
     totals = Counter()
@@ -261,9 +261,9 @@ def write_report(report, destination):
 
 
 def run(app, args):
-    import stash_merge
-    from stash_exclusions import policies_or_empty
-    from stash_temporal import load_policy
+    from stash_ai import merge as stash_merge
+    from stash_ai.exclusions import policies_or_empty
+    from stash_ai.temporal import load_policy
 
     app.APPLY_SCENE_TAGS = True
     app.CREATE_MARKERS = True

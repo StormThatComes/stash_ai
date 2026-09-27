@@ -17,7 +17,7 @@ import struct
 import sys
 import zlib
 
-from stash_db import BLOB_COLUMNS, KNOWN_VERSIONS
+from stash_ai.db import BLOB_COLUMNS, KNOWN_VERSIONS
 
 REPORT_FORMAT = 1
 KNOWN_MODELS = frozenset(("joytag", "wd", "dtq", "oppai"))
@@ -371,7 +371,7 @@ def build_report(path):
     if not path.is_file():
         raise FileNotFoundError(f"State database does not exist: {path}")
 
-    from stash_state import APPLICATION_ID
+    from stash_ai.state import APPLICATION_ID
 
     with _readonly(path) as db:
         application_id = db.execute("PRAGMA application_id").fetchone()[0]

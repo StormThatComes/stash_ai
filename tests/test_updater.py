@@ -19,7 +19,9 @@ class Remote(updater.GitHub):
     def __init__(self, files=None):
         self.files = files or {
             "stash_ai.py": b"print('new application')\n",
-            "stash_merge.py": b"VALUE = 2\n",
+            "stash_ai/__init__.py": b"",
+            "stash_ai/cli.py": b"def main(): return 0\n",
+            "stash_ai/merge.py": b"VALUE = 2\n",
             "joytag_stash_markers.py": b"RETIRED LAUNCHER",
             "stash_refine.py": b"RETIRED MODULE",
             updater.UPDATER: Path(updater.__file__).read_bytes(),
@@ -40,7 +42,7 @@ class Remote(updater.GitHub):
         self.calls.append(endpoint)
         if endpoint == "commits/main":
             return {"sha": self.commit, "commit": {"tree": {"sha": TREE}}}
-        if endpoint == "git/trees/" + TREE:
+        if endpoint == "git/trees/" + TREE + "?recursive=1":
             return self.mutate_tree({"truncated": False, "tree": [
                 {"path": name, "type": "blob", "mode": "100644", "size": len(data),
                  "sha": updater.blob_sha(data)} for name, data in self.files.items()]})
@@ -55,6 +57,7 @@ class Remote(updater.GitHub):
 def installed(root, remote):
     commit, files, requirements = remote.snapshot()
     for name in files:
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
         (root / name).write_bytes(remote.files[name])
     updater.atomic_write(root / updater.STATE, updater.json_bytes({
         "format": 1, "commit": commit, "baseline": files,
@@ -73,7 +76,31 @@ def stage(root, remote, **kwargs):
 
 
 def snapshot(root):
-    return {p.name: p.read_bytes() for p in root.iterdir() if p.is_file() and p.name != updater.LOCK}
+    return {p.relative_to(root).as_posix(): p.read_bytes() for p in root.rglob('*')
+            if p.is_file() and p.name != updater.LOCK
+            and updater.META not in p.parts and '__pycache__' not in p.parts}
+
+
+def application_files():
+    project = Path(updater.__file__).parent
+    files = {path.relative_to(project).as_posix(): path.read_bytes()
+             for path in (project / 'stash_ai').rglob('*.py')}
+    for name in ('stash_ai.py', updater.UPDATER):
+        files[name] = (project / name).read_bytes()
+    return files
+
+
+def flat_installation(root):
+    files = {name: ('# previous ' + name + '\n').encode() for name in updater.LEGACY_MODULES}
+    files['stash_ai.py'] = b"print('previous application')\n"
+    files[updater.UPDATER] = b'# previous updater\n'
+    for name, data in files.items():
+        (root / name).write_bytes(data)
+    baseline = {name: updater.blob_sha(data) for name, data in files.items()}
+    updater.atomic_write(root / updater.STATE, updater.json_bytes({
+        'format': 1, 'commit': 'c' * 40, 'baseline': baseline,
+        'upstream': baseline, 'requirements': None}))
+    return files
 
 
 def test_real_helper_selective_install_and_self_update(tmp_path):
@@ -106,12 +133,9 @@ def test_real_helper_selective_install_and_self_update(tmp_path):
 
 
 def test_installed_application_loads_extracted_modules_without_runtime_dependencies(tmp_path):
-    project = Path(updater.__file__).parent
-    files = {path.name: path.read_bytes() for path in project.glob('stash_*.py')}
-    files[updater.UPDATER] = Path(updater.__file__).read_bytes()
+    files = application_files()
     assert updater.update(tmp_path, Remote(files)) == 0
-    for name in ('stash_domain.py', 'stash_client.py', 'stash_transport.py', 'stash_tags.py',
-                 'stash_state_codec.py', 'stash_state.py', 'stash_state_db.py'):
+    for name in files:
         assert (tmp_path / name).read_bytes() == files[name]
     # The updater CI matrix installs only pytest, so --help must remain lightweight.
     result = subprocess.run([sys.executable, str(tmp_path / 'stash_ai.py'), '--help'],
@@ -119,6 +143,83 @@ def test_installed_application_loads_extracted_modules_without_runtime_dependenc
     assert result.returncode == 0, result.stderr
     assert '--abandon-pending' in result.stdout
     assert '--cleanup-only' in result.stdout
+
+
+def test_flat_installation_moves_modules_and_preserves_user_data(tmp_path):
+    flat_installation(tmp_path)
+    preserved = {'tagger_sources.sqlite3': b'cached inference', '.env': b'credentials',
+                 'tagger_models.yml': b'local configuration', 'stash_custom.py': b'user script'}
+    for name, data in preserved.items():
+        (tmp_path / name).write_bytes(data)
+    (tmp_path / 'models').mkdir()
+    (tmp_path / 'models/weights.bin').write_bytes(b'weights')
+    assert updater.update(tmp_path, Remote(application_files())) == 0
+    assert not any((tmp_path / name).exists() for name in updater.LEGACY_MODULES)
+    assert all((tmp_path / name).read_bytes() == data for name, data in preserved.items())
+    assert (tmp_path / 'models/weights.bin').read_bytes() == b'weights'
+    # Absolute invocation from another working directory still locates the package.
+    result = subprocess.run([sys.executable, str(tmp_path / 'stash_ai.py'), '--help'],
+                            cwd=tmp_path.parent, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+
+def test_modified_legacy_module_requires_force_and_is_backed_up(tmp_path):
+    flat_installation(tmp_path)
+    local = b'# my modifications\n'
+    (tmp_path / 'stash_merge.py').write_bytes(local)
+    before = snapshot(tmp_path)
+    remote = Remote()
+    with pytest.raises(updater.UpdateError, match='force-code'):
+        updater.update(tmp_path, remote)
+    assert snapshot(tmp_path) == before
+    assert updater.update(tmp_path, remote, force_code=True) == 0
+    assert not (tmp_path / 'stash_merge.py').exists()
+    assert local in [p.read_bytes() for p in (tmp_path / updater.META / 'transactions').glob('*/old-*')]
+
+
+def test_failed_layout_migration_restores_flat_installation(tmp_path, monkeypatch):
+    flat_installation(tmp_path)
+    before = snapshot(tmp_path)
+    previous_state = (tmp_path / updater.STATE).read_bytes()
+    identity, _ = stage(tmp_path, Remote())
+    original = updater.put_entry
+    failed = False
+
+    def fail_first_package_file(root, entry, data):
+        nonlocal failed
+        if entry['path'].startswith('stash_ai/') and not failed:
+            failed = True
+            raise OSError('package write failed')
+        original(root, entry, data)
+
+    monkeypatch.setattr(updater, 'put_entry', fail_first_package_file)
+    with pytest.raises(OSError, match='package write failed'):
+        updater.apply_transaction(tmp_path, identity)
+    assert snapshot(tmp_path) == before
+    assert (tmp_path / updater.STATE).read_bytes() == previous_state
+    assert not (tmp_path / updater.JOURNAL).exists()
+
+
+def test_root_only_upgrade_explains_second_pass_then_installs_package(tmp_path):
+    # A pre-package updater sees only root files in the new commit. Reproduce
+    # its completed first pass; the new updater must then install missing files
+    # even though the recorded commit SHA already equals main.
+    files = application_files()
+    root_files = {name: data for name, data in files.items() if '/' not in name}
+    for name, data in root_files.items():
+        (tmp_path / name).write_bytes(data)
+    baseline = {name: updater.blob_sha(data) for name, data in root_files.items()}
+    updater.atomic_write(tmp_path / updater.STATE, updater.json_bytes({
+        'format': 1, 'commit': COMMIT, 'baseline': baseline, 'upstream': baseline, 'requirements': None}))
+    result = subprocess.run([sys.executable, str(tmp_path / 'stash_ai.py'), '--help'],
+                            cwd=tmp_path, capture_output=True, text=True)
+    assert result.returncode == 1
+    assert 'once more' in result.stderr and 'update_stash_ai.py' in result.stderr
+    assert 'Traceback' not in result.stderr
+    assert updater.update(tmp_path, Remote(files)) == 0
+    result = subprocess.run([sys.executable, str(tmp_path / 'stash_ai.py'), '--help'],
+                            cwd=tmp_path, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
 
 
 @pytest.mark.parametrize("option", ["check", "dry_run"])
@@ -184,10 +285,10 @@ def test_only_owned_obsolete_code_is_removed(tmp_path):
     installed(tmp_path, remote)
     (tmp_path / "stash_custom.py").write_bytes(b"user code")
     (tmp_path / "custom.yml").write_bytes(b"user config")
-    del remote.files["stash_merge.py"]
+    del remote.files["stash_ai/merge.py"]
     del remote.files["marker_core_exclusions.yml"]
     assert updater.update(tmp_path, remote) == 0
-    assert not (tmp_path / "stash_merge.py").exists()
+    assert not (tmp_path / "stash_ai/merge.py").exists()
     assert (tmp_path / "marker_core_exclusions.yml").exists()
     assert (tmp_path / "stash_custom.py").read_bytes() == b"user code"
     assert (tmp_path / "custom.yml").read_bytes() == b"user config"
@@ -213,7 +314,7 @@ def test_download_failure_never_changes_installed_files(tmp_path, failure, monke
     assert not (tmp_path / updater.JOURNAL).exists()
 
 
-@pytest.mark.parametrize("problem", ["truncated", "symlink", "case_collision", "missing_updater"])
+@pytest.mark.parametrize("problem", ["truncated", "symlink", "case_collision", "missing_updater", "missing_package"])
 def test_bad_tree_is_rejected_before_downloading(tmp_path, problem):
     remote = Remote()
     def mutate(tree):
@@ -222,10 +323,12 @@ def test_bad_tree_is_rejected_before_downloading(tmp_path, problem):
         elif problem == "symlink":
             tree["tree"][0]["mode"] = "120000"
         elif problem == "case_collision":
-            entry = dict(tree["tree"][1], path="stash_MERGE.py")
+            entry = dict(tree["tree"][3], path="stash_ai/MERGE.py")
             tree["tree"].append(entry)
-        else:
+        elif problem == 'missing_updater':
             tree["tree"] = [e for e in tree["tree"] if e["path"] != updater.UPDATER]
+        else:
+            tree['tree'] = [e for e in tree['tree'] if not e['path'].startswith('stash_ai/')]
         return tree
     remote.mutate_tree = mutate
     with pytest.raises(updater.UpdateError):
@@ -233,10 +336,10 @@ def test_bad_tree_is_rejected_before_downloading(tmp_path, problem):
     assert not any(c.startswith("git/blobs/") for c in remote.calls)
 
 
-@pytest.mark.parametrize("path", ["stash_ai.py", updater.META, "tagger_models.yml.incoming"])
+@pytest.mark.parametrize("path", ["stash_ai.py", "stash_ai", updater.META, "tagger_models.yml.incoming"])
 def test_local_symlinks_are_not_followed(tmp_path, path):
     external = tmp_path / "external"
-    if path == updater.META:
+    if path in (updater.META, 'stash_ai'):
         external.mkdir()
     else:
         external.write_bytes(b"outside")
@@ -321,7 +424,7 @@ def test_corrupt_backup_prevents_partial_recovery(tmp_path):
 def test_file_tree_is_pinned_to_one_commit(tmp_path):
     remote = Remote()
     stage(tmp_path, remote)
-    assert remote.calls[:2] == ["commits/main", "git/trees/" + TREE]
+    assert remote.calls[:2] == ["commits/main", "git/trees/" + TREE + "?recursive=1"]
     assert all(c.startswith("git/blobs/") for c in remote.calls[2:])
 
 
@@ -363,16 +466,18 @@ def test_launcher_stops_before_runtime_imports_when_update_pending(tmp_path):
     assert "ModuleNotFoundError" not in result.stderr
 
 
-def test_stale_bytecode_is_removed_before_new_sources(tmp_path):
+@pytest.mark.parametrize('module', ['stash_ai.py', 'stash_ai/merge.py'])
+def test_stale_bytecode_is_removed_before_new_sources(tmp_path, module):
     remote = Remote()
     installed(tmp_path, remote)
-    cache = tmp_path / "__pycache__"
+    cache = tmp_path / Path(module).parent / "__pycache__"
     cache.mkdir()
-    (cache / "stash_ai.cpython-311.pyc").write_bytes(b"old cache")
+    stale = cache / (Path(module).stem + '.cpython-314.pyc')
+    stale.write_bytes(b"old cache")
     (cache / "user_custom.cpython-311.pyc").write_bytes(b"user cache")
-    remote.files["stash_ai.py"] = b"NEW = 1\n"
+    remote.files[module] = b"NEW = 1\n"
     assert updater.update(tmp_path, remote) == 0
-    assert not (cache / "stash_ai.cpython-311.pyc").exists()
+    assert not stale.exists()
     assert (cache / "user_custom.cpython-311.pyc").read_bytes() == b"user cache"
 
 

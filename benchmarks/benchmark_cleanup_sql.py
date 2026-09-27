@@ -16,7 +16,7 @@ from types import SimpleNamespace
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from stash_cleanup_sql import SQL, SQLCleanup
+from stash_ai.cleanup_sql import SQL, SQLCleanup
 
 
 def main():

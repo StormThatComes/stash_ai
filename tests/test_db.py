@@ -6,10 +6,10 @@ import zlib
 
 import pytest
 
-import stash_ai as app
-import stash_db
-import stash_merge as merge
-from stash_state_codec import encode
+from stash_ai import cli as app
+from stash_ai import db as stash_db
+from stash_ai import merge
+from stash_ai.state_codec import encode
 
 
 def seed(path, scope):

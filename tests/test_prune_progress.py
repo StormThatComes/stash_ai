@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 from tqdm import tqdm
 
-import stash_prune as prune
+from stash_ai import prune
 from tests.helpers.stash import Stash
 
 

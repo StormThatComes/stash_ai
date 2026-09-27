@@ -3,9 +3,9 @@ from copy import deepcopy
 
 import numpy as np
 
-import stash_ai as app
-from stash_taggers import SOURCES
-from stash_temporal import SceneAccumulator
+from stash_ai import cli as app
+from stash_ai.taggers import SOURCES
+from stash_ai.temporal import SceneAccumulator
 
 
 def span(source, start, end, tag="common", score=.9, extras=()):

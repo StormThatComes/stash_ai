@@ -418,7 +418,7 @@ class JoyTagger:
         self.labels, self.batch_size = vocabulary.labels, settings.batch_size
         self.prepare_image = prepare_image
         ensure_files(settings, weight_files(settings))
-        from stash_joytag import load_model
+        from stash_ai.joytag import load_model
         selected = "cuda" if settings.device == "auto" and torch.cuda.is_available() else settings.device
         self.device = torch.device("cpu" if selected == "auto" else selected)
         if self.device.type == "cuda" and not torch.cuda.is_available():

@@ -29,5 +29,6 @@ Pliki w [validation/](validation/README.md) oraz zachowane wyniki w
 przydatne do regresji, ale wartości czasu i liczby testów nie są bieżącą
 specyfikacją projektu.
 
-Kod aplikacji, YAML-e i domyślna baza `tagger_sources.sqlite3` pozostają w
-katalogu głównym. Updater nie pobiera dokumentacji, testów ani benchmarków.
+Kod aplikacji jest w pakiecie `stash_ai/`. W katalogu głównym pozostają
+launchery `stash_ai.py`, `update_stash_ai.py`, YAML-e i domyślna baza
+`tagger_sources.sqlite3`. Updater nie pobiera dokumentacji, testów ani benchmarków.

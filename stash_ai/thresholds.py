@@ -7,9 +7,9 @@ OVERRIDE = 'marker_threshold_override'
 
 
 def indexed_signature(segment, inference=None):
-    from stash_progress import digest
+    from stash_ai.progress import digest
     signature = segment['meta'].get('inference_signature') if inference is None else inference
-    from stash_scene_cache import SCENE_OVERRIDE
+    from stash_ai.scene_cache import SCENE_OVERRIDE
     if SCENE_OVERRIDE in segment and OVERRIDE in segment:
         return digest([signature, {
             'scene_threshold': segment[SCENE_OVERRIDE],
@@ -24,7 +24,7 @@ def marker_context(app, records):
     """Freeze effective thresholds with each publication, including cleanup replay."""
     if hasattr(app, 'MARKER_THRESHOLDS'):
         return app
-    from stash_merge import marker_segment_signature
+    from stash_ai.merge import marker_segment_signature
     context = SimpleNamespace(**vars(app))
     context.MARKER_THRESHOLDS = {
         marker_segment_signature(segment): segment[OVERRIDE]
@@ -33,7 +33,7 @@ def marker_context(app, records):
 
 
 def marker_threshold(segment, thresholds=None):
-    from stash_merge import marker_segment_signature
+    from stash_ai.merge import marker_segment_signature
     if thresholds is not None:
         return thresholds.get(marker_segment_signature(segment), segment['meta'].get('marker_threshold'))
     return segment.get(OVERRIDE, segment['meta'].get('marker_threshold'))
@@ -45,12 +45,12 @@ def _score(value):
 
 def validate(app, store, scene, config, *, check_scene=True):
     """Reject incomplete evidence; a missing detection is never treated as zero."""
-    from stash_temporal import marker_floor
+    from stash_ai.temporal import marker_floor
     model = config.source.key
     segments = store.records(scene, 'markers', model, borrow=True).get(model, [])
     if not segments:
         raise ValueError(f'{scene}/{model}: no cached marker frames; run inference for this scene/model.')
-    from stash_scene_cache import scene_threshold
+    from stash_ai.scene_cache import scene_threshold
     scene_segments = store.records(scene, 'scene', model, borrow=True).get(model, [])
     for segment in scene_segments:
         if check_scene and segment['meta'].get('origin') == 'inference' and scene_threshold(segment) != config.scene_threshold:
@@ -90,8 +90,8 @@ def apply(app, store, scene, config, segments=None):
 
 def reuse(app, store, scene, config, identity, cues, hashes, kinds):
     """Prove the original inference matches, allowing only a marker threshold edit."""
-    from stash_progress import completed, digest
-    from stash_scene_cache import reuse as reuse_scenes
+    from stash_ai.progress import completed, digest
+    from stash_ai.scene_cache import reuse as reuse_scenes
     if reuse_scenes(app, store, scene, config, identity, cues, hashes, kinds):
         return True
     if not app.CREATE_MARKERS:

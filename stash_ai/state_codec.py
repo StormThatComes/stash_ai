@@ -2,7 +2,7 @@
 import json
 import zlib
 
-from stash_runtime import stage
+from stash_ai.runtime import stage
 
 
 def encode(value, report=None):

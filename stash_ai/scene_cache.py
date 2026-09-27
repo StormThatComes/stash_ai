@@ -9,7 +9,7 @@ def scene_threshold(segment):
 
 
 def validate_scene(app, segment, threshold):
-    from stash_thresholds import _score
+    from stash_ai.thresholds import _score
     meta = segment['meta']
     needed = threshold * (app.TEMPORAL_POLICY.scene_support_ratio if app.TEMPORAL_POLICY.enabled else 1.0)
     floor = meta.get('scene_score_floor')
@@ -22,10 +22,10 @@ def validate_scene(app, segment, threshold):
 
 def project(app, segment):
     """A transient view; original scores, statistics and provenance stay immutable."""
-    from stash_domain import Cue
-    from stash_merge import marker_segment_signature
-    from stash_performance import StoredSegment
-    from stash_temporal import SceneAccumulator
+    from stash_ai.domain import Cue
+    from stash_ai.merge import marker_segment_signature
+    from stash_ai.performance import StoredSegment
+    from stash_ai.temporal import SceneAccumulator
     if getattr(segment, '_scene_projected', False):
         return segment
     signature = marker_segment_signature(segment)
@@ -59,7 +59,7 @@ def project(app, segment):
 
 
 def views(app, records):
-    from stash_merge import marker_segment_signature
+    from stash_ai.merge import marker_segment_signature
     if not hasattr(app, 'SCENE_THRESHOLDS'):
         app = SimpleNamespace(**vars(app), SCENE_THRESHOLDS={
             marker_segment_signature(s): s[SCENE_OVERRIDE]
@@ -68,8 +68,8 @@ def views(app, records):
 
 
 def as_frames(segment):
-    from stash_merge import marker_segment_signature
-    from stash_performance import StoredSegment
+    from stash_ai.merge import marker_segment_signature
+    from stash_ai.performance import StoredSegment
     if segment['mode'] != 'scene':
         return segment
     value = StoredSegment(mode='frames', items=segment['frames'], meta={**segment['meta'],
@@ -90,7 +90,7 @@ def frame_records(scenes, markers):
 
 
 def plan(app, store, scene, config, *, scenes=True, markers=False):
-    from stash_thresholds import OVERRIDE, validate
+    from stash_ai.thresholds import OVERRIDE, validate
     result = {}
     if scenes:
         segments = store.records(scene, 'scene', config.source.key, borrow=True).get(config.source.key, [])
@@ -146,8 +146,8 @@ def rethreshold(app, store, scenes, settings, report, *, markers=False):
 
 
 def reuse(app, store, scene, config, identity, cues, hashes, kinds):
-    from stash_progress import completed, digest
-    from stash_thresholds import indexed_signature
+    from stash_ai.progress import completed, digest
+    from stash_ai.thresholds import indexed_signature
     records = {kind: store.records(scene, kind, config.source.key, borrow=True).get(config.source.key, []) for kind in kinds}
     if any(not segments for segments in records.values()):
         return False

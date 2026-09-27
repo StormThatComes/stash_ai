@@ -2,7 +2,7 @@
 from copy import deepcopy
 import sqlite3
 
-import stash_cleanup_sql as fast
+from stash_ai import cleanup_sql as fast
 from tests.helpers.cleanup import FastStash
 
 

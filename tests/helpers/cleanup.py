@@ -4,7 +4,7 @@ from copy import deepcopy
 import pytest
 import yaml
 
-import stash_ai as app
+from stash_ai import cli as app
 from tests.helpers.stash import Stash
 
 

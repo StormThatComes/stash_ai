@@ -7,10 +7,10 @@ from types import SimpleNamespace
 
 import pytest
 
-import stash_ai as app
-import stash_joytag as joytag
-import stash_progress as progress
-from stash_taggers import JOYTAG, WD, JoyTagger, ModelSettings, Vocabulary, load_vocabulary
+from stash_ai import cli as app
+from stash_ai import joytag
+from stash_ai import progress
+from stash_ai.taggers import JOYTAG, WD, JoyTagger, ModelSettings, Vocabulary, load_vocabulary
 
 pytestmark = pytest.mark.usefixtures("reset_multimodel")
 

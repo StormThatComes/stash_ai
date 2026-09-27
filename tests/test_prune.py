@@ -3,8 +3,8 @@ from copy import deepcopy
 from collections import Counter
 import pytest
 
-import stash_ai as app
-from stash_prune import prune_tags, PruneClient, REQUIRED_COUNTS
+from stash_ai import cli as app
+from stash_ai.prune import prune_tags, PruneClient, REQUIRED_COUNTS
 
 
 from tests.helpers.prune import PruneStash

@@ -5,17 +5,17 @@ import json
 
 import pytest
 
-import stash_ai as app
-import stash_merge as merge
-import stash_model_report as model_report
-from stash_temporal import TemporalPolicy
+from stash_ai import cli as app
+from stash_ai import merge
+from stash_ai import model_report
+from stash_ai.temporal import TemporalPolicy
 
 
 pytestmark = pytest.mark.usefixtures("reset_temporal")
 
 
 def empty_policies():
-    from stash_taggers import SOURCES
+    from stash_ai.taggers import SOURCES
     return {source: frozenset() for source in SOURCES}
 
 

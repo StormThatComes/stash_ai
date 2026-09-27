@@ -4,11 +4,11 @@ import sqlite3
 
 import pytest
 
-import stash_ai as app
-import stash_cleanup as cleanup
-import stash_merge as merge
-import stash_recovery as recovery
-from stash_occurrences import OCCURRENCE_TAG
+from stash_ai import cli as app
+from stash_ai import cleanup
+from stash_ai import merge
+from stash_ai import recovery
+from stash_ai.occurrences import OCCURRENCE_TAG
 from tests.helpers.cleanup import FastStash
 from tests.helpers.cleanup import install
 from tests.helpers.cleanup import options

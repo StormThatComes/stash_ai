@@ -4,12 +4,12 @@ import json
 
 import pytest
 
-import stash_ai as app
-import stash_marker_groups as groups
-import stash_merge as merge
-from stash_occurrences import OCCURRENCE_TAG
-from stash_prune import REQUIRED_COUNTS, prune_tags
-from stash_taggers import WD
+from stash_ai import cli as app
+from stash_ai import marker_groups as groups
+from stash_ai import merge
+from stash_ai.occurrences import OCCURRENCE_TAG
+from stash_ai.prune import REQUIRED_COUNTS, prune_tags
+from stash_ai.taggers import WD
 from tests.helpers.cleanup import FastStash
 from tests.helpers.cleanup import install
 from tests.helpers.cleanup import options

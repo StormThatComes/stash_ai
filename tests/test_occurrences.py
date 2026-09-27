@@ -6,11 +6,11 @@ from dataclasses import asdict, replace
 import numpy as np
 import pytest
 
-import stash_ai as app
-import stash_merge as merge
-import stash_progress as progress
-from stash_occurrences import OCCURRENCE_TAG, occurrence_contributions
-from stash_temporal import SceneAccumulator, TemporalPolicy
+from stash_ai import cli as app
+from stash_ai import merge
+from stash_ai import progress
+from stash_ai.occurrences import OCCURRENCE_TAG, occurrence_contributions
+from stash_ai.temporal import SceneAccumulator, TemporalPolicy
 from tests.helpers.stash import Stash
 from tests.helpers.evidence import paired_records
 from tests.helpers.evidence import policies
@@ -294,7 +294,7 @@ def test_point_publication_recovers_after_api_failure_without_inference(pipeline
 
 
 def test_global_cleanup_masks_revoke_points_without_touching_raw_evidence(tmp_path):
-    from stash_cleanup import begin, finish
+    from stash_ai.cleanup import begin, finish
     scenes, markers = paired_records({'wd': [0, .95, 0]}, threshold=.35, marker_threshold=.65)
     with merge.StateStore(tmp_path/'state', 'fixture') as state:
         put(state, scenes, markers)

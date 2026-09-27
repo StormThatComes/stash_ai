@@ -6,10 +6,10 @@ import sqlite3
 
 import pytest
 
-import stash_ai as app
-import stash_developer_report as diagnostics
-import stash_merge as merge
-from stash_state_codec import encode
+from stash_ai import cli as app
+from stash_ai import developer_report as diagnostics
+from stash_ai import merge
+from stash_ai.state_codec import encode
 
 
 SECRETS = (

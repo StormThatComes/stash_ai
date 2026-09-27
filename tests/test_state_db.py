@@ -3,9 +3,9 @@ import sqlite3
 
 import pytest
 
-import stash_progress
-import stash_state_db
-from stash_state import StateStore
+from stash_ai import progress as stash_progress
+from stash_ai import state_db as stash_state_db
+from stash_ai.state import StateStore
 
 
 @pytest.mark.parametrize('stage', ['base_schema', 'feature_schema'])

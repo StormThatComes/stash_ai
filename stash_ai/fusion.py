@@ -5,14 +5,14 @@ from bisect import bisect_left, bisect_right
 from collections import defaultdict
 from copy import deepcopy
 
-from stash_taggers import SOURCES
-from stash_temporal import append_interval, marker_floor, qualified_extras
+from stash_ai.taggers import SOURCES
+from stash_ai.temporal import append_interval, marker_floor, qualified_extras
 
 
 class ObservationIndex:
     """One timeline and reusable interval queries shared by all primary labels."""
     def __init__(self, events, context, group, cache=None):
-        from stash_runtime import RamCache
+        from stash_ai.runtime import RamCache
         self.events, self.context, self.group = events, context, group
         self.starts = [event['start'] for event in events]
         self.cache = cache if cache is not None else RamCache(256 * 2**20)
@@ -33,13 +33,13 @@ class ObservationIndex:
         if last <= first:
             return {}
         if self.disjoint:
-            from stash_timeline import Timeline
+            from stash_ai.timeline import Timeline
             if allowed not in self.timelines:
                 self.timelines[allowed] = Timeline(self.events, self.context, allowed)
             support = self.timelines[allowed].support(first, last, end, policy, self.group)
         else:
             support = self.scan_support(first, last, end, policy, allowed)
-        from stash_timeline import support_size
+        from stash_ai.timeline import support_size
         self.cache.put(key, support, retained_bytes=support_size(support))
         self.cache_keys.add(key)
         return support
@@ -100,8 +100,8 @@ class ObservationIndex:
 class FrameIndex:
     """Verify groups once; observations are prepared lazily and reused."""
     def __init__(self, app, records, policies, signatures=None, cache=None, tag_policies=None):
-        from stash_merge import marker_segment_signature
-        from stash_exclusions import policies_or_empty
+        from stash_ai.merge import marker_segment_signature
+        from stash_ai.exclusions import policies_or_empty
         self.app, self.policies, self.cache = app, policies, cache
         self.tag_policies = policies_or_empty(tag_policies)
         self.signatures = signatures if signatures is not None else {
@@ -125,8 +125,8 @@ class FrameIndex:
 
 
 def make_groups(records, signatures=None):
-    from stash_merge import marker_segment_signature
-    from stash_progress import digest
+    from stash_ai.merge import marker_segment_signature
+    from stash_ai.progress import digest
     groups = {}
     for source in SOURCES:
         for segment in records.get(source, []):
@@ -136,7 +136,7 @@ def make_groups(records, signatures=None):
                 continue
             # A signature plus the actual timeline: shifted/missing cues never
             # become matching observations merely because metadata was copied.
-            from stash_performance import frame_group
+            from stash_ai.performance import frame_group
             key = frame_group(segment)
             signature = signatures[id(segment)] if signatures is not None else marker_segment_signature(segment)
             group = groups.setdefault(key, {"members": [], "context": defaultdict(set)})
@@ -151,12 +151,12 @@ def make_groups(records, signatures=None):
 
 def observations(app, group, core_policies, tag_policies=None):
     """One event per timestamp; duplicate runs of a model count only once."""
-    from stash_merge import raw_label
-    from stash_exclusions import policies_or_empty
+    from stash_ai.merge import raw_label
+    from stash_ai.exclusions import policies_or_empty
     tag_policies = policies_or_empty(tag_policies)
     times = {}
     for source, segment, signature in group["members"]:
-        from stash_thresholds import marker_threshold
+        from stash_ai.thresholds import marker_threshold
         high = marker_threshold(segment, getattr(app, "MARKER_THRESHOLDS", None))
         floor = marker_floor(app.TEMPORAL_POLICY, high)
         for row in segment["items"]:
@@ -258,7 +258,7 @@ def collect_extras(app, span, events, group, allowed=None):
 
 def enrich(app, records, policies, spans, signatures=None, index=None, metrics=None):
     """Add missing shared intervals and attach source-aware extras from compatible inputs."""
-    from stash_temporal import build_options
+    from stash_ai.temporal import build_options
     policy = app.TEMPORAL_POLICY
     if not policy.enabled or not (policy.shared_marker_frames or policy.shared_marker_extras):
         return spans

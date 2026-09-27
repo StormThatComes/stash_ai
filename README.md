@@ -226,6 +226,13 @@ Aktualne domyślne limity procesu:
 uruchamiania `pip`. Wymaga tokena GitHub z dostępem `Contents: read` do
 prywatnego repozytorium.
 
+Przy pierwszym przejściu ze starego układu (moduły `stash_*.py` obok launchera)
+uruchom updater **dwa razy**. Stara wersja pobiera tylko pliki z katalogu
+głównego; drugie uruchomienie nowego updatera pobierze pakiet `stash_ai/`.
+Zachowaj te same potrzebne opcje, np. `--force-code`. Przed ukończeniem migracji
+launcher wyświetla instrukcję ponownego uruchomienia updatera. Przy `git pull`
+lub użyciu najnowszego updatera od początku wystarczy jedna aktualizacja.
+
 ```powershell
 $env:GH_TOKEN = "<fine-grained PAT>"
 
@@ -236,6 +243,7 @@ python .\update_stash_ai.py
 
 Updater:
 - pobiera pliki z jednego SHA `main`;
+- instaluje launchery, pakiet `stash_ai/` oraz YAML-e; usuwa zastąpione moduły z katalogu głównego;
 - zachowuje lokalnie zmienione YAML-e i tworzy propozycje `.incoming`;
 - odmawia nadpisania zmienionego kodu bez `--force-code`;
 - nie aktualizuje modeli, `.env`, SQLite ani zależności Pythona;

@@ -31,11 +31,11 @@ def main():
     if min(args.frames, args.labels, args.repeats) < 1:
         parser.error('frames, labels and repeats must be positive')
     sys.path.insert(0, str(args.project.resolve()))
-    import stash_ai as app
-    import stash_merge as merge
-    from stash_runtime import RunReport
-    from stash_taggers import SOURCES
-    from stash_temporal import TemporalPolicy
+    from stash_ai import cli as app
+    from stash_ai import merge
+    from stash_ai.runtime import RunReport
+    from stash_ai.taggers import SOURCES
+    from stash_ai.temporal import TemporalPolicy
     from tests.helpers.stash import Stash
     app.TEMPORAL_POLICY = TemporalPolicy()
     app.MARKER_TAG_BLOCKLIST = set()
@@ -50,8 +50,8 @@ def main():
         gc.collect()
         report = RunReport(write=lambda _: None)
         context = nullcontext()
-        if (args.project/'stash_diagnostics.py').exists():
-            from stash_diagnostics import MergeDiagnostics
+        if (args.project/'stash_ai/diagnostics.py').exists():
+            from stash_ai.diagnostics import MergeDiagnostics
             context = MergeDiagnostics(report)
         with tempfile.TemporaryDirectory() as directory, merge.StateStore(Path(directory)/'state.sqlite3',
                 'offline-benchmark', cache_bytes=128*2**20) as state:

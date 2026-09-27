@@ -5,10 +5,10 @@ from types import SimpleNamespace
 
 import pytest
 
-import stash_ai as app
-import stash_merge as merge
-from stash_exclusions import policies_or_empty
-from stash_taggers import SOURCES, WD
+from stash_ai import cli as app
+from stash_ai import merge
+from stash_ai.exclusions import policies_or_empty
+from stash_ai.taggers import SOURCES, WD
 from tests.helpers.stash import Stash
 from tests.helpers.stash import sync
 from tests.helpers.evidence import segment
@@ -220,7 +220,7 @@ def test_failed_cleanup_does_not_start_definition_pruning(pipeline, monkeypatch,
     assert app.main(p.args) == 0
     path = policy_file(tmp_path, ['common'])
     monkeypatch.setattr(p.stash, 'delete_marker', lambda *args: (_ for _ in ()).throw(RuntimeError('write failed')))
-    import stash_prune
+    from stash_ai import prune as stash_prune
     monkeypatch.setattr(stash_prune, 'prune_tags', lambda *args, **kwargs: pytest.fail('pruning after failed cleanup'))
     assert app.main([*p.args, '--cleanup-only', '--tag-exclusions', str(path)]) == 1
     assert 'ai:common' in p.stash.tags

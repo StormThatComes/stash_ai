@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Iterator
 
-from stash_transport import StashTransport, absolute_stash_url, origin, safe_error
+from stash_ai.transport import StashTransport, absolute_stash_url, origin, safe_error
 
 
 class StashClient(StashTransport):
@@ -22,7 +22,7 @@ class StashClient(StashTransport):
         self.merge_only_reads = False
 
     def configure_merge_reads(self, report, *, merge_only=False):
-        from stash_merge_sql import SceneReader
+        from stash_ai.merge_sql import SceneReader
         self.report = report
         self.merge_only_reads = merge_only
         try:

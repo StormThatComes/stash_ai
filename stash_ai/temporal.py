@@ -6,7 +6,7 @@ from bisect import bisect_left
 from dataclasses import asdict, dataclass, fields, replace
 import math
 
-from stash_domain import MarkerSpec
+from stash_ai.domain import MarkerSpec
 
 
 @dataclass(frozen=True)
@@ -171,7 +171,7 @@ def consensus_seeds(records, policies, blocklist, policy, *, thresholds=None):
         for segment in segments:
             meta = segment["meta"]
             identity = meta.get("frame_input_signature")
-            from stash_thresholds import marker_threshold
+            from stash_ai.thresholds import marker_threshold
             high = marker_threshold(segment, thresholds)
             if segment["mode"] != "frames" or not identity or high is None:
                 continue
@@ -245,8 +245,8 @@ def build_markers(app, frames, core_exclusions, *, threshold=None, seeds=None, i
         return sorted(finished, key=lambda marker: (marker.start, marker.tag)), total
     # Inspect every observation inside the finished interval, including a short
     # permitted gap in primary detections. Compute this only for retained markers.
-    from stash_fusion import ObservationIndex
-    from stash_progress import digest
+    from stash_ai.fusion import ObservationIndex
+    from stash_ai.progress import digest
     events = {}
     for start, end, extras in extra_frames:
         event = events.setdefault(start, dict(start=start, end=end, extras={}))
