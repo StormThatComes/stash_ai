@@ -12,6 +12,10 @@ class PublicationStore:
     def __init__(self, store):
         self.store = store
 
+    @property
+    def report(self):
+        return getattr(self.store, 'report', None)
+
     @measured('state_read')
     def snapshot(self, scene, kind, *, borrow=False):
         store = self.store
