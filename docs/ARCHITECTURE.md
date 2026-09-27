@@ -45,13 +45,17 @@ zachowują dotychczasowy kontrakt dla call-site'ów i testów.
 | Moduł / klasa | Odpowiedzialność |
 | --- | --- |
 | `stash_ai/state_db.py` / `StateDatabase` | Cykl życia połączenia SQLite i blokady procesu, sprawdzenie identyfikatora/wersji bazy, podstawowe tabele i otwarcie źródła dry-run. |
-| `stash_ai/state.py` / `StateStore` | Cache, wyniki inferencji, importy legacy, trwały zamiar publikacji i zatwierdzanie snapshotów. Koordynuje inicjalizację schematów poszczególnych funkcji. |
+| `stash_ai/state.py` / `StateStore` | Façade i właściciel lifecycle/cache/serializacji; koordynuje inicjalizację schematów oraz deleguje trwałe dane do wyspecjalizowanych magazynów. |
+| `stash_ai/state_results.py` / `ResultStore` | Wyniki inferencji, indeksowanie źródeł i importy legacy. |
+| `stash_ai/state_publications.py` / `PublicationStore` | Snapshoty published/pending, trwały zamiar publikacji i atomowe zatwierdzanie przygotowanych publikacji. |
 | `stash_ai/preview.py` | Widoki nakładki dry-run, usunięcia w nakładce i wykrywanie zmian źródła. |
 | `stash_ai/state_codec.py` | Kodowanie i dekodowanie BLOB-ów. |
 
-`StateStore` posiada jeden `StateDatabase` i zamyka go również przy błędzie
-inicjalizacji. Blokada procesu obejmuje cały czas życia magazynu, także żądania
-do Stash. Dry-run korzysta z tymczasowej bazy: współczesne schematy odczytuje
+`StateStore` posiada jeden `StateDatabase`, jeden `ResultStore` i jeden
+`PublicationStore`; zachowuje dotychczasowe metody `records()/put()/snapshot()/prepare()`
+jako kompatybilne delegacje. Zamyka bazę również przy błędzie inicjalizacji.
+Blokada procesu obejmuje cały czas życia magazynu, także żądania do Stash.
+Dry-run korzysta z tymczasowej bazy: współczesne schematy odczytuje
 przez nakładkę ze źródłem otwartym tylko do odczytu, a starsze kopiuje przed
 migracją. Format zapisanych danych i kolejność migracji pozostają bez zmian.
 
