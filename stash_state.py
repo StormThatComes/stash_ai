@@ -6,17 +6,14 @@ from contextlib import AbstractContextManager
 from copy import deepcopy
 import hashlib
 import json
-import os
-from pathlib import Path
-import sqlite3
 from urllib.parse import urlparse
 
 from stash_runtime import measured
 from stash_state_codec import encode, decode
+from stash_state_db import APPLICATION_ID, StateDatabase
 from stash_taggers import SOURCES
 
 
-APPLICATION_ID = 0x53544D47
 KINDS = ("scene", "markers")
 
 
@@ -37,70 +34,18 @@ class StateStore(AbstractContextManager):
                  memory_budget_bytes=0):
         from stash_runtime import RamCache
         self.cache = RamCache(cache_bytes, rss_budget=memory_budget_bytes)
-        self.path, self.scope = Path(path).expanduser().resolve(), scope
-        self.lock_file, self.connection = None, None
-        self.preview_source = False
+        self.scope = scope
+        self._database = None
+        self.connection = None
         try:
-            if dry_run:
-                # Empty filename = SQLite-managed temporary DB, deleted at close.
-                # Its bounded page cache prevents a long preview consuming RAM
-                # proportional to the entire inference database.
-                self.connection = sqlite3.connect("", uri=True)
-                if self.path.exists():
-                    source = sqlite3.connect(self.path.as_uri() + "?mode=ro", uri=True)
-                    try:
-                        source_version = source.execute('PRAGMA user_version').fetchone()[0]
-                        if (source_version in (5, 6, 7) and
-                                source.execute('PRAGMA application_id').fetchone()[0] == APPLICATION_ID):
-                            # Modern schemas can be read directly; only preview
-                            # changes occupy the temporary overlay.
-                            self.connection.execute('ATTACH DATABASE ? AS cleanup_source',
-                                                    (self.path.as_uri() + '?mode=ro',))
-                            self.connection.execute(f'PRAGMA user_version={source_version}')
-                            self.preview_source = True
-                            self.preview_data_version = self.connection.execute(
-                                'PRAGMA cleanup_source.data_version').fetchone()[0]
-                        else:
-                            source.backup(self.connection)
-                    finally:
-                        source.close()
-            else:
-                self.path.parent.mkdir(parents=True, exist_ok=True)
-                self.lock_file = open(str(self.path) + ".lock", "a+b")
-                if self.lock_file.seek(0, os.SEEK_END) == 0:
-                    self.lock_file.write(b"0")
-                    self.lock_file.flush()
-                self.lock_file.seek(0)
-                try:
-                    if os.name == "nt":
-                        import msvcrt
-                        msvcrt.locking(self.lock_file.fileno(), msvcrt.LK_NBLCK, 1)
-                    else:
-                        import fcntl
-                        fcntl.flock(self.lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                except OSError as exc:
-                    raise RuntimeError("Another merged-output process is using this state DB.") from exc
-                self.connection = sqlite3.connect(self.path, timeout=30)
-            db = self.connection
-            application = db.execute("PRAGMA application_id").fetchone()[0]
-            version = db.execute("PRAGMA user_version").fetchone()[0]
-            tables = db.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
-            if application not in (0, APPLICATION_ID) or version not in (0, 1, 2, 3, 4, 5, 6, 7) or (tables and application != APPLICATION_ID):
-                raise ValueError("Not a supported stash-taggers state DB; choose another --state-db.")
-            db.executescript(f"""
-                PRAGMA application_id={APPLICATION_ID};
-                CREATE TABLE IF NOT EXISTS results (
-                    scope TEXT NOT NULL, scene TEXT NOT NULL, model TEXT NOT NULL,
-                    kind TEXT NOT NULL, data BLOB NOT NULL,
-                    PRIMARY KEY(scope, scene, model, kind));
-                CREATE TABLE IF NOT EXISTS snapshots (
-                    scope TEXT NOT NULL, scene TEXT NOT NULL, kind TEXT NOT NULL,
-                    published BLOB, pending BLOB,
-                    PRIMARY KEY(scope, scene, kind));
-                CREATE TABLE IF NOT EXISTS legacy_imports (
-                    scope TEXT NOT NULL, scene TEXT NOT NULL, kind TEXT NOT NULL,
-                    data BLOB NOT NULL, PRIMARY KEY(scope, scene, kind));
-            """)
+            database = StateDatabase(path, dry_run=dry_run)
+            self._database = database
+            self.path = database.path
+            self.connection = database.connection
+            self.preview_source = database.preview_source
+            if self.preview_source:
+                self.preview_data_version = database.preview_data_version
+            version = database.version
             from stash_progress import initialize_progress
             initialize_progress(self, version)
             from stash_cleanup import initialize
@@ -124,13 +69,11 @@ class StateStore(AbstractContextManager):
 
     def close(self):
         self.cache.clear()
-        if self.connection is not None:
-            self.connection.close()
-            self.connection = None
-        if self.lock_file is not None:
-            # Closing the descriptor releases the advisory lock on both platforms.
-            self.lock_file.close()
-            self.lock_file = None
+        if self._database is not None:
+            try:
+                self._database.close()
+            finally:
+                self.connection = None
 
     def __exit__(self, *args):
         self.close()

@@ -7,6 +7,7 @@ artefakty pomiarowe.
 
 - [Szybki start i konfiguracja](../README.md)
 - [Aktualny podręcznik](README_multimodel.md)
+- [Granice modułów i odpowiedzialności klas](ARCHITECTURE.md)
 - [Cleanup SQL](UPGRADE_cleanup_sql.md)
 - [Wydajność i pamięć](UPGRADE_performance.md)
 - [Merge i szybka ścieżka](UPGRADE_merge.md)

@@ -72,7 +72,8 @@ PUBLICATION_CODE_FILES = (
     'stash_scene.py', 'stash_occurrences.py', 'stash_exclusions.py', 'stash_cleanup.py',
     'stash_taggers.py', 'stash_tags.py', 'stash_domain.py', 'stash_performance.py',
     'stash_timeline.py', 'stash_merge_sql.py', 'stash_marker_groups.py', 'stash_recovery.py',
-    'stash_thresholds.py', 'stash_scene_cache.py', 'stash_state.py',
+    'stash_thresholds.py', 'stash_scene_cache.py', 'stash_state.py', 'stash_state_db.py',
+    'stash_client.py', 'stash_transport.py',
 )
 
 
