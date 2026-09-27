@@ -183,9 +183,9 @@ def test_keyset_relation_pages_work_when_prior_rows_are_deleted():
     class Reader:
         def gql(self, query, variables):
             return {'querySQL': {'rows': [list(row) for row in db.execute(variables['sql'], variables['args'])]}}
-    engine = fast.SQLCleanup(SimpleNamespace(stash=Reader()), SimpleNamespace(cleanup_page_size=3,cleanup_write_batch_size=2), Counter(), None)
+    session = fast.CleanupSqlSession(Reader(), Counter(), page_size=3)
     seen = []
-    for rows in engine.pages('extras', (1,'ai:blocked'), 20):
+    for rows in session.pages('extras', (1,'ai:blocked'), 20):
         seen.extend(r[1] for r in rows)
         db.executemany('DELETE FROM scene_markers_tags WHERE rowid=?', [(r[0],) for r in rows])
     assert seen == list(range(20,0,-1))
