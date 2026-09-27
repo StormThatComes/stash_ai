@@ -3,8 +3,10 @@
 W katalogu głównym pozostają dwa pliki Pythona uruchamiane z linii poleceń:
 `stash_ai.py` i `update_stash_ai.py`. Launcher `stash_ai.py` przejmuje blokadę
 instalacji, a `stash_ai/cli.py` koordynuje CLI i uruchomienie pipeline.
-Logika scalania pozostaje
-w `stash_ai/merge.py` oraz modułach domenowych, m.in. `stash_ai/scene.py`,
+Algorytmy scalania i kompatybilne entry pointy pozostają w `stash_ai/merge.py`.
+Stanowy lifecycle jednego przebiegu merged-output (scan, rethreshold, inference,
+publikacja i pruning) obsługuje `stash_ai/merge_run.py` / `MergedRun`.
+Pozostała logika domenowa znajduje się m.in. w `stash_ai/scene.py`,
 `stash_ai/fusion.py`, `stash_ai/temporal.py` i `stash_ai/occurrences.py`.
 
 `stash_ai/cli.py` pozostaje warstwą orkiestracji i kompatybilnym miejscem eksportu
