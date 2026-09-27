@@ -29,12 +29,20 @@ def project(app, segment):
     if getattr(segment, '_scene_projected', False):
         return segment
     signature = marker_segment_signature(segment)
-    threshold = (app.SCENE_THRESHOLDS.get(signature, segment['meta'].get('scene_threshold'))
+    meta = segment['meta']
+    threshold = (app.SCENE_THRESHOLDS.get(signature, meta.get('scene_threshold'))
                  if hasattr(app, 'SCENE_THRESHOLDS') else scene_threshold(segment))
-    if threshold == segment['meta'].get('scene_threshold'):
+    # Temporal statistics depend on the support floor as well as the high
+    # threshold. Old aggregates without retention metadata keep their original
+    # behavior; frame-backed results can also gain statistics after --no-temporal.
+    support_changed = (app.TEMPORAL_POLICY.enabled
+        and ('scene_support_floor' in meta or meta.get('scene_frames_format') == 1)
+        and meta.get('scene_support_floor') != threshold * app.TEMPORAL_POLICY.scene_support_ratio)
+    if threshold == meta.get('scene_threshold') and not support_changed:
         return segment
     validate_scene(app, segment, threshold)
     items = segment['items']
+    meta = {**meta, 'scene_threshold': threshold}
     if app.TEMPORAL_POLICY.enabled:
         labels = [item['tag'] for item in items]
         indexes = {tag: i for i, tag in enumerate(labels)}
@@ -44,7 +52,8 @@ def project(app, segment):
                                    Cue(row['start'], row['end'], '', (0, 0, 1, 1)))
         statistics = accumulator.statistics(labels)
         items = [{**item, 'statistics': statistics[item['tag']]} for item in items if item['tag'] in statistics]
-    result = StoredSegment({**segment, 'meta': {**segment['meta'], 'scene_threshold': threshold}, 'items': items})
+        meta['scene_support_floor'] = threshold * app.TEMPORAL_POLICY.scene_support_ratio
+    result = StoredSegment({**segment, 'meta': meta, 'items': items})
     result._evidence_digest, result._scene_projected = signature, True
     return result
 
