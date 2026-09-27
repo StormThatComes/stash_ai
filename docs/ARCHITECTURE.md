@@ -22,6 +22,11 @@ wykluczeń i hierarchii znajduje się w `stash_ai/config.py`, a parser cue WebVT
 w `stash_ai/vtt.py`. Dzięki temu format argumentów, YAML i VTT oraz specjalne
 ścieżki uruchomienia można testować niezależnie od normalnego pipeline inferencji.
 
+`stash_ai/taggers.py` pozostaje publiczną façade dla definicji modeli i adapterów
+inferencji. Obsługa plików modelu oraz parsowanie słowników tagów znajduje się w
+`stash_ai/vocabulary.py`; helpery są re-exportowane z `taggers.py`, aby zachować
+istniejące importy w kodzie i testach.
+
 ## Komunikacja ze Stash
 
 | Moduł / klasa | Odpowiedzialność |
