@@ -27,7 +27,7 @@ def fail(*args, **kwargs):
 
 @pytest.mark.parametrize('filename', [
     'tags.py', 'domain.py', 'state.py', 'state_db.py',
-    'client.py', 'transport.py', 'config.py', 'vtt.py', 'cli_args.py',
+    'client.py', 'transport.py', 'config.py', 'vtt.py', 'cli_args.py', 'cli_modes.py',
 ])
 def test_publication_code_tracks_extracted_modules(monkeypatch, filename):
     before = performance.publication_code()

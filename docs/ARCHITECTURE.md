@@ -9,9 +9,11 @@ w `stash_ai/merge.py` oraz modułach domenowych, m.in. `stash_ai/scene.py`,
 
 `stash_ai/cli.py` pozostaje warstwą orkiestracji i kompatybilnym miejscem eksportu
 helperów używanych przez testy. Definicja opcji CLI i walidacja kombinacji flag są
-w `stash_ai/cli_args.py`; parsowanie konfiguracji, wykluczeń i hierarchii znajduje
-się w `stash_ai/config.py`, a parser cue WebVTT w `stash_ai/vtt.py`. Dzięki temu
-format argumentów, YAML i VTT może być testowany niezależnie od dispatchu CLI i pipeline inferencji.
+w `stash_ai/cli_args.py`, a dispatch samodzielnych trybów DB/diagnostics/recovery/
+prune/model-report/backfill w `stash_ai/cli_modes.py`. Parsowanie konfiguracji,
+wykluczeń i hierarchii znajduje się w `stash_ai/config.py`, a parser cue WebVTT
+w `stash_ai/vtt.py`. Dzięki temu format argumentów, YAML i VTT oraz specjalne
+ścieżki uruchomienia można testować niezależnie od normalnego pipeline inferencji.
 
 ## Komunikacja ze Stash
 
