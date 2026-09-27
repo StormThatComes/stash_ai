@@ -17,6 +17,10 @@ class ResultStore:
     def __init__(self, store):
         self.store = store
 
+    @property
+    def report(self):
+        return getattr(self.store, 'report', None)
+
     @measured('state_read')
     def records(self, scene, kind, model=None, *, borrow=False):
         """Public reads are detached; internal read-only consumers may borrow."""
