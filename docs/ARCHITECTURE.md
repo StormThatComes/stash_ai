@@ -7,6 +7,11 @@ Logika scalania pozostaje
 w `stash_ai/merge.py` oraz modułach domenowych, m.in. `stash_ai/scene.py`,
 `stash_ai/fusion.py`, `stash_ai/temporal.py` i `stash_ai/occurrences.py`.
 
+`stash_ai/cli.py` pozostaje warstwą orkiestracji i kompatybilnym miejscem eksportu
+helperów używanych przez testy. Parsowanie konfiguracji, wykluczeń i hierarchii
+znajduje się w `stash_ai/config.py`, a parser cue WebVTT w `stash_ai/vtt.py`.
+Dzięki temu format YAML/VTT może być testowany niezależnie od dispatchu CLI i pipeline inferencji.
+
 ## Komunikacja ze Stash
 
 | Moduł / klasa | Odpowiedzialność |
