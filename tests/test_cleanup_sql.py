@@ -3,7 +3,6 @@ from collections import Counter
 from copy import deepcopy
 import json
 import sqlite3
-from types import SimpleNamespace
 
 import pytest
 
