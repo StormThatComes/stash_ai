@@ -695,16 +695,14 @@ def run_model(stash: StashClient, config: ModelSettings, vocabulary: Vocabulary,
 
 def main(argv: list[str] | None = None) -> int:
     global DRY_RUN, APPLY_SCENE_TAGS, CREATE_MARKERS, TEMPORAL_POLICY
-    from stash_ai.cli_args import database_mode, mode_flags, parse_args
+    from stash_ai.cli_args import mode_flags, parse_args
+    from stash_ai.cli_modes import run_database_command, run_standalone_command
 
     app = sys.modules[__name__]
     args = parse_args(app, argv)
-    if database_mode(args):
-        if args.anonymous_diagnostics is not None:
-            from stash_ai.developer_report import run as run_anonymous_diagnostics
-            return run_anonymous_diagnostics(args)
-        from stash_ai.db import run_mode as run_database_mode
-        return run_database_mode(args, STASH_URL)
+    result = run_database_command(app, args)
+    if result is not None:
+        return result
 
     from stash_ai.runtime import RunReport
     from tqdm import tqdm
@@ -717,21 +715,9 @@ def main(argv: list[str] | None = None) -> int:
     elif args.cleanup_only:
         APPLY_SCENE_TAGS, CREATE_MARKERS = True, True
     hierarchy_only, cleanup_only = mode_flags(args)
-    if args.abandon_pending and not args.merge_only and not cleanup_only:
-        from stash_ai.recovery import run_only
-        validate_config(scene_work=False)
-        return run_only(sys.modules[__name__], args)
-    if args.sync_marker_groups_only:
-        from stash_ai.marker_groups import run_backfill
-        validate_config(scene_work=False)
-        return run_backfill(sys.modules[__name__], args)
-    if args.prune_empty_tags_only:
-        from stash_ai.prune import run_prune
-        validate_config(scene_work=False)
-        return run_prune(sys.modules[__name__], args)
-    if args.model_report is not None:
-        from stash_ai.model_report import run as run_model_report
-        return run_model_report(sys.modules[__name__], args)
+    result = run_standalone_command(app, args, cleanup_only=cleanup_only)
+    if result is not None:
+        return result
     settings = load_model_settings(args.model_config, args.models, args.device, args.offline)
     print("Selected models: " + ", ".join(f"{item.source.title} ({item.source.prefix})" for item in settings))
     if args.download_models:
