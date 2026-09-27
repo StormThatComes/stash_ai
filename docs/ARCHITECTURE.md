@@ -31,6 +31,15 @@ Transport ponawia tylko odczyty, w tym ściśle dozwolone operacje SQL opakowane
 w mutację GraphQL. Zapisy nie są ponawiane. Nagłówek `ApiKey` nie jest przesyłany
 przy przekierowaniu mediów do innego origin.
 
+## Cleanup przez SQL
+
+`stash_ai/cleanup_sql_session.py` zawiera ograniczony allowlistą transport SQL/API,
+metryki odczytów i zapisów oraz keyset pagination. `stash_ai/cleanup_sql.py` /
+`SQLCleanup` pozostaje warstwą domenową: wybiera kandydatów, usuwa markery i
+powiązania, obsługuje preview i pruning. Cienkie metody delegujące w `SQLCleanup`
+zachowują dotychczasowy kontrakt dla call-site'ów i testów.
+
+
 ## Lokalny stan
 
 | Moduł / klasa | Odpowiedzialność |
