@@ -74,6 +74,7 @@ PUBLICATION_CODE_FILES = (
     'timeline.py', 'merge_sql.py', 'marker_groups.py', 'recovery.py',
     'thresholds.py', 'scene_cache.py', 'state.py', 'state_db.py',
     'client.py', 'transport.py', 'config.py', 'vtt.py', 'cli_args.py', 'cli_modes.py',
+    'cleanup_sql.py', 'cleanup_sql_session.py',
 )
 
 
