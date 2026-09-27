@@ -3,18 +3,16 @@
 from __future__ import annotations
 
 from contextlib import AbstractContextManager
-from copy import deepcopy
 import hashlib
-import json
 from urllib.parse import urlparse
 
 from stash_ai.runtime import measured
 from stash_ai.state_codec import encode, decode
 from stash_ai.state_db import APPLICATION_ID, StateDatabase
-from stash_ai.taggers import SOURCES
 
 
-KINDS = ("scene", "markers")
+from stash_ai.state_results import KINDS, ResultStore
+from stash_ai.state_publications import PublicationStore
 
 
 def scope_for(url):
@@ -42,6 +40,8 @@ class StateStore(AbstractContextManager):
             self._database = database
             self.path = database.path
             self.connection = database.connection
+            self.results = ResultStore(self)
+            self.publications = PublicationStore(self)
             self.preview_source = database.preview_source
             if self.preview_source:
                 self.preview_data_version = database.preview_data_version
@@ -103,173 +103,41 @@ class StateStore(AbstractContextManager):
     def unpack(self, value):
         return decode(value, getattr(self, 'report', None))
 
-    @measured('state_read')
     def records(self, scene, kind, model=None, *, borrow=False):
-        """Public reads are detached; internal read-only consumers may borrow."""
-        key = ('records', str(scene), kind)
-        records = self.cached(key)
-        if records is None:
-            records = {model: self.unpack(data) for model, data in self.read_rows(
-                "SELECT model,data FROM " + self.table('results') + " WHERE scope=? AND scene=? AND kind=?",
-                (self.scope, str(scene), kind))}
-            # Retired video samples are never inputs. Remove them from the decoded
-            # view without scanning/recompressing every scene during DB migration.
-            for segments in records.values():
-                from stash_ai.performance import StoredSegment
-                for index, segment in enumerate(segments):
-                    segment.pop("refinement", None)
-                    segments[index] = StoredSegment(segment)
-            self.retain(key, records)
-        result = {model: records[model]} if model in records else {} if model else records
-        return result if borrow else deepcopy(result)
+        return self.results.records(scene, kind, model, borrow=borrow)
 
     def sources(self, scene, kind):
-        key = ('sources', str(scene), kind)
-        value = self.cached(key)
-        if value is None:
-            value = {row[0] for row in self.connection.execute(
-                "SELECT model FROM " + self.table('results') + " WHERE scope=? AND scene=? AND kind=?", (self.scope, str(scene), kind))}
-            self.retain(key, value)
-        return set(value)
+        return self.results.sources(scene, kind)
 
     def preload_sources(self):
-        if not self.cache.limit:
-            return
-        last, values = None, set()
-        for scene, kind, model in self.connection.execute(
-                'SELECT scene,kind,model FROM ' + self.table('results') + ' WHERE scope=? ORDER BY scene,kind', (self.scope,)):
-            key = ('sources', scene, kind)
-            if key != last:
-                if last is not None:
-                    self.cache.put(last, values)
-                last, values = key, set()
-            values.add(model)
-        if last is not None:
-            self.cache.put(last, values)
+        return self.results.preload_sources()
 
-    @measured('state_write')
     def put(self, scene, model, outputs, replace=None):
-        with self.connection:
-            self._put(scene, model, outputs, replace)
+        return self.results.put(scene, model, outputs, replace)
 
     def _put(self, scene, model, outputs, replace=None):
-        if model not in SOURCES or set(outputs) - set(KINDS):
-            raise ValueError("Unknown result source or output kind.")
-        for kind, segment in outputs.items():
-            segment = {key: value for key, value in segment.items() if key != "refinement"}
-            old = self.records(scene, kind, model, borrow=True).get(model, []) if not (replace or {}).get(kind, True) else []
-            # Repeating an identical run with replacement disabled need not
-            # accumulate identical frame streams merely due to its timestamp.
-            keep = []
-            if old:
-                # Only append mode needs comparison. A shallow metadata copy
-                # avoids duplicating all retained frame observations.
-                def semantic(value):
-                    data = dict(value)
-                    if 'meta' in data:
-                        data['meta'] = {key: item for key, item in data['meta'].items() if key != 'captured_at'}
-                    # JSON normalizes tuples in new results to stored lists.
-                    return json.dumps(data, sort_keys=True, allow_nan=False)
-                current = semantic(segment)
-                keep = [previous for previous in old if semantic(previous) != current]
-            self.replace_records(scene, model, kind, keep + [segment])
+        return self.results._put(scene, model, outputs, replace)
 
     def replace_records(self, scene, model, kind, segments):
-        """Replace a segment list inside the caller's transaction, including previews."""
-        from stash_ai.progress import index_result
-        self.cache.discard(('records', str(scene), kind))
-        self.cache.discard(('sources', str(scene), kind))
-        self.cache.discard(('status', str(scene), model))
-        self.connection.execute("INSERT INTO results VALUES (?,?,?,?,?) "
-            "ON CONFLICT(scope,scene,model,kind) DO UPDATE SET data=excluded.data",
-            (self.scope, str(scene), model, kind, self.pack(segments)))
-        index_result(self, scene, model, kind, segments)
+        return self.results.replace_records(scene, model, kind, segments)
 
-    @measured('state_read')
     def imported_legacy(self, scene, kind, *, borrow=False):
-        key = ('legacy', str(scene), kind)
-        cached = self.cached(key)
-        if cached is not None:
-            return cached if borrow else deepcopy(cached)
-        rows = self.read_rows("SELECT data FROM " + self.table('legacy_imports') + " WHERE scope=? AND scene=? AND kind=?",
-                              (self.scope, str(scene), kind))
-        values = self.unpack(rows[0][0]) if rows else []
-        self.retain(key, values)
-        return values if borrow else deepcopy(values)
+        return self.results.imported_legacy(scene, kind, borrow=borrow)
 
-    @measured('state_write')
     def remember_legacy(self, scene, kind, data):
-        from stash_ai.performance import freeze
-        previous = self.imported_legacy(scene, kind, borrow=True)
-        known = {freeze(item) for item in previous}
-        fresh = [item for item in data if freeze(item) not in known]
-        if not fresh:
-            return
-        previous = previous + fresh
-        self.cache.discard(('legacy', str(scene), kind))
-        with self.connection:
-            self.connection.execute("INSERT INTO legacy_imports VALUES (?,?,?,?) "
-                "ON CONFLICT(scope,scene,kind) DO UPDATE SET data=excluded.data",
-                (self.scope, str(scene), kind, self.pack(previous)))
+        return self.results.remember_legacy(scene, kind, data)
 
-    @measured('state_read')
     def snapshot(self, scene, kind, *, borrow=False):
-        key = ('snapshot', str(scene), kind)
-        cached = self.cached(key)
-        if cached is not None:
-            return cached if borrow else deepcopy(cached)
-        rows = self.read_rows("SELECT published,pending FROM " + self.table('snapshots') + " WHERE scope=? AND scene=? AND kind=?",
-                              (self.scope, str(scene), kind))
-        from stash_ai.cleanup import mask_snapshot
-        values = tuple(mask_snapshot(self, self.unpack(item), kind) if item is not None else None
-                       for item in rows[0]) if rows else (None, None)
-        self.retain(key, values)
-        return values if borrow else deepcopy(values)
+        return self.publications.snapshot(scene, kind, borrow=borrow)
 
     def has_pending_publications(self):
-        return self.connection.execute('SELECT 1 FROM ' + self.table('snapshots') +
-            ' WHERE scope=? AND pending IS NOT NULL LIMIT 1', (self.scope,)).fetchone() is not None
+        return self.publications.has_pending_publications()
 
-    @measured('state_write')
     def prepare(self, scene, snapshots):
-        from stash_ai.cleanup import stamp_snapshot
-        with self.connection:
-            for kind, data in snapshots.items():
-                self.cache.discard(('snapshot', str(scene), kind))
-                if self.preview_source:
-                    self.connection.execute('INSERT OR IGNORE INTO snapshots SELECT * FROM '
-                        'cleanup_source.snapshots WHERE scope=? AND scene=? AND kind=?',
-                        (self.scope, str(scene), kind))
-                self.connection.execute("INSERT INTO snapshots VALUES (?,?,?,NULL,?) "
-                    "ON CONFLICT(scope,scene,kind) DO UPDATE SET pending=excluded.pending",
-                    (self.scope, str(scene), kind, self.pack(stamp_snapshot(self, data))))
+        return self.publications.prepare(scene, snapshots)
 
-    @measured('state_write')
     def publish(self, scene, snapshots):
-        from stash_ai.cleanup import stamp_snapshot
-        from stash_ai.recovery import clear_publications
-        with self.connection:
-            for kind, data in snapshots.items():
-                self.cache.discard(('snapshot', str(scene), kind))
-                self.connection.execute("INSERT INTO snapshots VALUES (?,?,?,?,NULL) "
-                    "ON CONFLICT(scope,scene,kind) DO UPDATE SET published=excluded.published,pending=NULL",
-                    (self.scope, str(scene), kind, self.pack(stamp_snapshot(self, data))))
-                clear_publications(self, scene, kind)
+        return self.publications.publish(scene, snapshots)
 
-
-    @measured('state_write')
     def commit_prepared(self, scene, kinds, *, publication=None):
-        """Promote durable intent without encoding large evidence a second time."""
-        from stash_ai.recovery import clear_publications
-        with self.connection:
-            for kind in kinds:
-                self.cache.discard(('snapshot', str(scene), kind))
-                changed = self.connection.execute('UPDATE snapshots SET published=pending,pending=NULL '
-                    'WHERE scope=? AND scene=? AND kind=? AND pending IS NOT NULL',
-                    (self.scope, str(scene), kind)).rowcount
-                if changed != 1:
-                    raise RuntimeError('Publication intent disappeared before commit.')
-                clear_publications(self, scene, kind)
-            if publication is not None:
-                from stash_ai.performance import record_check
-                record_check(self, scene, *publication)
+        return self.publications.commit_prepared(scene, kinds, publication=publication)
