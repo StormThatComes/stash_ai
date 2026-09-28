@@ -234,8 +234,15 @@ class SQLPreview:
         return getattr(self.stash, name)
 
     def find_scene(self, identifier):
+        return self._project(self.stash.find_scene(identifier))
+
+    def find_scene_for_merge(self, identifier):
+        read = getattr(self.stash, 'find_scene_for_merge', self.stash.find_scene)
+        return self._project(read(identifier))
+
+    def _project(self, scene):
         from copy import deepcopy
-        scene = deepcopy(self.stash.find_scene(identifier))
+        scene = deepcopy(scene)
         if self.app.APPLY_SCENE_TAGS:
             scene['tags'] = [t for t in scene.get('tags', []) if t['name'] not in self.names]
         if self.app.CREATE_MARKERS:
@@ -247,8 +254,10 @@ class SQLPreview:
         return scene
 
     def iter_scenes(self, ids):
-        for identifier in ids:
-            yield self.find_scene(identifier)
+        if not ids:
+            return
+        for scene in self.stash.iter_scenes(ids):
+            yield self._project(scene)
 
 
 def run_sql_cleanup(app, sql, store, settings, args, cores, tags, stats):

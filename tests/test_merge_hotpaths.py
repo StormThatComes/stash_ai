@@ -230,6 +230,69 @@ def test_sql_page_failure_falls_back_without_repeating_visited_scenes(database, 
         client.close()
 
 
+@pytest.mark.parametrize('page_size,expected', [(2, [2, 2, 1]), (5000, [5])])
+def test_explicit_sql_ids_are_batched_deduplicated_and_keep_order(database, page_size, expected):
+    database.executemany('INSERT INTO scenes VALUES (?,?)', [(i, str(i)) for i in range(3, 6)])
+    client = client_for(database)
+    client.scene_page_size = page_size
+    client.configure_merge_reads(RunReport(write=lambda line: None), merge_only=True)
+    client.calls.clear()
+    scenes = list(client.iter_scenes(['5', '2', '5', '1', '4', '3']))
+    assert [s['id'] for s in scenes] == ['5', '2', '1', '4', '3']
+    assert [len(json.loads(v['args'][0])) for _, v in client.calls] == expected
+    assert all(q == OPERATION for q, _ in client.calls)
+    assert all('paths' not in s for s in scenes)
+
+
+def test_explicit_sql_batches_cap_size_and_fetch_lazily(database):
+    database.executemany('INSERT INTO scenes VALUES (?,?)', [(i, str(i)) for i in range(3, 1003)])
+    client = client_for(database)
+    client.scene_page_size = 5000
+    client.configure_merge_reads(RunReport(write=lambda line: None), merge_only=True)
+    client.calls.clear()
+    scenes = client.iter_scenes([str(i) for i in range(1, 1003)])
+    assert next(scenes)['id'] == '1'
+    assert len(client.calls) == 1
+    assert len(json.loads(client.calls[0][1]['args'][0])) == 1000
+    assert len(list(scenes)) == 1001
+    assert len(json.loads(client.calls[1][1]['args'][0])) == 2
+
+
+def test_explicit_batch_failure_falls_back_without_replay(database):
+    database.executemany('INSERT INTO scenes VALUES (?,?)', [(i, str(i)) for i in range(3, 6)])
+    client = client_for(database)
+    client.scene_page_size = 2
+    report = RunReport(write=lambda line: None)
+    client.configure_merge_reads(report, merge_only=True)
+    read = client.merge_reader.read
+    def fail_second(ids):
+        if '4' in ids:
+            raise RuntimeError('snapshot unavailable')
+        return read(ids)
+    client.merge_reader.read = fail_second
+    assert [s['id'] for s in client.iter_scenes(['5', '2', '5', '1', '4', '3'])] == ['5', '2', '1', '4', '3']
+    assert report.counts['merge_graphql_fallback'] == 1
+    assert [v['id'] for q, v in client.calls if q != OPERATION] == ['1', '4', '3']
+    assert 'paths' in client.find_scene('1')
+
+
+def test_batched_missing_scene_remains_an_error(database):
+    client = client_for(database)
+    client.configure_merge_reads(RunReport(write=lambda line: None), merge_only=True)
+    with pytest.raises(RuntimeError, match='Scene 999 no longer exists'):
+        list(client.iter_scenes(['1', '999']))
+
+
+def test_snapshot_only_refresh_reads_current_sql_state(database):
+    client = client_for(database)
+    client.configure_merge_reads(RunReport(write=lambda line: None), merge_only=True)
+    old = list(client.iter_scenes(['2']))[0]
+    database.execute('INSERT INTO scenes_tags VALUES (2,3)')
+    current = client.find_scene('2')
+    assert old['tags'] == [] and current['tags'] == [{'id': '3', 'name': 'manual'}]
+    assert all(q == OPERATION for q, _ in client.calls)
+
+
 def test_exclusive_timers_do_not_double_count_and_survive_failures(monkeypatch):
     ticks = iter([0.,1.,4.,10.])
     monkeypatch.setattr('stash_ai.runtime.time.perf_counter',lambda:next(ticks))

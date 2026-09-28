@@ -1,6 +1,7 @@
 """Stash scene, tag and marker operations built on the shared HTTP transport."""
 from __future__ import annotations
 
+from itertools import batched
 from typing import Iterator
 
 from stash_ai.transport import StashTransport, absolute_stash_url, origin, safe_error
@@ -112,9 +113,17 @@ class StashClient(StashTransport):
 
     def iter_scenes(self, ids: list[str] | None = None) -> Iterator[dict]:
         if ids:
-            for scene_id in dict.fromkeys(ids):
-                yield (self.find_scene_for_merge(scene_id) if getattr(self, 'merge_only_reads', False)
-                       else self.find_scene(scene_id))
+            for group in batched(dict.fromkeys(ids), min(self.scene_page_size, 1000)):
+                snapshots = (self.merge_snapshots(group)
+                             if getattr(self, 'merge_only_reads', False) else None)
+                for scene_id in group:
+                    if snapshots is None:
+                        yield self.find_scene(scene_id)
+                    else:
+                        scene = snapshots.get(str(int(scene_id)))
+                        if scene is None:
+                            raise RuntimeError(f'Scene {scene_id} no longer exists.')
+                        yield scene
             return
         after = 0
         if getattr(self, 'merge_only_reads', False) and getattr(self, 'merge_reader', None):
@@ -162,6 +171,8 @@ class StashClient(StashTransport):
 
     def find_scene(self, scene_id: str) -> dict:
         reader = getattr(self, 'merge_reader', None)
+        if reader and getattr(self, 'merge_only_reads', False):
+            return self.find_scene_for_merge(scene_id)
         data = self.gql("""query StashAIScene($id: ID!) {
             findScene(id: $id) {
                 """ + ('id title paths { sprite vtt }' if reader else self.scene_fields()) + """
