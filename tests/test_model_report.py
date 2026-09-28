@@ -125,6 +125,36 @@ def test_ablation_report_distinguishes_redundant_and_unique_models(tmp_path):
     assert rows["oppai"]["scenes_unchanged"] == 1
 
 
+def test_ablation_replays_only_models_present_in_scene(tmp_path, monkeypatch):
+    path = tmp_path / "state.sqlite3"
+    policies = empty_policies()
+    app.TEMPORAL_POLICY = TemporalPolicy(enabled=False)
+
+    with merge.StateStore(path, "scope") as state:
+        state.put("1", "wd", inference_pair("only"))
+
+    calls = []
+    original = merge.evidence
+
+    def evidence(*args, **kwargs):
+        calls.append(kwargs.get("selected_sources"))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(merge, "evidence", evidence)
+    with merge.StateStore(path, "scope", True) as state:
+        report = model_report.build_report(
+            app, state, ["1"], policies, policies)
+
+    assert calls[0] is None
+    assert calls[1:] == [{"joytag", "dtq", "oppai"}]
+    rows = {row["model"]: row for row in report["models"]}
+    assert rows["wd"]["scenes_with_evidence"] == 1
+    assert all(
+        rows[model]["scenes_with_evidence"] == 0
+        for model in ("joytag", "dtq", "oppai")
+    )
+
+
 def test_report_file_is_new_json(tmp_path):
     destination = tmp_path / "report.json"
     report = {
