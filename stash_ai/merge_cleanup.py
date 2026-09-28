@@ -147,8 +147,9 @@ def cleanup_scene(app, stash, resolver, store, current, settings, selected, args
         if app.APPLY_SCENE_TAGS:
             result.update(app.cleanup_scene_tags(stash, current, scene_policies[source.key], source, report.detail))
         if app.CREATE_MARKERS:
-            result.update(app.cleanup_scene_marker_cores(stash, current, core_policies[source.key], report.detail,
-                                                        source, scene_policies[source.key]))
+            result.update(app.cleanup_scene_marker_cores(
+                stash, current, core_policies[source.key], source,
+                report.detail, scene_policies[source.key]))
         stats.update(result)
         if not stash.dry_run and any(result[name] for name in ('scene_tags_cleaned', 'markers_deleted', 'markers_updated')):
             current = stash.find_scene(scene_id)
