@@ -322,6 +322,40 @@ def _scene_tag_plan(app, source, existing_tags, scene_names, ids, scene_exclusio
     return final_ids, scene_changed, cleaned
 
 
+def _sync_statistics(existing_markers, source, core_exclusions, wanted,
+                     creates, updates, deletes, unchanged, extra_updates, spec_count):
+    excluded_ids = {
+        str(marker["id"])
+        for marker in existing_markers
+        if owned_marker(marker, source)
+        and marker_has_excluded_core(marker, core_exclusions, source)
+    }
+    return Counter(
+        markers_created=len(creates),
+        markers_updated=len(updates),
+        markers_deleted=len(deletes),
+        markers_unchanged=unchanged,
+        markers_skipped=spec_count - len(wanted),
+        markers_extras_cleaned=len(extra_updates),
+        markers_core_cleaned=len(excluded_ids.intersection(deletes)),
+    )
+
+
+def _publish_plan(stash, scene_id, creates, updates, deletes,
+                  scene_changed, final_ids):
+    if stash.dry_run:
+        return
+    # No destructive cleanup until all new/replacement marker writes succeed.
+    for payload in creates:
+        stash.create_marker(payload)
+    for payload in updates:
+        stash.update_marker(payload)
+    if scene_changed:
+        stash.update_scene_tags(scene_id, sorted(final_ids))
+    for marker_id in deletes:
+        stash.delete_marker(marker_id)
+
+
 def sync_scene(app, stash, resolver, scene: dict,
                scene_predictions: list[tuple[str, float]], specs: list,
                core_exclusions: frozenset[str], source=JOYTAG,
@@ -345,12 +379,7 @@ def sync_scene(app, stash, resolver, scene: dict,
     existing_markers = scene.get("scene_markers") or []
 
     scene_names, ids = _resolved_names(
-        app,
-        resolver,
-        source,
-        scene_predictions,
-        specs,
-        scene_exclusions,
+        app, resolver, source, scene_predictions, specs, scene_exclusions,
     )
     if app.CREATE_MARKERS and specs and not ids.get(source.owner_tag):
         raise ValueError(
@@ -359,54 +388,20 @@ def sync_scene(app, stash, resolver, scene: dict,
         )
 
     wanted, creates, updates, deletes, unchanged, extra_updates = _marker_plan(
-        app,
-        stash,
-        source,
-        scene_id,
-        existing_markers,
-        specs,
-        ids,
-        core_exclusions,
-        scene_exclusions,
+        app, stash, source, scene_id, existing_markers, specs, ids,
+        core_exclusions, scene_exclusions,
     )
-
-    excluded_ids = {
-        str(marker["id"])
-        for marker in existing_markers
-        if owned_marker(marker, source)
-        and marker_has_excluded_core(marker, core_exclusions, source)
-    }
-    stats = Counter(
-        markers_created=len(creates),
-        markers_updated=len(updates),
-        markers_deleted=len(deletes),
-        markers_unchanged=unchanged,
-        markers_skipped=spec_count - len(wanted),
-        markers_extras_cleaned=len(extra_updates),
-        markers_core_cleaned=len(excluded_ids.intersection(deletes)),
+    stats = _sync_statistics(
+        existing_markers, source, core_exclusions, wanted,
+        creates, updates, deletes, unchanged, extra_updates, spec_count,
     )
-
     final_ids, scene_changed, scene_cleaned = _scene_tag_plan(
-        app,
-        source,
-        existing_tags,
-        scene_names,
-        ids,
-        scene_exclusions,
+        app, source, existing_tags, scene_names, ids, scene_exclusions,
     )
     stats["scene_tags_updated"] = int(scene_changed)
     stats["scene_tags_cleaned"] = scene_cleaned
 
-    if stash.dry_run:
-        return stats
-
-    # No destructive cleanup until all new/replacement marker writes succeed.
-    for payload in creates:
-        stash.create_marker(payload)
-    for payload in updates:
-        stash.update_marker(payload)
-    if scene_changed:
-        stash.update_scene_tags(scene_id, sorted(final_ids))
-    for marker_id in deletes:
-        stash.delete_marker(marker_id)
+    _publish_plan(
+        stash, scene_id, creates, updates, deletes, scene_changed, final_ids,
+    )
     return stats
