@@ -155,11 +155,18 @@ def test_core_limit_and_gap_timing(monkeypatch):
     assert len(markers)==1 and markers[0].hits==4
 
 
+def test_hierarchy_loader_requires_explicit_source():
+    import inspect
+
+    parameter = inspect.signature(app.load_tag_hierarchy).parameters["source"]
+    assert parameter.default is inspect.Parameter.empty
+
+
 def test_original_hierarchy_and_model_settings():
     root=Path(__file__).resolve().parents[1]
     data=yaml.safe_load((root/"joytag_hierarchy.yml").read_text())
     labels=sorted({t for group in data["groups"].values() for t in group})
-    hierarchy=app.load_tag_hierarchy(root/"joytag_hierarchy.yml",labels)
+    hierarchy=app.load_tag_hierarchy(root/"joytag_hierarchy.yml",labels,JOYTAG)
     assert len(hierarchy.leaf_parents)==5813
     assert hierarchy.description_prefix==JOYTAG.hierarchy_description
     assert [s.source for s in app.load_model_settings(root/"tagger_models.yml",["all"],None)]==[JOYTAG,WD,DTQ,OPPAI]

@@ -8,6 +8,7 @@ import requests
 from stash_ai.client import StashClient, safe_error
 from stash_ai.state_codec import encode, decode
 from stash_ai.tags import TagResolver
+from stash_ai.taggers import JOYTAG
 
 
 def client(url, key, *, markers=True, page_size=100, timeout=30):
@@ -160,10 +161,18 @@ def test_error_redaction_uses_explicit_key_and_masks_media_tokens():
     assert message == '[redacted] http://stash.test/media?apikey=[redacted]&token=[redacted]'
 
 
+def test_tag_resolver_requires_explicit_source():
+    import inspect
+
+    parameter = inspect.signature(TagResolver).parameters["source"]
+    assert parameter.default is inspect.Parameter.empty
+    assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
+
+
 def test_resolvers_choose_missing_tag_behavior_independently():
     stash = SimpleNamespace(dry_run=True, find_tag=lambda name: None)
-    skip = TagResolver(stash, create_missing=False)
-    create = TagResolver(stash, create_missing=True)
+    skip = TagResolver(stash, source=JOYTAG, create_missing=False)
+    create = TagResolver(stash, source=JOYTAG, create_missing=True)
     assert skip.resolve('jt:label') is None
     assert create.resolve('jt:label') == 'dry-run:jt:label'
     assert skip.cache['jt:label'] is None

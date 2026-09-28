@@ -242,14 +242,14 @@ def build_markers(frames: list[FramePrediction], core_exclusions: frozenset[str]
     return sorted(finished, key=lambda marker: (marker.start, marker.tag)), total
 
 
-def owned_marker(marker: dict, source: ModelSource = JOYTAG) -> bool:
+def owned_marker(marker: dict, source: ModelSource) -> bool:
     """Compatibility wrapper for generated-marker ownership."""
     from stash_ai.separate_sync import owned_marker as _owned_marker
     return _owned_marker(marker, source)
 
 
 def marker_has_excluded_core(marker: dict, core_exclusions: frozenset[str],
-                             source: ModelSource = JOYTAG) -> bool:
+                             source: ModelSource) -> bool:
     """Compatibility wrapper for separate-output core exclusion checks."""
     from stash_ai.separate_sync import marker_has_excluded_core as _marker_has_excluded_core
     return _marker_has_excluded_core(marker, core_exclusions, source)
@@ -263,20 +263,20 @@ def marker_extra_cleanup_payload(marker: dict, scene_id: str,
 
 
 def cleanup_scene_marker_cores(stash: StashClient, scene: dict,
-                               core_exclusions: frozenset[str], report=None,
-                               source: ModelSource = JOYTAG,
+                               core_exclusions: frozenset[str], source: ModelSource,
+                               report=None,
                                tag_exclusions: frozenset[str] = frozenset()) -> Counter:
     """Compatibility wrapper for separate-output marker cleanup."""
     from stash_ai.separate_sync import cleanup_scene_marker_cores as _cleanup
     return _cleanup(
         sys.modules[__name__], stash, scene, core_exclusions,
-        report, source, tag_exclusions,
+        source, report, tag_exclusions,
     )
 
 
 def marker_payload(spec: MarkerSpec, scene_id: str,
                    ids: dict[str, str | None], has_end: bool,
-                   source: ModelSource = JOYTAG) -> dict:
+                   source: ModelSource) -> dict:
     """Compatibility wrapper for separate-output marker payloads."""
     from stash_ai.separate_sync import marker_payload as _marker_payload
     return _marker_payload(sys.modules[__name__], spec, scene_id, ids, has_end, source)
@@ -290,7 +290,7 @@ def marker_differs(existing: dict, wanted: dict) -> bool:
 
 def plan_marker_changes(existing: list[dict], wanted: list[dict],
                         core_exclusions: frozenset[str],
-                        source: ModelSource = JOYTAG
+                        source: ModelSource
                         ) -> tuple[list[dict], list[dict], list[str], int]:
     """Compatibility wrapper for separate-output marker planning."""
     from stash_ai.separate_sync import plan_marker_changes as _plan_marker_changes
@@ -301,7 +301,7 @@ def plan_marker_changes(existing: list[dict], wanted: list[dict],
 
 def sync_scene(stash: StashClient, resolver: TagResolver, scene: dict,
                scene_predictions: list[tuple[str, float]], specs: list[MarkerSpec],
-               core_exclusions: frozenset[str], source: ModelSource = JOYTAG,
+               core_exclusions: frozenset[str], source: ModelSource,
                scene_exclusions: frozenset[str] = frozenset()) -> Counter:
     """Compatibility wrapper around separate-output scene reconciliation."""
     from stash_ai.separate_sync import sync_scene as _sync_scene

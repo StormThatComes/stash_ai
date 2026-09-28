@@ -8,10 +8,10 @@ from __future__ import annotations
 
 from collections import Counter
 
-from stash_ai.taggers import JOYTAG
+from stash_ai.taggers import ModelSource
 
 
-def owned_marker(marker: dict, source=JOYTAG) -> bool:
+def owned_marker(marker: dict, source: ModelSource) -> bool:
     return bool(
         (marker.get("title") or "").startswith(source.title_prefix)
         and any(tag.get("name") == source.owner_tag for tag in marker.get("tags") or [])
@@ -19,7 +19,7 @@ def owned_marker(marker: dict, source=JOYTAG) -> bool:
 
 
 def marker_has_excluded_core(marker: dict, core_exclusions: frozenset[str],
-                             source=JOYTAG) -> bool:
+                             source: ModelSource) -> bool:
     name = (marker.get("primary_tag") or {}).get("name") or ""
     return name.startswith(source.prefix) and name[len(source.prefix):] in core_exclusions
 
@@ -54,8 +54,8 @@ def marker_extra_cleanup_payload(marker: dict, scene_id: str,
 
 
 def cleanup_scene_marker_cores(app, stash, scene: dict,
-                               core_exclusions: frozenset[str], report=None,
-                               source=JOYTAG,
+                               core_exclusions: frozenset[str], source: ModelSource,
+                               report=None,
                                tag_exclusions: frozenset[str] = frozenset()) -> Counter:
     """Remove excluded cores and global extras; never infer replacement runs."""
     from stash_ai.vtt import format_time
@@ -120,7 +120,7 @@ def cleanup_scene_marker_cores(app, stash, scene: dict,
 
 
 def marker_payload(app, spec, scene_id: str, ids: dict[str, str | None],
-                   has_end: bool, source=JOYTAG) -> dict:
+                   has_end: bool, source: ModelSource) -> dict:
     primary = ids[source.prefix + spec.tag]
     extras = {ids[source.prefix + tag] for tag in spec.extra_tags}
     extras.add(ids[source.owner_tag])
@@ -164,7 +164,7 @@ def marker_differs(existing: dict, wanted: dict) -> bool:
 
 
 def plan_marker_changes(app, existing: list[dict], wanted: list[dict],
-                        core_exclusions: frozenset[str], source=JOYTAG
+                        core_exclusions: frozenset[str], source: ModelSource
                         ) -> tuple[list[dict], list[dict], list[str], int]:
     available = {
         str(marker["id"]): marker
@@ -358,7 +358,7 @@ def _publish_plan(stash, scene_id, creates, updates, deletes,
 
 def sync_scene(app, stash, resolver, scene: dict,
                scene_predictions: list[tuple[str, float]], specs: list,
-               core_exclusions: frozenset[str], source=JOYTAG,
+               core_exclusions: frozenset[str], source: ModelSource,
                scene_exclusions: frozenset[str] = frozenset()) -> Counter:
     if resolver.source != source:
         raise ValueError(

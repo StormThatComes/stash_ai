@@ -41,7 +41,9 @@ supportu, counterfactual bez jednego modelu oraz formatowanie finalnych wierszy.
 inferencji. Obsługa plików modelu oraz parsowanie słowników tagów znajduje się w
 `stash_ai/vocabulary.py`, a preprocessing, konfiguracja sesji i inference modeli
 ONNX w `stash_ai/onnx_tagger.py`. Helpery i `OnnxTagger` są re-exportowane z
-`taggers.py`, aby zachować istniejące importy w kodzie i testach.
+`taggers.py`, aby zachować istniejące importy w kodzie i testach. Genericzne komponenty
+(`TagResolver`, loader hierarchii i separate-output reconciliation) wymagają jawnego
+`ModelSource`; JoyTag nie jest ich ukrytym domyślnym namespace'em.
 
 ## Komunikacja ze Stash
 
