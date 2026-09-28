@@ -300,21 +300,48 @@ class MergedRun:
                     'UPDATE merge_checks SET policy=? WHERE scope=? AND policy=?',
                     (final_key, self.store.scope, self.merge_key))
 
+    def _prune_sql(self):
+        """Prepare optional discovery before pruning; native checks still authorize deletes."""
+        from stash_ai.cleanup import CleanupClient
+        from stash_ai.cleanup_sql import SQLCleanup
+        try:
+            client = CleanupClient(self.stash)
+            if client.sql_available:
+                sql = SQLCleanup(client, self.args, self.stats, self.report)
+                sql.probe()
+                # Share one fresh, lightweight catalog between ordinary tags and
+                # marker groups, including tags created during this merge.
+                sql.catalog = client.catalog()
+                self.stats['merge_prune_sql_enabled'] += 1
+                return sql
+        except Exception as exc:
+            self.report.detail('SQL prune unavailable; using GraphQL: ' +
+                               self.app.safe_error(exc, api_key=self.app.STASH_API_KEY))
+        self.stats['merge_prune_graphql_fallback'] += 1
+        return None
+
     def _prune_outputs(self):
         app, args, stash = self.app, self.args, self.stash
         app.print_hierarchy_summary(self.resolver)
-        if args.prune_empty_tags and not self.stats["errors"]:
+        if self.stats['errors'] or not (args.prune_empty_tags or app.CREATE_MARKERS):
+            return
+        sql = self._prune_sql()
+        if args.prune_empty_tags:
             from stash_ai.prune import prune_tags
             # Groups use the projected marker counts below, including in dry-run.
-            self.stats.update(prune_tags(
-                stash, args.prune_prefixes, report=self.report.detail,
-                skip_marker_groups=app.CREATE_MARKERS))
-        elif not self.stats['errors']:
+            self.stats.update(sql.prune(prefixes=args.prune_prefixes, skip_marker_groups=app.CREATE_MARKERS)
+                              if sql is not None else prune_tags(
+                                  stash, args.prune_prefixes, report=self.report.detail,
+                                  skip_marker_groups=app.CREATE_MARKERS))
+        elif sql is not None and app.APPLY_SCENE_TAGS and app.CREATE_MARKERS:
+            self.stats.update(sql.prune(self.scene_policies))
+        else:
             from stash_ai.exclusions import prune_excluded_definitions
             self.stats.update(prune_excluded_definitions(
                 app, stash, self.scene_policies, self.report.detail))
-        if app.CREATE_MARKERS and not self.stats['errors']:
+        if app.CREATE_MARKERS:
             from stash_ai.marker_groups import for_resolver, prune_groups
+            delta = for_resolver(app, self.resolver).usage_delta
+            candidates = sql.marker_group_candidates(delta) if sql is not None else None
             self.stats.update(prune_groups(
-                stash, self.report.detail,
-                usage_delta=for_resolver(app, self.resolver).usage_delta))
+                stash, self.report.detail, candidate_ids=candidates, usage_delta=delta))
