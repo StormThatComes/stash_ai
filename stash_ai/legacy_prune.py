@@ -30,7 +30,8 @@ def _current_legacy(app, scene):
 
 def _legacy_rows(store):
     return list(store.connection.execute(
-        "SELECT scene,kind,data,length(data) FROM legacy_imports WHERE scope=? ORDER BY scene,kind",
+        "SELECT scene,kind,data,length(data) FROM " + store.table("legacy_imports") +
+        " WHERE scope=? ORDER BY scene,kind",
         (store.scope,),
     ))
 
@@ -73,8 +74,9 @@ def run(app, args):
                 "Pending publication plans exist; finish or abandon them before pruning legacy imports."
             )
 
+        table = store.table("legacy_imports")
         rows = store.connection.execute(
-            "SELECT COUNT(*),COALESCE(SUM(length(data)),0) FROM legacy_imports WHERE scope=?",
+            "SELECT COUNT(*),COALESCE(SUM(length(data)),0) FROM " + table + " WHERE scope=?",
             (store.scope,),
         ).fetchone()
         row_count, payload_bytes = int(rows[0]), int(rows[1] or 0)
@@ -89,7 +91,7 @@ def run(app, args):
             if hasattr(stash, "create_markers"):
                 stash.create_markers = True
             if store.connection.execute(
-                    "SELECT 1 FROM legacy_imports WHERE scope=? AND kind='markers' LIMIT 1",
+                    "SELECT 1 FROM " + table + " WHERE scope=? AND kind='markers' LIMIT 1",
                     (store.scope,)).fetchone():
                 stash.detect_marker_capabilities()
             removable, retained, _ = candidates(app, store, stash)
