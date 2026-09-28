@@ -22,6 +22,10 @@ raportowanie, a moduł wywołuje helpery przez obiekt `app`, dzięki czemu
 dotychczasowe punkty monkeypatch w `cli.py` pozostają aktywne. Pobieranie cue/sprite, przygotowanie obrazów,
 filtrowanie score i resumowalny lokalny pipeline inferencji znajdują się w
 `stash_ai/inference.py`; kompatybilne wrappery pozostają w `cli.py`.
+Reconciliation dla `--output-mode separate` (własność markerów, payloady,
+plan create/update/delete, cleanup wykluczeń i publikacja sceny) znajduje się w
+`stash_ai/separate_sync.py`; `cli.py` zachowuje kompatybilne wrappery również
+dla helperów używanych przez merged reconciliation.
 Definicja opcji CLI i walidacja kombinacji flag są
 w `stash_ai/cli_args.py`, a dispatch samodzielnych trybów DB/diagnostics/recovery/
 prune/model-report/backfill w `stash_ai/cli_modes.py`. Parsowanie konfiguracji,
