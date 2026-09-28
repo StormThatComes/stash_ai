@@ -66,6 +66,10 @@ python .\stash_ai.py --explain-tag ai:blue_hair --scene-id 123
 # Usuwanie nieużywanych definicji tagów.
 python .\stash_ai.py --prune-empty-tags-only --dry-run
 
+# Usuwanie niepotrzebnej historii importu starych source-prefixed tagów/markerów.
+python .\stash_ai.py --prune-legacy-imports --dry-run
+python .\stash_ai.py --prune-legacy-imports
+
 # Zdrowie, spójność logiczna i kompaktowanie lokalnej bazy stanu.
 python .\stash_ai.py --db-report
 python .\stash_ai.py --db-check
@@ -108,6 +112,25 @@ do zwykłego przeliczenia merge, cleanupu ani zmiany progów.
 Domyślnie `REPLACE_SCENE_TAGS=True` i `REPLACE_MARKERS=True`. Wyłączenie
 którejś flagi zachowuje historię danego rodzaju wyniku; ponowne włączenie
 normalizuje historię przy bezpiecznym reuse cache.
+
+### Czyszczenie historii legacy imports
+
+`--prune-legacy-imports` usuwa wyłącznie wpisy `legacy_imports`, które nie są
+już potrzebne do ochrony przed ponownym bootstrapem starych tagów/markerów
+`jt:`, `wd:`, `dtq:` i `op:`. Polecenie łączy się ze Stash, ale nie ładuje
+modeli ani nie uruchamia inferencji.
+
+Każdy zapisany import jest porównywany z aktualnymi source-prefixed obiektami w
+Stash. Wpis pozostaje, jeśli dokładnie zaimportowany wcześniej tag lub marker
+nadal istnieje. Jeśli taki obiekt zniknął (albo cała scena została usunięta),
+ledger można usunąć bez zmiany `results`, `result_index` ani snapshotów.
+`--dry-run` pokazuje liczbę i rozmiar rekordów kwalifikujących się do usunięcia.
+Komenda odmawia pracy przy pending publication planie.
+
+Samo usunięcie `legacy_imports` nie unieważnia już `merge_checks`: nowy legacy
+evidence i tak zapisuje `results`, a ten zapis nadal prawidłowo unieważnia cache.
+Po większym czyszczeniu można użyć `--db-compact`, aby zwrócić zwolnione strony
+SQLite do systemu plików.
 
 ### Zdrowie i kompaktowanie bazy stanu
 
