@@ -243,198 +243,72 @@ def build_markers(frames: list[FramePrediction], core_exclusions: frozenset[str]
 
 
 def owned_marker(marker: dict, source: ModelSource = JOYTAG) -> bool:
-    return bool((marker.get("title") or "").startswith(source.title_prefix)
-                and any(tag.get("name") == source.owner_tag for tag in marker.get("tags") or []))
+    """Compatibility wrapper for generated-marker ownership."""
+    from stash_ai.separate_sync import owned_marker as _owned_marker
+    return _owned_marker(marker, source)
 
 
 def marker_has_excluded_core(marker: dict, core_exclusions: frozenset[str],
                              source: ModelSource = JOYTAG) -> bool:
-    name = (marker.get("primary_tag") or {}).get("name") or ""
-    return name.startswith(source.prefix) and name[len(source.prefix):] in core_exclusions
+    """Compatibility wrapper for separate-output core exclusion checks."""
+    from stash_ai.separate_sync import marker_has_excluded_core as _marker_has_excluded_core
+    return _marker_has_excluded_core(marker, core_exclusions, source)
 
 
-def marker_extra_cleanup_payload(marker: dict, scene_id: str, blocked_names: set[str], has_end: bool):
-    """Preserve marker identity, primary, title and timing while stripping extras."""
-    primary = str(marker["primary_tag"]["id"])
-    extras = {str(tag["id"]) for tag in marker.get("tags", []) if str(tag["id"]) != primary}
-    kept = {str(tag["id"]) for tag in marker.get("tags", [])
-            if str(tag["id"]) != primary and tag["name"] not in blocked_names}
-    if extras == kept:
-        return None
-    payload = dict(id=str(marker["id"]), scene_id=scene_id, title=marker["title"],
-                   seconds=marker["seconds"], primary_tag_id=primary, tag_ids=sorted(kept))
-    if has_end:
-        payload["end_seconds"] = marker.get("end_seconds")
-    return payload
+def marker_extra_cleanup_payload(marker: dict, scene_id: str,
+                                 blocked_names: set[str], has_end: bool):
+    """Compatibility wrapper for retained-marker extra cleanup."""
+    from stash_ai.separate_sync import marker_extra_cleanup_payload as _payload
+    return _payload(marker, scene_id, blocked_names, has_end)
 
 
 def cleanup_scene_marker_cores(stash: StashClient, scene: dict,
-                              core_exclusions: frozenset[str], report=None, source: ModelSource = JOYTAG,
-                              tag_exclusions: frozenset[str] = frozenset()) -> Counter:
-    """Remove excluded cores and global extras; never infer replacement runs."""
-    core_exclusions = core_exclusions | tag_exclusions
-    excluded = [marker for marker in scene.get("scene_markers") or []
-                if (owned_marker(marker, source) and marker_has_excluded_core(marker, core_exclusions, source))
-                or marker_has_excluded_core(marker, tag_exclusions, source)]
-    stats = Counter(markers_deleted=len(excluded), markers_core_cleaned=len(excluded))
-    for marker in excluded:
-        if report:
-            report(f"{'[DRY] Would delete' if stash.dry_run else 'Deleting'} marker {marker['id']} "
-                   f"on scene {scene['id']}: core={marker['primary_tag']['name']!r}, "
-                   f"start={format_time(marker['seconds'])}")
-        if not stash.dry_run:
-            stash.delete_marker(str(marker["id"]))
-    excluded_ids = {str(marker["id"]) for marker in excluded}
-    blocked_names = {source.prefix + tag for tag in tag_exclusions | MARKER_TAG_BLOCKLIST}
-    for marker in scene.get("scene_markers") or []:
-        if str(marker["id"]) in excluded_ids:
-            continue
-        names = blocked_names if owned_marker(marker, source) else {source.prefix + tag for tag in tag_exclusions}
-        payload = marker_extra_cleanup_payload(marker, str(scene["id"]), names, stash.has_end_time)
-        if payload is not None:
-            stats["markers_updated"] += 1
-            stats["markers_extras_cleaned"] += 1
-            if report:
-                report(f"{'[DRY] ' if stash.dry_run else ''}Remove excluded extras from marker {marker['id']} on scene {scene['id']}.")
-            if not stash.dry_run:
-                stash.update_marker(payload)
-    return stats
+                               core_exclusions: frozenset[str], report=None,
+                               source: ModelSource = JOYTAG,
+                               tag_exclusions: frozenset[str] = frozenset()) -> Counter:
+    """Compatibility wrapper for separate-output marker cleanup."""
+    from stash_ai.separate_sync import cleanup_scene_marker_cores as _cleanup
+    return _cleanup(
+        sys.modules[__name__], stash, scene, core_exclusions,
+        report, source, tag_exclusions,
+    )
 
 
-def marker_payload(spec: MarkerSpec, scene_id: str, ids: dict[str, str | None], has_end: bool,
+def marker_payload(spec: MarkerSpec, scene_id: str,
+                   ids: dict[str, str | None], has_end: bool,
                    source: ModelSource = JOYTAG) -> dict:
-    primary = ids[source.prefix + spec.tag]
-    extras = {ids[source.prefix + tag] for tag in spec.extra_tags}
-    extras.add(ids[source.owner_tag])
-    extras.discard(primary)
-    extras.discard(None)
-    payload = {"scene_id": scene_id, "title": source.title_prefix + spec.tag,
-               "seconds": round(spec.start, 3), "primary_tag_id": primary,
-               "tag_ids": sorted(extras)}
-    if has_end:
-        payload["end_seconds"] = round(spec.end, 3) if MARKER_USE_END_TIME else None
-    return payload
+    """Compatibility wrapper for separate-output marker payloads."""
+    from stash_ai.separate_sync import marker_payload as _marker_payload
+    return _marker_payload(sys.modules[__name__], spec, scene_id, ids, has_end, source)
 
 
 def marker_differs(existing: dict, wanted: dict) -> bool:
-    if existing["title"] != wanted["title"] or abs(existing["seconds"] - wanted["seconds"]) > 0.0005:
-        return True
-    if str(existing["primary_tag"]["id"]) != wanted["primary_tag_id"]:
-        return True
-    # Some API versions include the primary tag in the returned tags list.
-    extra_ids = {str(tag["id"]) for tag in existing["tags"]} - {wanted["primary_tag_id"]}
-    if extra_ids != set(wanted["tag_ids"]):
-        return True
-    if "end_seconds" in wanted:
-        old_end, new_end = existing.get("end_seconds"), wanted["end_seconds"]
-        if old_end is None or new_end is None:
-            return old_end != new_end
-        return abs(old_end - new_end) > 0.0005
-    return False
+    """Compatibility wrapper for marker reconciliation comparison."""
+    from stash_ai.separate_sync import marker_differs as _marker_differs
+    return _marker_differs(existing, wanted)
 
 
 def plan_marker_changes(existing: list[dict], wanted: list[dict],
-                        core_exclusions: frozenset[str], source: ModelSource = JOYTAG) -> tuple[list[dict], list[dict], list[str], int]:
-    available = {str(marker["id"]): marker for marker in existing if owned_marker(marker, source)}
-    creates, updates = [], []
-    unchanged = 0
-    for payload in wanted:
-        matches = [marker for marker in available.values()
-                   if str(marker["primary_tag"]["id"]) == payload["primary_tag_id"]
-                   and abs(marker["seconds"] - payload["seconds"]) <= MARKER_MATCH_TOLERANCE_SECONDS]
-        if not matches:
-            creates.append(payload)
-            continue
-        current = min(matches, key=lambda marker: (abs(marker["seconds"] - payload["seconds"]), str(marker["id"])))
-        marker_id = str(current["id"])
-        del available[marker_id]
-        if marker_differs(current, payload):
-            updates.append({**payload, "id": marker_id})
-        else:
-            unchanged += 1
-    # The exclusion policy always wins over retaining obsolete generated runs.
-    deletes = sorted(marker_id for marker_id, marker in available.items()
-                     if REPLACE_MARKERS or marker_has_excluded_core(marker, core_exclusions, source))
-    return creates, updates, deletes, unchanged
+                        core_exclusions: frozenset[str],
+                        source: ModelSource = JOYTAG
+                        ) -> tuple[list[dict], list[dict], list[str], int]:
+    """Compatibility wrapper for separate-output marker planning."""
+    from stash_ai.separate_sync import plan_marker_changes as _plan_marker_changes
+    return _plan_marker_changes(
+        sys.modules[__name__], existing, wanted, core_exclusions, source,
+    )
 
 
 def sync_scene(stash: StashClient, resolver: TagResolver, scene: dict,
                scene_predictions: list[tuple[str, float]], specs: list[MarkerSpec],
                core_exclusions: frozenset[str], source: ModelSource = JOYTAG,
                scene_exclusions: frozenset[str] = frozenset()) -> Counter:
-    if resolver.source != source:
-        raise ValueError("Resolver/source mismatch; refusing to mix model namespaces.")
-    spec_count = len(specs)
-    # Enforce again at reconciliation, even for specs supplied outside inference.
-    from stash_ai.exclusions import filter_spec
-    core_exclusions = core_exclusions | scene_exclusions
-    specs = [filter_spec(spec, scene_exclusions) for spec in specs if spec.tag not in core_exclusions]
-    scene_id = str(scene["id"])
-    existing_tags = scene.get("tags") or []
-    scene_names = {source.prefix + tag for tag, _ in scene_predictions if tag not in scene_exclusions} if APPLY_SCENE_TAGS else set()
-    names = set(scene_names)
-    if CREATE_MARKERS and specs:
-        names.add(source.owner_tag)
-        for spec in specs:
-            names.add(source.prefix + spec.tag)
-            names.update(source.prefix + tag for tag in spec.extra_tags)
-    # Resolve everything before replacing scene tags or removing old markers.
-    ids = {name: resolver.resolve(name) for name in sorted(names)}
-    if CREATE_MARKERS and specs and not ids.get(source.owner_tag):
-        raise ValueError(f"Missing marker ownership tag {source.owner_tag!r}; enable CREATE_MISSING or create it in Stash.")
-    wanted = [marker_payload(spec, scene_id, ids, stash.has_end_time, source) for spec in specs
-              if ids.get(source.prefix + spec.tag)] if CREATE_MARKERS else []
-    existing_markers = scene.get("scene_markers") or []
-    plan = plan_marker_changes(existing_markers, wanted, core_exclusions, source) if CREATE_MARKERS else ([], [], [], 0)
-    creates, updates, deletes, unchanged = plan
-    if CREATE_MARKERS:
-        deletes = sorted(set(deletes) | {str(marker['id']) for marker in existing_markers
-                                        if marker_has_excluded_core(marker, scene_exclusions, source)})
-    # Retained markers must also lose forbidden extras when replacement is off.
-    changed_ids = set(deletes) | {payload["id"] for payload in updates}
-    wanted_keys = {(payload["primary_tag_id"], payload["seconds"]) for payload in wanted}
-    extra_updates = []
-    if CREATE_MARKERS and scene_exclusions:
-        blocked_names = {source.prefix + tag for tag in scene_exclusions}
-        for marker in existing_markers:
-            if str(marker["id"]) in changed_ids:
-                continue
-            if (str(marker["primary_tag"]["id"]), marker["seconds"]) in wanted_keys:
-                continue
-            payload = marker_extra_cleanup_payload(marker, scene_id, blocked_names, stash.has_end_time)
-            if payload is not None:
-                extra_updates.append(payload)
-        updates.extend(extra_updates)
-    excluded_ids = {str(marker["id"]) for marker in existing_markers
-                    if owned_marker(marker, source) and marker_has_excluded_core(marker, core_exclusions, source)}
-    stats = Counter(markers_created=len(creates), markers_updated=len(updates),
-                    markers_deleted=len(deletes), markers_unchanged=unchanged,
-                    markers_skipped=spec_count - len(wanted),
-                    markers_extras_cleaned=len(extra_updates),
-                    markers_core_cleaned=len(excluded_ids.intersection(deletes)))
-
-    existing_ids = {str(tag["id"]) for tag in existing_tags}
-    preserved = {str(tag["id"]) for tag in existing_tags
-                 if not (tag["name"].startswith(source.prefix) and (REPLACE_SCENE_TAGS
-                     or tag["name"][len(source.prefix):] in scene_exclusions))}
-    final_ids = preserved | {ids[name] for name in scene_names if ids[name] is not None}
-    scene_changed = APPLY_SCENE_TAGS and final_ids != existing_ids
-    stats["scene_tags_updated"] = int(scene_changed)
-    stats["scene_tags_cleaned"] = sum(tag["name"].startswith(source.prefix)
-        and tag["name"][len(source.prefix):] in scene_exclusions for tag in existing_tags) if APPLY_SCENE_TAGS else 0
-
-    if stash.dry_run:
-        return stats
-    # No destructive cleanup until all new/replacement marker writes succeed.
-    for payload in creates:
-        stash.create_marker(payload)
-    for payload in updates:
-        stash.update_marker(payload)
-    if scene_changed:
-        stash.update_scene_tags(scene_id, sorted(final_ids))
-    for marker_id in deletes:
-        stash.delete_marker(marker_id)
-    return stats
+    """Compatibility wrapper around separate-output scene reconciliation."""
+    from stash_ai.separate_sync import sync_scene as _sync_scene
+    return _sync_scene(
+        sys.modules[__name__], stash, resolver, scene, scene_predictions, specs,
+        core_exclusions, source, scene_exclusions,
+    )
 
 
 def validate_config(scene_work: bool = True) -> None:
