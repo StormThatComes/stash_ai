@@ -92,15 +92,17 @@ def run(app, args):
             print("Legacy imports: nothing to prune.")
             return 0
 
+        marker_rows = store.connection.execute(
+            "SELECT 1 FROM " + table + " WHERE scope=? AND kind='markers' LIMIT 1",
+            (store.scope,),
+        ).fetchone() is not None
         stash = app.create_stash_client(app.DRY_RUN)
         try:
             # The normal client may omit markers when marker output is disabled.
-            # Legacy pruning must inspect both kinds irrespective of output config.
+            # Request them here only when the ledger actually contains marker rows.
             if hasattr(stash, "create_markers"):
-                stash.create_markers = True
-            if store.connection.execute(
-                    "SELECT 1 FROM " + table + " WHERE scope=? AND kind='markers' LIMIT 1",
-                    (store.scope,)).fetchone():
+                stash.create_markers = marker_rows
+            if marker_rows:
                 stash.detect_marker_capabilities()
             if hasattr(stash, "configure_merge_reads"):
                 stash.configure_merge_reads(args.report, merge_only=True)
