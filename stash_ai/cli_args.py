@@ -86,6 +86,8 @@ def build_parser(app) -> argparse.ArgumentParser:
     modes.add_argument("--explain-tag", metavar="TAG", help="Show saved sources, scores and intervals for a raw/ai: tag; requires --scene-id; no Stash access.")
     modes.add_argument("--prune-empty-tags-only", action="store_true",
                        help="Remove unused leaf tag definitions without models/inference. Honors --dry-run.")
+    modes.add_argument("--prune-legacy-imports", action="store_true",
+                       help="Remove legacy-import ledger rows whose exact source objects no longer exist in Stash; no models/inference. Honors --dry-run.")
     modes.add_argument("--db-report", action="store_true",
                        help="Report state DB health, size and aggregate evidence/cache counts without Stash or model access.")
     modes.add_argument("--db-check", action="store_true",
@@ -124,6 +126,18 @@ def validate_args(app, parser: argparse.ArgumentParser, args: argparse.Namespace
             parser.error("--model-report cannot be combined with tagging, threshold, pruning or dry-run modifiers.")
         if args.model_report.suffix.lower() != ".json" or args.model_report.exists():
             parser.error("--model-report requires a new .json file; existing files are never overwritten.")
+    if args.prune_legacy_imports:
+        if args.output_mode != "merged":
+            parser.error("--prune-legacy-imports requires --output-mode merged.")
+        if args.scene_id:
+            parser.error("--prune-legacy-imports covers the current Stash/state DB; --scene-id does not apply.")
+        if args.models or args.device or args.offline or args.resume is not None or args.restart:
+            parser.error("--prune-legacy-imports does not use model/inference options.")
+        if (args.markers_only or args.scene_tags_only or args.profile_merge or args.force_merge
+                or args.rethreshold_scenes or args.rethreshold_markers or args.abandon_pending
+                or args.prune_empty_tags or args.prune_prefixes or args.create_all_tags or args.no_hierarchy):
+            parser.error("--prune-legacy-imports cannot be combined with tagging, threshold, recovery or tag-pruning modifiers.")
+
     if db_mode:
         if args.output_mode != "merged":
             parser.error("--db-report/--db-check/--db-compact require --output-mode merged.")
