@@ -28,9 +28,9 @@ def _current_legacy(app, scene):
     return values
 
 
-def _legacy_rows(store):
+def _legacy_meta(store):
     return list(store.connection.execute(
-        "SELECT scene,kind,data,length(data) FROM " + store.table("legacy_imports") +
+        "SELECT scene,kind,length(data) FROM " + store.table("legacy_imports") +
         " WHERE scope=? ORDER BY scene,kind",
         (store.scope,),
     ))
@@ -38,11 +38,11 @@ def _legacy_rows(store):
 
 def candidates(app, store, stash):
     """Find ledger rows with no exact imported source object left in live Stash."""
-    rows = _legacy_rows(store)
-    if not rows:
+    meta = _legacy_meta(store)
+    if not meta:
         return [], 0, 0
 
-    tracked_scenes = {scene for scene, _, _, _ in rows}
+    tracked_scenes = {scene for scene, _, _ in meta}
     live = defaultdict(set)
     for scene in tqdm(stash.iter_scenes(), desc="Inspect legacy imports", unit="scene"):
         scene_id = str(scene["id"])
@@ -54,7 +54,11 @@ def candidates(app, store, stash):
 
     removable = []
     retained = 0
-    for scene, kind, blob, size in rows:
+    query = (
+        "SELECT scene,kind,data,length(data) FROM " + store.table("legacy_imports") +
+        " WHERE scope=? ORDER BY scene,kind"
+    )
+    for scene, kind, blob, size in store.connection.execute(query, (store.scope,)):
         imported = store.unpack(blob)
         if not isinstance(imported, list):
             raise ValueError("Invalid legacy_imports payload.")
@@ -63,7 +67,7 @@ def candidates(app, store, stash):
             retained += 1
         else:
             removable.append((scene, kind, int(size or 0)))
-    return removable, retained, sum(size for _, _, size in rows)
+    return removable, retained, sum(int(size or 0) for _, _, size in meta)
 
 
 def run(app, args):
