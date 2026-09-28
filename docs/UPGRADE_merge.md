@@ -29,6 +29,23 @@ tagów/markerów może zostać dołączony zbiorczo.
 Jeśli read-only SQL nie jest dostępny lub przestaje działać, merge może wrócić
 do GraphQL. Zapisy zawsze używają API Stash.
 
+## Końcowe usuwanie pustych tagów
+
+Po udanym merge’u read-only SQL odrzuca tagi używane przez sceny lub markery,
+zanim aplikacja pobierze pełne liczniki użycia przez GraphQL. Dotyczy to pustych
+grup markerów, wykluczonych definicji oraz `--prune-empty-tags`. Jeden świeży
+katalog ID/nazw obsługuje obie fazy prune’a.
+
+SQL wyłącznie zawęża kandydatów. Kontrole wszystkich liczników użycia, dzieci,
+własności grup i ponowne sprawdzenie przed usunięciem pozostają w API Stash.
+W `--dry-run` kandydaci grup obejmują również grupy tracące markery w planowanym
+merge’u; użycie w pozostałych scenach nadal chroni grupę przed usunięciem.
+
+Jeśli wykrywanie możliwości SQL, jego weryfikacja lub odczyt katalogu nie
+powiedzie się, prune korzysta z dotychczasowej ścieżki GraphQL. Nieprawidłowe
+wyniki późniejszego filtrowania kandydatów przerywają prune.
+Podsumowanie pokazuje `merge_prune_sql_enabled` lub `merge_prune_graphql_fallback`.
+
 ## Indeksy temporalne
 
 Powtarzane zapytania o wystąpienia w tym samym przedziale korzystają z indeksów
