@@ -44,7 +44,11 @@ def candidates(app, store, stash):
 
     tracked_scenes = {scene for scene, _, _ in meta}
     live = defaultdict(set)
-    for scene in tqdm(stash.iter_scenes(), desc="Inspect legacy imports", unit="scene"):
+    identifiers = list(tracked_scenes)
+    scenes = (stash.iter_scenes(identifiers)
+              if getattr(stash, "merge_reader", None) is not None
+              else stash.iter_scenes())
+    for scene in tqdm(scenes, desc="Inspect legacy imports", unit="scene"):
         scene_id = str(scene["id"])
         if scene_id not in tracked_scenes:
             continue
@@ -98,6 +102,8 @@ def run(app, args):
                     "SELECT 1 FROM " + table + " WHERE scope=? AND kind='markers' LIMIT 1",
                     (store.scope,)).fetchone():
                 stash.detect_marker_capabilities()
+            if hasattr(stash, "configure_merge_reads"):
+                stash.configure_merge_reads(args.report, merge_only=True)
             removable, retained, _ = candidates(app, store, stash)
         finally:
             stash.close()
