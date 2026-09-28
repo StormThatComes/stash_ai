@@ -6,12 +6,14 @@ from collections import Counter
 import json
 from pathlib import Path
 import sqlite3
+import struct
 import zlib
 
 from .common import (
     BASE_TABLES, KNOWN_KINDS, KNOWN_MODELS, KNOWN_VERSIONS, STATE_TABLES,
     column_names, connect_readonly, count_rows, table_names,
 )
+from .payloads import valid_frames, valid_result_segments
 
 
 CHECK_MESSAGES = {
@@ -23,13 +25,13 @@ CHECK_MESSAGES = {
     "result_missing_index": "Saved results have no matching result_index row.",
     "result_index_orphan": "result_index rows have no matching saved result.",
     "result_index_mismatch": "result_index metadata disagrees with the saved result payload.",
-    "result_payload_invalid": "Saved result payloads cannot be decoded or violate the persisted segment shape.",
+    "result_payload_invalid": "Saved result payloads cannot be decoded or contain invalid segments, evidence rows, or values.",
     "state_payload_invalid": "Non-result application state contains an unreadable or structurally invalid compressed payload.",
     "checkpoint_orphan_frames": "Checkpoint frame chunks have no parent checkpoint.",
     "checkpoint_orphan_analysis": "Checkpoint analysis rows have no parent checkpoint.",
     "checkpoint_dimensions": "Checkpoint progress/top-row dimensions are impossible.",
     "checkpoint_frame_progress": "Checkpoint frame chunks have invalid progress relative to their parent checkpoint.",
-    "checkpoint_scores": "Checkpoint top-score BLOBs are corrupt or have an impossible float32 shape.",
+    "checkpoint_scores": "Checkpoint top-score BLOBs are corrupt, have an impossible float32 shape, or contain invalid probabilities.",
     "cleanup_state_invalid": "Cleanup state has an invalid generation or mask structure.",
     "recovery_cleanup_invalid": "Recovery cleanup metadata is invalid or refers to an impossible generation.",
     "empty_snapshot_without_recovery": "Snapshot rows contain neither published nor pending state and have no archived recovery publication.",
@@ -91,19 +93,6 @@ def _decoded_payload(blob, expected):
     return value
 
 
-def _valid_result_segments(segments, kind):
-    if not isinstance(segments, list):
-        return False
-    allowed_modes = {"scene"} if kind == "scene" else {"frames", "spans"}
-    return all(
-        isinstance(segment, dict)
-        and segment.get("mode") in allowed_modes
-        and isinstance(segment.get("meta"), dict)
-        and isinstance(segment.get("items"), list)
-        for segment in segments
-    )
-
-
 def _check_results_and_index(db, tables, errors, progress=None):
     if "results" not in tables:
         return 0
@@ -125,7 +114,7 @@ def _check_results_and_index(db, tables, errors, progress=None):
         _tick(progress)
         try:
             segments = _decoded_payload(blob, list)
-            if not _valid_result_segments(segments, kind):
+            if not valid_result_segments(segments, kind):
                 raise ValueError("Invalid result segment.")
             current = next(
                 (segment for segment in reversed(segments)
@@ -182,7 +171,9 @@ def _check_state_payloads(db, tables, errors, progress=None):
             checked += 1
             _tick(progress)
             try:
-                _decoded_payload(blob, expected)
+                payload = _decoded_payload(blob, expected)
+                if table == "checkpoint_frames" and not valid_frames(payload, checkpoint=True):
+                    raise ValueError("Invalid checkpoint frame evidence.")
             except (TypeError, ValueError, UnicodeDecodeError, json.JSONDecodeError, zlib.error):
                 errors["state_payload_invalid"] += 1
     return checked
@@ -194,6 +185,8 @@ def _check_checkpoints(db, tables, errors, progress=None):
             SELECT COUNT(*) FROM checkpoints
             WHERE processed <= 0 OR total <= 0 OR processed > total
                OR top_rows < 0 OR top_rows > processed
+               OR typeof(processed) != 'integer' OR typeof(total) != 'integer'
+               OR typeof(top_rows) != 'integer'
                OR signature = ''
         """).fetchone()[0]
 
@@ -201,10 +194,13 @@ def _check_checkpoints(db, tables, errors, progress=None):
             _tick(progress)
             try:
                 raw = zlib.decompress(blob)
-                valid = (
+                valid = type(top_rows) is int and (
                     (top_rows == 0 and len(raw) == 0)
                     or (top_rows > 0 and len(raw) > 0 and len(raw) % (top_rows * 4) == 0)
                 )
+                # The shape alone accepts NaN/Inf and out-of-range scores. Match
+                # inference's probability contract without importing NumPy.
+                valid = valid and all(0 <= score <= 1 for score, in struct.iter_unpack("<f", raw))
                 if not valid:
                     errors["checkpoint_scores"] += 1
             except (TypeError, zlib.error):

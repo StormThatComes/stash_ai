@@ -116,6 +116,12 @@ normalizuje historię przy bezpiecznym reuse cache.
 zgodność `results` z `result_index` (łącznie z zapisaną sygnaturą ostatniej
 inferencji), dekodowalność trwałych BLOB-ów, dozwolone model/kind, relacje
 checkpoint/frames/analysis, wymiary checkpointów oraz generacje cleanup/recovery.
+Waliduje też zawartość wyników scen, klatek i zakresów markerów: wymagane pola,
+tagi, czasy, prawdopodobieństwa oraz zapisane statystyki czasowe. Sprawdza klatki
+checkpointów (również `scene_tags`) i wartości float32: odrzuca `NaN`,
+nieskończoności oraz wyniki poza `[0, 1]`. Zachowuje obsługę starszych wyników bez
+statystyk i metadanych retencji, a także importowanych markerów punktowych i
+brakujących historycznych ocen (`score: null`).
 Osierocone lub historyczne rekordy, które nie muszą oznaczać uszkodzenia, są
 raportowane jako warnings. Pending publication/cleanup i refresh requests są
 pokazywane jako stan roboczy, a nie automatycznie jako błędy.
