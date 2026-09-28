@@ -8,8 +8,8 @@ Ten dokument opisuje bieżącą ścieżkę cleanupu dla dużych bibliotek.
 - używa read-only `querySQL`, gdy wymagane API i schema są dostępne;
 - w przeciwnym razie przechodzi na odczyt scen przez GraphQL.
 
-`--cleanup-strategy sql` wymaga ścieżki SQL i kończy się błędem, jeśli nie może
-jej użyć. `--cleanup-strategy scenes` wymusza odczyt scen.
+`--cleanup-strategy sql` wymaga SQL do wyszukiwania kandydatów i kończy się
+błędem, jeśli nie może go użyć. `--cleanup-strategy scenes` wymusza GraphQL.
 
 ```powershell
 python .\stash_ai.py --models all --cleanup-only --cleanup-strategy sql --dry-run
@@ -43,7 +43,18 @@ powiązania.
 - ponownie weryfikuje stan przed zapisem przez API.
 
 Dla reguł zależnych od modelu pobierane są tylko sceny wymagające dokładnego
-przeliczenia.
+przeliczenia. Ich tagi i markery są odczytywane przez `SceneReader` paczkami
+po `SCENE_PAGE_SIZE` scen (domyślnie 100, maksymalnie 1000), bez osobnych zapytań
+GraphQL o każdą scenę ani odczytu ścieżek sprite/VTT. Kolejna paczka jest pobierana
+dopiero po przetworzeniu poprzedniej. Przed zapisem stan sceny jest odświeżany;
+sceny niewymagające zmian nie potrzebują dodatkowego odczytu.
+
+Jeśli SELECT snapshotów jest niedostępny lub zawiedzie w trakcie pracy,
+pozostałe odczyty przechodzą na GraphQL bez powtarzania przetworzonych scen.
+Dotyczy to również `--cleanup-strategy sql`: wymaga on SQL do wyszukiwania
+kandydatów, ale odczyt ich szczegółów ma niezależny fallback. Tryb `scenes`
+pozostaje ścieżką GraphQL. Dry-run stosuje te same paczki i zachowuje podgląd
+globalnych usunięć także podczas ponownego odczytu sceny.
 
 ## Rozmiary partii
 

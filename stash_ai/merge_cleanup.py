@@ -107,7 +107,7 @@ def cleanup_support(app, store, scene_id, spans, selected, core_policies, tag_po
 
 def cleanup_scene(app, stash, resolver, store, current, settings, selected, args,
                   core_policies, scene_policies, scoped_tags, report):
-    """Reconcile one affected scene; refresh only after actual writes."""
+    """Reconcile one affected scene, rechecking prefetched data before writes."""
     from stash_ai.exclusions import excluded_names
     from stash_ai.scene import cleanup_scene_support
     scene_id, stats = str(current["id"]), Counter()
@@ -143,17 +143,31 @@ def cleanup_scene(app, stash, resolver, store, current, settings, selected, args
     # Most scenes have no old source-prefixed outputs. Reading the same scene
     # once for every configured model previously dominated no-op cleanup.
     for config in settings:
-        result, source = Counter(), config.source
-        if app.APPLY_SCENE_TAGS:
-            result.update(app.cleanup_scene_tags(stash, current, scene_policies[source.key], source, report.detail))
-        if app.CREATE_MARKERS:
-            result.update(app.cleanup_scene_marker_cores(
-                stash, current, core_policies[source.key], source,
-                report.detail, scene_policies[source.key]))
+        source = config.source
+        if not stash.dry_run and getattr(stash, 'merge_only_reads', False):
+            # Batch snapshots can age while earlier scenes are processed. Reuse
+            # the dry-run planner to avoid extra reads for unchanged outputs.
+            preview = SimpleNamespace(dry_run=True, has_end_time=stash.has_end_time)
+            planned = _cleanup_source(app, preview, current, source, core_policies, scene_policies)
+            if not any(planned.values()):
+                stats.update(planned)
+                continue
+            current = stash.find_scene(scene_id)
+        result = _cleanup_source(app, stash, current, source, core_policies, scene_policies, report.detail)
         stats.update(result)
         if not stash.dry_run and any(result[name] for name in ('scene_tags_cleaned', 'markers_deleted', 'markers_updated')):
             current = stash.find_scene(scene_id)
     return stats
+
+
+def _cleanup_source(app, stash, current, source, core_policies, scene_policies, report=None):
+    result = Counter()
+    if app.APPLY_SCENE_TAGS:
+        result.update(app.cleanup_scene_tags(stash, current, scene_policies[source.key], source, report))
+    if app.CREATE_MARKERS:
+        result.update(app.cleanup_scene_marker_cores(
+            stash, current, core_policies[source.key], source, report, scene_policies[source.key]))
+    return result
 
 
 class CleanupRun:
@@ -236,6 +250,9 @@ class CleanupRun:
         if app.CREATE_MARKERS:
             self.stash.detect_marker_capabilities()
             self.stash.detect_tag_hierarchy()
+        if self.sql is not None and hasattr(self.stash, 'configure_merge_reads'):
+            # Cleanup uses the same snapshots as merge-only; media paths are unused.
+            self.stash.configure_merge_reads(self.report, merge_only=True)
         self.resolver = app.TagResolver(self.cleanup_stash, source=merge.AI, report=self.report.detail,
                                         create_missing=app.CREATE_MISSING)
         bar = tqdm(self.cleanup_stash.iter_scenes(self.scene_ids), desc="Affected scene cleanup", unit="scene")
