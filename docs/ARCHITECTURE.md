@@ -30,8 +30,9 @@ w `stash_ai/vtt.py`. Dzięki temu format argumentów, YAML i VTT oraz specjalne
 
 `stash_ai/taggers.py` pozostaje publiczną façade dla definicji modeli i adapterów
 inferencji. Obsługa plików modelu oraz parsowanie słowników tagów znajduje się w
-`stash_ai/vocabulary.py`; helpery są re-exportowane z `taggers.py`, aby zachować
-istniejące importy w kodzie i testach.
+`stash_ai/vocabulary.py`, a preprocessing, konfiguracja sesji i inference modeli
+ONNX w `stash_ai/onnx_tagger.py`. Helpery i `OnnxTagger` są re-exportowane z
+`taggers.py`, aby zachować istniejące importy w kodzie i testach.
 
 ## Komunikacja ze Stash
 
