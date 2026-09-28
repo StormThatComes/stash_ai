@@ -27,7 +27,7 @@ def fail(*args, **kwargs):
 
 @pytest.mark.parametrize('filename', [
     'tags.py', 'domain.py', 'state.py', 'state_db.py', 'state_results.py', 'state_publications.py',
-    'vocabulary.py',
+    'vocabulary.py', 'inference.py',
     'merge_run.py', 'merge_cleanup.py', 'merge_sync.py',
     'client.py', 'transport.py', 'config.py', 'vtt.py', 'cli_args.py', 'cli_modes.py',
     'cleanup_sql.py', 'cleanup_sql_session.py',
