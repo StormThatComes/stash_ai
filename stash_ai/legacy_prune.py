@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from itertools import batched
 
 from tqdm import tqdm
 
@@ -36,6 +37,23 @@ def _legacy_meta(store):
     ))
 
 
+def _tracked_scenes(stash, identifiers):
+    """Use batched SQL when available, but treat missing scene IDs as deleted."""
+    if getattr(stash, "merge_reader", None) is None:
+        yield from stash.iter_scenes()
+        return
+
+    page_size = min(max(1, int(getattr(stash, "scene_page_size", 100))), 1000)
+    for group in batched(identifiers, page_size):
+        snapshots = stash.merge_snapshots(group)
+        if snapshots is None:
+            # SQL failed and the client disabled the reader. A full GraphQL scan
+            # is safe even after earlier groups: live identities are held in sets.
+            yield from stash.iter_scenes()
+            return
+        yield from snapshots.values()
+
+
 def candidates(app, store, stash):
     """Find ledger rows with no exact imported source object left in live Stash."""
     meta = _legacy_meta(store)
@@ -44,11 +62,8 @@ def candidates(app, store, stash):
 
     tracked_scenes = {scene for scene, _, _ in meta}
     live = defaultdict(set)
-    identifiers = list(tracked_scenes)
-    scenes = (stash.iter_scenes(identifiers)
-              if getattr(stash, "merge_reader", None) is not None
-              else stash.iter_scenes())
-    for scene in tqdm(scenes, desc="Inspect legacy imports", unit="scene"):
+    for scene in tqdm(_tracked_scenes(stash, list(tracked_scenes)),
+                      desc="Inspect legacy imports", unit="scene"):
         scene_id = str(scene["id"])
         if scene_id not in tracked_scenes:
             continue
