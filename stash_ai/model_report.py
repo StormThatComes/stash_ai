@@ -99,113 +99,168 @@ def _sources_for_scene(store, scene):
     return store.sources(scene, "scene") | store.sources(scene, "markers")
 
 
-def build_report(app, store, scene_ids, core_policies, scene_policies):
+def _scene_baseline(app, store, scene, core_policies, scene_policies):
     from stash_ai import merge as stash_merge
 
+    hits, spans = stash_merge.evidence(
+        app, store, scene, core_policies, scene_policies)
+    labels = _scene_labels(hits)
+    markers = _merged_markers(spans)
+    extras = _extras(markers)
+    sources = {
+        label: {
+            source
+            for hit in hits
+            if hit["tag"] == label
+            for source in (hit["source"], *hit.get("support_sources", ()))
+        }
+        for label in labels
+    }
+    return {
+        "present": _sources_for_scene(store, scene),
+        "labels": labels,
+        "markers": markers,
+        "extras": extras,
+        "sources": sources,
+    }
+
+
+def _record_scene_totals(totals, baseline):
+    totals["scenes"] += 1
+    totals["scene_tags"] += len(baseline["labels"])
+    totals["markers"] += len(baseline["markers"])
+    totals["occurrences"] += sum(
+        is_occurrence(marker) for marker in baseline["markers"])
+    totals["marker_extras"] += len(baseline["extras"])
+
+
+def _record_model_support(stats, model, baseline):
+    stats["scenes_total"] += 1
+    if model not in baseline["present"]:
+        stats["scenes_unchanged"] += 1
+        return False
+
+    stats["scenes_with_evidence"] += 1
+    stats["scene_tags_supported"] += sum(
+        model in sources for sources in baseline["sources"].values())
+    stats["scene_tags_sole_source"] += sum(
+        sources == {model} for sources in baseline["sources"].values())
+    stats["scene_tags_multi_model"] += sum(
+        model in sources and len(sources) > 1
+        for sources in baseline["sources"].values())
+    stats["marker_components_supported"] += sum(
+        model in marker.get("sources", ())
+        for marker in baseline["markers"])
+    stats["marker_components_sole_source"] += sum(
+        set(marker.get("sources", ())) == {model}
+        for marker in baseline["markers"])
+    stats["marker_components_multi_model"] += sum(
+        model in marker.get("sources", ())
+        and len(marker.get("sources", ())) > 1
+        for marker in baseline["markers"])
+    stats["occurrences_supported"] += sum(
+        is_occurrence(marker) and model in marker.get("sources", ())
+        for marker in baseline["markers"])
+    return True
+
+
+def _record_model_ablation(app, store, scene, model, models, baseline, stats,
+                           core_policies, scene_policies):
+    from stash_ai import merge as stash_merge
+
+    reduced_hits, reduced_spans = stash_merge.evidence(
+        app,
+        store,
+        scene,
+        core_policies,
+        scene_policies,
+        selected_sources=set(models) - {model},
+    )
+    reduced_labels = _scene_labels(reduced_hits)
+    reduced_markers = _merged_markers(reduced_spans)
+    reduced_extras = _extras(reduced_markers)
+
+    lost_scene = baseline["labels"] - reduced_labels
+    added_scene = reduced_labels - baseline["labels"]
+    delta = _marker_delta(baseline["markers"], reduced_markers)
+
+    stats["scene_tags_lost"] += len(lost_scene)
+    stats["scene_tags_added"] += len(added_scene)
+    stats["marker_components_lost"] += delta["lost"]
+    stats["marker_components_changed"] += delta["changed"]
+    stats["marker_components_added"] += delta["added"]
+    stats["marker_exact_removed"] += delta["exact_removed"]
+    stats["marker_exact_added"] += delta["exact_added"]
+    stats["marker_extras_lost"] += len(
+        baseline["extras"] - reduced_extras)
+    stats["marker_extras_added"] += len(
+        reduced_extras - baseline["extras"])
+    stats["occurrences_lost"] += sum(
+        is_occurrence(marker)
+        and not any(_overlaps(marker, other) for other in reduced_markers)
+        for marker in baseline["markers"])
+
+    changed = bool(
+        lost_scene
+        or added_scene
+        or delta["exact_removed"]
+        or delta["exact_added"]
+        or baseline["extras"] != reduced_extras
+    )
+    stats["scenes_changed"] += int(changed)
+    stats["scenes_unchanged"] += int(not changed)
+
+
+_MODEL_ROW_KEYS = (
+    "scenes_total", "scenes_with_evidence", "scenes_changed", "scenes_unchanged",
+    "scene_tags_supported", "scene_tags_sole_source", "scene_tags_multi_model",
+    "scene_tags_lost", "scene_tags_added",
+    "marker_components_supported", "marker_components_sole_source",
+    "marker_components_multi_model", "marker_components_lost",
+    "marker_components_changed", "marker_components_added",
+    "marker_exact_removed", "marker_exact_added",
+    "marker_extras_lost", "marker_extras_added",
+    "occurrences_supported", "occurrences_lost",
+)
+
+
+def _model_row(model, stats):
+    with_evidence = stats["scenes_with_evidence"]
+    return {
+        "model": model,
+        **{key: stats[key] for key in _MODEL_ROW_KEYS},
+        "changed_scene_pct_of_evidence": (
+            round(stats["scenes_changed"] * 100 / with_evidence, 2)
+            if with_evidence else 0
+        ),
+    }
+
+
+def build_report(app, store, scene_ids, core_policies, scene_policies):
     models = tuple(SOURCES)
     totals = Counter()
     utility = {model: Counter() for model in models}
-    source_presence = Counter()
 
     for scene in scene_ids:
-        present = _sources_for_scene(store, scene)
-        source_presence.update(present)
-
-        full_hits, full_spans = stash_merge.evidence(
+        baseline = _scene_baseline(
             app, store, scene, core_policies, scene_policies)
-        full_labels = _scene_labels(full_hits)
-        full_markers = _merged_markers(full_spans)
-        full_extras = _extras(full_markers)
-        scene_sources = {}
-        for label in full_labels:
-            scene_sources[label] = {
-                source for hit in full_hits if hit["tag"] == label
-                for source in (hit["source"], *hit.get("support_sources", ()))
-            }
-
-        totals["scenes"] += 1
-        totals["scene_tags"] += len(full_labels)
-        totals["markers"] += len(full_markers)
-        totals["occurrences"] += sum(is_occurrence(marker) for marker in full_markers)
-        totals["marker_extras"] += len(full_extras)
+        _record_scene_totals(totals, baseline)
 
         for model in models:
             stats = utility[model]
-            stats["scenes_total"] += 1
-            if model not in present:
-                stats["scenes_unchanged"] += 1
+            if not _record_model_support(stats, model, baseline):
                 continue
-
-            stats["scenes_with_evidence"] += 1
-            stats["scene_tags_supported"] += sum(
-                model in sources for sources in scene_sources.values())
-            stats["scene_tags_sole_source"] += sum(
-                sources == {model} for sources in scene_sources.values())
-            stats["scene_tags_multi_model"] += sum(
-                model in sources and len(sources) > 1 for sources in scene_sources.values())
-            stats["marker_components_supported"] += sum(
-                model in marker.get("sources", ()) for marker in full_markers)
-            stats["marker_components_sole_source"] += sum(
-                set(marker.get("sources", ())) == {model} for marker in full_markers)
-            stats["marker_components_multi_model"] += sum(
-                model in marker.get("sources", ()) and len(marker.get("sources", ())) > 1
-                for marker in full_markers)
-            stats["occurrences_supported"] += sum(
-                is_occurrence(marker) and model in marker.get("sources", ())
-                for marker in full_markers)
-
-            selected = set(models) - {model}
-            reduced_hits, reduced_spans = stash_merge.evidence(
-                app, store, scene, core_policies, scene_policies,
-                selected_sources=selected)
-            reduced_labels = _scene_labels(reduced_hits)
-            reduced_markers = _merged_markers(reduced_spans)
-            reduced_extras = _extras(reduced_markers)
-
-            lost_scene = full_labels - reduced_labels
-            added_scene = reduced_labels - full_labels
-            delta = _marker_delta(full_markers, reduced_markers)
-
-            stats["scene_tags_lost"] += len(lost_scene)
-            stats["scene_tags_added"] += len(added_scene)
-            stats["marker_components_lost"] += delta["lost"]
-            stats["marker_components_changed"] += delta["changed"]
-            stats["marker_components_added"] += delta["added"]
-            stats["marker_exact_removed"] += delta["exact_removed"]
-            stats["marker_exact_added"] += delta["exact_added"]
-            stats["marker_extras_lost"] += len(full_extras - reduced_extras)
-            stats["marker_extras_added"] += len(reduced_extras - full_extras)
-            stats["occurrences_lost"] += sum(
-                is_occurrence(marker) and not any(_overlaps(marker, other) for other in reduced_markers)
-                for marker in full_markers)
-            changed = bool(
-                lost_scene or added_scene or delta["exact_removed"] or delta["exact_added"]
-                or full_extras != reduced_extras
+            _record_model_ablation(
+                app,
+                store,
+                scene,
+                model,
+                models,
+                baseline,
+                stats,
+                core_policies,
+                scene_policies,
             )
-            stats["scenes_changed"] += int(changed)
-            stats["scenes_unchanged"] += int(not changed)
-
-    rows = []
-    for model in models:
-        stats = utility[model]
-        with_evidence = stats["scenes_with_evidence"]
-        rows.append({
-            "model": model,
-            **{key: stats[key] for key in (
-                "scenes_total", "scenes_with_evidence", "scenes_changed", "scenes_unchanged",
-                "scene_tags_supported", "scene_tags_sole_source", "scene_tags_multi_model",
-                "scene_tags_lost", "scene_tags_added",
-                "marker_components_supported", "marker_components_sole_source",
-                "marker_components_multi_model", "marker_components_lost",
-                "marker_components_changed", "marker_components_added",
-                "marker_exact_removed", "marker_exact_added",
-                "marker_extras_lost", "marker_extras_added",
-                "occurrences_supported", "occurrences_lost",
-            )},
-            "changed_scene_pct_of_evidence": (
-                round(stats["scenes_changed"] * 100 / with_evidence, 2) if with_evidence else 0
-            ),
-        })
 
     return {
         "format": REPORT_FORMAT,
@@ -219,9 +274,8 @@ def build_report(app, store, scene_ids, core_policies, scene_policies):
             "counterfactual_replays_consensus_temporal_extras_and_occurrence": True,
         },
         "totals": dict(totals),
-        "models": rows,
+        "models": [_model_row(model, utility[model]) for model in models],
     }
-
 
 def format_summary(report):
     total = report["totals"]

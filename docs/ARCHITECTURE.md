@@ -33,6 +33,10 @@ wykluczeń i hierarchii znajduje się w `stash_ai/config.py`, a parser cue WebVT
 w `stash_ai/vtt.py`. Dzięki temu format argumentów, YAML i VTT oraz specjalne
 ścieżki uruchomienia można testować niezależnie od normalnego pipeline inferencji.
 
+`stash_ai/model_report.py` buduje offline raport leave-one-model-out z zachowanego
+evidence. `build_report()` koordynuje osobne fazy baseline sceny, attribution
+supportu, counterfactual bez jednego modelu oraz formatowanie finalnych wierszy.
+
 `stash_ai/taggers.py` pozostaje publiczną façade dla definicji modeli i adapterów
 inferencji. Obsługa plików modelu oraz parsowanie słowników tagów znajduje się w
 `stash_ai/vocabulary.py`, a preprocessing, konfiguracja sesji i inference modeli
