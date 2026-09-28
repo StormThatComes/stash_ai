@@ -5,7 +5,7 @@ from collections import Counter
 from typing import TYPE_CHECKING
 
 from stash_ai.domain import TagHierarchy
-from stash_ai.taggers import JOYTAG, ModelSource
+from stash_ai.taggers import ModelSource
 
 if TYPE_CHECKING:
     from stash_ai.client import StashClient
@@ -13,8 +13,8 @@ if TYPE_CHECKING:
 
 class TagResolver:
     def __init__(self, stash: StashClient, hierarchy: TagHierarchy | None = None, report=None,
-                 source: ModelSource = JOYTAG, exclusions: frozenset[str] = frozenset(),
-                 *, create_missing: bool = True):
+                 *, source: ModelSource, exclusions: frozenset[str] = frozenset(),
+                 create_missing: bool = True):
         self.stash = stash
         self.create_missing = create_missing
         self.hierarchy = hierarchy
