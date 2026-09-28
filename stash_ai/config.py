@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from stash_ai.domain import TagHierarchy
-from stash_ai.taggers import JOYTAG, SOURCES, ModelSource, ModelSettings, Vocabulary, select_models
+from stash_ai.taggers import SOURCES, ModelSource, ModelSettings, Vocabulary, select_models
 
 
 def vocabulary_digest(labels: list[str]) -> str:
@@ -120,7 +120,7 @@ def metadata_hierarchy(vocabulary: Vocabulary, source: ModelSource) -> TagHierar
         raise ValueError(f"Hierarchy categories collide with predicted/owner tags: {sorted(collisions)!r}")
     return TagHierarchy(leaves, categories, prefix, "replace_managed", source.hierarchy_description)
 
-def load_tag_hierarchy(path: Path, labels: list[str], source: ModelSource = JOYTAG) -> TagHierarchy:
+def load_tag_hierarchy(path: Path, labels: list[str], source: ModelSource) -> TagHierarchy:
     if not path.is_file():
         raise FileNotFoundError(f"Hierarchy YAML missing: {path}. Place it beside the script or use --no-hierarchy.")
     data = load_unique_yaml(path, "Hierarchy")
