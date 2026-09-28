@@ -18,7 +18,10 @@ sceny. Pozostała logika domenowa znajduje się m.in. w `stash_ai/scene.py`,
 helperów używanych przez testy. Lifecycle jednego modelu w trybie
 `--output-mode separate` obsługuje `stash_ai/separate_run.py`; moduł wywołuje
 helpery przez obiekt `app`, dzięki czemu dotychczasowe punkty monkeypatch w
-`cli.py` pozostają aktywne. Definicja opcji CLI i walidacja kombinacji flag są
+`cli.py` pozostają aktywne. Pobieranie cue/sprite, przygotowanie obrazów,
+filtrowanie score i resumowalny lokalny pipeline inferencji znajdują się w
+`stash_ai/inference.py`; kompatybilne wrappery pozostają w `cli.py`.
+Definicja opcji CLI i walidacja kombinacji flag są
 w `stash_ai/cli_args.py`, a dispatch samodzielnych trybów DB/diagnostics/recovery/
 prune/model-report/backfill w `stash_ai/cli_modes.py`. Parsowanie konfiguracji,
 wykluczeń i hierarchii znajduje się w `stash_ai/config.py`, a parser cue WebVTT
