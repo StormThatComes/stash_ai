@@ -7,6 +7,7 @@ overriding CLI configuration and helper functions.
 from __future__ import annotations
 
 from collections import OrderedDict
+from dataclasses import dataclass
 from io import BytesIO
 from typing import Any, Iterator
 from urllib.parse import urljoin
@@ -104,18 +105,21 @@ def select_scores(scores: list[float], labels: list[str], threshold: float, limi
     return matches[:limit] if limit else matches
 
 
-def predict_scene(app, tagger: Any, stash, paths: dict, cues: list[Cue],
-                  scene_exclusions: frozenset[str] = frozenset(), *, raw_scene: bool = False,
-                  checkpoint=None, prefetch: int = 0, analysis: dict | None = None,
-                  report=None, prepare_workers: int = 1
-                  ) -> tuple[list[tuple[str, float]], list[FramePrediction]]:
-    import numpy as np
-    from stash_ai.progress import prepared_batches
-    from stash_ai.taggers import validate_scores
-    from stash_ai.temporal import SceneAccumulator, marker_floor, scene_reason
+@dataclass
+class _PredictionState:
+    processed: int
+    top_scores: Any
+    frame_predictions: list[FramePrediction]
+    scene_frames: list[dict]
+    accumulator: Any
+    retain_scene: bool
+    scene_floor: float
+    policy: Any
 
-    if not cues:
-        raise ValueError("Cannot predict a scene without VTT cues.")
+
+def _restore_prediction_state(app, tagger, cues, *, raw_scene, checkpoint, report):
+    import numpy as np
+    from stash_ai.temporal import SceneAccumulator
 
     settings, labels = tagger.settings, tagger.labels
     policy = app.TEMPORAL_POLICY
@@ -161,20 +165,39 @@ def predict_scene(app, tagger: Any, stash, paths: dict, cues: list[Cue],
         if retain_scene
         else []
     )
-
     if processed and report is not None:
         report.counts["checkpoint_resumes"] += 1
         report.detail(
             f"  Resume {settings.source.key}: {processed}/{len(cues)} frames already processed."
         )
 
+    return _PredictionState(
+        processed,
+        top_scores,
+        frame_predictions,
+        scene_frames,
+        accumulator,
+        retain_scene,
+        scene_floor,
+        policy,
+    )
+
+
+def _run_prediction_batches(app, tagger, stash, paths, cues, state, *,
+                            checkpoint, prefetch, prepare_workers):
+    import numpy as np
+    from stash_ai.progress import prepared_batches
+    from stash_ai.taggers import validate_scores
+    from stash_ai.temporal import marker_floor
+
+    settings, labels = tagger.settings, tagger.labels
     keep = 1 if app.AGGREGATION == "max" else min(app.TOP_K_FRAMES, len(cues))
     batches = prepared_batches(
         app,
         tagger,
         stash,
         paths,
-        cues[processed:],
+        cues[state.processed:],
         prefetch,
         prepare_workers,
     )
@@ -186,9 +209,11 @@ def predict_scene(app, tagger: Any, stash, paths: dict, cues: list[Cue],
                 labels,
                 settings.source.title,
             )
-            combined = np.concatenate((top_scores, result), axis=0)
+            combined = np.concatenate((state.top_scores, result), axis=0)
             count = min(keep, len(combined))
-            next_top = np.partition(combined, len(combined) - count, axis=0)[-count:]
+            state.top_scores = np.partition(
+                combined, len(combined) - count, axis=0
+            )[-count:]
 
             batch_frames = []
             if app.CREATE_MARKERS:
@@ -196,7 +221,7 @@ def predict_scene(app, tagger: Any, stash, paths: dict, cues: list[Cue],
                     matches = app.select_scores(
                         row,
                         labels,
-                        marker_floor(policy, settings.marker_threshold),
+                        marker_floor(state.policy, settings.marker_threshold),
                         0,
                     )
                     matches = [
@@ -211,26 +236,26 @@ def predict_scene(app, tagger: Any, stash, paths: dict, cues: list[Cue],
                     dict(
                         start=cue.start,
                         end=cue.end,
-                        tags=app.select_scores(row, labels, scene_floor, 0),
+                        tags=app.select_scores(row, labels, state.scene_floor, 0),
                     )
                     for cue, row in zip(batch_cues, result)
                 ]
-                if retain_scene
+                if state.retain_scene
                 else []
             )
-            scene_frames.extend(batch_scene)
-            if accumulator is not None:
-                accumulator.add(result, batch_cues)
-            top_scores = next_top
-            frame_predictions.extend(batch_frames)
-            processed += len(batch_cues)
+            state.scene_frames.extend(batch_scene)
+            if state.accumulator is not None:
+                state.accumulator.add(result, batch_cues)
+            state.frame_predictions.extend(batch_frames)
+            state.processed += len(batch_cues)
+
             if checkpoint:
                 checkpoint.record(
-                    processed,
-                    top_scores,
+                    state.processed,
+                    state.top_scores,
                     batch_frames,
-                    analysis=accumulator.state() if accumulator is not None else None,
-                    scene_frames=batch_scene if retain_scene else None,
+                    analysis=state.accumulator.state() if state.accumulator is not None else None,
+                    scene_frames=batch_scene if state.retain_scene else None,
                 )
     finally:
         # Save the last fully completed batch on Ctrl+C/inference/preparation errors.
@@ -240,20 +265,33 @@ def predict_scene(app, tagger: Any, stash, paths: dict, cues: list[Cue],
         finally:
             batches.close()
 
-    if processed != len(cues) or not len(top_scores):
+    if state.processed != len(cues) or not len(state.top_scores):
         raise RuntimeError("Incomplete inference; scene sync was not started.")
 
-    scene_scores = np.sort(top_scores, axis=0)[::-1].mean(axis=0)
-    statistics = accumulator.statistics(labels) if accumulator is not None else {}
+
+def _finalize_predictions(app, tagger, scene_exclusions, state, *, raw_scene, analysis):
+    import numpy as np
+    from stash_ai.temporal import scene_reason
+
+    settings, labels = tagger.settings, tagger.labels
+    scene_scores = np.sort(state.top_scores, axis=0)[::-1].mean(axis=0)
+    statistics = (
+        state.accumulator.statistics(labels)
+        if state.accumulator is not None
+        else {}
+    )
     if analysis is not None:
         analysis["scene_statistics"] = statistics
-        if retain_scene:
-            analysis.update(scene_frames=scene_frames, scene_score_floor=scene_floor)
+        if state.retain_scene:
+            analysis.update(
+                scene_frames=state.scene_frames,
+                scene_score_floor=state.scene_floor,
+            )
 
-    if accumulator is not None:
+    if state.accumulator is not None:
         predictions = [
             (labels[index], float(scene_scores[index]))
-            for index in accumulator.items
+            for index in state.accumulator.items
         ]
         predictions = [
             (tag, score)
@@ -265,13 +303,17 @@ def predict_scene(app, tagger: Any, stash, paths: dict, cues: list[Cue],
                     score,
                     statistics[tag],
                     settings.scene_threshold,
-                    policy,
+                    state.policy,
                 )
             )
         ]
         predictions.sort(key=lambda item: (-item[1], item[0]))
-    elif retain_scene:
-        candidates = {tag for row in scene_frames for tag, _ in row["tags"]}
+    elif state.retain_scene:
+        candidates = {
+            tag
+            for row in state.scene_frames
+            for tag, _ in row["tags"]
+        }
         predictions = [
             (tag, float(scene_scores[i]))
             for i, tag in enumerate(labels)
@@ -293,7 +335,7 @@ def predict_scene(app, tagger: Any, stash, paths: dict, cues: list[Cue],
     if app.MAX_TAGS and not raw_scene:
         predictions = predictions[:app.MAX_TAGS]
     if scene_exclusions and not raw_scene:
-        frame_predictions = [
+        state.frame_predictions = [
             FramePrediction(
                 frame.cue,
                 tuple(
@@ -302,6 +344,43 @@ def predict_scene(app, tagger: Any, stash, paths: dict, cues: list[Cue],
                     if tag not in scene_exclusions
                 ),
             )
-            for frame in frame_predictions
+            for frame in state.frame_predictions
         ]
-    return predictions, frame_predictions
+    return predictions, state.frame_predictions
+
+
+def predict_scene(app, tagger: Any, stash, paths: dict, cues: list[Cue],
+                  scene_exclusions: frozenset[str] = frozenset(), *, raw_scene: bool = False,
+                  checkpoint=None, prefetch: int = 0, analysis: dict | None = None,
+                  report=None, prepare_workers: int = 1
+                  ) -> tuple[list[tuple[str, float]], list[FramePrediction]]:
+    """Run local inference while preserving resumable checkpoint semantics."""
+    if not cues:
+        raise ValueError("Cannot predict a scene without VTT cues.")
+    state = _restore_prediction_state(
+        app,
+        tagger,
+        cues,
+        raw_scene=raw_scene,
+        checkpoint=checkpoint,
+        report=report,
+    )
+    _run_prediction_batches(
+        app,
+        tagger,
+        stash,
+        paths,
+        cues,
+        state,
+        checkpoint=checkpoint,
+        prefetch=prefetch,
+        prepare_workers=prepare_workers,
+    )
+    return _finalize_predictions(
+        app,
+        tagger,
+        scene_exclusions,
+        state,
+        raw_scene=raw_scene,
+        analysis=analysis,
+    )
