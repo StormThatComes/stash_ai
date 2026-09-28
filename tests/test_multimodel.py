@@ -159,7 +159,7 @@ def test_original_hierarchy_and_model_settings():
     root=Path(__file__).resolve().parents[1]
     data=yaml.safe_load((root/"joytag_hierarchy.yml").read_text())
     labels=sorted({t for group in data["groups"].values() for t in group})
-    hierarchy=app.load_tag_hierarchy(root/"joytag_hierarchy.yml",labels)
+    hierarchy=app.load_tag_hierarchy(root/"joytag_hierarchy.yml",labels,JOYTAG)
     assert len(hierarchy.leaf_parents)==5813
     assert hierarchy.description_prefix==JOYTAG.hierarchy_description
     assert [s.source for s in app.load_model_settings(root/"tagger_models.yml",["all"],None)]==[JOYTAG,WD,DTQ,OPPAI]
