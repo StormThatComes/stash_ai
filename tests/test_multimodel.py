@@ -155,6 +155,13 @@ def test_core_limit_and_gap_timing(monkeypatch):
     assert len(markers)==1 and markers[0].hits==4
 
 
+def test_hierarchy_loader_requires_explicit_source():
+    import inspect
+
+    parameter = inspect.signature(app.load_tag_hierarchy).parameters["source"]
+    assert parameter.default is inspect.Parameter.empty
+
+
 def test_original_hierarchy_and_model_settings():
     root=Path(__file__).resolve().parents[1]
     data=yaml.safe_load((root/"joytag_hierarchy.yml").read_text())
