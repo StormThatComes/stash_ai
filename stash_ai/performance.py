@@ -68,7 +68,7 @@ def initialize(store):
 
 
 PUBLICATION_CODE_FILES = (
-    'cli.py', 'merge.py', 'merge_run.py', 'merge_cleanup.py', 'merge_sync.py', 'temporal.py', 'fusion.py',
+    'cli.py', 'merge.py', 'merge_run.py', 'merge_cleanup.py', 'merge_sync.py', 'separate_sync.py', 'temporal.py', 'fusion.py',
     'scene.py', 'occurrences.py', 'exclusions.py', 'cleanup.py',
     'taggers.py', 'onnx_tagger.py', 'vocabulary.py', 'inference.py', 'tags.py', 'domain.py', 'performance.py',
     'timeline.py', 'merge_sql.py', 'marker_groups.py', 'recovery.py',
