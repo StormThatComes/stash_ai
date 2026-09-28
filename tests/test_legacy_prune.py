@@ -6,7 +6,7 @@ import sqlite3
 import pytest
 
 from stash_ai import cli as app
-from stash_ai import merge
+from stash_ai import legacy_prune
 from stash_ai.state import StateStore, scope_for
 from stash_ai.taggers import JOYTAG, WD
 from tests.helpers.stash import Stash
@@ -69,6 +69,25 @@ def test_prune_removes_only_unreferenced_rows_and_preserves_merge_check(tmp_path
     output = capsys.readouterr().out
     assert "removed 1/2 row(s)" in output
     assert "retained 1 row(s)" in output
+
+
+def test_sql_batch_path_treats_missing_scene_as_prunable(tmp_path):
+    path = tmp_path / "state.sqlite3"
+    with StateStore(path, scope_for(app.STASH_URL)) as store:
+        store.remember_legacy("99", "scene", [{"id": "7", "name": "jt:gone"}])
+
+        class SQLStash:
+            merge_reader = object()
+            scene_page_size = 100
+
+            def merge_snapshots(self, identifiers):
+                assert list(identifiers) == ["99"]
+                return {}
+
+        removable, retained, _ = legacy_prune.candidates(app, store, SQLStash())
+
+    assert [(scene, kind) for scene, kind, _ in removable] == [("99", "scene")]
+    assert retained == 0
 
 
 def test_prune_dry_run_uses_source_db_without_modifying_it(tmp_path, monkeypatch, capsys):
