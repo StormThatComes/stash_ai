@@ -28,9 +28,8 @@ def fail(*args, **kwargs):
 @pytest.mark.parametrize('filename', [
     'tags.py', 'domain.py', 'state.py', 'state_db.py', 'state_results.py', 'state_publications.py',
     'vocabulary.py', 'onnx_tagger.py', 'inference.py', 'progress.py',
-    'merge_run.py', 'merge_parallel.py', 'merge_cleanup.py', 'merge_sync.py', 'separate_sync.py',
-    'client.py', 'transport.py', 'config.py', 'vtt.py', 'cli_args.py', 'cli_modes.py',
-    'cleanup_sql.py', 'cleanup_sql_session.py',
+    'merge_run.py', 'merge_parallel.py', 'merge_sync.py', 'separate_sync.py',
+    'config.py',
 ])
 def test_publication_code_tracks_extracted_modules(monkeypatch, filename):
     before = performance.publication_code()
@@ -42,6 +41,22 @@ def test_publication_code_tracks_extracted_modules(monkeypatch, filename):
 
     monkeypatch.setattr(performance.Path, 'read_bytes', changed)
     assert performance.publication_code() != before
+
+
+@pytest.mark.parametrize('filename', [
+    'client.py', 'transport.py', 'vtt.py', 'cli_args.py', 'cli_modes.py',
+    'merge_cleanup.py', 'recovery.py', 'cleanup_sql.py', 'cleanup_sql_session.py',
+])
+def test_publication_code_ignores_runtime_and_maintenance_modules(monkeypatch, filename):
+    before = performance.publication_code()
+    read_bytes = performance.Path.read_bytes
+
+    def changed(path):
+        data = read_bytes(path)
+        return data + b'\n# changed' if path.name == filename else data
+
+    monkeypatch.setattr(performance.Path, 'read_bytes', changed)
+    assert performance.publication_code() == before
 
 
 def test_repeated_merge_avoids_decoding_evidence_and_publication(pipeline, monkeypatch, capsys):

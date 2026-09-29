@@ -73,15 +73,17 @@ def initialize(store):
     db.execute('PRAGMA cache_size=-65536')
 
 
+# Only code that can change merged publication from the same effective policy,
+# saved evidence and observed Stash state belongs here. Runtime transport/CLI,
+# VTT parsing and maintenance-only cleanup/recovery code have independent
+# invalidation signals and must not force a library-wide re-merge.
 PUBLICATION_CODE_FILES = (
-    'cli.py', 'merge.py', 'merge_run.py', 'merge_parallel.py', 'merge_cleanup.py', 'merge_sync.py', 'separate_sync.py', 'temporal.py', 'fusion.py',
-    'scene.py', 'occurrences.py', 'exclusions.py', 'cleanup.py',
+    'cli.py', 'merge.py', 'merge_run.py', 'merge_parallel.py', 'merge_sync.py', 'separate_sync.py',
+    'temporal.py', 'fusion.py', 'scene.py', 'occurrences.py', 'exclusions.py', 'cleanup.py',
     'taggers.py', 'onnx_tagger.py', 'vocabulary.py', 'inference.py', 'tags.py', 'domain.py', 'performance.py',
-    'timeline.py', 'merge_sql.py', 'marker_groups.py', 'recovery.py',
+    'timeline.py', 'merge_sql.py', 'marker_groups.py',
     'thresholds.py', 'scene_cache.py', 'progress.py', 'state.py', 'state_db.py',
-    'state_results.py', 'state_publications.py',
-    'client.py', 'transport.py', 'config.py', 'vtt.py', 'cli_args.py', 'cli_modes.py',
-    'cleanup_sql.py', 'cleanup_sql_session.py',
+    'state_results.py', 'state_publications.py', 'config.py',
 )
 
 

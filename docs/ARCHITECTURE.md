@@ -114,7 +114,10 @@ obok launcherów. Domyślne ścieżki są wyznaczane względem katalogu instalac
 nie katalogu roboczego terminala. Testy znajdują się w `tests/`, a benchmarki
 w `benchmarks/`.
 
-Moduły wpływające
-na publikację trzeba uwzględniać w `PUBLICATION_CODE_FILES` w `stash_ai/performance.py`,
-aby zmiana kodu unieważniała wcześniejsze sprawdzenia merge. To nie unieważnia
+Moduły, które mogą zmienić wynik merged publication przy tej samej efektywnej
+polityce, zapisanym evidence i obserwowanym stanie Stash, trzeba uwzględniać w
+`PUBLICATION_CODE_FILES` w `stash_ai/performance.py`. Warstwy transportu,
+CLI, parser VTT oraz tryby maintenance/cleanup mają własne sygnały invalidacji
+i celowo nie należą do tego fingerprintu, aby ich refaktory nie wymuszały
+re-merge całej biblioteki. Zmiana publication fingerprintu nie unieważnia
 surowego cache inferencji.
