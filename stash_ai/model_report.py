@@ -10,6 +10,8 @@ from collections import Counter
 import json
 from pathlib import Path
 
+from tqdm import tqdm
+
 from stash_ai.occurrences import is_occurrence
 from stash_ai.taggers import SOURCES
 from stash_ai.state import StateStore, scope_for
@@ -241,7 +243,7 @@ def build_report(app, store, scene_ids, core_policies, scene_policies):
     totals = Counter()
     utility = {model: Counter() for model in models}
 
-    for scene in scene_ids:
+    for scene in tqdm(scene_ids, desc="Model report", unit="scene"):
         baseline = _scene_baseline(
             app, store, scene, core_policies, scene_policies)
         _record_scene_totals(totals, baseline)
