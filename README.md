@@ -51,6 +51,7 @@ python .\stash_ai.py --merge-only --scene-id 123 --dry-run
 
 # Równoległe read-only przygotowanie evidence; publikacja do Stash pozostaje sekwencyjna.
 python .\stash_ai.py --merge-only --merge-workers 4
+# --dry-run i --profile-merge celowo używają ścieżki sekwencyjnej.
 
 # Zmiana progów z zachowanego cache, bez modeli.
 python .\stash_ai.py --models all --merge-only --rethreshold-markers
