@@ -1,5 +1,6 @@
 """Parallel merged evidence preparation stays read-only and deterministic."""
 import json
+from collections import Counter
 
 import pytest
 
@@ -45,7 +46,7 @@ def test_parallel_evidence_matches_serial_read_only(tmp_path):
     expected = {}
     with merge.StateStore(path, scope, True) as store:
         for scene_id in ("1", "2"):
-            diagnostics = {}
+            diagnostics = Counter()
             hits, spans = merge.evidence(
                 app, store, scene_id, policies, policies, diagnostics)
             expected[scene_id] = hits, spans, diagnostics
