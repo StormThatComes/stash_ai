@@ -5,7 +5,7 @@ from collections import Counter
 import pytest
 
 from stash_ai import cli as app
-from stash_ai import merge
+from stash_ai import merge, merge_parallel, performance
 from stash_ai.merge_parallel import iter_parallel_evidence
 from stash_ai.temporal import TemporalPolicy
 from tests.helpers.evidence import empty_policies, segment
@@ -85,3 +85,59 @@ def test_parallel_evidence_matches_serial_read_only(tmp_path):
         memory_budget_bytes=256 * 2**20,
     ))
     assert path.read_bytes() == before
+
+
+def test_parallel_worker_tolerates_parent_publication_commits(tmp_path):
+    app.TEMPORAL_POLICY = TemporalPolicy(enabled=False)
+    path = tmp_path / "state.sqlite3"
+    scope = merge.scope_for(app.STASH_URL)
+    policies = empty_policies()
+
+    with merge.StateStore(path, scope) as store:
+        store.put("1", "wd", _outputs("wd", "one"))
+        store.put("2", "dtq", _outputs("dtq", "two"))
+
+    merge_parallel._init_worker(
+        str(path),
+        scope,
+        merge_parallel.runtime_settings(app),
+        policies,
+        policies,
+        64 * 2**20,
+        512 * 2**20,
+    )
+    worker = merge_parallel._WORKER_STORE
+    try:
+        first = merge_parallel._worker_evidence("1")
+        assert first[-1] is None
+
+        with merge.StateStore(path, scope) as parent:
+            with parent.connection:
+                performance.record_check(parent, "1", "parent-policy", "parent-fingerprint")
+
+        second = merge_parallel._worker_evidence("2")
+        assert second[-1] is None
+        assert second[0] == "2"
+    finally:
+        worker.close()
+        merge_parallel._WORKER_STORE = None
+        merge_parallel._WORKER_APP = None
+        merge_parallel._WORKER_CORE_POLICIES = None
+        merge_parallel._WORKER_SCENE_POLICIES = None
+
+
+def test_normal_preview_still_rejects_parent_publication_commits(tmp_path):
+    path = tmp_path / "state.sqlite3"
+    scope = merge.scope_for(app.STASH_URL)
+
+    with merge.StateStore(path, scope) as store:
+        store.put("1", "wd", _outputs("wd", "one"))
+        store.put("2", "dtq", _outputs("dtq", "two"))
+
+    with merge.StateStore(path, scope, True) as preview:
+        assert preview.records("1", "scene")
+        with merge.StateStore(path, scope) as parent:
+            with parent.connection:
+                performance.record_check(parent, "1", "parent-policy", "parent-fingerprint")
+        with pytest.raises(RuntimeError, match="source state DB changed during dry-run"):
+            preview.records("2", "scene")
