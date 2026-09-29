@@ -249,7 +249,10 @@ class MergedRun:
         # Profiling records per-stage timings in the parent process, so keep that
         # diagnostic mode serial even when the normal merge uses CPU workers.
         workers = int(getattr(self.args, 'merge_workers', 1))
-        if getattr(self.args, 'profile_merge', None) is not None:
+        if self.app.DRY_RUN or getattr(self.args, 'profile_merge', None) is not None:
+            # Dry-run changes live in this process's temporary SQLite overlay,
+            # which isolated workers cannot observe. Profiling also needs parent
+            # process stage timings, so both modes intentionally remain serial.
             workers = 1
         if workers <= 1 or len(self.scenes) < 2:
             return self._merge_scenes_serial()
