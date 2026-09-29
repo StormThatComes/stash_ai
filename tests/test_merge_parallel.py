@@ -6,6 +6,7 @@ import pytest
 
 from stash_ai import cli as app
 from stash_ai import merge
+from stash_ai import merge_parallel
 from stash_ai.merge_parallel import iter_parallel_evidence
 from stash_ai.temporal import TemporalPolicy
 from tests.helpers.evidence import empty_policies, segment
@@ -31,6 +32,46 @@ def _outputs(source, label):
 
 def _normalized(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def test_parallel_worker_tolerates_parent_publication_commits(tmp_path):
+    app.TEMPORAL_POLICY = TemporalPolicy(enabled=False)
+    path = tmp_path / "state.sqlite3"
+    scope = merge.scope_for(app.STASH_URL)
+    policies = empty_policies()
+
+    with merge.StateStore(path, scope) as store:
+        store.put("1", "wd", _outputs("wd", "one"))
+        store.put("2", "dtq", _outputs("dtq", "two"))
+
+    merge_parallel._init_worker(
+        str(path),
+        scope,
+        merge_parallel.runtime_settings(app),
+        policies,
+        policies,
+        64 * 2**20,
+        512 * 2**20,
+    )
+    worker = merge_parallel._WORKER_STORE
+    try:
+        first = merge_parallel._worker_evidence("1")
+        assert first[-1] is None
+
+        # The parent publishes one prepared scene while the same worker remains
+        # alive for later scenes. This changes DB data_version but not results.
+        with merge.StateStore(path, scope) as parent:
+            parent.publish("1", {"scene": {"contributions": []}})
+
+        second = merge_parallel._worker_evidence("2")
+        assert second[-1] is None
+        assert second[0] == "2"
+    finally:
+        worker.close()
+        merge_parallel._WORKER_STORE = None
+        merge_parallel._WORKER_APP = None
+        merge_parallel._WORKER_CORE_POLICIES = None
+        merge_parallel._WORKER_SCENE_POLICIES = None
 
 
 def test_parallel_evidence_matches_serial_read_only(tmp_path):
