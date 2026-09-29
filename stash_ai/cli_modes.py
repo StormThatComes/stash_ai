@@ -29,6 +29,10 @@ def run_standalone_command(app, args, *, cleanup_only: bool) -> int | None:
         from stash_ai.prune import run_prune
         app.validate_config(scene_work=False)
         return run_prune(app, args)
+    if args.prune_legacy_imports:
+        from stash_ai.legacy_prune import run as run_legacy_prune
+        app.validate_config(scene_work=False)
+        return run_legacy_prune(app, args)
     if args.model_report is not None:
         from stash_ai.model_report import run as run_model_report
         return run_model_report(app, args)
