@@ -188,8 +188,9 @@ def test_cli_model_report_uses_saved_evidence_without_models_or_stash(tmp_path, 
         "--model-report", str(destination),
     ]) == 0
 
-    output = capsys.readouterr().out
-    assert "No Stash requests or inference were performed" in output
+    captured = capsys.readouterr()
+    assert "No Stash requests or inference were performed" in captured.out
+    assert "Model report" in captured.err
     data = json.loads(destination.read_text(encoding="utf-8"))
     assert data["totals"]["scenes"] == 1
     assert {row["model"] for row in data["models"]} == {"joytag", "wd", "dtq", "oppai"}
