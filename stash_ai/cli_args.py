@@ -37,8 +37,8 @@ def build_parser(app) -> argparse.ArgumentParser:
                         help="Process RAM target in GiB (default: 32); reserves 25%% for models and active work. RSS pressure evicts caches.")
     parser.add_argument("--prepare-workers", type=int, choices=range(1, 17), default=app.PREPARE_WORKERS,
                         help="CPU image preparation workers (default: 4); one model at a time runs inference.")
-    parser.add_argument("--merge-workers", type=int, choices=range(1, 17), default=1,
-                        help="Read-only CPU workers for merged evidence replay (default: 1). Stash/state writes stay serial.")
+    parser.add_argument("--merge-workers", type=int, choices=range(1, 17), default=4,
+                        help="Read-only CPU workers for merged evidence replay (default: 4). Stash/state writes stay serial.")
     parser.add_argument("--model-report-workers", type=int, choices=range(1, 17),
                         default=min(4, os.cpu_count() or 1),
                         help="CPU worker processes for --model-report (default: up to 4); use 1 for serial execution.")
