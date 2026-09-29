@@ -29,10 +29,13 @@ class StateStore(AbstractContextManager):
     A writer holds a process lock for its whole run, including Stash requests.
     """
     def __init__(self, path, scope, dry_run=False, cache_bytes=0, *, allow_cleanup=False, cleanup_preview=False,
-                 memory_budget_bytes=0):
+                 memory_budget_bytes=0, allow_parent_publication_updates=False):
         from stash_ai.runtime import RamCache
+        if allow_parent_publication_updates and not dry_run:
+            raise ValueError("Parent publication updates are only valid for read-only preview stores.")
         self.cache = RamCache(cache_bytes, rss_budget=memory_budget_bytes)
         self.scope = scope
+        self.allow_parent_publication_updates = bool(allow_parent_publication_updates)
         self._database = None
         self.connection = None
         try:
