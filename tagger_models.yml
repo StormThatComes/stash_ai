@@ -41,7 +41,7 @@ dtq:
 
 oppai:
   model_dir: models/oppai-oracle-v1.1
-  scene_threshold: 0.70
+  scene_threshold: 0.80
   marker_threshold: 0.85
   batch_size: 4
 
