@@ -200,6 +200,27 @@ def test_failed_merge_does_not_discover_or_prune_tags(tmp_path, monkeypatch):
     assert not stash.writes
 
 
+def test_pruned_catalog_is_finalized_for_next_merge(tmp_path, monkeypatch, capsys):
+    stash = PruneStash()
+    orphan = managed(stash, 'orphan')
+    install(monkeypatch, stash)
+    args = command(tmp_path)
+
+    assert app.main(args) == 0
+    assert orphan['name'] not in stash.tags
+    capsys.readouterr()
+
+    monkeypatch.setattr(
+        merge, 'evidence',
+        lambda *a, **k: pytest.fail('catalog pruning forced an unnecessary second merge'),
+    )
+    stash.writes.clear()
+    assert app.main(args) == 0
+    output = capsys.readouterr().out
+    assert 'merge_reused=1' in output
+    assert not stash.writes
+
+
 def test_unchanged_merge_skips_native_counters_for_used_groups(tmp_path, monkeypatch, capsys):
     stash = PruneStash()
     tag = managed(stash, 'used')
