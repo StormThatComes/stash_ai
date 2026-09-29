@@ -119,5 +119,5 @@ def iter_parallel_evidence(app, state_db, scope, scene_ids, core_policies,
             _worker_evidence,
             scene_ids,
             chunksize=1,
-            buffersize=max(workers * 2, 2),
+            buffersize=max(workers, 2),
         )
