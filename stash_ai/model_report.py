@@ -39,36 +39,63 @@ def _marker_key(marker):
     )
 
 
-def _overlaps(left, right):
-    if left["tag"] != right["tag"] or bool(is_occurrence(left)) != bool(is_occurrence(right)):
-        return False
-    a0 = float(left["start"])
-    b0 = float(right["start"])
-    a1 = float(left["end"]) if left["end"] is not None else a0
-    b1 = float(right["end"]) if right["end"] is not None else b0
-    if left["end"] is None and right["end"] is None:
-        return abs(a0 - b0) <= .0005
-    return max(a0, b0) <= min(a1, b1) + .0005
+_OVERLAP_EPSILON = .0005
+
+
+def _marker_group(marker):
+    return marker["tag"], bool(is_occurrence(marker))
+
+
+def _marker_end(marker):
+    return float(marker["end"]) if marker["end"] is not None else float(marker["start"])
+
+
+def _overlap_presence(markers, candidates):
+    """Return overlap existence per marker in linear time for unioned components.
+
+    union_intervals yields markers ordered by start; filtering that stream by
+    label/type preserves the order required by the monotonic cursors below.
+    """
+    grouped = {}
+    for candidate in candidates:
+        grouped.setdefault(_marker_group(candidate), []).append(candidate)
+
+    cursors = {}
+    result = []
+    for marker in markers:
+        group = _marker_group(marker)
+        rows = grouped.get(group, ())
+        cursor = cursors.get(group, 0)
+        start = float(marker["start"])
+        end = _marker_end(marker)
+        while cursor < len(rows) and _marker_end(rows[cursor]) + _OVERLAP_EPSILON < start:
+            cursor += 1
+        cursors[group] = cursor
+        result.append(
+            cursor < len(rows)
+            and float(rows[cursor]["start"]) <= end + _OVERLAP_EPSILON
+        )
+    return result
 
 
 def _marker_delta(full, reduced):
     reduced_keys = {_marker_key(item) for item in reduced}
     full_keys = {_marker_key(item) for item in full}
-    lost = 0
-    changed = 0
-    for marker in full:
-        matches = [other for other in reduced if _overlaps(marker, other)]
-        if not matches:
-            lost += 1
-        elif _marker_key(marker) not in reduced_keys:
-            changed += 1
-    added = sum(1 for marker in reduced if not any(_overlaps(marker, other) for other in full))
+    full_overlap = _overlap_presence(full, reduced)
+    reduced_overlap = _overlap_presence(reduced, full)
     return {
-        "lost": lost,
-        "changed": changed,
-        "added": added,
+        "lost": sum(not overlap for overlap in full_overlap),
+        "changed": sum(
+            overlap and _marker_key(marker) not in reduced_keys
+            for marker, overlap in zip(full, full_overlap)
+        ),
+        "added": sum(not overlap for overlap in reduced_overlap),
         "exact_removed": len(full_keys - reduced_keys),
         "exact_added": len(reduced_keys - full_keys),
+        "occurrences_lost": sum(
+            is_occurrence(marker) and not overlap
+            for marker, overlap in zip(full, full_overlap)
+        ),
     }
 
 
@@ -197,10 +224,7 @@ def _record_model_ablation(app, store, scene, model, models, baseline, stats,
         baseline["extras"] - reduced_extras)
     stats["marker_extras_added"] += len(
         reduced_extras - baseline["extras"])
-    stats["occurrences_lost"] += sum(
-        is_occurrence(marker)
-        and not any(_overlaps(marker, other) for other in reduced_markers)
-        for marker in baseline["markers"])
+    stats["occurrences_lost"] += delta["occurrences_lost"]
 
     changed = bool(
         lost_scene
@@ -340,6 +364,8 @@ def run(app, args):
             memory_budget_bytes=int(args.ram_budget_gb * 2**30),
             allow_cleanup=True,
         ) as store:
+            if not args.scene_id:
+                store.preload_sources()
             scenes = _scene_ids(store, args.scene_id)
             if args.scene_id and len(scenes) != len(dict.fromkeys(str(value) for value in args.scene_id)):
                 missing = sorted(set(map(str, args.scene_id)) - set(scenes))
