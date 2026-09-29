@@ -253,7 +253,7 @@ Aktualne domyślne limity procesu:
 - `--ram-cache-gb 24` — cache jest przydzielany na żądanie i ograniczony do
   maksymalnie 75% budżetu;
 - `--prepare-workers 4`;
-- `--merge-workers 1` — opcjonalnie zwiększ dla równoległego CPU replay evidence; zapisy Stash/SQLite pozostają sekwencyjne;
+- `--merge-workers 4` — równoległy CPU replay evidence; zapisy Stash/SQLite pozostają sekwencyjne;
 - `--prefetch-batches 4`.
 
 ## Aktualizacje
