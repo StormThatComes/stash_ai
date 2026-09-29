@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import math
+import os
 from pathlib import Path
 
 
@@ -36,6 +37,9 @@ def build_parser(app) -> argparse.ArgumentParser:
                         help="Process RAM target in GiB (default: 32); reserves 25%% for models and active work. RSS pressure evicts caches.")
     parser.add_argument("--prepare-workers", type=int, choices=range(1, 17), default=app.PREPARE_WORKERS,
                         help="CPU image preparation workers (default: 4); one model at a time runs inference.")
+    parser.add_argument("--model-report-workers", type=int, choices=range(1, 17),
+                        default=min(4, os.cpu_count() or 1),
+                        help="CPU worker processes for --model-report (default: up to 4); use 1 for serial execution.")
     parser.add_argument("--verbose", action="store_true", help="Include per-scene/tag diagnostics and detailed dry-run changes.")
     parser.add_argument("--profile-merge", type=Path, metavar="NEW.jsonl",
                         help="Stream per-scene wall/CPU, stage/API timings, counts and byte sizes to a new JSONL file; merged output only.")
