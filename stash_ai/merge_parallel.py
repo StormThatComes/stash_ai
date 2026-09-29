@@ -55,6 +55,9 @@ def _init_worker(state_db, scope, settings, core_policies, scene_policies,
         cache_bytes=cache_bytes,
         memory_budget_bytes=memory_budget_bytes,
         allow_cleanup=True,
+        # The owning parent keeps the writer lock and only commits publication
+        # state while workers replay immutable inference evidence.
+        allow_parent_publication_updates=True,
     )
     atexit.register(store.close)
     _WORKER_APP = app
