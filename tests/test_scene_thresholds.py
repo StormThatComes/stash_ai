@@ -58,7 +58,6 @@ def test_cached_scene_statistics_and_occurrences_match_fresh_inference(
     assert outputs(fresh) == cached
 
 
-@pytest.mark.parametrize('scene_only', [True, False])
 def test_explain_reports_effective_thresholds_after_rethreshold(pipeline, monkeypatch, capsys):
     p = pipeline
     configure(monkeypatch, scene=.4, marker=.7)
@@ -99,6 +98,7 @@ def test_explain_reports_effective_thresholds_after_rethreshold(pipeline, monkey
     assert marker['effective_support_floor'] == pytest.approx(.765)
 
 
+@pytest.mark.parametrize('scene_only', [True, False])
 def test_merge_only_support_ratio_matches_fresh_inference(pipeline, monkeypatch, tmp_path, scene_only):
     p = pipeline
     configure(monkeypatch)
