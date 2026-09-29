@@ -346,7 +346,7 @@ def test_shared_scene_cleanup_command_preserves_sources_and_manual_removals(pipe
     p = pipeline
     for values in p.scores.values(): values[:] = 0
     # Keep Oppai clearly above its scene threshold, including float32 rounding.
-    p.scores['wd'][0,0] = .6; p.scores['joytag'][1,0] = .62; p.scores['oppai'][2,0] = .75
+    p.scores['wd'][0,0] = .6; p.scores['joytag'][1,0] = .62; p.scores['oppai'][2,0] = .85
     args = ['--models', 'wd', 'joytag', 'oppai', *p.args[2:]]
     assert app.main(args) == 0
     assert [tag['name'] for tag in p.stash.scene['tags']] == ['ai:common']
