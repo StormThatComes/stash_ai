@@ -49,6 +49,10 @@ python .\stash_ai.py --models wd --scene-id 123 --restart
 python .\stash_ai.py --merge-only
 python .\stash_ai.py --merge-only --scene-id 123 --dry-run
 
+# Równoległe read-only przygotowanie evidence; publikacja do Stash pozostaje sekwencyjna.
+python .\stash_ai.py --merge-only --merge-workers 4
+# --dry-run i --profile-merge celowo używają ścieżki sekwencyjnej.
+
 # Zmiana progów z zachowanego cache, bez modeli.
 python .\stash_ai.py --models all --merge-only --rethreshold-markers
 python .\stash_ai.py --models all --merge-only --rethreshold-scenes --rethreshold-markers
@@ -249,6 +253,7 @@ Aktualne domyślne limity procesu:
 - `--ram-cache-gb 24` — cache jest przydzielany na żądanie i ograniczony do
   maksymalnie 75% budżetu;
 - `--prepare-workers 4`;
+- `--merge-workers 1` — opcjonalnie zwiększ dla równoległego CPU replay evidence; zapisy Stash/SQLite pozostają sekwencyjne;
 - `--prefetch-batches 4`.
 
 ## Aktualizacje
