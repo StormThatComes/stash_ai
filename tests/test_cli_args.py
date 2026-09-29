@@ -16,7 +16,7 @@ def test_parse_args_uses_live_cli_defaults_and_caps_cache(monkeypatch):
     assert args.ram_budget_gb == 8.0
     assert args.resume is False
     assert args.model_config == app.MODELS_CONFIG_FILE
-    assert args.merge_workers == 1
+    assert args.merge_workers == 4
 
 
 def test_parse_args_rejects_merged_only_mode_with_separate_output():
