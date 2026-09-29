@@ -1,6 +1,7 @@
 """Scene threshold replay, provenance and restart/resume equivalence."""
 from copy import deepcopy
 from dataclasses import replace
+import json
 
 import pytest
 
@@ -58,6 +59,46 @@ def test_cached_scene_statistics_and_occurrences_match_fresh_inference(
 
 
 @pytest.mark.parametrize('scene_only', [True, False])
+def test_explain_reports_effective_thresholds_after_rethreshold(pipeline, monkeypatch, capsys):
+    p = pipeline
+    configure(monkeypatch, scene=.4, marker=.7)
+    p.scores['wd'][:, 0] = .95
+    assert app.main(p.args) == 0
+    capsys.readouterr()
+
+    configure(monkeypatch, scene=.8, marker=.9)
+    assert app.main([
+        *p.args, '--merge-only', '--rethreshold-scenes', '--rethreshold-markers'
+    ]) == 0
+    capsys.readouterr()
+
+    assert app.main([*p.args, '--explain-tag', 'ai:common']) == 0
+    output = capsys.readouterr().out
+    report = json.loads(output[output.index('[\n'):])[0]
+
+    contributor = next(
+        item for item in report['scene_contributors']
+        if item['source'] == 'wd'
+    )
+    thresholds = contributor['thresholds']
+    assert thresholds['stored_scene_threshold'] == pytest.approx(.4)
+    assert thresholds['scene_threshold_override'] == pytest.approx(.8)
+    assert thresholds['effective_scene_threshold'] == pytest.approx(.8)
+    assert thresholds['scene_support_ratio'] == pytest.approx(.85)
+    assert thresholds['effective_support_floor'] == pytest.approx(.68)
+    assert thresholds['strong_peak_threshold'] == pytest.approx(.9)
+
+    scene_record = report['recorded_sources']['scene']['wd']['records'][0]['thresholds']
+    assert scene_record == thresholds
+
+    marker = report['recorded_sources']['markers']['wd']['records'][0]['thresholds']
+    assert marker['stored_marker_threshold'] == pytest.approx(.7)
+    assert marker['marker_threshold_override'] == pytest.approx(.9)
+    assert marker['effective_marker_threshold'] == pytest.approx(.9)
+    assert marker['marker_continue_ratio'] == pytest.approx(.85)
+    assert marker['effective_support_floor'] == pytest.approx(.765)
+
+
 def test_merge_only_support_ratio_matches_fresh_inference(pipeline, monkeypatch, tmp_path, scene_only):
     p = pipeline
     configure(monkeypatch)
