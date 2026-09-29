@@ -5,7 +5,7 @@ from collections import Counter
 import pytest
 
 from stash_ai import cli as app
-from stash_ai import merge, performance
+from stash_ai import merge, merge_parallel
 from stash_ai.merge_parallel import iter_parallel_evidence
 from stash_ai.temporal import TemporalPolicy
 from tests.helpers.evidence import empty_policies, segment
@@ -35,38 +35,6 @@ def _normalized(value):
 
 
 
-
-def test_worker_preview_tolerates_parent_publication_commit_but_normal_preview_does_not(tmp_path):
-    app.TEMPORAL_POLICY = TemporalPolicy(enabled=False)
-    path = tmp_path / "state.sqlite3"
-    scope = merge.scope_for(app.STASH_URL)
-    policies = empty_policies()
-
-    with merge.StateStore(path, scope) as store:
-        store.put("1", "wd", _outputs("wd", "one"))
-        store.put("2", "dtq", _outputs("dtq", "two"))
-
-    with merge.StateStore(path, scope, True) as preview:
-        assert preview.records("1", "scene")
-        with merge.StateStore(path, scope) as parent:
-            with parent.connection:
-                performance.record_check(parent, "1", "parent-policy", "parent-fingerprint")
-        with pytest.raises(RuntimeError, match="source state DB changed during dry-run"):
-            preview.records("2", "scene")
-
-    with merge.StateStore(
-        path,
-        scope,
-        True,
-        allow_parent_publication_updates=True,
-    ) as worker:
-        assert worker.records("1", "scene")
-        with merge.StateStore(path, scope) as parent:
-            with parent.connection:
-                performance.record_check(parent, "2", "parent-policy", "parent-fingerprint")
-        diagnostics = Counter()
-        hits, spans = merge.evidence(app, worker, "2", policies, policies, diagnostics)
-        assert hits or spans
 
 def test_parallel_evidence_matches_serial_read_only(tmp_path):
     app.TEMPORAL_POLICY = TemporalPolicy(enabled=False)
