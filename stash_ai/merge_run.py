@@ -59,8 +59,8 @@ class MergedRun:
                     return threshold_result
                 self._run_inference()
                 self._merge_scenes()
-                self._finalize_catalog_key()
-                self._prune_outputs()
+                catalog_pruned = self._prune_outputs()
+                self._finalize_catalog_key(refresh=catalog_pruned)
             finally:
                 self.stash.close()
             self.report.finish('Merged' + (' (planned)' if app.DRY_RUN else ''), self.stats, store.cache)
@@ -289,11 +289,21 @@ class MergedRun:
                         app.safe_error(exc, api_key=app.STASH_API_KEY))
                 self.report.progress(bar, self.stats)
 
-    def _finalize_catalog_key(self):
+    def _finalize_catalog_key(self, *, refresh=False):
         if not self.use_catalog:
             return
+        resolver = self.resolver
+        if refresh:
+            # Pruning mutates Stash after the resolver's initial catalog snapshot.
+            # Refresh only after an actual delete so merge_checks describe the
+            # catalog the next run will observe without adding a read to the
+            # unchanged hot path.
+            resolver = self.app.TagResolver(
+                self.stash, self.hierarchy, source=merge.AI,
+                create_missing=self.app.CREATE_MISSING)
+            resolver.preload()
         final_key = performance.digest([
-            self.base_key, performance.catalog_fingerprint(self.resolver)])
+            self.base_key, performance.catalog_fingerprint(resolver)])
         if final_key != self.merge_key:
             with self.store.connection:
                 self.store.connection.execute(
@@ -324,7 +334,8 @@ class MergedRun:
         app, args, stash = self.app, self.args, self.stash
         app.print_hierarchy_summary(self.resolver)
         if self.stats['errors'] or not (args.prune_empty_tags or app.CREATE_MARKERS):
-            return
+            return False
+        pruned_before = self.stats['tags_pruned'] + self.stats['marker_group_tags_pruned']
         sql = self._prune_sql()
         if args.prune_empty_tags:
             from stash_ai.prune import prune_tags
@@ -345,3 +356,5 @@ class MergedRun:
             candidates = sql.marker_group_candidates(delta) if sql is not None else None
             self.stats.update(prune_groups(
                 stash, self.report.detail, candidate_ids=candidates, usage_delta=delta))
+        pruned_after = self.stats['tags_pruned'] + self.stats['marker_group_tags_pruned']
+        return not stash.dry_run and pruned_after > pruned_before
