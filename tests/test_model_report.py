@@ -286,3 +286,43 @@ def test_cli_model_report_accepts_scene_filter_and_rejects_existing_output(tmp_p
     with pytest.raises(SystemExit) as exc:
         app.main(["--state-db", str(path), "--model-report", str(destination)])
     assert exc.value.code == 2
+
+
+def test_parallel_model_report_matches_serial_output(tmp_path):
+    path = tmp_path / "state.sqlite3"
+    scope = merge.scope_for(app.STASH_URL)
+    with merge.StateStore(path, scope) as state:
+        for scene in range(1, 7):
+            shared = inference_pair("shared-" + str(scene))
+            shared["scene"]["meta"]["inference_signature"] = "wd-scene-" + str(scene)
+            shared["markers"]["meta"]["inference_signature"] = "wd-markers-" + str(scene)
+            state.put(str(scene), "wd", shared)
+
+            if scene % 2:
+                dtq = inference_pair("shared-" + str(scene))
+                dtq["scene"]["meta"]["inference_signature"] = "dtq-scene-" + str(scene)
+                dtq["markers"]["meta"]["inference_signature"] = "dtq-markers-" + str(scene)
+                state.put(str(scene), "dtq", dtq)
+            else:
+                unique = inference_pair("unique-" + str(scene))
+                unique["scene"]["meta"]["inference_signature"] = "joy-scene-" + str(scene)
+                unique["markers"]["meta"]["inference_signature"] = "joy-markers-" + str(scene)
+                state.put(str(scene), "joytag", unique)
+
+    serial = tmp_path / "serial.json"
+    parallel = tmp_path / "parallel.json"
+    common = ["--state-db", str(path), "--no-temporal"]
+
+    assert app.main([
+        *common,
+        "--model-report", str(serial),
+        "--model-report-workers", "1",
+    ]) == 0
+    assert app.main([
+        *common,
+        "--model-report", str(parallel),
+        "--model-report-workers", "2",
+    ]) == 0
+
+    assert json.loads(parallel.read_text(encoding="utf-8")) == json.loads(
+        serial.read_text(encoding="utf-8"))

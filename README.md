@@ -80,7 +80,9 @@ python .\stash_ai.py --db-compact
 python .\stash_ai.py --anonymous-diagnostics .\stash-ai-diagnostics.json
 
 # Użyteczność modeli i leave-one-model-out ablation bez inferencji.
+# Domyślnie używa do 4 procesów CPU; --model-report-workers 1 wymusza tryb sekwencyjny.
 python .\stash_ai.py --model-report .\model-utility.json
+python .\stash_ai.py --model-report .\model-utility.json --model-report-workers 8
 python .\stash_ai.py --model-report .\model-utility-scene-123.json --scene-id 123
 
 # Porzucenie niedokończonego planu merge/cleanup.
