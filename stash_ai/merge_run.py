@@ -246,6 +246,16 @@ class MergedRun:
                 tagger.close()
 
     def _merge_scenes(self):
+        # Profiling records per-stage timings in the parent process, so keep that
+        # diagnostic mode serial even when the normal merge uses CPU workers.
+        workers = int(getattr(self.args, 'merge_workers', 1))
+        if getattr(self.args, 'profile_merge', None) is not None:
+            workers = 1
+        if workers <= 1 or len(self.scenes) < 2:
+            return self._merge_scenes_serial()
+        return self._merge_scenes_parallel(workers)
+
+    def _merge_scenes_serial(self):
         app, args, store = self.app, self.args, self.store
         bar = tqdm(self.scenes.items(), desc="Merge to ai:", unit="scene")
         for scene_id, current in bar:
@@ -288,6 +298,132 @@ class MergedRun:
                         'merge', '', scene_id, exc,
                         app.safe_error(exc, api_key=app.STASH_API_KEY))
                 self.report.progress(bar, self.stats)
+
+    def _merge_scenes_parallel(self, workers):
+        """Prepare evidence in read-only processes; publish serially in this process."""
+        from stash_ai.merge_parallel import iter_parallel_evidence
+
+        app, args, store = self.app, self.args, self.store
+        pending = []
+        bar = tqdm(total=len(self.scenes), desc="Merge to ai:", unit="scene")
+        try:
+            # Publication checks stay in the writer process and avoid scheduling
+            # expensive evidence replay for scenes whose published fingerprint is current.
+            for scene_id, current in self.scenes.items():
+                try:
+                    with stage(self.report, 'publication_check'):
+                        reason = (
+                            'forced' if getattr(args, 'force_merge', False)
+                            else performance.check_reason(
+                                store, scene_id, self.merge_key, current['fingerprint']))
+                    if reason == 'reused':
+                        self.stats['merge_reused'] += 1
+                        bar.update(1)
+                        self.report.progress(bar, self.stats)
+                        continue
+                    self.stats['merge_' + reason] += 1
+                    pending.append((scene_id, current, reason))
+                except Exception as exc:
+                    self.stats["errors"] += 1
+                    self.report.issue(
+                        'merge', '', scene_id, exc,
+                        app.safe_error(exc, api_key=app.STASH_API_KEY))
+                    bar.update(1)
+                    self.report.progress(bar, self.stats)
+
+            if not pending:
+                return
+
+            workers = min(workers, len(pending))
+            if workers <= 1:
+                # A collection can contain many reused scenes but only one changed
+                # scene; avoid process startup overhead in that case.
+                for scene_id, current, _ in pending:
+                    diagnostics = Counter()
+                    try:
+                        cache_before = store.cache.stats.copy()
+                        with self.report.measure('merge_compute'):
+                            scene_hits, spans = merge.evidence(
+                                app, store, scene_id, self.core_policies, self.scene_policies, diagnostics)
+                        with self.report.measure('merge_plan'):
+                            result = merge.sync_merged(
+                                app, self.stash, self.resolver, store, current, scene_hits, spans,
+                                report=self.report, tag_policies=self.scene_policies,
+                                publication_key=self.merge_key)
+                        self.stats.update(result)
+                        self.report.record_counts(**{
+                            'cache_' + key: value - cache_before[key]
+                            for key, value in store.cache.stats.items()
+                        })
+                        self.stats.update(diagnostics)
+                        self.stats["scenes_synced"] += 1
+                    except Exception as exc:
+                        self.stats["errors"] += 1
+                        self.report.issue(
+                            'merge', '', scene_id, exc,
+                            app.safe_error(exc, api_key=app.STASH_API_KEY))
+                    bar.update(1)
+                    self.report.progress(bar, self.stats)
+                return
+
+            # Evidence caches from inference/scan are not shared with spawned
+            # processes. Free them before allocating bounded worker-local caches.
+            store.cache.clear()
+            evidence = iter_parallel_evidence(
+                app,
+                args.state_db,
+                store.scope,
+                [scene_id for scene_id, _, _ in pending],
+                self.core_policies,
+                self.scene_policies,
+                workers=workers,
+                cache_bytes=int(getattr(args, 'ram_cache_gb', 0) * 2**30),
+                memory_budget_bytes=int(getattr(args, 'ram_budget_gb', 32) * 2**30),
+            )
+            completed = 0
+            try:
+                for (scene_id, current, _), prepared in zip(pending, evidence):
+                    worker_scene, scene_hits, spans, diagnostics, error = prepared
+                    try:
+                        if worker_scene != scene_id:
+                            raise RuntimeError(
+                                f"Merge worker returned scene {worker_scene!r} while {scene_id!r} was expected.")
+                        if error is not None:
+                            raise RuntimeError(error)
+                        cache_before = store.cache.stats.copy()
+                        with self.report.measure('merge_plan'):
+                            result = merge.sync_merged(
+                                app, self.stash, self.resolver, store, current, scene_hits, spans,
+                                report=self.report, tag_policies=self.scene_policies,
+                                publication_key=self.merge_key)
+                        self.stats.update(result)
+                        self.report.record_counts(**{
+                            'cache_' + key: value - cache_before[key]
+                            for key, value in store.cache.stats.items()
+                        })
+                        self.stats.update(diagnostics)
+                        self.stats["scenes_synced"] += 1
+                        self.stats["merge_parallel_scenes"] += 1
+                    except Exception as exc:
+                        self.stats["errors"] += 1
+                        self.report.issue(
+                            'merge', '', scene_id, exc,
+                            app.safe_error(exc, api_key=app.STASH_API_KEY))
+                    completed += 1
+                    bar.update(1)
+                    self.report.progress(bar, self.stats)
+            except Exception as exc:
+                # A broken worker pool is a run-level failure. Do not fall back to
+                # a second merge pass after some scenes may already be published.
+                remaining = len(pending) - completed
+                self.stats["errors"] += max(1, remaining)
+                self.report.issue(
+                    'merge workers', '', None, exc,
+                    app.safe_error(exc, api_key=app.STASH_API_KEY))
+                bar.update(remaining)
+                self.report.progress(bar, self.stats)
+        finally:
+            bar.close()
 
     def _finalize_catalog_key(self, *, refresh=False):
         if not self.use_catalog:
