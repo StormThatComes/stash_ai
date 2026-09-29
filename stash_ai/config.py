@@ -97,8 +97,8 @@ def load_model_settings(path: Path, chosen: list[str] | None, device: str | None
         config = ModelSettings(
             source=SOURCES[name], model_dir=model_dir,
             scene_threshold=values.get("scene_threshold", joytag_scene_threshold if name == "joytag" else
-                                       {"wd": 0.35, "dtq": 0.20, "oppai": 0.80}[name]),
-            marker_threshold=values.get("marker_threshold", 0.80 if name == "oppai" else default_marker_threshold),
+                                       {"wd": 0.35, "dtq": 0.20, "oppai": 0.84}[name]),
+            marker_threshold=values.get("marker_threshold", 0.90 if name == "oppai" else default_marker_threshold),
             batch_size=values.get("batch_size", joytag_batch_size if name == "joytag" else 4),
             device=device or data.get("device", "auto"),
             download_missing=False if offline else data.get("download_missing", True))
