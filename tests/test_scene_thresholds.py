@@ -147,10 +147,11 @@ def test_both_thresholds_reuse_models_and_round_trip(pipeline, monkeypatch):
     assert saved(p.path) == before
 
 
-def test_explicit_both_thresholds_need_no_assets_and_preserve_dry_run(pipeline, monkeypatch):
+def test_explicit_both_thresholds_need_no_assets_and_preserve_dry_run(pipeline, monkeypatch, capsys):
     p = pipeline
     configure(monkeypatch)
     assert app.main(p.args) == 0
+    capsys.readouterr()
     before = p.path.read_bytes(), deepcopy(p.stash.scene)
     configure(monkeypatch, scene=.8, marker=.9)
     for name in ('load_tagger', 'load_vocabulary', 'fetch_cues'):
@@ -159,6 +160,9 @@ def test_explicit_both_thresholds_need_no_assets_and_preserve_dry_run(pipeline, 
     args = [*p.args, '--merge-only', '--rethreshold-scenes', '--rethreshold-markers']
     p.stash.dry_run = True
     assert app.main([*args, '--dry-run']) == 0
+    stderr = capsys.readouterr().err
+    assert 'Check scene + marker thresholds' in stderr
+    assert 'Apply scene + marker thresholds' in stderr
     assert (p.path.read_bytes(), p.stash.scene) == before
     monkeypatch.setattr(app, 'DRY_RUN', False)
     p.stash.dry_run = False
@@ -205,7 +209,7 @@ def test_checkpoint_resume_retains_all_scene_frames_once(pipeline, monkeypatch, 
     assert app.main(args) == 0
 
 
-def test_shared_scene_cleanup_uses_frozen_scene_thresholds(pipeline, monkeypatch, tmp_path):
+def test_shared_scene_cleanup_uses_frozen_scene_thresholds(pipeline, monkeypatch, tmp_path, capsys):
     p = pipeline
     configure(monkeypatch)
     for scores in p.scores.values():
@@ -215,8 +219,12 @@ def test_shared_scene_cleanup_uses_frozen_scene_thresholds(pipeline, monkeypatch
     p.scores['oppai'][2, 0] = .64
     args = ['--models', 'wd', 'joytag', 'oppai', *p.args[2:]]
     assert app.main(args) == 0
+    capsys.readouterr()
     configure(monkeypatch, scene=.6)
     assert app.main([*args, '--merge-only', '--rethreshold-scenes']) == 0
+    stderr = capsys.readouterr().err
+    assert 'Check scene thresholds' in stderr
+    assert 'Apply scene thresholds' in stderr
     assert [t['name'] for t in p.stash.scene['tags']] == ['ai:common']
     # YAML alone must not alter the thresholds used by cleanup.
     configure(monkeypatch, scene=.9)

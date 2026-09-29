@@ -3,6 +3,8 @@
 import math
 from types import SimpleNamespace
 
+from tqdm import tqdm
+
 OVERRIDE = 'marker_threshold_override'
 
 
@@ -133,7 +135,7 @@ def reuse(app, store, scene, config, identity, cues, hashes, kinds):
 def rethreshold(app, store, scenes, settings, report):
     """Preflight the whole selection before changing policy or publishing to Stash."""
     errors = 0
-    for scene in scenes:
+    for scene in tqdm(scenes, desc='Check marker thresholds', unit='scene'):
         for config in settings:
             try:
                 validate(app, store, scene, config)
@@ -145,7 +147,7 @@ def rethreshold(app, store, scenes, settings, report):
     if errors:
         return dict(errors=errors)
     changed = 0
-    for scene in scenes:
+    for scene in tqdm(scenes, desc='Apply marker thresholds', unit='scene'):
         for config in settings:
             changed += apply(app, store, scene, config)
     return dict(marker_thresholds_updated=changed)

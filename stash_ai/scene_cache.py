@@ -1,6 +1,8 @@
 """Replay scene qualification from sparse frame evidence and exact aggregates."""
 from types import SimpleNamespace
 
+from tqdm import tqdm
+
 SCENE_OVERRIDE = 'scene_threshold_override'
 
 
@@ -126,8 +128,9 @@ def apply(store, scene, model, outputs):
 
 
 def rethreshold(app, store, scenes, settings, report, *, markers=False):
+    mode = 'scene + marker thresholds' if markers else 'scene thresholds'
     errors = 0
-    for scene in scenes:
+    for scene in tqdm(scenes, desc=f'Check {mode}', unit='scene'):
         for config in settings:
             try:
                 plan(app, store, scene, config, markers=markers)
@@ -137,7 +140,7 @@ def rethreshold(app, store, scenes, settings, report, *, markers=False):
     if errors:
         return dict(errors=errors)
     changed = 0
-    for scene in scenes:
+    for scene in tqdm(scenes, desc=f'Apply {mode}', unit='scene'):
         for config in settings:
             outputs = plan(app, store, scene, config, markers=markers)
             apply(store, scene, config.source.key, outputs)
