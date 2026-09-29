@@ -46,6 +46,68 @@ def inference_pair(label, *, score=.9, identity="same", marker_threshold=.8):
     }
 
 
+def _report_marker(tag, start, end, *, occurrence=False, extras=()):
+    return {
+        "tag": tag,
+        "start": start,
+        "end": end,
+        "contributors": [{"derived": "occurrence" if occurrence else "range"}],
+        "extra_tags": list(extras),
+    }
+
+
+def _naive_overlap(left, right):
+    if left["tag"] != right["tag"] or bool(model_report.is_occurrence(left)) != bool(model_report.is_occurrence(right)):
+        return False
+    a0, b0 = float(left["start"]), float(right["start"])
+    a1 = float(left["end"]) if left["end"] is not None else a0
+    b1 = float(right["end"]) if right["end"] is not None else b0
+    return max(a0, b0) <= min(a1, b1) + .0005
+
+
+def _naive_marker_delta(full, reduced):
+    reduced_keys = {model_report._marker_key(item) for item in reduced}
+    full_keys = {model_report._marker_key(item) for item in full}
+    full_overlap = [any(_naive_overlap(marker, other) for other in reduced) for marker in full]
+    reduced_overlap = [any(_naive_overlap(marker, other) for other in full) for marker in reduced]
+    return {
+        "lost": sum(not overlap for overlap in full_overlap),
+        "changed": sum(
+            overlap and model_report._marker_key(marker) not in reduced_keys
+            for marker, overlap in zip(full, full_overlap)
+        ),
+        "added": sum(not overlap for overlap in reduced_overlap),
+        "exact_removed": len(full_keys - reduced_keys),
+        "exact_added": len(reduced_keys - full_keys),
+        "occurrences_lost": sum(
+            model_report.is_occurrence(marker) and not overlap
+            for marker, overlap in zip(full, full_overlap)
+        ),
+    }
+
+
+def test_marker_delta_linear_overlap_matches_quadratic_reference():
+    full = [
+        _report_marker("a", 0.0, 1.0, extras=("x",)),
+        _report_marker("b", 1.0, 2.0),
+        _report_marker("a", 3.0, None, occurrence=True),
+        _report_marker("c", 5.0, 5.2),
+    ]
+    reduced = [
+        _report_marker("a", 0.2, 0.4, extras=("y",)),
+        # A second component still overlaps the same full component through the
+        # report's 0.5 ms matching tolerance.
+        _report_marker("a", 1.0004, 1.2),
+        _report_marker("b", 1.5, 2.5),
+        _report_marker("a", 3.0004, None, occurrence=True),
+        _report_marker("d", 6.0, 7.0),
+    ]
+    full.sort(key=lambda item: (item["start"], item["tag"]))
+    reduced.sort(key=lambda item: (item["start"], item["tag"]))
+
+    assert model_report._marker_delta(full, reduced) == _naive_marker_delta(full, reduced)
+
+
 def test_selected_sources_replays_consensus_instead_of_filtering_finished_markers(tmp_path):
     path = tmp_path / "state.sqlite3"
     policies = empty_policies()
@@ -182,6 +244,14 @@ def test_cli_model_report_uses_saved_evidence_without_models_or_stash(tmp_path, 
     destination = tmp_path / "model-report.json"
     monkeypatch.setattr(app, "load_model_settings", lambda *a, **k: pytest.fail("loaded model settings"))
     monkeypatch.setattr(app, "create_stash_client", lambda *a, **k: pytest.fail("connected to Stash"))
+    preloaded = []
+    original_preload = merge.StateStore.preload_sources
+
+    def preload_sources(store):
+        preloaded.append(True)
+        return original_preload(store)
+
+    monkeypatch.setattr(merge.StateStore, "preload_sources", preload_sources)
 
     assert app.main([
         "--state-db", str(path),
@@ -189,6 +259,7 @@ def test_cli_model_report_uses_saved_evidence_without_models_or_stash(tmp_path, 
     ]) == 0
 
     captured = capsys.readouterr()
+    assert preloaded == [True]
     assert "No Stash requests or inference were performed" in captured.out
     assert "Model report" in captured.err
     data = json.loads(destination.read_text(encoding="utf-8"))
