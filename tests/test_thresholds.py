@@ -148,16 +148,20 @@ def test_rethreshold_matches_fresh_marker_inference(pipeline, monkeypatch, tmp_p
     assert outputs(cached) == outputs(fresh)
 
 
-def test_explicit_rethreshold_needs_no_models_media_or_vocabulary(pipeline, monkeypatch):
+def test_explicit_rethreshold_needs_no_models_media_or_vocabulary(pipeline, monkeypatch, capsys):
     p = pipeline
     configure(monkeypatch)
     assert app.main(p.args) == 0
+    capsys.readouterr()
     configure(monkeypatch, marker=.85)
     fail_inference(monkeypatch)
     monkeypatch.setattr(app, 'load_vocabulary', lambda *a: pytest.fail('loaded vocabulary'))
     monkeypatch.setattr(app, 'fetch_cues', lambda *a: pytest.fail('fetched VTT'))
     monkeypatch.setattr(p.stash, 'get_media', lambda *a: pytest.fail('fetched sprite'))
     assert app.main([*p.args, '--merge-only', '--rethreshold-markers']) == 0
+    stderr = capsys.readouterr().err
+    assert 'Check marker thresholds' in stderr
+    assert 'Apply marker thresholds' in stderr
     assert records(p.path)['markers']['wd'][0][thresholds.OVERRIDE] == .85
 
 
