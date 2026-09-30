@@ -118,6 +118,9 @@ class StateStore(AbstractContextManager):
     def result_presence(self, models):
         return self.results.result_presence(models)
 
+    def result_index_presence(self, models):
+        return self.results.result_index_presence(models)
+
     def sources(self, scene, kind):
         return self.results.sources(scene, kind)
 
