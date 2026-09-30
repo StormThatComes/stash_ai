@@ -164,6 +164,29 @@ def request_refresh(store, scenes, models, kinds):
                                              (store.scope, str(scene), model, kind))
 
 
+def request_stale_refresh(store, scene, model, kinds, signature):
+    """Mark mismatched completed inference stale without destroying resumable work."""
+    kinds = tuple(dict.fromkeys(kinds))
+    if not kinds:
+        return []
+    placeholders = ",".join("?" for _ in kinds)
+    rows = store.connection.execute(
+        "SELECT kind FROM " + store.table('result_index') +
+        f" WHERE scope=? AND scene=? AND model=? AND kind IN ({placeholders}) "
+        "AND inference=1 AND (signature IS NULL OR signature<>?) ORDER BY kind",
+        (store.scope, str(scene), model, *kinds, signature)).fetchall()
+    stale = [kind for kind, in rows]
+    if not stale:
+        return []
+    with store.connection:
+        store.cache.discard(('status', str(scene), model))
+        for kind in stale:
+            store.connection.execute(
+                "INSERT OR IGNORE INTO refresh_requests VALUES (?,?,?,?)",
+                (store.scope, str(scene), model, kind))
+    return stale
+
+
 def pending_refreshes(store, kinds):
     """Group outstanding refresh requests that can affect the selected outputs."""
     kinds = tuple(dict.fromkeys(kinds))
