@@ -206,10 +206,13 @@ def test_dry_run_and_model_selection(pipeline, monkeypatch):
     assert thresholds.OVERRIDE not in saved['dtq'][0]
 
 
-def test_preflight_skips_second_model_with_no_saved_evidence(pipeline, monkeypatch, capsys):
+def test_preflight_skips_second_model_with_scene_only_history(pipeline, monkeypatch, capsys):
     p = pipeline
     configure(monkeypatch)
     assert app.main(p.args) == 0
+    with merge.StateStore(p.path, merge.scope_for(app.STASH_URL)) as state:
+        scene = state.records('1', 'scene')['wd'][0]
+        state.put('1', 'dtq', {'scene': scene})
     capsys.readouterr()
     configure(monkeypatch, marker=.85)
     p.stash.writes.clear()
