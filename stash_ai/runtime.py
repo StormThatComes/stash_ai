@@ -162,6 +162,7 @@ class RunReport:
         self.overflow = 0
         self.counts = Counter()
         self.timings, self.timing_calls = Counter(), Counter()
+        self.threshold_preflight = None
         self._timers = threading.local()
         self._timing_lock = threading.RLock()
         self.diagnostics = None
@@ -238,6 +239,13 @@ class RunReport:
         bar.set_postfix(processed=counts['processed'], reused=counts['reused'],
                         skipped=counts['skipped'], errors=counts['errors'], refresh=False)
 
+    def record_threshold_preflight(self, checked, failed, reasons=None, applied=0):
+        """Keep one compact summary for an atomic threshold update attempt."""
+        self.threshold_preflight = dict(
+            checked=int(checked), failed=int(failed), applied=int(applied),
+            reasons=dict(reasons or {}),
+        )
+
     def finish(self, title, counts, cache=None):
         groups = (
             ('Scenes/models', ('processed', 'reused', 'skipped', 'errors', 'scenes_synced', 'merge_reused', 'bootstrap_reused', 'checkpoint_resumes')),
@@ -252,6 +260,16 @@ class RunReport:
         combined = Counter(counts)
         combined.update(self.counts)
         self.write(title)
+        if self.threshold_preflight is not None:
+            threshold = self.threshold_preflight
+            self.write(
+                f"  Threshold preflight: checked={threshold['checked']}, "
+                f"failed={threshold['failed']}, applied={threshold['applied']}"
+            )
+            if threshold['reasons']:
+                ordered = sorted(threshold['reasons'].items(), key=lambda item: (-item[1], item[0]))
+                self.write('  Threshold blockers: ' + ', '.join(
+                    f'{reason}={count}' for reason, count in ordered))
         printed = set()
         for label, keys in groups:
             present = [key for key in keys if key in combined]
