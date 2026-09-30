@@ -257,12 +257,14 @@ class MergedRun:
             "Rerun without --merge-only to resume inference.")
 
     def _merge_scenes(self):
-        refresh_kinds = progress.output_kinds(self.app)
-        if (self.app.CREATE_MARKERS and self.app.TEMPORAL_POLICY.enabled
-                and self.app.TEMPORAL_POLICY.occurrence_markers):
-            refresh_kinds = [*refresh_kinds, "scene"]
-        self._pending_refreshes = progress.pending_refreshes(
-            self.store, refresh_kinds)
+        self._pending_refreshes = {}
+        if self.store is not None:
+            refresh_kinds = progress.output_kinds(self.app)
+            if (self.app.CREATE_MARKERS and self.app.TEMPORAL_POLICY.enabled
+                    and self.app.TEMPORAL_POLICY.occurrence_markers):
+                refresh_kinds = [*refresh_kinds, "scene"]
+            self._pending_refreshes = progress.pending_refreshes(
+                self.store, refresh_kinds)
         # Profiling records per-stage timings in the parent process, so keep that
         # diagnostic mode serial even when the normal merge uses CPU workers.
         workers = int(getattr(self.args, 'merge_workers', 1))
