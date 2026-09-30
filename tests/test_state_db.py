@@ -61,6 +61,22 @@ def test_preview_does_not_release_active_writer_or_change_source(tmp_path):
         assert reopened.records('1', 'scene')['wd'] == [original]
 
 
+def test_targeted_result_reads_do_not_decode_sibling_models(tmp_path):
+    path = tmp_path / 'state.sqlite3'
+    wd = {'mode': 'scene', 'meta': {'origin': 'inference'}, 'items': [{'tag': 'wd', 'score': .8}]}
+    dtq = {'mode': 'scene', 'meta': {'origin': 'inference'}, 'items': [{'tag': 'dtq', 'score': .7}]}
+    with StateStore(path, 'scope') as state:
+        state.put('1', 'wd', {'scene': wd})
+        state.put('1', 'dtq', {'scene': dtq})
+        state.report = RunReport(write=lambda _: None)
+
+        assert state.result_presence(['wd']) == {('1', 'wd', 'scene')}
+        assert state.report.timing_calls['state_json_decode'] == 0
+
+        assert state.model_records('1', 'scene', 'wd')[0]['items'][0]['tag'] == 'wd'
+        assert state.report.timing_calls['state_json_decode'] == 1
+
+
 @pytest.mark.parametrize('dry_run', [False, True])
 def test_unsupported_database_is_rejected_without_changing_source(tmp_path, dry_run):
     path = tmp_path / 'foreign.sqlite3'
