@@ -239,10 +239,14 @@ class RunReport:
         bar.set_postfix(processed=counts['processed'], reused=counts['reused'],
                         skipped=counts['skipped'], errors=counts['errors'], refresh=False)
 
-    def record_threshold_preflight(self, checked, failed, reasons=None, applied=0):
+    def record_threshold_preflight(self, checked, failed, reasons=None, applied=0, *,
+                                   selected=None, skipped_no_evidence=0):
         """Keep one compact summary for an atomic threshold update attempt."""
+        checked, skipped = int(checked), int(skipped_no_evidence)
         self.threshold_preflight = dict(
-            checked=int(checked), failed=int(failed), applied=int(applied),
+            selected=int(checked + skipped if selected is None else selected),
+            checked=checked, skipped_no_evidence=skipped,
+            failed=int(failed), applied=int(applied),
             reasons=dict(reasons or {}),
         )
 
@@ -264,7 +268,9 @@ class RunReport:
             threshold = self.threshold_preflight
             self.write(
                 f"  Threshold preflight: checked={threshold['checked']}, "
-                f"failed={threshold['failed']}, applied={threshold['applied']}"
+                f"failed={threshold['failed']}, applied={threshold['applied']}, "
+                f"selected={threshold['selected']}, "
+                f"skipped_no_evidence={threshold['skipped_no_evidence']}"
             )
             if threshold['reasons']:
                 ordered = sorted(threshold['reasons'].items(), key=lambda item: (-item[1], item[0]))
