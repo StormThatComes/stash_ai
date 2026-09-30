@@ -74,6 +74,21 @@ class ResultStore:
             (store.scope, *selected))
         return {(str(scene), model, kind) for scene, model, kind in rows}
 
+    def result_index_presence(self, models):
+        """Return indexed result keys without decoding result payloads."""
+        store = self.store
+        from stash_ai.preview import check_source
+        check_source(store)
+        selected = tuple(dict.fromkeys(models))
+        if not selected:
+            return set()
+        placeholders = ','.join('?' for _ in selected)
+        rows = store.read_rows(
+            "SELECT scene,model,kind FROM " + store.table('result_index') +
+            f" WHERE scope=? AND model IN ({placeholders})",
+            (store.scope, *selected))
+        return {(str(scene), model, kind) for scene, model, kind in rows}
+
     def sources(self, scene, kind):
         store = self.store
         key = ('sources', str(scene), kind)
