@@ -88,15 +88,32 @@ def validate_marker_cache(app, records):
                 raise ValueError(f'{model}: marker cache floor {floor!r} exceeds required {needed:g}; run inference.')
 
 
-def validate(app, store, scene, config, *, check_scene=True):
+def _model_records(store, scene, kind, model, *, direct=False):
+    if direct:
+        return store.model_records(scene, kind, model, borrow=True)
+    return store.records(scene, kind, model, borrow=True).get(model, [])
+
+
+def threshold_targets(store, scenes, settings):
+    """Select scene/model pairs that have any saved evidence without decoding payloads."""
+    scene_ids = [str(scene) for scene in scenes]
+    models = [config.source.key for config in settings]
+    present = {(scene, model) for scene, model, _ in store.result_presence(models)}
+    targets = [(scene, config) for scene in scene_ids for config in settings
+               if (scene, config.source.key) in present]
+    selected = len(scene_ids) * len(settings)
+    return targets, selected - len(targets), selected
+
+
+def validate(app, store, scene, config, *, check_scene=True, direct=False):
     """Reject incomplete evidence; a missing detection is never treated as zero."""
     from stash_ai.temporal import marker_floor
     model = config.source.key
-    segments = store.records(scene, 'markers', model, borrow=True).get(model, [])
+    segments = _model_records(store, scene, 'markers', model, direct=direct)
     if not segments:
         raise ValueError(f'{scene}/{model}: no cached marker frames; run inference for this scene/model.')
     from stash_ai.scene_cache import scene_threshold
-    scene_segments = store.records(scene, 'scene', model, borrow=True).get(model, [])
+    scene_segments = _model_records(store, scene, 'scene', model, direct=direct)
     for segment in scene_segments:
         if check_scene and segment['meta'].get('origin') == 'inference' and scene_threshold(segment) != config.scene_threshold:
             raise ValueError(f'{scene}/{model}: scene_threshold changed; scene statistics require inference.')
@@ -114,9 +131,9 @@ def validate(app, store, scene, config, *, check_scene=True):
     return segments
 
 
-def apply(app, store, scene, config, segments=None):
+def apply(app, store, scene, config, segments=None, *, direct=False):
     """Store policy separately; retain every original frame, score and signature."""
-    segments = validate(app, store, scene, config) if segments is None else segments
+    segments = validate(app, store, scene, config, direct=direct) if segments is None else segments
     if all(marker_threshold(s) == config.marker_threshold for s in segments):
         return False
     if any(store.snapshot(scene, kind, borrow=True)[1] is not None for kind in ('scene', 'markers')):
@@ -157,26 +174,28 @@ def reuse(app, store, scene, config, identity, cues, hashes, kinds):
 
 
 def rethreshold(app, store, scenes, settings, report):
-    """Preflight the whole selection before changing policy or publishing to Stash."""
-    errors, checked = 0, 0
+    """Preflight only saved evidence; fully absent scene/model pairs are a no-op."""
+    targets, skipped, selected = threshold_targets(store, scenes, settings)
+    errors = 0
     reasons = Counter()
-    for scene in tqdm(scenes, desc='Check marker thresholds', unit='scene'):
-        for config in settings:
-            checked += 1
-            try:
-                validate(app, store, scene, config)
-                if any(store.snapshot(scene, kind, borrow=True)[1] is not None for kind in ('scene', 'markers')):
-                    raise RuntimeError('Finish the pending merge or use --abandon-pending first.')
-            except (ValueError, RuntimeError) as exc:
-                report.issue('marker thresholds', config.source.key, scene, exc, str(exc))
-                reasons[threshold_failure_reason(exc)] += 1
-                errors += 1
+    for scene, config in tqdm(targets, desc='Check marker thresholds', unit='pair'):
+        try:
+            validate(app, store, scene, config, direct=True)
+            if any(store.snapshot(scene, kind, borrow=True)[1] is not None for kind in ('scene', 'markers')):
+                raise RuntimeError('Finish the pending merge or use --abandon-pending first.')
+        except (ValueError, RuntimeError) as exc:
+            report.issue('marker thresholds', config.source.key, scene, exc, str(exc))
+            reasons[threshold_failure_reason(exc)] += 1
+            errors += 1
     if errors:
-        report.record_threshold_preflight(checked, errors, reasons, applied=0)
+        report.record_threshold_preflight(
+            len(targets), errors, reasons, applied=0,
+            selected=selected, skipped_no_evidence=skipped)
         return dict(errors=errors)
     changed = 0
-    for scene in tqdm(scenes, desc='Apply marker thresholds', unit='scene'):
-        for config in settings:
-            changed += apply(app, store, scene, config)
-    report.record_threshold_preflight(checked, 0, applied=changed)
+    for scene, config in tqdm(targets, desc='Apply marker thresholds', unit='pair'):
+        changed += apply(app, store, scene, config, direct=True)
+    report.record_threshold_preflight(
+        len(targets), 0, applied=changed,
+        selected=selected, skipped_no_evidence=skipped)
     return dict(marker_thresholds_updated=changed)
