@@ -112,6 +112,12 @@ class StateStore(AbstractContextManager):
     def records(self, scene, kind, model=None, *, borrow=False):
         return self.results.records(scene, kind, model, borrow=borrow)
 
+    def model_records(self, scene, kind, model, *, borrow=False):
+        return self.results.model_records(scene, kind, model, borrow=borrow)
+
+    def result_presence(self, models):
+        return self.results.result_presence(models)
+
     def sources(self, scene, kind):
         return self.results.sources(scene, kind)
 
