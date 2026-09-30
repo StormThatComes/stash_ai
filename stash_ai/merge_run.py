@@ -138,7 +138,7 @@ class MergedRun:
             self.stats.update(rethreshold(
                 app, self.store, self.scenes, self.settings, self.report))
         if self.stats['errors']:
-            self.report.finish('Thresholds (not applied)', self.stats, self.store.cache)
+            self.report.finish('Threshold update aborted: 0 changes applied', self.stats, self.store.cache)
             return 1
         return None
 
