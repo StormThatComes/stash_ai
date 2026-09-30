@@ -231,7 +231,7 @@ def test_explicit_both_thresholds_need_no_assets_and_preserve_dry_run(pipeline, 
     assert app.main(args) == 0
 
 
-@pytest.mark.parametrize('change', ['old_cache', 'below_floor', 'pending', 'partial_model'])
+@pytest.mark.parametrize('change', ['old_cache', 'below_floor', 'pending', 'missing_result'])
 def test_invalid_scene_cache_preflight_does_not_publish(pipeline, monkeypatch, change):
     p = pipeline
     configure(monkeypatch)
@@ -246,22 +246,27 @@ def test_invalid_scene_cache_preflight_does_not_publish(pipeline, monkeypatch, c
     elif change == 'pending':
         with merge.StateStore(p.path, merge.scope_for(app.STASH_URL)) as state:
             state.prepare('1', {'scene': state.snapshot('1', 'scene')[0]})
-    elif change == 'partial_model':
+    elif change == 'missing_result':
         with merge.StateStore(p.path, merge.scope_for(app.STASH_URL)) as state:
-            marker = state.records('1', 'markers')['wd'][0]
-            state.put('1', 'dtq', {'markers': marker})
+            with state.connection:
+                state.connection.execute(
+                    "DELETE FROM results WHERE scope=? AND scene='1' AND model='wd' AND kind='scene'",
+                    (state.scope,))
     before = saved(p.path), deepcopy(p.stash.scene)
     configure(monkeypatch, scene=.3 if change == 'below_floor' else .8)
-    args = ['--models', 'wd', 'dtq', *p.args[2:]] if change == 'partial_model' else p.args
+    args = p.args
     p.stash.writes.clear()
     assert app.main([*args, '--merge-only', '--rethreshold-scenes']) == 1
     assert (saved(p.path), p.stash.scene) == before and not p.stash.writes
 
 
-def test_rethreshold_scenes_skips_completely_absent_model_evidence(pipeline, monkeypatch, capsys):
+def test_rethreshold_scenes_skips_model_with_marker_only_history(pipeline, monkeypatch, capsys):
     p = pipeline
     configure(monkeypatch)
     assert app.main(p.args) == 0
+    with merge.StateStore(p.path, merge.scope_for(app.STASH_URL)) as state:
+        marker = state.records('1', 'markers')['wd'][0]
+        state.put('1', 'dtq', {'markers': marker})
     capsys.readouterr()
 
     configure(monkeypatch, scene=.8)
