@@ -245,7 +245,20 @@ class MergedRun:
             if tagger is not None:
                 tagger.close()
 
+    def _ensure_refresh_complete(self, scene_id):
+        pending = self._pending_refreshes.get(str(scene_id), ())
+        if not pending:
+            return
+        self.stats["merge_refresh_blocked"] += 1
+        details = ", ".join(f"{model}/{kind}" for model, kind in pending)
+        raise RuntimeError(
+            "Fresh inference is still pending for " + details +
+            "; merge skipped to avoid reusing stale evidence. "
+            "Rerun without --merge-only to resume inference.")
+
     def _merge_scenes(self):
+        self._pending_refreshes = progress.pending_refreshes(
+            self.store, progress.output_kinds(self.app))
         # Profiling records per-stage timings in the parent process, so keep that
         # diagnostic mode serial even when the normal merge uses CPU workers.
         workers = int(getattr(self.args, 'merge_workers', 1))
@@ -264,6 +277,7 @@ class MergedRun:
         for scene_id, current in bar:
             with self.report.diagnostics.scene(scene_id) as sample:
                 try:
+                    self._ensure_refresh_complete(scene_id)
                     with stage(self.report, 'publication_check'):
                         reason = (
                             'forced' if getattr(args, 'force_merge', False)
@@ -314,6 +328,7 @@ class MergedRun:
             # expensive evidence replay for scenes whose published fingerprint is current.
             for scene_id, current in self.scenes.items():
                 try:
+                    self._ensure_refresh_complete(scene_id)
                     with stage(self.report, 'publication_check'):
                         reason = (
                             'forced' if getattr(args, 'force_merge', False)
