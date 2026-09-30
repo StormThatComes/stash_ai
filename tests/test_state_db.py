@@ -71,6 +71,7 @@ def test_targeted_result_reads_do_not_decode_sibling_models(tmp_path):
         state.report = RunReport(write=lambda _: None)
 
         assert state.result_presence(['wd']) == {('1', 'wd', 'scene')}
+        assert state.result_index_presence(['wd']) == {('1', 'wd', 'scene')}
         assert state.report.timing_calls['state_json_decode'] == 0
 
         assert state.model_records('1', 'scene', 'wd')[0]['items'][0]['tag'] == 'wd'
