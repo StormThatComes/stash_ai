@@ -127,7 +127,7 @@ class MergedRun:
             return None
         from stash_ai.thresholds import rethreshold
         if self.stats['errors']:
-            self.report.finish('Thresholds (not applied)', self.stats, self.store.cache)
+            self.report.finish('Threshold update aborted: 0 changes applied', self.stats, self.store.cache)
             return 1
         if getattr(args, 'rethreshold_scenes', False):
             from stash_ai.scene_cache import rethreshold as rethreshold_scenes
