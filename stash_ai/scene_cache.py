@@ -92,7 +92,8 @@ def frame_records(scenes, markers):
     return result
 
 
-def plan(app, store, scene, config, *, scenes=True, markers=False, direct=False):
+def plan(app, store, scene, config, *, scenes=True, markers=False, direct=False,
+         marker_check_scene=None):
     from stash_ai.thresholds import OVERRIDE, validate
     result = {}
     if scenes:
@@ -105,7 +106,8 @@ def plan(app, store, scene, config, *, scenes=True, markers=False, direct=False)
             validate_scene(app, segment, config.scene_threshold)
         result['scene'] = segments
     if markers:
-        result['markers'] = validate(app, store, scene, config, check_scene=not scenes, direct=direct)
+        check_scene = not scenes if marker_check_scene is None else marker_check_scene
+        result['markers'] = validate(app, store, scene, config, check_scene=check_scene, direct=direct)
     updated = {}
     for kind, segments in result.items():
         key, meta_key, threshold = ((SCENE_OVERRIDE, 'scene_threshold', config.scene_threshold) if kind == 'scene'
@@ -133,12 +135,16 @@ def apply(store, scene, model, outputs):
 def rethreshold(app, store, scenes, settings, report, *, markers=False):
     from stash_ai.thresholds import threshold_failure_reason, threshold_targets
     mode = 'scene + marker thresholds' if markers else 'scene thresholds'
-    targets, skipped, selected = threshold_targets(store, scenes, settings)
+    requested = ('scene', 'markers') if markers else ('scene',)
+    targets, skipped, selected = threshold_targets(store, scenes, settings, requested)
     errors = 0
     reasons = Counter()
-    for scene, config in tqdm(targets, desc=f'Check {mode}', unit='pair'):
+    for scene, config, available in tqdm(targets, desc=f'Check {mode}', unit='pair'):
         try:
-            plan(app, store, scene, config, markers=markers, direct=True)
+            plan(
+                app, store, scene, config,
+                scenes='scene' in available, markers='markers' in available,
+                direct=True, marker_check_scene=False if markers else None)
         except (ValueError, RuntimeError) as exc:
             report.issue('scene thresholds', config.source.key, scene, exc, str(exc))
             reasons[threshold_failure_reason(exc)] += 1
@@ -149,8 +155,11 @@ def rethreshold(app, store, scenes, settings, report, *, markers=False):
             selected=selected, skipped_no_evidence=skipped)
         return dict(errors=errors)
     changed = 0
-    for scene, config in tqdm(targets, desc=f'Apply {mode}', unit='pair'):
-        outputs = plan(app, store, scene, config, markers=markers, direct=True)
+    for scene, config, available in tqdm(targets, desc=f'Apply {mode}', unit='pair'):
+        outputs = plan(
+            app, store, scene, config,
+            scenes='scene' in available, markers='markers' in available,
+            direct=True, marker_check_scene=False if markers else None)
         apply(store, scene, config.source.key, outputs)
         changed += bool(outputs)
     report.record_threshold_preflight(
