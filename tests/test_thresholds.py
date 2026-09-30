@@ -206,15 +206,18 @@ def test_dry_run_and_model_selection(pipeline, monkeypatch):
     assert thresholds.OVERRIDE not in saved['dtq'][0]
 
 
-def test_preflight_rejects_missing_second_model_before_updating_first(pipeline, monkeypatch):
+def test_preflight_skips_second_model_with_no_saved_evidence(pipeline, monkeypatch, capsys):
     p = pipeline
     configure(monkeypatch)
     assert app.main(p.args) == 0
-    before = raw(p.path)
+    capsys.readouterr()
     configure(monkeypatch, marker=.85)
     p.stash.writes.clear()
-    assert app.main(['--models', 'wd', 'dtq', *p.args[2:], '--merge-only', '--rethreshold-markers']) == 1
-    assert raw(p.path) == before and not p.stash.writes
+    assert app.main(['--models', 'wd', 'dtq', *p.args[2:], '--merge-only', '--rethreshold-markers']) == 0
+    output = capsys.readouterr().out
+    assert records(p.path)['markers']['wd'][0][thresholds.OVERRIDE] == .85
+    assert ('Threshold preflight: checked=1, failed=0, applied=1, '
+            'selected=2, skipped_no_evidence=1') in output
 
 
 def test_failed_publication_resumes_with_saved_threshold_without_models(pipeline, monkeypatch):
