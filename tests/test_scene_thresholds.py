@@ -154,6 +154,27 @@ def test_support_ratio_change_rejects_incomplete_cache_before_publication(
     assert 'run inference' in capsys.readouterr().out
 
 
+def test_rethreshold_abort_report_is_explicit_and_groups_blockers(pipeline, monkeypatch, capsys):
+    p = pipeline
+    configure(monkeypatch)
+    assert app.main(p.args) == 0
+    capsys.readouterr()
+
+    with merge.StateStore(p.path, merge.scope_for(app.STASH_URL)) as state:
+        segment = state.records('1', 'scene')['wd'][0]
+        segment.pop('frames')
+        segment['meta'].pop('scene_frames_format')
+        segment['meta'].pop('scene_score_floor')
+        state.put('1', 'wd', {'scene': segment})
+
+    configure(monkeypatch, scene=.8)
+    assert app.main([*p.args, '--merge-only', '--rethreshold-scenes']) == 1
+    output = capsys.readouterr().out
+    assert 'Threshold update aborted: 0 changes applied' in output
+    assert 'Threshold preflight: checked=1, failed=1, applied=0' in output
+    assert 'Threshold blockers: missing scene frame evidence=1' in output
+
+
 def test_support_ratio_dry_run_preserves_source_and_stash(pipeline, monkeypatch, tmp_path, capsys):
     p = pipeline
     configure(monkeypatch)

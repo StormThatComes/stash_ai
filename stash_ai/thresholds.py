@@ -1,6 +1,7 @@
 """Marker publication thresholds over immutable, bounded inference evidence."""
 
 import math
+from collections import Counter
 from types import SimpleNamespace
 
 from tqdm import tqdm
@@ -43,6 +44,29 @@ def marker_threshold(segment, thresholds=None):
 
 def _score(value):
     return type(value) in (int, float) and math.isfinite(value) and 0 <= value <= 1
+
+
+def threshold_failure_reason(exc):
+    """Collapse scene-specific preflight errors into stable operator-facing reasons."""
+    message = str(exc).strip()
+    if ': ' in message:
+        prefix, remainder = message.split(': ', 1)
+        if '/' in prefix:
+            message = remainder
+    lower = message.lower()
+    rules = (
+        ('no scene results', 'missing scene results'),
+        ('scene frame evidence is missing', 'missing scene frame evidence'),
+        ('scene cache floor', 'scene cache floor too high'),
+        ('no cached marker frames', 'missing marker frames'),
+        ('imported ranges cannot be rethresholded', 'imported marker ranges'),
+        ('marker cache floor', 'marker cache floor too high'),
+        ('cache floor', 'marker cache floor too high'),
+        ('invalid cached marker threshold', 'invalid cached marker threshold'),
+        ('scene_threshold changed', 'scene threshold requires inference'),
+        ('finish the pending merge', 'pending publication'),
+    )
+    return next((reason for token, reason in rules if token in lower), type(exc).__name__)
 
 
 def validate_marker_cache(app, records):
@@ -134,20 +158,25 @@ def reuse(app, store, scene, config, identity, cues, hashes, kinds):
 
 def rethreshold(app, store, scenes, settings, report):
     """Preflight the whole selection before changing policy or publishing to Stash."""
-    errors = 0
+    errors, checked = 0, 0
+    reasons = Counter()
     for scene in tqdm(scenes, desc='Check marker thresholds', unit='scene'):
         for config in settings:
+            checked += 1
             try:
                 validate(app, store, scene, config)
                 if any(store.snapshot(scene, kind, borrow=True)[1] is not None for kind in ('scene', 'markers')):
                     raise RuntimeError('Finish the pending merge or use --abandon-pending first.')
             except (ValueError, RuntimeError) as exc:
                 report.issue('marker thresholds', config.source.key, scene, exc, str(exc))
+                reasons[threshold_failure_reason(exc)] += 1
                 errors += 1
     if errors:
+        report.record_threshold_preflight(checked, errors, reasons, applied=0)
         return dict(errors=errors)
     changed = 0
     for scene in tqdm(scenes, desc='Apply marker thresholds', unit='scene'):
         for config in settings:
             changed += apply(app, store, scene, config)
+    report.record_threshold_preflight(checked, 0, applied=changed)
     return dict(marker_thresholds_updated=changed)

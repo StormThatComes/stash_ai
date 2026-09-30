@@ -1,4 +1,5 @@
 """Replay scene qualification from sparse frame evidence and exact aggregates."""
+from collections import Counter
 from types import SimpleNamespace
 
 from tqdm import tqdm
@@ -128,16 +129,21 @@ def apply(store, scene, model, outputs):
 
 
 def rethreshold(app, store, scenes, settings, report, *, markers=False):
+    from stash_ai.thresholds import threshold_failure_reason
     mode = 'scene + marker thresholds' if markers else 'scene thresholds'
-    errors = 0
+    errors, checked = 0, 0
+    reasons = Counter()
     for scene in tqdm(scenes, desc=f'Check {mode}', unit='scene'):
         for config in settings:
+            checked += 1
             try:
                 plan(app, store, scene, config, markers=markers)
             except (ValueError, RuntimeError) as exc:
                 report.issue('scene thresholds', config.source.key, scene, exc, str(exc))
+                reasons[threshold_failure_reason(exc)] += 1
                 errors += 1
     if errors:
+        report.record_threshold_preflight(checked, errors, reasons, applied=0)
         return dict(errors=errors)
     changed = 0
     for scene in tqdm(scenes, desc=f'Apply {mode}', unit='scene'):
@@ -145,6 +151,7 @@ def rethreshold(app, store, scenes, settings, report, *, markers=False):
             outputs = plan(app, store, scene, config, markers=markers)
             apply(store, scene, config.source.key, outputs)
             changed += bool(outputs)
+    report.record_threshold_preflight(checked, 0, applied=changed)
     return dict(scene_thresholds_updated=changed)
 
 
