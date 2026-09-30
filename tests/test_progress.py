@@ -68,6 +68,40 @@ def test_restart_keeps_refresh_requests_for_unfinished_models(pipeline):
     assert all(m.seen==list(range(10)) for m in resumed[1:])
 
 
+def test_failed_restart_never_publishes_fresh_and_stale_model_mix(pipeline,monkeypatch):
+    p=pipeline;args=["--models","wd","dtq",*p.args[2:]]
+    assert app.main(args)==0
+    before=deepcopy(p.stash.scene)
+    with merge.StateStore(p.path,merge.scope_for(app.STASH_URL),True) as state:
+        snapshots={kind:state.snapshot("1",kind)[0] for kind in ("scene","markers")}
+
+    p.scores["wd"][:]=0;p.scores["dtq"][:]=0
+    fail={"dtq":True}
+    def load(settings,*_):
+        assert all(model.closed for model in p.loaded)
+        broken=fail.get(settings.source.key,False)
+        model=IndexedTagger(settings,p.scores[settings.source.key],p.vocab.labels,
+                            fail_at=0 if broken else None,error=RuntimeError)
+        p.loaded.append(model)
+        return model
+    monkeypatch.setattr(app,"load_tagger",load)
+
+    p.stash.writes.clear()
+    assert app.main([*args,"--restart"])==1
+    assert p.stash.scene==before and not p.stash.writes
+    with merge.StateStore(p.path,merge.scope_for(app.STASH_URL),True) as state:
+        assert progress.pending_refreshes(state,["scene","markers"])=={
+            "1":[("dtq","markers"),("dtq","scene")]}
+        assert {kind:state.snapshot("1",kind)[0] for kind in ("scene","markers")}==snapshots
+        assert state.records("1","scene")["wd"][0]["items"]==[]
+
+    fail["dtq"]=False
+    assert app.main(args)==0
+    assert not p.stash.scene["tags"] and not p.stash.scene["scene_markers"]
+    with merge.StateStore(p.path,merge.scope_for(app.STASH_URL),True) as state:
+        assert progress.pending_refreshes(state,["scene","markers"])=={}
+
+
 def test_source_content_change_invalidates_checkpoint_even_with_same_url(pipeline,monkeypatch):
     p=pipeline;p.fail["wd"]=4
     with pytest.raises(KeyboardInterrupt): app.main(p.args)
