@@ -113,9 +113,10 @@ def validate(app, store, scene, config, *, check_scene=True, direct=False):
     if not segments:
         raise ValueError(f'{scene}/{model}: no cached marker frames; run inference for this scene/model.')
     from stash_ai.scene_cache import scene_threshold
-    scene_segments = _model_records(store, scene, 'scene', model, direct=direct)
+    scene_segments = (_model_records(store, scene, 'scene', model, direct=direct)
+                      if check_scene else [])
     for segment in scene_segments:
-        if check_scene and segment['meta'].get('origin') == 'inference' and scene_threshold(segment) != config.scene_threshold:
+        if segment['meta'].get('origin') == 'inference' and scene_threshold(segment) != config.scene_threshold:
             raise ValueError(f'{scene}/{model}: scene_threshold changed; scene statistics require inference.')
     needed = marker_floor(app.TEMPORAL_POLICY, config.marker_threshold)
     for segment in segments:
