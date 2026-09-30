@@ -142,8 +142,12 @@ python .\stash_ai.py --models all --merge-only --rethreshold-scenes --rethreshol
 ```
 
 Zmiana progu sceny wymaga zapisanych obserwacji pozwalających ponownie obliczyć
-kwalifikację. Starszy lub niepełny cache może wymagać świeżej inferencji danej
-pary scena/model; `--merge-only` jej nie uruchomi, tylko zgłosi problem.
+kwalifikację. Para scena/model bez zapisanego evidence dla żądanego rodzaju
+wyniku jest pomijana jako brak pracy do wykonania; np. historia utworzona przez
+`--markers-only` nie blokuje `--rethreshold-scenes`. Jeśli odpowiedni
+`result_index` wskazuje, że wynik powinien istnieć, ale samego rekordu brakuje,
+albo zapisany cache jest starszy lub niepełny, operacja nadal kończy się błędem
+przed zastosowaniem zmian. `--merge-only` nie uruchamia brakującej inferencji.
 
 Zwykły przebieg z resume również potrafi wykorzystać cache po bezpiecznej zmianie
 progów, jeśli wszystkie wymagane obserwacje są dostępne.

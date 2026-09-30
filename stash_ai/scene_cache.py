@@ -92,18 +92,22 @@ def frame_records(scenes, markers):
     return result
 
 
-def plan(app, store, scene, config, *, scenes=True, markers=False):
+def plan(app, store, scene, config, *, scenes=True, markers=False, direct=False,
+         marker_check_scene=None):
     from stash_ai.thresholds import OVERRIDE, validate
     result = {}
     if scenes:
-        segments = store.records(scene, 'scene', config.source.key, borrow=True).get(config.source.key, [])
+        segments = (store.model_records(scene, 'scene', config.source.key, borrow=True)
+                    if direct else
+                    store.records(scene, 'scene', config.source.key, borrow=True).get(config.source.key, []))
         if not segments:
             raise ValueError('no scene results; run inference for this scene/model.')
         for segment in segments:
             validate_scene(app, segment, config.scene_threshold)
         result['scene'] = segments
     if markers:
-        result['markers'] = validate(app, store, scene, config, check_scene=not scenes)
+        check_scene = not scenes if marker_check_scene is None else marker_check_scene
+        result['markers'] = validate(app, store, scene, config, check_scene=check_scene, direct=direct)
     updated = {}
     for kind, segments in result.items():
         key, meta_key, threshold = ((SCENE_OVERRIDE, 'scene_threshold', config.scene_threshold) if kind == 'scene'
@@ -129,29 +133,38 @@ def apply(store, scene, model, outputs):
 
 
 def rethreshold(app, store, scenes, settings, report, *, markers=False):
-    from stash_ai.thresholds import threshold_failure_reason
+    from stash_ai.thresholds import threshold_failure_reason, threshold_targets
     mode = 'scene + marker thresholds' if markers else 'scene thresholds'
-    errors, checked = 0, 0
+    requested = ('scene', 'markers') if markers else ('scene',)
+    targets, skipped, selected = threshold_targets(store, scenes, settings, requested)
+    errors = 0
     reasons = Counter()
-    for scene in tqdm(scenes, desc=f'Check {mode}', unit='scene'):
-        for config in settings:
-            checked += 1
-            try:
-                plan(app, store, scene, config, markers=markers)
-            except (ValueError, RuntimeError) as exc:
-                report.issue('scene thresholds', config.source.key, scene, exc, str(exc))
-                reasons[threshold_failure_reason(exc)] += 1
-                errors += 1
+    for scene, config, available in tqdm(targets, desc=f'Check {mode}', unit='pair'):
+        try:
+            plan(
+                app, store, scene, config,
+                scenes='scene' in available, markers='markers' in available,
+                direct=True, marker_check_scene=False if markers else None)
+        except (ValueError, RuntimeError) as exc:
+            report.issue('scene thresholds', config.source.key, scene, exc, str(exc))
+            reasons[threshold_failure_reason(exc)] += 1
+            errors += 1
     if errors:
-        report.record_threshold_preflight(checked, errors, reasons, applied=0)
+        report.record_threshold_preflight(
+            len(targets), errors, reasons, applied=0,
+            selected=selected, skipped_no_evidence=skipped)
         return dict(errors=errors)
     changed = 0
-    for scene in tqdm(scenes, desc=f'Apply {mode}', unit='scene'):
-        for config in settings:
-            outputs = plan(app, store, scene, config, markers=markers)
-            apply(store, scene, config.source.key, outputs)
-            changed += bool(outputs)
-    report.record_threshold_preflight(checked, 0, applied=changed)
+    for scene, config, available in tqdm(targets, desc=f'Apply {mode}', unit='pair'):
+        outputs = plan(
+            app, store, scene, config,
+            scenes='scene' in available, markers='markers' in available,
+            direct=True, marker_check_scene=False if markers else None)
+        apply(store, scene, config.source.key, outputs)
+        changed += bool(outputs)
+    report.record_threshold_preflight(
+        len(targets), 0, applied=changed,
+        selected=selected, skipped_no_evidence=skipped)
     return dict(scene_thresholds_updated=changed)
 
 

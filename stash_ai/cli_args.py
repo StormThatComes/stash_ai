@@ -49,9 +49,11 @@ def build_parser(app) -> argparse.ArgumentParser:
                         help="Recompute even unchanged merges without rerunning models; requires --merge-only. Does not clear source state.")
     parser.add_argument("--rethreshold-scenes", action="store_true",
                         help="Apply YAML scene thresholds to retained frame evidence; requires --merge-only. "
+                             "Scene/model pairs with no saved scene evidence are skipped. "
                              "May be combined with --rethreshold-markers.")
     parser.add_argument("--rethreshold-markers", action="store_true",
                         help="Apply YAML marker thresholds to complete cached frames; requires --merge-only. "
+                             "Scene/model pairs with no saved marker evidence are skipped. "
                              "Never runs inference; rejects changed scene thresholds or insufficient retention.")
     parser.add_argument("--abandon-pending", action="store_true",
                         help="Abandon pending merge/cleanup plans, retaining applied changes and inference. "

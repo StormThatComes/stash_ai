@@ -21,6 +21,15 @@ class ResultStore:
     def report(self):
         return getattr(self.store, 'report', None)
 
+    @staticmethod
+    def _normalize_segments(segments):
+        """Apply the lazy compatibility view used by all decoded result reads."""
+        from stash_ai.performance import StoredSegment
+        for index, segment in enumerate(segments):
+            segment.pop("refinement", None)
+            segments[index] = StoredSegment(segment)
+        return segments
+
     @measured('state_read')
     def records(self, scene, kind, model=None, *, borrow=False):
         """Public reads are detached; internal read-only consumers may borrow."""
@@ -28,19 +37,57 @@ class ResultStore:
         key = ('records', str(scene), kind)
         records = store.cached(key)
         if records is None:
-            records = {model: store.unpack(data) for model, data in store.read_rows(
+            records = {model: self._normalize_segments(store.unpack(data)) for model, data in store.read_rows(
                 "SELECT model,data FROM " + store.table('results') + " WHERE scope=? AND scene=? AND kind=?",
                 (store.scope, str(scene), kind))}
-            # Retired video samples are never inputs. Remove them from the decoded
-            # view without scanning/recompressing every scene during DB migration.
-            for segments in records.values():
-                from stash_ai.performance import StoredSegment
-                for index, segment in enumerate(segments):
-                    segment.pop("refinement", None)
-                    segments[index] = StoredSegment(segment)
             store.retain(key, records)
         result = {model: records[model]} if model in records else {} if model else records
         return result if borrow else deepcopy(result)
+
+    @measured('state_read')
+    def model_records(self, scene, kind, model, *, borrow=False):
+        """Read one model payload without decoding or caching sibling model blobs."""
+        store = self.store
+        cached = store.cached(('records', str(scene), kind))
+        if cached is not None:
+            segments = cached.get(model, [])
+            return segments if borrow else deepcopy(segments)
+        rows = store.read_rows(
+            "SELECT data FROM " + store.table('results') +
+            " WHERE scope=? AND scene=? AND model=? AND kind=?",
+            (store.scope, str(scene), model, kind))
+        segments = self._normalize_segments(store.unpack(rows[0][0])) if rows else []
+        return segments if borrow else deepcopy(segments)
+
+    def result_presence(self, models):
+        """Return lightweight saved-result keys without decoding payload BLOBs."""
+        store = self.store
+        from stash_ai.preview import check_source
+        check_source(store)
+        selected = tuple(dict.fromkeys(models))
+        if not selected:
+            return set()
+        placeholders = ','.join('?' for _ in selected)
+        rows = store.read_rows(
+            "SELECT scene,model,kind FROM " + store.table('results') +
+            f" WHERE scope=? AND model IN ({placeholders})",
+            (store.scope, *selected))
+        return {(str(scene), model, kind) for scene, model, kind in rows}
+
+    def result_index_presence(self, models):
+        """Return indexed result keys without decoding result payloads."""
+        store = self.store
+        from stash_ai.preview import check_source
+        check_source(store)
+        selected = tuple(dict.fromkeys(models))
+        if not selected:
+            return set()
+        placeholders = ','.join('?' for _ in selected)
+        rows = store.read_rows(
+            "SELECT scene,model,kind FROM " + store.table('result_index') +
+            f" WHERE scope=? AND model IN ({placeholders})",
+            (store.scope, *selected))
+        return {(str(scene), model, kind) for scene, model, kind in rows}
 
     def sources(self, scene, kind):
         store = self.store
