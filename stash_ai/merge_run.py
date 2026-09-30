@@ -197,6 +197,10 @@ class MergedRun:
                                 self.stats["replacement_history_collapsed"] += collapsed
                             self.stats['threshold_cache_reused'] += 1
                             continue
+                    if not args.restart:
+                        stale = progress.request_stale_refresh(
+                            store, scene_id, key, kinds, signature)
+                        self.stats['auto_refresh_requested'] += len(stale)
                     if tagger is None:
                         try:
                             tagger = app.load_tagger(config, self.catalogs[key], app.prepare_image)
