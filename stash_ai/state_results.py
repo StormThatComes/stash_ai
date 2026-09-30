@@ -62,6 +62,8 @@ class ResultStore:
     def result_presence(self, models):
         """Return lightweight saved-result keys without decoding payload BLOBs."""
         store = self.store
+        from stash_ai.preview import check_source
+        check_source(store)
         selected = tuple(dict.fromkeys(models))
         if not selected:
             return set()
