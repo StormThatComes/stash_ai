@@ -164,6 +164,22 @@ def request_refresh(store, scenes, models, kinds):
                                              (store.scope, str(scene), model, kind))
 
 
+def pending_refreshes(store, kinds):
+    """Group outstanding refresh requests that can affect the selected outputs."""
+    kinds = tuple(dict.fromkeys(kinds))
+    if not kinds:
+        return {}
+    placeholders = ",".join("?" for _ in kinds)
+    rows = store.connection.execute(
+        "SELECT scene,model,kind FROM " + store.table('refresh_requests') +
+        f" WHERE scope=? AND kind IN ({placeholders}) ORDER BY scene,model,kind",
+        (store.scope, *kinds))
+    result = {}
+    for scene, model, kind in rows:
+        result.setdefault(str(scene), []).append((model, kind))
+    return result
+
+
 def finish(store, scene, model, outputs, replace):
     # Results and checkpoint removal commit together, including zero detections.
     with store.connection:
