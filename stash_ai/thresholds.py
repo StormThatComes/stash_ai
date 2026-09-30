@@ -94,13 +94,19 @@ def _model_records(store, scene, kind, model, *, direct=False):
     return store.records(scene, kind, model, borrow=True).get(model, [])
 
 
-def threshold_targets(store, scenes, settings):
-    """Select scene/model pairs that have any saved evidence without decoding payloads."""
+def threshold_targets(store, scenes, settings, kinds):
+    """Select requested output kinds using result keys/indexes without decoding payloads."""
     scene_ids = [str(scene) for scene in scenes]
     models = [config.source.key for config in settings]
-    present = {(scene, model) for scene, model, _ in store.result_presence(models)}
-    targets = [(scene, config) for scene in scene_ids for config in settings
-               if (scene, config.source.key) in present]
+    requested = frozenset(kinds)
+    known = store.result_presence(models) | store.result_index_presence(models)
+    targets = []
+    for scene in scene_ids:
+        for config in settings:
+            model = config.source.key
+            available = frozenset(kind for kind in requested if (scene, model, kind) in known)
+            if available:
+                targets.append((scene, config, available))
     selected = len(scene_ids) * len(settings)
     return targets, selected - len(targets), selected
 
@@ -176,10 +182,10 @@ def reuse(app, store, scene, config, identity, cues, hashes, kinds):
 
 def rethreshold(app, store, scenes, settings, report):
     """Preflight only saved evidence; fully absent scene/model pairs are a no-op."""
-    targets, skipped, selected = threshold_targets(store, scenes, settings)
+    targets, skipped, selected = threshold_targets(store, scenes, settings, ('markers',))
     errors = 0
     reasons = Counter()
-    for scene, config in tqdm(targets, desc='Check marker thresholds', unit='pair'):
+    for scene, config, _ in tqdm(targets, desc='Check marker thresholds', unit='pair'):
         try:
             validate(app, store, scene, config, direct=True)
             if any(store.snapshot(scene, kind, borrow=True)[1] is not None for kind in ('scene', 'markers')):
@@ -194,7 +200,7 @@ def rethreshold(app, store, scenes, settings, report):
             selected=selected, skipped_no_evidence=skipped)
         return dict(errors=errors)
     changed = 0
-    for scene, config in tqdm(targets, desc='Apply marker thresholds', unit='pair'):
+    for scene, config, _ in tqdm(targets, desc='Apply marker thresholds', unit='pair'):
         changed += apply(app, store, scene, config, direct=True)
     report.record_threshold_preflight(
         len(targets), 0, applied=changed,
