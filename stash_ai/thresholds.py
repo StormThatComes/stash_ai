@@ -61,6 +61,8 @@ def threshold_failure_reason(exc):
         ('no cached marker frames', 'missing marker frames'),
         ('imported ranges cannot be rethresholded', 'imported marker ranges'),
         ('marker cache floor', 'marker cache floor too high'),
+        ('cache floor', 'marker cache floor too high'),
+        ('invalid cached marker threshold', 'invalid cached marker threshold'),
         ('scene_threshold changed', 'scene threshold requires inference'),
         ('finish the pending merge', 'pending publication'),
     )
