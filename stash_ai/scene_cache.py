@@ -93,7 +93,7 @@ def frame_records(scenes, markers):
 
 
 def plan(app, store, scene, config, *, scenes=True, markers=False, direct=False,
-         marker_check_scene=None):
+         marker_check_scene=None, pending_checked=False):
     from stash_ai.thresholds import OVERRIDE, validate
     result = {}
     if scenes:
@@ -121,7 +121,8 @@ def plan(app, store, scene, config, *, scenes=True, markers=False, direct=False,
             values.append(value)
         if values != segments:
             updated[kind] = values
-    if updated and any(store.snapshot(scene, k, borrow=True)[1] is not None for k in ('scene', 'markers')):
+    if (updated and not pending_checked
+            and str(scene) in store.pending_publication_scenes()):
         raise RuntimeError('Finish the pending merge or use --abandon-pending before changing thresholds.')
     return updated
 
@@ -139,12 +140,16 @@ def rethreshold(app, store, scenes, settings, report, *, markers=False):
     targets, skipped, selected = threshold_targets(store, scenes, settings, requested)
     errors = 0
     reasons = Counter()
+    pending_scenes = store.pending_publication_scenes()
     for scene, config, available in tqdm(targets, desc=f'Check {mode}', unit='pair'):
         try:
-            plan(
+            outputs = plan(
                 app, store, scene, config,
                 scenes='scene' in available, markers='markers' in available,
-                direct=True, marker_check_scene=False if markers else None)
+                direct=True, marker_check_scene=False if markers else None,
+                pending_checked=True)
+            if outputs and str(scene) in pending_scenes:
+                raise RuntimeError('Finish the pending merge or use --abandon-pending before changing thresholds.')
         except (ValueError, RuntimeError) as exc:
             report.issue('scene thresholds', config.source.key, scene, exc, str(exc))
             reasons[threshold_failure_reason(exc)] += 1
@@ -159,7 +164,8 @@ def rethreshold(app, store, scenes, settings, report, *, markers=False):
         outputs = plan(
             app, store, scene, config,
             scenes='scene' in available, markers='markers' in available,
-            direct=True, marker_check_scene=False if markers else None)
+            direct=True, marker_check_scene=False if markers else None,
+            pending_checked=True)
         apply(store, scene, config.source.key, outputs)
         changed += bool(outputs)
     report.record_threshold_preflight(
