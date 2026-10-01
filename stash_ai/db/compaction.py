@@ -20,7 +20,7 @@ def _same_logical_counts(before, after):
         "schema_version", "known_scopes", "scenes", "pending_publications", "pending_cleanups",
         "scope_pending_publications", "scope_pending_cleanups", "recovery_publications",
         "recovery_cleanups", "checkpoints", "checkpoint_frames",
-        "refresh_requests", "merge_checks", "results", "scoped_payload_bytes",
+        "refresh_requests", "merge_checks", "result_thresholds", "results", "scoped_payload_bytes",
     )
     return all(before[field] == after[field] for field in fields)
 

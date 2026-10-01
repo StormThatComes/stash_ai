@@ -136,6 +136,9 @@ class StateStore(AbstractContextManager):
     def replace_records(self, scene, model, kind, segments):
         return self.results.replace_records(scene, model, kind, segments)
 
+    def set_result_threshold(self, scene, model, kind, threshold, segments):
+        return self.results.set_threshold(scene, model, kind, threshold, segments)
+
     def imported_legacy(self, scene, kind, *, borrow=False):
         return self.results.imported_legacy(scene, kind, borrow=borrow)
 

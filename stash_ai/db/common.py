@@ -5,11 +5,11 @@ from __future__ import annotations
 import sqlite3
 
 
-KNOWN_VERSIONS = frozenset(range(1, 8))
+KNOWN_VERSIONS = frozenset(range(1, 9))
 KNOWN_MODELS = frozenset(("joytag", "wd", "dtq", "oppai"))
 KNOWN_KINDS = frozenset(("scene", "markers"))
 STATE_TABLES = frozenset((
-    "results", "snapshots", "legacy_imports", "result_index", "refresh_requests",
+    "results", "result_thresholds", "snapshots", "legacy_imports", "result_index", "refresh_requests",
     "checkpoints", "checkpoint_frames", "checkpoint_analysis", "cleanup_state",
     "merge_checks", "recovery_publications", "recovery_cleanups",
 ))

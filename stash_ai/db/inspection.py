@@ -79,6 +79,7 @@ def inspect_database(path, scope):
         checkpoint_frames = count_rows(db, tables, "checkpoint_frames", scope)
         refresh_requests = count_rows(db, tables, "refresh_requests", scope)
         merge_checks = count_rows(db, tables, "merge_checks", scope)
+        result_thresholds = count_rows(db, tables, "result_thresholds", scope)
 
     wal_path = Path(str(path) + "-wal")
     shm_path = Path(str(path) + "-shm")
@@ -122,6 +123,7 @@ def inspect_database(path, scope):
         checkpoint_frames=checkpoint_frames,
         refresh_requests=refresh_requests,
         merge_checks=merge_checks,
+        result_thresholds=result_thresholds,
         warnings=warnings,
     )
 
@@ -166,7 +168,8 @@ def format_report(report):
         (
             "Work cache: "
             f"checkpoints={report['checkpoints']:,}, checkpoint chunks={report['checkpoint_frames']:,}, "
-            f"refresh requests={report['refresh_requests']:,}, merge checks={report['merge_checks']:,}"
+            f"refresh requests={report['refresh_requests']:,}, merge checks={report['merge_checks']:,}, "
+            f"result thresholds={report['result_thresholds']:,}"
         ),
         f"Estimated immediately reclaimable pages: {format_bytes(report['reclaimable_estimate_bytes'])}",
     ])

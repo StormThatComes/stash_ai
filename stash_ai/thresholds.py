@@ -153,7 +153,7 @@ def apply(app, store, scene, config, segments=None, *, direct=False, pending_che
             value[OVERRIDE] = config.marker_threshold
         updated.append(value)
     with store.connection:
-        store.replace_records(scene, config.source.key, 'markers', updated)
+        store.set_result_threshold(scene, config.source.key, 'markers', config.marker_threshold, updated)
     return True
 
 

@@ -58,7 +58,8 @@ def abandon(store, report):
         if not db.in_transaction:
             db.execute('BEGIN')
         # Version 7 prevents older executables from ignoring recovery evidence.
-        db.execute('PRAGMA user_version=7')
+        if db.execute('PRAGMA user_version').fetchone()[0] < 7:
+            db.execute('PRAGMA user_version=7')
         if count:
             db.execute('INSERT INTO recovery_publications SELECT scope,scene,kind,?,pending FROM ' + pending +
                        ' WHERE scope=? AND pending IS NOT NULL', (operation, store.scope))

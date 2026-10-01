@@ -26,7 +26,7 @@ def fail(*args, **kwargs):
 
 
 @pytest.mark.parametrize('filename', [
-    'tags.py', 'domain.py', 'state.py', 'state_db.py', 'state_results.py', 'state_publications.py',
+    'tags.py', 'domain.py', 'state.py', 'state_db.py', 'state_results.py', 'state_thresholds.py', 'state_publications.py',
     'vocabulary.py', 'onnx_tagger.py', 'inference.py', 'progress.py',
     'merge_run.py', 'merge_parallel.py', 'merge_sync.py', 'separate_sync.py',
     'config.py',

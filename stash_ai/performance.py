@@ -59,7 +59,7 @@ def initialize(store):
     # force unrelated scenes through merge again.
     for event in ('insert', 'update', 'delete'):
         db.execute(f'DROP TRIGGER IF EXISTS perf_legacy_imports_{event}')
-    for table in ('results', 'snapshots'):
+    for table in ('results', 'result_thresholds', 'snapshots'):
         for event, row in (('INSERT', 'NEW'), ('UPDATE', 'NEW'), ('DELETE', 'OLD')):
             db.execute(f'''CREATE TRIGGER IF NOT EXISTS perf_{table}_{event.lower()}
                 AFTER {event} ON {table} BEGIN
@@ -83,7 +83,7 @@ PUBLICATION_CODE_FILES = (
     'taggers.py', 'onnx_tagger.py', 'vocabulary.py', 'inference.py', 'tags.py', 'domain.py', 'performance.py',
     'timeline.py', 'merge_sql.py', 'marker_groups.py',
     'thresholds.py', 'scene_cache.py', 'progress.py', 'state.py', 'state_db.py',
-    'state_results.py', 'state_publications.py', 'config.py',
+    'state_results.py', 'state_thresholds.py', 'state_publications.py', 'config.py',
 )
 
 

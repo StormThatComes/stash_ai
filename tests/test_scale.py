@@ -204,7 +204,7 @@ def test_store_cache_is_detached_invalidated_and_rollback_safe(tmp_path):
         statements = []; state.connection.set_trace_callback(statements.append)
         state.records('1', 'scene')['wd'][0]['items'].clear()
         assert state.records('1', 'scene')['wd'][0]['items'] == first['items']
-        assert sum(sql.startswith('SELECT model,data') for sql in statements) == 1
+        assert sum(sql.startswith('SELECT r.model,r.data') for sql in statements) == 1
         assert progress.completed(state, '1', 'wd', ['scene'], 'a')
         try:
             with state.connection:
