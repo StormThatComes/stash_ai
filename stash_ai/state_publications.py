@@ -38,6 +38,14 @@ class PublicationStore:
             'SELECT 1 FROM ' + store.table('snapshots') +
             ' WHERE scope=? AND pending IS NOT NULL LIMIT 1', (store.scope,)).fetchone() is not None
 
+    def has_pending(self, scene):
+        """Check one scene's durable publication intent without decoding snapshots."""
+        store = self.store
+        return store.connection.execute(
+            'SELECT 1 FROM ' + store.table('snapshots') +
+            ' WHERE scope=? AND scene=? AND pending IS NOT NULL LIMIT 1',
+            (store.scope, str(scene))).fetchone() is not None
+
     def pending_scenes(self):
         """Return scenes with durable publication intent without decoding snapshots."""
         store = self.store
