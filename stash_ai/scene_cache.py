@@ -121,8 +121,7 @@ def plan(app, store, scene, config, *, scenes=True, markers=False, direct=False,
             values.append(value)
         if values != segments:
             updated[kind] = values
-    if (updated and not pending_checked
-            and str(scene) in store.pending_publication_scenes()):
+    if updated and not pending_checked and store.has_pending_publication(scene):
         raise RuntimeError('Finish the pending merge or use --abandon-pending before changing thresholds.')
     return updated
 
