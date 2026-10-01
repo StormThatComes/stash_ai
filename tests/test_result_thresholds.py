@@ -18,7 +18,8 @@ pytestmark = pytest.mark.usefixtures('reset_temporal')
 def outputs(threshold=.4, signature='original'):
     meta = dict(origin='inference', inference_signature=signature,
                 scene_threshold=threshold, marker_threshold=threshold,
-                scene_frames_format=1, scene_score_floor=.1, marker_score_floor=.1)
+                scene_frames_format=1, scene_score_floor=.1, marker_score_floor=.1,
+                marker_tag_blocklist=[])
     frames = [dict(start=0., end=1., tags=[['core', .8]])]
     return {
         'scene': dict(mode='scene', meta=deepcopy(meta), frames=deepcopy(frames),
