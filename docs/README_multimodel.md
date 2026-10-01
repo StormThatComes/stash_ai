@@ -152,6 +152,40 @@ przed zastosowaniem zmian. `--merge-only` nie uruchamia brakującej inferencji.
 Zwykły przebieg z resume również potrafi wykorzystać cache po bezpiecznej zmianie
 progów, jeśli wszystkie wymagane obserwacje są dostępne.
 
+### Niezależne progi retencji
+
+W sekcji `joytag`, `wd`, `dtq` lub `oppai` można ustawić osobno:
+
+```yaml
+scene_cache_floor: 0.20
+marker_cache_floor: 0.25
+```
+
+Są to opcjonalne wartości od 0 do 1, przeznaczone do zachowania większej ilości
+evidence w trybie `merged`. Pominięcie pola lub `null` zachowuje dotychczasowe
+wyniki i sygnatury resume. Cache zapisuje obserwacje od minimum ustawionego progu
+retencji i bieżącego progu wsparcia: dla scen
+`scene_threshold * scene_support_ratio`, a dla markerów
+`marker_threshold * marker_continue_ratio`. Bez reguł temporalnych minimum
+porównuje się bezpośrednio z progiem publikacji. Nie można w ten sposób odciąć
+wyników potrzebnych do bieżącej publikacji; słabsze wyniki nadal muszą przejść
+zwykłe reguły kwalifikacji.
+
+Przykład: inferencja przy `scene_threshold: 0.80` i `scene_cache_floor: 0.20`
+zachowa klatki od 0.20 oraz dokładne agregaty ich etykiet. Późniejsze obniżenie
+`scene_threshold` do 0.40 przy `scene_support_ratio: 0.85` wymaga obserwacji od
+0.34, więc `--rethreshold-scenes` może użyć tego cache bez modelu. Obniżenie do
+0.15 wymaga 0.1275 i zostanie odrzucone jako niewystarczająca retencja.
+
+Faktyczne minima są zapisane w metadanych `scene_score_floor` i
+`marker_score_floor`. Zmiana ustawienia retencji unieważnia zgodność ukończonej
+inferencji i częściowego checkpointu podczas zwykłego przebiegu. Trzeba ponownie
+wykonać inferencję, aby uzupełnić wcześniej odrzucone obserwacje; sam merge ani
+rethreshold ich nie odtworzy. Pozostaw ustawienia retencji bez zmian podczas
+obniżania samych progów publikacji. Szerszy cache zajmuje więcej miejsca i może
+wymagać więcej RAM/CPU przy merge. `--output-mode separate` nie zapisuje tego
+trwałego evidence i ignoruje opcjonalne progi retencji.
+
 ## 7. Reguły temporalne
 
 `temporal_policy.yml` steruje automatycznym postprocessingiem:

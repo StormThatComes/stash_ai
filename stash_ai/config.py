@@ -77,7 +77,9 @@ def load_model_settings(path: Path, chosen: list[str] | None, device: str | None
     settings = []
     for name in SOURCES:
         values = data.get(name, {})
-        if not isinstance(values, dict) or set(values) - {"model_dir", "scene_threshold", "marker_threshold", "batch_size"}:
+        if not isinstance(values, dict) or set(values) - {
+                "model_dir", "scene_threshold", "marker_threshold", "batch_size",
+                "scene_cache_floor", "marker_cache_floor"}:
             raise ValueError(f"Invalid {name} settings in {path.name}.")
         if name not in selected:
             continue
@@ -100,6 +102,8 @@ def load_model_settings(path: Path, chosen: list[str] | None, device: str | None
                                        {"wd": 0.35, "dtq": 0.20, "oppai": 0.80}[name]),
             marker_threshold=values.get("marker_threshold", 0.85 if name == "oppai" else default_marker_threshold),
             batch_size=values.get("batch_size", joytag_batch_size if name == "joytag" else 4),
+            scene_cache_floor=values.get("scene_cache_floor"),
+            marker_cache_floor=values.get("marker_cache_floor"),
             device=device or data.get("device", "auto"),
             download_missing=False if offline else data.get("download_missing", True))
         config.validate()

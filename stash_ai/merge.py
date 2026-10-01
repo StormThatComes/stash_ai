@@ -357,7 +357,7 @@ def sync_merged(app, stash, resolver, store, scene, scene_hits, spans, *, migrat
         tag_policies=tag_policies, publication_key=publication_key)
 
 def capture_outputs(app, config, vocabulary, cues, predictions, frames, analysis=None):
-    from stash_ai.temporal import marker_floor
+    from stash_ai.retention import marker_cache_floor
     cue_data = [[cue.start, cue.end, cue.image, list(cue.rect)] for cue in cues]
     meta = {"origin": "inference", "captured_at": now(), "repo": config.source.repo,
             "revision": config.source.revision, "vocabulary_sha256": app.vocabulary_digest(vocabulary.labels),
@@ -365,8 +365,10 @@ def capture_outputs(app, config, vocabulary, cues, predictions, frames, analysis
             "scene_threshold": config.scene_threshold, "marker_threshold": config.marker_threshold,
             "aggregation": app.AGGREGATION, "top_k_frames": app.TOP_K_FRAMES}
     if app.TEMPORAL_POLICY.enabled:
-        meta.update(analysis_format=3, marker_score_floor=marker_floor(app.TEMPORAL_POLICY, config.marker_threshold),
+        meta.update(analysis_format=3,
                     scene_support_floor=config.scene_threshold * app.TEMPORAL_POLICY.scene_support_ratio)
+    if app.TEMPORAL_POLICY.enabled or config.marker_cache_floor is not None:
+        meta['marker_score_floor'] = marker_cache_floor(config, app.TEMPORAL_POLICY)
     outputs = {}
     if app.APPLY_SCENE_TAGS:
         outputs["scene"] = {"mode": "scene", "meta": meta,

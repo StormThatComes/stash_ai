@@ -123,6 +123,34 @@ W trybie `merged` domyślne `resume`:
 `--restart` wymusza świeżą inferencję dla wybranych modeli/scen. Nie używaj go
 do zwykłego przeliczenia merge, cleanupu ani zmiany progów.
 
+### Retencja niezależna od progów publikacji
+
+Opcjonalne `scene_cache_floor` i `marker_cache_floor` w sekcji każdego modelu
+w `tagger_models.yml` zachowują słabsze wyniki do późniejszego przeliczenia
+progów bez GPU. Nie obniżają progów publikacji tagów ani markerów:
+
+```yaml
+wd:
+  scene_threshold: 0.80
+  marker_threshold: 0.85
+  scene_cache_floor: 0.20
+  marker_cache_floor: 0.25
+```
+
+Wartości muszą być liczbami od 0 do 1. Pominięcie pola albo `null` zachowuje
+dotychczasową automatyczną retencję. Faktyczny próg zapisu jest minimum ustawionej
+wartości i progu wsparcia wymaganego przez bieżącą politykę publikacji, więc
+ustawienie wyższej wartości nie usuwa potrzebnych obserwacji. Cache scen zachowuje
+także dokładne agregaty dla słabszych etykiet.
+
+Po świeżej inferencji można obniżyć progi publikacji w YAML i użyć
+`--merge-only --rethreshold-scenes --rethreshold-markers`, jeśli zapisane progi
+retencji obejmują nowe wymagane progi wsparcia. Zmiana samej retencji podczas
+zwykłego przebiegu uruchamia świeżą inferencję i unieważnia częściowy checkpoint;
+`--merge-only` nie uzupełnia wcześniej odrzuconych wyników. Niższa retencja zwiększa
+rozmiar bazy i koszt przetwarzania cache. Ustawienia dotyczą trwałego cache trybu
+`merged`; tryb `separate` nadal używa progów publikacji.
+
 Domyślnie `REPLACE_SCENE_TAGS=True` i `REPLACE_MARKERS=True`. Wyłączenie
 którejś flagi zachowuje historię danego rodzaju wyniku; ponowne włączenie
 normalizuje historię przy bezpiecznym reuse cache.

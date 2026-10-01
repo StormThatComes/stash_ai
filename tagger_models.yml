@@ -12,6 +12,9 @@
 # No sprite or extracted-frame cache is written to disk.
 # --merge-only migrates existing results without model inference.
 # --output-mode separate restores the original model-prefixed output format.
+# Optional per-model scene_cache_floor / marker_cache_floor keep weaker scores
+# for later offline retuning. Omitted/null preserves automatic retention.
+# Retention only widens the cache; publication thresholds still apply.
 version: 1
 enabled_models: [joytag, oppai, wd, dtq]
 device: cuda  # auto prefers CUDA; cuda requires CUDA; cpu forces CPU.
@@ -31,6 +34,8 @@ wd:
   model_dir: models/wd-eva02-large-tagger-v3
   scene_threshold: 0.40
   marker_threshold: 0.70
+  # scene_cache_floor: 0.20
+  # marker_cache_floor: 0.35
   batch_size: 4
 
 dtq:

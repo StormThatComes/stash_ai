@@ -248,7 +248,7 @@ def model_identity(app, config, vocabulary):
     if config.source.key == "joytag":
         from stash_ai.joytag import LOADER_REVISION, LOADER_SHA256
         loader = {"loader": {"revision": LOADER_REVISION, "sha256": LOADER_SHA256}}
-    return {"format": PREDICTION_FORMAT, "source": config.source.key, "repo": config.source.repo,
+    identity = {"format": PREDICTION_FORMAT, "source": config.source.key, "repo": config.source.repo,
             "revision": config.source.revision, "files": files, **loader,
             # Checkpoint score columns depend on label order, not just the set.
             "vocabulary": digest(vocabulary.labels), "batch_size": config.batch_size,
@@ -258,6 +258,14 @@ def model_identity(app, config, vocabulary):
                           "marker_ratio": app.TEMPORAL_POLICY.marker_continue_ratio if app.TEMPORAL_POLICY.enabled else 1.0,
                           "scene_ratio": app.TEMPORAL_POLICY.scene_support_ratio if app.TEMPORAL_POLICY.enabled else 1.0},
             "frame_blocklist": sorted(app.MARKER_TAG_BLOCKLIST)}
+    # Omitted/null settings preserve legacy inference/checkpoint signatures.
+    # Enabling or changing retention requests fresh inference to populate it;
+    # publication-only threshold edits can still reuse the retained evidence.
+    for name in ('scene_cache_floor', 'marker_cache_floor'):
+        value = getattr(config, name, None)
+        if value is not None:
+            identity['retention'][name] = value
+    return identity
 
 
 class VerifiedMedia:
