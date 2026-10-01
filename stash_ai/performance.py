@@ -82,7 +82,7 @@ PUBLICATION_CODE_FILES = (
     'temporal.py', 'fusion.py', 'scene.py', 'occurrences.py', 'exclusions.py', 'cleanup.py',
     'taggers.py', 'onnx_tagger.py', 'vocabulary.py', 'inference.py', 'tags.py', 'domain.py', 'performance.py',
     'timeline.py', 'merge_sql.py', 'marker_groups.py',
-    'thresholds.py', 'scene_cache.py', 'progress.py', 'state.py', 'state_db.py',
+    'thresholds.py', 'retention.py', 'scene_cache.py', 'progress.py', 'state.py', 'state_db.py',
     'state_results.py', 'state_thresholds.py', 'state_publications.py', 'config.py',
 )
 

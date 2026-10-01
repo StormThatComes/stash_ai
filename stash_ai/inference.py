@@ -114,19 +114,22 @@ class _PredictionState:
     accumulator: Any
     retain_scene: bool
     scene_floor: float
+    marker_floor: float
     policy: Any
 
 
 def _restore_prediction_state(app, tagger, cues, *, raw_scene, checkpoint, report):
     import numpy as np
-    from stash_ai.temporal import SceneAccumulator
+    from stash_ai.temporal import SceneAccumulator, marker_floor
+    from stash_ai.retention import scene_cache_floor, marker_cache_floor
 
     settings, labels = tagger.settings, tagger.labels
     policy = app.TEMPORAL_POLICY
     retain_scene = raw_scene and app.APPLY_SCENE_TAGS
-    scene_floor = settings.scene_threshold * (
-        policy.scene_support_ratio if policy.enabled else 1.0
-    )
+    scene_floor = scene_cache_floor(settings, policy)
+    # Separate mode has no persistent evidence; use the publication floor there.
+    retained_marker_floor = (marker_cache_floor(settings, policy) if raw_scene
+                             else marker_floor(policy, settings.marker_threshold))
     processed, top_scores, saved = (
         checkpoint.restore()
         if checkpoint
@@ -179,6 +182,7 @@ def _restore_prediction_state(app, tagger, cues, *, raw_scene, checkpoint, repor
         accumulator,
         retain_scene,
         scene_floor,
+        retained_marker_floor,
         policy,
     )
 
@@ -188,7 +192,6 @@ def _run_prediction_batches(app, tagger, stash, paths, cues, state, *,
     import numpy as np
     from stash_ai.progress import prepared_batches
     from stash_ai.taggers import validate_scores
-    from stash_ai.temporal import marker_floor
 
     settings, labels = tagger.settings, tagger.labels
     keep = 1 if app.AGGREGATION == "max" else min(app.TOP_K_FRAMES, len(cues))
@@ -221,7 +224,7 @@ def _run_prediction_batches(app, tagger, stash, paths, cues, state, *,
                     matches = app.select_scores(
                         row,
                         labels,
-                        marker_floor(state.policy, settings.marker_threshold),
+                        state.marker_floor,
                         0,
                     )
                     matches = [
@@ -288,7 +291,15 @@ def _finalize_predictions(app, tagger, scene_exclusions, state, *, raw_scene, an
                 scene_score_floor=state.scene_floor,
             )
 
-    if state.accumulator is not None:
+    if state.retain_scene and getattr(settings, 'scene_cache_floor', None) is not None:
+        # Keep exact aggregate scores for every retained label, including those
+        # below today's support floor. Temporal statistics still use today's
+        # publication policy; future rethreshold rebuilds them from the frames.
+        candidates = {tag for row in state.scene_frames for tag, _ in row['tags']}
+        predictions = [(tag, float(scene_scores[i])) for i, tag in enumerate(labels)
+                       if tag in candidates]
+        predictions.sort(key=lambda item: (-item[1], item[0]))
+    elif state.accumulator is not None:
         predictions = [
             (labels[index], float(scene_scores[index]))
             for index in state.accumulator.items

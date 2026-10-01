@@ -62,6 +62,8 @@ class ModelSettings:
     batch_size: int = 4
     device: str = "auto"
     download_missing: bool = True
+    scene_cache_floor: float | None = None
+    marker_cache_floor: float | None = None
 
     def validate(self) -> None:
         if self.device not in {"auto", "cpu", "cuda"}:
@@ -70,6 +72,11 @@ class ModelSettings:
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, (float, int)) or not math.isfinite(value) or not 0 <= value <= 1:
                 raise ValueError(f"{self.source.key}.{name} must be a number between 0 and 1.")
+        for name in ("scene_cache_floor", "marker_cache_floor"):
+            value = getattr(self, name)
+            if value is not None and (type(value) not in (int, float)
+                    or not math.isfinite(value) or not 0 <= value <= 1):
+                raise ValueError(f"{self.source.key}.{name} must be null or a number between 0 and 1.")
         if type(self.batch_size) is not int or self.batch_size < 1:
             raise ValueError(f"{self.source.key}.batch_size must be a positive integer.")
         if type(self.download_missing) is not bool:
