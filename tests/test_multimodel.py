@@ -363,7 +363,7 @@ def test_oppai_modes_and_old_config_compatibility(tmp_path,oppai_files,monkeypat
     monkeypatch.setenv("OPPAI_MODEL_PATH",str(oppai_files))
     settings=app.load_model_settings(old,["oppai"],None,True)[0]
     assert settings.source.prefix=="op:" and settings.model_dir==oppai_files
-    assert settings.scene_threshold==.84 and settings.marker_threshold==.90
+    assert settings.scene_threshold==.80 and settings.marker_threshold==.85
     monkeypatch.setattr(app,"create_stash_client",lambda _:pytest.fail("model-only mode contacted Stash"))
     monkeypatch.setattr(app,"load_tagger",lambda *args:pytest.fail("model-only mode loaded weights"))
     hierarchy_path=tmp_path/"fixture_hierarchy.yml"
