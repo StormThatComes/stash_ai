@@ -71,9 +71,11 @@ def threshold_failure_reason(exc):
     return next((reason for token, reason in rules if token in lower), type(exc).__name__)
 
 
-def validate_marker_blocklist(app, segment, identity):
+def validate_marker_blocklist(app, segment, identity, *, allow_unknown=False):
     """Previously filtered labels cannot be recovered by changing publication policy."""
     if segment['mode'] != 'frames' or segment['meta'].get('origin') != 'inference':
+        return
+    if allow_unknown and 'marker_tag_blocklist' not in segment['meta']:
         return
     retained = segment['meta'].get('marker_tag_blocklist')
     if not isinstance(retained, list) or any(not isinstance(tag, str) for tag in retained):
@@ -85,13 +87,13 @@ def validate_marker_blocklist(app, segment, identity):
                          'run inference with --restart for this scene/model.')
 
 
-def validate_marker_cache(app, records):
+def validate_marker_cache(app, records, *, allow_unknown_blocklist=False):
     """Check retained coverage before cached frames can build markers or votes."""
     from stash_ai.temporal import marker_floor
     for model, segments in records.items():
         for segment in segments:
             meta = segment['meta']
-            validate_marker_blocklist(app, segment, model)
+            validate_marker_blocklist(app, segment, model, allow_unknown=allow_unknown_blocklist)
             # Imported spans and old frames without retention metadata keep
             # their existing semantics; no original support floor can be proven.
             if segment['mode'] != 'frames' or 'marker_score_floor' not in meta:

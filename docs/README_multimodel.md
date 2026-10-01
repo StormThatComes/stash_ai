@@ -179,7 +179,11 @@ Dodanie wykluczeń jest bezpieczne dla cache. Usunięcie tagu z tej listy wymaga
 `--merge-only` i rethreshold markerów zgłoszą błąd przed publikacją takiej sceny,
 również przy `--markers-only`, `--no-temporal` i `--dry-run`.
 Starszy cache inferencji bez metadanych blocklisty również wymaga jednorazowego
-odświeżenia. Uruchom `--restart` dla wskazanych scen/modeli, np.:
+odświeżenia przed zwykłym merge lub rethreshold markerów. Cleanup może nadal
+cofać głosy z wcześniej opublikowanych markerów konsensusowych bez inferencji:
+sprawdza zgodność zapisanych dowodów i ogranicza wynik do opublikowanych
+zakresów oraz dodatków. Nie dodaje nowych głosów ani odblokowanych tagów.
+Uruchom `--restart` dla wskazanych scen/modeli przed zwykłym merge, np.:
 
 ```powershell
 python .\stash_ai.py --models wd --scene-id 123 --restart

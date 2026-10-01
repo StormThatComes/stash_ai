@@ -70,7 +70,12 @@ def cleanup_support(app, store, scene_id, spans, selected, core_policies, tag_po
             frozen_tags = {source: frozenset(options.get('tag_exclusions', {}).get(source, [])) |
                            (tag_policies[source] if source in selected else frozenset()) for source in SOURCES}
             # Cleanup can revoke old evidence but cannot add newly cached votes.
-            rebuilt[key] = (merge.marker_contributions(context, matching, policies, tag_policies=frozen_tags),
+            # Older frames may lack blocklist metadata. Their verified proofs
+            # are replayed with frozen exclusions, then clipped to published
+            # ranges/extras below; this never admits previously missing labels.
+            rebuilt[key] = (merge.marker_contributions(
+                                context, matching, policies, tag_policies=frozen_tags,
+                                allow_unknown_blocklist=True),
                             context, policies, matching, frozen_tags)
         candidates, context, policies, matching, frozen_tags = rebuilt[key]
         for item in candidates:
