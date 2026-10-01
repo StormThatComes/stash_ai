@@ -30,6 +30,8 @@ def main():
     parser.add_argument('--frames', type=int, default=600)
     parser.add_argument('--labels', type=int, default=12)
     parser.add_argument('--repeats', type=int, default=5)
+    parser.add_argument('--legacy-metadata', action='store_true',
+                        help='Remove derived metadata before Check to measure first-time backfill.')
     args = parser.parse_args()
     if min(args.scenes, args.frames, args.labels, args.repeats) < 1:
         parser.error('scenes, frames, labels and repeats must be positive')
@@ -62,6 +64,11 @@ def main():
                 for scene in scenes:
                     for source in SOURCES:
                         store.put(scene, source, outputs)
+                has_metadata = bool(store.connection.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='result_metadata'").fetchone())
+                if args.legacy_metadata and has_metadata:
+                    with store.connection:
+                        store.connection.execute('DELETE FROM result_metadata')
                 before = evidence_hash(store.connection)
                 report = RunReport(write=lambda _: None)
                 store.report = report
@@ -80,11 +87,31 @@ def main():
                     return blob
 
                 store.replace_records, store.pack = count_write, count_pack
-                gc.collect()
-                with redirect_stderr(io.StringIO()):
+                original_plan = scene_cache.plan
+                phases = {phase: dict(seconds=0., decode_calls=0) for phase in ('check', 'apply')}
+                plan_calls = 0
+
+                def timed_plan(*values, **options):
+                    nonlocal plan_calls
+                    phase = 'check' if plan_calls < args.scenes * len(settings) else 'apply'
+                    plan_calls += 1
+                    decodes = report.timing_calls['state_json_decode']
                     started = perf_counter()
-                    result = scene_cache.rethreshold(app, store, scenes, settings, report, markers=True)
-                    seconds = perf_counter() - started
+                    try:
+                        return original_plan(*values, **options)
+                    finally:
+                        phases[phase]['seconds'] += perf_counter() - started
+                        phases[phase]['decode_calls'] += report.timing_calls['state_json_decode'] - decodes
+
+                scene_cache.plan = timed_plan
+                gc.collect()
+                try:
+                    with redirect_stderr(io.StringIO()):
+                        started = perf_counter()
+                        result = scene_cache.rethreshold(app, store, scenes, settings, report, markers=True)
+                        seconds = perf_counter() - started
+                finally:
+                    scene_cache.plan = original_plan
                 if result != {'scene_thresholds_updated': args.scenes * len(settings)}:
                     raise RuntimeError('Unexpected threshold update result: ' + repr(result))
                 codec_calls = {name: report.timing_calls[name] for name in (
@@ -97,11 +124,15 @@ def main():
                 trials.append(dict(seconds=seconds, evidence_writes=writes, packed_bytes=packed_bytes,
                                    evidence_unchanged=before == evidence_hash(store.connection),
                                    effective_sha256=effective.hexdigest(),
-                                   codec_calls=codec_calls))
+                                   codec_calls=codec_calls, phases=phases,
+                                   metadata_rows=store.connection.execute(
+                                       'SELECT COUNT(*) FROM result_metadata').fetchone()[0] if has_metadata else 0))
     if len({trial['effective_sha256'] for trial in trials}) != 1:
         raise RuntimeError('Non-deterministic effective evidence')
     print(json.dumps(dict(scenes=args.scenes, models=len(settings), frames=args.frames,
-                         labels=args.labels, median_seconds=statistics.median(t['seconds'] for t in trials),
+                         labels=args.labels, legacy_metadata=args.legacy_metadata,
+                         median_seconds=statistics.median(t['seconds'] for t in trials),
+                         median_check_seconds=statistics.median(t['phases']['check']['seconds'] for t in trials),
                          scope='Synthetic local rethreshold only; no inference, merge or Stash API.',
                          trials=trials), indent=2))
 

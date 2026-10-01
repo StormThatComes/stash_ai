@@ -11,13 +11,14 @@ def scene_threshold(segment):
     return segment.get(SCENE_OVERRIDE, segment['meta'].get('scene_threshold'))
 
 
-def validate_scene(app, segment, threshold):
+def validate_scene(app, segment, threshold, *, has_frames=None):
     from stash_ai.thresholds import _score
     meta = segment['meta']
     needed = threshold * (app.TEMPORAL_POLICY.scene_support_ratio if app.TEMPORAL_POLICY.enabled else 1.0)
     floor = meta.get('scene_score_floor')
+    has_frames = 'frames' in segment if has_frames is None else has_frames
     if (segment['mode'] != 'scene' or meta.get('origin') != 'inference'
-            or meta.get('scene_frames_format') != 1 or 'frames' not in segment):
+            or meta.get('scene_frames_format') != 1 or not has_frames):
         raise ValueError('scene frame evidence is missing; run inference once to populate the cache.')
     if not _score(floor) or floor > needed:
         raise ValueError(f'scene cache floor {floor!r} exceeds required {needed:g}; run inference.')
@@ -93,21 +94,26 @@ def frame_records(scenes, markers):
 
 
 def plan(app, store, scene, config, *, scenes=True, markers=False, direct=False,
-         marker_check_scene=None, pending_checked=False):
+         marker_check_scene=None, pending_checked=False, metadata_only=False):
     from stash_ai.thresholds import OVERRIDE, validate
     result = {}
     if scenes:
-        segments = (store.model_records(scene, 'scene', config.source.key, borrow=True)
-                    if direct else
-                    store.records(scene, 'scene', config.source.key, borrow=True).get(config.source.key, []))
+        if metadata_only:
+            segments = store.result_metadata(scene, 'scene', config.source.key)
+        elif direct:
+            segments = store.model_records(scene, 'scene', config.source.key, borrow=True)
+        else:
+            segments = store.records(scene, 'scene', config.source.key, borrow=True).get(config.source.key, [])
         if not segments:
             raise ValueError('no scene results; run inference for this scene/model.')
         for segment in segments:
-            validate_scene(app, segment, config.scene_threshold)
+            validate_scene(app, segment, config.scene_threshold,
+                           has_frames=segment['has_frames'] if metadata_only else None)
         result['scene'] = segments
     if markers:
         check_scene = not scenes if marker_check_scene is None else marker_check_scene
-        result['markers'] = validate(app, store, scene, config, check_scene=check_scene, direct=direct)
+        result['markers'] = validate(app, store, scene, config, check_scene=check_scene, direct=direct,
+                                     metadata_only=metadata_only)
     updated = {}
     for kind, segments in result.items():
         key, meta_key, threshold = ((SCENE_OVERRIDE, 'scene_threshold', config.scene_threshold) if kind == 'scene'
@@ -142,19 +148,21 @@ def rethreshold(app, store, scenes, settings, report, *, markers=False):
     errors = 0
     reasons = Counter()
     pending_scenes = store.pending_publication_scenes()
-    for scene, config, available in tqdm(targets, desc=f'Check {mode}', unit='pair'):
-        try:
-            outputs = plan(
-                app, store, scene, config,
-                scenes='scene' in available, markers='markers' in available,
-                direct=True, marker_check_scene=False if markers else None,
-                pending_checked=True)
-            if outputs and str(scene) in pending_scenes:
-                raise RuntimeError('Finish the pending merge or use --abandon-pending before changing thresholds.')
-        except (ValueError, RuntimeError) as exc:
-            report.issue('scene thresholds', config.source.key, scene, exc, str(exc))
-            reasons[threshold_failure_reason(exc)] += 1
-            errors += 1
+    from stash_ai.state_metadata import backfill_batch
+    with backfill_batch(store):
+        for scene, config, available in tqdm(targets, desc=f'Check {mode}', unit='pair'):
+            try:
+                outputs = plan(
+                    app, store, scene, config,
+                    scenes='scene' in available, markers='markers' in available,
+                    direct=True, marker_check_scene=False if markers else None,
+                    pending_checked=True, metadata_only=True)
+                if outputs and str(scene) in pending_scenes:
+                    raise RuntimeError('Finish the pending merge or use --abandon-pending before changing thresholds.')
+            except (ValueError, RuntimeError) as exc:
+                report.issue('scene thresholds', config.source.key, scene, exc, str(exc))
+                reasons[threshold_failure_reason(exc)] += 1
+                errors += 1
     if errors:
         report.record_threshold_preflight(
             len(targets), errors, reasons, applied=0,

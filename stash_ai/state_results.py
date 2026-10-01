@@ -65,6 +65,43 @@ class ResultStore:
         segments = self._normalize_segments(store.unpack(rows[0][0]), kind, rows[0][1]) if rows else []
         return segments if borrow else deepcopy(segments)
 
+    @measured('state_read')
+    def metadata(self, scene, kind, model):
+        """Validate from small SQL records; lazily backfill older result payloads."""
+        from stash_ai.preview import check_source
+        from stash_ai.state_metadata import FORMAT, backfill_batch, decode, summarize
+        store = self.store
+        check_source(store)
+        params = (store.scope, str(scene), model, kind)
+        rows = store.read_rows(
+            'SELECT m.format,m.data,t.threshold FROM ' + store.table('results') + ' AS r LEFT JOIN ' +
+            store.table('result_metadata') + ' AS m USING(scope,scene,model,kind) LEFT JOIN ' +
+            store.table('result_thresholds') + ' AS t USING(scope,scene,model,kind) '
+            'WHERE r.scope=? AND r.scene=? AND r.model=? AND r.kind=?', params)
+        if not rows:
+            return []
+        version, data, threshold = rows[0]
+        segments = None
+        if version == FORMAT:
+            try:
+                segments = decode(data)
+            except (TypeError, ValueError):
+                pass  # A damaged derived row is rebuilt from the authoritative evidence.
+        if segments is None:
+            payload = store.read_rows('SELECT data FROM ' + store.table('results') +
+                ' WHERE scope=? AND scene=? AND model=? AND kind=?', params)[0][0]
+            segments = summarize(store.unpack(payload))
+            with backfill_batch(store):
+                self._save_metadata(scene, model, kind, segments)
+        return overlay(segments, kind, threshold)
+
+    def _save_metadata(self, scene, model, kind, segments):
+        from stash_ai.state_metadata import FORMAT, encode
+        store = self.store
+        store.connection.execute('INSERT INTO result_metadata VALUES (?,?,?,?,?,?) '
+            'ON CONFLICT(scope,scene,model,kind) DO UPDATE SET format=excluded.format,data=excluded.data',
+            (store.scope, str(scene), model, kind, FORMAT, encode(segments)))
+
     def result_presence(self, models):
         """Return lightweight saved-result keys without decoding payload BLOBs."""
         store = self.store
@@ -163,11 +200,21 @@ class ResultStore:
         # Appended history already carries its effective inline view. A new
         # inference must not inherit the previous result's table-wide threshold.
         delete(store, 'result_thresholds', scene, model, kind)
+        delete(store, 'result_metadata', scene, model, kind)
         store.connection.execute('DELETE FROM result_thresholds WHERE scope=? AND scene=? AND model=? AND kind=?',
             (store.scope, str(scene), model, kind))
         store.connection.execute("INSERT INTO results VALUES (?,?,?,?,?) "
             "ON CONFLICT(scope,scene,model,kind) DO UPDATE SET data=excluded.data",
             (store.scope, str(scene), model, kind, store.pack(segments)))
+        from stash_ai.state_metadata import summarize
+        try:
+            metadata = summarize(segments)
+        except (KeyError, TypeError):
+            # Low-level replacement also accepts incomplete state records.
+            # Leave those uncached rather than adding a new write-time constraint.
+            metadata = None
+        if metadata is not None:
+            self._save_metadata(scene, model, kind, metadata)
         index_result(store, scene, model, kind, segments)
 
     @measured('state_write')

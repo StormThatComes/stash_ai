@@ -115,6 +115,9 @@ class StateStore(AbstractContextManager):
     def model_records(self, scene, kind, model, *, borrow=False):
         return self.results.model_records(scene, kind, model, borrow=borrow)
 
+    def result_metadata(self, scene, kind, model):
+        return self.results.metadata(scene, kind, model)
+
     def result_presence(self, models):
         return self.results.result_presence(models)
 

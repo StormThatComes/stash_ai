@@ -18,7 +18,7 @@ python -m benchmarks.benchmark_rethreshold --scenes 6 --frames 600 --labels 12 -
 | `benchmark_merge_pipeline` | merge ze stanem SQLite, etapami i makietą API |
 | `benchmark_occurrences` | wybór reprezentatywnych punktów Occurance |
 | `benchmark_cleanup_sql` | odkrywanie kandydatów przez SQL; bez kosztu API i usuwania |
-| `benchmark_rethreshold` | zmiana obu progów, liczba zapisów evidence i zgodność efektywnych wyników; bez merge/API |
+| `benchmark_rethreshold` | zmiana obu progów, czas/dekodowania Check i Apply, zapisy evidence i zgodność wyników; bez merge/API |
 
 Każdy skrypt obsługuje też bezpośrednie uruchomienie przez ścieżkę, np.
 `python benchmarks/benchmark_performance.py`. Bez `--project` benchmark wskazuje
@@ -36,6 +36,13 @@ Wskazany katalog musi zawierać launcher `stash_ai.py` i pakiet `stash_ai/`.
 Narzędzia pomiarowe oraz makieta Stash pochodzą z bieżącego repozytorium,
 więc porównanie nie wymaga testów w starej instalacji. Porównuj identyczne dane
 i parametry; przy zmianie zachowania aplikacji mogą się różnić również hashe.
+
+`benchmark_rethreshold` domyślnie mierzy wyniki zapisane przez wskazaną wersję
+aplikacji, z gotowymi metadanymi walidacji, jeśli je obsługuje. Dodaj
+`--legacy-metadata`, aby zmierzyć pierwsze uzupełnianie metadanych starego cache.
+Opcja czyści tylko pochodne metadane w tymczasowej bazie benchmarku.
+Raport osobno pokazuje dekodowania evidence i czas planowania w `Check`/`Apply`;
+całkowity czas obejmuje też transakcje i zapisy progów.
 
 Skrypty drukują JSON na stdout. `benchmark_merge_pipeline` i `benchmark_occurrences`
 przyjmują też `--output PATH`. Do nowego pomiaru użyj nowej nazwy pliku:

@@ -27,6 +27,9 @@ CHECK_MESSAGES = {
     "result_index_mismatch": "result_index metadata disagrees with the saved result payload.",
     "result_threshold_invalid": "Effective result thresholds must be finite probabilities between 0 and 1.",
     "result_threshold_orphan": "Effective result thresholds have no matching saved result.",
+    "result_metadata_invalid": "Derived result validation metadata is malformed or uses an unsupported format.",
+    "result_metadata_mismatch": "Derived result validation metadata disagrees with its evidence payload.",
+    "result_metadata_orphan": "Derived result validation metadata has no matching saved result.",
     "result_payload_invalid": "Saved result payloads cannot be decoded or contain invalid segments, evidence rows, or values.",
     "state_payload_invalid": "Non-result application state contains an unreadable or structurally invalid compressed payload.",
     "checkpoint_orphan_frames": "Checkpoint frame chunks have no parent checkpoint.",
@@ -103,18 +106,30 @@ def _check_results_and_index(db, tables, errors, progress=None):
     checked = 0
     index_columns = 'i.inference,i.populated,i.signature' if 'result_index' in tables else 'NULL,NULL,NULL'
     threshold_column = 't.threshold' if 'result_thresholds' in tables else 'NULL'
-    query = f'SELECT r.kind,r.data,{index_columns},{threshold_column} FROM results AS r'
+    metadata_columns = 'm.format,m.data' if 'result_metadata' in tables else 'NULL,NULL'
+    query = f'SELECT r.kind,r.data,{index_columns},{threshold_column},{metadata_columns} FROM results AS r'
     if 'result_index' in tables:
         query += ' LEFT JOIN result_index AS i USING(scope,scene,model,kind)'
     if 'result_thresholds' in tables:
         query += ' LEFT JOIN result_thresholds AS t USING(scope,scene,model,kind)'
-    for kind, blob, inference, populated, signature, threshold in db.execute(query):
+    if 'result_metadata' in tables:
+        query += ' LEFT JOIN result_metadata AS m USING(scope,scene,model,kind)'
+    for kind, blob, inference, populated, signature, threshold, metadata_format, metadata in db.execute(query):
         checked += 1
         _tick(progress)
         try:
             segments = _decoded_payload(blob, list)
             if not valid_result_segments(segments, kind):
                 raise ValueError("Invalid result segment.")
+            if metadata_format is not None:
+                from stash_ai.state_metadata import FORMAT, decode, encode, summarize
+                try:
+                    if metadata_format != FORMAT:
+                        raise ValueError('Unsupported result metadata format.')
+                    if encode(decode(metadata)) != encode(summarize(segments)):
+                        errors['result_metadata_mismatch'] += 1
+                except (TypeError, ValueError):
+                    errors['result_metadata_invalid'] += 1
             if threshold is not None:
                 from stash_ai.state_thresholds import overlay
                 from stash_ai.thresholds import _score
@@ -154,6 +169,12 @@ def _check_results_and_index(db, tables, errors, progress=None):
                   AND r.model=i.model AND r.kind=i.kind
             )
         """).fetchone()[0]
+    if 'result_metadata' in tables:
+        errors['result_metadata_orphan'] += db.execute('''
+            SELECT COUNT(*) FROM result_metadata AS m WHERE NOT EXISTS (
+                SELECT 1 FROM results AS r WHERE r.scope=m.scope AND r.scene=m.scene
+                    AND r.model=m.model AND r.kind=m.kind)
+        ''').fetchone()[0]
     return checked
 
 
@@ -378,7 +399,8 @@ def check_database(path, scope, *, show_progress=False):
                 errors["sqlite_integrity_check"] += 1
             _tick(progress)
 
-            missing = STATE_TABLES - tables
+            # Validation metadata is a lazy derived cache; older databases may lack it.
+            missing = STATE_TABLES - tables - {'result_metadata'}
             required = BASE_TABLES | {'result_thresholds'} if version >= 8 else BASE_TABLES
             errors["missing_base_tables"] += len(required - tables)
             warnings["missing_state_tables"] += len(missing - required)
@@ -387,6 +409,7 @@ def check_database(path, scope, *, show_progress=False):
                 ("results", "model", KNOWN_MODELS),
                 ("result_index", "model", KNOWN_MODELS),
                 ("result_thresholds", "model", KNOWN_MODELS),
+                ("result_metadata", "model", KNOWN_MODELS),
                 ("refresh_requests", "model", KNOWN_MODELS),
                 ("checkpoints", "model", KNOWN_MODELS),
                 ("checkpoint_frames", "model", KNOWN_MODELS),
@@ -394,6 +417,7 @@ def check_database(path, scope, *, show_progress=False):
                 ("results", "kind", KNOWN_KINDS),
                 ("result_index", "kind", KNOWN_KINDS),
                 ("result_thresholds", "kind", KNOWN_KINDS),
+                ("result_metadata", "kind", KNOWN_KINDS),
                 ("refresh_requests", "kind", KNOWN_KINDS),
                 ("snapshots", "kind", KNOWN_KINDS),
                 ("legacy_imports", "kind", KNOWN_KINDS),
