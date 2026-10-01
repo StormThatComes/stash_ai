@@ -263,21 +263,25 @@ def marker_segment_signature(segment):
     return signature
 
 
-def marker_contributions(app, records, core_policies, *, index=None, metrics=None, cache=None, tag_policies=None):
+def marker_contributions(app, records, core_policies, *, index=None, metrics=None, cache=None, tag_policies=None,
+                         allow_unknown_blocklist=False):
     from stash_ai.fusion import FrameIndex
     from stash_ai.thresholds import marker_context
     app = marker_context(app, records)
     if index is not None:
-        return _marker_contributions(app, records, core_policies, index, metrics, tag_policies)
+        return _marker_contributions(app, records, core_policies, index, metrics, tag_policies,
+                                     allow_unknown_blocklist=allow_unknown_blocklist)
     with FrameIndex(app, records, core_policies, cache=cache, tag_policies=tag_policies) as index:
-        return _marker_contributions(app, records, core_policies, index, metrics, tag_policies)
+        return _marker_contributions(app, records, core_policies, index, metrics, tag_policies,
+                                     allow_unknown_blocklist=allow_unknown_blocklist)
 
 
-def _marker_contributions(app, records, core_policies, index, metrics, tag_policies):
+def _marker_contributions(app, records, core_policies, index, metrics, tag_policies, *,
+                          allow_unknown_blocklist=False):
     from stash_ai.temporal import consensus_seeds, build_options, build_markers as temporal_markers
     from stash_ai.exclusions import policies_or_empty, core_policies_with_global
     from stash_ai.thresholds import validate_marker_cache
-    validate_marker_cache(app, records)
+    validate_marker_cache(app, records, allow_unknown_blocklist=allow_unknown_blocklist)
     tag_policies = policies_or_empty(tag_policies if tag_policies is not None else getattr(index, 'tag_policies', None))
     effective_cores = core_policies_with_global(core_policies, tag_policies)
     report = getattr(index, 'report', None)
