@@ -41,8 +41,8 @@ dtq:
 
 oppai:
   model_dir: models/oppai-oracle-v1.1
-  scene_threshold: 0.84
-  marker_threshold: 0.90
+  scene_threshold: 0.80
+  marker_threshold: 0.85
   batch_size: 4
 
 # All vocabulary entries/categories are eligible. No whitelist is used.
