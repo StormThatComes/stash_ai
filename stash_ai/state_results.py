@@ -5,6 +5,7 @@ from copy import deepcopy
 import json
 
 from stash_ai.runtime import measured
+from stash_ai.state_thresholds import overlay
 from stash_ai.taggers import SOURCES
 
 
@@ -22,9 +23,10 @@ class ResultStore:
         return getattr(self.store, 'report', None)
 
     @staticmethod
-    def _normalize_segments(segments):
+    def _normalize_segments(segments, kind, threshold):
         """Apply the lazy compatibility view used by all decoded result reads."""
         from stash_ai.performance import StoredSegment
+        overlay(segments, kind, threshold)
         for index, segment in enumerate(segments):
             segment.pop("refinement", None)
             segments[index] = StoredSegment(segment)
@@ -37,8 +39,11 @@ class ResultStore:
         key = ('records', str(scene), kind)
         records = store.cached(key)
         if records is None:
-            records = {model: self._normalize_segments(store.unpack(data)) for model, data in store.read_rows(
-                "SELECT model,data FROM " + store.table('results') + " WHERE scope=? AND scene=? AND kind=?",
+            records = {model: self._normalize_segments(store.unpack(data), kind, threshold)
+                for model, data, threshold in store.read_rows(
+                "SELECT r.model,r.data,t.threshold FROM " + store.table('results') + " AS r LEFT JOIN " +
+                store.table('result_thresholds') + " AS t USING(scope,scene,model,kind) "
+                "WHERE r.scope=? AND r.scene=? AND r.kind=?",
                 (store.scope, str(scene), kind))}
             store.retain(key, records)
         result = {model: records[model]} if model in records else {} if model else records
@@ -53,10 +58,11 @@ class ResultStore:
             segments = cached.get(model, [])
             return segments if borrow else deepcopy(segments)
         rows = store.read_rows(
-            "SELECT data FROM " + store.table('results') +
-            " WHERE scope=? AND scene=? AND model=? AND kind=?",
+            "SELECT r.data,t.threshold FROM " + store.table('results') + " AS r LEFT JOIN " +
+            store.table('result_thresholds') + " AS t USING(scope,scene,model,kind) "
+            "WHERE r.scope=? AND r.scene=? AND r.model=? AND r.kind=?",
             (store.scope, str(scene), model, kind))
-        segments = self._normalize_segments(store.unpack(rows[0][0])) if rows else []
+        segments = self._normalize_segments(store.unpack(rows[0][0]), kind, rows[0][1]) if rows else []
         return segments if borrow else deepcopy(segments)
 
     def result_presence(self, models):
@@ -149,13 +155,43 @@ class ResultStore:
     def replace_records(self, scene, model, kind, segments):
         """Replace a segment list inside the caller's transaction, including previews."""
         store = self.store
+        from stash_ai.preview import delete
         from stash_ai.progress import index_result
         store.cache.discard(('records', str(scene), kind))
         store.cache.discard(('sources', str(scene), kind))
         store.cache.discard(('status', str(scene), model))
+        # Appended history already carries its effective inline view. A new
+        # inference must not inherit the previous result's table-wide threshold.
+        delete(store, 'result_thresholds', scene, model, kind)
+        store.connection.execute('DELETE FROM result_thresholds WHERE scope=? AND scene=? AND model=? AND kind=?',
+            (store.scope, str(scene), model, kind))
         store.connection.execute("INSERT INTO results VALUES (?,?,?,?,?) "
             "ON CONFLICT(scope,scene,model,kind) DO UPDATE SET data=excluded.data",
             (store.scope, str(scene), model, kind, store.pack(segments)))
+        index_result(store, scene, model, kind, segments)
+
+    @measured('state_write')
+    def set_threshold(self, scene, model, kind, threshold, segments):
+        """Update policy and its completion index inside the caller's transaction.
+
+        Segments are the validated effective view from the threshold planner.
+        The evidence BLOB is never encoded or written by this path.
+        """
+        from stash_ai.progress import index_result
+        from stash_ai.thresholds import _score
+        if model not in SOURCES or kind not in KINDS or not segments or not _score(threshold):
+            raise ValueError('Invalid result threshold.')
+        store = self.store
+        store.cache.discard(('records', str(scene), kind))
+        store.cache.discard(('status', str(scene), model))
+        if not store.connection.in_transaction:
+            store.connection.execute('BEGIN')
+        # Older executables must reject databases whose effective policy lives
+        # outside results.data. Merely opening an old DB need not upgrade it.
+        store.connection.execute('PRAGMA user_version=8')
+        store.connection.execute('INSERT INTO result_thresholds VALUES (?,?,?,?,?) '
+            'ON CONFLICT(scope,scene,model,kind) DO UPDATE SET threshold=excluded.threshold',
+            (store.scope, str(scene), model, kind, threshold))
         index_result(store, scene, model, kind, segments)
 
     @measured('state_read')

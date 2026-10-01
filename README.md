@@ -93,6 +93,14 @@ python .\stash_ai.py --model-report .\model-utility-scene-123.json --scene-id 12
 python .\stash_ai.py --abandon-pending
 ```
 
+Zmiana progów zapisuje małe wiersze w tabeli `result_thresholds`; skompresowane
+wyniki inferencji i evidence klatek pozostają bez zmian. Dotyczy to także
+automatycznego użycia cache po zmianie progów w YAML. Odczyt wyników, merge,
+cleanup i explain używają efektywnych progów z tej tabeli. Stare progi zapisane
+wewnątrz wyników są nadal odczytywane, bez przepisywania istniejącej bazy.
+Pierwsza zmiana progu oznacza bazę jako schemat v8, którego starsze wersje
+programu nie obsługują. `--dry-run` zapisuje progi wyłącznie w tymczasowej bazie.
+
 Pełną listę opcji pokazuje:
 
 ```powershell

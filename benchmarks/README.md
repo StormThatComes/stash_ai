@@ -9,6 +9,7 @@ python -m benchmarks.benchmark_performance --frames 400 --labels 28 --repeats 3
 python -m benchmarks.benchmark_merge_pipeline --frames 400 --labels 28 --repeats 3
 python -m benchmarks.benchmark_occurrences --frames 500 --labels 100 --repeats 5
 python -m benchmarks.benchmark_cleanup_sql --markers 2500000 --legacy-time-budget 5
+python -m benchmarks.benchmark_rethreshold --scenes 6 --frames 600 --labels 12 --repeats 5
 ```
 
 | Skrypt | Co mierzy |
@@ -17,6 +18,7 @@ python -m benchmarks.benchmark_cleanup_sql --markers 2500000 --legacy-time-budge
 | `benchmark_merge_pipeline` | merge ze stanem SQLite, etapami i makietą API |
 | `benchmark_occurrences` | wybór reprezentatywnych punktów Occurance |
 | `benchmark_cleanup_sql` | odkrywanie kandydatów przez SQL; bez kosztu API i usuwania |
+| `benchmark_rethreshold` | zmiana obu progów, liczba zapisów evidence i zgodność efektywnych wyników; bez merge/API |
 
 Każdy skrypt obsługuje też bezpośrednie uruchomienie przez ścieżkę, np.
 `python benchmarks/benchmark_performance.py`. Bez `--project` benchmark wskazuje
@@ -27,6 +29,7 @@ Do porównań z poprzednią kopią kodu:
 ```powershell
 python -m benchmarks.benchmark_performance --project C:\poprzednia_paczka\stash_ai
 python -m benchmarks.benchmark_merge_pipeline --project C:\poprzednia_paczka\stash_ai
+python -m benchmarks.benchmark_rethreshold --project C:\poprzednia_paczka\stash_ai
 ```
 
 Wskazany katalog musi zawierać launcher `stash_ai.py` i pakiet `stash_ai/`.

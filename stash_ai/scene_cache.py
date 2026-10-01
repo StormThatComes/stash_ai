@@ -127,9 +127,11 @@ def plan(app, store, scene, config, *, scenes=True, markers=False, direct=False,
 
 
 def apply(store, scene, model, outputs):
+    from stash_ai.thresholds import marker_threshold
     with store.connection:
         for kind, segments in outputs.items():
-            store.replace_records(scene, model, kind, segments)
+            threshold = scene_threshold(segments[0]) if kind == 'scene' else marker_threshold(segments[0])
+            store.set_result_threshold(scene, model, kind, threshold, segments)
 
 
 def rethreshold(app, store, scenes, settings, report, *, markers=False):

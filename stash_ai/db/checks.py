@@ -25,6 +25,8 @@ CHECK_MESSAGES = {
     "result_missing_index": "Saved results have no matching result_index row.",
     "result_index_orphan": "result_index rows have no matching saved result.",
     "result_index_mismatch": "result_index metadata disagrees with the saved result payload.",
+    "result_threshold_invalid": "Effective result thresholds must be finite probabilities between 0 and 1.",
+    "result_threshold_orphan": "Effective result thresholds have no matching saved result.",
     "result_payload_invalid": "Saved result payloads cannot be decoded or contain invalid segments, evidence rows, or values.",
     "state_payload_invalid": "Non-result application state contains an unreadable or structurally invalid compressed payload.",
     "checkpoint_orphan_frames": "Checkpoint frame chunks have no parent checkpoint.",
@@ -99,23 +101,25 @@ def _check_results_and_index(db, tables, errors, progress=None):
 
     indexed_signature = None
     checked = 0
-    query = """
-        SELECT r.scope,r.scene,r.model,r.kind,r.data,
-               i.inference,i.populated,i.signature
-        FROM results AS r
-        LEFT JOIN result_index AS i
-          ON i.scope=r.scope AND i.scene=r.scene AND i.model=r.model AND i.kind=r.kind
-    """ if "result_index" in tables else """
-        SELECT r.scope,r.scene,r.model,r.kind,r.data,NULL,NULL,NULL
-        FROM results AS r
-    """
-    for _, _, _, kind, blob, inference, populated, signature in db.execute(query):
+    index_columns = 'i.inference,i.populated,i.signature' if 'result_index' in tables else 'NULL,NULL,NULL'
+    threshold_column = 't.threshold' if 'result_thresholds' in tables else 'NULL'
+    query = f'SELECT r.kind,r.data,{index_columns},{threshold_column} FROM results AS r'
+    if 'result_index' in tables:
+        query += ' LEFT JOIN result_index AS i USING(scope,scene,model,kind)'
+    if 'result_thresholds' in tables:
+        query += ' LEFT JOIN result_thresholds AS t USING(scope,scene,model,kind)'
+    for kind, blob, inference, populated, signature, threshold in db.execute(query):
         checked += 1
         _tick(progress)
         try:
             segments = _decoded_payload(blob, list)
             if not valid_result_segments(segments, kind):
                 raise ValueError("Invalid result segment.")
+            if threshold is not None:
+                from stash_ai.state_thresholds import overlay
+                from stash_ai.thresholds import _score
+                if _score(threshold):
+                    overlay(segments, kind, threshold)
             current = next(
                 (segment for segment in reversed(segments)
                  if segment["meta"].get("origin") == "inference"),
@@ -151,6 +155,24 @@ def _check_results_and_index(db, tables, errors, progress=None):
             )
         """).fetchone()[0]
     return checked
+
+
+def _check_thresholds(db, tables, errors):
+    if 'result_thresholds' not in tables:
+        return
+    errors['result_threshold_invalid'] += db.execute('''
+        SELECT COUNT(*) FROM result_thresholds
+        WHERE threshold IS NULL OR typeof(threshold) NOT IN ('integer','real')
+            OR threshold < 0 OR threshold > 1
+    ''').fetchone()[0]
+    if 'results' in tables:
+        errors['result_threshold_orphan'] += db.execute('''
+            SELECT COUNT(*) FROM result_thresholds AS t WHERE NOT EXISTS (
+                SELECT 1 FROM results AS r WHERE r.scope=t.scope AND r.scene=t.scene
+                    AND r.model=t.model AND r.kind=t.kind)
+        ''').fetchone()[0]
+    else:
+        errors['result_threshold_orphan'] += count_rows(db, tables, 'result_thresholds')
 
 
 def _check_state_payloads(db, tables, errors, progress=None):
@@ -357,18 +379,21 @@ def check_database(path, scope, *, show_progress=False):
             _tick(progress)
 
             missing = STATE_TABLES - tables
-            errors["missing_base_tables"] += len(BASE_TABLES - tables)
-            warnings["missing_state_tables"] += len(missing - BASE_TABLES)
+            required = BASE_TABLES | {'result_thresholds'} if version >= 8 else BASE_TABLES
+            errors["missing_base_tables"] += len(required - tables)
+            warnings["missing_state_tables"] += len(missing - required)
 
             enum_specs = (
                 ("results", "model", KNOWN_MODELS),
                 ("result_index", "model", KNOWN_MODELS),
+                ("result_thresholds", "model", KNOWN_MODELS),
                 ("refresh_requests", "model", KNOWN_MODELS),
                 ("checkpoints", "model", KNOWN_MODELS),
                 ("checkpoint_frames", "model", KNOWN_MODELS),
                 ("checkpoint_analysis", "model", KNOWN_MODELS),
                 ("results", "kind", KNOWN_KINDS),
                 ("result_index", "kind", KNOWN_KINDS),
+                ("result_thresholds", "kind", KNOWN_KINDS),
                 ("refresh_requests", "kind", KNOWN_KINDS),
                 ("snapshots", "kind", KNOWN_KINDS),
                 ("legacy_imports", "kind", KNOWN_KINDS),
@@ -384,6 +409,7 @@ def check_database(path, scope, *, show_progress=False):
             if progress is not None:
                 progress.set_postfix_str("results/index", refresh=True)
             results_checked = _check_results_and_index(db, tables, errors, progress)
+            _check_thresholds(db, tables, errors)
             _tick(progress)
 
             if progress is not None:

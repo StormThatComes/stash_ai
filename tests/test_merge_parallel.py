@@ -1,14 +1,17 @@
 """Parallel merged evidence preparation stays read-only and deterministic."""
 import json
 from collections import Counter
+from types import SimpleNamespace
 
 import pytest
 
 from stash_ai import cli as app
 from stash_ai import merge
 from stash_ai import merge_parallel
+from stash_ai import thresholds
 from stash_ai.merge_parallel import iter_parallel_evidence
 from stash_ai.temporal import TemporalPolicy
+from stash_ai.taggers import SOURCES
 from tests.helpers.evidence import empty_policies, segment
 
 
@@ -34,7 +37,8 @@ def _normalized(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
-def test_parallel_worker_tolerates_parent_publication_commits(tmp_path):
+@pytest.mark.parametrize('rethresholded', [False, True])
+def test_parallel_worker_tolerates_parent_publication_commits(tmp_path, rethresholded):
     app.TEMPORAL_POLICY = TemporalPolicy(enabled=False)
     path = tmp_path / "state.sqlite3"
     scope = merge.scope_for(app.STASH_URL)
@@ -43,6 +47,10 @@ def test_parallel_worker_tolerates_parent_publication_commits(tmp_path):
     with merge.StateStore(path, scope) as store:
         store.put("1", "wd", _outputs("wd", "one"))
         store.put("2", "dtq", _outputs("dtq", "two"))
+        if rethresholded:
+            for scene, model in (('1', 'wd'), ('2', 'dtq')):
+                config = SimpleNamespace(source=SOURCES[model], scene_threshold=.4, marker_threshold=.95)
+                assert thresholds.apply(app, store, scene, config)
 
     merge_parallel._init_worker(
         str(path),
@@ -55,6 +63,9 @@ def test_parallel_worker_tolerates_parent_publication_commits(tmp_path):
     )
     worker = merge_parallel._WORKER_STORE
     try:
+        if rethresholded:
+            assert worker.preview_source
+            assert worker.model_records('1', 'markers', 'wd')[0][thresholds.OVERRIDE] == .95
         first = merge_parallel._worker_evidence("1")
         assert first[-1] is None
 
