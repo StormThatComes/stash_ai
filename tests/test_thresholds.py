@@ -1,6 +1,7 @@
 """Retune marker publication without inference or loss of source evidence."""
 from copy import deepcopy
 from dataclasses import replace
+from types import SimpleNamespace
 import sqlite3
 
 import pytest
@@ -10,6 +11,7 @@ from stash_ai import merge
 from stash_ai import progress
 from stash_ai import scene_cache
 from stash_ai import thresholds
+from stash_ai.runtime import RunReport
 from stash_ai.taggers import SOURCES
 from tests.helpers.evidence import paired_records, policies
 
@@ -279,3 +281,23 @@ def test_flag_requires_merge_with_marker_output(args):
     with pytest.raises(SystemExit) as exc:
         app.main([*args, '--rethreshold-markers'])
     assert exc.value.code == 2
+
+
+def test_marker_rethreshold_never_decodes_publication_snapshots(tmp_path, monkeypatch):
+    scenes, markers = paired_records({'wd': [.9, .9, .9]}, threshold=.4, marker_threshold=.7)
+    config = SimpleNamespace(source=SOURCES['wd'], marker_threshold=.85, scene_threshold=.4)
+    with merge.StateStore(tmp_path/'state.sqlite3', 'scope') as state:
+        state.put('1', 'wd', {'scene': scenes['wd'][0], 'markers': markers['wd'][0]})
+        state.publish('1', {
+            'scene': {'owned_ids': [], 'contributions': []},
+            'markers': {'contributions': [{'payload': 'x' * 10000}]},
+        })
+        monkeypatch.setattr(
+            state, 'snapshot',
+            lambda *args, **kwargs: pytest.fail('decoded a publication snapshot during rethreshold'))
+        report = RunReport(write=lambda _: None)
+
+        result = thresholds.rethreshold(app, state, {'1': {}}, [config], report)
+
+        assert result == {'marker_thresholds_updated': 1}
+        assert state.records('1', 'markers')['wd'][0][thresholds.OVERRIDE] == .85

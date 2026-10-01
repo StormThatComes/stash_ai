@@ -1,6 +1,7 @@
 """Scene threshold replay, provenance and restart/resume equivalence."""
 from copy import deepcopy
 from dataclasses import replace
+from types import SimpleNamespace
 import json
 
 import pytest
@@ -8,6 +9,8 @@ import pytest
 from stash_ai import cli as app
 from stash_ai import merge
 from stash_ai import scene_cache as cache
+from stash_ai.runtime import RunReport
+from stash_ai.taggers import SOURCES
 from tests.helpers.evidence import policies
 
 pytestmark = pytest.mark.usefixtures('reset_temporal')
@@ -348,3 +351,35 @@ def test_scene_flag_requires_scene_merge(args):
     with pytest.raises(SystemExit) as exc:
         app.main([*args, '--rethreshold-scenes'])
     assert exc.value.code == 2
+
+
+def test_scene_rethreshold_never_decodes_publication_snapshots(tmp_path, monkeypatch):
+    segment = {
+        'mode': 'scene',
+        'meta': {
+            'origin': 'inference',
+            'inference_signature': 'sig',
+            'scene_threshold': .4,
+            'marker_threshold': .7,
+            'scene_frames_format': 1,
+            'scene_score_floor': .3,
+        },
+        'items': [],
+        'frames': [
+            {'start': 0, 'end': 1, 'tags': [('core', .5)]},
+            {'start': 1, 'end': 2, 'tags': [('core', .6)]},
+        ],
+    }
+    config = SimpleNamespace(source=SOURCES['wd'], scene_threshold=.8, marker_threshold=.7)
+    with merge.StateStore(tmp_path/'state.sqlite3', 'scope') as state:
+        state.put('1', 'wd', {'scene': segment})
+        state.publish('1', {'scene': {'owned_ids': [], 'contributions': [{'payload': 'x' * 10000}]}})
+        monkeypatch.setattr(
+            state, 'snapshot',
+            lambda *args, **kwargs: pytest.fail('decoded a publication snapshot during rethreshold'))
+        report = RunReport(write=lambda _: None)
+
+        result = cache.rethreshold(app, state, {'1': {}}, [config], report)
+
+        assert result == {'scene_thresholds_updated': 1}
+        assert state.records('1', 'scene')['wd'][0][cache.SCENE_OVERRIDE] == .8

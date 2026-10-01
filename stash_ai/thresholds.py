@@ -138,12 +138,12 @@ def validate(app, store, scene, config, *, check_scene=True, direct=False):
     return segments
 
 
-def apply(app, store, scene, config, segments=None, *, direct=False):
+def apply(app, store, scene, config, segments=None, *, direct=False, pending_checked=False):
     """Store policy separately; retain every original frame, score and signature."""
     segments = validate(app, store, scene, config, direct=direct) if segments is None else segments
     if all(marker_threshold(s) == config.marker_threshold for s in segments):
         return False
-    if any(store.snapshot(scene, kind, borrow=True)[1] is not None for kind in ('scene', 'markers')):
+    if not pending_checked and store.has_pending_publication(scene):
         raise RuntimeError(f'{scene}: finish the pending merge or use --abandon-pending before changing thresholds.')
     updated = []
     for segment in segments:
@@ -185,10 +185,11 @@ def rethreshold(app, store, scenes, settings, report):
     targets, skipped, selected = threshold_targets(store, scenes, settings, ('markers',))
     errors = 0
     reasons = Counter()
+    pending_scenes = store.pending_publication_scenes()
     for scene, config, _ in tqdm(targets, desc='Check marker thresholds', unit='pair'):
         try:
             validate(app, store, scene, config, direct=True)
-            if any(store.snapshot(scene, kind, borrow=True)[1] is not None for kind in ('scene', 'markers')):
+            if str(scene) in pending_scenes:
                 raise RuntimeError('Finish the pending merge or use --abandon-pending first.')
         except (ValueError, RuntimeError) as exc:
             report.issue('marker thresholds', config.source.key, scene, exc, str(exc))
@@ -201,7 +202,7 @@ def rethreshold(app, store, scenes, settings, report):
         return dict(errors=errors)
     changed = 0
     for scene, config, _ in tqdm(targets, desc='Apply marker thresholds', unit='pair'):
-        changed += apply(app, store, scene, config, direct=True)
+        changed += apply(app, store, scene, config, direct=True, pending_checked=True)
     report.record_threshold_preflight(
         len(targets), 0, applied=changed,
         selected=selected, skipped_no_evidence=skipped)

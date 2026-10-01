@@ -148,6 +148,12 @@ class StateStore(AbstractContextManager):
     def has_pending_publications(self):
         return self.publications.has_pending_publications()
 
+    def has_pending_publication(self, scene):
+        return self.publications.has_pending(scene)
+
+    def pending_publication_scenes(self):
+        return self.publications.pending_scenes()
+
     def prepare(self, scene, snapshots):
         return self.publications.prepare(scene, snapshots)
 
