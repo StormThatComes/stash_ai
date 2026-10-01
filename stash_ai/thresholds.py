@@ -63,10 +63,26 @@ def threshold_failure_reason(exc):
         ('marker cache floor', 'marker cache floor too high'),
         ('cache floor', 'marker cache floor too high'),
         ('invalid cached marker threshold', 'invalid cached marker threshold'),
+        ('marker blocklist metadata', 'unknown marker blocklist'),
+        ('unblocked marker tags', 'unblocked marker tags require inference'),
         ('scene_threshold changed', 'scene threshold requires inference'),
         ('finish the pending merge', 'pending publication'),
     )
     return next((reason for token, reason in rules if token in lower), type(exc).__name__)
+
+
+def validate_marker_blocklist(app, segment, identity):
+    """Previously filtered labels cannot be recovered by changing publication policy."""
+    if segment['mode'] != 'frames' or segment['meta'].get('origin') != 'inference':
+        return
+    retained = segment['meta'].get('marker_tag_blocklist')
+    if not isinstance(retained, list) or any(not isinstance(tag, str) for tag in retained):
+        raise ValueError(f'{identity}: marker blocklist metadata is missing or invalid; '
+                         'run inference with --restart for this scene/model.')
+    unblocked = sorted(set(retained) - app.MARKER_TAG_BLOCKLIST)
+    if unblocked:
+        raise ValueError(f'{identity}: unblocked marker tags {unblocked!r} are absent from cached frames; '
+                         'run inference with --restart for this scene/model.')
 
 
 def validate_marker_cache(app, records):
@@ -75,6 +91,7 @@ def validate_marker_cache(app, records):
     for model, segments in records.items():
         for segment in segments:
             meta = segment['meta']
+            validate_marker_blocklist(app, segment, model)
             # Imported spans and old frames without retention metadata keep
             # their existing semantics; no original support floor can be proven.
             if segment['mode'] != 'frames' or 'marker_score_floor' not in meta:
@@ -129,6 +146,7 @@ def validate(app, store, scene, config, *, check_scene=True, direct=False):
         meta = segment['meta']
         if segment['mode'] != 'frames' or meta.get('origin') != 'inference':
             raise ValueError(f'{scene}/{model}: imported ranges cannot be rethresholded; run inference.')
+        validate_marker_blocklist(app, segment, f'{scene}/{model}')
         # Before temporal retention was introduced, only high detections survived.
         floor = meta.get('marker_score_floor', meta.get('marker_threshold'))
         if not _score(floor) or floor > needed:

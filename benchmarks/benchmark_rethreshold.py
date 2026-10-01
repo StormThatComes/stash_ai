@@ -39,7 +39,7 @@ def main():
     from stash_ai.state import StateStore
     from stash_ai.taggers import SOURCES
     from stash_ai.temporal import TemporalPolicy
-    app = SimpleNamespace(TEMPORAL_POLICY=TemporalPolicy())
+    app = SimpleNamespace(TEMPORAL_POLICY=TemporalPolicy(), MARKER_TAG_BLOCKLIST=set())
     settings = [SimpleNamespace(source=source, scene_threshold=.55, marker_threshold=.55)
                 for source in SOURCES.values()]
     frames = [dict(start=float(i), end=float(i + 1), tags=[
@@ -47,7 +47,8 @@ def main():
         for j in range(args.labels)]) for i in range(args.frames)]
     meta = dict(origin='inference', inference_signature='synthetic',
                 scene_threshold=.4, marker_threshold=.4, scene_frames_format=1,
-                scene_score_floor=.1, scene_support_floor=.34, marker_score_floor=.1)
+                scene_score_floor=.1, scene_support_floor=.34, marker_score_floor=.1,
+                marker_tag_blocklist=[])
     outputs = {
         'scene': dict(mode='scene', meta=meta, frames=frames,
                       items=[dict(tag='label_' + str(j), score=.9) for j in range(args.labels)]),

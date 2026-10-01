@@ -171,7 +171,23 @@ markerów obejmuje wymagany próg kontynuacji. Jeśli próg retencji jest wyższ
 skrypt zgłosi konieczność inferencji przed publikacją danej sceny, również
 w dry-run. Sprawdzany jest efektywny `marker_threshold`, także po rethresholdingu.
 Starsze klatki bez metadanych retencji i importowane zakresy zachowują
-dotychczasowe zachowanie.
+dotychczasowe zachowanie kontroli progów.
+
+Cache markerów zapisuje także `MARKER_TAG_BLOCKLIST` używaną podczas inferencji.
+Dodanie wykluczeń jest bezpieczne dla cache. Usunięcie tagu z tej listy wymaga
+świeżej inferencji: odrzucone wcześniej detekcje nie istnieją w zapisanych klatkach.
+`--merge-only` i rethreshold markerów zgłoszą błąd przed publikacją takiej sceny,
+również przy `--markers-only`, `--no-temporal` i `--dry-run`.
+Starszy cache inferencji bez metadanych blocklisty również wymaga jednorazowego
+odświeżenia. Uruchom `--restart` dla wskazanych scen/modeli, np.:
+
+```powershell
+python .\stash_ai.py --models wd --scene-id 123 --restart
+```
+
+`--force-merge` nie uzupełnia brakujących detekcji. Importowane zakresy markerów
+z trybu `separate` zachowują dotychczasowe zachowanie. Operacje tylko na tagach
+scen nie wymagają tych metadanych markerów.
 
 Po zmianie `scene_support_ratio`, `--merge-only` przelicza statystyki scen
 z zapisanych klatek, również bez zmiany `scene_threshold`. Surowe obserwacje

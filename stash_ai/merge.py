@@ -374,7 +374,8 @@ def capture_outputs(app, config, vocabulary, cues, predictions, frames, analysis
             outputs['scene']['meta'] = {**meta, 'scene_frames_format': 1,
                 'scene_score_floor': analysis['scene_score_floor']}
     if app.CREATE_MARKERS:
-        outputs["markers"] = {"mode": "frames", "meta": meta, "items": [
+        outputs["markers"] = {"mode": "frames", "meta": {
+            **meta, "marker_tag_blocklist": sorted(app.MARKER_TAG_BLOCKLIST)}, "items": [
             dict(start=frame.cue.start, end=frame.cue.end, tags=list(frame.tags)) for frame in frames]}
     return outputs
 

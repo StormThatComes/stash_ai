@@ -27,6 +27,7 @@ def inference_pair(label, *, score=.9, identity="same", marker_threshold=.8):
         "scene_threshold": .4,
         "marker_threshold": marker_threshold,
         "marker_score_floor": marker_threshold * .85,
+        "marker_tag_blocklist": [],
         "analysis_format": 3,
     }
     return {
