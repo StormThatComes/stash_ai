@@ -143,8 +143,7 @@ def apply(app, store, scene, config, segments=None, *, direct=False, pending_che
     segments = validate(app, store, scene, config, direct=direct) if segments is None else segments
     if all(marker_threshold(s) == config.marker_threshold for s in segments):
         return False
-    if (not pending_checked
-            and str(scene) in store.pending_publication_scenes()):
+    if not pending_checked and store.has_pending_publication(scene):
         raise RuntimeError(f'{scene}: finish the pending merge or use --abandon-pending before changing thresholds.')
     updated = []
     for segment in segments:
