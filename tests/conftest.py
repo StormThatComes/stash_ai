@@ -109,7 +109,7 @@ def merge_pipeline(monkeypatch,tmp_path):
     scores={key:np.zeros((6,3),np.float32) for key in SOURCES}
     for key,indices in {"joytag":[0,1],"wd":[1,2],"oppai":[2,3],"dtq":[4,5]}.items():
         scores[key][indices,0]=.9
-    # Keep Oppai common safely above its 0.90 marker threshold but below
+    # Keep Oppai common safely above its 0.85 marker threshold but below
     # unique_op (.92), preserving tests that exercise scene-tag ranking caps.
     scores["oppai"][2:4,0]=.91
     scores["oppai"][:2,1]=.92
