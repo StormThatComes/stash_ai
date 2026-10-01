@@ -9,7 +9,7 @@ KNOWN_VERSIONS = frozenset(range(1, 9))
 KNOWN_MODELS = frozenset(("joytag", "wd", "dtq", "oppai"))
 KNOWN_KINDS = frozenset(("scene", "markers"))
 STATE_TABLES = frozenset((
-    "results", "result_thresholds", "snapshots", "legacy_imports", "result_index", "refresh_requests",
+    "results", "result_thresholds", "result_metadata", "snapshots", "legacy_imports", "result_index", "refresh_requests",
     "checkpoints", "checkpoint_frames", "checkpoint_analysis", "cleanup_state",
     "merge_checks", "recovery_publications", "recovery_cleanups",
 ))

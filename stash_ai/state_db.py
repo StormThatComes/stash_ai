@@ -93,6 +93,10 @@ class StateDatabase(AbstractContextManager):
                 kind TEXT NOT NULL, threshold REAL NOT NULL
                     CHECK(typeof(threshold) IN ('integer','real') AND threshold BETWEEN 0 AND 1),
                 PRIMARY KEY(scope, scene, model, kind));
+            CREATE TABLE IF NOT EXISTS result_metadata (
+                scope TEXT NOT NULL, scene TEXT NOT NULL, model TEXT NOT NULL,
+                kind TEXT NOT NULL, format INTEGER NOT NULL, data TEXT NOT NULL,
+                PRIMARY KEY(scope, scene, model, kind));
             CREATE TRIGGER IF NOT EXISTS results_delete_threshold
                 AFTER DELETE ON results BEGIN
                     DELETE FROM result_thresholds WHERE scope=OLD.scope AND scene=OLD.scene
@@ -106,6 +110,15 @@ class StateDatabase(AbstractContextManager):
                 scope TEXT NOT NULL, scene TEXT NOT NULL, kind TEXT NOT NULL,
                 data BLOB NOT NULL, PRIMARY KEY(scope, scene, kind));
         """)
+        # Derived metadata stays safe when older executables write results.
+        # INSERT also covers SQLite REPLACE, whose DELETE triggers may be disabled.
+        for event, rows in (('INSERT', ('NEW',)), ('UPDATE', ('OLD', 'NEW')),
+                            ('DELETE', ('OLD',))):
+            deletes = ''.join(
+                f'DELETE FROM result_metadata WHERE scope={row}.scope AND scene={row}.scene '
+                f'AND model={row}.model AND kind={row}.kind;' for row in rows)
+            db.execute(f'''CREATE TRIGGER IF NOT EXISTS results_metadata_{event.lower()}
+                AFTER {event} ON results BEGIN {deletes} END''')
 
     def close(self):
         connection, self.connection = self.connection, None

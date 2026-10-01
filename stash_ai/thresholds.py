@@ -107,7 +107,9 @@ def validate_marker_cache(app, records, *, allow_unknown_blocklist=False):
                 raise ValueError(f'{model}: marker cache floor {floor!r} exceeds required {needed:g}; run inference.')
 
 
-def _model_records(store, scene, kind, model, *, direct=False):
+def _model_records(store, scene, kind, model, *, direct=False, metadata_only=False):
+    if metadata_only:
+        return store.result_metadata(scene, kind, model)
     if direct:
         return store.model_records(scene, kind, model, borrow=True)
     return store.records(scene, kind, model, borrow=True).get(model, [])
@@ -130,15 +132,15 @@ def threshold_targets(store, scenes, settings, kinds):
     return targets, selected - len(targets), selected
 
 
-def validate(app, store, scene, config, *, check_scene=True, direct=False):
+def validate(app, store, scene, config, *, check_scene=True, direct=False, metadata_only=False):
     """Reject incomplete evidence; a missing detection is never treated as zero."""
     from stash_ai.temporal import marker_floor
     model = config.source.key
-    segments = _model_records(store, scene, 'markers', model, direct=direct)
+    segments = _model_records(store, scene, 'markers', model, direct=direct, metadata_only=metadata_only)
     if not segments:
         raise ValueError(f'{scene}/{model}: no cached marker frames; run inference for this scene/model.')
     from stash_ai.scene_cache import scene_threshold
-    scene_segments = (_model_records(store, scene, 'scene', model, direct=direct)
+    scene_segments = (_model_records(store, scene, 'scene', model, direct=direct, metadata_only=metadata_only)
                       if check_scene else [])
     for segment in scene_segments:
         if segment['meta'].get('origin') == 'inference' and scene_threshold(segment) != config.scene_threshold:
@@ -206,15 +208,17 @@ def rethreshold(app, store, scenes, settings, report):
     errors = 0
     reasons = Counter()
     pending_scenes = store.pending_publication_scenes()
-    for scene, config, _ in tqdm(targets, desc='Check marker thresholds', unit='pair'):
-        try:
-            validate(app, store, scene, config, direct=True)
-            if str(scene) in pending_scenes:
-                raise RuntimeError('Finish the pending merge or use --abandon-pending first.')
-        except (ValueError, RuntimeError) as exc:
-            report.issue('marker thresholds', config.source.key, scene, exc, str(exc))
-            reasons[threshold_failure_reason(exc)] += 1
-            errors += 1
+    from stash_ai.state_metadata import backfill_batch
+    with backfill_batch(store):
+        for scene, config, _ in tqdm(targets, desc='Check marker thresholds', unit='pair'):
+            try:
+                validate(app, store, scene, config, direct=True, metadata_only=True)
+                if str(scene) in pending_scenes:
+                    raise RuntimeError('Finish the pending merge or use --abandon-pending first.')
+            except (ValueError, RuntimeError) as exc:
+                report.issue('marker thresholds', config.source.key, scene, exc, str(exc))
+                reasons[threshold_failure_reason(exc)] += 1
+                errors += 1
     if errors:
         report.record_threshold_preflight(
             len(targets), errors, reasons, applied=0,
