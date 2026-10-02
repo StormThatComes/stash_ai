@@ -203,6 +203,189 @@ def test_blocked_pairs_are_counted_and_receive_no_executable_plan(tmp_path, monk
     assert issue(data)['blockers'] and not data['plan']
 
 
+@pytest.mark.parametrize('problem', ['floor', 'historical_floor', 'old_floor', 'blocklist',
+                                    'scene_projection', 'unreadable'])
+def test_unselected_publication_dependencies_block_plan_without_expanding_targets(
+        tmp_path, monkeypatch, problem):
+    path = tmp_path / 'state.sqlite3'
+    seed(path)
+    peer = pair()
+    if problem in ('floor', 'historical_floor'):
+        peer['markers']['meta']['marker_score_floor'] = .8
+    elif problem == 'old_floor':
+        peer['markers']['meta'].pop('marker_score_floor')
+    elif problem == 'blocklist':
+        peer['markers']['meta']['marker_tag_blocklist'] = ['unblocked']
+    elif problem == 'scene_projection':
+        peer['scene']['meta'].update(scene_support_floor=.4, scene_score_floor=.4)
+    seed(path, model='dtq', outputs=peer)
+    if problem == 'historical_floor':
+        seed(path, model='dtq', history=True)
+    elif problem == 'unreadable':
+        with merge.StateStore(path, merge.scope_for(app.STASH_URL)) as state:
+            with state.connection:
+                state.connection.execute("UPDATE results SET data=? WHERE model='dtq' AND kind='markers'",
+                                         (b'broken',))
+    before = path.read_bytes()
+    if problem != 'unreadable':
+        monkeypatch.setattr(merge.StateStore, 'unpack', lambda *args: pytest.fail('prediction BLOB decoded'))
+    data = report(path, settings=[replace(config(), marker_threshold=.9)])
+    assert [row['model'] for row in data['models']] == ['wd']
+    assert data['totals']['scene_model_pairs'] == data['totals']['blocked_pairs'] == 1
+    assert data['totals']['fully_ready_scenes'] == 0 and not data['plan']
+    row = issue(data)
+    assert 'unusable_evidence_for_unselected_model' in row['blockers']
+    dependency, = row['publication_dependencies']
+    assert dependency['model'] == 'dtq'
+    assert dependency['kind'] == ('scene' if problem == 'scene_projection' else 'markers')
+    assert dependency['reason'] and '--models' in dependency['resolution']
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize('blocker', ['replacement', 'unreadable'])
+@pytest.mark.parametrize('order', [('wd', 'dtq'), ('dtq', 'wd')])
+def test_blocked_selected_pair_blocks_every_command_for_its_scene(
+        tmp_path, monkeypatch, blocker, order):
+    path = tmp_path / 'state.sqlite3'
+    broken = pair()
+    if blocker == 'replacement':
+        broken['markers']['meta']['marker_score_floor'] = .8
+        monkeypatch.setattr(app, 'REPLACE_MARKERS', False)
+    seed(path, outputs=broken)
+    if blocker == 'unreadable':
+        with merge.StateStore(path, merge.scope_for(app.STASH_URL)) as state:
+            with state.connection:
+                state.connection.execute("UPDATE results SET data=? WHERE model='wd' AND kind='markers'",
+                                         (b'broken',))
+    before = path.read_bytes()
+    data = report(path, ['1', 'safe'], [config(model) for model in order])
+    assert data['totals']['blocked_pairs'] == 2
+    assert 'blocked_selected_model' in issue(data, model='dtq')['blockers']
+    assert issue(data, model='dtq')['blocking_models'] == ['wd']
+    assert all(row['scene_ids'] == ['safe'] for row in data['plan'])
+    assert {row['model'] for row in actions(data)} == {'wd', 'dtq'}
+    assert path.read_bytes() == before
+
+
+def test_blocked_scene_is_not_added_back_by_publication_recovery(tmp_path, monkeypatch):
+    path = tmp_path / 'state.sqlite3'
+    broken = pair()
+    broken['markers']['meta']['marker_score_floor'] = .8
+    seed(path, outputs=broken)
+    monkeypatch.setattr(app, 'REPLACE_MARKERS', False)
+    with merge.StateStore(path, merge.scope_for(app.STASH_URL)) as state:
+        state.prepare('1', {'scene': {'owned_ids': [], 'contributions': []}})
+        from stash_ai.recovery import abandon
+        abandon(state, report=lambda _: None)
+    data = report(path, settings=[config('wd'), config('dtq')])
+    assert data['publication_recovery_scene_ids'] == ['1']
+    assert not data['plan']
+
+
+@pytest.mark.parametrize('peer_kind', ['no_scene', 'no_markers', 'imported_spans',
+                                     'old_scene', 'different_threshold', 'higher_override'])
+def test_usable_unselected_evidence_does_not_expand_or_block_selected_plan(tmp_path, peer_kind):
+    path = tmp_path / 'state.sqlite3'
+    seed(path)
+    peer = pair()
+    if peer_kind == 'no_scene':
+        del peer['scene']
+    elif peer_kind == 'no_markers':
+        del peer['markers']
+    elif peer_kind == 'imported_spans':
+        peer['markers'] = dict(mode='spans', meta=dict(origin='legacy'),
+            items=[dict(tag='imported', start=0., end=2., score=.9, hits=2, extra_tags=[])])
+    elif peer_kind == 'old_scene':
+        peer['scene'].pop('frames')
+        for field in ('scene_frames_format', 'scene_score_floor', 'scene_support_floor'):
+            peer['scene']['meta'].pop(field)
+    elif peer_kind == 'different_threshold':
+        peer['markers']['meta'].update(marker_threshold=.5, marker_score_floor=.4)
+    elif peer_kind == 'higher_override':
+        peer['markers']['meta']['marker_score_floor'] = .75
+        peer['markers']['marker_threshold_override'] = .9
+    seed(path, model='dtq', outputs=peer)
+    data = report(path, settings=[replace(config(), marker_threshold=.9)])
+    assert data['totals']['rethreshold_pairs'] == 1 and data['totals']['blocked_pairs'] == 0
+    assert [row['model'] for row in data['plan'] if 'model' in row] == ['wd']
+    assert data['plan'][-1]['action'] == 'merge_after_backfill'
+
+
+def test_unselected_dependency_checks_respect_scene_and_db_scope(tmp_path):
+    path = tmp_path / 'state.sqlite3'
+    seed(path)
+    peer = pair()
+    peer['markers']['meta']['marker_score_floor'] = .8
+    seed(path, scene='other', model='dtq', outputs=peer)
+    with merge.StateStore(path, merge.scope_for('http://other.example')) as state:
+        state.put('1', 'dtq', peer)
+    data = report(path, ['1'], [replace(config(), marker_threshold=.9)])
+    assert data['totals']['blocked_pairs'] == 0
+    assert all(row['scene_ids'] == ['1'] for row in data['plan'])
+
+
+def test_cli_reports_unselected_dependency_without_models_or_stash(tmp_path, monkeypatch, capsys):
+    path = tmp_path / 'state.sqlite3'
+    seed(path)
+    peer = pair()
+    peer['markers']['meta']['marker_score_floor'] = .8
+    seed(path, model='dtq', outputs=peer)
+    destination = tmp_path / 'cache.json'
+    for name in ('load_tagger', 'load_vocabulary', 'ensure_files', 'create_stash_client'):
+        monkeypatch.setattr(app, name, lambda *args: pytest.fail('model/Stash access'))
+    before = path.read_bytes()
+    assert app.main(['--cache-report', str(destination), '--state-db', str(path), '--models', 'wd']) == 0
+    data = json.loads(destination.read_text())
+    assert not data['plan'] and data['totals']['blocked_pairs'] == 1
+    assert issue(data)['publication_dependencies'][0]['model'] == 'dtq'
+    assert 'Unselected cached models block publication' in capsys.readouterr().out
+    assert path.read_bytes() == before
+
+
+def test_including_unselected_dependency_produces_a_plan_that_completes(pipeline, monkeypatch, tmp_path):
+    import yaml
+    p = pipeline
+    wd = pair()
+    wd['markers']['meta']['marker_score_floor'] = .2
+    seed(p.path, outputs=wd)
+    dtq = pair()
+    dtq['markers']['meta']['marker_score_floor'] = .8
+    seed(p.path, model='dtq', outputs=dtq)
+    config_data = app.load_unique_yaml(app.MODELS_CONFIG_FILE, 'test')
+    for model in ('wd', 'dtq'):
+        config_data[model].update(scene_threshold=.4, marker_threshold=.9 if model == 'wd' else .8,
+                                  scene_cache_floor=.1, marker_cache_floor=.2)
+    yaml_path = tmp_path / 'models.yml'
+    yaml_path.write_text(yaml.safe_dump(config_data))
+    context = ['--state-db', str(p.path), '--model-config', str(yaml_path)]
+    selected = app.load_model_settings(yaml_path, ['wd'], None, True)
+    before = p.path.read_bytes()
+    with merge.StateStore(p.path, merge.scope_for(app.STASH_URL), True) as state:
+        blocked = cache_report.build_report(app, state, ['1'], selected, context)
+    assert not blocked['plan'] and blocked['totals']['blocked_pairs'] == 1
+    assert p.path.read_bytes() == before and not p.stash.writes
+    settings = app.load_model_settings(yaml_path, ['wd', 'dtq'], None, True)
+    with merge.StateStore(p.path, merge.scope_for(app.STASH_URL), True) as state:
+        data = cache_report.build_report(app, state, ['1'], settings, context)
+    assert data['totals']['blocked_pairs'] == 0
+    assert [row['model'] for row in actions(data)] == ['dtq']
+    assert [row['action'] for row in data['plan']] == [
+        'restart_inference', 'rethreshold', 'merge_after_backfill']
+    original = app.load_tagger
+    loaded = []
+
+    def load(config, *args):
+        assert config.source.key == 'dtq'
+        loaded.append(config.source.key)
+        return original(config, *args)
+
+    monkeypatch.setattr(app, 'load_tagger', load)
+    assert [app.main([*row['argv'][2:], '--no-hierarchy']) for row in data['plan']] == [0, 0, 0]
+    assert loaded == ['dtq']
+    completed = report(p.path, settings=settings)
+    assert completed['totals']['fully_ready_scenes'] == 1 and not completed['plan']
+
+
 def test_pending_global_cleanup_blocks_backfill_without_changing_source(tmp_path):
     from stash_ai.cleanup import begin
     path = tmp_path / 'state.sqlite3'

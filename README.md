@@ -386,13 +386,27 @@ zablokowana do ukończenia wszystkich wskazanych modeli.
 
 Pending publication, globalny cleanup, refresh niewybranego modelu,
 nieczytelne evidence lub wyłączone zastępowanie nieużywalnej historii blokują
-automatyczne propozycje dla dotkniętych par. Najpierw dokończ pierwotny plan
+wszystkie polecenia planu dla dotkniętej sceny, również uzupełnienie innych
+modeli i końcowy merge. Każde z tych poleceń może próbować publikacji.
+Najpierw dokończ pierwotny plan
 albo wyjaśnij niespójność, a następnie wygeneruj raport ponownie. Gotowy evidence
 może nadal mieć blokadę publikacji; liczniki tych dwóch cech mogą się nakładać.
+
+Merge używa także zachowanego evidence niewybranych modeli. Raport sprawdza
+jego możliwość publikacji według zapisanych efektywnych progów i wybranej
+polityki, bez wymagania retencji z YAML dla tych modeli. Niepełny lub nieczytelny
+cache takiego modelu blokuje scenę; `issues[].publication_dependencies` wskazuje
+model, rodzaj wyniku, powód i sposób rozwiązania. Dołącz wskazany model przez
+`--models` i wygeneruj raport ponownie, aby zaplanować jego naprawę. Liczniki
+kompletności i cele inferencji nadal dotyczą wybranych modeli; raport nie
+rozszerza automatycznie zakresu inferencji. `issues[].blocking_models` wskazuje
+wybrane modele, których blokada uniemożliwia zaplanowanie pozostałych par sceny.
+
 Exit code `0` oznacza poprawnie wygenerowany raport, również gdy zawiera braki.
 Archiwalne evidence po `--abandon-pending` nie blokuje cache ani inferencji:
 `publication_recovery_scene_ids` pokazuje te sceny, a końcowy merge planu
-rekonsyliuje ich publikację, również gdy cache jest już kompletny.
+rekonsyliuje ich publikację, również gdy cache jest już kompletny, jeśli scena
+nie ma innych blokad publikacji.
 
 ## Wynik w Stash
 
