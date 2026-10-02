@@ -218,10 +218,11 @@ class ResultStore:
         index_result(store, scene, model, kind, segments)
 
     @measured('state_write')
-    def set_threshold(self, scene, model, kind, threshold, segments):
+    def set_threshold(self, scene, model, kind, threshold, segments, *, metadata_only=False):
         """Update policy and its completion index inside the caller's transaction.
 
-        Segments are the validated effective view from the threshold planner.
+        Segments are the validated effective view from the threshold planner,
+        or its small metadata records when metadata_only is true.
         The evidence BLOB is never encoded or written by this path.
         """
         from stash_ai.progress import index_result
@@ -239,7 +240,7 @@ class ResultStore:
         store.connection.execute('INSERT INTO result_thresholds VALUES (?,?,?,?,?) '
             'ON CONFLICT(scope,scene,model,kind) DO UPDATE SET threshold=excluded.threshold',
             (store.scope, str(scene), model, kind, threshold))
-        index_result(store, scene, model, kind, segments)
+        index_result(store, scene, model, kind, segments, metadata_only=metadata_only)
 
     @measured('state_read')
     def imported_legacy(self, scene, kind, *, borrow=False):

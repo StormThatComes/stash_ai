@@ -89,6 +89,10 @@ zachowują dotychczasowy kontrakt dla call-site'ów i testów.
 `PublicationStore`; zachowuje dotychczasowe metody `records()/put()/snapshot()/prepare()`
 jako kompatybilne delegacje. Zamyka bazę również przy błędzie inicjalizacji.
 Blokada procesu obejmuje cały czas życia magazynu, także żądania do Stash.
+Rethreshold waliduje i stosuje zmiany z małych rekordów `result_metadata`;
+`ResultStore.set_threshold(..., metadata_only=True)` zapisuje próg oraz indeks
+ukończenia z tego planu w jednej transakcji, bez odczytu BLOB-ów klatek.
+Pełne rekordy pozostają obsługiwane przez tę samą ścieżkę zapisu dla reuse inferencji.
 Dry-run korzysta z tymczasowej bazy: współczesne schematy odczytuje
 przez nakładkę ze źródłem otwartym tylko do odczytu, a starsze kopiuje przed
 migracją. Format zapisanych danych i kolejność migracji pozostają bez zmian.

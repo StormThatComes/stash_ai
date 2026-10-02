@@ -20,7 +20,7 @@ python -m benchmarks.benchmark_rethreshold --scenes 6 --frames 600 --labels 12 -
 | `benchmark_retained_merge` | obserwacje współdzielone, markery temporalne jednego modelu i merge CPU przy szerokiej retencji wyników, z hashami każdego etapu |
 | `benchmark_occurrences` | wybór reprezentatywnych punktów Occurance |
 | `benchmark_cleanup_sql` | odkrywanie kandydatów przez SQL; bez kosztu API i usuwania |
-| `benchmark_rethreshold` | zmiana obu progów, czas/dekodowania Check i Apply, zapisy evidence i zgodność wyników; bez merge/API |
+| `benchmark_rethreshold` | zmiana progów, czas/dekodowania Check i Apply, zapisy evidence oraz hashe wyników i result_index; bez merge/API |
 
 Każdy skrypt obsługuje też bezpośrednie uruchomienie przez ścieżkę, np.
 `python benchmarks/benchmark_performance.py`. Bez `--project` benchmark wskazuje
@@ -41,10 +41,13 @@ i parametry; przy zmianie zachowania aplikacji mogą się różnić również ha
 
 `benchmark_rethreshold` domyślnie mierzy wyniki zapisane przez wskazaną wersję
 aplikacji, z gotowymi metadanymi walidacji, jeśli je obsługuje. Dodaj
+`--mode scene` lub `--mode markers`, aby zmierzyć zmianę tylko progów scen
+lub markerów; domyślny `--mode combined` zmienia oba progi. Dodaj
 `--legacy-metadata`, aby zmierzyć pierwsze uzupełnianie metadanych starego cache.
 Opcja czyści tylko pochodne metadane w tymczasowej bazie benchmarku.
 Raport osobno pokazuje dekodowania evidence i czas planowania w `Check`/`Apply`;
 całkowity czas obejmuje też transakcje i zapisy progów.
+Hashe obejmują wejściowe BLOB-y, efektywne wyniki i indeks ukończenia.
 
 Skrypty drukują JSON na stdout. `benchmark_merge_pipeline` i `benchmark_occurrences`
 przyjmują też `--output PATH`. Do nowego pomiaru użyj nowej nazwy pliku:

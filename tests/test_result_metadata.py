@@ -18,7 +18,7 @@ def metadata_rows(store):
                                     ' ORDER BY scope,scene,model,kind').fetchall()
 
 
-def test_combined_check_never_reads_payloads_and_apply_decodes_once(tmp_path, monkeypatch):
+def test_combined_check_and_apply_never_read_payloads(tmp_path, monkeypatch):
     with StateStore(tmp_path/'state.sqlite3', 'scope') as store:
         for scene in ('1', '2'):
             store.put(scene, 'wd', outputs())
@@ -50,8 +50,8 @@ def test_combined_check_never_reads_payloads_and_apply_decodes_once(tmp_path, mo
         store.connection.set_authorizer(authorize)
         result = scene_cache.rethreshold(app, store, ['1', '2'], [config(.8)], report, markers=True)
         assert result == {'scene_thresholds_updated': 2}
-        assert checks == 2
-        assert report.timing_calls['state_json_decode'] == 4  # Apply: one read per scene/kind.
+        assert checks == 4  # Check and Apply both use the small metadata view.
+        assert report.timing_calls['state_json_decode'] == 0
         assert (blobs(store), metadata_rows(store)) == before
 
 
@@ -214,7 +214,7 @@ def test_legacy_backfill_only_selected_pairs_and_commits_once_per_check(tmp_path
         assert {(row[1], row[2], row[3]) for row in metadata_rows(store)} == {
             (scene, 'wd', kind) for scene in ('1', '2') for kind in ('scene', 'markers')}
         assert statements.count('COMMIT') == 3  # One Check backfill plus two Apply pairs.
-        assert report.timing_calls['state_json_decode'] == 8
+        assert report.timing_calls['state_json_decode'] == 4  # Check backfills each scene/kind once.
 
 
 @pytest.mark.parametrize('operation', ['update', 'replace', 'delete', 'move'])

@@ -188,7 +188,8 @@ def test_override_invalidates_only_affected_scene_and_scope(tmp_path):
 
 
 @pytest.mark.parametrize('initial_threshold', [None, .7])
-def test_both_thresholds_and_version_roll_back_if_index_write_fails(tmp_path, monkeypatch, initial_threshold):
+@pytest.mark.parametrize('metadata_only', [False, True])
+def test_both_thresholds_and_version_roll_back_if_index_write_fails(tmp_path, monkeypatch, initial_threshold, metadata_only):
     path = tmp_path / 'state.sqlite3'
     with StateStore(path, 'scope', cache_bytes=2**20) as store:
         store.put('1', 'wd', outputs())
@@ -199,17 +200,17 @@ def test_both_thresholds_and_version_roll_back_if_index_write_fails(tmp_path, mo
         old_records = store.records('1', 'scene')
         version = store.connection.execute('PRAGMA user_version').fetchone()
         index = store.connection.execute('SELECT * FROM result_index').fetchall()
-        planned = scene_cache.plan(app, store, '1', config(.8), markers=True)
+        planned = scene_cache.plan(app, store, '1', config(.8), markers=True, metadata_only=metadata_only)
         original = progress.index_result
 
-        def fail_second(store, scene, model, kind, segments):
+        def fail_second(store, scene, model, kind, segments, **options):
             if kind == 'markers':
                 raise RuntimeError('index write failed')
-            original(store, scene, model, kind, segments)
+            original(store, scene, model, kind, segments, **options)
 
         monkeypatch.setattr(progress, 'index_result', fail_second)
         with pytest.raises(RuntimeError, match='index write failed'):
-            scene_cache.apply(store, '1', 'wd', planned)
+            scene_cache.apply(store, '1', 'wd', planned, metadata_only=metadata_only)
         assert blobs(store) == raw
         assert threshold_rows(store) == old_thresholds
         assert store.connection.execute('PRAGMA user_version').fetchone() == version
