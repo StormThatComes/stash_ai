@@ -5,6 +5,7 @@ from dataclasses import replace
 import pytest
 
 from stash_ai import cli as app, merge, thresholds
+from stash_ai.taggers import SOURCES
 from tests.helpers.evidence import segment
 
 pytestmark = pytest.mark.usefixtures('reset_temporal')
@@ -130,3 +131,36 @@ def test_blocklist_exception_does_not_relax_historical_retention():
     frames['meta'].pop('marker_score_floor')
     with pytest.raises(ValueError, match='marker cache floor'):
         thresholds.validate_marker_cache(app, {'wd': [frames]}, allow_unknown_blocklist=True)
+
+
+def test_repeated_cleanup_preserves_nonempty_historical_bans(tmp_path):
+    policies = {source: frozenset() for source in SOURCES}
+    records = {
+        'wd': [segment('wd', [[('core', .9)]] * 4)],
+        'dtq': [segment('dtq', [[('detail', .9), ('revoked', .9), ('remaining', .9)]] * 4)],
+    }
+    # WD discarded detail at capture time; DTQ still has it in an older cache.
+    # The published proof applied the old blocklist to both sources.
+    records['wd'][0]['meta']['marker_tag_blocklist'] = ['detail']
+    frozen_tags = {source: frozenset({'detail'}) for source in SOURCES}
+    spans = merge.marker_contributions(app, records, policies, tag_policies=frozen_tags,
+                                       legacy_blocklist=frozenset({'detail'}))
+    for span in spans:
+        span['build_options']['blocklist'] = ['detail']
+        span['build_options']['tag_exclusions'] = {source: [] for source in SOURCES}
+    assert merge.union_intervals(spans)[0]['extra_tags'] == ['remaining', 'revoked']
+
+    with merge.StateStore(tmp_path / 'state', 'fixture') as state:
+        for source, segments in records.items():
+            state.put('1', source, {'markers': segments[0]})
+        original = state.records('1', 'markers')
+        tags = {**policies, 'dtq': frozenset({'revoked'})}
+        first = merge.cleanup_support(app, state, '1', spans, {'dtq'}, policies, tags)
+        assert merge.union_intervals(first)[0]['extra_tags'] == ['remaining']
+        assert all(span['build_options']['blocklist'] == ['detail'] for span in first)
+        tags['dtq'] = frozenset({'remaining', 'revoked'})
+        second = merge.cleanup_support(app, state, '1', first, {'dtq'}, policies, tags)
+        assert merge.union_intervals(second)[0]['extra_tags'] == []
+        assert state.records('1', 'markers') == original
+        with pytest.raises(ValueError, match='unblocked marker tags'):
+            merge.marker_contributions(app, original, policies)

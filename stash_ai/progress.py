@@ -258,7 +258,8 @@ def model_identity(app, config, vocabulary):
             "retention": {"temporal": app.TEMPORAL_POLICY.enabled,
                           "marker_ratio": app.TEMPORAL_POLICY.marker_continue_ratio if app.TEMPORAL_POLICY.enabled else 1.0,
                           "scene_ratio": app.TEMPORAL_POLICY.scene_support_ratio if app.TEMPORAL_POLICY.enabled else 1.0},
-            "frame_blocklist": sorted(app.MARKER_TAG_BLOCKLIST)}
+            # Keep the old empty value so default-policy caches/checkpoints match.
+            "frame_blocklist": []}
     # Omitted/null settings preserve legacy inference/checkpoint signatures.
     # Enabling or changing retention requests fresh inference to populate it;
     # publication-only threshold edits can still reuse the retained evidence.

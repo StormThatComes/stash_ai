@@ -65,7 +65,6 @@ python .\stash_ai.py --models wd --scene-id 123 --restart
 Occurrence respektuje:
 - `scene_tag_exclusions.yml`;
 - `marker_core_exclusions.yml`;
-- `MARKER_TAG_BLOCKLIST`;
 - `MAX_MARKERS_PER_SCENE`.
 
 Normalny marker zakresowy ma pierwszeństwo przed reprezentatywnym punktem tego

@@ -219,8 +219,8 @@ def candidate_names(app, selected, cores, tags):
         if app.APPLY_SCENE_TAGS:
             scene.update(source.prefix + label for label in bans)
         if app.CREATE_MARKERS:
-            primary.update(source.prefix + label for label in bans | core_bans | app.MARKER_TAG_BLOCKLIST)
-            extra.update(source.prefix + label for label in bans | app.MARKER_TAG_BLOCKLIST)
+            primary.update(source.prefix + label for label in bans | core_bans)
+            extra.update(source.prefix + label for label in bans)
     return scene, primary, extra
 
 
@@ -279,7 +279,8 @@ def run_sql_cleanup(app, sql, store, settings, args, cores, tags, stats):
         raise RuntimeError('An interrupted merge is pending; run --merge-only before cleanup.')
     fingerprint_data = {'tags': {s: sorted(tags[s]) for s in SOURCES},
                         'cores': {s: sorted(cores[s]) for s in SOURCES},
-                        'marker_blocklist': sorted(app.MARKER_TAG_BLOCKLIST)}
+                        # Preserve resumability of cleanups started with the default empty list.
+                        'marker_blocklist': []}
     kinds = [k for k, enabled in [('scene', app.APPLY_SCENE_TAGS), ('markers', app.CREATE_MARKERS)] if enabled] if wide else []
     if kinds != ['scene', 'markers']:
         fingerprint_data['output_kinds'] = kinds

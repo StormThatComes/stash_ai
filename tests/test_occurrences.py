@@ -85,13 +85,12 @@ def test_scene_peak_below_marker_retention_floor_still_supplies_a_point(tmp_path
     assert [(s['start'], s['end']) for s in spans] == [(2, None)]
 
 
-@pytest.mark.parametrize('block', ['core', 'scene', 'blocklist'])
-def test_occurrences_respect_all_exclusions(tmp_path, monkeypatch, block):
+@pytest.mark.parametrize('block', ['core', 'scene'])
+def test_occurrences_respect_all_exclusions(tmp_path, block):
     scenes, markers = paired_records({'wd': [0, .95, 0]}, threshold=.35, marker_threshold=.65)
     cores, tags = policies(), policies()
     if block == 'core': cores['wd'] = frozenset({'core'})
     if block == 'scene': tags['wd'] = frozenset({'core'})
-    if block == 'blocklist': monkeypatch.setattr(app, 'MARKER_TAG_BLOCKLIST', {'core'})
     with merge.StateStore(tmp_path/'state', 'fixture') as state:
         put(state, scenes, markers)
         _, spans = merge.evidence(app, state, '1', cores, tags)

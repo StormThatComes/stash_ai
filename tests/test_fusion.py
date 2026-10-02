@@ -243,15 +243,14 @@ def test_cleanup_command_rebuilds_shared_marker_and_then_removes_last_support(pi
     assert app.main(cleanup)==0 and not p.stash.scene['scene_markers']
 
 
-def test_cleanup_requires_published_evidence_and_preserves_extras_when_only_core_is_excluded(tmp_path,monkeypatch):
+def test_cleanup_requires_published_evidence_and_preserves_extras_when_only_core_is_excluded(tmp_path):
     excluded=policies({'detail'})
     with merge.StateStore(tmp_path/'state.sqlite3','fixture') as state:
         for source,segments in extra_records().items():state.put('1',source,{'markers':segments[0]})
         _,spans=merge.evidence(app,state,'1',excluded,policies())
         cleaned=merge.cleanup_support(app,state,'1',spans,{'dtq'},excluded)
         assert merge.union_intervals(cleaned)[0]['extra_tags']==['detail']
-        monkeypatch.setattr(app,'MARKER_TAG_BLOCKLIST',{'detail'})
-        cleaned=merge.cleanup_support(app,state,'1',spans,{'dtq'},excluded)
+        cleaned=merge.cleanup_support(app,state,'1',spans,{'wd','dtq'},excluded,policies({'detail'}))
         assert merge.union_intervals(cleaned)[0]['extra_tags']==[]
 
 

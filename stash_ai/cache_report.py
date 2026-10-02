@@ -119,7 +119,7 @@ def _inspect(app, config, kind, segments, index, refresh, checkpoint, error):
             else:
                 if segment['mode'] != 'frames' or meta.get('origin') != 'inference':
                     raise ValueError('Imported marker ranges cannot prove retained frame coverage.')
-                validate_marker_blocklist(app, segment, config.source.key)
+                validate_marker_blocklist(segment, config.source.key)
                 floor = meta.get('marker_score_floor', meta.get('marker_threshold'))
                 saved = marker_threshold(segment)
             if not _score(saved) or not _score(floor):
@@ -146,8 +146,7 @@ def _publication_dependencies(app, evidence, selected):
     from stash_ai.thresholds import validate_marker_cache
 
     dependencies = []
-    context = SimpleNamespace(TEMPORAL_POLICY=app.TEMPORAL_POLICY,
-                              MARKER_TAG_BLOCKLIST=app.MARKER_TAG_BLOCKLIST)
+    context = SimpleNamespace(TEMPORAL_POLICY=app.TEMPORAL_POLICY)
     for (model, kind), (segments, error) in sorted(evidence.items()):
         if model in selected:
             continue

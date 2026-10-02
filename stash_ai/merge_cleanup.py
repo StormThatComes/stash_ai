@@ -27,19 +27,19 @@ def cleanup_support(app, store, scene_id, spans, selected, core_policies, tag_po
             if point is not None:
                 cleaned.append(point)
             continue
-        own_blocked = app.MARKER_TAG_BLOCKLIST | (tag_policies[span['source']] if span['source'] in selected else frozenset())
+        own_blocked = tag_policies[span['source']] if span['source'] in selected else frozenset()
         if span.get('derived') != 'shared_frames' and span['source'] in selected and (
                 span['tag'] in core_policies[span['source']] or span['tag'] in own_blocked):
             continue
         core_affected = any(source in selected and (span["tag"] in core_policies[source] or
-                            span["tag"] in tag_policies[source] or span["tag"] in app.MARKER_TAG_BLOCKLIST)
+                            span["tag"] in tag_policies[source])
                             for source in span.get("support_sources", []))
         extra_labels = set(span.get('extra_tags', [])) | set(span.get('extra_support', {}))
         extra_sources = set(span.get('frame_context', {})) | {span['source']}
         extras_affected = any(extra_labels & tag_policies[source] for source in extra_sources & selected)
         affected = core_affected or extras_affected
         if not affected:
-            cleaned.append(prune_blocked_extras(span, app.MARKER_TAG_BLOCKLIST))
+            cleaned.append(span)
             continue
         if not span.get('build_options') or not span.get('evidence_signature'):
             # Imported ranges have no frame proofs. Their extras belong to the
@@ -64,10 +64,11 @@ def cleanup_support(app, store, scene_id, spans, selected, core_policies, tag_po
             context.MARKER_THRESHOLDS = options.get("marker_thresholds", {})
             for name, value in options["settings"].items():
                 setattr(context, name, value)
-            context.MARKER_TAG_BLOCKLIST = set(options["blocklist"]) | app.MARKER_TAG_BLOCKLIST
+            # Preserve the retired option only as part of this published proof.
+            legacy_blocklist = frozenset(options.get("blocklist", []))
             policies = {source: frozenset(options["core_exclusions"][source]) |
                         (core_policies[source] if source in selected else frozenset()) for source in SOURCES}
-            frozen_tags = {source: frozenset(options.get('tag_exclusions', {}).get(source, [])) |
+            frozen_tags = {source: frozenset(options.get('tag_exclusions', {}).get(source, [])) | legacy_blocklist |
                            (tag_policies[source] if source in selected else frozenset()) for source in SOURCES}
             # Cleanup can revoke old evidence but cannot add newly cached votes.
             # Older frames may lack blocklist or retention metadata. Verified
@@ -75,7 +76,8 @@ def cleanup_support(app, store, scene_id, spans, selected, core_policies, tag_po
             # ranges/extras below; this never admits previously missing labels.
             rebuilt[key] = (merge.marker_contributions(
                                 context, matching, policies, tag_policies=frozen_tags,
-                                allow_unknown_blocklist=True, allow_unknown_retention=True),
+                                allow_unknown_blocklist=True, allow_unknown_retention=True,
+                                legacy_blocklist=legacy_blocklist),
                             context, policies, matching, frozen_tags)
         candidates, context, policies, matching, frozen_tags = rebuilt[key]
         for item in candidates:
@@ -87,6 +89,10 @@ def cleanup_support(app, store, scene_id, spans, selected, core_policies, tag_po
             if end <= start:
                 continue
             clipped = {**item, "start": start, "end": end}
+            if options.get("blocklist"):
+                # A later cleanup still needs these frozen bans to validate the
+                # same legacy frames, even though new publications use none.
+                clipped["build_options"] = {**item["build_options"], "blocklist": options["blocklist"]}
             if (start, end) != (item["start"], item["end"]):
                 clipped.update(hits=None, strong_hits=None, extra_evidence=[], cleanup_clipped=True)
                 if clipped.get("derived") == "shared_frames":
@@ -104,7 +110,6 @@ def cleanup_support(app, store, scene_id, spans, selected, core_policies, tag_po
             # additional labels freed by a changed per-frame cap.
             new_extras = (set(clipped.get('extra_tags', [])) | set(clipped.get('extra_support', {}))) - extra_labels
             clipped = prune_blocked_extras(clipped, new_extras)
-            clipped = prune_blocked_extras(clipped, app.MARKER_TAG_BLOCKLIST)
             if clipped not in cleaned:
                 cleaned.append(clipped)
     return cleaned

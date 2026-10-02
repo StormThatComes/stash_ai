@@ -264,32 +264,37 @@ def marker_segment_signature(segment):
 
 
 def marker_contributions(app, records, core_policies, *, index=None, metrics=None, cache=None, tag_policies=None,
-                         allow_unknown_blocklist=False, allow_unknown_retention=False):
+                         allow_unknown_blocklist=False, allow_unknown_retention=False,
+                         legacy_blocklist=frozenset()):
     from stash_ai.fusion import FrameIndex
     from stash_ai.thresholds import marker_context
     app = marker_context(app, records)
     if index is not None:
         return _marker_contributions(app, records, core_policies, index, metrics, tag_policies,
                                      allow_unknown_blocklist=allow_unknown_blocklist,
-                                     allow_unknown_retention=allow_unknown_retention)
+                                     allow_unknown_retention=allow_unknown_retention,
+                                     legacy_blocklist=legacy_blocklist)
     with FrameIndex(app, records, core_policies, cache=cache, tag_policies=tag_policies) as index:
         return _marker_contributions(app, records, core_policies, index, metrics, tag_policies,
                                      allow_unknown_blocklist=allow_unknown_blocklist,
-                                     allow_unknown_retention=allow_unknown_retention)
+                                     allow_unknown_retention=allow_unknown_retention,
+                                     legacy_blocklist=legacy_blocklist)
 
 
 def _marker_contributions(app, records, core_policies, index, metrics, tag_policies, *,
-                          allow_unknown_blocklist=False, allow_unknown_retention=False):
+                          allow_unknown_blocklist=False, allow_unknown_retention=False,
+                          legacy_blocklist=frozenset()):
     from stash_ai.temporal import consensus_seeds, build_options, build_markers as temporal_markers
     from stash_ai.exclusions import policies_or_empty, core_policies_with_global
     from stash_ai.thresholds import validate_marker_cache
     validate_marker_cache(app, records, allow_unknown_blocklist=allow_unknown_blocklist,
-                          allow_unknown_retention=allow_unknown_retention)
+                          allow_unknown_retention=allow_unknown_retention,
+                          legacy_blocklist=legacy_blocklist)
     tag_policies = policies_or_empty(tag_policies if tag_policies is not None else getattr(index, 'tag_policies', None))
     effective_cores = core_policies_with_global(core_policies, tag_policies)
     report = getattr(index, 'report', None)
     with stage(report, 'marker_seeds'):
-        seeds = consensus_seeds(records, effective_cores, app.MARKER_TAG_BLOCKLIST, app.TEMPORAL_POLICY,
+        seeds = consensus_seeds(records, effective_cores, app.TEMPORAL_POLICY,
                                 thresholds=app.MARKER_THRESHOLDS)
     signatures = index.signatures
     spans = []
@@ -299,7 +304,7 @@ def _marker_contributions(app, records, core_policies, index, metrics, tag_polic
                 if segment["mode"] == "frames":
                     frames = [FramePrediction(Cue(frame["start"], frame["end"], "", (0, 0, 1, 1)),
                                tuple((raw_label(tag), score) for tag, score in frame["tags"]
-                                     if tag not in app.MARKER_TAG_BLOCKLIST and tag not in tag_policies[model]))
+                                     if tag not in tag_policies[model]))
                               for frame in segment["items"]]
                     from stash_ai.thresholds import marker_threshold
                     kwargs = dict(threshold=marker_threshold(segment, app.MARKER_THRESHOLDS), seeds=seeds,
@@ -312,7 +317,7 @@ def _marker_contributions(app, records, core_policies, index, metrics, tag_polic
                                   app.build_markers(frames, effective_cores[model], **kwargs))
                     options = {**build_options(app), "core_exclusions": {k: sorted(v) for k, v in core_policies.items()},
                                "tag_exclusions": {k: sorted(v) for k, v in tag_policies.items()},
-                               "blocklist": sorted(app.MARKER_TAG_BLOCKLIST)}
+                               "blocklist": []}
                     values = [dict(tag=marker.tag, start=marker.start, end=marker.end, score=marker.score,
                                    hits=marker.hits, extra_tags=list(marker.extra_tags),
                                    **(dict(extra_evidence=list(marker.extra_evidence), strong_hits=marker.strong_hits,
@@ -327,10 +332,10 @@ def _marker_contributions(app, records, core_policies, index, metrics, tag_polic
                 else:
                     raise ValueError("Unsupported stored marker evidence.")
                 for item in values:
-                    if item["tag"] not in effective_cores[model] and item["tag"] not in app.MARKER_TAG_BLOCKLIST:
+                    if item["tag"] not in effective_cores[model]:
                         from stash_ai.fusion import prune_blocked_extras
                         spans.append(prune_blocked_extras({**item, "source": model, "meta": segment["meta"]},
-                                                         app.MARKER_TAG_BLOCKLIST | tag_policies[model]))
+                                                         tag_policies[model]))
     from stash_ai.fusion import enrich
     with stage(report, 'marker_fusion'):
         return enrich(app, records, core_policies, spans, signatures, index, metrics)
@@ -383,8 +388,9 @@ def capture_outputs(app, config, vocabulary, cues, predictions, frames, analysis
             outputs['scene']['meta'] = {**meta, 'scene_frames_format': 1,
                 'scene_score_floor': analysis['scene_score_floor']}
     if app.CREATE_MARKERS:
+        # Empty legacy metadata proves no labels were discarded before caching.
         outputs["markers"] = {"mode": "frames", "meta": {
-            **meta, "marker_tag_blocklist": sorted(app.MARKER_TAG_BLOCKLIST)}, "items": [
+            **meta, "marker_tag_blocklist": []}, "items": [
             dict(start=frame.cue.start, end=frame.cue.end, tags=list(frame.tags)) for frame in frames]}
     return outputs
 

@@ -11,6 +11,17 @@ Globalny zakaz dotyczy również marker cores/extras i tworzenia hierarchii.
 `marker_core_exclusions.yml` wyklucza główne tagi markerów bez globalnego
 zakazu użycia etykiety w innych rolach.
 
+Opcja kodowa `MARKER_TAG_BLOCKLIST` została wycofana. Używaj powyższych plików
+YAML. Core-only pozostawia etykietę dostępną jako dodatek i tag sceny, a reguły
+`scene_tag_exclusions.yml` obejmują sceny oraz główne i dodatkowe tagi markerów.
+Osobny zakaz obejmujący wszystkie role markerów z zachowaniem tagu sceny
+nie jest już dostępny.
+
+Cache zapisany z pustą blocklistą jest nadal użyteczny. Niepusta lub nieznana
+historyczna blocklista wymaga `--restart` dla wskazanych scen/modeli przed
+zwykłym merge lub rethreshold markerów. Cleanup może nadal cofać opublikowane
+dowody bez inferencji, z zachowaniem ich historycznych reguł i granic.
+
 ## Cleanup
 
 ```powershell

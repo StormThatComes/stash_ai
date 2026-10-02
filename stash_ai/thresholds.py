@@ -71,8 +71,9 @@ def threshold_failure_reason(exc):
     return next((reason for token, reason in rules if token in lower), type(exc).__name__)
 
 
-def validate_marker_blocklist(app, segment, identity, *, allow_unknown=False):
-    """Previously filtered labels cannot be recovered by changing publication policy."""
+def validate_marker_blocklist(segment, identity, *, allow_unknown=False,
+                              legacy_blocklist=frozenset()):
+    """Guard coverage lost to the retired option; cleanup can replay frozen bans."""
     if segment['mode'] != 'frames' or segment['meta'].get('origin') != 'inference':
         return
     if allow_unknown and 'marker_tag_blocklist' not in segment['meta']:
@@ -81,20 +82,21 @@ def validate_marker_blocklist(app, segment, identity, *, allow_unknown=False):
     if not isinstance(retained, list) or any(not isinstance(tag, str) for tag in retained):
         raise ValueError(f'{identity}: marker blocklist metadata is missing or invalid; '
                          'run inference with --restart for this scene/model.')
-    unblocked = sorted(set(retained) - app.MARKER_TAG_BLOCKLIST)
+    unblocked = sorted(set(retained) - legacy_blocklist)
     if unblocked:
         raise ValueError(f'{identity}: unblocked marker tags {unblocked!r} are absent from cached frames; '
                          'run inference with --restart for this scene/model.')
 
 
 def validate_marker_cache(app, records, *, allow_unknown_blocklist=False,
-                          allow_unknown_retention=False):
+                          allow_unknown_retention=False, legacy_blocklist=frozenset()):
     """Check retained coverage before cached frames can build markers or votes."""
     from stash_ai.temporal import marker_floor
     for model, segments in records.items():
         for segment in segments:
             meta = segment['meta']
-            validate_marker_blocklist(app, segment, model, allow_unknown=allow_unknown_blocklist)
+            validate_marker_blocklist(segment, model, allow_unknown=allow_unknown_blocklist,
+                                      legacy_blocklist=legacy_blocklist)
             # Imported frames have no inference retention contract. Cleanup may
             # also revoke verified published proofs with unknown old retention.
             if segment['mode'] != 'frames':
@@ -157,7 +159,7 @@ def validate(app, store, scene, config, *, check_scene=True, direct=False, metad
         meta = segment['meta']
         if segment['mode'] != 'frames' or meta.get('origin') != 'inference':
             raise ValueError(f'{scene}/{model}: imported ranges cannot be rethresholded; run inference.')
-        validate_marker_blocklist(app, segment, f'{scene}/{model}')
+        validate_marker_blocklist(segment, f'{scene}/{model}')
         # Before temporal retention was introduced, only high detections survived.
         floor = meta.get('marker_score_floor', meta.get('marker_threshold'))
         if not _score(floor) or floor > needed:

@@ -162,7 +162,7 @@ def scene_reason(score, stats, threshold, policy):
     return None
 
 
-def consensus_seeds(records, policies, blocklist, policy, *, thresholds=None):
+def consensus_seeds(records, policies, policy, *, thresholds=None):
     """Only identical sampled inputs/times can vote, at most once per model."""
     if not policy.enabled:
         return {}
@@ -178,7 +178,7 @@ def consensus_seeds(records, policies, blocklist, policy, *, thresholds=None):
             floor = marker_floor(policy, high)
             for frame in segment["items"]:
                 for tag, score in frame["tags"]:
-                    if score >= floor and tag not in policies[model] and tag not in blocklist:
+                    if score >= floor and tag not in policies[model]:
                         votes[(identity, frame["start"], tag)].add(model)
     return {key: tuple(sorted(models)) for key, models in votes.items() if len(models) >= policy.consensus_min_models}
 
@@ -205,7 +205,7 @@ def build_markers(app, frames, core_exclusions, *, threshold=None, seeds=None, i
     for frame in frames:
         cue = frame.cue
         ordered = sorted(((tag, score) for tag, score in frame.tags
-                          if tag not in app.MARKER_TAG_BLOCKLIST and score >= sort_floor),
+                          if score >= sort_floor),
                          key=lambda item: (-item[1], item[0]))
         extras = [(tag, score) for tag, score in ordered if score >= high]
         cores = [(tag, score) for tag, score in ordered if tag not in core_exclusions and score >= floor]

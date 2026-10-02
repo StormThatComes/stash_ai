@@ -100,7 +100,6 @@ def publication_key(app, args, hierarchy, cores, tags, stash):
              'REPLACE_SCENE_TAGS', 'REPLACE_MARKERS')
     return digest(dict(code=code, policy=asdict(app.TEMPORAL_POLICY),
         settings={name: getattr(app, name) for name in names},
-        blocklist=sorted(app.MARKER_TAG_BLOCKLIST),
         cores={s: sorted(v) for s, v in cores.items()}, tags={s: sorted(v) for s, v in tags.items()},
         hierarchy=asdict(hierarchy) if hierarchy else None, end_time=stash.has_end_time))
 
