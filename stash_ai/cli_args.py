@@ -114,6 +114,8 @@ def build_parser(app) -> argparse.ArgumentParser:
                        help="Write an offline per-model utility and leave-one-model-out ablation report from saved evidence.")
     modes.add_argument("--tag-review-report", type=Path, metavar="NEW.json",
                        help="Write an offline tag review queue with reasons, examples and per-model counts; no inference or Stash requests.")
+    modes.add_argument("--cache-report", type=Path, metavar="NEW.json",
+                       help="Report scene/marker cache coverage against selected YAML models and plan targeted backfill; offline and read-only.")
     
     return parser
 
@@ -130,6 +132,18 @@ def mode_flags(args) -> tuple[bool, bool]:
 
 def validate_args(app, parser: argparse.ArgumentParser, args: argparse.Namespace) -> argparse.Namespace:
     db_mode = database_mode(args)
+    if args.cache_report is not None:
+        if args.output_mode != "merged":
+            parser.error("--cache-report requires --output-mode merged.")
+        if args.device or args.offline or args.resume is not None or args.restart:
+            parser.error("--cache-report does not use model execution/resume options.")
+        if (args.markers_only or args.scene_tags_only or args.profile_merge or args.force_merge
+                or args.rethreshold_scenes or args.rethreshold_markers or args.abandon_pending
+                or args.prune_empty_tags or args.prune_prefixes or args.create_all_tags or args.no_hierarchy
+                or args.dry_run):
+            parser.error("--cache-report is read-only and checks both outputs; tagging/recovery modifiers do not apply.")
+        if args.cache_report.suffix.lower() != ".json" or args.cache_report.expanduser().exists():
+            parser.error("--cache-report requires a new .json file; existing files are never overwritten.")
     if args.tag_review_report is not None:
         if args.output_mode != "merged":
             parser.error("--tag-review-report requires --output-mode merged.")

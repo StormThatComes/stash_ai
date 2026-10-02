@@ -39,4 +39,7 @@ def run_standalone_command(app, args, *, cleanup_only: bool) -> int | None:
     if args.tag_review_report is not None:
         from stash_ai.tag_review import run as run_tag_review
         return run_tag_review(app, args)
+    if args.cache_report is not None:
+        from stash_ai.cache_report import run as run_cache_report
+        return run_cache_report(app, args)
     return None
