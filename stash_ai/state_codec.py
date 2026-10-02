@@ -3,6 +3,7 @@ import json
 import zlib
 
 from stash_ai.runtime import stage
+from stash_ai.state_snapshot import FORMAT_KEY, expand
 
 
 def encode(value, report=None):
@@ -21,6 +22,9 @@ def decode(value, report=None):
         raw = zlib.decompress(value)
     with stage(report, 'state_json_decode'):
         result = json.loads(raw)
+    if isinstance(result, dict) and FORMAT_KEY in result:
+        with stage(report, 'state_snapshot_expand'):
+            result = expand(result)
     if report is not None:
         report.record_counts(state_json_bytes_read=len(raw), state_blob_bytes_read=len(value))
     return result

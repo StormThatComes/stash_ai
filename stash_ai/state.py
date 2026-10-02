@@ -6,7 +6,7 @@ from contextlib import AbstractContextManager
 import hashlib
 from urllib.parse import urlparse
 
-from stash_ai.runtime import measured
+from stash_ai.runtime import measured, stage
 from stash_ai.state_codec import encode, decode
 from stash_ai.state_db import APPLICATION_ID, StateDatabase
 
@@ -105,6 +105,18 @@ class StateStore(AbstractContextManager):
 
     def pack(self, value):
         return encode(value, getattr(self, 'report', None))
+
+    def pack_snapshot(self, value):
+        """Encode shared proofs and mark their format inside the write transaction."""
+        from stash_ai.state_snapshot import compact
+        with stage(getattr(self, 'report', None), 'state_snapshot_compact'):
+            packed = compact(value)
+        if packed is not value:
+            if not self.connection.in_transaction:
+                self.connection.execute('BEGIN')
+            if self.connection.execute('PRAGMA user_version').fetchone()[0] < 9:
+                self.connection.execute('PRAGMA user_version=9')
+        return self.pack(packed)
 
     def unpack(self, value):
         return decode(value, getattr(self, 'report', None))

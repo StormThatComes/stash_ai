@@ -44,6 +44,9 @@ def main():
     app.MARKER_MERGE_GAP_SECONDS = 0
     app.APPLY_SCENE_TAGS = app.CREATE_MARKERS = app.CREATE_MISSING = True
     source = synthetic_records(SOURCES, args.frames, args.labels)
+    for segments in source.values():
+        segments[0]['meta'].update(marker_tag_blocklist=[], marker_score_floor=.1)
+    input_sha256 = hashlib.sha256(json.dumps(source, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
     policies = {s: frozenset() for s in SOURCES}
     rows = []
     for _ in range(args.repeats):
@@ -66,14 +69,23 @@ def main():
                     counts = merge.sync_merged(app, stash, app.TagResolver(stash, source=merge.AI), state,
                                               stash.find_scene('1'), hits, spans, report=report)
                 elapsed, cpu_elapsed = time.perf_counter()-start, time.process_time()-cpu
+            stages = dict(report.timings)  # Verification below is outside the measured region.
             blobs = state.connection.execute('SELECT kind,published FROM snapshots ORDER BY kind').fetchall()
             sizes = {kind: dict(json_bytes=len(zlib.decompress(blob)), compressed_bytes=len(blob)) for kind, blob in blobs}
-            rows.append(dict(wall_seconds=elapsed, cpu_seconds=cpu_elapsed, stages=dict(report.timings),
+            logical = {kind: state.unpack(blob) for kind, blob in blobs}
+            canonical = lambda value: json.dumps(value, sort_keys=True, separators=(',', ':'), allow_nan=False).encode()
+            rows.append(dict(wall_seconds=elapsed, cpu_seconds=cpu_elapsed, stages=stages,
                              counts=dict(counts), snapshots=sizes,
+                             logical_snapshot_sha256=hashlib.sha256(canonical(logical)).hexdigest(),
+                             stash_sha256=hashlib.sha256(canonical(stash.scene)).hexdigest(),
                              snapshot_sha256=hashlib.sha256(b''.join(blob for _, blob in blobs)).hexdigest()))
+            # Keep verification's expanded snapshot out of the next trial's working set.
+            del logical, blobs, hits, spans, stash
     if len({row['snapshot_sha256'] for row in rows}) != 1:
         raise RuntimeError('Non-deterministic snapshots')
-    result = dict(frames=args.frames, labels=args.labels, models=len(SOURCES),
+    if len({row['logical_snapshot_sha256'] for row in rows}) != 1 or len({row['stash_sha256'] for row in rows}) != 1:
+        raise RuntimeError('Non-deterministic logical output')
+    result = dict(frames=args.frames, labels=args.labels, models=len(SOURCES), input_sha256=input_sha256,
                   median_seconds=statistics.median(row['wall_seconds'] for row in rows), trials=rows)
     rendered = json.dumps(result, indent=2)
     if args.output:
