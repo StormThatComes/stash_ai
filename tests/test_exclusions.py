@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from stash_ai import inference
+from stash_ai import merge_cleanup
 from stash_ai import separate_sync
 from stash_ai import cli as app
 from stash_ai import merge
@@ -108,14 +109,14 @@ def test_source_exclusion_rebuilds_extra_proofs_without_resurrecting_revoked_sou
         if old_snapshot:
             for span in spans: span['build_options'].pop('tag_exclusions', None)
         tags = policies_or_empty({'wd': ['detail']})
-        cleaned = merge.cleanup_support(app, store, '1', spans, {'wd'}, cores, tags)
+        cleaned = merge_cleanup.cleanup_support(app, store, '1', spans, {'wd'}, cores, tags)
         marker = merge.union_intervals(cleaned)[0]
         assert marker['extra_tags'] == ['detail']
         assert set(marker['extra_evidence']['detail']['source_evidence']) == {'dtq'}
         # The current file no longer bans WD. Cleanup must still retain that
         # earlier removal, using the frozen global exclusions from publication.
         tags = policies_or_empty({'dtq': ['detail']})
-        cleaned = merge.cleanup_support(app, store, '1', cleaned, {'dtq'}, cores, tags)
+        cleaned = merge_cleanup.cleanup_support(app, store, '1', cleaned, {'dtq'}, cores, tags)
         marker = merge.union_intervals(cleaned)[0]
         assert marker['extra_tags'] == []
         assert (marker['start'], marker['end']) == (0, 3)

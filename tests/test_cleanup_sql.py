@@ -7,6 +7,8 @@ import sqlite3
 import pytest
 
 from stash_ai import cli as app
+from stash_ai import state_codec
+from stash_ai import merge_sync
 from stash_ai import cleanup_sql as fast
 from stash_ai import merge
 from stash_ai.cleanup import CleanupClient
@@ -151,7 +153,7 @@ def test_source_specific_cleanup_reconciles_only_candidates(tmp_path, monkeypatc
     for i in range(2, 20):
         stash.scenes[str(i)] = dict(id=str(i), tags=[], scene_markers=[])
     with merge.StateStore(tmp_path/'state.sqlite3', merge.scope_for(app.STASH_URL)) as store:
-        merge.sync_merged(app, stash, app.TagResolver(stash, source=merge.AI), store, stash.find_scene('1'),
+        merge_sync.sync_merged(app, stash, app.TagResolver(stash, source=merge.AI), store, stash.find_scene('1'),
                          [hit('wd'), hit('oppai')], [span('joytag',10,20),span('oppai',20,30),span('wd',30,40)])
     stash.scene_reads.clear()
     install(monkeypatch, stash)
@@ -281,7 +283,7 @@ def test_legacy_interrupted_global_cleanup_can_resume_using_sql(tmp_path, monkey
         masks = {'global': {'blocked': 1}, 'core': {}, 'ids': {tag_id: 1}}
         with store.connection:
             store.connection.execute('INSERT INTO cleanup_state VALUES (?,?,?,?)',
-                                     (store.scope, 1, merge.encode(masks), fingerprint))
+                                     (store.scope, 1, state_codec.encode(masks), fingerprint))
             store.connection.execute('PRAGMA user_version=5')
     before = deepcopy((stash.scenes, stash.tags)), path.read_bytes(), path.stat().st_mtime_ns
     install(monkeypatch, stash)

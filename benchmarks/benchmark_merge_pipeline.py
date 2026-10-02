@@ -32,6 +32,7 @@ def main():
         parser.error('frames, labels and repeats must be positive')
     sys.path.insert(0, str(args.project.resolve()))
     from stash_ai import cli as app
+    from stash_ai import merge_sync
     from stash_ai import merge
     from stash_ai.runtime import RunReport
     from stash_ai.taggers import SOURCES
@@ -66,7 +67,7 @@ def main():
                 with report.measure('merge_compute'):
                     hits, spans = merge.evidence(app, state, '1', policies, policies)
                 with report.measure('merge_plan'):
-                    counts = merge.sync_merged(app, stash, app.TagResolver(stash, source=merge.AI), state,
+                    counts = merge_sync.sync_merged(app, stash, app.TagResolver(stash, source=merge.AI), state,
                                               stash.find_scene('1'), hits, spans, report=report)
                 elapsed, cpu_elapsed = time.perf_counter()-start, time.process_time()-cpu
             stages = dict(report.timings)  # Verification below is outside the measured region.

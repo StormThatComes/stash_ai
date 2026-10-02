@@ -35,6 +35,7 @@ def main():
         parser.error('markers/labels/repeats must be positive; labels cannot exceed markers')
     sys.path.insert(0, str(args.project.resolve()))
     from stash_ai import cli as app, merge
+    from stash_ai import merge_sync
     from stash_ai.runtime import RunReport
     from stash_ai.temporal import TemporalPolicy
     from tests.helpers.stash import Stash
@@ -52,14 +53,14 @@ def main():
             Path(directory)/'state.sqlite3', 'marker-matching-benchmark', cache_bytes=128*2**20) as store:
         stash = Stash(); stash.has_end_time = not args.point_only
         resolver = app.TagResolver(stash, source=merge.AI)
-        merge.sync_merged(app, stash, resolver, store, stash.find_scene('1'), [], spans, migrate=False)
+        merge_sync.sync_merged(app, stash, resolver, store, stash.find_scene('1'), [], spans, migrate=False)
         for _ in range(args.repeats):
             gc.collect()
             report = RunReport(write=lambda _: None)
             store.report = report
             current = stash.find_scene('1')  # Same input; API latency is excluded.
             start, cpu = time.perf_counter(), time.process_time()
-            counts = merge.sync_merged(app, stash, resolver, store, current, [], spans,
+            counts = merge_sync.sync_merged(app, stash, resolver, store, current, [], spans,
                                        migrate=False, cleanup=args.cleanup, report=report)
             elapsed, cpu_elapsed = time.perf_counter()-start, time.process_time()-cpu
             stages = dict(report.timings)

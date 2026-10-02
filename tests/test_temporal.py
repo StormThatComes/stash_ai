@@ -8,6 +8,8 @@ import numpy as np
 import pytest
 
 from stash_ai import inference
+from stash_ai import merge_cleanup
+from stash_ai import merge_sync
 from stash_ai import cli as app
 from stash_ai import merge
 from stash_ai.temporal import TemporalPolicy, SceneAccumulator, scene_reason, consensus_seeds
@@ -212,13 +214,13 @@ def test_cleanup_revokes_consensus_votes_without_restoring_manual_deletions(tmp_
         for model in ('wd','dtq','oppai'):
             state.put('1',model,{'markers':segment(model,[[('core',.7)]]*3)})
         hits,spans=merge.evidence(app,state,'1',policies,policies)
-        merge.sync_merged(app,stash,app.TagResolver(stash,source=merge.AI),state,stash.find_scene('1'),hits,spans)
+        merge_sync.sync_merged(app,stash,app.TagResolver(stash,source=merge.AI),state,stash.find_scene('1'),hits,spans)
         policies['wd']=frozenset({'core'})
         kept=[s for s in spans if s['source']!='wd']
-        cleaned=merge.cleanup_support(app,state,'1',kept,{'wd'},policies)
+        cleaned=merge_cleanup.cleanup_support(app,state,'1',kept,{'wd'},policies)
         assert merge.union_intervals(cleaned)[0]['sources']==['dtq','oppai']
         policies['dtq']=frozenset({'core'})
-        cleaned=merge.cleanup_support(app,state,'1',[s for s in cleaned if s['source']!='dtq'],{'dtq'},policies)
+        cleaned=merge_cleanup.cleanup_support(app,state,'1',[s for s in cleaned if s['source']!='dtq'],{'dtq'},policies)
         assert cleaned==[]
 
 
@@ -233,13 +235,13 @@ def test_cleanup_uses_published_evidence_and_does_not_adopt_new_votes(tmp_path,c
         kept=[span for span in spans if span['source']=='dtq']
         if change=='new_model':
             state.put('1','oppai',{'markers':segment('oppai',[[('core',.7)]]*3)})
-            assert merge.cleanup_support(app,state,'1',kept,{'wd'},policies)==[]
+            assert merge_cleanup.cleanup_support(app,state,'1',kept,{'wd'},policies)==[]
         else:
             altered=segment('wd',[[('core',.7)]]*3)
             altered['items'][0]['tags']=[('core',.71)]
             state.put('1','wd',{'markers':altered})
             with pytest.raises(RuntimeError,match='merge-only'):
-                merge.cleanup_support(app,state,'1',kept,{'wd'},policies)
+                merge_cleanup.cleanup_support(app,state,'1',kept,{'wd'},policies)
 
 
 def test_legacy_mode_filters_weaker_scores_retained_by_new_inference(monkeypatch):

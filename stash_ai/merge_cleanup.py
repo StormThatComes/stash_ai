@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from tqdm import tqdm
 
 from stash_ai import separate_sync
+from stash_ai import merge_sync
 from stash_ai import merge
 from stash_ai.runtime import RunReport
 from stash_ai.taggers import SOURCES
@@ -139,13 +140,13 @@ def cleanup_scene(app, stash, resolver, store, current, settings, selected, args
         hits = (published.get("scene") or {}).get("contributions", [])
         spans = (published.get("markers") or {}).get("contributions", [])
         clean_hits = cleanup_scene_support(app, store, scene_id, hits, selected, scene_policies)
-        clean_spans = merge.cleanup_support(app, store, scene_id, spans, selected, core_policies, scene_policies)
+        clean_spans = cleanup_support(app, store, scene_id, spans, selected, core_policies, scene_policies)
         blocked_names = excluded_names(scoped_tags)
         forbidden_present = (app.APPLY_SCENE_TAGS and any(tag['name'] in blocked_names for tag in current.get('tags', []))) or (
             app.CREATE_MARKERS and any(tag['name'] in blocked_names for marker in current.get('scene_markers', [])
                                       for tag in [marker['primary_tag'], *marker.get('tags', [])]))
         if clean_hits != hits or clean_spans != spans or forbidden_present:
-            result = merge.sync_merged(app, stash, resolver, store, current, clean_hits, clean_spans,
+            result = merge_sync.sync_merged(app, stash, resolver, store, current, clean_hits, clean_spans,
                                        migrate=False, cleanup=True, report=report, tag_policies=scoped_tags)
             stats.update(result)
             if not stash.dry_run and any(result[name] for name in (
@@ -270,7 +271,7 @@ class CleanupRun:
         for current in bar:
             scene_id = str(current["id"])
             try:
-                self.stats.update(merge.cleanup_scene(
+                self.stats.update(cleanup_scene(
                     app, self.cleanup_stash, self.resolver, self.store, current, self.settings, self.selected,
                     self.args, self.core_policies, self.scene_policies, self.scoped_tags, self.report))
                 self.stats["processed"] += 1

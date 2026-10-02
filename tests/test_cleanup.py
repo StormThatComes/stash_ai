@@ -6,6 +6,7 @@ import pytest
 import yaml
 
 from stash_ai import cli as app
+from stash_ai import merge_sync
 from stash_ai import cleanup
 from stash_ai import merge
 from stash_ai.taggers import WD
@@ -144,7 +145,7 @@ def test_publication_masks_are_lazy_and_unbanning_restores_raw_evidence(pipeline
     before = blobs()
     args = options(tmp_path, ['common'])
     with monkeypatch.context() as patch:
-        patch.setattr(merge, 'decode', lambda *_: pytest.fail('cleanup decompressed per-scene evidence'))
+        patch.setattr(merge.StateStore, 'unpack', lambda *_: pytest.fail('cleanup decompressed per-scene evidence'))
         assert app.main(args) == 0
     assert blobs() == before
     with merge.StateStore(p.path, merge.scope_for(app.STASH_URL), cache_bytes=2**20) as store:
@@ -173,7 +174,7 @@ def test_source_specific_cleanup_only_revisits_matching_scene_and_splits_bridge(
     for i in range(2, 100):
         stash.scenes[str(i)] = dict(id=str(i), tags=[stash.tag('ai:blocked')], scene_markers=[])
     with merge.StateStore(tmp_path/'state.sqlite3', merge.scope_for(app.STASH_URL)) as store:
-        merge.sync_merged(app, stash, app.TagResolver(stash, source=merge.AI), store, stash.find_scene('1'),
+        merge_sync.sync_merged(app, stash, app.TagResolver(stash, source=merge.AI), store, stash.find_scene('1'),
             [hit('wd'), hit('oppai')], [span('joytag', 10, 20), span('oppai', 20, 30), span('wd', 30, 40)])
     install(monkeypatch, stash)
     stash.scene_reads.clear()

@@ -3,7 +3,11 @@
 W katalogu głównym pozostają dwa pliki Pythona uruchamiane z linii poleceń:
 `stash_ai.py` i `update_stash_ai.py`. Launcher `stash_ai.py` przejmuje blokadę
 instalacji, a `stash_ai/cli.py` koordynuje CLI i uruchomienie pipeline.
-Algorytmy fusion i kompatybilne entry pointy pozostają w `stash_ai/merge.py`.
+Algorytmy fusion i entry point `run_merged()` pozostają w `stash_ai/merge.py`.
+`run_merged()` obejmuje `MergedRun.run()` kontekstem diagnostyki. Wywołania
+reconciliation korzystają bezpośrednio z `merge_sync` i `merge_cleanup`; CLI
+uruchamia cleanup przez `CleanupRun.run()`. Kod i testy importują codec
+bezpośrednio z `stash_ai/state_codec.py`.
 Stanowy lifecycle jednego przebiegu merged-output (scan, rethreshold, inference,
 publikacja i pruning) obsługuje `stash_ai/merge_run.py` / `MergedRun`. Opcjonalny `stash_ai/merge_parallel.py` uruchamia wyłącznie read-only replay evidence w izolowanych procesach; `MergedRun` zachowuje pojedynczy writer dla TagResolver, Stash i StateStore.
 Planowanie i publikację zmian jednej sceny rozdziela `stash_ai/merge_sync.py`;

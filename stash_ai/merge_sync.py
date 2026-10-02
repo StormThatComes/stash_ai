@@ -1,6 +1,6 @@
 """One-scene merged-output planning and publication.
 
-The public compatibility entry point remains stash_ai.merge.sync_merged.
+Call sync_merged directly for one-scene reconciliation.
 This module separates evidence preparation, tag planning, marker planning and
 publication while keeping merge algorithms function-oriented.
 """
