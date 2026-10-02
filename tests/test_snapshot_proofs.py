@@ -6,6 +6,8 @@ import zlib
 import pytest
 
 from stash_ai import cli as app, cleanup, db, merge, recovery, scene_cache
+from stash_ai import merge_cleanup
+from stash_ai import merge_sync
 from stash_ai.runtime import RunReport
 from stash_ai.state import StateStore
 from stash_ai.state_codec import decode, encode
@@ -241,7 +243,7 @@ def test_merge_cleanup_and_partial_publication_recovery_match_old_snapshots(tmp_
             policies = empty_policies()
             seed_records(store, ['core', 'abc', 'def'])
             hits, spans = merge.evidence(app, store, '1', policies, policies)
-            initial = merge.sync_merged(app, stash, resolver, store, stash.find_scene('1'), hits, spans)
+            initial = merge_sync.sync_merged(app, stash, resolver, store, stash.find_scene('1'), hits, spans)
             snapshot = store.snapshot('1', 'markers')[0]
             stored = json.loads(zlib.decompress(store.connection.execute("SELECT published FROM snapshots WHERE kind='markers'").fetchone()[0]))
             assert (FORMAT_KEY in stored) == compact_storage
@@ -249,12 +251,12 @@ def test_merge_cleanup_and_partial_publication_recovery_match_old_snapshots(tmp_
             markers = lambda items: [{k: v for k, v in item.items() if k != 'contributors'}
                                      for item in merge.union_intervals(items)]
             assert markers(snapshot['contributions']) == markers(spans)
-            repeated = merge.sync_merged(app, stash, resolver, store, stash.find_scene('1'), hits, spans)
+            repeated = merge_sync.sync_merged(app, stash, resolver, store, stash.find_scene('1'), hits, spans)
             assert repeated['markers_unchanged'] == 3
             raw_results = store.connection.execute('SELECT data FROM results ORDER BY model').fetchall()
             cores = {**policies, 'wd': frozenset({'core'})}
-            cleaned = merge.cleanup_support(app, store, '1', snapshot['contributions'], {'wd'}, cores, policies)
-            cleaned_stats = merge.sync_merged(app, stash, resolver, store, stash.find_scene('1'), [], cleaned,
+            cleaned = merge_cleanup.cleanup_support(app, store, '1', snapshot['contributions'], {'wd'}, cores, policies)
+            cleaned_stats = merge_sync.sync_merged(app, stash, resolver, store, stash.find_scene('1'), [], cleaned,
                                              cleanup=True, migrate=False, tag_policies=policies)
             assert store.connection.execute('SELECT data FROM results ORDER BY model').fetchall() == raw_results
 
@@ -269,7 +271,7 @@ def test_merge_cleanup_and_partial_publication_recovery_match_old_snapshots(tmp_
                 return create(payload)
             stash.create_marker = fail_second
             with pytest.raises(RuntimeError, match='partial publication'):
-                merge.sync_merged(app, stash, resolver, store, stash.find_scene('1'), hits, spans)
+                merge_sync.sync_merged(app, stash, resolver, store, stash.find_scene('1'), hits, spans)
             pending = store.connection.execute("SELECT pending FROM snapshots WHERE kind='markers'").fetchone()[0]
             recovery.abandon(store, lambda _: None)
             assert store.connection.execute("SELECT data FROM recovery_publications WHERE kind='markers'").fetchone()[0] == pending
@@ -277,7 +279,7 @@ def test_merge_cleanup_and_partial_publication_recovery_match_old_snapshots(tmp_
                                                       store.snapshot('1', 'markers')[0])
             assert reconciled and 'new' not in {s['tag'] for s in observed['contributions']}
             stash.create_marker = create
-            finished = merge.sync_merged(app, stash, resolver, store, stash.find_scene('1'), hits, spans)
+            finished = merge_sync.sync_merged(app, stash, resolver, store, stash.find_scene('1'), hits, spans)
             assert not store.has_pending_publications() and not recovery.publications(store, '1', 'markers')
             variants.append((stash.scene, stash.writes, initial, repeated, cleaned_stats, observed, finished,
                              store.snapshot('1', 'markers')[0]))

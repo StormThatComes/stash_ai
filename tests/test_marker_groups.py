@@ -5,6 +5,7 @@ import json
 import pytest
 
 from stash_ai import cli as app
+from stash_ai import merge_sync
 from stash_ai import marker_groups as groups
 from stash_ai import merge
 from stash_ai.occurrences import OCCURRENCE_TAG
@@ -53,7 +54,7 @@ def test_one_group_per_primary_independent_of_extra_labels_or_time_support(tmp_p
     with merge.StateStore(tmp_path/'state', 'fixture') as state:
         resolver = app.TagResolver(stash, source=merge.AI)
         contributions = [span('wd', 0, 5, 'abc', extras=['def']), span('joytag', 10, 15, 'abc')]
-        merge.sync_merged(app, stash, resolver, state, stash.find_scene('1'), [], contributions)
+        merge_sync.sync_merged(app, stash, resolver, state, stash.find_scene('1'), [], contributions)
         assert len(stash.scene['scene_markers']) == 2
         assert all(group_names(m) == {'m:abc'} for m in stash.scene['scene_markers'])
         assert 'm:def' not in stash.tags and 'm:abc:occurance' not in stash.tags
@@ -64,7 +65,7 @@ def test_one_group_per_primary_independent_of_extra_labels_or_time_support(tmp_p
         assert groups.managed_group(group)
         assert 'm:abc' not in json.dumps(state.snapshot('1', 'markers')[0]['contributions'])
         stash.writes.clear()
-        merge.sync_merged(app, stash, resolver, state, stash.find_scene('1'), [], contributions)
+        merge_sync.sync_merged(app, stash, resolver, state, stash.find_scene('1'), [], contributions)
         assert not stash.writes
 
 
@@ -74,7 +75,7 @@ def test_union_and_split_drop_obsolete_managed_groups_but_keep_manual_extras(tmp
         resolver = app.TagResolver(stash, source=merge.AI)
         base = [span('wd', 0, 5, 'abc'), span('joytag', 10, 15, 'abc')]
         def sync(contributions):
-            merge.sync_merged(app, stash, resolver, state, stash.find_scene('1'), [], contributions)
+            merge_sync.sync_merged(app, stash, resolver, state, stash.find_scene('1'), [], contributions)
         sync(base)
         stale = groups.for_resolver(app, resolver).resolve('old')
         for marker in stash.scene['scene_markers']:

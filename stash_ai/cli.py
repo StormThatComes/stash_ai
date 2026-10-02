@@ -290,17 +290,15 @@ def main(argv: list[str] | None = None) -> int:
     empty_policies = {name: frozenset() for name in SOURCES}
     core_policies = load_exclusion_policy(args.marker_core_exclusions, "excluded_core_tags") if CREATE_MARKERS and not hierarchy_only else empty_policies
     scene_policies = load_exclusion_policy(args.scene_tag_exclusions, "excluded_scene_tags")
+    if cleanup_only:
+        from stash_ai.merge_cleanup import CleanupRun
+        return CleanupRun(app, settings, args, core_policies, scene_policies).run()
     if args.output_mode == "merged":
         from stash_ai import merge as stash_merge
         if args.explain_tag:
             return stash_merge.explain(app, args, core_policies, scene_policies)
-        if cleanup_only:
-            return stash_merge.run_cleanup(app, settings, args, core_policies, scene_policies)
         if args.merge_only:
             return stash_merge.run_merged(app, settings, args, {}, stash_merge.combined_hierarchy(app, args, scene_policies), core_policies, scene_policies)
-    if cleanup_only:
-        from stash_ai.merge import run_cleanup as run_full_cleanup
-        return run_full_cleanup(sys.modules[__name__], settings, args, core_policies, scene_policies)
     catalogs, hierarchies = {}, {}
     # Validate all selected vocabularies and hierarchies before any Stash writes.
     for config in settings:

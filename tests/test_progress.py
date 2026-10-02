@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 
 from stash_ai import inference
+from stash_ai import state_codec
 from stash_ai import cli as app
 from stash_ai import merge
 from stash_ai import progress
@@ -183,7 +184,7 @@ def test_status_lookup_does_not_decompress_results(pipeline,monkeypatch):
     p=pipeline
     assert app.main(p.args)==0
     with merge.StateStore(p.path,merge.scope_for(app.STASH_URL),True) as state:
-        monkeypatch.setattr(merge,"decode",lambda *args:pytest.fail("status decompressed predictions"))
+        monkeypatch.setattr(state,"unpack",lambda *args:pytest.fail("status decompressed predictions"))
         assert merge.has_outputs(app,state,"1","wd")
         assert state.sources("1","markers")=={"wd"}
 
@@ -247,7 +248,7 @@ def test_v1_database_is_migrated_once_without_losing_sources(tmp_path,monkeypatc
     db=sqlite3.connect(path)
     db.executescript(f"PRAGMA application_id={merge.APPLICATION_ID}; PRAGMA user_version=1; "
                     "CREATE TABLE results(scope TEXT,scene TEXT,model TEXT,kind TEXT,data BLOB,PRIMARY KEY(scope,scene,model,kind));")
-    db.execute("INSERT INTO results VALUES (?,?,?,?,?)",("fixture","1","wd","scene",merge.encode([segment])))
+    db.execute("INSERT INTO results VALUES (?,?,?,?,?)",("fixture","1","wd","scene",state_codec.encode([segment])))
     db.commit();db.close()
     with merge.StateStore(path,"fixture") as state:
         assert state.connection.execute("PRAGMA user_version").fetchone()==(5,)

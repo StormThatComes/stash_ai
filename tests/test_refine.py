@@ -15,6 +15,8 @@ from PIL import Image
 import pytest
 
 from stash_ai import inference
+from stash_ai import state_codec
+from stash_ai import merge_cleanup
 from stash_ai import cli as app
 from stash_ai import merge
 from stash_ai import progress
@@ -53,12 +55,12 @@ def mark_as_v3(path, *, add_video_result=False):
         if add_video_result:
             rows=db.execute("SELECT scope,scene,model,data FROM results WHERE kind='markers'").fetchall()
             for scope,scene,model,data in rows:
-                records=merge.decode(data)
+                records=state_codec.decode(data)
                 records[-1]['refinement']=old_video_payload()
                 db.execute("UPDATE results SET data=? WHERE scope=? AND scene=? AND model=? AND kind='markers'",
-                           (merge.encode(records),scope,scene,model))
+                           (state_codec.encode(records),scope,scene,model))
         db.execute('CREATE TABLE refinement_progress(scope TEXT,scene TEXT,model TEXT,signature TEXT,data BLOB,PRIMARY KEY(scope,scene,model))')
-        db.execute('INSERT INTO refinement_progress VALUES (?,?,?,?,?)',('fixture','1','wd','old-job',merge.encode(old_video_payload())))
+        db.execute('INSERT INTO refinement_progress VALUES (?,?,?,?,?)',('fixture','1','wd','old-job',state_codec.encode(old_video_payload())))
         db.execute('PRAGMA user_version=3')
 
 
@@ -171,7 +173,7 @@ def test_frozen_old_policies_do_not_reenable_retired_options(tmp_path):
             span['build_options']['policy'].update(refine_enabled=True,refine_path_map=[{'stash':'/media','local':'/not-accessible'}])
         assert merge.union_intervals(spans)[0]['sources']==['wd','dtq','oppai']
         policies['wd']=frozenset({'core'})
-        cleaned=merge.cleanup_support(app,state,'1',[s for s in spans if s['source']!='wd'],{'wd'},policies)
+        cleaned=merge_cleanup.cleanup_support(app,state,'1',[s for s in spans if s['source']!='wd'],{'wd'},policies)
         assert merge.union_intervals(cleaned)[0]['sources']==['dtq','oppai']
         assert all(not any(k.startswith('refine_') for k in span['build_options']['policy']) for span in cleaned)
 
@@ -183,6 +185,6 @@ def test_appended_results_never_retain_retired_video_payload(tmp_path):
         state.put('1','wd',{'markers':data},replace={'markers':False})
         state.put('1','wd',{'markers':data},replace={'markers':False})
         raw=state.connection.execute("SELECT data FROM results WHERE kind='markers'").fetchone()[0]
-        records=merge.decode(raw)
+        records=state_codec.decode(raw)
         assert len(records)==1 and 'refinement' not in records[0]
         assert not any(key.startswith('refine_') for key in asdict(TemporalPolicy()))

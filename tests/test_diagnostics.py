@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from stash_ai import inference
+from stash_ai import state_codec
 from stash_ai import cli as app
 from stash_ai import merge
 from stash_ai.diagnostics import MergeDiagnostics
@@ -82,9 +83,9 @@ def test_codec_measures_bytes_without_changing_persisted_format(tmp_path):
     payload = {'contributions': [{'tag': 'tag', 'extra_tags': ['unicode-ą']} for _ in range(10)]}
     with MergeDiagnostics(report, tmp_path/'codec.jsonl') as diagnostics:
         with diagnostics.scene('1'):
-            baseline = merge.encode(payload)
-            encoded = merge.encode(payload, report)
-            assert baseline == encoded and merge.decode(encoded, report) == payload
+            baseline = state_codec.encode(payload)
+            encoded = state_codec.encode(payload, report)
+            assert baseline == encoded and state_codec.decode(encoded, report) == payload
     scene = records(tmp_path/'codec.jsonl')[1]
     assert scene['counts']['state_blob_bytes_read'] == scene['counts']['state_blob_bytes_written'] == len(encoded)
     assert scene['counts']['state_json_bytes_read'] == scene['counts']['state_json_bytes_written'] > len(encoded)

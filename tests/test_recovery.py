@@ -5,6 +5,8 @@ import sqlite3
 import pytest
 
 from stash_ai import cli as app
+from stash_ai import merge_cleanup
+from stash_ai import merge_sync
 from stash_ai import cleanup
 from stash_ai import merge
 from stash_ai import recovery
@@ -36,7 +38,7 @@ def seed(tmp_path, stash, spans=None):
         store.put('1', 'wd', {
             'scene': dict(mode='scene', items=hits, meta={'origin': 'legacy'}),
             'markers': dict(mode='spans', items=spans, meta={'origin': 'legacy'})})
-        merge.sync_merged(app, stash, app.TagResolver(stash, source=merge.AI), store, stash.find_scene('1'), hits, spans)
+        merge_sync.sync_merged(app, stash, app.TagResolver(stash, source=merge.AI), store, stash.find_scene('1'), hits, spans)
 
 
 def raw_results(tmp_path):
@@ -134,7 +136,7 @@ def test_abandoned_merge_keeps_scene_association_ownership_after_lost_response(t
     with state(tmp_path) as store:
         monkeypatch.setattr(stash, 'update_scene_tags', lost)
         with pytest.raises(RuntimeError):
-            merge.sync_merged(app, stash, app.TagResolver(stash, source=merge.AI), store,
+            merge_sync.sync_merged(app, stash, app.TagResolver(stash, source=merge.AI), store,
                               stash.find_scene('1'), [hit('wd', 'abc')], [])
     monkeypatch.setattr(stash, 'update_scene_tags', actual)
     before = state_path(tmp_path).read_bytes()
@@ -143,7 +145,7 @@ def test_abandoned_merge_keeps_scene_association_ownership_after_lost_response(t
         assert recovery.abandon(store, lambda _: None)['publications_abandoned'] == 2
         assert not store.has_pending_publications()
         # New desired policy has no AI output. 'abc' must not become a manual tag.
-        merge.sync_merged(app, stash, app.TagResolver(stash, source=merge.AI), store, stash.find_scene('1'), [], [])
+        merge_sync.sync_merged(app, stash, app.TagResolver(stash, source=merge.AI), store, stash.find_scene('1'), [], [])
         assert not recovery.publications(store, '1', 'scene')
     if dry:
         assert state_path(tmp_path).read_bytes() == before and not stash.writes
@@ -159,7 +161,7 @@ def test_repeated_abandonment_retains_all_applied_scene_ownership(tmp_path):
             store.prepare('1', {'scene': {'owned_ids': [tag['id']], 'contributions': [hit('wd', name)]}})
             recovery.abandon(store, lambda _: None)
         assert len(recovery.publications(store, '1', 'scene')) == 2
-        merge.sync_merged(app, stash, app.TagResolver(stash, source=merge.AI), store, stash.find_scene('1'), [], [])
+        merge_sync.sync_merged(app, stash, app.TagResolver(stash, source=merge.AI), store, stash.find_scene('1'), [], [])
         assert stash.scene['tags'] == [human]
         assert not recovery.publications(store, '1', 'scene')
 
@@ -319,5 +321,5 @@ def test_marker_title_selects_observed_model_votes_before_source_cleanup(tmp_pat
         recovery.abandon(store, lambda _: None)
         observed, _ = recovery.reconcile(app, stash, store, stash.find_scene('1'), 'markers', store.snapshot('1', 'markers')[0])
         cores = empty_policies(); cores['wd'] = frozenset({'core'})
-        kept = merge.cleanup_support(app, store, '1', observed['contributions'], {'wd'}, cores, empty_policies())
+        kept = merge_cleanup.cleanup_support(app, store, '1', observed['contributions'], {'wd'}, cores, empty_policies())
         assert {s['source'] for s in kept} == ({'oppai'} if applied else set())

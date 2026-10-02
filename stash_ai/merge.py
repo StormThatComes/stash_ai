@@ -19,7 +19,6 @@ from stash_ai.taggers import ModelSource, SOURCES
 from stash_ai.runtime import stage
 from stash_ai.occurrences import OCCURRENCE_TAG
 from stash_ai.state import APPLICATION_ID, KINDS, StateStore, scope_for
-from stash_ai.state_codec import encode, decode  # compatibility re-export
 
 AI = ModelSource("ai", "AI", "ai:", "ai:marker:stash-taggers", "[AI] ", "[AI hierarchy v1]")
 
@@ -342,11 +341,6 @@ def _marker_contributions(app, records, core_policies, index, metrics, tag_polic
         return enrich(app, records, core_policies, spans, signatures, index, metrics)
 
 
-def cleanup_support(app, store, scene_id, spans, selected, core_policies, tag_policies=None):
-    """Compatibility wrapper for cleanup support re-evaluation."""
-    from stash_ai.merge_cleanup import cleanup_support as _cleanup_support
-    return _cleanup_support(app, store, scene_id, spans, selected, core_policies, tag_policies)
-
 def overlaps(marker, wanted, tolerance):
     start, end = marker["seconds"], marker.get("end_seconds")
     end = start if end is None else end
@@ -355,15 +349,6 @@ def overlaps(marker, wanted, tolerance):
     return (max(start, wanted["seconds"]) <= min(end, target_end)
             or abs(start - wanted["seconds"]) <= tolerance)
 
-
-def sync_merged(app, stash, resolver, store, scene, scene_hits, spans, *, migrate=True, cleanup=False, report=None,
-                tag_policies=None, publication_key=None):
-    """Compatibility wrapper for one-scene merged reconciliation."""
-    from stash_ai.merge_sync import sync_merged as _sync_merged
-    return _sync_merged(
-        app, stash, resolver, store, scene, scene_hits, spans,
-        migrate=migrate, cleanup=cleanup, report=report,
-        tag_policies=tag_policies, publication_key=publication_key)
 
 def capture_outputs(app, config, vocabulary, cues, predictions, frames, analysis=None):
     from stash_ai.retention import marker_cache_floor
@@ -403,19 +388,15 @@ def has_outputs(app, store, scene_id, model):
 
 def run_merged(app, settings, args, catalogs, hierarchy, core_policies, scene_policies):
     from stash_ai.diagnostics import MergeDiagnostics
+    from stash_ai.merge_run import MergedRun
     from stash_ai.runtime import RunReport
     from tqdm import tqdm
     report = getattr(args, 'report', None) or RunReport(getattr(args, 'verbose', False), tqdm.write)
     args.report = report
     with MergeDiagnostics(report, getattr(args, 'profile_merge', None), dry_run=app.DRY_RUN,
                           merge_only=args.merge_only, force=getattr(args, 'force_merge', False)):
-        return _run_merged(app, settings, args, catalogs, hierarchy, core_policies, scene_policies)
+        return MergedRun(app, settings, args, catalogs, hierarchy, core_policies, scene_policies).run()
 
-
-def _run_merged(app, settings, args, catalogs, hierarchy, core_policies, scene_policies):
-    """Compatibility wrapper around the stateful merged-run orchestrator."""
-    from stash_ai.merge_run import MergedRun
-    return MergedRun(app, settings, args, catalogs, hierarchy, core_policies, scene_policies).run()
 
 def run_hierarchy(app, args, catalogs, hierarchy, tag_policies=None):
     from stash_ai.exclusions import policies_or_empty
@@ -435,18 +416,6 @@ def run_hierarchy(app, args, catalogs, hierarchy, tag_policies=None):
         stash.close()
     return 0
 
-
-def cleanup_scene(app, stash, resolver, store, current, settings, selected, args,
-                  core_policies, scene_policies, scoped_tags, report):
-    """Compatibility wrapper for one-scene cleanup reconciliation."""
-    from stash_ai.merge_cleanup import cleanup_scene as _cleanup_scene
-    return _cleanup_scene(app, stash, resolver, store, current, settings, selected, args,
-                          core_policies, scene_policies, scoped_tags, report)
-
-def run_cleanup(app, settings, args, core_policies, scene_policies):
-    """Compatibility wrapper around the stateful cleanup orchestrator."""
-    from stash_ai.merge_cleanup import CleanupRun
-    return CleanupRun(app, settings, args, core_policies, scene_policies).run()
 
 def _effective_scene_thresholds(app, threshold):
     """Explain the actual scene cutoffs used by temporal qualification."""

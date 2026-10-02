@@ -8,6 +8,7 @@ import sqlite3
 import pytest
 
 from stash_ai import inference
+from stash_ai import merge_cleanup
 from stash_ai import cli as app
 from stash_ai import merge
 from stash_ai import progress
@@ -274,9 +275,9 @@ def test_cleanup_replays_published_threshold_even_after_later_override(tmp_path)
         # At .9 both weak models vote; removing one must remove the marker.
         assert spans
         excluded = policies(); excluded['wd'] = frozenset({'core'})
-        assert merge.cleanup_support(app, state, '1', spans, {'wd'}, excluded) == []
+        assert merge_cleanup.cleanup_support(app, state, '1', spans, {'wd'}, excluded) == []
         # The same removal at the old .7 threshold leaves DTQ's strong evidence.
-        cleaned = merge.cleanup_support(app, state, '1', old_spans, {'wd'}, excluded)
+        cleaned = merge_cleanup.cleanup_support(app, state, '1', old_spans, {'wd'}, excluded)
         assert cleaned and all(s['source'] == 'dtq' for s in cleaned)
 
 

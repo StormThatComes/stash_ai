@@ -69,7 +69,7 @@ def test_repeated_merge_avoids_decoding_evidence_and_publication(pipeline, monke
     monkeypatch.setattr(p.stash, 'find_scene', lambda i: (reads.append(i), find(i))[1])
     monkeypatch.setattr(merge, 'evidence', fail)
     monkeypatch.setattr(merge.StateStore, 'prepare', fail)
-    monkeypatch.setattr(merge, 'decode', fail)
+    monkeypatch.setattr(merge.StateStore, 'unpack', fail)
     p.stash.writes.clear()
     assert app.main(p.args) == 0
     assert reads == ['1'] and p.stash.writes == []
@@ -157,7 +157,7 @@ def test_commit_promotes_exact_pending_bytes_and_is_atomic(tmp_path, monkeypatch
         with pytest.raises(RuntimeError, match='intent disappeared'):
             state.commit_prepared('1', ['scene', 'markers'])
         assert state.snapshot('1', 'scene') == ({'old': True}, {'new': True})
-        monkeypatch.setattr(merge, 'encode', fail)
+        monkeypatch.setattr(state, 'pack', fail)
         state.commit_prepared('1', ['scene'])
         assert state.connection.execute('SELECT published,pending FROM snapshots').fetchone() == (pending, None)
 

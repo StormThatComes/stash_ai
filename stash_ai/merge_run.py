@@ -1,7 +1,7 @@
 """Merged-output run orchestration.
 
-The compatibility entry points remain in :mod:`stash_ai.merge`; this module owns
-the stateful lifecycle of one merged run so the merge algorithms stay function-oriented.
+This module owns the stateful lifecycle of one merged run and calls
+merge reconciliation directly; merge algorithms stay function-oriented.
 """
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from collections import Counter
 from tqdm import tqdm
 
 from stash_ai import inference
+from stash_ai import merge_sync
 from stash_ai import merge
 from stash_ai import performance
 from stash_ai import progress
@@ -308,7 +309,7 @@ class MergedRun:
                         scene_hits, spans = merge.evidence(
                             app, store, scene_id, self.core_policies, self.scene_policies, diagnostics)
                     with self.report.measure('merge_plan'):
-                        result = merge.sync_merged(
+                        result = merge_sync.sync_merged(
                             app, self.stash, self.resolver, store, current, scene_hits, spans,
                             report=self.report, tag_policies=self.scene_policies,
                             publication_key=self.merge_key)
@@ -376,7 +377,7 @@ class MergedRun:
                             scene_hits, spans = merge.evidence(
                                 app, store, scene_id, self.core_policies, self.scene_policies, diagnostics)
                         with self.report.measure('merge_plan'):
-                            result = merge.sync_merged(
+                            result = merge_sync.sync_merged(
                                 app, self.stash, self.resolver, store, current, scene_hits, spans,
                                 report=self.report, tag_policies=self.scene_policies,
                                 publication_key=self.merge_key)
@@ -422,7 +423,7 @@ class MergedRun:
                             raise RuntimeError(error)
                         cache_before = store.cache.stats.copy()
                         with self.report.measure('merge_plan'):
-                            result = merge.sync_merged(
+                            result = merge_sync.sync_merged(
                                 app, self.stash, self.resolver, store, current, scene_hits, spans,
                                 report=self.report, tag_policies=self.scene_policies,
                                 publication_key=self.merge_key)

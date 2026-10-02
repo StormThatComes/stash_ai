@@ -11,6 +11,7 @@ import pytest
 import yaml
 
 from stash_ai import separate_sync
+from stash_ai import merge_sync
 from stash_ai import cli as app
 from stash_ai import merge
 from stash_ai import progress
@@ -108,7 +109,7 @@ def test_sync_common_tag_union_idempotence_and_manual_ownership(tmp_path):
     manual=stash.marker(JOYTAG,"common","manual",True)
     inputs=[span("joytag",10,30),span("wd",20,50),span("oppai",60,80)]
     with store(tmp_path) as state:
-        merge.sync_merged(app,stash,app.TagResolver(stash,source=merge.AI),state,stash.find_scene("1"),
+        merge_sync.sync_merged(app,stash,app.TagResolver(stash,source=merge.AI),state,stash.find_scene("1"),
                           [hit("joytag"),hit("wd"),hit("oppai","unique_op")],inputs)
         assert {t["name"] for t in stash.scene["tags"]}=={"manual","ai:common","ai:unique_op"}
         assert intervals(stash)==[(10,50),(60,80)]
@@ -117,7 +118,7 @@ def test_sync_common_tag_union_idempotence_and_manual_ownership(tmp_path):
         assert shared["title"]=="[AI] common [jt+wd]"
         assert {t["name"] for t in shared["tags"]}=={merge.AI.owner_tag, "m:common"}
         stash.writes.clear()
-        merge.sync_merged(app,stash,app.TagResolver(stash,source=merge.AI),state,stash.find_scene("1"),
+        merge_sync.sync_merged(app,stash,app.TagResolver(stash,source=merge.AI),state,stash.find_scene("1"),
                           [hit("joytag"),hit("wd"),hit("oppai","unique_op")],inputs)
         assert not stash.writes
 
@@ -126,7 +127,7 @@ def test_untracked_ai_scene_association_remains_manual(tmp_path):
     stash=Stash();tag=stash.tag("ai:common");stash.scene["tags"]=[tag]
     with store(tmp_path) as state:
         for hits in ([hit("wd")],[]):
-            merge.sync_merged(app,stash,app.TagResolver(stash,source=merge.AI),state,stash.find_scene("1"),hits,[])
+            merge_sync.sync_merged(app,stash,app.TagResolver(stash,source=merge.AI),state,stash.find_scene("1"),hits,[])
         assert stash.scene["tags"]==[tag]
 
 
@@ -134,7 +135,7 @@ def test_native_marker_id_survives_large_start_shift(tmp_path):
     stash=Stash()
     with store(tmp_path) as state:
         for inputs in ([span("wd",20,50)],[span("wd",20,50),span("joytag",10,30)]):
-            merge.sync_merged(app,stash,app.TagResolver(stash,source=merge.AI),state,stash.find_scene("1"),[],inputs)
+            merge_sync.sync_merged(app,stash,app.TagResolver(stash,source=merge.AI),state,stash.find_scene("1"),[],inputs)
             if len(inputs)==1: original=stash.scene["scene_markers"][0]["id"]
         assert len(stash.scene["scene_markers"])==1
         assert stash.scene["scene_markers"][0]["id"]==original and intervals(stash)==[(10,50)]
@@ -154,7 +155,7 @@ def test_legacy_import_migrates_all_sources_without_fabricating_scores(tmp_path)
         assert {s["source"] for s in hits}=={"joytag","wd","oppai"}
         assert all(s["score"] is None for s in hits+spans)
         assert {s["legacy_marker_id"] for s in spans}=={"joytag","wd"}
-        merge.sync_merged(app,stash,app.TagResolver(stash,source=merge.AI),state,stash.find_scene("1"),hits,spans)
+        merge_sync.sync_merged(app,stash,app.TagResolver(stash,source=merge.AI),state,stash.find_scene("1"),hits,spans)
         assert {t["name"] for t in stash.scene["tags"]}=={"ai:common","ai:unique_op","human"}
         assert intervals(stash)==[(10,50)] and manual in stash.scene["scene_markers"]
         assert all("manual extra" in {t["name"] for t in m["tags"]} for m in stash.scene["scene_markers"] if separate_sync.owned_marker(m,merge.AI))
@@ -169,11 +170,11 @@ def test_failed_api_write_keeps_legacy_results_and_pending_merge_recovers(tmp_pa
         merge.bootstrap_legacy(app,state,stash.find_scene("1"))
         hits,spans=merge.evidence(app,state,"1",empty_policies(),empty_policies())
         with pytest.raises(RuntimeError,match="injected"):
-            merge.sync_merged(app,stash,app.TagResolver(stash,source=merge.AI),state,stash.find_scene("1"),hits,spans)
+            merge_sync.sync_merged(app,stash,app.TagResolver(stash,source=merge.AI),state,stash.find_scene("1"),hits,spans)
         assert old in stash.scene["scene_markers"] and stash.scene["tags"][0]["name"]=="jt:common"
         assert state.snapshot("1","markers")[1] is not None
         stash.fail_create=False
-        merge.sync_merged(app,stash,app.TagResolver(stash,source=merge.AI),state,stash.find_scene("1"),hits,spans)
+        merge_sync.sync_merged(app,stash,app.TagResolver(stash,source=merge.AI),state,stash.find_scene("1"),hits,spans)
         assert intervals(stash)==[(10,30)] and state.snapshot("1","markers")[1] is None
 
 
@@ -339,13 +340,13 @@ def test_manual_extras_survive_absorbed_ai_markers_and_later_split(tmp_path):
     with store(tmp_path) as state:
         resolver=app.TagResolver(stash,source=merge.AI)
         base=[span("joytag",10,20),span("wd",30,40)]
-        merge.sync_merged(app,stash,resolver,state,stash.find_scene("1"),[],base)
+        merge_sync.sync_merged(app,stash,resolver,state,stash.find_scene("1"),[],base)
         for marker,name in zip(stash.scene["scene_markers"],["manual A","manual B"]):
             marker["tags"].append(stash.tag(name))
-        merge.sync_merged(app,stash,resolver,state,stash.find_scene("1"),[],base+[span("oppai",20,30)])
+        merge_sync.sync_merged(app,stash,resolver,state,stash.find_scene("1"),[],base+[span("oppai",20,30)])
         assert intervals(stash)==[(10,40)]
         assert {"manual A","manual B"} <= {tag["name"] for tag in stash.scene["scene_markers"][0]["tags"]}
-        merge.sync_merged(app,stash,resolver,state,stash.find_scene("1"),[],base)
+        merge_sync.sync_merged(app,stash,resolver,state,stash.find_scene("1"),[],base)
         assert intervals(stash)==[(10,20),(30,40)]
         assert all({"manual A","manual B"} <= {t["name"] for t in m["tags"]} for m in stash.scene["scene_markers"])
 
@@ -363,15 +364,15 @@ def test_recovery_after_partial_api_success_preserves_ownership(tmp_path,monkeyp
         hits,spans=merge.evidence(app,state,"1",empty_policies(),empty_policies())
         monkeypatch.setattr(stash,failure,interrupted)
         with pytest.raises(RuntimeError,match="lost response"):
-            merge.sync_merged(app,stash,app.TagResolver(stash,source=merge.AI),state,stash.find_scene("1"),hits,spans)
+            merge_sync.sync_merged(app,stash,app.TagResolver(stash,source=merge.AI),state,stash.find_scene("1"),hits,spans)
         monkeypatch.setattr(stash,failure,actual)
         merge.bootstrap_legacy(app,state,stash.find_scene("1"))
-        merge.sync_merged(app,stash,app.TagResolver(stash,source=merge.AI),state,stash.find_scene("1"),hits,spans)
+        merge_sync.sync_merged(app,stash,app.TagResolver(stash,source=merge.AI),state,stash.find_scene("1"),hits,spans)
         assert intervals(stash)==[(10,30)]
         assert {t["name"] for t in stash.scene["tags"]}=={"human","ai:common"}
         assert all(state.snapshot("1",kind)[1] is None for kind in merge.KINDS)
         # It must remain managed after recovery, not accidentally become manual.
-        merge.sync_merged(app,stash,app.TagResolver(stash,source=merge.AI),state,stash.find_scene("1"),[],[])
+        merge_sync.sync_merged(app,stash,app.TagResolver(stash,source=merge.AI),state,stash.find_scene("1"),[],[])
         assert {t["name"] for t in stash.scene["tags"]}=={"human"} and not intervals(stash)
 
 
@@ -423,7 +424,7 @@ def test_cleanup_selected_bridge_source_splits_union_and_keeps_manual_removals(m
     scope=merge.scope_for(app.STASH_URL)
     inputs=[span("joytag",10,20),span("oppai",20,30),span("wd",30,40),span("dtq",70,80,"extra")]
     with merge.StateStore(p.path,scope) as state:
-        merge.sync_merged(app,p.stash,app.TagResolver(p.stash,source=merge.AI),state,p.stash.find_scene("1"),
+        merge_sync.sync_merged(app,p.stash,app.TagResolver(p.stash,source=merge.AI),state,p.stash.find_scene("1"),
                           [hit("joytag"),hit("oppai"),hit("dtq","extra")],inputs)
     assert intervals(p.stash)==[(10,40)]
     p.stash.scene["tags"]=[t for t in p.stash.scene["tags"] if t["name"]!="ai:extra"]
