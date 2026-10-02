@@ -93,6 +93,11 @@ python .\stash_ai.py --model-report .\model-utility-scene-123.json --scene-id 12
 python .\stash_ai.py --tag-review-report .\tag-review.json
 python .\stash_ai.py --tag-review-report .\tag-review-scene-123.json --scene-id 123
 
+# Kompletność cache względem YAML oraz plan uzupełnienia brakujących par scena–model.
+python .\stash_ai.py --cache-report .\cache-coverage.json
+python .\stash_ai.py --cache-report .\cache-coverage-all.json --models all
+python .\stash_ai.py --cache-report .\cache-coverage-scene-123.json --models wd --scene-id 123
+
 # Porzucenie niedokończonego planu merge/cleanup.
 python .\stash_ai.py --abandon-pending
 ```
@@ -311,6 +316,70 @@ i raportowane osobno z powodami, zamiast uczestniczyć w porównaniu modeli.
 Raport opisuje wynik replay cache, a nie sprawdzony na żywo stan Stash.
 Heurystyki nie oznaczają potwierdzonych błędów: poprawny tag może mieć tylko jeden
 pik, długi zakres albo wsparcie jednego modelu. Raport nie uśrednia ocen modeli.
+
+### Raport kompletności cache i plan uzupełnienia
+
+`--cache-report NEW.json` sprawdza oba rodzaje evidence (sceny i markery) dla
+modeli włączonych w YAML lub wybranych przez `--models`. Działa offline, bez
+modeli, słowników, mediów i połączenia ze Stash. Nie zmienia źródłowej bazy
+ani publikacji i nie nadpisuje istniejącego raportu.
+
+Domyślny zakres obejmuje sceny znane **bieżącemu scope lokalnej bazy**, również
+te obecne tylko w checkpointach, refresh requests, snapshotach lub recovery.
+Sceny ze Stash, które nigdy nie trafiły do tej bazy, nie wchodzą do mianownika.
+Powtarzalne `--scene-id` ustala dokładny zakres; ID bez żadnego lokalnego stanu
+jest wtedy raportowane jako brakujące. Raport nie sprawdza aktualności wag,
+słownika, VTT ani sprite'ów — ich zgodność potwierdza zwykły przebieg inferencji.
+
+Tabela terminala i `models` w JSON pokazują per model liczbę par scena–model:
+gotowych, możliwych do przeliczenia bez GPU, wymagających inferencji,
+wymagających wyłącznie rethreshold oraz zablokowanych. `outputs` rozbija
+liczniki osobno na scene/markers i rozłączne statusy:
+
+| Status | Znaczenie |
+|---|---|
+| `ready` | Ukończona inferencja, zgodny indeks, efektywne progi i wystarczająca retencja |
+| `rethreshold` | Cache obejmuje progi YAML; wystarczy przeliczenie bez GPU |
+| `missing` | Brak wyniku danego rodzaju |
+| `partial` | Brak wyniku, lecz istnieje checkpoint do weryfikacji przy wznowieniu |
+| `refresh_required` | Oczekujące żądanie świeżej inferencji unieważnia stary wynik |
+| `legacy_only` | Importowane wyniki nie dowodzą ukończonej inferencji |
+| `insufficient` | Brak evidence klatek, za wysoki floor lub wcześniej odfiltrowane odblokowane etykiety |
+| `inconsistent` | Wynik i indeks są niespójne albo evidence jest nieczytelne; sprawdź `--db-check` |
+
+Ukończony wynik bez żadnych detekcji jest poprawnym cache, a nie brakiem.
+Retencja jest sprawdzana względem minimum floor z YAML i progu wsparcia
+potrzebnego do publikacji. Sprawdzana jest cała zachowana historia segmentów.
+Przy gotowych `result_metadata` raport nie dekoduje BLOB-ów predykcji; starsze
+metadane uzupełnia wyłącznie w tymczasowej bazie. Głęboka kontrola payloadów
+pozostaje zadaniem `--db-check`.
+
+`issues` zawiera konkretne pary scena–model z powodami, wymaganymi progami,
+blokadami oraz zapisanym postępem checkpointu. `plan` zawiera uporządkowane,
+pogrupowane **tablice argumentów `argv`**, po maksymalnie 50 scen na polecenie:
+
+- `resume_or_infer` uzupełnia tylko wskazane modele/sceny; zwykłe resume sprawdza
+  zgodność checkpointu i wykorzystuje poprawne ukończone wyniki;
+- `restart_inference` wymusza wymianę nieużywalnego ukończonego cache. Aktywne
+  braki/refresh z checkpointem dostają zwykłe resume, aby nie kasować postępu;
+- `rethreshold` stosuje oba progi z YAML bez inferencji;
+- `merge_after_backfill` na końcu odświeża konsensus modeli i Occurrence.
+
+Polecenia zachowują ścieżki `--state-db`, YAML modeli, polityki temporalnej
+i wykluczeń. Raport **nie wykonuje planu**. Ręczne uruchomienie tych poleceń
+może zmienić publikację w Stash; używaj tego samego `STASH_URL` i ustawień
+środowiska. Przy wielu oczekujących refreshach publikacja może pozostać
+zablokowana do ukończenia wszystkich wskazanych modeli.
+
+Pending publication, globalny cleanup, refresh niewybranego modelu,
+nieczytelne evidence lub wyłączone zastępowanie nieużywalnej historii blokują
+automatyczne propozycje dla dotkniętych par. Najpierw dokończ pierwotny plan
+albo wyjaśnij niespójność, a następnie wygeneruj raport ponownie. Gotowy evidence
+może nadal mieć blokadę publikacji; liczniki tych dwóch cech mogą się nakładać.
+Exit code `0` oznacza poprawnie wygenerowany raport, również gdy zawiera braki.
+Archiwalne evidence po `--abandon-pending` nie blokuje cache ani inferencji:
+`publication_recovery_scene_ids` pokazuje te sceny, a końcowy merge planu
+rekonsyliuje ich publikację, również gdy cache jest już kompletny.
 
 ## Wynik w Stash
 

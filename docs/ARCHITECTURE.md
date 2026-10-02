@@ -129,3 +129,11 @@ CLI, parser VTT oraz tryby maintenance/cleanup mają własne sygnały invalidacj
 i celowo nie należą do tego fingerprintu, aby ich refaktory nie wymuszały
 re-merge całej biblioteki. Zmiana publication fingerprintu nie unieważnia
 surowego cache inferencji.
+
+## Raport kompletności cache
+
+`stash_ai/cache_report.py` strumieniuje małe metadane wyników i sprawdza indeks,
+refresh requests, checkpointy oraz retencję względem wybranego YAML. Raport
+korzysta z read-only źródła i sparse preview; generuje advisory `argv` dla
+inferencji/rethreshold/merge bez ich uruchamiania. Nie dowodzi aktualności mediów
+ani modelu; głęboki test payloadów pozostaje w `--db-check`.
