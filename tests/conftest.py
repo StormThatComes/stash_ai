@@ -3,6 +3,7 @@
 Reset profiles are requested by each test module through usefixtures markers.
 They intentionally preserve the former per-module autouse behavior.
 """
+
 import pytest
 
 
@@ -71,7 +72,7 @@ def reset_temporal(monkeypatch, tmp_path):
 def pipeline(monkeypatch,tmp_path):
     from types import SimpleNamespace
     import numpy as np
-    from stash_ai import cli as app
+    from stash_ai import cli as app, inference
     from stash_ai.taggers import SOURCES, Vocabulary
     from tests.helpers.stash import Stash
     from tests.helpers.inference import IndexedTagger
@@ -83,8 +84,8 @@ def pipeline(monkeypatch,tmp_path):
                             loaded=[],fail={},path=tmp_path/"state.sqlite3")
     monkeypatch.setattr(app,"create_stash_client",lambda _:stash)
     monkeypatch.setattr(app,"load_vocabulary",lambda _:vocab)
-    monkeypatch.setattr(app,"fetch_cues",lambda *args:(context.cues,len(context.cues)))
-    monkeypatch.setattr(app,"iter_sprite_frames",lambda stash,paths,cues:((cue,int(cue.start)) for cue in cues))
+    monkeypatch.setattr(inference,"fetch_cues",lambda *args:(context.cues,len(context.cues)))
+    monkeypatch.setattr(inference,"iter_sprite_frames",lambda stash,paths,cues:((cue,int(cue.start)) for cue in cues))
     def load(settings,*args):
         assert all(model.closed for model in context.loaded)
         model=IndexedTagger(settings,context.scores[settings.source.key],vocab.labels,context.fail.get(settings.source.key))
@@ -99,7 +100,7 @@ def pipeline(monkeypatch,tmp_path):
 def merge_pipeline(monkeypatch,tmp_path):
     from types import SimpleNamespace
     import numpy as np
-    from stash_ai import cli as app
+    from stash_ai import cli as app, inference
     from stash_ai.taggers import SOURCES, Vocabulary
     from tests.helpers.stash import Stash
     from tests.helpers.inference import Tagger
@@ -115,8 +116,8 @@ def merge_pipeline(monkeypatch,tmp_path):
     scores["oppai"][:2,1]=.92
     monkeypatch.setattr(app,"create_stash_client",lambda _:stash)
     monkeypatch.setattr(app,"load_vocabulary",lambda _:vocabulary)
-    monkeypatch.setattr(app,"fetch_cues",lambda *args:(cues,len(cues)))
-    monkeypatch.setattr(app,"iter_sprite_frames",lambda *args:((cue,None) for cue in cues))
+    monkeypatch.setattr(inference,"fetch_cues",lambda *args:(cues,len(cues)))
+    monkeypatch.setattr(inference,"iter_sprite_frames",lambda *args:((cue,None) for cue in cues))
     loaded=[]
     def load(settings,*args):
         assert all(model.closed for model in loaded)

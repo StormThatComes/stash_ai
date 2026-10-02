@@ -1,9 +1,11 @@
 """Cleanup can revoke published proofs from caches predating blocklist metadata."""
+
 from copy import deepcopy
 from dataclasses import replace
 
 import pytest
 
+from stash_ai import inference
 from stash_ai import cli as app, merge, thresholds
 from stash_ai.taggers import SOURCES
 from tests.helpers.evidence import segment
@@ -52,7 +54,7 @@ def old_consensus(pipeline, monkeypatch, tmp_path, request):
     p.cleanup_args = [*p.args, '--cleanup-markers-only', '--cleanup-strategy', 'scenes',
                       '--marker-core-exclusions', str(core)]
     monkeypatch.setattr(app, 'load_tagger', lambda *args: pytest.fail('loaded a model'))
-    monkeypatch.setattr(app, 'fetch_cues', lambda *args: pytest.fail('fetched VTT'))
+    monkeypatch.setattr(inference, 'fetch_cues', lambda *args: pytest.fail('fetched VTT'))
     monkeypatch.setattr(p.stash, 'get_media', lambda *args: pytest.fail('fetched sprites'))
     p.stash.writes.clear()
     return p

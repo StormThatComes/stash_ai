@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 from tqdm import tqdm
 
+from stash_ai import separate_sync
 from stash_ai import merge
 from stash_ai.runtime import RunReport
 from stash_ai.taggers import SOURCES
@@ -133,7 +134,7 @@ def cleanup_scene(app, stash, resolver, store, current, settings, selected, args
             published[kind], recovered = reconcile(app, stash, store, current, kind, snapshot)
             stats['publications_reconciled'] += int(recovered)
         if app.CREATE_MARKERS and published.get("markers") is None and any(
-                app.owned_marker(marker, merge.AI) for marker in current.get("scene_markers", [])):
+                separate_sync.owned_marker(marker, merge.AI) for marker in current.get("scene_markers", [])):
             raise RuntimeError("AI marker source state is missing; restore the original --state-db.")
         hits = (published.get("scene") or {}).get("contributions", [])
         spans = (published.get("markers") or {}).get("contributions", [])
@@ -175,8 +176,8 @@ def _cleanup_source(app, stash, current, source, core_policies, scene_policies, 
     if app.APPLY_SCENE_TAGS:
         result.update(app.cleanup_scene_tags(stash, current, scene_policies[source.key], source, report))
     if app.CREATE_MARKERS:
-        result.update(app.cleanup_scene_marker_cores(
-            stash, current, core_policies[source.key], source, report, scene_policies[source.key]))
+        result.update(separate_sync.cleanup_scene_marker_cores(
+            app, stash, current, core_policies[source.key], source, report, scene_policies[source.key]))
     return result
 
 

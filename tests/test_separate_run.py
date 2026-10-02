@@ -1,21 +1,7 @@
-"""Compatibility boundary for separate-output orchestration."""
+"""Separate-output model lifecycle and reporting."""
 from stash_ai import cli
+from stash_ai import inference
 from stash_ai import separate_run
-
-
-def test_cli_run_model_wrapper_delegates_to_separate_run(monkeypatch):
-    captured = {}
-
-    def fake(*args):
-        captured["args"] = args
-        return {"processed": 1}
-
-    monkeypatch.setattr(separate_run, "run_model", fake)
-    values = ("stash", "config", "vocabulary", "hierarchy", "args", frozenset({"core"}), frozenset({"scene"}))
-
-    assert cli.run_model(*values) == {"processed": 1}
-    assert captured["args"][0] is cli
-    assert captured["args"][1:] == values
 
 
 def test_run_model_accumulates_scene_phases_and_closes_tagger(monkeypatch):
@@ -49,7 +35,16 @@ def test_run_model_accumulates_scene_phases_and_closes_tagger(monkeypatch):
             return [{"id": "1"}, {"id": "2"}]
 
     monkeypatch.setattr(cli, "TagResolver", Resolver)
-    monkeypatch.setattr(cli, "load_tagger", lambda *args: Tagger())
+    def prepare_image(app, image, size):
+        events.append(("prepare", app, image, size))
+        return "prepared"
+
+    def load_tagger(config, vocabulary, prepare):
+        assert prepare("frame", 448) == "prepared"
+        return Tagger()
+
+    monkeypatch.setattr(inference, "prepare_image", prepare_image)
+    monkeypatch.setattr(cli, "load_tagger", load_tagger)
     monkeypatch.setattr(cli, "print_hierarchy_summary", lambda resolver: events.append("summary"))
     monkeypatch.setattr(cli, "safe_error", lambda exc, **kwargs: str(exc))
 
@@ -76,5 +71,6 @@ def test_run_model_accumulates_scene_phases_and_closes_tagger(monkeypatch):
     assert stats["markers_created"] == 2
     assert stats["errors"] == 1
     assert len(issues) == 1 and issues[0][0:3] == ("inference", "wd", "2")
+    assert events[0] == ("prepare", cli, "frame", 448)
     assert events[-2:] == ["summary", "closed"]
     assert sum(isinstance(event, tuple) and event[0] == "progress" for event in events) == 2

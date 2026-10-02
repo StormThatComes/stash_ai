@@ -1,4 +1,5 @@
 """Temporal qualification, exclusions, source votes and exact checkpoint resume."""
+
 from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
@@ -6,6 +7,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from stash_ai import inference
 from stash_ai import cli as app
 from stash_ai import merge
 from stash_ai.temporal import TemporalPolicy, SceneAccumulator, scene_reason, consensus_seeds
@@ -176,7 +178,7 @@ def test_temporal_resume_preserves_statistics_and_all_sparse_scores(pipeline,mon
     assert p.loaded[-1].seen==list(range(4,10))
     expected=IndexedTagger(p.loaded[-1].settings,p.scores['wd'],p.vocab.labels)
     analysis={}
-    predictions,output=app.predict_scene(expected,p.stash,{},p.cues,raw_scene=True,analysis=analysis)
+    predictions,output=inference.predict_scene(app, expected,p.stash,{},p.cues,raw_scene=True,analysis=analysis)
     with merge.StateStore(p.path,merge.scope_for(app.STASH_URL),True) as state:
         scene=state.records('1','scene')['wd'][-1]
         markers=state.records('1','markers')['wd'][-1]

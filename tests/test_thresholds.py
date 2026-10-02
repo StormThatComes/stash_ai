@@ -1,4 +1,5 @@
 """Retune marker publication without inference or loss of source evidence."""
+
 from copy import deepcopy
 from dataclasses import replace
 from types import SimpleNamespace
@@ -6,6 +7,7 @@ import sqlite3
 
 import pytest
 
+from stash_ai import inference
 from stash_ai import cli as app
 from stash_ai import merge
 from stash_ai import progress
@@ -160,7 +162,7 @@ def test_explicit_rethreshold_needs_no_models_media_or_vocabulary(pipeline, monk
     configure(monkeypatch, marker=.85)
     fail_inference(monkeypatch)
     monkeypatch.setattr(app, 'load_vocabulary', lambda *a: pytest.fail('loaded vocabulary'))
-    monkeypatch.setattr(app, 'fetch_cues', lambda *a: pytest.fail('fetched VTT'))
+    monkeypatch.setattr(inference, 'fetch_cues', lambda *a: pytest.fail('fetched VTT'))
     monkeypatch.setattr(p.stash, 'get_media', lambda *a: pytest.fail('fetched sprite'))
     assert app.main([*p.args, '--merge-only', '--rethreshold-markers']) == 0
     stderr = capsys.readouterr().err

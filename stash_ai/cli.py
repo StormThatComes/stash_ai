@@ -50,7 +50,6 @@ import os
 import sys
 from collections import Counter
 from pathlib import Path
-from typing import Iterator
 from urllib.parse import urlparse
 
 INSTALL_ROOT = Path(__file__).resolve().parent.parent
@@ -64,6 +63,7 @@ RAM_BUDGET_GB = 32.0  # Process target; reserves 25% for models and active work.
 PREPARE_WORKERS = 4  # CPU transforms only. One model/inference call at a time.
 MERGE_STATE_FILE = (INSTALL_ROOT / "tagger_sources.sqlite3")
 
+from stash_ai import separate_run, separate_sync
 from stash_ai.taggers import (JOYTAG, SOURCES, ModelSource, ModelSettings, Vocabulary,
                            select_models, load_vocabulary, load_tagger, ensure_files, weight_files)
 from stash_ai.temporal import TemporalPolicy
@@ -141,57 +141,11 @@ JOYTAG_CLIP_MEAN = [0.48145466, 0.4578275, 0.40821073]
 JOYTAG_CLIP_STD = [0.26862954, 0.26130258, 0.27577711]
 
 
-def evenly_sample(items: list, count: int) -> list:
-    """Compatibility wrapper for deterministic cue sampling."""
-    from stash_ai.inference import evenly_sample as _evenly_sample
-    return _evenly_sample(items, count)
-
-
 def create_stash_client(dry_run: bool) -> StashClient:
     """Bind the current CLI settings once for each client instance."""
     return StashClient(dry_run, url=STASH_URL, api_key=STASH_API_KEY,
                        request_timeout=REQUEST_TIMEOUT, http_retries=HTTP_RETRIES,
                        scene_page_size=SCENE_PAGE_SIZE, create_markers=CREATE_MARKERS)
-
-
-def fetch_cues(stash: StashClient, paths: dict) -> tuple[list[Cue], int]:
-    """Compatibility wrapper for VTT cue loading."""
-    from stash_ai.inference import fetch_cues as _fetch_cues
-    return _fetch_cues(sys.modules[__name__], stash, paths)
-
-
-def iter_sprite_frames(stash: StashClient, paths: dict,
-                       cues: list[Cue]) -> Iterator[tuple[Cue, Any]]:
-    """Compatibility wrapper for sprite-frame iteration."""
-    from stash_ai.inference import iter_sprite_frames as _iter_sprite_frames
-    return _iter_sprite_frames(stash, paths, cues)
-
-
-def prepare_image(image: Any, target_size: int) -> Any:
-    """Compatibility wrapper for JoyTag image preparation."""
-    from stash_ai.inference import prepare_image as _prepare_image
-    return _prepare_image(sys.modules[__name__], image, target_size)
-
-
-def select_scores(scores: list[float], labels: list[str], threshold: float,
-                  limit: int) -> list[tuple[str, float]]:
-    """Compatibility wrapper for score filtering."""
-    from stash_ai.inference import select_scores as _select_scores
-    return _select_scores(scores, labels, threshold, limit)
-
-
-def predict_scene(tagger: Any, stash: StashClient, paths: dict, cues: list[Cue],
-                  scene_exclusions: frozenset[str] = frozenset(), *, raw_scene: bool = False,
-                  checkpoint=None, prefetch: int = 0, analysis: dict | None = None, report=None,
-                  prepare_workers: int = 1
-                  ) -> tuple[list[tuple[str, float]], list[FramePrediction]]:
-    """Compatibility wrapper around the local inference pipeline."""
-    from stash_ai.inference import predict_scene as _predict_scene
-    return _predict_scene(
-        sys.modules[__name__], tagger, stash, paths, cues, scene_exclusions,
-        raw_scene=raw_scene, checkpoint=checkpoint, prefetch=prefetch,
-        analysis=analysis, report=report, prepare_workers=prepare_workers,
-    )
 
 
 def build_markers(frames: list[FramePrediction], core_exclusions: frozenset[str], *,
@@ -236,75 +190,6 @@ def build_markers(frames: list[FramePrediction], core_exclusions: frozenset[str]
     if MAX_MARKERS_PER_SCENE:
         finished = finished[:MAX_MARKERS_PER_SCENE]
     return sorted(finished, key=lambda marker: (marker.start, marker.tag)), total
-
-
-def owned_marker(marker: dict, source: ModelSource) -> bool:
-    """Compatibility wrapper for generated-marker ownership."""
-    from stash_ai.separate_sync import owned_marker as _owned_marker
-    return _owned_marker(marker, source)
-
-
-def marker_has_excluded_core(marker: dict, core_exclusions: frozenset[str],
-                             source: ModelSource) -> bool:
-    """Compatibility wrapper for separate-output core exclusion checks."""
-    from stash_ai.separate_sync import marker_has_excluded_core as _marker_has_excluded_core
-    return _marker_has_excluded_core(marker, core_exclusions, source)
-
-
-def marker_extra_cleanup_payload(marker: dict, scene_id: str,
-                                 blocked_names: set[str], has_end: bool):
-    """Compatibility wrapper for retained-marker extra cleanup."""
-    from stash_ai.separate_sync import marker_extra_cleanup_payload as _payload
-    return _payload(marker, scene_id, blocked_names, has_end)
-
-
-def cleanup_scene_marker_cores(stash: StashClient, scene: dict,
-                               core_exclusions: frozenset[str], source: ModelSource,
-                               report=None,
-                               tag_exclusions: frozenset[str] = frozenset()) -> Counter:
-    """Compatibility wrapper for separate-output marker cleanup."""
-    from stash_ai.separate_sync import cleanup_scene_marker_cores as _cleanup
-    return _cleanup(
-        sys.modules[__name__], stash, scene, core_exclusions,
-        source, report, tag_exclusions,
-    )
-
-
-def marker_payload(spec: MarkerSpec, scene_id: str,
-                   ids: dict[str, str | None], has_end: bool,
-                   source: ModelSource) -> dict:
-    """Compatibility wrapper for separate-output marker payloads."""
-    from stash_ai.separate_sync import marker_payload as _marker_payload
-    return _marker_payload(sys.modules[__name__], spec, scene_id, ids, has_end, source)
-
-
-def marker_differs(existing: dict, wanted: dict) -> bool:
-    """Compatibility wrapper for marker reconciliation comparison."""
-    from stash_ai.separate_sync import marker_differs as _marker_differs
-    return _marker_differs(existing, wanted)
-
-
-def plan_marker_changes(existing: list[dict], wanted: list[dict],
-                        core_exclusions: frozenset[str],
-                        source: ModelSource
-                        ) -> tuple[list[dict], list[dict], list[str], int]:
-    """Compatibility wrapper for separate-output marker planning."""
-    from stash_ai.separate_sync import plan_marker_changes as _plan_marker_changes
-    return _plan_marker_changes(
-        sys.modules[__name__], existing, wanted, core_exclusions, source,
-    )
-
-
-def sync_scene(stash: StashClient, resolver: TagResolver, scene: dict,
-               scene_predictions: list[tuple[str, float]], specs: list[MarkerSpec],
-               core_exclusions: frozenset[str], source: ModelSource,
-               scene_exclusions: frozenset[str] = frozenset()) -> Counter:
-    """Compatibility wrapper around separate-output scene reconciliation."""
-    from stash_ai.separate_sync import sync_scene as _sync_scene
-    return _sync_scene(
-        sys.modules[__name__], stash, resolver, scene, scene_predictions, specs,
-        core_exclusions, source, scene_exclusions,
-    )
 
 
 def validate_config(scene_work: bool = True) -> None:
@@ -359,25 +244,9 @@ def cleanup_scene_tags(stash: StashClient, scene: dict, exclusions: frozenset[st
 
 def outputs_already_present(scene: dict, source: ModelSource) -> bool:
     tagged = any(tag["name"].startswith(source.prefix) for tag in scene.get("tags") or [])
-    marked = any(owned_marker(marker, source) for marker in scene.get("scene_markers") or [])
+    marked = any(separate_sync.owned_marker(marker, source) for marker in scene.get("scene_markers") or [])
     return (not APPLY_SCENE_TAGS or tagged) and (not CREATE_MARKERS or marked)
 
-
-def run_model(stash: StashClient, config: ModelSettings, vocabulary: Vocabulary,
-              hierarchy: TagHierarchy | None, args: Any, core_exclusions: frozenset[str],
-              scene_exclusions: frozenset[str]) -> Counter:
-    """Compatibility wrapper around separate-output model orchestration."""
-    from stash_ai.separate_run import run_model as _run_model
-    return _run_model(
-        sys.modules[__name__],
-        stash,
-        config,
-        vocabulary,
-        hierarchy,
-        args,
-        core_exclusions,
-        scene_exclusions,
-    )
 
 def main(argv: list[str] | None = None) -> int:
     global DRY_RUN, APPLY_SCENE_TAGS, CREATE_MARKERS, TEMPORAL_POLICY
@@ -471,7 +340,7 @@ def main(argv: list[str] | None = None) -> int:
         print("DRY RUN: all Stash changes below are planned." if DRY_RUN else "Synchronizing selected models.")
         for config in settings:
             try:
-                stats.update(run_model(stash, config, catalogs[config.source.key], hierarchies[config.source.key],
+                stats.update(separate_run.run_model(app, stash, config, catalogs[config.source.key], hierarchies[config.source.key],
                                        args, core_policies[config.source.key], scene_policies[config.source.key]))
             except Exception as exc:
                 stats["errors"] += 1

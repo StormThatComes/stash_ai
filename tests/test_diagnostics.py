@@ -1,10 +1,12 @@
 """Diagnostic accuracy, payload privacy, bounded memory and unchanged merging."""
+
 from copy import deepcopy
 import json
 from types import SimpleNamespace
 
 import pytest
 
+from stash_ai import inference
 from stash_ai import cli as app
 from stash_ai import merge
 from stash_ai.diagnostics import MergeDiagnostics
@@ -135,7 +137,7 @@ def test_profile_and_force_merge_preserve_results_and_do_not_run_models(pipeline
     expected = deepcopy(p.stash.scene)
     p.stash.writes.clear()
     monkeypatch.setattr(app, 'load_tagger', lambda *a: pytest.fail('profile loaded a model'))
-    monkeypatch.setattr(app, 'fetch_cues', lambda *a: pytest.fail('profile fetched media'))
+    monkeypatch.setattr(inference, 'fetch_cues', lambda *a: pytest.fail('profile fetched media'))
     for force in (False, True):
         path = tmp_path/f'profile-{force}.jsonl'
         args = [*p.args, '--merge-only', '--profile-merge', str(path)] + (['--force-merge'] if force else [])

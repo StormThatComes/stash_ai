@@ -26,18 +26,18 @@ extras mogły trafić do kolejnych fragmentów; dostępność do ponownego dopas
 nadal kontroluje plan publikacji. Indeksy żyją wyłącznie w pamięci, bez zmiany
 formatu snapshotów lub schematu bazy.
 
-`stash_ai/cli.py` pozostaje warstwą orkiestracji i kompatybilnym miejscem eksportu
-helperów używanych przez testy. Lifecycle jednego modelu w trybie
-`--output-mode separate` obsługuje `stash_ai/separate_run.py`; lifecycle jest
-podzielony na synchronizację hierarchii, przetwarzanie pojedynczej sceny oraz
-raportowanie, a moduł wywołuje helpery przez obiekt `app`, dzięki czemu
-dotychczasowe punkty monkeypatch w `cli.py` pozostają aktywne. Pobieranie cue/sprite, przygotowanie obrazów,
-filtrowanie score i resumowalny lokalny pipeline inferencji znajdują się w
-`stash_ai/inference.py`; kompatybilne wrappery pozostają w `cli.py`.
-Reconciliation dla `--output-mode separate` (własność markerów, payloady,
-plan create/update/delete, cleanup wykluczeń i publikacja sceny) znajduje się w
-`stash_ai/separate_sync.py`; `cli.py` zachowuje kompatybilne wrappery również
-dla helperów używanych przez merged reconciliation.
+`stash_ai/cli.py` koordynuje uruchomienie pipeline. Lifecycle jednego modelu
+w trybie `--output-mode separate` obsługuje `stash_ai/separate_run.py`; lifecycle
+jest podzielony na synchronizację hierarchii, przetwarzanie pojedynczej sceny
+oraz raportowanie. Pobieranie cue/sprite, przygotowanie obrazów, filtrowanie
+score i resumowalny lokalny pipeline inferencji znajdują się w
+`stash_ai/inference.py`. Reconciliation dla `--output-mode separate` (własność
+markerów, payloady, plan create/update/delete, cleanup wykluczeń i publikacja
+sceny) znajduje się w `stash_ai/separate_sync.py`. Wywołania i testy korzystają
+bezpośrednio z tych modułów; helpery inferencji i reconciliation nie są
+ponownie eksportowane przez `cli.py`. Funkcje zależne od ustawień przebiegu
+otrzymują `app` jako jawny argument, a callback przygotowania obrazu JoyTag
+wiąże ten argument przez `functools.partial`.
 Definicja opcji CLI i walidacja kombinacji flag są
 w `stash_ai/cli_args.py`, a dispatch samodzielnych trybów DB/diagnostics/recovery/
 prune/model-report/backfill w `stash_ai/cli_modes.py`. Parsowanie konfiguracji,

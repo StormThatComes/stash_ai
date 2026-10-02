@@ -1,10 +1,13 @@
 """Global exclusions across cached outputs, shared proofs and Stash cleanup."""
+
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+from stash_ai import inference
+from stash_ai import separate_sync
 from stash_ai import cli as app
 from stash_ai import merge
 from stash_ai.exclusions import policies_or_empty
@@ -62,7 +65,7 @@ def test_cleanup_removes_shared_and_legacy_extras_without_images_or_models(pipel
     core = tmp_path/'core.yml'; core.write_text('version: 1\nexcluded_core_tags: [extra]\n')
     args = ['--models', 'wd', 'dtq', *p.args[2:], '--marker-core-exclusions', str(core)]
     assert app.main(args) == 0
-    marker = next(m for m in p.stash.scene['scene_markers'] if app.owned_marker(m, merge.AI))
+    marker = next(m for m in p.stash.scene['scene_markers'] if separate_sync.owned_marker(m, merge.AI))
     assert 'ai:extra' in {t['name'] for t in marker['tags']}
     marker['tags'].append(p.stash.tag('op:extra'))
     manual = p.stash.marker(WD, 'keep', 'manual', manual=True)
@@ -71,8 +74,9 @@ def test_cleanup_removes_shared_and_legacy_extras_without_images_or_models(pipel
     before_raw = raw_results(p.path)
     before_marker = marker['id'], marker['seconds'], marker['end_seconds'], marker['title']
     path = policy_file(tmp_path, ['extra'])
-    for name in ('load_tagger', 'load_vocabulary', 'fetch_cues'):
+    for name in ('load_tagger', 'load_vocabulary'):
         monkeypatch.setattr(app, name, lambda *args: pytest.fail('cleanup accessed model/input assets'))
+    monkeypatch.setattr(inference, 'fetch_cues', lambda *args: pytest.fail('cleanup accessed model/input assets'))
     p.stash.dry_run = dry
     cleanup = ['--models', 'all', *p.args[2:], '--cleanup-only', '--tag-exclusions', str(path),
                '--marker-core-exclusions', str(core)] + (['--dry-run'] if dry else [])

@@ -6,6 +6,7 @@ import json
 
 import pytest
 
+from stash_ai import inference
 from stash_ai import cli as app
 from stash_ai import merge
 from stash_ai import scene_cache as cache
@@ -117,8 +118,9 @@ def test_merge_only_support_ratio_matches_fresh_inference(pipeline, monkeypatch,
     policy.write_text('version: 1\nscene_support_ratio: 1.0\n')
 
     with monkeypatch.context() as offline:
-        for name in ('load_tagger', 'load_vocabulary', 'fetch_cues'):
+        for name in ('load_tagger', 'load_vocabulary'):
             offline.setattr(app, name, lambda *a: pytest.fail('accessed inference inputs'))
+        offline.setattr(inference, 'fetch_cues', lambda *a: pytest.fail('accessed inference inputs'))
         offline.setattr(p.stash, 'get_media', lambda *a: pytest.fail('fetched media'))
         assert app.main([*args, '--merge-only', '--temporal-policy', str(policy)]) == 0
         cached = outputs(p.path)
@@ -221,8 +223,9 @@ def test_explicit_both_thresholds_need_no_assets_and_preserve_dry_run(pipeline, 
     capsys.readouterr()
     before = p.path.read_bytes(), deepcopy(p.stash.scene)
     configure(monkeypatch, scene=.8, marker=.9)
-    for name in ('load_tagger', 'load_vocabulary', 'fetch_cues'):
+    for name in ('load_tagger', 'load_vocabulary'):
         monkeypatch.setattr(app, name, lambda *a: pytest.fail('accessed inference inputs'))
+    monkeypatch.setattr(inference, 'fetch_cues', lambda *a: pytest.fail('accessed inference inputs'))
     monkeypatch.setattr(p.stash, 'get_media', lambda *a: pytest.fail('fetched media'))
     args = [*p.args, '--merge-only', '--rethreshold-scenes', '--rethreshold-markers']
     p.stash.dry_run = True

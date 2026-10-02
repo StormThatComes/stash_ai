@@ -1,9 +1,4 @@
-"""Separate-output reconciliation helpers.
-
-Public compatibility entry points remain in stash_ai.cli. Helpers that depend on
-live CLI policy flags receive the app module explicitly so existing monkeypatch
-surfaces remain valid.
-"""
+"""Separate-output reconciliation with explicit runtime settings and model sources."""
 from __future__ import annotations
 
 from collections import Counter

@@ -1,4 +1,5 @@
 """Offline behavior tests. Run: python -m pytest -q tests/test_multimodel.py"""
+
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
@@ -7,6 +8,7 @@ import sys
 import numpy as np
 import pytest
 import yaml
+from stash_ai import inference
 from stash_ai import cli as app
 from stash_ai import taggers as adapters
 from stash_ai.taggers import JOYTAG, WD, DTQ, OPPAI, SOURCES, ModelSettings, Vocabulary, load_vocabulary, select_models, validate_scores, prepare_wd, prepare_dtq, prepare_oppai, OnnxTagger
@@ -112,8 +114,8 @@ def test_main_all_releases_models_and_preserves_failed_source(monkeypatch,fail_w
     cues=[app.Cue(i,i+1,"x",(0,0,1,1)) for i in range(2)]
     monkeypatch.setattr(app,"create_stash_client",lambda _:stash)
     monkeypatch.setattr(app,"load_vocabulary",lambda _:vocab)
-    monkeypatch.setattr(app,"fetch_cues",lambda *args:(cues,2))
-    monkeypatch.setattr(app,"iter_sprite_frames",lambda *args:((cue,None) for cue in cues))
+    monkeypatch.setattr(inference,"fetch_cues",lambda *args:(cues,2))
+    monkeypatch.setattr(inference,"iter_sprite_frames",lambda *args:((cue,None) for cue in cues))
     loaded=[]
     def load(settings,vocabulary,prepare):
         assert all(t.closed for t in loaded)
@@ -133,8 +135,8 @@ def test_every_label_and_streaming_aggregation(monkeypatch,aggregation,batch):
     scores=np.random.default_rng(7).uniform(.7,.99,(5,len(labels))).astype(np.float32)
     cues=[app.Cue(i,i+1,"x",(0,0,1,1)) for i in range(5)]
     monkeypatch.setattr(app,"AGGREGATION",aggregation)
-    monkeypatch.setattr(app,"iter_sprite_frames",lambda *args:((c,None) for c in cues))
-    predictions,frames=app.predict_scene(Tagger(ModelSettings(WD,Path("."),batch_size=batch),labels,scores),Stash(),{},cues,frozenset({"scene_ban"}))
+    monkeypatch.setattr(inference,"iter_sprite_frames",lambda *args:((c,None) for c in cues))
+    predictions,frames=inference.predict_scene(app, Tagger(ModelSettings(WD,Path("."),batch_size=batch),labels,scores),Stash(),{},cues,frozenset({"scene_ban"}))
     expected=scores.max(axis=0) if aggregation=="max" else np.sort(scores,axis=0)[-2:].mean(axis=0)
     assert len(predictions)==len(labels)-1
     for tag,score in predictions: assert score==pytest.approx(expected[labels.index(tag)])

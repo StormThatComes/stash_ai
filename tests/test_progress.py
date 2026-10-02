@@ -1,4 +1,5 @@
 """Resume equivalence and bounded preparation; never connects to Stash/HF."""
+
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
@@ -9,6 +10,7 @@ import threading
 import numpy as np
 import pytest
 
+from stash_ai import inference
 from stash_ai import cli as app
 from stash_ai import merge
 from stash_ai import progress
@@ -44,7 +46,7 @@ def test_interruption_resume_matches_full_inference_and_counts_each_frame_once(p
     assert app.main([*p.args,"--prefetch-batches",str(prefetch)])==0
     assert p.loaded[-1].seen==list(range(4,10))
     expected=IndexedTagger(p.loaded[-1].settings,p.scores["wd"],p.vocab.labels)
-    predictions,frames=app.predict_scene(expected,p.stash,{},p.cues,raw_scene=True)
+    predictions,frames=inference.predict_scene(app, expected,p.stash,{},p.cues,raw_scene=True)
     with merge.StateStore(p.path,merge.scope_for(app.STASH_URL),True) as state:
         scene=state.records("1","scene")["wd"][0]
         markers=state.records("1","markers")["wd"][0]

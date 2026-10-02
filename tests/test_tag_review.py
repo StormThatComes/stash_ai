@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+from stash_ai import inference
 from stash_ai import cli as app, merge, tag_review
 from stash_ai.taggers import SOURCES
 from stash_ai.temporal import TemporalPolicy
@@ -205,8 +206,9 @@ def test_cli_offline_json_and_summary_preserve_database_and_skip_model_loading(t
     path = tmp_path / "state.sqlite3"
     seed(path, "1", "wd", pair())
     before = path.read_bytes()
-    for name in ("load_model_settings", "load_vocabulary", "load_tagger", "create_stash_client", "fetch_cues"):
+    for name in ('load_model_settings', 'load_vocabulary', 'load_tagger', 'create_stash_client'):
         monkeypatch.setattr(app, name, lambda *a, **k: pytest.fail("accessed inference or Stash"))
+    monkeypatch.setattr(inference, 'fetch_cues', lambda *a, **k: pytest.fail("accessed inference or Stash"))
     destination = tmp_path / "review.json"
     assert app.main(["--tag-review-report", str(destination), "--state-db", str(path),
                      "--no-temporal"]) == 0

@@ -7,6 +7,7 @@ from itertools import batched
 
 from tqdm import tqdm
 
+from stash_ai import separate_sync
 from stash_ai import merge
 from stash_ai.db.common import format_bytes
 from stash_ai.performance import freeze
@@ -24,7 +25,7 @@ def _current_legacy(app, scene):
     for marker in scene.get("scene_markers", []):
         parsed = merge.legacy_label((marker.get("primary_tag") or {}).get("name", ""))
         source = SOURCES.get(parsed[0]) if parsed else None
-        if source is not None and app.owned_marker(marker, source):
+        if source is not None and separate_sync.owned_marker(marker, source):
             values["markers"].add(freeze(marker))
     return values
 

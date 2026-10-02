@@ -11,6 +11,7 @@ from itertools import batched
 
 from tqdm import tqdm
 
+from stash_ai import separate_sync
 from stash_ai.cleanup import begin, finish
 from stash_ai.taggers import SOURCES
 
@@ -248,7 +249,7 @@ class SQLPreview:
         if self.app.CREATE_MARKERS:
             scene['scene_markers'] = [m for m in scene.get('scene_markers', []) if
                 m['primary_tag']['name'] not in self.names and not (
-                    m['primary_tag']['name'] in self.cores and self.app.owned_marker(m, self.cores[m['primary_tag']['name']]))]
+                    m['primary_tag']['name'] in self.cores and separate_sync.owned_marker(m, self.cores[m['primary_tag']['name']]))]
             for marker in scene['scene_markers']:
                 marker['tags'] = [t for t in marker.get('tags', []) if t['name'] not in self.names]
         return scene

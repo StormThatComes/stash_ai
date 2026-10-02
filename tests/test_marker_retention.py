@@ -5,6 +5,7 @@ import sqlite3
 
 import pytest
 
+from stash_ai import inference
 from stash_ai import cli as app, merge, thresholds
 from tests.test_thresholds import configure, raw
 
@@ -25,8 +26,9 @@ def stored_outputs(path):
 def offline(monkeypatch, stash):
     def unexpected(*args, **kwargs):
         pytest.fail('accessed inference inputs')
-    for name in ('load_tagger', 'load_vocabulary', 'fetch_cues'):
+    for name in ('load_tagger', 'load_vocabulary'):
         monkeypatch.setattr(app, name, unexpected)
+    monkeypatch.setattr(inference, 'fetch_cues', unexpected)
     monkeypatch.setattr(stash, 'get_media', unexpected)
 
 

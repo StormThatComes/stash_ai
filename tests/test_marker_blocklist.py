@@ -1,10 +1,12 @@
 """The retired blocklist must not silently restore labels lost from legacy caches."""
+
 from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
+from stash_ai import inference
 from stash_ai import cli as app, merge, progress, thresholds
 from stash_ai.taggers import ModelSettings, Vocabulary, WD
 from stash_ai.temporal import TemporalPolicy
@@ -116,7 +118,7 @@ def test_unfiltered_cache_retains_labels_and_reuses_predictions_without_models(p
         assert saved['meta']['marker_tag_blocklist'] == []
         assert all(['common', pytest.approx(.9)] in row['tags'] for row in saved['items'])
     monkeypatch.setattr(app, 'load_tagger', lambda *args: pytest.fail('loaded a model'))
-    monkeypatch.setattr(app, 'fetch_cues', lambda *args: pytest.fail('fetched VTT'))
+    monkeypatch.setattr(inference, 'fetch_cues', lambda *args: pytest.fail('fetched VTT'))
     assert app.main([*p.args, '--merge-only', '--force-merge']) == 0
     excluded = tmp_path / 'tags.yml'
     excluded.write_text('version: 1\nexcluded_tags: [common]\n')

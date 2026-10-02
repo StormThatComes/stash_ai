@@ -1,6 +1,8 @@
 """Shared offline helpers; no test collection or fixture registration."""
+
 from copy import deepcopy
 
+from stash_ai import separate_sync
 from stash_ai import cli as app
 
 
@@ -105,4 +107,4 @@ class Stash:
 
 
 def sync(stash,source,predictions=(),specs=(),cores=frozenset(),scenes=frozenset()):
-    return app.sync_scene(stash,app.TagResolver(stash,source=source),stash.find_scene("1"),list(predictions),list(specs),cores,source,scenes)
+    return separate_sync.sync_scene(app, stash,app.TagResolver(stash,source=source),stash.find_scene("1"),list(predictions),list(specs),cores,source,scenes)
