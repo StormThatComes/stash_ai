@@ -333,6 +333,14 @@ Szczegóły: [UPGRADE_abandon_pending.md](UPGRADE_abandon_pending.md).
 Każdy model ma własny plik `*_hierarchy.yml`. W trybie merged kategorie są
 publikowane pod wspólnymi tagami `ai:category:...`.
 
+Synchronizacja zawsze zastępuje rodziców zarządzanych przez daną hierarchię
+przypisaniami z aktualnego YAML-a. Zachowuje rodziców spoza tej hierarchii,
+w tym własne kategorie użytkownika. Usunięcie przypisania nie usuwa samego
+obiektu kategorii ze Stasha.
+
+Pole `parent_sync` zostało usunięte ze schematu. Jeśli korzystasz z własnego
+lub zachowanego lokalnie YAML-a, usuń to pole przed uruchomieniem nowej wersji.
+
 ```powershell
 python .\stash_ai.py --sync-hierarchy-only --dry-run
 python .\stash_ai.py --validate-hierarchy
