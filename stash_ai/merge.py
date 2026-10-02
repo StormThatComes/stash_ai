@@ -133,7 +133,7 @@ def combined_hierarchy(app, args, tag_policies=None):
     if set(categories) & {AI.prefix + label for label in leaves}:
         raise ValueError("A merged hierarchy category collides with a predicted tag.")
     return TagHierarchy({label: tuple(sorted(parents)) for label, parents in leaves.items()},
-                            categories, prefix, "replace_managed", AI.hierarchy_description)
+                            categories, prefix, AI.hierarchy_description)
 
 
 def bootstrap_legacy(app, store, scene):

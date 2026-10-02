@@ -40,7 +40,6 @@ class TagHierarchy:
     leaf_parents: dict[str, tuple[str, ...]]
     category_parents: dict[str, tuple[str, ...]]
     category_prefix: str
-    parent_sync: str
     description_prefix: str = DEFAULT_HIERARCHY_DESCRIPTION
 
     def is_managed_category(self, tag: dict) -> bool:

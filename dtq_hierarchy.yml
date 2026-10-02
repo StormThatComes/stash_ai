@@ -6,7 +6,7 @@
 # Named references describe predicted/source content, not verified identities/authorship.
 # Move a label to change its parent; repeat it in another group for multiple parents.
 # Keep raw label spelling, root and category_prefix stable. Preserve full coverage.
-# replace_managed changes only hierarchy-owned parents; manual parents remain.
+# Synchronization replaces hierarchy-owned parents; manual parents remain.
 # Existing obsolete category objects are retained, not deleted.
 # Validate: python stash_ai.py --models dtq --validate-hierarchy
 # Preview: python stash_ai.py --models dtq --sync-hierarchy-only --dry-run
@@ -32,7 +32,6 @@
     "reference_qualifier": 30
 "root": "DanbooruTagQuery L/16"
 "category_prefix": "dtq:category:"
-"parent_sync": "replace_managed"
 "groups":
   "Accessories / Eyewear and masks":
   - "adjusting_eyewear"

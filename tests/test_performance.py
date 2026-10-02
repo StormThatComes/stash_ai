@@ -121,7 +121,7 @@ def test_derived_invalidation_rolls_back_with_the_transaction(tmp_path):
 def test_manual_hierarchy_change_invalidates_unchanged_scene(pipeline, monkeypatch):
     p = pipeline
     hierarchy = app.TagHierarchy({'common': ('ai:category:General',), 'extra': ('ai:category:General',)},
-        {'ai:category:General': ()}, 'ai:category:', 'replace_managed', merge.AI.hierarchy_description)
+        {'ai:category:General': ()}, 'ai:category:', merge.AI.hierarchy_description)
     monkeypatch.setattr(merge, 'combined_hierarchy', lambda *args: hierarchy)
     assert app.main(p.args) == 0
     original = merge.evidence

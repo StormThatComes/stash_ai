@@ -122,13 +122,13 @@ def metadata_hierarchy(vocabulary: Vocabulary, source: ModelSource) -> TagHierar
     collisions = set(categories) & ({source.prefix + label for label in vocabulary.labels} | {source.owner_tag})
     if collisions:
         raise ValueError(f"Hierarchy categories collide with predicted/owner tags: {sorted(collisions)!r}")
-    return TagHierarchy(leaves, categories, prefix, "replace_managed", source.hierarchy_description)
+    return TagHierarchy(leaves, categories, prefix, source.hierarchy_description)
 
 def load_tag_hierarchy(path: Path, labels: list[str], source: ModelSource) -> TagHierarchy:
     if not path.is_file():
         raise FileNotFoundError(f"Hierarchy YAML missing: {path}. Place it beside the script or use --no-hierarchy.")
     data = load_unique_yaml(path, "Hierarchy")
-    allowed = {"version", "source", "root", "category_prefix", "parent_sync", "groups"}
+    allowed = {"version", "source", "root", "category_prefix", "groups"}
     if not isinstance(data, dict) or set(data) - allowed:
         raise ValueError("Hierarchy YAML must be a mapping using only: " + ", ".join(sorted(allowed)))
     if type(data.get("version")) is not int or data["version"] != 1:
@@ -139,9 +139,6 @@ def load_tag_hierarchy(path: Path, labels: list[str], source: ModelSource) -> Ta
         raise ValueError("Hierarchy root and category_prefix must be non-empty strings without surrounding whitespace.")
     if not prefix.startswith(source.prefix):
         raise ValueError(f"Hierarchy category_prefix must start with {source.prefix!r} for {source.key}.")
-    mode = data.get("parent_sync", "replace_managed")
-    if mode not in {"replace_managed", "add"}:
-        raise ValueError("parent_sync must be replace_managed or add.")
     groups = data.get("groups")
     if not isinstance(groups, dict) or not groups:
         raise ValueError("Hierarchy groups must be a non-empty mapping of category paths to label lists.")
@@ -188,4 +185,4 @@ def load_tag_hierarchy(path: Path, labels: list[str], source: ModelSource) -> Ta
         raise ValueError("Hierarchy source.tag_count does not match the model vocabulary.")
     if source_metadata.get("vocabulary_sha256", vocabulary_digest(labels)) != vocabulary_digest(labels):
         raise ValueError("Hierarchy source.vocabulary_sha256 does not match the model vocabulary.")
-    return TagHierarchy({tag: tuple(sorted(parents)) for tag, parents in leaves.items()}, categories, prefix, mode, source.hierarchy_description)
+    return TagHierarchy({tag: tuple(sorted(parents)) for tag, parents in leaves.items()}, categories, prefix, source.hierarchy_description)

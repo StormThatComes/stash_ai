@@ -302,9 +302,17 @@ def test_combined_hierarchy_has_one_namespace_and_all_labels(tmp_path):
     assert {name for name,parents in combined.category_parents.items() if not parents}=={"ai:category:AI"}
     assert all(name.startswith("ai:category:") for name in combined.category_parents)
     stash=Stash();manual=stash.tag("manual parent")
-    stash.tag("ai:blue_hair")["parents"]=[manual]
+    old=stash.tag("ai:category:Old");old["description"]=merge.AI.hierarchy_description
+    unowned=stash.tag("ai:category:Custom")
+    foreign=stash.tag("wd:category:General");foreign["description"]=SOURCES["wd"].hierarchy_description
+    stash.tag("ai:blue_hair")["parents"]=[manual,old,unowned,foreign]
     app.TagResolver(stash,combined,source=merge.AI).resolve("ai:blue_hair")
-    assert "manual parent" in {p["name"] for p in stash.tags["ai:blue_hair"]["parents"]}
+    assert {p["name"] for p in stash.tags["ai:blue_hair"]["parents"]}=={
+        manual["name"],unowned["name"],foreign["name"],"ai:category:Appearance / Hair / Color"}
+    assert old["name"] in stash.tags
+    before=deepcopy(stash.writes)
+    app.TagResolver(stash,combined,source=merge.AI).resolve("ai:blue_hair")
+    assert stash.writes==before
 
 
 def test_missing_source_state_does_not_destroy_existing_ai_markers(tmp_path):

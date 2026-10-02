@@ -7,7 +7,7 @@
 # group for multiple parents. Keep every raw label exactly as written, with quotes.
 # Category paths use / separators. They become real parent tags, not leaf renames.
 # Parents outside this script's category namespace/ownership are preserved.
-# replace_managed replaces only parents created by this feature; add retains old ones.
+# Synchronization replaces hierarchy-owned parents; manual parents remain.
 # Keep root/category_prefix stable after first use. Old category objects are not deleted.
 # Parent categories are not attached directly to scenes/markers: enable Include sub-tags
 # when filtering in Stash. The marker ownership tag is not part of this vocabulary.
@@ -28,7 +28,6 @@
   "note": "Proposed organizational taxonomy; editable, not model-learned tag implications."
 "root": "JoyTag"
 "category_prefix": "jt:category:"
-"parent_sync": "replace_managed"
 "groups":
   "Accessories / Eyewear and masks":
   - "adjusting_eyewear"

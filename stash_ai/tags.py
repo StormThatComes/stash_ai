@@ -83,7 +83,7 @@ class TagResolver:
     def _sync_parents(self, tag: dict, desired: list[dict], category: bool = False) -> dict:
         def final_parents(current: dict) -> dict[str, dict]:
             retained = {str(parent["id"]): parent for parent in current.get("parents", [])
-                        if self.hierarchy.parent_sync == "add" or not self.hierarchy.is_managed_category(parent)}
+                        if not self.hierarchy.is_managed_category(parent)}
             retained.update({str(parent["id"]): parent for parent in desired})
             return retained
 

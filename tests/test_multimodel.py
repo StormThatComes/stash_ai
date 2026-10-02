@@ -164,6 +164,17 @@ def test_hierarchy_loader_requires_explicit_source():
     assert parameter.default is inspect.Parameter.empty
 
 
+@pytest.mark.parametrize("mode", ["add", "replace_managed"])
+def test_hierarchy_rejects_removed_sync_option(tmp_path, mode):
+    path = tmp_path / "hierarchy.yml"
+    path.write_text(yaml.safe_dump({
+        "version": 1, "root": "WD", "category_prefix": "wd:category:",
+        "parent_sync": mode, "groups": {"General": ["common"]},
+    }), encoding="utf-8")
+    with pytest.raises(ValueError, match="Hierarchy YAML must be a mapping using only:"):
+        app.load_tag_hierarchy(path, ["common"], WD)
+
+
 def test_original_hierarchy_and_model_settings():
     root=Path(__file__).resolve().parents[1]
     data=yaml.safe_load((root/"joytag_hierarchy.yml").read_text())
