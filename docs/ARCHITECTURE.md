@@ -33,6 +33,10 @@ wykluczeń i hierarchii znajduje się w `stash_ai/config.py`, a parser cue WebVT
 w `stash_ai/vtt.py`. Dzięki temu format argumentów, YAML i VTT oraz specjalne
 ścieżki uruchomienia można testować niezależnie od normalnego pipeline inferencji.
 
+`stash_ai/tag_review.py` odtwarza lokalne evidence do raportu priorytetów przeglądu
+tagów, z deduplikacją liczników per model i ograniczoną liczbą przykładów. Nie
+korzysta z modeli ani połączenia ze Stash i pomija evidence z pending refresh.
+
 `stash_ai/model_report.py` buduje offline raport leave-one-model-out z zachowanego
 evidence. `build_report()` koordynuje osobne fazy baseline sceny, attribution
 supportu, counterfactual bez jednego modelu oraz formatowanie finalnych wierszy.

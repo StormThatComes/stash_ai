@@ -89,6 +89,10 @@ python .\stash_ai.py --model-report .\model-utility.json
 python .\stash_ai.py --model-report .\model-utility.json --model-report-workers 8
 python .\stash_ai.py --model-report .\model-utility-scene-123.json --scene-id 123
 
+# Tagi wymagające ręcznego przeglądu: powody, przykłady i liczniki per model.
+python .\stash_ai.py --tag-review-report .\tag-review.json
+python .\stash_ai.py --tag-review-report .\tag-review-scene-123.json --scene-id 123
+
 # Porzucenie niedokończonego planu merge/cleanup.
 python .\stash_ai.py --abandon-pending
 ```
@@ -260,6 +264,48 @@ Zmiana samego badge'a źródeł markera, np. `[jt+wd]` na `[wd]`, nie jest liczo
 jako zmiana semantyczna. Dzięki temu raport mierzy wpływ na tagowanie, zakresy i
 extras, a nie samą obecność provenance. `--scene-id` może ograniczyć analizę
 do wybranych scen.
+
+### Raport tagów wymagających przeglądu
+
+`--tag-review-report NEW.json` analizuje zapisane tagi scen i główne etykiety
+markerów, odtwarzając merge z efektywnymi progami zapisanymi w bazie. Używa
+wybranej polityki temporalnej i wykluczeń. Nie ładuje modeli, nie pobiera mediów,
+nie łączy się ze Stash i nie zmienia bazy źródłowej ani publikacji.
+
+Raport wskazuje priorytety ręcznego przeglądu:
+
+- `weak_or_borderline`: najlepszy wynik nie przekracza właściwego progu o więcej
+  niż `--tag-review-margin` (domyślnie `0.05`). Dla scen zakwalifikowanych przez
+  `strong_peak` używany jest próg silnego piku; pozostałe wyniki mają własny próg
+  sceny lub markera. Słabe wyniki zaakceptowane przez reguły czasowe/konsensus też
+  mogą zostać wskazane;
+- `isolated_peak`: tag sceny kwalifikuje się przez silny pik, ale tylko jedna
+  próbka przekracza próg sceny, przy co najmniej dwóch próbkach;
+- `model_disagreement`: inny model zachował tę samą etykietę na identycznym
+  wejściu, lecz nie kwalifikuje jej według własnych reguł sceny. Brak modelu lub
+  etykiety w cache nie jest głosem negatywnym; wykluczone etykiety nie służą do
+  porównań;
+- `long_marker`: po scaleniu zakres ma co najmniej
+  `--tag-review-long-marker-seconds` (domyślnie `300` sekund).
+
+Tabela w terminalu i sekcja `models` JSON pokazują dla JoyTag, WD, DTQ i Oppai
+liczbę różnych etykiet do przeglądu, liczbę par scena–tag oraz liczbę scen.
+Para scena–tag per model jest liczona raz, również gdy ten tag ma kilka zakresów,
+występuje jako tag sceny i core markera lub pochodzi z kilku zapisanych przebiegów.
+Globalne liczniki dodatkowo deduplikują modele; sumowanie wierszy modeli nie daje
+liczby różnych tagów w całej kolekcji. Liczniki powodów mogą się nakładać.
+
+Sekcja `tags` zawiera wiersze model–etykieta, liczniki powodów i do trzech
+przykładowych scen z wynikami, progami i czasami. Limit przykładów zmienia
+`--tag-review-examples 1..20`; liczniki obejmują wszystkie przeanalizowane sceny.
+Wiersze są sortowane według liczby wskazanych scen, następnie liczby powodów.
+`--scene-id` może ograniczyć analizę; istniejący plik raportu nie jest nadpisywany.
+
+Sceny z pending refresh/publication lub nieużywalnym evidence są pomijane
+i raportowane osobno z powodami, zamiast uczestniczyć w porównaniu modeli.
+Raport opisuje wynik replay cache, a nie sprawdzony na żywo stan Stash.
+Heurystyki nie oznaczają potwierdzonych błędów: poprawny tag może mieć tylko jeden
+pik, długi zakres albo wsparcie jednego modelu. Raport nie uśrednia ocen modeli.
 
 ## Wynik w Stash
 
