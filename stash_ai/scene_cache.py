@@ -132,12 +132,13 @@ def plan(app, store, scene, config, *, scenes=True, markers=False, direct=False,
     return updated
 
 
-def apply(store, scene, model, outputs):
+def apply(store, scene, model, outputs, *, metadata_only=False):
     from stash_ai.thresholds import marker_threshold
     with store.connection:
         for kind, segments in outputs.items():
             threshold = scene_threshold(segments[0]) if kind == 'scene' else marker_threshold(segments[0])
-            store.set_result_threshold(scene, model, kind, threshold, segments)
+            store.set_result_threshold(scene, model, kind, threshold, segments,
+                                       metadata_only=metadata_only)
 
 
 def rethreshold(app, store, scenes, settings, report, *, markers=False):
@@ -174,8 +175,8 @@ def rethreshold(app, store, scenes, settings, report, *, markers=False):
             app, store, scene, config,
             scenes='scene' in available, markers='markers' in available,
             direct=True, marker_check_scene=False if markers else None,
-            pending_checked=True)
-        apply(store, scene, config.source.key, outputs)
+            pending_checked=True, metadata_only=True)
+        apply(store, scene, config.source.key, outputs, metadata_only=True)
         changed += bool(outputs)
     report.record_threshold_preflight(
         len(targets), 0, applied=changed,

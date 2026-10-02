@@ -160,9 +160,11 @@ def validate(app, store, scene, config, *, check_scene=True, direct=False, metad
     return segments
 
 
-def apply(app, store, scene, config, segments=None, *, direct=False, pending_checked=False):
+def apply(app, store, scene, config, segments=None, *, direct=False, pending_checked=False,
+          metadata_only=False):
     """Store policy separately; retain every original frame, score and signature."""
-    segments = validate(app, store, scene, config, direct=direct) if segments is None else segments
+    segments = validate(app, store, scene, config, direct=direct,
+                        metadata_only=metadata_only) if segments is None else segments
     if all(marker_threshold(s) == config.marker_threshold for s in segments):
         return False
     if not pending_checked and store.has_pending_publication(scene):
@@ -175,7 +177,8 @@ def apply(app, store, scene, config, segments=None, *, direct=False, pending_che
             value[OVERRIDE] = config.marker_threshold
         updated.append(value)
     with store.connection:
-        store.set_result_threshold(scene, config.source.key, 'markers', config.marker_threshold, updated)
+        store.set_result_threshold(scene, config.source.key, 'markers', config.marker_threshold, updated,
+                                   metadata_only=metadata_only)
     return True
 
 
@@ -226,7 +229,7 @@ def rethreshold(app, store, scenes, settings, report):
         return dict(errors=errors)
     changed = 0
     for scene, config, _ in tqdm(targets, desc='Apply marker thresholds', unit='pair'):
-        changed += apply(app, store, scene, config, direct=True, pending_checked=True)
+        changed += apply(app, store, scene, config, direct=True, pending_checked=True, metadata_only=True)
     report.record_threshold_preflight(
         len(targets), 0, applied=changed,
         selected=selected, skipped_no_evidence=skipped)

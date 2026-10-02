@@ -54,7 +54,8 @@ def initialize_progress(store, previous_version):
             db.execute("PRAGMA user_version=4")
 
 
-def index_result(store, scene, model, kind, segments, scope=None):
+def index_result(store, scene, model, kind, segments, scope=None, *, metadata_only=False):
+    """Index a validated effective view, including a frame-free threshold plan."""
     from stash_ai.thresholds import indexed_signature
     inference = next((segment for segment in reversed(segments)
                       if segment["meta"].get("origin") == "inference"), None)
@@ -63,7 +64,7 @@ def index_result(store, scene, model, kind, segments, scope=None):
         "populated=excluded.populated,signature=excluded.signature",
         (scope or store.scope, str(scene), model, kind,
          int(inference is not None),
-         int(any(s["items"] for s in segments)),
+         int(any(s["populated"] if metadata_only else bool(s["items"]) for s in segments)),
          indexed_signature(inference) if inference is not None else None))
 
 

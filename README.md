@@ -155,13 +155,15 @@ zwykłego przebiegu uruchamia świeżą inferencję i unieważnia częściowy ch
 rozmiar bazy i koszt przetwarzania cache. Ustawienia dotyczą trwałego cache trybu
 `merged`; tryb `separate` nadal używa progów publikacji.
 
-Faza `Check` rethreshold korzysta z małych rekordów `result_metadata` w SQLite,
+Fazy `Check` i `Apply` rethreshold korzystają z małych rekordów `result_metadata` w SQLite,
 zamiast dekodować klatki z `results.data`. Nowe wyniki zapisują je atomowo razem
 z evidence; starsze wyniki uzupełniają metadane przy pierwszym sprawdzeniu.
 Dotyczy to także historii wyników i starych nadpisań progów. Zmiana lub usunięcie
 surowego wyniku unieważnia jego metadane przez trigger, również przy zapisie
-starszą wersją programu. `Apply` nadal odczytuje evidence, a zmianę progów zapisuje
-w `result_thresholds`. Dry-run uzupełnia wyłącznie tymczasową bazę; `--db-check`
+starszą wersją programu. `Apply` zapisuje progi w `result_thresholds` i aktualizuje
+`result_index` z metadanych: obecności wyników oraz sygnatury ostatniej inferencji
+w historii. Przy gotowych metadanych żadna z obu faz nie dekoduje BLOB-ów klatek.
+Dry-run uzupełnia wyłącznie tymczasową bazę; `--db-check`
 sprawdza zgodność istniejących metadanych z evidence bez ich naprawiania.
 
 Domyślnie `REPLACE_SCENE_TAGS=True` i `REPLACE_MARKERS=True`. Wyłączenie
