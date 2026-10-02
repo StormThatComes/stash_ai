@@ -1,10 +1,13 @@
-"""Cached marker coverage must survive changes to the inference-time blocklist."""
+"""The retired blocklist must not silently restore labels lost from legacy caches."""
 from copy import deepcopy
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
-from stash_ai import cli as app, merge, thresholds
+from stash_ai import cli as app, merge, progress, thresholds
+from stash_ai.taggers import ModelSettings, Vocabulary, WD
+from stash_ai.temporal import TemporalPolicy
 from tests.helpers.evidence import segment
 
 pytestmark = pytest.mark.usefixtures('reset_temporal')
@@ -17,10 +20,24 @@ def configure(monkeypatch):
         for config in original(*args)])
 
 
+@pytest.mark.parametrize('temporal,expected', [
+    (False, '90e2f394c8924f2f8b9ffea035ad04503434e8b7a5a0fb5e90607838f4a12a55'),
+    (True, 'b56223032268887b5f20c2129912f7cfee5c11ce98b50a2e721bd95eea601aa0'),
+])
+def test_default_empty_blocklist_keeps_pre_retirement_inference_identity(monkeypatch, tmp_path, temporal, expected):
+    monkeypatch.setattr(app, 'TEMPORAL_POLICY', TemporalPolicy(enabled=temporal))
+    config = ModelSettings(WD, tmp_path / 'missing', batch_size=2, scene_threshold=.4, marker_threshold=.7)
+    vocabulary = Vocabulary(['common', 'extra'], {'common': 'General', 'extra': 'General'})
+    identity = progress.model_identity(app, config, vocabulary)
+    # Digests captured before retirement; normalize only the machine-specific path.
+    identity['files'] = [[Path(path).name, size, mtime] for path, size, mtime in identity['files']]
+    assert progress.digest(identity) == expected
+
+
 @pytest.mark.parametrize('temporal', [True, False])
 @pytest.mark.parametrize('markers_only', [True, False])
 @pytest.mark.parametrize('dry_run', [True, False])
-def test_unblocking_rejects_merge_before_writes_and_restart_restores_range(
+def test_legacy_blocklist_rejects_merge_before_writes_and_restart_restores_range(
         pipeline, monkeypatch, capsys, temporal, markers_only, dry_run):
     p = pipeline
     configure(monkeypatch)
@@ -28,16 +45,21 @@ def test_unblocking_rejects_merge_before_writes_and_restart_restores_range(
     p.scores['wd'][:, 0] = .9
     args = [*p.args, *(['--markers-only'] if markers_only else []),
             *([] if temporal else ['--no-temporal'])]
-    monkeypatch.setattr(app, 'MARKER_TAG_BLOCKLIST', {'common', 'unrelated'})
     assert app.main(args) == 0
-    with merge.StateStore(p.path, merge.scope_for(app.STASH_URL), True) as state:
-        saved = state.records('1', 'markers')['wd'][0]
+    # Emulate frames captured by the old option, which discarded labels before storage.
+    with merge.StateStore(p.path, merge.scope_for(app.STASH_URL)) as state:
+        records = state.records('1', 'markers')['wd']
+        saved = records[0]
+        saved['meta']['marker_tag_blocklist'] = ['common', 'unrelated']
+        for row in saved['items']:
+            row['tags'] = []
+        with state.connection:
+            state.replace_records('1', 'wd', 'markers', records)
     assert saved['meta']['marker_tag_blocklist'] == ['common', 'unrelated']
     assert all(not row['tags'] for row in saved['items'])
     before = deepcopy(p.stash.scene)
     p.stash.writes.clear()
     capsys.readouterr()
-    monkeypatch.setattr(app, 'MARKER_TAG_BLOCKLIST', {'unrelated'})
     with monkeypatch.context() as guard:
         guard.setattr(app, 'load_tagger', lambda *args: pytest.fail('loaded a model during merge'))
         assert app.main([*args, '--merge-only', *(['--dry-run'] if dry_run else [])]) == 1
@@ -52,11 +74,10 @@ def test_unblocking_rejects_merge_before_writes_and_restart_restores_range(
 
 
 @pytest.mark.parametrize('combined', [True, False])
-def test_unblocking_aborts_rethreshold_before_any_policy_write(pipeline, monkeypatch, combined):
+def test_legacy_blocklist_aborts_rethreshold_before_any_policy_write(pipeline, monkeypatch, combined):
     p = pipeline
     configure(monkeypatch)
     args = ['--models', 'wd', 'dtq', *p.args[2:]]
-    monkeypatch.setattr(app, 'MARKER_TAG_BLOCKLIST', set())
     assert app.main(args) == 0
     # WD is a safe earlier target; DTQ contains frames captured while common was blocked.
     with merge.StateStore(p.path, merge.scope_for(app.STASH_URL)) as state:
@@ -85,21 +106,27 @@ def test_unblocking_aborts_rethreshold_before_any_policy_write(pipeline, monkeyp
     assert not p.stash.writes
 
 
-def test_unchanged_and_stricter_blocklists_reuse_cache_without_models(pipeline, monkeypatch):
+def test_unfiltered_cache_retains_labels_and_reuses_predictions_without_models(pipeline, monkeypatch, tmp_path):
     p = pipeline
     configure(monkeypatch)
     p.scores['wd'][:, 0] = .9
-    monkeypatch.setattr(app, 'MARKER_TAG_BLOCKLIST', {'unrelated'})
     assert app.main(p.args) == 0
+    with merge.StateStore(p.path, merge.scope_for(app.STASH_URL), True) as state:
+        saved = state.records('1', 'markers')['wd'][0]
+        assert saved['meta']['marker_tag_blocklist'] == []
+        assert all(['common', pytest.approx(.9)] in row['tags'] for row in saved['items'])
     monkeypatch.setattr(app, 'load_tagger', lambda *args: pytest.fail('loaded a model'))
+    monkeypatch.setattr(app, 'fetch_cues', lambda *args: pytest.fail('fetched VTT'))
     assert app.main([*p.args, '--merge-only', '--force-merge']) == 0
-    monkeypatch.setattr(app, 'MARKER_TAG_BLOCKLIST', {'common', 'unrelated'})
-    assert app.main([*p.args, '--merge-only']) == 0
+    excluded = tmp_path / 'tags.yml'
+    excluded.write_text('version: 1\nexcluded_tags: [common]\n')
+    assert app.main([*p.args, '--merge-only', '--tag-exclusions', str(excluded)]) == 0
     assert all(m['primary_tag']['name'] != 'ai:common' for m in p.stash.scene['scene_markers'])
-    # Compare against the capture policy, not the stricter last publication.
-    monkeypatch.setattr(app, 'MARKER_TAG_BLOCKLIST', {'unrelated'})
+    # YAML policy changes preserve the raw evidence and can be reversed without inference.
     assert app.main([*p.args, '--merge-only']) == 0
     assert any(m['primary_tag']['name'] == 'ai:common' for m in p.stash.scene['scene_markers'])
+    with merge.StateStore(p.path, merge.scope_for(app.STASH_URL), True) as state:
+        assert state.records('1', 'markers')['wd'][0] == saved
 
 
 @pytest.mark.parametrize('retained', [None, 'common', [None]])

@@ -106,10 +106,6 @@ MAX_MARKERS_PER_SCENE = 0  # 0 = unlimited; otherwise keep highest-confidence ru
 MARKER_USE_END_TIME = True
 REPLACE_MARKERS = True  # False retains obsolete markers except excluded cores.
 
-# Optional raw-label blocklist for both primary and additional marker tags.
-# Applies to each model; no allowlist is used.
-MARKER_TAG_BLOCKLIST: set[str] = set()
-
 # Marker ownership identifiers are defined in stash_ai/taggers.py and stash_ai/merge.py.
 MARKER_MATCH_TOLERANCE_SECONDS = 0.25
 

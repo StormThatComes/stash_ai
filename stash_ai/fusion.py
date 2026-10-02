@@ -168,7 +168,7 @@ def observations(app, group, core_policies, tag_policies=None):
             event["end"] = max(event["end"], end)
             eligible = []
             for tag, score in row["tags"]:
-                if tag not in app.MARKER_TAG_BLOCKLIST and tag not in tag_policies[source]:
+                if tag not in tag_policies[source]:
                     # Validate even observations below the current publication floor.
                     label = raw_label(tag)
                     if score >= sort_floor:
@@ -272,7 +272,7 @@ def enrich(app, records, policies, spans, signatures=None, index=None, metrics=N
     groups, by_signature = index.groups, index.by_signature
     options = {**build_options(app), "core_exclusions": {k: sorted(v) for k, v in policies.items()},
                "tag_exclusions": {k: sorted(v) for k, v in index.tag_policies.items()},
-               "blocklist": sorted(app.MARKER_TAG_BLOCKLIST)}
+               "blocklist": []}
     covered = defaultdict(list)
     for span in spans:
         key = by_signature.get(span.get("evidence_signature"))

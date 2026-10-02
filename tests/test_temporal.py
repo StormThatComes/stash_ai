@@ -26,9 +26,8 @@ def test_extras_recur_across_entire_marker_and_first_frame_noise_is_removed():
     assert markers[0].extra_evidence==(('later',2,.5),)
 
 
-def test_core_exclusion_remains_eligible_as_extra_and_blocklist_removes_both(monkeypatch):
-    data=frames([[('core',.9),('excluded',.9),('blocked',.99)]]*3)
-    monkeypatch.setattr(app,'MARKER_TAG_BLOCKLIST',{'blocked'})
+def test_core_exclusion_remains_eligible_as_extra():
+    data=frames([[('core',.9),('excluded',.9)]]*3)
     markers,_=app.build_markers(data,frozenset({'excluded'}),threshold=.8)
     assert [m.tag for m in markers]==['core'] and markers[0].extra_tags==('excluded',)
 

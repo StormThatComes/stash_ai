@@ -62,7 +62,7 @@ def occurrence_contributions(app, scene_hits, records, spans, core_policies, tag
     if not policy.enabled or not policy.occurrence_markers:
         return []
     covered = {item['tag'] for item in spans}
-    blocked = {s: set(core_policies[s]) | set(tag_policies[s]) | app.MARKER_TAG_BLOCKLIST for s in SOURCES}
+    blocked = {s: set(core_policies[s]) | set(tag_policies[s]) for s in SOURCES}
     hits = [hit for hit in scene_hits if hit['tag'] not in covered and hit['meta'].get('origin') == 'inference'
             and any(hit['tag'] not in blocked[s] for s in _sources(hit))]
     missing = {hit['tag'] for hit in hits}
@@ -162,8 +162,6 @@ def occurrence_contributions(app, scene_hits, records, spans, core_policies, tag
 def cleanup_occurrence(app, store, scene_id, point, selected, cores, tags):
     """Revoke published witnesses without moving the point or adding new votes."""
     from stash_ai.scene import cleanup_scene_support
-    if point['tag'] in app.MARKER_TAG_BLOCKLIST:
-        return None
     hits = cleanup_scene_support(app, store, scene_id, point['scene_evidence'], selected, tags)
     witnesses = [w for w in point['occurrence_evidence']
                  if (w['source'] not in selected or point['tag'] not in cores[w['source']] | tags[w['source']])

@@ -207,8 +207,13 @@ w dry-run. Sprawdzany jest efektywny `marker_threshold`, także po rethresholdin
 Starsze klatki bez metadanych retencji i importowane zakresy zachowują
 dotychczasowe zachowanie kontroli progów.
 
-Cache markerów zapisuje także `MARKER_TAG_BLOCKLIST` używaną podczas inferencji.
-Dodanie wykluczeń jest bezpieczne dla cache. Usunięcie tagu z tej listy wymaga
+Opcja `MARKER_TAG_BLOCKLIST` została wycofana. Wykluczenia ustawiaj w
+`marker_core_exclusions.yml` lub `scene_tag_exclusions.yml`; są stosowane podczas
+publikacji i zachowują surowe detekcje w cache. Dotychczasowy cache oraz
+checkpointy zapisane z pustą blocklistą zachowują zgodność.
+
+Pole `marker_tag_blocklist` pozostaje w metadanych historycznych wyników;
+nowe wyniki zapisują pustą listę. Cache z niepustą historyczną listą wymaga
 świeżej inferencji: odrzucone wcześniej detekcje nie istnieją w zapisanych klatkach.
 `--merge-only` i rethreshold markerów zgłoszą błąd przed publikacją takiej sceny,
 również przy `--markers-only`, `--no-temporal` i `--dry-run`.
@@ -216,7 +221,8 @@ Starszy cache inferencji bez metadanych blocklisty również wymaga jednorazoweg
 odświeżenia przed zwykłym merge lub rethreshold markerów. Cleanup może nadal
 cofać głosy z wcześniej opublikowanych markerów konsensusowych bez inferencji:
 sprawdza zgodność zapisanych dowodów i ogranicza wynik do opublikowanych
-zakresów oraz dodatków. Nie dodaje nowych głosów ani odblokowanych tagów.
+zakresów oraz dodatków. Zachowuje również historyczne zakazy z dowodów
+publikacji, nie dodając nowych głosów ani odblokowanych tagów.
 Uruchom `--restart` dla wskazanych scen/modeli przed zwykłym merge, np.:
 
 ```powershell

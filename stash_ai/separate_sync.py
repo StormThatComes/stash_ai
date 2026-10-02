@@ -88,7 +88,7 @@ def cleanup_scene_marker_cores(app, stash, scene: dict,
     excluded_ids = {str(marker["id"]) for marker in excluded}
     blocked_names = {
         source.prefix + tag
-        for tag in tag_exclusions | app.MARKER_TAG_BLOCKLIST
+        for tag in tag_exclusions
     }
     for marker in scene.get("scene_markers") or []:
         if str(marker["id"]) in excluded_ids:

@@ -227,11 +227,6 @@ def _run_prediction_batches(app, tagger, stash, paths, cues, state, *,
                         state.marker_floor,
                         0,
                     )
-                    matches = [
-                        (tag, score)
-                        for tag, score in matches
-                        if tag not in app.MARKER_TAG_BLOCKLIST
-                    ]
                     batch_frames.append(FramePrediction(cue, tuple(matches)))
 
             batch_scene = (

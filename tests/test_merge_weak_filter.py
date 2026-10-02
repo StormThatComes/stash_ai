@@ -53,10 +53,9 @@ def test_temporal_markers_sort_only_eligible_scores(monkeypatch):
 def test_wide_cache_preserves_observations_ties_exclusions_and_empty_timestamps(monkeypatch, enabled, cap):
     monkeypatch.setattr(app, 'TEMPORAL_POLICY', replace(app.TEMPORAL_POLICY, enabled=enabled))
     monkeypatch.setattr(app, 'MARKER_MAX_TAGS_PER_FRAME', cap)
-    monkeypatch.setattr(app, 'MARKER_TAG_BLOCKLIST', {'blocked'})
     rows = [[('a', .95), ('c', .9), ('b', .9), ('support', .7), ('blocked', 1.)], [],
             [('b', .9), ('detail', .9)]]
-    core_policies, tag_policies = policies({'a', 'detail'}), policies({'c'})
+    core_policies, tag_policies = policies({'a', 'detail'}), policies({'c', 'blocked'})
     lean = {source: [segment(source, rows)] for source in ('wd', 'dtq')}
     wide = deepcopy(lean)
     for items in wide.values():
@@ -103,12 +102,11 @@ def test_low_score_invalid_labels_still_fail_merge_validation(label, shared, mon
         merge.marker_contributions(app, records, policies())
 
 
-def test_direct_observation_validation_checks_low_labels_but_keeps_exclusion_semantics(monkeypatch):
+def test_direct_observation_validation_checks_low_labels_but_keeps_exclusion_semantics():
     records = {'wd': [segment('wd', [[('core', .9), (' bad', .01)]])]}
     with pytest.raises(ValueError, match='Invalid or reserved merged label'):
         fusion.observations(app, group(records), policies())
-    monkeypatch.setattr(app, 'MARKER_TAG_BLOCKLIST', {' bad'})
-    assert set(fusion.observations(app, group(records), policies())[0]['cores']) == {'core'}
+    assert set(fusion.observations(app, group(records), policies(), policies({' bad'}))[0]['cores']) == {'core'}
 
 
 @pytest.mark.parametrize('ratio', [.5, .85, 1.])
