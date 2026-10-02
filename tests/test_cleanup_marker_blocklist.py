@@ -10,8 +10,8 @@ from tests.helpers.evidence import segment
 pytestmark = pytest.mark.usefixtures('reset_temporal')
 
 
-@pytest.fixture
-def old_consensus(pipeline, monkeypatch, tmp_path):
+@pytest.fixture(params=[False, True], ids=['known-retention', 'unknown-retention'])
+def old_consensus(pipeline, monkeypatch, tmp_path, request):
     p = pipeline
     settings = app.load_model_settings
     monkeypatch.setattr(app, 'load_model_settings', lambda *args: [
@@ -22,16 +22,19 @@ def old_consensus(pipeline, monkeypatch, tmp_path):
         p.scores[model][:, 0] = .7
     p.args = ['--models', 'wd', 'dtq', *p.args[2:]]
 
-    # Emulate publication before #82: neither frames nor their published proof
-    # signatures contained marker_tag_blocklist. Restore strict checks afterward.
+    # Emulate publication before #82, optionally also before retention metadata.
+    # Both cached frames and published proof signatures lack these fields.
+    # Restore strict checks after capturing the historical publication.
     capture = merge.capture_outputs
     with monkeypatch.context() as previous:
         def capture_old(*args, **kwargs):
             outputs = capture(*args, **kwargs)
             outputs['markers']['meta'].pop('marker_tag_blocklist')
+            if request.param:
+                outputs['markers']['meta'].pop('marker_score_floor')
             return outputs
         previous.setattr(merge, 'capture_outputs', capture_old)
-        previous.setattr(thresholds, 'validate_marker_blocklist', lambda *args, **kwargs: None)
+        previous.setattr(thresholds, 'validate_marker_cache', lambda *args, **kwargs: None)
         assert app.main(p.args) == 0
     assert len(p.stash.scene['scene_markers']) == 1
     assert p.stash.scene['scene_markers'][0]['primary_tag']['name'] == 'ai:common'
@@ -40,6 +43,8 @@ def old_consensus(pipeline, monkeypatch, tmp_path):
         assert any({span['source'], *span.get('support_sources', [])} == {'wd', 'dtq'}
                    for span in published['contributions'])
         assert all('marker_tag_blocklist' not in records[0]['meta']
+                   for records in state.records('1', 'markers').values())
+        assert all(('marker_score_floor' not in records[0]['meta']) == request.param
                    for records in state.records('1', 'markers').values())
     core = tmp_path/'exclude.yml'
     core.write_text('version: 1\nexcluded_core_tags: []\nby_model:\n  wd: [common]\n')
@@ -109,3 +114,19 @@ def test_cleanup_exception_does_not_accept_invalid_or_known_incomplete_metadata(
     with pytest.raises(ValueError, match='marker blocklist metadata|unblocked marker tags'):
         thresholds.validate_marker_cache(
             app, {'wd': [frames]}, allow_unknown_blocklist=True)
+
+
+@pytest.mark.parametrize('floor', [None, float('nan'), .75])
+def test_cleanup_retention_exception_still_checks_explicit_floors(floor):
+    frames = segment('wd', [[('common', .9)]] * 2)
+    frames['meta']['marker_score_floor'] = floor
+    with pytest.raises(ValueError, match='marker cache floor'):
+        thresholds.validate_marker_cache(app, {'wd': [frames]}, allow_unknown_retention=True)
+
+
+def test_blocklist_exception_does_not_relax_historical_retention():
+    frames = segment('wd', [[('common', .9)]] * 2)
+    frames['meta'].pop('marker_tag_blocklist')
+    frames['meta'].pop('marker_score_floor')
+    with pytest.raises(ValueError, match='marker cache floor'):
+        thresholds.validate_marker_cache(app, {'wd': [frames]}, allow_unknown_blocklist=True)

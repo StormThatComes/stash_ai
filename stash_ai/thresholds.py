@@ -87,24 +87,31 @@ def validate_marker_blocklist(app, segment, identity, *, allow_unknown=False):
                          'run inference with --restart for this scene/model.')
 
 
-def validate_marker_cache(app, records, *, allow_unknown_blocklist=False):
+def validate_marker_cache(app, records, *, allow_unknown_blocklist=False,
+                          allow_unknown_retention=False):
     """Check retained coverage before cached frames can build markers or votes."""
     from stash_ai.temporal import marker_floor
     for model, segments in records.items():
         for segment in segments:
             meta = segment['meta']
             validate_marker_blocklist(app, segment, model, allow_unknown=allow_unknown_blocklist)
-            # Imported spans and old frames without retention metadata keep
-            # their existing semantics; no original support floor can be proven.
-            if segment['mode'] != 'frames' or 'marker_score_floor' not in meta:
+            # Imported frames have no inference retention contract. Cleanup may
+            # also revoke verified published proofs with unknown old retention.
+            if segment['mode'] != 'frames':
+                continue
+            if 'marker_score_floor' not in meta and (
+                    meta.get('origin') != 'inference' or allow_unknown_retention):
                 continue
             threshold = marker_threshold(segment, getattr(app, 'MARKER_THRESHOLDS', None))
             if not _score(threshold):
                 raise ValueError(f'{model}: invalid cached marker threshold; run inference.')
             needed = marker_floor(app.TEMPORAL_POLICY, threshold)
-            floor = meta['marker_score_floor']
+            # Before retention metadata existed, only high detections may have
+            # survived. Overrides change publication, not the capture floor.
+            floor = meta.get('marker_score_floor', meta.get('marker_threshold'))
             if not _score(floor) or floor > needed:
-                raise ValueError(f'{model}: marker cache floor {floor!r} exceeds required {needed:g}; run inference.')
+                raise ValueError(f'{model}: marker cache floor {floor!r} exceeds required {needed:g}; '
+                                 'run inference with --restart for this scene/model.')
 
 
 def _model_records(store, scene, kind, model, *, direct=False, metadata_only=False):

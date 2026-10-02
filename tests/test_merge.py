@@ -317,7 +317,8 @@ def test_missing_source_state_does_not_destroy_existing_ai_markers(tmp_path):
 def test_no_frame_fusion_across_models(tmp_path):
     with store(tmp_path) as state:
         for source,indices in [("joytag",{0,2}),("wd",{1,3})]:
-            state.put("1",source,{"markers":{"mode":"frames","meta":{"origin":"inference", "marker_tag_blocklist": []},"items":[
+            state.put("1",source,{"markers":{"mode":"frames","meta":{"origin":"inference", "marker_tag_blocklist": [],
+                "marker_threshold": .8, "marker_score_floor": .8},"items":[
                 dict(start=i*5,end=(i+1)*5,tags=[["common",.9]] if i in indices else []) for i in range(4)]}})
         _,spans=merge.evidence(app,state,"1",empty_policies(),empty_policies())
         assert spans==[]  # Each model's MIN_HITS is still checked independently.

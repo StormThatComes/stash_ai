@@ -166,6 +166,13 @@ zwykłego przebiegu uruchamia świeżą inferencję i unieważnia częściowy ch
 rozmiar bazy i koszt przetwarzania cache. Ustawienia dotyczą trwałego cache trybu
 `merged`; tryb `separate` nadal używa progów publikacji.
 
+Stary cache inferencji bez `marker_score_floor` jest sprawdzany z użyciem
+zapisanego `marker_threshold` jako konserwatywnego progu retencji. Jeśli np.
+włączenie polityki temporalnej wymaga słabszych obserwacji, `--merge-only`
+odmawia publikacji i wymaga ponownej inferencji. Nadpisanie progu publikacji
+nie obniża historycznego floor. Cleanup może nadal cofać głosy ze zweryfikowanych
+opublikowanych markerów bez tych metadanych, w granicach zapisanych dowodów.
+
 Fazy `Check` i `Apply` rethreshold korzystają z małych rekordów `result_metadata` w SQLite,
 zamiast dekodować klatki z `results.data`. Nowe wyniki zapisują je atomowo razem
 z evidence; starsze wyniki uzupełniają metadane przy pierwszym sprawdzeniu.

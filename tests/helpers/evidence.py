@@ -26,7 +26,8 @@ def frames(rows, step=1):
 
 
 def segment(model, rows, identity='same'):
-    return dict(mode='frames',meta=dict(origin='inference',marker_threshold=.8,marker_tag_blocklist=[],frame_input_signature=identity,
+    # Synthetic evidence retains every supplied observation without filtering.
+    return dict(mode='frames',meta=dict(origin='inference',marker_threshold=.8,marker_score_floor=0.,marker_tag_blocklist=[],frame_input_signature=identity,
                 inference_signature=model+'-'+identity),items=[dict(start=f.cue.start,end=f.cue.end,tags=list(f.tags)) for f in frames(rows)])
 
 
