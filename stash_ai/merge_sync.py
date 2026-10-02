@@ -6,10 +6,11 @@ publication while keeping merge algorithms function-oriented.
 """
 from __future__ import annotations
 
-from collections import Counter, defaultdict
+from collections import Counter
 from dataclasses import dataclass, field
 
 from stash_ai import merge
+from stash_ai.marker_index import MarkerIntervalIndex, PreviousMarkerRanges
 from stash_ai.runtime import stage
 
 
@@ -45,18 +46,10 @@ def _previous_ranges(app, stash, store, scene_id):
     return result
 
 
-def _temporal_marker(marker, previous_ranges):
-    """Restore the logical range of a point-only marker when it was published."""
-    ends = [item["end"] for item in previous_ranges if item["end"] is not None
-            and merge.AI.prefix + item["tag"] == marker["primary_tag"]["name"]
-            and abs(round(item["start"], 3) - marker["seconds"]) <= 0.0005]
-    return {**marker, "end_seconds": max(ends)} if ends else marker
-
-
 def prepare_sync_evidence(app, stash, store, scene, scene_hits, spans, *, cleanup, report):
     """Build merged markers/scene labels and apply cleanup-only retention rules."""
     scene_id = str(scene["id"])
-    previous_ranges = _previous_ranges(app, stash, store, scene_id)
+    previous_ranges = PreviousMarkerRanges(_previous_ranges(app, stash, store, scene_id))
     with stage(report, 'marker_union'):
         markers = merge.union_intervals(spans, borrow=True) if app.CREATE_MARKERS else []
     if report is not None:
@@ -70,11 +63,9 @@ def prepare_sync_evidence(app, stash, store, scene, scene_hits, spans, *, cleanu
         scene_hits = [hit for hit in scene_hits if hit["tag"] in scene_labels]
         present = [marker for marker in scene.get("scene_markers", [])
                    if app.owned_marker(marker, merge.AI)]
-        markers = [marker for marker in markers if any(
-            old["primary_tag"]["name"] == merge.AI.prefix + marker["tag"] and
-            merge.overlaps(_temporal_marker(old, previous_ranges),
-                           {"seconds": marker["start"], "end_seconds": marker["end"]}, 0)
-            for old in present)]
+        existing = MarkerIntervalIndex(present if markers else [], previous_ranges, by_name=True)
+        markers = [marker for marker in markers if existing.overlapping(
+            merge.AI.prefix + marker["tag"], {"seconds": marker["start"], "end_seconds": marker["end"]})]
         spans = [item for marker in markers for item in marker["contributors"]]
     return scene_hits, spans, markers, scene_labels, previous_ranges
 
@@ -204,9 +195,7 @@ def plan_markers(app, stash, resolver, scene_id, scene, markers, ids, groups, bl
         plan.wanted_markers = wanted
         current_markers = scene.get("scene_markers", [])
         owned = [marker for marker in current_markers if app.owned_marker(marker, merge.AI)]
-        owned_by_primary = defaultdict(list)
-        for marker in owned:
-            owned_by_primary[str(marker["primary_tag"]["id"])].append(marker)
+        existing = MarkerIntervalIndex(owned if wanted else [], previous_ranges)
         available = {str(marker["id"]): marker for marker in owned}
 
         def manual_extra(tag):
@@ -214,22 +203,20 @@ def plan_markers(app, stash, resolver, scene_id, scene, markers, ids, groups, bl
                     and not groups.owns(tag))
 
         for payload, interval in wanted:
-            same_primary = owned_by_primary[payload["primary_tag_id"]]
-            related = [marker for marker in same_primary
-                       if merge.overlaps(_temporal_marker(marker, previous_ranges), interval, 0)]
+            related = existing.overlapping(payload["primary_tag_id"], interval)
             # Keep manual extras from every marker absorbed by the union, including
             # duplicates that will be deleted. A split carries them to both pieces.
             payload["tag_ids"] = sorted(set(payload["tag_ids"]) | {str(tag["id"]) for marker in related
                 for tag in marker.get("tags", []) if manual_extra(tag)})
-            matches = [marker for marker in same_primary if str(marker["id"]) in available
-                       and merge.overlaps(_temporal_marker(marker, previous_ranges), interval,
-                                          app.MARKER_MATCH_TOLERANCE_SECONDS)]
+            matches = [marker for marker in existing.overlapping(
+                payload["primary_tag_id"], interval, app.MARKER_MATCH_TOLERANCE_SECONDS)
+                if str(marker["id"]) in available]
             if not matches:
                 plan.creates.append(payload)
                 continue
 
             def match_key(marker):
-                marker = _temporal_marker(marker, previous_ranges)
+                marker = existing.temporal(marker)
                 old_end = marker.get("end_seconds") if marker.get("end_seconds") is not None else marker["seconds"]
                 new_end = interval["end_seconds"] if interval["end_seconds"] is not None else interval["seconds"]
                 shared = max(0, min(old_end, new_end) - max(marker["seconds"], payload["seconds"]))

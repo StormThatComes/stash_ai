@@ -14,6 +14,18 @@ też re-ewaluację wcześniej opublikowanego evidence oraz rekonsyliację pojedy
 sceny. Pozostała logika domenowa znajduje się m.in. w `stash_ai/scene.py`,
 `stash_ai/fusion.py`, `stash_ai/temporal.py` i `stash_ai/occurrences.py`.
 
+`stash_ai/marker_index.py` buduje dla jednej sceny niemutowalny indeks istniejących
+markerów według primary tagu. Posortowane początki i drzewo maksymalnych końców
+ograniczają kandydatów także dla zagnieżdżonych przedziałów; końcowy filtr używa
+dotychczasowego `merge.overlaps()`, z osobną tolerancją początku. Cleanup wyszukuje
+według nazwy primary, a planowanie po odświeżeniu sceny według jego ID. Dla outputu
+punktowego `PreviousMarkerRanges` indeksuje zaokrąglone początki z published,
+pending i recovery oraz zachowuje największy pasujący koniec. Normalizacja odbywa
+się raz na marker w indeksie. Wybrane markery pozostają w indeksie, aby ich ręczne
+extras mogły trafić do kolejnych fragmentów; dostępność do ponownego dopasowania
+nadal kontroluje plan publikacji. Indeksy żyją wyłącznie w pamięci, bez zmiany
+formatu snapshotów lub schematu bazy.
+
 `stash_ai/cli.py` pozostaje warstwą orkiestracji i kompatybilnym miejscem eksportu
 helperów używanych przez testy. Lifecycle jednego modelu w trybie
 `--output-mode separate` obsługuje `stash_ai/separate_run.py`; lifecycle jest

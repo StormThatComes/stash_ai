@@ -7,6 +7,7 @@ nie łączą się ze Stash i nie uruchamiają modeli GPU.
 ```powershell
 python -m benchmarks.benchmark_performance --frames 400 --labels 28 --repeats 3
 python -m benchmarks.benchmark_merge_pipeline --frames 400 --labels 28 --repeats 3
+python -m benchmarks.benchmark_marker_matching --markers 1000 --labels 1 --repeats 5
 python -m benchmarks.benchmark_retained_merge --frames 400 --labels 12 --weak-labels 108 --repeats 5
 python -m benchmarks.benchmark_occurrences --frames 500 --labels 100 --repeats 5
 python -m benchmarks.benchmark_cleanup_sql --markers 2500000 --legacy-time-budget 5
@@ -17,6 +18,7 @@ python -m benchmarks.benchmark_rethreshold --scenes 6 --frames 600 --labels 12 -
 |---|---|
 | `benchmark_performance` | budowanie markerów i scalanie, z hashem wyniku |
 | `benchmark_merge_pipeline` | merge ze stanem SQLite, etapami i makietą API |
+| `benchmark_marker_matching` | ponowny merge na istniejących markerach; czas całego sync i dopasowania, hashe logicznych snapshotów oraz Stash |
 | `benchmark_retained_merge` | obserwacje współdzielone, markery temporalne jednego modelu i merge CPU przy szerokiej retencji wyników, z hashami każdego etapu |
 | `benchmark_occurrences` | wybór reprezentatywnych punktów Occurance |
 | `benchmark_cleanup_sql` | odkrywanie kandydatów przez SQL; bez kosztu API i usuwania |
@@ -44,6 +46,14 @@ snapshotu. Przy zmianie formatu zapisu porównuj `input_sha256`,
 `logical_snapshot_sha256`, `stash_sha256` i liczniki operacji; `snapshot_sha256`
 obejmuje surowe BLOB-y, więc może się zmienić przy identycznym wyniku logicznym.
 Dekodowanie i hashowanie do tej weryfikacji odbywa się poza pomiarem czasu.
+
+`benchmark_marker_matching` najpierw publikuje rozłączne przedziały, a następnie
+mierzy ponowny sync na tych samych markerach. `--labels` rozkłada je na wiele
+primary tagów, `--point-only` symuluje Stash bez końców markerów, a `--cleanup`
+obejmuje również sprawdzanie obecności markerów przed cleanupem. Także ten skrypt
+obsługuje `--project` i `--output`. Przy porównaniu wersji użyj tego samego skryptu
+i parametrów; hashe oraz liczniki muszą być identyczne. Weryfikacja jest poza
+pomiarem; wynik obejmuje lokalny zapis snapshotu, bez inferencji i opóźnień API.
 
 `benchmark_rethreshold` domyślnie mierzy wyniki zapisane przez wskazaną wersję
 aplikacji, z gotowymi metadanymi walidacji, jeśli je obsługuje. Dodaj

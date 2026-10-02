@@ -1,0 +1,266 @@
+{
+  "measured_at_utc": "2026-10-02T18:30:30.188575+00:00",
+  "baseline_commit": "38ee96284ff1b909e3997a248a7470310f66043e",
+  "candidate": "Changes in this PR",
+  "harness": "benchmarks/benchmark_marker_matching.py in this PR, same script for both projects",
+  "environment": {
+    "python": "3.12.14",
+    "system": "Linux",
+    "machine": "x86_64"
+  },
+  "scope": "Offline serial repeat sync; initial publication and hash verification outside timing; SQLite snapshot writes and zero-latency Stash mock included; no inference/GPU/API latency.",
+  "cases": [
+    {
+      "case": "range",
+      "markers": 1000,
+      "labels": 1,
+      "point_only": false,
+      "cleanup": false,
+      "repeats": 5,
+      "input_sha256": "6bcfa747d1c6ff452349938955c28428581b0d992c4aef546fc64725870b32e7",
+      "logical_snapshot_sha256": "1c16027d64b42167fcf8f165bc79a6594c6cf126f390f041bb83c4e8e98cfbd5",
+      "stash_sha256": "e67a947fe2b5fab43a054ac806854d6baac7ab67cafedf484bbfb6d8402f443e",
+      "counts": {
+        "scene_tags_updated": 0,
+        "legacy_scene_tags_migrated": 0,
+        "markers_created": 0,
+        "markers_updated": 0,
+        "markers_deleted": 0,
+        "markers_unchanged": 1000,
+        "merged_markers": 1000,
+        "merged_scene_tags": 0,
+        "short_extras": 0,
+        "occurrence_markers": 0,
+        "occurrence_manual_locations": 0,
+        "cross_model_extras": 0
+      },
+      "before": {
+        "median_seconds": 0.9129349780000666,
+        "median_matching_seconds": 0.8545589650000238,
+        "median_cpu_seconds": 0.9129105000000002,
+        "wall_seconds": [
+          0.7719762680000031,
+          1.293747035000024,
+          0.9129349780000666,
+          1.0570424080000294,
+          0.7654331039999533
+        ],
+        "matching_seconds": [
+          0.7381589739999299,
+          1.2482385790000308,
+          0.8545589650000238,
+          1.0287334690000307,
+          0.733833577999917
+        ]
+      },
+      "after": {
+        "median_seconds": 0.061215733999915756,
+        "median_matching_seconds": 0.031122035000066717,
+        "median_cpu_seconds": 0.061267794000000014,
+        "wall_seconds": [
+          0.061215733999915756,
+          0.06258089100003872,
+          0.05733701500003008,
+          0.06822689100010848,
+          0.059594067999910294
+        ],
+        "matching_seconds": [
+          0.03144470799998089,
+          0.031122035000066717,
+          0.02931985199995779,
+          0.03874477800002296,
+          0.03048677900005714
+        ]
+      }
+    },
+    {
+      "case": "point",
+      "markers": 125,
+      "labels": 1,
+      "point_only": true,
+      "cleanup": false,
+      "repeats": 5,
+      "input_sha256": "c8be3c9c2f0aabcc722c2233d2142ff2858bdc1f625660eda1d175bb0e67b8a2",
+      "logical_snapshot_sha256": "129284ce0ede03dbe89b0b9875a2bd2cbd549e128358dd8f5d7d3d9245094b9d",
+      "stash_sha256": "492d8a26af82c5a6c9c1407b798053211e6e74a4265a2000ccdc5a50678c1f48",
+      "counts": {
+        "scene_tags_updated": 0,
+        "legacy_scene_tags_migrated": 0,
+        "markers_created": 0,
+        "markers_updated": 0,
+        "markers_deleted": 0,
+        "markers_unchanged": 125,
+        "merged_markers": 125,
+        "merged_scene_tags": 0,
+        "short_extras": 0,
+        "occurrence_markers": 0,
+        "occurrence_manual_locations": 0,
+        "cross_model_extras": 0
+      },
+      "before": {
+        "median_seconds": 1.2422332119999737,
+        "median_matching_seconds": 1.2377728489999527,
+        "median_cpu_seconds": 1.2405229580000001,
+        "wall_seconds": [
+          1.2667676290000145,
+          1.2410782250000238,
+          1.2176548550000916,
+          1.4940339199999926,
+          1.2422332119999737
+        ],
+        "matching_seconds": [
+          1.2600521230000368,
+          1.2363670089999914,
+          1.212916365999945,
+          1.4889284550000639,
+          1.2377728489999527
+        ]
+      },
+      "after": {
+        "median_seconds": 0.012428488000068683,
+        "median_matching_seconds": 0.004231195999977899,
+        "median_cpu_seconds": 0.012403562000000007,
+        "wall_seconds": [
+          0.012428488000068683,
+          0.01341905299989321,
+          0.017453133999993042,
+          0.011707378999972207,
+          0.00857339599997431
+        ],
+        "matching_seconds": [
+          0.005673462999993717,
+          0.004231195999977899,
+          0.004637165999952231,
+          0.0035299649999842586,
+          0.0032775939999964976
+        ]
+      }
+    },
+    {
+      "case": "cleanup",
+      "markers": 1000,
+      "labels": 20,
+      "point_only": false,
+      "cleanup": true,
+      "repeats": 5,
+      "input_sha256": "1ad74d2d52860c4812be5471e5b640226380b8b08e92f5aff86860c06b8bc8a7",
+      "logical_snapshot_sha256": "712463490cc58cd5f4f410b90e5d89707047aefb8bc7108b264a3d63b3519cd1",
+      "stash_sha256": "cee73f31776e49e75657e23119f295b4e808c2867cfee3ecd94ecb72e8dc397d",
+      "counts": {
+        "scene_tags_updated": 0,
+        "legacy_scene_tags_migrated": 0,
+        "markers_created": 0,
+        "markers_updated": 0,
+        "markers_deleted": 0,
+        "markers_unchanged": 1000,
+        "merged_markers": 1000,
+        "merged_scene_tags": 0,
+        "short_extras": 0,
+        "occurrence_markers": 0,
+        "occurrence_manual_locations": 0,
+        "cross_model_extras": 0
+      },
+      "before": {
+        "median_seconds": 0.17854399099996954,
+        "median_matching_seconds": 0.06564566600002308,
+        "median_cpu_seconds": 0.178288309,
+        "wall_seconds": [
+          0.17854399099996954,
+          0.2066927380000152,
+          0.1764059110000744,
+          0.16991879799991239,
+          0.18866071000002194
+        ],
+        "matching_seconds": [
+          0.06564566600002308,
+          0.07285817199999656,
+          0.06064550899998267,
+          0.05796222700007547,
+          0.07195938600000318
+        ]
+      },
+      "after": {
+        "median_seconds": 0.06542515199998888,
+        "median_matching_seconds": 0.026599196000006486,
+        "median_cpu_seconds": 0.065418735,
+        "wall_seconds": [
+          0.07241105699995387,
+          0.06259637399989515,
+          0.06542515199998888,
+          0.059283173000039824,
+          0.0682751729998472
+        ],
+        "matching_seconds": [
+          0.027278776000002836,
+          0.02579974500008575,
+          0.029653448999852117,
+          0.025557473999924696,
+          0.026599196000006486
+        ]
+      }
+    },
+    {
+      "case": "small",
+      "markers": 10,
+      "labels": 1,
+      "point_only": false,
+      "cleanup": false,
+      "repeats": 5,
+      "input_sha256": "559b021b85d009be3b39ae9f7b150f9ddcb819f4cf651580f2808693ef54801d",
+      "logical_snapshot_sha256": "d82d02399f8ffeb2e4e6f51eda940fd9b82811fd977cd1b6d94d83e085655fe8",
+      "stash_sha256": "d3c14c78d7f6925c16772cd7f7ca9167a06522f6447238714061bbb0ec05f6a2",
+      "counts": {
+        "scene_tags_updated": 0,
+        "legacy_scene_tags_migrated": 0,
+        "markers_created": 0,
+        "markers_updated": 0,
+        "markers_deleted": 0,
+        "markers_unchanged": 10,
+        "merged_markers": 10,
+        "merged_scene_tags": 0,
+        "short_extras": 0,
+        "occurrence_markers": 0,
+        "occurrence_manual_locations": 0,
+        "cross_model_extras": 0
+      },
+      "before": {
+        "median_seconds": 0.001166797999985647,
+        "median_matching_seconds": 0.00030514399986714125,
+        "median_cpu_seconds": 0.0011663090000000043,
+        "wall_seconds": [
+          0.0012726059999295103,
+          0.0011819480000667681,
+          0.0010194550000051095,
+          0.001166797999985647,
+          0.0011379510001461313
+        ],
+        "matching_seconds": [
+          0.00030514399986714125,
+          0.00041398799999115,
+          0.0003421179999349988,
+          0.00027647499996419356,
+          0.000258119000136503
+        ]
+      },
+      "after": {
+        "median_seconds": 0.0011675709999963146,
+        "median_matching_seconds": 0.00040261300000565825,
+        "median_cpu_seconds": 0.0011674249999999997,
+        "wall_seconds": [
+          0.0013851690000592498,
+          0.0010191199999098899,
+          0.0011789600000611244,
+          0.0011675709999963146,
+          0.0009751019999839627
+        ],
+        "matching_seconds": [
+          0.00040866799986361,
+          0.00034063900011460646,
+          0.0005264640001314547,
+          0.00040261300000565825,
+          0.00028627799997593684
+        ]
+      }
+    }
+  ]
+}

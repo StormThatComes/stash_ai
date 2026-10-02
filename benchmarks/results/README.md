@@ -20,3 +20,12 @@ bez inferencji i opóźnień sieciowych, nie prognoza czasu całej biblioteki.
 
 [Instrukcja nowych pomiarów](../README.md) ·
 [Historyczne raporty walidacji](../../docs/validation/README.md)
+
+[Indeks przedziałów markerów](marker_interval_index.json) to pomiar z 2026-10-02
+względem `main` po #93, mediana 5 prób tym samym skryptem. Dla 1000 istniejących
+markerów jednego primary tagu ponowny sync skrócił się z 0,913 do 0,061 s, a samo
+dopasowanie z 0,855 do 0,031 s. Dla 125 markerów punktowych sync skrócił się
+z 1,242 do 0,012 s; cleanup 1000 markerów w 20 primary tagach z 0,179 do 0,065 s.
+Plik zawiera też mały wariant kontrolny. Hashe wejścia, logicznych snapshotów,
+wyników Stash i liczniki są zgodne między wersjami. Pomiar obejmuje SQLite i makietę
+Stash, bez inferencji oraz opóźnień API.
