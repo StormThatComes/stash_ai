@@ -17,9 +17,11 @@ pytestmark = pytest.mark.usefixtures('reset_temporal')
 
 
 def configure(monkeypatch, scene=.4, marker=.7):
+    # Exercise automatic retention independently of the bundled cache floors.
     original = app.load_model_settings
     monkeypatch.setattr(app, 'load_model_settings', lambda *a: [
-        replace(c, scene_threshold=scene, marker_threshold=marker) for c in original(*a)])
+        replace(c, scene_threshold=scene, marker_threshold=marker,
+                scene_cache_floor=None, marker_cache_floor=None) for c in original(*a)])
 
 
 def saved(path):
