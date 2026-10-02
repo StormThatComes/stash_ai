@@ -84,6 +84,7 @@ zachowują dotychczasowy kontrakt dla call-site'ów i testów.
 | `stash_ai/state_publications.py` / `PublicationStore` | Snapshoty published/pending, trwały zamiar publikacji i atomowe zatwierdzanie przygotowanych publikacji. |
 | `stash_ai/preview.py` | Widoki nakładki dry-run, usunięcia w nakładce i wykrywanie zmian źródła. |
 | `stash_ai/state_codec.py` | Kodowanie i dekodowanie BLOB-ów. |
+| `stash_ai/state_snapshot.py` | Wersjonowana reprezentacja snapshotów ze współdzielonymi dowodami `extra_support` i odtwarzanie contributions przy odczycie. |
 
 `StateStore` posiada jeden `StateDatabase`, jeden `ResultStore` i jeden
 `PublicationStore`; zachowuje dotychczasowe metody `records()/put()/snapshot()/prepare()`
@@ -95,7 +96,19 @@ ukończenia z tego planu w jednej transakcji, bez odczytu BLOB-ów klatek.
 Pełne rekordy pozostają obsługiwane przez tę samą ścieżkę zapisu dla reuse inferencji.
 Dry-run korzysta z tymczasowej bazy: współczesne schematy odczytuje
 przez nakładkę ze źródłem otwartym tylko do odczytu, a starsze kopiuje przed
-migracją. Format zapisanych danych i kolejność migracji pozostają bez zmian.
+migracją. Schemat v9 również korzysta z nakładki odczytu.
+
+`StateStore.pack_snapshot()` internuje powtarzające się obiekty dowodów według
+tożsamości, bez hashowania dużych struktur. Unikatowe dowody pozostają inline.
+Kompaktowy BLOB zawiera envelope `__stash_ai_snapshot__: 1`, `snapshot` oraz
+tablicę `proofs`; wartości `extra_support` są pełnymi dowodami lub indeksami tej
+tablicy. `state_codec.decode()` waliduje referencje i zwraca dotychczasową,
+rozwiniętą strukturę także dla cleanupu, recovery i kontroli bazy. Dowody są
+współdzielone i niemutowalne dla pożyczających je czytelników; odczyt publiczny
+nadal zwraca kopię oddzieloną od cache. Zapis nowego formatu i podniesienie wersji
+bazy do 9 odbywają się w jednej transakcji. Stare snapshoty oraz inne BLOB-y
+zachowują dotychczasowy format. Promocja pending i archiwizacja recovery kopiują
+już zapisany BLOB bez ponownej serializacji.
 
 Obsługa samodzielnych komend bazy znajduje się w pakiecie `stash_ai/db/`:
 

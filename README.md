@@ -107,8 +107,14 @@ wyniki inferencji i evidence klatek pozostają bez zmian. Dotyczy to także
 automatycznego użycia cache po zmianie progów w YAML. Odczyt wyników, merge,
 cleanup i explain używają efektywnych progów z tej tabeli. Stare progi zapisane
 wewnątrz wyników są nadal odczytywane, bez przepisywania istniejącej bazy.
-Pierwsza zmiana progu oznacza bazę jako schemat v8, którego starsze wersje
+Pierwsza zmiana progu oznacza bazę jako schemat co najmniej v8, którego starsze wersje
 programu nie obsługują. `--dry-run` zapisuje progi wyłącznie w tymczasowej bazie.
+
+Snapshoty merge zapisują współdzielone dowody `extra_support` raz, a contributions
+odwołują się do nich przez referencje. Zmniejsza to koszt serializacji i kompresji.
+Pierwszy taki zapis oznacza bazę jako schemat v9; starsze wersje programu odmówią
+jej otwarcia. Istniejące snapshoty są nadal odczytywane bez przepisywania, a wyniki
+inferencji pozostają bez zmian. `--dry-run` zmienia wyłącznie tymczasową bazę.
 
 Pełną listę opcji pokazuje:
 

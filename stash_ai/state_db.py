@@ -41,7 +41,7 @@ class StateDatabase(AbstractContextManager):
         source = sqlite3.connect(self.path.as_uri() + "?mode=ro", uri=True)
         try:
             source_version = source.execute('PRAGMA user_version').fetchone()[0]
-            if (source_version in (5, 6, 7, 8) and
+            if (source_version in (5, 6, 7, 8, 9) and
                     source.execute('PRAGMA application_id').fetchone()[0] == APPLICATION_ID):
                 # Modern schemas can be read directly; only preview
                 # changes occupy the temporary overlay.
@@ -79,7 +79,7 @@ class StateDatabase(AbstractContextManager):
         application = db.execute("PRAGMA application_id").fetchone()[0]
         self.version = db.execute("PRAGMA user_version").fetchone()[0]
         tables = db.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
-        if (application not in (0, APPLICATION_ID) or self.version not in (0, 1, 2, 3, 4, 5, 6, 7, 8)
+        if (application not in (0, APPLICATION_ID) or self.version not in (0, 1, 2, 3, 4, 5, 6, 7, 8, 9)
                 or (tables and application != APPLICATION_ID)):
             raise ValueError("Not a supported stash-taggers state DB; choose another --state-db.")
         db.executescript(f"""

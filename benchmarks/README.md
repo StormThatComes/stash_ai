@@ -39,6 +39,12 @@ Narzędzia pomiarowe oraz makieta Stash pochodzą z bieżącego repozytorium,
 więc porównanie nie wymaga testów w starej instalacji. Porównuj identyczne dane
 i parametry; przy zmianie zachowania aplikacji mogą się różnić również hashe.
 
+`benchmark_merge_pipeline` pokazuje rozmiar JSON i skompresowanego BLOB-a każdego
+snapshotu. Przy zmianie formatu zapisu porównuj `input_sha256`,
+`logical_snapshot_sha256`, `stash_sha256` i liczniki operacji; `snapshot_sha256`
+obejmuje surowe BLOB-y, więc może się zmienić przy identycznym wyniku logicznym.
+Dekodowanie i hashowanie do tej weryfikacji odbywa się poza pomiarem czasu.
+
 `benchmark_rethreshold` domyślnie mierzy wyniki zapisane przez wskazaną wersję
 aplikacji, z gotowymi metadanymi walidacji, jeśli je obsługuje. Dodaj
 `--mode scene` lub `--mode markers`, aby zmierzyć zmianę tylko progów scen

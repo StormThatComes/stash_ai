@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 
 
-KNOWN_VERSIONS = frozenset(range(1, 9))
+KNOWN_VERSIONS = frozenset(range(1, 10))
 KNOWN_MODELS = frozenset(("joytag", "wd", "dtq", "oppai"))
 KNOWN_KINDS = frozenset(("scene", "markers"))
 STATE_TABLES = frozenset((

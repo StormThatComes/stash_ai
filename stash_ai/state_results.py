@@ -236,7 +236,8 @@ class ResultStore:
             store.connection.execute('BEGIN')
         # Older executables must reject databases whose effective policy lives
         # outside results.data. Merely opening an old DB need not upgrade it.
-        store.connection.execute('PRAGMA user_version=8')
+        if store.connection.execute('PRAGMA user_version').fetchone()[0] < 8:
+            store.connection.execute('PRAGMA user_version=8')
         store.connection.execute('INSERT INTO result_thresholds VALUES (?,?,?,?,?) '
             'ON CONFLICT(scope,scene,model,kind) DO UPDATE SET threshold=excluded.threshold',
             (store.scope, str(scene), model, kind, threshold))

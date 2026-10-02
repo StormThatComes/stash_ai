@@ -67,7 +67,7 @@ class PublicationStore:
                         (store.scope, str(scene), kind))
                 store.connection.execute("INSERT INTO snapshots VALUES (?,?,?,NULL,?) "
                     "ON CONFLICT(scope,scene,kind) DO UPDATE SET pending=excluded.pending",
-                    (store.scope, str(scene), kind, store.pack(stamp_snapshot(store, data))))
+                    (store.scope, str(scene), kind, store.pack_snapshot(stamp_snapshot(store, data))))
 
     @measured('state_write')
     def publish(self, scene, snapshots):
@@ -79,7 +79,7 @@ class PublicationStore:
                 store.cache.discard(('snapshot', str(scene), kind))
                 store.connection.execute("INSERT INTO snapshots VALUES (?,?,?,?,NULL) "
                     "ON CONFLICT(scope,scene,kind) DO UPDATE SET published=excluded.published,pending=NULL",
-                    (store.scope, str(scene), kind, store.pack(stamp_snapshot(store, data))))
+                    (store.scope, str(scene), kind, store.pack_snapshot(stamp_snapshot(store, data))))
                 clear_publications(store, scene, kind)
 
     @measured('state_write')

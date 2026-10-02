@@ -1,0 +1,227 @@
+{
+  "measured_at_utc": "2026-10-02T13:24:06.337091+00:00",
+  "baseline_commit": "809aa04b1e9c965f0b52a0725d94967ef279bb20",
+  "candidate": "Changes in this PR",
+  "harness": "benchmarks/benchmark_merge_pipeline.py in this PR, same script for both projects",
+  "environment": {
+    "python": "3.12.14",
+    "system": "Linux",
+    "machine": "x86_64",
+    "zlib": "1.3.2"
+  },
+  "scope": "Offline synthetic single-scene serial merge; SQLite snapshots and zero-latency Stash mock; no inference/GPU/API latency. pack_seconds includes compaction, JSON encoding and compression.",
+  "cases": [
+    {
+      "case": "shared_proofs",
+      "frames": 400,
+      "labels": 28,
+      "models": 4,
+      "repeats": 5,
+      "input_sha256": "95e16457de80a080501d88c8df9e69cf34a8590c4e82deee04c34967bdcb6441",
+      "logical_snapshot_sha256": "d0116e62f3f56883abaf679cf82d6a3c9dedcbcdbc9167ecf6648afae63f2512",
+      "stash_sha256": "0e807d3b8313bed996444353409b2d7a7d1c5ddf501bc13d907a7fa368e105a3",
+      "counts": {
+        "scene_tags_updated": 0,
+        "legacy_scene_tags_migrated": 0,
+        "markers_created": 453,
+        "markers_updated": 0,
+        "markers_deleted": 0,
+        "markers_unchanged": 0,
+        "merged_markers": 453,
+        "merged_scene_tags": 0,
+        "short_extras": 0,
+        "occurrence_markers": 0,
+        "occurrence_manual_locations": 0,
+        "cross_model_extras": 0
+      },
+      "before": {
+        "median_seconds": 1.996345969999993,
+        "median_pack_seconds": 0.789988008000023,
+        "snapshots": {
+          "markers": {
+            "json_bytes": 44287851,
+            "compressed_bytes": 1691967
+          },
+          "scene": {
+            "json_bytes": 35,
+            "compressed_bytes": 39
+          }
+        },
+        "trials": [
+          {
+            "wall_seconds": 1.9318061550000039,
+            "cpu_seconds": 1.931684976,
+            "pack_seconds": 0.7463889629999585
+          },
+          {
+            "wall_seconds": 1.996345969999993,
+            "cpu_seconds": 1.99579188,
+            "pack_seconds": 0.789988008000023
+          },
+          {
+            "wall_seconds": 2.034376684999984,
+            "cpu_seconds": 2.0338411060000006,
+            "pack_seconds": 0.8025340330001427
+          },
+          {
+            "wall_seconds": 1.9977751569999782,
+            "cpu_seconds": 1.9971327599999995,
+            "pack_seconds": 0.7933273229999713
+          },
+          {
+            "wall_seconds": 1.9657810449999715,
+            "cpu_seconds": 1.9650470589999998,
+            "pack_seconds": 0.7761975749999692
+          }
+        ]
+      },
+      "after": {
+        "median_seconds": 1.5111220520000188,
+        "median_pack_seconds": 0.3186119819997657,
+        "snapshots": {
+          "markers": {
+            "json_bytes": 14902103,
+            "compressed_bytes": 728209
+          },
+          "scene": {
+            "json_bytes": 35,
+            "compressed_bytes": 39
+          }
+        },
+        "trials": [
+          {
+            "wall_seconds": 1.5331902949999403,
+            "cpu_seconds": 1.5327090959999998,
+            "pack_seconds": 0.3213310910000473
+          },
+          {
+            "wall_seconds": 1.5111220520000188,
+            "cpu_seconds": 1.5105040090000004,
+            "pack_seconds": 0.31449010200003613
+          },
+          {
+            "wall_seconds": 1.5074406169999293,
+            "cpu_seconds": 1.506612456,
+            "pack_seconds": 0.3186119819997657
+          },
+          {
+            "wall_seconds": 1.4923318090000066,
+            "cpu_seconds": 1.4916939020000006,
+            "pack_seconds": 0.3190892990000975
+          },
+          {
+            "wall_seconds": 1.598159475999978,
+            "cpu_seconds": 1.5976179080000001,
+            "pack_seconds": 0.3118105190001188
+          }
+        ]
+      }
+    },
+    {
+      "case": "one_label",
+      "frames": 400,
+      "labels": 1,
+      "models": 4,
+      "repeats": 5,
+      "input_sha256": "b0e75d919452a6d86c029268cf80c0d3a103201d513356c090f25c92e11242d8",
+      "logical_snapshot_sha256": "208a00ced137f02186e9a90e29d4043ef75517bc9f82a8ad7d3d9b297b27b45f",
+      "stash_sha256": "a531ce2c168ffc835fb0b3379abf1f12cd30acd8245c96b26e76c559ab516e87",
+      "counts": {
+        "scene_tags_updated": 0,
+        "legacy_scene_tags_migrated": 0,
+        "markers_created": 25,
+        "markers_updated": 0,
+        "markers_deleted": 0,
+        "markers_unchanged": 0,
+        "merged_markers": 25,
+        "merged_scene_tags": 0,
+        "short_extras": 0,
+        "occurrence_markers": 0,
+        "occurrence_manual_locations": 0,
+        "cross_model_extras": 0
+      },
+      "before": {
+        "median_seconds": 0.022078534000002037,
+        "median_pack_seconds": 0.0016638150000289897,
+        "snapshots": {
+          "markers": {
+            "json_bytes": 160967,
+            "compressed_bytes": 2437
+          },
+          "scene": {
+            "json_bytes": 35,
+            "compressed_bytes": 39
+          }
+        },
+        "trials": [
+          {
+            "wall_seconds": 0.024277605000065705,
+            "cpu_seconds": 0.02424227200000001,
+            "pack_seconds": 0.0018225850000135324
+          },
+          {
+            "wall_seconds": 0.022078534000002037,
+            "cpu_seconds": 0.022037737,
+            "pack_seconds": 0.0015782140001192602
+          },
+          {
+            "wall_seconds": 0.023948619000066174,
+            "cpu_seconds": 0.023899036000000012,
+            "pack_seconds": 0.002524570999980824
+          },
+          {
+            "wall_seconds": 0.02118824299998323,
+            "cpu_seconds": 0.02114638000000002,
+            "pack_seconds": 0.0016638150000289897
+          },
+          {
+            "wall_seconds": 0.021786102999953982,
+            "cpu_seconds": 0.021746106000000015,
+            "pack_seconds": 0.0015876619999062314
+          }
+        ]
+      },
+      "after": {
+        "median_seconds": 0.022415961999968204,
+        "median_pack_seconds": 0.0017177260000380556,
+        "snapshots": {
+          "markers": {
+            "json_bytes": 160967,
+            "compressed_bytes": 2437
+          },
+          "scene": {
+            "json_bytes": 35,
+            "compressed_bytes": 39
+          }
+        },
+        "trials": [
+          {
+            "wall_seconds": 0.025195657999915966,
+            "cpu_seconds": 0.02517217799999999,
+            "pack_seconds": 0.0017009629999620302
+          },
+          {
+            "wall_seconds": 0.02174319900007049,
+            "cpu_seconds": 0.021567852,
+            "pack_seconds": 0.001565715999731765
+          },
+          {
+            "wall_seconds": 0.021308834999899773,
+            "cpu_seconds": 0.021265055000000005,
+            "pack_seconds": 0.0017177260000380556
+          },
+          {
+            "wall_seconds": 0.022415961999968204,
+            "cpu_seconds": 0.022368835000000004,
+            "pack_seconds": 0.002000731999942218
+          },
+          {
+            "wall_seconds": 0.023337969999943198,
+            "cpu_seconds": 0.023287253000000008,
+            "pack_seconds": 0.0019229239999276615
+          }
+        ]
+      }
+    }
+  ]
+}
