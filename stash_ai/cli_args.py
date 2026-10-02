@@ -42,6 +42,12 @@ def build_parser(app) -> argparse.ArgumentParser:
     parser.add_argument("--model-report-workers", type=int, choices=range(1, 17),
                         default=min(4, os.cpu_count() or 1),
                         help="CPU worker processes for --model-report (default: up to 4); use 1 for serial execution.")
+    parser.add_argument("--tag-review-margin", type=float, default=None, metavar="SCORE",
+                        help="Weak/borderline score margin above each model's own threshold (default: 0.05); --tag-review-report only.")
+    parser.add_argument("--tag-review-long-marker-seconds", type=float, default=None, metavar="SECONDS",
+                        help="Flag merged marker ranges at least this long (default: 300); --tag-review-report only.")
+    parser.add_argument("--tag-review-examples", type=int, default=None, metavar="N",
+                        help="Retain up to N example scenes per model/tag (default: 3, maximum: 20); --tag-review-report only.")
     parser.add_argument("--verbose", action="store_true", help="Include per-scene/tag diagnostics and detailed dry-run changes.")
     parser.add_argument("--profile-merge", type=Path, metavar="NEW.jsonl",
                         help="Stream per-scene wall/CPU, stage/API timings, counts and byte sizes to a new JSONL file; merged output only.")
@@ -106,6 +112,8 @@ def build_parser(app) -> argparse.ArgumentParser:
                        help="Write a local content-free developer diagnostics JSON from the state DB; never uploads it.")
     modes.add_argument("--model-report", type=Path, metavar="NEW.json",
                        help="Write an offline per-model utility and leave-one-model-out ablation report from saved evidence.")
+    modes.add_argument("--tag-review-report", type=Path, metavar="NEW.json",
+                       help="Write an offline tag review queue with reasons, examples and per-model counts; no inference or Stash requests.")
     
     return parser
 
@@ -122,6 +130,29 @@ def mode_flags(args) -> tuple[bool, bool]:
 
 def validate_args(app, parser: argparse.ArgumentParser, args: argparse.Namespace) -> argparse.Namespace:
     db_mode = database_mode(args)
+    if args.tag_review_report is not None:
+        if args.output_mode != "merged":
+            parser.error("--tag-review-report requires --output-mode merged.")
+        if args.models or args.device or args.offline or args.resume is not None or args.restart:
+            parser.error("--tag-review-report uses all saved model evidence; model/inference options do not apply.")
+        if (args.markers_only or args.scene_tags_only or args.profile_merge or args.force_merge
+                or args.rethreshold_scenes or args.rethreshold_markers or args.abandon_pending
+                or args.prune_empty_tags or args.prune_prefixes or args.create_all_tags or args.no_hierarchy
+                or args.dry_run):
+            parser.error("--tag-review-report cannot be combined with tagging, threshold, pruning or dry-run modifiers.")
+        if args.tag_review_report.suffix.lower() != ".json" or args.tag_review_report.exists():
+            parser.error("--tag-review-report requires a new .json file; existing files are never overwritten.")
+    elif any(value is not None for value in (
+            args.tag_review_margin, args.tag_review_long_marker_seconds, args.tag_review_examples)):
+        parser.error("--tag-review-* settings require --tag-review-report.")
+    if args.tag_review_margin is not None and (
+            not math.isfinite(args.tag_review_margin) or not 0 <= args.tag_review_margin <= 1):
+        parser.error("--tag-review-margin must be a finite number in [0, 1].")
+    if args.tag_review_long_marker_seconds is not None and (
+            not math.isfinite(args.tag_review_long_marker_seconds) or args.tag_review_long_marker_seconds <= 0):
+        parser.error("--tag-review-long-marker-seconds must be finite and positive.")
+    if args.tag_review_examples is not None and not 1 <= args.tag_review_examples <= 20:
+        parser.error("--tag-review-examples must be in 1..20.")
     if args.model_report is not None:
         if args.output_mode != "merged":
             parser.error("--model-report requires --output-mode merged.")

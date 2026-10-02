@@ -36,4 +36,7 @@ def run_standalone_command(app, args, *, cleanup_only: bool) -> int | None:
     if args.model_report is not None:
         from stash_ai.model_report import run as run_model_report
         return run_model_report(app, args)
+    if args.tag_review_report is not None:
+        from stash_ai.tag_review import run as run_tag_review
+        return run_tag_review(app, args)
     return None
