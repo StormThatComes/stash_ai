@@ -189,6 +189,7 @@ def build_markers(app, frames, core_exclusions, *, threshold=None, seeds=None, i
     policy = app.TEMPORAL_POLICY
     high = threshold if threshold is not None else 0.0
     floor = marker_floor(policy, high)
+    sort_floor = min(floor, high)
     seeds = seeds or {}
     active, finished = {}, []
     frames = sorted(frames, key=lambda frame: frame.cue.start)
@@ -203,7 +204,8 @@ def build_markers(app, frames, core_exclusions, *, threshold=None, seeds=None, i
 
     for frame in frames:
         cue = frame.cue
-        ordered = sorted(((tag, score) for tag, score in frame.tags if tag not in app.MARKER_TAG_BLOCKLIST),
+        ordered = sorted(((tag, score) for tag, score in frame.tags
+                          if tag not in app.MARKER_TAG_BLOCKLIST and score >= sort_floor),
                          key=lambda item: (-item[1], item[0]))
         extras = [(tag, score) for tag, score in ordered if score >= high]
         cores = [(tag, score) for tag, score in ordered if tag not in core_exclusions and score >= floor]

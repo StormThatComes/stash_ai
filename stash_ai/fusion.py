@@ -159,15 +159,21 @@ def observations(app, group, core_policies, tag_policies=None):
         from stash_ai.thresholds import marker_threshold
         high = marker_threshold(segment, getattr(app, "MARKER_THRESHOLDS", None))
         floor = marker_floor(app.TEMPORAL_POLICY, high)
+        sort_floor = min(floor, high)
         for row in segment["items"]:
             start, end = row["start"], row["end"]
             if start < 0 or end <= start:
                 raise ValueError("Invalid cached VTT interval for shared observations.")
             event = times.setdefault(start, {"start": start, "end": end, "cores": {}, "extras": {}})
             event["end"] = max(event["end"], end)
-            ordered = sorted(((raw_label(tag), score) for tag, score in row["tags"]
-                              if tag not in app.MARKER_TAG_BLOCKLIST and tag not in tag_policies[source]),
-                             key=lambda item: (-item[1], item[0]))
+            eligible = []
+            for tag, score in row["tags"]:
+                if tag not in app.MARKER_TAG_BLOCKLIST and tag not in tag_policies[source]:
+                    # Validate even observations below the current publication floor.
+                    label = raw_label(tag)
+                    if score >= sort_floor:
+                        eligible.append((label, score))
+            ordered = sorted(eligible, key=lambda item: (-item[1], item[0]))
             cores = [(tag, score) for tag, score in ordered if score >= floor and tag not in core_policies[source]]
             extras = [(tag, score) for tag, score in ordered if score >= high]
             if app.MARKER_MAX_TAGS_PER_FRAME:

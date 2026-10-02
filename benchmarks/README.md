@@ -7,6 +7,7 @@ nie łączą się ze Stash i nie uruchamiają modeli GPU.
 ```powershell
 python -m benchmarks.benchmark_performance --frames 400 --labels 28 --repeats 3
 python -m benchmarks.benchmark_merge_pipeline --frames 400 --labels 28 --repeats 3
+python -m benchmarks.benchmark_retained_merge --frames 400 --labels 12 --weak-labels 108 --repeats 5
 python -m benchmarks.benchmark_occurrences --frames 500 --labels 100 --repeats 5
 python -m benchmarks.benchmark_cleanup_sql --markers 2500000 --legacy-time-budget 5
 python -m benchmarks.benchmark_rethreshold --scenes 6 --frames 600 --labels 12 --repeats 5
@@ -16,6 +17,7 @@ python -m benchmarks.benchmark_rethreshold --scenes 6 --frames 600 --labels 12 -
 |---|---|
 | `benchmark_performance` | budowanie markerów i scalanie, z hashem wyniku |
 | `benchmark_merge_pipeline` | merge ze stanem SQLite, etapami i makietą API |
+| `benchmark_retained_merge` | obserwacje współdzielone, markery temporalne jednego modelu i merge CPU przy szerokiej retencji wyników, z hashami każdego etapu |
 | `benchmark_occurrences` | wybór reprezentatywnych punktów Occurance |
 | `benchmark_cleanup_sql` | odkrywanie kandydatów przez SQL; bez kosztu API i usuwania |
 | `benchmark_rethreshold` | zmiana obu progów, czas/dekodowania Check i Apply, zapisy evidence i zgodność wyników; bez merge/API |
@@ -54,3 +56,11 @@ python -m benchmarks.benchmark_occurrences --output benchmarks/results/local_occ
 Lokalne wyniki `local_*` są ignorowane przez Git. Zachowane wcześniejsze pomiary
 w [results](results/README.md) są punktami odniesienia; nie nadpisuj ich zwykłym
 uruchomieniem. Czasy syntetycznych testów nie są prognozą czasu pracy całej biblioteki.
+
+`benchmark_retained_merge` zachowuje po 12 obserwacji mocnych lub podtrzymujących
+oraz 108 słabszych na klatkę przy progu publikacji 0,8 i retencji od 0,1.
+Dodaj `--weak-labels 0`, aby sprawdzić wariant bez zbędnych obserwacji.
+Do porównania wersji uruchom ten sam skrypt z tymi samymi parametrami i innym
+`--project`; identyczne hashe wejścia i wszystkich trzech etapów potwierdzają
+zgodność danych, markerów i dowodów. Cały pomiar `merge_cpu` obejmuje budowanie
+markerów i scalanie przed zapisem do SQLite lub wywołaniem API Stash.
