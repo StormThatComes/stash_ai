@@ -1,10 +1,11 @@
 """Marker-policy replay must never treat unretained detections as absence."""
 from copy import deepcopy
+from dataclasses import replace
 import sqlite3
 
 import pytest
 
-from stash_ai import cli as app, merge
+from stash_ai import cli as app, merge, thresholds
 from tests.test_thresholds import configure, raw
 
 pytestmark = pytest.mark.usefixtures('reset_temporal')
@@ -27,6 +28,86 @@ def offline(monkeypatch, stash):
     for name in ('load_tagger', 'load_vocabulary', 'fetch_cues'):
         monkeypatch.setattr(app, name, unexpected)
     monkeypatch.setattr(stash, 'get_media', unexpected)
+
+
+@pytest.mark.parametrize('old_cache', [False, True])
+@pytest.mark.parametrize('dry_run', [False, True])
+def test_enabling_temporal_checks_historical_retention_before_publication(
+        pipeline, monkeypatch, capsys, old_cache, dry_run):
+    p = pipeline
+    p.scores['wd'][:] = 0
+    p.scores['wd'][:8, 0] = .6
+    p.scores['wd'][:2, 0] = p.scores['wd'][6:8, 0] = .8
+    args = [*p.args, '--markers-only']
+    with monkeypatch.context() as previous:
+        if old_cache:
+            settings = app.load_model_settings
+            previous.setattr(app, 'load_model_settings', lambda *a: [
+                replace(config, scene_cache_floor=None, marker_cache_floor=None)
+                for config in settings(*a)])
+        assert app.main([*args, '--no-temporal']) == 0
+    with merge.StateStore(p.path, merge.scope_for(app.STASH_URL), True) as state:
+        meta = state.records('1', 'markers')['wd'][0]['meta']
+        assert ('marker_score_floor' not in meta) == old_cache
+    before = stored_outputs(p.path), deepcopy(p.stash.scene)
+    database_bytes = p.path.read_bytes()
+    p.stash.writes.clear()
+    p.stash.dry_run = dry_run
+    capsys.readouterr()
+    with monkeypatch.context() as blocked:
+        offline(blocked, p.stash)
+        status = app.main([*args, '--merge-only', *(['--dry-run'] if dry_run else [])])
+    assert status == int(old_cache)
+    if old_cache or dry_run:
+        assert (stored_outputs(p.path), p.stash.scene) == before
+        assert not p.stash.writes
+    if dry_run:
+        assert p.path.read_bytes() == database_bytes
+    if old_cache:
+        output = capsys.readouterr().out
+        assert 'marker cache floor' in output and 'wd' in output and '--restart' in output
+    elif not dry_run:
+        assert marker_ranges(p.stash) == [('ai:common', 0, 8)]
+    monkeypatch.setattr(app, 'DRY_RUN', False)
+    p.stash.dry_run = False
+    assert app.main([*args, '--restart']) == 0
+    assert marker_ranges(p.stash) == [('ai:common', 0, 8)]
+
+
+def test_old_high_only_cache_remains_usable_without_temporal(pipeline, monkeypatch):
+    p = pipeline
+    configure(monkeypatch)
+    args = [*p.args, '--markers-only', '--no-temporal']
+    assert app.main(args) == 0
+    before = stored_outputs(p.path), deepcopy(p.stash.scene)
+    p.stash.writes.clear()
+    offline(monkeypatch, p.stash)
+    assert app.main([*args, '--merge-only', '--force-merge']) == 0
+    assert (stored_outputs(p.path), p.stash.scene) == before
+    assert not p.stash.writes
+
+
+@pytest.mark.parametrize('override,usable', [(.8, False), (.9, True)])
+def test_historical_floor_uses_capture_threshold_instead_of_override(override, usable):
+    from tests.helpers.evidence import segment, policies
+    frames = segment('wd', [[('core', .95)]] * 2)
+    frames['meta'].pop('marker_score_floor', None)
+    frames['meta']['marker_threshold'] = .7
+    frames[thresholds.OVERRIDE] = override
+    if usable:
+        assert merge.marker_contributions(app, {'wd': [frames]}, policies())
+    else:
+        with pytest.raises(ValueError, match='wd: marker cache floor.*run inference'):
+            merge.marker_contributions(app, {'wd': [frames]}, policies())
+
+
+def test_historical_incomplete_segment_cannot_hide_behind_complete_history():
+    from tests.helpers.evidence import segment, policies
+    old = segment('wd', [[], []])
+    old['meta'].pop('marker_score_floor', None)
+    current = segment('wd', [[('core', .9)]] * 2)
+    with pytest.raises(ValueError, match='wd: marker cache floor.*run inference'):
+        merge.marker_contributions(app, {'wd': [old, current]}, policies())
 
 
 @pytest.mark.parametrize('markers_only', [False, True])
@@ -113,7 +194,10 @@ def test_scene_tags_only_does_not_require_marker_cache(pipeline, monkeypatch, tm
 
 def test_legacy_frames_and_imported_ranges_remain_usable():
     from tests.helpers.evidence import segment, policies
-    records = {'wd': [segment('wd', [[('core', .9)]] * 2)], 'joytag': [
+    imported = segment('wd', [[('core', .9)]] * 2)
+    imported['meta'].update(origin='legacy')
+    imported['meta'].pop('marker_score_floor', None)
+    records = {'wd': [imported], 'joytag': [
         dict(mode='spans', meta={'origin': 'legacy'}, items=[
             dict(tag='legacy', start=3, end=5, extra_tags=[])])]}
     markers = merge.union_intervals(merge.marker_contributions(app, records, policies()))
