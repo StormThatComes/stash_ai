@@ -294,6 +294,9 @@ Para scena–tag per model jest liczona raz, również gdy ten tag ma kilka zakr
 występuje jako tag sceny i core markera lub pochodzi z kilku zapisanych przebiegów.
 Globalne liczniki dodatkowo deduplikują modele; sumowanie wierszy modeli nie daje
 liczby różnych tagów w całej kolekcji. Liczniki powodów mogą się nakładać.
+Model wspierający core markera głosem konsensusowym również jest uwzględniony,
+nawet jeśli nie utworzył własnego zakresu. Jego wynik pochodzi ze zgodnych,
+zachowanych obserwacji w zakresie wkładu, a przykład ma `support_only: true`.
 
 Sekcja `tags` zawiera wiersze model–etykieta, liczniki powodów i do trzech
 przykładowych scen z wynikami, progami i czasami. Limit przykładów zmienia

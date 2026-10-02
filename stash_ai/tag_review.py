@@ -6,6 +6,7 @@ Only explicitly retained, compatible peer observations can prove disagreement.
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+from bisect import bisect_left, bisect_right
 from dataclasses import asdict, dataclass
 import json
 import math
@@ -132,17 +133,60 @@ def _scene_signals(app, store, scene, hits, rows, options, scene_policies):
                         "peer_threshold": meta["scene_threshold"]})
 
 
-def _marker_signals(store, scene, spans, rows, options):
+def _supporting_scores(app, contribution, tag, segments, postings):
+    from stash_ai.temporal import marker_floor
+    from stash_ai.thresholds import marker_threshold
+    from stash_ai.timeline import Series
+
+    identity = contribution["meta"].get("frame_input_signature")
+    if not identity:
+        return
+    for model in contribution.get("support_sources", ()):
+        if model == contribution["source"]:
+            continue
+        for signature in contribution.get("support_context", {}).get(model, ()):
+            key = model, signature
+            segment = segments.get(key)
+            if (segment is None or segment["mode"] != "frames"
+                    or segment["meta"].get("frame_input_signature") != identity):
+                continue
+            threshold = marker_threshold(segment)
+            if not _score(threshold):
+                continue
+            if key not in postings:
+                series = {}
+                floor = marker_floor(app.TEMPORAL_POLICY, threshold)
+                for position, frame in enumerate(sorted(segment["items"], key=lambda row: row["start"])):
+                    for label, score in frame["tags"]:
+                        if _score(score) and score >= floor:
+                            if label not in series:
+                                series[label] = Series()
+                            series[label].append(position, frame["start"], frame["end"], score)
+                postings[key] = series
+            series = postings[key].get(tag)
+            if series is None:
+                continue
+            lo = bisect_left(series.starts, contribution["start"])
+            end = contribution["end"]
+            hi = (bisect_right(series.starts, contribution["start"]) if end is None
+                  else bisect_left(series.starts, end))
+            if lo < hi:
+                yield model, max(series.scores[lo:hi]), threshold
+
+
+def _marker_signals(app, store, scene, spans, rows, options):
     from stash_ai.merge import marker_segment_signature, union_intervals
     from stash_ai.occurrences import is_occurrence
     from stash_ai.performance import digest
     from stash_ai.thresholds import marker_threshold
 
-    effective, by_meta = {}, defaultdict(set)
+    effective, by_meta, segments_by_signature, postings = {}, defaultdict(set), {}, {}
     for model, segments in store.records(scene, "markers", borrow=True).items():
         for segment in segments:
             threshold = marker_threshold(segment)
-            effective[model, marker_segment_signature(segment)] = threshold
+            key = model, marker_segment_signature(segment)
+            effective[key] = threshold
+            segments_by_signature[key] = segment
             by_meta[model, digest(segment["meta"])].add(threshold)
 
     for marker in union_intervals(spans, borrow=True):
@@ -151,18 +195,22 @@ def _marker_signals(store, scene, spans, rows, options):
         duration = (marker["end"] - marker["start"]) if marker["end"] is not None else None
         for contribution in marker["contributors"]:
             model, tag = contribution["source"], marker["tag"]
-            row = _candidate(rows, model, tag)
             threshold = effective.get((model, contribution.get("evidence_signature")))
             if threshold is None:
                 values = by_meta.get((model, digest(contribution["meta"])), set())
                 threshold = next(iter(values)) if len(values) == 1 else None
             score = contribution.get("score")
-            detail = dict(kind="marker", start=marker["start"], end=marker["end"],
-                          score=score, threshold=threshold)
-            if _score(score) and _score(threshold) and score <= threshold + options.margin + 1e-12:
-                _flag(row, "weak_or_borderline", detail)
-            if duration is not None and duration >= options.long_marker_seconds:
-                _flag(row, "long_marker", {**detail, "duration_seconds": duration})
+            witnesses = [(model, score, threshold, False)]
+            witnesses.extend((peer, score, threshold, True) for peer, score, threshold in
+                             _supporting_scores(app, contribution, tag, segments_by_signature, postings))
+            for source, score, threshold, support_only in witnesses:
+                row = _candidate(rows, source, tag)
+                detail = dict(kind="marker", start=marker["start"], end=marker["end"],
+                              score=score, threshold=threshold, support_only=support_only)
+                if _score(score) and _score(threshold) and score <= threshold + options.margin + 1e-12:
+                    _flag(row, "weak_or_borderline", detail)
+                if duration is not None and duration >= options.long_marker_seconds:
+                    _flag(row, "long_marker", {**detail, "duration_seconds": duration})
 
 
 def build_report(app, store, scenes, core_policies, scene_policies, options=ReviewOptions()):
@@ -188,7 +236,7 @@ def build_report(app, store, scenes, core_policies, scene_policies, options=Revi
                 hits, spans = merge.evidence(app, store, scene, core_policies, scene_policies)
                 rows = {}
                 _scene_signals(app, store, scene, hits, rows, options, scene_policies)
-                _marker_signals(store, scene, spans, rows, options)
+                _marker_signals(app, store, scene, spans, rows, options)
             except (ValueError, RuntimeError, KeyError, TypeError) as exc:
                 reason, message = "unusable_evidence", str(exc)
         if reason is not None:

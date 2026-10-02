@@ -247,7 +247,7 @@ def test_cli_scene_selection_options_missing_scene_and_empty_report(tmp_path):
     assert json.loads(missing.read_text())["totals"]["selected_scenes"] == 0
 
 
-def test_report_on_real_inference_keeps_isolated_peak_and_consensus_provenance(pipeline, tmp_path):
+def test_report_on_real_inference_keeps_isolated_peak_without_modifying_cache(pipeline, tmp_path):
     p = pipeline
     p.scores["wd"][:] = .1
     p.scores["wd"][3, 0] = .99
@@ -259,6 +259,23 @@ def test_report_on_real_inference_keeps_isolated_peak_and_consensus_provenance(p
     assert data["totals"]["unique_tags_flagged"] == 1
     assert model_rows(data)["wd"]["reasons"]["isolated_peak"] == 1
     assert p.path.read_bytes() == before
+
+
+def test_marker_consensus_vote_is_counted_even_without_an_independent_range(tmp_path):
+    from tests.helpers.evidence import paired_records
+    path = tmp_path / "state.sqlite3"
+    scenes, markers = paired_records({"wd": [.72, .72], "dtq": [.72, 0]},
+                                     threshold=.9, marker_threshold=.8)
+    for model in scenes:
+        seed(path, "1", model, {"scene": scenes[model][0], "markers": markers[model][0]})
+    data = report(path)
+    rows = model_rows(data)
+    assert rows["wd"]["unique_tags_flagged"] == rows["dtq"]["unique_tags_flagged"] == 1
+    assert data["totals"]["unique_tags_flagged"] == 1
+    dtq = next(row for row in data["tags"] if row["model"] == "dtq")
+    detail = dtq["examples"][0]["evidence"][0]
+    assert detail["support_only"] is True
+    assert detail["score"] == .72 and detail["threshold"] == .8
 
 
 @pytest.mark.parametrize("flags", [
