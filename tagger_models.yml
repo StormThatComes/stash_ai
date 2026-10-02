@@ -28,26 +28,32 @@ joytag:
   model_dir: models/joytag
   scene_threshold: 0.45
   marker_threshold: 0.70
+  scene_cache_floor: 0.20
+  marker_cache_floor: 0.30
   batch_size: 16
 
 wd:
   model_dir: models/wd-eva02-large-tagger-v3
   scene_threshold: 0.40
   marker_threshold: 0.70
-  # scene_cache_floor: 0.20
-  # marker_cache_floor: 0.35
+  scene_cache_floor: 0.20
+  marker_cache_floor: 0.25
   batch_size: 4
 
 dtq:
   model_dir: models/danbooru-tag-query-l16
   scene_threshold: 0.25
   marker_threshold: 0.70
+  scene_cache_floor: 0.10
+  marker_cache_floor: 0.15
   batch_size: 4
 
 oppai:
   model_dir: models/oppai-oracle-v1.1
   scene_threshold: 0.80
   marker_threshold: 0.85
+  scene_cache_floor: 0.35
+  marker_cache_floor: 0.40
   batch_size: 4
 
 # All vocabulary entries/categories are eligible. No whitelist is used.
