@@ -42,7 +42,7 @@ def scene_ids(store, requested):
     return sorted(known)
 
 
-def _metadata_rows(store, models, scenes):
+def _metadata_rows(store, scenes):
     from stash_ai.state_metadata import FORMAT, decode
     from stash_ai.state_thresholds import overlay
 
@@ -50,14 +50,13 @@ def _metadata_rows(store, models, scenes):
         store.connection.execute('CREATE TEMP TABLE IF NOT EXISTS cache_report_scenes (scene TEXT PRIMARY KEY)')
         store.connection.execute('DELETE FROM cache_report_scenes')
         store.connection.executemany('INSERT INTO cache_report_scenes VALUES (?)', ((scene,) for scene in scenes))
-    placeholders = ','.join('?' for _ in models)
     rows = store.connection.execute(
         'SELECT r.scene,r.model,r.kind,m.format,m.data,t.threshold FROM ' +
         store.table('results') + ' AS r LEFT JOIN ' + store.table('result_metadata') +
         ' AS m USING(scope,scene,model,kind) LEFT JOIN ' + store.table('result_thresholds') +
-        f' AS t USING(scope,scene,model,kind) WHERE r.scope=? AND r.model IN ({placeholders}) '
+        ' AS t USING(scope,scene,model,kind) WHERE r.scope=? '
         'AND r.scene IN (SELECT scene FROM cache_report_scenes) '
-        'ORDER BY r.scene,r.model,r.kind', (store.scope, *models))
+        'ORDER BY r.scene,r.model,r.kind', (store.scope,))
     for scene, model, kind, version, data, threshold in rows:
         if kind not in KINDS:
             continue
@@ -140,6 +139,45 @@ def _inspect(app, config, kind, segments, index, refresh, checkpoint, error):
                   target_threshold=threshold, saved_thresholds=sorted(set(effective)))
 
 
+def _publication_dependencies(app, evidence, selected):
+    """Merge reads unselected cached models at their saved effective thresholds."""
+    from stash_ai.scene_cache import scene_threshold, validate_scene
+    from stash_ai.taggers import SOURCES
+    from stash_ai.thresholds import validate_marker_cache
+
+    dependencies = []
+    context = SimpleNamespace(TEMPORAL_POLICY=app.TEMPORAL_POLICY,
+                              MARKER_TAG_BLOCKLIST=app.MARKER_TAG_BLOCKLIST)
+    for (model, kind), (segments, error) in sorted(evidence.items()):
+        if model in selected:
+            continue
+        try:
+            if error:
+                raise ValueError(error)
+            if model not in SOURCES:
+                raise ValueError('Unknown cached model; run --db-check.')
+            if kind == 'markers':
+                if any(segment['mode'] not in ('frames', 'spans') for segment in segments):
+                    raise ValueError('Unsupported stored marker evidence; run --db-check.')
+                validate_marker_cache(context, {model: segments})
+            else:
+                # Unchanged old aggregates remain publishable. Validate only
+                # projection required by an override or changed support policy.
+                for segment in segments:
+                    meta = segment['meta']
+                    threshold = scene_threshold(segment)
+                    support_changed = (app.TEMPORAL_POLICY.enabled
+                        and ('scene_support_floor' in meta or meta.get('scene_frames_format') == 1)
+                        and meta.get('scene_support_floor') != threshold * app.TEMPORAL_POLICY.scene_support_ratio)
+                    if threshold != meta.get('scene_threshold') or support_changed:
+                        validate_scene(app, segment, threshold, has_frames=segment['has_frames'])
+        except (KeyError, TypeError, ValueError) as exc:
+            dependencies.append(dict(model=model, kind=kind, reason=str(exc),
+                resolution=f'Include {model} with --models and regenerate the report; '
+                           'resolve unreadable or invalid evidence with --db-check first.'))
+    return dependencies
+
+
 def build_report(app, store, scenes, settings, command_context=()):
     """Inspect one scene at a time; count outputs separately from scene/model pairs."""
     from stash_ai.preview import check_source
@@ -160,7 +198,7 @@ def build_report(app, store, scenes, settings, command_context=()):
     pairs = {model: Counter() for model in models}
     issues, operations = [], defaultdict(list)
     complete_scenes = 0
-    grouped = iter(groupby(_metadata_rows(store, models, scenes), key=lambda row: row[0]))
+    grouped = iter(groupby(_metadata_rows(store, scenes), key=lambda row: row[0]))
     current = next(grouped, None)
     with backfill_batch(store):
         for scene in tqdm(scenes, desc='Cache coverage', unit='scene'):
@@ -173,7 +211,8 @@ def build_report(app, store, scenes, settings, command_context=()):
                 evidence = {(model, kind): (segments, error)
                             for _, model, kind, segments, error in current[1]}
                 current = next(grouped, None)
-            scene_ready = True
+            dependencies = _publication_dependencies(app, evidence, models)
+            inspected = []
             for config in settings:
                 model = config.source.key
                 checkpoint = checkpoints.get((scene, model))
@@ -184,7 +223,6 @@ def build_report(app, store, scenes, settings, command_context=()):
                         indexes.get((scene, model, kind)), (scene, model, kind) in refreshes,
                         checkpoint, error)
                     counts[model][kind][outputs[kind]['status']] += 1
-                statuses = {value['status'] for value in outputs.values()}
                 blockers = []
                 if store.cleanup_pending:
                     blockers.append('pending_global_cleanup')
@@ -192,11 +230,22 @@ def build_report(app, store, scenes, settings, command_context=()):
                     blockers.append('pending_publication')
                 if scene in outside_refresh:
                     blockers.append('refresh_required_for_unselected_model')
+                if dependencies:
+                    blockers.append('unusable_evidence_for_unselected_model')
                 if any(value.get('unreadable') for value in outputs.values()):
                     blockers.append('unreadable_evidence_run_db_check')
                 if any(outputs[kind]['status'] in RESTART and not getattr(app,
                        'REPLACE_SCENE_TAGS' if kind == 'scene' else 'REPLACE_MARKERS') for kind in KINDS):
                     blockers.append('replacement_disabled')
+                inspected.append((model, checkpoint, outputs, blockers))
+            # Every generated command attempts publication. A blocked selected
+            # pair therefore blocks its peers, regardless of model iteration order.
+            blocking_models = sorted(model for model, _, _, blockers in inspected if blockers)
+            scene_ready = True
+            for model, checkpoint, outputs, blockers in inspected:
+                statuses = {value['status'] for value in outputs.values()}
+                if blocking_models and not blockers:
+                    blockers.append('blocked_selected_model')
                 reusable = statuses <= REUSABLE
                 ready = statuses == {'ready'}
                 pairs[model]['evidence_ready_pairs'] += ready
@@ -206,6 +255,10 @@ def build_report(app, store, scenes, settings, command_context=()):
                 if ready and not blockers:
                     continue
                 row = dict(scene_id=scene, model=model, outputs=outputs, blockers=blockers)
+                if dependencies:
+                    row['publication_dependencies'] = dependencies
+                if 'blocked_selected_model' in blockers:
+                    row['blocking_models'] = blocking_models
                 if checkpoint:
                     row['checkpoint'] = checkpoint
                 issues.append(row)
@@ -226,9 +279,10 @@ def build_report(app, store, scenes, settings, command_context=()):
             complete_scenes += scene_ready
     check_source(store)
     plan = []
+    blocked_scenes = {row['scene_id'] for row in issues if row['blockers']}
     for action in ('resume_or_infer', 'restart_inference', 'rethreshold'):
         for model in models:
-            targets = operations.get((action, model), ())
+            targets = [scene for scene in operations.get((action, model), ()) if scene not in blocked_scenes]
             for start in range(0, len(targets), 50):
                 batch = targets[start:start + 50]
                 argv = ['python', 'stash_ai.py', *command_context, '--output-mode', 'merged', '--models', model]
@@ -242,10 +296,9 @@ def build_report(app, store, scenes, settings, command_context=()):
                     argv.append('--resume')
                 plan.append(dict(action=action, model=model, scene_ids=batch, argv=argv,
                                  uses_inference=action != 'rethreshold'))
-    blocked_scenes = {row['scene_id'] for row in issues if row['blockers']}
     recovery_scenes = set(scenes) & recovery
-    actionable_scenes = sorted({scene for targets in operations.values() for scene in targets}
-                              | (recovery_scenes - blocked_scenes))
+    actionable_scenes = sorted(({scene for targets in operations.values() for scene in targets}
+                               | recovery_scenes) - blocked_scenes)
     # Refresh publication after all backfills, including cross-model votes and Occurrence.
     for start in range(0, len(actionable_scenes), 50):
         batch = actionable_scenes[start:start + 50]
@@ -264,7 +317,8 @@ def build_report(app, store, scenes, settings, command_context=()):
                        integrity='Compact metadata is trusted when valid; --db-check performs a deep payload check.',
                        checkpoint='Presence/progress only; inference verifies compatibility before resuming.',
                        plan='Advisory argv arrays in execution order; never executed by this report. Running them can publish to Stash.',
-                       blockers='Finish original interrupted publication/cleanup or resolve DB errors, then regenerate this report.'),
+                       blockers='Blockers exclude the entire scene from all plan commands. Finish interrupted publication/cleanup, '
+                                'include reported unselected dependency models with --models, or resolve DB errors, then regenerate.'),
         totals=dict(scenes=len(scenes), fully_ready_scenes=complete_scenes,
                     scene_model_pairs=len(scenes) * len(models),
                     **{key: sum(row[key] for row in summary) for key in (
@@ -283,6 +337,8 @@ def format_summary(report):
     for row in report['models']:
         lines.append(f"{row['model']:<10} {row['evidence_ready_pairs']:>11,} {row['reusable_pairs']:>15,} "
                      f"{row['inference_pairs']:>10,} {row['rethreshold_pairs']:>12,} {row['blocked_pairs']:>8,}")
+    if any(row.get('publication_dependencies') for row in report['issues']):
+        lines.append('Unselected cached models block publication; see issues.publication_dependencies and include them with --models.')
     lines.append('Offline coverage; current model/media freshness is unverified. Plan commands are not executed.')
     return '\n'.join(lines)
 
