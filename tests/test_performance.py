@@ -1,4 +1,5 @@
 """Publication invalidation, sparse previews and ordered CPU preparation, offline."""
+
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
@@ -11,6 +12,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
+from stash_ai import inference
 from stash_ai import cli as app
 from stash_ai import merge
 from stash_ai import performance
@@ -223,10 +225,10 @@ def test_media_is_fetched_once_for_four_models_with_identical_signatures(pipelin
         calls[url] += 1
         return url.encode()
     monkeypatch.setattr(p.stash, 'get_media', get_media)
-    def cues(media, paths):
+    def cues(app, media, paths):
         media.get_media(paths['vtt'])
         return p.cues, len(p.cues)
-    monkeypatch.setattr(app, 'fetch_cues', cues)
+    monkeypatch.setattr(inference, 'fetch_cues', cues)
     paths = p.stash.scene['paths']
     reference = [progress.inspect_input(app, p.stash, paths, model)[2] for model in range(4)]
     calls.clear()
@@ -268,7 +270,7 @@ def test_cpu_transforms_are_parallel_ordered_and_own_their_images(monkeypatch, p
         copies.append(image)
         rendezvous.wait(timeout=5)
         return image.getpixel((0, 0))[0]
-    monkeypatch.setattr(app, 'iter_sprite_frames', frames)
+    monkeypatch.setattr(inference, 'iter_sprite_frames', frames)
     batches = list(progress.prepared_batches(app, SimpleNamespace(batch_size=4, prepare=prepare), None, {}, [], prefetch, workers=4))
     assert [v for batch, _ in batches for v in batch] == list(range(8))
     assert len(threads) == 4 and threading.get_ident() not in threads
@@ -291,7 +293,7 @@ def test_cpu_preparation_failure_closes_workers_and_owned_images(monkeypatch):
     def prepare(image):
         copies.append(image)
         raise ValueError('bad frame')
-    monkeypatch.setattr(app, 'iter_sprite_frames', frames)
+    monkeypatch.setattr(inference, 'iter_sprite_frames', frames)
     with pytest.raises(ValueError, match='bad frame'):
         list(progress.prepared_batches(app, SimpleNamespace(batch_size=4, prepare=prepare), None, {}, [], 2, workers=4))
     assert copies
@@ -307,7 +309,7 @@ def test_vectorized_score_filter_preserves_float_boundaries_and_order(threshold)
     scores[:4] = [.65, np.nextafter(np.float32(.65), np.float32(0)), .65, .35]
     labels = [f'tag_{i}' for i in range(len(scores))]
     for limit in [0, 7]:
-        assert app.select_scores(scores, labels, threshold, limit) == app.select_scores(scores.tolist(), labels, threshold, limit)
+        assert inference.select_scores(scores, labels, threshold, limit) == inference.select_scores(scores.tolist(), labels, threshold, limit)
 
 
 def test_cache_accounts_cue_attributes_and_evicts_under_process_pressure(monkeypatch):

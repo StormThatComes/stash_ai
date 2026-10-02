@@ -13,6 +13,7 @@ import hashlib
 import json
 import math
 
+from stash_ai import separate_sync
 from stash_ai.domain import Cue, FramePrediction, TagHierarchy
 from stash_ai.taggers import ModelSource, SOURCES
 from stash_ai.runtime import stage
@@ -142,7 +143,7 @@ def bootstrap_legacy(app, store, scene):
         if not enabled:
             continue
         existing = store.sources(scene_id, kind)
-        if kind == "markers" and not existing and any(app.owned_marker(marker, AI) for marker in scene.get("scene_markers", [])):
+        if kind == "markers" and not existing and any(separate_sync.owned_marker(marker, AI) for marker in scene.get("scene_markers", [])):
             raise RuntimeError("Merged markers exist without their source state. Restore the original --state-db before synchronization.")
         from stash_ai.performance import freeze
         imported = {freeze(item) for item in store.imported_legacy(scene_id, kind, borrow=True)}
@@ -159,7 +160,7 @@ def bootstrap_legacy(app, store, scene):
         else:
             for marker in scene.get("scene_markers", []):
                 parsed = legacy_label((marker.get("primary_tag") or {}).get("name", ""))
-                if not parsed or not app.owned_marker(marker, SOURCES[parsed[0]]):
+                if not parsed or not separate_sync.owned_marker(marker, SOURCES[parsed[0]]):
                     continue
                 model, label = parsed
                 originals.append(marker)

@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import zlib
 
+from stash_ai import inference
 from stash_ai.state_codec import encode, decode
 from stash_ai.taggers import metadata_files, weight_files
 
@@ -299,7 +300,7 @@ class VerifiedMedia:
 
 def inspect_input(app, stash, paths, identity):
     media = VerifiedMedia(stash)
-    cues, total = app.fetch_cues(media, paths)
+    cues, total = inference.fetch_cues(app, media, paths)
     if not cues:
         raise ValueError("No VTT cues to analyze.")
     for url in dict.fromkeys(cue.image for cue in cues):
@@ -439,7 +440,7 @@ def prepared_batches(app, tagger, stash, paths, cues, prefetch=False, workers=1)
         raise ValueError('prefetch must be an integer in 0..16.')
     if type(workers) is not int or not 1 <= workers <= 16:
         raise ValueError('prepare workers must be an integer in 1..16.')
-    iterator = app.iter_sprite_frames(stash, paths, cues)
+    iterator = inference.iter_sprite_frames(stash, paths, cues)
     executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="prepare-frames") if prefetch else None
     transforms = ThreadPoolExecutor(max_workers=workers, thread_name_prefix='transform-frames') if workers > 1 else None
     def transform(image):

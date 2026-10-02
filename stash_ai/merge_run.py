@@ -5,10 +5,12 @@ the stateful lifecycle of one merged run so the merge algorithms stay function-o
 """
 from __future__ import annotations
 
+from functools import partial
 from collections import Counter
 
 from tqdm import tqdm
 
+from stash_ai import inference
 from stash_ai import merge
 from stash_ai import performance
 from stash_ai import progress
@@ -203,7 +205,7 @@ class MergedRun:
                         self.stats['auto_refresh_requested'] += len(stale)
                     if tagger is None:
                         try:
-                            tagger = app.load_tagger(config, self.catalogs[key], app.prepare_image)
+                            tagger = app.load_tagger(config, self.catalogs[key], partial(inference.prepare_image, app))
                         except Exception as exc:
                             self.stats["errors"] += 1
                             self.report.issue(
@@ -225,8 +227,8 @@ class MergedRun:
                         progress.digest({"input": signature, "kinds": kinds, "scene_frames": 1}),
                         len(cues), len(self.catalogs[key].labels), args.checkpoint_batches)
                     analysis = {}
-                    predictions, frames = app.predict_scene(
-                        tagger, media, paths, cues, raw_scene=True, checkpoint=checkpoint,
+                    predictions, frames = inference.predict_scene(
+                        app, tagger, media, paths, cues, raw_scene=True, checkpoint=checkpoint,
                         prefetch=args.prefetch_batches, analysis=analysis, report=self.report,
                         prepare_workers=getattr(args, 'prepare_workers', 1))
                     outputs = merge.capture_outputs(

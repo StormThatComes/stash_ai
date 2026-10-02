@@ -1,7 +1,10 @@
 """Derived marker groups. Never model evidence, scene tags, or marker ownership."""
+
 from collections import Counter
 from copy import deepcopy
 import json
+
+from stash_ai import separate_sync
 
 ROOT = 'ai_markers'
 PREFIX = 'm:'
@@ -189,7 +192,7 @@ def run_backfill(app, args):
                     updates = []
                     for marker in scene.get('scene_markers', []):
                         core = marker['primary_tag']['name']
-                        if not app.owned_marker(marker, AI) or not core.startswith(AI.prefix):
+                        if not separate_sync.owned_marker(marker, AI) or not core.startswith(AI.prefix):
                             continue
                         occurrence = any(t['name'] == OCCURRENCE_TAG for t in marker.get('tags', []))
                         desired = groups.resolve(core[len(AI.prefix):], occurrence)

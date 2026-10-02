@@ -1,4 +1,5 @@
 """Occurrence publication, old caches, revocation and exact sampled positions."""
+
 from collections import Counter
 from copy import deepcopy
 from dataclasses import asdict, replace
@@ -6,6 +7,7 @@ from dataclasses import asdict, replace
 import numpy as np
 import pytest
 
+from stash_ai import inference
 from stash_ai import cli as app
 from stash_ai import merge
 from stash_ai import progress
@@ -235,7 +237,7 @@ def test_pipeline_reuses_results_for_markers_only_dry_run_and_cleanup(pipeline, 
         records = state.connection.execute('SELECT data FROM results ORDER BY kind').fetchall()
         assert state.records('1', 'scene')['wd'][0]['items'][0]['statistics']['peak_time'] == 3
     monkeypatch.setattr(app, 'load_tagger', lambda *a: pytest.fail('merge or cleanup loaded a model'))
-    monkeypatch.setattr(app, 'fetch_cues', lambda *a: pytest.fail('merge or cleanup fetched media'))
+    monkeypatch.setattr(inference, 'fetch_cues', lambda *a: pytest.fail('merge or cleanup fetched media'))
     p.stash.writes.clear()
     assert app.main([*p.args, '--merge-only', '--markers-only']) == 0
     assert not p.stash.writes and p.stash.scene['scene_markers'] == point

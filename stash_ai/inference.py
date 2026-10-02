@@ -1,9 +1,4 @@
-"""Media preparation and local scene inference.
-
-The compatibility surface remains in stash_ai.cli. Functions that depend on
-runtime CLI settings receive the live app module so tests and callers can keep
-overriding CLI configuration and helper functions.
-"""
+"""Media preparation and local scene inference with explicit runtime settings."""
 from __future__ import annotations
 
 from collections import OrderedDict
@@ -44,7 +39,7 @@ def fetch_cues(app, stash, paths: dict) -> tuple[list[Cue], int]:
         )
         for cue in cues
     ]
-    return app.evenly_sample(cues, app.MAX_FRAMES_PER_SCENE), len(cues)
+    return evenly_sample(cues, app.MAX_FRAMES_PER_SCENE), len(cues)
 
 
 def iter_sprite_frames(stash, paths: dict, cues: list[Cue]) -> Iterator[tuple[Cue, Any]]:
@@ -221,7 +216,7 @@ def _run_prediction_batches(app, tagger, stash, paths, cues, state, *,
             batch_frames = []
             if app.CREATE_MARKERS:
                 for cue, row in zip(batch_cues, result):
-                    matches = app.select_scores(
+                    matches = select_scores(
                         row,
                         labels,
                         state.marker_floor,
@@ -234,7 +229,7 @@ def _run_prediction_batches(app, tagger, stash, paths, cues, state, *,
                     dict(
                         start=cue.start,
                         end=cue.end,
-                        tags=app.select_scores(row, labels, state.scene_floor, 0),
+                        tags=select_scores(row, labels, state.scene_floor, 0),
                     )
                     for cue, row in zip(batch_cues, result)
                 ]
@@ -329,7 +324,7 @@ def _finalize_predictions(app, tagger, scene_exclusions, state, *, raw_scene, an
     else:
         predictions = [
             (tag, score)
-            for tag, score in app.select_scores(
+            for tag, score in select_scores(
                 scene_scores,
                 labels,
                 settings.scene_threshold,

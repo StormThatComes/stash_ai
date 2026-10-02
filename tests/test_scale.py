@@ -1,4 +1,6 @@
 """Shared scene proof, short extras, bounded RAM/prefetch, and 9000-scene output."""
+
+from functools import partial
 from collections import Counter
 from copy import deepcopy
 from dataclasses import asdict, replace
@@ -8,6 +10,7 @@ import threading
 import numpy as np
 import pytest
 
+from stash_ai import inference
 from stash_ai import cli as app
 from stash_ai import fusion
 from stash_ai import merge
@@ -253,7 +256,7 @@ def test_prefetch_queue_has_a_strict_bound(pipeline, monkeypatch):
     p = pipeline
     p.cues = [app.Cue(i, i+1, 'sprite', (0,0,1,1)) for i in range(30)]
     config = app.load_model_settings(app.MODELS_CONFIG_FILE, ['wd'], None)[0]
-    model = app.load_tagger(config, p.vocab, app.prepare_image)
+    model = app.load_tagger(config, p.vocab, partial(inference.prepare_image, app))
     ready = threading.Event()
     original = model.prepare
     def prepare(value):
@@ -327,7 +330,7 @@ def test_shared_scene_merge_only_reuses_cache_and_preserves_other_outputs(pipeli
         before = state.connection.execute('SELECT model,kind,data FROM results ORDER BY model,kind').fetchall()
     markers = deepcopy(p.stash.scene['scene_markers'])
     monkeypatch.setattr(app, 'load_tagger', lambda *args: pytest.fail('merge-only loaded a model'))
-    monkeypatch.setattr(app, 'fetch_cues', lambda *args: pytest.fail('merge-only fetched input images'))
+    monkeypatch.setattr(inference, 'fetch_cues', lambda *args: pytest.fail('merge-only fetched input images'))
     assert app.main([*args, '--merge-only', '--scene-tags-only']) == 0
     assert [tag['name'] for tag in p.stash.scene['tags']] == ['ai:common']
     assert p.stash.scene['scene_markers'] == markers

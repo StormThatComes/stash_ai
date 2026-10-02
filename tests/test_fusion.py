@@ -1,4 +1,5 @@
 """Shared VTT evidence, extra-only models, published-source cleanup and cache reuse."""
+
 from copy import deepcopy
 from dataclasses import replace
 import json
@@ -6,6 +7,7 @@ import json
 import numpy as np
 import pytest
 
+from stash_ai import inference
 from stash_ai import cli as app
 from stash_ai import merge
 from stash_ai.temporal import TemporalPolicy
@@ -265,7 +267,7 @@ def test_merge_only_applies_shared_rules_without_inference_or_changing_source_re
     with merge.StateStore(p.path,merge.scope_for(app.STASH_URL),True) as state:
         before=state.connection.execute('SELECT model,kind,data FROM results ORDER BY model,kind').fetchall()
     monkeypatch.setattr(app,'load_tagger',lambda *args:pytest.fail('shared merge loaded a model'))
-    monkeypatch.setattr(app,'fetch_cues',lambda *args:pytest.fail('shared merge fetched images'))
+    monkeypatch.setattr(inference,'fetch_cues',lambda *args:pytest.fail('shared merge fetched images'))
     assert app.main([*args,'--merge-only'])==0
     assert [(m['seconds'],m['end_seconds']) for m in p.stash.scene['scene_markers']]==[(0,4)]
     with merge.StateStore(p.path,merge.scope_for(app.STASH_URL),True) as state:
