@@ -9,7 +9,15 @@ reconciliation korzystają bezpośrednio z `merge_sync` i `merge_cleanup`; CLI
 uruchamia cleanup przez `CleanupRun.run()`. Kod i testy importują codec
 bezpośrednio z `stash_ai/state_codec.py`.
 Stanowy lifecycle jednego przebiegu merged-output (scan, rethreshold, inference,
-publikacja i pruning) obsługuje `stash_ai/merge_run.py` / `MergedRun`. Opcjonalny `stash_ai/merge_parallel.py` uruchamia wyłącznie read-only replay evidence w izolowanych procesach; `MergedRun` zachowuje pojedynczy writer dla TagResolver, Stash i StateStore.
+publikacja i pruning) obsługuje `stash_ai/merge_run.py` / `MergedRun`, który otwiera
+oraz zamyka Stash i StateStore. Faza publikacji znajduje się w
+`stash_ai/merge_publish.py` / `MergePublisher`: sprawdza pending refresh i cache
+publikacji, wybiera tryb szeregowy lub równoległy oraz wspólnie obsługuje
+publikację, liczniki i błędy. Korzysta z zasobów przebiegu bez przejmowania ich
+lifecycle. Opcjonalny `stash_ai/merge_parallel.py` uruchamia wyłącznie read-only
+replay evidence w izolowanych procesach; `MergePublisher` zachowuje pojedynczy
+writer dla TagResolver, Stash i StateStore. Dry-run i profilowanie pozostają
+szeregowe, a awaria workerów nie uruchamia drugiego przebiegu publikacji.
 Planowanie i publikację zmian jednej sceny rozdziela `stash_ai/merge_sync.py`;
 `MergeSyncPlan` przechowuje wyłącznie plan snapshotów i mutacji Stash, a kolejne
 funkcje obsługują przygotowanie evidence, tagi, markery i publikację. Cleanup ma

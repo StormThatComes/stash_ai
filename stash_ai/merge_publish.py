@@ -1,0 +1,174 @@
+"""Schedule merged evidence and publish it through the parent process's writer."""
+from __future__ import annotations
+
+from collections import Counter
+
+from tqdm import tqdm
+
+from stash_ai import merge, merge_sync, performance, progress
+from stash_ai.runtime import stage
+
+
+class MergePublisher:
+    """Borrow one run's resources for its publication phase."""
+
+    def __init__(self, app, args, store, stash, resolver, core_policies, scene_policies,
+                 *, publication_key, stats, report):
+        self.app, self.args = app, args
+        self.store, self.stash, self.resolver = store, stash, resolver
+        self.core_policies, self.scene_policies = core_policies, scene_policies
+        self.publication_key, self.stats, self.report = publication_key, stats, report
+        self.pending_refreshes = {}
+
+    def run(self, scenes):
+        refresh_kinds = progress.output_kinds(self.app)
+        if (self.app.CREATE_MARKERS and self.app.TEMPORAL_POLICY.enabled
+                and self.app.TEMPORAL_POLICY.occurrence_markers):
+            refresh_kinds = [*refresh_kinds, "scene"]
+        self.pending_refreshes = progress.pending_refreshes(self.store, refresh_kinds)
+        workers = int(getattr(self.args, 'merge_workers', 1))
+        if self.app.DRY_RUN or getattr(self.args, 'profile_merge', None) is not None:
+            # Workers cannot see the temporary dry-run overlay. Profiling needs
+            # per-stage timings from the parent, so it also remains serial.
+            workers = 1
+        if workers <= 1 or len(scenes) < 2:
+            return self._serial(scenes)
+        return self._parallel(scenes, workers)
+
+    def _reason(self, scene_id, current):
+        pending = self.pending_refreshes.get(str(scene_id), ())
+        if pending:
+            self.stats["merge_refresh_blocked"] += 1
+            details = ", ".join(f"{model}/{kind}" for model, kind in pending)
+            raise RuntimeError(
+                "Fresh inference is still pending for " + details +
+                "; merge skipped to avoid reusing stale evidence. "
+                "Rerun without --merge-only to resume inference.")
+        with stage(self.report, 'publication_check'):
+            reason = (
+                'forced' if getattr(self.args, 'force_merge', False)
+                else performance.check_reason(
+                    self.store, scene_id, self.publication_key, current['fingerprint']))
+        self.stats['merge_' + reason] += 1
+        return reason
+
+    def _issue(self, scene_id, exc):
+        self.stats["errors"] += 1
+        self.report.issue(
+            'merge', '', scene_id, exc,
+            self.app.safe_error(exc, api_key=self.app.STASH_API_KEY))
+
+    def _merge_one(self, scene_id, current, prepared=None):
+        """Publish local or worker evidence with the same accounting and errors."""
+        try:
+            if prepared is not None:
+                worker_scene, scene_hits, spans, diagnostics, error = prepared
+                if worker_scene != scene_id:
+                    raise RuntimeError(
+                        f"Merge worker returned scene {worker_scene!r} while {scene_id!r} was expected.")
+                if error is not None:
+                    raise RuntimeError(error)
+            cache_before = self.store.cache.stats.copy()
+            if prepared is None:
+                diagnostics = Counter()
+                with self.report.measure('merge_compute'):
+                    scene_hits, spans = merge.evidence(
+                        self.app, self.store, scene_id, self.core_policies,
+                        self.scene_policies, diagnostics)
+            with self.report.measure('merge_plan'):
+                result = merge_sync.sync_merged(
+                    self.app, self.stash, self.resolver, self.store, current, scene_hits, spans,
+                    report=self.report, tag_policies=self.scene_policies,
+                    publication_key=self.publication_key)
+            self.stats.update(result)
+            self.report.record_counts(**{
+                'cache_' + key: value - cache_before[key]
+                for key, value in self.store.cache.stats.items()
+            })
+            self.stats.update(diagnostics)
+            self.stats["scenes_synced"] += 1
+            if prepared is not None:
+                self.stats["merge_parallel_scenes"] += 1
+            return result + diagnostics
+        except Exception as exc:
+            self._issue(scene_id, exc)
+            return None
+
+    def _serial(self, scenes):
+        bar = tqdm(scenes.items(), desc="Merge to ai:", unit="scene")
+        for scene_id, current in bar:
+            with self.report.diagnostics.scene(scene_id) as sample:
+                try:
+                    reason = self._reason(scene_id, current)
+                    sample['reason'] = reason
+                    if reason == 'reused':
+                        sample['status'] = 'reused'
+                    else:
+                        statistics = self._merge_one(scene_id, current)
+                        if statistics is None:
+                            sample['status'] = 'error'
+                        else:
+                            sample['statistics'] = dict(statistics)
+                except Exception as exc:
+                    sample['status'] = 'error'
+                    self._issue(scene_id, exc)
+                self.report.progress(bar, self.stats)
+
+    def _parallel(self, scenes, workers):
+        """Prepare evidence in read-only processes; publish serially here."""
+        from stash_ai.merge_parallel import iter_parallel_evidence
+
+        pending = []
+        bar = tqdm(total=len(scenes), desc="Merge to ai:", unit="scene")
+        try:
+            # Check in the writer process before scheduling expensive replay.
+            for scene_id, current in scenes.items():
+                try:
+                    if self._reason(scene_id, current) != 'reused':
+                        pending.append((scene_id, current))
+                        continue
+                except Exception as exc:
+                    self._issue(scene_id, exc)
+                bar.update(1)
+                self.report.progress(bar, self.stats)
+
+            if not pending:
+                return
+            workers = min(workers, len(pending))
+            if workers <= 1:
+                # Avoid process startup when only one scene needs publication.
+                for scene_id, current in pending:
+                    self._merge_one(scene_id, current)
+                    bar.update(1)
+                    self.report.progress(bar, self.stats)
+                return
+
+            # Inference/scan caches are not shared with spawned processes.
+            self.store.cache.clear()
+            evidence = iter_parallel_evidence(
+                self.app, self.args.state_db, self.store.scope,
+                [scene_id for scene_id, _ in pending],
+                self.core_policies, self.scene_policies,
+                workers=workers,
+                cache_bytes=int(getattr(self.args, 'ram_cache_gb', 0) * 2**30),
+                memory_budget_bytes=int(getattr(self.args, 'ram_budget_gb', 32) * 2**30),
+            )
+            completed = 0
+            try:
+                for (scene_id, current), prepared in zip(pending, evidence):
+                    self._merge_one(scene_id, current, prepared)
+                    completed += 1
+                    bar.update(1)
+                    self.report.progress(bar, self.stats)
+            except Exception as exc:
+                # Never retry a second merge pass after a pool failure: some
+                # scenes may already have been published by the parent.
+                remaining = len(pending) - completed
+                self.stats["errors"] += max(1, remaining)
+                self.report.issue(
+                    'merge workers', '', None, exc,
+                    self.app.safe_error(exc, api_key=self.app.STASH_API_KEY))
+                bar.update(remaining)
+                self.report.progress(bar, self.stats)
+        finally:
+            bar.close()
