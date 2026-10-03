@@ -7,10 +7,7 @@ never runs inference and never connects to or writes to Stash.
 from __future__ import annotations
 
 from collections import Counter
-from concurrent.futures import ProcessPoolExecutor
-import atexit
 import json
-from multiprocessing import get_context
 from pathlib import Path
 
 from tqdm import tqdm
@@ -21,12 +18,6 @@ from stash_ai.state import StateStore, scope_for
 
 
 REPORT_FORMAT = 1
-
-_WORKER_APP = None
-_WORKER_STORE = None
-_WORKER_CORE_POLICIES = None
-_WORKER_SCENE_POLICIES = None
-
 
 def _scene_labels(hits):
     return {item["tag"] for item in hits}
@@ -270,7 +261,7 @@ def _model_row(model, stats):
     }
 
 
-def _scene_report(app, store, scene, core_policies, scene_policies):
+def scene_report(app, store, scene, core_policies, scene_policies):
     """Return mergeable counters for one independent scene."""
     models = tuple(SOURCES)
     totals = Counter()
@@ -298,14 +289,14 @@ def _scene_report(app, store, scene, core_policies, scene_policies):
     return totals, utility
 
 
-def _merge_scene_report(totals, utility, partial):
+def merge_scene_report(totals, utility, partial):
     scene_totals, scene_utility = partial
     totals.update(scene_totals)
     for model in utility:
         utility[model].update(scene_utility[model])
 
 
-def _report_payload(totals, utility):
+def report_payload(totals, utility):
     return {
         "format": REPORT_FORMAT,
         "mode": "leave-one-model-out",
@@ -327,105 +318,13 @@ def build_report(app, store, scene_ids, core_policies, scene_policies):
     totals = Counter()
     utility = {model: Counter() for model in SOURCES}
     for scene in tqdm(scene_ids, desc="Model report", unit="scene"):
-        _merge_scene_report(
+        merge_scene_report(
             totals,
             utility,
-            _scene_report(app, store, scene, core_policies, scene_policies),
+            scene_report(app, store, scene, core_policies, scene_policies),
         )
-    return _report_payload(totals, utility)
+    return report_payload(totals, utility)
 
-
-def _init_report_worker(state_db, scope, temporal_policy, core_policies,
-                        scene_policies, cache_bytes, memory_budget_bytes,
-                        preload_sources):
-    """Initialize one isolated read-only worker and keep its DB/cache hot."""
-    global _WORKER_APP, _WORKER_STORE, _WORKER_CORE_POLICIES, _WORKER_SCENE_POLICIES
-    from stash_ai import cli as app
-
-    app.APPLY_SCENE_TAGS = True
-    app.CREATE_MARKERS = True
-    app.TEMPORAL_POLICY = temporal_policy
-    store = StateStore(
-        state_db,
-        scope,
-        True,
-        cache_bytes=cache_bytes,
-        memory_budget_bytes=memory_budget_bytes,
-        allow_cleanup=True,
-    )
-    if preload_sources:
-        store.preload_sources()
-    atexit.register(store.close)
-    _WORKER_APP = app
-    _WORKER_STORE = store
-    _WORKER_CORE_POLICIES = core_policies
-    _WORKER_SCENE_POLICIES = scene_policies
-
-
-def _report_worker_scene(scene):
-    if _WORKER_STORE is None or _WORKER_APP is None:
-        raise RuntimeError("Model report worker was not initialized.")
-    return _scene_report(
-        _WORKER_APP,
-        _WORKER_STORE,
-        scene,
-        _WORKER_CORE_POLICIES,
-        _WORKER_SCENE_POLICIES,
-    )
-
-
-def build_report_parallel(app, state_db, scope, scene_ids, core_policies,
-                          scene_policies, *, workers, cache_bytes,
-                          memory_budget_bytes, preload_sources=True):
-    """Replay independent scenes in isolated CPU worker processes."""
-    scene_ids = list(scene_ids)
-    if not scene_ids:
-        return _report_payload(
-            Counter(), {model: Counter() for model in SOURCES})
-
-    workers = max(1, min(int(workers), len(scene_ids)))
-    if workers == 1:
-        with StateStore(
-            state_db,
-            scope,
-            True,
-            cache_bytes=cache_bytes,
-            memory_budget_bytes=memory_budget_bytes,
-            allow_cleanup=True,
-        ) as store:
-            if preload_sources:
-                store.preload_sources()
-            return build_report(
-                app, store, scene_ids, core_policies, scene_policies)
-
-    totals = Counter()
-    utility = {model: Counter() for model in SOURCES}
-    worker_cache = cache_bytes // workers
-    worker_budget = max(1, memory_budget_bytes // workers)
-    chunksize = max(1, min(64, len(scene_ids) // (workers * 8) or 1))
-
-    with ProcessPoolExecutor(
-        max_workers=workers,
-        mp_context=get_context("spawn"),
-        initializer=_init_report_worker,
-        initargs=(
-            str(Path(state_db).expanduser().resolve()),
-            scope,
-            app.TEMPORAL_POLICY,
-            core_policies,
-            scene_policies,
-            worker_cache,
-            worker_budget,
-            preload_sources,
-        ),
-    ) as executor:
-        partials = executor.map(
-            _report_worker_scene, scene_ids, chunksize=chunksize)
-        for partial in tqdm(
-                partials, total=len(scene_ids), desc="Model report", unit="scene"):
-            _merge_scene_report(totals, utility, partial)
-
-    return _report_payload(totals, utility)
 
 def format_summary(report):
     total = report["totals"]
@@ -465,7 +364,6 @@ def write_report(report, destination):
 
 
 def run(app, args):
-    from stash_ai import merge as stash_merge
     from stash_ai.exclusions import policies_or_empty
     from stash_ai.temporal import load_policy
 
@@ -505,6 +403,8 @@ def run(app, args):
                     app, store, scenes, core_policies, scene_policies)
 
         if report is None:
+            from stash_ai.reports.model_workers import build_report_parallel
+
             report = build_report_parallel(
                 app,
                 args.state_db,

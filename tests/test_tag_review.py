@@ -5,7 +5,9 @@ import json
 import pytest
 
 from stash_ai import inference
-from stash_ai import cli as app, merge, tag_review
+from stash_ai import cli as app, merge
+from stash_ai.reports import tag_review
+from stash_ai.reports.review_accumulator import ReviewAccumulator
 from stash_ai.models import SOURCES
 from stash_ai.temporal import TemporalPolicy
 from tests.test_model_report import inference_pair
@@ -38,6 +40,33 @@ def seed(path, scene, model, outputs, replace=None):
 
 def model_rows(data):
     return {row["model"]: row for row in data["models"]}
+
+
+def test_accumulator_preserves_global_counts_and_caps_examples():
+    accumulator = ReviewAccumulator(27, 1, tag_review.REASONS)
+    rows = {
+        ("wd", "shared"): dict(reasons={"long_marker", "weak_or_borderline"}, evidence=[]),
+        ("dtq", "shared"): dict(reasons={"long_marker"}, evidence=[]),
+        ("wd", "accepted"): dict(reasons=set(), evidence=[]),
+    }
+    accumulator.record("first", rows)
+    accumulator.record("second", rows)
+    for scene in range(25):
+        accumulator.skip(str(scene), "unusable_evidence", "Incomplete cache")
+    data = accumulator.payload()
+    assert data["totals"] == dict(
+        selected_scenes=27, analyzed_scenes=2, scenes_flagged=2,
+        scene_tag_pairs_reviewed=4, scene_tag_pairs_flagged=2,
+        unique_tags_reviewed=2, unique_tags_flagged=1, skipped_scenes=25)
+    models = model_rows(data)
+    assert models["wd"]["scene_tag_pairs_reviewed"] == 4
+    assert models["dtq"]["scene_tag_pairs_flagged"] == 2
+    assert models["wd"]["reasons"]["long_marker"] == 2
+    assert models["wd"]["reasons"]["weak_or_borderline"] == 2
+    assert all(row["scene_count"] == 2 and len(row["examples"]) == 1 for row in data["tags"])
+    assert all(row["examples"][0]["scene_id"] == "first" for row in data["tags"])
+    assert data["skipped_by_reason"] == {"unusable_evidence": 25}
+    assert len(data["skipped_scene_examples"]) == 20
 
 
 def test_counts_deduplicate_models_scenes_history_and_marker_ranges(tmp_path):

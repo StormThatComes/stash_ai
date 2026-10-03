@@ -5,7 +5,8 @@ import json
 
 import pytest
 
-from stash_ai import cache_report, cli as app, merge
+from stash_ai import cli as app, merge
+from stash_ai.reports import cache as cache_report
 from stash_ai.models import ModelSettings, SOURCES
 from tests.test_model_report import inference_pair
 

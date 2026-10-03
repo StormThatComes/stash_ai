@@ -64,13 +64,16 @@ wykluczeń i hierarchii znajduje się w `stash_ai/config.py`, a parser cue WebVT
 w `stash_ai/vtt.py`. Dzięki temu format argumentów, YAML i VTT oraz specjalne
 ścieżki uruchomienia można testować niezależnie od normalnego pipeline inferencji.
 
-`stash_ai/tag_review.py` odtwarza lokalne evidence do raportu priorytetów przeglądu
-tagów, z deduplikacją liczników per model i ograniczoną liczbą przykładów. Nie
+`stash_ai/reports/tag_review.py` odtwarza lokalne evidence do raportu priorytetów przeglądu
+tagów. `reports/review_accumulator.py` zawiera `ReviewAccumulator`, który zarządza
+deduplikacją liczników globalnych i per model, powodami oraz limitami przykładów. Raport nie
 korzysta z modeli ani połączenia ze Stash i pomija evidence z pending refresh.
 
-`stash_ai/model_report.py` buduje offline raport leave-one-model-out z zachowanego
+`stash_ai/reports/model.py` buduje offline raport leave-one-model-out z zachowanego
 evidence. `build_report()` koordynuje osobne fazy baseline sceny, attribution
 supportu, counterfactual bez jednego modelu oraz formatowanie finalnych wierszy.
+`reports/model_workers.py` odpowiada za izolowane procesy odczytu, ich inicjalizację,
+podział budżetu pamięci oraz redukcję wyników do tego samego formatu co ścieżka serialna.
 
 `stash_ai/models.py` definiuje wspólne typy `ModelSource`, `ModelSettings` i
 `Vocabulary`, katalog źródeł oraz walidację wyboru modeli i wyników predykcji.
@@ -169,7 +172,7 @@ Obsługa samodzielnych komend bazy znajduje się w pakiecie `stash_ai/db/`:
 | `stash_ai/db/compaction.py` | Blokada procesu, warunki bezpiecznego VACUUM i porównanie agregatów przed i po kompaktowaniu. |
 | `stash_ai/db/common.py` | Wspólne definicje obsługiwanego schematu, połączenie SQLite tylko do odczytu i helpery zapytań. |
 
-`stash_ai/developer_report.py` korzysta z definicji schematu i helperów odczytu
+`stash_ai/reports/developer.py` korzysta z definicji schematu i helperów odczytu
 z `stash_ai.db.common`; nadal odpowiada za własny format anonimowego raportu JSON
 i ograniczone pamięciowo rozkłady. Pakiet `db` nie uruchamia migracji ani nie
 zmienia protokołu blokady używanego przez `StateStore`.
@@ -194,8 +197,14 @@ surowego cache inferencji.
 
 ## Raport kompletności cache
 
-`stash_ai/cache_report.py` strumieniuje małe metadane wyników i sprawdza indeks,
+`stash_ai/reports/cache.py` strumieniuje małe metadane wyników i sprawdza indeks,
 refresh requests, checkpointy oraz retencję względem wybranego YAML. Raport
 korzysta z read-only źródła i sparse preview; generuje advisory `argv` dla
 inferencji/rethreshold/merge bez ich uruchamiania. Nie dowodzi aktualności mediów
 ani modelu; głęboki test payloadów pozostaje w `--db-check`.
+
+Pakiet `stash_ai/reports/` grupuje raporty offline bez re-eksportów starych modułów.
+`cache_assessment.py` ocenia retencję, indeks i blokady publikacji całej sceny;
+`cache_coverage.py` agreguje liczniki oraz problemy, a `cache_plan.py` wybiera akcje
+i buduje uporządkowany plan komend w paczkach po 50 scen. `cache.py` koordynuje
+strumieniowy odczyt metadanych, kontrolę źródła preview i zapis istniejącego formatu JSON.
