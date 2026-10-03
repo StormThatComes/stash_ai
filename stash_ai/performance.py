@@ -78,7 +78,7 @@ def initialize(store):
 # VTT parsing and maintenance-only cleanup/recovery code have independent
 # invalidation signals and must not force a library-wide re-merge.
 PUBLICATION_CODE_FILES = (
-    'cli.py', 'merge.py', 'merge_run.py', 'merge_parallel.py', 'merge_sync.py', 'marker_index.py', 'separate_sync.py',
+    'cli.py', 'merge.py', 'merge_run.py', 'merge_publish.py', 'merge_parallel.py', 'merge_sync.py', 'marker_index.py', 'separate_sync.py',
     'temporal.py', 'fusion.py', 'scene.py', 'occurrences.py', 'exclusions.py', 'cleanup.py',
     'taggers.py', 'onnx_tagger.py', 'vocabulary.py', 'inference.py', 'tags.py', 'domain.py', 'performance.py',
     'timeline.py', 'merge_sql.py', 'marker_groups.py',

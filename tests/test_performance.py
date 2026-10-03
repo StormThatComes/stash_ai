@@ -30,7 +30,7 @@ def fail(*args, **kwargs):
 @pytest.mark.parametrize('filename', [
     'tags.py', 'domain.py', 'state.py', 'state_db.py', 'state_results.py', 'state_thresholds.py', 'state_publications.py',
     'vocabulary.py', 'onnx_tagger.py', 'inference.py', 'progress.py',
-    'merge_run.py', 'merge_parallel.py', 'merge_sync.py', 'separate_sync.py',
+    'merge_run.py', 'merge_publish.py', 'merge_parallel.py', 'merge_sync.py', 'separate_sync.py',
     'config.py',
 ])
 def test_publication_code_tracks_extracted_modules(monkeypatch, filename):
