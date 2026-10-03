@@ -168,7 +168,7 @@ def test_database_module_moves_to_package_and_remains_importable(tmp_path):
     # Exercise the existing API through the installed package with stdlib only.
     result = subprocess.run([sys.executable, '-c', '''
 from stash_ai.db import check_database, compact_database, inspect_database
-from stash_ai.developer_report import build_report
+from stash_ai.reports.developer import build_report
 for operation, args in (
     (check_database, ('missing.sqlite3', 'scope')),
     (compact_database, ('missing.sqlite3', 'scope')),
@@ -181,6 +181,42 @@ for operation, args in (
         pass
     else:
         raise AssertionError('Missing database must be rejected')
+'''], cwd=tmp_path, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert not (tmp_path / 'missing.sqlite3').exists()
+
+
+def test_reports_move_to_nested_package_and_remove_old_bytecode(tmp_path):
+    files = application_files()
+    previous = {name: data for name, data in files.items()
+                if not name.startswith('stash_ai/reports/')}
+    modules = ('cache_report', 'tag_review', 'model_report', 'developer_report')
+    previous.update({f'stash_ai/{name}.py': b'PREVIOUS_REPORT = True\n' for name in modules})
+    installed(tmp_path, Remote(previous))
+    result = subprocess.run(
+        [sys.executable, '-c', 'from stash_ai import ' + ', '.join(modules)],
+        cwd=tmp_path, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    cache = tmp_path / 'stash_ai/__pycache__'
+    for name in modules:
+        assert list(cache.glob(name + '.*.pyc'))
+
+    assert updater.update(tmp_path, Remote(files)) == 0
+
+    for name in modules:
+        assert not (tmp_path / f'stash_ai/{name}.py').exists()
+        assert not list(cache.glob(name + '.*.pyc'))
+    for name, data in files.items():
+        if name.startswith('stash_ai/reports/'):
+            assert (tmp_path / name).read_bytes() == data
+    result = subprocess.run([sys.executable, '-c', '''
+from stash_ai.reports.developer import build_report
+try:
+    build_report('missing.sqlite3')
+except FileNotFoundError:
+    pass
+else:
+    raise AssertionError('Missing database must be rejected')
 '''], cwd=tmp_path, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
     assert not (tmp_path / 'missing.sqlite3').exists()

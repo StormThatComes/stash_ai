@@ -4,7 +4,8 @@ import sqlite3
 
 import pytest
 
-from stash_ai import cli as app, db, developer_report, performance
+from stash_ai import cli as app, db, performance
+from stash_ai.reports import developer as developer_report
 from stash_ai import scene_cache, thresholds
 from stash_ai.runtime import RunReport
 from stash_ai.state import StateStore

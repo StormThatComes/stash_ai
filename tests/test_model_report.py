@@ -7,7 +7,8 @@ import pytest
 
 from stash_ai import cli as app
 from stash_ai import merge
-from stash_ai import model_report
+from stash_ai.reports import model as model_report
+from stash_ai.reports import model_workers
 from stash_ai.temporal import TemporalPolicy
 
 
@@ -327,3 +328,31 @@ def test_parallel_model_report_matches_serial_output(tmp_path):
 
     assert json.loads(parallel.read_text(encoding="utf-8")) == json.loads(
         serial.read_text(encoding="utf-8"))
+
+
+def test_empty_parallel_report_does_not_open_database(tmp_path):
+    path = tmp_path / "missing.sqlite3"
+    policies = empty_policies()
+    report = model_workers.build_report_parallel(
+        app, path, "scope", [], policies, policies,
+        workers=2, cache_bytes=0, memory_budget_bytes=1)
+    assert report == model_report.build_report(app, None, [], policies, policies)
+    assert not path.exists()
+
+
+@pytest.mark.parametrize("preload", [False, True])
+def test_parallel_report_single_scene_fallback_is_read_only(tmp_path, preload):
+    path = tmp_path / "state.sqlite3"
+    scope = merge.scope_for(app.STASH_URL)
+    policies = empty_policies()
+    with merge.StateStore(path, scope) as state:
+        state.put("1", "wd", inference_pair("common"))
+    before = path.read_bytes()
+    with merge.StateStore(path, scope, True, allow_cleanup=True) as state:
+        serial = model_report.build_report(app, state, ["1"], policies, policies)
+    parallel = model_workers.build_report_parallel(
+        app, path, scope, ["1"], policies, policies,
+        workers=2, cache_bytes=0, memory_budget_bytes=1024**2,
+        preload_sources=preload)
+    assert parallel == serial
+    assert path.read_bytes() == before

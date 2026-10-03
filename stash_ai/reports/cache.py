@@ -1,0 +1,176 @@
+"""Offline cache coverage and an advisory, targeted inference/rethreshold plan.
+
+Coverage proves retained evidence and its internal completion index, not freshness
+against current model assets or live Stash media. Existing compact metadata is
+streamed; older evidence is decoded only to derive metadata in the preview DB.
+"""
+from __future__ import annotations
+
+from itertools import groupby
+import json
+from pathlib import Path
+import sqlite3
+from types import SimpleNamespace
+import zlib
+
+from tqdm import tqdm
+
+from stash_ai.state_results import KINDS
+
+from stash_ai.reports.cache_assessment import assess_scene
+from stash_ai.reports.cache_coverage import CoverageAccumulator
+from stash_ai.reports.cache_plan import build_plan
+
+
+def _keys(store, table, columns):
+    return list(store.connection.execute(
+        f'SELECT {columns} FROM {store.table(table)} WHERE scope=?', (store.scope,)))
+
+
+def scene_ids(store, requested):
+    """Explicit IDs may have no local state; otherwise include working-state-only scenes."""
+    if requested:
+        return sorted(set(map(str, requested)))
+    known = set()
+    for table in ('results', 'result_index', 'refresh_requests', 'checkpoints',
+                  'snapshots', 'legacy_imports', 'recovery_publications'):
+        known.update(row[0] for row in _keys(store, table, 'DISTINCT scene'))
+    return sorted(known)
+
+
+def _metadata_rows(store, scenes):
+    from stash_ai.state_metadata import FORMAT, decode
+    from stash_ai.state_thresholds import overlay
+
+    with store.connection:
+        store.connection.execute('CREATE TEMP TABLE IF NOT EXISTS cache_report_scenes (scene TEXT PRIMARY KEY)')
+        store.connection.execute('DELETE FROM cache_report_scenes')
+        store.connection.executemany('INSERT INTO cache_report_scenes VALUES (?)', ((scene,) for scene in scenes))
+    rows = store.connection.execute(
+        'SELECT r.scene,r.model,r.kind,m.format,m.data,t.threshold FROM ' +
+        store.table('results') + ' AS r LEFT JOIN ' + store.table('result_metadata') +
+        ' AS m USING(scope,scene,model,kind) LEFT JOIN ' + store.table('result_thresholds') +
+        ' AS t USING(scope,scene,model,kind) WHERE r.scope=? '
+        'AND r.scene IN (SELECT scene FROM cache_report_scenes) '
+        'ORDER BY r.scene,r.model,r.kind', (store.scope,))
+    for scene, model, kind, version, data, threshold in rows:
+        if kind not in KINDS:
+            continue
+        segments = None
+        if version == FORMAT:
+            try:
+                segments = overlay(decode(data), kind, threshold)
+            except (TypeError, ValueError):
+                pass
+        if segments is None:
+            try:
+                segments = store.result_metadata(scene, kind, model)
+            except (TypeError, ValueError, KeyError, IndexError, zlib.error) as exc:
+                yield scene, model, kind, None, f'Unreadable evidence: {type(exc).__name__}; run --db-check.'
+                continue
+        yield scene, model, kind, segments, None
+
+
+def _scene_evidence(store, scenes):
+    """Stream compact metadata, retaining only the current scene's evidence."""
+    grouped = iter(groupby(_metadata_rows(store, scenes), key=lambda row: row[0]))
+    current = next(grouped, None)
+    for scene in tqdm(scenes, desc='Cache coverage', unit='scene'):
+        while current is not None and current[0] < scene:
+            current = next(grouped, None)
+        if current is None or current[0] != scene:
+            evidence = {}
+        else:
+            evidence = {(model, kind): (segments, error)
+                        for _, model, kind, segments, error in current[1]}
+            current = next(grouped, None)
+        yield scene, evidence
+
+
+def build_report(app, store, scenes, settings, command_context=()):
+    """Inspect one scene at a time; count outputs separately from scene/model pairs."""
+    from stash_ai.preview import check_source
+    from stash_ai.state_metadata import backfill_batch
+
+    models = [config.source.key for config in settings]
+    indexes = {(scene, model, kind): (inference, populated, signature)
+               for scene, model, kind, inference, populated, signature in
+               _keys(store, 'result_index', 'scene,model,kind,inference,populated,signature')}
+    refreshes = set(_keys(store, 'refresh_requests', 'scene,model,kind'))
+    checkpoints = {(scene, model): dict(processed=processed, total=total, compatibility='unverified')
+                   for scene, model, processed, total in
+                   _keys(store, 'checkpoints', 'scene,model,processed,total')}
+    pending = store.pending_publication_scenes()
+    recovery = {scene for scene, in _keys(store, 'recovery_publications', 'DISTINCT scene')}
+    outside_refresh = {scene for scene, model, kind in refreshes if model not in models and kind in KINDS}
+    coverage = CoverageAccumulator(models)
+    with backfill_batch(store):
+        for scene, evidence in _scene_evidence(store, scenes):
+            coverage.record(assess_scene(
+                app, scene, settings, evidence, indexes, refreshes, checkpoints,
+                cleanup_pending=store.cleanup_pending, publication_pending=scene in pending,
+                outside_refresh=scene in outside_refresh))
+    check_source(store)
+    recovery_scenes = set(scenes) & recovery
+    plan = build_plan(models, coverage.operations, coverage.blocked_scenes,
+                      recovery_scenes, command_context)
+    return dict(format_version=1, mode='cache-coverage',
+        semantics=dict(scene_universe='Explicit --scene-id values, or scenes known to the current local DB scope; unseen Stash scenes are not counted.',
+                       freshness='Inference identity beyond thresholds/retention, model assets, vocabulary, VTT and sprites are unverified offline.',
+                       coverage='Both scene and marker inference evidence, completion index, YAML thresholds and requested retention; completed empty detections count as ready.',
+                       integrity='Compact metadata is trusted when valid; --db-check performs a deep payload check.',
+                       checkpoint='Presence/progress only; inference verifies compatibility before resuming.',
+                       plan='Advisory argv arrays in execution order; never executed by this report. Running them can publish to Stash.',
+                       blockers='Blockers exclude the entire scene from all plan commands. Finish interrupted publication/cleanup, '
+                                'include reported unselected dependency models with --models, or resolve DB errors, then regenerate.'),
+        **coverage.payload(len(scenes)), plan=plan,
+        publication_recovery_scene_ids=sorted(recovery_scenes),
+        targets=[dict(model=config.source.key, scene_threshold=config.scene_threshold,
+                      marker_threshold=config.marker_threshold, scene_cache_floor=config.scene_cache_floor,
+                      marker_cache_floor=config.marker_cache_floor) for config in settings])
+
+
+def format_summary(report):
+    totals = report['totals']
+    lines = [f"Cache coverage: {totals['fully_ready_scenes']:,}/{totals['scenes']:,} locally known/requested scenes ready.",
+             'model       ready pairs  reusable pairs  inference  rethreshold  blocked']
+    for row in report['models']:
+        lines.append(f"{row['model']:<10} {row['evidence_ready_pairs']:>11,} {row['reusable_pairs']:>15,} "
+                     f"{row['inference_pairs']:>10,} {row['rethreshold_pairs']:>12,} {row['blocked_pairs']:>8,}")
+    if any(row.get('publication_dependencies') for row in report['issues']):
+        lines.append('Unselected cached models block publication; see issues.publication_dependencies and include them with --models.')
+    lines.append('Offline coverage; current model/media freshness is unverified. Plan commands are not executed.')
+    return '\n'.join(lines)
+
+
+def run(app, args):
+    from stash_ai.state import StateStore, scope_for
+    from stash_ai.temporal import load_policy
+
+    try:
+        if not Path(args.state_db).expanduser().is_file():
+            raise FileNotFoundError(f'State database does not exist: {args.state_db}')
+        settings = app.load_model_settings(args.model_config, args.models, None, True)
+        local = SimpleNamespace(**{**vars(app), 'TEMPORAL_POLICY':
+                                    load_policy(app, args.temporal_policy, not args.no_temporal)})
+        context = []
+        for flag, path in (('--state-db', args.state_db), ('--model-config', args.model_config),
+                           ('--temporal-policy', args.temporal_policy),
+                           ('--marker-core-exclusions', args.marker_core_exclusions),
+                           ('--scene-tag-exclusions', args.scene_tag_exclusions)):
+            context.extend((flag, str(Path(path).expanduser().resolve())))
+        if args.no_temporal:
+            context.append('--no-temporal')
+        with StateStore(args.state_db, scope_for(app.STASH_URL), True, allow_cleanup=True) as store:
+            report = build_report(local, store, scene_ids(store, args.scene_id), settings, context)
+        payload = json.dumps(report, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False) + '\n'
+        destination = Path(args.cache_report).expanduser().resolve()
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        with destination.open('x', encoding='utf-8', newline='\n') as stream:
+            stream.write(payload)
+        print(format_summary(report))
+        print(f'Cache report written to {destination}. No Stash requests or inference were performed.')
+        return 0
+    except (OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+        print('Cache report failed: ' + str(exc))
+        return 1

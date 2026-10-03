@@ -5,7 +5,7 @@ Only explicitly retained, compatible peer observations can prove disagreement.
 """
 from __future__ import annotations
 
-from collections import Counter, defaultdict
+from collections import defaultdict
 from bisect import bisect_left, bisect_right
 from dataclasses import asdict, dataclass
 import json
@@ -17,6 +17,7 @@ from types import SimpleNamespace
 from tqdm import tqdm
 
 from stash_ai.models import SOURCES
+from stash_ai.reports.review_accumulator import ReviewAccumulator
 
 REASONS = {
     "weak_or_borderline": "Best retained score is at most the applicable threshold plus the review margin.",
@@ -219,13 +220,7 @@ def build_report(app, store, scenes, core_policies, scene_policies, options=Revi
     pending = store.pending_publication_scenes()
     refresh = {row[0] for row in store.connection.execute(
         f"SELECT DISTINCT scene FROM {store.table('refresh_requests')} WHERE scope=?", (store.scope,))}
-    inspected = {model: set() for model in SOURCES}
-    flagged = {model: set() for model in SOURCES}
-    model_counts = {model: Counter() for model in SOURCES}
-    model_reasons = {model: Counter() for model in SOURCES}
-    tags, skipped, skip_counts = {}, [], Counter()
-    totals = Counter(selected_scenes=len(scenes))
-    all_tags, review_tags = set(), set()
+    accumulator = ReviewAccumulator(len(scenes), options.examples, REASONS)
 
     for scene in tqdm(scenes, desc="Tag review", unit="scene"):
         reason = ("pending_refresh" if scene in refresh else
@@ -240,41 +235,10 @@ def build_report(app, store, scenes, core_policies, scene_policies, options=Revi
             except (ValueError, RuntimeError, KeyError, TypeError) as exc:
                 reason, message = "unusable_evidence", str(exc)
         if reason is not None:
-            skip_counts[reason] += 1
-            if len(skipped) < 20:
-                skipped.append({"scene_id": scene, "reason": reason,
-                                **({"message": message} if message else {})})
+            accumulator.skip(scene, reason, message)
             continue
+        accumulator.record(scene, rows)
 
-        totals["analyzed_scenes"] += 1
-        flagged_models, flagged_labels = set(), set()
-        all_tags.update(tag for _, tag in rows)
-        totals["scene_tag_pairs_reviewed"] += len({tag for _, tag in rows})
-        for (model, tag), row in rows.items():
-            inspected[model].add(tag)
-            model_counts[model]["scene_tag_pairs_reviewed"] += 1
-            if not row["reasons"]:
-                continue
-            flagged[model].add(tag)
-            flagged_models.add(model)
-            flagged_labels.add(tag)
-            model_counts[model]["scene_tag_pairs_flagged"] += 1
-            model_reasons[model].update(row["reasons"])
-            entry = tags.setdefault((model, tag), dict(
-                model=model, tag="ai:" + tag, scene_count=0, reasons=Counter(), examples=[]))
-            entry["scene_count"] += 1
-            entry["reasons"].update(row["reasons"])
-            if len(entry["examples"]) < options.examples:
-                entry["examples"].append(dict(scene_id=scene, reasons=sorted(row["reasons"]),
-                                              evidence=row["evidence"]))
-        for model in flagged_models:
-            model_counts[model]["scenes_flagged"] += 1
-        review_tags.update(flagged_labels)
-        totals["scene_tag_pairs_flagged"] += len(flagged_labels)
-        totals["scenes_flagged"] += bool(flagged_labels)
-
-    total_keys = ("selected_scenes", "analyzed_scenes", "scenes_flagged",
-                  "scene_tag_pairs_reviewed", "scene_tag_pairs_flagged")
     return {
         "format": 1,
         "mode": "tag-review",
@@ -290,21 +254,7 @@ def build_report(app, store, scenes, core_policies, scene_policies, options=Revi
         },
         "options": asdict(options),
         "reason_definitions": REASONS,
-        "totals": {**{key: totals[key] for key in total_keys},
-                   "unique_tags_reviewed": len(all_tags), "unique_tags_flagged": len(review_tags),
-                   "skipped_scenes": sum(skip_counts.values())},
-        "models": [
-            dict(model=model, unique_tags_reviewed=len(inspected[model]),
-                 unique_tags_flagged=len(flagged[model]),
-                 scene_tag_pairs_reviewed=model_counts[model]["scene_tag_pairs_reviewed"],
-                 scene_tag_pairs_flagged=model_counts[model]["scene_tag_pairs_flagged"],
-                 scenes_flagged=model_counts[model]["scenes_flagged"],
-                 reasons={reason: model_reasons[model][reason] for reason in REASONS})
-            for model in SOURCES],
-        "tags": sorted(tags.values(), key=lambda entry: (
-            -entry["scene_count"], -sum(entry["reasons"].values()), entry["model"], entry["tag"])),
-        "skipped_by_reason": dict(sorted(skip_counts.items())),
-        "skipped_scene_examples": skipped,
+        **accumulator.payload(),
         "warnings": ["Pending global cleanup; report replays the selected policies."]
                     if store.cleanup_pending else [],
     }
