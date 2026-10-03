@@ -11,13 +11,11 @@ import sqlite3
 import sys
 import tempfile
 from time import perf_counter
-from types import SimpleNamespace
 
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from stash_ai.cleanup_sql import SQLCleanup
-from stash_ai.cleanup_sql_session import SQL
+from stash_ai.cleanup_sql_session import CleanupSqlSession, SQL
 
 
 def main():
@@ -57,14 +55,13 @@ def main():
                 def gql(self, query, variables):
                     return {'querySQL': {'rows': [list(row) for row in db.execute(variables['sql'],variables['args'])]}}
             stats = Counter()
-            engine = SQLCleanup(SimpleNamespace(stash=Reader()),
-                SimpleNamespace(cleanup_page_size=2000,cleanup_write_batch_size=200), stats, None)
-            engine.probe()
+            session = CleanupSqlSession(Reader(), stats, page_size=2000)
+            session.probe()
             for name, prefix, owner in [('global_primary','', ''), ('owned_core','[AI] ', 'ai:marker:stash-taggers')]:
                 stats.clear()
                 started = perf_counter()
                 params = (1,'ai:blocked',prefix,prefix,prefix,owner)
-                count = sum(len(page) for page in engine.pages('primary',params,engine.bounds[0]))
+                count = sum(len(page) for page in session.pages('primary',params,session.bounds[0]))
                 result[name] = {'rows': count, 'queries': stats['cleanup_sql_reads'],
                                 'seconds': round(perf_counter()-started, 4)}
             plans = {}

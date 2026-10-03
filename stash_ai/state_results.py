@@ -163,15 +163,15 @@ class ResultStore:
     @measured('state_write')
     def put(self, scene, model, outputs, replace=None):
         with self.store.connection:
-            # Route through the façade so existing StateStore interception remains valid.
-            self.store._put(scene, model, outputs, replace)
+            self.put_in_transaction(scene, model, outputs, replace)
 
-    def _put(self, scene, model, outputs, replace=None):
+    def put_in_transaction(self, scene, model, outputs, replace=None):
+        """Write outputs while the caller owns the commit or rollback boundary."""
         if model not in SOURCES or set(outputs) - set(KINDS):
             raise ValueError("Unknown result source or output kind.")
         for kind, segment in outputs.items():
             segment = {key: value for key, value in segment.items() if key != "refinement"}
-            old = (self.store.records(scene, kind, model, borrow=True).get(model, [])
+            old = (self.records(scene, kind, model, borrow=True).get(model, [])
                    if not (replace or {}).get(kind, True) else [])
             # Repeating an identical run with replacement disabled need not
             # accumulate identical frame streams merely due to its timestamp.
@@ -187,7 +187,7 @@ class ResultStore:
                     return json.dumps(data, sort_keys=True, allow_nan=False)
                 current = semantic(segment)
                 keep = [previous for previous in old if semantic(previous) != current]
-            self.store.replace_records(scene, model, kind, keep + [segment])
+            self.replace_records(scene, model, kind, keep + [segment])
 
     def replace_records(self, scene, model, kind, segments):
         """Replace a segment list inside the caller's transaction, including previews."""

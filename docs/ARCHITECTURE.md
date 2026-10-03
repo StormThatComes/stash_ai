@@ -100,9 +100,10 @@ przy przekierowaniu mediów do innego origin.
 `stash_ai/cleanup_sql_session.py` zawiera ograniczony allowlistą transport SQL/API,
 metryki odczytów i zapisów oraz keyset pagination. `stash_ai/cleanup_sql.py` /
 `SQLCleanup` pozostaje warstwą domenową: wybiera kandydatów, usuwa markery i
-powiązania, obsługuje preview i pruning. Cienkie metody delegujące w `SQLCleanup`
-zachowują dotychczasowy kontrakt dla call-site'ów i testów. Stałe SQL i
-walidator odczytów są importowane bezpośrednio z `cleanup_sql_session.py`.
+powiązania, obsługuje preview i pruning. Korzysta bezpośrednio ze swojej
+`CleanupSqlSession` do odczytów, zapisów, stronicowania i granic discovery.
+Stałe SQL i walidator odczytów są importowane bezpośrednio z
+`cleanup_sql_session.py`.
 
 
 ## Lokalny stan
@@ -118,8 +119,11 @@ walidator odczytów są importowane bezpośrednio z `cleanup_sql_session.py`.
 | `stash_ai/state_snapshot.py` | Wersjonowana reprezentacja snapshotów ze współdzielonymi dowodami `extra_support` i odtwarzanie contributions przy odczycie. |
 
 `StateStore` posiada jeden `StateDatabase`, jeden `ResultStore` i jeden
-`PublicationStore`; zachowuje dotychczasowe metody `records()/put()/snapshot()/prepare()`
-jako kompatybilne delegacje. Zamyka bazę również przy błędzie inicjalizacji.
+`PublicationStore`; udostępnia metody `records()/put()/snapshot()/prepare()`
+delegujące do właściciela danej operacji. `ResultStore.put()` zarządza transakcją
+zwykłego zapisu. Zakończenie inferencji używa `ResultStore.put_in_transaction()`
+we wspólnej transakcji z usunięciem checkpointu i żądań refresh. `StateStore`
+zamyka bazę również przy błędzie inicjalizacji.
 Blokada procesu obejmuje cały czas życia magazynu, także żądania do Stash.
 Rethreshold waliduje i stosuje zmiany z małych rekordów `result_metadata`;
 `ResultStore.set_threshold(..., metadata_only=True)` zapisuje próg oraz indeks

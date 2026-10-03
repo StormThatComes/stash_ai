@@ -229,7 +229,7 @@ class CleanupRun:
             from stash_ai.cleanup_sql import SQLCleanup
             candidate = SQLCleanup(client, args, self.stats, self.report)
             try:
-                candidate.probe()
+                candidate.session.probe()
                 self.sql = candidate
             except Exception as exc:
                 if strategy == 'sql' or self.store.cleanup_pending:

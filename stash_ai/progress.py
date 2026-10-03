@@ -208,7 +208,7 @@ def pending_refreshes(store, kinds):
 def finish(store, scene, model, outputs, replace):
     # Results and checkpoint removal commit together, including zero detections.
     with store.connection:
-        store._put(scene, model, outputs, replace)
+        store.results.put_in_transaction(scene, model, outputs, replace)
         clear_checkpoint(store, scene, model)
         for kind in outputs:
             from stash_ai.preview import delete

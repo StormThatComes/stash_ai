@@ -281,7 +281,7 @@ class MergedRun:
         try:
             client = CleanupClient(self.stash)
             sql = SQLCleanup(client, self.args, self.stats, self.report)
-            sql.probe()
+            sql.session.probe()
             # Share one fresh, lightweight catalog between ordinary tags and
             # marker groups, including tags created during this merge.
             sql.catalog = client.catalog()
