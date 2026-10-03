@@ -1,7 +1,7 @@
 """Parallel merged evidence preparation stays read-only and deterministic."""
 import json
 from collections import Counter
-from types import SimpleNamespace
+from pathlib import Path
 
 import pytest
 
@@ -11,7 +11,7 @@ from stash_ai import merge_parallel
 from stash_ai import thresholds
 from stash_ai.merge_parallel import iter_parallel_evidence
 from stash_ai.temporal import TemporalPolicy
-from stash_ai.models import SOURCES
+from stash_ai.models import ModelSettings, SOURCES
 from tests.helpers.evidence import empty_policies, segment
 
 
@@ -49,7 +49,7 @@ def test_parallel_worker_tolerates_parent_publication_commits(tmp_path, rethresh
         store.put("2", "dtq", _outputs("dtq", "two"))
         if rethresholded:
             for scene, model in (('1', 'wd'), ('2', 'dtq')):
-                config = SimpleNamespace(source=SOURCES[model], scene_threshold=.4, marker_threshold=.95)
+                config = ModelSettings(SOURCES[model], Path('.'), scene_threshold=.4, marker_threshold=.95)
                 assert thresholds.apply(app, store, scene, config)
 
     merge_parallel._init_worker(

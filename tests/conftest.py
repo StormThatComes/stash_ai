@@ -76,7 +76,7 @@ def pipeline(monkeypatch,tmp_path):
     from stash_ai.domain import Cue
     from stash_ai.models import SOURCES, Vocabulary
     from tests.helpers.stash import Stash
-    from tests.helpers.inference import IndexedTagger
+    from tests.helpers.inference import IndexedTagger, sprite_frames
     stash=Stash()
     cues=[Cue(i,i+1,"sprite",(0,0,1,1)) for i in range(10)]
     vocab=Vocabulary(["common","extra"],{"common":"General","extra":"General"})
@@ -86,7 +86,7 @@ def pipeline(monkeypatch,tmp_path):
     monkeypatch.setattr(app,"create_stash_client",lambda _:stash)
     monkeypatch.setattr(app,"load_vocabulary",lambda _:vocab)
     monkeypatch.setattr(inference,"fetch_cues",lambda *args:(context.cues,len(context.cues)))
-    monkeypatch.setattr(inference,"iter_sprite_frames",lambda stash,paths,cues:((cue,int(cue.start)) for cue in cues))
+    monkeypatch.setattr(inference,"iter_sprite_frames",lambda stash,paths,cues:sprite_frames(cues))
     def load(settings,*args):
         assert all(model.closed for model in context.loaded)
         model=IndexedTagger(settings,context.scores[settings.source.key],vocab.labels,context.fail.get(settings.source.key))
@@ -105,7 +105,7 @@ def merge_pipeline(monkeypatch,tmp_path):
     from stash_ai.domain import Cue
     from stash_ai.models import SOURCES, Vocabulary
     from tests.helpers.stash import Stash
-    from tests.helpers.inference import Tagger
+    from tests.helpers.inference import Tagger, sprite_frames
     stash=Stash();cues=[Cue(i,i+10,"sprite",(0,0,1,1)) for i in [10,20,30,40,70,80]]
     labels=["common","unique_op","extra"]
     vocabulary=Vocabulary(labels,{tag:"General" for tag in labels})
@@ -119,7 +119,7 @@ def merge_pipeline(monkeypatch,tmp_path):
     monkeypatch.setattr(app,"create_stash_client",lambda _:stash)
     monkeypatch.setattr(app,"load_vocabulary",lambda _:vocabulary)
     monkeypatch.setattr(inference,"fetch_cues",lambda *args:(cues,len(cues)))
-    monkeypatch.setattr(inference,"iter_sprite_frames",lambda *args:((cue,None) for cue in cues))
+    monkeypatch.setattr(inference,"iter_sprite_frames",lambda *args:sprite_frames(cues))
     loaded=[]
     def load(settings,*args):
         assert all(model.closed for model in loaded)

@@ -1,5 +1,6 @@
 """Frame-free Apply preserves completion indexes, history and preview isolation."""
 from copy import deepcopy
+from dataclasses import replace
 import sqlite3
 
 import pytest
@@ -15,7 +16,7 @@ pytestmark = pytest.mark.usefixtures('reset_temporal')
 def target(mode, value=.8):
     result = config(value)
     if mode == 'markers':
-        result.scene_threshold = .4
+        result = replace(result, scene_threshold=.4)
     return result
 
 

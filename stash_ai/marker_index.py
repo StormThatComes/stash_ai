@@ -84,9 +84,7 @@ class MarkerIntervalIndex:
     Max-end subtrees prune even nested/overlapping ranges. Consumed matches remain
     in this immutable index: their manual extras must survive subsequent splits.
     """
-    def __init__(self, markers, previous_ranges, *, by_name=False):
-        if not isinstance(previous_ranges, PreviousMarkerRanges):
-            previous_ranges = PreviousMarkerRanges(previous_ranges)
+    def __init__(self, markers, previous_ranges: PreviousMarkerRanges, *, by_name=False):
         grouped = defaultdict(list)
         self.temporal_views = {}
         for order, marker in enumerate(markers):

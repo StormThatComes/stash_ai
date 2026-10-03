@@ -277,7 +277,7 @@ def test_prefetch_is_bounded_and_closes_producer(pipeline,monkeypatch):
     original=model.prepare
     def prepare(image):
         out=original(image)
-        if image==3: prepared.set()
+        if out==3: prepared.set()
         return out
     model.prepare=prepare
     iterator=progress.prepared_batches(app,model,p.stash,{},p.cues,True)

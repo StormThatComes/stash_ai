@@ -262,7 +262,7 @@ def test_prefetch_queue_has_a_strict_bound(pipeline, monkeypatch):
     original = model.prepare
     def prepare(value):
         result = original(value)
-        if value == 15: ready.set()
+        if result == 15: ready.set()
         return result
     monkeypatch.setattr(model, 'prepare', prepare)
     iterator = progress.prepared_batches(app, model, p.stash, {}, p.cues, 3)

@@ -28,7 +28,7 @@ from stash_ai.onnx_tagger import prepare_wd, prepare_dtq, prepare_oppai, OnnxTag
 
 from tests.helpers.stash import Stash
 from tests.helpers.stash import sync
-from tests.helpers.inference import Tagger
+from tests.helpers.inference import Tagger, sprite_frames
 pytestmark = pytest.mark.usefixtures("reset_multimodel")
 
 
@@ -127,7 +127,7 @@ def test_main_all_releases_models_and_preserves_failed_source(monkeypatch,fail_w
     monkeypatch.setattr(app,"create_stash_client",lambda _:stash)
     monkeypatch.setattr(app,"load_vocabulary",lambda _:vocab)
     monkeypatch.setattr(inference,"fetch_cues",lambda *args:(cues,2))
-    monkeypatch.setattr(inference,"iter_sprite_frames",lambda *args:((cue,None) for cue in cues))
+    monkeypatch.setattr(inference,"iter_sprite_frames",lambda *args:sprite_frames(cues))
     loaded=[]
     def load(settings,vocabulary,prepare):
         assert all(t.closed for t in loaded)
@@ -147,7 +147,7 @@ def test_every_label_and_streaming_aggregation(monkeypatch,aggregation,batch):
     scores=np.random.default_rng(7).uniform(.7,.99,(5,len(labels))).astype(np.float32)
     cues=[Cue(i,i+1,"x",(0,0,1,1)) for i in range(5)]
     monkeypatch.setattr(app,"AGGREGATION",aggregation)
-    monkeypatch.setattr(inference,"iter_sprite_frames",lambda *args:((c,None) for c in cues))
+    monkeypatch.setattr(inference,"iter_sprite_frames",lambda *args:sprite_frames(cues))
     predictions,frames=inference.predict_scene(app, Tagger(ModelSettings(WD,Path("."),batch_size=batch),labels,scores),Stash(),{},cues,frozenset({"scene_ban"}))
     expected=scores.max(axis=0) if aggregation=="max" else np.sort(scores,axis=0)[-2:].mean(axis=0)
     assert len(predictions)==len(labels)-1

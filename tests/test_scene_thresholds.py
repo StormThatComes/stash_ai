@@ -1,7 +1,7 @@
 """Scene threshold replay, provenance and restart/resume equivalence."""
 from copy import deepcopy
 from dataclasses import replace
-from types import SimpleNamespace
+from pathlib import Path
 import json
 
 import pytest
@@ -11,7 +11,7 @@ from stash_ai import cli as app
 from stash_ai import merge
 from stash_ai import scene_cache as cache
 from stash_ai.runtime import RunReport
-from stash_ai.models import SOURCES
+from stash_ai.models import ModelSettings, SOURCES
 from tests.helpers.evidence import policies
 
 pytestmark = pytest.mark.usefixtures('reset_temporal')
@@ -375,7 +375,7 @@ def test_scene_rethreshold_never_decodes_publication_snapshots(tmp_path, monkeyp
             {'start': 1, 'end': 2, 'tags': [('core', .6)]},
         ],
     }
-    config = SimpleNamespace(source=SOURCES['wd'], scene_threshold=.8, marker_threshold=.7)
+    config = ModelSettings(SOURCES['wd'], Path('.'), scene_threshold=.8, marker_threshold=.7)
     with merge.StateStore(tmp_path/'state.sqlite3', 'scope') as state:
         state.put('1', 'wd', {'scene': segment})
         state.publish('1', {'scene': {'owned_ids': [], 'contributions': [{'payload': 'x' * 10000}]}})

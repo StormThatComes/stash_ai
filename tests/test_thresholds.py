@@ -2,7 +2,7 @@
 
 from copy import deepcopy
 from dataclasses import replace
-from types import SimpleNamespace
+from pathlib import Path
 import sqlite3
 
 import pytest
@@ -15,7 +15,7 @@ from stash_ai import progress
 from stash_ai import scene_cache
 from stash_ai import thresholds
 from stash_ai.runtime import RunReport
-from stash_ai.models import SOURCES
+from stash_ai.models import ModelSettings, SOURCES
 from tests.helpers.evidence import paired_records, policies
 
 pytestmark = pytest.mark.usefixtures('reset_temporal')
@@ -290,7 +290,7 @@ def test_flag_requires_merge_with_marker_output(args):
 
 def test_marker_rethreshold_never_decodes_publication_snapshots(tmp_path, monkeypatch):
     scenes, markers = paired_records({'wd': [.9, .9, .9]}, threshold=.4, marker_threshold=.7)
-    config = SimpleNamespace(source=SOURCES['wd'], marker_threshold=.85, scene_threshold=.4)
+    config = ModelSettings(SOURCES['wd'], Path('.'), marker_threshold=.85, scene_threshold=.4)
     with merge.StateStore(tmp_path/'state.sqlite3', 'scope') as state:
         state.put('1', 'wd', {'scene': scenes['wd'][0], 'markers': markers['wd'][0]})
         state.publish('1', {
