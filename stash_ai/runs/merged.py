@@ -5,21 +5,19 @@ merge reconciliation directly; merge algorithms stay function-oriented.
 """
 from __future__ import annotations
 
-from functools import partial
 from collections import Counter
 
 from tqdm import tqdm
 
 from stash_ai.commands import legacy as legacy_commands
-from stash_ai.inference.identity import model_identity
 from stash_ai.signatures import digest
-from stash_ai.inference import checkpoints, prediction, preparation
 from stash_ai.inference.inputs import RunInputs
 from stash_ai.merge_publish import MergePublisher
 from stash_ai import merge
 from stash_ai import performance
 from stash_ai import progress
 from stash_ai.runtime import stage
+from .merged_model import MergedModelRun
 
 
 class MergedRun:
@@ -149,100 +147,10 @@ class MergedRun:
                 store, self.scenes, [config.source.key for config in self.settings], kinds)
         progress.preload_status(store)
         for config in self.settings:
-            self._run_model(config, kinds, replacement, inputs)
-
-    def _run_model(self, config, kinds, replacement, inputs):
-        app, args, store = self.app, self.args, self.store
-        key = config.source.key
-        tagger = None
-        identity = model_identity(app, config, self.catalogs[key])
-        try:
-            bar = tqdm(self.scenes.items(), desc=key + " inference", unit="scene")
-            for scene_id, current in bar:
-                self.report.progress(bar, self.stats)
-                paths = current["paths"]
-                if not paths.get("sprite") or not paths.get("vtt"):
-                    self.stats["skipped"] += 1
-                    continue
-                if app.SKIP_EXISTING_OUTPUTS and not args.restart and merge.has_outputs(app, store, scene_id, key):
-                    self.stats["skipped"] += 1
-                    continue
-                try:
-                    store.cache.pressure(force=True)
-                    cues, media, signature = inputs.inspect(app, paths, identity)
-                    if args.resume and not args.restart and current['publication_reason'] != 'reused':
-                        collapsed = progress.reuse_replacement_policy(
-                            store, scene_id, key, kinds, signature, replacement)
-                        if collapsed is not None:
-                            self.stats["replacement_history_collapsed"] += collapsed
-                            self.stats["reused"] += 1
-                            continue
-                    if args.resume and progress.completed(store, scene_id, key, kinds, signature):
-                        self.stats["reused"] += 1
-                        continue
-                    if args.resume and not args.restart:
-                        from stash_ai.thresholds import reuse
-                        if reuse(app, store, scene_id, config, identity, cues, media.hashes, kinds):
-                            if current['publication_reason'] != 'reused':
-                                collapsed = progress.collapse_replacement_history(
-                                    store, scene_id, key, kinds, replacement)
-                                if collapsed is None:
-                                    raise RuntimeError(
-                                        f'{scene_id}/{key}: threshold cache did not leave a current inference segment.')
-                                self.stats["replacement_history_collapsed"] += collapsed
-                            self.stats['threshold_cache_reused'] += 1
-                            continue
-                    if not args.restart:
-                        stale = progress.request_stale_refresh(
-                            store, scene_id, key, kinds, signature)
-                        self.stats['auto_refresh_requested'] += len(stale)
-                    if tagger is None:
-                        try:
-                            tagger = app.load_tagger(config, self.catalogs[key], partial(preparation.prepare_image, app))
-                        except Exception as exc:
-                            self.stats["errors"] += 1
-                            self.report.issue(
-                                'load model', key, None, exc,
-                                app.safe_error(exc, api_key=app.STASH_API_KEY))
-                            break
-                        # Auto-download may just have supplied missing weight files.
-                        identity = model_identity(app, config, self.catalogs[key])
-                        signature = digest({
-                            "model": identity,
-                            "cues": [[c.start, c.end, c.image, list(c.rect)] for c in cues],
-                            "media": media.hashes,
-                        })
-                    if not args.resume:
-                        with store.connection:
-                            checkpoints.clear_checkpoint(store, scene_id, key)
-                    checkpoint = checkpoints.Checkpoint(
-                        store, scene_id, key,
-                        digest({"input": signature, "kinds": kinds, "scene_frames": 1}),
-                        len(cues), len(self.catalogs[key].labels), args.checkpoint_batches)
-                    analysis = {}
-                    predictions, frames = prediction.predict_scene(
-                        app, tagger, media, paths, cues, raw_scene=True, checkpoint=checkpoint,
-                        prefetch=args.prefetch_batches, analysis=analysis, report=self.report,
-                        prepare_workers=args.prepare_workers)
-                    outputs = merge.capture_outputs(
-                        app, config, self.catalogs[key], cues, predictions, frames, analysis)
-                    for segment in outputs.values():
-                        segment["meta"].update(
-                            inference_signature=signature,
-                            frame_input_signature=digest({
-                                "cues": [[c.start, c.end, c.image, list(c.rect)] for c in cues],
-                                "media": media.hashes,
-                            }))
-                    checkpoints.finish(store, scene_id, key, outputs, replacement)
-                    self.stats["processed"] += 1
-                except Exception as exc:
-                    self.stats["errors"] += 1
-                    self.report.issue(
-                        'inference', key, scene_id, exc,
-                        app.safe_error(exc, api_key=app.STASH_API_KEY))
-        finally:
-            if tagger is not None:
-                tagger.close()
+            MergedModelRun(
+                app, args, store, config, self.catalogs[config.source.key],
+                stats=self.stats, report=self.report,
+            ).run(self.scenes, kinds, replacement, inputs)
 
     def _merge_scenes(self):
         MergePublisher(
