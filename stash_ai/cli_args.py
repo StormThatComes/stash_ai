@@ -106,6 +106,8 @@ def build_parser(app) -> argparse.ArgumentParser:
                        help="Report state DB health, size and aggregate evidence/cache counts without Stash or model access.")
     modes.add_argument("--db-check", action="store_true",
                        help="Deep-check state DB logical consistency and compressed state without Stash or model access.")
+    modes.add_argument("--db-update", action="store_true",
+                       help="Upgrade the entire state DB to the latest supported schema without Stash or models. Honors --dry-run.")
     modes.add_argument("--db-compact", action="store_true",
                        help="Safely VACUUM the state DB while idle; refuses pending publication/cleanup plans. Honors --dry-run.")
     modes.add_argument("--anonymous-diagnostics", type=Path, metavar="NEW.json",
@@ -121,7 +123,8 @@ def build_parser(app) -> argparse.ArgumentParser:
 
 
 def database_mode(args) -> bool:
-    return bool(args.db_report or args.db_check or args.db_compact or args.anonymous_diagnostics is not None)
+    return bool(args.db_report or args.db_check or args.db_update or args.db_compact
+                or args.anonymous_diagnostics is not None)
 
 
 def mode_flags(args) -> tuple[bool, bool]:
@@ -193,7 +196,7 @@ def validate_args(app, parser: argparse.ArgumentParser, args: argparse.Namespace
 
     if db_mode:
         if args.output_mode != "merged":
-            parser.error("--db-report/--db-check/--db-compact require --output-mode merged.")
+            parser.error("--db-report/--db-check/--db-update/--db-compact require --output-mode merged.")
         if args.scene_id:
             parser.error("Database maintenance covers the state DB; --scene-id does not apply.")
         if args.models or args.device or args.offline or args.no_temporal or args.resume is not None or args.restart:

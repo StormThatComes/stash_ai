@@ -15,20 +15,30 @@ from .common import (
 )
 from .compaction import MIN_FREE_HEADROOM, compact_database
 from .inspection import format_report, inspect_database
+from .update import update_database
 
 __all__ = [
     "BASE_TABLES", "BLOB_COLUMNS", "CHECK_MESSAGES", "KNOWN_KINDS", "KNOWN_MODELS",
     "KNOWN_VERSIONS", "MIN_FREE_HEADROOM", "STATE_TABLES", "check_database",
     "compact_database", "format_check_report", "format_report", "inspect_database",
-    "run_mode",
+    "run_mode", "update_database",
 ]
 
 
 def run_mode(args, stash_url):
     from stash_ai.state import scope_for
 
-    scope = scope_for(stash_url)
     try:
+        if args.db_update:
+            before, after = update_database(args.state_db, dry_run=args.dry_run)
+            if args.dry_run:
+                print(f"DRY RUN: state DB schema v{before} -> v{after}; no migrations were run.")
+            elif before == after:
+                print(f"State DB schema is up to date: v{after}.")
+            else:
+                print(f"State DB updated: schema v{before} -> v{after}.")
+            return 0
+        scope = scope_for(stash_url)
         if args.db_report:
             print(format_report(inspect_database(args.state_db, scope)))
             return 0
