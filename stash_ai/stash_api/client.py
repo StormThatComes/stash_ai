@@ -5,7 +5,7 @@ from itertools import batched
 import re
 from typing import Iterator
 
-from stash_ai.transport import StashTransport, safe_error
+from stash_ai.stash_api.transport import StashTransport, safe_error
 
 
 class StashClient(StashTransport):
@@ -42,7 +42,7 @@ class StashClient(StashTransport):
                            'Upgrade Stash before running commands that connect to it.')
 
     def configure_merge_reads(self, report, *, merge_only=False):
-        from stash_ai.merge_sql import SceneReader
+        from stash_ai.stash_api.sql import SceneReader
         self.report = report
         self.merge_only_reads = merge_only
         try:

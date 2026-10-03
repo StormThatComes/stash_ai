@@ -126,15 +126,21 @@ i zamyka ją po transformacji. Fixture testowe zachowują te same kontrakty.
 
 ## Komunikacja ze Stash
 
+Pakiet `stash_ai/stash_api/` grupuje klienta domenowego, transport HTTP,
+odczyt snapshotów scen przez SQL i resolver tagów. `StashClient` pozostaje
+spójną klasą z dziedziczeniem po `StashTransport`; `sql.py` zawiera wyłącznie
+odczyty, a `tags.py` zarządza katalogiem i hierarchią tagów. Wywołania importują
+bezpośrednio te moduły, bez wrapperów pod dawnymi ścieżkami.
+
 | Moduł / klasa | Odpowiedzialność |
 | --- | --- |
-| `stash_ai/transport.py` / `StashTransport` | Sesje HTTP, uwierzytelnianie, retry odczytów, blokada zapisu podczas dry-run, dekodowanie GraphQL i przekierowania mediów. |
-| `stash_ai/client.py` / `StashClient` | Zapytania dotyczące scen, tagów i markerów, wymaganie Stash 0.31.1+, stronicowanie oraz fallback z SQL na GraphQL. |
+| `stash_ai/stash_api/transport.py` / `StashTransport` | Sesje HTTP, uwierzytelnianie, retry odczytów, blokada zapisu podczas dry-run, dekodowanie GraphQL i przekierowania mediów. |
+| `stash_ai/stash_api/client.py` / `StashClient` | Zapytania dotyczące scen, tagów i markerów, wymaganie Stash 0.31.1+, stronicowanie oraz fallback z SQL na GraphQL. |
 
 `StashClient` jest specjalizacją `StashTransport`. Wspólny transport utrzymuje
 jedną konfigurację połączenia i jeden raport żądań. Klient jest importowany z
-`stash_ai.client`, a funkcje pomocnicze HTTP bezpośrednio z
-`stash_ai.transport`. Pozostałe moduły używają analogicznych
+`stash_ai.stash_api.client`, a funkcje pomocnicze HTTP bezpośrednio z
+`stash_ai.stash_api.transport`. Pozostałe moduły używają analogicznych
 importów pakietowych, np. `from stash_ai.storage.store import StateStore`.
 
 Transport ponawia tylko odczyty, w tym ściśle dozwolone operacje SQL opakowane

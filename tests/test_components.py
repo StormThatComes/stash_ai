@@ -5,10 +5,10 @@ import time
 import pytest
 import requests
 
-from stash_ai.client import StashClient
-from stash_ai.transport import safe_error
+from stash_ai.stash_api.client import StashClient
+from stash_ai.stash_api.transport import safe_error
 from stash_ai.storage.codec import encode, decode
-from stash_ai.tags import TagResolver
+from stash_ai.stash_api.tags import TagResolver
 from stash_ai.models import JOYTAG
 
 pytestmark = pytest.mark.usefixtures("supported_stash_version")
@@ -81,7 +81,7 @@ def test_read_only_graphql_retries_transient_failures(monkeypatch, failure):
 
 
 def test_allowlisted_sql_read_mutation_is_retried(monkeypatch):
-    from stash_ai.merge_sql import OPERATION, SQL
+    from stash_ai.stash_api.sql import OPERATION, SQL
     current = client('http://stash.test', 'private-key')
     calls = 0
 

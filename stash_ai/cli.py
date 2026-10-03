@@ -70,9 +70,9 @@ from stash_ai.backends.vocabulary import load_vocabulary, ensure_files, weight_f
 from stash_ai.backends.loader import load_tagger
 from stash_ai.temporal import TemporalPolicy
 from stash_ai.domain import FramePrediction, MarkerSpec
-from stash_ai.client import StashClient
-from stash_ai.transport import safe_error
-from stash_ai.tags import TagResolver
+from stash_ai.stash_api.client import StashClient
+from stash_ai.stash_api.transport import safe_error
+from stash_ai.stash_api.tags import TagResolver
 from stash_ai.config import (
     vocabulary_digest, load_unique_yaml, load_exclusion_policy,
     load_model_settings as _load_model_settings, metadata_hierarchy, load_tag_hierarchy,
