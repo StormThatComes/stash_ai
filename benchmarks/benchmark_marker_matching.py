@@ -12,7 +12,7 @@ import time
 if __package__ in (None, ''):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-# Keep the harness/mocks from this checkout when --project selects older code.
+# Keep this checkout's harness/mocks when --project selects application code.
 import tests.helpers
 
 
@@ -41,7 +41,6 @@ def main():
     from tests.helpers.stash import Stash
 
     app.TEMPORAL_POLICY = TemporalPolicy(enabled=False)
-    app.MARKER_TAG_BLOCKLIST = set()
     app.APPLY_SCENE_TAGS = False
     app.CREATE_MARKERS = app.CREATE_MISSING = True
     app.MARKER_USE_END_TIME = not args.point_only
