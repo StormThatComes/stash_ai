@@ -7,7 +7,7 @@ from typing import Iterator, TYPE_CHECKING
 from urllib.parse import urljoin
 
 from stash_ai.domain import Cue
-from stash_ai.transport import absolute_stash_url
+from stash_ai.stash_api.transport import absolute_stash_url
 from stash_ai.vtt import format_time, parse_vtt_cues
 
 if TYPE_CHECKING:

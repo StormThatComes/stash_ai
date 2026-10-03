@@ -8,7 +8,7 @@ from stash_ai.domain import TagHierarchy
 from stash_ai.models import ModelSource
 
 if TYPE_CHECKING:
-    from stash_ai.client import StashClient
+    from stash_ai.stash_api.client import StashClient
 
 
 class TagResolver:

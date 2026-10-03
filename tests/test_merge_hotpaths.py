@@ -12,7 +12,7 @@ import pytest
 from stash_ai import cli as app
 
 from stash_ai.fusion import ObservationIndex
-from stash_ai.merge_sql import SceneReader, OPERATION, SQL, is_read_only_merge
+from stash_ai.stash_api.sql import SceneReader, OPERATION, SQL, is_read_only_merge
 from stash_ai.performance import scene_fingerprint
 from stash_ai.runtime import RamCache, RunReport, retained_size
 from stash_ai.temporal import TemporalPolicy
