@@ -42,7 +42,7 @@ def main():
     from stash_ai.state import StateStore
     from stash_ai.models import SOURCES
     from stash_ai.temporal import TemporalPolicy
-    app = SimpleNamespace(TEMPORAL_POLICY=TemporalPolicy(), MARKER_TAG_BLOCKLIST=set())
+    app = SimpleNamespace(TEMPORAL_POLICY=TemporalPolicy())
     settings = [SimpleNamespace(source=source, scene_threshold=.4 if args.mode == 'markers' else .55,
                                 marker_threshold=.55)
                 for source in SOURCES.values()]
@@ -66,9 +66,7 @@ def main():
                 for scene in scenes:
                     for source in SOURCES:
                         store.put(scene, source, outputs)
-                has_metadata = bool(store.connection.execute(
-                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='result_metadata'").fetchone())
-                if args.legacy_metadata and has_metadata:
+                if args.legacy_metadata:
                     with store.connection:
                         store.connection.execute('DELETE FROM result_metadata')
                 before = evidence_hash(store.connection)
@@ -139,7 +137,7 @@ def main():
                                    index_sha256=hashlib.sha256(json.dumps(index).encode()).hexdigest(),
                                    codec_calls=codec_calls, phases=phases,
                                    metadata_rows=store.connection.execute(
-                                       'SELECT COUNT(*) FROM result_metadata').fetchone()[0] if has_metadata else 0))
+                                       'SELECT COUNT(*) FROM result_metadata').fetchone()[0]))
     if len({trial['effective_sha256'] for trial in trials}) != 1:
         raise RuntimeError('Non-deterministic effective evidence')
     if len({trial['index_sha256'] for trial in trials}) != 1:

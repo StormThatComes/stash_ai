@@ -1,12 +1,11 @@
 """Offline CPU benchmark; no Stash connection or model loading.
 
-Run against this directory and a previous extracted release with --project.
+Run against checkouts exposing the current benchmark API with --project.
 Compare hashes as well as timings. Does not estimate GPU or full-library time.
 """
 import argparse
 import gc
 import hashlib
-import inspect
 import json
 from pathlib import Path
 import statistics
@@ -19,7 +18,8 @@ if __package__ in (None, ""):
 
 def synthetic_records(sources, frames, labels):
     return {source: [dict(mode='frames', meta=dict(origin='inference',
-        marker_threshold=.8, frame_input_signature='benchmark',
+        marker_threshold=.8, marker_score_floor=.1, marker_tag_blocklist=[],
+        frame_input_signature='benchmark',
         inference_signature=source + '-benchmark'), items=[
             dict(start=i, end=i+1, tags=[(f'tag_{t}', .9) for t in range(labels)
                 if (i // (4+t % 7)+t) % 4 != 0]) for i in range(frames)])]
@@ -48,11 +48,9 @@ def main():
     from stash_ai.temporal import TemporalPolicy
     from stash_ai.models import SOURCES
     app.TEMPORAL_POLICY = TemporalPolicy()
-    app.MARKER_TAG_BLOCKLIST = set()
     app.MARKER_MIN_HITS = 2
     app.MARKER_MERGE_GAP_SECONDS = 0
     app.MARKER_MAX_TAGS_PER_FRAME = app.MAX_MARKERS_PER_SCENE = 0
-    optimized = 'borrow' in inspect.signature(merge.union_intervals).parameters
     records = synthetic_records(SOURCES, args.frames, args.labels)
     policies = {source: frozenset() for source in SOURCES}
     times, hashes = [], set()
@@ -60,7 +58,7 @@ def main():
         gc.collect()
         start = time.perf_counter()
         spans = merge.marker_contributions(app, records, policies)
-        merged = merge.union_intervals(spans, **({'borrow': True} if optimized else {}))
+        merged = merge.union_intervals(spans, borrow=True)
         times.append(time.perf_counter()-start)
         hashes.add(fingerprint(merged))
         sizes = dict(contributions=len(spans), markers=len(merged))
@@ -74,7 +72,7 @@ def main():
     filtering = []
     for _ in range(args.repeats):
         start = time.perf_counter()
-        selected = [inference.select_scores(row if optimized else row.tolist(), labels, .65, 0) for row in values]
+        selected = [inference.select_scores(row, labels, .65, 0) for row in values]
         filtering.append(time.perf_counter()-start)
     print(json.dumps(dict(
         frames=args.frames, labels=args.labels, sources=len(SOURCES), repeats=args.repeats,

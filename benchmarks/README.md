@@ -36,9 +36,14 @@ python -m benchmarks.benchmark_merge_pipeline --project C:\poprzednia_paczka\sta
 python -m benchmarks.benchmark_rethreshold --project C:\poprzednia_paczka\stash_ai
 ```
 
-Wskazany katalog musi zawierać launcher `stash_ai.py` i pakiet `stash_ai/`.
+Wskazany katalog musi zawierać kompletną aplikację: launcher `stash_ai.py`,
+`update_stash_ai.py` i pakiet `stash_ai/`.
+Porównywane rewizje muszą udostępniać aktualne API używane przez skrypty:
+`union_intervals(..., borrow=True)`, filtrowanie tablic NumPy przez `select_scores`,
+`MergeDiagnostics` i tabelę `result_metadata` w `StateStore`. Benchmarki nie
+dopasowują wywołań do starszych API.
 Narzędzia pomiarowe oraz makieta Stash pochodzą z bieżącego repozytorium,
-więc porównanie nie wymaga testów w starej instalacji. Porównuj identyczne dane
+więc porównanie nie wymaga testów we wskazanej instalacji. Porównuj identyczne dane
 i parametry; przy zmianie zachowania aplikacji mogą się różnić również hashe.
 
 `benchmark_merge_pipeline` pokazuje rozmiar JSON i skompresowanego BLOB-a każdego
@@ -49,14 +54,14 @@ Dekodowanie i hashowanie do tej weryfikacji odbywa się poza pomiarem czasu.
 
 `benchmark_marker_matching` najpierw publikuje rozłączne przedziały, a następnie
 mierzy ponowny sync na tych samych markerach. `--labels` rozkłada je na wiele
-primary tagów, `--point-only` symuluje Stash bez końców markerów, a `--cleanup`
+primary tagów, `--point-only` mierzy publikację markerów punktowych, a `--cleanup`
 obejmuje również sprawdzanie obecności markerów przed cleanupem. Także ten skrypt
 obsługuje `--project` i `--output`. Przy porównaniu wersji użyj tego samego skryptu
 i parametrów; hashe oraz liczniki muszą być identyczne. Weryfikacja jest poza
 pomiarem; wynik obejmuje lokalny zapis snapshotu, bez inferencji i opóźnień API.
 
 `benchmark_rethreshold` domyślnie mierzy wyniki zapisane przez wskazaną wersję
-aplikacji, z gotowymi metadanymi walidacji, jeśli je obsługuje. Dodaj
+aplikacji, z gotowymi metadanymi walidacji. Dodaj
 `--mode scene` lub `--mode markers`, aby zmierzyć zmianę tylko progów scen
 lub markerów; domyślny `--mode combined` zmienia oba progi. Dodaj
 `--legacy-metadata`, aby zmierzyć pierwsze uzupełnianie metadanych starego cache.

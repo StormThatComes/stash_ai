@@ -1,14 +1,13 @@
 """Offline merge CPU benchmark for a cache retaining scores below publication.
 
-Run the same script against both revisions with --project; compare stage hashes
-and timings. No SQLite, Stash API, inference or GPU time is included.
+Run the same script against compatible revisions with --project; compare stage
+hashes and timings. No SQLite, Stash API, inference or GPU time is included.
 """
 
 import argparse
 from dataclasses import asdict, is_dataclass
 import gc
 import hashlib
-import inspect
 import json
 from pathlib import Path
 import statistics
@@ -59,7 +58,6 @@ def main():
     from stash_ai.domain import Cue, FramePrediction
     from stash_ai.models import SOURCES
     app.TEMPORAL_POLICY = temporal.TemporalPolicy()
-    app.MARKER_TAG_BLOCKLIST = set()
     app.MARKER_MIN_HITS = 2
     app.MARKER_MERGE_GAP_SECONDS = 0
     app.MARKER_MAX_TAGS_PER_FRAME = app.MAX_MARKERS_PER_SCENE = 0
@@ -75,14 +73,13 @@ def main():
     first = next(iter(records.values()))[0]
     frames = [FramePrediction(Cue(row['start'], row['end'], '', (0, 0, 1, 1)),
                                   tuple(row['tags'])) for row in first['items']]
-    borrow = {'borrow': True} if 'borrow' in inspect.signature(merge.union_intervals).parameters else {}
     result = dict(frames=args.frames, labels=args.labels, weak_labels=args.weak_labels,
         sources=len(SOURCES), repeats=args.repeats, input_sha256=fingerprint(records),
         observations=measure(lambda: [fusion.observations(app, group, policies) for group in groups], args.repeats),
         temporal_markers=measure(lambda: temporal.build_markers(app, frames, frozenset(), threshold=.8,
             identity='retained-benchmark'), args.repeats),
         merge_cpu=measure(lambda: merge.union_intervals(merge.marker_contributions(app, records, policies),
-            **borrow), args.repeats))
+            borrow=True), args.repeats))
     print(json.dumps(result, indent=2))
 
 

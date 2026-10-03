@@ -1,6 +1,5 @@
 """Offline full merge including durable snapshots; mock Stash has zero latency."""
 import argparse
-from contextlib import nullcontext
 import gc
 import hashlib
 import json
@@ -34,35 +33,29 @@ def main():
     from stash_ai import cli as app
     from stash_ai import merge_sync
     from stash_ai import merge
+    from stash_ai.diagnostics import MergeDiagnostics
     from stash_ai.runtime import RunReport
     from stash_ai.models import SOURCES
     from stash_ai.temporal import TemporalPolicy
     from tests.helpers.stash import Stash
     app.TEMPORAL_POLICY = TemporalPolicy()
-    app.MARKER_TAG_BLOCKLIST = set()
     app.MAX_MARKERS_PER_SCENE = app.MARKER_MAX_TAGS_PER_FRAME = 0
     app.MARKER_MIN_HITS = 2
     app.MARKER_MERGE_GAP_SECONDS = 0
     app.APPLY_SCENE_TAGS = app.CREATE_MARKERS = app.CREATE_MISSING = True
     source = synthetic_records(SOURCES, args.frames, args.labels)
-    for segments in source.values():
-        segments[0]['meta'].update(marker_tag_blocklist=[], marker_score_floor=.1)
     input_sha256 = hashlib.sha256(json.dumps(source, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
     policies = {s: frozenset() for s in SOURCES}
     rows = []
     for _ in range(args.repeats):
         gc.collect()
         report = RunReport(write=lambda _: None)
-        context = nullcontext()
-        if (args.project/'stash_ai/diagnostics.py').exists():
-            from stash_ai.diagnostics import MergeDiagnostics
-            context = MergeDiagnostics(report)
         with tempfile.TemporaryDirectory() as directory, merge.StateStore(Path(directory)/'state.sqlite3',
                 'offline-benchmark', cache_bytes=128*2**20) as state:
             for model, segments in source.items(): state.put('1', model, {'markers': segments[0]})
             state.report = report
             stash = Stash()
-            with context:
+            with MergeDiagnostics(report):
                 start, cpu = time.perf_counter(), time.process_time()
                 with report.measure('merge_compute'):
                     hits, spans = merge.evidence(app, state, '1', policies, policies)

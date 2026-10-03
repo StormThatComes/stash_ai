@@ -26,7 +26,6 @@ def main():
     from stash_ai.models import SOURCES
     from stash_ai.temporal import TemporalPolicy
     app.TEMPORAL_POLICY = TemporalPolicy()
-    app.MARKER_TAG_BLOCKLIST = set()
     app.MAX_MARKERS_PER_SCENE = 0
     policies = {s: frozenset() for s in SOURCES}
     labels = [f'tag_{i}' for i in range(args.labels)]
