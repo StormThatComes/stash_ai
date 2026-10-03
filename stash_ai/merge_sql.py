@@ -11,14 +11,14 @@ TAGS = """(SELECT json_group_array(json_object('id',CAST(t.id AS TEXT),'name',t.
 EXTRAS = """(SELECT json_group_array(json_object('id',CAST(et.id AS TEXT),'name',et.name))
     FROM scene_markers_tags mt JOIN tags et ON et.id=mt.tag_id WHERE mt.scene_marker_id=m.id)"""
 MARKERS = """(SELECT json_group_array(json_object('id',CAST(m.id AS TEXT),
-    'title',m.title,'seconds',m.seconds,'end_seconds',{end},
+    'title',m.title,'seconds',m.seconds,'end_seconds',m.end_seconds,
     'primary_tag',json_object('id',CAST(t.id AS TEXT),'name',t.name),'tags',{extras}))
     FROM scene_markers m JOIN tags t ON t.id=m.primary_tag_id WHERE m.scene_id=s.id)"""
 SQL = {mode: "SELECT s.id,json_object('id',CAST(s.id AS TEXT),'title',s.title,'tags'," + TAGS +
-    ",'scene_markers'," + (MARKERS.format(end='m.end_seconds' if mode == 'ranges' else 'NULL', extras=EXTRAS)
+    ",'scene_markers'," + (MARKERS.format(extras=EXTRAS)
         if mode != 'tags' else "json('[]')") + ") AS snapshot FROM scenes s " +
     "WHERE s.id IN (SELECT value FROM json_each(?)) ORDER BY s.id"
-    for mode in ('ranges', 'points', 'tags')}
+    for mode in ('ranges', 'tags')}
 SQL.update({'page_' + mode: sql.replace(
     'WHERE s.id IN (SELECT value FROM json_each(?)) ORDER BY s.id',
     'WHERE s.id > ? ORDER BY s.id LIMIT ?') for mode, sql in list(SQL.items())})
@@ -32,7 +32,7 @@ def is_read_only_merge(query, variables):
 class SceneReader:
     def __init__(self, stash, markers, report=None):
         self.stash, self.report = stash, report
-        self.mode = 'ranges' if markers and stash.has_end_time else 'points' if markers else 'tags'
+        self.mode = 'ranges' if markers else 'tags'
 
     def read(self, identifiers):
         wanted = {int(identifier) for identifier in identifiers}

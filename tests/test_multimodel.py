@@ -249,7 +249,7 @@ def test_preprocessing_and_only_untagged(monkeypatch):
     assert app.outputs_already_present(stash.scene,WD)
 
 
-def test_dry_run_api_guard():
+def test_dry_run_api_guard(supported_stash_version):
     client=app.create_stash_client(True)
     try:
         with pytest.raises(RuntimeError,match="mutation attempted"): client.gql("mutation Test { x }")

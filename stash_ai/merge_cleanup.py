@@ -159,7 +159,7 @@ def cleanup_scene(app, stash, resolver, store, current, settings, selected, args
         if not stash.dry_run and getattr(stash, 'merge_only_reads', False):
             # Batch snapshots can age while earlier scenes are processed. Reuse
             # the dry-run planner to avoid extra reads for unchanged outputs.
-            preview = SimpleNamespace(dry_run=True, has_end_time=stash.has_end_time)
+            preview = SimpleNamespace(dry_run=True)
             planned = _cleanup_source(app, preview, current, source, core_policies, scene_policies)
             if not any(planned.values()):
                 stats.update(planned)
@@ -225,7 +225,7 @@ class CleanupRun:
         self.scene_ids = args.scene_id or None
         strategy = getattr(args, 'cleanup_strategy', 'auto')
         client = CleanupClient(self.stash) if strategy in ('auto', 'sql') else None
-        if strategy in ('auto', 'sql') and client.sql_available:
+        if strategy in ('auto', 'sql'):
             from stash_ai.cleanup_sql import SQLCleanup
             candidate = SQLCleanup(client, args, self.stats, self.report)
             try:
@@ -243,9 +243,6 @@ class CleanupRun:
                 self.stats['cleanup_resumed'] = 1
             self.scene_ids, self.cleanup_stash = run_sql_cleanup(
                 app, self.sql, self.store, self.settings, args, self.core_policies, self.scene_policies, self.stats)
-        elif strategy == 'sql':
-            raise RuntimeError('Stash does not expose the required SQL cleanup API. '
-                               'Use --cleanup-strategy scenes for compatibility.')
         elif self.store.cleanup_pending:
             raise RuntimeError('Global cleanup is interrupted and the required Stash API is unavailable; '
                                'restore API access and rerun the same cleanup.')
@@ -259,9 +256,6 @@ class CleanupRun:
         # list convention means the whole library, not zero scenes.
         if self.scene_ids == []:
             return
-        if app.CREATE_MARKERS:
-            self.stash.detect_marker_capabilities()
-            self.stash.detect_tag_hierarchy()
         if self.sql is not None and hasattr(self.stash, 'configure_merge_reads'):
             # Cleanup uses the same snapshots as merge-only; media paths are unused.
             self.stash.configure_merge_reads(self.report, merge_only=True)

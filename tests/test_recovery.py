@@ -166,9 +166,10 @@ def test_repeated_abandonment_retains_all_applied_scene_ownership(tmp_path):
         assert not recovery.publications(store, '1', 'scene')
 
 
-@pytest.mark.parametrize('has_end', [False, True])
-def test_abandoned_partial_merge_cleanup_preserves_observed_range_or_occurrence(tmp_path, monkeypatch, has_end):
-    stash = FastStash(); stash.has_end_time = has_end
+@pytest.mark.parametrize('use_end', [False, True])
+def test_abandoned_partial_merge_cleanup_preserves_observed_range_or_occurrence(tmp_path, monkeypatch, use_end):
+    stash = FastStash()
+    monkeypatch.setattr(app, 'MARKER_USE_END_TIME', use_end)
     seed(tmp_path, stash, [span('wd', 0, 2, 'core')])
     old = deepcopy(stash.scene['scene_markers'][0])
     point = {**span('wd', 8, None, 'core'), 'derived': 'occurrence'}

@@ -515,11 +515,12 @@ def test_caps_follow_blacklists_and_keep_all_qualified_evidence(merge_pipeline,m
         assert {item["tag"] for item in state.records("1","scene")["oppai"][0]["items"]}=={"common","unique_op","extra"}
 
 
-def test_point_only_stash_retains_full_source_ranges(merge_pipeline,monkeypatch,capsys):
-    p=merge_pipeline;p.stash.has_end_time=False
+def test_point_output_retains_full_source_ranges(merge_pipeline,monkeypatch,capsys):
+    p=merge_pipeline
+    monkeypatch.setattr(app,"MARKER_USE_END_TIME",False)
     assert app.main(p.args)==0
     assert intervals(p.stash)==[(10,None),(70,None)]
-    assert all("end_seconds" not in write[1] for write in p.stash.writes if write[0] in {"create","update"})
+    assert all(write[1]["end_seconds"] is None for write in p.stash.writes if write[0] in {"create","update"})
     with merge.StateStore(p.path,merge.scope_for(app.STASH_URL),True) as state:
         snapshot,_=state.snapshot("1","markers")
         assert [(m["start"],m["end"]) for m in merge.union_intervals(snapshot["contributions"]) if m["tag"]=="common"]==[(10,50),(70,90)]
@@ -551,10 +552,9 @@ def test_scene_cap_does_not_drop_previous_runs_or_legacy_confidence(tmp_path,mon
         assert {h["score"] for h in hits if h["tag"]=="old"}=={.95,None}
 
 
-@pytest.mark.parametrize("has_end,use_end",[(False,True),(True,False)])
-def test_cleanup_point_output_uses_recorded_extent_when_start_moves(merge_pipeline,monkeypatch,tmp_path,has_end,use_end):
-    p=merge_pipeline;p.stash.has_end_time=has_end
-    monkeypatch.setattr(app,"MARKER_USE_END_TIME",use_end)
+def test_cleanup_point_output_uses_recorded_extent_when_start_moves(merge_pipeline,monkeypatch,tmp_path):
+    p=merge_pipeline
+    monkeypatch.setattr(app,"MARKER_USE_END_TIME",False)
     assert app.main(p.args)==0
     first=next(m for m in p.stash.scene["scene_markers"] if m["seconds"]==10 and m["primary_tag"]["name"]=="ai:common")
     first["tags"].append(p.stash.tag("manual extra"))

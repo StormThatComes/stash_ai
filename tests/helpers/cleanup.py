@@ -11,11 +11,11 @@ from tests.helpers.stash import Stash
 
 class FastStash(Stash):
     """Models Stash's primary-tag restriction, cascades and tag pagination."""
-    def __init__(self, dry=False, bulk=True):
+    def __init__(self, dry=False):
         super().__init__(dry)
         self.scenes = {'1': self.scene}
         self.images = []
-        self.bulk, self.calls, self.scene_reads = bulk, [], []
+        self.calls, self.scene_reads = [], []
         self.fail_after = None
         self.last_tag = 0
         self.last_marker = 1000
@@ -83,9 +83,6 @@ class FastStash(Stash):
     def gql(self, query, variables=None):
         op = query.split('StashAI', 1)[1].split('(', 1)[0].split()[0]
         self.calls.append((op, deepcopy(variables)))
-        if op == 'CleanupCapabilities':
-            mutations = ['tagDestroy', 'sceneMarkerDestroy'] + (['tagsDestroy', 'sceneMarkersDestroy'] if self.bulk else [])
-            return {'mutation': {'fields': [{'name': name} for name in mutations]}}
         if op == 'CleanupTags':
             rows = list(self.tags.values())
             key, field = 'findTags', 'tags'

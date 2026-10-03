@@ -103,17 +103,17 @@ class ScanningIndex:
                 and merge.overlaps(self.temporal(m), interval, tolerance)]
 
 
-@pytest.mark.parametrize('has_end,use_end', [(True, True), (False, True), (True, False)])
+@pytest.mark.parametrize('use_end', [True, False])
 @pytest.mark.parametrize('dry', [False, True])
 @pytest.mark.parametrize('cleanup', [False, True])
 def test_publication_split_duplicates_cleanup_and_retry_match_scanner(
-        tmp_path, monkeypatch, has_end, use_end, dry, cleanup):
+        tmp_path, monkeypatch, use_end, dry, cleanup):
     monkeypatch.setattr(app, 'MARKER_USE_END_TIME', use_end)
     variants = []
     for implementation in (ScanningIndex, MarkerIntervalIndex):
         with monkeypatch.context() as patch:
             patch.setattr(merge_sync, 'MarkerIntervalIndex', implementation)
-            stash = Stash(); stash.has_end_time = has_end
+            stash = Stash()
             manual = stash.marker(merge.AI, 'location', 'manual', manual=True)
             manual.update(seconds=75, end_seconds=None)
             point = {**span('wd', 75, None, 'location'), 'derived': 'occurrence'}

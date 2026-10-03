@@ -13,9 +13,14 @@ pochodzi wyłącznie z VTT i sprite'ów Stash; aplikacja nie otwiera plików wid
 ## Wymagania
 
 - Python **3.14.7** — to jedyna wspierana i testowana wersja;
-- Stash z wygenerowanymi sprite'ami/VTT;
+- Stash **0.31.1 lub nowszy** z wygenerowanymi sprite'ami/VTT;
 - zależności z `requirements.txt`;
 - CUDA jest zalecana; CPU działa, ale jest znacznie wolniejsze.
+
+Wersja Stash jest sprawdzana przed odczytem scen i zmianami na serwerze, także
+w `--dry-run`. Komendy lokalne, np. `--db-update`, `--db-check` i `--db-report`,
+nie wymagają połączenia ze Stash. Markery punktowe (`end_seconds: null`)
+i ustawienie `MARKER_USE_END_TIME=False` pozostają obsługiwane.
 
 Dla CPU zamień `onnxruntime-gpu` na zgodny `onnxruntime>=1.21,<2`.
 

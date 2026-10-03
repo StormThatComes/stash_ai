@@ -1,4 +1,4 @@
-"""Shared cleanup API capabilities and lazy publication masks. No model/media IO."""
+"""Shared cleanup tag catalog and lazy publication masks. No model/media IO."""
 from __future__ import annotations
 
 from tqdm import tqdm
@@ -109,21 +109,6 @@ def stamp_snapshot(store, snapshot):
 class CleanupClient:
     def __init__(self, stash):
         self.stash = stash
-        data = stash.gql('''query StashAICleanupCapabilities {
-            mutation: __type(name: "Mutation") { fields { name } }
-            bulk_marker: __type(name: "BulkSceneMarkerUpdateInput") { inputFields { name } }
-            bulk_scene: __type(name: "BulkSceneUpdateInput") { inputFields { name } }
-            bulk_ids: __type(name: "BulkUpdateIds") { inputFields { name } }
-        }''')
-        mutations = {f['name'] for f in (data.get('mutation') or {}).get('fields', [])}
-        self.bulk_tags = 'tagsDestroy' in mutations
-        self.bulk_markers = 'sceneMarkersDestroy' in mutations
-        self.sql_available = 'querySQL' in mutations
-        bulk_ids = {'ids', 'mode'} <= {f['name'] for f in (data.get('bulk_ids') or {}).get('inputFields', [])}
-        self.bulk_marker_tags = (bulk_ids and 'bulkSceneMarkerUpdate' in mutations and
-            {'ids', 'tag_ids'} <= {f['name'] for f in (data.get('bulk_marker') or {}).get('inputFields', [])})
-        self.bulk_scene_tags = (bulk_ids and 'bulkSceneUpdate' in mutations and
-            {'ids', 'tag_ids'} <= {f['name'] for f in (data.get('bulk_scene') or {}).get('inputFields', [])})
 
     def catalog(self):
         catalog = {}

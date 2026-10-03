@@ -20,8 +20,8 @@ CREATE INDEX index_scenes_tags_on_tag_id ON scenes_tags(tag_id);
 
 
 class SQLStash(FastStash):
-    def __init__(self, dry=False, bulk=True):
-        super().__init__(dry, bulk)
+    def __init__(self, dry=False):
+        super().__init__(dry)
         self.sql_calls = []
         self.before_sql = None
 
@@ -46,12 +46,6 @@ class SQLStash(FastStash):
             for tag in tags:
                 tag['image_count'] = sum(any(t['id'] == tag['id'] for t in image['tags']) for image in self.images)
             return {'findTags': {'tags': tags}}
-        if 'CleanupCapabilities' in query:
-            data = super().gql(query, variables)
-            data['mutation']['fields'] += [{'name': n} for n in ['querySQL', 'bulkSceneMarkerUpdate', 'bulkSceneUpdate']]
-            for key, values in [('bulk_marker', ['ids', 'tag_ids']), ('bulk_scene', ['ids', 'tag_ids']), ('bulk_ids', ['ids', 'mode'])]:
-                data[key] = {'inputFields': [{'name': name} for name in values]}
-            return data
         if query == fast.READ_OPERATION:
             key = next(k for k, v in fast.SQL.items() if v == variables['sql'])
             self.sql_calls.append((key, deepcopy(variables['args'])))
@@ -77,7 +71,4 @@ class SQLStash(FastStash):
                 self.fail_after = None
                 raise RuntimeError('Connection lost after committed removal')
             return {field: changed}
-        if 'CleanupDeleteMarker(' in query:
-            self.delete_marker(variables['id'])
-            return {'sceneMarkerDestroy': True}
         return super().gql(query, variables)

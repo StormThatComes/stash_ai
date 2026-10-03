@@ -35,8 +35,8 @@ class MergeSyncPlan:
         return self.final_scene_tag_ids != self.existing_scene_tag_ids
 
 
-def _previous_ranges(app, stash, store, scene_id):
-    if not app.CREATE_MARKERS or (stash.has_end_time and app.MARKER_USE_END_TIME):
+def _previous_ranges(app, store, scene_id):
+    if not app.CREATE_MARKERS or app.MARKER_USE_END_TIME:
         return []
     from stash_ai.recovery import publications
     result = []
@@ -50,7 +50,7 @@ def _previous_ranges(app, stash, store, scene_id):
 def prepare_sync_evidence(app, stash, store, scene, scene_hits, spans, *, cleanup, report):
     """Build merged markers/scene labels and apply cleanup-only retention rules."""
     scene_id = str(scene["id"])
-    previous_ranges = PreviousMarkerRanges(_previous_ranges(app, stash, store, scene_id))
+    previous_ranges = PreviousMarkerRanges(_previous_ranges(app, store, scene_id))
     with stage(report, 'marker_union'):
         markers = merge.union_intervals(spans, borrow=True) if app.CREATE_MARKERS else []
     if report is not None:
@@ -180,9 +180,8 @@ def _wanted_markers(app, stash, resolver, scene_id, markers, ids, groups, blocke
                    "seconds": round(marker["start"], 3)}
         if is_occurrence(marker):
             payload['title'] += ' · wykrycie'
-        if stash.has_end_time:
-            payload["end_seconds"] = (round(marker["end"], 3)
-                                      if marker["end"] is not None and app.MARKER_USE_END_TIME else None)
+        payload["end_seconds"] = (round(marker["end"], 3)
+                                  if marker["end"] is not None and app.MARKER_USE_END_TIME else None)
         wanted.append((payload, {"seconds": marker["start"], "end_seconds": marker["end"]}))
     return wanted, resolved_marker_labels
 
@@ -250,7 +249,7 @@ def plan_markers(app, stash, resolver, scene_id, scene, markers, ids, groups, bl
                 if str(marker['id']) in changed_ids:
                     continue
                 payload = separate_sync.marker_extra_cleanup_payload(
-                    marker, scene_id, blocked_names, stash.has_end_time)
+                    marker, scene_id, blocked_names)
                 if payload is not None:
                     plan.updates.append(payload)
 

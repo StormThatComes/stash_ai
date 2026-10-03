@@ -47,7 +47,7 @@ def test_nested_timings_are_exclusive_and_failures_are_recorded(tmp_path, monkey
 
 
 @pytest.mark.parametrize('failure', [False, True])
-def test_api_records_named_operation_bytes_and_errors_without_payloads(tmp_path, failure):
+def test_api_records_named_operation_bytes_and_errors_without_payloads(tmp_path, failure, supported_stash_version):
     path = tmp_path/'api.jsonl'
     report = RunReport(write=lambda _: None)
     client = app.create_stash_client(False); client.report = report

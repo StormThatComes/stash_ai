@@ -54,10 +54,9 @@ def test_global_cleanup_of_9000_scenes_never_fetches_scenes_or_predictions(tmp_p
     assert stash.writes == [] and not stash.scene_reads
 
 
-@pytest.mark.parametrize('bulk', [False, True])
-def test_cursor_deletion_handles_overlapping_tags_once(tmp_path, monkeypatch, bulk):
+def test_cursor_deletion_handles_overlapping_tags_once(tmp_path, monkeypatch):
     monkeypatch.setattr(cleanup, 'PAGE_SIZE', 3)
-    stash = SQLStash(bulk=bulk)
+    stash = SQLStash()
     for i in range(1, 18):
         marker = stash.marker(merge.AI, 'ban'+str(i % 5), str(i))
         marker['tags'] += [stash.tag('op:ban'+str(j)) for j in range(5)]
@@ -67,8 +66,7 @@ def test_cursor_deletion_handles_overlapping_tags_once(tmp_path, monkeypatch, bu
     assert not stash.scene['scene_markers']
     removed = [identifier for op, identifier in stash.writes if op == 'delete']
     assert len(removed) == len(set(removed)) == 17
-    if bulk:
-        assert all(len(v['ids']) <= 2 for op, v in stash.calls if op == 'CleanupDeleteMarkers')
+    assert all(len(v['ids']) <= 2 for op, v in stash.calls if op == 'CleanupDeleteMarkers')
     assert not stash.scene_reads
 
 

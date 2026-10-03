@@ -26,7 +26,8 @@ Dla `--merge-only` sceny mogą być stronicowane po rosnącym ID bez COUNT/OFFSE
 Podczas zwykłej inferencji GraphQL nadal dostarcza ścieżki VTT/sprite, a stan
 tagów/markerów może zostać dołączony zbiorczo.
 
-Jeśli read-only SQL nie jest dostępny lub przestaje działać, merge może wrócić
+Na Stash 0.31.1+ pola hierarchii i `end_seconds` są wymagane. Markery
+punktowe nadal mają `end_seconds: null`. Jeśli wykonanie read-only SQL zawiedzie, merge może wrócić
 do GraphQL. Zapisy zawsze używają API Stash.
 
 ## Końcowe usuwanie pustych tagów

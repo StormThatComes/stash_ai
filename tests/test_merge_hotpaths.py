@@ -10,12 +10,15 @@ from types import SimpleNamespace
 import pytest
 
 from stash_ai import cli as app
+
 from stash_ai.fusion import ObservationIndex
 from stash_ai.merge_sql import SceneReader, OPERATION, SQL, is_read_only_merge
 from stash_ai.performance import scene_fingerprint
 from stash_ai.runtime import RamCache, RunReport, retained_size
 from stash_ai.temporal import TemporalPolicy
 from stash_ai.timeline import support_size
+
+pytestmark = pytest.mark.usefixtures("supported_stash_version")
 
 
 @pytest.mark.parametrize('overlap', [False, True])
@@ -110,7 +113,8 @@ def native_scene(db, identifier, markers=True, end=True, full=True):
 
 def client_for(db, *, end=True, deny=False):
     client = app.create_stash_client(True)
-    client.has_end_time = end
+    if not end:
+        db.execute("UPDATE scene_markers SET end_seconds=NULL")
     calls = []
     def post(url, **kwargs):
         payload = kwargs['json']

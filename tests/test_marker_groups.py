@@ -48,9 +48,10 @@ def saved_marker_sources(tmp_path):
         state.publish('1', {'markers': {'contributions': [span('wd', 0, 2, 'blocked')]}})
 
 
-@pytest.mark.parametrize('has_end', [False, True])
-def test_one_group_per_primary_independent_of_extra_labels_or_time_support(tmp_path, has_end):
-    stash = Stash(); stash.has_end_time = has_end
+@pytest.mark.parametrize('use_end', [False, True])
+def test_one_group_per_primary_independent_of_extra_labels_or_time_policy(tmp_path, monkeypatch, use_end):
+    stash = Stash()
+    monkeypatch.setattr(app, 'MARKER_USE_END_TIME', use_end)
     with merge.StateStore(tmp_path/'state', 'fixture') as state:
         resolver = app.TagResolver(stash, source=merge.AI)
         contributions = [span('wd', 0, 5, 'abc', extras=['def']), span('joytag', 10, 15, 'abc')]
@@ -139,10 +140,10 @@ def test_missing_tags_respect_create_missing_switch(monkeypatch):
     assert not stash.writes
 
 
-@pytest.mark.parametrize('has_end', [False, True])
-def test_backfill_uses_semantic_type_preserves_identity_and_ignores_manual_markers(tmp_path, monkeypatch, has_end):
-    stash = FastStash(); stash.has_end_time = has_end
-    regular = stash.marker(merge.AI, 'abc', '1'); regular['end_seconds'] = None
+@pytest.mark.parametrize('end', [None, 2])
+def test_backfill_uses_semantic_type_preserves_identity_and_ignores_manual_markers(tmp_path, monkeypatch, end):
+    stash = FastStash()
+    regular = stash.marker(merge.AI, 'abc', '1'); regular['end_seconds'] = end
     occurrence = stash.marker(merge.AI, 'abc', '2'); occurrence['tags'].append(stash.tag(OCCURRENCE_TAG))
     occurrence.update(title='[AI] custom title', seconds=12.125, end_seconds=None)
     manual = stash.marker(merge.AI, 'abc', '3', manual=True)

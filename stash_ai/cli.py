@@ -329,12 +329,6 @@ def main(argv: list[str] | None = None) -> int:
     stash = create_stash_client(DRY_RUN)
     stats = Counter()
     try:
-        if any(hierarchies.values()):
-            stash.detect_tag_hierarchy()
-        if CREATE_MARKERS and not hierarchy_only:
-            stash.detect_marker_capabilities()
-            if MARKER_USE_END_TIME and not stash.has_end_time:
-                print("Stash has no marker end-time field; creating point markers.")
         print("DRY RUN: all Stash changes below are planned." if DRY_RUN else "Synchronizing selected models.")
         for config in settings:
             try:

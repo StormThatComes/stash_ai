@@ -81,7 +81,6 @@ def test_old_video_yaml_is_rejected_explicitly(tmp_path,enabled):
 
 def test_scene_query_only_requests_sprite_and_vtt_media():
     client=app.StashClient.__new__(app.StashClient)
-    client.has_end_time=True
     client.create_markers=app.CREATE_MARKERS
     fields=client.scene_fields()
     assert 'paths { sprite vtt }' in fields

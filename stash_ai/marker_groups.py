@@ -61,8 +61,6 @@ class MarkerGroups:
 
     def _root(self):
         if self.root is None:
-            if not self.stash.has_tag_hierarchy:
-                self.stash.detect_tag_hierarchy()
             # An existing user-created organizational root can be reused; never
             # claim or delete it, or change its other hierarchy relationships.
             self.root = self.resolver._find(ROOT) or self._create(ROOT, ROOT_DESCRIPTION, [])
@@ -181,8 +179,6 @@ def run_backfill(app, args):
             raise RuntimeError('An interrupted merge is pending; run --merge-only before synchronizing marker groups.')
         stash = app.create_stash_client(app.DRY_RUN)
         try:
-            stash.detect_marker_capabilities()
-            stash.detect_tag_hierarchy()
             resolver = app.TagResolver(stash, source=AI, report=report.detail, create_missing=app.CREATE_MISSING)
             resolver.preload()
             groups = for_resolver(app, resolver)
@@ -202,8 +198,7 @@ def run_backfill(app, args):
                             continue
                         payload = dict(id=str(marker['id']), scene_id=str(scene['id']), title=marker['title'],
                             seconds=marker['seconds'], primary_tag_id=str(marker['primary_tag']['id']), tag_ids=sorted(tags))
-                        if stash.has_end_time:
-                            payload['end_seconds'] = marker.get('end_seconds')
+                        payload['end_seconds'] = marker.get('end_seconds')
                         updates.append(payload)
                     groups.record_preview(scene, [], updates, [])
                     for payload in updates:
