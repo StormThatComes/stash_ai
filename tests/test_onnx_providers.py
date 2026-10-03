@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from stash_ai.onnx_tagger import _execution_providers
+from stash_ai.backends.onnx_session import _execution_providers
 
 
 @pytest.mark.parametrize('device,available,use_cuda', [

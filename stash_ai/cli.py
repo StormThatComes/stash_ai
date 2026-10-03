@@ -66,8 +66,8 @@ MERGE_STATE_FILE = (INSTALL_ROOT / "tagger_sources.sqlite3")
 
 from stash_ai.runs import separate
 from stash_ai.models import SOURCES, ModelSource, ModelSettings
-from stash_ai.vocabulary import load_vocabulary, ensure_files, weight_files
-from stash_ai.taggers import load_tagger
+from stash_ai.backends.vocabulary import load_vocabulary, ensure_files, weight_files
+from stash_ai.backends.loader import load_tagger
 from stash_ai.temporal import TemporalPolicy
 from stash_ai.domain import FramePrediction, MarkerSpec
 from stash_ai.client import StashClient
@@ -285,7 +285,7 @@ def main(argv: list[str] | None = None) -> int:
             load_vocabulary(config)
             ensure_files(config, weight_files(config))
             if config.source.key == "joytag":
-                from stash_ai.joytag import loader_path
+                from stash_ai.backends.joytag import loader_path
                 loader_path(config.download_missing)
             print(f"{config.source.title}: files ready in {config.model_dir}.")
         return 0

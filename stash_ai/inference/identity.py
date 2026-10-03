@@ -3,7 +3,7 @@ from pathlib import Path
 
 from stash_ai.models import ModelSettings
 from stash_ai.signatures import digest
-from stash_ai.vocabulary import metadata_files, weight_files
+from stash_ai.backends.vocabulary import metadata_files, weight_files
 
 PREDICTION_FORMAT = 2
 
@@ -19,7 +19,7 @@ def model_identity(app, config: ModelSettings, vocabulary):
     files = [stamp(config.model_dir / name) for name in (*metadata_files(config.source), *weight_files(config))]
     loader = {}
     if config.source.key == "joytag":
-        from stash_ai.joytag import LOADER_REVISION, LOADER_SHA256
+        from stash_ai.backends.joytag import LOADER_REVISION, LOADER_SHA256
         loader = {"loader": {"revision": LOADER_REVISION, "sha256": LOADER_SHA256}}
     identity = {"format": PREDICTION_FORMAT, "source": config.source.key, "repo": config.source.repo,
             "revision": config.source.revision, "files": files, **loader,

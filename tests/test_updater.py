@@ -322,6 +322,7 @@ def test_run_modules_move_to_package_and_remove_stale_bytecode(tmp_path):
     ('cleanup', ('merge_cleanup', 'cleanup', 'cleanup_sql', 'cleanup_sql_session', 'prune', 'legacy_prune')),
     ('storage', ('state', 'state_db', 'state_results', 'state_publications', 'state_codec',
                  'state_metadata', 'state_snapshot', 'state_thresholds', 'preview', 'progress')),
+    ('backends', ('taggers', 'onnx_tagger', 'joytag', 'vocabulary')),
 ])
 def test_domain_modules_move_to_packages_and_remove_stale_bytecode(tmp_path, package, modules):
     files = application_files()
