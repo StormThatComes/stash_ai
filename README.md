@@ -74,9 +74,11 @@ python .\stash_ai.py --prune-empty-tags-only --dry-run
 python .\stash_ai.py --prune-legacy-imports --dry-run
 python .\stash_ai.py --prune-legacy-imports
 
-# Zdrowie, spójność logiczna i kompaktowanie lokalnej bazy stanu.
+# Zdrowie, aktualizacja schematu, spójność i kompaktowanie lokalnej bazy stanu.
 python .\stash_ai.py --db-report
 python .\stash_ai.py --db-check
+python .\stash_ai.py --db-update --dry-run
+python .\stash_ai.py --db-update
 python .\stash_ai.py --db-compact --dry-run
 python .\stash_ai.py --db-compact
 
@@ -207,7 +209,23 @@ evidence i tak zapisuje `results`, a ten zapis nadal prawidłowo unieważnia cac
 Po większym czyszczeniu można użyć `--db-compact`, aby zwrócić zwolnione strony
 SQLite do systemu plików.
 
-### Zdrowie i kompaktowanie bazy stanu
+### Zdrowie, aktualizacja i kompaktowanie bazy stanu
+
+`--db-update` aktualizuje całą istniejącą bazę wskazaną przez `--state-db`
+do najnowszego obsługiwanego schematu (obecnie v9), we wszystkich scope'ach.
+Korzysta z tych samych migracji i locka writera co zwykłe uruchomienie aplikacji.
+Tworzy aktualne tabele, indeksy i triggery, uzupełnia `result_index` dla baz
+sprzed v2 oraz usuwa wycofaną tabelę `refinement_progress` dla baz sprzed v4.
+Nie łączy się ze Stash ani nie ładuje konfiguracji modeli. Zachowuje wyniki,
+checkpointy, pending publication/cleanup i recovery; nie zmienia progów ani
+nie wymaga ponownej inferencji. Starsze, nadal czytelne formaty payloadów
+pozostają zapisane w swojej dotychczasowej postaci.
+
+`--dry-run` wykonuje odczytowy preflight i pokazuje wersję źródłową oraz
+docelową; nie uruchamia migracji ani nie tworzy locka. Polecenie odrzuca brakującą,
+obcą lub nowszą niż obsługiwana bazę. Migracje są powtarzalne: mogą zatwierdzić
+etapy pośrednie, ale najnowsza wersja jest ustawiana dopiero po ukończeniu
+inicjalizacji. Przerwaną aktualizację można uruchomić ponownie.
 
 `--db-check` wykonuje głęboki, wyłącznie odczytowy test spójności całej bazy
 (we wszystkich scope'ach). Oprócz pełnego SQLite `integrity_check` sprawdza m.in.
