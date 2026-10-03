@@ -80,7 +80,7 @@ def initialize(store):
 PUBLICATION_CODE_FILES = (
     'cli.py', 'merge.py', 'merge_run.py', 'merge_publish.py', 'merge_parallel.py', 'merge_sync.py', 'marker_index.py', 'separate_sync.py',
     'temporal.py', 'fusion.py', 'scene.py', 'occurrences.py', 'exclusions.py', 'cleanup.py',
-    'taggers.py', 'onnx_tagger.py', 'vocabulary.py', 'inference.py', 'tags.py', 'domain.py', 'performance.py',
+    'models.py', 'taggers.py', 'onnx_tagger.py', 'vocabulary.py', 'inference.py', 'tags.py', 'domain.py', 'performance.py',
     'timeline.py', 'merge_sql.py', 'marker_groups.py',
     'thresholds.py', 'retention.py', 'scene_cache.py', 'progress.py', 'state.py', 'state_db.py',
     'state_results.py', 'state_thresholds.py', 'state_metadata.py', 'state_publications.py', 'config.py',

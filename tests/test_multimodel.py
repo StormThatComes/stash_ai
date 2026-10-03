@@ -8,10 +8,22 @@ import sys
 import numpy as np
 import pytest
 import yaml
+from stash_ai.domain import Cue, FramePrediction, MarkerSpec
 from stash_ai import inference
 from stash_ai import cli as app
-from stash_ai import taggers as adapters
-from stash_ai.taggers import JOYTAG, WD, DTQ, OPPAI, SOURCES, ModelSettings, Vocabulary, load_vocabulary, select_models, validate_scores, prepare_wd, prepare_dtq, prepare_oppai, OnnxTagger
+from stash_ai.models import (
+    JOYTAG,
+    WD,
+    DTQ,
+    OPPAI,
+    SOURCES,
+    ModelSettings,
+    Vocabulary,
+    select_models,
+    validate_scores,
+)
+from stash_ai.vocabulary import load_vocabulary
+from stash_ai.onnx_tagger import prepare_wd, prepare_dtq, prepare_oppai, OnnxTagger
 
 
 from tests.helpers.stash import Stash
@@ -29,7 +41,7 @@ def test_source_isolation_and_idempotence(source):
         stash.marker(item,"old",item.key)
     manual=stash.marker(source,"old","manual",True)
     other=deepcopy([m for m in stash.scene["scene_markers"] if m["id"]!=source.key])
-    spec=app.MarkerSpec("new",10,12,.9,2,("extra",))
+    spec=MarkerSpec("new",10,12,.9,2,("extra",))
     sync(stash,source,[("new",.9)],[spec])
     assert {t["name"] for t in stash.scene["tags"]} == {"manual",source.prefix+"new"}|{s.prefix+"old" for s in SOURCES.values() if s!=source}
     assert all(m in stash.scene["scene_markers"] for m in other)
@@ -48,8 +60,8 @@ def test_global_blacklist_covers_markers_but_core_only_tags_remain_extras(source
     stash.marker(source,"core_ban","remove")
     kept=stash.marker(source,"old","keep")
     manual=stash.marker(source,"core_ban","manual",True)
-    specs=[app.MarkerSpec("core_ban",0,2,.9,2),app.MarkerSpec("scene_ban",4,6,.9,2,("core_ban",)),
-           app.MarkerSpec('allowed',8,10,.9,2,('core_ban','scene_ban'))]
+    specs=[MarkerSpec("core_ban",0,2,.9,2),MarkerSpec("scene_ban",4,6,.9,2,("core_ban",)),
+           MarkerSpec('allowed',8,10,.9,2,('core_ban','scene_ban'))]
     result=sync(stash,source,[("core_ban",.9),("scene_ban",.9)],specs,frozenset({"core_ban"}),frozenset({"scene_ban"}))
     assert {t["name"] for t in stash.scene["tags"]}=={"scene_ban",source.prefix+"keep",source.prefix+"core_ban"}
     assert kept in stash.scene["scene_markers"] and manual in stash.scene["scene_markers"]
@@ -64,7 +76,7 @@ def test_global_blacklist_covers_markers_but_core_only_tags_remain_extras(source
 def test_dry_run_and_failure_preserve_existing_markers(source):
     stash=Stash(True)
     old=stash.marker(source,"old","old")
-    specs=[app.MarkerSpec("new",0,2,.9,2)]
+    specs=[MarkerSpec("new",0,2,.9,2)]
     result=sync(stash,source,[("new",.9)],specs)
     assert not stash.writes and result["markers_created"]==result["markers_deleted"]==1
     stash.dry_run,stash.fail_create=False,True
@@ -102,7 +114,7 @@ def test_output_modes(monkeypatch,mode,source):
     before=deepcopy(stash.scene)
     monkeypatch.setattr(app,"APPLY_SCENE_TAGS",mode=="scenes")
     monkeypatch.setattr(app,"CREATE_MARKERS",mode=="markers")
-    sync(stash,source,[("new",.9)],[app.MarkerSpec("new",0,2,.9,2)])
+    sync(stash,source,[("new",.9)],[MarkerSpec("new",0,2,.9,2)])
     key="tags" if mode=="markers" else "scene_markers"
     assert stash.scene[key]==before[key]
 
@@ -111,7 +123,7 @@ def test_output_modes(monkeypatch,mode,source):
 def test_main_all_releases_models_and_preserves_failed_source(monkeypatch,fail_wd):
     stash=Stash();stash.scene["tags"].append(stash.tag("wd:old"));old=stash.marker(WD,"old","old")
     vocab=Vocabulary(["tag"],{"tag":"General"})
-    cues=[app.Cue(i,i+1,"x",(0,0,1,1)) for i in range(2)]
+    cues=[Cue(i,i+1,"x",(0,0,1,1)) for i in range(2)]
     monkeypatch.setattr(app,"create_stash_client",lambda _:stash)
     monkeypatch.setattr(app,"load_vocabulary",lambda _:vocab)
     monkeypatch.setattr(inference,"fetch_cues",lambda *args:(cues,2))
@@ -133,7 +145,7 @@ def test_main_all_releases_models_and_preserves_failed_source(monkeypatch,fail_w
 def test_every_label_and_streaming_aggregation(monkeypatch,aggregation,batch):
     labels=["core_ban","scene_ban"]+[f"tag{i}" for i in range(40)]
     scores=np.random.default_rng(7).uniform(.7,.99,(5,len(labels))).astype(np.float32)
-    cues=[app.Cue(i,i+1,"x",(0,0,1,1)) for i in range(5)]
+    cues=[Cue(i,i+1,"x",(0,0,1,1)) for i in range(5)]
     monkeypatch.setattr(app,"AGGREGATION",aggregation)
     monkeypatch.setattr(inference,"iter_sprite_frames",lambda *args:((c,None) for c in cues))
     predictions,frames=inference.predict_scene(app, Tagger(ModelSettings(WD,Path("."),batch_size=batch),labels,scores),Stash(),{},cues,frozenset({"scene_ban"}))
@@ -148,7 +160,7 @@ def test_every_label_and_streaming_aggregation(monkeypatch,aggregation,batch):
 
 def test_core_limit_and_gap_timing(monkeypatch):
     monkeypatch.setattr(app,"MARKER_MAX_TAGS_PER_FRAME",1)
-    frames=[app.FramePrediction(app.Cue(i,i+1,"x",(0,0,1,1)),(("blocked",.99),("valid",.8))) for i in [0,1,4,5]]
+    frames=[FramePrediction(Cue(i,i+1,"x",(0,0,1,1)),(("blocked",.99),("valid",.8))) for i in [0,1,4,5]]
     markers,total=app.build_markers(frames,frozenset({"blocked"}))
     assert total==2 and [(m.start,m.end) for m in markers]==[(0,2),(4,6)]
     assert all(m.extra_tags==("blocked",) for m in markers)

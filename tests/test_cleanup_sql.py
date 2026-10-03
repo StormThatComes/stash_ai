@@ -10,9 +10,10 @@ from stash_ai import cli as app
 from stash_ai import state_codec
 from stash_ai import merge_sync
 from stash_ai import cleanup_sql as fast
+from stash_ai.cleanup_sql_session import CleanupSqlSession, READ_OPERATION, SQL, is_read_only_cleanup
 from stash_ai import merge
 from stash_ai.cleanup import CleanupClient
-from stash_ai.taggers import WD
+from stash_ai.models import WD
 from tests.helpers.cleanup import FastStash
 from tests.helpers.cleanup import install
 from tests.helpers.cleanup import options
@@ -163,15 +164,15 @@ def test_source_specific_cleanup_reconciles_only_candidates(tmp_path, monkeypatc
 
 
 def test_sql_dry_run_allowlist_cannot_execute_writes_or_injected_statements():
-    assert fast.is_read_only_cleanup(fast.READ_OPERATION, {'sql': fast.SQL['probe']})
-    for sql in ['DELETE FROM tags', 'SELECT 1; DELETE FROM tags', fast.SQL['probe']+'; DELETE FROM tags']:
-        assert not fast.is_read_only_cleanup(fast.READ_OPERATION, {'sql': sql})
+    assert is_read_only_cleanup(READ_OPERATION, {'sql': SQL['probe']})
+    for sql in ['DELETE FROM tags', 'SELECT 1; DELETE FROM tags', SQL['probe']+'; DELETE FROM tags']:
+        assert not is_read_only_cleanup(READ_OPERATION, {'sql': sql})
     stash = app.StashClient.__new__(app.StashClient)
     stash.dry_run = True
     with pytest.raises(RuntimeError, match='dry-run'):
-        stash.gql(fast.READ_OPERATION, {'sql': 'DELETE FROM tags', 'args': []})
+        stash.gql(READ_OPERATION, {'sql': 'DELETE FROM tags', 'args': []})
     with pytest.raises(RuntimeError, match='dry-run'):
-        stash.gql(fast.READ_OPERATION + ' mutation { execSQL(sql:"DELETE FROM tags") { rows_affected } }', {'sql':fast.SQL['probe']})
+        stash.gql(READ_OPERATION + ' mutation { execSQL(sql:"DELETE FROM tags") { rows_affected } }', {'sql':SQL['probe']})
 
 
 def test_keyset_relation_pages_work_when_prior_rows_are_deleted():
@@ -184,13 +185,13 @@ def test_keyset_relation_pages_work_when_prior_rows_are_deleted():
     class Reader:
         def gql(self, query, variables):
             return {'querySQL': {'rows': [list(row) for row in db.execute(variables['sql'], variables['args'])]}}
-    session = fast.CleanupSqlSession(Reader(), Counter(), page_size=3)
+    session = CleanupSqlSession(Reader(), Counter(), page_size=3)
     seen = []
     for rows in session.pages('extras', (1,'ai:blocked'), 20):
         seen.extend(r[1] for r in rows)
         db.executemany('DELETE FROM scene_markers_tags WHERE rowid=?', [(r[0],) for r in rows])
     assert seen == list(range(20,0,-1))
-    plan = [r[3] for r in db.execute('EXPLAIN QUERY PLAN '+fast.SQL['extras'],(1,'ai:blocked',0,20,3))]
+    plan = [r[3] for r in db.execute('EXPLAIN QUERY PLAN '+SQL['extras'],(1,'ai:blocked',0,20,3))]
     assert any('index_scene_markers_tags_on_tag_id' in row for row in plan)
     assert not any('TEMP B-TREE' in row for row in plan)
 
@@ -269,7 +270,7 @@ def test_sql_pruning_limits_counters_to_possible_empty_tags(tmp_path, monkeypatc
 @pytest.mark.parametrize('dry', [False, True])
 def test_legacy_interrupted_global_cleanup_can_resume_using_sql(tmp_path, monkeypatch, strategy, dry):
     from stash_ai.progress import digest
-    from stash_ai.taggers import SOURCES
+    from stash_ai.models import SOURCES
 
     stash = SQLStash(dry=dry)
     stash.marker(merge.AI, 'blocked', '2')  # Marker 1 was already deleted by legacy.

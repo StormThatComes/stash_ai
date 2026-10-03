@@ -142,7 +142,7 @@ def _inspect(app, config, kind, segments, index, refresh, checkpoint, error):
 def _publication_dependencies(app, evidence, selected):
     """Merge reads unselected cached models at their saved effective thresholds."""
     from stash_ai.scene_cache import scene_threshold, validate_scene
-    from stash_ai.taggers import SOURCES
+    from stash_ai.models import SOURCES
     from stash_ai.thresholds import validate_marker_cache
 
     dependencies = []

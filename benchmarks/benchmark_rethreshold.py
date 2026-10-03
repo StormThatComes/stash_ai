@@ -40,7 +40,7 @@ def main():
     from stash_ai import scene_cache, thresholds
     from stash_ai.runtime import RunReport
     from stash_ai.state import StateStore
-    from stash_ai.taggers import SOURCES
+    from stash_ai.models import SOURCES
     from stash_ai.temporal import TemporalPolicy
     app = SimpleNamespace(TEMPORAL_POLICY=TemporalPolicy(), MARKER_TAG_BLOCKLIST=set())
     settings = [SimpleNamespace(source=source, scene_threshold=.4 if args.mode == 'markers' else .55,

@@ -9,7 +9,7 @@ from typing import Any, TYPE_CHECKING
 from stash_ai.vocabulary import ensure_files
 
 if TYPE_CHECKING:
-    from stash_ai.taggers import ModelSettings, Vocabulary
+    from stash_ai.models import ModelSettings, Vocabulary
 
 
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
@@ -292,7 +292,7 @@ class OnnxTagger:
 
     def predict_batch(self, images: list[Any]) -> Any:
         import numpy as np
-        from stash_ai.taggers import validate_scores
+        from stash_ai.models import validate_scores
 
         count = len(images)
         if not count or count > self.batch_size:

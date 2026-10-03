@@ -15,10 +15,10 @@ import math
 
 from stash_ai import separate_sync
 from stash_ai.domain import Cue, FramePrediction, TagHierarchy
-from stash_ai.taggers import ModelSource, SOURCES
+from stash_ai.models import ModelSource, SOURCES
 from stash_ai.runtime import stage
 from stash_ai.occurrences import OCCURRENCE_TAG
-from stash_ai.state import APPLICATION_ID, KINDS, StateStore, scope_for
+from stash_ai.state import KINDS, StateStore, scope_for
 
 AI = ModelSource("ai", "AI", "ai:", "ai:marker:stash-taggers", "[AI] ", "[AI hierarchy v1]")
 

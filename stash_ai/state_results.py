@@ -6,7 +6,7 @@ import json
 
 from stash_ai.runtime import measured
 from stash_ai.state_thresholds import overlay
-from stash_ai.taggers import SOURCES
+from stash_ai.models import SOURCES
 
 
 KINDS = ("scene", "markers")

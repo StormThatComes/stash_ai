@@ -10,7 +10,7 @@ from stash_ai import marker_groups as groups
 from stash_ai import merge
 from stash_ai.occurrences import OCCURRENCE_TAG
 from stash_ai.prune import REQUIRED_COUNTS, prune_tags
-from stash_ai.taggers import WD
+from stash_ai.models import WD
 from tests.helpers.cleanup import FastStash
 from tests.helpers.cleanup import install
 from tests.helpers.cleanup import options

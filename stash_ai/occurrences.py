@@ -11,7 +11,7 @@ import heapq
 from itertools import groupby
 import math
 
-from stash_ai.taggers import SOURCES
+from stash_ai.models import SOURCES
 
 OCCURRENCE_TAG = 'ai:marker:occurrence'
 

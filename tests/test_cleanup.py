@@ -9,7 +9,7 @@ from stash_ai import cli as app
 from stash_ai import merge_sync
 from stash_ai import cleanup
 from stash_ai import merge
-from stash_ai.taggers import WD
+from stash_ai.models import WD
 from tests.helpers.evidence import span
 from tests.helpers.evidence import hit
 

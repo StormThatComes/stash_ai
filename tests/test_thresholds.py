@@ -15,7 +15,7 @@ from stash_ai import progress
 from stash_ai import scene_cache
 from stash_ai import thresholds
 from stash_ai.runtime import RunReport
-from stash_ai.taggers import SOURCES
+from stash_ai.models import SOURCES
 from tests.helpers.evidence import paired_records, policies
 
 pytestmark = pytest.mark.usefixtures('reset_temporal')

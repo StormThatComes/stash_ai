@@ -6,7 +6,7 @@ from stash_ai import separate_run
 
 def test_run_model_accumulates_scene_phases_and_closes_tagger(monkeypatch):
     from types import SimpleNamespace
-    from stash_ai.taggers import WD
+    from stash_ai.models import WD
 
     events = []
     issues = []

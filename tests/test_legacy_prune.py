@@ -8,7 +8,7 @@ import pytest
 from stash_ai import cli as app
 from stash_ai import legacy_prune
 from stash_ai.state import StateStore, scope_for
-from stash_ai.taggers import JOYTAG, WD
+from stash_ai.models import JOYTAG, WD
 from tests.helpers.stash import Stash
 
 

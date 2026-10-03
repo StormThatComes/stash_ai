@@ -7,13 +7,14 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from stash_ai.domain import Cue, FramePrediction
 from stash_ai import inference
 from stash_ai import merge_cleanup
 from stash_ai import merge_sync
 from stash_ai import cli as app
 from stash_ai import merge
 from stash_ai.temporal import TemporalPolicy, SceneAccumulator, scene_reason, consensus_seeds
-from stash_ai.taggers import SOURCES
+from stash_ai.models import SOURCES
 from tests.helpers.inference import IndexedTagger
 
 
@@ -37,9 +38,9 @@ def test_core_exclusion_remains_eligible_as_extra():
 
 
 def test_extra_coverage_is_duration_weighted_and_overlaps_not_double_counted(monkeypatch):
-    data=[app.FramePrediction(app.Cue(0,10,'',(0,0,1,1)),(('core',.9),)),
-          app.FramePrediction(app.Cue(10,11,'',(0,0,1,1)),(('core',.9),('brief',.9))),
-          app.FramePrediction(app.Cue(10.5,11.5,'',(0,0,1,1)),(('core',.9),('brief',.9)))]
+    data=[FramePrediction(Cue(0,10,'',(0,0,1,1)),(('core',.9),)),
+          FramePrediction(Cue(10,11,'',(0,0,1,1)),(('core',.9),('brief',.9))),
+          FramePrediction(Cue(10.5,11.5,'',(0,0,1,1)),(('core',.9),('brief',.9)))]
     markers,_=app.build_markers(data,frozenset({'brief'}),threshold=.8)
     assert markers[0].extra_tags==()
     monkeypatch.setattr(app,'TEMPORAL_POLICY',replace(app.TEMPORAL_POLICY,extra_min_fraction=0))
@@ -152,9 +153,9 @@ def test_scene_rules_accept_short_strong_or_repeated_support(values,expected):
 
 def test_scene_coverage_and_counter_snapshot_do_not_double_count_or_mutate():
     accumulator=SceneAccumulator(.5,app.TEMPORAL_POLICY)
-    accumulator.add(np.array([[.8],[.8]],np.float32),[app.Cue(0,2,'',(0,0,1,1)),app.Cue(1,3,'',(0,0,1,1))])
+    accumulator.add(np.array([[.8],[.8]],np.float32),[Cue(0,2,'',(0,0,1,1)),Cue(1,3,'',(0,0,1,1))])
     state=accumulator.state()
-    accumulator.add(np.array([[.8]],np.float32),[app.Cue(3,4,'',(0,0,1,1))])
+    accumulator.add(np.array([[.8]],np.float32),[Cue(3,4,'',(0,0,1,1))])
     resumed=SceneAccumulator(.5,app.TEMPORAL_POLICY,state)
     stats=resumed.statistics(['tag'])['tag']
     assert stats['hits']==2 and stats['sampled_seconds']==stats['support_seconds']==3
@@ -163,7 +164,7 @@ def test_scene_coverage_and_counter_snapshot_do_not_double_count_or_mutate():
 
 def test_scene_run_breaks_on_a_negative_frame_even_with_overlapping_cues():
     accumulator=SceneAccumulator(.5,app.TEMPORAL_POLICY)
-    cues=[app.Cue(0,10,'',(0,0,1,1)),app.Cue(1,2,'',(0,0,1,1)),app.Cue(2,3,'',(0,0,1,1))]
+    cues=[Cue(0,10,'',(0,0,1,1)),Cue(1,2,'',(0,0,1,1)),Cue(2,3,'',(0,0,1,1))]
     accumulator.add(np.array([[.8],[0],[.8]],np.float32),cues)
     assert accumulator.statistics(['tag'])['tag']['longest_hits']==1
 

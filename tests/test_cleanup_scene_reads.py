@@ -10,7 +10,7 @@ from stash_ai.client import StashClient
 from stash_ai.cleanup_sql import SQLPreview
 from stash_ai.merge_sql import OPERATION
 from stash_ai.runtime import RunReport
-from stash_ai.taggers import WD
+from stash_ai.models import WD
 from tests.helpers.cleanup import FastStash, install, options
 from tests.helpers.cleanup_sql import SQLStash
 from tests.helpers.evidence import hit, span

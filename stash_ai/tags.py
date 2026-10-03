@@ -5,7 +5,7 @@ from collections import Counter
 from typing import TYPE_CHECKING
 
 from stash_ai.domain import TagHierarchy
-from stash_ai.taggers import ModelSource
+from stash_ai.models import ModelSource
 
 if TYPE_CHECKING:
     from stash_ai.client import StashClient

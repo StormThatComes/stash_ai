@@ -7,7 +7,7 @@ from io import BytesIO
 from typing import Any, Iterator
 from urllib.parse import urljoin
 
-from stash_ai.client import absolute_stash_url
+from stash_ai.transport import absolute_stash_url
 from stash_ai.domain import Cue, FramePrediction
 from stash_ai.vtt import format_time, parse_vtt_cues
 
@@ -186,7 +186,7 @@ def _run_prediction_batches(app, tagger, stash, paths, cues, state, *,
                             checkpoint, prefetch, prepare_workers):
     import numpy as np
     from stash_ai.progress import prepared_batches
-    from stash_ai.taggers import validate_scores
+    from stash_ai.models import validate_scores
 
     settings, labels = tagger.settings, tagger.labels
     keep = 1 if app.AGGREGATION == "max" else min(app.TOP_K_FRAMES, len(cues))

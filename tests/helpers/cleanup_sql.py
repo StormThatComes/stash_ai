@@ -2,7 +2,7 @@
 from copy import deepcopy
 import sqlite3
 
-from stash_ai import cleanup_sql as fast
+from stash_ai.cleanup_sql_session import READ_OPERATION, SQL
 from tests.helpers.cleanup import FastStash
 
 
@@ -46,8 +46,8 @@ class SQLStash(FastStash):
             for tag in tags:
                 tag['image_count'] = sum(any(t['id'] == tag['id'] for t in image['tags']) for image in self.images)
             return {'findTags': {'tags': tags}}
-        if query == fast.READ_OPERATION:
-            key = next(k for k, v in fast.SQL.items() if v == variables['sql'])
+        if query == READ_OPERATION:
+            key = next(k for k, v in SQL.items() if v == variables['sql'])
             self.sql_calls.append((key, deepcopy(variables['args'])))
             if self.before_sql:
                 self.before_sql(self, key)

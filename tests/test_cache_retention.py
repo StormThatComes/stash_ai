@@ -6,7 +6,7 @@ import pytest
 import yaml
 
 from stash_ai import cli as app, progress
-from stash_ai.taggers import ModelSettings, SOURCES
+from stash_ai.models import ModelSettings, SOURCES
 from tests.test_marker_retention import marker_ranges, offline
 from tests.test_scene_thresholds import outputs
 from tests.test_thresholds import raw, records

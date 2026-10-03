@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from collections import Counter
 
-from stash_ai.taggers import ModelSource
+from stash_ai.models import ModelSource
 
 
 def owned_marker(marker: dict, source: ModelSource) -> bool:

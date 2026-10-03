@@ -15,7 +15,7 @@ pytestmark = pytest.mark.usefixtures("reset_temporal")
 
 
 def empty_policies():
-    from stash_ai.taggers import SOURCES
+    from stash_ai.models import SOURCES
     return {source: frozenset() for source in SOURCES}
 
 
