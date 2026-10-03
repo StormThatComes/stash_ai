@@ -78,7 +78,7 @@ class Stash:
         self.scene["scene_markers"]=[m for m in self.scene["scene_markers"] if m["id"]!=identifier]
     def close(self): pass
     def gql(self,query,variables=None):
-        from stash_ai.prune import REQUIRED_COUNTS
+        from stash_ai.cleanup.prune import REQUIRED_COUNTS
         counts=REQUIRED_COUNTS|{'studio_count','group_count'}
         if 'querySQL' in query:
             raise RuntimeError('SQL temporarily unavailable')

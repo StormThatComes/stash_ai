@@ -16,7 +16,7 @@ import pytest
 
 from stash_ai.inference import sprites
 from stash_ai import state_codec
-from stash_ai import merge_cleanup
+from stash_ai.cleanup import evidence as cleanup_evidence
 from stash_ai import cli as app
 from stash_ai import merge
 from stash_ai.temporal import TemporalPolicy, load_policy
@@ -171,7 +171,7 @@ def test_frozen_old_policies_do_not_reenable_retired_options(tmp_path):
             span['build_options']['policy'].update(refine_enabled=True,refine_path_map=[{'stash':'/media','local':'/not-accessible'}])
         assert merge.union_intervals(spans)[0]['sources']==['wd','dtq','oppai']
         policies['wd']=frozenset({'core'})
-        cleaned=merge_cleanup.cleanup_support(app,state,'1',[s for s in spans if s['source']!='wd'],{'wd'},policies)
+        cleaned=cleanup_evidence.cleanup_support(app,state,'1',[s for s in spans if s['source']!='wd'],{'wd'},policies)
         assert merge.union_intervals(cleaned)[0]['sources']==['dtq','oppai']
         assert all(not any(k.startswith('refine_') for k in span['build_options']['policy']) for span in cleaned)
 

@@ -10,7 +10,7 @@ import pytest
 from stash_ai.rethreshold import markers as marker_updates, execution as rethreshold_execution
 from stash_ai.signatures import digest
 from stash_ai.inference import sprites
-from stash_ai import merge_cleanup
+from stash_ai.cleanup import evidence as cleanup_evidence
 from stash_ai import cli as app
 from stash_ai import merge
 from stash_ai import scene_cache
@@ -276,9 +276,9 @@ def test_cleanup_replays_published_threshold_even_after_later_override(tmp_path)
         # At .9 both weak models vote; removing one must remove the marker.
         assert spans
         excluded = policies(); excluded['wd'] = frozenset({'core'})
-        assert merge_cleanup.cleanup_support(app, state, '1', spans, {'wd'}, excluded) == []
+        assert cleanup_evidence.cleanup_support(app, state, '1', spans, {'wd'}, excluded) == []
         # The same removal at the old .7 threshold leaves DTQ's strong evidence.
-        cleaned = merge_cleanup.cleanup_support(app, state, '1', old_spans, {'wd'}, excluded)
+        cleaned = cleanup_evidence.cleanup_support(app, state, '1', old_spans, {'wd'}, excluded)
         assert cleaned and all(s['source'] == 'dtq' for s in cleaned)
 
 

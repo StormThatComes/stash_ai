@@ -156,7 +156,7 @@ class PreviewUsage:
 
 def prune_groups(stash, report=print, *, candidate_ids=None, usage_delta=None):
     """Only owned, globally unused leaf groups are pruned; the root is retained."""
-    from stash_ai.prune import prune_tags
+    from stash_ai.cleanup.prune import prune_tags
     if candidate_ids is None:
         candidate_ids = [str(t['id']) for t in stash.iter_tags() if t['name'].startswith(PREFIX)]
     if not candidate_ids:

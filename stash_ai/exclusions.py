@@ -45,5 +45,5 @@ def prune_excluded_definitions(app, stash, policies, report):
     names = excluded_names(policies, unused=True)
     if not names or not (app.APPLY_SCENE_TAGS and app.CREATE_MARKERS):
         return {}
-    from stash_ai.prune import prune_tags
+    from stash_ai.cleanup.prune import prune_tags
     return prune_tags(stash, report=report, names=names)

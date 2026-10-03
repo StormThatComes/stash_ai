@@ -296,7 +296,7 @@ def main(argv: list[str] | None = None) -> int:
     core_policies = load_exclusion_policy(args.marker_core_exclusions, "excluded_core_tags") if CREATE_MARKERS and not hierarchy_only else empty_policies
     scene_policies = load_exclusion_policy(args.scene_tag_exclusions, "excluded_scene_tags")
     if cleanup_only:
-        from stash_ai.merge_cleanup import CleanupRun
+        from stash_ai.cleanup.run import CleanupRun
         return CleanupRun(app, settings, args, core_policies, scene_policies).run()
     result = run_saved_merge_command(app, settings, args, core_policies, scene_policies)
     if result is not None:

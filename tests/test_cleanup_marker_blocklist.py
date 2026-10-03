@@ -6,7 +6,7 @@ from dataclasses import replace
 import pytest
 
 from stash_ai.inference import sprites
-from stash_ai import merge_cleanup
+from stash_ai.cleanup import evidence as cleanup_evidence
 from stash_ai import cli as app, merge, thresholds
 from stash_ai.models import SOURCES
 from tests.helpers.evidence import segment
@@ -158,11 +158,11 @@ def test_repeated_cleanup_preserves_nonempty_historical_bans(tmp_path):
             state.put('1', source, {'markers': segments[0]})
         original = state.records('1', 'markers')
         tags = {**policies, 'dtq': frozenset({'revoked'})}
-        first = merge_cleanup.cleanup_support(app, state, '1', spans, {'dtq'}, policies, tags)
+        first = cleanup_evidence.cleanup_support(app, state, '1', spans, {'dtq'}, policies, tags)
         assert merge.union_intervals(first)[0]['extra_tags'] == ['remaining']
         assert all(span['build_options']['blocklist'] == ['detail'] for span in first)
         tags['dtq'] = frozenset({'remaining', 'revoked'})
-        second = merge_cleanup.cleanup_support(app, state, '1', first, {'dtq'}, policies, tags)
+        second = cleanup_evidence.cleanup_support(app, state, '1', first, {'dtq'}, policies, tags)
         assert merge.union_intervals(second)[0]['extra_tags'] == []
         assert state.records('1', 'markers') == original
         with pytest.raises(ValueError, match='unblocked marker tags'):

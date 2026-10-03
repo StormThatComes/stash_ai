@@ -5,8 +5,8 @@ import json
 import pytest
 
 from stash_ai import cli as app
-from stash_ai import cleanup_sql as fast
-from stash_ai.cleanup_sql_session import READ_OPERATION, SQL
+from stash_ai.cleanup import sql as fast
+from stash_ai.cleanup.sql_session import READ_OPERATION, SQL
 from stash_ai import marker_groups as groups
 from stash_ai import merge
 from tests.helpers.cleanup import install, options

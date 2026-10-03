@@ -4,7 +4,7 @@ from collections import Counter
 import pytest
 
 from stash_ai import cli as app
-from stash_ai.prune import prune_tags, PruneClient, REQUIRED_COUNTS
+from stash_ai.cleanup.prune import prune_tags, PruneClient, REQUIRED_COUNTS
 
 
 from tests.helpers.prune import PruneStash

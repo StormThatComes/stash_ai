@@ -76,7 +76,7 @@ def initialize(store):
 # invalidation signals and must not force a library-wide re-merge.
 PUBLICATION_CODE_FILES = (
     'cli.py', 'merge.py', 'commands/hierarchy.py', 'commands/legacy.py', 'runs/merged.py', 'runs/merged_model.py', 'publication/publisher.py', 'publication/parallel.py', 'publication/merged.py', 'marker_index.py', 'publication/separate.py', 'publication/markers.py',
-    'temporal.py', 'fusion.py', 'scene.py', 'occurrences.py', 'exclusions.py', 'cleanup.py',
+    'temporal.py', 'fusion.py', 'scene.py', 'occurrences.py', 'exclusions.py', 'cleanup/state.py', 'cleanup/client.py',
     'models.py', 'taggers.py', 'onnx_tagger.py', 'vocabulary.py', 'inference/prediction.py', 'inference/sprites.py', 'inference/preparation.py', 'tags.py', 'domain.py', 'performance.py',
     'timeline.py', 'merge_sql.py', 'marker_groups.py',
     'thresholds.py', 'retention.py', 'scene_cache.py', 'rethreshold/markers.py', 'rethreshold/scenes.py', 'progress.py', 'inference/inputs.py', 'inference/identity.py', 'inference/checkpoints.py', 'signatures.py', 'state.py', 'state_db.py',

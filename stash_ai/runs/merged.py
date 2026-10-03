@@ -182,8 +182,8 @@ class MergedRun:
 
     def _prune_sql(self):
         """Prepare optional discovery before pruning; native checks still authorize deletes."""
-        from stash_ai.cleanup import CleanupClient
-        from stash_ai.cleanup_sql import SQLCleanup
+        from stash_ai.cleanup.client import CleanupClient
+        from stash_ai.cleanup.sql import SQLCleanup
         try:
             client = CleanupClient(self.stash)
             sql = SQLCleanup(client, self.args, self.stats, self.report)
@@ -207,7 +207,7 @@ class MergedRun:
         pruned_before = self.stats['tags_pruned'] + self.stats['marker_group_tags_pruned']
         sql = self._prune_sql()
         if args.prune_empty_tags:
-            from stash_ai.prune import prune_tags
+            from stash_ai.cleanup.prune import prune_tags
             # Groups use the projected marker counts below, including in dry-run.
             self.stats.update(sql.prune(prefixes=args.prune_prefixes, skip_marker_groups=app.CREATE_MARKERS)
                               if sql is not None else prune_tags(

@@ -9,10 +9,10 @@ import pytest
 from stash_ai import cli as app
 from stash_ai import state_codec
 from stash_ai.publication import merged as merge_sync
-from stash_ai import cleanup_sql as fast
-from stash_ai.cleanup_sql_session import CleanupSqlSession, READ_OPERATION, SQL, is_read_only_cleanup
+from stash_ai.cleanup import sql as fast
+from stash_ai.cleanup.sql_session import CleanupSqlSession, READ_OPERATION, SQL, is_read_only_cleanup
 from stash_ai import merge
-from stash_ai.cleanup import CleanupClient
+from stash_ai.cleanup.client import CleanupClient
 from stash_ai.models import WD
 from tests.helpers.cleanup import FastStash
 from tests.helpers.cleanup import install

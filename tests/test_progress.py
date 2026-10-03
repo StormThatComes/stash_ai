@@ -310,7 +310,7 @@ def test_v1_database_is_migrated_once_without_losing_sources(tmp_path,monkeypatc
 
 @pytest.mark.parametrize("failure",[False,True])
 def test_pruning_follows_only_successful_merge(pipeline,monkeypatch,failure):
-    from stash_ai import prune as stash_prune
+    from stash_ai.cleanup import prune as stash_prune
     p=pipeline;p.stash.fail_create=failure
     calls=[]
     monkeypatch.setattr(stash_prune,"prune_tags",lambda *args,**kwargs:calls.append(args) or {})

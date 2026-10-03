@@ -319,6 +319,7 @@ def test_run_modules_move_to_package_and_remove_stale_bytecode(tmp_path):
 
 @pytest.mark.parametrize('package,modules', [
     ('publication', ('merge_sync', 'separate_sync', 'merge_publish', 'merge_parallel')),
+    ('cleanup', ('merge_cleanup', 'cleanup', 'cleanup_sql', 'cleanup_sql_session', 'prune', 'legacy_prune')),
 ])
 def test_domain_modules_move_to_packages_and_remove_stale_bytecode(tmp_path, package, modules):
     files = application_files()

@@ -388,7 +388,7 @@ def test_including_unselected_dependency_produces_a_plan_that_completes(pipeline
 
 
 def test_pending_global_cleanup_blocks_backfill_without_changing_source(tmp_path):
-    from stash_ai.cleanup import begin
+    from stash_ai.cleanup.state import begin
     path = tmp_path / 'state.sqlite3'
     seed(path)
     with merge.StateStore(path, merge.scope_for(app.STASH_URL)) as store:

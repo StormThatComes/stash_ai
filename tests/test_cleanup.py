@@ -7,7 +7,8 @@ import yaml
 
 from stash_ai import cli as app
 from stash_ai.publication import merged as merge_sync
-from stash_ai import cleanup
+from stash_ai.cleanup import state as cleanup
+from stash_ai.cleanup import client as cleanup_client
 from stash_ai import merge
 from stash_ai.models import WD
 from tests.helpers.evidence import span
@@ -55,7 +56,7 @@ def test_global_cleanup_of_9000_scenes_never_fetches_scenes_or_predictions(tmp_p
 
 
 def test_cursor_deletion_handles_overlapping_tags_once(tmp_path, monkeypatch):
-    monkeypatch.setattr(cleanup, 'PAGE_SIZE', 3)
+    monkeypatch.setattr(cleanup_client, 'PAGE_SIZE', 3)
     stash = SQLStash()
     for i in range(1, 18):
         marker = stash.marker(merge.AI, 'ban'+str(i % 5), str(i))

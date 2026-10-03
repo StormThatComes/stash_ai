@@ -26,7 +26,7 @@ class PublicationStore:
         rows = store.read_rows(
             "SELECT published,pending FROM " + store.table('snapshots') + " WHERE scope=? AND scene=? AND kind=?",
             (store.scope, str(scene), kind))
-        from stash_ai.cleanup import mask_snapshot
+        from stash_ai.cleanup.state import mask_snapshot
         values = tuple(mask_snapshot(store, store.unpack(item), kind) if item is not None else None
                        for item in rows[0]) if rows else (None, None)
         store.retain(key, values)
@@ -56,7 +56,7 @@ class PublicationStore:
     @measured('state_write')
     def prepare(self, scene, snapshots):
         store = self.store
-        from stash_ai.cleanup import stamp_snapshot
+        from stash_ai.cleanup.state import stamp_snapshot
         with store.connection:
             for kind, data in snapshots.items():
                 store.cache.discard(('snapshot', str(scene), kind))
@@ -72,7 +72,7 @@ class PublicationStore:
     @measured('state_write')
     def publish(self, scene, snapshots):
         store = self.store
-        from stash_ai.cleanup import stamp_snapshot
+        from stash_ai.cleanup.state import stamp_snapshot
         from stash_ai.recovery import clear_publications
         with store.connection:
             for kind, data in snapshots.items():

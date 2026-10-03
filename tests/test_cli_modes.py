@@ -35,7 +35,7 @@ def test_model_report_dispatch_skips_model_loading(monkeypatch, tmp_path):
 
 
 def test_prune_dispatch_runs_config_validation(monkeypatch):
-    from stash_ai import prune
+    from stash_ai.cleanup import prune
 
     validated = []
     monkeypatch.setattr(app, "validate_config", lambda *, scene_work: validated.append(scene_work))

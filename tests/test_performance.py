@@ -31,9 +31,9 @@ def fail(*args, **kwargs):
 
 @pytest.mark.parametrize('filename', [
     'tags.py', 'domain.py', 'state.py', 'state_db.py', 'state_results.py', 'state_thresholds.py', 'state_publications.py',
-    'models.py', 'vocabulary.py', 'onnx_tagger.py', 'prediction.py', 'sprites.py', 'preparation.py', 'progress.py', 'inputs.py', 'identity.py', 'checkpoints.py', 'signatures.py',
+    'models.py', 'vocabulary.py', 'onnx_tagger.py', 'inference/prediction.py', 'inference/sprites.py', 'inference/preparation.py', 'progress.py', 'inference/inputs.py', 'inference/identity.py', 'inference/checkpoints.py', 'signatures.py',
     'runs/merged.py', 'runs/merged_model.py', 'publication/publisher.py', 'publication/parallel.py', 'publication/merged.py', 'publication/separate.py', 'publication/markers.py',
-    'config.py', 'hierarchy.py', 'legacy.py', 'rethreshold/markers.py', 'rethreshold/scenes.py',
+    'config.py', 'commands/hierarchy.py', 'commands/legacy.py', 'rethreshold/markers.py', 'rethreshold/scenes.py', 'cleanup/state.py', 'cleanup/client.py',
 ])
 def test_publication_code_tracks_extracted_modules(monkeypatch, filename):
     before = performance.publication_code()
@@ -41,18 +41,18 @@ def test_publication_code_tracks_extracted_modules(monkeypatch, filename):
 
     def changed(path):
         data = read_bytes(path)
-        return data + b'\n# changed' if path.as_posix().endswith('/' + filename) else data
+        return data + b'\n# changed' if path.as_posix().endswith('/stash_ai/' + filename) else data
 
     monkeypatch.setattr(performance.Path, 'read_bytes', changed)
     assert performance.publication_code() != before
 
 
 @pytest.mark.parametrize('filename', [
-    'client.py', 'transport.py', 'vtt.py', 'arguments.py', 'validation.py', 'dispatch.py', 'explain.py',
-    'merge_cleanup.py', 'recovery.py', 'cleanup_sql.py', 'cleanup_sql_session.py',
+    'client.py', 'transport.py', 'vtt.py', 'commands/arguments.py', 'commands/validation.py', 'commands/dispatch.py', 'commands/explain.py',
+    'cleanup/run.py', 'recovery.py', 'cleanup/sql.py', 'cleanup/sql_session.py',
     'rethreshold/execution.py', 'rethreshold/targets.py', 'db/checks.py',
     'db/validation/common.py', 'db/validation/schema.py', 'db/validation/results.py',
-    'db/validation/checkpoints.py', 'db/validation/state.py', 'runs/separate.py',
+    'db/validation/checkpoints.py', 'db/validation/state.py', 'runs/separate.py', 'cleanup/evidence.py', 'cleanup/scenes.py',
 ])
 def test_publication_code_ignores_runtime_and_maintenance_modules(monkeypatch, filename):
     before = performance.publication_code()
@@ -60,7 +60,7 @@ def test_publication_code_ignores_runtime_and_maintenance_modules(monkeypatch, f
 
     def changed(path):
         data = read_bytes(path)
-        return data + b'\n# changed' if path.as_posix().endswith('/' + filename) else data
+        return data + b'\n# changed' if path.as_posix().endswith('/stash_ai/' + filename) else data
 
     monkeypatch.setattr(performance.Path, 'read_bytes', changed)
     assert performance.publication_code() == before
@@ -142,7 +142,7 @@ def test_manual_hierarchy_change_invalidates_unchanged_scene(pipeline, monkeypat
 
 
 def test_cleanup_generation_invalidates_only_its_scope(tmp_path):
-    from stash_ai.cleanup import save_state
+    from stash_ai.cleanup.state import save_state
     with merge.StateStore(tmp_path/'state.db', 'a') as state:
         with state.connection:
             performance.record_check(state, '1', 'p', 'f')

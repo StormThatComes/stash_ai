@@ -15,7 +15,7 @@ from time import perf_counter
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from stash_ai.cleanup_sql_session import CleanupSqlSession, SQL
+from stash_ai.cleanup.sql_session import CleanupSqlSession, SQL
 
 
 def main():

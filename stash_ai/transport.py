@@ -58,7 +58,7 @@ class StashTransport:
     def _read_only(query: str, variables: dict | None = None) -> bool:
         if not query.lstrip().startswith('mutation'):
             return True
-        from stash_ai.cleanup_sql_session import is_read_only_cleanup
+        from stash_ai.cleanup.sql_session import is_read_only_cleanup
         from stash_ai.merge_sql import is_read_only_merge
         return is_read_only_cleanup(query, variables) or is_read_only_merge(query, variables)
 

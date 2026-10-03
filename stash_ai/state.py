@@ -54,7 +54,7 @@ class StateStore(AbstractContextManager):
             version = database.version
             from stash_ai.progress import initialize_progress
             initialize_progress(self, version)
-            from stash_ai.cleanup import initialize
+            from stash_ai.cleanup.state import initialize
             initialize(self, version)
             if self.preview_source:
                 self.connection.execute('INSERT INTO cleanup_state SELECT * FROM cleanup_source.cleanup_state WHERE scope=?', (self.scope,))

@@ -10,7 +10,7 @@ zmian i usuwania wykluczonych extras. Moduły i testy importują je bezpośredni
 bez zależności trybu merged od reconciliation trybu separate.
 `commands/dispatch.py` wywołuje tryby CLI oraz obejmuje `MergedRun.run()`
 kontekstem diagnostyki przez `run_merged()`. Wywołania
-reconciliation korzystają bezpośrednio z `merge_sync` i `merge_cleanup`; CLI
+reconciliation korzystają bezpośrednio z `publication/merged.py` i `cleanup/scenes.py`; CLI
 uruchamia cleanup przez `CleanupRun.run()`. Kod i testy importują codec
 bezpośrednio z `stash_ai/state_codec.py`.
 Stanowy lifecycle jednego przebiegu merged-output (scan, rethreshold, inference,
@@ -31,9 +31,13 @@ szeregowe, a awaria workerów nie uruchamia drugiego przebiegu publikacji.
 Planowanie i publikację zmian jednej sceny rozdziela `stash_ai/publication/merged.py`;
 `MergeSyncPlan` przechowuje wyłącznie plan snapshotów i mutacji Stash, a kolejne
 funkcje obsługują przygotowanie evidence, tagi, markery i publikację. Cleanup ma
-osobny lifecycle w `stash_ai/merge_cleanup.py` / `CleanupRun`; ten moduł zawiera
-też re-ewaluację wcześniej opublikowanego evidence oraz rekonsyliację pojedynczej
-sceny. Pozostała logika domenowa znajduje się m.in. w `stash_ai/scene.py`,
+osobny lifecycle w `stash_ai/cleanup/run.py` / `CleanupRun`. Rekonsyliację jednej
+sceny zawiera `cleanup/scenes.py`, a re-ewaluację opublikowanego evidence
+`cleanup/evidence.py`: kwalifikacja zmienionych dowodów, leniwy `EvidenceReplay`
+z indeksem sygnatur i cache replay oraz clipping do opublikowanych przedziałów.
+Stan i maski cleanupu znajdują się w `cleanup/state.py`, a odczyt katalogu tagów
+w `cleanup/client.py`. `cleanup/prune.py` i `cleanup/legacy.py` obsługują pruning
+zwykłych tagów oraz zachowanych wyników legacy. Pozostała logika domenowa znajduje się m.in. w `stash_ai/scene.py`,
 `stash_ai/fusion.py`, `stash_ai/temporal.py` i `stash_ai/occurrences.py`.
 
 `stash_ai/marker_index.py` buduje dla jednej sceny niemutowalny indeks istniejących
@@ -137,13 +141,13 @@ przy przekierowaniu mediów do innego origin.
 
 ## Cleanup przez SQL
 
-`stash_ai/cleanup_sql_session.py` zawiera ograniczony allowlistą transport SQL/API,
-metryki odczytów i zapisów oraz keyset pagination. `stash_ai/cleanup_sql.py` /
+`stash_ai/cleanup/sql_session.py` zawiera ograniczony allowlistą transport SQL/API,
+metryki odczytów i zapisów oraz keyset pagination. `stash_ai/cleanup/sql.py` /
 `SQLCleanup` pozostaje warstwą domenową: wybiera kandydatów, usuwa markery i
 powiązania, obsługuje preview i pruning. Korzysta bezpośrednio ze swojej
 `CleanupSqlSession` do odczytów, zapisów, stronicowania i granic discovery.
 Stałe SQL i walidator odczytów są importowane bezpośrednio z
-`cleanup_sql_session.py`.
+`cleanup/sql_session.py`.
 
 
 ## Lokalny stan

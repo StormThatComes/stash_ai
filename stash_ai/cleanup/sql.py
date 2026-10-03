@@ -12,10 +12,10 @@ from itertools import batched
 
 from tqdm import tqdm
 
-from stash_ai.cleanup import begin, finish
+from stash_ai.cleanup.state import begin, finish
 from stash_ai.models import SOURCES
 
-from stash_ai.cleanup_sql_session import CleanupSqlSession
+from stash_ai.cleanup.sql_session import CleanupSqlSession
 
 
 class SQLCleanup:
@@ -159,7 +159,7 @@ class SQLCleanup:
     def prune(self, policies=None, prefixes=None, *, skip_marker_groups=False):
         from stash_ai.exclusions import excluded_names
         from stash_ai.marker_groups import PREFIX
-        from stash_ai.prune import prefixes_checked, prune_tags
+        from stash_ai.cleanup.prune import prefixes_checked, prune_tags
         names = excluded_names(policies, unused=True) if policies is not None else None
         prefixes = prefixes_checked(prefixes)
         selected = {i for i, n in self.catalog.items()

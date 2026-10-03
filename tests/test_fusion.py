@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 from stash_ai.inference import sprites
-from stash_ai import merge_cleanup
+from stash_ai.cleanup import evidence as cleanup_evidence
 from stash_ai import cli as app
 from stash_ai import merge
 from stash_ai.temporal import TemporalPolicy
@@ -175,11 +175,11 @@ def test_cleanup_rebuilds_a_shared_range_when_its_anchor_source_is_excluded(tmp_
         _,spans=merge.evidence(app,state,'1',excluded,policies())
         assert spans[0]['source']=='wd'
         excluded['wd']=frozenset({'core'})
-        cleaned=merge_cleanup.cleanup_support(app,state,'1',spans,{'wd'},excluded)
+        cleaned=cleanup_evidence.cleanup_support(app,state,'1',spans,{'wd'},excluded)
         marker=merge.union_intervals(cleaned)[0]
         assert (marker['start'],marker['end'],marker['sources'])==(1,3,['dtq','oppai'])
         excluded['dtq']=frozenset({'core'})
-        assert merge_cleanup.cleanup_support(app,state,'1',cleaned,{'dtq'},excluded)==[]
+        assert cleanup_evidence.cleanup_support(app,state,'1',cleaned,{'dtq'},excluded)==[]
 
 
 def test_cleanup_does_not_adopt_new_unpublished_votes(tmp_path):
@@ -189,7 +189,7 @@ def test_cleanup_does_not_adopt_new_unpublished_votes(tmp_path):
         _,spans=merge.evidence(app,state,'1',excluded,policies())
         state.put('1','oppai',{'markers':segment('oppai',[[],[],[('core',.9)]])})
         excluded['wd']=frozenset({'core'})
-        assert merge_cleanup.cleanup_support(app,state,'1',spans,{'wd'},excluded)==[]
+        assert cleanup_evidence.cleanup_support(app,state,'1',spans,{'wd'},excluded)==[]
 
 
 def test_cleanup_clips_source_scores_and_extra_proofs_to_published_bounds(tmp_path):
@@ -203,7 +203,7 @@ def test_cleanup_clips_source_scores_and_extra_proofs_to_published_bounds(tmp_pa
         # otherwise return a longer interval from the same frozen inputs.
         spans[0].update(start=2,end=4)
         excluded['wd']=frozenset({'core','detail'})
-        cleaned=merge_cleanup.cleanup_support(app,state,'1',spans,{'wd'},excluded)
+        cleaned=cleanup_evidence.cleanup_support(app,state,'1',spans,{'wd'},excluded)
         assert len(cleaned)==1
         proof=cleaned[0]['source_evidence']
         assert (proof['dtq']['score'],proof['oppai']['score'])==(.91,.92)
@@ -223,7 +223,7 @@ def test_cleanup_refuses_changed_required_frame_records(tmp_path):
         state.put('1','dtq',{'markers':changed})
         excluded['wd']=frozenset({'core'})
         with pytest.raises(RuntimeError,match='sources changed'):
-            merge_cleanup.cleanup_support(app,state,'1',spans,{'wd'},excluded)
+            cleanup_evidence.cleanup_support(app,state,'1',spans,{'wd'},excluded)
 
 
 def test_cleanup_command_rebuilds_shared_marker_and_then_removes_last_support(pipeline,monkeypatch,tmp_path):
@@ -251,9 +251,9 @@ def test_cleanup_requires_published_evidence_and_preserves_extras_when_only_core
     with merge.StateStore(tmp_path/'state.sqlite3','fixture') as state:
         for source,segments in extra_records().items():state.put('1',source,{'markers':segments[0]})
         _,spans=merge.evidence(app,state,'1',excluded,policies())
-        cleaned=merge_cleanup.cleanup_support(app,state,'1',spans,{'dtq'},excluded)
+        cleaned=cleanup_evidence.cleanup_support(app,state,'1',spans,{'dtq'},excluded)
         assert merge.union_intervals(cleaned)[0]['extra_tags']==['detail']
-        cleaned=merge_cleanup.cleanup_support(app,state,'1',spans,{'wd','dtq'},excluded,policies({'detail'}))
+        cleaned=cleanup_evidence.cleanup_support(app,state,'1',spans,{'wd','dtq'},excluded,policies({'detail'}))
         assert merge.union_intervals(cleaned)[0]['extra_tags']==[]
 
 

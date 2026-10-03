@@ -8,7 +8,8 @@ import pytest
 
 from stash_ai.rethreshold import execution as rethreshold_execution, scenes as scene_updates
 from stash_ai import cli as app
-from stash_ai import cleanup, db, performance, progress, recovery
+from stash_ai import db, performance, progress, recovery
+from stash_ai.cleanup import state as cleanup
 from stash_ai.reports import developer as developer_report
 from stash_ai import scene_cache, thresholds
 from stash_ai.runtime import RunReport
