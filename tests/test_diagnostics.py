@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from stash_ai import inference
+from stash_ai.inference import sprites
 from stash_ai import state_codec
 from stash_ai import cli as app
 from stash_ai import merge
@@ -138,7 +138,7 @@ def test_profile_and_force_merge_preserve_results_and_do_not_run_models(pipeline
     expected = deepcopy(p.stash.scene)
     p.stash.writes.clear()
     monkeypatch.setattr(app, 'load_tagger', lambda *a: pytest.fail('profile loaded a model'))
-    monkeypatch.setattr(inference, 'fetch_cues', lambda *a: pytest.fail('profile fetched media'))
+    monkeypatch.setattr(sprites, 'fetch_cues', lambda *a: pytest.fail('profile fetched media'))
     for force in (False, True):
         path = tmp_path/f'profile-{force}.jsonl'
         args = [*p.args, '--merge-only', '--profile-merge', str(path)] + (['--force-merge'] if force else [])

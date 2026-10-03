@@ -1,5 +1,6 @@
 """Occurrence publication, old caches, revocation and exact sampled positions."""
 
+
 from collections import Counter
 from copy import deepcopy
 from dataclasses import asdict, replace
@@ -7,13 +8,13 @@ from dataclasses import asdict, replace
 import numpy as np
 import pytest
 
+from stash_ai.inference.identity import model_identity
 from stash_ai.domain import Cue
-from stash_ai import inference
+from stash_ai.inference import sprites
 from stash_ai import merge_cleanup
 from stash_ai import merge_sync
 from stash_ai import cli as app
 from stash_ai import merge
-from stash_ai import progress
 from stash_ai.occurrences import OCCURRENCE_TAG, occurrence_contributions
 from stash_ai.temporal import SceneAccumulator, TemporalPolicy
 from tests.helpers.stash import Stash
@@ -224,11 +225,11 @@ def test_marker_cap_has_priority_over_additional_points(tmp_path, monkeypatch):
 
 def test_old_policy_snapshots_and_inference_identity_remain_compatible(pipeline, monkeypatch):
     settings = app.load_model_settings(app.MODELS_CONFIG_FILE, ['wd'], None)[0]
-    identity = progress.model_identity(app, settings, pipeline.vocab)
+    identity = model_identity(app, settings, pipeline.vocab)
     saved = asdict(app.TEMPORAL_POLICY); saved.pop('occurrence_markers')
     assert not TemporalPolicy.from_snapshot(saved).occurrence_markers
     monkeypatch.setattr(app, 'TEMPORAL_POLICY', replace(app.TEMPORAL_POLICY, occurrence_markers=False))
-    assert progress.model_identity(app, settings, pipeline.vocab) == identity
+    assert model_identity(app, settings, pipeline.vocab) == identity
 
 
 def test_pipeline_reuses_results_for_markers_only_dry_run_and_cleanup(pipeline, monkeypatch, tmp_path):
@@ -241,7 +242,7 @@ def test_pipeline_reuses_results_for_markers_only_dry_run_and_cleanup(pipeline, 
         records = state.connection.execute('SELECT data FROM results ORDER BY kind').fetchall()
         assert state.records('1', 'scene')['wd'][0]['items'][0]['statistics']['peak_time'] == 3
     monkeypatch.setattr(app, 'load_tagger', lambda *a: pytest.fail('merge or cleanup loaded a model'))
-    monkeypatch.setattr(inference, 'fetch_cues', lambda *a: pytest.fail('merge or cleanup fetched media'))
+    monkeypatch.setattr(sprites, 'fetch_cues', lambda *a: pytest.fail('merge or cleanup fetched media'))
     p.stash.writes.clear()
     assert app.main([*p.args, '--merge-only', '--markers-only']) == 0
     assert not p.stash.writes and p.stash.scene['scene_markers'] == point

@@ -1,11 +1,13 @@
 """Wider cache must support offline retuning without changing publication."""
+
 from copy import deepcopy
 from dataclasses import replace
 
 import pytest
 import yaml
 
-from stash_ai import cli as app, progress
+from stash_ai.inference.identity import model_identity
+from stash_ai import cli as app
 from stash_ai.models import ModelSettings, SOURCES
 from tests.test_marker_retention import marker_ranges, offline
 from tests.test_scene_thresholds import outputs
@@ -41,12 +43,12 @@ def test_retention_settings_apply_to_all_models(tmp_path, value):
 
 def test_omitted_retention_preserves_legacy_model_identity(tmp_path, pipeline):
     config = ModelSettings(SOURCES['wd'], tmp_path)
-    expected = progress.model_identity(app, config, pipeline.vocab)
+    expected = model_identity(app, config, pipeline.vocab)
     assert expected['retention'] == dict(temporal=True, marker_ratio=.85, scene_ratio=.85)
-    assert progress.model_identity(app, replace(config, scene_cache_floor=None,
+    assert model_identity(app, replace(config, scene_cache_floor=None,
         marker_cache_floor=None), pipeline.vocab) == expected
     for name in ('scene_cache_floor', 'marker_cache_floor'):
-        assert progress.model_identity(app, replace(config, **{name: .2}), pipeline.vocab) != expected
+        assert model_identity(app, replace(config, **{name: .2}), pipeline.vocab) != expected
 
 
 @pytest.mark.parametrize('temporal', [True, False])

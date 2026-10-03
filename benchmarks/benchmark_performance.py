@@ -43,7 +43,7 @@ def main():
     sys.path.insert(0, str(args.project.resolve()))
     import numpy as np
     from stash_ai import cli as app
-    from stash_ai import inference
+    from stash_ai.inference import prediction
     from stash_ai import merge
     from stash_ai.temporal import TemporalPolicy
     from stash_ai.models import SOURCES
@@ -72,7 +72,7 @@ def main():
     filtering = []
     for _ in range(args.repeats):
         start = time.perf_counter()
-        selected = [inference.select_scores(row, labels, .65, 0) for row in values]
+        selected = [prediction.select_scores(row, labels, .65, 0) for row in values]
         filtering.append(time.perf_counter()-start)
     print(json.dumps(dict(
         frames=args.frames, labels=args.labels, sources=len(SOURCES), repeats=args.repeats,

@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from stash_ai import inference
+from stash_ai.inference import sprites
 from stash_ai import merge_cleanup
 from stash_ai import separate_sync
 from stash_ai import cli as app
@@ -77,7 +77,7 @@ def test_cleanup_removes_shared_and_legacy_extras_without_images_or_models(pipel
     path = policy_file(tmp_path, ['extra'])
     for name in ('load_tagger', 'load_vocabulary'):
         monkeypatch.setattr(app, name, lambda *args: pytest.fail('cleanup accessed model/input assets'))
-    monkeypatch.setattr(inference, 'fetch_cues', lambda *args: pytest.fail('cleanup accessed model/input assets'))
+    monkeypatch.setattr(sprites, 'fetch_cues', lambda *args: pytest.fail('cleanup accessed model/input assets'))
     p.stash.dry_run = dry
     cleanup = ['--models', 'all', *p.args[2:], '--cleanup-only', '--tag-exclusions', str(path),
                '--marker-core-exclusions', str(core)] + (['--dry-run'] if dry else [])

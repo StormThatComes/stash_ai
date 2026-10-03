@@ -1,6 +1,6 @@
 """Separate-output model lifecycle and reporting."""
 from stash_ai import cli
-from stash_ai import inference
+from stash_ai.inference import preparation
 from stash_ai import separate_run
 from tests.helpers.cli import runtime_args
 
@@ -44,7 +44,7 @@ def test_run_model_accumulates_scene_phases_and_closes_tagger(monkeypatch):
         assert prepare("frame", 448) == "prepared"
         return Tagger()
 
-    monkeypatch.setattr(inference, "prepare_image", prepare_image)
+    monkeypatch.setattr(preparation, "prepare_image", prepare_image)
     monkeypatch.setattr(cli, "load_tagger", load_tagger)
     monkeypatch.setattr(cli, "print_hierarchy_summary", lambda resolver: events.append("summary"))
     monkeypatch.setattr(cli, "safe_error", lambda exc, **kwargs: str(exc))

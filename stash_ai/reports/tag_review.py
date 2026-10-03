@@ -178,7 +178,7 @@ def _supporting_scores(app, contribution, tag, segments, postings):
 def _marker_signals(app, store, scene, spans, rows, options):
     from stash_ai.merge import marker_segment_signature, union_intervals
     from stash_ai.occurrences import is_occurrence
-    from stash_ai.performance import digest
+    from stash_ai.signatures import digest
     from stash_ai.thresholds import marker_threshold
 
     effective, by_meta, segments_by_signature, postings = {}, defaultdict(set), {}, {}

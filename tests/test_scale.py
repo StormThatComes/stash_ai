@@ -1,5 +1,6 @@
 """Shared scene proof, short extras, bounded RAM/prefetch, and 9000-scene output."""
 
+
 from functools import partial
 from collections import Counter
 from copy import deepcopy
@@ -10,8 +11,9 @@ import threading
 import numpy as np
 import pytest
 
+from stash_ai.inference.identity import model_identity
 from stash_ai.domain import Cue
-from stash_ai import inference
+from stash_ai.inference import checkpoints, preparation, sprites
 from stash_ai import cli as app
 from stash_ai import fusion
 from stash_ai import merge
@@ -222,7 +224,7 @@ def test_store_cache_is_detached_invalidated_and_rollback_safe(tmp_path):
         assert progress.completed(state, '1', 'wd', ['scene'], 'b')
         progress.request_refresh(state, ['1'], ['wd'], ['scene'])
         assert not progress.completed(state, '1', 'wd', ['scene'], 'b')
-        progress.finish(state, '1', 'wd', {'scene': second}, {})
+        checkpoints.finish(state, '1', 'wd', {'scene': second}, {})
         assert progress.completed(state, '1', 'wd', ['scene'], 'b')
 
 
@@ -257,7 +259,7 @@ def test_prefetch_queue_has_a_strict_bound(pipeline, monkeypatch):
     p = pipeline
     p.cues = [Cue(i, i+1, 'sprite', (0,0,1,1)) for i in range(30)]
     config = app.load_model_settings(app.MODELS_CONFIG_FILE, ['wd'], None)[0]
-    model = app.load_tagger(config, p.vocab, partial(inference.prepare_image, app))
+    model = app.load_tagger(config, p.vocab, partial(preparation.prepare_image, app))
     ready = threading.Event()
     original = model.prepare
     def prepare(value):
@@ -265,7 +267,7 @@ def test_prefetch_queue_has_a_strict_bound(pipeline, monkeypatch):
         if result == 15: ready.set()
         return result
     monkeypatch.setattr(model, 'prepare', prepare)
-    iterator = progress.prepared_batches(app, model, p.stash, {}, p.cues, 3)
+    iterator = preparation.prepared_batches(app, model, p.stash, {}, p.cues, 3)
     try:
         next(iterator)
         assert ready.wait(2)
@@ -309,10 +311,10 @@ def test_invalid_ram_budget_is_rejected_before_work(pipeline, value):
 
 def test_new_policy_switches_do_not_invalidate_inference_or_old_snapshots(pipeline, monkeypatch):
     config = app.load_model_settings(app.MODELS_CONFIG_FILE, ['wd'], None)[0]
-    before = progress.model_identity(app, config, pipeline.vocab)
+    before = model_identity(app, config, pipeline.vocab)
     monkeypatch.setattr(app, 'TEMPORAL_POLICY', replace(app.TEMPORAL_POLICY, shared_scene_tags=False,
                        short_marker_extras=False, extra_short_min_hits=7))
-    assert progress.model_identity(app, config, pipeline.vocab) == before
+    assert model_identity(app, config, pipeline.vocab) == before
     old = asdict(app.TEMPORAL_POLICY)
     for key in ('shared_scene_tags', 'short_marker_extras', 'extra_short_min_hits'): old.pop(key)
     restored = TemporalPolicy.from_snapshot(old)
@@ -331,7 +333,7 @@ def test_shared_scene_merge_only_reuses_cache_and_preserves_other_outputs(pipeli
         before = state.connection.execute('SELECT model,kind,data FROM results ORDER BY model,kind').fetchall()
     markers = deepcopy(p.stash.scene['scene_markers'])
     monkeypatch.setattr(app, 'load_tagger', lambda *args: pytest.fail('merge-only loaded a model'))
-    monkeypatch.setattr(inference, 'fetch_cues', lambda *args: pytest.fail('merge-only fetched input images'))
+    monkeypatch.setattr(sprites, 'fetch_cues', lambda *args: pytest.fail('merge-only fetched input images'))
     assert app.main([*args, '--merge-only', '--scene-tags-only']) == 0
     assert [tag['name'] for tag in p.stash.scene['tags']] == ['ai:common']
     assert p.stash.scene['scene_markers'] == markers

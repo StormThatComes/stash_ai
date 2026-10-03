@@ -4,8 +4,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from stash_ai import cli as app, inference
-from stash_ai.inference_inputs import VerifiedMedia, RunInputs, inspect_input
+from stash_ai import cli as app
+from stash_ai.inference import sprites
+from stash_ai.inference.inputs import VerifiedMedia, RunInputs, inspect_input
 from stash_ai.runtime import RamCache
 
 
@@ -49,7 +50,7 @@ def test_media_is_fetched_once_for_four_models_with_identical_signatures(pipelin
     def cues(app, media, paths):
         media.get_media(paths['vtt'])
         return p.cues, len(p.cues)
-    monkeypatch.setattr(inference, 'fetch_cues', cues)
+    monkeypatch.setattr(sprites, 'fetch_cues', cues)
     paths = p.stash.scene['paths']
     reference = [inspect_input(app, p.stash, paths, model)[2] for model in range(4)]
     calls.clear()

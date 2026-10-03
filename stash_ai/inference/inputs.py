@@ -4,8 +4,8 @@ from __future__ import annotations
 from collections import OrderedDict
 import hashlib
 
-from stash_ai import inference
-from stash_ai.progress import digest
+from stash_ai.inference import sprites
+from stash_ai.signatures import digest
 
 
 class VerifiedMedia:
@@ -37,7 +37,7 @@ class VerifiedMedia:
 
 def inspect_input(app, stash, paths, identity):
     media = VerifiedMedia(stash)
-    cues, total = inference.fetch_cues(app, media, paths)
+    cues, total = sprites.fetch_cues(app, media, paths)
     if not cues:
         raise ValueError("No VTT cues to analyze.")
     for url in dict.fromkeys(cue.image for cue in cues):

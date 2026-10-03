@@ -43,20 +43,28 @@ w trybie `--output-mode separate` obsługuje `stash_ai/separate_run.py`; lifecyc
 jest podzielony na synchronizację hierarchii, przetwarzanie pojedynczej sceny
 oraz raportowanie. Pobieranie cue/sprite, przygotowanie obrazów, filtrowanie
 score i resumowalny lokalny pipeline inferencji znajdują się w
-`stash_ai/inference.py`. Reconciliation dla `--output-mode separate` (własność
+`stash_ai/inference/`. Reconciliation dla `--output-mode separate` (własność
 markerów, payloady, plan create/update/delete, cleanup wykluczeń i publikacja
 sceny) znajduje się w `stash_ai/separate_sync.py`. Wywołania i testy korzystają
 bezpośrednio z tych modułów; helpery inferencji i reconciliation nie są
 ponownie eksportowane przez `cli.py`. Funkcje zależne od ustawień przebiegu
 otrzymują `app` jako jawny argument, a callback przygotowania obrazu JoyTag
 wiąże ten argument przez `functools.partial`.
-`stash_ai/inference_inputs.py` zawiera `VerifiedMedia`, `RunMedia`, `RunInputs`
+`stash_ai/inference/inputs.py` zawiera `VerifiedMedia`, `RunMedia`, `RunInputs`
 i `inspect_input()`: weryfikuje wejścia VTT/sprite, tworzy ich sygnatury i
 współdzieli ograniczony cache mediów oraz manifestów między modelami wyłącznie
-w RAM. Kod i testy importują je bezpośrednio z tego modułu. `stash_ai/progress.py`
-obsługuje indeks ukończenia, resume/refresh, podpis modelu, checkpointy oraz
-przygotowanie batchy. Format sygnatur wejść i checkpointów pozostaje taki sam;
+w RAM. Kod i testy importują je bezpośrednio z tego modułu.
+`inference/sprites.py` odpowiada za cue i dekodowanie sprite, a
+`inference/preparation.py` za preprocessing obrazów oraz ograniczone, uporządkowane
+batchowanie z własnością i zamykaniem obrazów w workerach. `inference/prediction.py`
+odtwarza stan predykcji, wykonuje batche i finalizuje wyniki sceny.
+`inference/identity.py` buduje tożsamość modeli; `inference/checkpoints.py` zawiera
+`Checkpoint`, zapis i odtworzenie kompaktowego stanu oraz atomowe zakończenie inferencji.
+`stash_ai/progress.py` obsługuje indeks ukończenia, ponowne użycie wyników i resume/refresh.
+`stash_ai/signatures.py` definiuje wspólny `digest()` dla sygnatur wejść, checkpointów
+i publikacji. Kanoniczny JSON, hashe, format BLOB-ów oraz schemat bazy pozostają takie same;
 zapis wyników, usunięcie checkpointu i zakończenie refresh nadal są atomowe.
+Pakiet `inference` nie re-eksportuje helperów; wywołania używają modułów, które je definiują.
 Definicja opcji CLI i walidacja kombinacji flag są
 w `stash_ai/cli_args.py`, a dispatch samodzielnych trybów DB/diagnostics/recovery/
 prune/model-report/backfill w `stash_ai/cli_modes.py`. Parsowanie konfiguracji,

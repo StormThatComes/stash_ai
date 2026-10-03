@@ -13,7 +13,7 @@ import pytest
 from PIL import Image
 
 from stash_ai.domain import Cue, TagHierarchy
-from stash_ai import inference
+from stash_ai.inference import checkpoints, prediction, preparation, sprites
 from stash_ai import cli as app
 from stash_ai import merge
 from stash_ai import performance
@@ -30,7 +30,7 @@ def fail(*args, **kwargs):
 
 @pytest.mark.parametrize('filename', [
     'tags.py', 'domain.py', 'state.py', 'state_db.py', 'state_results.py', 'state_thresholds.py', 'state_publications.py',
-    'models.py', 'vocabulary.py', 'onnx_tagger.py', 'inference.py', 'progress.py', 'inference_inputs.py',
+    'models.py', 'vocabulary.py', 'onnx_tagger.py', 'prediction.py', 'sprites.py', 'preparation.py', 'progress.py', 'inputs.py', 'identity.py', 'checkpoints.py', 'signatures.py',
     'merge_run.py', 'merge_publish.py', 'merge_parallel.py', 'merge_sync.py', 'separate_sync.py',
     'config.py',
 ])
@@ -194,13 +194,13 @@ def test_preview_resumes_checkpoint_and_does_not_resurrect_deleted_source(pipeli
     with merge.StateStore(p.path, merge.scope_for(app.STASH_URL), True) as preview:
         assert preview.connection.execute('SELECT processed FROM ' + preview.table('checkpoints')).fetchone() == (4,)
         progress.request_refresh(preview, ['1'], ['wd'], ['scene', 'markers'])
-        checkpoint = progress.Checkpoint(preview, '1', 'wd', 'new', 10, 2)
+        checkpoint = checkpoints.Checkpoint(preview, '1', 'wd', 'new', 10, 2)
         assert checkpoint.restore()[0] == 0
         assert not preview.connection.execute('SELECT 1 FROM ' + preview.table('checkpoint_frames')).fetchall()
         checkpoint.record(2, np.zeros((2, 2), np.float32), [])
         checkpoint.flush()
-        assert progress.Checkpoint(preview, '1', 'wd', 'new', 10, 2).restore()[0] == 2
-        progress.finish(preview, '1', 'wd', {k: dict(meta={'origin':'inference', 'inference_signature':'new'}, items=[]) for k in merge.KINDS}, {})
+        assert checkpoints.Checkpoint(preview, '1', 'wd', 'new', 10, 2).restore()[0] == 2
+        checkpoints.finish(preview, '1', 'wd', {k: dict(meta={'origin':'inference', 'inference_signature':'new'}, items=[]) for k in merge.KINDS}, {})
         assert progress.completed(preview, '1', 'wd', merge.KINDS, 'new')
         assert not preview.connection.execute('SELECT 1 FROM ' + preview.table('checkpoints')).fetchall()
     assert p.path.read_bytes() == before
@@ -236,8 +236,8 @@ def test_cpu_transforms_are_parallel_ordered_and_own_their_images(monkeypatch, p
         copies.append(image)
         rendezvous.wait(timeout=5)
         return image.getpixel((0, 0))[0]
-    monkeypatch.setattr(inference, 'iter_sprite_frames', frames)
-    batches = list(progress.prepared_batches(app, SimpleNamespace(batch_size=4, prepare=prepare), None, {}, [], prefetch, workers=4))
+    monkeypatch.setattr(sprites, 'iter_sprite_frames', frames)
+    batches = list(preparation.prepared_batches(app, SimpleNamespace(batch_size=4, prepare=prepare), None, {}, [], prefetch, workers=4))
     assert [v for batch, _ in batches for v in batch] == list(range(8))
     assert len(threads) == 4 and threading.get_ident() not in threads
     assert all(a is not b for a in copies for b in originals)
@@ -259,9 +259,9 @@ def test_cpu_preparation_failure_closes_workers_and_owned_images(monkeypatch):
     def prepare(image):
         copies.append(image)
         raise ValueError('bad frame')
-    monkeypatch.setattr(inference, 'iter_sprite_frames', frames)
+    monkeypatch.setattr(sprites, 'iter_sprite_frames', frames)
     with pytest.raises(ValueError, match='bad frame'):
-        list(progress.prepared_batches(app, SimpleNamespace(batch_size=4, prepare=prepare), None, {}, [], 2, workers=4))
+        list(preparation.prepared_batches(app, SimpleNamespace(batch_size=4, prepare=prepare), None, {}, [], 2, workers=4))
     assert copies
     for image in copies:
         with pytest.raises(ValueError):
@@ -277,7 +277,7 @@ def test_vectorized_score_filter_preserves_float_boundaries_and_order(threshold)
     expected = sorted(((label, score) for label, score in zip(labels, scores.tolist())
                        if score >= threshold), key=lambda item: (-item[1], item[0]))
     for limit in [0, 7]:
-        assert inference.select_scores(scores, labels, threshold, limit) == (expected[:limit] if limit else expected)
+        assert prediction.select_scores(scores, labels, threshold, limit) == (expected[:limit] if limit else expected)
 
 
 def test_cache_accounts_cue_attributes_and_evicts_under_process_pressure(monkeypatch):

@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 from stash_ai.domain import Cue, FramePrediction
-from stash_ai import inference
+from stash_ai.inference import prediction
 from stash_ai import merge_cleanup
 from stash_ai import merge_sync
 from stash_ai import cli as app
@@ -181,7 +181,7 @@ def test_temporal_resume_preserves_statistics_and_all_sparse_scores(pipeline,mon
     assert p.loaded[-1].seen==list(range(4,10))
     expected=IndexedTagger(p.loaded[-1].settings,p.scores['wd'],p.vocab.labels)
     analysis={}
-    predictions,output=inference.predict_scene(app, expected,p.stash,{},p.cues,raw_scene=True,analysis=analysis)
+    predictions,output=prediction.predict_scene(app, expected,p.stash,{},p.cues,raw_scene=True,analysis=analysis)
     with merge.StateStore(p.path,merge.scope_for(app.STASH_URL),True) as state:
         scene=state.records('1','scene')['wd'][-1]
         markers=state.records('1','markers')['wd'][-1]

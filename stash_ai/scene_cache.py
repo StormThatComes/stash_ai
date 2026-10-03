@@ -185,7 +185,8 @@ def rethreshold(app, store, scenes, settings, report, *, markers=False):
 
 
 def reuse(app, store, scene, config, identity, cues, hashes, kinds):
-    from stash_ai.progress import completed, digest
+    from stash_ai.progress import completed
+    from stash_ai.signatures import digest
     from stash_ai.thresholds import indexed_signature
     records = {kind: store.records(scene, kind, config.source.key, borrow=True).get(config.source.key, []) for kind in kinds}
     if any(not segments for segments in records.values()):

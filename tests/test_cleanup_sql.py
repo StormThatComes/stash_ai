@@ -269,7 +269,7 @@ def test_sql_pruning_limits_counters_to_possible_empty_tags(tmp_path, monkeypatc
 @pytest.mark.parametrize('strategy', ['auto', 'sql'])
 @pytest.mark.parametrize('dry', [False, True])
 def test_legacy_interrupted_global_cleanup_can_resume_using_sql(tmp_path, monkeypatch, strategy, dry):
-    from stash_ai.progress import digest
+    from stash_ai.signatures import digest
     from stash_ai.models import SOURCES
 
     stash = SQLStash(dry=dry)
