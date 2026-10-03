@@ -40,7 +40,7 @@ def main():
     from stash_ai.rethreshold import (
         execution as rethreshold_execution, markers as marker_updates, scenes as scene_updates)
     from stash_ai.runtime import RunReport
-    from stash_ai.state import StateStore
+    from stash_ai.storage.store import StateStore
     from stash_ai.models import ModelSettings, SOURCES
     from stash_ai.temporal import TemporalPolicy
     app = SimpleNamespace(TEMPORAL_POLICY=TemporalPolicy())

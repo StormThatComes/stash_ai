@@ -12,7 +12,7 @@ bez zależności trybu merged od reconciliation trybu separate.
 kontekstem diagnostyki przez `run_merged()`. Wywołania
 reconciliation korzystają bezpośrednio z `publication/merged.py` i `cleanup/scenes.py`; CLI
 uruchamia cleanup przez `CleanupRun.run()`. Kod i testy importują codec
-bezpośrednio z `stash_ai/state_codec.py`.
+bezpośrednio z `stash_ai/storage/codec.py`.
 Stanowy lifecycle jednego przebiegu merged-output (scan, rethreshold, inference,
 publikacja i pruning) obsługuje `stash_ai/runs/merged.py` / `MergedRun`, który otwiera
 oraz zamyka Stash i StateStore. `runs/merged_model.py` / `MergedModelRun` odpowiada
@@ -74,7 +74,7 @@ batchowanie z własnością i zamykaniem obrazów w workerach. `inference/predic
 odtwarza stan predykcji, wykonuje batche i finalizuje wyniki sceny.
 `inference/identity.py` buduje tożsamość modeli; `inference/checkpoints.py` zawiera
 `Checkpoint`, zapis i odtworzenie kompaktowego stanu oraz atomowe zakończenie inferencji.
-`stash_ai/progress.py` obsługuje indeks ukończenia, ponowne użycie wyników i resume/refresh.
+`stash_ai/storage/progress.py` obsługuje indeks ukończenia, ponowne użycie wyników i resume/refresh.
 `stash_ai/signatures.py` definiuje wspólny `digest()` dla sygnatur wejść, checkpointów
 i publikacji. Kanoniczny JSON, hashe, format BLOB-ów oraz schemat bazy pozostają takie same;
 zapis wyników, usunięcie checkpointu i zakończenie refresh nadal są atomowe.
@@ -152,15 +152,20 @@ Stałe SQL i walidator odczytów są importowane bezpośrednio z
 
 ## Lokalny stan
 
+Pakiet `stash_ai/storage/` obejmuje bazę, magazyny wyników i publikacji,
+serializację, metadata, snapshoty, nakładkę preview oraz indeks ukończenia.
+Importy wskazują bezpośrednio moduły pakietu. Przeniesienie nie zmienia wersji
+schematu, identyfikatora bazy, formatu BLOB-ów ani domyślnej lokalizacji SQLite.
+
 | Moduł / klasa | Odpowiedzialność |
 | --- | --- |
-| `stash_ai/state_db.py` / `StateDatabase` | Cykl życia połączenia SQLite i blokady procesu, sprawdzenie identyfikatora/wersji bazy, podstawowe tabele i otwarcie źródła dry-run. |
-| `stash_ai/state.py` / `StateStore` | Façade i właściciel lifecycle/cache/serializacji; koordynuje inicjalizację schematów oraz deleguje trwałe dane do wyspecjalizowanych magazynów. |
-| `stash_ai/state_results.py` / `ResultStore` | Wyniki inferencji, indeksowanie źródeł i importy legacy. |
-| `stash_ai/state_publications.py` / `PublicationStore` | Snapshoty published/pending, trwały zamiar publikacji i atomowe zatwierdzanie przygotowanych publikacji. |
-| `stash_ai/preview.py` | Widoki nakładki dry-run, usunięcia w nakładce i wykrywanie zmian źródła. |
-| `stash_ai/state_codec.py` | Kodowanie i dekodowanie BLOB-ów. |
-| `stash_ai/state_snapshot.py` | Wersjonowana reprezentacja snapshotów ze współdzielonymi dowodami `extra_support` i odtwarzanie contributions przy odczycie. |
+| `stash_ai/storage/database.py` / `StateDatabase` | Cykl życia połączenia SQLite i blokady procesu, sprawdzenie identyfikatora/wersji bazy, podstawowe tabele i otwarcie źródła dry-run. |
+| `stash_ai/storage/store.py` / `StateStore` | Façade i właściciel lifecycle/cache/serializacji; koordynuje inicjalizację schematów oraz deleguje trwałe dane do wyspecjalizowanych magazynów. |
+| `stash_ai/storage/results.py` / `ResultStore` | Wyniki inferencji, indeksowanie źródeł i importy legacy. |
+| `stash_ai/storage/publications.py` / `PublicationStore` | Snapshoty published/pending, trwały zamiar publikacji i atomowe zatwierdzanie przygotowanych publikacji. |
+| `stash_ai/storage/preview.py` | Widoki nakładki dry-run, usunięcia w nakładce i wykrywanie zmian źródła. |
+| `stash_ai/storage/codec.py` | Kodowanie i dekodowanie BLOB-ów. |
+| `stash_ai/storage/snapshots.py` | Wersjonowana reprezentacja snapshotów ze współdzielonymi dowodami `extra_support` i odtwarzanie contributions przy odczycie. |
 
 `StateStore` posiada jeden `StateDatabase`, jeden `ResultStore` i jeden
 `PublicationStore`; udostępnia metody `records()/put()/snapshot()/prepare()`

@@ -7,7 +7,7 @@ import requests
 
 from stash_ai.client import StashClient
 from stash_ai.transport import safe_error
-from stash_ai.state_codec import encode, decode
+from stash_ai.storage.codec import encode, decode
 from stash_ai.tags import TagResolver
 from stash_ai.models import JOYTAG
 

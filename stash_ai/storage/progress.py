@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from stash_ai.inference import checkpoints
-from stash_ai.state_codec import decode
+from stash_ai.storage.codec import decode
 
 
 def initialize_progress(store, previous_version):

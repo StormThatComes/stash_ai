@@ -5,7 +5,8 @@ from collections import Counter
 
 from tqdm import tqdm
 
-from stash_ai import merge, performance, progress
+from stash_ai import merge, performance
+from stash_ai.storage import progress
 from stash_ai.publication import merged as merge_sync
 from stash_ai.runtime import stage
 

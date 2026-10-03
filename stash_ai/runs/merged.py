@@ -15,7 +15,7 @@ from stash_ai.inference.inputs import RunInputs
 from stash_ai.publication.publisher import MergePublisher
 from stash_ai import merge
 from stash_ai import performance
-from stash_ai import progress
+from stash_ai.storage import progress
 from stash_ai.runtime import stage
 from .merged_model import MergedModelRun
 

@@ -57,7 +57,7 @@ def check_database(path, scope, *, show_progress=False):
     if not path.is_file():
         raise FileNotFoundError(f"State database does not exist: {path}")
 
-    from stash_ai.state import APPLICATION_ID
+    from stash_ai.storage.store import APPLICATION_ID
 
     errors, warnings = Counter(), Counter()
     with connect_readonly(path) as db:

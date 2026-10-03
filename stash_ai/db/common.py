@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from stash_ai.state_db import LATEST_SCHEMA_VERSION
+from stash_ai.storage.database import LATEST_SCHEMA_VERSION
 
 KNOWN_VERSIONS = frozenset(range(1, LATEST_SCHEMA_VERSION + 1))
 KNOWN_MODELS = frozenset(("joytag", "wd", "dtq", "oppai"))

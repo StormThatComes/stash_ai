@@ -6,9 +6,11 @@ import sqlite3
 import pytest
 
 from stash_ai.rethreshold import markers as marker_updates, execution as rethreshold_execution, scenes as scene_updates
-from stash_ai import cli as app, db, progress, scene_cache, state_metadata, thresholds
+from stash_ai import cli as app, db, scene_cache, thresholds
+from stash_ai.storage import progress
+from stash_ai.storage import metadata as state_metadata
 from stash_ai.runtime import RunReport
-from stash_ai.state import StateStore
+from stash_ai.storage.store import StateStore
 from tests.test_result_thresholds import blobs, config, outputs
 
 pytestmark = pytest.mark.usefixtures('reset_temporal')

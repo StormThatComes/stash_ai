@@ -53,7 +53,7 @@ def run(app, store, scene_ids, settings, report, *, scenes=True, markers=False):
     targets, skipped, selected = threshold_targets(store, scene_ids, settings, requested)
     errors, reasons = 0, Counter()
     pending_scenes = store.pending_publication_scenes()
-    from stash_ai.state_metadata import backfill_batch
+    from stash_ai.storage.metadata import backfill_batch
     with backfill_batch(store):
         for scene, config, available in tqdm(targets, desc=f'Check {mode}', unit='pair'):
             try:

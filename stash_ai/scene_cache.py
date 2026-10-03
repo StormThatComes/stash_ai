@@ -91,7 +91,7 @@ def frame_records(scenes, markers):
 
 
 def reuse(app, store, scene, config, identity, cues, hashes, kinds):
-    from stash_ai.progress import completed
+    from stash_ai.storage.progress import completed
     from stash_ai.rethreshold.scenes import plan, apply
     from stash_ai.signatures import digest
     from stash_ai.thresholds import indexed_signature

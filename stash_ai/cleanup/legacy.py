@@ -11,7 +11,7 @@ from tqdm import tqdm
 from stash_ai.commands import legacy as legacy_commands
 from stash_ai.db.common import format_bytes
 from stash_ai.performance import freeze
-from stash_ai.state import StateStore, scope_for
+from stash_ai.storage.store import StateStore, scope_for
 from stash_ai.models import SOURCES
 
 

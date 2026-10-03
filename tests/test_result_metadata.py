@@ -9,7 +9,7 @@ from stash_ai import cli as app, db, performance
 from stash_ai.reports import developer as developer_report
 from stash_ai import scene_cache, thresholds
 from stash_ai.runtime import RunReport
-from stash_ai.state import StateStore
+from stash_ai.storage.store import StateStore
 from tests.test_result_thresholds import blobs, config, outputs, rethreshold, threshold_rows
 
 pytestmark = pytest.mark.usefixtures('reset_temporal')

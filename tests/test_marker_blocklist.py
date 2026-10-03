@@ -10,7 +10,8 @@ from stash_ai.rethreshold import targets as rethreshold_targets
 from stash_ai.inference.identity import model_identity
 from stash_ai.signatures import digest
 from stash_ai.inference import sprites
-from stash_ai import cli as app, merge, progress, thresholds
+from stash_ai import cli as app, merge, thresholds
+from stash_ai.storage import progress
 from stash_ai.models import ModelSettings, Vocabulary, WD
 from stash_ai.temporal import TemporalPolicy
 from tests.helpers.evidence import segment

@@ -90,7 +90,7 @@ def validate_marker_cache(app, records, *, allow_unknown_blocklist=False,
 
 def reuse(app, store, scene, config, identity, cues, hashes, kinds):
     """Prove the original inference matches, allowing only a marker threshold edit."""
-    from stash_ai.progress import completed
+    from stash_ai.storage.progress import completed
     from stash_ai.rethreshold.markers import validate, apply
     from stash_ai.signatures import digest
     from stash_ai.scene_cache import reuse as reuse_scenes

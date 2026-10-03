@@ -171,7 +171,7 @@ def run_backfill(app, args):
     """Repair group membership on existing owned markers, without source replay."""
     from tqdm import tqdm
     from stash_ai.merge import AI
-    from stash_ai.state import StateStore, scope_for
+    from stash_ai.storage.store import StateStore, scope_for
     from stash_ai.occurrences import OCCURRENCE_TAG
     stats, report = Counter(), args.report
     with StateStore(args.state_db, scope_for(app.STASH_URL), app.DRY_RUN) as store:

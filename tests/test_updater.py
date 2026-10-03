@@ -320,6 +320,8 @@ def test_run_modules_move_to_package_and_remove_stale_bytecode(tmp_path):
 @pytest.mark.parametrize('package,modules', [
     ('publication', ('merge_sync', 'separate_sync', 'merge_publish', 'merge_parallel')),
     ('cleanup', ('merge_cleanup', 'cleanup', 'cleanup_sql', 'cleanup_sql_session', 'prune', 'legacy_prune')),
+    ('storage', ('state', 'state_db', 'state_results', 'state_publications', 'state_codec',
+                 'state_metadata', 'state_snapshot', 'state_thresholds', 'preview', 'progress')),
 ])
 def test_domain_modules_move_to_packages_and_remove_stale_bytecode(tmp_path, package, modules):
     files = application_files()
@@ -346,6 +348,27 @@ def test_domain_modules_move_to_packages_and_remove_stale_bytecode(tmp_path, pac
                             capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
     assert '--output-mode' in result.stdout
+
+
+def test_installed_storage_preserves_publication_round_trip_without_runtime_dependencies(tmp_path):
+    assert updater.update(tmp_path, Remote(application_files())) == 0
+    result = subprocess.run([sys.executable, '-c', '''
+from stash_ai.storage import codec, snapshots, progress
+from stash_ai.storage.database import APPLICATION_ID
+from stash_ai.storage.store import StateStore
+snapshot = {'scene': {'owned_ids': [], 'contributions': []}}
+assert codec.decode(codec.encode(snapshot)) == snapshot
+assert snapshots.expand(snapshots.compact(snapshot)) == snapshot
+assert callable(progress.completed)
+with StateStore('state.sqlite3', 'fixture') as store:
+    assert store.connection.execute('PRAGMA application_id').fetchone()[0] == APPLICATION_ID
+    store.prepare('1', snapshot)
+    assert store.snapshot('1', 'scene') == (None, snapshot['scene'])
+    store.publish('1', snapshot)
+with StateStore('state.sqlite3', 'fixture') as store:
+    assert store.snapshot('1', 'scene') == (snapshot['scene'], None)
+'''], cwd=tmp_path, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
 
 
 def test_failed_database_package_migration_restores_module(tmp_path, monkeypatch):

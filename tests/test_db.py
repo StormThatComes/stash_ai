@@ -9,7 +9,7 @@ import pytest
 from stash_ai import cli as app
 from stash_ai import db as stash_db
 from stash_ai import merge
-from stash_ai.state_codec import encode
+from stash_ai.storage.codec import encode
 
 
 def seed(path, scope):

@@ -26,7 +26,7 @@ __all__ = [
 
 
 def run_mode(args, stash_url):
-    from stash_ai.state import scope_for
+    from stash_ai.storage.store import scope_for
 
     try:
         if args.db_update:
