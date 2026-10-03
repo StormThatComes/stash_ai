@@ -403,7 +403,6 @@ def run_hierarchy(app, args, catalogs, hierarchy, tag_policies=None):
     tag_policies = policies_or_empty(tag_policies)
     stash = app.create_stash_client(app.DRY_RUN)
     try:
-        stash.detect_tag_hierarchy()
         resolver = app.TagResolver(stash, hierarchy, source=AI, report=args.report.detail, create_missing=app.CREATE_MISSING)
         resolver.preload()
         labels = sorted({label for source, vocabulary in catalogs.items() for label in vocabulary.labels

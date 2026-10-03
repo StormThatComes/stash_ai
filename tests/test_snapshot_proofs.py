@@ -230,15 +230,16 @@ def seed_records(store, labels, identity='input'):
         store.put('1', model, {'markers': segment(model, [[(label, .9) for label in labels]]*6, identity)})
 
 
-@pytest.mark.parametrize('has_end_time', [False, True])
-def test_merge_cleanup_and_partial_publication_recovery_match_old_snapshots(tmp_path, monkeypatch, has_end_time):
+@pytest.mark.parametrize('use_end', [False, True])
+def test_merge_cleanup_and_partial_publication_recovery_match_old_snapshots(tmp_path, monkeypatch, use_end):
     variants = []
     for compact_storage in (False, True):
         path = tmp_path/('compact.sqlite3' if compact_storage else 'old.sqlite3')
         with StateStore(path, merge.scope_for(app.STASH_URL), cache_bytes=2**20) as store:
             if not compact_storage:
                 monkeypatch.setattr(store, 'pack_snapshot', store.pack)
-            stash = Stash(); stash.has_end_time = has_end_time
+            stash = Stash()
+            monkeypatch.setattr(app, 'MARKER_USE_END_TIME', use_end)
             resolver = app.TagResolver(stash, source=merge.AI)
             policies = empty_policies()
             seed_records(store, ['core', 'abc', 'def'])

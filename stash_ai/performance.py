@@ -92,7 +92,7 @@ def publication_code():
     return hashlib.sha256(b''.join((root / name).read_bytes() for name in PUBLICATION_CODE_FILES)).hexdigest()
 
 
-def publication_key(app, args, hierarchy, cores, tags, stash):
+def publication_key(app, args, hierarchy, cores, tags):
     code = publication_code()
     names = ('APPLY_SCENE_TAGS', 'CREATE_MARKERS', 'CREATE_MISSING', 'MAX_TAGS',
              'MARKER_MIN_HITS', 'MARKER_MERGE_GAP_SECONDS', 'MARKER_MAX_TAGS_PER_FRAME',
@@ -101,7 +101,7 @@ def publication_key(app, args, hierarchy, cores, tags, stash):
     return digest(dict(code=code, policy=asdict(app.TEMPORAL_POLICY),
         settings={name: getattr(app, name) for name in names},
         cores={s: sorted(v) for s, v in cores.items()}, tags={s: sorted(v) for s, v in tags.items()},
-        hierarchy=asdict(hierarchy) if hierarchy else None, end_time=stash.has_end_time))
+        hierarchy=asdict(hierarchy) if hierarchy else None))
 
 
 def scene_fingerprint(scene):

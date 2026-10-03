@@ -125,3 +125,17 @@ def merge_pipeline(monkeypatch,tmp_path):
     monkeypatch.setattr(app,"load_tagger",load)
     args=["--models","all","--no-hierarchy","--state-db",str(tmp_path/"sources.sqlite3"),"--scene-id","1"]
     return SimpleNamespace(stash=stash,scores=scores,loaded=loaded,args=args,path=tmp_path/"sources.sqlite3")
+
+
+@pytest.fixture
+def supported_stash_version(monkeypatch):
+    """Allow real clients to initialize without network access in transport tests."""
+    from types import SimpleNamespace
+    import requests
+
+    def post(self, url, **kwargs):
+        assert kwargs['json']['query'] == 'query StashAIVersion { version { version } }'
+        return SimpleNamespace(status_code=200, raise_for_status=lambda: None,
+                               json=lambda: {'data': {'version': {'version': 'v0.31.1'}}})
+
+    monkeypatch.setattr(requests.Session, 'post', post)

@@ -201,12 +201,14 @@ def test_invalid_limits_fail_before_io(flag,value):
         app.main(['--cleanup-only',flag,value])
 
 
-def test_sql_single_mutation_fallback(tmp_path, monkeypatch):
-    stash = SQLStash(bulk=False)
+def test_sql_cleanup_uses_bulk_mutations_without_capability_queries(tmp_path, monkeypatch):
+    stash = SQLStash()
     stash.marker(merge.AI, 'blocked', '1')
     install(monkeypatch, stash)
     assert app.main(args(tmp_path, ['blocked'])) == 0
     assert not stash.scene['scene_markers'] and 'ai:blocked' not in stash.tags
+    assert {'CleanupDeleteMarkers', 'CleanupDeleteTags'} <= {op for op, _ in stash.calls}
+    assert all(op != 'CleanupCapabilities' for op, _ in stash.calls)
 
 
 @pytest.mark.parametrize('strategy', ['auto', 'sql'])

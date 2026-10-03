@@ -10,6 +10,8 @@ from stash_ai.state_codec import encode, decode
 from stash_ai.tags import TagResolver
 from stash_ai.taggers import JOYTAG
 
+pytestmark = pytest.mark.usefixtures("supported_stash_version")
+
 
 def client(url, key, *, markers=True, page_size=100, timeout=30):
     return StashClient(True, url=url, api_key=key, request_timeout=timeout,

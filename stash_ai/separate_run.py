@@ -64,7 +64,7 @@ def _report_dry_run(app, stash, source, predictions, markers, report):
         )
     for marker in markers:
         interval = app.format_time(marker.start)
-        if app.MARKER_USE_END_TIME and stash.has_end_time:
+        if app.MARKER_USE_END_TIME:
             interval += " -> " + app.format_time(marker.end)
         tqdm.write(
             f"  {interval} | {source.prefix}{marker.tag} | "

@@ -8,7 +8,7 @@ from stash_ai import cli as app
 
 class Stash:
     def __init__(self, dry=False):
-        self.dry_run, self.has_end_time, self.has_tag_hierarchy = dry, True, True
+        self.dry_run = dry
         self.tags, self.writes = {}, []
         self.fail_create = False
         self.scene = dict(id="1", title="fixture", tags=[], scene_markers=[], paths=dict(sprite="/sprite",vtt="/vtt"))
@@ -69,14 +69,12 @@ class Stash:
         assert not self.dry_run
         self.writes.append(("delete",identifier))
         self.scene["scene_markers"]=[m for m in self.scene["scene_markers"] if m["id"]!=identifier]
-    def detect_marker_capabilities(self): pass
-    def detect_tag_hierarchy(self): pass
     def close(self): pass
     def gql(self,query,variables=None):
         from stash_ai.prune import REQUIRED_COUNTS
         counts=REQUIRED_COUNTS|{'studio_count','group_count'}
-        if 'CleanupCapabilities' in query:
-            return {}  # This fixture exercises the older compatible API path.
+        if 'querySQL' in query:
+            raise RuntimeError('SQL temporarily unavailable')
         def usage(tag):
             identifier=tag['id']
             scenes=getattr(self,'scenes',{'1':self.scene}).values()

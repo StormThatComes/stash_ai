@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 from itertools import batched
+import re
 from typing import Iterator
 
 from stash_ai.transport import StashTransport, absolute_stash_url, origin, safe_error
 
 
 class StashClient(StashTransport):
-    """Build domain queries and manage Stash capabilities and SQL read fallback."""
+    """Build domain queries for Stash 0.31.1+ and manage SQL read fallback."""
 
     def __init__(self, dry_run: bool, *, url: str, api_key: str,
                  request_timeout: float, http_retries: int, scene_page_size: int,
@@ -17,10 +18,28 @@ class StashClient(StashTransport):
                          request_timeout=request_timeout, http_retries=http_retries)
         self.scene_page_size = scene_page_size
         self.create_markers = create_markers
-        self.has_end_time = False
-        self.has_tag_hierarchy = False
         self.merge_reader = None
         self.merge_only_reads = False
+        try:
+            self._require_supported_version()
+        except Exception:
+            self.close()
+            raise
+
+    def _require_supported_version(self):
+        data = self.gql('query StashAIVersion { version { version } }')
+        version = (data.get('version') or {}).get('version')
+        match = re.fullmatch(r'v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?'
+                             r'(?:\+[0-9A-Za-z.-]+)?', version) if isinstance(version, str) else None
+        if match:
+            release = tuple(map(int, match.group(1, 2, 3)))
+            suffix = match.group(4)
+            # Stash development builds use git describe: v0.31.1-175-gabcdef.
+            post_release = suffix is None or re.fullmatch(r'\d+-g[0-9a-f]+(?:-dirty)?|dirty', suffix)
+            if release > (0, 31, 1) or (release == (0, 31, 1) and post_release):
+                return
+        raise RuntimeError(f'Stash >= 0.31.1 is required; server reported {version!r}. '
+                           'Upgrade Stash before running commands that connect to it.')
 
     def configure_merge_reads(self, report, *, merge_only=False):
         from stash_ai.merge_sql import SceneReader
@@ -58,39 +77,8 @@ class StashClient(StashTransport):
             raise RuntimeError(f'Scene {scene_id} no longer exists.')
         return scene
 
-    def detect_marker_capabilities(self) -> None:
-        data = self.gql('''query StashAIMarkerCapabilities {
-            create: __type(name: "SceneMarkerCreateInput") { inputFields { name } }
-            update: __type(name: "SceneMarkerUpdateInput") { inputFields { name } }
-            marker: __type(name: "SceneMarker") { fields { name } }
-        }''')
-        if not all(data.get(name) for name in ("create", "update", "marker")):
-            raise RuntimeError("This Stash server does not expose the scene marker API.")
-        self.has_end_time = all(
-            any(field["name"] == "end_seconds" for field in data[name][key])
-            for name, key in (("create", "inputFields"), ("update", "inputFields"), ("marker", "fields"))
-        )
-
-    def detect_tag_hierarchy(self) -> None:
-        data = self.gql('''query StashAIHierarchyCapabilities {
-            create: __type(name: "TagCreateInput") { inputFields { name } }
-            update: __type(name: "TagUpdateInput") { inputFields { name } }
-            tag: __type(name: "Tag") { fields { name } }
-        }''')
-        self.has_tag_hierarchy = all(
-            required <= {field["name"] for field in (data.get(name) or {}).get(key, [])}
-            for name, key, required in (
-                ("create", "inputFields", {"parent_ids", "description", "ignore_auto_tag"}),
-                ("update", "inputFields", {"parent_ids", "ignore_auto_tag"}),
-                ("tag", "fields", {"parents", "description", "ignore_auto_tag"}),
-            )
-        )
-        if not self.has_tag_hierarchy:
-            raise RuntimeError("Stash does not expose the required tag hierarchy/settings API. Update Stash; "
-                               "merged marker groups require hierarchy support even with --no-hierarchy.")
-
     def tag_fields(self) -> str:
-        return "id name description ignore_auto_tag parents { id name description }" if self.has_tag_hierarchy else "id name"
+        return "id name description ignore_auto_tag parents { id name description }"
 
     def iter_tags(self) -> Iterator[dict]:
         page = 1
@@ -165,8 +153,7 @@ class StashClient(StashTransport):
     def scene_fields(self) -> str:
         marker_fields = ""
         if self.create_markers:
-            end = "end_seconds" if self.has_end_time else ""
-            marker_fields = f"scene_markers {{ id title seconds {end} primary_tag {{ id name }} tags {{ id name }} }}"
+            marker_fields = "scene_markers { id title seconds end_seconds primary_tag { id name } tags { id name } }"
         return "id title paths { sprite vtt } tags { id name } " + marker_fields
 
     def find_scene(self, scene_id: str) -> dict:

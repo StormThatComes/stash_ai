@@ -136,15 +136,13 @@ def test_merge_prune_rechecks_new_usage_before_deleting(tmp_path, monkeypatch, c
     assert 'marker_group_tags_retained=1' in capsys.readouterr().out
 
 
-@pytest.mark.parametrize('failure', ['unsupported', 'probe', 'catalog'])
+@pytest.mark.parametrize('failure', ['probe', 'catalog'])
 def test_merge_prune_falls_back_before_discovery_writes(tmp_path, monkeypatch, capsys, failure):
     stash = SQLStash()
     tag = managed(stash, 'orphan')
     original = stash.gql
 
     def gql(query, variables=None):
-        if failure == 'unsupported' and 'StashAICleanupCapabilities' in query:
-            return {}
         if failure == 'probe' and query == fast.READ_OPERATION:
             raise RuntimeError('SQL disabled')
         if failure == 'catalog' and 'StashAICleanupTags' in query:

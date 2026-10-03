@@ -5,7 +5,7 @@ Ten dokument opisuje bieżącą ścieżkę cleanupu dla dużych bibliotek.
 ## Strategie
 
 `--cleanup-strategy auto` jest domyślne:
-- używa read-only `querySQL`, gdy wymagane API i schema są dostępne;
+- próbuje read-only `querySQL` na Stash 0.31.1+ i sprawdza wymagany SELECT/schema;
 - w przeciwnym razie przechodzi na odczyt scen przez GraphQL.
 
 `--cleanup-strategy sql` wymaga SQL do wyszukiwania kandydatów i kończy się

@@ -43,7 +43,8 @@ def main():
     app.TEMPORAL_POLICY = TemporalPolicy(enabled=False)
     app.MARKER_TAG_BLOCKLIST = set()
     app.APPLY_SCENE_TAGS = False
-    app.CREATE_MARKERS = app.CREATE_MISSING = app.MARKER_USE_END_TIME = True
+    app.CREATE_MARKERS = app.CREATE_MISSING = True
+    app.MARKER_USE_END_TIME = not args.point_only
     app.MAX_MARKERS_PER_SCENE = app.MARKER_MAX_TAGS_PER_FRAME = 0
     app.MARKER_MERGE_GAP_SECONDS = 0
     spans = [dict(source='wd', tag=f'core_{i % args.labels}', start=float(i*3), end=float(i*3 + 1),
@@ -51,7 +52,7 @@ def main():
     trials = []
     with tempfile.TemporaryDirectory() as directory, merge.StateStore(
             Path(directory)/'state.sqlite3', 'marker-matching-benchmark', cache_bytes=128*2**20) as store:
-        stash = Stash(); stash.has_end_time = not args.point_only
+        stash = Stash()
         resolver = app.TagResolver(stash, source=merge.AI)
         merge_sync.sync_merged(app, stash, resolver, store, stash.find_scene('1'), [], spans, migrate=False)
         for _ in range(args.repeats):

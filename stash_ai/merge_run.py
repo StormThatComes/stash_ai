@@ -70,13 +70,7 @@ class MergedRun:
         return int(bool(self.stats["errors"]))
 
     def _configure_stash(self):
-        app, stash, args = self.app, self.stash, self.args
-        if self.hierarchy or app.CREATE_MARKERS:
-            stash.detect_tag_hierarchy()
-        if app.CREATE_MARKERS:
-            stash.detect_marker_capabilities()
-            if not stash.has_end_time:
-                print("Stash supports point markers only; full merged ranges remain in the source state.")
+        stash, args = self.stash, self.args
         if hasattr(stash, 'configure_merge_reads'):
             stash.configure_merge_reads(self.report, merge_only=args.merge_only)
 
@@ -89,7 +83,7 @@ class MergedRun:
         if self.use_catalog or not args.scene_id or len(args.scene_id) > 1:
             self.resolver.preload()
         self.base_key = performance.publication_key(
-            app, args, self.hierarchy, self.core_policies, self.scene_policies, stash)
+            app, args, self.hierarchy, self.core_policies, self.scene_policies)
         self.merge_key = (
             performance.digest([self.base_key, performance.catalog_fingerprint(self.resolver)])
             if self.use_catalog else self.base_key)
@@ -483,14 +477,13 @@ class MergedRun:
         from stash_ai.cleanup_sql import SQLCleanup
         try:
             client = CleanupClient(self.stash)
-            if client.sql_available:
-                sql = SQLCleanup(client, self.args, self.stats, self.report)
-                sql.probe()
-                # Share one fresh, lightweight catalog between ordinary tags and
-                # marker groups, including tags created during this merge.
-                sql.catalog = client.catalog()
-                self.stats['merge_prune_sql_enabled'] += 1
-                return sql
+            sql = SQLCleanup(client, self.args, self.stats, self.report)
+            sql.probe()
+            # Share one fresh, lightweight catalog between ordinary tags and
+            # marker groups, including tags created during this merge.
+            sql.catalog = client.catalog()
+            self.stats['merge_prune_sql_enabled'] += 1
+            return sql
         except Exception as exc:
             self.report.detail('SQL prune unavailable; using GraphQL: ' +
                                self.app.safe_error(exc, api_key=self.app.STASH_API_KEY))

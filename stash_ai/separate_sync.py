@@ -20,7 +20,7 @@ def marker_has_excluded_core(marker: dict, core_exclusions: frozenset[str],
 
 
 def marker_extra_cleanup_payload(marker: dict, scene_id: str,
-                                 blocked_names: set[str], has_end: bool):
+                                 blocked_names: set[str]):
     """Preserve marker identity, primary, title and timing while stripping extras."""
     primary = str(marker["primary_tag"]["id"])
     extras = {
@@ -43,8 +43,7 @@ def marker_extra_cleanup_payload(marker: dict, scene_id: str,
         primary_tag_id=primary,
         tag_ids=sorted(kept),
     )
-    if has_end:
-        payload["end_seconds"] = marker.get("end_seconds")
+    payload["end_seconds"] = marker.get("end_seconds")
     return payload
 
 
@@ -97,7 +96,6 @@ def cleanup_scene_marker_cores(app, stash, scene: dict,
             marker,
             str(scene["id"]),
             names,
-            stash.has_end_time,
         )
         if payload is None:
             continue
@@ -115,7 +113,7 @@ def cleanup_scene_marker_cores(app, stash, scene: dict,
 
 
 def marker_payload(app, spec, scene_id: str, ids: dict[str, str | None],
-                   has_end: bool, source: ModelSource) -> dict:
+                   source: ModelSource) -> dict:
     primary = ids[source.prefix + spec.tag]
     extras = {ids[source.prefix + tag] for tag in spec.extra_tags}
     extras.add(ids[source.owner_tag])
@@ -128,10 +126,7 @@ def marker_payload(app, spec, scene_id: str, ids: dict[str, str | None],
         "primary_tag_id": primary,
         "tag_ids": sorted(extras),
     }
-    if has_end:
-        payload["end_seconds"] = (
-            round(spec.end, 3) if app.MARKER_USE_END_TIME else None
-        )
+    payload["end_seconds"] = round(spec.end, 3) if app.MARKER_USE_END_TIME else None
     return payload
 
 
@@ -143,7 +138,7 @@ def marker_differs(existing: dict, wanted: dict) -> bool:
         return True
     if str(existing["primary_tag"]["id"]) != wanted["primary_tag_id"]:
         return True
-    # Some API versions include the primary tag in the returned tags list.
+    # Stash may return the primary tag among associations; compare only extras.
     extra_ids = {
         str(tag["id"])
         for tag in existing["tags"]
@@ -227,7 +222,7 @@ def _marker_plan(app, stash, source, scene_id, existing_markers, specs, ids,
                  core_exclusions, scene_exclusions):
     wanted = (
         [
-            marker_payload(app, spec, scene_id, ids, stash.has_end_time, source)
+            marker_payload(app, spec, scene_id, ids, source)
             for spec in specs
             if ids.get(source.prefix + spec.tag)
         ]
@@ -277,7 +272,6 @@ def _marker_plan(app, stash, source, scene_id, existing_markers, specs, ids,
                 marker,
                 scene_id,
                 blocked_names,
-                stash.has_end_time,
             )
             if payload is not None:
                 extra_updates.append(payload)

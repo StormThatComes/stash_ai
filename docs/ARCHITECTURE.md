@@ -70,7 +70,7 @@ ONNX w `stash_ai/onnx_tagger.py`. Helpery i `OnnxTagger` są re-exportowane z
 | Moduł / klasa | Odpowiedzialność |
 | --- | --- |
 | `stash_ai/transport.py` / `StashTransport` | Sesje HTTP, uwierzytelnianie, retry odczytów, blokada zapisu podczas dry-run, dekodowanie GraphQL i przekierowania mediów. |
-| `stash_ai/client.py` / `StashClient` | Zapytania dotyczące scen, tagów i markerów, wykrywanie możliwości API, stronicowanie oraz fallback z SQL na GraphQL. |
+| `stash_ai/client.py` / `StashClient` | Zapytania dotyczące scen, tagów i markerów, wymaganie Stash 0.31.1+, stronicowanie oraz fallback z SQL na GraphQL. |
 
 `StashClient` jest specjalizacją `StashTransport`. Wspólny transport utrzymuje
 jedną konfigurację połączenia i jeden raport żądań. Klient i funkcje pomocnicze

@@ -73,19 +73,11 @@ class SQLCleanup:
                 self.stats['cleanup_markers_changed_or_gone'] += len(group) - len(current)
                 if current and not self.stash.dry_run:
                     ids = list(map(str, current))
-                    if self.client.bulk_markers:
-                        result = self.write('''mutation StashAICleanupDeleteMarkers($ids: [ID!]!) {
-                            sceneMarkersDestroy(ids: $ids)
-                        }''', {'ids': ids})['sceneMarkersDestroy']
-                        if result is not True:
-                            raise RuntimeError('Marker deletion was not confirmed; rerun the same cleanup.')
-                    else:
-                        for value in ids:
-                            result = self.write('''mutation StashAICleanupDeleteMarker($id: ID!) {
-                                sceneMarkerDestroy(id: $id)
-                            }''', {'id': value})['sceneMarkerDestroy']
-                            if result is not True:
-                                raise RuntimeError('Marker deletion was not confirmed; rerun the same cleanup.')
+                    result = self.write('''mutation StashAICleanupDeleteMarkers($ids: [ID!]!) {
+                        sceneMarkersDestroy(ids: $ids)
+                    }''', {'ids': ids})['sceneMarkersDestroy']
+                    if result is not True:
+                        raise RuntimeError('Marker deletion was not confirmed; rerun the same cleanup.')
                 if self.stash.dry_run and current and group_ids:
                     for tag_id, count in self.read('group_usage', (json.dumps(current), json.dumps(group_ids))):
                         self.group_usage_delta[str(tag_id)] -= int(count)
@@ -137,14 +129,9 @@ class SQLCleanup:
             return
         # One tag per mutation: a popular tag can have millions of associations.
         if not self.stash.dry_run:
-            if self.client.bulk_tags:
-                result = self.write('''mutation StashAICleanupDeleteTags($ids: [ID!]!) {
-                    tagsDestroy(ids: $ids)
-                }''', {'ids': [str(identifier)]})['tagsDestroy']
-            else:
-                result = self.write('''mutation StashAICleanupDeleteTag($input: TagDestroyInput!) {
-                    tagDestroy(input: $input)
-                }''', {'input': {'id': str(identifier)}})['tagDestroy']
+            result = self.write('''mutation StashAICleanupDeleteTags($ids: [ID!]!) {
+                tagsDestroy(ids: $ids)
+            }''', {'ids': [str(identifier)]})['tagsDestroy']
             if result is not True:
                 raise RuntimeError('Tag deletion was not confirmed; rerun the same cleanup.')
         self.stats['blacklisted_tags_deleted'] += 1
@@ -288,15 +275,7 @@ def run_sql_cleanup(app, sql, store, settings, args, cores, tags, stats):
     fingerprint = digest(fingerprint_data)
     if store.cleanup_pending and store.cleanup_pending != fingerprint:
         raise RuntimeError('Global cleanup is interrupted; rerun the same cleanup mode and exclusion policies.')
-    # Older APIs without bulk REMOVE can still use SQL to discover affected scenes.
-    direct = wide and ((app.APPLY_SCENE_TAGS and app.CREATE_MARKERS) or
-        (app.CREATE_MARKERS and sql.client.bulk_marker_tags) or
-        (app.APPLY_SCENE_TAGS and sql.client.bulk_scene_tags))
-    if not direct:
-        if store.cleanup_pending:
-            raise RuntimeError('Interrupted cleanup needs the same bulk API capabilities before it can resume.')
-        global_labels, common_cores, names, core_names = frozenset(), frozenset(), set(), {}
-    if direct and (global_labels or common_cores or store.cleanup_pending):
+    if wide and (global_labels or common_cores or store.cleanup_pending):
         begin(store, fingerprint, global_labels, common_cores,
               [i for i, n in catalog.items() if n in names], kinds=kinds)
     remaining_tags = {s: tags[s] - global_labels for s in SOURCES}

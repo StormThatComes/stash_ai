@@ -118,8 +118,6 @@ def run(app, args):
             # Request them here only when the ledger actually contains marker rows.
             if hasattr(stash, "create_markers"):
                 stash.create_markers = marker_rows
-            if marker_rows:
-                stash.detect_marker_capabilities()
             if hasattr(stash, "configure_merge_reads"):
                 stash.configure_merge_reads(args.report, merge_only=True)
             removable, retained, _ = candidates(app, store, stash)
