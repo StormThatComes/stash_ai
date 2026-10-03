@@ -12,7 +12,7 @@ from stash_ai import separate_sync
 from stash_ai import cli as app
 from stash_ai import merge
 from stash_ai.exclusions import policies_or_empty
-from stash_ai.taggers import SOURCES, WD
+from stash_ai.models import SOURCES, WD
 from tests.helpers.stash import Stash
 from tests.helpers.stash import sync
 from tests.helpers.evidence import segment

@@ -46,7 +46,7 @@ def main():
     from stash_ai import inference
     from stash_ai import merge
     from stash_ai.temporal import TemporalPolicy
-    from stash_ai.taggers import SOURCES
+    from stash_ai.models import SOURCES
     app.TEMPORAL_POLICY = TemporalPolicy()
     app.MARKER_TAG_BLOCKLIST = set()
     app.MARKER_MIN_HITS = 2

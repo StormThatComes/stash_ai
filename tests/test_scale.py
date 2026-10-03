@@ -10,6 +10,7 @@ import threading
 import numpy as np
 import pytest
 
+from stash_ai.domain import Cue
 from stash_ai import inference
 from stash_ai import cli as app
 from stash_ai import fusion
@@ -17,7 +18,7 @@ from stash_ai import merge
 from stash_ai import progress
 from stash_ai.runtime import RamCache, RunReport, retained_size
 from stash_ai.scene import shared_scene_contributions, cleanup_scene_support
-from stash_ai.taggers import SOURCES
+from stash_ai.models import SOURCES
 from stash_ai.temporal import SceneAccumulator, TemporalPolicy
 from tests.helpers.evidence import segment
 from tests.helpers.evidence import frames
@@ -254,7 +255,7 @@ def test_multi_batch_prefetch_resume_matches_uninterrupted_results(pipeline, pre
 
 def test_prefetch_queue_has_a_strict_bound(pipeline, monkeypatch):
     p = pipeline
-    p.cues = [app.Cue(i, i+1, 'sprite', (0,0,1,1)) for i in range(30)]
+    p.cues = [Cue(i, i+1, 'sprite', (0,0,1,1)) for i in range(30)]
     config = app.load_model_settings(app.MODELS_CONFIG_FILE, ['wd'], None)[0]
     model = app.load_tagger(config, p.vocab, partial(inference.prepare_image, app))
     ready = threading.Event()

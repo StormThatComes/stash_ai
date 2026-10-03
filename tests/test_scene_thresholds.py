@@ -11,7 +11,7 @@ from stash_ai import cli as app
 from stash_ai import merge
 from stash_ai import scene_cache as cache
 from stash_ai.runtime import RunReport
-from stash_ai.taggers import SOURCES
+from stash_ai.models import SOURCES
 from tests.helpers.evidence import policies
 
 pytestmark = pytest.mark.usefixtures('reset_temporal')

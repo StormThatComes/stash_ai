@@ -10,12 +10,14 @@ import threading
 import numpy as np
 import pytest
 
+from stash_ai.domain import Cue
 from stash_ai import inference
 from stash_ai import state_codec
 from stash_ai import cli as app
 from stash_ai import merge
+from stash_ai.state_db import APPLICATION_ID
 from stash_ai import progress
-from stash_ai.taggers import ModelSettings, Vocabulary, WD, SOURCES
+from stash_ai.models import ModelSettings, Vocabulary, WD, SOURCES
 from tests.helpers.stash import Stash
 
 
@@ -113,7 +115,7 @@ def test_automatic_input_invalidation_never_publishes_fresh_and_stale_model_mix(
         snapshots={kind:state.snapshot("1",kind)[0] for kind in ("scene","markers")}
 
     # Same media URLs, but changed cue timing invalidates both models' inference signatures.
-    p.cues=[app.Cue(c.start,c.end+.1,c.image,c.rect) for c in p.cues]
+    p.cues=[Cue(c.start,c.end+.1,c.image,c.rect) for c in p.cues]
     p.scores["wd"][:]=0;p.scores["dtq"][:]=0
     fail={"dtq":True}
     def load(settings,*_):
@@ -152,7 +154,7 @@ def test_source_content_change_invalidates_checkpoint_even_with_same_url(pipelin
 def test_vtt_timing_change_invalidates_but_scene_threshold_reuses_frames(pipeline,monkeypatch):
     p=pipeline
     assert app.main(p.args)==0
-    p.cues=[app.Cue(c.start,c.end+.1,c.image,c.rect) for c in p.cues]
+    p.cues=[Cue(c.start,c.end+.1,c.image,c.rect) for c in p.cues]
     assert app.main(p.args)==0 and len(p.loaded)==2
     original=app.load_model_settings
     from dataclasses import replace
@@ -246,7 +248,7 @@ def test_v1_database_is_migrated_once_without_losing_sources(tmp_path,monkeypatc
     path=tmp_path/"v1.sqlite3"
     segment={"mode":"scene","meta":{"origin":"inference"},"items":[{"tag":"common","score":.9}]}
     db=sqlite3.connect(path)
-    db.executescript(f"PRAGMA application_id={merge.APPLICATION_ID}; PRAGMA user_version=1; "
+    db.executescript(f"PRAGMA application_id={APPLICATION_ID}; PRAGMA user_version=1; "
                     "CREATE TABLE results(scope TEXT,scene TEXT,model TEXT,kind TEXT,data BLOB,PRIMARY KEY(scope,scene,model,kind));")
     db.execute("INSERT INTO results VALUES (?,?,?,?,?)",("fixture","1","wd","scene",state_codec.encode([segment])))
     db.commit();db.close()

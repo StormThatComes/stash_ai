@@ -3,6 +3,7 @@
 Run the same script against both revisions with --project; compare stage hashes
 and timings. No SQLite, Stash API, inference or GPU time is included.
 """
+
 import argparse
 from dataclasses import asdict, is_dataclass
 import gc
@@ -55,7 +56,8 @@ def main():
         parser.error('frames, labels and repeats must be positive; weak-labels must be nonnegative')
     sys.path.insert(0, str(args.project.resolve()))
     from stash_ai import cli as app, fusion, merge, temporal
-    from stash_ai.taggers import SOURCES
+    from stash_ai.domain import Cue, FramePrediction
+    from stash_ai.models import SOURCES
     app.TEMPORAL_POLICY = temporal.TemporalPolicy()
     app.MARKER_TAG_BLOCKLIST = set()
     app.MARKER_MIN_HITS = 2
@@ -71,7 +73,7 @@ def main():
     policies = {source: frozenset() for source in SOURCES}
     groups = list(fusion.make_groups(records).values())
     first = next(iter(records.values()))[0]
-    frames = [app.FramePrediction(app.Cue(row['start'], row['end'], '', (0, 0, 1, 1)),
+    frames = [FramePrediction(Cue(row['start'], row['end'], '', (0, 0, 1, 1)),
                                   tuple(row['tags'])) for row in first['items']]
     borrow = {'borrow': True} if 'borrow' in inspect.signature(merge.union_intervals).parameters else {}
     result = dict(frames=args.frames, labels=args.labels, weak_labels=args.weak_labels,

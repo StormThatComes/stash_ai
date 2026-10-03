@@ -5,7 +5,7 @@ from bisect import bisect_left, bisect_right
 from collections import defaultdict
 from copy import deepcopy
 
-from stash_ai.taggers import SOURCES
+from stash_ai.models import SOURCES
 from stash_ai.temporal import append_interval, marker_floor, qualified_extras
 
 

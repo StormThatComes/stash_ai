@@ -73,11 +73,12 @@ def pipeline(monkeypatch,tmp_path):
     from types import SimpleNamespace
     import numpy as np
     from stash_ai import cli as app, inference
-    from stash_ai.taggers import SOURCES, Vocabulary
+    from stash_ai.domain import Cue
+    from stash_ai.models import SOURCES, Vocabulary
     from tests.helpers.stash import Stash
     from tests.helpers.inference import IndexedTagger
     stash=Stash()
-    cues=[app.Cue(i,i+1,"sprite",(0,0,1,1)) for i in range(10)]
+    cues=[Cue(i,i+1,"sprite",(0,0,1,1)) for i in range(10)]
     vocab=Vocabulary(["common","extra"],{"common":"General","extra":"General"})
     values=np.array([[.8,.1],[.9,.3],[.2,.8],[.8,.9],[.9,.7],[.3,.9],[.9,.9],[.8,.2],[.9,.8],[.4,.9]],np.float32)
     context=SimpleNamespace(stash=stash,cues=cues,vocab=vocab,scores={key:values.copy() for key in SOURCES},
@@ -101,10 +102,11 @@ def merge_pipeline(monkeypatch,tmp_path):
     from types import SimpleNamespace
     import numpy as np
     from stash_ai import cli as app, inference
-    from stash_ai.taggers import SOURCES, Vocabulary
+    from stash_ai.domain import Cue
+    from stash_ai.models import SOURCES, Vocabulary
     from tests.helpers.stash import Stash
     from tests.helpers.inference import Tagger
-    stash=Stash();cues=[app.Cue(i,i+10,"sprite",(0,0,1,1)) for i in [10,20,30,40,70,80]]
+    stash=Stash();cues=[Cue(i,i+10,"sprite",(0,0,1,1)) for i in [10,20,30,40,70,80]]
     labels=["common","unique_op","extra"]
     vocabulary=Vocabulary(labels,{tag:"General" for tag in labels})
     scores={key:np.zeros((6,3),np.float32) for key in SOURCES}

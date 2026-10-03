@@ -8,7 +8,7 @@ import pytest
 
 from stash_ai import inference
 from stash_ai import cli as app, merge, progress, thresholds
-from stash_ai.taggers import ModelSettings, Vocabulary, WD
+from stash_ai.models import ModelSettings, Vocabulary, WD
 from stash_ai.temporal import TemporalPolicy
 from tests.helpers.evidence import segment
 

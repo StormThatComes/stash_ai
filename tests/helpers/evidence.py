@@ -1,10 +1,12 @@
 """Shared offline helpers; no test collection or fixture registration."""
+
 from copy import deepcopy
 
 import numpy as np
 
+from stash_ai.domain import Cue, FramePrediction
 from stash_ai import cli as app
-from stash_ai.taggers import SOURCES
+from stash_ai.models import SOURCES
 from stash_ai.temporal import SceneAccumulator
 
 
@@ -22,7 +24,7 @@ def empty_policies():
 
 
 def frames(rows, step=1):
-    return [app.FramePrediction(app.Cue(i*step, (i+1)*step, "sprite", (0,0,1,1)), tuple(row)) for i,row in enumerate(rows)]
+    return [FramePrediction(Cue(i*step, (i+1)*step, "sprite", (0,0,1,1)), tuple(row)) for i,row in enumerate(rows)]
 
 
 def segment(model, rows, identity='same'):

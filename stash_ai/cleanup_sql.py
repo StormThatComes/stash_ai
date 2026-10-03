@@ -13,11 +13,9 @@ from tqdm import tqdm
 
 from stash_ai import separate_sync
 from stash_ai.cleanup import begin, finish
-from stash_ai.taggers import SOURCES
+from stash_ai.models import SOURCES
 
-from stash_ai.cleanup_sql_session import (
-    READ_OPERATION, SQL, CleanupSqlSession, is_read_only_cleanup,
-)
+from stash_ai.cleanup_sql_session import CleanupSqlSession
 
 
 class SQLCleanup:

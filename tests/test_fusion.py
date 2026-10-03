@@ -12,7 +12,7 @@ from stash_ai import merge_cleanup
 from stash_ai import cli as app
 from stash_ai import merge
 from stash_ai.temporal import TemporalPolicy
-from stash_ai.taggers import SOURCES
+from stash_ai.models import SOURCES
 from tests.helpers.evidence import segment
 
 

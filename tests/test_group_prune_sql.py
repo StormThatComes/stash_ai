@@ -6,6 +6,7 @@ import pytest
 
 from stash_ai import cli as app
 from stash_ai import cleanup_sql as fast
+from stash_ai.cleanup_sql_session import READ_OPERATION, SQL
 from stash_ai import marker_groups as groups
 from stash_ai import merge
 from tests.helpers.cleanup import install, options
@@ -156,7 +157,7 @@ def test_unexpected_sql_candidate_stops_before_group_deletion(tmp_path, monkeypa
     original = stash.gql
 
     def gql(query, variables=None):
-        if query == fast.READ_OPERATION and variables['sql'] == fast.SQL['unused_candidates']:
+        if query == READ_OPERATION and variables['sql'] == SQL['unused_candidates']:
             return {'querySQL': {'columns': ['id'], 'rows': [[int(outside['id'])]]}}
         return original(query, variables)
 

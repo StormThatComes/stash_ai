@@ -10,7 +10,7 @@ import zlib
 
 from stash_ai import inference
 from stash_ai.state_codec import encode, decode
-from stash_ai.taggers import metadata_files, weight_files
+from stash_ai.vocabulary import metadata_files, weight_files
 
 PREDICTION_FORMAT = 2
 

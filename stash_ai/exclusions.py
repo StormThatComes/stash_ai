@@ -5,7 +5,7 @@ The legacy scene_tag_exclusions.yml filename remains supported unchanged.
 """
 from dataclasses import replace
 
-from stash_ai.taggers import SOURCES
+from stash_ai.models import SOURCES
 
 
 def policies_or_empty(policies=None):

@@ -12,6 +12,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
+from stash_ai.domain import Cue, TagHierarchy
 from stash_ai import inference
 from stash_ai import cli as app
 from stash_ai import merge
@@ -29,7 +30,7 @@ def fail(*args, **kwargs):
 
 @pytest.mark.parametrize('filename', [
     'tags.py', 'domain.py', 'state.py', 'state_db.py', 'state_results.py', 'state_thresholds.py', 'state_publications.py',
-    'vocabulary.py', 'onnx_tagger.py', 'inference.py', 'progress.py',
+    'models.py', 'vocabulary.py', 'onnx_tagger.py', 'inference.py', 'progress.py',
     'merge_run.py', 'merge_publish.py', 'merge_parallel.py', 'merge_sync.py', 'separate_sync.py',
     'config.py',
 ])
@@ -120,7 +121,7 @@ def test_derived_invalidation_rolls_back_with_the_transaction(tmp_path):
 
 def test_manual_hierarchy_change_invalidates_unchanged_scene(pipeline, monkeypatch):
     p = pipeline
-    hierarchy = app.TagHierarchy({'common': ('ai:category:General',), 'extra': ('ai:category:General',)},
+    hierarchy = TagHierarchy({'common': ('ai:category:General',), 'extra': ('ai:category:General',)},
         {'ai:category:General': ()}, 'ai:category:', merge.AI.hierarchy_description)
     monkeypatch.setattr(merge, 'combined_hierarchy', lambda *args: hierarchy)
     assert app.main(p.args) == 0
@@ -262,7 +263,7 @@ def test_cpu_transforms_are_parallel_ordered_and_own_their_images(monkeypatch, p
             frame = Image.new('RGB', (2, 2), (i, 0, 0))
             originals.append(frame)
             try:
-                yield app.Cue(i, i+1, 'sprite', (0,0,2,2)), frame
+                yield Cue(i, i+1, 'sprite', (0,0,2,2)), frame
             finally:
                 frame.close()
     def prepare(image):
@@ -287,7 +288,7 @@ def test_cpu_preparation_failure_closes_workers_and_owned_images(monkeypatch):
         for i in range(8):
             image = Image.new('RGB', (2, 2))
             try:
-                yield app.Cue(i, i+1, 'sprite', (0,0,2,2)), image
+                yield Cue(i, i+1, 'sprite', (0,0,2,2)), image
             finally:
                 image.close()
     def prepare(image):
@@ -313,7 +314,7 @@ def test_vectorized_score_filter_preserves_float_boundaries_and_order(threshold)
 
 
 def test_cache_accounts_cue_attributes_and_evicts_under_process_pressure(monkeypatch):
-    cue = app.Cue(0, 1, 's'*10000, (0,0,1,1))
+    cue = Cue(0, 1, 's'*10000, (0,0,1,1))
     assert retained_size(cue) > 10000
     monkeypatch.setattr('stash_ai.runtime.process_rss', lambda: 1000)
     cache = RamCache(20000, rss_budget=40000)

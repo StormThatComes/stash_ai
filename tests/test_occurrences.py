@@ -7,6 +7,7 @@ from dataclasses import asdict, replace
 import numpy as np
 import pytest
 
+from stash_ai.domain import Cue
 from stash_ai import inference
 from stash_ai import merge_cleanup
 from stash_ai import merge_sync
@@ -33,7 +34,7 @@ def put(state, scenes, markers, scene='1'):
 def test_peak_time_is_compact_earliest_max_and_survives_resume():
     policy = TemporalPolicy()
     acc = SceneAccumulator(.2, policy)
-    cues = [app.Cue(i * 10, (i + 1) * 10, '', (0, 0, 1, 1)) for i in range(6)]
+    cues = [Cue(i * 10, (i + 1) * 10, '', (0, 0, 1, 1)) for i in range(6)]
     acc.add(np.array([[.25], [.35], [.30]]), cues[:3])
     saved = acc.state()
     resumed = SceneAccumulator(.2, policy, saved)
@@ -46,13 +47,13 @@ def test_peak_time_is_compact_earliest_max_and_survives_resume():
 
 def test_old_checkpoint_never_assigns_a_new_time_to_an_unseen_old_maximum():
     acc = SceneAccumulator(.2, TemporalPolicy())
-    acc.add(np.array([[.9]]), [app.Cue(0, 10, '', (0, 0, 1, 1))])
+    acc.add(np.array([[.9]]), [Cue(0, 10, '', (0, 0, 1, 1))])
     saved = acc.state()
     saved['items'][0].pop('peak_time')
     resumed = SceneAccumulator(.2, TemporalPolicy(), saved)
-    resumed.add(np.array([[.4]]), [app.Cue(10, 20, '', (0, 0, 1, 1))])
+    resumed.add(np.array([[.4]]), [Cue(10, 20, '', (0, 0, 1, 1))])
     assert 'peak_time' not in resumed.statistics(['core'])['core']
-    resumed.add(np.array([[.95]]), [app.Cue(20, 30, '', (0, 0, 1, 1))])
+    resumed.add(np.array([[.95]]), [Cue(20, 30, '', (0, 0, 1, 1))])
     assert resumed.statistics(['core'])['core']['peak_time'] == 20
 
 

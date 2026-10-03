@@ -11,7 +11,7 @@ from stash_ai import separate_sync
 from stash_ai import merge_sync
 from stash_ai import merge
 from stash_ai.runtime import RunReport
-from stash_ai.taggers import SOURCES
+from stash_ai.models import SOURCES
 
 
 def cleanup_support(app, store, scene_id, spans, selected, core_policies, tag_policies=None):

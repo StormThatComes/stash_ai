@@ -6,7 +6,7 @@ import pytest
 
 from stash_ai import inference
 from stash_ai import cli as app, merge, tag_review
-from stash_ai.taggers import SOURCES
+from stash_ai.models import SOURCES
 from stash_ai.temporal import TemporalPolicy
 from tests.test_model_report import inference_pair
 

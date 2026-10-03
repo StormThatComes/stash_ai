@@ -12,7 +12,7 @@ from stash_ai import merge
 from stash_ai.db.common import format_bytes
 from stash_ai.performance import freeze
 from stash_ai.state import StateStore, scope_for
-from stash_ai.taggers import SOURCES
+from stash_ai.models import SOURCES
 
 
 def _current_legacy(app, scene):

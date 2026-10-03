@@ -16,7 +16,7 @@ from types import SimpleNamespace
 
 from tqdm import tqdm
 
-from stash_ai.taggers import SOURCES
+from stash_ai.models import SOURCES
 
 REASONS = {
     "weak_or_borderline": "Best retained score is at most the applicable threshold plus the review margin.",

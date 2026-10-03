@@ -65,13 +65,18 @@ korzysta z modeli ani połączenia ze Stash i pomija evidence z pending refresh.
 evidence. `build_report()` koordynuje osobne fazy baseline sceny, attribution
 supportu, counterfactual bez jednego modelu oraz formatowanie finalnych wierszy.
 
-`stash_ai/taggers.py` pozostaje publiczną façade dla definicji modeli i adapterów
-inferencji. Obsługa plików modelu oraz parsowanie słowników tagów znajduje się w
-`stash_ai/vocabulary.py`, a preprocessing, konfiguracja sesji i inference modeli
-ONNX w `stash_ai/onnx_tagger.py`. Helpery i `OnnxTagger` są re-exportowane z
-`taggers.py`, aby zachować istniejące importy w kodzie i testach. Genericzne komponenty
-(`TagResolver`, loader hierarchii i separate-output reconciliation) wymagają jawnego
-`ModelSource`; JoyTag nie jest ich ukrytym domyślnym namespace'em.
+`stash_ai/models.py` definiuje wspólne typy `ModelSource`, `ModelSettings` i
+`Vocabulary`, katalog źródeł oraz walidację wyboru modeli i wyników predykcji.
+Moduł nie zależy od loaderów ani adapterów inferencji. `stash_ai/taggers.py`
+zawiera adapter JoyTag i wybór adaptera przez `load_tagger()`. Obsługa plików
+modelu oraz parsowanie słowników tagów znajduje się w `stash_ai/vocabulary.py`,
+a preprocessing, konfiguracja sesji i inference modeli ONNX w
+`stash_ai/onnx_tagger.py`. Kod, testy i benchmarki importują typy oraz helpery
+bezpośrednio z modułów, które je definiują; `taggers.py` nie re-eksportuje
+starego API. Wspólne typy i walidacja usuwają cykle między loaderami i adapterami.
+Genericzne komponenty (`TagResolver`, loader hierarchii i separate-output
+reconciliation) wymagają jawnego `ModelSource`; JoyTag nie jest ich ukrytym
+domyślnym namespace'em.
 
 ## Komunikacja ze Stash
 
@@ -81,8 +86,9 @@ ONNX w `stash_ai/onnx_tagger.py`. Helpery i `OnnxTagger` są re-exportowane z
 | `stash_ai/client.py` / `StashClient` | Zapytania dotyczące scen, tagów i markerów, wymaganie Stash 0.31.1+, stronicowanie oraz fallback z SQL na GraphQL. |
 
 `StashClient` jest specjalizacją `StashTransport`. Wspólny transport utrzymuje
-jedną konfigurację połączenia i jeden raport żądań. Klient i funkcje pomocnicze
-są importowane z `stash_ai.client`. Pozostałe moduły używają analogicznych
+jedną konfigurację połączenia i jeden raport żądań. Klient jest importowany z
+`stash_ai.client`, a funkcje pomocnicze HTTP bezpośrednio z
+`stash_ai.transport`. Pozostałe moduły używają analogicznych
 importów pakietowych, np. `from stash_ai.state import StateStore`.
 
 Transport ponawia tylko odczyty, w tym ściśle dozwolone operacje SQL opakowane
@@ -95,7 +101,8 @@ przy przekierowaniu mediów do innego origin.
 metryki odczytów i zapisów oraz keyset pagination. `stash_ai/cleanup_sql.py` /
 `SQLCleanup` pozostaje warstwą domenową: wybiera kandydatów, usuwa markery i
 powiązania, obsługuje preview i pruning. Cienkie metody delegujące w `SQLCleanup`
-zachowują dotychczasowy kontrakt dla call-site'ów i testów.
+zachowują dotychczasowy kontrakt dla call-site'ów i testów. Stałe SQL i
+walidator odczytów są importowane bezpośrednio z `cleanup_sql_session.py`.
 
 
 ## Lokalny stan

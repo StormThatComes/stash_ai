@@ -64,17 +64,19 @@ PREPARE_WORKERS = 4  # CPU transforms only. One model/inference call at a time.
 MERGE_STATE_FILE = (INSTALL_ROOT / "tagger_sources.sqlite3")
 
 from stash_ai import separate_run, separate_sync
-from stash_ai.taggers import (JOYTAG, SOURCES, ModelSource, ModelSettings, Vocabulary,
-                           select_models, load_vocabulary, load_tagger, ensure_files, weight_files)
+from stash_ai.models import SOURCES, ModelSource, ModelSettings
+from stash_ai.vocabulary import load_vocabulary, ensure_files, weight_files
+from stash_ai.taggers import load_tagger
 from stash_ai.temporal import TemporalPolicy
-from stash_ai.domain import Cue, FramePrediction, MarkerSpec, TagHierarchy
-from stash_ai.client import StashClient, safe_error
+from stash_ai.domain import FramePrediction, MarkerSpec
+from stash_ai.client import StashClient
+from stash_ai.transport import safe_error
 from stash_ai.tags import TagResolver
 from stash_ai.config import (
     vocabulary_digest, load_unique_yaml, load_exclusion_policy,
     load_model_settings as _load_model_settings, metadata_hierarchy, load_tag_hierarchy,
 )
-from stash_ai.vtt import TIMESTAMP_RE, RECT_RE, timestamp_seconds, format_time, parse_vtt_cues
+from stash_ai.vtt import format_time
 
 DEFAULT_TEMPORAL = True
 TEMPORAL_POLICY = TemporalPolicy()
@@ -106,7 +108,7 @@ MAX_MARKERS_PER_SCENE = 0  # 0 = unlimited; otherwise keep highest-confidence ru
 MARKER_USE_END_TIME = True
 REPLACE_MARKERS = True  # False retains obsolete markers except excluded cores.
 
-# Marker ownership identifiers are defined in stash_ai/taggers.py and stash_ai/merge.py.
+# Marker ownership identifiers are defined in stash_ai/models.py and stash_ai/merge.py.
 MARKER_MATCH_TOLERANCE_SECONDS = 0.25
 
 CREATE_MISSING = True

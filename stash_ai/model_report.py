@@ -16,7 +16,7 @@ from pathlib import Path
 from tqdm import tqdm
 
 from stash_ai.occurrences import is_occurrence
-from stash_ai.taggers import SOURCES
+from stash_ai.models import SOURCES
 from stash_ai.state import StateStore, scope_for
 
 

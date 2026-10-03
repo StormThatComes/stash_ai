@@ -7,16 +7,14 @@ import os
 import shutil
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from stash_ai.taggers import ModelSettings, ModelSource, Vocabulary
+from stash_ai import models
 
 
 CATEGORY_NAMES = {0: "General", 1: "Artist", 3: "Copyright", 4: "Character", 5: "Meta", 9: "Rating"}
 
 
-def metadata_files(source: ModelSource) -> tuple[str, ...]:
+def metadata_files(source: models.ModelSource) -> tuple[str, ...]:
     if source.key == "joytag":
         return ("top_tags.txt",)
     if source.key == "wd":
@@ -26,13 +24,13 @@ def metadata_files(source: ModelSource) -> tuple[str, ...]:
     return ("tag_to_id.json", "tag_category.json", "config.json")
 
 
-def weight_files(settings: ModelSettings) -> tuple[str, ...]:
+def weight_files(settings: models.ModelSettings) -> tuple[str, ...]:
     if settings.source.key == "joytag":
         return ("config.json", "model.safetensors")
     return ("model.onnx",)
 
 
-def ensure_files(settings: ModelSettings, filenames: tuple[str, ...]) -> None:
+def ensure_files(settings: models.ModelSettings, filenames: tuple[str, ...]) -> None:
     """Download only the chosen model's missing assets, at a pinned revision."""
     missing = [name for name in filenames if not (settings.model_dir / name).is_file()]
     if not missing:
@@ -55,7 +53,7 @@ def ensure_files(settings: ModelSettings, filenames: tuple[str, ...]) -> None:
             Path(temporary).unlink(missing_ok=True)
 
 
-def validate_labels(labels: list[str], source: ModelSource) -> None:
+def validate_labels(labels: list[str], source: models.ModelSource) -> None:
     if not labels or len(set(labels)) != len(labels):
         raise ValueError(f"{source.title}: vocabulary is empty or contains duplicate labels.")
     if any(not isinstance(label, str) or not label or label != label.strip() or "\n" in label or "\r" in label
@@ -65,14 +63,7 @@ def validate_labels(labels: list[str], source: ModelSource) -> None:
         raise ValueError(f"{source.title}: a model label collides with the marker ownership tag.")
 
 
-def _vocabulary(labels, categories, image_size=448, output_count=None, output_indices=None):
-    # Local import avoids a module initialization cycle while taggers.py keeps
-    # the public Vocabulary dataclass and compatibility re-exports.
-    from stash_ai.taggers import Vocabulary
-    return Vocabulary(labels, categories, image_size, output_count, output_indices)
-
-
-def load_vocabulary(settings: ModelSettings) -> Vocabulary:
+def load_vocabulary(settings: models.ModelSettings) -> models.Vocabulary:
     source = settings.source
     ensure_files(settings, metadata_files(source))
     if source.key == "oppai":
@@ -110,10 +101,10 @@ def load_vocabulary(settings: ModelSettings) -> Vocabulary:
         for label in labels:
             categories[label] = CATEGORY_NAMES.get(raw_categories.get(label), "Uncategorized")
     validate_labels(labels, source)
-    return _vocabulary(labels, categories, image_size)
+    return models.Vocabulary(labels, categories, image_size)
 
 
-def load_oppai_vocabulary(settings: ModelSettings) -> Vocabulary:
+def load_oppai_vocabulary(settings: models.ModelSettings) -> models.Vocabulary:
     """Keep the original ONNX indices while removing only PAD/UNK output slots."""
     def read(name):
         return json.loads((settings.model_dir / name).read_text(encoding="utf-8-sig"))
@@ -153,4 +144,4 @@ def load_oppai_vocabulary(settings: ModelSettings) -> Vocabulary:
     labels = [all_labels[i] for i in indices]
     categories = {all_labels[i]: CATEGORY_NAMES.get(int(rows[i]["category"]), f"Category {rows[i]['category']}")
                   for i in indices}
-    return _vocabulary(labels, categories, 448, len(all_labels), indices)
+    return models.Vocabulary(labels, categories, 448, len(all_labels), indices)

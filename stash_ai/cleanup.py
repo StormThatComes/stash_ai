@@ -4,7 +4,7 @@ from __future__ import annotations
 from tqdm import tqdm
 
 from stash_ai.state_codec import encode, decode
-from stash_ai.taggers import SOURCES
+from stash_ai.models import SOURCES
 
 PAGE_SIZE = 1000
 

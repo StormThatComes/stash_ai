@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from stash_ai.domain import TagHierarchy
-from stash_ai.taggers import SOURCES, ModelSource, ModelSettings, Vocabulary, select_models
+from stash_ai.models import SOURCES, ModelSource, ModelSettings, Vocabulary, select_models
 
 
 def vocabulary_digest(labels: list[str]) -> str:

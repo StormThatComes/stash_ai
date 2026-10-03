@@ -11,7 +11,7 @@ from stash_ai import merge_parallel
 from stash_ai import thresholds
 from stash_ai.merge_parallel import iter_parallel_evidence
 from stash_ai.temporal import TemporalPolicy
-from stash_ai.taggers import SOURCES
+from stash_ai.models import SOURCES
 from tests.helpers.evidence import empty_policies, segment
 
 

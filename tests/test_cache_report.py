@@ -6,7 +6,7 @@ import json
 import pytest
 
 from stash_ai import cache_report, cli as app, merge
-from stash_ai.taggers import ModelSettings, SOURCES
+from stash_ai.models import ModelSettings, SOURCES
 from tests.test_model_report import inference_pair
 
 pytestmark = pytest.mark.usefixtures('reset_temporal')

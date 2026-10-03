@@ -23,7 +23,7 @@ def main():
     from stash_ai import cli as app
     from stash_ai.occurrences import occurrence_contributions
     from stash_ai.performance import StoredSegment, segment_digest
-    from stash_ai.taggers import SOURCES
+    from stash_ai.models import SOURCES
     from stash_ai.temporal import TemporalPolicy
     app.TEMPORAL_POLICY = TemporalPolicy()
     app.MARKER_TAG_BLOCKLIST = set()

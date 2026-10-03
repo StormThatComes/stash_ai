@@ -15,7 +15,7 @@ from stash_ai import merge_sync
 from stash_ai import cli as app
 from stash_ai import merge
 from stash_ai import progress
-from stash_ai.taggers import SOURCES, JOYTAG, WD, DTQ, OPPAI, ModelSettings, Vocabulary
+from stash_ai.models import SOURCES, JOYTAG, WD, DTQ, OPPAI, ModelSettings, Vocabulary
 from tests.helpers.stash import Stash
 from tests.helpers.inference import Tagger
 

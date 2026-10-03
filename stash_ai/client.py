@@ -5,7 +5,7 @@ from itertools import batched
 import re
 from typing import Iterator
 
-from stash_ai.transport import StashTransport, absolute_stash_url, origin, safe_error
+from stash_ai.transport import StashTransport, safe_error
 
 
 class StashClient(StashTransport):

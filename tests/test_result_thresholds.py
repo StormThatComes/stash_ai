@@ -10,7 +10,7 @@ from stash_ai import cleanup, db, developer_report, performance, progress, recov
 from stash_ai import scene_cache, thresholds
 from stash_ai.runtime import RunReport
 from stash_ai.state import StateStore
-from stash_ai.taggers import SOURCES
+from stash_ai.models import SOURCES
 
 pytestmark = pytest.mark.usefixtures('reset_temporal')
 
