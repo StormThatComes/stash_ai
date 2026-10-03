@@ -117,8 +117,7 @@ def _execution_providers(ort, settings):
             import torch  # noqa: F401
         except ImportError:
             pass
-        if hasattr(ort, "preload_dlls"):
-            ort.preload_dlls()
+        ort.preload_dlls()
     providers = (
         ["CUDAExecutionProvider", "CPUExecutionProvider"]
         if use_cuda else ["CPUExecutionProvider"]

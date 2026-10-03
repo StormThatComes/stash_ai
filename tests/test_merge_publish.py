@@ -10,6 +10,7 @@ from stash_ai.merge_publish import MergePublisher
 from stash_ai.runtime import RunReport
 from stash_ai.state import StateStore
 from stash_ai.temporal import TemporalPolicy
+from tests.helpers.cli import runtime_args
 
 
 @pytest.fixture
@@ -20,11 +21,12 @@ def publication(tmp_path, monkeypatch):
         TEMPORAL_POLICY=TemporalPolicy(enabled=False), STASH_API_KEY='',
         safe_error=lambda exc, **kwargs: str(exc),
     )
-    args = SimpleNamespace(
+    report = RunReport(False, messages.append)
+    args = runtime_args(
+        report=report,
         state_db=tmp_path / 'state.db', merge_workers=1, profile_merge=None,
         force_merge=False, ram_cache_gb=1, ram_budget_gb=3,
     )
-    report = RunReport(False, messages.append)
     reasons = {}
     monkeypatch.setattr(
         performance, 'check_reason',

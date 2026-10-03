@@ -40,7 +40,7 @@ def _build_markers(app, args, config, frame_predictions, core_exclusions):
         threshold=config.marker_threshold,
         cache=RamCache(
             int(args.ram_cache_gb * 2**30),
-            rss_budget=int(getattr(args, "ram_budget_gb", 32) * 2**30),
+            rss_budget=int(args.ram_budget_gb * 2**30),
         ),
     )
 
@@ -116,7 +116,7 @@ def _process_scene(app, stash, tagger, resolver, scene, scene_id, config, args,
         scene_exclusions,
         prefetch=args.prefetch_batches,
         report=report,
-        prepare_workers=getattr(args, "prepare_workers", 1),
+        prepare_workers=args.prepare_workers,
     )
     markers, total_markers = _build_markers(
         app,

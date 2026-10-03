@@ -55,6 +55,8 @@ def test_prune_removes_only_unreferenced_rows_and_preserves_merge_check(tmp_path
     _install(monkeypatch, stash)
 
     assert app.main(["--prune-legacy-imports", "--state-db", str(path)]) == 0
+    assert stash.create_markers is True
+    assert stash.merge_read_configurations == [True]
 
     with sqlite3.connect(path) as db:
         assert db.execute(

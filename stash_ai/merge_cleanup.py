@@ -10,7 +10,6 @@ from tqdm import tqdm
 from stash_ai import separate_sync
 from stash_ai import merge_sync
 from stash_ai import merge
-from stash_ai.runtime import RunReport
 from stash_ai.models import SOURCES
 
 
@@ -123,7 +122,7 @@ def cleanup_scene(app, stash, resolver, store, current, settings, selected, args
     from stash_ai.exclusions import excluded_names
     from stash_ai.scene import cleanup_scene_support
     scene_id, stats = str(current["id"]), Counter()
-    if getattr(args, 'output_mode', 'merged') == 'merged':
+    if args.output_mode == 'merged':
         published = {}
         for kind, enabled in (("scene", app.APPLY_SCENE_TAGS), ("markers", app.CREATE_MARKERS)):
             if not enabled:
@@ -192,7 +191,7 @@ class CleanupRun:
         self.selected = {config.source.key for config in settings}
         self.scoped_tags = selected_policies(scene_policies, self.selected)
         self.stats = Counter()
-        self.report = getattr(args, 'report', None) or RunReport(getattr(args, 'verbose', False), tqdm.write)
+        self.report = args.report
         self.wide = not args.scene_id and self.selected == set(SOURCES)
         self.store = self.stash = self.cleanup_stash = self.resolver = self.sql = None
         self.scene_ids = None
@@ -200,10 +199,10 @@ class CleanupRun:
     def run(self):
         app, args = self.app, self.args
         with merge.StateStore(args.state_db, merge.scope_for(app.STASH_URL), app.DRY_RUN,
-                cache_bytes=int(getattr(args, 'ram_cache_gb', 0) * 2**30),
-                allow_cleanup=self.wide or getattr(args, 'abandon_pending', False), cleanup_preview=True,
-                memory_budget_bytes=int(getattr(args, 'ram_budget_gb', 32) * 2**30)) as self.store:
-            if getattr(args, 'abandon_pending', False):
+                cache_bytes=int(args.ram_cache_gb * 2**30),
+                allow_cleanup=self.wide or args.abandon_pending, cleanup_preview=True,
+                memory_budget_bytes=int(args.ram_budget_gb * 2**30)) as self.store:
+            if args.abandon_pending:
                 from stash_ai.recovery import abandon
                 self.stats.update(abandon(self.store, self.report.write))
             self.stash = self.cleanup_stash = app.create_stash_client(app.DRY_RUN)
@@ -223,7 +222,7 @@ class CleanupRun:
         app, args = self.app, self.args
         from stash_ai.cleanup import CleanupClient
         self.scene_ids = args.scene_id or None
-        strategy = getattr(args, 'cleanup_strategy', 'auto')
+        strategy = args.cleanup_strategy
         client = CleanupClient(self.stash) if strategy in ('auto', 'sql') else None
         if strategy in ('auto', 'sql'):
             from stash_ai.cleanup_sql import SQLCleanup
@@ -256,7 +255,7 @@ class CleanupRun:
         # list convention means the whole library, not zero scenes.
         if self.scene_ids == []:
             return
-        if self.sql is not None and hasattr(self.stash, 'configure_merge_reads'):
+        if self.sql is not None:
             # Cleanup uses the same snapshots as merge-only; media paths are unused.
             self.stash.configure_merge_reads(self.report, merge_only=True)
         self.resolver = app.TagResolver(self.cleanup_stash, source=merge.AI, report=self.report.detail,
@@ -279,7 +278,7 @@ class CleanupRun:
             return
         app, args = self.app, self.args
         from stash_ai.exclusions import prune_excluded_definitions
-        if getattr(args, 'prune_empty_tags', False):
+        if args.prune_empty_tags:
             from stash_ai.prune import prune_tags
             self.stats.update(self.sql.prune(prefixes=args.prune_prefixes, skip_marker_groups=app.CREATE_MARKERS)
                               if self.sql is not None else prune_tags(

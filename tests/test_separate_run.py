@@ -2,6 +2,7 @@
 from stash_ai import cli
 from stash_ai import inference
 from stash_ai import separate_run
+from tests.helpers.cli import runtime_args
 
 
 def test_run_model_accumulates_scene_phases_and_closes_tagger(monkeypatch):
@@ -55,8 +56,9 @@ def test_run_model_accumulates_scene_phases_and_closes_tagger(monkeypatch):
         return {"processed": 1, "markers_created": 2}
 
     monkeypatch.setattr(separate_run, "_process_scene", process)
-    args = SimpleNamespace(
+    args = runtime_args(
         report=Report(),
+        output_mode="separate",
         sync_hierarchy_only=False,
         scene_id=None,
     )

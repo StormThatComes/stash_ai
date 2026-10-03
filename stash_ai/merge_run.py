@@ -15,7 +15,7 @@ from stash_ai.merge_publish import MergePublisher
 from stash_ai import merge
 from stash_ai import performance
 from stash_ai import progress
-from stash_ai.runtime import RunReport, stage
+from stash_ai.runtime import stage
 
 
 class MergedRun:
@@ -30,7 +30,7 @@ class MergedRun:
         self.core_policies = core_policies
         self.scene_policies = scene_policies
         self.stats = Counter()
-        self.report = getattr(args, 'report', None) or RunReport(getattr(args, 'verbose', False), tqdm.write)
+        self.report = args.report
         self.store = None
         self.stash = None
         self.resolver = None
@@ -43,12 +43,12 @@ class MergedRun:
         app, args = self.app, self.args
         with merge.StateStore(
                 args.state_db, merge.scope_for(app.STASH_URL), app.DRY_RUN,
-                cache_bytes=int(getattr(args, 'ram_cache_gb', 0) * 2**30),
-                allow_cleanup=getattr(args, 'abandon_pending', False),
-                memory_budget_bytes=int(getattr(args, 'ram_budget_gb', 32) * 2**30)) as store:
+                cache_bytes=int(args.ram_cache_gb * 2**30),
+                allow_cleanup=args.abandon_pending,
+                memory_budget_bytes=int(args.ram_budget_gb * 2**30)) as store:
             self.store = store
             store.report = self.report
-            if getattr(args, 'abandon_pending', False):
+            if args.abandon_pending:
                 from stash_ai.recovery import abandon
                 self.stats.update(abandon(store, self.report.write))
             self.stash = app.create_stash_client(app.DRY_RUN)
@@ -71,8 +71,7 @@ class MergedRun:
 
     def _configure_stash(self):
         stash, args = self.stash, self.args
-        if hasattr(stash, 'configure_merge_reads'):
-            stash.configure_merge_reads(self.report, merge_only=args.merge_only)
+        stash.configure_merge_reads(self.report, merge_only=args.merge_only)
 
     def _prepare_resolver(self):
         app, args, stash = self.app, self.args, self.stash
@@ -120,13 +119,13 @@ class MergedRun:
 
     def _apply_thresholds(self):
         args, app = self.args, self.app
-        if not (getattr(args, 'rethreshold_markers', False) or getattr(args, 'rethreshold_scenes', False)):
+        if not (args.rethreshold_markers or args.rethreshold_scenes):
             return None
         from stash_ai.thresholds import rethreshold
         if self.stats['errors']:
             self.report.finish('Threshold update aborted: 0 changes applied', self.stats, self.store.cache)
             return 1
-        if getattr(args, 'rethreshold_scenes', False):
+        if args.rethreshold_scenes:
             from stash_ai.scene_cache import rethreshold as rethreshold_scenes
             self.stats.update(rethreshold_scenes(
                 app, self.store, self.scenes, self.settings, self.report,
@@ -225,7 +224,7 @@ class MergedRun:
                     predictions, frames = inference.predict_scene(
                         app, tagger, media, paths, cues, raw_scene=True, checkpoint=checkpoint,
                         prefetch=args.prefetch_batches, analysis=analysis, report=self.report,
-                        prepare_workers=getattr(args, 'prepare_workers', 1))
+                        prepare_workers=args.prepare_workers)
                     outputs = merge.capture_outputs(
                         app, config, self.catalogs[key], cues, predictions, frames, analysis)
                     for segment in outputs.values():

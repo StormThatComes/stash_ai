@@ -202,8 +202,7 @@ class SQLPreview:
         return self._project(self.stash.find_scene(identifier))
 
     def find_scene_for_merge(self, identifier):
-        read = getattr(self.stash, 'find_scene_for_merge', self.stash.find_scene)
-        return self._project(read(identifier))
+        return self._project(self.stash.find_scene_for_merge(identifier))
 
     def _project(self, scene):
         from copy import deepcopy

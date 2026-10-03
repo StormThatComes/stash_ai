@@ -9,6 +9,7 @@ def test_parse_args_uses_live_cli_defaults_and_caps_cache(monkeypatch):
     monkeypatch.setattr(app, "RAM_CACHE_GB", 12.0)
     monkeypatch.setattr(app, "RAM_BUDGET_GB", 8.0)
     monkeypatch.setattr(app, "DEFAULT_RESUME", False)
+    monkeypatch.setattr(app, "PREPARE_WORKERS", 3)
 
     args = cli_args.parse_args(app, [])
 
@@ -17,6 +18,11 @@ def test_parse_args_uses_live_cli_defaults_and_caps_cache(monkeypatch):
     assert args.resume is False
     assert args.model_config == app.MODELS_CONFIG_FILE
     assert args.merge_workers == 4
+    assert args.prepare_workers == 3
+    assert args.profile_merge is None
+    assert args.force_merge is args.rethreshold_markers is args.rethreshold_scenes is False
+    assert args.abandon_pending is args.prune_empty_tags is False
+    assert args.cleanup_strategy == "auto"
 
 
 def test_parse_args_rejects_merged_only_mode_with_separate_output():
