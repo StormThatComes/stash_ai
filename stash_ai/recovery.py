@@ -5,12 +5,12 @@ recovery evidence; interrupted cleanup masks become conditional on observed
 outputs. Cleanup reconciles a scene lazily before applying its new policies.
 """
 
+from stash_ai.publication import markers as marker_ops
 from collections import Counter
 from copy import deepcopy
 import json
 import uuid
 
-from stash_ai import separate_sync
 
 
 def initialize(store):
@@ -152,7 +152,7 @@ def reconcile(app, stash, store, scene, kind, published):
     else:
         versions = [union_intervals(s.get('contributions', []), borrow=True) for s in candidates]
         for marker in scene.get('scene_markers', []):
-            if not separate_sync.owned_marker(marker, AI):
+            if not marker_ops.owned_marker(marker, AI):
                 continue
             occurrence = any(t['name'] == OCCURRENCE_TAG for t in marker.get('tags', []))
             present = {t['name'][len(AI.prefix):] for t in marker.get('tags', [])

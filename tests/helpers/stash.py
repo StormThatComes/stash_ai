@@ -2,7 +2,7 @@
 
 from copy import deepcopy
 
-from stash_ai import separate_sync
+from stash_ai.publication import separate as separate_sync
 from stash_ai import cli as app
 
 

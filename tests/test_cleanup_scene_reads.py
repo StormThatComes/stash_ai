@@ -5,7 +5,7 @@ import json
 import pytest
 
 from stash_ai import cli as app, merge
-from stash_ai import merge_sync
+from stash_ai.publication import merged as merge_sync
 from stash_ai.client import StashClient
 from stash_ai.cleanup_sql import SQLPreview
 from stash_ai.merge_sql import OPERATION

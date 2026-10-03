@@ -6,7 +6,7 @@ import pytest
 
 from stash_ai import cli as app
 from stash_ai import merge_cleanup
-from stash_ai import merge_sync
+from stash_ai.publication import merged as merge_sync
 from stash_ai import cleanup
 from stash_ai import merge
 from stash_ai import recovery

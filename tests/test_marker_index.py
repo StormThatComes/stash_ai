@@ -5,7 +5,8 @@ import random
 
 import pytest
 
-from stash_ai import cli as app, merge, merge_sync
+from stash_ai import cli as app, merge
+from stash_ai.publication import merged as merge_sync
 from stash_ai.marker_index import MarkerIntervalIndex, PreviousMarkerRanges
 from tests.helpers.evidence import span
 from tests.helpers.stash import Stash

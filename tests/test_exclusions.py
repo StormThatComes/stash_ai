@@ -1,5 +1,6 @@
 """Global exclusions across cached outputs, shared proofs and Stash cleanup."""
 
+from stash_ai.publication import markers as marker_ops
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
@@ -9,7 +10,6 @@ import pytest
 from stash_ai.commands import hierarchy as hierarchy_commands
 from stash_ai.inference import sprites
 from stash_ai import merge_cleanup
-from stash_ai import separate_sync
 from stash_ai import cli as app
 from stash_ai import merge
 from stash_ai.exclusions import policies_or_empty
@@ -67,7 +67,7 @@ def test_cleanup_removes_shared_and_legacy_extras_without_images_or_models(pipel
     core = tmp_path/'core.yml'; core.write_text('version: 1\nexcluded_core_tags: [extra]\n')
     args = ['--models', 'wd', 'dtq', *p.args[2:], '--marker-core-exclusions', str(core)]
     assert app.main(args) == 0
-    marker = next(m for m in p.stash.scene['scene_markers'] if separate_sync.owned_marker(m, merge.AI))
+    marker = next(m for m in p.stash.scene['scene_markers'] if marker_ops.owned_marker(m, merge.AI))
     assert 'ai:extra' in {t['name'] for t in marker['tags']}
     marker['tags'].append(p.stash.tag('op:extra'))
     manual = p.stash.marker(WD, 'keep', 'manual', manual=True)

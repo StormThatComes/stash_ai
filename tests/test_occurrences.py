@@ -12,7 +12,7 @@ from stash_ai.inference.identity import model_identity
 from stash_ai.domain import Cue
 from stash_ai.inference import sprites
 from stash_ai import merge_cleanup
-from stash_ai import merge_sync
+from stash_ai.publication import merged as merge_sync
 from stash_ai import cli as app
 from stash_ai import merge
 from stash_ai.occurrences import OCCURRENCE_TAG, occurrence_contributions

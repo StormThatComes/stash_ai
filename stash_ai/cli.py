@@ -45,6 +45,7 @@ writes. Launch the application with stash_ai.py.
 
 from __future__ import annotations
 
+from stash_ai.publication import markers as marker_ops
 import math
 import os
 import sys
@@ -63,7 +64,6 @@ RAM_BUDGET_GB = 32.0  # Process target; reserves 25% for models and active work.
 PREPARE_WORKERS = 4  # CPU transforms only. One model/inference call at a time.
 MERGE_STATE_FILE = (INSTALL_ROOT / "tagger_sources.sqlite3")
 
-from stash_ai import separate_sync
 from stash_ai.runs import separate
 from stash_ai.models import SOURCES, ModelSource, ModelSettings
 from stash_ai.vocabulary import load_vocabulary, ensure_files, weight_files
@@ -247,7 +247,7 @@ def cleanup_scene_tags(stash: StashClient, scene: dict, exclusions: frozenset[st
 
 def outputs_already_present(scene: dict, source: ModelSource) -> bool:
     tagged = any(tag["name"].startswith(source.prefix) for tag in scene.get("tags") or [])
-    marked = any(separate_sync.owned_marker(marker, source) for marker in scene.get("scene_markers") or [])
+    marked = any(marker_ops.owned_marker(marker, source) for marker in scene.get("scene_markers") or [])
     return (not APPLY_SCENE_TAGS or tagged) and (not CREATE_MARKERS or marked)
 
 

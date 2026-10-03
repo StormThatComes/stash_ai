@@ -1,6 +1,7 @@
 """Behavior tests for exact-label AI fusion; no live Stash or model downloads."""
 
 
+from stash_ai.publication import markers as marker_ops
 from copy import deepcopy
 from itertools import permutations
 import json
@@ -12,8 +13,7 @@ import yaml
 
 from stash_ai.commands import hierarchy as hierarchy_commands, legacy as legacy_commands
 from stash_ai.inference.identity import model_identity
-from stash_ai import separate_sync
-from stash_ai import merge_sync
+from stash_ai.publication import merged as merge_sync
 from stash_ai import cli as app
 from stash_ai import merge
 from stash_ai.inference.inputs import inspect_input
@@ -35,7 +35,7 @@ def store(tmp_path, scope="fixture", dry=False):
 
 def intervals(stash, label="common"):
     return sorted((marker["seconds"], marker.get("end_seconds")) for marker in stash.scene["scene_markers"]
-                  if marker["primary_tag"]["name"]=="ai:"+label and separate_sync.owned_marker(marker,merge.AI))
+                  if marker["primary_tag"]["name"]=="ai:"+label and marker_ops.owned_marker(marker,merge.AI))
 
 
 def test_interval_union_retains_ends_separate_events_sources_and_extras():
@@ -161,7 +161,7 @@ def test_legacy_import_migrates_all_sources_without_fabricating_scores(tmp_path)
         merge_sync.sync_merged(app,stash,app.TagResolver(stash,source=merge.AI),state,stash.find_scene("1"),hits,spans)
         assert {t["name"] for t in stash.scene["tags"]}=={"ai:common","ai:unique_op","human"}
         assert intervals(stash)==[(10,50)] and manual in stash.scene["scene_markers"]
-        assert all("manual extra" in {t["name"] for t in m["tags"]} for m in stash.scene["scene_markers"] if separate_sync.owned_marker(m,merge.AI))
+        assert all("manual extra" in {t["name"] for t in m["tags"]} for m in stash.scene["scene_markers"] if marker_ops.owned_marker(m,merge.AI))
         assert "jt:common" in stash.tags  # No global tag objects are deleted.
 
 

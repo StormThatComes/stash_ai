@@ -1,5 +1,5 @@
 """One-scene merged reconciliation plans."""
-from stash_ai import merge_sync
+from stash_ai.publication import merged as merge_sync
 
 
 def test_merge_sync_plan_reports_scene_change():
