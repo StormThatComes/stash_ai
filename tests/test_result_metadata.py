@@ -4,6 +4,7 @@ import sqlite3
 
 import pytest
 
+from stash_ai.rethreshold import execution as rethreshold_execution, scenes as scene_updates
 from stash_ai import cli as app, db, performance
 from stash_ai.reports import developer as developer_report
 from stash_ai import scene_cache, thresholds
@@ -26,7 +27,7 @@ def test_combined_check_and_apply_never_read_payloads(tmp_path, monkeypatch):
         report = RunReport(write=lambda _: None)
         store.report = report
         before = blobs(store), metadata_rows(store)
-        plan, unpack = scene_cache.plan, store.unpack
+        plan, unpack = scene_updates.plan, store.unpack
         checking, checks = False, 0
 
         def guarded_unpack(value):
@@ -43,13 +44,13 @@ def test_combined_check_and_apply_never_read_payloads(tmp_path, monkeypatch):
                 checking = False
 
         monkeypatch.setattr(store, 'unpack', guarded_unpack)
-        monkeypatch.setattr(scene_cache, 'plan', guarded_plan)
+        monkeypatch.setattr(scene_updates, 'plan', guarded_plan)
         def authorize(action, table, column, database, trigger):
             if checking and action == sqlite3.SQLITE_READ and table == 'results' and column == 'data':
                 return sqlite3.SQLITE_DENY
             return sqlite3.SQLITE_OK
         store.connection.set_authorizer(authorize)
-        result = scene_cache.rethreshold(app, store, ['1', '2'], [config(.8)], report, markers=True)
+        result = rethreshold_execution.run(app, store, ['1', '2'], [config(.8)], report, markers=True)
         assert result == {'scene_thresholds_updated': 2}
         assert checks == 4  # Check and Apply both use the small metadata view.
         assert report.timing_calls['state_json_decode'] == 0
@@ -62,7 +63,7 @@ def test_marker_check_uses_metadata_for_scene_threshold_guard(tmp_path, monkeypa
         report = RunReport(write=lambda _: None)
         store.report = report
         monkeypatch.setattr(store, 'unpack', lambda *a: pytest.fail('Check decoded evidence'))
-        result = thresholds.rethreshold(app, store, ['1'], [config(.8)], report)
+        result = rethreshold_execution.run(app, store, ['1'], [config(.8)], report, scenes=False, markers=True)
         assert result == {'errors': 1}
         assert not threshold_rows(store)
         assert report.timing_calls['state_json_decode'] == 0
@@ -97,7 +98,7 @@ def test_metadata_check_matches_payload_validation(tmp_path, problem):
         messages = []
         for metadata_only in (False, True):
             with pytest.raises(ValueError) as error:
-                scene_cache.plan(app, store, '1', config(.8), markers=True,
+                scene_updates.plan(app, store, '1', config(.8), markers=True,
                                  direct=True, metadata_only=metadata_only)
             messages.append(str(error.value))
         assert messages[0] == messages[1]
@@ -123,7 +124,7 @@ def test_combined_pending_guard_keeps_noop_semantics(tmp_path, monkeypatch, same
         store.put('1', 'wd', outputs())
         store.prepare('1', {'markers': {'contributions': []}})
         target = config(.4 if same_threshold else .8)
-        planned = scene_cache.plan(app, store, '1', target, markers=True,
+        planned = scene_updates.plan(app, store, '1', target, markers=True,
                                    direct=True, metadata_only=True, pending_checked=True)
         assert bool(planned) == (not same_threshold)
         # A pending combined no-op remains valid; an actual edit fails before Apply.
@@ -155,14 +156,14 @@ def test_old_database_backfills_once_and_keeps_inline_overrides(tmp_path, monkey
         store.report = report
         statements = []
         store.connection.set_trace_callback(statements.append)
-        assert scene_cache.plan(app, store, '1', config(.4), markers=True,
+        assert scene_updates.plan(app, store, '1', config(.4), markers=True,
                                 direct=True, metadata_only=True)
         assert report.timing_calls['state_json_decode'] == 2
         assert store.connection.execute('PRAGMA user_version').fetchone() == (version,)
         first = metadata_rows(store)
         assert len(first) == 2
         monkeypatch.setattr(store, 'unpack', lambda *a: pytest.fail('Repeated legacy decode'))
-        assert scene_cache.plan(app, store, '1', config(.4), markers=True,
+        assert scene_updates.plan(app, store, '1', config(.4), markers=True,
                                 direct=True, metadata_only=True)
         assert metadata_rows(store) == first
         assert not any(sql.startswith(('INSERT INTO results ', 'UPDATE results ')) for sql in statements)
@@ -210,7 +211,7 @@ def test_legacy_backfill_only_selected_pairs_and_commits_once_per_check(tmp_path
         store.report = report
         statements = []
         store.connection.set_trace_callback(statements.append)
-        assert scene_cache.rethreshold(app, store, ['1', '2'], [config(.8)], report,
+        assert rethreshold_execution.run(app, store, ['1', '2'], [config(.8)], report,
                                         markers=True) == {'scene_thresholds_updated': 2}
         assert {(row[1], row[2], row[3]) for row in metadata_rows(store)} == {
             (scene, 'wd', kind) for scene in ('1', '2') for kind in ('scene', 'markers')}

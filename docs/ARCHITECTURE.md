@@ -183,7 +183,8 @@ Obsługa samodzielnych komend bazy znajduje się w pakiecie `stash_ai/db/`:
 | `stash_ai/db/__init__.py` | Dotychczasowe importy `stash_ai.db` i dispatch komend `--db-report`, `--db-check`, `--db-update`, `--db-compact`. |
 | `stash_ai/db/update.py` | Jawna, lokalna aktualizacja całej bazy do najnowszego schematu przez istniejące migracje stanu; odczytowy preflight i dry-run. |
 | `stash_ai/db/inspection.py` | Odczyt stanu i zajętości bazy oraz formatowanie raportu agregatów. |
-| `stash_ai/db/checks.py` | Głęboka kontrola BLOB-ów, indeksów, checkpointów i relacji stanu w jednej transakcji odczytu; raport błędów i ostrzeżeń. |
+| `stash_ai/db/checks.py` | Koordynacja głębokiej kontroli bazy w jednej transakcji odczytu oraz format raportu błędów i ostrzeżeń. |
+| `stash_ai/db/validation/` | Osobne walidatory schematu i domen, wyników/indeksów/progów, checkpointów oraz payloadów i relacji cleanup/recovery; wspólne dekodowanie i rozliczanie postępu. |
 | `stash_ai/db/compaction.py` | Blokada procesu, warunki bezpiecznego VACUUM i porównanie agregatów przed i po kompaktowaniu. |
 | `stash_ai/db/common.py` | Wspólne definicje obsługiwanego schematu, połączenie SQLite tylko do odczytu i helpery zapytań. |
 
@@ -191,6 +192,19 @@ Obsługa samodzielnych komend bazy znajduje się w pakiecie `stash_ai/db/`:
 z `stash_ai.db.common`; nadal odpowiada za własny format anonimowego raportu JSON
 i ograniczone pamięciowo rozkłady. Pakiet `db` nie uruchamia migracji ani nie
 zmienia protokołu blokady używanego przez `StateStore`.
+
+`stash_ai/rethreshold/` oddziela lokalną zmianę progów od projekcji evidence.
+`targets.py` wybiera pary scena/model z małych indeksów i grupuje przyczyny błędów;
+`markers.py` waliduje pokrycie markerów i zapisuje ich próg, a `scenes.py` planuje
+zmiany scen oraz opcjonalnie markerów. `execution.py` wspólnie obsługuje wszystkie
+trzy tryby: pełny preflight w batchu backfill metadanych, przerwanie przy dowolnym
+błędzie, a dopiero potem Apply z dotychczasową transakcją dla pojedynczej pary.
+Marker-only nadal blokuje pending publication także przy niezmienionym progu;
+scene/combined dopuszcza pending no-op. Check i Apply korzystają z metadanych,
+zachowując surowe BLOB-y evidence oraz atomowy zapis progu i indeksu ukończenia.
+`thresholds.py` zachowuje efektywne progi markerów, podpisy i kontrakty retencji,
+a `scene_cache.py` projekcję scen i konwersję obserwacji do klatek. Reuse korzysta
+bezpośrednio z planów w `rethreshold`, bez wrapperów pod dawnymi ścieżkami.
 
 Updater instaluje pliki Pythona z pakietu `stash_ai/`, również z jego podkatalogów.
 Pozostaje samodzielnym skryptem stdlib, aby odzyskiwanie przerwanej aktualizacji

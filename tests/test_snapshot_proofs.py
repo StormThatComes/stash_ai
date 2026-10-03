@@ -5,7 +5,8 @@ import zlib
 
 import pytest
 
-from stash_ai import cli as app, cleanup, db, merge, recovery, scene_cache
+from stash_ai.rethreshold import execution as rethreshold_execution
+from stash_ai import cli as app, cleanup, db, merge, recovery
 from stash_ai import merge_cleanup
 from stash_ai import merge_sync
 from stash_ai.runtime import RunReport
@@ -160,7 +161,7 @@ def test_rethreshold_cleanup_and_abandonment_never_downgrade_v9(tmp_path):
     with StateStore(path, 'scope') as store:
         store.put('1', 'wd', outputs())
         store.publish('1', {'markers': shared_snapshot()})
-        assert scene_cache.rethreshold(app, store, ['1'], [config(.8)], RunReport(write=lambda _: None), markers=True) == {'scene_thresholds_updated': 1}
+        assert rethreshold_execution.run(app, store, ['1'], [config(.8)], RunReport(write=lambda _: None), markers=True) == {'scene_thresholds_updated': 1}
         assert store.connection.execute('PRAGMA user_version').fetchone() == (9,)
         cleanup.begin(store, 'policy', {'unused'}, set(), [])
         cleanup.finish(store)

@@ -1,12 +1,12 @@
 """The retired blocklist must not silently restore labels lost from legacy caches."""
 
-
 from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
+from stash_ai.rethreshold import targets as rethreshold_targets
 from stash_ai.inference.identity import model_identity
 from stash_ai.signatures import digest
 from stash_ai.inference import sprites
@@ -165,8 +165,8 @@ def test_each_history_segment_is_checked_and_imported_ranges_keep_their_semantic
 
 
 def test_blocklist_preflight_reasons_are_stable():
-    assert thresholds.threshold_failure_reason(ValueError(
+    assert rethreshold_targets.threshold_failure_reason(ValueError(
         '123/wd: unblocked marker tags [\'common\'] are absent from cached frames; run inference.')) == (
             'unblocked marker tags require inference')
-    assert thresholds.threshold_failure_reason(ValueError(
+    assert rethreshold_targets.threshold_failure_reason(ValueError(
         '123/wd: marker blocklist metadata is missing or invalid; run inference.')) == 'unknown marker blocklist'

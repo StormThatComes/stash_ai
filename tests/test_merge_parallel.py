@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from stash_ai.rethreshold import markers as marker_updates
 from stash_ai import cli as app
 from stash_ai import merge
 from stash_ai import merge_parallel
@@ -50,7 +51,7 @@ def test_parallel_worker_tolerates_parent_publication_commits(tmp_path, rethresh
         if rethresholded:
             for scene, model in (('1', 'wd'), ('2', 'dtq')):
                 config = ModelSettings(SOURCES[model], Path('.'), scene_threshold=.4, marker_threshold=.95)
-                assert thresholds.apply(app, store, scene, config)
+                assert marker_updates.apply(app, store, scene, config)
 
     merge_parallel._init_worker(
         str(path),

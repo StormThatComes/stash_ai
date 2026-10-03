@@ -33,7 +33,7 @@ def fail(*args, **kwargs):
     'tags.py', 'domain.py', 'state.py', 'state_db.py', 'state_results.py', 'state_thresholds.py', 'state_publications.py',
     'models.py', 'vocabulary.py', 'onnx_tagger.py', 'prediction.py', 'sprites.py', 'preparation.py', 'progress.py', 'inputs.py', 'identity.py', 'checkpoints.py', 'signatures.py',
     'merge_run.py', 'merge_publish.py', 'merge_parallel.py', 'merge_sync.py', 'separate_sync.py',
-    'config.py', 'hierarchy.py', 'legacy.py',
+    'config.py', 'hierarchy.py', 'legacy.py', 'rethreshold/markers.py', 'rethreshold/scenes.py',
 ])
 def test_publication_code_tracks_extracted_modules(monkeypatch, filename):
     before = performance.publication_code()
@@ -41,7 +41,7 @@ def test_publication_code_tracks_extracted_modules(monkeypatch, filename):
 
     def changed(path):
         data = read_bytes(path)
-        return data + b'\n# changed' if path.name == filename else data
+        return data + b'\n# changed' if path.as_posix().endswith('/' + filename) else data
 
     monkeypatch.setattr(performance.Path, 'read_bytes', changed)
     assert performance.publication_code() != before
@@ -50,6 +50,9 @@ def test_publication_code_tracks_extracted_modules(monkeypatch, filename):
 @pytest.mark.parametrize('filename', [
     'client.py', 'transport.py', 'vtt.py', 'arguments.py', 'validation.py', 'dispatch.py', 'explain.py',
     'merge_cleanup.py', 'recovery.py', 'cleanup_sql.py', 'cleanup_sql_session.py',
+    'rethreshold/execution.py', 'rethreshold/targets.py', 'db/checks.py',
+    'db/validation/common.py', 'db/validation/schema.py', 'db/validation/results.py',
+    'db/validation/checkpoints.py', 'db/validation/state.py',
 ])
 def test_publication_code_ignores_runtime_and_maintenance_modules(monkeypatch, filename):
     before = performance.publication_code()
@@ -57,7 +60,7 @@ def test_publication_code_ignores_runtime_and_maintenance_modules(monkeypatch, f
 
     def changed(path):
         data = read_bytes(path)
-        return data + b'\n# changed' if path.name == filename else data
+        return data + b'\n# changed' if path.as_posix().endswith('/' + filename) else data
 
     monkeypatch.setattr(performance.Path, 'read_bytes', changed)
     assert performance.publication_code() == before

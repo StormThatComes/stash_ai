@@ -6,6 +6,7 @@ import json
 
 import pytest
 
+from stash_ai.rethreshold import execution as rethreshold_execution
 from stash_ai.inference import sprites
 from stash_ai import cli as app
 from stash_ai import merge
@@ -384,7 +385,7 @@ def test_scene_rethreshold_never_decodes_publication_snapshots(tmp_path, monkeyp
             lambda *args, **kwargs: pytest.fail('decoded a publication snapshot during rethreshold'))
         report = RunReport(write=lambda _: None)
 
-        result = cache.rethreshold(app, state, {'1': {}}, [config], report)
+        result = rethreshold_execution.run(app, state, {'1': {}}, [config], report)
 
         assert result == {'scene_thresholds_updated': 1}
         assert state.records('1', 'scene')['wd'][0][cache.SCENE_OVERRIDE] == .8

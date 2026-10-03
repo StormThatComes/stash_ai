@@ -37,7 +37,8 @@ def main():
     if min(args.scenes, args.frames, args.labels, args.repeats) < 1:
         parser.error('scenes, frames, labels and repeats must be positive')
     sys.path.insert(0, str(args.project.resolve()))
-    from stash_ai import scene_cache, thresholds
+    from stash_ai.rethreshold import (
+        execution as rethreshold_execution, markers as marker_updates, scenes as scene_updates)
     from stash_ai.runtime import RunReport
     from stash_ai.state import StateStore
     from stash_ai.models import ModelSettings, SOURCES
@@ -87,7 +88,7 @@ def main():
                     return blob
 
                 store.replace_records, store.pack = count_write, count_pack
-                planner = thresholds if args.mode == 'markers' else scene_cache
+                planner = marker_updates if args.mode == 'markers' else scene_updates
                 plan_name = 'validate' if args.mode == 'markers' else 'plan'
                 original_plan = getattr(planner, plan_name)
                 phases = {phase: dict(seconds=0., decode_calls=0) for phase in ('check', 'apply')}
@@ -110,11 +111,9 @@ def main():
                 try:
                     with redirect_stderr(io.StringIO()):
                         started = perf_counter()
-                        if args.mode == 'markers':
-                            result = thresholds.rethreshold(app, store, scenes, settings, report)
-                        else:
-                            result = scene_cache.rethreshold(app, store, scenes, settings, report,
-                                                             markers=args.mode == 'combined')
+                        result = rethreshold_execution.run(
+                            app, store, scenes, settings, report,
+                            scenes=args.mode != 'markers', markers=args.mode != 'scene')
                         seconds = perf_counter() - started
                 finally:
                     setattr(planner, plan_name, original_plan)

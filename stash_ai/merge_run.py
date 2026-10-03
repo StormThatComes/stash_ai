@@ -125,18 +125,13 @@ class MergedRun:
         args, app = self.args, self.app
         if not (args.rethreshold_markers or args.rethreshold_scenes):
             return None
-        from stash_ai.thresholds import rethreshold
+        from stash_ai.rethreshold.execution import run
         if self.stats['errors']:
             self.report.finish('Threshold update aborted: 0 changes applied', self.stats, self.store.cache)
             return 1
-        if args.rethreshold_scenes:
-            from stash_ai.scene_cache import rethreshold as rethreshold_scenes
-            self.stats.update(rethreshold_scenes(
-                app, self.store, self.scenes, self.settings, self.report,
-                markers=args.rethreshold_markers))
-        else:
-            self.stats.update(rethreshold(
-                app, self.store, self.scenes, self.settings, self.report))
+        self.stats.update(run(
+            app, self.store, self.scenes, self.settings, self.report,
+            scenes=args.rethreshold_scenes, markers=args.rethreshold_markers))
         if self.stats['errors']:
             self.report.finish('Threshold update aborted: 0 changes applied', self.stats, self.store.cache)
             return 1

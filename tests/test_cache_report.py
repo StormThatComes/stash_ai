@@ -5,6 +5,7 @@ import json
 
 import pytest
 
+from stash_ai.rethreshold import scenes as scene_updates
 from stash_ai import cli as app, merge
 from stash_ai.reports import cache as cache_report
 from stash_ai.models import ModelSettings, SOURCES
@@ -77,9 +78,8 @@ def test_rethreshold_uses_sql_overrides_and_has_no_gpu_action(tmp_path):
     assert first['totals']['rethreshold_pairs'] == 1 and not actions(first)
     assert first['plan'][0]['action'] == 'rethreshold'
     with merge.StateStore(path, merge.scope_for(app.STASH_URL)) as store:
-        from stash_ai import scene_cache
-        updates = scene_cache.plan(app, store, '1', settings[0], markers=True, metadata_only=True)
-        scene_cache.apply(store, '1', 'wd', updates, metadata_only=True)
+        updates = scene_updates.plan(app, store, '1', settings[0], markers=True, metadata_only=True)
+        scene_updates.apply(store, '1', 'wd', updates, metadata_only=True)
     before = path.read_bytes()
     assert report(path, settings=settings)['totals']['fully_ready_scenes'] == 1
     assert path.read_bytes() == before

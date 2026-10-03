@@ -5,6 +5,7 @@ import sqlite3
 
 import pytest
 
+from stash_ai.rethreshold import markers as marker_updates, execution as rethreshold_execution, scenes as scene_updates
 from stash_ai import cli as app, db, progress, scene_cache, state_metadata, thresholds
 from stash_ai.runtime import RunReport
 from stash_ai.state import StateStore
@@ -22,8 +23,8 @@ def target(mode, value=.8):
 
 def update(store, mode, report):
     if mode == 'markers':
-        return thresholds.rethreshold(app, store, ['1'], [target(mode)], report)
-    return scene_cache.rethreshold(app, store, ['1'], [target(mode)], report,
+        return rethreshold_execution.run(app, store, ['1'], [target(mode)], report, scenes=False, markers=True)
+    return rethreshold_execution.run(app, store, ['1'], [target(mode)], report,
                                   markers=mode == 'combined')
 
 
@@ -48,10 +49,10 @@ def test_metadata_apply_matches_full_payload_index_and_preserves_history(tmp_pat
     # Reference the established full-evidence path, including preview overlays.
     with StateStore(paths[0], 'scope', dry_run=dry_run) as store:
         if mode == 'markers':
-            assert thresholds.apply(app, store, '1', target(mode))
+            assert marker_updates.apply(app, store, '1', target(mode))
         else:
-            planned = scene_cache.plan(app, store, '1', target(mode), markers=mode == 'combined')
-            scene_cache.apply(store, '1', 'wd', planned)
+            planned = scene_updates.plan(app, store, '1', target(mode), markers=mode == 'combined')
+            scene_updates.apply(store, '1', 'wd', planned)
         expected_index = index_rows(store)
         expected_records = {kind: store.records('1', kind) for kind in ('scene', 'markers')}
     source = paths[1].read_bytes()
