@@ -11,6 +11,7 @@ from collections import Counter
 from tqdm import tqdm
 
 from stash_ai import inference
+from stash_ai.inference_inputs import RunInputs
 from stash_ai.merge_publish import MergePublisher
 from stash_ai import merge
 from stash_ai import performance
@@ -142,7 +143,7 @@ class MergedRun:
         app, args, store = self.app, self.args, self.store
         kinds = progress.output_kinds(app)
         replacement = {"scene": app.REPLACE_SCENE_TAGS, "markers": app.REPLACE_MARKERS}
-        inputs = progress.RunInputs(self.stash, store.cache, self.report)
+        inputs = RunInputs(self.stash, store.cache, self.report)
         if args.merge_only:
             return
         if args.restart:

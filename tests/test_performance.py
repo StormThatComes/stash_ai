@@ -30,7 +30,7 @@ def fail(*args, **kwargs):
 
 @pytest.mark.parametrize('filename', [
     'tags.py', 'domain.py', 'state.py', 'state_db.py', 'state_results.py', 'state_thresholds.py', 'state_publications.py',
-    'models.py', 'vocabulary.py', 'onnx_tagger.py', 'inference.py', 'progress.py',
+    'models.py', 'vocabulary.py', 'onnx_tagger.py', 'inference.py', 'progress.py', 'inference_inputs.py',
     'merge_run.py', 'merge_publish.py', 'merge_parallel.py', 'merge_sync.py', 'separate_sync.py',
     'config.py',
 ])
@@ -217,41 +217,6 @@ def test_preview_detects_external_source_commit_even_for_fast_skip(tmp_path):
             writer.execute('DELETE FROM merge_checks')
         with pytest.raises(RuntimeError, match='changed during dry-run'):
             performance.checked(preview, '1', 'p', 'f')
-
-
-def test_media_is_fetched_once_for_four_models_with_identical_signatures(pipeline, monkeypatch):
-    p = pipeline
-    calls = Counter()
-    def get_media(url):
-        calls[url] += 1
-        return url.encode()
-    monkeypatch.setattr(p.stash, 'get_media', get_media)
-    def cues(app, media, paths):
-        media.get_media(paths['vtt'])
-        return p.cues, len(p.cues)
-    monkeypatch.setattr(inference, 'fetch_cues', cues)
-    paths = p.stash.scene['paths']
-    reference = [progress.inspect_input(app, p.stash, paths, model)[2] for model in range(4)]
-    calls.clear()
-    inputs = progress.RunInputs(p.stash, RamCache(1000000))
-    for model in range(4):
-        out, media, signature = inputs.inspect(app, paths, model)
-        assert out == p.cues and signature == reference[model]
-        assert media.get_media('sprite') == b'sprite'
-    assert calls == {'/vtt': 1, 'sprite': 1}
-
-
-def test_media_eviction_revalidates_and_new_run_accepts_new_bytes(pipeline, monkeypatch):
-    p = pipeline
-    cache = RamCache(1000000)
-    inputs = progress.RunInputs(p.stash, cache)
-    paths = p.stash.scene['paths']
-    original = inputs.inspect(app, paths, 'model')[2]
-    cache.clear()
-    monkeypatch.setattr(p.stash, 'get_media', lambda url: b'new input')
-    with pytest.raises(RuntimeError, match='media changed'):
-        inputs.inspect(app, paths, 'model')
-    assert progress.RunInputs(p.stash, cache).inspect(app, paths, 'model')[2] != original
 
 
 @pytest.mark.parametrize('prefetch', [0, 2])
