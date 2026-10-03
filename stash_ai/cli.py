@@ -252,8 +252,10 @@ def outputs_already_present(scene: dict, source: ModelSource) -> bool:
 
 def main(argv: list[str] | None = None) -> int:
     global DRY_RUN, APPLY_SCENE_TAGS, CREATE_MARKERS, TEMPORAL_POLICY
-    from stash_ai.cli_args import mode_flags, parse_args
-    from stash_ai.cli_modes import run_database_command, run_standalone_command
+    from stash_ai.commands.arguments import parse_args
+    from stash_ai.commands.validation import mode_flags
+    from stash_ai.commands.dispatch import (
+        run_database_command, run_standalone_command, run_saved_merge_command, run_merged)
 
     app = sys.modules[__name__]
     args = parse_args(app, argv)
@@ -295,12 +297,9 @@ def main(argv: list[str] | None = None) -> int:
     if cleanup_only:
         from stash_ai.merge_cleanup import CleanupRun
         return CleanupRun(app, settings, args, core_policies, scene_policies).run()
-    if args.output_mode == "merged":
-        from stash_ai import merge as stash_merge
-        if args.explain_tag:
-            return stash_merge.explain(app, args, core_policies, scene_policies)
-        if args.merge_only:
-            return stash_merge.run_merged(app, settings, args, {}, stash_merge.combined_hierarchy(app, args, scene_policies), core_policies, scene_policies)
+    result = run_saved_merge_command(app, settings, args, core_policies, scene_policies)
+    if result is not None:
+        return result
     catalogs, hierarchies = {}, {}
     # Validate all selected vocabularies and hierarchies before any Stash writes.
     for config in settings:
@@ -318,7 +317,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{source.title}: {len(vocabulary.labels):,} labels; "
               f"hierarchy={'off' if hierarchy is None else str(len(hierarchy.category_parents)) + ' categories'}; "
               f"scene threshold={config.scene_threshold}, marker threshold={config.marker_threshold}.")
-    merged_hierarchy = stash_merge.combined_hierarchy(app, args, scene_policies) if args.output_mode == "merged" else None
+    merged_hierarchy = None
+    if args.output_mode == "merged":
+        from stash_ai.commands.hierarchy import combined_hierarchy
+        merged_hierarchy = combined_hierarchy(app, args, scene_policies)
     if merged_hierarchy:
         print(f"AI: {len(merged_hierarchy.leaf_parents):,} unique labels; {len(merged_hierarchy.category_parents)} shared categories.")
     if args.validate_hierarchy:
@@ -326,8 +328,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.output_mode == "merged":
         if args.sync_hierarchy_only:
-            return stash_merge.run_hierarchy(app, args, catalogs, merged_hierarchy, scene_policies)
-        return stash_merge.run_merged(app, settings, args, catalogs, merged_hierarchy, core_policies, scene_policies)
+            from stash_ai.commands.hierarchy import run_hierarchy
+            return run_hierarchy(app, args, catalogs, merged_hierarchy, scene_policies)
+        return run_merged(app, settings, args, catalogs, merged_hierarchy, core_policies, scene_policies)
     stash = create_stash_client(DRY_RUN)
     stats = Counter()
     try:

@@ -1,10 +1,11 @@
-"""Argument parsing and cross-option validation for the Stash AI CLI."""
+"""CLI argument definitions; grouped validation lives in validation.py."""
 from __future__ import annotations
 
 import argparse
-import math
 import os
 from pathlib import Path
+
+from stash_ai.commands.validation import validate_args
 
 
 def build_parser(app) -> argparse.ArgumentParser:
@@ -118,158 +119,8 @@ def build_parser(app) -> argparse.ArgumentParser:
                        help="Write an offline tag review queue with reasons, examples and per-model counts; no inference or Stash requests.")
     modes.add_argument("--cache-report", type=Path, metavar="NEW.json",
                        help="Report scene/marker cache coverage against selected YAML models and plan targeted backfill; offline and read-only.")
-    
+
     return parser
-
-
-def database_mode(args) -> bool:
-    return bool(args.db_report or args.db_check or args.db_update or args.db_compact
-                or args.anonymous_diagnostics is not None)
-
-
-def mode_flags(args) -> tuple[bool, bool]:
-    hierarchy_only = args.sync_hierarchy_only or args.validate_hierarchy
-    cleanup_only = args.cleanup_only or args.cleanup_markers_only or args.cleanup_scene_tags_only
-    return hierarchy_only, cleanup_only
-
-
-def validate_args(app, parser: argparse.ArgumentParser, args: argparse.Namespace) -> argparse.Namespace:
-    db_mode = database_mode(args)
-    if args.cache_report is not None:
-        if args.output_mode != "merged":
-            parser.error("--cache-report requires --output-mode merged.")
-        if args.device or args.offline or args.resume is not None or args.restart:
-            parser.error("--cache-report does not use model execution/resume options.")
-        if (args.markers_only or args.scene_tags_only or args.profile_merge or args.force_merge
-                or args.rethreshold_scenes or args.rethreshold_markers or args.abandon_pending
-                or args.prune_empty_tags or args.prune_prefixes or args.create_all_tags or args.no_hierarchy
-                or args.dry_run):
-            parser.error("--cache-report is read-only and checks both outputs; tagging/recovery modifiers do not apply.")
-        if args.cache_report.suffix.lower() != ".json" or args.cache_report.expanduser().exists():
-            parser.error("--cache-report requires a new .json file; existing files are never overwritten.")
-    if args.tag_review_report is not None:
-        if args.output_mode != "merged":
-            parser.error("--tag-review-report requires --output-mode merged.")
-        if args.models or args.device or args.offline or args.resume is not None or args.restart:
-            parser.error("--tag-review-report uses all saved model evidence; model/inference options do not apply.")
-        if (args.markers_only or args.scene_tags_only or args.profile_merge or args.force_merge
-                or args.rethreshold_scenes or args.rethreshold_markers or args.abandon_pending
-                or args.prune_empty_tags or args.prune_prefixes or args.create_all_tags or args.no_hierarchy
-                or args.dry_run):
-            parser.error("--tag-review-report cannot be combined with tagging, threshold, pruning or dry-run modifiers.")
-        if args.tag_review_report.suffix.lower() != ".json" or args.tag_review_report.exists():
-            parser.error("--tag-review-report requires a new .json file; existing files are never overwritten.")
-    elif any(value is not None for value in (
-            args.tag_review_margin, args.tag_review_long_marker_seconds, args.tag_review_examples)):
-        parser.error("--tag-review-* settings require --tag-review-report.")
-    if args.tag_review_margin is not None and (
-            not math.isfinite(args.tag_review_margin) or not 0 <= args.tag_review_margin <= 1):
-        parser.error("--tag-review-margin must be a finite number in [0, 1].")
-    if args.tag_review_long_marker_seconds is not None and (
-            not math.isfinite(args.tag_review_long_marker_seconds) or args.tag_review_long_marker_seconds <= 0):
-        parser.error("--tag-review-long-marker-seconds must be finite and positive.")
-    if args.tag_review_examples is not None and not 1 <= args.tag_review_examples <= 20:
-        parser.error("--tag-review-examples must be in 1..20.")
-    if args.model_report is not None:
-        if args.output_mode != "merged":
-            parser.error("--model-report requires --output-mode merged.")
-        if args.models or args.device or args.offline or args.resume is not None or args.restart:
-            parser.error("--model-report uses all saved model evidence; model/inference options do not apply.")
-        if (args.markers_only or args.scene_tags_only or args.profile_merge or args.force_merge
-                or args.rethreshold_scenes or args.rethreshold_markers or args.abandon_pending
-                or args.prune_empty_tags or args.prune_prefixes or args.create_all_tags or args.no_hierarchy
-                or args.dry_run):
-            parser.error("--model-report cannot be combined with tagging, threshold, pruning or dry-run modifiers.")
-        if args.model_report.suffix.lower() != ".json" or args.model_report.exists():
-            parser.error("--model-report requires a new .json file; existing files are never overwritten.")
-    if args.prune_legacy_imports:
-        if args.output_mode != "merged":
-            parser.error("--prune-legacy-imports requires --output-mode merged.")
-        if args.scene_id:
-            parser.error("--prune-legacy-imports covers the current Stash/state DB; --scene-id does not apply.")
-        if args.models or args.device or args.offline or args.resume is not None or args.restart:
-            parser.error("--prune-legacy-imports does not use model/inference options.")
-        if (args.markers_only or args.scene_tags_only or args.profile_merge or args.force_merge
-                or args.rethreshold_scenes or args.rethreshold_markers or args.abandon_pending
-                or args.prune_empty_tags or args.prune_prefixes or args.create_all_tags or args.no_hierarchy):
-            parser.error("--prune-legacy-imports cannot be combined with tagging, threshold, recovery or tag-pruning modifiers.")
-
-    if db_mode:
-        if args.output_mode != "merged":
-            parser.error("--db-report/--db-check/--db-update/--db-compact require --output-mode merged.")
-        if args.scene_id:
-            parser.error("Database maintenance covers the state DB; --scene-id does not apply.")
-        if args.models or args.device or args.offline or args.no_temporal or args.resume is not None or args.restart:
-            parser.error("Database maintenance does not use model/inference options.")
-        if (args.markers_only or args.scene_tags_only or args.profile_merge or args.force_merge
-                or args.rethreshold_scenes or args.rethreshold_markers or args.abandon_pending
-                or args.prune_empty_tags or args.prune_prefixes or args.create_all_tags or args.no_hierarchy):
-            parser.error("Database maintenance cannot be combined with tagging, threshold, cleanup or pruning modifiers.")
-        if args.anonymous_diagnostics is not None and args.dry_run:
-            parser.error("--anonymous-diagnostics is already read-only for the state DB; --dry-run does not apply.")
-
-    if args.output_mode != "merged" and (args.resume or args.restart):
-        parser.error("--resume/--restart require --output-mode merged; separate retains its original full-inference behavior.")
-    args.resume = app.DEFAULT_RESUME if args.resume is None else args.resume
-    if args.checkpoint_batches < 1:
-        parser.error("--checkpoint-batches must be >= 1.")
-    if not 1 <= args.cleanup_page_size <= 10000 or not 1 <= args.cleanup_write_batch_size <= 1000:
-        parser.error("--cleanup-page-size must be 1..10000 and --cleanup-write-batch-size must be 1..1000.")
-    if not math.isfinite(args.ram_cache_gb) or args.ram_cache_gb < 0:
-        parser.error("--ram-cache-gb must be a finite number >= 0.")
-    if not math.isfinite(args.ram_budget_gb) or args.ram_budget_gb <= 0:
-        parser.error("--ram-budget-gb must be a finite number > 0.")
-    args.ram_cache_gb = min(args.ram_cache_gb, args.ram_budget_gb * .75)
-
-    hierarchy_only, cleanup_only = mode_flags(args)
-    if args.abandon_pending:
-        if (args.output_mode != "merged" or hierarchy_only or args.download_models or args.explain_tag
-                or args.prune_empty_tags_only or args.sync_marker_groups_only or args.restart):
-            parser.error("--abandon-pending is standalone or accompanies merged --merge-only/cleanup modes.")
-        if not args.merge_only and not cleanup_only and (
-                args.markers_only or args.scene_tags_only or args.prune_empty_tags or args.profile_merge):
-            parser.error("Standalone --abandon-pending does not publish outputs or prune tags.")
-    if args.rethreshold_scenes and (not args.merge_only or args.markers_only):
-        parser.error("--rethreshold-scenes requires --merge-only and scene output.")
-    if args.rethreshold_markers and (not args.merge_only or args.scene_tags_only):
-        parser.error("--rethreshold-markers requires --merge-only and marker output.")
-    if args.force_merge and not args.merge_only:
-        parser.error("--force-merge requires --merge-only.")
-    if args.profile_merge:
-        if (args.output_mode != "merged" or hierarchy_only or cleanup_only or args.download_models
-                or args.explain_tag or args.prune_empty_tags_only or args.sync_marker_groups_only):
-            parser.error("--profile-merge applies to merged tagging or --merge-only.")
-        if args.profile_merge.suffix.lower() != ".jsonl" or args.profile_merge.exists():
-            parser.error("--profile-merge requires a new .jsonl file; existing files are never overwritten.")
-    if (args.markers_only or args.scene_tags_only) and (
-            hierarchy_only or cleanup_only or args.download_models or args.explain_tag
-            or args.prune_empty_tags_only or args.sync_marker_groups_only):
-        parser.error("--markers-only/--scene-tags-only apply to tagging or --merge-only.")
-    if hierarchy_only and args.no_hierarchy:
-        parser.error("Hierarchy-only modes cannot be combined with --no-hierarchy.")
-    if (hierarchy_only or args.download_models) and args.scene_id:
-        parser.error("This mode operates on global/model files; --scene-id does not apply.")
-    if args.create_all_tags and not args.sync_hierarchy_only:
-        parser.error("--create-all-tags requires --sync-hierarchy-only.")
-    if (args.merge_only or args.explain_tag or args.sync_marker_groups_only) and args.output_mode != "merged":
-        parser.error("--merge-only, --explain-tag and --sync-marker-groups-only require --output-mode merged.")
-    if args.explain_tag and not args.scene_id:
-        parser.error("--explain-tag requires at least one --scene-id.")
-    if args.prune_empty_tags_only and args.scene_id:
-        parser.error("Empty-tag definitions have global scope; --scene-id does not apply to --prune-empty-tags-only.")
-    if args.prune_empty_tags and (
-            hierarchy_only or args.download_models or args.explain_tag
-            or args.output_mode != "merged" or args.sync_marker_groups_only):
-        parser.error("--prune-empty-tags follows merged tagging, --merge-only or merged cleanup; use --prune-empty-tags-only otherwise.")
-    if args.prune_prefixes and not (args.prune_empty_tags or args.prune_empty_tags_only):
-        parser.error("--prune-prefixes requires an empty-tag pruning mode.")
-    if args.restart and (
-            hierarchy_only or cleanup_only or args.download_models or args.explain_tag
-            or args.merge_only or args.prune_empty_tags_only or args.sync_marker_groups_only):
-        parser.error("--restart applies to model inference.")
-    if args.abandon_pending and not args.merge_only and not cleanup_only and args.scene_id:
-        parser.error("Standalone abandonment covers pending plans for this Stash/state DB; --scene-id does not apply.")
-    return args
 
 
 def parse_args(app, argv: list[str] | None = None) -> argparse.Namespace:

@@ -254,6 +254,39 @@ assert digest({}) == '44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61c
     assert result.returncode == 0, result.stderr
 
 
+def test_cli_commands_move_to_package_and_remove_stale_bytecode(tmp_path):
+    files = application_files()
+    previous = {name: data for name, data in files.items()
+                if not name.startswith('stash_ai/commands/')}
+    modules = ('cli_args', 'cli_modes')
+    previous.update({f'stash_ai/{name}.py': b'PREVIOUS_COMMANDS = True\n' for name in modules})
+    installed(tmp_path, Remote(previous))
+    result = subprocess.run(
+        [sys.executable, '-c', 'from stash_ai import ' + ', '.join(modules)],
+        cwd=tmp_path, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    cache = tmp_path / 'stash_ai/__pycache__'
+    for name in modules:
+        assert list(cache.glob(name + '.*.pyc'))
+
+    assert updater.update(tmp_path, Remote(files)) == 0
+
+    for name in modules:
+        assert not (tmp_path / f'stash_ai/{name}.py').exists()
+        assert not list(cache.glob(name + '.*.pyc'))
+    for name, data in files.items():
+        if name.startswith('stash_ai/commands/'):
+            assert (tmp_path / name).read_bytes() == data
+    # Database dispatch must be importable before optional runtime dependencies.
+    result = subprocess.run([sys.executable, '-c', '''
+from stash_ai.commands import arguments, dispatch, validation
+assert callable(arguments.parse_args)
+assert callable(dispatch.run_database_command)
+assert callable(validation.validate_reports)
+'''], cwd=tmp_path, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+
 def test_failed_database_package_migration_restores_module(tmp_path, monkeypatch):
     database_module_installation(tmp_path)
     before = snapshot(tmp_path)

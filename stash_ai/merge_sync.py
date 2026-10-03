@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass, field
 
+from stash_ai.commands import legacy as legacy_commands
 from stash_ai import separate_sync
 from stash_ai import merge
 from stash_ai.marker_index import MarkerIntervalIndex, PreviousMarkerRanges
@@ -128,7 +129,7 @@ def plan_scene_tags(app, store, scene_id, scene, scene_hits, scene_labels, ids, 
     from stash_ai.recovery import publications
 
     current_tags = scene.get("tags", [])
-    migrated_scene_ids = ({str(tag["id"]) for tag in current_tags if merge.legacy_label(tag["name"])}
+    migrated_scene_ids = ({str(tag["id"]) for tag in current_tags if legacy_commands.legacy_label(tag["name"])}
                           if migrate else set())
     published, pending = store.snapshot(scene_id, "scene", borrow=True)
     owned_before = set((published or {}).get("owned_ids", [])) | set((pending or {}).get("owned_ids", []))
@@ -141,7 +142,7 @@ def plan_scene_tags(app, store, scene_id, scene, scene_hits, scene_labels, ids, 
 
     # CREATE_MISSING=False must not remove a legacy association lacking a replacement.
     migrated_scene_ids.difference_update(str(tag["id"]) for tag in current_tags
-        if (parsed := merge.legacy_label(tag["name"])) and parsed[1] in unresolved_labels)
+        if (parsed := legacy_commands.legacy_label(tag["name"])) and parsed[1] in unresolved_labels)
     forbidden_ids = {str(tag['id']) for tag in current_tags if tag['name'] in blocked_names}
     preserved = existing_ids - owned_before - migrated_scene_ids - forbidden_ids
     final_ids = preserved | desired_ids
@@ -236,7 +237,7 @@ def plan_markers(app, stash, resolver, scene_id, scene, markers, ids, groups, bl
         if migrate and app.CREATE_MARKERS:
             predicted_labels = {marker["tag"] for marker in markers}
             for marker in current_markers:
-                parsed = merge.legacy_label((marker.get("primary_tag") or {}).get("name", ""))
+                parsed = legacy_commands.legacy_label((marker.get("primary_tag") or {}).get("name", ""))
                 if parsed and separate_sync.owned_marker(marker, merge.SOURCES[parsed[0]]):
                     if parsed[1] not in predicted_labels or parsed[1] in resolved_marker_labels:
                         plan.deletes.add(str(marker["id"]))

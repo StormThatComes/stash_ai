@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 import yaml
 
+from stash_ai.commands import hierarchy as hierarchy_commands, legacy as legacy_commands
 from stash_ai.inference.identity import model_identity
 from stash_ai import separate_sync
 from stash_ai import merge_sync
@@ -152,7 +153,7 @@ def test_legacy_import_migrates_all_sources_without_fabricating_scores(tmp_path)
         marker["tags"].append(manual_tag)
     manual=stash.marker(JOYTAG,"common","manual",True)
     with store(tmp_path) as state:
-        merge.bootstrap_legacy(app,state,stash.find_scene("1"))
+        legacy_commands.bootstrap_legacy(app,state,stash.find_scene("1"))
         hits,spans=merge.evidence(app,state,"1",empty_policies(),empty_policies())
         assert {s["source"] for s in hits}=={"joytag","wd","oppai"}
         assert all(s["score"] is None for s in hits+spans)
@@ -169,7 +170,7 @@ def test_failed_api_write_keeps_legacy_results_and_pending_merge_recovers(tmp_pa
     old=stash.marker(JOYTAG,"common","legacy");old.update(seconds=10,end_seconds=30)
     stash.fail_create=True
     with store(tmp_path) as state:
-        merge.bootstrap_legacy(app,state,stash.find_scene("1"))
+        legacy_commands.bootstrap_legacy(app,state,stash.find_scene("1"))
         hits,spans=merge.evidence(app,state,"1",empty_policies(),empty_policies())
         with pytest.raises(RuntimeError,match="injected"):
             merge_sync.sync_merged(app,stash,app.TagResolver(stash,source=merge.AI),state,stash.find_scene("1"),hits,spans)
@@ -296,7 +297,7 @@ def test_combined_hierarchy_has_one_namespace_and_all_labels(tmp_path):
     root=Path(__file__).resolve().parents[1]
     args=runtime_args(no_hierarchy=False,hierarchy=root/"joytag_hierarchy.yml",**{
         key+"_hierarchy":root/f"{key}_hierarchy.yml" for key in ("wd","dtq","oppai")})
-    combined=merge.combined_hierarchy(app,args)
+    combined=hierarchy_commands.combined_hierarchy(app,args)
     expected=set()
     for key in SOURCES:
         data=yaml.safe_load((root/f"{key}_hierarchy.yml").read_text(encoding="utf-8"))
@@ -324,7 +325,7 @@ def test_missing_source_state_does_not_destroy_existing_ai_markers(tmp_path):
     before=deepcopy(stash.scene)
     with store(tmp_path) as state:
         with pytest.raises(RuntimeError,match="source state"):
-            merge.bootstrap_legacy(app,state,stash.find_scene("1"))
+            legacy_commands.bootstrap_legacy(app,state,stash.find_scene("1"))
     assert stash.scene==before and not stash.writes
 
 
@@ -363,13 +364,13 @@ def test_recovery_after_partial_api_success_preserves_ownership(tmp_path,monkeyp
         actual(*args)  # Simulate server success followed by a lost response.
         raise RuntimeError("lost response")
     with store(tmp_path) as state:
-        merge.bootstrap_legacy(app,state,stash.find_scene("1"))
+        legacy_commands.bootstrap_legacy(app,state,stash.find_scene("1"))
         hits,spans=merge.evidence(app,state,"1",empty_policies(),empty_policies())
         monkeypatch.setattr(stash,failure,interrupted)
         with pytest.raises(RuntimeError,match="lost response"):
             merge_sync.sync_merged(app,stash,app.TagResolver(stash,source=merge.AI),state,stash.find_scene("1"),hits,spans)
         monkeypatch.setattr(stash,failure,actual)
-        merge.bootstrap_legacy(app,state,stash.find_scene("1"))
+        legacy_commands.bootstrap_legacy(app,state,stash.find_scene("1"))
         merge_sync.sync_merged(app,stash,app.TagResolver(stash,source=merge.AI),state,stash.find_scene("1"),hits,spans)
         assert intervals(stash)==[(10,30)]
         assert {t["name"] for t in stash.scene["tags"]}=={"human","ai:common"}
@@ -401,9 +402,9 @@ def test_new_legacy_results_are_imported_alongside_existing_cache_once(merge_pip
 def test_retry_does_not_reimport_old_legacy_after_successful_new_inference(tmp_path):
     stash=Stash();old=stash.marker(WD,"common","legacy")
     with store(tmp_path) as state:
-        merge.bootstrap_legacy(app,state,stash.find_scene("1"))
+        legacy_commands.bootstrap_legacy(app,state,stash.find_scene("1"))
         state.put("1","wd",{"markers":{"mode":"frames","meta":{"origin":"inference"},"items":[]}})
-        merge.bootstrap_legacy(app,state,stash.find_scene("1"))
+        legacy_commands.bootstrap_legacy(app,state,stash.find_scene("1"))
         assert state.records("1","markers")["wd"][0]["items"]==[]
         assert len(state.records("1","markers")["wd"])==1
 

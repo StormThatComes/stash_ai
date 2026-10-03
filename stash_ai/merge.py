@@ -5,7 +5,7 @@ module so CLI and imported use share the same configuration and Stash client.
 """
 from __future__ import annotations
 
-from collections import Counter, defaultdict
+from collections import defaultdict
 from contextlib import nullcontext
 from copy import deepcopy
 from datetime import datetime, timezone
@@ -13,8 +13,7 @@ import hashlib
 import json
 import math
 
-from stash_ai import separate_sync
-from stash_ai.domain import Cue, FramePrediction, TagHierarchy
+from stash_ai.domain import Cue, FramePrediction
 from stash_ai.models import ModelSource, SOURCES
 from stash_ai.runtime import stage
 from stash_ai.occurrences import OCCURRENCE_TAG
@@ -32,15 +31,6 @@ def raw_label(value):
             or AI.prefix + value in (AI.owner_tag, OCCURRENCE_TAG) or value.startswith("category:")):
         raise ValueError(f"Invalid or reserved merged label: {value!r}")
     return value
-
-
-def legacy_label(name):
-    for key, source in SOURCES.items():
-        if name.startswith(source.prefix) and name != source.owner_tag:
-            label = name[len(source.prefix):]
-            if label and not label.startswith(("category:", "marker:")):
-                return key, raw_label(label)
-    return None
 
 
 def source_codes(sources):
@@ -92,96 +82,6 @@ def union_intervals(contributions, *, borrow=False):
             component["extra_tags"] = sorted({raw_label(label) for label in component["extra_tags"]})
             merged.append(component)
     return sorted(merged, key=lambda item: (item["start"], item["tag"]))
-
-
-def combined_hierarchy(app, args, tag_policies=None):
-    """Compose the four local YAMLs into one stable ai: category namespace."""
-    if args.no_hierarchy:
-        return None
-    from stash_ai.exclusions import policies_or_empty
-    tag_policies = policies_or_empty(tag_policies)
-    prefix, root = "ai:category:", "ai:category:AI"
-    leaves = defaultdict(set)
-    categories = {root: ()}
-    for key, source in SOURCES.items():
-        path = args.hierarchy if key == "joytag" else getattr(args, key + "_hierarchy")
-        data = app.load_unique_yaml(path, "Hierarchy")
-        if not isinstance(data, dict) or not isinstance(data.get("groups"), dict):
-            raise ValueError(f"Invalid hierarchy: {path}")
-        groups = data["groups"].values()
-        if any(not isinstance(group, list) or any(not isinstance(label, str) for label in group) for group in groups):
-            raise ValueError(f"Invalid hierarchy labels: {path}")
-        labels = sorted({label for group in groups for label in group})
-        hierarchy = app.load_tag_hierarchy(path, labels, source)
-        def converted(name):
-            return root if not hierarchy.category_parents[name] else prefix + name[len(hierarchy.category_prefix):]
-        for name, parents in hierarchy.category_parents.items():
-            mapped, wanted = converted(name), tuple(converted(parent) for parent in parents)
-            if mapped in categories and categories[mapped] != wanted:
-                raise ValueError(f"Conflicting AI hierarchy category: {mapped}")
-            categories[mapped] = wanted
-        for label, parents in hierarchy.leaf_parents.items():
-            raw_label(label)
-            if label in tag_policies[key]:
-                continue
-            leaves[label].update(converted(parent) for parent in parents)
-    fallbacks = {prefix + suffix for suffix in ("Other / Unclassified", "General", "Uncategorized")}
-    for parents in leaves.values():
-        if parents - fallbacks:
-            parents.difference_update(fallbacks)
-    if set(categories) & {AI.prefix + label for label in leaves}:
-        raise ValueError("A merged hierarchy category collides with a predicted tag.")
-    return TagHierarchy({label: tuple(sorted(parents)) for label, parents in leaves.items()},
-                            categories, prefix, AI.hierarchy_description)
-
-
-def bootstrap_legacy(app, store, scene):
-    """Capture all known source namespaces before migrating any associations."""
-    scene_id = str(scene["id"])
-    for kind, enabled in (("scene", app.APPLY_SCENE_TAGS), ("markers", app.CREATE_MARKERS)):
-        if not enabled:
-            continue
-        existing = store.sources(scene_id, kind)
-        if kind == "markers" and not existing and any(separate_sync.owned_marker(marker, AI) for marker in scene.get("scene_markers", [])):
-            raise RuntimeError("Merged markers exist without their source state. Restore the original --state-db before synchronization.")
-        from stash_ai.performance import freeze
-        imported = {freeze(item) for item in store.imported_legacy(scene_id, kind, borrow=True)}
-        originals = []
-        by_model = defaultdict(list)
-        if kind == "scene":
-            for tag in scene.get("tags", []):
-                parsed = legacy_label(tag["name"])
-                if parsed:
-                    model, label = parsed
-                    originals.append(tag)
-                    if model not in existing or freeze(tag) not in imported:
-                        by_model[model].append({"tag": label, "score": None, "legacy_tag_id": str(tag["id"])})
-        else:
-            for marker in scene.get("scene_markers", []):
-                parsed = legacy_label((marker.get("primary_tag") or {}).get("name", ""))
-                if not parsed or not separate_sync.owned_marker(marker, SOURCES[parsed[0]]):
-                    continue
-                model, label = parsed
-                originals.append(marker)
-                if model in existing and freeze(marker) in imported:
-                    continue
-                extras, manual_ids = set(), set()
-                for tag in marker.get("tags", []):
-                    extra = legacy_label(tag["name"])
-                    if extra:
-                        extras.add(extra[1])
-                    elif tag["name"] not in {source.owner_tag for source in SOURCES.values()}:
-                        manual_ids.add(str(tag["id"]))
-                by_model[model].append(dict(tag=label, start=marker["seconds"], end=marker.get("end_seconds"),
-                    score=None, hits=None, extra_tags=sorted(extras - {label}), extra_ids=sorted(manual_ids),
-                    legacy_marker_id=str(marker["id"])))
-        for model, items in by_model.items():
-            segment = {"mode": "scene" if kind == "scene" else "spans", "items": items,
-                       "meta": {"origin": "legacy", "captured_at": now(), "revision": None}}
-            # Fresh separate-mode outputs augment the cache. Only a successful
-            # merged-mode inference replaces that model's previous evidence.
-            store.put(scene_id, model, {kind: segment}, {kind: False})
-        store.remember_legacy(scene_id, kind, originals)
 
 
 def evidence(app, store, scene_id, core_policies, scene_policies, metrics=None, *, selected_sources=None):
@@ -384,138 +284,3 @@ def capture_outputs(app, config, vocabulary, cues, predictions, frames, analysis
 def has_outputs(app, store, scene_id, model):
     from stash_ai.progress import completed, output_kinds
     return completed(store, scene_id, model, output_kinds(app))
-
-
-def run_merged(app, settings, args, catalogs, hierarchy, core_policies, scene_policies):
-    from stash_ai.diagnostics import MergeDiagnostics
-    from stash_ai.merge_run import MergedRun
-    with MergeDiagnostics(args.report, args.profile_merge, dry_run=app.DRY_RUN,
-                          merge_only=args.merge_only, force=args.force_merge):
-        return MergedRun(app, settings, args, catalogs, hierarchy, core_policies, scene_policies).run()
-
-
-def run_hierarchy(app, args, catalogs, hierarchy, tag_policies=None):
-    from stash_ai.exclusions import policies_or_empty
-    tag_policies = policies_or_empty(tag_policies)
-    stash = app.create_stash_client(app.DRY_RUN)
-    try:
-        resolver = app.TagResolver(stash, hierarchy, source=AI, report=args.report.detail, create_missing=app.CREATE_MISSING)
-        resolver.preload()
-        labels = sorted({label for source, vocabulary in catalogs.items() for label in vocabulary.labels
-                         if label not in tag_policies[source]})
-        for label in labels:
-            if args.create_all_tags or AI.prefix + label in resolver.cache:
-                resolver.resolve(AI.prefix + label)
-        app.print_hierarchy_summary(resolver)
-    finally:
-        stash.close()
-    return 0
-
-
-def _effective_scene_thresholds(app, threshold):
-    """Explain the actual scene cutoffs used by temporal qualification."""
-    result = {"effective_scene_threshold": threshold}
-    if type(threshold) not in (int, float):
-        return result
-    policy = app.TEMPORAL_POLICY
-    ratio = policy.scene_support_ratio if policy.enabled else 1.0
-    result.update(
-        temporal_enabled=policy.enabled,
-        scene_support_ratio=ratio,
-        effective_support_floor=threshold * ratio,
-    )
-    if policy.enabled:
-        result["strong_peak_threshold"] = (
-            threshold + (1.0 - threshold) * policy.scene_strong_margin
-        )
-    return result
-
-
-def _record_thresholds(app, kind, segment):
-    """Expose stored policy separately from the effective replay policy."""
-    meta = segment.get("meta", {})
-    if kind == "scene":
-        from stash_ai.scene_cache import SCENE_OVERRIDE, scene_threshold
-        result = {
-            "stored_scene_threshold": meta.get("scene_threshold"),
-            "scene_threshold_override": segment.get(SCENE_OVERRIDE),
-            **_effective_scene_thresholds(app, scene_threshold(segment)),
-        }
-        return result
-    from stash_ai.temporal import marker_floor
-    from stash_ai.thresholds import OVERRIDE, marker_threshold
-    effective = marker_threshold(segment)
-    result = {
-        "stored_marker_threshold": meta.get("marker_threshold"),
-        "marker_threshold_override": segment.get(OVERRIDE),
-        "effective_marker_threshold": effective,
-    }
-    if type(effective) in (int, float):
-        policy = app.TEMPORAL_POLICY
-        result.update(
-            temporal_enabled=policy.enabled,
-            marker_continue_ratio=policy.marker_continue_ratio if policy.enabled else 1.0,
-            effective_support_floor=marker_floor(policy, effective),
-        )
-    return result
-
-
-def _explain_scene_contributor(app, hit, recorded_scene_sources):
-    value = dict(hit)
-    thresholds = _effective_scene_thresholds(
-        app, hit.get("meta", {}).get("scene_threshold"))
-    source_records = recorded_scene_sources.get(hit.get("source"), {}).get("records", ())
-    signature = hit.get("meta", {}).get("inference_signature")
-    matching = [
-        record["thresholds"] for record in source_records
-        if record.get("meta", {}).get("inference_signature") == signature
-    ]
-    if len(matching) == 1:
-        thresholds["stored_scene_threshold"] = matching[0].get("stored_scene_threshold")
-        thresholds["scene_threshold_override"] = matching[0].get("scene_threshold_override")
-    value["thresholds"] = thresholds
-    return value
-
-
-def explain(app, args, core_policies, scene_policies):
-    label = raw_label(args.explain_tag.removeprefix(AI.prefix))
-    # Inspection always opens a read-only snapshot, even without --dry-run.
-    with StateStore(args.state_db, scope_for(app.STASH_URL), True,
-                    cache_bytes=int(args.ram_cache_gb * 2**30),
-                    memory_budget_bytes=int(args.ram_budget_gb * 2**30)) as store:
-        reports = []
-        for scene_id in dict.fromkeys(args.scene_id):
-            diagnostics = Counter()
-            hits, spans = evidence(app, store, scene_id, core_policies, scene_policies, diagnostics)
-            matching = [span for span in spans if span["tag"] == label]
-            recorded_sources = {}
-            for kind in KINDS:
-                sources = {}
-                for source, segments in store.records(scene_id, kind).items():
-                    matches = []
-                    for segment in segments:
-                        items = ([dict(start=frame["start"], end=frame["end"], score=score)
-                                  for frame in segment["items"] for tag, score in frame["tags"] if tag == label]
-                                 if segment["mode"] == "frames" else [entry for entry in segment["items"] if entry["tag"] == label])
-                        if items:
-                            matches.append({
-                                "meta": segment["meta"],
-                                "thresholds": _record_thresholds(app, kind, segment),
-                                "detections": items,
-                            })
-                    if matches:
-                        sources[source] = {"excluded": label in scene_policies[source] or (kind == 'markers' and label in core_policies[source]),
-                                           "records": matches}
-                recorded_sources[kind] = sources
-            reports.append({"scene_id": str(scene_id), "tag": AI.prefix + label, 'diagnostics': dict(diagnostics),
-                            "scene_contributors": [
-                                _explain_scene_contributor(app, hit, recorded_sources["scene"])
-                                for hit in hits if hit["tag"] == label
-                            ],
-                            "markers": union_intervals(matching), "recorded_sources": recorded_sources,
-                            "as_marker_extra": [dict(tag=AI.prefix + marker["tag"], start=marker["start"], end=marker["end"],
-                                                     evidence=marker["extra_evidence"][label])
-                                                for marker in union_intervals(spans) if label in marker.get("extra_evidence", {})],
-                            "pending_sync": any(store.snapshot(scene_id, kind, borrow=True)[1] is not None for kind in KINDS)})
-    print(json.dumps(reports, ensure_ascii=False, indent=2, allow_nan=False))
-    return 0
