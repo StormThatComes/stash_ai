@@ -1,7 +1,8 @@
 """Threshold policy writes preserve evidence, preview isolation and completion."""
 from copy import deepcopy
+from dataclasses import replace
+from pathlib import Path
 import sqlite3
-from types import SimpleNamespace
 
 import pytest
 
@@ -10,7 +11,7 @@ from stash_ai import cleanup, db, developer_report, performance, progress, recov
 from stash_ai import scene_cache, thresholds
 from stash_ai.runtime import RunReport
 from stash_ai.state import StateStore
-from stash_ai.models import SOURCES
+from stash_ai.models import ModelSettings, SOURCES
 
 pytestmark = pytest.mark.usefixtures('reset_temporal')
 
@@ -29,7 +30,7 @@ def outputs(threshold=.4, signature='original'):
 
 
 def config(threshold):
-    return SimpleNamespace(source=SOURCES['wd'], scene_threshold=threshold, marker_threshold=threshold)
+    return ModelSettings(SOURCES['wd'], Path('.'), scene_threshold=threshold, marker_threshold=threshold)
 
 
 def rethreshold(store, threshold, *, markers=True, scenes=('1',)):
@@ -86,8 +87,7 @@ def test_marker_only_updates_policy_without_writing_blob(tmp_path, monkeypatch):
         store.put('1', 'wd', {'markers': outputs()['markers']})
         before = blobs(store)
         monkeypatch.setattr(store, 'pack', lambda *a: pytest.fail('encoded inference evidence'))
-        target = config(.8)
-        target.scene_threshold = .4
+        target = replace(config(.8), scene_threshold=.4)
         result = thresholds.rethreshold(app, store, ['1'], [target], RunReport(write=lambda _: None))
         assert result == {'marker_thresholds_updated': 1}
         assert blobs(store) == before

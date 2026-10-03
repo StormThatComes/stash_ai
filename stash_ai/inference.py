@@ -4,12 +4,16 @@ from __future__ import annotations
 from collections import OrderedDict
 from dataclasses import dataclass
 from io import BytesIO
-from typing import Any, Iterator
+from typing import Any, Iterator, TYPE_CHECKING
 from urllib.parse import urljoin
 
 from stash_ai.transport import absolute_stash_url
 from stash_ai.domain import Cue, FramePrediction
 from stash_ai.vtt import format_time, parse_vtt_cues
+
+if TYPE_CHECKING:
+    import numpy as np
+    from PIL.Image import Image as PILImage
 
 
 def evenly_sample(items: list, count: int) -> list:
@@ -42,10 +46,10 @@ def fetch_cues(app, stash, paths: dict) -> tuple[list[Cue], int]:
     return evenly_sample(cues, app.MAX_FRAMES_PER_SCENE), len(cues)
 
 
-def iter_sprite_frames(stash, paths: dict, cues: list[Cue]) -> Iterator[tuple[Cue, Any]]:
+def iter_sprite_frames(stash, paths: dict, cues: list[Cue]) -> Iterator[tuple[Cue, PILImage]]:
     from PIL import Image
 
-    sheets: OrderedDict[str, Any] = OrderedDict()
+    sheets: OrderedDict[str, PILImage] = OrderedDict()
     try:
         for cue in cues:
             url = cue.image
@@ -70,7 +74,7 @@ def iter_sprite_frames(stash, paths: dict, cues: list[Cue]) -> Iterator[tuple[Cu
             sprite.close()
 
 
-def prepare_image(app, image: Any, target_size: int) -> Any:
+def prepare_image(app, image: PILImage, target_size: int) -> Any:
     import torchvision.transforms.functional as TVF
     from PIL import Image
 
@@ -82,20 +86,13 @@ def prepare_image(app, image: Any, target_size: int) -> Any:
     return TVF.normalize(tensor, mean=app.JOYTAG_CLIP_MEAN, std=app.JOYTAG_CLIP_STD)
 
 
-def select_scores(scores: list[float], labels: list[str], threshold: float, limit: int) -> list[tuple[str, float]]:
+def select_scores(scores: np.ndarray, labels: list[str], threshold: float, limit: int) -> list[tuple[str, float]]:
     import numpy as np
 
-    if isinstance(scores, np.ndarray):
-        # Match Python float comparisons exactly at the threshold, including
-        # float32 values just below a float64 policy boundary.
-        indexes = np.flatnonzero(scores.astype(np.float64, copy=False) >= threshold)
-        matches = [(labels[int(i)], float(scores[i])) for i in indexes]
-    else:
-        matches = [
-            (label, float(score))
-            for label, score in zip(labels, scores)
-            if score >= threshold
-        ]
+    # Match Python float comparisons exactly at the threshold, including
+    # float32 values just below a float64 policy boundary.
+    indexes = np.flatnonzero(scores.astype(np.float64, copy=False) >= threshold)
+    matches = [(labels[int(i)], float(scores[i])) for i in indexes]
     matches.sort(key=lambda item: (-item[1], item[0]))
     return matches[:limit] if limit else matches
 
@@ -281,7 +278,7 @@ def _finalize_predictions(app, tagger, scene_exclusions, state, *, raw_scene, an
                 scene_score_floor=state.scene_floor,
             )
 
-    if state.retain_scene and getattr(settings, 'scene_cache_floor', None) is not None:
+    if state.retain_scene and settings.scene_cache_floor is not None:
         # Keep exact aggregate scores for every retained label, including those
         # below today's support floor. Temporal statistics still use today's
         # publication policy; future rethreshold rebuilds them from the frames.

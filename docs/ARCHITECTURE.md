@@ -85,6 +85,12 @@ Genericzne komponenty (`TagResolver`, loader hierarchii i separate-output
 reconciliation) wymagają jawnego `ModelSource`; JoyTag nie jest ich ukrytym
 domyślnym namespace'em.
 
+Kontrakty wewnętrzne są jawne: `select_scores()` przyjmuje tablicę NumPy,
+retencja i podpisy inferencji korzystają z pełnego `ModelSettings`, a
+`MarkerIntervalIndex` wymaga gotowego `PreviousMarkerRanges`. Iterator klatek
+i przygotowanie batchy operują na obrazach PIL; worker tworzy własną kopię
+i zamyka ją po transformacji. Fixture testowe zachowują te same kontrakty.
+
 ## Komunikacja ze Stash
 
 | Moduł / klasa | Odpowiedzialność |

@@ -274,8 +274,10 @@ def test_vectorized_score_filter_preserves_float_boundaries_and_order(threshold)
     scores = np.random.default_rng(15).random(1024).astype(np.float32)
     scores[:4] = [.65, np.nextafter(np.float32(.65), np.float32(0)), .65, .35]
     labels = [f'tag_{i}' for i in range(len(scores))]
+    expected = sorted(((label, score) for label, score in zip(labels, scores.tolist())
+                       if score >= threshold), key=lambda item: (-item[1], item[0]))
     for limit in [0, 7]:
-        assert inference.select_scores(scores, labels, threshold, limit) == inference.select_scores(scores.tolist(), labels, threshold, limit)
+        assert inference.select_scores(scores, labels, threshold, limit) == (expected[:limit] if limit else expected)
 
 
 def test_cache_accounts_cue_attributes_and_evicts_under_process_pressure(monkeypatch):

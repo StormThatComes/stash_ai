@@ -35,9 +35,7 @@ def test_lookup_matches_full_scan_for_nested_duplicates_points_and_boundaries(to
                 marker('rounding', -1e-17, None), marker('point', 20, None)]
     rng.shuffle(markers)
     saved = deepcopy(markers)
-    index = MarkerIntervalIndex(markers, [])
-    if by_name:
-        index = MarkerIntervalIndex(markers, [], by_name=True)
+    index = MarkerIntervalIndex(markers, PreviousMarkerRanges([]), by_name=by_name)
     queries = [(start, end) for start in (-100, 0, 1, 10, 20, 100) for end in (None, 0, 10, 20, 100)]
     queries += [(rng.uniform(-25, 65), rng.choice([None, rng.uniform(-25, 65)])) for _ in range(100)]
     for label in ('core', 'other', 'missing'):
@@ -51,7 +49,7 @@ def test_lookup_matches_full_scan_for_nested_duplicates_points_and_boundaries(to
 
 
 def test_start_tolerance_does_not_extend_interval_ends():
-    index = MarkerIntervalIndex([marker('old', 0, 5), marker('point', 10, None)], [])
+    index = MarkerIntervalIndex([marker('old', 0, 5), marker('point', 10, None)], PreviousMarkerRanges([]))
     assert index.overlapping('core', dict(seconds=5.1, end_seconds=6), .25) == []
     assert [m['id'] for m in index.overlapping('core', dict(seconds=10.2, end_seconds=None), .25)] == ['point']
     assert [m['id'] for m in index.overlapping('core', dict(seconds=5, end_seconds=6))] == ['old']
@@ -79,7 +77,7 @@ def test_saved_point_extents_match_original_rounding_and_maximum_selection():
 def test_nested_long_range_does_not_force_scanning_unrelated_short_ranges(monkeypatch):
     markers = [marker(i, i*3, i*3 + 1) for i in range(10000)]
     markers.append(marker('outer', 0, 40000))
-    index = MarkerIntervalIndex(markers, [])
+    index = MarkerIntervalIndex(markers, PreviousMarkerRanges([]))
     calls, overlaps = [], merge.overlaps
     def counted(*args):
         calls.append(args[0]['id'])

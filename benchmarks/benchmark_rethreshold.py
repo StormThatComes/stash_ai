@@ -40,11 +40,11 @@ def main():
     from stash_ai import scene_cache, thresholds
     from stash_ai.runtime import RunReport
     from stash_ai.state import StateStore
-    from stash_ai.models import SOURCES
+    from stash_ai.models import ModelSettings, SOURCES
     from stash_ai.temporal import TemporalPolicy
     app = SimpleNamespace(TEMPORAL_POLICY=TemporalPolicy())
-    settings = [SimpleNamespace(source=source, scene_threshold=.4 if args.mode == 'markers' else .55,
-                                marker_threshold=.55)
+    settings = [ModelSettings(source, Path('.'), scene_threshold=.4 if args.mode == 'markers' else .55,
+                              marker_threshold=.55)
                 for source in SOURCES.values()]
     frames = [dict(start=float(i), end=float(i + 1), tags=[
         ['label_' + str(j), .3 + ((i * 7 + j * 19) % 600) / 1000]

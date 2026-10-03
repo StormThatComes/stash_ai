@@ -6,11 +6,16 @@ from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 import zlib
 
 from stash_ai import inference
+from stash_ai.models import ModelSettings
 from stash_ai.state_codec import encode, decode
 from stash_ai.vocabulary import metadata_files, weight_files
+
+if TYPE_CHECKING:
+    from PIL.Image import Image as PILImage
 
 PREDICTION_FORMAT = 2
 
@@ -237,7 +242,7 @@ def preload_status(store):
         store.cache.put(last, values)
 
 
-def model_identity(app, config, vocabulary):
+def model_identity(app, config: ModelSettings, vocabulary):
     def stamp(path):
         path = Path(path).resolve()
         try:
@@ -265,7 +270,7 @@ def model_identity(app, config, vocabulary):
     # Enabling or changing retention requests fresh inference to populate it;
     # publication-only threshold edits can still reuse the retained evidence.
     for name in ('scene_cache_floor', 'marker_cache_floor'):
-        value = getattr(config, name, None)
+        value = getattr(config, name)
         if value is not None:
             identity['retention'][name] = value
     return identity
@@ -352,12 +357,11 @@ def prepared_batches(app, tagger, stash, paths, cues, prefetch=False, workers=1)
     iterator = inference.iter_sprite_frames(stash, paths, cues)
     executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="prepare-frames") if prefetch else None
     transforms = ThreadPoolExecutor(max_workers=workers, thread_name_prefix='transform-frames') if workers > 1 else None
-    def transform(image):
+    def transform(image: PILImage):
         try:
             return tagger.prepare(image)
         finally:
-            if hasattr(image, 'close'):
-                image.close()
+            image.close()
     def prepare_next():
         prepared, batch_cues = [], []
         for _ in range(tagger.batch_size):
@@ -368,7 +372,7 @@ def prepared_batches(app, tagger, stash, paths, cues, prefetch=False, workers=1)
             if transforms:
                 # The source iterator closes its frame on the next step. Each
                 # worker owns a copy, and closes it even if preparation fails.
-                owned = image.copy() if hasattr(image, 'copy') else image
+                owned = image.copy()
                 prepared.append(transforms.submit(transform, owned))
             else:
                 prepared.append(tagger.prepare(image))
