@@ -1,4 +1,5 @@
 """Offline contracts for fully managed Hugging Face JoyTag installations."""
+
 import hashlib
 import json
 from pathlib import Path
@@ -7,9 +8,9 @@ from types import SimpleNamespace
 
 import pytest
 
+from stash_ai.inference.identity import model_identity
 from stash_ai import cli as app
 from stash_ai import joytag
-from stash_ai import progress
 from stash_ai.models import JOYTAG, WD, ModelSettings, Vocabulary
 from stash_ai.taggers import JoyTagger
 from stash_ai.vocabulary import load_vocabulary
@@ -162,7 +163,7 @@ def test_joytag_defaults_to_managed_models_directory_and_rejects_code_dir(tmp_pa
 def test_loader_revision_changes_only_joytag_inference_identity(tmp_path, monkeypatch):
     vocabulary = Vocabulary(['tag'], {})
     configs = [ModelSettings(s, tmp_path/s.key) for s in (JOYTAG, WD)]
-    before = [progress.model_identity(app, c, vocabulary) for c in configs]
+    before = [model_identity(app, c, vocabulary) for c in configs]
     monkeypatch.setattr(joytag, 'LOADER_REVISION', 'a'*40)
-    after = [progress.model_identity(app, c, vocabulary) for c in configs]
+    after = [model_identity(app, c, vocabulary) for c in configs]
     assert before[0] != after[0] and before[1] == after[1]

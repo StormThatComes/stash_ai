@@ -1,5 +1,6 @@
 """Resume equivalence and bounded preparation; never connects to Stash/HF."""
 
+
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
@@ -10,8 +11,9 @@ import threading
 import numpy as np
 import pytest
 
+from stash_ai.inference.identity import model_identity
 from stash_ai.domain import Cue, FramePrediction
-from stash_ai import inference
+from stash_ai.inference import checkpoints, prediction, preparation
 from stash_ai import state_codec
 from stash_ai import cli as app
 from stash_ai import merge
@@ -49,7 +51,7 @@ def test_interruption_resume_matches_full_inference_and_counts_each_frame_once(p
     assert app.main([*p.args,"--prefetch-batches",str(prefetch)])==0
     assert p.loaded[-1].seen==list(range(4,10))
     expected=IndexedTagger(p.loaded[-1].settings,p.scores["wd"],p.vocab.labels)
-    predictions,frames=inference.predict_scene(app, expected,p.stash,{},p.cues,raw_scene=True)
+    predictions,frames=prediction.predict_scene(app, expected,p.stash,{},p.cues,raw_scene=True)
     with merge.StateStore(p.path,merge.scope_for(app.STASH_URL),True) as state:
         scene=state.records("1","scene")["wd"][0]
         markers=state.records("1","markers")["wd"][0]
@@ -222,7 +224,7 @@ def test_finish_rolls_back_results_checkpoint_and_refresh_together(tmp_path, mon
         segment['items'] = []
     with merge.StateStore(path, 'fixture') as state:
         state.put('1', 'wd', original)
-        checkpoint = progress.Checkpoint(state, '1', 'wd', 'new', 2, 1, every=1)
+        checkpoint = checkpoints.Checkpoint(state, '1', 'wd', 'new', 2, 1, every=1)
         checkpoint.record(1, np.array([[.8]], dtype=np.float32),
                           [FramePrediction(Cue(0., 1., '', (0, 0, 1, 1)), (('core', .8),))],
                           analysis={'scene': {'frames': 1}})
@@ -236,20 +238,20 @@ def test_finish_rolls_back_results_checkpoint_and_refresh_together(tmp_path, mon
                     for table in tables}
         before = rows()
         cached = {kind: state.records('1', kind) for kind in original}
-        clear_checkpoint = progress.clear_checkpoint
+        clear_checkpoint = checkpoints.clear_checkpoint
 
         def fail_after_checkpoint_removal(*args):
             clear_checkpoint(*args)
             raise RuntimeError('checkpoint cleanup failed')
 
         with monkeypatch.context() as patch:
-            patch.setattr(progress, 'clear_checkpoint', fail_after_checkpoint_removal)
+            patch.setattr(checkpoints, 'clear_checkpoint', fail_after_checkpoint_removal)
             with pytest.raises(RuntimeError, match='checkpoint cleanup failed'):
-                progress.finish(state, '1', 'wd', fresh, {})
+                checkpoints.finish(state, '1', 'wd', fresh, {})
         assert rows() == before
         assert {kind: state.records('1', kind) for kind in original} == cached
 
-        progress.finish(state, '1', 'wd', fresh, {})
+        checkpoints.finish(state, '1', 'wd', fresh, {})
         for kind, segment in fresh.items():
             assert state.records('1', kind)['wd'] == [segment]
         for table in ('checkpoints', 'checkpoint_frames', 'checkpoint_analysis', 'refresh_requests'):
@@ -280,7 +282,7 @@ def test_prefetch_is_bounded_and_closes_producer(pipeline,monkeypatch):
         if out==3: prepared.set()
         return out
     model.prepare=prepare
-    iterator=progress.prepared_batches(app,model,p.stash,{},p.cues,True)
+    iterator=preparation.prepared_batches(app,model,p.stash,{},p.cues,True)
     batch,_=next(iterator)
     assert batch==[0,1]
     assert prepared.wait(2)
@@ -323,9 +325,9 @@ def test_pruning_follows_only_successful_merge(pipeline,monkeypatch,failure):
 def test_ordered_vocabulary_changes_checkpoint_identity(pipeline):
     p=pipeline
     config=ModelSettings(WD,Path("missing"))
-    original=progress.model_identity(app,config,p.vocab)
+    original=model_identity(app,config,p.vocab)
     reordered=Vocabulary(list(reversed(p.vocab.labels)),p.vocab.categories)
-    assert progress.model_identity(app,config,reordered)!=original
+    assert model_identity(app,config,reordered)!=original
 
 
 @pytest.mark.parametrize("flag",["--resume","--restart"])

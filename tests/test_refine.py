@@ -14,12 +14,11 @@ from types import SimpleNamespace
 from PIL import Image
 import pytest
 
-from stash_ai import inference
+from stash_ai.inference import sprites
 from stash_ai import state_codec
 from stash_ai import merge_cleanup
 from stash_ai import cli as app
 from stash_ai import merge
-from stash_ai import progress
 from stash_ai.temporal import TemporalPolicy, load_policy
 from stash_ai.models import SOURCES
 from tests.helpers.evidence import segment
@@ -103,8 +102,8 @@ def test_existing_sprite_reader_uses_only_stash_http_bytes(monkeypatch):
         return SimpleNamespace(status_code=200,content=urls[url],raise_for_status=lambda:None)
     client.media=SimpleNamespace(get=get)
     paths={'sprite':'/sprite.png','vtt':'/thumb.vtt'}
-    cues,total=inference.fetch_cues(app, client,paths)
-    samples=[(cue.start,image.getpixel((0,0))) for cue,image in inference.iter_sprite_frames(client,paths,cues)]
+    cues,total=sprites.fetch_cues(app, client,paths)
+    samples=[(cue.start,image.getpixel((0,0))) for cue,image in sprites.iter_sprite_frames(client,paths,cues)]
     assert total==2 and samples==[(0,(255,255,255)),(1,(255,255,255))]
     assert requested==list(urls)
 

@@ -126,7 +126,7 @@ class FrameIndex:
 
 def make_groups(records, signatures=None):
     from stash_ai.merge import marker_segment_signature
-    from stash_ai.progress import digest
+    from stash_ai.signatures import digest
     groups = {}
     for source in SOURCES:
         for segment in records.get(source, []):

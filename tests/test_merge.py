@@ -1,5 +1,6 @@
 """Behavior tests for exact-label AI fusion; no live Stash or model downloads."""
 
+
 from copy import deepcopy
 from itertools import permutations
 import json
@@ -9,12 +10,12 @@ import numpy as np
 import pytest
 import yaml
 
+from stash_ai.inference.identity import model_identity
 from stash_ai import separate_sync
 from stash_ai import merge_sync
 from stash_ai import cli as app
 from stash_ai import merge
-from stash_ai import progress
-from stash_ai.inference_inputs import inspect_input
+from stash_ai.inference.inputs import inspect_input
 from stash_ai.models import SOURCES, JOYTAG, WD, DTQ, OPPAI, ModelSettings, Vocabulary
 from tests.helpers.stash import Stash
 from tests.helpers.inference import Tagger
@@ -452,7 +453,7 @@ def test_enabling_replacement_collapses_reused_history_without_inference(merge_p
     assert app.main(args) == 0
 
     config = app.load_model_settings(app.MODELS_CONFIG_FILE, ['oppai'], None)[0]
-    identity = progress.model_identity(app, config, app.load_vocabulary(config))
+    identity = model_identity(app, config, app.load_vocabulary(config))
     _, _, current_signature = inspect_input(app, p.stash, p.stash.scene['paths'], identity)
     with merge.StateStore(p.path, merge.scope_for(app.STASH_URL), True) as state:
         scene_segments = state.records('1', 'scene')['oppai']

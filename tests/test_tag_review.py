@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from stash_ai import inference
+from stash_ai.inference import sprites
 from stash_ai import cli as app, merge
 from stash_ai.reports import tag_review
 from stash_ai.reports.review_accumulator import ReviewAccumulator
@@ -237,7 +237,7 @@ def test_cli_offline_json_and_summary_preserve_database_and_skip_model_loading(t
     before = path.read_bytes()
     for name in ('load_model_settings', 'load_vocabulary', 'load_tagger', 'create_stash_client'):
         monkeypatch.setattr(app, name, lambda *a, **k: pytest.fail("accessed inference or Stash"))
-    monkeypatch.setattr(inference, 'fetch_cues', lambda *a, **k: pytest.fail("accessed inference or Stash"))
+    monkeypatch.setattr(sprites, 'fetch_cues', lambda *a, **k: pytest.fail("accessed inference or Stash"))
     destination = tmp_path / "review.json"
     assert app.main(["--tag-review-report", str(destination), "--state-db", str(path),
                      "--no-temporal"]) == 0

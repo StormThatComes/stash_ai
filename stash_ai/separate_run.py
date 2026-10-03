@@ -5,7 +5,7 @@ from collections import Counter
 from functools import partial
 from typing import Any
 
-from stash_ai import inference
+from stash_ai.inference import prediction, preparation, sprites
 from stash_ai import separate_sync
 
 
@@ -106,8 +106,8 @@ def _process_scene(app, stash, tagger, resolver, scene, scene_id, config, args,
     if app.SKIP_EXISTING_OUTPUTS and app.outputs_already_present(scene, source):
         return Counter(skipped=1)
 
-    cues, total_frames = inference.fetch_cues(app, stash, paths)
-    predictions, frame_predictions = inference.predict_scene(
+    cues, total_frames = sprites.fetch_cues(app, stash, paths)
+    predictions, frame_predictions = prediction.predict_scene(
         app,
         tagger,
         stash,
@@ -183,7 +183,7 @@ def run_model(app, stash, config, vocabulary, hierarchy, args: Any,
         return _sync_hierarchy(app, resolver, vocabulary, args, scene_exclusions)
 
     stats = Counter()
-    tagger = app.load_tagger(config, vocabulary, partial(inference.prepare_image, app))
+    tagger = app.load_tagger(config, vocabulary, partial(preparation.prepare_image, app))
     try:
         progress = tqdm(stash.iter_scenes(args.scene_id), desc=source.key, unit="scene")
         for scene in progress:

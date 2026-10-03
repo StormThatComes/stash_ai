@@ -1,12 +1,15 @@
 """The retired blocklist must not silently restore labels lost from legacy caches."""
 
+
 from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
-from stash_ai import inference
+from stash_ai.inference.identity import model_identity
+from stash_ai.signatures import digest
+from stash_ai.inference import sprites
 from stash_ai import cli as app, merge, progress, thresholds
 from stash_ai.models import ModelSettings, Vocabulary, WD
 from stash_ai.temporal import TemporalPolicy
@@ -30,10 +33,10 @@ def test_default_empty_blocklist_keeps_pre_retirement_inference_identity(monkeyp
     monkeypatch.setattr(app, 'TEMPORAL_POLICY', TemporalPolicy(enabled=temporal))
     config = ModelSettings(WD, tmp_path / 'missing', batch_size=2, scene_threshold=.4, marker_threshold=.7)
     vocabulary = Vocabulary(['common', 'extra'], {'common': 'General', 'extra': 'General'})
-    identity = progress.model_identity(app, config, vocabulary)
+    identity = model_identity(app, config, vocabulary)
     # Digests captured before retirement; normalize only the machine-specific path.
     identity['files'] = [[Path(path).name, size, mtime] for path, size, mtime in identity['files']]
-    assert progress.digest(identity) == expected
+    assert digest(identity) == expected
 
 
 @pytest.mark.parametrize('temporal', [True, False])
@@ -118,7 +121,7 @@ def test_unfiltered_cache_retains_labels_and_reuses_predictions_without_models(p
         assert saved['meta']['marker_tag_blocklist'] == []
         assert all(['common', pytest.approx(.9)] in row['tags'] for row in saved['items'])
     monkeypatch.setattr(app, 'load_tagger', lambda *args: pytest.fail('loaded a model'))
-    monkeypatch.setattr(inference, 'fetch_cues', lambda *args: pytest.fail('fetched VTT'))
+    monkeypatch.setattr(sprites, 'fetch_cues', lambda *args: pytest.fail('fetched VTT'))
     assert app.main([*p.args, '--merge-only', '--force-merge']) == 0
     excluded = tmp_path / 'tags.yml'
     excluded.write_text('version: 1\nexcluded_tags: [common]\n')

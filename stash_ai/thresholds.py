@@ -10,7 +10,7 @@ OVERRIDE = 'marker_threshold_override'
 
 
 def indexed_signature(segment, inference=None):
-    from stash_ai.progress import digest
+    from stash_ai.signatures import digest
     signature = segment['meta'].get('inference_signature') if inference is None else inference
     from stash_ai.scene_cache import SCENE_OVERRIDE
     if SCENE_OVERRIDE in segment and OVERRIDE in segment:
@@ -193,7 +193,8 @@ def apply(app, store, scene, config, segments=None, *, direct=False, pending_che
 
 def reuse(app, store, scene, config, identity, cues, hashes, kinds):
     """Prove the original inference matches, allowing only a marker threshold edit."""
-    from stash_ai.progress import completed, digest
+    from stash_ai.progress import completed
+    from stash_ai.signatures import digest
     from stash_ai.scene_cache import reuse as reuse_scenes
     if reuse_scenes(app, store, scene, config, identity, cues, hashes, kinds):
         return True

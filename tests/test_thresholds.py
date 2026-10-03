@@ -1,5 +1,6 @@
 """Retune marker publication without inference or loss of source evidence."""
 
+
 from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
@@ -7,11 +8,11 @@ import sqlite3
 
 import pytest
 
-from stash_ai import inference
+from stash_ai.signatures import digest
+from stash_ai.inference import sprites
 from stash_ai import merge_cleanup
 from stash_ai import cli as app
 from stash_ai import merge
-from stash_ai import progress
 from stash_ai import scene_cache
 from stash_ai import thresholds
 from stash_ai.runtime import RunReport
@@ -53,10 +54,10 @@ def test_indexed_signature_combines_threshold_overrides_without_breaking_legacy_
     assert thresholds.indexed_signature(segment) == 'sig-a'
 
     marker_only = {**segment, thresholds.OVERRIDE: .9}
-    assert thresholds.indexed_signature(marker_only) == progress.digest(['sig-a', .9])
+    assert thresholds.indexed_signature(marker_only) == digest(['sig-a', .9])
 
     scene_only = {**segment, scene_cache.SCENE_OVERRIDE: .8}
-    assert thresholds.indexed_signature(scene_only) == progress.digest([
+    assert thresholds.indexed_signature(scene_only) == digest([
         'sig-a', {'scene_threshold': .8}
     ])
 
@@ -66,7 +67,7 @@ def test_indexed_signature_combines_threshold_overrides_without_breaking_legacy_
         scene_cache.SCENE_OVERRIDE: .8,
     }
     combined = thresholds.indexed_signature(both)
-    assert combined == progress.digest([
+    assert combined == digest([
         'sig-a',
         {'scene_threshold': .8, 'marker_threshold': .9},
     ])
@@ -163,7 +164,7 @@ def test_explicit_rethreshold_needs_no_models_media_or_vocabulary(pipeline, monk
     configure(monkeypatch, marker=.85)
     fail_inference(monkeypatch)
     monkeypatch.setattr(app, 'load_vocabulary', lambda *a: pytest.fail('loaded vocabulary'))
-    monkeypatch.setattr(inference, 'fetch_cues', lambda *a: pytest.fail('fetched VTT'))
+    monkeypatch.setattr(sprites, 'fetch_cues', lambda *a: pytest.fail('fetched VTT'))
     monkeypatch.setattr(p.stash, 'get_media', lambda *a: pytest.fail('fetched sprite'))
     assert app.main([*p.args, '--merge-only', '--rethreshold-markers']) == 0
     stderr = capsys.readouterr().err

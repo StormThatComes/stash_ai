@@ -26,7 +26,7 @@ def _number(value, low=0.0, high=float('inf')):
 
 
 def _run(meta):
-    from stash_ai.performance import digest
+    from stash_ai.signatures import digest
     signature = meta.get('inference_signature')
     return (signature, meta.get('frame_input_signature')) if signature else ('metadata', digest(meta))
 

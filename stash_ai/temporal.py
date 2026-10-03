@@ -248,7 +248,7 @@ def build_markers(app, frames, core_exclusions, *, threshold=None, seeds=None, i
     # Inspect every observation inside the finished interval, including a short
     # permitted gap in primary detections. Compute this only for retained markers.
     from stash_ai.fusion import ObservationIndex
-    from stash_ai.progress import digest
+    from stash_ai.signatures import digest
     events = {}
     for start, end, extras in extra_frames:
         event = events.setdefault(start, dict(start=start, end=end, extras={}))

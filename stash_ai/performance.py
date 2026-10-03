@@ -7,10 +7,7 @@ import hashlib
 import json
 from pathlib import Path
 
-
-def digest(value):
-    return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True,
-        separators=(',', ':'), allow_nan=False).encode()).hexdigest()
+from stash_ai.signatures import digest
 
 
 class StoredSegment(dict):
@@ -80,9 +77,9 @@ def initialize(store):
 PUBLICATION_CODE_FILES = (
     'cli.py', 'merge.py', 'merge_run.py', 'merge_publish.py', 'merge_parallel.py', 'merge_sync.py', 'marker_index.py', 'separate_sync.py',
     'temporal.py', 'fusion.py', 'scene.py', 'occurrences.py', 'exclusions.py', 'cleanup.py',
-    'models.py', 'taggers.py', 'onnx_tagger.py', 'vocabulary.py', 'inference.py', 'tags.py', 'domain.py', 'performance.py',
+    'models.py', 'taggers.py', 'onnx_tagger.py', 'vocabulary.py', 'inference/prediction.py', 'inference/sprites.py', 'inference/preparation.py', 'tags.py', 'domain.py', 'performance.py',
     'timeline.py', 'merge_sql.py', 'marker_groups.py',
-    'thresholds.py', 'retention.py', 'scene_cache.py', 'progress.py', 'inference_inputs.py', 'state.py', 'state_db.py',
+    'thresholds.py', 'retention.py', 'scene_cache.py', 'progress.py', 'inference/inputs.py', 'inference/identity.py', 'inference/checkpoints.py', 'signatures.py', 'state.py', 'state_db.py',
     'state_results.py', 'state_thresholds.py', 'state_metadata.py', 'state_publications.py', 'config.py',
 )
 

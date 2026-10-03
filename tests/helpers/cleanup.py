@@ -4,7 +4,7 @@ from copy import deepcopy
 import pytest
 import yaml
 
-from stash_ai import inference
+from stash_ai.inference import sprites
 from stash_ai import cli as app
 from tests.helpers.stash import Stash
 
@@ -121,5 +121,5 @@ def install(monkeypatch, stash):
     monkeypatch.setattr(app, 'create_stash_client', lambda *_: stash)
     for name in ('load_tagger', 'load_vocabulary'):
         monkeypatch.setattr(app, name, lambda *args: pytest.fail('cleanup accessed model or media assets'))
-    monkeypatch.setattr(inference, 'fetch_cues', lambda *args: pytest.fail('cleanup accessed model or media assets'))
-    monkeypatch.setattr(inference, 'iter_sprite_frames', lambda *args: pytest.fail('cleanup accessed model or media assets'))
+    monkeypatch.setattr(sprites, 'fetch_cues', lambda *args: pytest.fail('cleanup accessed model or media assets'))
+    monkeypatch.setattr(sprites, 'iter_sprite_frames', lambda *args: pytest.fail('cleanup accessed model or media assets'))

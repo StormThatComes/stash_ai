@@ -172,7 +172,7 @@ def cleanup_scene_support(app, store, scene_id, hits, selected, policies):
     from types import SimpleNamespace
     from stash_ai.fusion import FrameIndex
     from stash_ai.merge import marker_segment_signature
-    from stash_ai.progress import digest
+    from stash_ai.signatures import digest
     from stash_ai.temporal import TemporalPolicy
     cleaned, rebuilt, records = [], {}, {}
     for hit in hits:

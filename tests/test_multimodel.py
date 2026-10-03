@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 import yaml
 from stash_ai.domain import Cue, FramePrediction, MarkerSpec
-from stash_ai import inference
+from stash_ai.inference import prediction, sprites
 from stash_ai import cli as app
 from stash_ai.models import (
     JOYTAG,
@@ -126,8 +126,8 @@ def test_main_all_releases_models_and_preserves_failed_source(monkeypatch,fail_w
     cues=[Cue(i,i+1,"x",(0,0,1,1)) for i in range(2)]
     monkeypatch.setattr(app,"create_stash_client",lambda _:stash)
     monkeypatch.setattr(app,"load_vocabulary",lambda _:vocab)
-    monkeypatch.setattr(inference,"fetch_cues",lambda *args:(cues,2))
-    monkeypatch.setattr(inference,"iter_sprite_frames",lambda *args:sprite_frames(cues))
+    monkeypatch.setattr(sprites,"fetch_cues",lambda *args:(cues,2))
+    monkeypatch.setattr(sprites,"iter_sprite_frames",lambda *args:sprite_frames(cues))
     loaded=[]
     def load(settings,vocabulary,prepare):
         assert all(t.closed for t in loaded)
@@ -147,8 +147,8 @@ def test_every_label_and_streaming_aggregation(monkeypatch,aggregation,batch):
     scores=np.random.default_rng(7).uniform(.7,.99,(5,len(labels))).astype(np.float32)
     cues=[Cue(i,i+1,"x",(0,0,1,1)) for i in range(5)]
     monkeypatch.setattr(app,"AGGREGATION",aggregation)
-    monkeypatch.setattr(inference,"iter_sprite_frames",lambda *args:sprite_frames(cues))
-    predictions,frames=inference.predict_scene(app, Tagger(ModelSettings(WD,Path("."),batch_size=batch),labels,scores),Stash(),{},cues,frozenset({"scene_ban"}))
+    monkeypatch.setattr(sprites,"iter_sprite_frames",lambda *args:sprite_frames(cues))
+    predictions,frames=prediction.predict_scene(app, Tagger(ModelSettings(WD,Path("."),batch_size=batch),labels,scores),Stash(),{},cues,frozenset({"scene_ban"}))
     expected=scores.max(axis=0) if aggregation=="max" else np.sort(scores,axis=0)[-2:].mean(axis=0)
     assert len(predictions)==len(labels)-1
     for tag,score in predictions: assert score==pytest.approx(expected[labels.index(tag)])

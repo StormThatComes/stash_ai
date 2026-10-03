@@ -10,8 +10,10 @@ from collections import Counter
 
 from tqdm import tqdm
 
-from stash_ai import inference
-from stash_ai.inference_inputs import RunInputs
+from stash_ai.inference.identity import model_identity
+from stash_ai.signatures import digest
+from stash_ai.inference import checkpoints, prediction, preparation
+from stash_ai.inference.inputs import RunInputs
 from stash_ai.merge_publish import MergePublisher
 from stash_ai import merge
 from stash_ai import performance
@@ -85,7 +87,7 @@ class MergedRun:
         self.base_key = performance.publication_key(
             app, args, self.hierarchy, self.core_policies, self.scene_policies)
         self.merge_key = (
-            performance.digest([self.base_key, performance.catalog_fingerprint(self.resolver)])
+            digest([self.base_key, performance.catalog_fingerprint(self.resolver)])
             if self.use_catalog else self.base_key)
         self.store.preload_sources()
 
@@ -157,7 +159,7 @@ class MergedRun:
         app, args, store = self.app, self.args, self.store
         key = config.source.key
         tagger = None
-        identity = progress.model_identity(app, config, self.catalogs[key])
+        identity = model_identity(app, config, self.catalogs[key])
         try:
             bar = tqdm(self.scenes.items(), desc=key + " inference", unit="scene")
             for scene_id, current in bar:
@@ -200,7 +202,7 @@ class MergedRun:
                         self.stats['auto_refresh_requested'] += len(stale)
                     if tagger is None:
                         try:
-                            tagger = app.load_tagger(config, self.catalogs[key], partial(inference.prepare_image, app))
+                            tagger = app.load_tagger(config, self.catalogs[key], partial(preparation.prepare_image, app))
                         except Exception as exc:
                             self.stats["errors"] += 1
                             self.report.issue(
@@ -208,21 +210,21 @@ class MergedRun:
                                 app.safe_error(exc, api_key=app.STASH_API_KEY))
                             break
                         # Auto-download may just have supplied missing weight files.
-                        identity = progress.model_identity(app, config, self.catalogs[key])
-                        signature = progress.digest({
+                        identity = model_identity(app, config, self.catalogs[key])
+                        signature = digest({
                             "model": identity,
                             "cues": [[c.start, c.end, c.image, list(c.rect)] for c in cues],
                             "media": media.hashes,
                         })
                     if not args.resume:
                         with store.connection:
-                            progress.clear_checkpoint(store, scene_id, key)
-                    checkpoint = progress.Checkpoint(
+                            checkpoints.clear_checkpoint(store, scene_id, key)
+                    checkpoint = checkpoints.Checkpoint(
                         store, scene_id, key,
-                        progress.digest({"input": signature, "kinds": kinds, "scene_frames": 1}),
+                        digest({"input": signature, "kinds": kinds, "scene_frames": 1}),
                         len(cues), len(self.catalogs[key].labels), args.checkpoint_batches)
                     analysis = {}
-                    predictions, frames = inference.predict_scene(
+                    predictions, frames = prediction.predict_scene(
                         app, tagger, media, paths, cues, raw_scene=True, checkpoint=checkpoint,
                         prefetch=args.prefetch_batches, analysis=analysis, report=self.report,
                         prepare_workers=args.prepare_workers)
@@ -231,11 +233,11 @@ class MergedRun:
                     for segment in outputs.values():
                         segment["meta"].update(
                             inference_signature=signature,
-                            frame_input_signature=progress.digest({
+                            frame_input_signature=digest({
                                 "cues": [[c.start, c.end, c.image, list(c.rect)] for c in cues],
                                 "media": media.hashes,
                             }))
-                    progress.finish(store, scene_id, key, outputs, replacement)
+                    checkpoints.finish(store, scene_id, key, outputs, replacement)
                     self.stats["processed"] += 1
                 except Exception as exc:
                     self.stats["errors"] += 1
@@ -266,7 +268,7 @@ class MergedRun:
                 self.stash, self.hierarchy, source=merge.AI,
                 create_missing=self.app.CREATE_MISSING)
             resolver.preload()
-        final_key = performance.digest([
+        final_key = digest([
             self.base_key, performance.catalog_fingerprint(resolver)])
         if final_key != self.merge_key:
             with self.store.connection:
