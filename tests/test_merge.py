@@ -4,7 +4,6 @@ from copy import deepcopy
 from itertools import permutations
 import json
 from pathlib import Path
-from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -18,6 +17,7 @@ from stash_ai import progress
 from stash_ai.models import SOURCES, JOYTAG, WD, DTQ, OPPAI, ModelSettings, Vocabulary
 from tests.helpers.stash import Stash
 from tests.helpers.inference import Tagger
+from tests.helpers.cli import runtime_args
 
 
 from tests.helpers.evidence import span
@@ -217,6 +217,7 @@ def test_merge_only_needs_no_model_assets_and_can_restore_unblocked_cached_tags(
     assert app.main(args)==0
     assert {t["name"] for t in p.stash.scene["tags"]}=={"ai:common","ai:unique_op"}
     assert intervals(p.stash,'unique_op')==[(10,30)]
+    assert p.stash.merge_read_configurations == [False, True, True]
 
 
 def test_source_blacklists_shrink_union_without_removing_other_sources(merge_pipeline,monkeypatch,tmp_path):
@@ -291,7 +292,7 @@ def test_only_untagged_uses_successful_records_even_with_no_predictions(merge_pi
 
 def test_combined_hierarchy_has_one_namespace_and_all_labels(tmp_path):
     root=Path(__file__).resolve().parents[1]
-    args=SimpleNamespace(no_hierarchy=False,hierarchy=root/"joytag_hierarchy.yml",**{
+    args=runtime_args(no_hierarchy=False,hierarchy=root/"joytag_hierarchy.yml",**{
         key+"_hierarchy":root/f"{key}_hierarchy.yml" for key in ("wd","dtq","oppai")})
     combined=merge.combined_hierarchy(app,args)
     expected=set()

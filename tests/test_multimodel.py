@@ -362,6 +362,7 @@ def test_onnx_batches_activation_and_output_mapping(source,tmp_path,monkeypatch)
             row=np.array([.99,.98,.1,.3,.7,.9] if source==OPPAI else [-2,0,1,2] if source==DTQ else [.1,.3,.7,.9],np.float32)
             return [np.broadcast_to(row,(fixed_batch,count)).copy()]
     ort=SimpleNamespace(InferenceSession=Session,get_available_providers=lambda:["CPUExecutionProvider"],
+        preload_dlls=lambda: pytest.fail("CPU inference preloaded CUDA libraries"),
         SessionOptions=SimpleNamespace,GraphOptimizationLevel=SimpleNamespace(ORT_ENABLE_BASIC=1,ORT_DISABLE_ALL=0))
     monkeypatch.setitem(sys.modules,"onnxruntime",ort)
     (tmp_path/"model.onnx").touch()

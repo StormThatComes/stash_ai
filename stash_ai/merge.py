@@ -389,12 +389,8 @@ def has_outputs(app, store, scene_id, model):
 def run_merged(app, settings, args, catalogs, hierarchy, core_policies, scene_policies):
     from stash_ai.diagnostics import MergeDiagnostics
     from stash_ai.merge_run import MergedRun
-    from stash_ai.runtime import RunReport
-    from tqdm import tqdm
-    report = getattr(args, 'report', None) or RunReport(getattr(args, 'verbose', False), tqdm.write)
-    args.report = report
-    with MergeDiagnostics(report, getattr(args, 'profile_merge', None), dry_run=app.DRY_RUN,
-                          merge_only=args.merge_only, force=getattr(args, 'force_merge', False)):
+    with MergeDiagnostics(args.report, args.profile_merge, dry_run=app.DRY_RUN,
+                          merge_only=args.merge_only, force=args.force_merge):
         return MergedRun(app, settings, args, catalogs, hierarchy, core_policies, scene_policies).run()
 
 
@@ -485,8 +481,8 @@ def explain(app, args, core_policies, scene_policies):
     label = raw_label(args.explain_tag.removeprefix(AI.prefix))
     # Inspection always opens a read-only snapshot, even without --dry-run.
     with StateStore(args.state_db, scope_for(app.STASH_URL), True,
-                    cache_bytes=int(getattr(args, 'ram_cache_gb', 0) * 2**30),
-                    memory_budget_bytes=int(getattr(args, 'ram_budget_gb', 32) * 2**30)) as store:
+                    cache_bytes=int(args.ram_cache_gb * 2**30),
+                    memory_budget_bytes=int(args.ram_budget_gb * 2**30)) as store:
         reports = []
         for scene_id in dict.fromkeys(args.scene_id):
             diagnostics = Counter()

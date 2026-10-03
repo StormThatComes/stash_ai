@@ -26,8 +26,8 @@ class MergePublisher:
                 and self.app.TEMPORAL_POLICY.occurrence_markers):
             refresh_kinds = [*refresh_kinds, "scene"]
         self.pending_refreshes = progress.pending_refreshes(self.store, refresh_kinds)
-        workers = int(getattr(self.args, 'merge_workers', 1))
-        if self.app.DRY_RUN or getattr(self.args, 'profile_merge', None) is not None:
+        workers = self.args.merge_workers
+        if self.app.DRY_RUN or self.args.profile_merge is not None:
             # Workers cannot see the temporary dry-run overlay. Profiling needs
             # per-stage timings from the parent, so it also remains serial.
             workers = 1
@@ -46,7 +46,7 @@ class MergePublisher:
                 "Rerun without --merge-only to resume inference.")
         with stage(self.report, 'publication_check'):
             reason = (
-                'forced' if getattr(self.args, 'force_merge', False)
+                'forced' if self.args.force_merge
                 else performance.check_reason(
                     self.store, scene_id, self.publication_key, current['fingerprint']))
         self.stats['merge_' + reason] += 1
@@ -150,8 +150,8 @@ class MergePublisher:
                 [scene_id for scene_id, _ in pending],
                 self.core_policies, self.scene_policies,
                 workers=workers,
-                cache_bytes=int(getattr(self.args, 'ram_cache_gb', 0) * 2**30),
-                memory_budget_bytes=int(getattr(self.args, 'ram_budget_gb', 32) * 2**30),
+                cache_bytes=int(self.args.ram_cache_gb * 2**30),
+                memory_budget_bytes=int(self.args.ram_budget_gb * 2**30),
             )
             completed = 0
             try:

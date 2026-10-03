@@ -116,10 +116,8 @@ def run(app, args):
         try:
             # The normal client may omit markers when marker output is disabled.
             # Request them here only when the ledger actually contains marker rows.
-            if hasattr(stash, "create_markers"):
-                stash.create_markers = marker_rows
-            if hasattr(stash, "configure_merge_reads"):
-                stash.configure_merge_reads(args.report, merge_only=True)
+            stash.create_markers = marker_rows
+            stash.configure_merge_reads(args.report, merge_only=True)
             removable, retained, _ = candidates(app, store, stash)
         finally:
             stash.close()

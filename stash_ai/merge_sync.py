@@ -95,8 +95,7 @@ def resolve_sync_tags(app, stash, resolver, scene_id, scene, markers, spans, sce
 
     # Refresh after tag creation/reparenting, preserving newly added manual tags.
     with stage(report, 'scene_refresh'):
-        scene = (stash.find_scene_for_merge(scene_id) if hasattr(stash, 'find_scene_for_merge')
-                 else stash.find_scene(scene_id))
+        scene = stash.find_scene_for_merge(scene_id)
     if report is not None:
         report.record_counts(existing_markers=len(scene.get('scene_markers', [])),
                              existing_scene_tags=len(scene.get('tags', [])))

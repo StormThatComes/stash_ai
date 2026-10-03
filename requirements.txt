@@ -18,6 +18,7 @@ tqdm>=4.66.0
 PyYAML>=6.0
 
 # ONNX classifiers. Use only one ORT package. This GPU range uses CUDA 12/cuDNN 9.
+# ORT 1.21+ supplies preload_dlls for CUDA library setup.
 # CPU-only: replace onnxruntime-gpu with onnxruntime>=1.21,<2.
 numpy>=1.24,<3
 onnxruntime-gpu>=1.21,<1.27

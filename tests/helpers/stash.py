@@ -9,6 +9,8 @@ from stash_ai import cli as app
 class Stash:
     def __init__(self, dry=False):
         self.dry_run = dry
+        self.create_markers = True
+        self.merge_read_configurations = []
         self.tags, self.writes = {}, []
         self.fail_create = False
         self.scene = dict(id="1", title="fixture", tags=[], scene_markers=[], paths=dict(sprite="/sprite",vtt="/vtt"))
@@ -46,6 +48,11 @@ class Stash:
         self.scene["scene_markers"].append(marker)
         return marker
     def find_scene(self,identifier): return deepcopy(self.scene)
+    def configure_merge_reads(self, report, *, merge_only=False):
+        self.report = report
+        self.merge_read_configurations.append(merge_only)
+    def find_scene_for_merge(self, identifier):
+        return self.find_scene(identifier)
     def get_media(self,url): return url.encode("utf-8")
     def iter_scenes(self,identifiers=None): yield self.find_scene("1")
     def iter_tags(self): yield from deepcopy(list(self.tags.values()))
