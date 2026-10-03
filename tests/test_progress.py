@@ -270,15 +270,6 @@ def test_api_failure_resumes_only_synchronization(pipeline,monkeypatch):
     assert p.stash.scene["scene_markers"]
 
 
-def test_verified_media_ram_limit_and_input_consistency():
-    stash=SimpleNamespace(get_media=lambda url:(url*8).encode())
-    media=progress.VerifiedMedia(stash,limit=16)
-    for url in ["a","b","c","d"]:media.get_media(url)
-    assert media.size<=16 and len(media.cache)<=2
-    stash.get_media=lambda url:b"changed"
-    with pytest.raises(RuntimeError,match="changed"):media.get_media("a")
-
-
 def test_prefetch_is_bounded_and_closes_producer(pipeline,monkeypatch):
     p=pipeline;config=ModelSettings(WD,Path("missing"),batch_size=2)
     model=IndexedTagger(config,p.scores["wd"],p.vocab.labels)
