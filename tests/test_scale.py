@@ -212,7 +212,7 @@ def test_store_cache_is_detached_invalidated_and_rollback_safe(tmp_path):
         assert progress.completed(state, '1', 'wd', ['scene'], 'a')
         try:
             with state.connection:
-                state._put('1', 'wd', {'scene': second})
+                state.results.put_in_transaction('1', 'wd', {'scene': second})
                 assert state.records('1', 'scene')['wd'][0]['items'] == []
                 raise RuntimeError('rollback')
         except RuntimeError:

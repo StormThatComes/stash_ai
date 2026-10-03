@@ -10,7 +10,7 @@ import threading
 import numpy as np
 import pytest
 
-from stash_ai.domain import Cue
+from stash_ai.domain import Cue, FramePrediction
 from stash_ai import inference
 from stash_ai import state_codec
 from stash_ai import cli as app
@@ -205,6 +205,60 @@ def test_zero_predictions_are_successfully_completed(pipeline,monkeypatch):
     assert app.main(p.args)==0
     monkeypatch.setattr(app,"load_tagger",lambda *args:pytest.fail("empty successful result repeated"))
     assert app.main(p.args)==0
+
+
+@pytest.mark.parametrize('dry_run', [False, True])
+@pytest.mark.parametrize('cache_bytes', [0, 2**20])
+def test_finish_rolls_back_results_checkpoint_and_refresh_together(tmp_path, monkeypatch, dry_run, cache_bytes):
+    path = tmp_path / 'state.sqlite3'
+    meta = dict(origin='inference', inference_signature='old')
+    original = {
+        'scene': dict(mode='scene', meta=meta, items=[dict(tag='core', score=.8)]),
+        'markers': dict(mode='frames', meta=meta, items=[dict(start=0., end=1., tags=[['core', .8]])]),
+    }
+    fresh = deepcopy(original)
+    for segment in fresh.values():
+        segment['meta']['inference_signature'] = 'new'
+        segment['items'] = []
+    with merge.StateStore(path, 'fixture') as state:
+        state.put('1', 'wd', original)
+        checkpoint = progress.Checkpoint(state, '1', 'wd', 'new', 2, 1, every=1)
+        checkpoint.record(1, np.array([[.8]], dtype=np.float32),
+                          [FramePrediction(Cue(0., 1., '', (0, 0, 1, 1)), (('core', .8),))],
+                          analysis={'scene': {'frames': 1}})
+        progress.request_refresh(state, ['1'], ['wd'], ['scene', 'markers'])
+
+    tables = ('results', 'result_metadata', 'result_thresholds', 'result_index',
+              'checkpoints', 'checkpoint_frames', 'checkpoint_analysis', 'refresh_requests')
+    with merge.StateStore(path, 'fixture', dry_run, cache_bytes=cache_bytes) as state:
+        def rows():
+            return {table: state.connection.execute('SELECT * FROM ' + state.table(table)).fetchall()
+                    for table in tables}
+        before = rows()
+        cached = {kind: state.records('1', kind) for kind in original}
+        clear_checkpoint = progress.clear_checkpoint
+
+        def fail_after_checkpoint_removal(*args):
+            clear_checkpoint(*args)
+            raise RuntimeError('checkpoint cleanup failed')
+
+        with monkeypatch.context() as patch:
+            patch.setattr(progress, 'clear_checkpoint', fail_after_checkpoint_removal)
+            with pytest.raises(RuntimeError, match='checkpoint cleanup failed'):
+                progress.finish(state, '1', 'wd', fresh, {})
+        assert rows() == before
+        assert {kind: state.records('1', kind) for kind in original} == cached
+
+        progress.finish(state, '1', 'wd', fresh, {})
+        for kind, segment in fresh.items():
+            assert state.records('1', kind)['wd'] == [segment]
+        for table in ('checkpoints', 'checkpoint_frames', 'checkpoint_analysis', 'refresh_requests'):
+            assert state.connection.execute('SELECT COUNT(*) FROM ' + state.table(table)).fetchone() == (0,)
+        assert progress.completed(state, '1', 'wd', ['scene', 'markers'], 'new')
+
+    with merge.StateStore(path, 'fixture', True) as state:
+        for kind, segment in (original if dry_run else fresh).items():
+            assert state.records('1', kind)['wd'] == [segment]
 
 
 def test_api_failure_resumes_only_synchronization(pipeline,monkeypatch):

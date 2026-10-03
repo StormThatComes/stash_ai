@@ -30,65 +30,44 @@ class SQLCleanup:
         self.preview_names, self.preview_cores = set(), {}
         self.group_usage_delta = Counter()
 
-    @property
-    def page_size(self):
-        return self.session.page_size
-
-    @property
-    def bounds(self):
-        return self.session.bounds
-
     def tick(self):
         if self.progress is not None:
             self.progress.set_postfix(deleted=self.stats['markers_deleted'],
                 removed=self.stats['marker_tag_removals'] + self.stats['scene_tag_removals'], refresh=False)
             self.progress.update(0)
 
-    def read(self, key, params=()):
-        """Compatibility delegation for cleanup-domain call sites and tests."""
-        return self.session.read(key, params)
-
-    def probe(self):
-        return self.session.probe()
-
-    def write(self, query, variables):
-        return self.session.write(query, variables)
-
-    def pages(self, key, params, bound):
-        return self.session.pages(key, params, bound)
-
     def delete_primary(self, identifier, name, source=None):
         from stash_ai.marker_groups import PREFIX
         group_ids = [int(i) for i, n in self.catalog.items() if n.startswith(PREFIX)]
         prefix, owner = (source.title_prefix, source.owner_tag) if source else ('', '')
         params = (int(identifier), name, prefix, prefix, prefix, owner)
-        for rows in self.pages('primary', params, self.bounds[0]):
+        for rows in self.session.pages('primary', params, self.session.bounds[0]):
             for group in batched((int(row[0]) for row in rows), self.write_size):
                 current = group if self.stash.dry_run else [int(row[0]) for row in
-                    self.read('primary_check', (*params, json.dumps(group)))]
+                    self.session.read('primary_check', (*params, json.dumps(group)))]
                 if not set(current) <= set(group):
                     raise ValueError('Unexpected cleanup marker IDs; stopped before mutation.')
                 self.stats['cleanup_markers_changed_or_gone'] += len(group) - len(current)
                 if current and not self.stash.dry_run:
                     ids = list(map(str, current))
-                    result = self.write('''mutation StashAICleanupDeleteMarkers($ids: [ID!]!) {
+                    result = self.session.write('''mutation StashAICleanupDeleteMarkers($ids: [ID!]!) {
                         sceneMarkersDestroy(ids: $ids)
                     }''', {'ids': ids})['sceneMarkersDestroy']
                     if result is not True:
                         raise RuntimeError('Marker deletion was not confirmed; rerun the same cleanup.')
                 if self.stash.dry_run and current and group_ids:
-                    for tag_id, count in self.read('group_usage', (json.dumps(current), json.dumps(group_ids))):
+                    for tag_id, count in self.session.read('group_usage', (json.dumps(current), json.dumps(group_ids))):
                         self.group_usage_delta[str(tag_id)] -= int(count)
                 self.stats['markers_deleted'] += len(current)
                 self.tick()
 
     def remove_associations(self, identifier, name, *, markers):
-        key, check, bound = ('extras', 'extra_check', self.bounds[1]) if markers else (
-            'scenes', 'scene_check', self.bounds[2])
-        for rows in self.pages(key, (int(identifier), name), bound):
+        key, check, bound = ('extras', 'extra_check', self.session.bounds[1]) if markers else (
+            'scenes', 'scene_check', self.session.bounds[2])
+        for rows in self.session.pages(key, (int(identifier), name), bound):
             for group in batched(dict.fromkeys(int(row[1]) for row in rows), self.write_size):
                 current = group if self.stash.dry_run else [int(row[0]) for row in
-                    self.read(check, (int(identifier), name, json.dumps(group)))]
+                    self.session.read(check, (int(identifier), name, json.dumps(group)))]
                 current = list(dict.fromkeys(current))
                 if markers and self.stash.dry_run:
                     current = self.preview_survivors(current)
@@ -97,7 +76,7 @@ class SQLCleanup:
                 if current and not self.stash.dry_run:
                     field, input_type = ('bulkSceneMarkerUpdate', 'BulkSceneMarkerUpdateInput') if markers else (
                         'bulkSceneUpdate', 'BulkSceneUpdateInput')
-                    result = self.write('mutation StashAICleanupRemoveTags($input: ' + input_type +
+                    result = self.session.write('mutation StashAICleanupRemoveTags($input: ' + input_type +
                         '!) { ' + field + '(input: $input) { id } }', {'input': {
                             'ids': list(map(str, current)), 'tag_ids': {'ids': [str(identifier)], 'mode': 'REMOVE'}}})[field]
                     if result is None or {str(row['id']) for row in result} != set(map(str, current)):
@@ -108,7 +87,7 @@ class SQLCleanup:
 
     def preview_survivors(self, ids):
         """Do not count extra removals on markers already planned for deletion."""
-        rows = self.read('marker_metadata', (json.dumps(ids),))
+        rows = self.session.read('marker_metadata', (json.dumps(ids),))
         removed = {int(i) for i, name in rows if name in self.preview_names}
         core_groups = {}
         for i, name in rows:
@@ -118,16 +97,16 @@ class SQLCleanup:
             source = self.preview_cores[name]
             p = source.title_prefix
             params = (self.ids_by_name[name], name, p, p, p, source.owner_tag, json.dumps(group))
-            removed.update(int(row[0]) for row in self.read('primary_check', params))
+            removed.update(int(row[0]) for row in self.session.read('primary_check', params))
         return [i for i in ids if i not in removed]
 
     def delete_tag(self, identifier, name):
-        if not self.stash.dry_run and self.read('tag_check', (json.dumps([int(identifier)]),)) != [[int(identifier), name]]:
+        if not self.stash.dry_run and self.session.read('tag_check', (json.dumps([int(identifier)]),)) != [[int(identifier), name]]:
             self.stats['cleanup_tags_changed_or_gone'] += 1
             return
         # One tag per mutation: a popular tag can have millions of associations.
         if not self.stash.dry_run:
-            result = self.write('''mutation StashAICleanupDeleteTags($ids: [ID!]!) {
+            result = self.session.write('''mutation StashAICleanupDeleteTags($ids: [ID!]!) {
                 tagsDestroy(ids: $ids)
             }''', {'ids': [str(identifier)]})['tagsDestroy']
             if result is not True:
@@ -139,13 +118,13 @@ class SQLCleanup:
         for identifier, name in catalog.items():
             params = (int(identifier),)
             if name in primary_names:
-                for rows in self.pages('primary_scenes', params, self.bounds[0]):
+                for rows in self.session.pages('primary_scenes', params, self.session.bounds[0]):
                     scenes.update(str(row[1]) for row in rows)
             if name in extra_names:
-                for rows in self.pages('extra_scenes', params, self.bounds[1]):
+                for rows in self.session.pages('extra_scenes', params, self.session.bounds[1]):
                     scenes.update(str(row[1]) for row in rows)
             if name in scene_names:
-                for rows in self.pages('scenes', (int(identifier), name), self.bounds[2]):
+                for rows in self.session.pages('scenes', (int(identifier), name), self.session.bounds[2]):
                     scenes.update(str(row[1]) for row in rows)
         return scenes
 
@@ -153,7 +132,7 @@ class SQLCleanup:
         """Reject definitely-used tags; native usage/ownership checks still decide deletion."""
         candidates = set()
         for group in batched(sorted(set(ids)), page_size):
-            found = {str(row[0]) for row in self.read('unused_candidates', (json.dumps(list(map(int, group))),))}
+            found = {str(row[0]) for row in self.session.read('unused_candidates', (json.dumps(list(map(int, group))),))}
             if not found <= set(group):
                 raise ValueError('Unexpected prune candidate IDs; stopped before mutation.')
             candidates.update(found)
@@ -168,7 +147,7 @@ class SQLCleanup:
         if not selected:
             return []
         with tqdm(total=len(selected), desc='Find empty marker groups', unit='tag', dynamic_ncols=True) as bar:
-            candidates = self.unused_candidates(selected, page_size=self.page_size, progress=bar)
+            candidates = self.unused_candidates(selected, page_size=self.session.page_size, progress=bar)
         if self.stash.dry_run:
             # SQL sees the real database, not planned removals. Let PreviewUsage
             # check groups losing members, even when SQL still finds their tags.

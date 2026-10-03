@@ -145,9 +145,6 @@ class StateStore(AbstractContextManager):
     def put(self, scene, model, outputs, replace=None):
         return self.results.put(scene, model, outputs, replace)
 
-    def _put(self, scene, model, outputs, replace=None):
-        return self.results._put(scene, model, outputs, replace)
-
     def replace_records(self, scene, model, kind, segments):
         return self.results.replace_records(scene, model, kind, segments)
 
