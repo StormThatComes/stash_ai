@@ -1,8 +1,5 @@
 """Replay scene qualification from sparse frame evidence and exact aggregates."""
-from collections import Counter
 from types import SimpleNamespace
-
-from tqdm import tqdm
 
 SCENE_OVERRIDE = 'scene_threshold_override'
 
@@ -93,99 +90,9 @@ def frame_records(scenes, markers):
     return result
 
 
-def plan(app, store, scene, config, *, scenes=True, markers=False, direct=False,
-         marker_check_scene=None, pending_checked=False, metadata_only=False):
-    from stash_ai.thresholds import OVERRIDE, validate
-    result = {}
-    if scenes:
-        if metadata_only:
-            segments = store.result_metadata(scene, 'scene', config.source.key)
-        elif direct:
-            segments = store.model_records(scene, 'scene', config.source.key, borrow=True)
-        else:
-            segments = store.records(scene, 'scene', config.source.key, borrow=True).get(config.source.key, [])
-        if not segments:
-            raise ValueError('no scene results; run inference for this scene/model.')
-        for segment in segments:
-            validate_scene(app, segment, config.scene_threshold,
-                           has_frames=segment['has_frames'] if metadata_only else None)
-        result['scene'] = segments
-    if markers:
-        check_scene = not scenes if marker_check_scene is None else marker_check_scene
-        result['markers'] = validate(app, store, scene, config, check_scene=check_scene, direct=direct,
-                                     metadata_only=metadata_only)
-    updated = {}
-    for kind, segments in result.items():
-        key, meta_key, threshold = ((SCENE_OVERRIDE, 'scene_threshold', config.scene_threshold) if kind == 'scene'
-                                   else (OVERRIDE, 'marker_threshold', config.marker_threshold))
-        values = []
-        for segment in segments:
-            value = dict(segment)
-            value.pop(key, None)
-            if threshold != segment['meta'][meta_key]:
-                value[key] = threshold
-            values.append(value)
-        if values != segments:
-            updated[kind] = values
-    if updated and not pending_checked and store.has_pending_publication(scene):
-        raise RuntimeError('Finish the pending merge or use --abandon-pending before changing thresholds.')
-    return updated
-
-
-def apply(store, scene, model, outputs, *, metadata_only=False):
-    from stash_ai.thresholds import marker_threshold
-    with store.connection:
-        for kind, segments in outputs.items():
-            threshold = scene_threshold(segments[0]) if kind == 'scene' else marker_threshold(segments[0])
-            store.set_result_threshold(scene, model, kind, threshold, segments,
-                                       metadata_only=metadata_only)
-
-
-def rethreshold(app, store, scenes, settings, report, *, markers=False):
-    from stash_ai.thresholds import threshold_failure_reason, threshold_targets
-    mode = 'scene + marker thresholds' if markers else 'scene thresholds'
-    requested = ('scene', 'markers') if markers else ('scene',)
-    targets, skipped, selected = threshold_targets(store, scenes, settings, requested)
-    errors = 0
-    reasons = Counter()
-    pending_scenes = store.pending_publication_scenes()
-    from stash_ai.state_metadata import backfill_batch
-    with backfill_batch(store):
-        for scene, config, available in tqdm(targets, desc=f'Check {mode}', unit='pair'):
-            try:
-                outputs = plan(
-                    app, store, scene, config,
-                    scenes='scene' in available, markers='markers' in available,
-                    direct=True, marker_check_scene=False if markers else None,
-                    pending_checked=True, metadata_only=True)
-                if outputs and str(scene) in pending_scenes:
-                    raise RuntimeError('Finish the pending merge or use --abandon-pending before changing thresholds.')
-            except (ValueError, RuntimeError) as exc:
-                report.issue('scene thresholds', config.source.key, scene, exc, str(exc))
-                reasons[threshold_failure_reason(exc)] += 1
-                errors += 1
-    if errors:
-        report.record_threshold_preflight(
-            len(targets), errors, reasons, applied=0,
-            selected=selected, skipped_no_evidence=skipped)
-        return dict(errors=errors)
-    changed = 0
-    for scene, config, available in tqdm(targets, desc=f'Apply {mode}', unit='pair'):
-        outputs = plan(
-            app, store, scene, config,
-            scenes='scene' in available, markers='markers' in available,
-            direct=True, marker_check_scene=False if markers else None,
-            pending_checked=True, metadata_only=True)
-        apply(store, scene, config.source.key, outputs, metadata_only=True)
-        changed += bool(outputs)
-    report.record_threshold_preflight(
-        len(targets), 0, applied=changed,
-        selected=selected, skipped_no_evidence=skipped)
-    return dict(scene_thresholds_updated=changed)
-
-
 def reuse(app, store, scene, config, identity, cues, hashes, kinds):
     from stash_ai.progress import completed
+    from stash_ai.rethreshold.scenes import plan, apply
     from stash_ai.signatures import digest
     from stash_ai.thresholds import indexed_signature
     records = {kind: store.records(scene, kind, config.source.key, borrow=True).get(config.source.key, []) for kind in kinds}

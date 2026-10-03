@@ -6,6 +6,7 @@ import sqlite3
 
 import pytest
 
+from stash_ai.rethreshold import execution as rethreshold_execution, scenes as scene_updates
 from stash_ai import cli as app
 from stash_ai import cleanup, db, performance, progress, recovery
 from stash_ai.reports import developer as developer_report
@@ -35,7 +36,7 @@ def config(threshold):
 
 
 def rethreshold(store, threshold, *, markers=True, scenes=('1',)):
-    return scene_cache.rethreshold(app, store, scenes, [config(threshold)],
+    return rethreshold_execution.run(app, store, scenes, [config(threshold)],
                                   RunReport(write=lambda _: None), markers=markers)
 
 
@@ -89,7 +90,7 @@ def test_marker_only_updates_policy_without_writing_blob(tmp_path, monkeypatch):
         before = blobs(store)
         monkeypatch.setattr(store, 'pack', lambda *a: pytest.fail('encoded inference evidence'))
         target = replace(config(.8), scene_threshold=.4)
-        result = thresholds.rethreshold(app, store, ['1'], [target], RunReport(write=lambda _: None))
+        result = rethreshold_execution.run(app, store, ['1'], [target], RunReport(write=lambda _: None), scenes=False, markers=True)
         assert result == {'marker_thresholds_updated': 1}
         assert blobs(store) == before
         assert store.records('1', 'markers')['wd'][0][thresholds.OVERRIDE] == .8
@@ -201,7 +202,7 @@ def test_both_thresholds_and_version_roll_back_if_index_write_fails(tmp_path, mo
         old_records = store.records('1', 'scene')
         version = store.connection.execute('PRAGMA user_version').fetchone()
         index = store.connection.execute('SELECT * FROM result_index').fetchall()
-        planned = scene_cache.plan(app, store, '1', config(.8), markers=True, metadata_only=metadata_only)
+        planned = scene_updates.plan(app, store, '1', config(.8), markers=True, metadata_only=metadata_only)
         original = progress.index_result
 
         def fail_second(store, scene, model, kind, segments, **options):
@@ -211,7 +212,7 @@ def test_both_thresholds_and_version_roll_back_if_index_write_fails(tmp_path, mo
 
         monkeypatch.setattr(progress, 'index_result', fail_second)
         with pytest.raises(RuntimeError, match='index write failed'):
-            scene_cache.apply(store, '1', 'wd', planned, metadata_only=metadata_only)
+            scene_updates.apply(store, '1', 'wd', planned, metadata_only=metadata_only)
         assert blobs(store) == raw
         assert threshold_rows(store) == old_thresholds
         assert store.connection.execute('PRAGMA user_version').fetchone() == version

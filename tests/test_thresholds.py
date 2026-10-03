@@ -1,6 +1,5 @@
 """Retune marker publication without inference or loss of source evidence."""
 
-
 from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
@@ -8,6 +7,7 @@ import sqlite3
 
 import pytest
 
+from stash_ai.rethreshold import markers as marker_updates, execution as rethreshold_execution
 from stash_ai.signatures import digest
 from stash_ai.inference import sprites
 from stash_ai import merge_cleanup
@@ -271,7 +271,7 @@ def test_cleanup_replays_published_threshold_even_after_later_override(tmp_path)
         old_spans = merge.marker_contributions(app, state.records('1', 'markers'), policies())
         for model in markers:
             config = type('Config', (), dict(source=SOURCES[model], marker_threshold=.9, scene_threshold=.4))
-            assert thresholds.apply(app, state, '1', config)
+            assert marker_updates.apply(app, state, '1', config)
         spans = merge.marker_contributions(app, state.records('1', 'markers'), policies())
         # At .9 both weak models vote; removing one must remove the marker.
         assert spans
@@ -303,7 +303,7 @@ def test_marker_rethreshold_never_decodes_publication_snapshots(tmp_path, monkey
             lambda *args, **kwargs: pytest.fail('decoded a publication snapshot during rethreshold'))
         report = RunReport(write=lambda _: None)
 
-        result = thresholds.rethreshold(app, state, {'1': {}}, [config], report)
+        result = rethreshold_execution.run(app, state, {'1': {}}, [config], report, scenes=False, markers=True)
 
         assert result == {'marker_thresholds_updated': 1}
         assert state.records('1', 'markers')['wd'][0][thresholds.OVERRIDE] == .85
