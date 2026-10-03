@@ -8,9 +8,9 @@ import pytest
 from stash_ai.rethreshold import markers as marker_updates
 from stash_ai import cli as app
 from stash_ai import merge
-from stash_ai import merge_parallel
+from stash_ai.publication import parallel as merge_parallel
 from stash_ai import thresholds
-from stash_ai.merge_parallel import iter_parallel_evidence
+from stash_ai.publication.parallel import iter_parallel_evidence
 from stash_ai.temporal import TemporalPolicy
 from stash_ai.models import ModelSettings, SOURCES
 from tests.helpers.evidence import empty_policies, segment

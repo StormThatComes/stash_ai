@@ -1,14 +1,15 @@
 """Cleanup-specific merge reconciliation and stateful cleanup orchestration."""
 from __future__ import annotations
 
+from stash_ai.publication import markers as marker_ops
 from collections import Counter
 import json
 from types import SimpleNamespace
 
 from tqdm import tqdm
 
-from stash_ai import separate_sync
-from stash_ai import merge_sync
+from stash_ai.publication import separate as separate_sync
+from stash_ai.publication import merged as merge_sync
 from stash_ai import merge
 from stash_ai.models import SOURCES
 
@@ -134,7 +135,7 @@ def cleanup_scene(app, stash, resolver, store, current, settings, selected, args
             published[kind], recovered = reconcile(app, stash, store, current, kind, snapshot)
             stats['publications_reconciled'] += int(recovered)
         if app.CREATE_MARKERS and published.get("markers") is None and any(
-                separate_sync.owned_marker(marker, merge.AI) for marker in current.get("scene_markers", [])):
+                marker_ops.owned_marker(marker, merge.AI) for marker in current.get("scene_markers", [])):
             raise RuntimeError("AI marker source state is missing; restore the original --state-db.")
         hits = (published.get("scene") or {}).get("contributions", [])
         spans = (published.get("markers") or {}).get("contributions", [])

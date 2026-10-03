@@ -5,7 +5,8 @@ from collections import Counter
 
 from tqdm import tqdm
 
-from stash_ai import merge, merge_sync, performance, progress
+from stash_ai import merge, performance, progress
+from stash_ai.publication import merged as merge_sync
 from stash_ai.runtime import stage
 
 
@@ -116,7 +117,7 @@ class MergePublisher:
 
     def _parallel(self, scenes, workers):
         """Prepare evidence in read-only processes; publish serially here."""
-        from stash_ai.merge_parallel import iter_parallel_evidence
+        from stash_ai.publication.parallel import iter_parallel_evidence
 
         pending = []
         bar = tqdm(total=len(scenes), desc="Merge to ai:", unit="scene")

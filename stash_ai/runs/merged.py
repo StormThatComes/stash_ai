@@ -12,7 +12,7 @@ from tqdm import tqdm
 from stash_ai.commands import legacy as legacy_commands
 from stash_ai.signatures import digest
 from stash_ai.inference.inputs import RunInputs
-from stash_ai.merge_publish import MergePublisher
+from stash_ai.publication.publisher import MergePublisher
 from stash_ai import merge
 from stash_ai import performance
 from stash_ai import progress

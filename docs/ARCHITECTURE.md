@@ -4,6 +4,10 @@ W katalogu głównym pozostają dwa pliki Pythona uruchamiane z linii poleceń:
 `stash_ai.py` i `update_stash_ai.py`. Launcher `stash_ai.py` przejmuje blokadę
 instalacji, a `stash_ai/cli.py` koordynuje CLI i uruchomienie pipeline.
 Algorytmy evidence/fusion i union przedziałów pozostają w `stash_ai/merge.py`.
+Pakiet `stash_ai/publication/` grupuje planowanie i publikację obu trybów wyjścia.
+`markers.py` zawiera wspólne reguły własności markerów, payloadów, porównywania
+zmian i usuwania wykluczonych extras. Moduły i testy importują je bezpośrednio,
+bez zależności trybu merged od reconciliation trybu separate.
 `commands/dispatch.py` wywołuje tryby CLI oraz obejmuje `MergedRun.run()`
 kontekstem diagnostyki przez `run_merged()`. Wywołania
 reconciliation korzystają bezpośrednio z `merge_sync` i `merge_cleanup`; CLI
@@ -17,14 +21,14 @@ pojedynczej sceny. Współdzieli store, cache, liczniki i raport z `MergedRun`,
 a tagger ładuje dopiero po wyczerpaniu możliwości reuse i zamyka w `finally`.
 Błąd inferencji dotyczy jednej sceny; błąd ładowania modelu kończy jego pętlę.
 Faza publikacji znajduje się w
-`stash_ai/merge_publish.py` / `MergePublisher`: sprawdza pending refresh i cache
+`stash_ai/publication/publisher.py` / `MergePublisher`: sprawdza pending refresh i cache
 publikacji, wybiera tryb szeregowy lub równoległy oraz wspólnie obsługuje
 publikację, liczniki i błędy. Korzysta z zasobów przebiegu bez przejmowania ich
-lifecycle. Opcjonalny `stash_ai/merge_parallel.py` uruchamia wyłącznie read-only
+lifecycle. Opcjonalny `stash_ai/publication/parallel.py` uruchamia wyłącznie read-only
 replay evidence w izolowanych procesach; `MergePublisher` zachowuje pojedynczy
 writer dla TagResolver, Stash i StateStore. Dry-run i profilowanie pozostają
 szeregowe, a awaria workerów nie uruchamia drugiego przebiegu publikacji.
-Planowanie i publikację zmian jednej sceny rozdziela `stash_ai/merge_sync.py`;
+Planowanie i publikację zmian jednej sceny rozdziela `stash_ai/publication/merged.py`;
 `MergeSyncPlan` przechowuje wyłącznie plan snapshotów i mutacji Stash, a kolejne
 funkcje obsługują przygotowanie evidence, tagi, markery i publikację. Cleanup ma
 osobny lifecycle w `stash_ai/merge_cleanup.py` / `CleanupRun`; ten moduł zawiera
@@ -51,7 +55,7 @@ oraz raportowanie. Pobieranie cue/sprite, przygotowanie obrazów, filtrowanie
 score i resumowalny lokalny pipeline inferencji znajdują się w
 `stash_ai/inference/`. Reconciliation dla `--output-mode separate` (własność
 markerów, payloady, plan create/update/delete, cleanup wykluczeń i publikacja
-sceny) znajduje się w `stash_ai/separate_sync.py`. Wywołania i testy korzystają
+sceny) znajduje się w `stash_ai/publication/separate.py`. Wywołania i testy korzystają
 bezpośrednio z tych modułów; helpery inferencji i reconciliation nie są
 ponownie eksportowane przez `cli.py`. Funkcje zależne od ustawień przebiegu
 otrzymują `app` jako jawny argument, a callback przygotowania obrazu JoyTag

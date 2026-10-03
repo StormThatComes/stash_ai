@@ -31,7 +31,7 @@ def main():
         parser.error('frames, labels and repeats must be positive')
     sys.path.insert(0, str(args.project.resolve()))
     from stash_ai import cli as app
-    from stash_ai import merge_sync
+    from stash_ai.publication import merged as merge_sync
     from stash_ai import merge
     from stash_ai.diagnostics import MergeDiagnostics
     from stash_ai.runtime import RunReport

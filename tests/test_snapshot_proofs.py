@@ -8,7 +8,7 @@ import pytest
 from stash_ai.rethreshold import execution as rethreshold_execution
 from stash_ai import cli as app, cleanup, db, merge, recovery
 from stash_ai import merge_cleanup
-from stash_ai import merge_sync
+from stash_ai.publication import merged as merge_sync
 from stash_ai.runtime import RunReport
 from stash_ai.state import StateStore
 from stash_ai.state_codec import decode, encode

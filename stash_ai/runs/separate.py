@@ -6,7 +6,7 @@ from functools import partial
 from typing import Any
 
 from stash_ai.inference import prediction, preparation, sprites
-from stash_ai import separate_sync
+from stash_ai.publication import separate as separate_sync
 
 
 def _sync_hierarchy(app, resolver, vocabulary, args, scene_exclusions) -> Counter:

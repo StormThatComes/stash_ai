@@ -317,6 +317,36 @@ def test_run_modules_move_to_package_and_remove_stale_bytecode(tmp_path):
     assert '--output-mode' in result.stdout
 
 
+@pytest.mark.parametrize('package,modules', [
+    ('publication', ('merge_sync', 'separate_sync', 'merge_publish', 'merge_parallel')),
+])
+def test_domain_modules_move_to_packages_and_remove_stale_bytecode(tmp_path, package, modules):
+    files = application_files()
+    prefix = f'stash_ai/{package}/'
+    previous = {name: data for name, data in files.items() if not name.startswith(prefix)}
+    previous.update({f'stash_ai/{name}.py': b'PREVIOUS_MODULE = True\n' for name in modules})
+    installed(tmp_path, Remote(previous))
+    result = subprocess.run(
+        [sys.executable, '-c', 'from stash_ai import ' + ', '.join(modules)],
+        cwd=tmp_path, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    cache = tmp_path / 'stash_ai/__pycache__'
+    assert all(list(cache.glob(name + '.*.pyc')) for name in modules)
+
+    assert updater.update(tmp_path, Remote(files)) == 0
+
+    for name in modules:
+        assert not (tmp_path / f'stash_ai/{name}.py').exists()
+        assert not list(cache.glob(name + '.*.pyc'))
+    for name, data in files.items():
+        if name.startswith(prefix):
+            assert (tmp_path / name).read_bytes() == data
+    result = subprocess.run([sys.executable, 'stash_ai.py', '--help'], cwd=tmp_path,
+                            capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert '--output-mode' in result.stdout
+
+
 def test_failed_database_package_migration_restores_module(tmp_path, monkeypatch):
     database_module_installation(tmp_path)
     before = snapshot(tmp_path)

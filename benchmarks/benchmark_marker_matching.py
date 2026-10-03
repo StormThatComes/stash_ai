@@ -35,7 +35,7 @@ def main():
         parser.error('markers/labels/repeats must be positive; labels cannot exceed markers')
     sys.path.insert(0, str(args.project.resolve()))
     from stash_ai import cli as app, merge
-    from stash_ai import merge_sync
+    from stash_ai.publication import merged as merge_sync
     from stash_ai.runtime import RunReport
     from stash_ai.temporal import TemporalPolicy
     from tests.helpers.stash import Stash

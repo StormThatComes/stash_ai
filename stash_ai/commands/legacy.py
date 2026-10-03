@@ -1,7 +1,8 @@
 """Capture source-prefixed Stash objects before merged-output migration."""
+from stash_ai.publication import markers as marker_ops
 from collections import defaultdict
 
-from stash_ai import merge, separate_sync
+from stash_ai import merge
 from stash_ai.models import SOURCES
 
 
@@ -21,7 +22,7 @@ def bootstrap_legacy(app, store, scene):
         if not enabled:
             continue
         existing = store.sources(scene_id, kind)
-        if kind == "markers" and not existing and any(separate_sync.owned_marker(marker, merge.AI) for marker in scene.get("scene_markers", [])):
+        if kind == "markers" and not existing and any(marker_ops.owned_marker(marker, merge.AI) for marker in scene.get("scene_markers", [])):
             raise RuntimeError("Merged markers exist without their source state. Restore the original --state-db before synchronization.")
         from stash_ai.performance import freeze
         imported = {freeze(item) for item in store.imported_legacy(scene_id, kind, borrow=True)}
@@ -38,7 +39,7 @@ def bootstrap_legacy(app, store, scene):
         else:
             for marker in scene.get("scene_markers", []):
                 parsed = legacy_label((marker.get("primary_tag") or {}).get("name", ""))
-                if not parsed or not separate_sync.owned_marker(marker, SOURCES[parsed[0]]):
+                if not parsed or not marker_ops.owned_marker(marker, SOURCES[parsed[0]]):
                     continue
                 model, label = parsed
                 originals.append(marker)

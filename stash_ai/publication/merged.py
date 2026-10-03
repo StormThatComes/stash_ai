@@ -6,11 +6,11 @@ publication while keeping merge algorithms function-oriented.
 """
 from __future__ import annotations
 
+from stash_ai.publication import markers as marker_ops
 from collections import Counter
 from dataclasses import dataclass, field
 
 from stash_ai.commands import legacy as legacy_commands
-from stash_ai import separate_sync
 from stash_ai import merge
 from stash_ai.marker_index import MarkerIntervalIndex, PreviousMarkerRanges
 from stash_ai.runtime import stage
@@ -64,7 +64,7 @@ def prepare_sync_evidence(app, stash, store, scene, scene_hits, spans, *, cleanu
                                          if tag["name"].startswith(merge.AI.prefix))
         scene_hits = [hit for hit in scene_hits if hit["tag"] in scene_labels]
         present = [marker for marker in scene.get("scene_markers", [])
-                   if separate_sync.owned_marker(marker, merge.AI)]
+                   if marker_ops.owned_marker(marker, merge.AI)]
         existing = MarkerIntervalIndex(present if markers else [], previous_ranges, by_name=True)
         markers = [marker for marker in markers if existing.overlapping(
             merge.AI.prefix + marker["tag"], {"seconds": marker["start"], "end_seconds": marker["end"]})]
@@ -104,7 +104,7 @@ def resolve_sync_tags(app, stash, resolver, scene_id, scene, markers, spans, sce
     # A manually maintained ai: marker already supplies a location. It remains
     # untouched, and must not receive a duplicate automatically generated point.
     manual_labels = {marker['primary_tag']['name'] for marker in scene.get('scene_markers', [])
-                     if not separate_sync.owned_marker(marker, merge.AI)}
+                     if not marker_ops.owned_marker(marker, merge.AI)}
     suppressed = {marker['tag'] for marker in markers
                   if is_occurrence(marker) and merge.AI.prefix + marker['tag'] in manual_labels}
     if suppressed:
@@ -194,7 +194,7 @@ def plan_markers(app, stash, resolver, scene_id, scene, markers, ids, groups, bl
             app, stash, resolver, scene_id, markers, ids, groups, blocked_names)
         plan.wanted_markers = wanted
         current_markers = scene.get("scene_markers", [])
-        owned = [marker for marker in current_markers if separate_sync.owned_marker(marker, merge.AI)]
+        owned = [marker for marker in current_markers if marker_ops.owned_marker(marker, merge.AI)]
         existing = MarkerIntervalIndex(owned if wanted else [], previous_ranges)
         available = {str(marker["id"]): marker for marker in owned}
 
@@ -228,7 +228,7 @@ def plan_markers(app, stash, resolver, scene_id, scene, markers, ids, groups, bl
             # Additional manually attached tags outside the generated namespace survive.
             payload["tag_ids"] = sorted(set(payload["tag_ids"]) | {
                 str(tag["id"]) for tag in current.get("tags", []) if manual_extra(tag)})
-            if separate_sync.marker_differs(current, payload):
+            if marker_ops.marker_differs(current, payload):
                 plan.updates.append({**payload, "id": marker_id})
             else:
                 plan.unchanged += 1
@@ -238,7 +238,7 @@ def plan_markers(app, stash, resolver, scene_id, scene, markers, ids, groups, bl
             predicted_labels = {marker["tag"] for marker in markers}
             for marker in current_markers:
                 parsed = legacy_commands.legacy_label((marker.get("primary_tag") or {}).get("name", ""))
-                if parsed and separate_sync.owned_marker(marker, merge.SOURCES[parsed[0]]):
+                if parsed and marker_ops.owned_marker(marker, merge.SOURCES[parsed[0]]):
                     if parsed[1] not in predicted_labels or parsed[1] in resolved_marker_labels:
                         plan.deletes.add(str(marker["id"]))
         if app.CREATE_MARKERS and blocked_names:
@@ -248,7 +248,7 @@ def plan_markers(app, stash, resolver, scene_id, scene, markers, ids, groups, bl
             for marker in current_markers:
                 if str(marker['id']) in changed_ids:
                     continue
-                payload = separate_sync.marker_extra_cleanup_payload(
+                payload = marker_ops.marker_extra_cleanup_payload(
                     marker, scene_id, blocked_names)
                 if payload is not None:
                     plan.updates.append(payload)
