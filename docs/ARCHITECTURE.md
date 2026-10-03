@@ -3,8 +3,9 @@
 W katalogu głównym pozostają dwa pliki Pythona uruchamiane z linii poleceń:
 `stash_ai.py` i `update_stash_ai.py`. Launcher `stash_ai.py` przejmuje blokadę
 instalacji, a `stash_ai/cli.py` koordynuje CLI i uruchomienie pipeline.
-Algorytmy fusion i entry point `run_merged()` pozostają w `stash_ai/merge.py`.
-`run_merged()` obejmuje `MergedRun.run()` kontekstem diagnostyki. Wywołania
+Algorytmy evidence/fusion i union przedziałów pozostają w `stash_ai/merge.py`.
+`commands/dispatch.py` wywołuje tryby CLI oraz obejmuje `MergedRun.run()`
+kontekstem diagnostyki przez `run_merged()`. Wywołania
 reconciliation korzystają bezpośrednio z `merge_sync` i `merge_cleanup`; CLI
 uruchamia cleanup przez `CleanupRun.run()`. Kod i testy importują codec
 bezpośrednio z `stash_ai/state_codec.py`.
@@ -65,9 +66,15 @@ odtwarza stan predykcji, wykonuje batche i finalizuje wyniki sceny.
 i publikacji. Kanoniczny JSON, hashe, format BLOB-ów oraz schemat bazy pozostają takie same;
 zapis wyników, usunięcie checkpointu i zakończenie refresh nadal są atomowe.
 Pakiet `inference` nie re-eksportuje helperów; wywołania używają modułów, które je definiują.
-Definicja opcji CLI i walidacja kombinacji flag są
-w `stash_ai/cli_args.py`, a dispatch samodzielnych trybów DB/diagnostics/recovery/
-prune/model-report/backfill w `stash_ai/cli_modes.py`. Parsowanie konfiguracji,
+Pakiet `stash_ai/commands/` grupuje granice trybów uruchomienia:
+`arguments.py` definiuje parser, a `validation.py` oddziela walidację raportów,
+DB/maintenance i pipeline, zachowując kolejność błędów oraz normalizację opcji.
+`dispatch.py` rozdziela komendy DB przed konfiguracją runtime, komendy samodzielne
+przed ładowaniem modeli oraz explain/merge-only przed dostępem do vocabularies i wag.
+`explain.py` zawiera odczytową diagnostykę tagów; `hierarchy.py` kompozycję hierarchii
+i jej samodzielną synchronizację, a `legacy.py` rozpoznanie namespace'ów oraz bootstrap
+starych wyników. CLI używa bezpośrednich importów bez wrapperów pod dawnymi ścieżkami.
+Parsowanie konfiguracji,
 wykluczeń i hierarchii znajduje się w `stash_ai/config.py`, a parser cue WebVTT
 w `stash_ai/vtt.py`. Dzięki temu format argumentów, YAML i VTT oraz specjalne
 ścieżki uruchomienia można testować niezależnie od normalnego pipeline inferencji.

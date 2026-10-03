@@ -6,7 +6,8 @@ import zlib
 import pytest
 
 from stash_ai import cli as app
-from stash_ai import cli_args, db as stash_db, performance
+from stash_ai import db as stash_db, performance
+from stash_ai.commands import arguments
 from stash_ai.state import StateStore
 from stash_ai.state_codec import encode
 from stash_ai.state_db import APPLICATION_ID, LATEST_SCHEMA_VERSION
@@ -204,5 +205,5 @@ def test_db_update_cli_reports_unreadable_legacy_evidence_without_claiming_succe
 ])
 def test_db_update_cli_rejects_unrelated_modes_and_modifiers(extra):
     with pytest.raises(SystemExit) as error:
-        cli_args.parse_args(app, ['--db-update', *extra])
+        arguments.parse_args(app, ['--db-update', *extra])
     assert error.value.code == 2

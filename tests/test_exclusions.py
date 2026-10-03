@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from stash_ai.commands import hierarchy as hierarchy_commands
 from stash_ai.inference import sprites
 from stash_ai import merge_cleanup
 from stash_ai import separate_sync
@@ -170,7 +171,7 @@ def test_hierarchy_create_all_does_not_recreate_excluded_tags(pipeline, monkeypa
     # Metadata hierarchy validation itself is covered separately; this exercise
     # targets the actual hierarchy command's full-vocabulary creation loop.
     monkeypatch.setattr(app, 'load_tag_hierarchy', lambda *args: None)
-    monkeypatch.setattr(merge, 'combined_hierarchy', lambda *args: None)
+    monkeypatch.setattr(hierarchy_commands, 'combined_hierarchy', lambda *args: None)
     monkeypatch.setattr(app, 'load_tagger', lambda *args: pytest.fail('hierarchy loaded a model'))
     assert app.main(args) == 0
     prefix = 'ai:' if output_mode == 'merged' else 'wd:'
@@ -182,10 +183,10 @@ def test_combined_hierarchy_filters_each_source_before_union():
     args = SimpleNamespace(no_hierarchy=False, hierarchy=root/'joytag_hierarchy.yml',
         **{source+'_hierarchy': root/f'{source}_hierarchy.yml' for source in ('wd', 'dtq', 'oppai')})
     policies = {source: frozenset({'blue_hair'}) for source in SOURCES}
-    hierarchy = merge.combined_hierarchy(app, args, policies)
+    hierarchy = hierarchy_commands.combined_hierarchy(app, args, policies)
     assert 'blue_hair' not in hierarchy.leaf_parents
     policies['wd'] = frozenset()
-    assert 'blue_hair' in merge.combined_hierarchy(app, args, policies).leaf_parents
+    assert 'blue_hair' in hierarchy_commands.combined_hierarchy(app, args, policies).leaf_parents
 
 
 def test_exclusion_key_alias_is_backward_compatible_and_unambiguous(tmp_path):

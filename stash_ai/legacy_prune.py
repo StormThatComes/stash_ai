@@ -7,8 +7,8 @@ from itertools import batched
 
 from tqdm import tqdm
 
+from stash_ai.commands import legacy as legacy_commands
 from stash_ai import separate_sync
-from stash_ai import merge
 from stash_ai.db.common import format_bytes
 from stash_ai.performance import freeze
 from stash_ai.state import StateStore, scope_for
@@ -19,11 +19,11 @@ def _current_legacy(app, scene):
     """Return exact source objects that bootstrap_legacy would recognize now."""
     values = {"scene": set(), "markers": set()}
     for tag in scene.get("tags", []):
-        if merge.legacy_label(tag.get("name", "")):
+        if legacy_commands.legacy_label(tag.get("name", "")):
             values["scene"].add(freeze(tag))
 
     for marker in scene.get("scene_markers", []):
-        parsed = merge.legacy_label((marker.get("primary_tag") or {}).get("name", ""))
+        parsed = legacy_commands.legacy_label((marker.get("primary_tag") or {}).get("name", ""))
         source = SOURCES.get(parsed[0]) if parsed else None
         if source is not None and separate_sync.owned_marker(marker, source):
             values["markers"].add(freeze(marker))

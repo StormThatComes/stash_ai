@@ -12,6 +12,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
+from stash_ai.commands import hierarchy as hierarchy_commands
 from stash_ai.domain import Cue, TagHierarchy
 from stash_ai.inference import checkpoints, prediction, preparation, sprites
 from stash_ai import cli as app
@@ -32,7 +33,7 @@ def fail(*args, **kwargs):
     'tags.py', 'domain.py', 'state.py', 'state_db.py', 'state_results.py', 'state_thresholds.py', 'state_publications.py',
     'models.py', 'vocabulary.py', 'onnx_tagger.py', 'prediction.py', 'sprites.py', 'preparation.py', 'progress.py', 'inputs.py', 'identity.py', 'checkpoints.py', 'signatures.py',
     'merge_run.py', 'merge_publish.py', 'merge_parallel.py', 'merge_sync.py', 'separate_sync.py',
-    'config.py',
+    'config.py', 'hierarchy.py', 'legacy.py',
 ])
 def test_publication_code_tracks_extracted_modules(monkeypatch, filename):
     before = performance.publication_code()
@@ -47,7 +48,7 @@ def test_publication_code_tracks_extracted_modules(monkeypatch, filename):
 
 
 @pytest.mark.parametrize('filename', [
-    'client.py', 'transport.py', 'vtt.py', 'cli_args.py', 'cli_modes.py',
+    'client.py', 'transport.py', 'vtt.py', 'arguments.py', 'validation.py', 'dispatch.py', 'explain.py',
     'merge_cleanup.py', 'recovery.py', 'cleanup_sql.py', 'cleanup_sql_session.py',
 ])
 def test_publication_code_ignores_runtime_and_maintenance_modules(monkeypatch, filename):
@@ -123,7 +124,7 @@ def test_manual_hierarchy_change_invalidates_unchanged_scene(pipeline, monkeypat
     p = pipeline
     hierarchy = TagHierarchy({'common': ('ai:category:General',), 'extra': ('ai:category:General',)},
         {'ai:category:General': ()}, 'ai:category:', merge.AI.hierarchy_description)
-    monkeypatch.setattr(merge, 'combined_hierarchy', lambda *args: hierarchy)
+    monkeypatch.setattr(hierarchy_commands, 'combined_hierarchy', lambda *args: hierarchy)
     assert app.main(p.args) == 0
     original = merge.evidence
     monkeypatch.setattr(merge, 'evidence', fail)

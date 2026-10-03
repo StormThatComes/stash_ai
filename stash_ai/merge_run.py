@@ -10,6 +10,7 @@ from collections import Counter
 
 from tqdm import tqdm
 
+from stash_ai.commands import legacy as legacy_commands
 from stash_ai.inference.identity import model_identity
 from stash_ai.signatures import digest
 from stash_ai.inference import checkpoints, prediction, preparation
@@ -105,7 +106,7 @@ class MergedRun:
                         self.stats['bootstrap_reused'] += 1
                     else:
                         with self.report.measure('bootstrap'):
-                            merge.bootstrap_legacy(app, self.store, current)
+                            legacy_commands.bootstrap_legacy(app, self.store, current)
                     # Keep only input paths/ID between passes; marker bodies need
                     # no collection-sized in-memory cache and are refreshed at sync.
                     self.scenes[scene_id] = {

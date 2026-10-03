@@ -1,6 +1,6 @@
 """Complete CLI arguments for focused runtime tests."""
 from stash_ai import cli as app
-from stash_ai.cli_args import parse_args
+from stash_ai.commands.arguments import parse_args
 from stash_ai.runtime import RunReport
 
 
