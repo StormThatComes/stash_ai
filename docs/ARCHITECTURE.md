@@ -10,8 +10,13 @@ reconciliation korzystają bezpośrednio z `merge_sync` i `merge_cleanup`; CLI
 uruchamia cleanup przez `CleanupRun.run()`. Kod i testy importują codec
 bezpośrednio z `stash_ai/state_codec.py`.
 Stanowy lifecycle jednego przebiegu merged-output (scan, rethreshold, inference,
-publikacja i pruning) obsługuje `stash_ai/merge_run.py` / `MergedRun`, który otwiera
-oraz zamyka Stash i StateStore. Faza publikacji znajduje się w
+publikacja i pruning) obsługuje `stash_ai/runs/merged.py` / `MergedRun`, który otwiera
+oraz zamyka Stash i StateStore. `runs/merged_model.py` / `MergedModelRun` odpowiada
+za przebieg jednego modelu: kwalifikację scen, reuse/refresh oraz inferencję
+pojedynczej sceny. Współdzieli store, cache, liczniki i raport z `MergedRun`,
+a tagger ładuje dopiero po wyczerpaniu możliwości reuse i zamyka w `finally`.
+Błąd inferencji dotyczy jednej sceny; błąd ładowania modelu kończy jego pętlę.
+Faza publikacji znajduje się w
 `stash_ai/merge_publish.py` / `MergePublisher`: sprawdza pending refresh i cache
 publikacji, wybiera tryb szeregowy lub równoległy oraz wspólnie obsługuje
 publikację, liczniki i błędy. Korzysta z zasobów przebiegu bez przejmowania ich
@@ -40,7 +45,7 @@ nadal kontroluje plan publikacji. Indeksy żyją wyłącznie w pamięci, bez zmi
 formatu snapshotów lub schematu bazy.
 
 `stash_ai/cli.py` koordynuje uruchomienie pipeline. Lifecycle jednego modelu
-w trybie `--output-mode separate` obsługuje `stash_ai/separate_run.py`; lifecycle
+w trybie `--output-mode separate` obsługuje `stash_ai/runs/separate.py`; lifecycle
 jest podzielony na synchronizację hierarchii, przetwarzanie pojedynczej sceny
 oraz raportowanie. Pobieranie cue/sprite, przygotowanie obrazów, filtrowanie
 score i resumowalny lokalny pipeline inferencji znajdują się w

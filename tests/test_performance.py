@@ -32,7 +32,7 @@ def fail(*args, **kwargs):
 @pytest.mark.parametrize('filename', [
     'tags.py', 'domain.py', 'state.py', 'state_db.py', 'state_results.py', 'state_thresholds.py', 'state_publications.py',
     'models.py', 'vocabulary.py', 'onnx_tagger.py', 'prediction.py', 'sprites.py', 'preparation.py', 'progress.py', 'inputs.py', 'identity.py', 'checkpoints.py', 'signatures.py',
-    'merge_run.py', 'merge_publish.py', 'merge_parallel.py', 'merge_sync.py', 'separate_sync.py',
+    'runs/merged.py', 'runs/merged_model.py', 'merge_publish.py', 'merge_parallel.py', 'merge_sync.py', 'separate_sync.py',
     'config.py', 'hierarchy.py', 'legacy.py', 'rethreshold/markers.py', 'rethreshold/scenes.py',
 ])
 def test_publication_code_tracks_extracted_modules(monkeypatch, filename):
@@ -52,7 +52,7 @@ def test_publication_code_tracks_extracted_modules(monkeypatch, filename):
     'merge_cleanup.py', 'recovery.py', 'cleanup_sql.py', 'cleanup_sql_session.py',
     'rethreshold/execution.py', 'rethreshold/targets.py', 'db/checks.py',
     'db/validation/common.py', 'db/validation/schema.py', 'db/validation/results.py',
-    'db/validation/checkpoints.py', 'db/validation/state.py',
+    'db/validation/checkpoints.py', 'db/validation/state.py', 'runs/separate.py',
 ])
 def test_publication_code_ignores_runtime_and_maintenance_modules(monkeypatch, filename):
     before = performance.publication_code()

@@ -63,7 +63,8 @@ RAM_BUDGET_GB = 32.0  # Process target; reserves 25% for models and active work.
 PREPARE_WORKERS = 4  # CPU transforms only. One model/inference call at a time.
 MERGE_STATE_FILE = (INSTALL_ROOT / "tagger_sources.sqlite3")
 
-from stash_ai import separate_run, separate_sync
+from stash_ai import separate_sync
+from stash_ai.runs import separate
 from stash_ai.models import SOURCES, ModelSource, ModelSettings
 from stash_ai.vocabulary import load_vocabulary, ensure_files, weight_files
 from stash_ai.taggers import load_tagger
@@ -337,7 +338,7 @@ def main(argv: list[str] | None = None) -> int:
         print("DRY RUN: all Stash changes below are planned." if DRY_RUN else "Synchronizing selected models.")
         for config in settings:
             try:
-                stats.update(separate_run.run_model(app, stash, config, catalogs[config.source.key], hierarchies[config.source.key],
+                stats.update(separate.run_model(app, stash, config, catalogs[config.source.key], hierarchies[config.source.key],
                                        args, core_policies[config.source.key], scene_policies[config.source.key]))
             except Exception as exc:
                 stats["errors"] += 1

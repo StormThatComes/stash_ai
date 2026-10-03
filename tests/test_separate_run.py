@@ -1,7 +1,7 @@
 """Separate-output model lifecycle and reporting."""
 from stash_ai import cli
 from stash_ai.inference import preparation
-from stash_ai import separate_run
+from stash_ai.runs import separate
 from tests.helpers.cli import runtime_args
 
 
@@ -55,7 +55,7 @@ def test_run_model_accumulates_scene_phases_and_closes_tagger(monkeypatch):
             raise ValueError("bad scene")
         return {"processed": 1, "markers_created": 2}
 
-    monkeypatch.setattr(separate_run, "_process_scene", process)
+    monkeypatch.setattr(separate, "_process_scene", process)
     args = runtime_args(
         report=Report(),
         output_mode="separate",
@@ -64,7 +64,7 @@ def test_run_model_accumulates_scene_phases_and_closes_tagger(monkeypatch):
     )
     config = SimpleNamespace(source=WD)
 
-    stats = separate_run.run_model(
+    stats = separate.run_model(
         cli, Stash(), config, SimpleNamespace(labels=[]), None, args,
         frozenset(), frozenset(),
     )
