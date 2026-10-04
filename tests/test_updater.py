@@ -1035,3 +1035,25 @@ assert segment_digest(borrowed) == original
 assert not {'torch', 'numpy', 'onnxruntime', 'tqdm'} & set(sys.modules)
 """], cwd=tmp_path, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
+
+
+def test_extracted_bootstrap_and_scene_selection_install_without_ml(tmp_path):
+    files = application_files()
+    previous = {path: data for path, data in files.items()
+                if path not in ('stash_ai/commands/bootstrap.py', 'stash_ai/inference/scene_predictions.py')}
+    installed(tmp_path, Remote(previous))
+    assert updater.update(tmp_path, Remote(files)) == 0
+    result = subprocess.run([sys.executable, '-I', '-c', """
+import sys
+sys.path.insert(0, '.')
+from stash_ai.commands.bootstrap import catalogs, policies, runtime_options
+from stash_ai.runs.separate import run
+from stash_ai.inference.prediction import predict_scene
+from stash_ai.inference.scene_predictions import retained_scores, temporal_scores
+from stash_ai.evidence.temporal.policy import TemporalPolicy
+assert retained_scores([0.8, 0.2], ['visible', 'retained'], [{'tags': [('retained', 0.3)]}]) == [('retained', 0.2)]
+assert temporal_scores([0.8, 0.2], ['visible', 'retained'], [0, 1], {}, 0.5,
+                       TemporalPolicy(), raw_scene=True, exclusions={'visible'}) == [('visible', 0.8), ('retained', 0.2)]
+assert not {'torch', 'numpy', 'onnxruntime', 'tqdm'} & set(sys.modules)
+"""], cwd=tmp_path, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr

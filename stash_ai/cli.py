@@ -49,7 +49,6 @@ from stash_ai.publication import markers as marker_ops
 import math
 import os
 import sys
-from collections import Counter
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -252,9 +251,8 @@ def outputs_already_present(scene: dict, source: ModelSource) -> bool:
 
 
 def main(argv: list[str] | None = None) -> int:
-    global DRY_RUN, APPLY_SCENE_TAGS, CREATE_MARKERS, TEMPORAL_POLICY
     from stash_ai.commands.arguments import parse_args
-    from stash_ai.commands.validation import mode_flags
+    from stash_ai.commands import bootstrap
     from stash_ai.commands.dispatch import (
         run_database_command, run_standalone_command, run_saved_merge_command, run_merged)
 
@@ -264,66 +262,24 @@ def main(argv: list[str] | None = None) -> int:
     if result is not None:
         return result
 
-    from stash_ai.runtime.report import RunReport
-    from tqdm import tqdm
-    args.report = RunReport(args.verbose, tqdm.write)
-    DRY_RUN = DRY_RUN or args.dry_run
-    if args.markers_only or args.cleanup_markers_only or args.sync_marker_groups_only:
-        APPLY_SCENE_TAGS, CREATE_MARKERS = False, True
-    elif args.scene_tags_only or args.cleanup_scene_tags_only:
-        APPLY_SCENE_TAGS, CREATE_MARKERS = True, False
-    elif args.cleanup_only:
-        APPLY_SCENE_TAGS, CREATE_MARKERS = True, True
-    hierarchy_only, cleanup_only = mode_flags(args)
+    hierarchy_only, cleanup_only = bootstrap.runtime_options(app, args)
     result = run_standalone_command(app, args, cleanup_only=cleanup_only)
     if result is not None:
         return result
-    settings = load_model_settings(args.model_config, args.models, args.device, args.offline)
-    print("Selected models: " + ", ".join(f"{item.source.title} ({item.source.prefix})" for item in settings))
+    settings = bootstrap.selected_settings(app, args)
     if args.download_models:
-        for config in settings:
-            load_vocabulary(config)
-            ensure_files(config, weight_files(config))
-            if config.source.key == "joytag":
-                from stash_ai.backends.joytag import loader_path
-                loader_path(config.download_missing)
-            print(f"{config.source.title}: files ready in {config.model_dir}.")
+        bootstrap.download_models(app, settings)
         return 0
-    from stash_ai.evidence.temporal.policy import load_policy
-    TEMPORAL_POLICY = load_policy(sys.modules[__name__], args.temporal_policy, not args.no_temporal) if not hierarchy_only else TemporalPolicy(enabled=False)
-    validate_config(scene_work=not hierarchy_only and not cleanup_only and not args.explain_tag)
-    empty_policies = {name: frozenset() for name in SOURCES}
-    core_policies = load_exclusion_policy(args.marker_core_exclusions, "excluded_core_tags") if CREATE_MARKERS and not hierarchy_only else empty_policies
-    scene_policies = load_exclusion_policy(args.scene_tag_exclusions, "excluded_scene_tags")
+    core_policies, scene_policies = bootstrap.policies(
+        app, args, hierarchy_only=hierarchy_only, cleanup_only=cleanup_only)
     if cleanup_only:
         from stash_ai.cleanup.run import CleanupRun
         return CleanupRun(app, settings, args, core_policies, scene_policies).run()
     result = run_saved_merge_command(app, settings, args, core_policies, scene_policies)
     if result is not None:
         return result
-    catalogs, hierarchies = {}, {}
-    # Validate all selected vocabularies and hierarchies before any Stash writes.
-    for config in settings:
-        source = config.source
-        vocabulary = load_vocabulary(config)
-        catalogs[source.key] = vocabulary
-        hierarchy_path = args.hierarchy if source.key == "joytag" else getattr(args, source.key + "_hierarchy")
-        if args.no_hierarchy:
-            hierarchy = None
-        elif hierarchy_path is not None:
-            hierarchy = load_tag_hierarchy(hierarchy_path, vocabulary.labels, source)
-        else:
-            hierarchy = metadata_hierarchy(vocabulary, source)
-        hierarchies[source.key] = hierarchy
-        print(f"{source.title}: {len(vocabulary.labels):,} labels; "
-              f"hierarchy={'off' if hierarchy is None else str(len(hierarchy.category_parents)) + ' categories'}; "
-              f"scene threshold={config.scene_threshold}, marker threshold={config.marker_threshold}.")
-    merged_hierarchy = None
-    if args.output_mode == "merged":
-        from stash_ai.commands.hierarchy import combined_hierarchy
-        merged_hierarchy = combined_hierarchy(app, args, scene_policies)
-    if merged_hierarchy:
-        print(f"AI: {len(merged_hierarchy.leaf_parents):,} unique labels; {len(merged_hierarchy.category_parents)} shared categories.")
+    catalogs, hierarchies, merged_hierarchy = bootstrap.catalogs(
+        app, settings, args, scene_policies)
     if args.validate_hierarchy:
         print("Vocabularies/hierarchies validated. No Stash requests or model weights loaded.")
         return 0
@@ -332,27 +288,9 @@ def main(argv: list[str] | None = None) -> int:
             from stash_ai.commands.hierarchy import run_hierarchy
             return run_hierarchy(app, args, catalogs, merged_hierarchy, scene_policies)
         return run_merged(app, settings, args, catalogs, merged_hierarchy, core_policies, scene_policies)
-    stash = create_stash_client(DRY_RUN)
-    stats = Counter()
-    try:
-        print("DRY RUN: all Stash changes below are planned." if DRY_RUN else "Synchronizing selected models.")
-        for config in settings:
-            try:
-                stats.update(separate.run_model(app, stash, config, catalogs[config.source.key], hierarchies[config.source.key],
-                                       args, core_policies[config.source.key], scene_policies[config.source.key]))
-            except Exception as exc:
-                stats["errors"] += 1
-                args.report.issue('load model', config.source.key, None, exc, safe_error(exc, api_key=STASH_API_KEY))
-        if not hierarchy_only and not stats["errors"]:
-            from stash_ai.exclusions import prune_excluded_definitions, selected_policies
-            stats.update(prune_excluded_definitions(sys.modules[__name__], stash,
-                selected_policies(scene_policies, {config.source.key for config in settings}), args.report.detail))
-    finally:
-        stash.close()
-    args.report.finish('Done' + (' (planned)' if DRY_RUN else ''), stats)
-    if stats["errors"] and not DRY_RUN:
-        print("Failed scenes may have partial writes. Correct the error and rerun to reconcile them.")
-    return 1 if stats["errors"] else 0
+    return separate.run(
+        app, settings, args, catalogs, hierarchies, core_policies, scene_policies,
+        hierarchy_only=hierarchy_only)
 
 
 def run() -> int:
