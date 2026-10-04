@@ -157,7 +157,7 @@ def test_publication_masks_are_lazy_and_unbanning_restores_raw_evidence(pipeline
             assert all('common' not in item.get('extra_tags', []) for item in snapshot['contributions'])
             assert store.snapshot('1', kind)[0] == snapshot
     options(tmp_path)  # Remove the ban; a normal merge may restore it from raw scores.
-    merge_args = ['--models', 'all', *p.args[2:], '--merge-only', '--tag-exclusions', str(tmp_path/'tags.yml'),
+    merge_args = ['--models', 'all', *p.args[2:], '--merge-only', '--scene-tag-exclusions', str(tmp_path/'tags.yml'),
                   '--marker-core-exclusions', str(tmp_path/'cores.yml')]
     monkeypatch.setattr(app.services, 'load_tagger', lambda *_: pytest.fail('unban reran inference'))
     assert app.main(merge_args) == 0

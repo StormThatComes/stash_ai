@@ -547,3 +547,5 @@ produkcyjnego serwera.
 
 Pliki w `docs/validation/` są historycznymi wynikami konkretnych walidacji i
 benchmarków. Nie opisują bieżącej liczby testów ani aktualnego kontraktu aplikacji.
+
+Nazwy konfiguracji i CLI są opisane w [instrukcji aktualizacji wykluczeń](docs/UPGRADE_exclusions.md#aktualizacja-starych-nazw). Używaj `excluded_scene_tags`, `--models`, `--scene-tag-exclusions` i `--cleanup-markers-only`; domyślny plik markerów to `marker_core_exclusions.yml`.
