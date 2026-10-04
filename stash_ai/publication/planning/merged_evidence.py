@@ -10,7 +10,7 @@ from stash_ai.runtime.timing import stage
 def _previous_ranges(app, store, scene_id):
     if not app.CREATE_MARKERS or app.MARKER_USE_END_TIME:
         return []
-    from stash_ai.recovery import publications
+    from stash_ai.storage.recovery import publications
     result = []
     for snapshot in (*store.snapshot(scene_id, "markers", borrow=True),
                      *publications(store, scene_id, 'markers')):

@@ -25,7 +25,7 @@ class ResultStore:
     @staticmethod
     def _normalize_segments(segments, kind, threshold):
         """Apply the lazy compatibility view used by all decoded result reads."""
-        from stash_ai.performance import StoredSegment
+        from stash_ai.storage.segments import StoredSegment
         overlay(segments, kind, threshold)
         for index, segment in enumerate(segments):
             segment.pop("refinement", None)
@@ -260,7 +260,7 @@ class ResultStore:
     @measured('state_write')
     def remember_legacy(self, scene, kind, data):
         store = self.store
-        from stash_ai.performance import freeze
+        from stash_ai.signatures import freeze
         previous = store.imported_legacy(scene, kind, borrow=True)
         known = {freeze(item) for item in previous}
         fresh = [item for item in data if freeze(item) not in known]

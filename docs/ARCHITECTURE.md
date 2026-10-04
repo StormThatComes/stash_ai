@@ -250,7 +250,7 @@ w `benchmarks/`.
 
 Moduły, które mogą zmienić wynik merged publication przy tej samej efektywnej
 polityce, zapisanym evidence i obserwowanym stanie Stash, trzeba uwzględniać w
-`PUBLICATION_CODE_FILES` w `stash_ai/performance.py`. Warstwy transportu,
+`PUBLICATION_CODE_FILES` w `stash_ai/publication/fingerprints.py`. Warstwy transportu,
 CLI, parser VTT oraz tryby maintenance/cleanup mają własne sygnały invalidacji
 i celowo nie należą do tego fingerprintu, aby ich refaktory nie wymuszały
 re-merge całej biblioteki. Zmiana publication fingerprintu nie unieważnia
@@ -307,3 +307,11 @@ Grupy markerów rozwiązuje `publication/groups.py`; ich backfill uruchamia
 `commands/marker_groups.py`, a pruning wraz z dry-run korektą liczników
 obsługuje `cleanup/groups.py`. `cleanup/markers.py` usuwa wykluczone rdzenie
 i extras w trybie separate, bez wyliczania nowych markerów.
+
+Recovery jest rozdzielone między `storage/recovery.py` (lokalna archiwizacja
+i odczyt intentów), `publication/recovery.py` (uzgodnienie dowodów z faktycznie
+obecnymi wynikami Stash) oraz `commands/recovery.py` (tryb abandon-pending).
+`storage/merge_checks.py` odpowiada za transakcyjnie unieważniany indeks publikacji,
+`storage/segments.py` za pożyczone segmenty i ich memoizowaną tożsamość, a
+`publication/fingerprints.py` za podpis kodu, polityki, katalogu i stanu sceny.
+Ścieżki kodu do hashowania są liczone względem pakietu, niezależnie od cwd.

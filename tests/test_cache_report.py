@@ -277,7 +277,7 @@ def test_blocked_scene_is_not_added_back_by_publication_recovery(tmp_path, monke
     monkeypatch.setattr(app, 'REPLACE_MARKERS', False)
     with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL)) as state:
         state.prepare('1', {'scene': {'owned_ids': [], 'contributions': []}})
-        from stash_ai.recovery import abandon
+        from stash_ai.storage.recovery import abandon
         abandon(state, report=lambda _: None)
     data = report(path, settings=[config('wd'), config('dtq')])
     assert data['publication_recovery_scene_ids'] == ['1']
@@ -406,7 +406,7 @@ def test_archived_recovery_does_not_block_complete_cache_and_plans_reconciliatio
     seed(path)
     with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL)) as store:
         store.prepare('1', {'scene': {'owned_ids': [], 'contributions': []}})
-        from stash_ai.recovery import abandon
+        from stash_ai.storage.recovery import abandon
         abandon(store, report=lambda _: None)
     before = path.read_bytes()
     data = report(path)

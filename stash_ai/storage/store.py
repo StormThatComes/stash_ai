@@ -60,9 +60,9 @@ class StateStore(AbstractContextManager):
                 self.connection.execute('INSERT INTO cleanup_state SELECT * FROM cleanup_source.cleanup_state WHERE scope=?', (self.scope,))
                 self.connection.commit()
                 initialize(self, version)
-            from stash_ai.performance import initialize as initialize_performance
-            initialize_performance(self)
-            from stash_ai.recovery import initialize as initialize_recovery
+            from stash_ai.storage.merge_checks import initialize as initialize_merge_checks
+            initialize_merge_checks(self)
+            from stash_ai.storage.recovery import initialize as initialize_recovery
             initialize_recovery(self)
             from stash_ai.storage.preview import initialize as initialize_preview
             initialize_preview(self)

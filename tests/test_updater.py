@@ -994,3 +994,44 @@ assert PreviousMarkerRanges([]).temporal({'seconds': 1, 'primary_tag': {'name': 
 assert not {'torch', 'numpy', 'onnxruntime', 'tqdm'} & set(sys.modules)
 """], cwd=tmp_path, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
+
+
+def test_recovery_and_fingerprints_migrate_without_ml_or_working_directory_dependency(tmp_path):
+    files = application_files()
+    moved = ('stash_ai/storage/recovery.py', 'stash_ai/publication/recovery.py',
+             'stash_ai/commands/recovery.py', 'stash_ai/publication/fingerprints.py',
+             'stash_ai/storage/segments.py', 'stash_ai/storage/merge_checks.py')
+    previous = {path: data for path, data in files.items() if path not in moved}
+    previous.update({f'stash_ai/{name}.py': b'PREVIOUS_STATE = True\n'
+                     for name in ('performance', 'recovery')})
+    installed(tmp_path, Remote(previous))
+    result = subprocess.run([sys.executable, '-c', 'from stash_ai import performance, recovery'],
+                            cwd=tmp_path, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert updater.update(tmp_path, Remote(files)) == 0
+    for name in ('performance', 'recovery'):
+        assert not (tmp_path / f'stash_ai/{name}.py').exists()
+        assert not list((tmp_path / 'stash_ai/__pycache__').glob(name + '.*.pyc'))
+    result = subprocess.run([sys.executable, '-I', '-c', """
+import os
+import sys
+from copy import deepcopy
+sys.path.insert(0, os.path.abspath('.'))
+from stash_ai.storage.segments import StoredSegment, segment_digest
+from stash_ai.publication.fingerprints import publication_code
+from stash_ai.storage.recovery import abandon
+from stash_ai.publication.recovery import reconcile
+from stash_ai.commands.recovery import run_only
+before = publication_code()
+os.chdir('stash_ai/publication')
+assert publication_code() == before
+borrowed = StoredSegment(meta={}, items=[])
+original = segment_digest(borrowed)
+detached = deepcopy(borrowed)
+detached['items'].append({'new': True})
+assert type(detached) is dict
+assert segment_digest(detached) != original
+assert segment_digest(borrowed) == original
+assert not {'torch', 'numpy', 'onnxruntime', 'tqdm'} & set(sys.modules)
+"""], cwd=tmp_path, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr

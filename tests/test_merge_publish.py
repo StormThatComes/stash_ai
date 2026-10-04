@@ -4,7 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from stash_ai import performance
+from stash_ai.publication import fingerprints as performance
+import stash_ai.storage.merge_checks as performance_merge_checks
 from stash_ai.evidence import pipeline as merge
 from stash_ai.storage import progress
 from stash_ai.publication import parallel as merge_parallel
@@ -33,7 +34,7 @@ def publication(tmp_path, monkeypatch):
     )
     reasons = {}
     monkeypatch.setattr(
-        performance, 'check_reason',
+        performance_merge_checks, 'check_reason',
         lambda store, scene_id, key, fingerprint: reasons.get(scene_id, 'stale'))
 
     def evidence(app, store, scene_id, core_policies, scene_policies, diagnostics):
