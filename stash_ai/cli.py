@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import sys
 
-from stash_ai.runs import separate
 from stash_ai.runtime.context import RuntimeContext
 from stash_ai.commands.modes import Command
 from stash_ai.stash_api.transport import safe_error
@@ -38,19 +37,15 @@ def main(argv: list[str] | None = None, *, runtime: RuntimeContext | None = None
     result = run_saved_merge_command(app, settings, args, core_policies, scene_policies)
     if result is not None:
         return result
-    catalogs, hierarchies, merged_hierarchy = bootstrap.catalogs(
+    catalogs, merged_hierarchy = bootstrap.catalogs(
         app, settings, args, scene_policies)
     if args.command is Command.VALIDATE_HIERARCHY:
         print("Vocabularies/hierarchies validated. No Stash requests or model weights loaded.")
         return 0
-    if args.output_mode == "merged":
-        if args.command is Command.SYNC_HIERARCHY:
-            from stash_ai.commands.hierarchy import run_hierarchy
-            return run_hierarchy(app, args, catalogs, merged_hierarchy, scene_policies)
-        return run_merged(app, settings, args, catalogs, merged_hierarchy, core_policies, scene_policies)
-    return separate.run(
-        app, settings, args, catalogs, hierarchies, core_policies, scene_policies,
-        hierarchy_only=hierarchy_only)
+    if args.command is Command.SYNC_HIERARCHY:
+        from stash_ai.commands.hierarchy import run_hierarchy
+        return run_hierarchy(app, args, catalogs, merged_hierarchy, scene_policies)
+    return run_merged(app, settings, args, catalogs, merged_hierarchy, core_policies, scene_policies)
 
 def run() -> int:
     """CLI exit handling shared by the root launcher."""

@@ -30,15 +30,14 @@ from tests.helpers.cleanup_sql import SQLStash
 pytestmark = pytest.mark.usefixtures("reset_progress")
 
 
-def args(tmp_path, labels=(), cores=(), by_model=None, mode='cleanup-only', output='merged'):
-    result = options(tmp_path, labels, cores, by_model, output=output)
+def args(tmp_path, labels=(), cores=(), by_model=None, mode='cleanup-only'):
+    result = options(tmp_path, labels, cores, by_model)
     result[result.index('--cleanup-only')] = '--' + mode
     return [*result, '--cleanup-strategy', 'sql', '--cleanup-page-size', '3', '--cleanup-write-batch-size', '2']
 
 
-@pytest.mark.parametrize('output', ['merged', 'separate'])
 @pytest.mark.parametrize('dry', [False, True])
-def test_global_uses_primary_ids_only_and_preserves_manual_cores(tmp_path, monkeypatch, output, dry):
+def test_global_uses_primary_ids_only_and_preserves_manual_cores(tmp_path, monkeypatch, dry):
     stash = SQLStash(dry=dry)
     blocked = stash.tag('ai:blocked')
     stash.scene['tags'] = [blocked, stash.tag('human')]
@@ -50,7 +49,7 @@ def test_global_uses_primary_ids_only_and_preserves_manual_cores(tmp_path, monke
     stash.images = [{'tags': [blocked]}]
     before = deepcopy((stash.scenes, stash.tags, stash.images))
     install(monkeypatch, stash)
-    command = args(tmp_path, ['blocked'], ['core'], output=output)
+    command = args(tmp_path, ['blocked'], ['core'])
     assert app.main(command + (['--dry-run'] if dry else [])) == 0
     assert not stash.scene_reads
     assert not any(k in {'primary_scenes', 'extra_scenes', 'extras'} for k, _ in stash.sql_calls)
@@ -343,4 +342,3 @@ def test_marker_preview_does_not_double_count_extras_on_deleted_cores(tmp_path, 
     out = capsys.readouterr().out
     assert 'markers_deleted=2' in out and 'marker_tag_removals=1' in out
     assert not stash.writes
-

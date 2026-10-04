@@ -146,7 +146,8 @@ def test_import_rejects_execution_and_publication_options_before_state_access(tm
 
 def test_separate_outputs_require_explicit_import_before_merged_publication(pipeline, monkeypatch, capsys):
     p = pipeline
-    assert app.main([*p.args, '--output-mode', 'separate']) == 0
+    p.stash.scene['tags'].append(p.stash.tag('wd:common'))
+    p.stash.marker(WD, 'common', 'historical')
     source_scene = deepcopy(p.stash.scene)
     assert not p.path.exists()
     monkeypatch.setattr(app.services, 'load_tagger', lambda *a: pytest.fail('conversion loaded weights'))

@@ -1,6 +1,8 @@
 """Offline API-contract, scale and recovery tests for SQL discovery and shared cleanup state."""
 from stash_ai.storage.results import KINDS
 from copy import deepcopy
+from pathlib import Path
+from tests.helpers.temporal import policy_args
 import sqlite3
 
 import pytest
@@ -24,8 +26,7 @@ from tests.helpers.cleanup import install
 pytestmark = pytest.mark.usefixtures("reset_progress")
 
 
-@pytest.mark.parametrize('output', ['merged', 'separate'])
-def test_global_cleanup_of_9000_scenes_never_fetches_scenes_or_predictions(tmp_path, monkeypatch, capsys, output):
+def test_global_cleanup_of_9000_scenes_never_fetches_scenes_or_predictions(tmp_path, monkeypatch, capsys):
     stash = SQLStash()
     blocked, human = stash.tag('ai:blocked'), stash.tag('blocked')
     for i in range(1, 9001):
@@ -42,7 +43,7 @@ def test_global_cleanup_of_9000_scenes_never_fetches_scenes_or_predictions(tmp_p
     stash.images.append({'tags': [parent, human]})
     install(monkeypatch, stash)
     monkeypatch.setattr(merge_store.StateStore, 'records', lambda *a, **k: pytest.fail('global cleanup decoded results'))
-    assert app.main(options(tmp_path, ['blocked'], ['core_only'], output=output)) == 0
+    assert app.main(options(tmp_path, ['blocked'], ['core_only'])) == 0
     assert not stash.scene_reads
     assert all([t['name'] for t in s['tags']] == ['blocked'] for s in stash.scenes.values())
     assert {m['id'] for m in stash.scene['scene_markers']} == {'2', '4'}
@@ -54,7 +55,7 @@ def test_global_cleanup_of_9000_scenes_never_fetches_scenes_or_predictions(tmp_p
     assert len(stash.calls) < 15
     assert 'cleanup_candidate_scenes=0' in capsys.readouterr().out
     stash.writes.clear()
-    assert app.main(options(tmp_path, ['blocked'], ['core_only'], output=output)) == 0
+    assert app.main(options(tmp_path, ['blocked'], ['core_only'])) == 0
     assert stash.writes == [] and not stash.scene_reads
 
 
@@ -134,7 +135,7 @@ def test_pending_merge_blocks_global_deletion_before_first_mutation(tmp_path, mo
 @pytest.mark.parametrize('temporal', [False, True])
 def test_publication_masks_are_lazy_and_unbanning_restores_raw_evidence(pipeline, tmp_path, monkeypatch, temporal):
     p = pipeline
-    monkeypatch.setattr(app, 'DEFAULT_TEMPORAL', temporal)
+    monkeypatch.setattr(app, 'TEMPORAL_POLICY_FILE', Path(policy_args(tmp_path, temporal)[1]))
     assert app.main(['--models', 'all', *p.args[2:]]) == 0
     stash = SQLStash()
     stash.tags, stash.scene = deepcopy(p.stash.tags), deepcopy(p.stash.scene)
@@ -212,7 +213,6 @@ def test_partial_scope_keeps_compatible_scene_cleanup(pipeline, tmp_path, monkey
 
 def test_lazy_global_mask_keeps_frozen_exclusions_during_later_source_cleanup(pipeline, tmp_path, monkeypatch):
     p = pipeline
-    monkeypatch.setattr(app, 'DEFAULT_TEMPORAL', True)
     assert app.main(['--models', 'all', *p.args[2:]]) == 0
     stash = SQLStash()
     stash.tags, stash.scene = deepcopy(p.stash.tags), deepcopy(p.stash.scene)
@@ -232,4 +232,3 @@ def test_lazy_global_mask_keeps_frozen_exclusions_during_later_source_cleanup(pi
         for item in spans:
             if item.get('build_options'):
                 assert all('extra' in values for values in item['build_options']['tag_exclusions'].values())
-

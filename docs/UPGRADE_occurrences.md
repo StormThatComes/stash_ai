@@ -1,8 +1,8 @@
 # Punkty Occurrence dla tagów scen
 
-Occurrence jest domyślnie włączone w trybie `merged` przez
-`occurrence_markers: true` w `temporal_policy.yml`. `--no-temporal` również
-wyłącza tę funkcję.
+Occurrence jest domyślnie włączone przez
+`occurrence_markers: true` w `temporal_policy.yml`. Ustawienie tej reguły na
+`false` wyłącza punkty Occurrence, pozostawiając pozostałe reguły temporalne.
 
 ## Co tworzy
 

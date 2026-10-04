@@ -156,7 +156,6 @@ def test_source_content_change_invalidates_checkpoint_even_with_same_url(pipelin
 
 def test_analysis_version_restarts_only_partial_model_and_preserves_completed_results(pipeline, monkeypatch):
     from stash_ai.evidence.temporal import statistics
-    monkeypatch.setattr(app, 'DEFAULT_TEMPORAL', True)
     p = pipeline
     args = ['--models', 'dtq', 'wd', *p.args[2:]]
     p.fail['wd'] = 4

@@ -12,6 +12,7 @@ import stash_ai.evidence.intervals as merge_intervals
 import stash_ai.evidence.source_markers as merge_source_markers
 import stash_ai.storage.store as merge_store
 from tests.test_thresholds import configure, raw
+from tests.helpers.temporal import install_threshold_policy
 
 pytestmark = pytest.mark.usefixtures('reset_temporal')
 
@@ -38,7 +39,7 @@ def offline(monkeypatch, stash):
 
 @pytest.mark.parametrize('old_cache', [False, True])
 @pytest.mark.parametrize('dry_run', [False, True])
-def test_enabling_temporal_checks_historical_retention_before_publication(
+def test_wider_support_policy_checks_historical_retention_before_publication(
         pipeline, monkeypatch, capsys, old_cache, dry_run):
     p = pipeline
     p.scores['wd'][:] = 0
@@ -46,12 +47,13 @@ def test_enabling_temporal_checks_historical_retention_before_publication(
     p.scores['wd'][:2, 0] = p.scores['wd'][6:8, 0] = .8
     args = [*p.args, '--markers-only']
     with monkeypatch.context() as previous:
+        install_threshold_policy(previous, app, p.path.parent)
         if old_cache:
             settings = app.services.load_model_settings
             previous.setattr(app.services, 'load_model_settings', lambda *a: [
                 replace(config, scene_cache_floor=None, marker_cache_floor=None)
                 for config in settings(*a)])
-        assert app.main([*args, '--no-temporal']) == 0
+        assert app.main([*args]) == 0
     if old_cache:
         from stash_ai.storage.codec import encode
         with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL)) as state:
@@ -88,10 +90,11 @@ def test_enabling_temporal_checks_historical_retention_before_publication(
     assert marker_ranges(p.stash) == [('ai:common', 0, 8)]
 
 
-def test_old_high_only_cache_remains_usable_without_temporal(pipeline, monkeypatch):
+def test_old_high_only_cache_remains_usable_with_matching_support_policy(pipeline, monkeypatch):
     p = pipeline
     configure(monkeypatch)
-    args = [*p.args, '--markers-only', '--no-temporal']
+    install_threshold_policy(monkeypatch, app, p.path.parent)
+    args = [*p.args, '--markers-only']
     assert app.main(args) == 0
     before = stored_outputs(p.path), deepcopy(p.stash.scene)
     p.stash.writes.clear()
@@ -226,4 +229,3 @@ def test_incomplete_history_cannot_contribute_consensus_votes(source):
     records[source].insert(0, incomplete)
     with pytest.raises(ValueError, match=source + ': marker cache floor.*run inference'):
         merge_source_markers.marker_contributions(app, records, policies())
-

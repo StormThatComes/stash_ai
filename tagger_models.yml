@@ -11,7 +11,7 @@
 # --verbose enables per-scene diagnostics; default output summarizes the collection.
 # No sprite or extracted-frame cache is written to disk.
 # --merge-only migrates existing results without model inference.
-# --output-mode separate restores the original model-prefixed output format.
+# Historical model-prefixed outputs can be imported with --import-legacy-only.
 # Optional per-model scene_cache_floor / marker_cache_floor keep weaker scores
 # for later offline retuning. Omitted/null preserves automatic retention.
 # Retention only widens the cache; publication thresholds still apply.
@@ -61,7 +61,7 @@ oppai:
 # Count caps are disabled in the script (0 = unlimited); time grouping,
 # MARKER_MIN_HITS and confidence thresholds still apply.
 # WD_MODEL_PATH, DTQ_MODEL_PATH and OPPAI_MODEL_PATH override the paths above.
-# OppaiOracle uses source code op (op: tags in separate mode) and --models oppai.
+# OppaiOracle uses source code op (historical op: tags) and --models oppai.
 # "all" runs four models. Merged marker titles identify sources, e.g. [jt+wd+op].
 # Bundled defaults: joytag_hierarchy.yml, wd_hierarchy.yml, dtq_hierarchy.yml,
 # oppai_hierarchy.yml. Override with --hierarchy / --wd-hierarchy /

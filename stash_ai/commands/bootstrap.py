@@ -3,7 +3,6 @@ from stash_ai.evidence.temporal.policy import TemporalPolicy
 from stash_ai.models import SOURCES
 
 
-
 def runtime_options(app, args):
     from stash_ai.commands.validation import mode_flags
     from stash_ai.runtime.report import RunReport
@@ -39,7 +38,7 @@ def download_models(app, settings):
 def policies(app, args, *, hierarchy_only, cleanup_only):
     from stash_ai.evidence.temporal.policy import load_policy
     app.TEMPORAL_POLICY = (
-        load_policy(args.temporal_policy, not args.no_temporal)
+        load_policy(args.temporal_policy)
         if not hierarchy_only else TemporalPolicy(enabled=False))
     app.services.validate_config(scene_work=not hierarchy_only and not cleanup_only and not args.explain_tag)
     empty_policies = {name: frozenset() for name in SOURCES}
@@ -52,7 +51,7 @@ def policies(app, args, *, hierarchy_only, cleanup_only):
 
 def catalogs(app, settings, args, scene_policies):
     """Validate all selected vocabularies/hierarchies before any Stash writes."""
-    catalogs, hierarchies = {}, {}
+    catalogs = {}
     for config in settings:
         source = config.source
         vocabulary = app.services.load_vocabulary(config)
@@ -62,15 +61,11 @@ def catalogs(app, settings, args, scene_policies):
             hierarchy = None
         else:
             hierarchy = app.services.load_tag_hierarchy(hierarchy_path, vocabulary.labels, source)
-        hierarchies[source.key] = hierarchy
         print(f"{source.title}: {len(vocabulary.labels):,} labels; "
               f"hierarchy={'off' if hierarchy is None else str(len(hierarchy.category_parents)) + ' categories'}; "
               f"scene threshold={config.scene_threshold}, marker threshold={config.marker_threshold}.")
-    merged_hierarchy = None
-    if args.output_mode == "merged":
-        from stash_ai.commands.hierarchy import combined_hierarchy
-        merged_hierarchy = combined_hierarchy(app, args, scene_policies)
+    from stash_ai.commands.hierarchy import combined_hierarchy
+    merged_hierarchy = combined_hierarchy(app, args, scene_policies)
     if merged_hierarchy:
         print(f"AI: {len(merged_hierarchy.leaf_parents):,} unique labels; {len(merged_hierarchy.category_parents)} shared categories.")
-    return catalogs, hierarchies, merged_hierarchy
-
+    return catalogs, merged_hierarchy

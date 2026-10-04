@@ -486,10 +486,10 @@ def test_cli_is_offline_and_preserves_settings_in_plan(tmp_path, monkeypatch, ca
         monkeypatch.setattr(app.services, name, lambda *args: pytest.fail('model/Stash access'))
     before = path.read_bytes()
     assert app.main(['--cache-report', str(destination), '--state-db', str(path),
-                     '--models', 'wd', '--scene-id', '404', '--no-temporal']) == 0
+                     '--models', 'wd', '--scene-id', '404']) == 0
     data = json.loads(destination.read_text())
     assert data['targets'][0]['model'] == 'wd'
-    assert '--no-temporal' in data['plan'][0]['argv']
+    assert str(app.TEMPORAL_POLICY_FILE.resolve()) in data['plan'][0]['argv']
     assert str(path.resolve()) in data['plan'][0]['argv']
     assert path.read_bytes() == before
     assert 'freshness is unverified' in capsys.readouterr().out
@@ -521,9 +521,6 @@ def test_cli_refuses_existing_report(tmp_path):
 
 @pytest.mark.usefixtures('reset_progress')
 def test_generated_backfill_resumes_actual_inference_checkpoint(pipeline, monkeypatch):
-    from stash_ai.evidence.temporal.policy import TemporalPolicy
-    monkeypatch.setattr(app, 'DEFAULT_TEMPORAL', False)
-    monkeypatch.setattr(app, 'TEMPORAL_POLICY', TemporalPolicy(enabled=False))
     p = pipeline
     p.fail['wd'] = 4
     with pytest.raises(KeyboardInterrupt):
@@ -531,7 +528,7 @@ def test_generated_backfill_resumes_actual_inference_checkpoint(pipeline, monkey
     settings = app.services.load_model_settings(app.MODELS_CONFIG_FILE, ['wd'], None, True)
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), True) as store:
         data = cache_report.build_report(app, store, ['1'], settings,
-                                         ['--state-db', str(p.path), '--no-temporal'])
+                                         ['--state-db', str(p.path)])
     assert actions(data)[0]['action'] == 'resume_or_infer'
     assert issue(data)['checkpoint']['processed'] == 4
     p.fail.clear()
@@ -543,9 +540,6 @@ def test_generated_backfill_resumes_actual_inference_checkpoint(pipeline, monkey
 @pytest.mark.usefixtures('reset_progress')
 def test_generated_rethreshold_applies_yaml_without_loading_a_model(pipeline, monkeypatch, tmp_path):
     import yaml
-    from stash_ai.evidence.temporal.policy import TemporalPolicy
-    monkeypatch.setattr(app, 'DEFAULT_TEMPORAL', False)
-    monkeypatch.setattr(app, 'TEMPORAL_POLICY', TemporalPolicy(enabled=False))
     p = pipeline
     assert app.main(p.args) == 0
     data = app.services.load_unique_yaml(app.MODELS_CONFIG_FILE, 'test')
@@ -555,7 +549,7 @@ def test_generated_rethreshold_applies_yaml_without_loading_a_model(pipeline, mo
     settings = app.services.load_model_settings(yaml_path, ['wd'], None, True)
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), True) as store:
         result = cache_report.build_report(app, store, ['1'], settings,
-            ['--state-db', str(p.path), '--model-config', str(yaml_path), '--no-temporal'])
+            ['--state-db', str(p.path), '--model-config', str(yaml_path)])
     assert not actions(result) and result['plan'][0]['action'] == 'rethreshold'
     monkeypatch.setattr(app.services, 'load_tagger', lambda *args: pytest.fail('model loaded for rethreshold'))
     assert app.main([*result['plan'][0]['argv'][2:], '--no-hierarchy']) == 0

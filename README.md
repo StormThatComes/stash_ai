@@ -186,8 +186,7 @@ Po świeżej inferencji można obniżyć progi publikacji w YAML i użyć
 retencji obejmują nowe wymagane progi wsparcia. Zmiana samej retencji podczas
 zwykłego przebiegu uruchamia świeżą inferencję i unieważnia częściowy checkpoint;
 `--merge-only` nie uzupełnia wcześniej odrzuconych wyników. Niższa retencja zwiększa
-rozmiar bazy i koszt przetwarzania cache. Ustawienia dotyczą trwałego cache trybu
-`merged`; tryb `separate` nadal używa progów publikacji.
+rozmiar bazy i koszt przetwarzania cache. Ustawienia dotyczą trwałego cache inferencji.
 
 Stary cache inferencji bez `marker_score_floor` jest sprawdzany z użyciem
 zapisanego `marker_threshold` jako konserwatywnego progu retencji. Jeśli np.
@@ -212,7 +211,7 @@ Historyczne serie są normalizowane przy potwierdzonym reuse; import legacy
 nadal dopisuje dowody atomowo. Zwykłe przedziały opublikowane dawniej jako
 punkty odzyskują długość ze snapshotów przy uzgadnianiu, bez ponownej inferencji.
 
-### Przejście z separate do merged
+### Import historycznych wyników modeli
 
 Normalny merge korzysta z zapisanej bazy evidence. Stare obiekty `jt:`, `wd:`,
 `dtq:` i `op:` najpierw zaimportuj przez `--import-legacy-only`, potem uruchom
@@ -226,8 +225,8 @@ Czyta wszystkie namespace'y modeli; `--scene-id`, `--markers-only` oraz
 `--scene-tags-only` ograniczają zakres. `--dry-run` zapisuje tylko tymczasową
 nakładkę. Przy pending merge/cleanup trzeba najpierw dokończyć lub porzucić plan.
 
-Ledger zapobiega ponownemu importowi tych samych obiektów. Późniejsze wyniki
-z separate wymagają ponownego jawnego importu i dopisują historię bez utraty
+Ledger zapobiega ponownemu importowi tych samych obiektów. Później znalezione historyczne wyniki
+w namespace’ach modeli wymagają ponownego jawnego importu i dopisują historię bez utraty
 istniejącego cache. Normalny merge zgłasza niezaimportowane obiekty; nie importuje
 ich automatycznie. Publikacja migruje tylko obiekty potwierdzone w ledgerze.
 
@@ -489,8 +488,15 @@ W trybie `merged`:
 Pisownia `:occurance` w nazwach grup jest celowa i pozostaje zgodna z istniejącym
 formatem.
 
-`--output-mode separate` zachowuje prefiksy poszczególnych modeli i nie używa
-wspólnego mechanizmu publikacji `ai:`.
+Nowe wyniki zawsze używają wspólnej publikacji `ai:` i reguł temporalnych.
+Przełączniki `--output-mode` i `--no-temporal` oraz klucz YAML `enabled`
+zostały usunięte; usuń je ze skryptów i `temporal_policy.yml`. Poszczególne
+reguły nadal konfiguruje polityka YAML, w tym `occurrence_markers`.
+Historyczne namespace’y modeli nadal można importować i czyścić. Zamrożone
+snapshoty sprzed reguł temporalnych zachowują własny algorytm replay dla
+cleanupu. Aktualny cache nie wymaga ponownej inferencji wyłącznie z powodu
+usunięcia tych przełączników; retencja zapisanych obserwacji nadal podlega
+walidacji przy zmianie polityki.
 
 ## Konfiguracja
 

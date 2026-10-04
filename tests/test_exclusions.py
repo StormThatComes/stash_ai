@@ -1,5 +1,7 @@
 """Global exclusions across cached outputs, shared proofs and Stash cleanup."""
 
+from tests.helpers.temporal import policy_args
+
 from stash_ai.publication import markers as marker_ops
 from copy import deepcopy
 from pathlib import Path
@@ -19,7 +21,6 @@ import stash_ai.storage.store as merge_store
 from stash_ai.exclusions import policies_or_empty
 from stash_ai.models import SOURCES, WD
 from tests.helpers.stash import Stash
-from tests.helpers.stash import sync
 from tests.helpers.evidence import segment
 
 
@@ -47,7 +48,7 @@ def raw_results(path):
 @pytest.mark.parametrize('temporal', [False, True])
 def test_global_exclusions_reuse_raw_results_and_remove_all_roles(pipeline, monkeypatch, tmp_path, temporal):
     p = pipeline
-    args = ['--models', 'all', *p.args[2:]] + ([] if temporal else ['--no-temporal'])
+    args = ['--models', 'all', *p.args[2:]] + policy_args(p.path.parent, temporal)
     assert app.main(args) == 0
     assert 'ai:common' in names_in_scene(p.stash)
     before = raw_results(p.path)
@@ -151,7 +152,7 @@ def test_markers_only_always_loads_the_global_list(pipeline, monkeypatch, tmp_pa
 
 
 @pytest.mark.parametrize('source', list(SOURCES.values()))
-def test_separate_sync_removes_extras_from_retained_markers_and_scoped_manual_assignments(source, monkeypatch):
+def test_legacy_cleanup_removes_extras_from_retained_markers_and_scoped_manual_assignments(source, monkeypatch):
     stash = Stash()
     retained = stash.marker(source, 'keep', 'retained', manual=True)
     retained['tags'].extend([stash.tag(source.prefix+'blocked'), stash.tag('manual')])
@@ -159,7 +160,9 @@ def test_separate_sync_removes_extras_from_retained_markers_and_scoped_manual_as
     manual['tags'].append(stash.tag(source.prefix+'blocked'))
     removed = stash.marker(source, 'blocked', 'blocked', manual=True)
     before = retained['seconds'], retained['end_seconds'], retained['title']
-    sync(stash, source, scenes=frozenset({'blocked'}))
+    from stash_ai.cleanup.markers import cleanup_scene_marker_cores
+    cleanup_scene_marker_cores(app, stash, stash.find_scene('1'), frozenset(), source,
+                               tag_exclusions=frozenset({'blocked'}))
     kept = next(m for m in stash.scene['scene_markers'] if m['id'] == 'retained')
     assert (kept['seconds'], kept['end_seconds'], kept['title']) == before
     assert source.prefix+'blocked' not in names_in_scene(stash)
@@ -167,11 +170,10 @@ def test_separate_sync_removes_extras_from_retained_markers_and_scoped_manual_as
     assert 'manual' in {t['name'] for t in kept['tags']}
 
 
-@pytest.mark.parametrize('output_mode', ['merged', 'separate'])
-def test_hierarchy_create_all_does_not_recreate_excluded_tags(pipeline, monkeypatch, tmp_path, output_mode):
+def test_hierarchy_create_all_does_not_recreate_excluded_tags(pipeline, monkeypatch, tmp_path):
     p = pipeline
     path = policy_file(tmp_path, ['common'], key='excluded_scene_tags')
-    args = ['--models', 'wd', '--output-mode', output_mode, '--sync-hierarchy-only', '--create-all-tags',
+    args = ['--models', 'wd', '--sync-hierarchy-only', '--create-all-tags',
             '--scene-tag-exclusions', str(path), '--state-db', str(p.path)]
     # Metadata hierarchy validation itself is covered separately; this exercise
     # targets the actual hierarchy command's full-vocabulary creation loop.
@@ -179,7 +181,7 @@ def test_hierarchy_create_all_does_not_recreate_excluded_tags(pipeline, monkeypa
     monkeypatch.setattr(hierarchy_commands, 'combined_hierarchy', lambda *args: None)
     monkeypatch.setattr(app.services, 'load_tagger', lambda *args: pytest.fail('hierarchy loaded a model'))
     assert app.main(args) == 0
-    prefix = 'ai:' if output_mode == 'merged' else 'wd:'
+    prefix = 'ai:'
     assert prefix+'extra' in p.stash.tags and prefix+'common' not in p.stash.tags
 
 

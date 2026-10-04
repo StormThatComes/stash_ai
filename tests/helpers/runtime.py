@@ -10,7 +10,7 @@ class TestRuntime(RuntimeContext):
         return main(argv, runtime=self)
 
     def build_markers(self, *args, **kwargs):
-        from stash_ai.evidence.marker_building import build_markers
+        from stash_ai.evidence.temporal.markers import build_markers
         return build_markers(self, *args, **kwargs)
 
 

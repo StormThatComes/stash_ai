@@ -1,14 +1,12 @@
-"""Build temporal or classic marker specs from explicit runtime settings."""
+"""Reconstruct pre-temporal markers for frozen publication/cleanup snapshots.
+
+Fresh inference always uses the temporal engine. This adapter preserves the
+first-frame extras and interval identities recorded by historical snapshots.
+"""
 from stash_ai.domain import FramePrediction, MarkerSpec
 
 
-def build_markers(app, frames: list[FramePrediction], core_exclusions: frozenset[str], *,
-                  threshold=None, seeds=None, identity=None, cache=None) -> tuple[list[MarkerSpec], int]:
-    """Group eligible cores independently; exclusions may still be extras."""
-    if app.TEMPORAL_POLICY.enabled:
-        from stash_ai.evidence.temporal.markers import build_markers as temporal_markers
-        return temporal_markers(app, frames, core_exclusions,
-                                threshold=threshold, seeds=seeds, identity=identity, extra_cache=cache)
+def replay_markers(app, frames, core_exclusions, *, threshold):
     if threshold is not None:
         frames = [FramePrediction(frame.cue, tuple((tag, score) for tag, score in frame.tags if score >= threshold)) for frame in frames]
     active: dict[str, dict] = {}
