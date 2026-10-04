@@ -113,6 +113,8 @@ def test_source_exclusion_rebuilds_extra_proofs_without_resurrecting_revoked_sou
         _, spans = merge.evidence(app, store, '1', cores, empty)
         if old_snapshot:
             for span in spans: span['build_options'].pop('tag_exclusions', None)
+            from stash_ai.db.snapshot_migration import normalize
+            spans = normalize({'contributions': spans})['contributions']
         tags = policies_or_empty({'wd': ['detail']})
         cleaned = cleanup_evidence.cleanup_support(app, store, '1', spans, {'wd'}, cores, tags)
         marker = merge_intervals.union_intervals(cleaned)[0]

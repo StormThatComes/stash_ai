@@ -2,7 +2,8 @@
 from dataclasses import asdict
 
 from stash_ai.storage.codec import decode
-from stash_ai.storage.snapshots import FORMAT_KEY, expand, encode
+from stash_ai.storage.snapshots import FORMAT, FORMAT_KEY, expand, encode
+from stash_ai.models import SOURCES
 
 
 def complete_policy(values):
@@ -22,12 +23,57 @@ def decode_legacy(blob):
     value = decode(blob)
     if isinstance(value, dict) and FORMAT_KEY in value:
         version = value[FORMAT_KEY]
-        if type(version) is not int or version not in (1, 2):
+        if type(version) is not int or version not in range(1, FORMAT + 1):
             raise ValueError('Unsupported historical snapshot format.')
         value = expand(value, version=version)
     if not isinstance(value, dict):
         raise ValueError('Invalid historical snapshot format.')
     return value
+
+
+def complete_options(options):
+    if not isinstance(options, dict) or 'policy' not in options:
+        raise ValueError('Invalid historical build options.')
+    result = {**options, 'policy': complete_policy(options['policy'])}
+    if 'max_tags' in options:
+        result.setdefault('scene_thresholds', {})
+        fields = ('scene_exclusions',)
+    else:
+        result.setdefault('marker_thresholds', {})
+        fields = ('core_exclusions', 'tag_exclusions')
+    for field in fields:
+        # Only tag exclusions had historical empty-map defaults. Missing core
+        # or scene bans cannot be reconstructed from today's configuration.
+        required = field != 'tag_exclusions'
+        saved = result.get(field, {})
+        if (not isinstance(saved, dict) or set(saved) - set(SOURCES)
+                or (required and set(saved) != set(SOURCES))
+                or any(not isinstance(tags, list) or any(not isinstance(tag, str) for tag in tags)
+                       for tags in saved.values())):
+            raise ValueError('Invalid historical frozen exclusions.')
+        result[field] = {source: list(saved.get(source, [])) for source in SOURCES}
+    retired = result.pop('blocklist', [])
+    if not isinstance(retired, list) or any(not isinstance(tag, str) for tag in retired):
+        raise ValueError('Invalid historical marker blocklist.')
+    if retired:
+        if 'tag_exclusions' not in result:
+            raise ValueError('Unexpected historical scene blocklist.')
+        result['tag_exclusions'] = {source: sorted(set(tags) | set(retired))
+                                    for source, tags in result['tag_exclusions'].items()}
+    return result
+
+
+def normalize_item(item):
+    if not isinstance(item, dict):
+        raise ValueError('Invalid historical snapshot contribution.')
+    result = dict(item)
+    if item.get('build_options') is not None:
+        result['build_options'] = complete_options(item['build_options'])
+    if 'scene_evidence' in item:
+        if not isinstance(item['scene_evidence'], list):
+            raise ValueError('Invalid historical scene evidence.')
+        result['scene_evidence'] = [normalize_item(hit) for hit in item['scene_evidence']]
+    return result
 
 
 def normalize(snapshot):
@@ -37,12 +83,7 @@ def normalize(snapshot):
     if not isinstance(snapshot['contributions'], list) or any(
             not isinstance(item, dict) for item in snapshot['contributions']):
         raise ValueError('Invalid historical snapshot contributions.')
-    contributions = []
-    for item in snapshot['contributions']:
-        options = item.get('build_options')
-        if options is not None and 'policy' in options:
-            item = {**item, 'build_options': {**options, 'policy': complete_policy(options['policy'])}}
-        contributions.append(item)
+    contributions = [normalize_item(item) for item in snapshot['contributions']]
     return {**snapshot, 'contributions': contributions}
 
 

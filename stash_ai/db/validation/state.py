@@ -29,7 +29,7 @@ def check_state_payloads(db, tables, errors, progress=None):
             tick(progress)
             try:
                 if table in ('snapshots', 'recovery_publications'):
-                    if version >= 11:
+                    if version >= 12:
                         from stash_ai.storage.snapshots import decode
                     else:
                         from stash_ai.db.snapshot_migration import decode_legacy as decode

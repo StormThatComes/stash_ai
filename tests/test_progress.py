@@ -154,6 +154,36 @@ def test_source_content_change_invalidates_checkpoint_even_with_same_url(pipelin
     assert p.loaded[-1].seen==list(range(10))
 
 
+def test_analysis_version_restarts_only_partial_model_and_preserves_completed_results(pipeline, monkeypatch):
+    from stash_ai.evidence.temporal import statistics
+    monkeypatch.setattr(app, 'DEFAULT_TEMPORAL', True)
+    p = pipeline
+    args = ['--models', 'dtq', 'wd', *p.args[2:]]
+    p.fail['wd'] = 4
+    with monkeypatch.context() as old:
+        old.setattr(statistics, 'CHECKPOINT_FORMAT', 0)
+        with pytest.raises(KeyboardInterrupt):
+            app.main(args)
+    with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL)) as state:
+        completed = state.connection.execute("SELECT kind,data FROM results WHERE model='dtq' ORDER BY kind").fetchall()
+        assert completed
+        blob, = state.connection.execute('SELECT data FROM checkpoint_analysis').fetchone()
+        analysis = state_codec.decode(blob)
+        analysis.pop('format')
+        for item in analysis['items'].values():
+            item.pop('peak_time')
+        with state.connection:
+            state.connection.execute('UPDATE checkpoint_analysis SET data=?', (state_codec.encode(analysis),))
+    loaded = len(p.loaded)
+    p.fail.clear()
+    assert app.main(args) == 0
+    assert len(p.loaded) == loaded + 1 and p.loaded[-1].seen == list(range(10))
+    with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), True) as state:
+        assert state.connection.execute("SELECT kind,data FROM " + state.table('results') + " WHERE model='dtq' ORDER BY kind").fetchall() == completed
+        for table in ('checkpoints', 'checkpoint_frames', 'checkpoint_analysis'):
+            assert state.connection.execute('SELECT COUNT(*) FROM ' + table).fetchone() == (0,)
+
+
 def test_vtt_timing_change_invalidates_but_scene_threshold_reuses_frames(pipeline,monkeypatch):
     p=pipeline
     assert app.main(p.args)==0
@@ -303,7 +333,7 @@ def test_v1_database_is_migrated_once_without_losing_sources(tmp_path,monkeypatc
     from stash_ai.db import update_database
     update_database(path)
     with merge_store.StateStore(path,"fixture") as state:
-        assert state.connection.execute("PRAGMA user_version").fetchone()==(11,)
+        assert state.connection.execute("PRAGMA user_version").fetchone()==(12,)
         assert state.records("1","scene")["wd"]==[segment]
         assert progress.completed(state,"1","wd",["scene"])
         assert not progress.completed(state,"1","wd",["scene"],"new-signature")
@@ -337,4 +367,3 @@ def test_ordered_vocabulary_changes_checkpoint_identity(pipeline):
 def test_resume_flags_are_explicitly_rejected_for_legacy_separate_mode(pipeline,flag):
     with pytest.raises(SystemExit) as exc:app.main([*pipeline.args,"--output-mode","separate",flag])
     assert exc.value.code==2 and not pipeline.loaded
-

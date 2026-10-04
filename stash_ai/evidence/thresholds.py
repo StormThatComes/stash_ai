@@ -43,7 +43,7 @@ def _score(value):
 
 
 def validate_marker_blocklist(segment, identity, *, allow_unknown=False,
-                              legacy_blocklist=frozenset()):
+                              frozen_exclusions=frozenset()):
     """Guard coverage lost to the retired option; cleanup can replay frozen bans."""
     if segment['mode'] != 'frames' or segment['meta'].get('origin') != 'inference':
         return
@@ -53,21 +53,21 @@ def validate_marker_blocklist(segment, identity, *, allow_unknown=False,
     if not isinstance(retained, list) or any(not isinstance(tag, str) for tag in retained):
         raise ValueError(f'{identity}: marker blocklist metadata is missing or invalid; '
                          'run inference with --restart for this scene/model.')
-    unblocked = sorted(set(retained) - legacy_blocklist)
+    unblocked = sorted(set(retained) - frozen_exclusions)
     if unblocked:
         raise ValueError(f'{identity}: unblocked marker tags {unblocked!r} are absent from cached frames; '
                          'run inference with --restart for this scene/model.')
 
 
 def validate_marker_cache(app, records, *, allow_unknown_blocklist=False,
-                          allow_unknown_retention=False, legacy_blocklist=frozenset()):
+                          allow_unknown_retention=False, frozen_exclusions=None):
     """Check retained coverage before cached frames can build markers or votes."""
     from stash_ai.evidence.temporal.policy import marker_floor
     for model, segments in records.items():
         for segment in segments:
             meta = segment['meta']
             validate_marker_blocklist(segment, model, allow_unknown=allow_unknown_blocklist,
-                                      legacy_blocklist=legacy_blocklist)
+                                      frozen_exclusions=frozen_exclusions[model] if frozen_exclusions is not None else frozenset())
             # Imported frames have no inference retention contract. Cleanup may
             # also revoke verified published proofs with unknown old retention.
             if segment['mode'] != 'frames':

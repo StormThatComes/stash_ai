@@ -141,6 +141,17 @@ def test_blocklist_exception_does_not_relax_historical_retention():
         thresholds.validate_marker_cache(app, {'wd': [frames]}, allow_unknown_blocklist=True)
 
 
+def test_frozen_coverage_bans_are_scoped_to_the_model_with_missing_detections():
+    frames = segment('wd', [[('core', .9)]] * 4)
+    frames['meta']['marker_tag_blocklist'] = ['detail']
+    frozen = {source: frozenset() for source in SOURCES}
+    frozen['dtq'] = frozenset({'detail'})
+    with pytest.raises(ValueError, match='unblocked marker tags'):
+        thresholds.validate_marker_cache(app, {'wd': [frames]}, frozen_exclusions=frozen)
+    frozen['wd'] = frozenset({'detail'})
+    thresholds.validate_marker_cache(app, {'wd': [frames]}, frozen_exclusions=frozen)
+
+
 def test_repeated_cleanup_preserves_nonempty_historical_bans(tmp_path):
     policies = {source: frozenset() for source in SOURCES}
     records = {
@@ -152,10 +163,12 @@ def test_repeated_cleanup_preserves_nonempty_historical_bans(tmp_path):
     records['wd'][0]['meta']['marker_tag_blocklist'] = ['detail']
     frozen_tags = {source: frozenset({'detail'}) for source in SOURCES}
     spans = merge_source_markers.marker_contributions(app, records, policies, tag_policies=frozen_tags,
-                                       legacy_blocklist=frozenset({'detail'}))
+                                       frozen_exclusions=frozen_tags)
     for span in spans:
         span['build_options']['blocklist'] = ['detail']
         span['build_options']['tag_exclusions'] = {source: [] for source in SOURCES}
+    from stash_ai.db.snapshot_migration import normalize
+    spans = normalize({'contributions': spans})['contributions']
     assert merge_intervals.union_intervals(spans)[0]['extra_tags'] == ['remaining', 'revoked']
 
     with merge_store.StateStore(tmp_path / 'state', 'fixture') as state:
@@ -165,11 +178,11 @@ def test_repeated_cleanup_preserves_nonempty_historical_bans(tmp_path):
         tags = {**policies, 'dtq': frozenset({'revoked'})}
         first = cleanup_evidence.cleanup_support(app, state, '1', spans, {'dtq'}, policies, tags)
         assert merge_intervals.union_intervals(first)[0]['extra_tags'] == ['remaining']
-        assert all(span['build_options']['blocklist'] == ['detail'] for span in first)
+        assert all('blocklist' not in span['build_options'] and all(
+            'detail' in bans for bans in span['build_options']['tag_exclusions'].values()) for span in first)
         tags['dtq'] = frozenset({'remaining', 'revoked'})
         second = cleanup_evidence.cleanup_support(app, state, '1', first, {'dtq'}, policies, tags)
         assert merge_intervals.union_intervals(second)[0]['extra_tags'] == []
         assert state.records('1', 'markers') == original
         with pytest.raises(ValueError, match='unblocked marker tags'):
             merge_source_markers.marker_contributions(app, original, policies)
-
