@@ -38,10 +38,6 @@ def load_exclusion_policy(path: Path, key: str) -> dict[str, frozenset[str]]:
     if not path.is_file():
         raise FileNotFoundError(f"Exclusions YAML missing: {path}. Use {key}: [] for an empty blacklist.")
     data = load_unique_yaml(path, "Tag exclusions")
-    if key == "excluded_scene_tags" and isinstance(data, dict) and "excluded_tags" in data:
-        if key in data:
-            raise ValueError("Use excluded_tags or excluded_scene_tags, not both.")
-        data = {key if name == "excluded_tags" else name: value for name, value in data.items()}
     if (not isinstance(data, dict) or not {"version", key} <= set(data)
             or set(data) - {"version", key, "by_model"}):
         raise ValueError(f"{path.name} must contain version, {key}, and optionally by_model.")

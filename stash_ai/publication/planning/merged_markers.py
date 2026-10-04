@@ -4,7 +4,6 @@ from stash_ai.publication import markers as marker_ops
 from stash_ai.publication.index import MarkerIntervalIndex
 from stash_ai.commands import legacy as legacy_commands
 import stash_ai.evidence.labels as merge_labels
-import stash_ai.models as merge_models
 from stash_ai.runtime.timing import stage
 
 
@@ -43,7 +42,7 @@ def _wanted_markers(app, scene_id, markers, catalog, blocked_names):
     return wanted, resolved_marker_labels
 
 
-def plan_markers(app, resolved, catalog, previous_ranges, plan, *, migrate, report):
+def plan_markers(app, store, resolved, catalog, previous_ranges, plan, *, migrate, report):
     """Match wanted markers to owned markers and populate create/update/delete actions."""
     scene, markers, blocked_names = resolved.scene, resolved.markers, resolved.blocked_names
     scene_id = str(scene['id'])
@@ -93,12 +92,13 @@ def plan_markers(app, resolved, catalog, previous_ranges, plan, *, migrate, repo
 
         plan.deletes = set(available) if app.CREATE_MARKERS else set()
         if migrate and app.CREATE_MARKERS:
+            from stash_ai.signatures import freeze
+            legacy_markers = list(legacy_commands.legacy_objects(scene, 'markers'))
+            imported = {freeze(item) for item in store.imported_legacy(scene_id, 'markers', borrow=True)} if legacy_markers else set()
             predicted_labels = {marker["tag"] for marker in markers}
-            for marker in current_markers:
-                parsed = legacy_commands.legacy_label((marker.get("primary_tag") or {}).get("name", ""))
-                if parsed and marker_ops.owned_marker(marker, merge_models.SOURCES[parsed[0]]):
-                    if parsed[1] not in predicted_labels or parsed[1] in resolved_marker_labels:
-                        plan.deletes.add(str(marker["id"]))
+            for _, label, marker in legacy_markers:
+                if freeze(marker) in imported and (label not in predicted_labels or label in resolved_marker_labels):
+                    plan.deletes.add(str(marker["id"]))
         if app.CREATE_MARKERS and blocked_names:
             plan.deletes.update(str(marker['id']) for marker in current_markers
                                 if marker['primary_tag']['name'] in blocked_names)
@@ -110,4 +110,3 @@ def plan_markers(app, resolved, catalog, previous_ranges, plan, *, migrate, repo
                     marker, scene_id, blocked_names)
                 if payload is not None:
                     plan.updates.append(payload)
-

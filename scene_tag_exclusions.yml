@@ -1,6 +1,5 @@
 # Global output blacklist: scenes, marker cores, marker extras and hierarchy.
-# The legacy filename and excluded_scene_tags key are kept for compatibility.
-# excluded_tags is also accepted as the list key (use only one of the two).
+# Use the canonical excluded_scene_tags key; see docs/UPGRADE_exclusions.md.
 # Common raw labels apply to all four models; matching is exact/case-sensitive.
 # Use raw names WITHOUT ai:/jt:/wd:/dtq:/op:. Absent labels in a vocabulary are harmless.
 version: 1

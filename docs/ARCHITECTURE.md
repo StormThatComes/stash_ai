@@ -92,8 +92,8 @@ DB/maintenance i pipeline, zachowując kolejność błędów oraz normalizację 
 `dispatch.py` rozdziela komendy DB przed konfiguracją runtime, komendy samodzielne
 przed ładowaniem modeli oraz explain/merge-only przed dostępem do vocabularies i wag.
 `explain.py` zawiera odczytową diagnostykę tagów; `hierarchy.py` kompozycję hierarchii
-i jej samodzielną synchronizację, a `legacy.py` rozpoznanie namespace'ów oraz bootstrap
-starych wyników. CLI używa bezpośrednich importów bez wrapperów pod dawnymi ścieżkami.
+i jej samodzielną synchronizację, a `legacy.py` rozpoznanie namespace'ów, odczytowy source check oraz jawny
+import starych wyników. CLI używa bezpośrednich importów bez wrapperów pod dawnymi ścieżkami.
 Parsowanie konfiguracji,
 wykluczeń i hierarchii znajduje się w `stash_ai/config.py`, a parser cue WebVTT
 w `stash_ai/vtt.py`. Dzięki temu format argumentów, YAML i VTT oraz specjalne
@@ -389,3 +389,5 @@ Schema upgrades run only through `--db-update`. Runtime writers and dry-run read
 Schema v10 stores per-segment effective thresholds as JSON arrays in `result_thresholds.thresholds`; null entries use the segment's original inference threshold. Evidence BLOBs and derived metadata contain no publication overrides. The offline migration strips retired refinement and inline overrides once, preserving evidence signatures and mixed history. New inference always declares its actual marker capture floor and an empty marker blocklist. Unknown historical retention is rejected for new publication, while verified frozen cleanup replay keeps its narrower exception.
 
 Schema v11 uses snapshot envelope v2 for every new publication, including snapshots with no shared proofs. Generic compressed JSON decoding never dispatches by a magic key. Snapshot decoding validates the envelope and complete frozen policy; historical plain JSON/v1 envelopes and old policy defaults are handled only by offline snapshot migration. Pending promotion still copies the encoded intent, and migration preserves proof references, recovery operation IDs, ownership and old False flags.
+
+Legacy Stash conversion runs only through `--import-legacy-only`, before model/configuration loading. Each scene commits imported evidence and its exact-object ledger in one transaction. Ordinary merged scans only validate known inputs and lost-state guards; they cannot import evidence. Publication planning migrates only ledger-confirmed objects, preserving late or uncaptured source objects. SQL read fallback, unknown scores/end times, manual markers, pending plans and anti-duplication semantics remain in effect.
