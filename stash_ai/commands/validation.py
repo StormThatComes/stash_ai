@@ -51,6 +51,14 @@ def validate_reports(parser, args):
 def validate_maintenance(parser, args):
     """Validate whole-database operations and legacy-ledger maintenance."""
     db_mode = database_mode(args)
+    if args.import_legacy_only:
+        if args.output_mode != 'merged':
+            parser.error('--import-legacy-only requires --output-mode merged.')
+        if supplied(args, MODEL_OPTIONS):
+            parser.error('--import-legacy-only does not use model/inference options.')
+        modifiers = tuple(name for name in PUBLICATION_OPTIONS if name not in ('markers_only', 'scene_tags_only'))
+        if supplied(args, modifiers):
+            parser.error('--import-legacy-only cannot publish, rethreshold, prune or abandon plans.')
     if args.prune_legacy_imports:
         if args.output_mode != "merged":
             parser.error("--prune-legacy-imports requires --output-mode merged.")
@@ -145,4 +153,3 @@ def validate_args(app, parser: argparse.ArgumentParser, args: argparse.Namespace
     validate_maintenance(parser, args)
     validate_pipeline(app, parser, args)
     return args
-
