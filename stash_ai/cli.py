@@ -45,6 +45,8 @@ writes. Launch the application with stash_ai.py.
 
 from __future__ import annotations
 
+from collections import Counter
+
 from stash_ai.publication import markers as marker_ops
 import math
 import os
