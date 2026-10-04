@@ -246,7 +246,14 @@ bezpośrednio z planów w `rethreshold`, bez wrapperów pod dawnymi ścieżkami.
 
 Updater instaluje pliki Pythona z pakietu `stash_ai/`, również z jego podkatalogów.
 Pozostaje samodzielnym skryptem stdlib, aby odzyskiwanie przerwanej aktualizacji
-działało także przy niekompletnym pakiecie. Migrację starego updatera opisuje
+działało także przy niekompletnym pakiecie. `RemoteSnapshot` opisuje jeden przypięty
+commit, a `UpdatePlan` zawiera operacje, konflikty i następny stan instalacji.
+`prepare` zapisuje komplet plików i backupów przed publikacją journalu;
+`PreparedUpdate` przekazuje helperowi jego tożsamość i katalog. `UpdateTransaction`
+waliduje trwały plan oraz skupia apply i rollback, z fazami `Phase`.
+`run_helper` obsługuje przekazanie blokady, usunięcie tokenów z environment i status
+procesu. Format 1 metadanych pozostaje zgodny z wcześniejszym updaterem;
+żaden z tych obiektów nie wymaga importu pakietu aplikacji. Migrację starego updatera opisuje
 [README](../README.md#aktualizacje).
 
 YAML-e, domyślna baza `tagger_sources.sqlite3` i katalog `models/` pozostają
