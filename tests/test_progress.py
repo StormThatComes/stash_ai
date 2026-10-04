@@ -300,12 +300,14 @@ def test_v1_database_is_migrated_once_without_losing_sources(tmp_path,monkeypatc
                     "CREATE TABLE results(scope TEXT,scene TEXT,model TEXT,kind TEXT,data BLOB,PRIMARY KEY(scope,scene,model,kind));")
     db.execute("INSERT INTO results VALUES (?,?,?,?,?)",("fixture","1","wd","scene",state_codec.encode([segment])))
     db.commit();db.close()
+    from stash_ai.db import update_database
+    update_database(path)
     with merge_store.StateStore(path,"fixture") as state:
-        assert state.connection.execute("PRAGMA user_version").fetchone()==(5,)
+        assert state.connection.execute("PRAGMA user_version").fetchone()==(11,)
         assert state.records("1","scene")["wd"]==[segment]
         assert progress.completed(state,"1","wd",["scene"])
         assert not progress.completed(state,"1","wd",["scene"],"new-signature")
-    monkeypatch.setattr(progress,"decode",lambda *args:pytest.fail("migration repeated"))
+    monkeypatch.setattr(state_codec,"decode",lambda *args:pytest.fail("migration repeated"))
     with merge_store.StateStore(path,"fixture") as state:assert progress.completed(state,"1","wd",["scene"])
 
 

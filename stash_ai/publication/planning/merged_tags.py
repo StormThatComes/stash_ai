@@ -64,8 +64,10 @@ def plan_scene_tags(app, store, scene_id, scene, scene_hits, scene_labels, ids, 
     from stash_ai.storage.recovery import publications
 
     current_tags = scene.get("tags", [])
-    migrated_scene_ids = ({str(tag["id"]) for tag in current_tags if legacy_commands.legacy_label(tag["name"])}
-                          if migrate else set())
+    legacy_tags = [tag for tag in current_tags if legacy_commands.legacy_label(tag['name'])] if migrate else []
+    from stash_ai.signatures import freeze
+    imported = {freeze(item) for item in store.imported_legacy(scene_id, 'scene', borrow=True)} if legacy_tags else set()
+    migrated_scene_ids = {str(tag['id']) for tag in legacy_tags if freeze(tag) in imported}
     published, pending = store.snapshot(scene_id, "scene", borrow=True)
     owned_before = set((published or {}).get("owned_ids", [])) | set((pending or {}).get("owned_ids", []))
     owned_before.update(identifier for snapshot in publications(store, scene_id, 'scene')

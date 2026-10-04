@@ -60,6 +60,5 @@ class RuntimeContext(RuntimeSettings):
     services: RuntimeServices | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self):
-        super().__post_init__()
         if self.services is None:
             self.services = RuntimeServices.bind(self)

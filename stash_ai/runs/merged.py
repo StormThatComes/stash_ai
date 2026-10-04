@@ -103,10 +103,10 @@ class MergedRun:
                     publication_reason = merge_checks.check_reason(
                         self.store, scene_id, self.merge_key, fingerprint)
                     if publication_reason == 'reused':
-                        self.stats['bootstrap_reused'] += 1
+                        self.stats['source_check_reused'] += 1
                     else:
-                        with self.report.measure('bootstrap'):
-                            legacy_commands.bootstrap_legacy(app, self.store, current)
+                        with self.report.measure('source_check'):
+                            legacy_commands.check_sources(app, self.store, current)
                     # Keep only input paths/ID between passes; marker bodies need
                     # no collection-sized in-memory cache and are refreshed at sync.
                     self.scenes[scene_id] = {
@@ -230,4 +230,3 @@ class MergedRun:
                 stash, self.report.detail, candidate_ids=candidates, usage_delta=delta))
         pruned_after = self.stats['tags_pruned'] + self.stats['marker_group_tags_pruned']
         return not stash.dry_run and pruned_after > pruned_before
-

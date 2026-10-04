@@ -24,11 +24,10 @@ class ResultStore:
 
     @staticmethod
     def _normalize_segments(segments, kind, threshold):
-        """Apply the lazy compatibility view used by all decoded result reads."""
+        """Apply separate publication policy to canonical evidence records."""
         from stash_ai.storage.segments import StoredSegment
         overlay(segments, kind, threshold)
         for index, segment in enumerate(segments):
-            segment.pop("refinement", None)
             segments[index] = StoredSegment(segment)
         return segments
 
@@ -41,7 +40,7 @@ class ResultStore:
         if records is None:
             records = {model: self._normalize_segments(store.unpack(data), kind, threshold)
                 for model, data, threshold in store.read_rows(
-                "SELECT r.model,r.data,t.threshold FROM " + store.table('results') + " AS r LEFT JOIN " +
+                "SELECT r.model,r.data,t.thresholds FROM " + store.table('results') + " AS r LEFT JOIN " +
                 store.table('result_thresholds') + " AS t USING(scope,scene,model,kind) "
                 "WHERE r.scope=? AND r.scene=? AND r.kind=?",
                 (store.scope, str(scene), kind))}
@@ -58,7 +57,7 @@ class ResultStore:
             segments = cached.get(model, [])
             return segments if borrow else deepcopy(segments)
         rows = store.read_rows(
-            "SELECT r.data,t.threshold FROM " + store.table('results') + " AS r LEFT JOIN " +
+            "SELECT r.data,t.thresholds FROM " + store.table('results') + " AS r LEFT JOIN " +
             store.table('result_thresholds') + " AS t USING(scope,scene,model,kind) "
             "WHERE r.scope=? AND r.scene=? AND r.model=? AND r.kind=?",
             (store.scope, str(scene), model, kind))
@@ -133,7 +132,6 @@ class ResultStore:
         if model not in SOURCES or set(outputs) - set(KINDS):
             raise ValueError("Unknown result source or output kind.")
         for kind, segment in outputs.items():
-            segment = {key: value for key, value in segment.items() if key != "refinement"}
             old = (self.records(scene, kind, model, borrow=True).get(model, [])
                    if not (replace or {}).get(kind, True) else [])
             # Repeating an identical run with replacement disabled need not
@@ -154,24 +152,31 @@ class ResultStore:
 
     def replace_records(self, scene, model, kind, segments):
         """Replace a segment list inside the caller's transaction, including previews."""
+        if any('refinement' in segment for segment in segments):
+            raise ValueError('Retired refinement evidence is not supported; run --db-update for saved results.')
         store = self.store
         from stash_ai.storage.preview import delete
         from stash_ai.storage.progress import index_result
         store.cache.discard(('records', str(scene), kind))
         store.cache.discard(('sources', str(scene), kind))
         store.cache.discard(('status', str(scene), model))
-        # Appended history already carries its effective inline view. A new
-        # inference must not inherit the previous result's table-wide threshold.
+        from stash_ai.storage.thresholds import separate
+        raw, thresholds = separate(segments, kind)
+        # History keeps its own effective thresholds. A new segment must not
+        # inherit the previous result's policy.
         delete(store, 'result_thresholds', scene, model, kind)
         delete(store, 'result_metadata', scene, model, kind)
         store.connection.execute('DELETE FROM result_thresholds WHERE scope=? AND scene=? AND model=? AND kind=?',
             (store.scope, str(scene), model, kind))
         store.connection.execute("INSERT INTO results VALUES (?,?,?,?,?) "
             "ON CONFLICT(scope,scene,model,kind) DO UPDATE SET data=excluded.data",
-            (store.scope, str(scene), model, kind, store.pack(segments)))
+            (store.scope, str(scene), model, kind, store.pack(raw)))
+        if thresholds is not None:
+            store.connection.execute('INSERT INTO result_thresholds VALUES (?,?,?,?,?)',
+                                     (store.scope, str(scene), model, kind, thresholds))
         from stash_ai.storage.metadata import summarize
         try:
-            metadata = summarize(segments)
+            metadata = summarize(raw)
         except (KeyError, TypeError):
             # Low-level replacement also accepts incomplete state records.
             # Leave those uncached rather than adding a new write-time constraint.
@@ -197,11 +202,8 @@ class ResultStore:
         store.cache.discard(('status', str(scene), model))
         if not store.connection.in_transaction:
             store.connection.execute('BEGIN')
-        # Older executables must reject databases whose effective policy lives
-        # outside results.data. Merely opening an old DB need not upgrade it.
-        if store.connection.execute('PRAGMA user_version').fetchone()[0] < 8:
-            store.connection.execute('PRAGMA user_version=8')
+        from stash_ai.storage.thresholds import encode
         store.connection.execute('INSERT INTO result_thresholds VALUES (?,?,?,?,?) '
-            'ON CONFLICT(scope,scene,model,kind) DO UPDATE SET threshold=excluded.threshold',
-            (store.scope, str(scene), model, kind, threshold))
+            'ON CONFLICT(scope,scene,model,kind) DO UPDATE SET thresholds=excluded.thresholds',
+            (store.scope, str(scene), model, kind, encode([threshold] * len(segments))))
         index_result(store, scene, model, kind, segments, metadata_only=metadata_only)

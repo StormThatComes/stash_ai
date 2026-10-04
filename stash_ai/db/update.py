@@ -4,8 +4,8 @@ from contextlib import closing
 from pathlib import Path
 import zlib
 
-from stash_ai.storage.store import StateStore
-from stash_ai.storage.database import APPLICATION_ID, LATEST_SCHEMA_VERSION
+from stash_ai.storage.database import StateDatabase
+from stash_ai.storage.schema import APPLICATION_ID, LATEST_SCHEMA_VERSION
 
 from .common import connect_readonly, table_names
 
@@ -32,15 +32,11 @@ def update_database(path, *, dry_run=False):
     if dry_run:
         return version, LATEST_SCHEMA_VERSION
 
-    # StateStore owns the same writer lock as tagging/cleanup and initializes
-    # every feature schema. Its old result-index migration visits all scopes;
-    # no current Stash URL or scope-specific policy is needed for maintenance.
     try:
-        with StateStore(path, '', allow_cleanup=True) as state:
-            version = state._database.version
-            with state.connection:
-                if state.connection.execute('PRAGMA user_version').fetchone()[0] < LATEST_SCHEMA_VERSION:
-                    state.connection.execute(f'PRAGMA user_version={LATEST_SCHEMA_VERSION}')
+        from .migrations import migrate
+        with StateDatabase(path, migration=True) as database:
+            version = database.version
+            migrate(database)
     except (KeyError, TypeError, zlib.error) as exc:
         raise ValueError('Saved state could not be migrated; inspect the database with --db-check.') from exc
     return version, LATEST_SCHEMA_VERSION

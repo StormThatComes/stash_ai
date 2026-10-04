@@ -12,12 +12,6 @@ def initialize(store):
         CREATE INDEX IF NOT EXISTS snapshots_pending_scope
             ON snapshots(scope, scene, kind) WHERE pending IS NOT NULL;
     ''')
-    # legacy_imports is only an anti-duplication ledger. Any newly imported
-    # legacy evidence also writes results, which already invalidates merge_checks.
-    # Drop triggers created by older versions so pruning dead ledger rows does not
-    # force unrelated scenes through merge again.
-    for event in ('insert', 'update', 'delete'):
-        db.execute(f'DROP TRIGGER IF EXISTS perf_legacy_imports_{event}')
     for table in MERGE_INVALIDATING_TABLES:
         for event, row in (('INSERT', 'NEW'), ('UPDATE', 'NEW'), ('DELETE', 'OLD')):
             db.execute(f'''CREATE TRIGGER IF NOT EXISTS perf_{table}_{event.lower()}
@@ -55,4 +49,3 @@ def record_check(store, scene, policy, fingerprint):
     store.connection.execute('INSERT INTO merge_checks VALUES (?,?,?,?) '
         'ON CONFLICT(scope,scene) DO UPDATE SET policy=excluded.policy,fingerprint=excluded.fingerprint',
         (store.scope, str(scene), policy, fingerprint))
-

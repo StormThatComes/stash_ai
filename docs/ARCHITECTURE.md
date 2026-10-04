@@ -92,8 +92,8 @@ DB/maintenance i pipeline, zachowując kolejność błędów oraz normalizację 
 `dispatch.py` rozdziela komendy DB przed konfiguracją runtime, komendy samodzielne
 przed ładowaniem modeli oraz explain/merge-only przed dostępem do vocabularies i wag.
 `explain.py` zawiera odczytową diagnostykę tagów; `hierarchy.py` kompozycję hierarchii
-i jej samodzielną synchronizację, a `legacy.py` rozpoznanie namespace'ów oraz bootstrap
-starych wyników. CLI używa bezpośrednich importów bez wrapperów pod dawnymi ścieżkami.
+i jej samodzielną synchronizację, a `legacy.py` rozpoznanie namespace'ów, odczytowy source check oraz jawny
+import starych wyników. CLI używa bezpośrednich importów bez wrapperów pod dawnymi ścieżkami.
 Parsowanie konfiguracji,
 wykluczeń i hierarchii znajduje się w `stash_ai/config.py`, a parser cue WebVTT
 w `stash_ai/vtt.py`. Dzięki temu format argumentów, YAML i VTT oraz specjalne
@@ -196,15 +196,14 @@ Rethreshold waliduje i stosuje zmiany z małych rekordów `result_metadata`;
 `ResultStore.set_threshold(..., metadata_only=True)` zapisuje próg oraz indeks
 ukończenia z tego planu w jednej transakcji, bez odczytu BLOB-ów klatek.
 Pełne rekordy pozostają obsługiwane przez tę samą ścieżkę zapisu dla reuse inferencji.
-Dry-run korzysta z tymczasowej bazy: współczesne schematy odczytuje
-przez nakładkę ze źródłem otwartym tylko do odczytu, a starsze kopiuje przed
-migracją. Schemat v9 również korzysta z nakładki odczytu.
+Dry-run wymaga aktualnego schematu i odczytuje bazę przez nakładkę ze źródłem
+otwartym tylko do odczytu. Starszą bazę aktualizuje wyłącznie `--db-update`.
 
 `StateStore.pack_snapshot()` internuje powtarzające się obiekty dowodów według
 tożsamości, bez hashowania dużych struktur. Unikatowe dowody pozostają inline.
-Kompaktowy BLOB zawiera envelope `__stash_ai_snapshot__: 1`, `snapshot` oraz
+Kompaktowy BLOB zawiera envelope `__stash_ai_snapshot__: 2`, `snapshot` oraz
 tablicę `proofs`; wartości `extra_support` są pełnymi dowodami lub indeksami tej
-tablicy. `state_codec.decode()` waliduje referencje i zwraca dotychczasową,
+tablicy. `storage.snapshots.decode()` waliduje referencje i zwraca dotychczasową,
 rozwiniętą strukturę także dla cleanupu, recovery i kontroli bazy. Dowody są
 współdzielone i niemutowalne dla pożyczających je czytelników; odczyt publiczny
 nadal zwraca kopię oddzieloną od cache. Zapis nowego formatu i podniesienie wersji
@@ -384,3 +383,11 @@ Shared marker extras consume ObservationIndex. FrameIndex owns indexes used
 throughout a scene, while clipped cleanup replay closes its temporary index
 even when qualification fails. Closing drops query cache references without
 changing the proof objects retained by result spans.
+
+Schema upgrades run only through `--db-update`. Runtime writers and dry-run readers require the current schema; fresh stores are created at the current version. Preview always attaches a current database read-only and writes into a sparse temporary overlay. The offline updater visits every scope, backfills derived result metadata, and preserves raw evidence and unfinished plans. Metadata invalidated or corrupted later is still rebuilt from authoritative evidence.
+
+Schema v10 stores per-segment effective thresholds as JSON arrays in `result_thresholds.thresholds`; null entries use the segment's original inference threshold. Evidence BLOBs and derived metadata contain no publication overrides. The offline migration strips retired refinement and inline overrides once, preserving evidence signatures and mixed history. New inference always declares its actual marker capture floor and an empty marker blocklist. Unknown historical retention is rejected for new publication, while verified frozen cleanup replay keeps its narrower exception.
+
+Schema v11 uses snapshot envelope v2 for every new publication, including snapshots with no shared proofs. Generic compressed JSON decoding never dispatches by a magic key. Snapshot decoding validates the envelope and complete frozen policy; historical plain JSON/v1 envelopes and old policy defaults are handled only by offline snapshot migration. Pending promotion still copies the encoded intent, and migration preserves proof references, recovery operation IDs, ownership and old False flags.
+
+Legacy Stash conversion runs only through `--import-legacy-only`, before model/configuration loading. Each scene commits imported evidence and its exact-object ledger in one transaction. Ordinary merged scans only validate known inputs and lost-state guards; they cannot import evidence. Publication planning migrates only ledger-confirmed objects, preserving late or uncaptured source objects. SQL read fallback, unknown scores/end times, manual markers, pending plans and anti-duplication semantics remain in effect.

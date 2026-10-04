@@ -123,7 +123,7 @@ excluded_core_tags:
 # To remove existing owned markers with excluded cores without inference:
 #   python stash_ai.py --cleanup-markers-only --dry-run
 #   python stash_ai.py --cleanup-markers-only
-# --sync-marker-core-only is an alias; --scene-id ID limits either command.
+# --scene-id ID limits cleanup to selected scenes.
 # Manual markers are preserved. Cleanup deletes the excluded-core marker;
 # it does not remove the tag itself or promote one of its additional tags.
 # Use excluded_core_tags: [] to allow every label as a core.

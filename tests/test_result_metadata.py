@@ -155,6 +155,8 @@ def test_old_database_backfills_once_and_keeps_inline_overrides(tmp_path, monkey
             connection.execute('DROP TRIGGER results_metadata_' + event)
         connection.execute('DROP TABLE result_metadata')
         connection.execute(f'PRAGMA user_version={version}')
+    from stash_ai.db import update_database
+    update_database(path)
     source = path.read_bytes()
     with StateStore(path, 'scope', dry_run=dry_run) as store:
         report = RunReport(write=lambda _: None)
@@ -162,8 +164,8 @@ def test_old_database_backfills_once_and_keeps_inline_overrides(tmp_path, monkey
         statements = []
         store.connection.set_trace_callback(statements.append)
         assert scene_updates.plan(app, store, '1', config(.4), request=ThresholdRequest(kinds=('scene', 'markers'), access=RecordAccess.METADATA))
-        assert report.timing_calls['state_json_decode'] == 2
-        assert store.connection.execute('PRAGMA user_version').fetchone() == (version,)
+        assert report.timing_calls['state_json_decode'] == 0
+        assert store.connection.execute('PRAGMA user_version').fetchone() == (11,)
         first = metadata_rows(store)
         assert len(first) == 2
         monkeypatch.setattr(store, 'unpack', lambda *a: pytest.fail('Repeated legacy decode'))
@@ -185,6 +187,8 @@ def test_preview_new_inference_metadata_hides_source_and_tracks_history(tmp_path
     with StateStore(path, 'scope') as store:
         store.put('1', 'wd', outputs())
         rethreshold(store, .8)
+    from stash_ai.db import update_database
+    update_database(path)
     source = path.read_bytes()
     with StateStore(path, 'scope', dry_run=dry_run) as store:
         new = outputs(.6, 'new')

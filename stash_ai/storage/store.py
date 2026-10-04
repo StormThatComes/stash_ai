@@ -58,9 +58,12 @@ class StateStore(AbstractContextManager):
             self.preview_source = database.preview_source
             if self.preview_source:
                 self.preview_data_version = database.preview_data_version
-            version = database.version
             from stash_ai.storage.schema import initialize_features
-            initialize_features(self, version)
+            initialize_features(self)
+            if database.fresh:
+                from stash_ai.storage.schema import LATEST_SCHEMA_VERSION
+                self.connection.execute(f'PRAGMA user_version={LATEST_SCHEMA_VERSION}')
+                self.connection.commit()
             if self.cleanup_pending and not allow_cleanup:
                 raise RuntimeError('Global cleanup is interrupted; rerun the same --models all cleanup mode '
                                    'with the same exclusion policies, or use --abandon-pending with current policies.')
@@ -102,18 +105,17 @@ class StateStore(AbstractContextManager):
         return encode(value, self.report)
 
     def pack_snapshot(self, value):
-        """Encode shared proofs and mark their format inside the write transaction."""
+        """Encode shared proofs using the current snapshot format."""
         from stash_ai.storage.snapshots import compact
         with stage(self.report, 'state_snapshot_compact'):
             packed = compact(value)
-        if packed is not value:
-            if not self.connection.in_transaction:
-                self.connection.execute('BEGIN')
-            if self.connection.execute('PRAGMA user_version').fetchone()[0] < 9:
-                self.connection.execute('PRAGMA user_version=9')
         return self.pack(packed)
 
     def unpack(self, value):
+        return decode(value, self.report)
+
+    def unpack_snapshot(self, value):
+        from stash_ai.storage.snapshots import decode
         return decode(value, self.report)
 
     def records(self, scene, kind, model=None, *, borrow=False):
@@ -173,4 +175,3 @@ class StateStore(AbstractContextManager):
 
     def commit_prepared(self, scene, kinds, *, publication=None):
         return self.publications.commit_prepared(scene, kinds, publication=publication)
-

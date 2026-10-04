@@ -47,7 +47,7 @@ def _metadata_rows(store, scenes):
         store.connection.execute('DELETE FROM cache_report_scenes')
         store.connection.executemany('INSERT INTO cache_report_scenes VALUES (?)', ((scene,) for scene in scenes))
     rows = store.connection.execute(
-        'SELECT r.scene,r.model,r.kind,m.format,m.data,t.threshold FROM ' +
+        'SELECT r.scene,r.model,r.kind,m.format,m.data,t.thresholds FROM ' +
         store.table('results') + ' AS r LEFT JOIN ' + store.table('result_metadata') +
         ' AS m USING(scope,scene,model,kind) LEFT JOIN ' + store.table('result_thresholds') +
         ' AS t USING(scope,scene,model,kind) WHERE r.scope=? '

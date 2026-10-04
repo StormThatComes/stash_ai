@@ -22,14 +22,12 @@ def initialize(store):
             PRIMARY KEY(scope,generation));
     ''')
     if store.preview_source:
-        available = {row[0] for row in db.execute("SELECT name FROM cleanup_source.sqlite_master WHERE type='table'")}
-        if 'recovery_cleanups' in available:
-            db.execute('INSERT INTO recovery_cleanups SELECT * FROM cleanup_source.recovery_cleanups WHERE scope=?',
-                       (store.scope,))
-            db.commit()
+        db.execute('INSERT INTO recovery_cleanups SELECT * FROM cleanup_source.recovery_cleanups WHERE scope=?',
+                   (store.scope,))
+        db.commit()
     store.recovery_available = bool(db.execute('SELECT 1 FROM recovery_publications WHERE scope=? LIMIT 1',
                                               (store.scope,)).fetchone())
-    if store.preview_source and 'recovery_publications' in available:
+    if store.preview_source:
         store.recovery_available |= bool(db.execute(
             'SELECT 1 FROM cleanup_source.recovery_publications WHERE scope=? LIMIT 1', (store.scope,)).fetchone())
     load_cleanups(store)
@@ -57,9 +55,6 @@ def abandon(store, report):
     with db:
         if not db.in_transaction:
             db.execute('BEGIN')
-        # Version 7 prevents older executables from ignoring recovery evidence.
-        if db.execute('PRAGMA user_version').fetchone()[0] < 7:
-            db.execute('PRAGMA user_version=7')
         if count:
             db.execute('INSERT INTO recovery_publications SELECT scope,scene,kind,?,pending FROM ' + pending +
                        ' WHERE scope=? AND pending IS NOT NULL', (operation, store.scope))
@@ -99,7 +94,7 @@ def publications(store, scene, kind):
     from stash_ai.cleanup.state import mask_snapshot
     rows = store.read_rows('SELECT data FROM ' + store.table('recovery_publications') +
         ' WHERE scope=? AND scene=? AND kind=? ORDER BY operation DESC', (store.scope, str(scene), kind))
-    result = [mask_snapshot(store, store.unpack(row[0]), kind) for row in rows]
+    result = [mask_snapshot(store, store.unpack_snapshot(row[0]), kind) for row in rows]
     store.retain(key, result)
     return result
 

@@ -52,6 +52,14 @@ def test_enabling_temporal_checks_historical_retention_before_publication(
                 replace(config, scene_cache_floor=None, marker_cache_floor=None)
                 for config in settings(*a)])
         assert app.main([*args, '--no-temporal']) == 0
+    if old_cache:
+        from stash_ai.storage.codec import encode
+        with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL)) as state:
+            records = state.records('1', 'markers')['wd']
+            for segment in records:
+                segment['meta'].pop('marker_score_floor', None)
+            with state.connection:
+                state.connection.execute("UPDATE results SET data=? WHERE kind='markers'", (encode(records),))
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), True) as state:
         meta = state.records('1', 'markers')['wd'][0]['meta']
         assert ('marker_score_floor' not in meta) == old_cache
@@ -93,18 +101,15 @@ def test_old_high_only_cache_remains_usable_without_temporal(pipeline, monkeypat
     assert not p.stash.writes
 
 
-@pytest.mark.parametrize('override,usable', [(.8, False), (.9, True)])
-def test_historical_floor_uses_capture_threshold_instead_of_override(override, usable):
+@pytest.mark.parametrize('override', [.8, .9])
+def test_unknown_historical_floor_requires_inference_even_at_high_threshold(override):
     from tests.helpers.evidence import segment, policies
     frames = segment('wd', [[('core', .95)]] * 2)
     frames['meta'].pop('marker_score_floor', None)
     frames['meta']['marker_threshold'] = .7
     frames[thresholds_identity.OVERRIDE] = override
-    if usable:
-        assert merge_source_markers.marker_contributions(app, {'wd': [frames]}, policies())
-    else:
-        with pytest.raises(ValueError, match='wd: marker cache floor.*run inference'):
-            merge_source_markers.marker_contributions(app, {'wd': [frames]}, policies())
+    with pytest.raises(ValueError, match='wd: marker cache floor.*run inference'):
+        merge_source_markers.marker_contributions(app, {'wd': [frames]}, policies())
 
 
 def test_historical_incomplete_segment_cannot_hide_behind_complete_history():

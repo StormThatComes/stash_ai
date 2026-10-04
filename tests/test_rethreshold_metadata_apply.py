@@ -96,7 +96,7 @@ def test_metadata_apply_matches_full_payload_index_and_preserves_history(tmp_pat
     assert db.check_database(paths[1], 'scope')['ok']
 
 
-@pytest.mark.parametrize('history', ['no_inference', 'legacy_tail', 'empty_inference_tail', 'both_overrides'])
+@pytest.mark.parametrize('history', ['no_inference', 'legacy_tail', 'empty_inference_tail', 'scene_override'])
 def test_small_index_plan_retains_latest_inference_and_all_history_population(tmp_path, history):
     saved = [outputs(signature='first')['scene'], outputs(signature='last')['scene']]
     if history == 'no_inference':
@@ -108,11 +108,10 @@ def test_small_index_plan_retains_latest_inference_and_all_history_population(tm
         saved[-1]['items'] = saved[-1]['frames'] = []
     else:
         saved[-1][scene_cache_identity.SCENE_OVERRIDE] = .8
-        saved[-1][thresholds_identity.OVERRIDE] = .9
     with StateStore(tmp_path/'state.sqlite3', 'scope') as store:
         store.replace_records('1', 'wd', 'scene', saved)
         expected = index_rows(store)
-        small = state_metadata.summarize(saved)
+        small = store.result_metadata('1', 'scene', 'wd')
         before = deepcopy(small)
         assert all('items' not in segment and 'frames' not in segment for segment in small)
         with store.connection:

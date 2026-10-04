@@ -1,4 +1,4 @@
-"""Derived metadata persistence with lazy, transactional compatibility backfill."""
+"""Derived metadata persistence and repair after invalidation or corruption."""
 from stash_ai.runtime.timing import measured
 from stash_ai.storage.thresholds import overlay
 
@@ -13,14 +13,14 @@ class MetadataStore:
 
     @measured('state_read')
     def get(self, scene, kind, model):
-        """Validate from small SQL records; lazily backfill older result payloads."""
+        """Validate small SQL records and repair invalidated derived rows."""
         from stash_ai.storage.preview import check_source
         from stash_ai.storage.metadata import FORMAT, backfill_batch, decode, summarize
         store = self.store
         check_source(store)
         params = (store.scope, str(scene), model, kind)
         rows = store.read_rows(
-            'SELECT m.format,m.data,t.threshold FROM ' + store.table('results') + ' AS r LEFT JOIN ' +
+            'SELECT m.format,m.data,t.thresholds FROM ' + store.table('results') + ' AS r LEFT JOIN ' +
             store.table('result_metadata') + ' AS m USING(scope,scene,model,kind) LEFT JOIN ' +
             store.table('result_thresholds') + ' AS t USING(scope,scene,model,kind) '
             'WHERE r.scope=? AND r.scene=? AND r.model=? AND r.kind=?', params)
@@ -47,4 +47,3 @@ class MetadataStore:
         store.connection.execute('INSERT INTO result_metadata VALUES (?,?,?,?,?,?) '
             'ON CONFLICT(scope,scene,model,kind) DO UPDATE SET format=excluded.format,data=excluded.data',
             (store.scope, str(scene), model, kind, FORMAT, encode(segments)))
-

@@ -109,11 +109,11 @@ class FastStash(Stash):
 
 def options(tmp_path, labels=(), cores=(), by_model=None, *, output='merged'):
     tags, core = tmp_path/'tags.yml', tmp_path/'cores.yml'
-    tags.write_text(yaml.safe_dump(dict(version=1, excluded_tags=list(labels), by_model=by_model or {})))
+    tags.write_text(yaml.safe_dump(dict(version=1, excluded_scene_tags=list(labels), by_model=by_model or {})))
     core.write_text(yaml.safe_dump(dict(version=1, excluded_core_tags=list(cores))))
     return ['--models', 'all', '--output-mode', output, '--no-hierarchy', '--cleanup-only',
             '--cleanup-strategy', 'auto',
-            '--state-db', str(tmp_path/'state.sqlite3'), '--tag-exclusions', str(tags),
+            '--state-db', str(tmp_path/'state.sqlite3'), '--scene-tag-exclusions', str(tags),
             '--marker-core-exclusions', str(core)]
 
 

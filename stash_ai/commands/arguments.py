@@ -9,8 +9,8 @@ from stash_ai.commands.validation import validate_args
 
 
 def build_parser(app) -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Tag Stash scenes and timestamped markers with JoyTag, WD, DTQ and/or OppaiOracle.")
-    parser.add_argument("--models", "--model", nargs="+", metavar="MODEL", help="joytag, wd, dtq, oppai, any subset, or all; commas also accepted.")
+    parser = argparse.ArgumentParser(allow_abbrev=False, description="Tag Stash scenes and timestamped markers with JoyTag, WD, DTQ and/or OppaiOracle.")
+    parser.add_argument("--models", nargs="+", metavar="MODEL", help="joytag, wd, dtq, oppai, any subset, or all; commas also accepted.")
     parser.add_argument("--model-config", type=Path, default=app.MODELS_CONFIG_FILE, metavar="YAML", help="Selection, paths, thresholds and batch sizes.")
     parser.add_argument("--device", choices=("auto", "cpu", "cuda"), help="Override configured device.")
     parser.add_argument("--offline", action="store_true", help="Require local model assets; never download.")
@@ -80,9 +80,9 @@ def build_parser(app) -> argparse.ArgumentParser:
     parser.add_argument("--dtq-hierarchy", type=Path, default=app.JOYTAG_HIERARCHY_FILE.with_name("dtq_hierarchy.yml"), metavar="YAML", help="DTQ hierarchy; defaults to bundled dtq_hierarchy.yml.")
     parser.add_argument("--oppai-hierarchy", type=Path, default=app.JOYTAG_HIERARCHY_FILE.with_name("oppai_hierarchy.yml"), metavar="YAML", help="OppaiOracle hierarchy; defaults to bundled oppai_hierarchy.yml.")
     parser.add_argument("--marker-core-exclusions", type=Path, default=app.MARKER_CORE_EXCLUSIONS_FILE, metavar="YAML", help="Common/per-model excluded marker core labels.")
-    parser.add_argument("--scene-tag-exclusions", "--tag-exclusions", dest="scene_tag_exclusions", type=Path,
+    parser.add_argument("--scene-tag-exclusions", type=Path,
                         default=app.SCENE_TAG_EXCLUSIONS_FILE, metavar="YAML",
-                        help="Global blacklist for scene tags, marker cores/extras and hierarchy creation (legacy filename supported).")
+                        help="Global blacklist for scene tags, marker cores/extras and hierarchy creation.")
     parser.add_argument("--no-hierarchy", action="store_true", help="Disable model/category parent synchronization; marker groups still use ai_markers.")
     parser.add_argument("--create-all-tags", action="store_true", help="With --sync-hierarchy-only, create full vocabularies.")
     outputs = parser.add_mutually_exclusive_group()
@@ -91,11 +91,13 @@ def build_parser(app) -> argparse.ArgumentParser:
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--sync-hierarchy-only", action="store_true", help="Organize tags without inference or scene/marker edits.")
     modes.add_argument("--validate-hierarchy", action="store_true", help="Validate vocabularies/hierarchies without Stash or weights.")
-    modes.add_argument("--cleanup-markers-only", "--sync-marker-core-only", dest="cleanup_markers_only", action="store_true", help="Remove excluded marker cores and global extras without inference or model files.")
+    modes.add_argument("--cleanup-markers-only", action="store_true", help="Remove excluded marker cores and global extras without inference or model files.")
     modes.add_argument("--cleanup-scene-tags-only", action="store_true", help="Apply scene blacklist without inference or model files.")
     modes.add_argument("--cleanup-only", action="store_true", help="Apply both blacklists without inference; full all-model cleanup removes globally banned tags in batches.")
     modes.add_argument("--download-models", action="store_true", help="Download selected model assets from Hugging Face without Stash or inference.")
-    modes.add_argument("--merge-only", action="store_true", help="Merge saved evidence and existing source-prefixed results without models/inference.")
+    modes.add_argument("--merge-only", action="store_true", help="Merge saved evidence without models/inference; import source-prefixed outputs first with --import-legacy-only.")
+    modes.add_argument("--import-legacy-only", action="store_true",
+                       help="Capture source-prefixed Stash outputs in the state DB without models, media or Stash writes. Honors --dry-run and --scene-id.")
     modes.add_argument("--sync-marker-groups-only", action="store_true",
                        help="Repair m:<core> / m:<core>:occurance groups on existing owned ai: markers; no inference or time changes.")
     modes.add_argument("--explain-tag", metavar="TAG", help="Show saved sources, scores and intervals for a raw/ai: tag; requires --scene-id; no Stash access.")
