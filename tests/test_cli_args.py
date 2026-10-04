@@ -1,7 +1,7 @@
 """CLI parser defaults and cross-option validation."""
 import pytest
 
-from stash_ai import cli as app
+from tests.helpers.runtime import runtime as app
 from stash_ai.commands import arguments, validation
 
 
@@ -42,3 +42,4 @@ def test_parse_args_accepts_parallel_merge_workers():
     args = arguments.parse_args(app, ["--merge-only", "--merge-workers", "4"])
 
     assert args.merge_workers == 4
+

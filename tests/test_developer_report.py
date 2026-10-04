@@ -8,7 +8,7 @@ import sqlite3
 
 import pytest
 
-from stash_ai import cli as app
+from tests.helpers.runtime import runtime as app
 from stash_ai.reports.developer import report as diagnostics
 import stash_ai.storage.store as merge_store
 from stash_ai.storage.codec import encode
@@ -181,8 +181,8 @@ def test_cli_does_not_load_models_connect_to_stash_or_use_stash_url(tmp_path, mo
     path = tmp_path / "state.sqlite3"
     seed(path)
     destination = tmp_path / "anonymous.json"
-    monkeypatch.setattr(app, "load_model_settings", lambda *a, **k: pytest.fail("loaded model config"))
-    monkeypatch.setattr(app, "create_stash_client", lambda *a, **k: pytest.fail("connected to Stash"))
+    monkeypatch.setattr(app.services, "load_model_settings", lambda *a, **k: pytest.fail("loaded model config"))
+    monkeypatch.setattr(app.services, "create_stash_client", lambda *a, **k: pytest.fail("connected to Stash"))
     monkeypatch.setattr(app, "STASH_URL", "https://private-host.example/sensitive-path")
 
     assert app.main([
@@ -207,3 +207,4 @@ def test_cli_rejects_dry_run_because_report_itself_is_the_only_write(tmp_path):
             "--dry-run",
         ])
     assert exc.value.code == 2
+

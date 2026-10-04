@@ -20,7 +20,8 @@ def main():
     args = parser.parse_args()
     if min(args.frames, args.labels, args.repeats) < 1:
         parser.error('frames, labels and repeats must be positive')
-    from stash_ai import cli as app
+    from stash_ai.runtime.context import RuntimeContext
+    app = RuntimeContext()
     from stash_ai.evidence.occurrences import occurrence_contributions
     from stash_ai.storage.segments import StoredSegment, segment_digest
     from stash_ai.models import SOURCES
@@ -63,3 +64,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+

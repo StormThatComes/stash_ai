@@ -10,7 +10,7 @@ from itertools import groupby
 import json
 from pathlib import Path
 import sqlite3
-from types import SimpleNamespace
+from dataclasses import replace
 import zlib
 
 from tqdm import tqdm
@@ -150,9 +150,8 @@ def run(app, args):
     try:
         if not Path(args.state_db).expanduser().is_file():
             raise FileNotFoundError(f'State database does not exist: {args.state_db}')
-        settings = app.load_model_settings(args.model_config, args.models, None, True)
-        local = SimpleNamespace(**{**vars(app), 'TEMPORAL_POLICY':
-                                    load_policy(app, args.temporal_policy, not args.no_temporal)})
+        settings = app.services.load_model_settings(args.model_config, args.models, None, True)
+        local = replace(app, TEMPORAL_POLICY=load_policy(args.temporal_policy, not args.no_temporal))
         context = []
         for flag, path in (('--state-db', args.state_db), ('--model-config', args.model_config),
                            ('--temporal-policy', args.temporal_policy),

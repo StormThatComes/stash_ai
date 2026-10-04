@@ -6,7 +6,7 @@ import zlib
 
 import pytest
 
-from stash_ai import cli as app
+from tests.helpers.runtime import runtime as app
 from stash_ai import db as stash_db
 import stash_ai.storage.store as merge_store
 from stash_ai.storage.codec import encode
@@ -132,8 +132,8 @@ def test_db_cli_does_not_load_models_or_stash(tmp_path, monkeypatch, capsys):
     path = tmp_path / "state.sqlite3"
     scope = merge_store.scope_for(app.STASH_URL)
     seed(path, scope)
-    monkeypatch.setattr(app, "load_model_settings", lambda *a, **k: pytest.fail("loaded model config"))
-    monkeypatch.setattr(app, "create_stash_client", lambda *a, **k: pytest.fail("connected to Stash"))
+    monkeypatch.setattr(app.services, "load_model_settings", lambda *a, **k: pytest.fail("loaded model config"))
+    monkeypatch.setattr(app.services, "create_stash_client", lambda *a, **k: pytest.fail("connected to Stash"))
 
     assert app.main(["--state-db", str(path), "--db-report"]) == 0
     output = capsys.readouterr().out
@@ -320,8 +320,8 @@ def test_db_check_cli_is_offline_and_returns_nonzero_for_inconsistency(tmp_path,
     path = tmp_path / "state.sqlite3"
     scope = merge_store.scope_for(app.STASH_URL)
     seed(path, scope)
-    monkeypatch.setattr(app, "load_model_settings", lambda *a, **k: pytest.fail("loaded model config"))
-    monkeypatch.setattr(app, "create_stash_client", lambda *a, **k: pytest.fail("connected to Stash"))
+    monkeypatch.setattr(app.services, "load_model_settings", lambda *a, **k: pytest.fail("loaded model config"))
+    monkeypatch.setattr(app.services, "create_stash_client", lambda *a, **k: pytest.fail("connected to Stash"))
 
     assert app.main(["--state-db", str(path), "--db-check"]) == 0
     assert "State DB consistency: ok" in capsys.readouterr().out
@@ -336,3 +336,4 @@ def test_db_check_cli_is_offline_and_returns_nonzero_for_inconsistency(tmp_path,
     output = capsys.readouterr().out
     assert "State DB consistency: FAILED" in output
     assert "result_missing_index" in output
+

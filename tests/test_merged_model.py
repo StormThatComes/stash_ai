@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from stash_ai import cli as app
+from tests.helpers.runtime import runtime as app
 import stash_ai.storage.store as merge_store
 from stash_ai.inference import prediction
 from stash_ai.inference.identity import model_identity
@@ -84,7 +84,7 @@ def test_loading_failure_stops_remaining_scenes_without_retrying(model_run, monk
         raise OSError('missing weights')
 
     monkeypatch.setattr(context.inputs, 'inspect', inspect)
-    monkeypatch.setattr(app, 'load_tagger', load)
+    monkeypatch.setattr(app.services, 'load_tagger', load)
     run_model(context)
 
     assert loaded == ['wd'] and len(inspected) == 1
@@ -107,7 +107,7 @@ def test_skipped_and_completed_scenes_do_not_load_a_model(model_run, monkeypatch
         else:
             context.args.resume = True
     context.stats.clear()
-    monkeypatch.setattr(app, 'load_tagger', lambda *args: pytest.fail('unnecessary model load'))
+    monkeypatch.setattr(app.services, 'load_tagger', lambda *args: pytest.fail('unnecessary model load'))
 
     run_model(context)
 
@@ -118,14 +118,14 @@ def test_skipped_and_completed_scenes_do_not_load_a_model(model_run, monkeypatch
 def test_downloaded_weights_refresh_signatures_before_saving_and_enable_resume(model_run, monkeypatch):
     context = model_run
     before = model_identity(app, context.config, context.pipeline.vocab)
-    original = app.load_tagger
+    original = app.services.load_tagger
 
     def load(*args):
         context.config.model_dir.mkdir()
         (context.config.model_dir / 'model.onnx').write_bytes(b'downloaded weights')
         return original(*args)
 
-    monkeypatch.setattr(app, 'load_tagger', load)
+    monkeypatch.setattr(app.services, 'load_tagger', load)
     run_model(context)
     after = model_identity(app, context.config, context.pipeline.vocab)
     assert before != after
@@ -136,6 +136,7 @@ def test_downloaded_weights_refresh_signatures_before_saving_and_enable_resume(m
 
     context.args.resume = True
     context.stats.clear()
-    monkeypatch.setattr(app, 'load_tagger', lambda *args: pytest.fail('downloaded weights invalidated resume'))
+    monkeypatch.setattr(app.services, 'load_tagger', lambda *args: pytest.fail('downloaded weights invalidated resume'))
     run_model(context)
     assert context.stats['reused'] == 2 and not context.stats['processed']
+

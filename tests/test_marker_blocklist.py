@@ -10,7 +10,7 @@ from stash_ai.rethreshold import targets as rethreshold_targets
 from stash_ai.inference.identity import model_identity
 from stash_ai.signatures import digest
 from stash_ai.inference import sprites
-from stash_ai import cli as app
+from tests.helpers.runtime import runtime as app
 from stash_ai.evidence import thresholds as thresholds
 import stash_ai.storage.store as merge_store
 from stash_ai.storage import progress
@@ -22,8 +22,8 @@ pytestmark = pytest.mark.usefixtures('reset_temporal')
 
 
 def configure(monkeypatch):
-    original = app.load_model_settings
-    monkeypatch.setattr(app, 'load_model_settings', lambda *args: [
+    original = app.services.load_model_settings
+    monkeypatch.setattr(app.services, 'load_model_settings', lambda *args: [
         replace(config, scene_threshold=.4, marker_threshold=.7)
         for config in original(*args)])
 
@@ -69,7 +69,7 @@ def test_legacy_blocklist_rejects_merge_before_writes_and_restart_restores_range
     p.stash.writes.clear()
     capsys.readouterr()
     with monkeypatch.context() as guard:
-        guard.setattr(app, 'load_tagger', lambda *args: pytest.fail('loaded a model during merge'))
+        guard.setattr(app.services, 'load_tagger', lambda *args: pytest.fail('loaded a model during merge'))
         assert app.main([*args, '--merge-only', *(['--dry-run'] if dry_run else [])]) == 1
     output = capsys.readouterr().out
     assert 'unblocked marker tags' in output and 'common' in output and '--restart' in output
@@ -97,13 +97,13 @@ def test_legacy_blocklist_aborts_rethreshold_before_any_policy_write(pipeline, m
             state.replace_records('1', 'dtq', 'markers', records)
         before = state.connection.execute('SELECT * FROM results ORDER BY model,kind').fetchall()
         policies = state.connection.execute('SELECT * FROM result_thresholds').fetchall()
-    original = app.load_model_settings
-    monkeypatch.setattr(app, 'load_model_settings', lambda *values: [
+    original = app.services.load_model_settings
+    monkeypatch.setattr(app.services, 'load_model_settings', lambda *values: [
         replace(config, marker_threshold=.9, scene_threshold=.8 if combined else .4)
         for config in original(*values)])
     p.stash.writes.clear()
     with monkeypatch.context() as guard:
-        guard.setattr(app, 'load_tagger', lambda *values: pytest.fail('loaded a model'))
+        guard.setattr(app.services, 'load_tagger', lambda *values: pytest.fail('loaded a model'))
         assert app.main([*args, '--merge-only', '--rethreshold-markers',
                          *(['--rethreshold-scenes'] if combined else [])]) == 1
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), True) as state:
@@ -123,7 +123,7 @@ def test_unfiltered_cache_retains_labels_and_reuses_predictions_without_models(p
         saved = state.records('1', 'markers')['wd'][0]
         assert saved['meta']['marker_tag_blocklist'] == []
         assert all(['common', pytest.approx(.9)] in row['tags'] for row in saved['items'])
-    monkeypatch.setattr(app, 'load_tagger', lambda *args: pytest.fail('loaded a model'))
+    monkeypatch.setattr(app.services, 'load_tagger', lambda *args: pytest.fail('loaded a model'))
     monkeypatch.setattr(sprites, 'fetch_cues', lambda *args: pytest.fail('fetched VTT'))
     assert app.main([*p.args, '--merge-only', '--force-merge']) == 0
     excluded = tmp_path / 'tags.yml'
@@ -173,3 +173,4 @@ def test_blocklist_preflight_reasons_are_stable():
             'unblocked marker tags require inference')
     assert rethreshold_targets.threshold_failure_reason(ValueError(
         '123/wd: marker blocklist metadata is missing or invalid; run inference.')) == 'unknown marker blocklist'
+

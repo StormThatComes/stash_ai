@@ -8,7 +8,7 @@ import json
 
 import pytest
 
-from stash_ai import cli as app
+from tests.helpers.runtime import runtime as app
 from stash_ai.evidence import pipeline as merge
 import stash_ai.evidence.intervals as merge_intervals
 import stash_ai.storage.store as merge_store
@@ -249,8 +249,8 @@ def test_cli_model_report_uses_saved_evidence_without_models_or_stash(tmp_path, 
         state.put("1", "wd", inference_pair("saved"))
 
     destination = tmp_path / "model-report.json"
-    monkeypatch.setattr(app, "load_model_settings", lambda *a, **k: pytest.fail("loaded model settings"))
-    monkeypatch.setattr(app, "create_stash_client", lambda *a, **k: pytest.fail("connected to Stash"))
+    monkeypatch.setattr(app.services, "load_model_settings", lambda *a, **k: pytest.fail("loaded model settings"))
+    monkeypatch.setattr(app.services, "create_stash_client", lambda *a, **k: pytest.fail("connected to Stash"))
     preloaded = []
     original_preload = merge_store.StateStore.preload_sources
 
@@ -361,3 +361,4 @@ def test_parallel_report_single_scene_fallback_is_read_only(tmp_path, preload):
         preload_sources=preload)
     assert parallel == serial
     assert path.read_bytes() == before
+

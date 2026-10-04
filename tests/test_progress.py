@@ -15,7 +15,7 @@ from stash_ai.inference.identity import model_identity
 from stash_ai.domain import Cue, FramePrediction
 from stash_ai.inference import checkpoints, prediction, preparation
 from stash_ai.storage import codec as state_codec
-from stash_ai import cli as app
+from tests.helpers.runtime import runtime as app
 import stash_ai.inference.results as merge_results
 import stash_ai.storage.store as merge_store
 from stash_ai.storage.database import APPLICATION_ID
@@ -32,7 +32,7 @@ def test_resume_reuses_completed_pairs_without_loading_weights_or_rewriting_stas
     p=pipeline
     assert app.main(p.args)==0
     p.stash.writes.clear()
-    monkeypatch.setattr(app,"load_tagger",lambda *args:pytest.fail("completed model loaded"))
+    monkeypatch.setattr(app.services,"load_tagger",lambda *args:pytest.fail("completed model loaded"))
     assert app.main(p.args)==0
     assert not p.stash.writes
 
@@ -92,7 +92,7 @@ def test_failed_restart_never_publishes_fresh_and_stale_model_mix(pipeline,monke
                             fail_at=0 if broken else None,error=RuntimeError)
         p.loaded.append(model)
         return model
-    monkeypatch.setattr(app,"load_tagger",load)
+    monkeypatch.setattr(app.services,"load_tagger",load)
 
     p.stash.writes.clear()
     assert app.main([*args,"--restart"])==1
@@ -128,7 +128,7 @@ def test_automatic_input_invalidation_never_publishes_fresh_and_stale_model_mix(
                             fail_at=0 if broken else None,error=RuntimeError)
         p.loaded.append(model)
         return model
-    monkeypatch.setattr(app,"load_tagger",load)
+    monkeypatch.setattr(app.services,"load_tagger",load)
 
     p.stash.writes.clear()
     assert app.main(args)==1
@@ -159,9 +159,9 @@ def test_vtt_timing_change_invalidates_but_scene_threshold_reuses_frames(pipelin
     assert app.main(p.args)==0
     p.cues=[Cue(c.start,c.end+.1,c.image,c.rect) for c in p.cues]
     assert app.main(p.args)==0 and len(p.loaded)==2
-    original=app.load_model_settings
+    original=app.services.load_model_settings
     from dataclasses import replace
-    monkeypatch.setattr(app,"load_model_settings",lambda *args:[replace(c,scene_threshold=.77) for c in original(*args)])
+    monkeypatch.setattr(app.services,"load_model_settings",lambda *args:[replace(c,scene_threshold=.77) for c in original(*args)])
     assert app.main(p.args)==0 and len(p.loaded)==2
 
 
@@ -169,7 +169,7 @@ def test_policy_change_reuses_predictions_and_updates_outputs(pipeline,monkeypat
     p=pipeline
     assert app.main(p.args)==0
     policy=tmp_path/"scene.yml";policy.write_text("version: 1\nexcluded_scene_tags: [common]\n")
-    monkeypatch.setattr(app,"load_tagger",lambda *args:pytest.fail("blacklist change reran inference"))
+    monkeypatch.setattr(app.services,"load_tagger",lambda *args:pytest.fail("blacklist change reran inference"))
     assert app.main([*p.args,"--scene-tag-exclusions",str(policy)])==0
     assert "ai:common" not in {t["name"] for t in p.stash.scene["tags"]}
     assert not any(m["primary_tag"]["name"]=="ai:common" for m in p.stash.scene["scene_markers"])
@@ -179,7 +179,7 @@ def test_policy_change_reuses_predictions_and_updates_outputs(pipeline,monkeypat
 def test_partial_output_can_reuse_a_completed_full_run(pipeline,monkeypatch):
     p=pipeline
     assert app.main(p.args)==0
-    monkeypatch.setattr(app,"load_tagger",lambda *args:pytest.fail("partial output reran inference"))
+    monkeypatch.setattr(app.services,"load_tagger",lambda *args:pytest.fail("partial output reran inference"))
     before=deepcopy(p.stash.scene["tags"])
     assert app.main([*p.args,"--markers-only"])==0
     assert p.stash.scene["tags"]==before
@@ -206,7 +206,7 @@ def test_dry_restart_does_not_change_results_checkpoint_or_refresh_requests(pipe
 def test_zero_predictions_are_successfully_completed(pipeline,monkeypatch):
     p=pipeline;p.scores["wd"][:]=0
     assert app.main(p.args)==0
-    monkeypatch.setattr(app,"load_tagger",lambda *args:pytest.fail("empty successful result repeated"))
+    monkeypatch.setattr(app.services,"load_tagger",lambda *args:pytest.fail("empty successful result repeated"))
     assert app.main(p.args)==0
 
 
@@ -268,7 +268,7 @@ def test_api_failure_resumes_only_synchronization(pipeline,monkeypatch):
     p=pipeline;p.stash.fail_create=True
     assert app.main(p.args)==1
     p.stash.fail_create=False
-    monkeypatch.setattr(app,"load_tagger",lambda *args:pytest.fail("API failure repeated inference"))
+    monkeypatch.setattr(app.services,"load_tagger",lambda *args:pytest.fail("API failure repeated inference"))
     assert app.main(p.args)==0
     assert p.stash.scene["scene_markers"]
 
@@ -318,7 +318,7 @@ def test_pruning_follows_only_successful_merge(pipeline,monkeypatch,failure):
     assert app.main([*p.args,"--prune-empty-tags"])==int(failure)
     assert len(calls)==2*int(not failure)  # Generic definitions and derived marker groups.
     p.stash.fail_create=False
-    monkeypatch.setattr(app,"load_tagger",lambda *args:pytest.fail("merge-only loaded weights"))
+    monkeypatch.setattr(app.services,"load_tagger",lambda *args:pytest.fail("merge-only loaded weights"))
     assert app.main([*p.args,"--merge-only","--prune-empty-tags"])==0
     assert len(calls)==2*int(not failure)+2
 
@@ -335,3 +335,4 @@ def test_ordered_vocabulary_changes_checkpoint_identity(pipeline):
 def test_resume_flags_are_explicitly_rejected_for_legacy_separate_mode(pipeline,flag):
     with pytest.raises(SystemExit) as exc:app.main([*pipeline.args,"--output-mode","separate",flag])
     assert exc.value.code==2 and not pipeline.loaded
+

@@ -5,7 +5,7 @@ import sqlite3
 
 import pytest
 
-from stash_ai import cli as app
+from tests.helpers.runtime import runtime as app
 from stash_ai.cleanup import legacy as legacy_prune
 from stash_ai.storage.store import StateStore, scope_for
 from stash_ai.models import JOYTAG, WD
@@ -29,9 +29,9 @@ def _seed(path, stash):
 
 def _install(monkeypatch, stash):
     monkeypatch.setattr(app, "DRY_RUN", False)
-    monkeypatch.setattr(app, "create_stash_client", lambda *_: stash)
+    monkeypatch.setattr(app.services, "create_stash_client", lambda *_: stash)
     monkeypatch.setattr(
-        app, "load_model_settings",
+        app.services, "load_model_settings",
         lambda *a, **k: pytest.fail("legacy pruning loaded model configuration"),
     )
 
@@ -135,3 +135,4 @@ def test_prune_refuses_pending_publication(tmp_path, monkeypatch):
 
     with pytest.raises(RuntimeError, match="Pending publication plans"):
         app.main(["--prune-legacy-imports", "--state-db", str(path)])
+

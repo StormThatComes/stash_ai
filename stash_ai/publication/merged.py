@@ -52,8 +52,8 @@ def publish_sync_plan(app, stash, resolver, store, scene_id, scene, markers, sce
         if app.APPLY_SCENE_TAGS and (report is None or report.verbose):
             write("  Scene tags: " + (", ".join(merge_labels.AI.prefix + label for label in sorted(scene_labels)) or "(none)"))
         for marker in markers if report is None or report.verbose else ():
-            end = app.format_time(marker["end"]) if marker["end"] is not None else "point (end unknown)"
-            write(f"  {app.format_time(marker['start'])} -> {end}: ai:{marker['tag']} "
+            end = app.services.format_time(marker["end"]) if marker["end"] is not None else "point (end unknown)"
+            write(f"  {app.services.format_time(marker['start'])} -> {end}: ai:{marker['tag']} "
                   f"[{'+'.join(merge_labels.source_codes(marker['sources']))}]")
         store.publish(scene_id, plan.snapshots)  # temporary preview overlay only
         return stats
@@ -107,3 +107,4 @@ def sync_merged(app, stash, resolver, store, scene, scene_hits, spans, *, migrat
     return publish_sync_plan(
         app, stash, resolver, store, scene_id, scene, markers, scene_labels, plan, stats,
         report=report, publication_key=publication_key)
+

@@ -1,3 +1,4 @@
+from stash_ai.evidence import marker_building
 """Build validated per-source markers before cross-model enrichment."""
 from stash_ai.domain import Cue, FramePrediction
 from stash_ai.runtime.timing import stage
@@ -56,7 +57,7 @@ def _marker_contributions(app, records, core_policies, index, metrics, tag_polic
                                   collect_extras=not defer_extras,
                                   extra_group=index.by_signature.get(signatures[id(segment)], signatures[id(segment)]),
                                   extra_cache=index.cache) if app.TEMPORAL_POLICY.enabled else
-                                  app.build_markers(frames, effective_cores[model], **kwargs))
+                                  marker_building.build_markers(app, frames, effective_cores[model], **kwargs))
                     options = {**build_options(app), "core_exclusions": {k: sorted(v) for k, v in core_policies.items()},
                                "tag_exclusions": {k: sorted(v) for k, v in tag_policies.items()},
                                "blocklist": []}
@@ -81,3 +82,4 @@ def _marker_contributions(app, records, core_policies, index, metrics, tag_polic
     from stash_ai.evidence.shared_markers import enrich
     with stage(report, 'marker_fusion'):
         return enrich(app, records, core_policies, spans, signatures, index, metrics)
+

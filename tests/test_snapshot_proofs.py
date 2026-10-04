@@ -6,7 +6,8 @@ import zlib
 import pytest
 
 from stash_ai.rethreshold import execution as rethreshold_execution
-from stash_ai import cli as app, db
+from stash_ai import db
+from tests.helpers.runtime import runtime as app
 from stash_ai.storage import recovery as recovery
 import stash_ai.publication.recovery as recovery_recovery
 from stash_ai.evidence import pipeline as merge
@@ -248,7 +249,7 @@ def test_merge_cleanup_and_partial_publication_recovery_match_old_snapshots(tmp_
                 monkeypatch.setattr(store, 'pack_snapshot', store.pack)
             stash = Stash()
             monkeypatch.setattr(app, 'MARKER_USE_END_TIME', use_end)
-            resolver = app.TagResolver(stash, source=merge_labels.AI)
+            resolver = app.services.TagResolver(stash, source=merge_labels.AI)
             policies = empty_policies()
             seed_records(store, ['core', 'abc', 'def'])
             hits, spans = merge.evidence(app, store, '1', policies, policies)
@@ -294,3 +295,4 @@ def test_merge_cleanup_and_partial_publication_recovery_match_old_snapshots(tmp_
                              store.snapshot('1', 'markers')[0]))
         assert db.check_database(path, merge_store.scope_for(app.STASH_URL))['ok']
     assert variants[0] == variants[1]
+

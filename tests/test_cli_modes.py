@@ -1,7 +1,7 @@
 """CLI phase dispatch keeps saved-evidence modes ahead of model assets."""
 import pytest
 
-from stash_ai import cli as app
+from tests.helpers.runtime import runtime as app
 from stash_ai.commands import arguments, dispatch
 
 
@@ -38,7 +38,7 @@ def test_prune_dispatch_runs_config_validation(monkeypatch):
     from stash_ai.cleanup import prune
 
     validated = []
-    monkeypatch.setattr(app, "validate_config", lambda *, scene_work: validated.append(scene_work))
+    monkeypatch.setattr(app.services, "validate_config", lambda *, scene_work: validated.append(scene_work))
     monkeypatch.setattr(prune, "run_prune", lambda selected_app, args: 5)
     args = arguments.parse_args(app, ["--prune-empty-tags-only"])
 
@@ -95,17 +95,18 @@ def test_later_catalog_failure_prevents_stash_and_model_loading(monkeypatch, tmp
     from stash_ai.models import WD, DTQ, ModelSettings, Vocabulary, SOURCES
     calls = []
     settings = [ModelSettings(source, tmp_path, download_missing=False) for source in (WD, DTQ)]
-    monkeypatch.setattr(app, 'load_model_settings', lambda *a: settings)
-    monkeypatch.setattr(app, 'validate_config', lambda **k: None)
-    monkeypatch.setattr(app, 'load_exclusion_policy', lambda *a: {key: frozenset() for key in SOURCES})
+    monkeypatch.setattr(app.services, 'load_model_settings', lambda *a: settings)
+    monkeypatch.setattr(app.services, 'validate_config', lambda **k: None)
+    monkeypatch.setattr(app.services, 'load_exclusion_policy', lambda *a: {key: frozenset() for key in SOURCES})
     def vocabulary(config):
         calls.append(config.source.key)
         if config.source == DTQ:
             raise ValueError('invalid later vocabulary')
         return Vocabulary(['example'], {'example': 'General'})
-    monkeypatch.setattr(app, 'load_vocabulary', vocabulary)
+    monkeypatch.setattr(app.services, 'load_vocabulary', vocabulary)
     for name in ('create_stash_client', 'load_tagger'):
-        monkeypatch.setattr(app, name, lambda *a: pytest.fail('catalog failure reached Stash or weights'))
+        monkeypatch.setattr(app.services, name, lambda *a: pytest.fail('catalog failure reached Stash or weights'))
     with pytest.raises(ValueError, match='invalid later vocabulary'):
         app.main(['--models', 'all', '--no-hierarchy', '--no-temporal', '--output-mode', mode])
     assert calls == ['wd', 'dtq']
+

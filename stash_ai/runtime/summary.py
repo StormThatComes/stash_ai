@@ -1,4 +1,7 @@
 """Render the existing grouped counters, errors and timing summary."""
+from __future__ import annotations
+from stash_ai.stash_api.tags import TagResolver
+
 from collections import Counter
 
 
@@ -48,3 +51,12 @@ def write_summary(report, title, counts, cache=None):
         report.write(f"  Errors {stage}/{source}/{kind}: {group['count']}; " + ' | '.join(group['examples']))
     if report.overflow:
         report.write(f'  Other errors: {report.overflow}; use --verbose for full diagnostics.')
+
+
+
+def print_hierarchy_summary(resolver: TagResolver) -> None:
+    if resolver.hierarchy:
+        print(resolver.source.title + " hierarchy" + (" (planned)" if resolver.stash.dry_run else "") + ": " + ", ".join(
+            f"{name}={resolver.hierarchy_stats[name]}" for name in
+            ("categories_created", "tags_created", "tags_reparented", "parents_unchanged", "hierarchy_skipped")
+        ))

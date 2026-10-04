@@ -3,7 +3,7 @@
 from copy import deepcopy
 
 from stash_ai.publication import separate as separate_sync
-from stash_ai import cli as app
+from tests.helpers.runtime import runtime as app
 
 
 class Stash:
@@ -112,4 +112,5 @@ class Stash:
 
 
 def sync(stash,source,predictions=(),specs=(),cores=frozenset(),scenes=frozenset()):
-    return separate_sync.sync_scene(app, stash,app.TagResolver(stash,source=source),stash.find_scene("1"),list(predictions),list(specs),cores,source,scenes)
+    return separate_sync.sync_scene(app, stash,app.services.TagResolver(stash,source=source),stash.find_scene("1"),list(predictions),list(specs),cores,source,scenes)
+

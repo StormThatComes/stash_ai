@@ -53,6 +53,12 @@ extras mogły trafić do kolejnych fragmentów; dostępność do ponownego dopas
 nadal kontroluje plan publikacji. Indeksy żyją wyłącznie w pamięci, bez zmiany
 formatu snapshotów lub schematu bazy.
 
+`runtime/settings.py` zawiera ustawienia jednego uruchomienia, a
+`runtime/context.py` łączy je z jawnymi, wstrzykiwanymi usługami. CLI tworzy nowy
+kontekst przy każdym wywołaniu; moduły domenowe nie importują CLI. Wspólny
+`runtime/workers.py` otwiera izolowany, read-only store i dane ustawień dla
+procesów merge oraz model report, bez ładowania usług CLI.
+
 `stash_ai/cli.py` koordynuje uruchomienie pipeline. Lifecycle jednego modelu
 w trybie `--output-mode separate` obsługuje `stash_ai/runs/separate.py`; lifecycle
 jest podzielony na synchronizację hierarchii, przetwarzanie pojedynczej sceny
@@ -323,3 +329,4 @@ kończą się przed bootstrapem, a wszystkie katalogi są walidowane przed
 lifecycle Stash dla wybranych modeli. `inference/scene_predictions.py` oddziela
 wybór zachowanych etykiet od kwalifikacji temporal; finalizacja w `prediction.py`
 zachowuje raw evidence, limity i wykluczenia przed publikacją.
+

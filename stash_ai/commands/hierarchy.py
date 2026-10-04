@@ -17,14 +17,14 @@ def combined_hierarchy(app, args, tag_policies=None):
     categories = {root: ()}
     for key, source in SOURCES.items():
         path = args.hierarchy if key == "joytag" else getattr(args, key + "_hierarchy")
-        data = app.load_unique_yaml(path, "Hierarchy")
+        data = app.services.load_unique_yaml(path, "Hierarchy")
         if not isinstance(data, dict) or not isinstance(data.get("groups"), dict):
             raise ValueError(f"Invalid hierarchy: {path}")
         groups = data["groups"].values()
         if any(not isinstance(group, list) or any(not isinstance(label, str) for label in group) for group in groups):
             raise ValueError(f"Invalid hierarchy labels: {path}")
         labels = sorted({label for group in groups for label in group})
-        hierarchy = app.load_tag_hierarchy(path, labels, source)
+        hierarchy = app.services.load_tag_hierarchy(path, labels, source)
         def converted(name):
             return root if not hierarchy.category_parents[name] else prefix + name[len(hierarchy.category_prefix):]
         for name, parents in hierarchy.category_parents.items():
@@ -50,16 +50,17 @@ def combined_hierarchy(app, args, tag_policies=None):
 def run_hierarchy(app, args, catalogs, hierarchy, tag_policies=None):
     from stash_ai.exclusions import policies_or_empty
     tag_policies = policies_or_empty(tag_policies)
-    stash = app.create_stash_client(app.DRY_RUN)
+    stash = app.services.create_stash_client(app.DRY_RUN)
     try:
-        resolver = app.TagResolver(stash, hierarchy, source=merge_labels.AI, report=args.report.detail, create_missing=app.CREATE_MISSING)
+        resolver = app.services.TagResolver(stash, hierarchy, source=merge_labels.AI, report=args.report.detail, create_missing=app.CREATE_MISSING)
         resolver.preload()
         labels = sorted({label for source, vocabulary in catalogs.items() for label in vocabulary.labels
                          if label not in tag_policies[source]})
         for label in labels:
             if args.create_all_tags or merge_labels.AI.prefix + label in resolver.cache:
                 resolver.resolve(merge_labels.AI.prefix + label)
-        app.print_hierarchy_summary(resolver)
+        app.services.print_hierarchy_summary(resolver)
     finally:
         stash.close()
     return 0
+

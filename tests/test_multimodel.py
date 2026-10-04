@@ -10,7 +10,7 @@ import pytest
 import yaml
 from stash_ai.domain import Cue, FramePrediction, MarkerSpec
 from stash_ai.inference import prediction, sprites
-from stash_ai import cli as app
+from tests.helpers.runtime import runtime as app
 from stash_ai.models import (
     JOYTAG,
     WD,
@@ -96,7 +96,7 @@ def test_cleanup_all_refreshes_between_sources(tmp_path,monkeypatch,dry):
     stash.scene["tags"].append(stash.tag("blocked"))
     stash.marker(WD,"blocked","manual",True)
     before=deepcopy(stash.scene)
-    monkeypatch.setattr(app,"create_stash_client",lambda _:stash)
+    monkeypatch.setattr(app.services,"create_stash_client",lambda _:stash)
     from tests.helpers.cleanup import options, install
     install(monkeypatch, stash)
     command = [*options(tmp_path, ['blocked'], ['blocked'], output='separate'),
@@ -125,8 +125,8 @@ def test_main_all_releases_models_and_preserves_failed_source(monkeypatch,fail_w
     stash=Stash();stash.scene["tags"].append(stash.tag("wd:old"));old=stash.marker(WD,"old","old")
     vocab=Vocabulary(["tag"],{"tag":"General"})
     cues=[Cue(i,i+1,"x",(0,0,1,1)) for i in range(2)]
-    monkeypatch.setattr(app,"create_stash_client",lambda _:stash)
-    monkeypatch.setattr(app,"load_vocabulary",lambda _:vocab)
+    monkeypatch.setattr(app.services,"create_stash_client",lambda _:stash)
+    monkeypatch.setattr(app.services,"load_vocabulary",lambda _:vocab)
     monkeypatch.setattr(sprites,"fetch_cues",lambda *args:(cues,2))
     monkeypatch.setattr(sprites,"iter_sprite_frames",lambda *args:sprite_frames(cues))
     loaded=[]
@@ -134,7 +134,7 @@ def test_main_all_releases_models_and_preserves_failed_source(monkeypatch,fail_w
         assert all(t.closed for t in loaded)
         model=Tagger(settings,vocabulary.labels,np.full((2,1),np.nan if fail_wd and settings.source==WD else .9,np.float32))
         loaded.append(model);return model
-    monkeypatch.setattr(app,"load_tagger",load)
+    monkeypatch.setattr(app.services,"load_tagger",load)
     assert app.main(["--models","all","--no-hierarchy"])==int(fail_wd)
     assert all(t.closed for t in loaded) and len(loaded)==len(SOURCES)
     assert {t["name"] for t in stash.scene["tags"]}=={"jt:tag","dtq:tag","op:tag","wd:old" if fail_wd else "wd:tag"}
@@ -173,7 +173,7 @@ def test_core_limit_and_gap_timing(monkeypatch):
 def test_hierarchy_loader_requires_explicit_source():
     import inspect
 
-    parameter = inspect.signature(app.load_tag_hierarchy).parameters["source"]
+    parameter = inspect.signature(app.services.load_tag_hierarchy).parameters["source"]
     assert parameter.default is inspect.Parameter.empty
 
 
@@ -185,17 +185,17 @@ def test_hierarchy_rejects_removed_sync_option(tmp_path, mode):
         "parent_sync": mode, "groups": {"General": ["common"]},
     }), encoding="utf-8")
     with pytest.raises(ValueError, match="Hierarchy YAML must be a mapping using only:"):
-        app.load_tag_hierarchy(path, ["common"], WD)
+        app.services.load_tag_hierarchy(path, ["common"], WD)
 
 
 def test_original_hierarchy_and_model_settings():
     root=Path(__file__).resolve().parents[1]
     data=yaml.safe_load((root/"joytag_hierarchy.yml").read_text())
     labels=sorted({t for group in data["groups"].values() for t in group})
-    hierarchy=app.load_tag_hierarchy(root/"joytag_hierarchy.yml",labels,JOYTAG)
+    hierarchy=app.services.load_tag_hierarchy(root/"joytag_hierarchy.yml",labels,JOYTAG)
     assert len(hierarchy.leaf_parents)==5813
     assert hierarchy.description_prefix==JOYTAG.hierarchy_description
-    assert [s.source for s in app.load_model_settings(root/"tagger_models.yml",["all"],None)]==[JOYTAG,WD,DTQ,OPPAI]
+    assert [s.source for s in app.services.load_model_settings(root/"tagger_models.yml",["all"],None)]==[JOYTAG,WD,DTQ,OPPAI]
     assert select_models(["dtq,wd","wd"])==["dtq","wd"]
 
 
@@ -205,8 +205,8 @@ def test_model_hierarchies_include_all_categories_and_keep_manual_parents():
     old=stash.tag("wd:category:Old");old["description"]=WD.hierarchy_description
     stash.tag("wd:tag")["parents"]=[manual,other,old]
     vocab=Vocabulary(["tag","character","unknown"],{"tag":"General","character":"Character"})
-    hierarchy=app.metadata_hierarchy(vocab,WD)
-    resolver=app.TagResolver(stash,hierarchy,source=WD)
+    hierarchy=app.services.metadata_hierarchy(vocab,WD)
+    resolver=app.services.TagResolver(stash,hierarchy,source=WD)
     for name in vocab.labels: resolver.resolve("wd:"+name)
     assert {p["name"] for p in stash.tags["wd:tag"]["parents"]}=={"manual parent","jt:category:Other","wd:category:General"}
     assert all("wd:"+name in stash.tags for name in vocab.labels)
@@ -217,16 +217,16 @@ def test_model_hierarchies_include_all_categories_and_keep_manual_parents():
     'version: 1\nexcluded_core_tags: []\nexcluded_core_tags: []'])
 def test_bad_policies(tmp_path,body):
     path=tmp_path/"policy.yml";path.write_text(body)
-    with pytest.raises(ValueError): app.load_exclusion_policy(path,"excluded_core_tags")
+    with pytest.raises(ValueError): app.services.load_exclusion_policy(path,"excluded_core_tags")
 
 
 def test_scoped_policies_and_cleanup_without_model_files(tmp_path,monkeypatch):
     path=tmp_path/"policy.yml";path.write_text('version: 1\nexcluded_core_tags: [common]\nby_model: {wd: [special]}')
-    policies=app.load_exclusion_policy(path,"excluded_core_tags")
+    policies=app.services.load_exclusion_policy(path,"excluded_core_tags")
     assert policies["wd"]==frozenset({"common","special"}) and policies["dtq"]==frozenset({"common"})
     stash=Stash();stash.marker(WD,"watermark","delete")
-    monkeypatch.setattr(app,"create_stash_client",lambda _:stash)
-    monkeypatch.setattr(app,"load_vocabulary",lambda _:pytest.fail("cleanup read vocabulary"))
+    monkeypatch.setattr(app.services,"create_stash_client",lambda _:stash)
+    monkeypatch.setattr(app.services,"load_vocabulary",lambda _:pytest.fail("cleanup read vocabulary"))
     assert app.main(["--models","wd","--cleanup-markers-only","--offline"])==0
     assert not stash.scene["scene_markers"]
 
@@ -263,7 +263,7 @@ def test_preprocessing_and_only_untagged(monkeypatch):
 
 
 def test_dry_run_api_guard(supported_stash_version):
-    client=app.create_stash_client(True)
+    client=app.services.create_stash_client(True)
     try:
         with pytest.raises(RuntimeError,match="mutation attempted"): client.gql("mutation Test { x }")
     finally: client.close()
@@ -388,18 +388,18 @@ def test_oppai_modes_and_old_config_compatibility(tmp_path,oppai_files,monkeypat
     old=tmp_path/"models.yml"
     old.write_text("version: 1\nenabled_models: [joytag]\n")
     monkeypatch.setenv("OPPAI_MODEL_PATH",str(oppai_files))
-    settings=app.load_model_settings(old,["oppai"],None,True)[0]
+    settings=app.services.load_model_settings(old,["oppai"],None,True)[0]
     assert settings.source.prefix=="op:" and settings.model_dir==oppai_files
     assert settings.scene_threshold==.80 and settings.marker_threshold==.85
-    monkeypatch.setattr(app,"create_stash_client",lambda _:pytest.fail("model-only mode contacted Stash"))
-    monkeypatch.setattr(app,"load_tagger",lambda *args:pytest.fail("model-only mode loaded weights"))
+    monkeypatch.setattr(app.services,"create_stash_client",lambda _:pytest.fail("model-only mode contacted Stash"))
+    monkeypatch.setattr(app.services,"load_tagger",lambda *args:pytest.fail("model-only mode loaded weights"))
     hierarchy_path=tmp_path/"fixture_hierarchy.yml"
     hierarchy_path.write_text(yaml.safe_dump({"version":1,"root":OPPAI.title,
         "category_prefix":"op:category:","groups":{"Fixture":load_vocabulary(settings).labels}}))
     assert app.main(["--model-config",str(old),"--models","oppai","--validate-hierarchy",
                      "--oppai-hierarchy",str(hierarchy_path),"--offline"])==0
     downloads=[]
-    monkeypatch.setattr(app,"ensure_files",lambda config,names:downloads.append((config.source,names)))
+    monkeypatch.setattr(app.services,"ensure_files",lambda config,names:downloads.append((config.source,names)))
     assert app.main(["--model-config",str(old),"--models","oppai","--download-models"])==0
     assert downloads==[(OPPAI,("model.onnx",))]
 
@@ -407,17 +407,17 @@ def test_oppai_modes_and_old_config_compatibility(tmp_path,oppai_files,monkeypat
 def test_oppai_scoped_blacklist_and_cleanup_without_assets(tmp_path,monkeypatch):
     policy=tmp_path/"cores.yml"
     policy.write_text("version: 1\nexcluded_core_tags: [common]\nby_model:\n  oppai: [special]\n")
-    policies=app.load_exclusion_policy(policy,"excluded_core_tags")
+    policies=app.services.load_exclusion_policy(policy,"excluded_core_tags")
     assert policies["oppai"]==frozenset({"common","special"})
     assert policies["wd"]==frozenset({"common"})
     stash=Stash();stash.marker(OPPAI,"special","delete");stash.marker(OPPAI,"keep","keep")
     stash.marker(WD,"special","other");stash.marker(OPPAI,"special","manual",True)
-    monkeypatch.setattr(app,"create_stash_client",lambda _:stash)
-    monkeypatch.setattr(app,"load_vocabulary",lambda _:pytest.fail("cleanup accessed model files"))
+    monkeypatch.setattr(app.services,"create_stash_client",lambda _:stash)
+    monkeypatch.setattr(app.services,"load_vocabulary",lambda _:pytest.fail("cleanup accessed model files"))
     assert app.main(["--models","oppai","--cleanup-markers-only","--marker-core-exclusions",str(policy),"--offline"])==0
     assert {m["id"] for m in stash.scene["scene_markers"]}=={"keep","other","manual"}
     policy.write_text('version: 1\nexcluded_core_tags: ["op:special"]\n')
-    with pytest.raises(ValueError): app.load_exclusion_policy(policy,"excluded_core_tags")
+    with pytest.raises(ValueError): app.services.load_exclusion_policy(policy,"excluded_core_tags")
 
 
 # Independently measured from the pinned upstream vocabularies, excluding only
@@ -438,8 +438,8 @@ def bundled_catalogs():
         path=root/f"{key}_hierarchy.yml"
         data=yaml.safe_load(path.read_text(encoding="utf-8"))
         labels=sorted({label for group in data["groups"].values() for label in group})
-        assert len(labels)==count and app.vocabulary_digest(labels)==digest
-        hierarchy=app.load_tag_hierarchy(path,labels,SOURCES[key])
+        assert len(labels)==count and app.services.vocabulary_digest(labels)==digest
+        hierarchy=app.services.load_tag_hierarchy(path,labels,SOURCES[key])
         assert hierarchy.category_prefix==SOURCES[key].prefix+"category:"
         result[key]=(Vocabulary(labels,{}),hierarchy)
     return result
@@ -449,9 +449,9 @@ def test_default_hierarchies_cover_pinned_vocabularies_and_validate_without_weig
     # No explicit hierarchy flags: verify that all four CLI defaults load from
     # beside the script even when launched in another working directory.
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(app,"load_vocabulary",lambda settings:bundled_catalogs[settings.source.key][0])
-    monkeypatch.setattr(app,"create_stash_client",lambda _:pytest.fail("validation contacted Stash"))
-    monkeypatch.setattr(app,"load_tagger",lambda *args:pytest.fail("validation loaded weights"))
+    monkeypatch.setattr(app.services,"load_vocabulary",lambda settings:bundled_catalogs[settings.source.key][0])
+    monkeypatch.setattr(app.services,"create_stash_client",lambda _:pytest.fail("validation contacted Stash"))
+    monkeypatch.setattr(app.services,"load_tagger",lambda *args:pytest.fail("validation loaded weights"))
     assert app.main(["--models","all","--validate-hierarchy","--offline"])==0
     joy= bundled_catalogs["joytag"][1]
     for source in (WD,DTQ,OPPAI):
@@ -472,11 +472,12 @@ def test_bundled_hierarchy_migrates_old_metadata_parents_idempotently(bundled_ca
     old=stash.tag(source.prefix+"category:General");old["description"]=source.hierarchy_description
     leaf=stash.tag(source.prefix+"blue_hair");leaf["parents"]=[manual,foreign,old]
     hierarchy=bundled_catalogs[source.key][1]
-    resolver=app.TagResolver(stash,hierarchy,source=source)
+    resolver=app.services.TagResolver(stash,hierarchy,source=source)
     resolver.resolve(leaf["name"])
     assert {parent["name"] for parent in leaf["parents"]}=={
         manual["name"],foreign["name"],source.prefix+"category:Appearance / Hair / Color"}
     assert old["name"] in stash.tags
     before=deepcopy(stash.writes)
-    app.TagResolver(stash,hierarchy,source=source).resolve(leaf["name"])
+    app.services.TagResolver(stash,hierarchy,source=source).resolve(leaf["name"])
     assert stash.writes==before
+

@@ -17,7 +17,7 @@ import pytest
 from stash_ai.inference import sprites
 from stash_ai.storage import codec as state_codec
 from stash_ai.cleanup import evidence as cleanup_evidence
-from stash_ai import cli as app
+from tests.helpers.runtime import runtime as app
 from stash_ai.evidence import pipeline as merge
 import stash_ai.evidence.intervals as merge_intervals
 import stash_ai.storage.store as merge_store
@@ -67,7 +67,7 @@ def mark_as_v3(path, *, add_video_result=False):
 
 @pytest.mark.parametrize('flag',['--refine-markers','--no-refine-markers'])
 def test_removed_cli_flags_fail_before_any_model_or_stash_access(flag,monkeypatch):
-    monkeypatch.setattr(app,'load_model_settings',lambda *args:pytest.fail('invalid flags reached model configuration'))
+    monkeypatch.setattr(app.services,'load_model_settings',lambda *args:pytest.fail('invalid flags reached model configuration'))
     with pytest.raises(SystemExit) as error:app.main([flag])
     assert error.value.code==2
 
@@ -77,11 +77,11 @@ def test_old_video_yaml_is_rejected_explicitly(tmp_path,enabled):
     path=tmp_path/'policy.yml'
     path.write_text('version: 1\nrefine_enabled: '+str(enabled).lower()+'\n')
     with pytest.raises(ValueError,match='Video-file analysis has been removed'):
-        load_policy(app,path)
+        load_policy(path)
 
 
 def test_scene_query_only_requests_sprite_and_vtt_media():
-    client=app.StashClient.__new__(app.StashClient)
+    client=app.services.StashClient.__new__(app.services.StashClient)
     client.create_markers=app.CREATE_MARKERS
     fields=client.scene_fields()
     assert 'paths { sprite vtt }' in fields
@@ -90,7 +90,7 @@ def test_scene_query_only_requests_sprite_and_vtt_media():
 
 def test_existing_sprite_reader_uses_only_stash_http_bytes(monkeypatch):
     monkeypatch.setattr(app,'STASH_URL','http://stash.test:9999')
-    client=app.StashClient.__new__(app.StashClient)
+    client=app.services.StashClient.__new__(app.services.StashClient)
     client.url=app.STASH_URL
     client.request_timeout=app.REQUEST_TIMEOUT
     with Image.new('RGB',(2,1),'white') as sprite:
@@ -124,7 +124,7 @@ def test_v3_completed_vtt_results_are_reused_without_video_samples_or_model_load
     assert app.main(p.args)==0
     expected=deepcopy(p.stash.scene)
     mark_as_v3(p.path,add_video_result=True)
-    monkeypatch.setattr(app,'load_tagger',lambda *args:pytest.fail('base model results were recomputed'))
+    monkeypatch.setattr(app.services,'load_tagger',lambda *args:pytest.fail('base model results were recomputed'))
     assert app.main([*p.args,*(['--merge-only'] if mode=='merge-only' else [])])==0
     assert p.stash.scene==expected
     with merge_store.StateStore(p.path,merge_store.scope_for(app.STASH_URL),True) as state:
@@ -188,3 +188,4 @@ def test_appended_results_never_retain_retired_video_payload(tmp_path):
         records=state_codec.decode(raw)
         assert len(records)==1 and 'refinement' not in records[0]
         assert not any(key.startswith('refine_') for key in asdict(TemporalPolicy()))
+

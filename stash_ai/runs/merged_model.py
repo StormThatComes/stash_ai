@@ -78,7 +78,7 @@ class MergedModelRun:
 
     def _load_tagger(self):
         try:
-            self.tagger = self.app.load_tagger(
+            self.tagger = self.app.services.load_tagger(
                 self.config, self.vocabulary, partial(preparation.prepare_image, self.app))
         except Exception as exc:
             self._record_error('load model', None, exc)
@@ -137,4 +137,5 @@ class MergedModelRun:
     def _record_error(self, stage, scene_id, exc):
         self.stats["errors"] += 1
         self.report.issue(stage, self.key, scene_id, exc,
-                          self.app.safe_error(exc, api_key=self.app.STASH_API_KEY))
+                          self.app.services.safe_error(exc, api_key=self.app.STASH_API_KEY))
+

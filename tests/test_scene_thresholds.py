@@ -8,7 +8,7 @@ import pytest
 
 from stash_ai.rethreshold import execution as rethreshold_execution
 from stash_ai.inference import sprites
-from stash_ai import cli as app
+from tests.helpers.runtime import runtime as app
 from stash_ai.evidence import pipeline as merge
 import stash_ai.storage.store as merge_store
 import stash_ai.evidence.identity as cache_identity
@@ -21,8 +21,8 @@ pytestmark = pytest.mark.usefixtures('reset_temporal')
 
 def configure(monkeypatch, scene=.4, marker=.7):
     # Exercise automatic retention independently of the bundled cache floors.
-    original = app.load_model_settings
-    monkeypatch.setattr(app, 'load_model_settings', lambda *a: [
+    original = app.services.load_model_settings
+    monkeypatch.setattr(app.services, 'load_model_settings', lambda *a: [
         replace(c, scene_threshold=scene, marker_threshold=marker,
                 scene_cache_floor=None, marker_cache_floor=None) for c in original(*a)])
 
@@ -121,7 +121,7 @@ def test_merge_only_support_ratio_matches_fresh_inference(pipeline, monkeypatch,
 
     with monkeypatch.context() as offline:
         for name in ('load_tagger', 'load_vocabulary'):
-            offline.setattr(app, name, lambda *a: pytest.fail('accessed inference inputs'))
+            offline.setattr(app.services, name, lambda *a: pytest.fail('accessed inference inputs'))
         offline.setattr(sprites, 'fetch_cues', lambda *a: pytest.fail('accessed inference inputs'))
         offline.setattr(p.stash, 'get_media', lambda *a: pytest.fail('fetched media'))
         assert app.main([*args, '--merge-only', '--temporal-policy', str(policy)]) == 0
@@ -157,7 +157,7 @@ def test_support_ratio_change_rejects_incomplete_cache_before_publication(
     p.stash.writes.clear()
     policy = tmp_path/'changed.yml'
     policy.write_text(f'version: 1\nscene_support_ratio: {0.7 if missing == "below_floor" else 1.0}\n')
-    monkeypatch.setattr(app, 'load_tagger', lambda *a: pytest.fail('loaded model'))
+    monkeypatch.setattr(app.services, 'load_tagger', lambda *a: pytest.fail('loaded model'))
     assert app.main([*p.args, '--merge-only', '--temporal-policy', str(policy)]) == 1
     assert (saved(p.path), p.stash.scene) == before and not p.stash.writes
     assert 'run inference' in capsys.readouterr().out
@@ -195,7 +195,7 @@ def test_support_ratio_dry_run_preserves_source_and_stash(pipeline, monkeypatch,
     p.stash.dry_run = True
     policy = tmp_path/'strict.yml'
     policy.write_text('version: 1\nscene_support_ratio: 1.0\n')
-    monkeypatch.setattr(app, 'load_tagger', lambda *a: pytest.fail('loaded model'))
+    monkeypatch.setattr(app.services, 'load_tagger', lambda *a: pytest.fail('loaded model'))
     assert app.main([*p.args, '--merge-only', '--dry-run', '--temporal-policy', str(policy)]) == 0
     assert 'merged_scene_tags=0' in capsys.readouterr().out
     assert (p.path.read_bytes(), p.stash.scene) == before and not p.stash.writes
@@ -207,7 +207,7 @@ def test_both_thresholds_reuse_models_and_round_trip(pipeline, monkeypatch):
     assert app.main(p.args) == 0
     before = saved(p.path)
     configure(monkeypatch, scene=.8, marker=.9)
-    monkeypatch.setattr(app, 'load_tagger', lambda *a: pytest.fail('loaded model'))
+    monkeypatch.setattr(app.services, 'load_tagger', lambda *a: pytest.fail('loaded model'))
     assert app.main(p.args) == 0
     assert saved(p.path)['wd'][0][cache_identity.SCENE_OVERRIDE] == .8
     expected = outputs(p.path)
@@ -226,7 +226,7 @@ def test_explicit_both_thresholds_need_no_assets_and_preserve_dry_run(pipeline, 
     before = p.path.read_bytes(), deepcopy(p.stash.scene)
     configure(monkeypatch, scene=.8, marker=.9)
     for name in ('load_tagger', 'load_vocabulary'):
-        monkeypatch.setattr(app, name, lambda *a: pytest.fail('accessed inference inputs'))
+        monkeypatch.setattr(app.services, name, lambda *a: pytest.fail('accessed inference inputs'))
     monkeypatch.setattr(sprites, 'fetch_cues', lambda *a: pytest.fail('accessed inference inputs'))
     monkeypatch.setattr(p.stash, 'get_media', lambda *a: pytest.fail('fetched media'))
     args = [*p.args, '--merge-only', '--rethreshold-scenes', '--rethreshold-markers']
@@ -303,7 +303,7 @@ def test_checkpoint_resume_retains_all_scene_frames_once(pipeline, monkeypatch, 
     frames = saved(p.path)['wd'][0]['frames']
     assert len(frames) == len(p.cues) and [f['start'] for f in frames] == list(range(10))
     configure(monkeypatch, scene=.8)
-    monkeypatch.setattr(app, 'load_tagger', lambda *a: pytest.fail('loaded model'))
+    monkeypatch.setattr(app.services, 'load_tagger', lambda *a: pytest.fail('loaded model'))
     assert app.main(args) == 0
 
 
@@ -328,7 +328,7 @@ def test_shared_scene_cleanup_uses_frozen_scene_thresholds(pipeline, monkeypatch
     configure(monkeypatch, scene=.9)
     exclusion = tmp_path/'exclude.yml'
     exclusion.write_text('version: 1\nexcluded_scene_tags: []\nby_model:\n  joytag: [common]\n')
-    monkeypatch.setattr(app, 'load_tagger', lambda *a: pytest.fail('loaded model'))
+    monkeypatch.setattr(app.services, 'load_tagger', lambda *a: pytest.fail('loaded model'))
     assert app.main([*args, '--cleanup-only', '--scene-tag-exclusions', str(exclusion)]) == 0
     assert [t['name'] for t in p.stash.scene['tags']] == ['ai:common']
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), True) as state:
@@ -390,3 +390,4 @@ def test_scene_rethreshold_never_decodes_publication_snapshots(tmp_path, monkeyp
 
         assert result == {'scene_thresholds_updated': 1}
         assert state.records('1', 'scene')['wd'][0][cache_identity.SCENE_OVERRIDE] == .8
+

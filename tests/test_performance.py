@@ -15,7 +15,7 @@ from PIL import Image
 from stash_ai.commands import hierarchy as hierarchy_commands
 from stash_ai.domain import Cue, TagHierarchy
 from stash_ai.inference import checkpoints, prediction, preparation, sprites
-from stash_ai import cli as app
+from tests.helpers.runtime import runtime as app
 from stash_ai.evidence import pipeline as merge
 import stash_ai.evidence.labels as merge_labels
 import stash_ai.storage.results as merge_results
@@ -115,7 +115,7 @@ def test_merge_check_invalidates_real_changes(pipeline, monkeypatch, tmp_path, c
     calls = []
     original = merge.evidence
     monkeypatch.setattr(merge, 'evidence', lambda *a, **kw: (calls.append(1), original(*a, **kw))[1])
-    monkeypatch.setattr(app, 'load_tagger', fail)
+    monkeypatch.setattr(app.services, 'load_tagger', fail)
     assert app.main(args) == 0 and calls == [1]
 
 
@@ -331,3 +331,4 @@ def test_detached_records_cannot_reuse_a_stale_segment_digest(tmp_path):
         detached['items'].append({'new': True})
         assert performance_segments.segment_digest(detached) != original
         assert performance_segments.segment_digest(borrowed) == original and borrowed['items'] == []
+

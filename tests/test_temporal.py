@@ -11,7 +11,7 @@ from stash_ai.domain import Cue, FramePrediction
 from stash_ai.inference import prediction
 from stash_ai.cleanup import evidence as cleanup_evidence
 from stash_ai.publication import merged as merge_sync
-from stash_ai import cli as app
+from tests.helpers.runtime import runtime as app
 from stash_ai.evidence import pipeline as merge
 import stash_ai.evidence.intervals as merge_intervals
 import stash_ai.evidence.labels as merge_labels
@@ -201,7 +201,7 @@ def test_temporal_resume_preserves_statistics_and_all_sparse_scores(pipeline,mon
 def test_temporal_partial_resume_reuses_completed_results(pipeline,monkeypatch,mode):
     p=pipeline
     assert app.main([*p.args,mode])==0
-    monkeypatch.setattr(app,'load_tagger',lambda *args:pytest.fail('completed partial model loaded'))
+    monkeypatch.setattr(app.services,'load_tagger',lambda *args:pytest.fail('completed partial model loaded'))
     assert app.main([*p.args,mode])==0
 
 
@@ -221,7 +221,7 @@ def test_cleanup_revokes_consensus_votes_without_restoring_manual_deletions(tmp_
         for model in ('wd','dtq','oppai'):
             state.put('1',model,{'markers':segment(model,[[('core',.7)]]*3)})
         hits,spans=merge.evidence(app,state,'1',policies,policies)
-        merge_sync.sync_merged(app,stash,app.TagResolver(stash,source=merge_labels.AI),state,stash.find_scene('1'),hits,spans)
+        merge_sync.sync_merged(app,stash,app.services.TagResolver(stash,source=merge_labels.AI),state,stash.find_scene('1'),hits,spans)
         policies['wd']=frozenset({'core'})
         kept=[s for s in spans if s['source']!='wd']
         cleaned=cleanup_evidence.cleanup_support(app,state,'1',kept,{'wd'},policies)
@@ -269,3 +269,4 @@ def test_old_cached_results_still_merge_without_new_evidence(tmp_path):
                            'markers':dict(mode='spans',meta={'origin':'legacy'},items=[dict(tag='legacy',start=0,end=10,extra_tags=[])])})
         hits,spans=merge.evidence(app,state,'1',{m:frozenset() for m in SOURCES},{m:frozenset() for m in SOURCES})
         assert hits[0]['tag']=='legacy' and spans[0]['end']==10
+

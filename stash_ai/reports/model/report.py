@@ -131,9 +131,9 @@ def run(app, args):
 
     app.APPLY_SCENE_TAGS = True
     app.CREATE_MARKERS = True
-    app.TEMPORAL_POLICY = load_policy(app, args.temporal_policy, not args.no_temporal)
-    core_policies = app.load_exclusion_policy(args.marker_core_exclusions, "excluded_core_tags")
-    scene_policies = app.load_exclusion_policy(args.scene_tag_exclusions, "excluded_scene_tags")
+    app.TEMPORAL_POLICY = load_policy(args.temporal_policy, not args.no_temporal)
+    core_policies = app.services.load_exclusion_policy(args.marker_core_exclusions, "excluded_core_tags")
+    scene_policies = app.services.load_exclusion_policy(args.scene_tag_exclusions, "excluded_scene_tags")
     core_policies = policies_or_empty(core_policies)
     scene_policies = policies_or_empty(scene_policies)
 
@@ -186,3 +186,4 @@ def run(app, args):
     except (OSError, ValueError, RuntimeError) as exc:
         print("Model utility report failed: " + str(exc))
         return 1
+

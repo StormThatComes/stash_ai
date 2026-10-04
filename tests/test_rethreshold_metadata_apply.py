@@ -6,7 +6,8 @@ import sqlite3
 import pytest
 
 from stash_ai.rethreshold import markers as marker_updates, execution as rethreshold_execution, scenes as scene_updates
-from stash_ai import cli as app, db
+from stash_ai import db
+from tests.helpers.runtime import runtime as app
 import stash_ai.evidence.identity as scene_cache_identity
 import stash_ai.evidence.identity as thresholds_identity
 from stash_ai.storage import progress
@@ -137,3 +138,4 @@ def test_legacy_or_damaged_metadata_is_backfilled_once_before_apply(tmp_path, mo
         assert 'errors' not in update(store, mode, report)
         assert report.timing_calls['state_json_decode'] == (1 if mode == 'scene' else 2)
         assert blobs(store) == raw
+

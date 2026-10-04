@@ -1,5 +1,6 @@
 """Reconcile cleanup changes for one scene before moving to the next."""
 from __future__ import annotations
+from stash_ai.cleanup import scene_tags
 
 from collections import Counter
 from types import SimpleNamespace
@@ -69,8 +70,9 @@ def cleanup_scene(app, stash, resolver, store, current, settings, selected, args
 def _cleanup_source(app, stash, current, source, core_policies, scene_policies, report=None):
     result = Counter()
     if app.APPLY_SCENE_TAGS:
-        result.update(app.cleanup_scene_tags(stash, current, scene_policies[source.key], source, report))
+        result.update(scene_tags.cleanup_scene_tags(stash, current, scene_policies[source.key], source, report))
     if app.CREATE_MARKERS:
         result.update(separate_sync_markers.cleanup_scene_marker_cores(
             app, stash, current, core_policies[source.key], source, report, scene_policies[source.key]))
     return result
+

@@ -138,7 +138,7 @@ def shared_scene_contributions(app, index, scene_records, policies, existing=(),
     scene_by_run = _scene_run_index(scene_records)
     existing = {entry['tag'] for entry in existing}
     options = dict(policy=asdict(policy), max_tags=app.MAX_TAGS,
-                   scene_thresholds=dict(getattr(app, "SCENE_THRESHOLDS", {})),
+                   scene_thresholds=dict(app.SCENE_THRESHOLDS or {}),
                    scene_exclusions={source: sorted(values) for source, values in policies.items()})
     candidates, usable, partial = [], False, False
 
@@ -169,7 +169,7 @@ def shared_scene_contributions(app, index, scene_records, policies, existing=(),
 
 def cleanup_scene_support(app, store, scene_id, hits, selected, policies):
     """Revoke only published sources, under their frozen rules and input records."""
-    from types import SimpleNamespace
+    from dataclasses import replace
     from stash_ai.evidence.frames import FrameIndex
     from stash_ai.evidence.identity import marker_segment_signature
     from stash_ai.signatures import digest
@@ -200,7 +200,7 @@ def cleanup_scene_support(app, store, scene_id, hits, selected, policies):
                     if not set(signatures) <= set(available):
                         raise RuntimeError('Shared scene sources changed since publication; run --merge-only before cleanup.')
                     matching[kind][source] = [available[sig] for sig in signatures]
-            context = SimpleNamespace(**vars(app))
+            context = replace(app)
             options = hit['build_options']
             context.TEMPORAL_POLICY = TemporalPolicy.from_snapshot(options['policy'])
             context.MAX_TAGS = options['max_tags']

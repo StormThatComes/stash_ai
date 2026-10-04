@@ -13,7 +13,7 @@ from dataclasses import asdict
 import json
 from pathlib import Path
 import sqlite3
-from types import SimpleNamespace
+from dataclasses import replace
 
 from tqdm import tqdm
 
@@ -108,10 +108,10 @@ def run(app, args):
             long_marker_seconds=300.0 if args.tag_review_long_marker_seconds is None
             else args.tag_review_long_marker_seconds,
             examples=3 if args.tag_review_examples is None else args.tag_review_examples)
-        local = SimpleNamespace(**{**vars(app), "APPLY_SCENE_TAGS": True, "CREATE_MARKERS": True,
-                                   "TEMPORAL_POLICY": load_policy(app, args.temporal_policy, not args.no_temporal)})
-        core = app.load_exclusion_policy(args.marker_core_exclusions, "excluded_core_tags")
-        tags = app.load_exclusion_policy(args.scene_tag_exclusions, "excluded_scene_tags")
+        local = replace(app, APPLY_SCENE_TAGS=True, CREATE_MARKERS=True,
+                        TEMPORAL_POLICY=load_policy(args.temporal_policy, not args.no_temporal))
+        core = app.services.load_exclusion_policy(args.marker_core_exclusions, "excluded_core_tags")
+        tags = app.services.load_exclusion_policy(args.scene_tag_exclusions, "excluded_scene_tags")
         if not Path(args.state_db).expanduser().is_file():
             raise FileNotFoundError(f"State database does not exist: {args.state_db}")
         with StateStore(args.state_db, scope_for(app.STASH_URL), True,

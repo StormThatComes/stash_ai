@@ -6,7 +6,7 @@ import sqlite3
 import pytest
 
 from stash_ai.inference import sprites
-from stash_ai import cli as app
+from tests.helpers.runtime import runtime as app
 import stash_ai.evidence.identity as thresholds_identity
 import stash_ai.evidence.intervals as merge_intervals
 import stash_ai.evidence.source_markers as merge_source_markers
@@ -31,7 +31,7 @@ def offline(monkeypatch, stash):
     def unexpected(*args, **kwargs):
         pytest.fail('accessed inference inputs')
     for name in ('load_tagger', 'load_vocabulary'):
-        monkeypatch.setattr(app, name, unexpected)
+        monkeypatch.setattr(app.services, name, unexpected)
     monkeypatch.setattr(sprites, 'fetch_cues', unexpected)
     monkeypatch.setattr(stash, 'get_media', unexpected)
 
@@ -47,8 +47,8 @@ def test_enabling_temporal_checks_historical_retention_before_publication(
     args = [*p.args, '--markers-only']
     with monkeypatch.context() as previous:
         if old_cache:
-            settings = app.load_model_settings
-            previous.setattr(app, 'load_model_settings', lambda *a: [
+            settings = app.services.load_model_settings
+            previous.setattr(app.services, 'load_model_settings', lambda *a: [
                 replace(config, scene_cache_floor=None, marker_cache_floor=None)
                 for config in settings(*a)])
         assert app.main([*args, '--no-temporal']) == 0
@@ -221,3 +221,4 @@ def test_incomplete_history_cannot_contribute_consensus_votes(source):
     records[source].insert(0, incomplete)
     with pytest.raises(ValueError, match=source + ': marker cache floor.*run inference'):
         merge_source_markers.marker_contributions(app, records, policies())
+

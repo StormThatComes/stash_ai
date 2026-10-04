@@ -7,7 +7,7 @@ import sqlite3
 import pytest
 
 from stash_ai.rethreshold import execution as rethreshold_execution, scenes as scene_updates
-from stash_ai import cli as app
+from tests.helpers.runtime import runtime as app
 from stash_ai import db
 from stash_ai.publication import fingerprints as performance
 import stash_ai.storage.merge_checks as performance_merge_checks
@@ -328,3 +328,4 @@ def test_v8_missing_threshold_table_is_a_db_check_error(tmp_path):
     report = db.check_database(path, 'scope')
     assert not report['ok']
     assert any(issue['code'] == 'missing_base_tables' for issue in report['errors'])
+

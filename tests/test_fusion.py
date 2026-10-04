@@ -9,7 +9,7 @@ import pytest
 
 from stash_ai.inference import sprites
 from stash_ai.cleanup import evidence as cleanup_evidence
-from stash_ai import cli as app
+from tests.helpers.runtime import runtime as app
 from stash_ai.evidence import pipeline as merge
 import stash_ai.evidence.intervals as merge_intervals
 import stash_ai.evidence.source_markers as merge_source_markers
@@ -236,7 +236,7 @@ def test_cleanup_command_rebuilds_shared_marker_and_then_removes_last_support(pi
     args=['--models','wd','dtq','oppai',*p.args[2:]]
     assert app.main(args)==0
     assert [(m['seconds'],m['end_seconds']) for m in p.stash.scene['scene_markers']]==[(0,3)]
-    monkeypatch.setattr(app,'load_tagger',lambda *args:pytest.fail('cleanup loaded a model'))
+    monkeypatch.setattr(app.services,'load_tagger',lambda *args:pytest.fail('cleanup loaded a model'))
     core=tmp_path/'core.yml'
     core.write_text('version: 1\nexcluded_core_tags: []\nby_model:\n  wd: [common]\n')
     cleanup=[*args,'--cleanup-only','--marker-core-exclusions',str(core)]
@@ -270,7 +270,7 @@ def test_merge_only_applies_shared_rules_without_inference_or_changing_source_re
     assert not p.stash.scene['scene_markers']
     with merge_store.StateStore(p.path,merge_store.scope_for(app.STASH_URL),True) as state:
         before=state.connection.execute('SELECT model,kind,data FROM results ORDER BY model,kind').fetchall()
-    monkeypatch.setattr(app,'load_tagger',lambda *args:pytest.fail('shared merge loaded a model'))
+    monkeypatch.setattr(app.services,'load_tagger',lambda *args:pytest.fail('shared merge loaded a model'))
     monkeypatch.setattr(sprites,'fetch_cues',lambda *args:pytest.fail('shared merge fetched images'))
     assert app.main([*args,'--merge-only'])==0
     assert [(m['seconds'],m['end_seconds']) for m in p.stash.scene['scene_markers']]==[(0,4)]
@@ -297,3 +297,4 @@ def test_shared_merge_dry_run_and_extra_explanation(pipeline,monkeypatch,tmp_pat
     report=json.loads(output[output.index('[\n'):])[0]
     assert report['as_marker_extra'][0]['tag']=='ai:common'
     assert set(report['as_marker_extra'][0]['evidence']['source_evidence'])=={'dtq'}
+

@@ -5,7 +5,8 @@ import sqlite3
 import pytest
 
 from stash_ai.rethreshold import execution as rethreshold_execution, scenes as scene_updates
-from stash_ai import cli as app, db
+from stash_ai import db
+from tests.helpers.runtime import runtime as app
 from stash_ai.publication import fingerprints as performance
 import stash_ai.storage.merge_checks as performance_merge_checks
 from stash_ai.reports.developer import report as developer_report
@@ -335,3 +336,4 @@ def test_compaction_and_anonymous_report_preserve_only_metadata_counts(tmp_path)
     assert report['database']['table_rows']['result_metadata'] == 2
     assert 'result_metadata' not in report['database']['blob_tables']
     assert 'marker_tag_blocklist' not in json.dumps(report)
+

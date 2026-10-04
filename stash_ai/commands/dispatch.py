@@ -19,19 +19,19 @@ def run_standalone_command(app, args, *, cleanup_only: bool) -> int | None:
     """Run commands that bypass model loading and the normal tagging pipeline."""
     if args.abandon_pending and not args.merge_only and not cleanup_only:
         from stash_ai.commands.recovery import run_only
-        app.validate_config(scene_work=False)
+        app.services.validate_config(scene_work=False)
         return run_only(app, args)
     if args.sync_marker_groups_only:
         from stash_ai.commands.marker_groups import run_backfill
-        app.validate_config(scene_work=False)
+        app.services.validate_config(scene_work=False)
         return run_backfill(app, args)
     if args.prune_empty_tags_only:
         from stash_ai.cleanup.prune import run_prune
-        app.validate_config(scene_work=False)
+        app.services.validate_config(scene_work=False)
         return run_prune(app, args)
     if args.prune_legacy_imports:
         from stash_ai.cleanup.legacy import run as run_legacy_prune
-        app.validate_config(scene_work=False)
+        app.services.validate_config(scene_work=False)
         return run_legacy_prune(app, args)
     if args.model_report is not None:
         from stash_ai.reports.model.report import run as run_model_report
@@ -65,3 +65,4 @@ def run_saved_merge_command(app, settings, args, core_policies, scene_policies) 
         hierarchy = combined_hierarchy(app, args, scene_policies)
         return run_merged(app, settings, args, {}, hierarchy, core_policies, scene_policies)
     return None
+

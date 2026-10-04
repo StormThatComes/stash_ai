@@ -10,7 +10,7 @@ import pytest
 from stash_ai.commands import hierarchy as hierarchy_commands
 from stash_ai.inference import sprites
 from stash_ai.cleanup import evidence as cleanup_evidence
-from stash_ai import cli as app
+from tests.helpers.runtime import runtime as app
 from stash_ai.evidence import pipeline as merge
 import stash_ai.evidence.intervals as merge_intervals
 import stash_ai.evidence.labels as merge_labels
@@ -52,7 +52,7 @@ def test_global_exclusions_reuse_raw_results_and_remove_all_roles(pipeline, monk
     assert 'ai:common' in names_in_scene(p.stash)
     before = raw_results(p.path)
     path = policy_file(tmp_path, ['common'])
-    monkeypatch.setattr(app, 'load_tagger', lambda *args: pytest.fail('blacklist reran inference'))
+    monkeypatch.setattr(app.services, 'load_tagger', lambda *args: pytest.fail('blacklist reran inference'))
     assert app.main([*args, '--tag-exclusions', str(path)]) == 0
     assert 'ai:common' not in names_in_scene(p.stash)
     assert 'ai:common' not in p.stash.tags
@@ -81,7 +81,7 @@ def test_cleanup_removes_shared_and_legacy_extras_without_images_or_models(pipel
     before_marker = marker['id'], marker['seconds'], marker['end_seconds'], marker['title']
     path = policy_file(tmp_path, ['extra'])
     for name in ('load_tagger', 'load_vocabulary'):
-        monkeypatch.setattr(app, name, lambda *args: pytest.fail('cleanup accessed model/input assets'))
+        monkeypatch.setattr(app.services, name, lambda *args: pytest.fail('cleanup accessed model/input assets'))
     monkeypatch.setattr(sprites, 'fetch_cues', lambda *args: pytest.fail('cleanup accessed model/input assets'))
     p.stash.dry_run = dry
     cleanup = ['--models', 'all', *p.args[2:], '--cleanup-only', '--tag-exclusions', str(path),
@@ -141,7 +141,7 @@ def test_markers_only_always_loads_the_global_list(pipeline, monkeypatch, tmp_pa
     assert app.main(p.args) == 0
     before_tags = deepcopy(p.stash.scene['tags'])
     path = policy_file(tmp_path, ['extra'])
-    monkeypatch.setattr(app, 'load_tagger', lambda *args: pytest.fail('partial cleanup reran model'))
+    monkeypatch.setattr(app.services, 'load_tagger', lambda *args: pytest.fail('partial cleanup reran model'))
     options = ['--merge-only', mode] if mode == '--markers-only' else [mode]
     assert app.main([*p.args, *options, '--scene-tag-exclusions', str(path)]) == 0
     assert p.stash.scene['tags'] == before_tags
@@ -174,9 +174,9 @@ def test_hierarchy_create_all_does_not_recreate_excluded_tags(pipeline, monkeypa
             '--tag-exclusions', str(path), '--state-db', str(p.path)]
     # Metadata hierarchy validation itself is covered separately; this exercise
     # targets the actual hierarchy command's full-vocabulary creation loop.
-    monkeypatch.setattr(app, 'load_tag_hierarchy', lambda *args: None)
+    monkeypatch.setattr(app.services, 'load_tag_hierarchy', lambda *args: None)
     monkeypatch.setattr(hierarchy_commands, 'combined_hierarchy', lambda *args: None)
-    monkeypatch.setattr(app, 'load_tagger', lambda *args: pytest.fail('hierarchy loaded a model'))
+    monkeypatch.setattr(app.services, 'load_tagger', lambda *args: pytest.fail('hierarchy loaded a model'))
     assert app.main(args) == 0
     prefix = 'ai:' if output_mode == 'merged' else 'wd:'
     assert prefix+'extra' in p.stash.tags and prefix+'common' not in p.stash.tags
@@ -195,12 +195,12 @@ def test_combined_hierarchy_filters_each_source_before_union():
 
 def test_exclusion_key_alias_is_backward_compatible_and_unambiguous(tmp_path):
     legacy = policy_file(tmp_path, ['common'])
-    expected = app.load_exclusion_policy(legacy, 'excluded_scene_tags')
+    expected = app.services.load_exclusion_policy(legacy, 'excluded_scene_tags')
     current = policy_file(tmp_path, ['common'], key='excluded_tags')
-    assert app.load_exclusion_policy(current, 'excluded_scene_tags') == expected
+    assert app.services.load_exclusion_policy(current, 'excluded_scene_tags') == expected
     current.write_text('version: 1\nexcluded_scene_tags: []\nexcluded_tags: [common]\n')
     with pytest.raises(ValueError, match='not both'):
-        app.load_exclusion_policy(current, 'excluded_scene_tags')
+        app.services.load_exclusion_policy(current, 'excluded_scene_tags')
 
 
 def test_pruned_legacy_extra_id_cannot_reappear_or_break_the_next_merge(pipeline, tmp_path, monkeypatch):
@@ -209,7 +209,7 @@ def test_pruned_legacy_extra_id_cannot_reappear_or_break_the_next_merge(pipeline
     old['tags'].append(p.stash.tag('ai:blocked'))
     path = policy_file(tmp_path, ['blocked'])
     args = [*p.args, '--merge-only', '--tag-exclusions', str(path)]
-    monkeypatch.setattr(app, 'load_tagger', lambda *args: pytest.fail('legacy merge loaded model'))
+    monkeypatch.setattr(app.services, 'load_tagger', lambda *args: pytest.fail('legacy merge loaded model'))
     assert app.main(args) == 0
     assert 'ai:blocked' not in p.stash.tags
     p.stash.writes.clear()
@@ -220,7 +220,7 @@ def test_pruned_legacy_extra_id_cannot_reappear_or_break_the_next_merge(pipeline
 def test_cleanup_pruning_flag_is_supported_and_does_not_load_assets(pipeline, monkeypatch):
     p = pipeline
     p.stash.tag('op:unused')
-    monkeypatch.setattr(app, 'load_tagger', lambda *args: pytest.fail('cleanup loaded model'))
+    monkeypatch.setattr(app.services, 'load_tagger', lambda *args: pytest.fail('cleanup loaded model'))
     assert app.main([*p.args, '--cleanup-only', '--prune-empty-tags']) == 0
     assert 'op:unused' not in p.stash.tags
 
@@ -234,3 +234,4 @@ def test_failed_cleanup_does_not_start_definition_pruning(pipeline, monkeypatch,
     monkeypatch.setattr(stash_prune, 'prune_tags', lambda *args, **kwargs: pytest.fail('pruning after failed cleanup'))
     assert app.main([*p.args, '--cleanup-only', '--tag-exclusions', str(path)]) == 1
     assert 'ai:common' in p.stash.tags
+

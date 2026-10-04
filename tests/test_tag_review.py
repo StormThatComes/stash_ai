@@ -7,7 +7,7 @@ import json
 import pytest
 
 from stash_ai.inference import sprites
-from stash_ai import cli as app
+from tests.helpers.runtime import runtime as app
 import stash_ai.storage.store as merge_store
 from stash_ai.reports.review import report as tag_review
 from stash_ai.reports.review.accumulator import ReviewAccumulator
@@ -239,7 +239,7 @@ def test_cli_offline_json_and_summary_preserve_database_and_skip_model_loading(t
     seed(path, "1", "wd", pair())
     before = path.read_bytes()
     for name in ('load_model_settings', 'load_vocabulary', 'load_tagger', 'create_stash_client'):
-        monkeypatch.setattr(app, name, lambda *a, **k: pytest.fail("accessed inference or Stash"))
+        monkeypatch.setattr(app.services, name, lambda *a, **k: pytest.fail("accessed inference or Stash"))
     monkeypatch.setattr(sprites, 'fetch_cues', lambda *a, **k: pytest.fail("accessed inference or Stash"))
     destination = tmp_path / "review.json"
     assert app.main(["--tag-review-report", str(destination), "--state-db", str(path),
@@ -327,3 +327,4 @@ def test_cli_rejects_unsafe_or_invalid_review_options(tmp_path, flags):
 def test_review_modifiers_require_the_review_mode():
     with pytest.raises(SystemExit):
         app.main(["--tag-review-margin", ".1"])
+

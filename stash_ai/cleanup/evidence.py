@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from types import SimpleNamespace
+from dataclasses import replace
 
 import stash_ai.evidence.identity as merge_identity
 import stash_ai.evidence.source_markers as merge_source_markers
@@ -36,7 +36,7 @@ class EvidenceReplay:
     def _rebuild(self, options, matching):
         from stash_ai.evidence.temporal.policy import TemporalPolicy
 
-        context = SimpleNamespace(**vars(self.app))
+        context = replace(self.app)
         context.TEMPORAL_POLICY = TemporalPolicy.from_snapshot(options['policy'])
         context.MARKER_THRESHOLDS = options.get('marker_thresholds', {})
         for name, value in options['settings'].items():

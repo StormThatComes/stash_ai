@@ -60,10 +60,11 @@ class TemporalPolicy:
             raise ValueError("Invalid marker_max_weak_seconds.")
 
 
-def load_policy(app, path, enabled=True):
+def load_policy(path, enabled=True):
     if not enabled:
         return TemporalPolicy(enabled=False)
-    data = app.load_unique_yaml(path, "Temporal policy")
+    from stash_ai.config import load_unique_yaml
+    data = load_unique_yaml(path, "Temporal policy")
     if not isinstance(data, dict) or type(data.get("version")) is not int or data["version"] != 1:
         raise ValueError("Temporal policy requires version: 1.")
     allowed = {f.name for f in fields(TemporalPolicy)}
@@ -82,6 +83,7 @@ def marker_floor(policy, threshold):
 
 def build_options(app):
     return {"policy": asdict(app.TEMPORAL_POLICY),
-        "marker_thresholds": dict(getattr(app, "MARKER_THRESHOLDS", {})),
+        "marker_thresholds": dict(app.MARKER_THRESHOLDS or {}),
         "settings": {name: getattr(app, name) for name in (
         "MARKER_MIN_HITS", "MARKER_MERGE_GAP_SECONDS", "MARKER_MAX_TAGS_PER_FRAME", "MAX_MARKERS_PER_SCENE")}}
+

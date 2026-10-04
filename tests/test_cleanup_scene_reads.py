@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from stash_ai import cli as app
+from tests.helpers.runtime import runtime as app
 import stash_ai.evidence.labels as merge_labels
 import stash_ai.storage.store as merge_store
 from stash_ai.publication import merged as merge_sync
@@ -121,7 +121,7 @@ def test_prefetched_scene_is_refreshed_before_cleanup_writes(tmp_path, monkeypat
     stash = SceneSQLStash()
     if output == 'merged':
         with merge_store.StateStore(tmp_path/'state.sqlite3', merge_store.scope_for(app.STASH_URL)) as store:
-            merge_sync.sync_merged(app, stash, app.TagResolver(stash, source=merge_labels.AI), store,
+            merge_sync.sync_merged(app, stash, app.services.TagResolver(stash, source=merge_labels.AI), store,
                               stash.find_scene('1'), [hit('wd')], [])
     else:
         stash.scene['tags'] = [stash.tag('wd:common')]
@@ -186,7 +186,7 @@ def test_batched_marker_cleanup_matches_graphql_with_global_preview(tmp_path, mo
         path.mkdir()
         stash = SceneSQLStash()
         with merge_store.StateStore(path/'state.sqlite3', merge_store.scope_for(app.STASH_URL)) as store:
-            merge_sync.sync_merged(app, stash, app.TagResolver(stash, source=merge_labels.AI), store,
+            merge_sync.sync_merged(app, stash, app.services.TagResolver(stash, source=merge_labels.AI), store,
                 stash.find_scene('1'), [hit('wd'), hit('oppai'), hit('wd', 'blocked')],
                 [span('wd', 10, 20), span('oppai', 20, 30), span('wd', 40, 50, tag='blocked')])
         before = deepcopy((stash.scenes, stash.tags)), (path/'state.sqlite3').read_bytes()
@@ -212,3 +212,4 @@ def test_batched_marker_cleanup_matches_graphql_with_global_preview(tmp_path, mo
             assert [(m['seconds'], m['end_seconds']) for m in stash.scene['scene_markers']] == [(10, 20)]
         assert bool(stash.scene_reads) == deny
     assert results[0] == results[1]
+

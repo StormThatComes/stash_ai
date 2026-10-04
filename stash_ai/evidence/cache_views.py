@@ -1,5 +1,5 @@
 """Replay scene qualification from sparse frame evidence and exact aggregates."""
-from types import SimpleNamespace
+from dataclasses import replace
 
 from stash_ai.evidence.identity import SCENE_OVERRIDE
 
@@ -32,7 +32,7 @@ def project(app, segment):
     signature = marker_segment_signature(segment)
     meta = segment['meta']
     threshold = (app.SCENE_THRESHOLDS.get(signature, meta.get('scene_threshold'))
-                 if hasattr(app, 'SCENE_THRESHOLDS') else scene_threshold(segment))
+                 if app.SCENE_THRESHOLDS is not None else scene_threshold(segment))
     # Temporal statistics depend on the support floor as well as the high
     # threshold. Old aggregates without retention metadata keep their original
     # behavior; frame-backed results can also gain statistics after --no-temporal.
@@ -61,8 +61,8 @@ def project(app, segment):
 
 def views(app, records):
     from stash_ai.evidence.identity import marker_segment_signature
-    if not hasattr(app, 'SCENE_THRESHOLDS'):
-        app = SimpleNamespace(**vars(app), SCENE_THRESHOLDS={
+    if app.SCENE_THRESHOLDS is None:
+        app = replace(app, SCENE_THRESHOLDS={
             marker_segment_signature(s): s[SCENE_OVERRIDE]
             for segments in records.values() for s in segments if SCENE_OVERRIDE in s})
     return app, {source: [project(app, s) for s in segments] for source, segments in records.items()}

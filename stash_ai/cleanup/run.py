@@ -35,14 +35,14 @@ class CleanupRun:
             if args.abandon_pending:
                 from stash_ai.storage.recovery import abandon
                 self.stats.update(abandon(self.store, self.report.write))
-            self.stash = self.cleanup_stash = app.create_stash_client(app.DRY_RUN)
+            self.stash = self.cleanup_stash = app.services.create_stash_client(app.DRY_RUN)
             try:
                 self._prepare_strategy()
                 self._cleanup_scenes()
                 self._prune()
             except Exception as exc:
                 self.stats['errors'] += 1
-                self.report.issue('cleanup', '', None, exc, app.safe_error(exc, api_key=app.STASH_API_KEY))
+                self.report.issue('cleanup', '', None, exc, app.services.safe_error(exc, api_key=app.STASH_API_KEY))
             finally:
                 self.stash.close()
             self.report.finish('Cleanup' + (' (planned)' if app.DRY_RUN else ''), self.stats, self.store.cache)
@@ -63,7 +63,7 @@ class CleanupRun:
             except Exception as exc:
                 if strategy == 'sql' or self.store.cleanup_pending:
                     raise
-                self.report.write('SQL cleanup unavailable (' + app.safe_error(exc, api_key=app.STASH_API_KEY) +
+                self.report.write('SQL cleanup unavailable (' + app.services.safe_error(exc, api_key=app.STASH_API_KEY) +
                                   '); scanning scenes instead.')
         if self.sql is not None:
             from stash_ai.cleanup.sql import run_sql_cleanup
@@ -88,7 +88,7 @@ class CleanupRun:
         if self.sql is not None:
             # Cleanup uses the same snapshots as merge-only; media paths are unused.
             self.stash.configure_merge_reads(self.report, merge_only=True)
-        self.resolver = app.TagResolver(self.cleanup_stash, source=merge_labels.AI, report=self.report.detail,
+        self.resolver = app.services.TagResolver(self.cleanup_stash, source=merge_labels.AI, report=self.report.detail,
                                         create_missing=app.CREATE_MISSING)
         bar = tqdm(self.cleanup_stash.iter_scenes(self.scene_ids), desc="Affected scene cleanup", unit="scene")
         for current in bar:
@@ -100,7 +100,7 @@ class CleanupRun:
                 self.stats["processed"] += 1
             except Exception as exc:
                 self.stats["errors"] += 1
-                self.report.issue('cleanup', '', scene_id, exc, app.safe_error(exc, api_key=app.STASH_API_KEY))
+                self.report.issue('cleanup', '', scene_id, exc, app.services.safe_error(exc, api_key=app.STASH_API_KEY))
             self.report.progress(bar, self.stats)
 
     def _prune(self):
@@ -129,3 +129,4 @@ class CleanupRun:
             candidates = self.sql.marker_group_candidates(delta) if self.sql is not None else None
             self.stats.update(prune_groups(
                 self.stash, self.report.detail, candidate_ids=candidates, usage_delta=delta))
+

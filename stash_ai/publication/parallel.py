@@ -5,19 +5,15 @@ all Stash access, tag resolution, publication intent and SQLite writes serial.
 """
 from __future__ import annotations
 
-import atexit
 from collections import Counter
 from concurrent.futures import ProcessPoolExecutor
 from multiprocessing import get_context
 from pathlib import Path
 
-from stash_ai.storage.store import StateStore
+from stash_ai.runtime.workers import open_read_worker
 
 
-_WORKER_APP = None
-_WORKER_STORE = None
-_WORKER_CORE_POLICIES = None
-_WORKER_SCENE_POLICIES = None
+_WORKER_CONTEXT = None
 
 _RUNTIME_SETTINGS = (
     "APPLY_SCENE_TAGS",
@@ -42,43 +38,31 @@ def runtime_settings(app):
 
 def _init_worker(state_db, scope, settings, core_policies, scene_policies,
                  cache_bytes, memory_budget_bytes):
-    global _WORKER_APP, _WORKER_STORE, _WORKER_CORE_POLICIES, _WORKER_SCENE_POLICIES
-    from stash_ai import cli as app
-
-    for name, value in settings.items():
-        setattr(app, name, value)
-    store = StateStore(
-        state_db,
-        scope,
-        True,
-        cache_bytes=cache_bytes,
-        memory_budget_bytes=memory_budget_bytes,
-        allow_cleanup=True,
-        # The parent owns the only writer lock. During merge it changes
-        # publication state, never inference results consumed by workers.
+    global _WORKER_CONTEXT
+    if _WORKER_CONTEXT is not None:
+        _WORKER_CONTEXT.close()
+    _WORKER_CONTEXT = open_read_worker(
+        state_db, scope, settings, core_policies, scene_policies,
+        cache_bytes, memory_budget_bytes,
+        # Parent changes publication state, never inference evidence.
         allow_parent_publication_updates=True,
     )
-    atexit.register(store.close)
-    _WORKER_APP = app
-    _WORKER_STORE = store
-    _WORKER_CORE_POLICIES = core_policies
-    _WORKER_SCENE_POLICIES = scene_policies
 
 
 def _worker_evidence(scene_id):
     """Return one scene's merge evidence or a serializable failure."""
-    if _WORKER_APP is None or _WORKER_STORE is None:
+    if _WORKER_CONTEXT is None:
         return str(scene_id), None, None, None, "Merge worker was not initialized."
     from stash_ai.evidence import pipeline as merge
 
     diagnostics = Counter()
     try:
         scene_hits, spans = merge.evidence(
-            _WORKER_APP,
-            _WORKER_STORE,
+            _WORKER_CONTEXT.settings,
+            _WORKER_CONTEXT.store,
             str(scene_id),
-            _WORKER_CORE_POLICIES,
-            _WORKER_SCENE_POLICIES,
+            _WORKER_CONTEXT.core_policies,
+            _WORKER_CONTEXT.scene_policies,
             diagnostics,
         )
         return str(scene_id), scene_hits, spans, diagnostics, None
@@ -123,3 +107,4 @@ def iter_parallel_evidence(app, state_db, scope, scene_ids, core_policies,
             chunksize=1,
             buffersize=max(workers, 2),
         )
+

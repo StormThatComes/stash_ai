@@ -8,7 +8,7 @@ import zlib
 
 import pytest
 
-from stash_ai import cli as app
+from tests.helpers.runtime import runtime as app
 from stash_ai import db as stash_db
 import stash_ai.storage.store as merge_store
 from tests.test_db import issues, seed
@@ -170,5 +170,6 @@ def test_cli_rejects_unusable_payload_offline(tmp_path, monkeypatch):
     path = tmp_path / "state.sqlite3"
     save_result(path, "frames", [{}])
     for name in ("StashClient", "load_model_settings", "load_tagger"):
-        monkeypatch.setattr(app, name, lambda *a, **kw: pytest.fail("db-check must stay offline"))
+        monkeypatch.setattr(app.services, name, lambda *a, **kw: pytest.fail("db-check must stay offline"))
     assert app.main(["--state-db", str(path), "--db-check"]) == 1
+

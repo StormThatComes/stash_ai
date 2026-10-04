@@ -5,7 +5,7 @@ import sqlite3
 import pytest
 import yaml
 
-from stash_ai import cli as app
+from tests.helpers.runtime import runtime as app
 from stash_ai.publication import merged as merge_sync
 from stash_ai.cleanup import state as cleanup
 from stash_ai.cleanup import client as cleanup_client
@@ -138,7 +138,7 @@ def test_publication_masks_are_lazy_and_unbanning_restores_raw_evidence(pipeline
     stash = SQLStash()
     stash.tags, stash.scene = deepcopy(p.stash.tags), deepcopy(p.stash.scene)
     stash.scenes = {'1': stash.scene}
-    monkeypatch.setattr(app, 'create_stash_client', lambda *_: stash)
+    monkeypatch.setattr(app.services, 'create_stash_client', lambda *_: stash)
     def blobs():
         with sqlite3.connect(p.path) as db:
             return (db.execute('SELECT data FROM results ORDER BY model,kind').fetchall(),
@@ -158,7 +158,7 @@ def test_publication_masks_are_lazy_and_unbanning_restores_raw_evidence(pipeline
     options(tmp_path)  # Remove the ban; a normal merge may restore it from raw scores.
     merge_args = ['--models', 'all', *p.args[2:], '--merge-only', '--tag-exclusions', str(tmp_path/'tags.yml'),
                   '--marker-core-exclusions', str(tmp_path/'cores.yml')]
-    monkeypatch.setattr(app, 'load_tagger', lambda *_: pytest.fail('unban reran inference'))
+    monkeypatch.setattr(app.services, 'load_tagger', lambda *_: pytest.fail('unban reran inference'))
     assert app.main(merge_args) == 0
     assert 'ai:common' in {t['name'] for t in stash.scene['tags']}
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL)) as store:
@@ -175,7 +175,7 @@ def test_source_specific_cleanup_only_revisits_matching_scene_and_splits_bridge(
     for i in range(2, 100):
         stash.scenes[str(i)] = dict(id=str(i), tags=[stash.tag('ai:blocked')], scene_markers=[])
     with merge_store.StateStore(tmp_path/'state.sqlite3', merge_store.scope_for(app.STASH_URL)) as store:
-        merge_sync.sync_merged(app, stash, app.TagResolver(stash, source=merge_labels.AI), store, stash.find_scene('1'),
+        merge_sync.sync_merged(app, stash, app.services.TagResolver(stash, source=merge_labels.AI), store, stash.find_scene('1'),
             [hit('wd'), hit('oppai')], [span('joytag', 10, 20), span('oppai', 20, 30), span('wd', 30, 40)])
     install(monkeypatch, stash)
     stash.scene_reads.clear()
@@ -231,3 +231,4 @@ def test_lazy_global_mask_keeps_frozen_exclusions_during_later_source_cleanup(pi
         for item in spans:
             if item.get('build_options'):
                 assert all('extra' in values for values in item['build_options']['tag_exclusions'].values())
+

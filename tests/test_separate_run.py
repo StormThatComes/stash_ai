@@ -1,5 +1,5 @@
 """Separate-output model lifecycle and reporting."""
-from stash_ai import cli
+from tests.helpers.runtime import runtime as cli
 from stash_ai.inference import preparation
 from stash_ai.runs import separate
 from tests.helpers.cli import runtime_args
@@ -35,7 +35,7 @@ def test_run_model_accumulates_scene_phases_and_closes_tagger(monkeypatch):
         def iter_scenes(self, scene_id):
             return [{"id": "1"}, {"id": "2"}]
 
-    monkeypatch.setattr(cli, "TagResolver", Resolver)
+    monkeypatch.setattr(cli.services, "TagResolver", Resolver)
     def prepare_image(app, image, size):
         events.append(("prepare", app, image, size))
         return "prepared"
@@ -45,9 +45,9 @@ def test_run_model_accumulates_scene_phases_and_closes_tagger(monkeypatch):
         return Tagger()
 
     monkeypatch.setattr(preparation, "prepare_image", prepare_image)
-    monkeypatch.setattr(cli, "load_tagger", load_tagger)
-    monkeypatch.setattr(cli, "print_hierarchy_summary", lambda resolver: events.append("summary"))
-    monkeypatch.setattr(cli, "safe_error", lambda exc, **kwargs: str(exc))
+    monkeypatch.setattr(cli.services, "load_tagger", load_tagger)
+    monkeypatch.setattr(cli.services, "print_hierarchy_summary", lambda resolver: events.append("summary"))
+    monkeypatch.setattr(cli.services, "safe_error", lambda exc, **kwargs: str(exc))
 
     def process(*args):
         scene_id = args[5]
@@ -76,3 +76,4 @@ def test_run_model_accumulates_scene_phases_and_closes_tagger(monkeypatch):
     assert events[0] == ("prepare", cli, "frame", 448)
     assert events[-2:] == ["summary", "closed"]
     assert sum(isinstance(event, tuple) and event[0] == "progress" for event in events) == 2
+

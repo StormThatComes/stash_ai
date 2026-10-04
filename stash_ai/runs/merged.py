@@ -55,7 +55,7 @@ class MergedRun:
             if args.abandon_pending:
                 from stash_ai.storage.recovery import abandon
                 self.stats.update(abandon(store, self.report.write))
-            self.stash = app.create_stash_client(app.DRY_RUN)
+            self.stash = app.services.create_stash_client(app.DRY_RUN)
             self.stash.report = self.report
             try:
                 self._configure_stash()
@@ -79,7 +79,7 @@ class MergedRun:
 
     def _prepare_resolver(self):
         app, args, stash = self.app, self.args, self.stash
-        self.resolver = app.TagResolver(
+        self.resolver = app.services.TagResolver(
             stash, self.hierarchy, source=merge_labels.AI, report=self.report.detail,
             create_missing=app.CREATE_MISSING)
         self.use_catalog = bool(self.hierarchy or app.CREATE_MARKERS)
@@ -119,7 +119,7 @@ class MergedRun:
                     self.stats["errors"] += 1
                     self.report.issue(
                         'read sources', '', scene_id, exc,
-                        app.safe_error(exc, api_key=app.STASH_API_KEY))
+                        app.services.safe_error(exc, api_key=app.STASH_API_KEY))
 
     def _apply_thresholds(self):
         args, app = self.args, self.app
@@ -170,7 +170,7 @@ class MergedRun:
             # Refresh only after an actual delete so merge_checks describe the
             # catalog the next run will observe without adding a read to the
             # unchanged hot path.
-            resolver = self.app.TagResolver(
+            resolver = self.app.services.TagResolver(
                 self.stash, self.hierarchy, source=merge_labels.AI,
                 create_missing=self.app.CREATE_MISSING)
             resolver.preload()
@@ -197,13 +197,13 @@ class MergedRun:
             return sql
         except Exception as exc:
             self.report.detail('SQL prune unavailable; using GraphQL: ' +
-                               self.app.safe_error(exc, api_key=self.app.STASH_API_KEY))
+                               self.app.services.safe_error(exc, api_key=self.app.STASH_API_KEY))
         self.stats['merge_prune_graphql_fallback'] += 1
         return None
 
     def _prune_outputs(self):
         app, args, stash = self.app, self.args, self.stash
-        app.print_hierarchy_summary(self.resolver)
+        app.services.print_hierarchy_summary(self.resolver)
         if self.stats['errors'] or not (args.prune_empty_tags or app.CREATE_MARKERS):
             return False
         pruned_before = self.stats['tags_pruned'] + self.stats['marker_group_tags_pruned']
@@ -230,3 +230,4 @@ class MergedRun:
                 stash, self.report.detail, candidate_ids=candidates, usage_delta=delta))
         pruned_after = self.stats['tags_pruned'] + self.stats['marker_group_tags_pruned']
         return not stash.dry_run and pruned_after > pruned_before
+
