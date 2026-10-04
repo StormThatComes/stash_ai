@@ -1,14 +1,14 @@
 """Offline model utility and leave-one-model-out ablation reporting."""
 
 from stash_ai.reports.model.comparison import _marker_key, _marker_delta
-from stash_ai.evidence.occurrences import is_occurrence
+from stash_ai.evidence.marker_identity import is_occurrence
 
 from dataclasses import replace
 import json
 
 import pytest
 
-from stash_ai import cli as app
+from tests.helpers.runtime import runtime as app
 from stash_ai.evidence import pipeline as merge
 import stash_ai.evidence.intervals as merge_intervals
 import stash_ai.storage.store as merge_store
@@ -249,8 +249,8 @@ def test_cli_model_report_uses_saved_evidence_without_models_or_stash(tmp_path, 
         state.put("1", "wd", inference_pair("saved"))
 
     destination = tmp_path / "model-report.json"
-    monkeypatch.setattr(app, "load_model_settings", lambda *a, **k: pytest.fail("loaded model settings"))
-    monkeypatch.setattr(app, "create_stash_client", lambda *a, **k: pytest.fail("connected to Stash"))
+    monkeypatch.setattr(app.services, "load_model_settings", lambda *a, **k: pytest.fail("loaded model settings"))
+    monkeypatch.setattr(app.services, "create_stash_client", lambda *a, **k: pytest.fail("connected to Stash"))
     preloaded = []
     original_preload = merge_store.StateStore.preload_sources
 
@@ -259,11 +259,16 @@ def test_cli_model_report_uses_saved_evidence_without_models_or_stash(tmp_path, 
         return original_preload(store)
 
     monkeypatch.setattr(merge_store.StateStore, "preload_sources", preload_sources)
+    monkeypatch.setattr(app, "APPLY_SCENE_TAGS", False)
+    monkeypatch.setattr(app, "CREATE_MARKERS", False)
+    policy_before = app.TEMPORAL_POLICY
 
     assert app.main([
         "--state-db", str(path),
         "--model-report", str(destination),
     ]) == 0
+    assert app.APPLY_SCENE_TAGS is app.CREATE_MARKERS is False
+    assert app.TEMPORAL_POLICY is policy_before
 
     captured = capsys.readouterr()
     assert preloaded == [True]

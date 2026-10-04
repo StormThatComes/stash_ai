@@ -5,7 +5,7 @@ import random
 
 import pytest
 
-from stash_ai import cli as app
+from tests.helpers.runtime import runtime as app
 import stash_ai.evidence.intervals as merge_intervals
 import stash_ai.evidence.labels as merge_labels
 import stash_ai.storage.store as merge_store
@@ -122,7 +122,7 @@ def test_publication_split_duplicates_cleanup_and_retry_match_scanner(
             manual.update(seconds=75, end_seconds=None)
             point = {**span('wd', 75, None, 'location'), 'derived': 'occurrence'}
             path = tmp_path/(implementation.__name__ + '.sqlite3')
-            resolver = app.TagResolver(stash, source=merge_labels.AI)
+            resolver = app.services.TagResolver(stash, source=merge_labels.AI)
             # Seed a normal publication before testing cleanup and preview.
             base = [span('wd', 10, 20), span('dtq', 30, 40), point]
             with merge_store.StateStore(path, 'scope') as store:
@@ -163,3 +163,4 @@ def test_publication_split_duplicates_cleanup_and_retry_match_scanner(
             if dry:
                 assert path.read_bytes() == source
     assert variants[0] == variants[1]
+

@@ -16,16 +16,17 @@ from stash_ai.runtime.report import RunReport
 from stash_ai.storage.store import StateStore
 from stash_ai.evidence.temporal.policy import TemporalPolicy
 from tests.helpers.cli import runtime_args
+from stash_ai.runtime.context import RuntimeContext
 
 
 @pytest.fixture
 def publication(tmp_path, monkeypatch):
     messages, writes, computed, worker_jobs = [], [], [], []
-    app = SimpleNamespace(
+    app = RuntimeContext(
         DRY_RUN=False, APPLY_SCENE_TAGS=True, CREATE_MARKERS=True,
         TEMPORAL_POLICY=TemporalPolicy(enabled=False), STASH_API_KEY='',
-        safe_error=lambda exc, **kwargs: str(exc),
     )
+    app.services.safe_error = lambda exc, **kwargs: str(exc)
     report = RunReport(False, messages.append)
     args = runtime_args(
         report=report,
@@ -211,3 +212,4 @@ def test_pool_failure_never_retries_completed_scenes(publication, monkeypatch, c
     assert p.publisher.stats['errors'] == 3 - completed
     assert p.publisher.stats['scenes_synced'] == completed
     assert any('merge workers' in message and 'pool failed' in message for message in p.messages)
+

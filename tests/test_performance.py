@@ -15,7 +15,7 @@ from PIL import Image
 from stash_ai.commands import hierarchy as hierarchy_commands
 from stash_ai.domain import Cue, TagHierarchy
 from stash_ai.inference import checkpoints, prediction, preparation, sprites
-from stash_ai import cli as app
+from tests.helpers.runtime import runtime as app
 from stash_ai.evidence import pipeline as merge
 import stash_ai.evidence.labels as merge_labels
 import stash_ai.storage.results as merge_results
@@ -64,7 +64,7 @@ def test_publication_code_tracks_extracted_modules(monkeypatch, filename):
     'commands/marker_groups.py', 'cleanup/groups.py', 'cleanup/markers.py', 'cleanup/run.py', 'storage/recovery.py', 'publication/recovery.py', 'commands/recovery.py', 'cleanup/sql.py', 'cleanup/sql_session.py',
     'rethreshold/execution.py', 'rethreshold/targets.py', 'db/checks.py',
     'db/validation/common.py', 'db/validation/schema.py', 'db/validation/results.py',
-    'db/validation/checkpoints.py', 'db/validation/state.py', 'runs/separate.py', 'cleanup/evidence.py', 'cleanup/scenes.py',
+    'db/validation/checkpoints.py', 'db/validation/state.py', 'runs/separate.py', 'cleanup/evidence.py', 'cleanup/scenes.py', 'evidence/frozen_replay.py', 'stash_api/scene_reads.py', 'commands/modes.py', 'reports/io.py', 'reports/runtime.py', 'cleanup/sql_discovery.py', 'cleanup/sql_mutations.py', 'cleanup/sql_preview.py',
 ])
 def test_publication_code_ignores_runtime_and_maintenance_modules(monkeypatch, filename):
     before = performance.publication_code()
@@ -115,7 +115,7 @@ def test_merge_check_invalidates_real_changes(pipeline, monkeypatch, tmp_path, c
     calls = []
     original = merge.evidence
     monkeypatch.setattr(merge, 'evidence', lambda *a, **kw: (calls.append(1), original(*a, **kw))[1])
-    monkeypatch.setattr(app, 'load_tagger', fail)
+    monkeypatch.setattr(app.services, 'load_tagger', fail)
     assert app.main(args) == 0 and calls == [1]
 
 
@@ -331,3 +331,4 @@ def test_detached_records_cannot_reuse_a_stale_segment_digest(tmp_path):
         detached['items'].append({'new': True})
         assert performance_segments.segment_digest(detached) != original
         assert performance_segments.segment_digest(borrowed) == original and borrowed['items'] == []
+

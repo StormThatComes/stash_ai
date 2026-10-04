@@ -1,18 +1,23 @@
 """Capture raw predictions and check completion without publication side effects."""
 from datetime import datetime, timezone
+from stash_ai.config import vocabulary_digest
+from stash_ai.models import ModelSource
+from stash_ai.publication import markers as marker_ops
 import hashlib
 import json
+from .input_identity import cue_manifest
+from stash_ai.evidence.contracts import RetainedRecord
 
 
 def now():
     return datetime.now(timezone.utc).isoformat()
 
 
-def capture_outputs(app, config, vocabulary, cues, predictions, frames, analysis=None):
+def capture_outputs(app, config, vocabulary, cues, predictions, frames, analysis=None) -> dict[str, RetainedRecord]:
     from stash_ai.evidence.retention import marker_cache_floor
-    cue_data = [[cue.start, cue.end, cue.image, list(cue.rect)] for cue in cues]
+    cue_data = cue_manifest(cues)
     meta = {"origin": "inference", "captured_at": now(), "repo": config.source.repo,
-            "revision": config.source.revision, "vocabulary_sha256": app.vocabulary_digest(vocabulary.labels),
+            "revision": config.source.revision, "vocabulary_sha256": vocabulary_digest(vocabulary.labels),
             "input_cues_sha256": hashlib.sha256(json.dumps(cue_data, ensure_ascii=False).encode()).hexdigest(),
             "scene_threshold": config.scene_threshold, "marker_threshold": config.marker_threshold,
             "aggregation": app.AGGREGATION, "top_k_frames": app.TOP_K_FRAMES}
@@ -42,3 +47,10 @@ def capture_outputs(app, config, vocabulary, cues, predictions, frames, analysis
 def has_outputs(app, store, scene_id, model):
     from stash_ai.storage.progress import completed, output_kinds
     return completed(store, scene_id, model, output_kinds(app))
+
+
+
+def outputs_already_present(app, scene: dict, source: ModelSource) -> bool:
+    tagged = any(tag["name"].startswith(source.prefix) for tag in scene.get("tags") or [])
+    marked = any(marker_ops.owned_marker(marker, source) for marker in scene.get("scene_markers") or [])
+    return (not app.APPLY_SCENE_TAGS or tagged) and (not app.CREATE_MARKERS or marked)

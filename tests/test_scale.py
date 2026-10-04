@@ -14,7 +14,7 @@ import pytest
 from stash_ai.inference.identity import model_identity
 from stash_ai.domain import Cue
 from stash_ai.inference import checkpoints, preparation, sprites
-from stash_ai import cli as app
+from tests.helpers.runtime import runtime as app
 from stash_ai.evidence import frames as fusion
 from stash_ai.evidence import pipeline as merge
 import stash_ai.evidence.intervals as merge_intervals
@@ -264,8 +264,8 @@ def test_multi_batch_prefetch_resume_matches_uninterrupted_results(pipeline, pre
 def test_prefetch_queue_has_a_strict_bound(pipeline, monkeypatch):
     p = pipeline
     p.cues = [Cue(i, i+1, 'sprite', (0,0,1,1)) for i in range(30)]
-    config = app.load_model_settings(app.MODELS_CONFIG_FILE, ['wd'], None)[0]
-    model = app.load_tagger(config, p.vocab, partial(preparation.prepare_image, app))
+    config = app.services.load_model_settings(app.MODELS_CONFIG_FILE, ['wd'], None)[0]
+    model = app.services.load_tagger(config, p.vocab, partial(preparation.prepare_image, app))
     ready = threading.Event()
     original = model.prepare
     def prepare(value):
@@ -300,7 +300,7 @@ def test_9000_scene_dry_run_prints_only_a_collection_summary(pipeline, monkeypat
         return dict(id=str(identifier), paths={}, tags=[], scene_markers=[])
     monkeypatch.setattr(p.stash, 'iter_scenes', lambda ids: (scene(i) for i in range(9000)))
     monkeypatch.setattr(p.stash, 'find_scene', scene)
-    monkeypatch.setattr(app, 'load_tagger', lambda *args: pytest.fail('merge-only loaded a model'))
+    monkeypatch.setattr(app.services, 'load_tagger', lambda *args: pytest.fail('merge-only loaded a model'))
     args = ['--models', 'wd', '--no-hierarchy', '--state-db', str(p.path), '--merge-only', '--dry-run', '--ram-cache-gb', '.001']
     assert app.main(args) == 0
     output = capsys.readouterr().out
@@ -316,7 +316,7 @@ def test_invalid_ram_budget_is_rejected_before_work(pipeline, value):
 
 
 def test_new_policy_switches_do_not_invalidate_inference_or_old_snapshots(pipeline, monkeypatch):
-    config = app.load_model_settings(app.MODELS_CONFIG_FILE, ['wd'], None)[0]
+    config = app.services.load_model_settings(app.MODELS_CONFIG_FILE, ['wd'], None)[0]
     before = model_identity(app, config, pipeline.vocab)
     monkeypatch.setattr(app, 'TEMPORAL_POLICY', replace(app.TEMPORAL_POLICY, shared_scene_tags=False,
                        short_marker_extras=False, extra_short_min_hits=7))
@@ -338,7 +338,7 @@ def test_shared_scene_merge_only_reuses_cache_and_preserves_other_outputs(pipeli
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), True) as state:
         before = state.connection.execute('SELECT model,kind,data FROM results ORDER BY model,kind').fetchall()
     markers = deepcopy(p.stash.scene['scene_markers'])
-    monkeypatch.setattr(app, 'load_tagger', lambda *args: pytest.fail('merge-only loaded a model'))
+    monkeypatch.setattr(app.services, 'load_tagger', lambda *args: pytest.fail('merge-only loaded a model'))
     monkeypatch.setattr(sprites, 'fetch_cues', lambda *args: pytest.fail('merge-only fetched input images'))
     assert app.main([*args, '--merge-only', '--scene-tags-only']) == 0
     assert [tag['name'] for tag in p.stash.scene['tags']] == ['ai:common']
@@ -366,7 +366,7 @@ def test_shared_scene_cleanup_command_preserves_sources_and_manual_removals(pipe
         p.stash.scene['tags'] = []
     excluded = tmp_path/'scene.yml'
     excluded.write_text('version: 1\nexcluded_scene_tags: []\nby_model:\n  joytag: [common]\n')
-    monkeypatch.setattr(app, 'load_tagger', lambda *args: pytest.fail('cleanup loaded a model'))
+    monkeypatch.setattr(app.services, 'load_tagger', lambda *args: pytest.fail('cleanup loaded a model'))
     cleanup = [*args, '--cleanup-scene-tags-only', '--scene-tag-exclusions', str(excluded)]
     assert app.main(cleanup) == 0
     assert [tag['name'] for tag in p.stash.scene['tags']] == ([] if manual_delete else ['ai:common'])
@@ -375,3 +375,4 @@ def test_shared_scene_cleanup_command_preserves_sources_and_manual_removals(pipe
         assert not hits if manual_delete else hits[0]['support_sources'] == ['wd', 'oppai']
     p.stash.writes.clear()
     assert app.main(cleanup) == 0 and not p.stash.writes
+

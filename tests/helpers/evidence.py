@@ -5,7 +5,7 @@ from copy import deepcopy
 import numpy as np
 
 from stash_ai.domain import Cue, FramePrediction
-from stash_ai import cli as app
+from tests.helpers.runtime import runtime as app
 from stash_ai.models import SOURCES
 from stash_ai.evidence.temporal.statistics import SceneAccumulator
 
@@ -52,3 +52,4 @@ def paired_records(values, threshold=.8, marker_threshold=.8):
             score=sum(sorted(scores, reverse=True)[:2]) / min(2, len(scores)), statistics=stats['core'])] if stats else [])
         markers[source], scenes[source] = [marker], [scene]
     return scenes, markers
+

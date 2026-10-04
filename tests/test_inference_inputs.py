@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from stash_ai import cli as app
+from tests.helpers.runtime import runtime as app
 from stash_ai.inference import sprites
 from stash_ai.inference.inputs import VerifiedMedia, RunInputs, inspect_input
 from stash_ai.runtime.cache import RamCache
@@ -73,4 +73,5 @@ def test_media_eviction_revalidates_and_new_run_accepts_new_bytes(pipeline, monk
     with pytest.raises(RuntimeError, match='media changed'):
         inputs.inspect(app, paths, 'model')
     assert RunInputs(p.stash, cache).inspect(app, paths, 'model')[2] != original
+
 

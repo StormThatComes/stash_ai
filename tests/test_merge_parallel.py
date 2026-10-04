@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from stash_ai.rethreshold import markers as marker_updates
-from stash_ai import cli as app
+from tests.helpers.runtime import runtime as app
 from stash_ai.evidence import pipeline as merge
 import stash_ai.storage.store as merge_store
 from stash_ai.publication import parallel as merge_parallel
@@ -63,7 +63,7 @@ def test_parallel_worker_tolerates_parent_publication_commits(tmp_path, rethresh
         64 * 2**20,
         512 * 2**20,
     )
-    worker = merge_parallel._WORKER_STORE
+    worker = merge_parallel._WORKER_CONTEXT.store
     try:
         if rethresholded:
             assert worker.preview_source
@@ -80,11 +80,8 @@ def test_parallel_worker_tolerates_parent_publication_commits(tmp_path, rethresh
         assert second[-1] is None
         assert second[0] == "2"
     finally:
-        worker.close()
-        merge_parallel._WORKER_STORE = None
-        merge_parallel._WORKER_APP = None
-        merge_parallel._WORKER_CORE_POLICIES = None
-        merge_parallel._WORKER_SCENE_POLICIES = None
+        merge_parallel._WORKER_CONTEXT.close()
+        merge_parallel._WORKER_CONTEXT = None
 
 
 def test_parallel_evidence_matches_serial_read_only(tmp_path):
@@ -139,3 +136,4 @@ def test_parallel_evidence_matches_serial_read_only(tmp_path):
         memory_budget_bytes=256 * 2**20,
     ))
     assert path.read_bytes() == before
+

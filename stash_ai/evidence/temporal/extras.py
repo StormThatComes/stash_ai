@@ -1,7 +1,7 @@
 """Qualify extra labels over compatible observations and full interval unions."""
 from collections import defaultdict
 from .policy import TemporalPolicy
-from stash_ai.evidence.intervals import append_interval
+from stash_ai.evidence.interval_geometry import append_interval
 
 
 def longest_extra_run(evidence):
@@ -102,3 +102,4 @@ def merged_extras(component):
                         signatures=sorted({signature for record in records for signature in record["signatures"]}))
     component["extra_tags"] = sorted(accepted - {component["tag"]})
     component["extra_evidence"] = statistics
+

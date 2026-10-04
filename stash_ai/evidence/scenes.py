@@ -138,7 +138,7 @@ def shared_scene_contributions(app, index, scene_records, policies, existing=(),
     scene_by_run = _scene_run_index(scene_records)
     existing = {entry['tag'] for entry in existing}
     options = dict(policy=asdict(policy), max_tags=app.MAX_TAGS,
-                   scene_thresholds=dict(getattr(app, "SCENE_THRESHOLDS", {})),
+                   scene_thresholds=dict(app.SCENE_THRESHOLDS or {}),
                    scene_exclusions={source: sorted(values) for source, values in policies.items()})
     candidates, usable, partial = [], False, False
 
@@ -169,12 +169,11 @@ def shared_scene_contributions(app, index, scene_records, policies, existing=(),
 
 def cleanup_scene_support(app, store, scene_id, hits, selected, policies):
     """Revoke only published sources, under their frozen rules and input records."""
-    from types import SimpleNamespace
     from stash_ai.evidence.frames import FrameIndex
-    from stash_ai.evidence.identity import marker_segment_signature
     from stash_ai.signatures import digest
-    from stash_ai.evidence.temporal.policy import TemporalPolicy
-    cleaned, rebuilt, records = [], {}, {}
+    from stash_ai.evidence.frozen_replay import PublishedRecords, snapshot_context, frozen_policies
+    cleaned, rebuilt = [], {}
+    published = PublishedRecords(store, scene_id)
     for hit in hits:
         if hit.get('derived') != 'shared_scene_frames':
             if hit['source'] not in selected or hit['tag'] not in policies[hit['source']]:
@@ -187,31 +186,17 @@ def cleanup_scene_support(app, store, scene_id, hits, selected, policies):
         if key not in rebuilt:
             matching = {}
             for kind, field in (('scene', 'scene_context'), ('markers', 'frame_context')):
-                if kind not in records:
-                    available = store.records(scene_id, kind, borrow=True)
-                    if kind == 'markers':
-                        from stash_ai.evidence.cache_views import frame_records
-                        available = frame_records(store.records(scene_id, 'scene', borrow=True), available)
-                    records[kind] = {source: {marker_segment_signature(segment): segment for segment in segments}
-                                     for source, segments in available.items()}
-                matching[kind] = {}
-                for source, signatures in hit[field].items():
-                    available = records[kind].get(source, {})
-                    if not set(signatures) <= set(available):
-                        raise RuntimeError('Shared scene sources changed since publication; run --merge-only before cleanup.')
-                    matching[kind][source] = [available[sig] for sig in signatures]
-            context = SimpleNamespace(**vars(app))
+                matching[kind] = published.matching(
+                    kind, hit[field], scene_frames=kind == 'markers', error=
+                    'Shared scene sources changed since publication; run --merge-only before cleanup.')
             options = hit['build_options']
-            context.TEMPORAL_POLICY = TemporalPolicy.from_snapshot(options['policy'])
-            context.MAX_TAGS = options['max_tags']
-            context.SCENE_THRESHOLDS = options.get('scene_thresholds', {})
+            context = snapshot_context(app, options, 'scene')
             from stash_ai.evidence.cache_views import views, frame_records
             context, matching['scene'] = views(context, matching['scene'])
             matching['markers'] = frame_records(matching['scene'], matching['markers'])
-            frozen = {source: frozenset(options['scene_exclusions'][source]) |
-                      (policies[source] if source in selected else frozenset()) for source in SOURCES}
-            index = FrameIndex(context, matching['markers'], {s: frozenset() for s in SOURCES}, cache=store.cache)
-            rebuilt[key] = shared_scene_contributions(context, index, matching['scene'], frozen)
+            frozen = frozen_policies(options, 'scene_exclusions', selected, policies)
+            with FrameIndex(context, matching['markers'], {s: frozenset() for s in SOURCES}, cache=store.cache) as index:
+                rebuilt[key] = shared_scene_contributions(context, index, matching['scene'], frozen)
         for candidate in rebuilt[key]:
             if candidate['tag'] == hit['tag'] and candidate not in cleaned:
                 cleaned.append(candidate)

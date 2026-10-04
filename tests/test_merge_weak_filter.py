@@ -8,7 +8,7 @@ import math
 
 import pytest
 
-from stash_ai import cli as app
+from tests.helpers.runtime import runtime as app
 import stash_ai.evidence.identity as thresholds_identity
 from stash_ai.evidence import frames as fusion
 import stash_ai.evidence.intervals as merge_intervals
@@ -150,3 +150,4 @@ def test_consensus_at_support_floor_survives_wider_retention():
     assert markers[0]['tag'] == 'core'
     assert (markers[0]['start'], markers[0]['end']) == (0, 3)
     assert markers[0]['sources'] == ['wd', 'dtq']
+

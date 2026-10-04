@@ -55,7 +55,8 @@ def main():
     if min(args.frames, args.labels, args.repeats) < 1 or args.weak_labels < 0:
         parser.error('frames, labels and repeats must be positive; weak-labels must be nonnegative')
     sys.path.insert(0, str(args.project.resolve()))
-    from stash_ai import cli as app
+    from stash_ai.runtime.context import RuntimeContext
+    app = RuntimeContext()
     from stash_ai.evidence import frames as fusion
     import stash_ai.evidence.intervals as merge_intervals
     import stash_ai.evidence.source_markers as merge_source_markers
@@ -91,3 +92,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+

@@ -5,6 +5,7 @@ from stash_ai.publication.index import MarkerIntervalIndex, PreviousMarkerRanges
 import stash_ai.evidence.intervals as merge_intervals
 import stash_ai.evidence.labels as merge_labels
 from stash_ai.runtime.timing import stage
+from .types import PreparedEvidence
 
 
 def _previous_ranges(app, store, scene_id):
@@ -40,4 +41,5 @@ def prepare_sync_evidence(app, stash, store, scene, scene_hits, spans, *, cleanu
         markers = [marker for marker in markers if existing.overlapping(
             merge_labels.AI.prefix + marker["tag"], {"seconds": marker["start"], "end_seconds": marker["end"]})]
         spans = [item for marker in markers for item in marker["contributors"]]
-    return scene_hits, spans, markers, scene_labels, previous_ranges
+    return PreparedEvidence(scene_hits, spans, markers, scene_labels, previous_ranges)
+

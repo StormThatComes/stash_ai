@@ -1,11 +1,13 @@
 """SQL preflight preserves retention guards, history and legacy preview isolation."""
+from stash_ai.rethreshold.plans import RecordAccess, PendingPolicy, ThresholdRequest
 import json
 import sqlite3
 
 import pytest
 
 from stash_ai.rethreshold import execution as rethreshold_execution, scenes as scene_updates
-from stash_ai import cli as app, db
+from stash_ai import db
+from tests.helpers.runtime import runtime as app
 from stash_ai.publication import fingerprints as performance
 import stash_ai.storage.merge_checks as performance_merge_checks
 from stash_ai.reports.developer import report as developer_report
@@ -39,7 +41,7 @@ def test_combined_check_and_apply_never_read_payloads(tmp_path, monkeypatch):
 
         def guarded_plan(*args, **kwargs):
             nonlocal checking, checks
-            checking = kwargs.get('metadata_only', False)
+            checking = kwargs['request'].access is RecordAccess.METADATA
             checks += int(checking)
             try:
                 return plan(*args, **kwargs)
@@ -55,7 +57,7 @@ def test_combined_check_and_apply_never_read_payloads(tmp_path, monkeypatch):
         store.connection.set_authorizer(authorize)
         result = rethreshold_execution.run(app, store, ['1', '2'], [config(.8)], report, markers=True)
         assert result == {'scene_thresholds_updated': 2}
-        assert checks == 4  # Check and Apply both use the small metadata view.
+        assert checks == 2  # Each target is planned once; Apply reuses that metadata plan.
         assert report.timing_calls['state_json_decode'] == 0
         assert (blobs(store), metadata_rows(store)) == before
 
@@ -101,8 +103,8 @@ def test_metadata_check_matches_payload_validation(tmp_path, problem):
         messages = []
         for metadata_only in (False, True):
             with pytest.raises(ValueError) as error:
-                scene_updates.plan(app, store, '1', config(.8), markers=True,
-                                 direct=True, metadata_only=metadata_only)
+                scene_updates.plan(app, store, '1', config(.8), request=ThresholdRequest(kinds=('scene', 'markers'),
+                                     access=RecordAccess.METADATA if metadata_only else RecordAccess.MODEL))
             messages.append(str(error.value))
         assert messages[0] == messages[1]
 
@@ -127,8 +129,8 @@ def test_combined_pending_guard_keeps_noop_semantics(tmp_path, monkeypatch, same
         store.put('1', 'wd', outputs())
         store.prepare('1', {'markers': {'contributions': []}})
         target = config(.4 if same_threshold else .8)
-        planned = scene_updates.plan(app, store, '1', target, markers=True,
-                                   direct=True, metadata_only=True, pending_checked=True)
+        planned = scene_updates.plan(app, store, '1', target, request=ThresholdRequest(kinds=('scene', 'markers'),
+                                       access=RecordAccess.METADATA, pending=PendingPolicy.CHECKED_BY_EXECUTOR))
         assert bool(planned) == (not same_threshold)
         # A pending combined no-op remains valid; an actual edit fails before Apply.
         if not same_threshold:
@@ -159,15 +161,13 @@ def test_old_database_backfills_once_and_keeps_inline_overrides(tmp_path, monkey
         store.report = report
         statements = []
         store.connection.set_trace_callback(statements.append)
-        assert scene_updates.plan(app, store, '1', config(.4), markers=True,
-                                direct=True, metadata_only=True)
+        assert scene_updates.plan(app, store, '1', config(.4), request=ThresholdRequest(kinds=('scene', 'markers'), access=RecordAccess.METADATA))
         assert report.timing_calls['state_json_decode'] == 2
         assert store.connection.execute('PRAGMA user_version').fetchone() == (version,)
         first = metadata_rows(store)
         assert len(first) == 2
         monkeypatch.setattr(store, 'unpack', lambda *a: pytest.fail('Repeated legacy decode'))
-        assert scene_updates.plan(app, store, '1', config(.4), markers=True,
-                                direct=True, metadata_only=True)
+        assert scene_updates.plan(app, store, '1', config(.4), request=ThresholdRequest(kinds=('scene', 'markers'), access=RecordAccess.METADATA))
         assert metadata_rows(store) == first
         assert not any(sql.startswith(('INSERT INTO results ', 'UPDATE results ')) for sql in statements)
     if dry_run:
@@ -269,14 +269,14 @@ def test_metadata_and_results_roll_back_together(tmp_path, monkeypatch):
     with StateStore(tmp_path/'state.sqlite3', 'scope') as store:
         store.put('1', 'wd', outputs())
         before = blobs(store), metadata_rows(store)
-        save = store.results._save_metadata
+        save = store.metadata.save
 
         def fail_second(scene, model, kind, segments):
             if kind == 'markers':
                 raise RuntimeError('metadata write failed')
             return save(scene, model, kind, segments)
 
-        monkeypatch.setattr(store.results, '_save_metadata', fail_second)
+        monkeypatch.setattr(store.metadata, 'save', fail_second)
         with pytest.raises(RuntimeError, match='metadata write failed'):
             store.put('1', 'wd', outputs(.6, 'new'))
         assert (blobs(store), metadata_rows(store)) == before
@@ -335,3 +335,4 @@ def test_compaction_and_anonymous_report_preserve_only_metadata_counts(tmp_path)
     assert report['database']['table_rows']['result_metadata'] == 2
     assert 'result_metadata' not in report['database']['blob_tables']
     assert 'marker_tag_blocklist' not in json.dumps(report)
+

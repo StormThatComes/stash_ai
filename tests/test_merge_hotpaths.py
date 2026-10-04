@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from stash_ai import cli as app
+from tests.helpers.runtime import runtime as app
 
 from stash_ai.evidence.observations import ObservationIndex
 from stash_ai.stash_api.sql import SceneReader, OPERATION, SQL, is_read_only_merge
@@ -114,7 +114,7 @@ def native_scene(db, identifier, markers=True, end=True, full=True):
 
 
 def client_for(db, *, end=True, deny=False):
-    client = app.create_stash_client(True)
+    client = app.services.create_stash_client(True)
     if not end:
         db.execute("UPDATE scene_markers SET end_seconds=NULL")
     calls = []
@@ -321,3 +321,4 @@ def test_publication_check_and_snapshots_share_one_commit(tmp_path):
         state.commit_prepared('1', ['scene'], publication=('p','f'))
         assert checked(state,'1','p','f')
         assert sum(sql == 'COMMIT' for sql in statements) == 1
+

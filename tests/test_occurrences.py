@@ -13,11 +13,12 @@ from stash_ai.domain import Cue
 from stash_ai.inference import sprites
 from stash_ai.cleanup import evidence as cleanup_evidence
 from stash_ai.publication import merged as merge_sync
-from stash_ai import cli as app
+from tests.helpers.runtime import runtime as app
 from stash_ai.evidence import pipeline as merge
 import stash_ai.evidence.labels as merge_labels
 import stash_ai.storage.store as merge_store
-from stash_ai.evidence.occurrences import OCCURRENCE_TAG, occurrence_contributions
+from stash_ai.evidence.marker_identity import OCCURRENCE_TAG
+from stash_ai.evidence.occurrences import occurrence_contributions
 from stash_ai.evidence.temporal.statistics import SceneAccumulator
 from stash_ai.evidence.temporal.policy import TemporalPolicy
 from tests.helpers.stash import Stash
@@ -155,7 +156,7 @@ def test_point_publication_is_idempotent_and_promotes_to_a_range(tmp_path, monke
     with merge_store.StateStore(tmp_path/'state', 'fixture') as state:
         put(state, scenes, markers)
         hits, spans = merge.evidence(app, state, '1', policies(), policies())
-        resolver = app.TagResolver(stash, source=merge_labels.AI)
+        resolver = app.services.TagResolver(stash, source=merge_labels.AI)
         merge_sync.sync_merged(app, stash, resolver, state, stash.find_scene('1'), hits, spans)
         point = deepcopy(stash.scene['scene_markers'][0]); stash.writes.clear()
         merge_sync.sync_merged(app, stash, resolver, state, stash.find_scene('1'), hits, spans)
@@ -181,7 +182,7 @@ def test_manual_location_suppresses_automatic_point_without_modifying_it(tmp_pat
     with merge_store.StateStore(tmp_path/'state', 'fixture') as state:
         put(state, scenes, markers)
         hits, spans = merge.evidence(app, state, '1', policies(), policies())
-        merge_sync.sync_merged(app, stash, app.TagResolver(stash, source=merge_labels.AI), state, stash.find_scene('1'), hits, spans)
+        merge_sync.sync_merged(app, stash, app.services.TagResolver(stash, source=merge_labels.AI), state, stash.find_scene('1'), hits, spans)
         assert state.snapshot('1', 'markers')[0]['contributions'] == []
     assert stash.scene['scene_markers'] == [manual]
 
@@ -227,7 +228,7 @@ def test_marker_cap_has_priority_over_additional_points(tmp_path, monkeypatch):
 
 
 def test_old_policy_snapshots_and_inference_identity_remain_compatible(pipeline, monkeypatch):
-    settings = app.load_model_settings(app.MODELS_CONFIG_FILE, ['wd'], None)[0]
+    settings = app.services.load_model_settings(app.MODELS_CONFIG_FILE, ['wd'], None)[0]
     identity = model_identity(app, settings, pipeline.vocab)
     saved = asdict(app.TEMPORAL_POLICY); saved.pop('occurrence_markers')
     assert not TemporalPolicy.from_snapshot(saved).occurrence_markers
@@ -244,7 +245,7 @@ def test_pipeline_reuses_results_for_markers_only_dry_run_and_cleanup(pipeline, 
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), True) as state:
         records = state.connection.execute('SELECT data FROM results ORDER BY kind').fetchall()
         assert state.records('1', 'scene')['wd'][0]['items'][0]['statistics']['peak_time'] == 3
-    monkeypatch.setattr(app, 'load_tagger', lambda *a: pytest.fail('merge or cleanup loaded a model'))
+    monkeypatch.setattr(app.services, 'load_tagger', lambda *a: pytest.fail('merge or cleanup loaded a model'))
     monkeypatch.setattr(sprites, 'fetch_cues', lambda *a: pytest.fail('merge or cleanup fetched media'))
     p.stash.writes.clear()
     assert app.main([*p.args, '--merge-only', '--markers-only']) == 0
@@ -271,7 +272,7 @@ def test_merge_only_recovers_old_cached_frames_without_rewriting_them(pipeline, 
         record['meta']['analysis_format'] = 2
         state.put('1', 'wd', {'scene': record})
     p.stash.scene['scene_markers'] = []
-    monkeypatch.setattr(app, 'load_tagger', lambda *a: pytest.fail('old cache caused inference'))
+    monkeypatch.setattr(app.services, 'load_tagger', lambda *a: pytest.fail('old cache caused inference'))
     assert app.main([*p.args, '--merge-only']) == 0
     assert len(p.stash.scene['scene_markers']) == 1 and p.stash.scene['scene_markers'][0]['seconds'] == 5
 
@@ -282,7 +283,7 @@ def test_enabling_points_does_not_invalidate_completed_inference(pipeline, monke
     disabled = tmp_path/'old.yml'; disabled.write_text('version: 1\noccurrence_markers: false\n')
     assert app.main([*p.args, '--temporal-policy', str(disabled)]) == 0
     assert not p.stash.scene['scene_markers']
-    monkeypatch.setattr(app, 'load_tagger', lambda *a: pytest.fail('policy change repeated inference'))
+    monkeypatch.setattr(app.services, 'load_tagger', lambda *a: pytest.fail('policy change repeated inference'))
     assert app.main(p.args) == 0
     assert len(p.stash.scene['scene_markers']) == 1 and p.stash.scene['scene_markers'][0]['seconds'] == 7
 
@@ -295,7 +296,7 @@ def test_point_publication_recovers_after_api_failure_without_inference(pipeline
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), True) as state:
         assert state.snapshot('1', 'markers')[1]['contributions'][0]['derived'] == 'occurrence'
     p.stash.fail_create = False
-    monkeypatch.setattr(app, 'load_tagger', lambda *a: pytest.fail('API retry loaded a model'))
+    monkeypatch.setattr(app.services, 'load_tagger', lambda *a: pytest.fail('API retry loaded a model'))
     assert app.main([*p.args, '--merge-only']) == 0
     assert len(p.stash.scene['scene_markers']) == 1
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), True) as state:
@@ -321,7 +322,7 @@ def test_cleanup_never_restores_a_manually_deleted_point(tmp_path):
     with merge_store.StateStore(tmp_path/'state', 'fixture') as state:
         put(state, scenes, markers)
         hits, spans = merge.evidence(app, state, '1', policies(), policies())
-        resolver = app.TagResolver(stash, source=merge_labels.AI)
+        resolver = app.services.TagResolver(stash, source=merge_labels.AI)
         merge_sync.sync_merged(app, stash, resolver, state, stash.find_scene('1'), hits, spans)
         stash.scene['scene_markers'] = []
         cores = policies(); cores['wd'] = frozenset({'core'})
@@ -329,3 +330,4 @@ def test_cleanup_never_restores_a_manually_deleted_point(tmp_path):
         assert cleaned
         merge_sync.sync_merged(app, stash, resolver, state, stash.find_scene('1'), hits, cleaned, migrate=False, cleanup=True)
         assert not stash.scene['scene_markers']
+

@@ -42,7 +42,8 @@ def main():
         parser.error('frames, labels and repeats must be positive')
     sys.path.insert(0, str(args.project.resolve()))
     import numpy as np
-    from stash_ai import cli as app
+    from stash_ai.runtime.context import RuntimeContext
+    app = RuntimeContext()
     from stash_ai.inference import prediction
     import stash_ai.evidence.intervals as merge_intervals
     import stash_ai.evidence.source_markers as merge_source_markers
@@ -84,3 +85,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+

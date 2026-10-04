@@ -1,4 +1,7 @@
 """Prepare runtime options, policies and model assets in CLI phase order."""
+from stash_ai.evidence.temporal.policy import TemporalPolicy
+from stash_ai.models import SOURCES
+
 
 
 def runtime_options(app, args):
@@ -18,15 +21,15 @@ def runtime_options(app, args):
 
 
 def selected_settings(app, args):
-    settings = app.load_model_settings(args.model_config, args.models, args.device, args.offline)
+    settings = app.services.load_model_settings(args.model_config, args.models, args.device, args.offline)
     print("Selected models: " + ", ".join(f"{item.source.title} ({item.source.prefix})" for item in settings))
     return settings
 
 
 def download_models(app, settings):
     for config in settings:
-        app.load_vocabulary(config)
-        app.ensure_files(config, app.weight_files(config))
+        app.services.load_vocabulary(config)
+        app.services.ensure_files(config, app.services.weight_files(config))
         if config.source.key == "joytag":
             from stash_ai.backends.joytag import loader_path
             loader_path(config.download_missing)
@@ -36,14 +39,14 @@ def download_models(app, settings):
 def policies(app, args, *, hierarchy_only, cleanup_only):
     from stash_ai.evidence.temporal.policy import load_policy
     app.TEMPORAL_POLICY = (
-        load_policy(app, args.temporal_policy, not args.no_temporal)
-        if not hierarchy_only else app.TemporalPolicy(enabled=False))
-    app.validate_config(scene_work=not hierarchy_only and not cleanup_only and not args.explain_tag)
-    empty_policies = {name: frozenset() for name in app.SOURCES}
+        load_policy(args.temporal_policy, not args.no_temporal)
+        if not hierarchy_only else TemporalPolicy(enabled=False))
+    app.services.validate_config(scene_work=not hierarchy_only and not cleanup_only and not args.explain_tag)
+    empty_policies = {name: frozenset() for name in SOURCES}
     core_policies = (
-        app.load_exclusion_policy(args.marker_core_exclusions, "excluded_core_tags")
+        app.services.load_exclusion_policy(args.marker_core_exclusions, "excluded_core_tags")
         if app.CREATE_MARKERS and not hierarchy_only else empty_policies)
-    scene_policies = app.load_exclusion_policy(args.scene_tag_exclusions, "excluded_scene_tags")
+    scene_policies = app.services.load_exclusion_policy(args.scene_tag_exclusions, "excluded_scene_tags")
     return core_policies, scene_policies
 
 
@@ -52,15 +55,15 @@ def catalogs(app, settings, args, scene_policies):
     catalogs, hierarchies = {}, {}
     for config in settings:
         source = config.source
-        vocabulary = app.load_vocabulary(config)
+        vocabulary = app.services.load_vocabulary(config)
         catalogs[source.key] = vocabulary
         hierarchy_path = args.hierarchy if source.key == "joytag" else getattr(args, source.key + "_hierarchy")
         if args.no_hierarchy:
             hierarchy = None
         elif hierarchy_path is not None:
-            hierarchy = app.load_tag_hierarchy(hierarchy_path, vocabulary.labels, source)
+            hierarchy = app.services.load_tag_hierarchy(hierarchy_path, vocabulary.labels, source)
         else:
-            hierarchy = app.metadata_hierarchy(vocabulary, source)
+            hierarchy = app.services.metadata_hierarchy(vocabulary, source)
         hierarchies[source.key] = hierarchy
         print(f"{source.title}: {len(vocabulary.labels):,} labels; "
               f"hierarchy={'off' if hierarchy is None else str(len(hierarchy.category_parents)) + ' categories'}; "
@@ -72,3 +75,4 @@ def catalogs(app, settings, args, scene_policies):
     if merged_hierarchy:
         print(f"AI: {len(merged_hierarchy.leaf_parents):,} unique labels; {len(merged_hierarchy.category_parents)} shared categories.")
     return catalogs, hierarchies, merged_hierarchy
+

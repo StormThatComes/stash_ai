@@ -4,13 +4,13 @@ import json
 
 import pytest
 
-from stash_ai import cli as app
+from tests.helpers.runtime import runtime as app
 from stash_ai.publication import merged as merge_sync
 from stash_ai.publication import groups as groups
 import stash_ai.cleanup.groups as groups_groups
 import stash_ai.evidence.labels as merge_labels
 import stash_ai.storage.store as merge_store
-from stash_ai.evidence.occurrences import OCCURRENCE_TAG
+from stash_ai.evidence.marker_identity import OCCURRENCE_TAG
 from stash_ai.cleanup.prune import REQUIRED_COUNTS, prune_tags
 from stash_ai.models import WD
 from tests.helpers.cleanup import FastStash
@@ -26,7 +26,7 @@ pytestmark = pytest.mark.usefixtures("reset_progress")
 
 
 def manager(stash):
-    return groups.for_resolver(app, app.TagResolver(stash, source=merge_labels.AI))
+    return groups.for_resolver(app, app.services.TagResolver(stash, source=merge_labels.AI))
 
 
 def attach(stash, marker, label, occurrence=False):
@@ -55,7 +55,7 @@ def test_one_group_per_primary_independent_of_extra_labels_or_time_policy(tmp_pa
     stash = Stash()
     monkeypatch.setattr(app, 'MARKER_USE_END_TIME', use_end)
     with merge_store.StateStore(tmp_path/'state', 'fixture') as state:
-        resolver = app.TagResolver(stash, source=merge_labels.AI)
+        resolver = app.services.TagResolver(stash, source=merge_labels.AI)
         contributions = [span('wd', 0, 5, 'abc', extras=['def']), span('joytag', 10, 15, 'abc')]
         merge_sync.sync_merged(app, stash, resolver, state, stash.find_scene('1'), [], contributions)
         assert len(stash.scene['scene_markers']) == 2
@@ -75,7 +75,7 @@ def test_one_group_per_primary_independent_of_extra_labels_or_time_policy(tmp_pa
 def test_union_and_split_drop_obsolete_managed_groups_but_keep_manual_extras(tmp_path):
     stash = Stash()
     with merge_store.StateStore(tmp_path/'state', 'fixture') as state:
-        resolver = app.TagResolver(stash, source=merge_labels.AI)
+        resolver = app.services.TagResolver(stash, source=merge_labels.AI)
         base = [span('wd', 0, 5, 'abc'), span('joytag', 10, 15, 'abc')]
         def sync(contributions):
             merge_sync.sync_merged(app, stash, resolver, state, stash.find_scene('1'), [], contributions)
@@ -101,7 +101,7 @@ def test_repair_adds_direct_root_preserving_other_parents_and_disables_autotag(d
     tag = stash.tags['m:abc:occurance']
     tag.update(parents=[manual], ignore_auto_tag=False)
     stash.dry_run = dry; stash.writes.clear()
-    resolver = app.TagResolver(stash, source=merge_labels.AI)
+    resolver = app.services.TagResolver(stash, source=merge_labels.AI)
     assert groups.for_resolver(app, resolver).resolve('abc', True) == identifier
     repaired = resolver.records['m:abc:occurance']
     assert {p['name'] for p in repaired['parents']} == {'ai_markers', 'human category'}
@@ -126,7 +126,7 @@ def test_name_collision_never_adopts_an_unrelated_group(existing):
 def test_changed_ownership_on_refresh_prevents_hierarchy_repair(monkeypatch):
     stash = Stash(); identifier = manager(stash).resolve('abc')
     stash.tags['m:abc']['parents'] = []
-    resolver = app.TagResolver(stash, source=merge_labels.AI); resolver.preload()
+    resolver = app.services.TagResolver(stash, source=merge_labels.AI); resolver.preload()
     stash.tags['m:abc']['description'] = 'Now maintained manually'
     stash.writes.clear()
     with pytest.raises(ValueError, match='ownership changed'):
@@ -153,7 +153,7 @@ def test_backfill_uses_semantic_type_preserves_identity_and_ignores_manual_marke
     for marker in (regular, occurrence): marker['tags'].append(stash.tag('human'))
     before = deepcopy(stash.scene)
     install(monkeypatch, stash)
-    monkeypatch.setattr(app, 'load_model_settings', lambda *a: pytest.fail('backfill loaded model configuration'))
+    monkeypatch.setattr(app.services, 'load_model_settings', lambda *a: pytest.fail('backfill loaded model configuration'))
     assert app.main(backfill_args(tmp_path, '--no-hierarchy')) == 0
     after = stash.scene['scene_markers']
     assert group_names(after[0]) == {'m:abc'}
@@ -301,10 +301,11 @@ def test_merge_cache_repairs_groups_with_no_category_hierarchy(pipeline, monkeyp
         for marker in p.stash.scene['scene_markers']:
             marker['tags'] = [t for t in marker['tags'] if t['id'] != tag['id']]
     p.stash.writes.clear()
-    monkeypatch.setattr(app, 'load_tagger', lambda *a: pytest.fail('group repair loaded model weights'))
+    monkeypatch.setattr(app.services, 'load_tagger', lambda *a: pytest.fail('group repair loaded model weights'))
     assert app.main([*p.args, '--merge-only']) == 0
     assert p.stash.tags['m:common']['parents'][0]['name'] == 'ai_markers'
     assert all('m:common' in group_names(m) for m in p.stash.scene['scene_markers'] if m['primary_tag']['name'] == 'ai:common')
     p.stash.writes.clear()
     assert app.main([*p.args, '--merge-only']) == 0
     assert not p.stash.writes
+

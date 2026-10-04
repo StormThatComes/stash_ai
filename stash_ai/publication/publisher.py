@@ -59,7 +59,7 @@ class MergePublisher:
         self.stats["errors"] += 1
         self.report.issue(
             'merge', '', scene_id, exc,
-            self.app.safe_error(exc, api_key=self.app.STASH_API_KEY))
+            self.app.services.safe_error(exc, api_key=self.app.STASH_API_KEY))
 
     def _merge_one(self, scene_id, current, prepared=None):
         """Publish local or worker evidence with the same accounting and errors."""
@@ -170,8 +170,9 @@ class MergePublisher:
                 self.stats["errors"] += max(1, remaining)
                 self.report.issue(
                     'merge workers', '', None, exc,
-                    self.app.safe_error(exc, api_key=self.app.STASH_API_KEY))
+                    self.app.services.safe_error(exc, api_key=self.app.STASH_API_KEY))
                 bar.update(remaining)
                 self.report.progress(bar, self.stats)
         finally:
             bar.close()
+

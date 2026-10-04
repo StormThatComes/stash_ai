@@ -7,10 +7,8 @@ streamed; older evidence is decoded only to derive metadata in the preview DB.
 from __future__ import annotations
 
 from itertools import groupby
-import json
 from pathlib import Path
 import sqlite3
-from types import SimpleNamespace
 import zlib
 
 from tqdm import tqdm
@@ -20,6 +18,8 @@ from stash_ai.storage.results import KINDS
 from stash_ai.reports.cache_assessment import assess_scene
 from stash_ai.reports.cache_coverage import CoverageAccumulator
 from stash_ai.reports.cache_plan import build_plan
+from stash_ai.reports.io import write_json_report
+from stash_ai.reports.runtime import report_context, report_store, require_database
 
 
 def _keys(store, table, columns):
@@ -144,15 +144,11 @@ def format_summary(report):
 
 
 def run(app, args):
-    from stash_ai.storage.store import StateStore, scope_for
-    from stash_ai.evidence.temporal.policy import load_policy
 
     try:
-        if not Path(args.state_db).expanduser().is_file():
-            raise FileNotFoundError(f'State database does not exist: {args.state_db}')
-        settings = app.load_model_settings(args.model_config, args.models, None, True)
-        local = SimpleNamespace(**{**vars(app), 'TEMPORAL_POLICY':
-                                    load_policy(app, args.temporal_policy, not args.no_temporal)})
+        require_database(args)
+        settings = app.services.load_model_settings(args.model_config, args.models, None, True)
+        local = report_context(app, args)
         context = []
         for flag, path in (('--state-db', args.state_db), ('--model-config', args.model_config),
                            ('--temporal-policy', args.temporal_policy),
@@ -161,13 +157,9 @@ def run(app, args):
             context.extend((flag, str(Path(path).expanduser().resolve())))
         if args.no_temporal:
             context.append('--no-temporal')
-        with StateStore(args.state_db, scope_for(app.STASH_URL), True, allow_cleanup=True) as store:
+        with report_store(app, args) as store:
             report = build_report(local, store, scene_ids(store, args.scene_id), settings, context)
-        payload = json.dumps(report, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False) + '\n'
-        destination = Path(args.cache_report).expanduser().resolve()
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        with destination.open('x', encoding='utf-8', newline='\n') as stream:
-            stream.write(payload)
+        destination = write_json_report(report, args.cache_report)
         print(format_summary(report))
         print(f'Cache report written to {destination}. No Stash requests or inference were performed.')
         return 0

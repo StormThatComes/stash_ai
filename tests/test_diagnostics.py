@@ -8,7 +8,7 @@ import pytest
 
 from stash_ai.inference import sprites
 from stash_ai.storage import codec as state_codec
-from stash_ai import cli as app
+from tests.helpers.runtime import runtime as app
 from stash_ai.runtime.diagnostics import MergeDiagnostics
 from stash_ai.runtime.report import RunReport
 
@@ -49,7 +49,7 @@ def test_nested_timings_are_exclusive_and_failures_are_recorded(tmp_path, monkey
 def test_api_records_named_operation_bytes_and_errors_without_payloads(tmp_path, failure, supported_stash_version):
     path = tmp_path/'api.jsonl'
     report = RunReport(write=lambda _: None)
-    client = app.create_stash_client(False); client.report = report
+    client = app.services.create_stash_client(False); client.report = report
     secret = 'PAYLOAD_MUST_NEVER_ENTER_PROFILE'
     payload = {'errors': [{'message': secret}]} if failure else {'data': {'sceneMarkerCreate': {'id': '7'}}}
     body = json.dumps(payload).encode()
@@ -136,7 +136,7 @@ def test_profile_and_force_merge_preserve_results_and_do_not_run_models(pipeline
     assert app.main(p.args) == 0
     expected = deepcopy(p.stash.scene)
     p.stash.writes.clear()
-    monkeypatch.setattr(app, 'load_tagger', lambda *a: pytest.fail('profile loaded a model'))
+    monkeypatch.setattr(app.services, 'load_tagger', lambda *a: pytest.fail('profile loaded a model'))
     monkeypatch.setattr(sprites, 'fetch_cues', lambda *a: pytest.fail('profile fetched media'))
     for force in (False, True):
         path = tmp_path/f'profile-{force}.jsonl'
@@ -196,3 +196,4 @@ def test_independent_reports_keep_request_sizes_and_diagnostics_separate():
     assert second_diagnostics.api['second']['response_bytes'] == 7
     assert set(first_diagnostics.api) == {'first'}
     assert set(second_diagnostics.api) == {'second'}
+

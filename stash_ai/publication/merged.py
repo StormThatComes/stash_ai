@@ -7,7 +7,7 @@ publication sequencing and durable snapshot promotion.
 from __future__ import annotations
 
 from .planning.merged_evidence import prepare_sync_evidence
-from .planning.merged_tags import resolve_sync_tags, plan_scene_tags
+from .planning.merged_tags import resolve_sync_tags, resolve_marker_catalog, plan_scene_tags
 from .planning.merged_markers import plan_markers
 
 from collections import Counter
@@ -17,7 +17,7 @@ from stash_ai.runtime.timing import stage
 
 
 def sync_statistics(app, plan, markers, suppressed):
-    from stash_ai.evidence.occurrences import is_occurrence
+    from stash_ai.evidence.marker_identity import is_occurrence
 
     stats = Counter(
         scene_tags_updated=int(app.APPLY_SCENE_TAGS and plan.scene_changed),
@@ -52,8 +52,8 @@ def publish_sync_plan(app, stash, resolver, store, scene_id, scene, markers, sce
         if app.APPLY_SCENE_TAGS and (report is None or report.verbose):
             write("  Scene tags: " + (", ".join(merge_labels.AI.prefix + label for label in sorted(scene_labels)) or "(none)"))
         for marker in markers if report is None or report.verbose else ():
-            end = app.format_time(marker["end"]) if marker["end"] is not None else "point (end unknown)"
-            write(f"  {app.format_time(marker['start'])} -> {end}: ai:{marker['tag']} "
+            end = app.services.format_time(marker["end"]) if marker["end"] is not None else "point (end unknown)"
+            write(f"  {app.services.format_time(marker['start'])} -> {end}: ai:{marker['tag']} "
                   f"[{'+'.join(merge_labels.source_codes(marker['sources']))}]")
         store.publish(scene_id, plan.snapshots)  # temporary preview overlay only
         return stats
@@ -91,19 +91,21 @@ def sync_merged(app, stash, resolver, store, scene, scene_hits, spans, *, migrat
     """Reconcile only script-owned markers and recorded scene associations."""
     scene_id = str(scene["id"])
     report = report or getattr(store, 'report', None)
-    scene_hits, spans, markers, scene_labels, previous_ranges = prepare_sync_evidence(
+    evidence = prepare_sync_evidence(
         app, stash, store, scene, scene_hits, spans, cleanup=cleanup, report=report)
-    scene, markers, spans, ids, groups, blocked_names, suppressed = resolve_sync_tags(
-        app, stash, resolver, scene_id, scene, markers, spans, scene_labels,
-        tag_policies, previous_ranges, report)
+    resolved = resolve_sync_tags(app, stash, resolver, scene_id, evidence, tag_policies, report)
+    with stage(report, 'tag_resolution'):
+        catalog = resolve_marker_catalog(resolver, resolved)
+    scene, markers, spans = resolved.scene, resolved.markers, resolved.spans
+    scene_labels, suppressed = evidence.scene_labels, resolved.suppressed
     plan = plan_scene_tags(
-        app, store, scene_id, scene, scene_hits, scene_labels, ids, blocked_names, migrate=migrate)
-    plan_markers(
-        app, stash, resolver, scene_id, scene, markers, ids, groups, blocked_names,
-        previous_ranges, plan, migrate=migrate, report=report)
+        app, store, scene_id, scene, evidence.scene_hits, scene_labels,
+        resolved.ids, resolved.blocked_names, migrate=migrate)
+    plan_markers(app, resolved, catalog, evidence.previous_ranges, plan, migrate=migrate, report=report)
     if app.CREATE_MARKERS:
         plan.snapshots["markers"] = {"contributions": spans}
     stats = sync_statistics(app, plan, markers, suppressed)
     return publish_sync_plan(
         app, stash, resolver, store, scene_id, scene, markers, scene_labels, plan, stats,
         report=report, publication_key=publication_key)
+

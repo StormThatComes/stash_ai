@@ -11,7 +11,6 @@ from __future__ import annotations
 from .database import database_report, _checkpoint_report, _grouped_counts
 from .evidence import _result_evidence_report
 
-import json
 import platform
 from pathlib import Path
 import sqlite3
@@ -19,6 +18,7 @@ import struct
 import sys
 
 from stash_ai.db.common import KNOWN_VERSIONS, connect_readonly, table_names
+from stash_ai.reports.io import write_json_report
 
 REPORT_FORMAT = 1
 
@@ -80,10 +80,7 @@ def write_report(state_db, destination):
         raise ValueError("Anonymous diagnostics output must use a .json filename.")
 
     report = build_report(state_db)
-    payload = json.dumps(report, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False) + "\n"
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    with destination.open("x", encoding="utf-8", newline="\n") as stream:
-        stream.write(payload)
+    destination = write_json_report(report, destination)
     return destination, report
 
 
@@ -102,3 +99,4 @@ def run(args):
     except (OSError, sqlite3.DatabaseError, ValueError, RuntimeError) as exc:
         print("Anonymous diagnostics failed: " + str(exc))
         return 1
+

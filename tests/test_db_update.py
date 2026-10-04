@@ -5,7 +5,7 @@ import zlib
 
 import pytest
 
-from stash_ai import cli as app
+from tests.helpers.runtime import runtime as app
 from stash_ai import db as stash_db
 from stash_ai.publication import fingerprints as performance
 import stash_ai.storage.merge_checks as performance_merge_checks
@@ -170,7 +170,7 @@ def test_db_update_cli_stays_offline_and_reports_dry_run_and_idempotence(tmp_pat
     path = tmp_path / 'state.sqlite3'
     seed_version(path, 1)
     for name in ('load_model_settings', 'create_stash_client', 'validate_config', 'load_tagger'):
-        monkeypatch.setattr(app, name, lambda *a, **kw: pytest.fail('db-update must stay offline'))
+        monkeypatch.setattr(app.services, name, lambda *a, **kw: pytest.fail('db-update must stay offline'))
     monkeypatch.setattr(app, 'STASH_URL', 'unused-invalid-url')
     command = ['--state-db', str(path), '--db-update']
     before = path.read_bytes()
@@ -209,3 +209,4 @@ def test_db_update_cli_rejects_unrelated_modes_and_modifiers(extra):
     with pytest.raises(SystemExit) as error:
         arguments.parse_args(app, ['--db-update', *extra])
     assert error.value.code == 2
+

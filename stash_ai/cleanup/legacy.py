@@ -112,7 +112,7 @@ def run(app, args):
             "SELECT 1 FROM " + table + " WHERE scope=? AND kind='markers' LIMIT 1",
             (store.scope,),
         ).fetchone() is not None
-        stash = app.create_stash_client(app.DRY_RUN)
+        stash = app.services.create_stash_client(app.DRY_RUN)
         try:
             # The normal client may omit markers when marker output is disabled.
             # Request them here only when the ledger actually contains marker rows.
@@ -139,3 +139,4 @@ def run(app, args):
         if reclaimable and not app.DRY_RUN:
             print("Run --db-compact later to return freed SQLite pages to the filesystem.")
         return 0
+

@@ -7,7 +7,7 @@ import pytest
 import yaml
 
 from stash_ai.inference.identity import model_identity
-from stash_ai import cli as app
+from tests.helpers.runtime import runtime as app
 from stash_ai.models import ModelSettings, SOURCES
 from tests.test_marker_retention import marker_ranges, offline
 from tests.test_scene_thresholds import outputs
@@ -29,14 +29,14 @@ def test_invalid_retention_is_rejected_by_yaml_loader(tmp_path, name, value):
     path = tmp_path/'models.yml'
     model_config(path, **{name: value})
     with pytest.raises(ValueError, match=f'wd.{name} must be null or a number between 0 and 1'):
-        app.load_model_settings(path, ['wd'], None)
+        app.services.load_model_settings(path, ['wd'], None)
 
 
 @pytest.mark.parametrize('value', [None, 0, .2, 1])
 def test_retention_settings_apply_to_all_models(tmp_path, value):
     path = tmp_path/'models.yml'
     model_config(path, scene_cache_floor=value, marker_cache_floor=value)
-    settings = app.load_model_settings(path, ['all'], None)
+    settings = app.services.load_model_settings(path, ['all'], None)
     assert [s.source.key for s in settings] == list(SOURCES)
     assert all(s.scene_cache_floor == s.marker_cache_floor == value for s in settings)
 
@@ -111,7 +111,7 @@ def test_individual_retention_supports_automatic_threshold_reuse(pipeline, monke
     assert app.main(args) == 0
     model_config(path, scene=.4 if kind == 'scene' else .8,
                  marker=.4 if kind == 'markers' else .85, **options)
-    monkeypatch.setattr(app, 'load_tagger', lambda *a: pytest.fail('loaded a model'))
+    monkeypatch.setattr(app.services, 'load_tagger', lambda *a: pytest.fail('loaded a model'))
     if kind == 'scene':
         assert app.main(args) == 0
         assert {t['name'] for t in p.stash.scene['tags']} == {'ai:common', 'ai:extra'}
@@ -245,3 +245,4 @@ def test_exact_scene_aggregate_includes_scores_below_retention(pipeline, monkeyp
     scene = records(p.path)['scene']['wd'][0]
     assert scene['items'] == [dict(tag='common', score=pytest.approx(.18))]
     assert len([row for row in scene['frames'] if row['tags']]) == 1
+

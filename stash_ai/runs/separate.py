@@ -1,5 +1,7 @@
 """Separate-output model orchestration using inference and reconciliation modules."""
 from __future__ import annotations
+from stash_ai.inference import results as result_ops
+from stash_ai.evidence import marker_building
 
 from collections import Counter
 from functools import partial
@@ -24,7 +26,7 @@ def _sync_hierarchy(app, resolver, vocabulary, args, scene_exclusions) -> Counte
     )
     for label in tqdm(selected, desc=source.key + " hierarchy", unit="tag"):
         resolver.resolve(source.prefix + label)
-    app.print_hierarchy_summary(resolver)
+    app.services.print_hierarchy_summary(resolver)
     return Counter()
 
 
@@ -34,7 +36,7 @@ def _build_markers(app, args, config, frame_predictions, core_exclusions):
 
     from stash_ai.runtime.cache import RamCache
 
-    return app.build_markers(
+    return marker_building.build_markers(app,
         frame_predictions,
         core_exclusions,
         threshold=config.marker_threshold,
@@ -63,9 +65,9 @@ def _report_dry_run(app, stash, source, predictions, markers, report):
             )
         )
     for marker in markers:
-        interval = app.format_time(marker.start)
+        interval = app.services.format_time(marker.start)
         if app.MARKER_USE_END_TIME:
-            interval += " -> " + app.format_time(marker.end)
+            interval += " -> " + app.services.format_time(marker.end)
         tqdm.write(
             f"  {interval} | {source.prefix}{marker.tag} | "
             f"confidence={marker.score:.3f}, hits={marker.hits} | "
@@ -103,7 +105,7 @@ def _process_scene(app, stash, tagger, resolver, scene, scene_id, config, args,
         )
         return Counter(skipped=1)
 
-    if app.SKIP_EXISTING_OUTPUTS and app.outputs_already_present(scene, source):
+    if app.SKIP_EXISTING_OUTPUTS and result_ops.outputs_already_present(app, scene, source):
         return Counter(skipped=1)
 
     cues, total_frames = sprites.fetch_cues(app, stash, paths)
@@ -161,7 +163,7 @@ def _report_model_summary(app, resolver, source):
     if resolver.missing:
         verb = "Would create" if app.DRY_RUN and app.CREATE_MISSING else "Missing (skipped)"
         print(f"{source.key}: {verb} tags: {len(resolver.missing):,}")
-    app.print_hierarchy_summary(resolver)
+    app.services.print_hierarchy_summary(resolver)
 
 
 def run_model(app, stash, config, vocabulary, hierarchy, args: Any,
@@ -171,7 +173,7 @@ def run_model(app, stash, config, vocabulary, hierarchy, args: Any,
 
     source = config.source
     report = args.report
-    resolver = app.TagResolver(
+    resolver = app.services.TagResolver(
         stash,
         hierarchy,
         report=report.detail,
@@ -183,7 +185,7 @@ def run_model(app, stash, config, vocabulary, hierarchy, args: Any,
         return _sync_hierarchy(app, resolver, vocabulary, args, scene_exclusions)
 
     stats = Counter()
-    tagger = app.load_tagger(config, vocabulary, partial(preparation.prepare_image, app))
+    tagger = app.services.load_tagger(config, vocabulary, partial(preparation.prepare_image, app))
     try:
         progress = tqdm(stash.iter_scenes(args.scene_id), desc=source.key, unit="scene")
         for scene in progress:
@@ -209,7 +211,7 @@ def run_model(app, stash, config, vocabulary, hierarchy, args: Any,
                     source.key,
                     scene_id,
                     exc,
-                    app.safe_error(exc, api_key=app.STASH_API_KEY),
+                    app.services.safe_error(exc, api_key=app.STASH_API_KEY),
                 )
             finally:
                 report.progress(progress, stats)
@@ -223,7 +225,7 @@ def run_model(app, stash, config, vocabulary, hierarchy, args: Any,
 def run(app, settings, args, catalogs, hierarchies, core_policies, scene_policies,
         *, hierarchy_only):
     """Own the shared Stash lifecycle across all selected separate models."""
-    stash = app.create_stash_client(app.DRY_RUN)
+    stash = app.services.create_stash_client(app.DRY_RUN)
     stats = Counter()
     try:
         print("DRY RUN: all Stash changes below are planned." if app.DRY_RUN else "Synchronizing selected models.")
@@ -236,7 +238,7 @@ def run(app, settings, args, catalogs, hierarchies, core_policies, scene_policie
                 stats["errors"] += 1
                 args.report.issue(
                     'load model', config.source.key, None, exc,
-                    app.safe_error(exc, api_key=app.STASH_API_KEY))
+                    app.services.safe_error(exc, api_key=app.STASH_API_KEY))
         if not hierarchy_only and not stats["errors"]:
             from stash_ai.exclusions import prune_excluded_definitions, selected_policies
             stats.update(prune_excluded_definitions(app, stash,
@@ -247,3 +249,4 @@ def run(app, settings, args, catalogs, hierarchies, core_policies, scene_policie
     if stats["errors"] and not app.DRY_RUN:
         print("Failed scenes may have partial writes. Correct the error and rerun to reconcile them.")
     return 1 if stats["errors"] else 0
+

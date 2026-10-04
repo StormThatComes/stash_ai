@@ -1,11 +1,12 @@
 """Separate-source marker payloads, matching and exclusion updates."""
 from stash_ai.models import ModelSource
 from stash_ai.publication import markers as marker_ops
+from .types import MarkerChanges, SeparateMarkerPlan
 
 
 def plan_marker_changes(app, existing: list[dict], wanted: list[dict],
                         core_exclusions: frozenset[str], source: ModelSource
-                        ) -> tuple[list[dict], list[dict], list[str], int]:
+                        ) -> MarkerChanges:
     available = {
         str(marker["id"]): marker
         for marker in existing
@@ -45,10 +46,10 @@ def plan_marker_changes(app, existing: list[dict], wanted: list[dict],
         if app.REPLACE_MARKERS
         or marker_ops.marker_has_excluded_core(marker, core_exclusions, source)
     )
-    return creates, updates, deletes, unchanged
+    return MarkerChanges(creates, updates, deletes, unchanged)
 
 
-def _marker_plan(app, stash, source, scene_id, existing_markers, specs, ids,
+def plan_separate_markers(app, source, scene_id, existing_markers, specs, ids,
                  core_exclusions, scene_exclusions):
     wanted = (
         [
@@ -68,9 +69,9 @@ def _marker_plan(app, stash, source, scene_id, existing_markers, specs, ids,
             source,
         )
         if app.CREATE_MARKERS
-        else ([], [], [], 0)
+        else MarkerChanges()
     )
-    creates, updates, deletes, unchanged = plan
+    creates, updates, deletes, unchanged = plan.creates, plan.updates, plan.deletes, plan.unchanged
 
     if app.CREATE_MARKERS:
         deletes = sorted(
@@ -107,4 +108,5 @@ def _marker_plan(app, stash, source, scene_id, existing_markers, specs, ids,
                 extra_updates.append(payload)
         updates.extend(extra_updates)
 
-    return wanted, creates, updates, deletes, unchanged, extra_updates
+    return SeparateMarkerPlan(creates, updates, deletes, unchanged, wanted, extra_updates)
+

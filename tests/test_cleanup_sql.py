@@ -6,7 +6,7 @@ import sqlite3
 
 import pytest
 
-from stash_ai import cli as app
+from tests.helpers.runtime import runtime as app
 from stash_ai.storage import codec as state_codec
 from stash_ai.publication import merged as merge_sync
 from stash_ai.cleanup import sql as fast
@@ -156,7 +156,7 @@ def test_source_specific_cleanup_reconciles_only_candidates(tmp_path, monkeypatc
     for i in range(2, 20):
         stash.scenes[str(i)] = dict(id=str(i), tags=[], scene_markers=[])
     with merge_store.StateStore(tmp_path/'state.sqlite3', merge_store.scope_for(app.STASH_URL)) as store:
-        merge_sync.sync_merged(app, stash, app.TagResolver(stash, source=merge_labels.AI), store, stash.find_scene('1'),
+        merge_sync.sync_merged(app, stash, app.services.TagResolver(stash, source=merge_labels.AI), store, stash.find_scene('1'),
                          [hit('wd'), hit('oppai')], [span('joytag',10,20),span('oppai',20,30),span('wd',30,40)])
     stash.scene_reads.clear()
     install(monkeypatch, stash)
@@ -169,7 +169,7 @@ def test_sql_dry_run_allowlist_cannot_execute_writes_or_injected_statements():
     assert is_read_only_cleanup(READ_OPERATION, {'sql': SQL['probe']})
     for sql in ['DELETE FROM tags', 'SELECT 1; DELETE FROM tags', SQL['probe']+'; DELETE FROM tags']:
         assert not is_read_only_cleanup(READ_OPERATION, {'sql': sql})
-    stash = app.StashClient.__new__(app.StashClient)
+    stash = app.services.StashClient.__new__(app.services.StashClient)
     stash.dry_run = True
     with pytest.raises(RuntimeError, match='dry-run'):
         stash.gql(READ_OPERATION, {'sql': 'DELETE FROM tags', 'args': []})
@@ -306,7 +306,7 @@ def test_legacy_interrupted_global_cleanup_can_resume_using_sql(tmp_path, monkey
 
 
 def test_removed_legacy_strategy_fails_before_api_or_state_access(tmp_path, monkeypatch, capsys):
-    monkeypatch.setattr(app, 'create_stash_client', lambda *_: pytest.fail('invalid strategy accessed Stash'))
+    monkeypatch.setattr(app.services, 'create_stash_client', lambda *_: pytest.fail('invalid strategy accessed Stash'))
     command = [*args(tmp_path), '--cleanup-strategy', 'legacy']
     with pytest.raises(SystemExit) as exc:
         app.main(command)
@@ -338,3 +338,4 @@ def test_marker_preview_does_not_double_count_extras_on_deleted_cores(tmp_path, 
     out = capsys.readouterr().out
     assert 'markers_deleted=2' in out and 'marker_tag_removals=1' in out
     assert not stash.writes
+

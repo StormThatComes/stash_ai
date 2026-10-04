@@ -7,7 +7,7 @@ import pytest
 
 from stash_ai.inference import sprites
 from stash_ai.cleanup import evidence as cleanup_evidence
-from stash_ai import cli as app
+from tests.helpers.runtime import runtime as app
 from stash_ai.evidence import thresholds as thresholds
 import stash_ai.evidence.intervals as merge_intervals
 import stash_ai.evidence.source_markers as merge_source_markers
@@ -22,8 +22,8 @@ pytestmark = pytest.mark.usefixtures('reset_temporal')
 @pytest.fixture(params=[False, True], ids=['known-retention', 'unknown-retention'])
 def old_consensus(pipeline, monkeypatch, tmp_path, request):
     p = pipeline
-    settings = app.load_model_settings
-    monkeypatch.setattr(app, 'load_model_settings', lambda *args: [
+    settings = app.services.load_model_settings
+    monkeypatch.setattr(app.services, 'load_model_settings', lambda *args: [
         replace(config, scene_threshold=.4, marker_threshold=.8)
         for config in settings(*args)])
     for model in ('wd', 'dtq'):
@@ -59,7 +59,7 @@ def old_consensus(pipeline, monkeypatch, tmp_path, request):
     core.write_text('version: 1\nexcluded_core_tags: []\nby_model:\n  wd: [common]\n')
     p.cleanup_args = [*p.args, '--cleanup-markers-only', '--cleanup-strategy', 'scenes',
                       '--marker-core-exclusions', str(core)]
-    monkeypatch.setattr(app, 'load_tagger', lambda *args: pytest.fail('loaded a model'))
+    monkeypatch.setattr(app.services, 'load_tagger', lambda *args: pytest.fail('loaded a model'))
     monkeypatch.setattr(sprites, 'fetch_cues', lambda *args: pytest.fail('fetched VTT'))
     monkeypatch.setattr(p.stash, 'get_media', lambda *args: pytest.fail('fetched sprites'))
     p.stash.writes.clear()
@@ -172,3 +172,4 @@ def test_repeated_cleanup_preserves_nonempty_historical_bans(tmp_path):
         assert state.records('1', 'markers') == original
         with pytest.raises(ValueError, match='unblocked marker tags'):
             merge_source_markers.marker_contributions(app, original, policies)
+

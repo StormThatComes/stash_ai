@@ -11,7 +11,7 @@ from stash_ai.rethreshold import markers as marker_updates, execution as rethres
 from stash_ai.signatures import digest
 from stash_ai.inference import sprites
 from stash_ai.cleanup import evidence as cleanup_evidence
-from stash_ai import cli as app
+from tests.helpers.runtime import runtime as app
 from stash_ai.evidence import pipeline as merge
 import stash_ai.evidence.source_markers as merge_source_markers
 import stash_ai.storage.store as merge_store
@@ -27,8 +27,8 @@ pytestmark = pytest.mark.usefixtures('reset_temporal')
 
 def configure(monkeypatch, *, marker=.70, scene=.40):
     # Exercise automatic retention independently of the bundled cache floors.
-    original = app.load_model_settings
-    monkeypatch.setattr(app, 'load_model_settings', lambda *a: [
+    original = app.services.load_model_settings
+    monkeypatch.setattr(app.services, 'load_model_settings', lambda *a: [
         replace(c, marker_threshold=marker, scene_threshold=scene,
                 scene_cache_floor=None, marker_cache_floor=None) for c in original(*a)])
 
@@ -44,7 +44,7 @@ def records(path):
 
 
 def fail_inference(monkeypatch):
-    monkeypatch.setattr(app, 'load_tagger', lambda *a: pytest.fail('loaded a model'))
+    monkeypatch.setattr(app.services, 'load_tagger', lambda *a: pytest.fail('loaded a model'))
 
 
 def test_indexed_signature_combines_threshold_overrides_without_breaking_legacy_hashes():
@@ -166,7 +166,7 @@ def test_explicit_rethreshold_needs_no_models_media_or_vocabulary(pipeline, monk
     capsys.readouterr()
     configure(monkeypatch, marker=.85)
     fail_inference(monkeypatch)
-    monkeypatch.setattr(app, 'load_vocabulary', lambda *a: pytest.fail('loaded vocabulary'))
+    monkeypatch.setattr(app.services, 'load_vocabulary', lambda *a: pytest.fail('loaded vocabulary'))
     monkeypatch.setattr(sprites, 'fetch_cues', lambda *a: pytest.fail('fetched VTT'))
     monkeypatch.setattr(p.stash, 'get_media', lambda *a: pytest.fail('fetched sprite'))
     assert app.main([*p.args, '--merge-only', '--rethreshold-markers']) == 0
@@ -310,3 +310,4 @@ def test_marker_rethreshold_never_decodes_publication_snapshots(tmp_path, monkey
 
         assert result == {'marker_thresholds_updated': 1}
         assert state.records('1', 'markers')['wd'][0][thresholds_identity.OVERRIDE] == .85
+

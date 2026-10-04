@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from stash_ai import cli as app
+from tests.helpers.runtime import runtime as app
 from stash_ai.cleanup import sql as fast
 from stash_ai.cleanup.sql_session import READ_OPERATION, SQL
 from stash_ai.publication import groups as groups
@@ -235,3 +235,4 @@ def test_unchanged_merge_skips_native_counters_for_used_groups(tmp_path, monkeyp
     assert 'merge_reused=1' in output
     assert 'marker_group_tags_candidates=0' in output
     assert not stash.usage_reads and not stash.writes
+

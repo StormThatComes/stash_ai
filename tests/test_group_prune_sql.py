@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from stash_ai import cli as app
+from tests.helpers.runtime import runtime as app
 from stash_ai.cleanup import sql as fast
 from stash_ai.cleanup.sql_session import READ_OPERATION, SQL
 from stash_ai.publication import groups as groups
@@ -166,3 +166,4 @@ def test_unexpected_sql_candidate_stops_before_group_deletion(tmp_path, monkeypa
     install(monkeypatch, stash)
     assert app.main(command(tmp_path)) == 1
     assert not stash.usage_reads and not stash.writes
+

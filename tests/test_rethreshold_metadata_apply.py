@@ -1,4 +1,5 @@
 """Frame-free Apply preserves completion indexes, history and preview isolation."""
+from stash_ai.rethreshold.plans import RecordAccess, PendingPolicy, ThresholdRequest
 from copy import deepcopy
 from dataclasses import replace
 import sqlite3
@@ -6,7 +7,8 @@ import sqlite3
 import pytest
 
 from stash_ai.rethreshold import markers as marker_updates, execution as rethreshold_execution, scenes as scene_updates
-from stash_ai import cli as app, db
+from stash_ai import db
+from tests.helpers.runtime import runtime as app
 import stash_ai.evidence.identity as scene_cache_identity
 import stash_ai.evidence.identity as thresholds_identity
 from stash_ai.storage import progress
@@ -55,7 +57,7 @@ def test_metadata_apply_matches_full_payload_index_and_preserves_history(tmp_pat
         if mode == 'markers':
             assert marker_updates.apply(app, store, '1', target(mode))
         else:
-            planned = scene_updates.plan(app, store, '1', target(mode), markers=mode == 'combined')
+            planned = scene_updates.plan(app, store, '1', target(mode), request=ThresholdRequest(kinds=('scene', 'markers') if mode == 'combined' else ('scene',)))
             scene_updates.apply(store, '1', 'wd', planned)
         expected_index = index_rows(store)
         expected_records = {kind: store.records('1', kind) for kind in ('scene', 'markers')}
@@ -137,3 +139,4 @@ def test_legacy_or_damaged_metadata_is_backfilled_once_before_apply(tmp_path, mo
         assert 'errors' not in update(store, mode, report)
         assert report.timing_calls['state_json_decode'] == (1 if mode == 'scene' else 2)
         assert blobs(store) == raw
+

@@ -1,7 +1,6 @@
 """Read-only process workers for the offline model utility report."""
 from collections import Counter
 from concurrent.futures import ProcessPoolExecutor
-import atexit
 from multiprocessing import get_context
 from pathlib import Path
 
@@ -11,49 +10,35 @@ from stash_ai.models import SOURCES
 from stash_ai.reports.model import report as model
 from .analysis import scene_report, merge_scene_report
 from stash_ai.storage.store import StateStore
+from stash_ai.runtime.workers import open_read_worker
 
-_WORKER_APP = None
-_WORKER_STORE = None
-_WORKER_CORE_POLICIES = None
-_WORKER_SCENE_POLICIES = None
+_WORKER_CONTEXT = None
 
 
 def _init_report_worker(state_db, scope, temporal_policy, core_policies,
                         scene_policies, cache_bytes, memory_budget_bytes,
                         preload_sources):
     """Initialize one isolated read-only worker and keep its DB/cache hot."""
-    global _WORKER_APP, _WORKER_STORE, _WORKER_CORE_POLICIES, _WORKER_SCENE_POLICIES
-    from stash_ai import cli as app
-
-    app.APPLY_SCENE_TAGS = True
-    app.CREATE_MARKERS = True
-    app.TEMPORAL_POLICY = temporal_policy
-    store = StateStore(
-        state_db,
-        scope,
-        True,
-        cache_bytes=cache_bytes,
-        memory_budget_bytes=memory_budget_bytes,
-        allow_cleanup=True,
+    global _WORKER_CONTEXT
+    if _WORKER_CONTEXT is not None:
+        _WORKER_CONTEXT.close()
+    _WORKER_CONTEXT = open_read_worker(
+        state_db, scope,
+        dict(APPLY_SCENE_TAGS=True, CREATE_MARKERS=True, TEMPORAL_POLICY=temporal_policy),
+        core_policies, scene_policies, cache_bytes, memory_budget_bytes,
+        preload_sources=preload_sources,
     )
-    if preload_sources:
-        store.preload_sources()
-    atexit.register(store.close)
-    _WORKER_APP = app
-    _WORKER_STORE = store
-    _WORKER_CORE_POLICIES = core_policies
-    _WORKER_SCENE_POLICIES = scene_policies
 
 
 def _report_worker_scene(scene):
-    if _WORKER_STORE is None or _WORKER_APP is None:
+    if _WORKER_CONTEXT is None:
         raise RuntimeError("Model report worker was not initialized.")
     return scene_report(
-        _WORKER_APP,
-        _WORKER_STORE,
+        _WORKER_CONTEXT.settings,
+        _WORKER_CONTEXT.store,
         scene,
-        _WORKER_CORE_POLICIES,
-        _WORKER_SCENE_POLICIES,
+        _WORKER_CONTEXT.core_policies,
+        _WORKER_CONTEXT.scene_policies,
     )
 
 
@@ -109,3 +94,4 @@ def build_report_parallel(app, state_db, scope, scene_ids, core_policies,
             merge_scene_report(totals, utility, partial)
 
     return model.report_payload(totals, utility)
+

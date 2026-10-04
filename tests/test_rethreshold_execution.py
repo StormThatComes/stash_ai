@@ -3,7 +3,7 @@ from dataclasses import replace
 
 import pytest
 
-from stash_ai import cli as app
+from tests.helpers.runtime import runtime as app
 from stash_ai.rethreshold.execution import run
 from stash_ai.runtime.report import RunReport
 from stash_ai.storage.store import StateStore
@@ -60,3 +60,4 @@ def test_pending_publication_preserves_mode_specific_noop_rules(tmp_path, scenes
             assert report.groups[phase, 'wd', 'RuntimeError']['examples'] == ['scene 1: ' + message]
         assert not threshold_rows(store)
         assert blobs(store) == before
+

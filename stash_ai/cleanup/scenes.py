@@ -1,5 +1,6 @@
 """Reconcile cleanup changes for one scene before moving to the next."""
 from __future__ import annotations
+from stash_ai.cleanup import scene_tags
 
 from collections import Counter
 from types import SimpleNamespace
@@ -27,7 +28,7 @@ def cleanup_scene(app, stash, resolver, store, current, settings, selected, args
             if pending is not None:
                 raise RuntimeError("An interrupted merge is pending; run --merge-only before cleanup.")
             from stash_ai.publication.recovery import reconcile
-            published[kind], recovered = reconcile(app, stash, store, current, kind, snapshot)
+            published[kind], recovered = reconcile(store, current, kind, snapshot)
             stats['publications_reconciled'] += int(recovered)
         if app.CREATE_MARKERS and published.get("markers") is None and any(
                 marker_ops.owned_marker(marker, merge_labels.AI) for marker in current.get("scene_markers", [])):
@@ -69,8 +70,9 @@ def cleanup_scene(app, stash, resolver, store, current, settings, selected, args
 def _cleanup_source(app, stash, current, source, core_policies, scene_policies, report=None):
     result = Counter()
     if app.APPLY_SCENE_TAGS:
-        result.update(app.cleanup_scene_tags(stash, current, scene_policies[source.key], source, report))
+        result.update(scene_tags.cleanup_scene_tags(stash, current, scene_policies[source.key], source, report))
     if app.CREATE_MARKERS:
         result.update(separate_sync_markers.cleanup_scene_marker_cores(
             app, stash, current, core_policies[source.key], source, report, scene_policies[source.key]))
     return result
+

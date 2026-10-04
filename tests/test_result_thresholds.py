@@ -1,4 +1,5 @@
 """Threshold policy writes preserve evidence, preview isolation and completion."""
+from stash_ai.rethreshold.plans import RecordAccess, PendingPolicy, ThresholdRequest
 from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
@@ -7,7 +8,7 @@ import sqlite3
 import pytest
 
 from stash_ai.rethreshold import execution as rethreshold_execution, scenes as scene_updates
-from stash_ai import cli as app
+from tests.helpers.runtime import runtime as app
 from stash_ai import db
 from stash_ai.publication import fingerprints as performance
 import stash_ai.storage.merge_checks as performance_merge_checks
@@ -208,7 +209,8 @@ def test_both_thresholds_and_version_roll_back_if_index_write_fails(tmp_path, mo
         old_records = store.records('1', 'scene')
         version = store.connection.execute('PRAGMA user_version').fetchone()
         index = store.connection.execute('SELECT * FROM result_index').fetchall()
-        planned = scene_updates.plan(app, store, '1', config(.8), markers=True, metadata_only=metadata_only)
+        planned = scene_updates.plan(app, store, '1', config(.8), request=ThresholdRequest(kinds=('scene', 'markers'),
+                                      access=RecordAccess.METADATA if metadata_only else RecordAccess.BATCH))
         original = progress.index_result
 
         def fail_second(store, scene, model, kind, segments, **options):
@@ -218,7 +220,7 @@ def test_both_thresholds_and_version_roll_back_if_index_write_fails(tmp_path, mo
 
         monkeypatch.setattr(progress, 'index_result', fail_second)
         with pytest.raises(RuntimeError, match='index write failed'):
-            scene_updates.apply(store, '1', 'wd', planned, metadata_only=metadata_only)
+            scene_updates.apply(store, '1', 'wd', planned)
         assert blobs(store) == raw
         assert threshold_rows(store) == old_thresholds
         assert store.connection.execute('PRAGMA user_version').fetchone() == version
@@ -328,3 +330,4 @@ def test_v8_missing_threshold_table_is_a_db_check_error(tmp_path):
     report = db.check_database(path, 'scope')
     assert not report['ok']
     assert any(issue['code'] == 'missing_base_tables' for issue in report['errors'])
+

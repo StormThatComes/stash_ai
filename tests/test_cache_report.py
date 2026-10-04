@@ -1,4 +1,5 @@
 """Coverage counts and advisory plans must never mistake absence for negative detections."""
+from stash_ai.rethreshold.plans import RecordAccess, ThresholdRequest
 from copy import deepcopy
 from dataclasses import replace
 import json
@@ -6,7 +7,7 @@ import json
 import pytest
 
 from stash_ai.rethreshold import scenes as scene_updates
-from stash_ai import cli as app
+from tests.helpers.runtime import runtime as app
 import stash_ai.storage.store as merge_store
 from stash_ai.reports import cache as cache_report
 from stash_ai.models import ModelSettings, SOURCES
@@ -79,8 +80,8 @@ def test_rethreshold_uses_sql_overrides_and_has_no_gpu_action(tmp_path):
     assert first['totals']['rethreshold_pairs'] == 1 and not actions(first)
     assert first['plan'][0]['action'] == 'rethreshold'
     with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL)) as store:
-        updates = scene_updates.plan(app, store, '1', settings[0], markers=True, metadata_only=True)
-        scene_updates.apply(store, '1', 'wd', updates, metadata_only=True)
+        updates = scene_updates.plan(app, store, '1', settings[0], request=ThresholdRequest(kinds=('scene', 'markers'), access=RecordAccess.METADATA))
+        scene_updates.apply(store, '1', 'wd', updates)
     before = path.read_bytes()
     assert report(path, settings=settings)['totals']['fully_ready_scenes'] == 1
     assert path.read_bytes() == before
@@ -334,7 +335,7 @@ def test_cli_reports_unselected_dependency_without_models_or_stash(tmp_path, mon
     seed(path, model='dtq', outputs=peer)
     destination = tmp_path / 'cache.json'
     for name in ('load_tagger', 'load_vocabulary', 'ensure_files', 'create_stash_client'):
-        monkeypatch.setattr(app, name, lambda *args: pytest.fail('model/Stash access'))
+        monkeypatch.setattr(app.services, name, lambda *args: pytest.fail('model/Stash access'))
     before = path.read_bytes()
     assert app.main(['--cache-report', str(destination), '--state-db', str(path), '--models', 'wd']) == 0
     data = json.loads(destination.read_text())
@@ -353,27 +354,27 @@ def test_including_unselected_dependency_produces_a_plan_that_completes(pipeline
     dtq = pair()
     dtq['markers']['meta']['marker_score_floor'] = .8
     seed(p.path, model='dtq', outputs=dtq)
-    config_data = app.load_unique_yaml(app.MODELS_CONFIG_FILE, 'test')
+    config_data = app.services.load_unique_yaml(app.MODELS_CONFIG_FILE, 'test')
     for model in ('wd', 'dtq'):
         config_data[model].update(scene_threshold=.4, marker_threshold=.9 if model == 'wd' else .8,
                                   scene_cache_floor=.1, marker_cache_floor=.2)
     yaml_path = tmp_path / 'models.yml'
     yaml_path.write_text(yaml.safe_dump(config_data))
     context = ['--state-db', str(p.path), '--model-config', str(yaml_path)]
-    selected = app.load_model_settings(yaml_path, ['wd'], None, True)
+    selected = app.services.load_model_settings(yaml_path, ['wd'], None, True)
     before = p.path.read_bytes()
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), True) as state:
         blocked = cache_report.build_report(app, state, ['1'], selected, context)
     assert not blocked['plan'] and blocked['totals']['blocked_pairs'] == 1
     assert p.path.read_bytes() == before and not p.stash.writes
-    settings = app.load_model_settings(yaml_path, ['wd', 'dtq'], None, True)
+    settings = app.services.load_model_settings(yaml_path, ['wd', 'dtq'], None, True)
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), True) as state:
         data = cache_report.build_report(app, state, ['1'], settings, context)
     assert data['totals']['blocked_pairs'] == 0
     assert [row['model'] for row in actions(data)] == ['dtq']
     assert [row['action'] for row in data['plan']] == [
         'restart_inference', 'rethreshold', 'merge_after_backfill']
-    original = app.load_tagger
+    original = app.services.load_tagger
     loaded = []
 
     def load(config, *args):
@@ -381,7 +382,7 @@ def test_including_unselected_dependency_produces_a_plan_that_completes(pipeline
         loaded.append(config.source.key)
         return original(config, *args)
 
-    monkeypatch.setattr(app, 'load_tagger', load)
+    monkeypatch.setattr(app.services, 'load_tagger', load)
     assert [app.main([*row['argv'][2:], '--no-hierarchy']) for row in data['plan']] == [0, 0, 0]
     assert loaded == ['dtq']
     completed = report(p.path, settings=settings)
@@ -471,7 +472,7 @@ def test_cli_is_offline_and_preserves_settings_in_plan(tmp_path, monkeypatch, ca
     seed(path)
     destination = tmp_path / 'cache.json'
     for name in ('load_tagger', 'load_vocabulary', 'ensure_files', 'create_stash_client'):
-        monkeypatch.setattr(app, name, lambda *args: pytest.fail('model/Stash access'))
+        monkeypatch.setattr(app.services, name, lambda *args: pytest.fail('model/Stash access'))
     before = path.read_bytes()
     assert app.main(['--cache-report', str(destination), '--state-db', str(path),
                      '--models', 'wd', '--scene-id', '404', '--no-temporal']) == 0
@@ -516,7 +517,7 @@ def test_generated_backfill_resumes_actual_inference_checkpoint(pipeline, monkey
     p.fail['wd'] = 4
     with pytest.raises(KeyboardInterrupt):
         app.main(p.args)
-    settings = app.load_model_settings(app.MODELS_CONFIG_FILE, ['wd'], None, True)
+    settings = app.services.load_model_settings(app.MODELS_CONFIG_FILE, ['wd'], None, True)
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), True) as store:
         data = cache_report.build_report(app, store, ['1'], settings,
                                          ['--state-db', str(p.path), '--no-temporal'])
@@ -536,15 +537,16 @@ def test_generated_rethreshold_applies_yaml_without_loading_a_model(pipeline, mo
     monkeypatch.setattr(app, 'TEMPORAL_POLICY', TemporalPolicy(enabled=False))
     p = pipeline
     assert app.main(p.args) == 0
-    data = app.load_unique_yaml(app.MODELS_CONFIG_FILE, 'test')
+    data = app.services.load_unique_yaml(app.MODELS_CONFIG_FILE, 'test')
     data['wd'].update(scene_threshold=.5, marker_threshold=.6)
     yaml_path = tmp_path / 'thresholds.yml'
     yaml_path.write_text(yaml.safe_dump(data))
-    settings = app.load_model_settings(yaml_path, ['wd'], None, True)
+    settings = app.services.load_model_settings(yaml_path, ['wd'], None, True)
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), True) as store:
         result = cache_report.build_report(app, store, ['1'], settings,
             ['--state-db', str(p.path), '--model-config', str(yaml_path), '--no-temporal'])
     assert not actions(result) and result['plan'][0]['action'] == 'rethreshold'
-    monkeypatch.setattr(app, 'load_tagger', lambda *args: pytest.fail('model loaded for rethreshold'))
+    monkeypatch.setattr(app.services, 'load_tagger', lambda *args: pytest.fail('model loaded for rethreshold'))
     assert app.main([*result['plan'][0]['argv'][2:], '--no-hierarchy']) == 0
     assert report(p.path, settings=settings)['totals']['fully_ready_scenes'] == 1
+

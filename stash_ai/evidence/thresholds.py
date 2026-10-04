@@ -1,7 +1,7 @@
 """Marker publication thresholds over immutable, bounded inference evidence."""
 
 import math
-from types import SimpleNamespace
+from dataclasses import replace
 
 from stash_ai.evidence.identity import OVERRIDE
 
@@ -22,10 +22,10 @@ def indexed_signature(segment, inference=None):
 
 def marker_context(app, records):
     """Freeze effective thresholds with each publication, including cleanup replay."""
-    if hasattr(app, 'MARKER_THRESHOLDS'):
+    if app.MARKER_THRESHOLDS is not None:
         return app
     from stash_ai.evidence.identity import marker_segment_signature
-    context = SimpleNamespace(**vars(app))
+    context = replace(app)
     context.MARKER_THRESHOLDS = {
         marker_segment_signature(segment): segment[OVERRIDE]
         for segments in records.values() for segment in segments if OVERRIDE in segment}

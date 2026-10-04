@@ -34,7 +34,8 @@ def main():
     if min(args.markers, args.labels, args.repeats) < 1 or args.labels > args.markers:
         parser.error('markers/labels/repeats must be positive; labels cannot exceed markers')
     sys.path.insert(0, str(args.project.resolve()))
-    from stash_ai import cli as app
+    from stash_ai.runtime.context import RuntimeContext
+    app = RuntimeContext()
     import stash_ai.evidence.labels as merge_labels
     import stash_ai.storage.store as merge_store
     from stash_ai.publication import merged as merge_sync
@@ -90,3 +91,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+

@@ -30,7 +30,8 @@ def main():
     if min(args.frames, args.labels, args.repeats) < 1:
         parser.error('frames, labels and repeats must be positive')
     sys.path.insert(0, str(args.project.resolve()))
-    from stash_ai import cli as app
+    from stash_ai.runtime.context import RuntimeContext
+    app = RuntimeContext()
     from stash_ai.publication import merged as merge_sync
     from stash_ai.evidence import pipeline as merge
     import stash_ai.evidence.labels as merge_labels
@@ -91,3 +92,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+

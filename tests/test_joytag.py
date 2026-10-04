@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from stash_ai.inference.identity import model_identity
-from stash_ai import cli as app
+from tests.helpers.runtime import runtime as app
 from stash_ai.backends import joytag
 from stash_ai.models import JOYTAG, WD, ModelSettings, Vocabulary
 from stash_ai.backends.loader import JoyTagger
@@ -57,7 +57,7 @@ def hf_assets(tmp_path, monkeypatch):
     monkeypatch.delenv("JOYTAG_MODEL_PATH", raising=False)
     config = tmp_path / "models.yml"
     config.write_text("version: 1\njoytag:\n  model_dir: models/joytag\n")
-    monkeypatch.setattr(app, "create_stash_client", lambda _: pytest.fail("model download accessed Stash"))
+    monkeypatch.setattr(app.services, "create_stash_client", lambda _: pytest.fail("model download accessed Stash"))
     return SimpleNamespace(model_dir=model_dir, cache=cache, config=config, assets=assets, requests=requests)
 
 
@@ -153,11 +153,11 @@ def test_joytag_defaults_to_managed_models_directory_and_rejects_code_dir(tmp_pa
     monkeypatch.setenv('JOYTAG_CODE_PATH', str(tmp_path/'unused-checkout'))
     config = tmp_path/'models.yml'
     config.write_text('version: 1\n')
-    settings = app.load_model_settings(config, ['joytag'], None)[0]
+    settings = app.services.load_model_settings(config, ['joytag'], None)[0]
     assert settings.model_dir == tmp_path/'models/joytag'
     config.write_text('version: 1\njoytag:\n  code_dir: old-checkout\n')
     with pytest.raises(ValueError, match='Invalid joytag settings'):
-        app.load_model_settings(config, ['joytag'], None)
+        app.services.load_model_settings(config, ['joytag'], None)
 
 
 def test_loader_revision_changes_only_joytag_inference_identity(tmp_path, monkeypatch):
@@ -167,3 +167,4 @@ def test_loader_revision_changes_only_joytag_inference_identity(tmp_path, monkey
     monkeypatch.setattr(joytag, 'LOADER_REVISION', 'a'*40)
     after = [model_identity(app, c, vocabulary) for c in configs]
     assert before[0] != after[0] and before[1] == after[1]
+
