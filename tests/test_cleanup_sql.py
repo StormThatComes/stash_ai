@@ -1,5 +1,6 @@
 """Real SQLite SELECT contracts and API-write semantics for large cleanup."""
 from stash_ai.storage.results import KINDS
+from stash_ai.stash_api.client import StashClient
 from collections import Counter
 from copy import deepcopy
 import json
@@ -170,7 +171,7 @@ def test_sql_dry_run_allowlist_cannot_execute_writes_or_injected_statements():
     assert is_read_only_cleanup(READ_OPERATION, {'sql': SQL['probe']})
     for sql in ['DELETE FROM tags', 'SELECT 1; DELETE FROM tags', SQL['probe']+'; DELETE FROM tags']:
         assert not is_read_only_cleanup(READ_OPERATION, {'sql': sql})
-    stash = app.services.StashClient.__new__(app.services.StashClient)
+    stash = StashClient.__new__(StashClient)
     stash.dry_run = True
     stash.report = None
     with pytest.raises(RuntimeError, match='dry-run'):

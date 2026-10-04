@@ -29,9 +29,6 @@ class RuntimeServices:
     load_unique_yaml: Callable = config.load_unique_yaml
     load_exclusion_policy: Callable = config.load_exclusion_policy
     load_tag_hierarchy: Callable = config.load_tag_hierarchy
-    metadata_hierarchy: Callable = config.metadata_hierarchy
-    vocabulary_digest: Callable = config.vocabulary_digest
-    StashClient: Callable = StashClient
     TagResolver: Callable = TagResolver
     print_hierarchy_summary: Callable = print_hierarchy_summary
     safe_error: Callable = safe_error

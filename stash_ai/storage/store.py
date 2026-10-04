@@ -152,9 +152,6 @@ class StateStore(AbstractContextManager):
     def imported_legacy(self, scene, kind, *, borrow=False):
         return self.legacy.records(scene, kind, borrow=borrow)
 
-    def remember_legacy(self, scene, kind, data):
-        return self.legacy.remember(scene, kind, data)
-
     def snapshot(self, scene, kind, *, borrow=False):
         return self.publications.snapshot(scene, kind, borrow=borrow)
 

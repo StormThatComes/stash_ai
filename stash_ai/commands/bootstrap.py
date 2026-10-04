@@ -60,10 +60,8 @@ def catalogs(app, settings, args, scene_policies):
         hierarchy_path = args.hierarchy if source.key == "joytag" else getattr(args, source.key + "_hierarchy")
         if args.no_hierarchy:
             hierarchy = None
-        elif hierarchy_path is not None:
-            hierarchy = app.services.load_tag_hierarchy(hierarchy_path, vocabulary.labels, source)
         else:
-            hierarchy = app.services.metadata_hierarchy(vocabulary, source)
+            hierarchy = app.services.load_tag_hierarchy(hierarchy_path, vocabulary.labels, source)
         hierarchies[source.key] = hierarchy
         print(f"{source.title}: {len(vocabulary.labels):,} labels; "
               f"hierarchy={'off' if hierarchy is None else str(len(hierarchy.category_parents)) + ' categories'}; "

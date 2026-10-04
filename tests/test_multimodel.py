@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 import yaml
 from stash_ai.domain import Cue, FramePrediction, MarkerSpec
+from stash_ai.config import vocabulary_digest
 from stash_ai.inference import prediction, sprites
 from tests.helpers.runtime import runtime as app
 from stash_ai.models import (
@@ -199,13 +200,17 @@ def test_original_hierarchy_and_model_settings():
     assert select_models(["dtq,wd","wd"])==["dtq","wd"]
 
 
-def test_model_hierarchies_include_all_categories_and_keep_manual_parents():
+def test_model_hierarchies_include_all_categories_and_keep_manual_parents(tmp_path):
     stash=Stash();manual=stash.tag("manual parent");other=stash.tag("jt:category:Other")
     other["description"]=JOYTAG.hierarchy_description
     old=stash.tag("wd:category:Old");old["description"]=WD.hierarchy_description
     stash.tag("wd:tag")["parents"]=[manual,other,old]
     vocab=Vocabulary(["tag","character","unknown"],{"tag":"General","character":"Character"})
-    hierarchy=app.services.metadata_hierarchy(vocab,WD)
+    path = tmp_path / 'hierarchy.yml'
+    path.write_text(yaml.safe_dump(dict(version=1, root='WD',
+        category_prefix='wd:category:', groups={'General': ['tag'],
+        'Character': ['character'], 'Uncategorized': ['unknown']})))
+    hierarchy=app.services.load_tag_hierarchy(path,vocab.labels,WD)
     resolver=app.services.TagResolver(stash,hierarchy,source=WD)
     for name in vocab.labels: resolver.resolve("wd:"+name)
     assert {p["name"] for p in stash.tags["wd:tag"]["parents"]}=={"manual parent","jt:category:Other","wd:category:General"}
@@ -438,7 +443,7 @@ def bundled_catalogs():
         path=root/f"{key}_hierarchy.yml"
         data=yaml.safe_load(path.read_text(encoding="utf-8"))
         labels=sorted({label for group in data["groups"].values() for label in group})
-        assert len(labels)==count and app.services.vocabulary_digest(labels)==digest
+        assert len(labels)==count and vocabulary_digest(labels)==digest
         hierarchy=app.services.load_tag_hierarchy(path,labels,SOURCES[key])
         assert hierarchy.category_prefix==SOURCES[key].prefix+"category:"
         result[key]=(Vocabulary(labels,{}),hierarchy)

@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from stash_ai.domain import TagHierarchy
-from stash_ai.models import SOURCES, ModelSource, ModelSettings, Vocabulary, select_models
+from stash_ai.models import SOURCES, ModelSource, ModelSettings, select_models
 
 
 def vocabulary_digest(labels: list[str]) -> str:
@@ -105,20 +105,6 @@ def load_model_settings(path: Path, chosen: list[str] | None, device: str | None
         config.validate()
         settings.append(config)
     return sorted(settings, key=lambda item: selected.index(item.source.key))
-
-def metadata_hierarchy(vocabulary: Vocabulary, source: ModelSource) -> TagHierarchy:
-    prefix = source.prefix + "category:"
-    root = prefix + source.title
-    categories = {root: ()}
-    leaves = {}
-    for label in vocabulary.labels:
-        category = prefix + vocabulary.categories.get(label, "Uncategorized")
-        categories[category] = (root,)
-        leaves[label] = (category,)
-    collisions = set(categories) & ({source.prefix + label for label in vocabulary.labels} | {source.owner_tag})
-    if collisions:
-        raise ValueError(f"Hierarchy categories collide with predicted/owner tags: {sorted(collisions)!r}")
-    return TagHierarchy(leaves, categories, prefix, source.hierarchy_description)
 
 def load_tag_hierarchy(path: Path, labels: list[str], source: ModelSource) -> TagHierarchy:
     if not path.is_file():

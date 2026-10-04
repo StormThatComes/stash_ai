@@ -169,7 +169,7 @@ def test_check_accepts_real_checkpoint_and_completed_inference(pipeline, scene_o
 def test_cli_rejects_unusable_payload_offline(tmp_path, monkeypatch):
     path = tmp_path / "state.sqlite3"
     save_result(path, "frames", [{}])
-    for name in ("StashClient", "load_model_settings", "load_tagger"):
+    for name in ("create_stash_client", "load_model_settings", "load_tagger"):
         monkeypatch.setattr(app.services, name, lambda *a, **kw: pytest.fail("db-check must stay offline"))
     assert app.main(["--state-db", str(path), "--db-check"]) == 1
 

@@ -15,6 +15,7 @@ from PIL import Image
 import pytest
 
 from stash_ai.inference import sprites
+from stash_ai.stash_api.client import StashClient
 from stash_ai.storage import codec as state_codec
 from stash_ai.cleanup import evidence as cleanup_evidence
 from tests.helpers.runtime import runtime as app
@@ -81,7 +82,7 @@ def test_old_video_yaml_is_rejected_explicitly(tmp_path,enabled):
 
 
 def test_scene_query_only_requests_sprite_and_vtt_media():
-    client=app.services.StashClient.__new__(app.services.StashClient)
+    client=StashClient.__new__(StashClient)
     client.create_markers=app.CREATE_MARKERS
     fields=client.scene_fields()
     assert 'paths { sprite vtt }' in fields
@@ -90,7 +91,7 @@ def test_scene_query_only_requests_sprite_and_vtt_media():
 
 def test_existing_sprite_reader_uses_only_stash_http_bytes(monkeypatch):
     monkeypatch.setattr(app,'STASH_URL','http://stash.test:9999')
-    client=app.services.StashClient.__new__(app.services.StashClient)
+    client=StashClient.__new__(StashClient)
     client.url=app.STASH_URL
     client.request_timeout=app.REQUEST_TIMEOUT
     with Image.new('RGB',(2,1),'white') as sprite:

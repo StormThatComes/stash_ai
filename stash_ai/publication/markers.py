@@ -73,9 +73,7 @@ def marker_differs(existing: dict, wanted: dict) -> bool:
     } - {wanted["primary_tag_id"]}
     if extra_ids != set(wanted["tag_ids"]):
         return True
-    if "end_seconds" in wanted:
-        old_end, new_end = existing.get("end_seconds"), wanted["end_seconds"]
-        if old_end is None or new_end is None:
-            return old_end != new_end
-        return abs(old_end - new_end) > 0.0005
-    return False
+    old_end, new_end = existing.get("end_seconds"), wanted["end_seconds"]
+    if old_end is None or new_end is None:
+        return old_end != new_end
+    return abs(old_end - new_end) > 0.0005
