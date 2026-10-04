@@ -8,7 +8,7 @@ def reconcile(app, stash, store, scene, kind, published):
     """Observe surviving outputs; never replay an abandoned plan or infer votes."""
     from stash_ai.evidence.labels import AI, source_codes
     from stash_ai.evidence.intervals import union_intervals
-    from stash_ai.evidence.occurrences import OCCURRENCE_TAG, is_occurrence
+    from stash_ai.evidence.marker_identity import OCCURRENCE_TAG, is_occurrence
     from stash_ai.evidence.shared_markers import prune_blocked_extras
     from stash_ai.signatures import freeze
     archived = publications(store, scene['id'], kind)
@@ -74,3 +74,4 @@ def reconcile(app, stash, store, scene, kind, published):
     # The dry-run StateStore writes only its temporary overlay.
     store.publish(str(scene['id']), {kind: result})
     return result, True
+

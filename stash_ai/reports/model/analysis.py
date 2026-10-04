@@ -1,7 +1,7 @@
 """Replay source support and leave-one-model-out analysis for one scene."""
 from collections import Counter
 from stash_ai.models import SOURCES
-from stash_ai.evidence.occurrences import is_occurrence
+from stash_ai.evidence.marker_identity import is_occurrence
 from .comparison import _extras, _marker_delta
 
 
@@ -160,3 +160,4 @@ def merge_scene_report(totals, utility, partial):
     totals.update(scene_totals)
     for model in utility:
         utility[model].update(scene_utility[model])
+

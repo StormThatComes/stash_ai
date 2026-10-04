@@ -9,7 +9,7 @@ from stash_ai.runtime.timing import stage
 
 
 def _wanted_markers(app, stash, resolver, scene_id, markers, ids, groups, blocked_names):
-    from stash_ai.evidence.occurrences import OCCURRENCE_TAG, is_occurrence
+    from stash_ai.evidence.marker_identity import OCCURRENCE_TAG, is_occurrence
 
     def allowed_id(identifier):
         name = resolver.name_for_id(str(identifier))
@@ -107,3 +107,4 @@ def plan_markers(app, stash, resolver, scene_id, scene, markers, ids, groups, bl
                     marker, scene_id, blocked_names)
                 if payload is not None:
                     plan.updates.append(payload)
+

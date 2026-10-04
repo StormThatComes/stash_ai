@@ -12,7 +12,7 @@ def resolve_sync_tags(app, stash, resolver, scene_id, scene, markers, spans, sce
     """Resolve generated tags, refresh the scene and suppress manual occurrences."""
     from stash_ai.exclusions import excluded_names
     from stash_ai.publication.groups import for_resolver
-    from stash_ai.evidence.occurrences import OCCURRENCE_TAG, is_occurrence
+    from stash_ai.evidence.marker_identity import OCCURRENCE_TAG, is_occurrence
 
     groups = for_resolver(app, resolver)
     blocked_names = excluded_names(tag_policies)
@@ -86,3 +86,4 @@ def plan_scene_tags(app, store, scene_id, scene, scene_hits, scene_labels, ids, 
         snapshots["scene"] = {"owned_ids": sorted(desired_ids - preserved), "contributions": scene_hits}
 
     return MergeSyncPlan(snapshots, existing_ids, desired_ids, final_ids, migrated_scene_ids)
+

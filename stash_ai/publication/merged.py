@@ -17,7 +17,7 @@ from stash_ai.runtime.timing import stage
 
 
 def sync_statistics(app, plan, markers, suppressed):
-    from stash_ai.evidence.occurrences import is_occurrence
+    from stash_ai.evidence.marker_identity import is_occurrence
 
     stats = Counter(
         scene_tags_updated=int(app.APPLY_SCENE_TAGS and plan.scene_changed),

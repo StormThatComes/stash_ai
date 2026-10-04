@@ -1,13 +1,14 @@
-from stash_ai.evidence import marker_building
 """Build validated per-source markers before cross-model enrichment."""
+from stash_ai.evidence import marker_building
+from .contracts import RecordsBySource, MarkerContribution
 from stash_ai.domain import Cue, FramePrediction
 from stash_ai.runtime.timing import stage
 from .labels import raw_label
 
 
-def marker_contributions(app, records, core_policies, *, index=None, metrics=None, cache=None, tag_policies=None,
+def marker_contributions(app, records: RecordsBySource, core_policies, *, index=None, metrics=None, cache=None, tag_policies=None,
                          allow_unknown_blocklist=False, allow_unknown_retention=False,
-                         legacy_blocklist=frozenset()):
+                         legacy_blocklist=frozenset()) -> list[MarkerContribution]:
     from stash_ai.evidence.frames import FrameIndex
     from stash_ai.evidence.thresholds import marker_context
     app = marker_context(app, records)

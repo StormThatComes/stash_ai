@@ -10,6 +10,7 @@ from stash_ai.storage import progress
 from stash_ai.inference import checkpoints, prediction, preparation
 from stash_ai.inference.identity import model_identity
 from stash_ai.signatures import digest
+from stash_ai.inference.input_identity import cue_manifest, frame_signature, inference_signature
 
 
 class MergedModelRun:
@@ -100,11 +101,7 @@ class MergedModelRun:
                 return False
             # Auto-download may just have supplied missing weight files.
             self.identity = model_identity(app, self.config, self.vocabulary)
-            signature = digest({
-                "model": self.identity,
-                "cues": [[c.start, c.end, c.image, list(c.rect)] for c in cues],
-                "media": media.hashes,
-            })
+            signature = inference_signature(self.identity, cue_manifest(cues), media.hashes)
         self._predict_scene(scene_id, paths, cues, media, signature, kinds, replacement)
         return True
 
@@ -127,10 +124,7 @@ class MergedModelRun:
         for segment in outputs.values():
             segment["meta"].update(
                 inference_signature=signature,
-                frame_input_signature=digest({
-                    "cues": [[c.start, c.end, c.image, list(c.rect)] for c in cues],
-                    "media": media.hashes,
-                }))
+                frame_input_signature=frame_signature(cue_manifest(cues), media.hashes))
         checkpoints.finish(store, scene_id, self.key, outputs, replacement)
         self.stats["processed"] += 1
 

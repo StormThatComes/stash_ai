@@ -10,7 +10,7 @@ from stash_ai.publication import groups as groups
 import stash_ai.cleanup.groups as groups_groups
 import stash_ai.evidence.labels as merge_labels
 import stash_ai.storage.store as merge_store
-from stash_ai.evidence.occurrences import OCCURRENCE_TAG
+from stash_ai.evidence.marker_identity import OCCURRENCE_TAG
 from stash_ai.cleanup.prune import REQUIRED_COUNTS, prune_tags
 from stash_ai.models import WD
 from tests.helpers.cleanup import FastStash

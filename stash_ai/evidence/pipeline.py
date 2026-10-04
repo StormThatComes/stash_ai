@@ -2,10 +2,11 @@
 from contextlib import nullcontext
 from stash_ai.runtime.timing import stage
 from .labels import raw_label
+from .contracts import SceneContribution, MarkerContribution
 from .source_markers import marker_contributions
 
 
-def evidence(app, store, scene_id, core_policies, scene_policies, metrics=None, *, selected_sources=None):
+def evidence(app, store, scene_id, core_policies, scene_policies, metrics=None, *, selected_sources=None) -> tuple[list[SceneContribution], list[MarkerContribution]]:
     """Retain source markers and enrich them with compatible shared observations.
 
     selected_sources is an analysis-only view used for counterfactual reports:
@@ -67,3 +68,4 @@ def evidence(app, store, scene_id, core_policies, scene_policies, metrics=None, 
         with report.measure('occurrence_compute') if report is not None else nullcontext():
             spans.extend(occurrence_contributions(app, scene_hits, frame_records(scene_records, records), spans, core_policies, scene_policies, metrics))
     return sorted(scene_hits, key=lambda item: (item["tag"], item["source"])), spans
+

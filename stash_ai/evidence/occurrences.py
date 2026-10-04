@@ -13,13 +13,6 @@ import math
 
 from stash_ai.models import SOURCES
 
-OCCURRENCE_TAG = 'ai:marker:occurrence'
-
-
-def is_occurrence(marker):
-    return bool(marker.get('contributors')) and all(
-        item.get('derived') == 'occurrence' for item in marker['contributors'])
-
 
 def _number(value, low=0.0, high=float('inf')):
     return type(value) in (int, float) and math.isfinite(value) and low <= value <= high
@@ -160,7 +153,7 @@ def occurrence_contributions(app, scene_hits, records, spans, core_policies, tag
     ranked = sorted(best.values(), key=lambda item: (tuple(-v for v in item[0]), item[1]['tag']))
     limited = 0
     if app.MAX_MARKERS_PER_SCENE:
-        from stash_ai.evidence.intervals import union_intervals
+        from stash_ai.evidence.interval_geometry import union_intervals
         remaining = max(0, app.MAX_MARKERS_PER_SCENE - len(union_intervals(spans, borrow=True)))
         limited = max(0, len(ranked) - remaining)
         ranked = ranked[:remaining]
@@ -182,3 +175,4 @@ def cleanup_occurrence(app, store, scene_id, point, selected, cores, tags):
         return None
     return _point(point['tag'], point['start'], witnesses,
                   [hit for hit in hits if any(_matches(hit, w) for w in witnesses)])
+

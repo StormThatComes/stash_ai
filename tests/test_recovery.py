@@ -12,7 +12,7 @@ import stash_ai.evidence.labels as merge_labels
 import stash_ai.storage.store as merge_store
 from stash_ai.storage import recovery as recovery
 import stash_ai.publication.recovery as recovery_recovery
-from stash_ai.evidence.occurrences import OCCURRENCE_TAG
+from stash_ai.evidence.marker_identity import OCCURRENCE_TAG
 from tests.helpers.cleanup import FastStash
 from tests.helpers.cleanup import install
 from tests.helpers.cleanup import options

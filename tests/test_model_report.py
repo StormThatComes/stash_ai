@@ -1,7 +1,7 @@
 """Offline model utility and leave-one-model-out ablation reporting."""
 
 from stash_ai.reports.model.comparison import _marker_key, _marker_delta
-from stash_ai.evidence.occurrences import is_occurrence
+from stash_ai.evidence.marker_identity import is_occurrence
 
 from dataclasses import replace
 import json

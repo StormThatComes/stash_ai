@@ -330,3 +330,10 @@ lifecycle Stash dla wybranych modeli. `inference/scene_predictions.py` oddziela
 wybór zachowanych etykiet od kwalifikacji temporal; finalizacja w `prediction.py`
 zachowuje raw evidence, limity i wykluczenia przed publikacją.
 
+
+Evidence ma jawne kontrakty słownikowe w `evidence/contracts.py`, w tym warianty
+rekordów scene/frames/spans i wyników pochodnych. `interval_geometry.py` scala
+geometrię bez algorytmów temporal; `intervals.py` dokłada kwalifikację extras.
+Nazwy zarezerwowane i klasyfikacja occurrence żyją w `marker_identity.py`.
+`inference/input_identity.py` współdzieli manifest cue i historyczny format
+podpisów między preflightem, cache, reuse i inferencją.
