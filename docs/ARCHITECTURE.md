@@ -246,7 +246,14 @@ bezpośrednio z planów w `rethreshold`, bez wrapperów pod dawnymi ścieżkami.
 
 Updater instaluje pliki Pythona z pakietu `stash_ai/`, również z jego podkatalogów.
 Pozostaje samodzielnym skryptem stdlib, aby odzyskiwanie przerwanej aktualizacji
-działało także przy niekompletnym pakiecie. Migrację starego updatera opisuje
+działało także przy niekompletnym pakiecie. `RemoteSnapshot` opisuje jeden przypięty
+commit, a `UpdatePlan` zawiera operacje, konflikty i następny stan instalacji.
+`prepare` zapisuje komplet plików i backupów przed publikacją journalu;
+`PreparedUpdate` przekazuje helperowi jego tożsamość i katalog. `UpdateTransaction`
+waliduje trwały plan oraz skupia apply i rollback, z fazami `Phase`.
+`run_helper` obsługuje przekazanie blokady, usunięcie tokenów z environment i status
+procesu. Format 1 metadanych pozostaje zgodny z wcześniejszym updaterem;
+żaden z tych obiektów nie wymaga importu pakietu aplikacji. Migrację starego updatera opisuje
 [README](../README.md#aktualizacje).
 
 YAML-e, domyślna baza `tagger_sources.sqlite3` i katalog `models/` pozostają
@@ -352,3 +359,16 @@ dopasowaniem markerów; payloady i plan create/update/delete powstają z gotowyc
 danych. Wspólny `evidence/frozen_replay.py` wybiera dokładne podpisy opublikowanej
 evidence i odtwarza zamrożoną politykę. Recovery osobno rekonstruuje obserwowane
 snapshoty scen i markerów, po czym koordynator zapisuje baseline.
+
+`stash_api/scene_reads.py` koordynuje SQL snapshoty, pola mediów GraphQL
+i jednokierunkowy fallback po błędzie, wspólny dla find, batch i page.
+`cleanup/sql.py` ustala lifecycle i politykę cleanupu; `sql_discovery.py`
+wykonuje ograniczone SELECT-y, `sql_mutations.py` rewaliduje partie i potwierdza
+zapisy natywnym API, a `sql_preview.py` modeluje skutki dry-run bez zapisu źródła.
+
+`commands/modes.py` ustala jeden `Command` przed normalizacją domyślnych
+opcji. Dispatch, grupy trybów i deklaratywne reguły raportów korzystają z tego
+wyboru, zachowując kolejność walidacji. `reports/runtime.py` współdzieli
+izolowane ustawienia, polityki i read-only store, a `reports/io.py` zapisuje
+nowy JSON z wyłącznym otwarciem pliku. Wybór scen i specyfika raportów pozostają
+w ich modułach.

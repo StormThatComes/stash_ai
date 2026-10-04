@@ -1,11 +1,11 @@
 """Stash scene, tag and marker operations built on the shared HTTP transport."""
 from __future__ import annotations
 
-from itertools import batched
 import re
 from typing import Iterator
 
-from stash_ai.stash_api.transport import StashTransport, safe_error
+from stash_ai.stash_api.transport import StashTransport
+from stash_ai.stash_api.scene_reads import SceneReads
 
 
 class StashClient(StashTransport):
@@ -18,8 +18,7 @@ class StashClient(StashTransport):
                          request_timeout=request_timeout, http_retries=http_retries)
         self.scene_page_size = scene_page_size
         self.create_markers = create_markers
-        self.merge_reader = None
-        self.merge_only_reads = False
+        self.scene_access = SceneReads(self)
         try:
             self._require_supported_version()
         except Exception:
@@ -41,41 +40,23 @@ class StashClient(StashTransport):
         raise RuntimeError(f'Stash >= 0.31.1 is required; server reported {version!r}. '
                            'Upgrade Stash before running commands that connect to it.')
 
+    @property
+    def merge_reader(self):
+        return self.scene_access.reader
+
+    @property
+    def merge_only_reads(self):
+        return self.scene_access.merge_only
+
     def configure_merge_reads(self, report, *, merge_only=False):
-        from stash_ai.stash_api.sql import SceneReader
         self.report = report
-        self.merge_only_reads = merge_only
-        try:
-            reader = SceneReader(self, self.create_markers, report)
-            reader.read([])  # Verify the exact SELECT/schema/JSON support, once.
-            self.merge_reader = reader
-            report.counts['merge_sql_enabled'] += 1
-        except Exception as exc:
-            self.merge_reader = None
-            report.counts['merge_graphql_fallback'] += 1
-            report.detail('Merge SQL unavailable; using GraphQL: ' + safe_error(exc, self.api_key))
+        self.scene_access.configure(report, merge_only=merge_only)
 
     def merge_snapshots(self, ids):
-        reader = getattr(self, 'merge_reader', None)
-        if reader is None:
-            return None
-        try:
-            return reader.read(ids)
-        except Exception as exc:
-            self.merge_reader = None
-            if self.report is not None:
-                self.report.counts['merge_graphql_fallback'] += 1
-                self.report.detail('Merge SQL read failed; using GraphQL: ' + safe_error(exc, self.api_key))
-            return None
+        return self.scene_access.snapshots(ids)
 
     def find_scene_for_merge(self, scene_id):
-        scenes = self.merge_snapshots([scene_id])
-        if scenes is None:
-            return self.find_scene(scene_id)
-        scene = scenes.get(str(int(scene_id)))
-        if scene is None:
-            raise RuntimeError(f'Scene {scene_id} no longer exists.')
-        return scene
+        return self.scene_access.find_for_merge(scene_id)
 
     def tag_fields(self) -> str:
         return "id name description ignore_auto_tag parents { id name description }"
@@ -100,55 +81,7 @@ class StashClient(StashTransport):
         return result
 
     def iter_scenes(self, ids: list[str] | None = None) -> Iterator[dict]:
-        if ids:
-            for group in batched(dict.fromkeys(ids), min(self.scene_page_size, 1000)):
-                snapshots = (self.merge_snapshots(group)
-                             if getattr(self, 'merge_only_reads', False) else None)
-                for scene_id in group:
-                    if snapshots is None:
-                        yield self.find_scene(scene_id)
-                    else:
-                        scene = snapshots.get(str(int(scene_id)))
-                        if scene is None:
-                            raise RuntimeError(f'Scene {scene_id} no longer exists.')
-                        yield scene
-            return
-        after = 0
-        if getattr(self, 'merge_only_reads', False) and getattr(self, 'merge_reader', None):
-            while True:
-                try:
-                    scenes = self.merge_reader.page(after, min(self.scene_page_size, 1000))
-                except Exception as exc:
-                    self.merge_reader = None
-                    self.report.counts['merge_graphql_fallback'] += 1
-                    self.report.detail('Merge SQL page failed; using GraphQL: ' + safe_error(exc, self.api_key))
-                    break
-                yield from scenes.values()
-                if len(scenes) < min(self.scene_page_size, 1000):
-                    return
-                after = max(map(int, scenes))
-        page = 1
-        while True:
-            reader = getattr(self, 'merge_reader', None)
-            result = self.gql('''query StashAIScenes($filter: FindFilterType!) {
-                findScenes(filter: $filter) {
-                    scenes { ''' + ('id title paths { sprite vtt }' if reader else self.scene_fields()) + ''' }
-                }
-            }''', {"filter": {"page": page, "per_page": self.scene_page_size,
-                              "sort": "id", "direction": "ASC"}})["findScenes"]["scenes"]
-            if reader and result:
-                snapshots = self.merge_snapshots([scene['id'] for scene in result])
-                for scene in result:
-                    if snapshots is None:
-                        yield self.find_scene(scene['id'])
-                    elif scene['id'] in snapshots:
-                        yield {**scene, **snapshots[scene['id']]}
-                    # A scene removed between the two read requests is skipped.
-            else:
-                yield from (scene for scene in result if not after or int(scene['id']) > after)
-            if len(result) < self.scene_page_size:
-                return
-            page += 1
+        return self.scene_access.iter_scenes(ids)
 
     def scene_fields(self) -> str:
         marker_fields = ""
@@ -157,24 +90,7 @@ class StashClient(StashTransport):
         return "id title paths { sprite vtt } tags { id name } " + marker_fields
 
     def find_scene(self, scene_id: str) -> dict:
-        reader = getattr(self, 'merge_reader', None)
-        if reader and getattr(self, 'merge_only_reads', False):
-            return self.find_scene_for_merge(scene_id)
-        data = self.gql("""query StashAIScene($id: ID!) {
-            findScene(id: $id) {
-                """ + ('id title paths { sprite vtt }' if reader else self.scene_fields()) + """
-            }
-        }""", {"id": scene_id})["findScene"]
-        if not data:
-            raise RuntimeError(f"Scene {scene_id} no longer exists.")
-        if reader:
-            scenes = self.merge_snapshots([data['id']])
-            if scenes is None:
-                return self.find_scene(scene_id)
-            if data['id'] not in scenes:
-                raise RuntimeError(f'Scene {scene_id} no longer exists.')
-            data.update(scenes[data['id']])
-        return data
+        return self.scene_access.find(scene_id)
 
     def find_tag(self, name: str) -> dict | None:
         tags = self.gql('''query StashAIFindTag($name: String!) {
@@ -240,3 +156,4 @@ class StashClient(StashTransport):
         }''', {"id": marker_id})["sceneMarkerDestroy"]
         if not result:
             raise RuntimeError(f"Stash did not delete marker {marker_id}.")
+

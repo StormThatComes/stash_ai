@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 import atexit
 import base64
+from dataclasses import asdict, dataclass
+from enum import StrEnum
 import hashlib
 import json
 import os
@@ -40,6 +42,45 @@ SHA = re.compile(r"[0-9a-f]{40}\Z")
 
 class UpdateError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True)
+class RemoteSnapshot:
+    commit: str
+    files: dict[str, str]
+    requirements: str | None
+
+
+@dataclass(frozen=True)
+class FileChange:
+    path: str
+    before: str | None
+    after: str | None
+
+
+@dataclass(frozen=True)
+class UpdatePlan:
+    actions: tuple[FileChange, ...]
+    conflicts: tuple[str, ...]
+    kept_configs: tuple[str, ...]
+    next_state: dict
+
+
+@dataclass(frozen=True)
+class PreparedUpdate:
+    identity: str
+    directory: Path
+
+
+@dataclass(frozen=True)
+class TransactionEntry(FileChange):
+    mode: int
+
+
+class Phase(StrEnum):
+    PREPARED = "prepared"
+    APPLYING = "applying"
+    COMMITTED = "committed"
 
 
 def allowed(name):
@@ -282,7 +323,7 @@ class GitHub:
                 files[name] = entry["sha"]
             if not REQUIRED_FILES.issubset(files):
                 raise UpdateError("main does not contain the complete application package and updater.")
-            return sha, files, requirements
+            return RemoteSnapshot(sha, files, requirements)
         except (KeyError, TypeError, ValueError):
             raise UpdateError("Invalid or incomplete GitHub file tree; refusing partial installation.") from None
 
@@ -317,7 +358,9 @@ def load_state(root):
     return state
 
 
-def plan_update(root, state, commit, remote, requirements, *, overwrite_configs=False, force_code=False):
+def plan_update(root, state, snapshot, *, overwrite_configs=False, force_code=False):
+    """Inspect local files without downloading or changing the installation."""
+    remote = snapshot.files
     actions, conflicts, kept = [], [], []
     baseline = dict(state["baseline"])
     for name, sha in sorted(remote.items()):
@@ -335,12 +378,12 @@ def plan_update(root, state, commit, remote, requirements, *, overwrite_configs=
                 if before is not None and before != state["upstream"].get(name):
                     conflicts.append(incoming)
                 else:
-                    actions.append({"path": incoming, "before": before, "after": sha})
+                    actions.append(FileChange(incoming, before, sha))
             continue
         if modified and name.endswith(".py") and not force_code:
             conflicts.append(name)
             continue
-        actions.append({"path": name, "before": current, "after": sha})
+        actions.append(FileChange(name, current, sha))
         baseline[name] = sha
     for name in sorted((set(baseline) | RETIRED_FILES | LEGACY_MODULES) - set(remote)):
         if name.endswith(".yml"):
@@ -350,11 +393,11 @@ def plan_update(root, state, commit, remote, requirements, *, overwrite_configs=
             if current != baseline.get(name) and not force_code:
                 conflicts.append(name)
                 continue
-            actions.append({"path": name, "before": current, "after": None})
+            actions.append(FileChange(name, current, None))
         baseline.pop(name, None)
-    next_state = {"format": 1, "commit": commit, "baseline": baseline,
-                  "upstream": remote, "requirements": requirements}
-    return actions, conflicts, kept, next_state
+    next_state = {"format": 1, "commit": snapshot.commit, "baseline": baseline,
+                  "upstream": remote, "requirements": snapshot.requirements}
+    return UpdatePlan(tuple(actions), tuple(conflicts), tuple(kept), next_state)
 
 
 def journal_write(root, identity, phase):
@@ -363,8 +406,8 @@ def journal_write(root, identity, phase):
 
 def clear_bytecode(root, entries):
     for entry in entries:
-        if entry["path"].endswith(".py"):
-            module = Path(entry["path"])
+        if entry.path.endswith(".py"):
+            module = Path(entry.path)
             cache = safe_path(root, (module.parent / "__pycache__").as_posix())
             if not cache.exists():
                 continue
@@ -372,60 +415,52 @@ def clear_bytecode(root, entries):
                 safe_path(root, path.relative_to(root).as_posix()).unlink()
 
 
-def prepare(root, actions, next_state, client):
+def prepare(root, plan, client):
     """Stage all downloads and backups before publishing the recovery journal."""
     identity = uuid.uuid4().hex
     directory = safe_path(root, META + "/transactions/" + identity)
     directory.mkdir(parents=True)
     entries = []
     # Updater last among code files; installed-version metadata last overall.
-    ordered = sorted(actions, key=lambda entry: entry["path"] == UPDATER)
-    state_data = json_bytes(next_state)
-    ordered.append({"path": STATE, "before": file_sha(safe_path(root, STATE)),
-                    "after": blob_sha(state_data)})
+    ordered = sorted(plan.actions, key=lambda entry: entry.path == UPDATER)
+    state_data = json_bytes(plan.next_state)
+    ordered.append(FileChange(STATE, file_sha(safe_path(root, STATE)), blob_sha(state_data)))
     for index, action in enumerate(ordered):
-        target = safe_path(root, action["path"])
+        target = safe_path(root, action.path)
         old = read_bytes(target)
-        if (blob_sha(old) if old is not None else None) != action["before"]:
-            raise UpdateError(f"File changed while planning: {action['path']}")
+        if (blob_sha(old) if old is not None else None) != action.before:
+            raise UpdateError(f"File changed while planning: {action.path}")
         mode = target.stat().st_mode & 0o777 if old is not None else 0o644
-        entry = dict(action, mode=mode)
+        entry = TransactionEntry(action.path, action.before, action.after, mode)
         if old is not None:
             atomic_write(directory / f"old-{index}", old)
-        if action["after"] is not None:
-            data = state_data if action["path"] == STATE else client.blob(action["after"])
-            if blob_sha(data) != action["after"]:
-                raise UpdateError(f"Hash mismatch: {action['path']}")
-            if action["path"].endswith(".py"):
+        if action.after is not None:
+            data = state_data if action.path == STATE else client.blob(action.after)
+            if blob_sha(data) != action.after:
+                raise UpdateError(f"Hash mismatch: {action.path}")
+            if action.path.endswith(".py"):
                 try:
-                    compile(data, action["path"], "exec", dont_inherit=True)
+                    compile(data, action.path, "exec", dont_inherit=True)
                 except (SyntaxError, ValueError):
-                    raise UpdateError(f"Invalid Python for this interpreter: {action['path']}") from None
+                    raise UpdateError(f"Invalid Python for this interpreter: {action.path}") from None
             atomic_write(directory / f"new-{index}", data)
         entries.append(entry)
-    atomic_write(directory / "plan.json", json_bytes({"format": 1, "entries": entries}))
+    atomic_write(directory / "plan.json", json_bytes({"format": 1, "entries": [asdict(e) for e in entries]}))
     # The helper is the currently trusted updater, with no application imports.
     atomic_write(directory / "worker.py", Path(__file__).read_bytes())
     sync_dir(directory.parent)
-    journal_write(root, identity, "prepared")
-    return identity, directory
+    journal_write(root, identity, Phase.PREPARED)
+    return PreparedUpdate(identity, directory)
 
 
-def load_transaction(root, identity=None):
-    journal = read_json(safe_path(root, JOURNAL))
-    if journal is None:
-        raise UpdateError("No incomplete update to process.")
-    if (not re.fullmatch(r"[0-9a-f]{32}", str(journal.get("id", "")))
-            or journal.get("phase") not in ("prepared", "applying", "committed")
-            or (identity is not None and identity != journal["id"])):
-        raise UpdateError("Invalid update journal or another transaction has replaced it.")
-    directory = safe_path(root, META + "/transactions/" + journal["id"])
-    plan = read_json(safe_path(root, directory.relative_to(root).as_posix() + "/plan.json"))
+def transaction_entries(root, plan):
+    """Validate the durable format before constructing in-memory entries."""
     try:
         entries = plan["entries"]
         names = set()
         if not isinstance(entries, list) or not entries or entries[-1]["path"] != STATE:
             raise ValueError
+        result = []
         for entry in entries:
             name = entry["path"]
             if not (name == STATE or historical_file(name)
@@ -440,13 +475,72 @@ def load_transaction(root, identity=None):
                     raise ValueError
             if not isinstance(entry["mode"], int) or not 0 <= entry["mode"] <= 0o777:
                 raise ValueError
+            result.append(TransactionEntry(name, entry["before"], entry["after"], entry["mode"]))
     except (KeyError, TypeError, ValueError):
         raise UpdateError("Invalid transaction plan; backups were retained.") from None
-    return journal, directory, entries
+    return tuple(result)
+
+
+@dataclass(frozen=True)
+class UpdateTransaction:
+    """A validated recovery journal; callers hold the exclusive installation lock."""
+    root: Path
+    identity: str
+    phase: Phase
+    directory: Path
+    entries: tuple[TransactionEntry, ...]
+
+    @classmethod
+    def load(cls, root, identity=None):
+        journal = read_json(safe_path(root, JOURNAL))
+        if journal is None:
+            raise UpdateError("No incomplete update to process.")
+        if (not re.fullmatch(r"[0-9a-f]{32}", str(journal.get("id", "")))
+                or journal.get("phase") not in tuple(Phase)
+                or (identity is not None and identity != journal["id"])):
+            raise UpdateError("Invalid update journal or another transaction has replaced it.")
+        directory = safe_path(root, META + "/transactions/" + journal["id"])
+        plan = read_json(safe_path(root, directory.relative_to(root).as_posix() + "/plan.json"))
+        return cls(root, journal["id"], Phase(journal["phase"]), directory,
+                   transaction_entries(root, plan))
+
+    def backups(self, which):
+        return tuple(checked_backup(self.root, self.directory, i, entry, which)
+                     for i, entry in enumerate(self.entries))
+
+    def restore(self):
+        # Validate every backup and destination before restoring any file.
+        backups = self.backups("old")
+        for entry in self.entries:
+            if file_sha(safe_path(self.root, entry.path)) not in (entry.before, entry.after):
+                raise UpdateError(f"Recovery found an external edit: {entry.path}. Backups were retained.")
+        clear_bytecode(self.root, self.entries)
+        for entry, data in zip(self.entries, backups):
+            put_entry(self.root, entry, data)
+        finish_journal(self.root)
+
+    def apply(self):
+        if self.phase != Phase.PREPARED:
+            raise UpdateError("Transaction was already started; use --recover.")
+        data = self.backups("new")
+        self.backups("old")
+        for entry in self.entries:
+            if file_sha(safe_path(self.root, entry.path)) != entry.before:
+                raise UpdateError(f"File changed before installation: {entry.path}. Use --recover.")
+        journal_write(self.root, self.identity, Phase.APPLYING)
+        try:
+            clear_bytecode(self.root, self.entries)
+            for entry, content in zip(self.entries, data):
+                put_entry(self.root, entry, content)
+            journal_write(self.root, self.identity, Phase.COMMITTED)
+        except BaseException:
+            self.restore()
+            raise
+        finish_journal(self.root)
 
 
 def checked_backup(root, directory, index, entry, which):
-    expected = entry["before" if which == "old" else "after"]
+    expected = entry.before if which == "old" else entry.after
     if expected is None:
         return None
     name = (directory / f"{which}-{index}").relative_to(root).as_posix()
@@ -457,13 +551,13 @@ def checked_backup(root, directory, index, entry, which):
 
 
 def put_entry(root, entry, data):
-    target = safe_path(root, entry["path"])
+    target = safe_path(root, entry.path)
     if data is None:
         target.unlink(missing_ok=True)
         if target.parent.exists():
             sync_dir(target.parent)
     else:
-        atomic_write(target, data, mode=0o600 if entry["path"] == STATE else entry["mode"])
+        atomic_write(target, data, mode=0o600 if entry.path == STATE else entry.mode)
 
 
 def finish_journal(root):
@@ -471,39 +565,11 @@ def finish_journal(root):
     sync_dir(root / META)
 
 
-def restore(root, directory, entries):
-    # Validate every backup and destination before restoring any file.
-    backups = [checked_backup(root, directory, i, e, "old") for i, e in enumerate(entries)]
-    for entry in entries:
-        if file_sha(safe_path(root, entry["path"])) not in (entry["before"], entry["after"]):
-            raise UpdateError(f"Recovery found an external edit: {entry['path']}. Backups were retained.")
-    clear_bytecode(root, entries)
-    for entry, data in zip(entries, backups):
-        put_entry(root, entry, data)
-    finish_journal(root)
-
-
 def apply_transaction(root, identity):
     with InstallationLock(root, exclusive=True):
-        journal, directory, entries = load_transaction(root, identity)
-        if journal["phase"] != "prepared":
-            raise UpdateError("Transaction was already started; use --recover.")
-        data = [checked_backup(root, directory, i, e, "new") for i, e in enumerate(entries)]
-        for i, entry in enumerate(entries):
-            checked_backup(root, directory, i, entry, "old")
-            if file_sha(safe_path(root, entry["path"])) != entry["before"]:
-                raise UpdateError(f"File changed before installation: {entry['path']}. Use --recover.")
-        journal_write(root, identity, "applying")
-        try:
-            clear_bytecode(root, entries)
-            for entry, content in zip(entries, data):
-                put_entry(root, entry, content)
-            journal_write(root, identity, "committed")
-        except BaseException:
-            restore(root, directory, entries)
-            raise
-        finish_journal(root)
-        print(f"Update installed. Backups: {directory}", flush=True)
+        transaction = UpdateTransaction.load(root, identity)
+        transaction.apply()
+        print(f"Update installed. Backups: {transaction.directory}", flush=True)
     return 0
 
 
@@ -512,58 +578,45 @@ def recover(root):
         if not safe_path(root, JOURNAL).exists():
             print("No incomplete update.")
             return 0
-        journal, directory, entries = load_transaction(root)
-        if journal["phase"] == "committed":
+        transaction = UpdateTransaction.load(root)
+        if transaction.phase == Phase.COMMITTED:
             finish_journal(root)
             print("Completed update finalized.")
-        elif journal["phase"] == "prepared":
+        elif transaction.phase == Phase.PREPARED:
             # No application files have been touched; keep any edits made since staging.
             finish_journal(root)
             print("Unstarted update discarded. Application files were not changed.")
         else:
-            restore(root, directory, entries)
+            transaction.restore()
             print("Previous installation restored. SQLite and pending operations were not changed.")
     return 0
 
 
-def update(root, client, *, check=False, dry_run=False, overwrite_configs=False, force_code=False):
-    with InstallationLock(root, exclusive=not (check or dry_run)):
-        require_complete(root)
-        state = load_state(root)
-        commit, remote, requirements = client.snapshot()
-        print(f"Installed: {state['commit'] or 'untracked installation'}; main: {commit}")
-        actions, conflicts, kept, next_state = plan_update(
-            root, state, commit, remote, requirements,
-            overwrite_configs=overwrite_configs, force_code=force_code)
-        for entry in actions:
-            print(f"{'REMOVE' if entry['after'] is None else 'UPDATE'} {entry['path']}")
-        for name in kept:
-            print(f"KEEP local configuration: {name}; upstream proposal: {name}.incoming")
-        for name in conflicts:
-            print(f"CONFLICT {name}")
-        if requirements != state.get("requirements"):
-            print("requirements.txt changed or has no recorded baseline. Review dependencies manually; "
-                  "the updater does not download requirements or run pip.")
-        if not state["commit"]:
-            print("First adoption: stop any application started before updater support was installed.")
-        if check or dry_run:
-            print("Preview only: no application, configuration or updater-state writes.")
-            return 2 if conflicts else 0
-        if conflicts:
-            raise UpdateError("Local or untracked Python files require --force-code; "
-                              "edited .incoming proposals must be moved aside first. No files installed.")
-        if not actions and state == next_state:
-            print("Already up to date.")
-            return 0
-        identity, directory = prepare(root, actions, next_state, client)
+def describe_plan(state, snapshot, plan):
+    print(f"Installed: {state['commit'] or 'untracked installation'}; main: {snapshot.commit}")
+    for entry in plan.actions:
+        print(f"{'REMOVE' if entry.after is None else 'UPDATE'} {entry.path}")
+    for name in plan.kept_configs:
+        print(f"KEEP local configuration: {name}; upstream proposal: {name}.incoming")
+    for name in plan.conflicts:
+        print(f"CONFLICT {name}")
+    if snapshot.requirements != state.get("requirements"):
+        print("requirements.txt changed or has no recorded baseline. Review dependencies manually; "
+              "the updater does not download requirements or run pip.")
+    if not state["commit"]:
+        print("First adoption: stop any application started before updater support was installed.")
+
+
+def run_helper(root, prepared):
+    """Hand off without credentials; leave recovery exclusively to the child."""
     # Journal blocks app startup during the lock handoff. The child locks again
     # and verifies the transaction identity and every destination before applying.
     print("Installing with the temporary updater helper...", flush=True)
     environment = dict(os.environ)
     for key in ("GH_TOKEN", "GITHUB_TOKEN"):
         environment.pop(key, None)
-    child = subprocess.Popen([sys.executable, str(directory / "worker.py"),
-                              "--install-dir", str(root), "--_apply", identity],
+    child = subprocess.Popen([sys.executable, str(prepared.directory / "worker.py"),
+                              "--install-dir", str(root), "--_apply", prepared.identity],
                              env=environment)
     try:
         status = child.wait()
@@ -577,7 +630,28 @@ def update(root, client, *, check=False, dry_run=False, overwrite_configs=False,
         return 130
 
 
-def main(argv=None):
+def update(root, client, *, check=False, dry_run=False, overwrite_configs=False, force_code=False):
+    with InstallationLock(root, exclusive=not (check or dry_run)):
+        require_complete(root)
+        state = load_state(root)
+        snapshot = client.snapshot()
+        plan = plan_update(root, state, snapshot,
+                           overwrite_configs=overwrite_configs, force_code=force_code)
+        describe_plan(state, snapshot, plan)
+        if check or dry_run:
+            print("Preview only: no application, configuration or updater-state writes.")
+            return 2 if plan.conflicts else 0
+        if plan.conflicts:
+            raise UpdateError("Local or untracked Python files require --force-code; "
+                              "edited .incoming proposals must be moved aside first. No files installed.")
+        if not plan.actions and state == plan.next_state:
+            print("Already up to date.")
+            return 0
+        prepared = prepare(root, plan, client)
+    return run_helper(root, prepared)
+
+
+def build_parser():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--install-dir", type=Path, default=Path(__file__).resolve().parent,
                         help="Application directory (default: next to this script).")
@@ -588,7 +662,11 @@ def main(argv=None):
     mode.add_argument("--_apply", help=argparse.SUPPRESS)
     parser.add_argument("--overwrite-configs", action="store_true", help="Replace local YAML files, keeping backups.")
     parser.add_argument("--force-code", action="store_true", help="Replace modified/untracked Python files, keeping backups.")
-    args = parser.parse_args(argv)
+    return parser
+
+
+def main(argv=None):
+    args = build_parser().parse_args(argv)
     root = args.install_dir.resolve()
     if not root.is_dir():
         raise UpdateError("Installation directory does not exist.")

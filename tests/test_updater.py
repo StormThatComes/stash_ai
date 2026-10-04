@@ -55,24 +55,23 @@ class Remote(updater.GitHub):
 
 
 def installed(root, remote):
-    commit, files, requirements = remote.snapshot()
-    for name in files:
+    version = remote.snapshot()
+    for name in version.files:
         (root / name).parent.mkdir(parents=True, exist_ok=True)
         (root / name).write_bytes(remote.files[name])
     updater.atomic_write(root / updater.STATE, updater.json_bytes({
-        "format": 1, "commit": commit, "baseline": files,
-        "upstream": files, "requirements": requirements}))
+        "format": 1, "commit": version.commit, "baseline": version.files,
+        "upstream": version.files, "requirements": version.requirements}))
     remote.calls.clear()
 
 
 def stage(root, remote, **kwargs):
     with updater.InstallationLock(root, exclusive=True):
         state = updater.load_state(root)
-        commit, files, requirements = remote.snapshot()
-        actions, conflicts, _, next_state = updater.plan_update(
-            root, state, commit, files, requirements, **kwargs)
-        assert not conflicts
-        return updater.prepare(root, actions, next_state, remote)
+        plan = updater.plan_update(root, state, remote.snapshot(), **kwargs)
+        assert not plan.conflicts
+        prepared = updater.prepare(root, plan, remote)
+        return prepared.identity, prepared.directory
 
 
 def snapshot(root):
@@ -518,7 +517,7 @@ def test_failed_database_package_migration_restores_module(tmp_path, monkeypatch
 
     def fail_after_removing_module(root, entry, data):
         original(root, entry, data)
-        if entry['path'] == 'stash_ai/db.py' and data is None:
+        if entry.path == 'stash_ai/db.py' and data is None:
             raise OSError('database module migration interrupted')
 
     monkeypatch.setattr(updater, 'put_entry', fail_after_removing_module)
@@ -576,7 +575,7 @@ def test_failed_layout_migration_restores_flat_installation(tmp_path, monkeypatc
 
     def fail_first_package_file(root, entry, data):
         nonlocal failed
-        if entry['path'].startswith('stash_ai/') and not failed:
+        if entry.path.startswith('stash_ai/') and not failed:
             failed = True
             raise OSError('package write failed')
         original(root, entry, data)
@@ -753,7 +752,7 @@ def test_replace_failure_rolls_back_code_configs_and_state(tmp_path, monkeypatch
     original = updater.put_entry
     calls = []
     def fail_once(root, entry, data):
-        calls.append(entry["path"])
+        calls.append(entry.path)
         if len(calls) == 2:
             raise OSError("simulated disk error")
         original(root, entry, data)
@@ -772,7 +771,7 @@ def test_recover_all_durable_phases_offline(tmp_path, phase, monkeypatch):
     old_code = (tmp_path / "stash_ai.py").read_bytes()
     remote.files["stash_ai.py"] = b"NEW = 1\n"
     identity, directory = stage(tmp_path, remote)
-    _, _, entries = updater.load_transaction(tmp_path)
+    entries = updater.UpdateTransaction.load(tmp_path).entries
     if phase != "prepared":
         updater.journal_write(tmp_path, identity, "applying")
         selected = entries if phase == "committed" else entries[:1]
@@ -808,6 +807,73 @@ def test_corrupt_backup_prevents_partial_recovery(tmp_path):
     with pytest.raises(updater.UpdateError, match="damaged"):
         updater.recover(tmp_path)
     assert snapshot(tmp_path) == before and (tmp_path / updater.JOURNAL).exists()
+
+
+@pytest.mark.parametrize("which", ["old", "new"])
+@pytest.mark.parametrize("damage", ["missing", "corrupt"])
+def test_late_staged_damage_prevents_any_installation(tmp_path, which, damage):
+    remote = Remote()
+    installed(tmp_path, remote)
+    remote.files["stash_ai.py"] = b"NEW = 1\n"
+    identity, directory = stage(tmp_path, remote)
+    transaction = updater.UpdateTransaction.load(tmp_path)
+    # Damage the final metadata backup, after all application-file backups.
+    target = directory / f"{which}-{len(transaction.entries) - 1}"
+    if damage == "missing":
+        target.unlink()
+    else:
+        target.write_bytes(b"damaged")
+    before = snapshot(tmp_path)
+    previous_state = (tmp_path / updater.STATE).read_bytes()
+    previous_journal = (tmp_path / updater.JOURNAL).read_bytes()
+    with pytest.raises(updater.UpdateError, match="damaged"):
+        updater.apply_transaction(tmp_path, identity)
+    assert snapshot(tmp_path) == before
+    assert (tmp_path / updater.STATE).read_bytes() == previous_state
+    assert (tmp_path / updater.JOURNAL).read_bytes() == previous_journal
+
+
+def test_wrong_helper_identity_preserves_prepared_transaction(tmp_path):
+    stage(tmp_path, Remote())
+    before = snapshot(tmp_path)
+    journal = (tmp_path / updater.JOURNAL).read_bytes()
+    with pytest.raises(updater.UpdateError, match="another transaction"):
+        updater.apply_transaction(tmp_path, "0" * 32)
+    assert snapshot(tmp_path) == before
+    assert (tmp_path / updater.JOURNAL).read_bytes() == journal
+
+
+def test_standalone_helper_applies_legacy_metadata_format(tmp_path):
+    # Construct format 1 directly, independently of prepare/asdict.
+    root = tmp_path / "installation"
+    root.mkdir()
+    identity = "1" * 32
+    directory = root / updater.META / "transactions" / identity
+    directory.mkdir(parents=True)
+    old, new = b"OLD = True\n", b"NEW = True\n"
+    state = updater.json_bytes({"format": 1, "commit": COMMIT,
+                                "baseline": {"stash_ai.py": updater.blob_sha(new)},
+                                "upstream": {"stash_ai.py": updater.blob_sha(new)},
+                                "requirements": None})
+    (root / "stash_ai.py").write_bytes(old)
+    (directory / "old-0").write_bytes(old)
+    (directory / "new-0").write_bytes(new)
+    (directory / "new-1").write_bytes(state)
+    (directory / "plan.json").write_bytes(updater.json_bytes({"format": 1, "entries": [
+        {"path": "stash_ai.py", "before": updater.blob_sha(old),
+         "after": updater.blob_sha(new), "mode": 0o644},
+        {"path": updater.STATE, "before": None, "after": updater.blob_sha(state), "mode": 0o644},
+    ]}))
+    (root / updater.JOURNAL).write_bytes(updater.json_bytes(
+        {"format": 1, "id": identity, "phase": "prepared"}))
+    helper = tmp_path / "worker.py"
+    helper.write_bytes(Path(updater.__file__).read_bytes())
+    result = subprocess.run([sys.executable, "-I", str(helper), "--install-dir", str(root),
+                             "--_apply", identity], cwd=tmp_path, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert (root / "stash_ai.py").read_bytes() == new
+    assert (root / updater.STATE).read_bytes() == state
+    assert not (root / updater.JOURNAL).exists()
 
 
 def test_file_tree_is_pinned_to_one_commit(tmp_path):
