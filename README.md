@@ -112,13 +112,14 @@ python .\stash_ai.py --abandon-pending
 Zmiana progów zapisuje małe wiersze w tabeli `result_thresholds`; skompresowane
 wyniki inferencji i evidence klatek pozostają bez zmian. Dotyczy to także
 automatycznego użycia cache po zmianie progów w YAML. Odczyt wyników, merge,
-cleanup i explain używają efektywnych progów z tej tabeli. Stare progi zapisane
-wewnątrz wyników są nadal odczytywane, bez przepisywania istniejącej bazy.
+cleanup i explain używają efektywnych progów z tej tabeli. Każdy segment historii ma własny efektywny próg zapisany w tej tabeli.
+`--db-update` przenosi dawne inline overrides i usuwa wycofane `refinement`;
+klatki, wyniki i podpisy dowodów zachowują swoje wartości.
 `--dry-run` zapisuje progi wyłącznie w tymczasowej bazie.
 
 Snapshoty merge zapisują współdzielone dowody `extra_support` raz, a contributions
 odwołują się do nich przez referencje. Zmniejsza to koszt serializacji i kompresji.
-Aktualny schemat to v9; starsze wersje programu odmówią jego otwarcia. Istniejące snapshoty są nadal odczytywane bez przepisywania, a wyniki
+Aktualny schemat to v10; starsze wersje programu odmówią jego otwarcia. Istniejące snapshoty są nadal odczytywane bez przepisywania, a wyniki
 inferencji pozostają bez zmian. `--dry-run` zmienia wyłącznie tymczasową bazę.
 
 Pełną listę opcji pokazuje:
@@ -215,16 +216,17 @@ SQLite do systemu plików.
 ### Zdrowie, aktualizacja i kompaktowanie bazy stanu
 
 `--db-update` aktualizuje całą istniejącą bazę wskazaną przez `--state-db`
-do najnowszego obsługiwanego schematu (obecnie v9), we wszystkich scope'ach.
+do najnowszego obsługiwanego schematu (obecnie v10), we wszystkich scope'ach.
 Zwykłe uruchomienie oraz `--dry-run` wymagają aktualnego schematu: starszą bazę
-trzeba najpierw zaktualizować tą komendą. Nowa baza od razu otrzymuje v9.
+trzeba najpierw zaktualizować tą komendą. Nowa baza od razu otrzymuje v10.
 Updater korzysta z tego samego locka writera; migracje są wyłącznie offline.
 Tworzy aktualne tabele, indeksy i triggery, uzupełnia `result_index` dla baz
 sprzed v2, uzupełnia historyczne `result_metadata` we wszystkich scope'ach
 oraz usuwa wycofaną tabelę `refinement_progress`.
-Nie łączy się ze Stash ani nie ładuje konfiguracji modeli. Zachowuje wyniki,
-checkpointy, pending publication/cleanup i recovery; nie zmienia progów ani
-nie wymaga ponownej inferencji. Starsze, nadal czytelne formaty payloadów
+Nie łączy się ze Stash ani nie ładuje konfiguracji modeli. Zachowuje wyniki, checkpointy, pending publication/cleanup i recovery oraz
+efektywne progi każdego segmentu. Nie odtwarza utraconych detekcji: brakująca
+metadata retention lub niepusty historyczny marker blocklist może wymagać
+ponownej inferencji z `--restart`. Starsze, nadal czytelne formaty payloadów
 pozostają zapisane w swojej dotychczasowej postaci.
 
 `--dry-run` wykonuje odczytowy preflight i pokazuje wersję źródłową oraz

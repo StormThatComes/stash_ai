@@ -81,6 +81,44 @@ def test_update_backfills_missing_and_corrupt_metadata_in_every_scope(tmp_path):
             assert state.result_metadata('1', 'scene', 'wd')[0]['populated']
 
 
+@pytest.mark.parametrize('table_threshold', [None, .7])
+def test_v9_migration_preserves_mixed_history_and_frozen_proof_identity(tmp_path, table_threshold):
+    from stash_ai.evidence.identity import marker_segment_signature
+    from stash_ai.storage.codec import decode
+    from tests.test_result_thresholds import outputs
+    path = tmp_path / 'state.sqlite3'
+    old = [outputs()['markers'], outputs(.6)['markers']]
+    old[0]['marker_threshold_override'] = .8
+    old[0]['refinement'] = {'retired': True}
+    expected = [{k: v for k, v in segment.items() if k != 'refinement'} for segment in old]
+    if table_threshold is not None:
+        for segment in expected:
+            segment['marker_threshold_override'] = table_threshold
+    signatures = [marker_segment_signature(segment) for segment in expected]
+    with StateStore(path, 'scope-a') as state:
+        state.prepare('1', {'markers': {'contributions': [], 'frozen_signatures': signatures}})
+        with state.connection as db:
+            db.execute('INSERT INTO results VALUES (?,?,?,?,?)', ('scope-a', '1', 'wd', 'markers', encode(old)))
+            db.execute('DROP TABLE result_thresholds')
+            db.execute('CREATE TABLE result_thresholds(scope TEXT,scene TEXT,model TEXT,kind TEXT,threshold REAL,PRIMARY KEY(scope,scene,model,kind))')
+            if table_threshold is not None:
+                db.execute('INSERT INTO result_thresholds VALUES (?,?,?,?,?)', ('scope-a', '1', 'wd', 'markers', table_threshold))
+            db.execute('PRAGMA user_version=9')
+    pending = rows(path, 'snapshots')
+    stash_db.update_database(path)
+    with StateStore(path, 'scope-a') as state:
+        effective = state.model_records('1', 'markers', 'wd')
+        assert effective == expected
+        assert [marker_segment_signature(segment) for segment in effective] == signatures
+        raw = decode(state.connection.execute('SELECT data FROM results').fetchone()[0])
+        assert all('marker_threshold_override' not in segment and 'refinement' not in segment for segment in raw)
+        assert state.connection.execute('SELECT thresholds FROM result_thresholds').fetchone() == (('[0.8,null]' if table_threshold is None else '[0.7,0.7]'),)
+    assert rows(path, 'snapshots') == pending
+    evidence = rows(path, 'results')
+    stash_db.update_database(path)
+    assert rows(path, 'results') == evidence
+
+
 @pytest.mark.parametrize('version', range(LATEST_SCHEMA_VERSION + 1))
 def test_update_migrates_every_supported_version_and_all_scopes(tmp_path, version):
     path = tmp_path / 'state.sqlite3'
@@ -134,7 +172,7 @@ def test_update_preserves_pending_and_recovery_work_checkpoints_and_thresholds(t
             db.execute('INSERT INTO checkpoint_analysis VALUES (?,?,?,?)',
                        ('scope-a', '2', 'wd', encode({})))
             db.execute('INSERT INTO refresh_requests VALUES (?,?,?,?)', ('scope-a', '2', 'wd', 'scene'))
-            db.execute('INSERT INTO result_thresholds VALUES (?,?,?,?,?)', ('scope-a', '1', 'wd', 'scene', .8))
+            db.execute('INSERT INTO result_thresholds VALUES (?,?,?,?,?)', ('scope-a', '1', 'wd', 'scene', '[0.8]'))
             db.execute('INSERT INTO legacy_imports VALUES (?,?,?,?)', ('scope-a', '1', 'scene', encode([])))
     with sqlite3.connect(path) as connection:
         connection.execute('PRAGMA user_version=8')
@@ -209,11 +247,11 @@ def test_db_update_cli_stays_offline_and_reports_dry_run_and_idempotence(tmp_pat
 
     assert app.main([*command, '--dry-run']) == 0
     assert path.read_bytes() == before
-    assert 'DRY RUN: state DB schema v1 -> v9' in capsys.readouterr().out
+    assert 'DRY RUN: state DB schema v1 -> v10' in capsys.readouterr().out
     assert app.main(command) == 0
-    assert 'State DB updated: schema v1 -> v9' in capsys.readouterr().out
+    assert 'State DB updated: schema v1 -> v10' in capsys.readouterr().out
     assert app.main(command) == 0
-    assert 'up to date: v9' in capsys.readouterr().out
+    assert 'up to date: v10' in capsys.readouterr().out
     assert app.main(['--state-db', str(tmp_path / 'missing.sqlite3'), '--db-update']) == 1
     assert 'does not exist' in capsys.readouterr().out
 

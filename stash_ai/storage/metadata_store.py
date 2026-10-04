@@ -20,7 +20,7 @@ class MetadataStore:
         check_source(store)
         params = (store.scope, str(scene), model, kind)
         rows = store.read_rows(
-            'SELECT m.format,m.data,t.threshold FROM ' + store.table('results') + ' AS r LEFT JOIN ' +
+            'SELECT m.format,m.data,t.thresholds FROM ' + store.table('results') + ' AS r LEFT JOIN ' +
             store.table('result_metadata') + ' AS m USING(scope,scene,model,kind) LEFT JOIN ' +
             store.table('result_thresholds') + ' AS t USING(scope,scene,model,kind) '
             'WHERE r.scope=? AND r.scene=? AND r.model=? AND r.kind=?', params)
