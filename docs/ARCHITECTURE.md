@@ -201,9 +201,9 @@ otwartym tylko do odczytu. Starszą bazę aktualizuje wyłącznie `--db-update`.
 
 `StateStore.pack_snapshot()` internuje powtarzające się obiekty dowodów według
 tożsamości, bez hashowania dużych struktur. Unikatowe dowody pozostają inline.
-Kompaktowy BLOB zawiera envelope `__stash_ai_snapshot__: 1`, `snapshot` oraz
+Kompaktowy BLOB zawiera envelope `__stash_ai_snapshot__: 2`, `snapshot` oraz
 tablicę `proofs`; wartości `extra_support` są pełnymi dowodami lub indeksami tej
-tablicy. `state_codec.decode()` waliduje referencje i zwraca dotychczasową,
+tablicy. `storage.snapshots.decode()` waliduje referencje i zwraca dotychczasową,
 rozwiniętą strukturę także dla cleanupu, recovery i kontroli bazy. Dowody są
 współdzielone i niemutowalne dla pożyczających je czytelników; odczyt publiczny
 nadal zwraca kopię oddzieloną od cache. Zapis nowego formatu i podniesienie wersji
@@ -387,3 +387,5 @@ changing the proof objects retained by result spans.
 Schema upgrades run only through `--db-update`. Runtime writers and dry-run readers require the current schema; fresh stores are created at the current version. Preview always attaches a current database read-only and writes into a sparse temporary overlay. The offline updater visits every scope, backfills derived result metadata, and preserves raw evidence and unfinished plans. Metadata invalidated or corrupted later is still rebuilt from authoritative evidence.
 
 Schema v10 stores per-segment effective thresholds as JSON arrays in `result_thresholds.thresholds`; null entries use the segment's original inference threshold. Evidence BLOBs and derived metadata contain no publication overrides. The offline migration strips retired refinement and inline overrides once, preserving evidence signatures and mixed history. New inference always declares its actual marker capture floor and an empty marker blocklist. Unknown historical retention is rejected for new publication, while verified frozen cleanup replay keeps its narrower exception.
+
+Schema v11 uses snapshot envelope v2 for every new publication, including snapshots with no shared proofs. Generic compressed JSON decoding never dispatches by a magic key. Snapshot decoding validates the envelope and complete frozen policy; historical plain JSON/v1 envelopes and old policy defaults are handled only by offline snapshot migration. Pending promotion still copies the encoded intent, and migration preserves proof references, recovery operation IDs, ownership and old False flags.

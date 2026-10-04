@@ -20,6 +20,7 @@ def check_state_payloads(db, tables, errors, progress=None):
         ("recovery_publications", "data", dict),
     )
     checked = 0
+    version = db.execute('PRAGMA user_version').fetchone()[0]
     for table, column, expected in specs:
         if table not in tables or column not in column_names(db, table):
             continue
@@ -27,7 +28,14 @@ def check_state_payloads(db, tables, errors, progress=None):
             checked += 1
             tick(progress)
             try:
-                payload = decoded_payload(blob, expected)
+                if table in ('snapshots', 'recovery_publications'):
+                    if version >= 11:
+                        from stash_ai.storage.snapshots import decode
+                    else:
+                        from stash_ai.db.snapshot_migration import decode_legacy as decode
+                    payload = decode(blob)
+                else:
+                    payload = decoded_payload(blob, expected)
                 if table == "checkpoint_frames" and not valid_frames(payload, checkpoint=True):
                     raise ValueError("Invalid checkpoint frame evidence.")
             except (TypeError, ValueError, UnicodeDecodeError, json.JSONDecodeError, zlib.error):

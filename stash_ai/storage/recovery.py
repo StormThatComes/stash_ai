@@ -94,7 +94,7 @@ def publications(store, scene, kind):
     from stash_ai.cleanup.state import mask_snapshot
     rows = store.read_rows('SELECT data FROM ' + store.table('recovery_publications') +
         ' WHERE scope=? AND scene=? AND kind=? ORDER BY operation DESC', (store.scope, str(scene), kind))
-    result = [mask_snapshot(store, store.unpack(row[0]), kind) for row in rows]
+    result = [mask_snapshot(store, store.unpack_snapshot(row[0]), kind) for row in rows]
     store.retain(key, result)
     return result
 

@@ -1,4 +1,5 @@
 """State database reporting and safe compaction."""
+from stash_ai.storage.snapshots import encode as encode_snapshot
 
 import hashlib
 import sqlite3
@@ -304,7 +305,7 @@ def test_deep_check_relation_warnings_do_not_mark_database_failed(tmp_path):
         )
         db.execute(
             "INSERT INTO recovery_publications VALUES (?,?,?,?,?)",
-            (scope, "recovery-only", "scene", "op", encode({"contributions": []})),
+            (scope, "recovery-only", "scene", "op", encode_snapshot({"contributions": []})),
         )
 
     report = stash_db.check_database(path, scope)

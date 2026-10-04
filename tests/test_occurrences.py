@@ -1,4 +1,5 @@
 """Occurrence publication, old caches, revocation and exact sampled positions."""
+from stash_ai.db.snapshot_migration import complete_policy
 
 
 from collections import Counter
@@ -231,7 +232,7 @@ def test_old_policy_snapshots_and_inference_identity_remain_compatible(pipeline,
     settings = app.services.load_model_settings(app.MODELS_CONFIG_FILE, ['wd'], None)[0]
     identity = model_identity(app, settings, pipeline.vocab)
     saved = asdict(app.TEMPORAL_POLICY); saved.pop('occurrence_markers')
-    assert not TemporalPolicy.from_snapshot(saved).occurrence_markers
+    assert not TemporalPolicy.from_snapshot(complete_policy(saved)).occurrence_markers
     monkeypatch.setattr(app, 'TEMPORAL_POLICY', replace(app.TEMPORAL_POLICY, occurrence_markers=False))
     assert model_identity(app, settings, pipeline.vocab) == identity
 

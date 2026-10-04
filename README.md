@@ -119,8 +119,10 @@ klatki, wyniki i podpisy dowodów zachowują swoje wartości.
 
 Snapshoty merge zapisują współdzielone dowody `extra_support` raz, a contributions
 odwołują się do nich przez referencje. Zmniejsza to koszt serializacji i kompresji.
-Aktualny schemat to v10; starsze wersje programu odmówią jego otwarcia. Istniejące snapshoty są nadal odczytywane bez przepisywania, a wyniki
-inferencji pozostają bez zmian. `--dry-run` zmienia wyłącznie tymczasową bazę.
+Aktualny schemat to v11; starsze wersje programu odmówią jego otwarcia. Każdy nowy snapshot ma otoczkę formatu v2. `--db-update` konwertuje dawne
+snapshoty, także pending i recovery, oraz uzupełnia pełną politykę temporalną.
+Brakujące dawne przełączniki współdzielenia i occurrences zachowują `False`;
+wyniki inferencji pozostają bez zmian. `--dry-run` zmienia wyłącznie tymczasową bazę.
 
 Pełną listę opcji pokazuje:
 
@@ -216,9 +218,9 @@ SQLite do systemu plików.
 ### Zdrowie, aktualizacja i kompaktowanie bazy stanu
 
 `--db-update` aktualizuje całą istniejącą bazę wskazaną przez `--state-db`
-do najnowszego obsługiwanego schematu (obecnie v10), we wszystkich scope'ach.
+do najnowszego obsługiwanego schematu (obecnie v11), we wszystkich scope'ach.
 Zwykłe uruchomienie oraz `--dry-run` wymagają aktualnego schematu: starszą bazę
-trzeba najpierw zaktualizować tą komendą. Nowa baza od razu otrzymuje v10.
+trzeba najpierw zaktualizować tą komendą. Nowa baza od razu otrzymuje v11.
 Updater korzysta z tego samego locka writera; migracje są wyłącznie offline.
 Tworzy aktualne tabele, indeksy i triggery, uzupełnia `result_index` dla baz
 sprzed v2, uzupełnia historyczne `result_metadata` we wszystkich scope'ach
