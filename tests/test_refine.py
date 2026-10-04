@@ -124,11 +124,13 @@ def test_v3_completed_vtt_results_are_reused_without_video_samples_or_model_load
     assert app.main(p.args)==0
     expected=deepcopy(p.stash.scene)
     mark_as_v3(p.path,add_video_result=True)
+    from stash_ai.db import update_database
+    update_database(p.path)
     monkeypatch.setattr(app.services,'load_tagger',lambda *args:pytest.fail('base model results were recomputed'))
     assert app.main([*p.args,*(['--merge-only'] if mode=='merge-only' else [])])==0
     assert p.stash.scene==expected
     with merge_store.StateStore(p.path,merge_store.scope_for(app.STASH_URL),True) as state:
-        assert state.connection.execute('PRAGMA user_version').fetchone()==(5,)
+        assert state.connection.execute('PRAGMA user_version').fetchone()==(9,)
         assert not state.connection.execute("SELECT 1 FROM sqlite_master WHERE name='refinement_progress'").fetchone()
         assert 'refinement' not in state.records('1','markers')['wd'][-1]
 
@@ -137,6 +139,8 @@ def test_v3_partial_vtt_checkpoint_survives_removing_video_progress(pipeline):
     p=pipeline;p.fail['wd']=4
     with pytest.raises(KeyboardInterrupt):app.main(p.args)
     mark_as_v3(p.path)
+    from stash_ai.db import update_database
+    update_database(p.path)
     p.fail.clear()
     assert app.main(p.args)==0
     assert p.loaded[-1].seen==list(range(4,10))
@@ -146,6 +150,8 @@ def test_v3_dry_run_does_not_change_database_bytes_or_stash(pipeline):
     p=pipeline
     assert app.main(p.args)==0
     mark_as_v3(p.path,add_video_result=True)
+    from stash_ai.db import update_database
+    update_database(p.path)
     expected=(p.path.read_bytes(),deepcopy(p.stash.scene))
     p.stash.dry_run=True
     assert app.main([*p.args,'--merge-only','--dry-run'])==0
@@ -156,6 +162,8 @@ def test_explain_excludes_retired_video_evidence(pipeline,capsys):
     p=pipeline
     assert app.main(p.args)==0
     mark_as_v3(p.path,add_video_result=True)
+    from stash_ai.db import update_database
+    update_database(p.path)
     capsys.readouterr()
     assert app.main([*p.args,'--explain-tag','ai:video_only'])==0
     report=capsys.readouterr().out

@@ -115,13 +115,14 @@ def test_v7_inline_overrides_are_read_lazily_and_can_be_restored(tmp_path, dry_r
     with sqlite3.connect(path) as connection:
         connection.execute('DROP TABLE result_thresholds')
         connection.execute('PRAGMA user_version=7')
+    db.update_database(path)
     source_before = path.read_bytes()
     with StateStore(path, 'scope', dry_run=dry_run) as store:
-        assert store.connection.execute('PRAGMA user_version').fetchone() == (7,)
+        assert store.connection.execute('PRAGMA user_version').fetchone() == (9,)
         assert store.records('1', 'scene')['wd'] == [old['scene']]
         assert store.model_records('1', 'markers', 'wd') == [old['markers']]
         assert rethreshold(store, .4) == {'scene_thresholds_updated': 1}
-        assert store.connection.execute('PRAGMA user_version').fetchone() == (8,)
+        assert store.connection.execute('PRAGMA user_version').fetchone() == (9,)
         assert blobs(store) == ([] if dry_run else before)
         assert store.records('1', 'scene')['wd'] == [outputs()['scene']]
         assert store.model_records('1', 'markers', 'wd') == [outputs()['markers']]
@@ -138,6 +139,7 @@ def test_new_inference_resets_override_and_append_keeps_effective_history(tmp_pa
     with StateStore(path, 'scope') as store:
         store.put('1', 'wd', outputs())
         rethreshold(store, .8)
+    db.update_database(path)
     source_before = path.read_bytes()
     with StateStore(path, 'scope', dry_run=dry_run) as store:
         if dry_run:
@@ -274,7 +276,7 @@ def test_abandon_and_cleanup_preserve_v8_and_effective_thresholds(tmp_path):
         recovery.abandon(store, lambda _: None)
         cleanup.begin(store, 'cleanup', {'excluded'}, set(), [], kinds=('scene',))
         cleanup.finish(store)
-        assert store.connection.execute('PRAGMA user_version').fetchone() == (8,)
+        assert store.connection.execute('PRAGMA user_version').fetchone() == (9,)
         assert store.records('1', 'scene')['wd'][0][scene_cache_identity.SCENE_OVERRIDE] == .8
     assert db.check_database(path, 'scope')['ok']
 

@@ -51,6 +51,36 @@ def rows(path, table):
         return db.execute(f'SELECT * FROM {table} ORDER BY 1,2').fetchall()
 
 
+@pytest.mark.parametrize('version', [0, 1, 5, 8])
+@pytest.mark.parametrize('dry_run', [False, True])
+def test_runtime_requires_explicit_upgrade_without_changing_old_database(tmp_path, version, dry_run):
+    path = tmp_path / 'state.sqlite3'
+    seed_version(path, version)
+    before = path.read_bytes(), path.stat().st_mtime_ns
+    with pytest.raises(ValueError, match='--db-update'):
+        StateStore(path, 'scope-a', dry_run=dry_run)
+    assert (path.read_bytes(), path.stat().st_mtime_ns) == before
+    stash_db.update_database(path)
+    with StateStore(path, 'scope-a', dry_run=dry_run) as state:
+        assert state.records('1', 'scene')['wd']
+
+
+def test_update_backfills_missing_and_corrupt_metadata_in_every_scope(tmp_path):
+    path = tmp_path / 'state.sqlite3'
+    seed_version(path, LATEST_SCHEMA_VERSION)
+    evidence = rows(path, 'results')
+    with sqlite3.connect(path) as db:
+        db.execute("DELETE FROM result_metadata WHERE scope='scope-a'")
+        db.execute("UPDATE result_metadata SET data='corrupt' WHERE scope='scope-b'")
+    stash_db.update_database(path)
+    assert rows(path, 'results') == evidence
+    assert len(rows(path, 'result_metadata')) == 2
+    for scope in ('scope-a', 'scope-b'):
+        with StateStore(path, scope) as state:
+            state.unpack = lambda *_: pytest.fail('runtime repeated historical backfill')
+            assert state.result_metadata('1', 'scene', 'wd')[0]['populated']
+
+
 @pytest.mark.parametrize('version', range(LATEST_SCHEMA_VERSION + 1))
 def test_update_migrates_every_supported_version_and_all_scopes(tmp_path, version):
     path = tmp_path / 'state.sqlite3'
@@ -88,7 +118,7 @@ def test_dry_run_only_reports_target_without_modifying_database_or_lock(tmp_path
 
 def test_update_preserves_pending_and_recovery_work_checkpoints_and_thresholds(tmp_path):
     path = tmp_path / 'state.sqlite3'
-    seed_version(path, 8)
+    seed_version(path, LATEST_SCHEMA_VERSION)
     with StateStore(path, 'scope-b') as state:
         state.prepare('1', {'scene': {'owned_ids': [], 'contributions': []}})
         with state.connection as db:
@@ -106,6 +136,8 @@ def test_update_preserves_pending_and_recovery_work_checkpoints_and_thresholds(t
             db.execute('INSERT INTO refresh_requests VALUES (?,?,?,?)', ('scope-a', '2', 'wd', 'scene'))
             db.execute('INSERT INTO result_thresholds VALUES (?,?,?,?,?)', ('scope-a', '1', 'wd', 'scene', .8))
             db.execute('INSERT INTO legacy_imports VALUES (?,?,?,?)', ('scope-a', '1', 'scene', encode([])))
+    with sqlite3.connect(path) as connection:
+        connection.execute('PRAGMA user_version=8')
     preserved = ('results', 'snapshots', 'cleanup_state', 'recovery_cleanups', 'recovery_publications',
                  'checkpoints', 'checkpoint_frames', 'checkpoint_analysis', 'refresh_requests',
                  'result_thresholds', 'result_metadata', 'legacy_imports')
@@ -118,13 +150,13 @@ def test_update_preserves_pending_and_recovery_work_checkpoints_and_thresholds(t
 
 def test_update_refuses_an_active_writer_and_releases_failed_lock(tmp_path):
     path = tmp_path / 'state.sqlite3'
-    seed_version(path, 5)
+    seed_version(path, LATEST_SCHEMA_VERSION)
     with StateStore(path, 'scope-a'):
         before = path.read_bytes()
         with pytest.raises(RuntimeError, match='Another merged-output process'):
             stash_db.update_database(path)
         assert path.read_bytes() == before
-    assert stash_db.update_database(path) == (5, LATEST_SCHEMA_VERSION)
+    assert stash_db.update_database(path) == (LATEST_SCHEMA_VERSION, LATEST_SCHEMA_VERSION)
 
 
 def test_failed_migration_can_be_retried_and_does_not_claim_latest_version(tmp_path, monkeypatch):
@@ -209,4 +241,3 @@ def test_db_update_cli_rejects_unrelated_modes_and_modifiers(extra):
     with pytest.raises(SystemExit) as error:
         arguments.parse_args(app, ['--db-update', *extra])
     assert error.value.code == 2
-

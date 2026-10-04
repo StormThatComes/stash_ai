@@ -114,13 +114,11 @@ wyniki inferencji i evidence klatek pozostają bez zmian. Dotyczy to także
 automatycznego użycia cache po zmianie progów w YAML. Odczyt wyników, merge,
 cleanup i explain używają efektywnych progów z tej tabeli. Stare progi zapisane
 wewnątrz wyników są nadal odczytywane, bez przepisywania istniejącej bazy.
-Pierwsza zmiana progu oznacza bazę jako schemat co najmniej v8, którego starsze wersje
-programu nie obsługują. `--dry-run` zapisuje progi wyłącznie w tymczasowej bazie.
+`--dry-run` zapisuje progi wyłącznie w tymczasowej bazie.
 
 Snapshoty merge zapisują współdzielone dowody `extra_support` raz, a contributions
 odwołują się do nich przez referencje. Zmniejsza to koszt serializacji i kompresji.
-Pierwszy taki zapis oznacza bazę jako schemat v9; starsze wersje programu odmówią
-jej otwarcia. Istniejące snapshoty są nadal odczytywane bez przepisywania, a wyniki
+Aktualny schemat to v9; starsze wersje programu odmówią jego otwarcia. Istniejące snapshoty są nadal odczytywane bez przepisywania, a wyniki
 inferencji pozostają bez zmian. `--dry-run` zmienia wyłącznie tymczasową bazę.
 
 Pełną listę opcji pokazuje:
@@ -218,9 +216,12 @@ SQLite do systemu plików.
 
 `--db-update` aktualizuje całą istniejącą bazę wskazaną przez `--state-db`
 do najnowszego obsługiwanego schematu (obecnie v9), we wszystkich scope'ach.
-Korzysta z tych samych migracji i locka writera co zwykłe uruchomienie aplikacji.
+Zwykłe uruchomienie oraz `--dry-run` wymagają aktualnego schematu: starszą bazę
+trzeba najpierw zaktualizować tą komendą. Nowa baza od razu otrzymuje v9.
+Updater korzysta z tego samego locka writera; migracje są wyłącznie offline.
 Tworzy aktualne tabele, indeksy i triggery, uzupełnia `result_index` dla baz
-sprzed v2 oraz usuwa wycofaną tabelę `refinement_progress` dla baz sprzed v4.
+sprzed v2, uzupełnia historyczne `result_metadata` we wszystkich scope'ach
+oraz usuwa wycofaną tabelę `refinement_progress`.
 Nie łączy się ze Stash ani nie ładuje konfiguracji modeli. Zachowuje wyniki,
 checkpointy, pending publication/cleanup i recovery; nie zmienia progów ani
 nie wymaga ponownej inferencji. Starsze, nadal czytelne formaty payloadów

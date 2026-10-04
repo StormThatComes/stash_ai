@@ -7,7 +7,7 @@ from pathlib import Path
 import sqlite3
 
 
-from stash_ai.storage.schema import APPLICATION_ID, LATEST_SCHEMA_VERSION
+from stash_ai.storage.schema import APPLICATION_ID, LATEST_SCHEMA_VERSION, STATE_TABLES
 
 
 class StateDatabase(AbstractContextManager):
@@ -17,10 +17,11 @@ class StateDatabase(AbstractContextManager):
     Closing it releases the connection and lock even if store setup failed.
     """
 
-    def __init__(self, path, *, dry_run=False):
+    def __init__(self, path, *, dry_run=False, migration=False):
         self.path = Path(path).expanduser().resolve()
         self.lock_file, self.connection = None, None
         self.preview_source = False
+        self.migration = migration
         try:
             if dry_run:
                 self._open_preview()
@@ -40,19 +41,16 @@ class StateDatabase(AbstractContextManager):
             return
         source = sqlite3.connect(self.path.as_uri() + "?mode=ro", uri=True)
         try:
-            source_version = source.execute('PRAGMA user_version').fetchone()[0]
-            if (5 <= source_version <= LATEST_SCHEMA_VERSION and
-                    source.execute('PRAGMA application_id').fetchone()[0] == APPLICATION_ID):
-                # Modern schemas can be read directly; only preview
-                # changes occupy the temporary overlay.
-                self.connection.execute('ATTACH DATABASE ? AS cleanup_source',
-                                        (self.path.as_uri() + '?mode=ro',))
-                self.connection.execute(f'PRAGMA user_version={source_version}')
-                self.preview_source = True
-                self.preview_data_version = self.connection.execute(
-                    'PRAGMA cleanup_source.data_version').fetchone()[0]
-            else:
-                source.backup(self.connection)
+            _, fresh = self._validate(source)
+            if fresh:
+                return
+            self.connection.execute('ATTACH DATABASE ? AS cleanup_source',
+                                    (self.path.as_uri() + '?mode=ro',))
+            self.connection.execute(f'PRAGMA application_id={APPLICATION_ID}')
+            self.connection.execute(f'PRAGMA user_version={LATEST_SCHEMA_VERSION}')
+            self.preview_source = True
+            self.preview_data_version = self.connection.execute(
+                'PRAGMA cleanup_source.data_version').fetchone()[0]
         finally:
             source.close()
 
@@ -74,14 +72,22 @@ class StateDatabase(AbstractContextManager):
             raise RuntimeError("Another merged-output process is using this state DB.") from exc
         self.connection = sqlite3.connect(self.path, timeout=30)
 
-    def _initialize_schema(self):
-        db = self.connection
+    def _validate(self, db):
         application = db.execute("PRAGMA application_id").fetchone()[0]
-        self.version = db.execute("PRAGMA user_version").fetchone()[0]
+        version = db.execute("PRAGMA user_version").fetchone()[0]
         tables = db.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
-        if (application not in (0, APPLICATION_ID) or self.version not in range(LATEST_SCHEMA_VERSION + 1)
+        if (application not in (0, APPLICATION_ID) or version not in range(LATEST_SCHEMA_VERSION + 1)
                 or (tables and application != APPLICATION_ID)):
             raise ValueError("Not a supported stash-taggers state DB; choose another --state-db.")
+        if tables and version != LATEST_SCHEMA_VERSION and not self.migration:
+            raise ValueError(f'State DB schema v{version} requires --db-update before use (including --dry-run).')
+        if tables and not self.migration and STATE_TABLES - {name for name, in tables}:
+            raise ValueError('Incomplete state DB schema; run --db-update before use.')
+        return version, not tables
+
+    def _initialize_schema(self):
+        db = self.connection
+        self.version, self.fresh = self._validate(db)
         db.executescript(f"""
             PRAGMA application_id={APPLICATION_ID};
             CREATE TABLE IF NOT EXISTS results (
@@ -133,4 +139,3 @@ class StateDatabase(AbstractContextManager):
 
     def __exit__(self, *args):
         self.close()
-

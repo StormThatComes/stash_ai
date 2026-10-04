@@ -2,10 +2,9 @@
 from __future__ import annotations
 
 from stash_ai.inference import checkpoints
-from stash_ai.storage.codec import decode
 
 
-def initialize_progress(store, previous_version):
+def initialize_progress(store):
     db = store.connection
     db.executescript("""
         CREATE TABLE IF NOT EXISTS result_index (
@@ -28,18 +27,6 @@ def initialize_progress(store, previous_version):
             scope TEXT NOT NULL, scene TEXT NOT NULL, model TEXT NOT NULL, data BLOB NOT NULL,
             PRIMARY KEY(scope,scene,model));
     """)
-    if previous_version < 2:
-        # One-time migration; future status checks never decompress prediction blobs.
-        with db:
-            for scope, scene, model, kind, data in db.execute("SELECT scope,scene,model,kind,data FROM results"):
-                index_result(store, scene, model, kind, decode(data), scope=scope)
-    if previous_version < 4:
-        with db:
-            # Video sampling is retired; base VTT results and checkpoints stay valid.
-            db.execute("DROP TABLE IF EXISTS refinement_progress")
-            db.execute("PRAGMA user_version=4")
-
-
 def index_result(store, scene, model, kind, segments, scope=None, *, metadata_only=False):
     """Index a validated effective view, including a frame-free threshold plan."""
     from stash_ai.evidence.thresholds import indexed_signature

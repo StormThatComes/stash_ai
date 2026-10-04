@@ -196,9 +196,8 @@ Rethreshold waliduje i stosuje zmiany z małych rekordów `result_metadata`;
 `ResultStore.set_threshold(..., metadata_only=True)` zapisuje próg oraz indeks
 ukończenia z tego planu w jednej transakcji, bez odczytu BLOB-ów klatek.
 Pełne rekordy pozostają obsługiwane przez tę samą ścieżkę zapisu dla reuse inferencji.
-Dry-run korzysta z tymczasowej bazy: współczesne schematy odczytuje
-przez nakładkę ze źródłem otwartym tylko do odczytu, a starsze kopiuje przed
-migracją. Schemat v9 również korzysta z nakładki odczytu.
+Dry-run wymaga aktualnego schematu i odczytuje bazę przez nakładkę ze źródłem
+otwartym tylko do odczytu. Starszą bazę aktualizuje wyłącznie `--db-update`.
 
 `StateStore.pack_snapshot()` internuje powtarzające się obiekty dowodów według
 tożsamości, bez hashowania dużych struktur. Unikatowe dowody pozostają inline.
@@ -384,3 +383,5 @@ Shared marker extras consume ObservationIndex. FrameIndex owns indexes used
 throughout a scene, while clipped cleanup replay closes its temporary index
 even when qualification fails. Closing drops query cache references without
 changing the proof objects retained by result spans.
+
+Schema upgrades run only through `--db-update`. Runtime writers and dry-run readers require the current schema; fresh stores are created at the current version. Preview always attaches a current database read-only and writes into a sparse temporary overlay. The offline updater visits every scope, backfills derived result metadata, and preserves raw evidence and unfinished plans. Metadata invalidated or corrupted later is still rebuilt from authoritative evidence.

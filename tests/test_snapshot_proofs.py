@@ -117,7 +117,7 @@ def test_snapshot_storage_promotion_and_preview_are_transparent(tmp_path, monkey
         store.publish('1', {'markers': {'contributions': []}})
     source = path.read_bytes()
     with StateStore(path, 'scope', dry_run=dry_run, cache_bytes=cache_bytes) as store:
-        assert store.connection.execute('PRAGMA user_version').fetchone() == (5,)
+        assert store.connection.execute('PRAGMA user_version').fetchone() == (9,)
         store.report = RunReport(write=lambda _: None)
         raw_results = store.connection.execute('SELECT * FROM ' + store.table('results')).fetchall()
         getattr(store, operation)('1', {'markers': saved})

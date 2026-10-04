@@ -227,7 +227,7 @@ def test_scoped_policies_and_cleanup_without_model_files(tmp_path,monkeypatch):
     stash=Stash();stash.marker(WD,"watermark","delete")
     monkeypatch.setattr(app.services,"create_stash_client",lambda _:stash)
     monkeypatch.setattr(app.services,"load_vocabulary",lambda _:pytest.fail("cleanup read vocabulary"))
-    assert app.main(["--models","wd","--cleanup-markers-only","--offline"])==0
+    assert app.main(["--models","wd","--cleanup-markers-only","--state-db",str(tmp_path/"state.sqlite3"),"--offline"])==0
     assert not stash.scene["scene_markers"]
 
 
@@ -414,7 +414,7 @@ def test_oppai_scoped_blacklist_and_cleanup_without_assets(tmp_path,monkeypatch)
     stash.marker(WD,"special","other");stash.marker(OPPAI,"special","manual",True)
     monkeypatch.setattr(app.services,"create_stash_client",lambda _:stash)
     monkeypatch.setattr(app.services,"load_vocabulary",lambda _:pytest.fail("cleanup accessed model files"))
-    assert app.main(["--models","oppai","--cleanup-markers-only","--marker-core-exclusions",str(policy),"--offline"])==0
+    assert app.main(["--models","oppai","--cleanup-markers-only","--marker-core-exclusions",str(policy),"--state-db",str(tmp_path/"state.sqlite3"),"--offline"])==0
     assert {m["id"] for m in stash.scene["scene_markers"]}=={"keep","other","manual"}
     policy.write_text('version: 1\nexcluded_core_tags: ["op:special"]\n')
     with pytest.raises(ValueError): app.services.load_exclusion_policy(policy,"excluded_core_tags")

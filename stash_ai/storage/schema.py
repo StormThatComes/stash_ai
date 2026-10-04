@@ -41,21 +41,21 @@ PREVIEW_TABLES = tuple(table.name for table in TABLES if table.preview)
 MERGE_INVALIDATING_TABLES = tuple(table.name for table in TABLES if table.invalidates_merge)
 
 
-def initialize_features(store, version):
-    """Preserve migrations and preview-copy order before installing read views."""
+def initialize_features(store):
+    """Create current feature tables and load state before installing read views."""
     from stash_ai.storage.progress import initialize_progress
     from stash_ai.cleanup.state import initialize as initialize_cleanup
     from stash_ai.storage.merge_checks import initialize as initialize_checks
     from stash_ai.storage.recovery import initialize as initialize_recovery
     from stash_ai.storage.preview import initialize as initialize_preview
-    initialize_progress(store, version)
-    initialize_cleanup(store, version)
+    initialize_progress(store)
+    initialize_cleanup(store)
     if store.preview_source:
         store.connection.execute(
             'INSERT INTO cleanup_state SELECT * FROM cleanup_source.cleanup_state WHERE scope=?',
             (store.scope,))
         store.connection.commit()
-        initialize_cleanup(store, version)
+        initialize_cleanup(store)
     initialize_checks(store)
     initialize_recovery(store)
     initialize_preview(store)
