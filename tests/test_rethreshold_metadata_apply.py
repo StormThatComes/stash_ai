@@ -11,7 +11,7 @@ import stash_ai.evidence.identity as scene_cache_identity
 import stash_ai.evidence.identity as thresholds_identity
 from stash_ai.storage import progress
 from stash_ai.storage import metadata as state_metadata
-from stash_ai.runtime import RunReport
+from stash_ai.runtime.report import RunReport
 from stash_ai.storage.store import StateStore
 from tests.test_result_thresholds import blobs, config, outputs
 

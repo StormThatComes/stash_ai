@@ -18,11 +18,11 @@ def run_database_command(app, args) -> int | None:
 def run_standalone_command(app, args, *, cleanup_only: bool) -> int | None:
     """Run commands that bypass model loading and the normal tagging pipeline."""
     if args.abandon_pending and not args.merge_only and not cleanup_only:
-        from stash_ai.recovery import run_only
+        from stash_ai.commands.recovery import run_only
         app.validate_config(scene_work=False)
         return run_only(app, args)
     if args.sync_marker_groups_only:
-        from stash_ai.marker_groups import run_backfill
+        from stash_ai.commands.marker_groups import run_backfill
         app.validate_config(scene_work=False)
         return run_backfill(app, args)
     if args.prune_empty_tags_only:
@@ -46,7 +46,7 @@ def run_standalone_command(app, args, *, cleanup_only: bool) -> int | None:
 
 
 def run_merged(app, settings, args, catalogs, hierarchy, core_policies, scene_policies):
-    from stash_ai.diagnostics import MergeDiagnostics
+    from stash_ai.runtime.diagnostics import MergeDiagnostics
     from stash_ai.runs.merged import MergedRun
     with MergeDiagnostics(args.report, args.profile_merge, dry_run=app.DRY_RUN,
                           merge_only=args.merge_only, force=args.force_merge):

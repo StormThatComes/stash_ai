@@ -5,11 +5,11 @@ from collections import Counter
 
 from tqdm import tqdm
 
-from stash_ai import performance
+import stash_ai.storage.merge_checks as merge_checks
 from stash_ai.evidence import pipeline as merge
 from stash_ai.storage import progress
 from stash_ai.publication import merged as merge_sync
-from stash_ai.runtime import stage
+from stash_ai.runtime.timing import stage
 
 
 class MergePublisher:
@@ -50,7 +50,7 @@ class MergePublisher:
         with stage(self.report, 'publication_check'):
             reason = (
                 'forced' if self.args.force_merge
-                else performance.check_reason(
+                else merge_checks.check_reason(
                     self.store, scene_id, self.publication_key, current['fingerprint']))
         self.stats['merge_' + reason] += 1
         return reason

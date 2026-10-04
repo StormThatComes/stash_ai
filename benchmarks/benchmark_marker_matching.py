@@ -38,7 +38,7 @@ def main():
     import stash_ai.evidence.labels as merge_labels
     import stash_ai.storage.store as merge_store
     from stash_ai.publication import merged as merge_sync
-    from stash_ai.runtime import RunReport
+    from stash_ai.runtime.report import RunReport
     from stash_ai.evidence.temporal.policy import TemporalPolicy
     from tests.helpers.stash import Stash
 

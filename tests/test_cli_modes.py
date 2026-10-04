@@ -78,3 +78,34 @@ def test_explain_dispatch_uses_diagnostics_without_entering_merge(monkeypatch):
 
     assert dispatch.run_saved_merge_command(app, [], args, cores, tags) == 9
     assert called == [(app, args, cores, tags)]
+
+
+def test_main_database_command_bypasses_bootstrap(monkeypatch):
+    from stash_ai import db
+    from stash_ai.commands import bootstrap
+    monkeypatch.setattr(db, 'run_mode', lambda args, url: 7)
+    for name in ('runtime_options', 'selected_settings', 'policies', 'catalogs'):
+        monkeypatch.setattr(bootstrap, name, lambda *a, **k: pytest.fail('database command entered bootstrap'))
+    assert app.main(['--db-report']) == 7
+
+
+@pytest.mark.usefixtures('reset_merge')
+@pytest.mark.parametrize('mode', ['merged', 'separate'])
+def test_later_catalog_failure_prevents_stash_and_model_loading(monkeypatch, tmp_path, mode):
+    from stash_ai.models import WD, DTQ, ModelSettings, Vocabulary, SOURCES
+    calls = []
+    settings = [ModelSettings(source, tmp_path, download_missing=False) for source in (WD, DTQ)]
+    monkeypatch.setattr(app, 'load_model_settings', lambda *a: settings)
+    monkeypatch.setattr(app, 'validate_config', lambda **k: None)
+    monkeypatch.setattr(app, 'load_exclusion_policy', lambda *a: {key: frozenset() for key in SOURCES})
+    def vocabulary(config):
+        calls.append(config.source.key)
+        if config.source == DTQ:
+            raise ValueError('invalid later vocabulary')
+        return Vocabulary(['example'], {'example': 'General'})
+    monkeypatch.setattr(app, 'load_vocabulary', vocabulary)
+    for name in ('create_stash_client', 'load_tagger'):
+        monkeypatch.setattr(app, name, lambda *a: pytest.fail('catalog failure reached Stash or weights'))
+    with pytest.raises(ValueError, match='invalid later vocabulary'):
+        app.main(['--models', 'all', '--no-hierarchy', '--no-temporal', '--output-mode', mode])
+    assert calls == ['wd', 'dtq']

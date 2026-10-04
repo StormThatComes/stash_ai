@@ -2,7 +2,7 @@
 import json
 import zlib
 
-from stash_ai.runtime import stage
+from stash_ai.runtime.timing import stage
 from stash_ai.storage.snapshots import FORMAT_KEY, expand
 
 

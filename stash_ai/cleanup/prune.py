@@ -144,7 +144,7 @@ def prune_tags(stash, prefixes=None, report=print, *, names=None, candidate_ids=
     report = tqdm.write if report is print else report
     names = frozenset(names) if names is not None else None
     def selected(tag):
-        from stash_ai.marker_groups import PREFIX, ROOT, managed_group
+        from stash_ai.publication.groups import PREFIX, ROOT, managed_group
         if tag['name'] == ROOT or (tag['name'].startswith(PREFIX) and (skip_marker_groups or not managed_group(tag))):
             return False
         return tag["name"] in names if names is not None else tag["name"].startswith(prefixes)

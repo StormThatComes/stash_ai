@@ -33,7 +33,7 @@ class CleanupRun:
                 allow_cleanup=self.wide or args.abandon_pending, cleanup_preview=True,
                 memory_budget_bytes=int(args.ram_budget_gb * 2**30)) as self.store:
             if args.abandon_pending:
-                from stash_ai.recovery import abandon
+                from stash_ai.storage.recovery import abandon
                 self.stats.update(abandon(self.store, self.report.write))
             self.stash = self.cleanup_stash = app.create_stash_client(app.DRY_RUN)
             try:
@@ -121,7 +121,8 @@ class CleanupRun:
                 self.stats.update(prune_excluded_definitions(
                     app, self.stash, self.scoped_tags, self.report.detail))
         if app.CREATE_MARKERS:
-            from stash_ai.marker_groups import for_resolver, prune_groups
+            from stash_ai.publication.groups import for_resolver
+            from stash_ai.cleanup.groups import prune_groups
             delta = Counter(getattr(self.cleanup_stash, 'marker_group_usage_delta', {}))
             if self.resolver is not None:
                 delta.update(for_resolver(app, self.resolver).usage_delta)

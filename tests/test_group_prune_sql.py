@@ -7,7 +7,7 @@ import pytest
 from stash_ai import cli as app
 from stash_ai.cleanup import sql as fast
 from stash_ai.cleanup.sql_session import READ_OPERATION, SQL
-from stash_ai import marker_groups as groups
+from stash_ai.publication import groups as groups
 import stash_ai.evidence.labels as merge_labels
 import stash_ai.storage.store as merge_store
 from tests.helpers.cleanup import install, options

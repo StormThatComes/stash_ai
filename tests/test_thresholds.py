@@ -18,7 +18,7 @@ import stash_ai.storage.store as merge_store
 import stash_ai.evidence.identity as scene_cache_identity
 from stash_ai.evidence import thresholds as thresholds
 import stash_ai.evidence.identity as thresholds_identity
-from stash_ai.runtime import RunReport
+from stash_ai.runtime.report import RunReport
 from stash_ai.models import ModelSettings, SOURCES
 from tests.helpers.evidence import paired_records, policies
 
