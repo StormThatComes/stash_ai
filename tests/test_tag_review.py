@@ -193,7 +193,7 @@ def test_unusable_scenes_are_skipped_without_negative_votes(tmp_path, pending):
     seed(path, "1", "wd", outputs)
     with merge.StateStore(path, merge.scope_for(app.STASH_URL)) as state:
         if pending == "refresh":
-            from stash_ai.progress import request_refresh
+            from stash_ai.storage.progress import request_refresh
             request_refresh(state, ["1"], ["wd"], ["scene", "markers"])
         elif pending == "publication":
             state.prepare("1", {"scene": {"owned_ids": [], "contributions": []}})

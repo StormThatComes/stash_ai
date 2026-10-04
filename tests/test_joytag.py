@@ -10,10 +10,10 @@ import pytest
 
 from stash_ai.inference.identity import model_identity
 from stash_ai import cli as app
-from stash_ai import joytag
+from stash_ai.backends import joytag
 from stash_ai.models import JOYTAG, WD, ModelSettings, Vocabulary
-from stash_ai.taggers import JoyTagger
-from stash_ai.vocabulary import load_vocabulary
+from stash_ai.backends.loader import JoyTagger
+from stash_ai.backends.vocabulary import load_vocabulary
 
 pytestmark = pytest.mark.usefixtures("reset_multimodel")
 

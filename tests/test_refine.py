@@ -15,7 +15,7 @@ from PIL import Image
 import pytest
 
 from stash_ai.inference import sprites
-from stash_ai import state_codec
+from stash_ai.storage import codec as state_codec
 from stash_ai.cleanup import evidence as cleanup_evidence
 from stash_ai import cli as app
 from stash_ai import merge

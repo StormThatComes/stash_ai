@@ -8,9 +8,9 @@ import pytest
 from stash_ai import cli as app
 from stash_ai import db as stash_db, performance
 from stash_ai.commands import arguments
-from stash_ai.state import StateStore
-from stash_ai.state_codec import encode
-from stash_ai.state_db import APPLICATION_ID, LATEST_SCHEMA_VERSION
+from stash_ai.storage.store import StateStore
+from stash_ai.storage.codec import encode
+from stash_ai.storage.database import APPLICATION_ID, LATEST_SCHEMA_VERSION
 
 
 def seed_version(path, version):

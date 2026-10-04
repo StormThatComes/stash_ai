@@ -280,7 +280,7 @@ def format_summary(report):
 
 
 def run(app, args):
-    from stash_ai.state import StateStore, scope_for
+    from stash_ai.storage.store import StateStore, scope_for
     from stash_ai.temporal import load_policy
 
     try:

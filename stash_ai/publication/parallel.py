@@ -11,7 +11,7 @@ from concurrent.futures import ProcessPoolExecutor
 from multiprocessing import get_context
 from pathlib import Path
 
-from stash_ai.state import StateStore
+from stash_ai.storage.store import StateStore
 
 
 _WORKER_APP = None

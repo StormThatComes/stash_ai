@@ -34,7 +34,7 @@ def inspect_database(path, scope):
     if not path.is_file():
         raise FileNotFoundError(f"State database does not exist: {path}")
 
-    from stash_ai.state import APPLICATION_ID
+    from stash_ai.storage.store import APPLICATION_ID
 
     with connect_readonly(path) as db:
         application_id = db.execute("PRAGMA application_id").fetchone()[0]

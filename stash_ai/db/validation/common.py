@@ -33,7 +33,7 @@ def tick(progress, amount=1, phase=None):
 
 
 def decoded_payload(blob, expected):
-    from stash_ai.state_codec import decode
+    from stash_ai.storage.codec import decode
     value = decode(blob)
     if not isinstance(value, expected):
         raise ValueError("Unexpected persisted payload shape.")

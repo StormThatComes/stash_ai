@@ -1,7 +1,7 @@
 """Shared cleanup tag catalog and lazy publication masks. No model/media IO."""
 from __future__ import annotations
 
-from stash_ai.state_codec import encode, decode
+from stash_ai.storage.codec import encode, decode
 from stash_ai.models import SOURCES
 
 def initialize(store, previous_version):

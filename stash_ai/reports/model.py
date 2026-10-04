@@ -14,7 +14,7 @@ from tqdm import tqdm
 
 from stash_ai.occurrences import is_occurrence
 from stash_ai.models import SOURCES
-from stash_ai.state import StateStore, scope_for
+from stash_ai.storage.store import StateStore, scope_for
 
 
 REPORT_FORMAT = 1

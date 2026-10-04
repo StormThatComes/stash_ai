@@ -17,7 +17,7 @@ from stash_ai.inference import checkpoints, preparation, sprites
 from stash_ai import cli as app
 from stash_ai import fusion
 from stash_ai import merge
-from stash_ai import progress
+from stash_ai.storage import progress
 from stash_ai.runtime import RamCache, RunReport, retained_size
 from stash_ai.scene import shared_scene_contributions, cleanup_scene_support
 from stash_ai.models import SOURCES

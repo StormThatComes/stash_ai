@@ -18,7 +18,7 @@ from stash_ai.inference import checkpoints, prediction, preparation, sprites
 from stash_ai import cli as app
 from stash_ai import merge
 from stash_ai import performance
-from stash_ai import progress
+from stash_ai.storage import progress
 from stash_ai.runtime import RamCache, retained_size
 
 
@@ -30,8 +30,8 @@ def fail(*args, **kwargs):
 
 
 @pytest.mark.parametrize('filename', [
-    'tags.py', 'domain.py', 'state.py', 'state_db.py', 'state_results.py', 'state_thresholds.py', 'state_publications.py',
-    'models.py', 'vocabulary.py', 'onnx_tagger.py', 'inference/prediction.py', 'inference/sprites.py', 'inference/preparation.py', 'progress.py', 'inference/inputs.py', 'inference/identity.py', 'inference/checkpoints.py', 'signatures.py',
+    'stash_api/tags.py', 'domain.py', 'storage/store.py', 'storage/database.py', 'storage/results.py', 'storage/thresholds.py', 'storage/publications.py',
+    'models.py', 'backends/vocabulary.py', 'backends/onnx.py', 'backends/onnx_preprocessing.py', 'backends/onnx_session.py', 'inference/prediction.py', 'inference/sprites.py', 'inference/preparation.py', 'storage/progress.py', 'inference/inputs.py', 'inference/identity.py', 'inference/checkpoints.py', 'signatures.py',
     'runs/merged.py', 'runs/merged_model.py', 'publication/publisher.py', 'publication/parallel.py', 'publication/merged.py', 'publication/separate.py', 'publication/markers.py',
     'config.py', 'commands/hierarchy.py', 'commands/legacy.py', 'rethreshold/markers.py', 'rethreshold/scenes.py', 'cleanup/state.py', 'cleanup/client.py',
 ])
@@ -48,7 +48,7 @@ def test_publication_code_tracks_extracted_modules(monkeypatch, filename):
 
 
 @pytest.mark.parametrize('filename', [
-    'client.py', 'transport.py', 'vtt.py', 'commands/arguments.py', 'commands/validation.py', 'commands/dispatch.py', 'commands/explain.py',
+    'stash_api/client.py', 'stash_api/transport.py', 'vtt.py', 'commands/arguments.py', 'commands/validation.py', 'commands/dispatch.py', 'commands/explain.py',
     'cleanup/run.py', 'recovery.py', 'cleanup/sql.py', 'cleanup/sql_session.py',
     'rethreshold/execution.py', 'rethreshold/targets.py', 'db/checks.py',
     'db/validation/common.py', 'db/validation/schema.py', 'db/validation/results.py',

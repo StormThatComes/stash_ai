@@ -4,8 +4,8 @@ from contextlib import closing
 from pathlib import Path
 import zlib
 
-from stash_ai.state import StateStore
-from stash_ai.state_db import APPLICATION_ID, LATEST_SCHEMA_VERSION
+from stash_ai.storage.store import StateStore
+from stash_ai.storage.database import APPLICATION_ID, LATEST_SCHEMA_VERSION
 
 from .common import connect_readonly, table_names
 

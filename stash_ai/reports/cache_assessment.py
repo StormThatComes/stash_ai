@@ -2,7 +2,7 @@
 from dataclasses import dataclass
 from types import SimpleNamespace
 
-from stash_ai.state_results import KINDS
+from stash_ai.storage.results import KINDS
 
 STATUSES = (
     'ready', 'rethreshold', 'missing', 'partial', 'refresh_required',
