@@ -7,12 +7,12 @@ import hashlib
 from urllib.parse import urlparse
 
 from stash_ai.runtime import measured, stage
-from stash_ai.state_codec import encode, decode
-from stash_ai.state_db import APPLICATION_ID, StateDatabase
+from stash_ai.storage.codec import encode, decode
+from stash_ai.storage.database import APPLICATION_ID, StateDatabase
 
 
-from stash_ai.state_results import KINDS, ResultStore
-from stash_ai.state_publications import PublicationStore
+from stash_ai.storage.results import KINDS, ResultStore
+from stash_ai.storage.publications import PublicationStore
 
 
 def scope_for(url):
@@ -52,9 +52,9 @@ class StateStore(AbstractContextManager):
             if self.preview_source:
                 self.preview_data_version = database.preview_data_version
             version = database.version
-            from stash_ai.progress import initialize_progress
+            from stash_ai.storage.progress import initialize_progress
             initialize_progress(self, version)
-            from stash_ai.cleanup import initialize
+            from stash_ai.cleanup.state import initialize
             initialize(self, version)
             if self.preview_source:
                 self.connection.execute('INSERT INTO cleanup_state SELECT * FROM cleanup_source.cleanup_state WHERE scope=?', (self.scope,))
@@ -64,7 +64,7 @@ class StateStore(AbstractContextManager):
             initialize_performance(self)
             from stash_ai.recovery import initialize as initialize_recovery
             initialize_recovery(self)
-            from stash_ai.preview import initialize as initialize_preview
+            from stash_ai.storage.preview import initialize as initialize_preview
             initialize_preview(self)
             if self.cleanup_pending and not allow_cleanup:
                 raise RuntimeError('Global cleanup is interrupted; rerun the same --models all cleanup mode '
@@ -86,12 +86,12 @@ class StateStore(AbstractContextManager):
 
     def cached(self, key):
         # A transaction may still roll back: never cache its provisional view.
-        from stash_ai.preview import check_source
+        from stash_ai.storage.preview import check_source
         check_source(self)
         return None if self.connection.in_transaction else self.cache.get(key)
 
     def table(self, name):
-        from stash_ai.preview import table
+        from stash_ai.storage.preview import table
         return table(self, name)
 
     @measured('state_cache')
@@ -108,7 +108,7 @@ class StateStore(AbstractContextManager):
 
     def pack_snapshot(self, value):
         """Encode shared proofs and mark their format inside the write transaction."""
-        from stash_ai.state_snapshot import compact
+        from stash_ai.storage.snapshots import compact
         with stage(getattr(self, 'report', None), 'state_snapshot_compact'):
             packed = compact(value)
         if packed is not value:

@@ -9,7 +9,7 @@ from tqdm import tqdm
 
 from stash_ai.models import SOURCES
 from stash_ai.reports import model
-from stash_ai.state import StateStore
+from stash_ai.storage.store import StateStore
 
 _WORKER_APP = None
 _WORKER_STORE = None

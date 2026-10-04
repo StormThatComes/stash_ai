@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 import requests
 
-from stash_ai.client import StashClient
+from stash_ai.stash_api.client import StashClient
 
 
 def connect(dry_run=False):

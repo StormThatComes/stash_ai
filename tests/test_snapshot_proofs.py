@@ -6,13 +6,14 @@ import zlib
 import pytest
 
 from stash_ai.rethreshold import execution as rethreshold_execution
-from stash_ai import cli as app, cleanup, db, merge, recovery
-from stash_ai import merge_cleanup
+from stash_ai import cli as app, db, merge, recovery
+from stash_ai.cleanup import state as cleanup
+from stash_ai.cleanup import evidence as cleanup_evidence
 from stash_ai.publication import merged as merge_sync
 from stash_ai.runtime import RunReport
-from stash_ai.state import StateStore
-from stash_ai.state_codec import decode, encode
-from stash_ai.state_snapshot import FORMAT_KEY, compact, expand
+from stash_ai.storage.store import StateStore
+from stash_ai.storage.codec import decode, encode
+from stash_ai.storage.snapshots import FORMAT_KEY, compact, expand
 from tests.helpers.evidence import empty_policies, segment, span
 from tests.helpers.stash import Stash
 from tests.test_result_thresholds import config, outputs
@@ -257,7 +258,7 @@ def test_merge_cleanup_and_partial_publication_recovery_match_old_snapshots(tmp_
             assert repeated['markers_unchanged'] == 3
             raw_results = store.connection.execute('SELECT data FROM results ORDER BY model').fetchall()
             cores = {**policies, 'wd': frozenset({'core'})}
-            cleaned = merge_cleanup.cleanup_support(app, store, '1', snapshot['contributions'], {'wd'}, cores, policies)
+            cleaned = cleanup_evidence.cleanup_support(app, store, '1', snapshot['contributions'], {'wd'}, cores, policies)
             cleaned_stats = merge_sync.sync_merged(app, stash, resolver, store, stash.find_scene('1'), [], cleaned,
                                              cleanup=True, migrate=False, tag_policies=policies)
             assert store.connection.execute('SELECT data FROM results ORDER BY model').fetchall() == raw_results

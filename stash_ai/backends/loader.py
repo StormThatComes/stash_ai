@@ -4,8 +4,9 @@ from __future__ import annotations
 import gc
 from typing import Any
 
-from stash_ai import models, onnx_tagger
-from stash_ai import vocabulary as assets
+from stash_ai import models
+from stash_ai.backends import onnx as onnx_tagger
+from stash_ai.backends import vocabulary as assets
 
 
 class JoyTagger:
@@ -15,7 +16,7 @@ class JoyTagger:
         self.labels, self.batch_size = vocabulary.labels, settings.batch_size
         self.prepare_image = prepare_image
         assets.ensure_files(settings, assets.weight_files(settings))
-        from stash_ai.joytag import load_model
+        from stash_ai.backends.joytag import load_model
         selected = "cuda" if settings.device == "auto" and torch.cuda.is_available() else settings.device
         self.device = torch.device("cpu" if selected == "auto" else selected)
         if self.device.type == "cuda" and not torch.cuda.is_available():

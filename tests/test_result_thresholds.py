@@ -8,11 +8,13 @@ import pytest
 
 from stash_ai.rethreshold import execution as rethreshold_execution, scenes as scene_updates
 from stash_ai import cli as app
-from stash_ai import cleanup, db, performance, progress, recovery
+from stash_ai import db, performance, recovery
+from stash_ai.storage import progress
+from stash_ai.cleanup import state as cleanup
 from stash_ai.reports import developer as developer_report
 from stash_ai import scene_cache, thresholds
 from stash_ai.runtime import RunReport
-from stash_ai.state import StateStore
+from stash_ai.storage.store import StateStore
 from stash_ai.models import ModelSettings, SOURCES
 
 pytestmark = pytest.mark.usefixtures('reset_temporal')

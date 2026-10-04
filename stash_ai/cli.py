@@ -66,13 +66,13 @@ MERGE_STATE_FILE = (INSTALL_ROOT / "tagger_sources.sqlite3")
 
 from stash_ai.runs import separate
 from stash_ai.models import SOURCES, ModelSource, ModelSettings
-from stash_ai.vocabulary import load_vocabulary, ensure_files, weight_files
-from stash_ai.taggers import load_tagger
+from stash_ai.backends.vocabulary import load_vocabulary, ensure_files, weight_files
+from stash_ai.backends.loader import load_tagger
 from stash_ai.temporal import TemporalPolicy
 from stash_ai.domain import FramePrediction, MarkerSpec
-from stash_ai.client import StashClient
-from stash_ai.transport import safe_error
-from stash_ai.tags import TagResolver
+from stash_ai.stash_api.client import StashClient
+from stash_ai.stash_api.transport import safe_error
+from stash_ai.stash_api.tags import TagResolver
 from stash_ai.config import (
     vocabulary_digest, load_unique_yaml, load_exclusion_policy,
     load_model_settings as _load_model_settings, metadata_hierarchy, load_tag_hierarchy,
@@ -285,7 +285,7 @@ def main(argv: list[str] | None = None) -> int:
             load_vocabulary(config)
             ensure_files(config, weight_files(config))
             if config.source.key == "joytag":
-                from stash_ai.joytag import loader_path
+                from stash_ai.backends.joytag import loader_path
                 loader_path(config.download_missing)
             print(f"{config.source.title}: files ready in {config.model_dir}.")
         return 0
@@ -296,7 +296,7 @@ def main(argv: list[str] | None = None) -> int:
     core_policies = load_exclusion_policy(args.marker_core_exclusions, "excluded_core_tags") if CREATE_MARKERS and not hierarchy_only else empty_policies
     scene_policies = load_exclusion_policy(args.scene_tag_exclusions, "excluded_scene_tags")
     if cleanup_only:
-        from stash_ai.merge_cleanup import CleanupRun
+        from stash_ai.cleanup.run import CleanupRun
         return CleanupRun(app, settings, args, core_policies, scene_policies).run()
     result = run_saved_merge_command(app, settings, args, core_policies, scene_policies)
     if result is not None:

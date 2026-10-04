@@ -58,8 +58,8 @@ class StashTransport:
     def _read_only(query: str, variables: dict | None = None) -> bool:
         if not query.lstrip().startswith('mutation'):
             return True
-        from stash_ai.cleanup_sql_session import is_read_only_cleanup
-        from stash_ai.merge_sql import is_read_only_merge
+        from stash_ai.cleanup.sql_session import is_read_only_cleanup
+        from stash_ai.stash_api.sql import is_read_only_merge
         return is_read_only_cleanup(query, variables) or is_read_only_merge(query, variables)
 
     def gql(self, query: str, variables: dict | None = None) -> dict:
@@ -71,7 +71,7 @@ class StashTransport:
         match = re.search(r'\b(?:query|mutation)\s+(StashAI[A-Za-z0-9_]*)\b', query)
         operation = match.group(1) if match else ('read' if read else 'write')
         if operation == 'StashAIMergeReadSQL':
-            from stash_ai.merge_sql import SQL
+            from stash_ai.stash_api.sql import SQL
             operation += '.' + next((mode for mode, sql in SQL.items() if sql == (variables or {}).get('sql')), 'unknown')
         with report.request(operation, read):
             return self._gql(query, variables)

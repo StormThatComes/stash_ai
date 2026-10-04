@@ -17,7 +17,7 @@ from stash_ai.domain import Cue, FramePrediction
 from stash_ai.models import ModelSource, SOURCES
 from stash_ai.runtime import stage
 from stash_ai.occurrences import OCCURRENCE_TAG
-from stash_ai.state import KINDS, StateStore, scope_for
+from stash_ai.storage.store import KINDS, StateStore, scope_for
 
 AI = ModelSource("ai", "AI", "ai:", "ai:marker:stash-taggers", "[AI] ", "[AI hierarchy v1]")
 
@@ -282,5 +282,5 @@ def capture_outputs(app, config, vocabulary, cues, predictions, frames, analysis
 
 
 def has_outputs(app, store, scene_id, model):
-    from stash_ai.progress import completed, output_kinds
+    from stash_ai.storage.progress import completed, output_kinds
     return completed(store, scene_id, model, output_kinds(app))

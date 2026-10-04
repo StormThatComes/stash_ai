@@ -3,7 +3,7 @@ from collections import Counter
 import json
 
 from stash_ai import merge
-from stash_ai.state import KINDS, StateStore, scope_for
+from stash_ai.storage.store import KINDS, StateStore, scope_for
 
 
 def _effective_scene_thresholds(app, threshold):

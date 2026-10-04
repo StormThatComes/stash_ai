@@ -9,7 +9,7 @@ import pytest
 from stash_ai import cli as app
 from stash_ai.reports import developer as diagnostics
 from stash_ai import merge
-from stash_ai.state_codec import encode
+from stash_ai.storage.codec import encode
 
 
 SECRETS = (

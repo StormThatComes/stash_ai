@@ -9,7 +9,7 @@ import pytest
 
 from stash_ai.commands import hierarchy as hierarchy_commands
 from stash_ai.inference import sprites
-from stash_ai import merge_cleanup
+from stash_ai.cleanup import evidence as cleanup_evidence
 from stash_ai import cli as app
 from stash_ai import merge
 from stash_ai.exclusions import policies_or_empty
@@ -110,14 +110,14 @@ def test_source_exclusion_rebuilds_extra_proofs_without_resurrecting_revoked_sou
         if old_snapshot:
             for span in spans: span['build_options'].pop('tag_exclusions', None)
         tags = policies_or_empty({'wd': ['detail']})
-        cleaned = merge_cleanup.cleanup_support(app, store, '1', spans, {'wd'}, cores, tags)
+        cleaned = cleanup_evidence.cleanup_support(app, store, '1', spans, {'wd'}, cores, tags)
         marker = merge.union_intervals(cleaned)[0]
         assert marker['extra_tags'] == ['detail']
         assert set(marker['extra_evidence']['detail']['source_evidence']) == {'dtq'}
         # The current file no longer bans WD. Cleanup must still retain that
         # earlier removal, using the frozen global exclusions from publication.
         tags = policies_or_empty({'dtq': ['detail']})
-        cleaned = merge_cleanup.cleanup_support(app, store, '1', cleaned, {'dtq'}, cores, tags)
+        cleaned = cleanup_evidence.cleanup_support(app, store, '1', cleaned, {'dtq'}, cores, tags)
         marker = merge.union_intervals(cleaned)[0]
         assert marker['extra_tags'] == []
         assert (marker['start'], marker['end']) == (0, 3)
@@ -226,7 +226,7 @@ def test_failed_cleanup_does_not_start_definition_pruning(pipeline, monkeypatch,
     assert app.main(p.args) == 0
     path = policy_file(tmp_path, ['common'])
     monkeypatch.setattr(p.stash, 'delete_marker', lambda *args: (_ for _ in ()).throw(RuntimeError('write failed')))
-    from stash_ai import prune as stash_prune
+    from stash_ai.cleanup import prune as stash_prune
     monkeypatch.setattr(stash_prune, 'prune_tags', lambda *args, **kwargs: pytest.fail('pruning after failed cleanup'))
     assert app.main([*p.args, '--cleanup-only', '--tag-exclusions', str(path)]) == 1
     assert 'ai:common' in p.stash.tags

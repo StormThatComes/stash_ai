@@ -3,7 +3,7 @@ from collections import Counter, defaultdict
 
 from stash_ai.reports.cache_assessment import REUSABLE, STATUSES
 from stash_ai.reports.cache_plan import backfill_action
-from stash_ai.state_results import KINDS
+from stash_ai.storage.results import KINDS
 
 PAIR_COUNTS = (
     'evidence_ready_pairs', 'reusable_pairs', 'inference_pairs',

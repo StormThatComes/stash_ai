@@ -1,11 +1,11 @@
 """Compact checkpoints and atomic completion of retained inference results."""
 import zlib
 
-from stash_ai.state_codec import encode, decode
+from stash_ai.storage.codec import encode, decode
 
 
 def clear_checkpoint(store, scene, model):
-    from stash_ai.preview import delete
+    from stash_ai.storage.preview import delete
     for table in ("checkpoints", "checkpoint_frames", "checkpoint_analysis"):
         delete(store, table, scene, model)
         store.connection.execute(f"DELETE FROM {table} WHERE scope=? AND scene=? AND model=?",
@@ -18,7 +18,7 @@ def finish(store, scene, model, outputs, replace):
         store.results.put_in_transaction(scene, model, outputs, replace)
         clear_checkpoint(store, scene, model)
         for kind in outputs:
-            from stash_ai.preview import delete
+            from stash_ai.storage.preview import delete
             delete(store, 'refresh_requests', scene, model, kind)
             store.connection.execute("DELETE FROM refresh_requests WHERE scope=? AND scene=? AND model=? AND kind=?",
                                      (store.scope, str(scene), model, kind))

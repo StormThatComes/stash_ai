@@ -6,9 +6,9 @@ import pytest
 
 from stash_ai import cli as app, merge
 from stash_ai.publication import merged as merge_sync
-from stash_ai.client import StashClient
-from stash_ai.cleanup_sql import SQLPreview
-from stash_ai.merge_sql import OPERATION
+from stash_ai.stash_api.client import StashClient
+from stash_ai.cleanup.sql import SQLPreview
+from stash_ai.stash_api.sql import OPERATION
 from stash_ai.runtime import RunReport
 from stash_ai.models import WD
 from tests.helpers.cleanup import FastStash, install, options

@@ -5,9 +5,9 @@ import sqlite3
 import pytest
 
 from stash_ai import cli as app
-from stash_ai import merge_cleanup
+from stash_ai.cleanup import evidence as cleanup_evidence
 from stash_ai.publication import merged as merge_sync
-from stash_ai import cleanup
+from stash_ai.cleanup import state as cleanup
 from stash_ai import merge
 from stash_ai import recovery
 from stash_ai.occurrences import OCCURRENCE_TAG
@@ -322,5 +322,5 @@ def test_marker_title_selects_observed_model_votes_before_source_cleanup(tmp_pat
         recovery.abandon(store, lambda _: None)
         observed, _ = recovery.reconcile(app, stash, store, stash.find_scene('1'), 'markers', store.snapshot('1', 'markers')[0])
         cores = empty_policies(); cores['wd'] = frozenset({'core'})
-        kept = merge_cleanup.cleanup_support(app, store, '1', observed['contributions'], {'wd'}, cores, empty_policies())
+        kept = cleanup_evidence.cleanup_support(app, store, '1', observed['contributions'], {'wd'}, cores, empty_policies())
         assert {s['source'] for s in kept} == ({'oppai'} if applied else set())

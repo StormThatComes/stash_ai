@@ -9,7 +9,7 @@ import pytest
 
 from stash_ai.domain import Cue, FramePrediction
 from stash_ai.inference import prediction
-from stash_ai import merge_cleanup
+from stash_ai.cleanup import evidence as cleanup_evidence
 from stash_ai.publication import merged as merge_sync
 from stash_ai import cli as app
 from stash_ai import merge
@@ -218,10 +218,10 @@ def test_cleanup_revokes_consensus_votes_without_restoring_manual_deletions(tmp_
         merge_sync.sync_merged(app,stash,app.TagResolver(stash,source=merge.AI),state,stash.find_scene('1'),hits,spans)
         policies['wd']=frozenset({'core'})
         kept=[s for s in spans if s['source']!='wd']
-        cleaned=merge_cleanup.cleanup_support(app,state,'1',kept,{'wd'},policies)
+        cleaned=cleanup_evidence.cleanup_support(app,state,'1',kept,{'wd'},policies)
         assert merge.union_intervals(cleaned)[0]['sources']==['dtq','oppai']
         policies['dtq']=frozenset({'core'})
-        cleaned=merge_cleanup.cleanup_support(app,state,'1',[s for s in cleaned if s['source']!='dtq'],{'dtq'},policies)
+        cleaned=cleanup_evidence.cleanup_support(app,state,'1',[s for s in cleaned if s['source']!='dtq'],{'dtq'},policies)
         assert cleaned==[]
 
 
@@ -236,13 +236,13 @@ def test_cleanup_uses_published_evidence_and_does_not_adopt_new_votes(tmp_path,c
         kept=[span for span in spans if span['source']=='dtq']
         if change=='new_model':
             state.put('1','oppai',{'markers':segment('oppai',[[('core',.7)]]*3)})
-            assert merge_cleanup.cleanup_support(app,state,'1',kept,{'wd'},policies)==[]
+            assert cleanup_evidence.cleanup_support(app,state,'1',kept,{'wd'},policies)==[]
         else:
             altered=segment('wd',[[('core',.7)]]*3)
             altered['items'][0]['tags']=[('core',.71)]
             state.put('1','wd',{'markers':altered})
             with pytest.raises(RuntimeError,match='merge-only'):
-                merge_cleanup.cleanup_support(app,state,'1',kept,{'wd'},policies)
+                cleanup_evidence.cleanup_support(app,state,'1',kept,{'wd'},policies)
 
 
 def test_legacy_mode_filters_weaker_scores_retained_by_new_inference(monkeypatch):

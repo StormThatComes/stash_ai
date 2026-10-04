@@ -15,7 +15,7 @@ import zlib
 
 from tqdm import tqdm
 
-from stash_ai.state_results import KINDS
+from stash_ai.storage.results import KINDS
 
 from stash_ai.reports.cache_assessment import assess_scene
 from stash_ai.reports.cache_coverage import CoverageAccumulator
@@ -39,8 +39,8 @@ def scene_ids(store, requested):
 
 
 def _metadata_rows(store, scenes):
-    from stash_ai.state_metadata import FORMAT, decode
-    from stash_ai.state_thresholds import overlay
+    from stash_ai.storage.metadata import FORMAT, decode
+    from stash_ai.storage.thresholds import overlay
 
     with store.connection:
         store.connection.execute('CREATE TEMP TABLE IF NOT EXISTS cache_report_scenes (scene TEXT PRIMARY KEY)')
@@ -89,8 +89,8 @@ def _scene_evidence(store, scenes):
 
 def build_report(app, store, scenes, settings, command_context=()):
     """Inspect one scene at a time; count outputs separately from scene/model pairs."""
-    from stash_ai.preview import check_source
-    from stash_ai.state_metadata import backfill_batch
+    from stash_ai.storage.preview import check_source
+    from stash_ai.storage.metadata import backfill_batch
 
     models = [config.source.key for config in settings]
     indexes = {(scene, model, kind): (inference, populated, signature)
@@ -144,7 +144,7 @@ def format_summary(report):
 
 
 def run(app, args):
-    from stash_ai.state import StateStore, scope_for
+    from stash_ai.storage.store import StateStore, scope_for
     from stash_ai.temporal import load_policy
 
     try:

@@ -5,7 +5,8 @@ from functools import partial
 
 from tqdm import tqdm
 
-from stash_ai import merge, progress
+from stash_ai import merge
+from stash_ai.storage import progress
 from stash_ai.inference import checkpoints, prediction, preparation
 from stash_ai.inference.identity import model_identity
 from stash_ai.signatures import digest

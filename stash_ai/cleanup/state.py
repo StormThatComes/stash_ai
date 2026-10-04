@@ -1,13 +1,8 @@
 """Shared cleanup tag catalog and lazy publication masks. No model/media IO."""
 from __future__ import annotations
 
-from tqdm import tqdm
-
-from stash_ai.state_codec import encode, decode
+from stash_ai.storage.codec import encode, decode
 from stash_ai.models import SOURCES
-
-PAGE_SIZE = 1000
-
 
 def initialize(store, previous_version):
     store.connection.executescript('''
@@ -104,31 +99,3 @@ def mask_snapshot(store, snapshot, kind):
 def stamp_snapshot(store, snapshot):
     snapshot = {key: value for key, value in snapshot.items() if key != 'recovery_required'}
     return {**snapshot, 'cleanup_generation': store.cleanup_generation} if store.cleanup_generation else snapshot
-
-
-class CleanupClient:
-    def __init__(self, stash):
-        self.stash = stash
-
-    def catalog(self):
-        catalog = {}
-        with tqdm(desc='Read cleanup tags', unit='tag', dynamic_ncols=True) as bar:
-            page = 1
-            while True:
-                count = 'count' if page == 1 else ''
-                response = self.stash.gql('''query StashAICleanupTags($filter: FindFilterType!) {
-                    findTags(filter: $filter) { ''' + count + ''' tags { id name } }
-                }''', {'filter': self.filter(page)})['findTags']
-                for tag in response['tags']:
-                    if not isinstance(tag.get('name'), str) or not tag.get('id'):
-                        raise ValueError('Incomplete tag catalog; cleanup stopped.')
-                    catalog[str(tag['id'])] = tag['name']
-                bar.total = max(response.get('count', bar.total or 0), bar.n + len(response['tags']))
-                bar.update(len(response['tags']))
-                if len(response['tags']) < PAGE_SIZE:
-                    return catalog
-                page += 1
-
-    @staticmethod
-    def filter(page=1, size=None):
-        return dict(page=page, per_page=PAGE_SIZE if size is None else size, sort='id', direction='ASC')

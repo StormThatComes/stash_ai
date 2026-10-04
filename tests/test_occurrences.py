@@ -11,7 +11,7 @@ import pytest
 from stash_ai.inference.identity import model_identity
 from stash_ai.domain import Cue
 from stash_ai.inference import sprites
-from stash_ai import merge_cleanup
+from stash_ai.cleanup import evidence as cleanup_evidence
 from stash_ai.publication import merged as merge_sync
 from stash_ai import cli as app
 from stash_ai import merge
@@ -192,12 +192,12 @@ def test_cleanup_revokes_only_selected_witness_and_never_moves_point(tmp_path, k
         original = deepcopy(spans)
         cores, tags = policies(), policies()
         (cores if kind == 'core' else tags)['wd'] = frozenset({'core'})
-        cleaned = merge_cleanup.cleanup_support(app, state, '1', spans, {'wd'}, cores, tags)
+        cleaned = cleanup_evidence.cleanup_support(app, state, '1', spans, {'wd'}, cores, tags)
         assert spans == original
         assert len(cleaned) == 1 and cleaned[0]['source'] == 'dtq' and cleaned[0]['start'] == 1
         assert len(cleaned[0]['occurrence_evidence']) == 1
         (cores if kind == 'core' else tags)['dtq'] = frozenset({'core'})
-        assert merge_cleanup.cleanup_support(app, state, '1', cleaned, {'dtq'}, cores, tags) == []
+        assert cleanup_evidence.cleanup_support(app, state, '1', cleaned, {'dtq'}, cores, tags) == []
 
 
 def test_cleanup_rechecks_shared_scene_qualification_before_retaining_point(tmp_path, monkeypatch):
@@ -208,7 +208,7 @@ def test_cleanup_rechecks_shared_scene_qualification_before_retaining_point(tmp_
         hits, spans = merge.evidence(app, state, '1', policies(), policies())
         assert hits[0]['derived'] == 'shared_scene_frames' and spans[0]['derived'] == 'occurrence'
         blocked = policies(); blocked['wd'] = frozenset({'core'})
-        assert merge_cleanup.cleanup_support(app, state, '1', spans, {'wd'}, policies(), blocked) == []
+        assert cleanup_evidence.cleanup_support(app, state, '1', spans, {'wd'}, policies(), blocked) == []
 
 
 def test_marker_cap_has_priority_over_additional_points(tmp_path, monkeypatch):
@@ -300,7 +300,7 @@ def test_point_publication_recovers_after_api_failure_without_inference(pipeline
 
 
 def test_global_cleanup_masks_revoke_points_without_touching_raw_evidence(tmp_path):
-    from stash_ai.cleanup import begin, finish
+    from stash_ai.cleanup.state import begin, finish
     scenes, markers = paired_records({'wd': [0, .95, 0]}, threshold=.35, marker_threshold=.65)
     with merge.StateStore(tmp_path/'state', 'fixture') as state:
         put(state, scenes, markers)
@@ -322,7 +322,7 @@ def test_cleanup_never_restores_a_manually_deleted_point(tmp_path):
         merge_sync.sync_merged(app, stash, resolver, state, stash.find_scene('1'), hits, spans)
         stash.scene['scene_markers'] = []
         cores = policies(); cores['wd'] = frozenset({'core'})
-        cleaned = merge_cleanup.cleanup_support(app, state, '1', spans, {'wd'}, cores, policies())
+        cleaned = cleanup_evidence.cleanup_support(app, state, '1', spans, {'wd'}, cores, policies())
         assert cleaned
         merge_sync.sync_merged(app, stash, resolver, state, stash.find_scene('1'), hits, cleaned, migrate=False, cleanup=True)
         assert not stash.scene['scene_markers']

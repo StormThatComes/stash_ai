@@ -5,7 +5,7 @@ from copy import deepcopy
 import json
 
 from stash_ai.runtime import measured
-from stash_ai.state_thresholds import overlay
+from stash_ai.storage.thresholds import overlay
 from stash_ai.models import SOURCES
 
 
@@ -68,8 +68,8 @@ class ResultStore:
     @measured('state_read')
     def metadata(self, scene, kind, model):
         """Validate from small SQL records; lazily backfill older result payloads."""
-        from stash_ai.preview import check_source
-        from stash_ai.state_metadata import FORMAT, backfill_batch, decode, summarize
+        from stash_ai.storage.preview import check_source
+        from stash_ai.storage.metadata import FORMAT, backfill_batch, decode, summarize
         store = self.store
         check_source(store)
         params = (store.scope, str(scene), model, kind)
@@ -96,7 +96,7 @@ class ResultStore:
         return overlay(segments, kind, threshold)
 
     def _save_metadata(self, scene, model, kind, segments):
-        from stash_ai.state_metadata import FORMAT, encode
+        from stash_ai.storage.metadata import FORMAT, encode
         store = self.store
         store.connection.execute('INSERT INTO result_metadata VALUES (?,?,?,?,?,?) '
             'ON CONFLICT(scope,scene,model,kind) DO UPDATE SET format=excluded.format,data=excluded.data',
@@ -105,7 +105,7 @@ class ResultStore:
     def result_presence(self, models):
         """Return lightweight saved-result keys without decoding payload BLOBs."""
         store = self.store
-        from stash_ai.preview import check_source
+        from stash_ai.storage.preview import check_source
         check_source(store)
         selected = tuple(dict.fromkeys(models))
         if not selected:
@@ -120,7 +120,7 @@ class ResultStore:
     def result_index_presence(self, models):
         """Return indexed result keys without decoding result payloads."""
         store = self.store
-        from stash_ai.preview import check_source
+        from stash_ai.storage.preview import check_source
         check_source(store)
         selected = tuple(dict.fromkeys(models))
         if not selected:
@@ -192,8 +192,8 @@ class ResultStore:
     def replace_records(self, scene, model, kind, segments):
         """Replace a segment list inside the caller's transaction, including previews."""
         store = self.store
-        from stash_ai.preview import delete
-        from stash_ai.progress import index_result
+        from stash_ai.storage.preview import delete
+        from stash_ai.storage.progress import index_result
         store.cache.discard(('records', str(scene), kind))
         store.cache.discard(('sources', str(scene), kind))
         store.cache.discard(('status', str(scene), model))
@@ -206,7 +206,7 @@ class ResultStore:
         store.connection.execute("INSERT INTO results VALUES (?,?,?,?,?) "
             "ON CONFLICT(scope,scene,model,kind) DO UPDATE SET data=excluded.data",
             (store.scope, str(scene), model, kind, store.pack(segments)))
-        from stash_ai.state_metadata import summarize
+        from stash_ai.storage.metadata import summarize
         try:
             metadata = summarize(segments)
         except (KeyError, TypeError):
@@ -225,7 +225,7 @@ class ResultStore:
         or its small metadata records when metadata_only is true.
         The evidence BLOB is never encoded or written by this path.
         """
-        from stash_ai.progress import index_result
+        from stash_ai.storage.progress import index_result
         from stash_ai.thresholds import _score
         if model not in SOURCES or kind not in KINDS or not segments or not _score(threshold):
             raise ValueError('Invalid result threshold.')

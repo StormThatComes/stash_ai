@@ -46,7 +46,7 @@ def load_cleanups(store):
 def abandon(store, report):
     """One local transaction; the ordinary state DB writer lock stays held."""
     from stash_ai.merge import now
-    from stash_ai.preview import check_source
+    from stash_ai.storage.preview import check_source
     check_source(store)
     db = store.connection
     pending = store.table('snapshots')
@@ -99,7 +99,7 @@ def publications(store, scene, kind):
     cached = store.cached(key)
     if cached is not None:
         return cached
-    from stash_ai.cleanup import mask_snapshot
+    from stash_ai.cleanup.state import mask_snapshot
     rows = store.read_rows('SELECT data FROM ' + store.table('recovery_publications') +
         ' WHERE scope=? AND scene=? AND kind=? ORDER BY operation DESC', (store.scope, str(scene), kind))
     result = [mask_snapshot(store, store.unpack(row[0]), kind) for row in rows]
@@ -111,7 +111,7 @@ def clear_publications(store, scene, kind):
     """Called only inside a successful publication's transaction."""
     if not store.recovery_available:
         return
-    from stash_ai.preview import delete
+    from stash_ai.storage.preview import delete
     delete(store, 'recovery_publications', scene, kind=kind)
     store.connection.execute('DELETE FROM recovery_publications WHERE scope=? AND scene=? AND kind=?',
                              (store.scope, str(scene), kind))
@@ -190,7 +190,7 @@ def reconcile(app, stash, store, scene, kind, published):
 
 
 def run_only(app, args):
-    from stash_ai.state import StateStore, scope_for
+    from stash_ai.storage.store import StateStore, scope_for
     with StateStore(args.state_db, scope_for(app.STASH_URL), app.DRY_RUN, allow_cleanup=True) as store:
         stats = abandon(store, args.report.write)
     args.report.finish('Abandon pending' + (' (planned)' if app.DRY_RUN else ''), stats)

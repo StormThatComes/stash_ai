@@ -3,11 +3,11 @@ import sqlite3
 
 import pytest
 
-from stash_ai import progress as stash_progress
-from stash_ai import state_db as stash_state_db
-from stash_ai.state import StateStore
-from stash_ai.state_publications import PublicationStore
-from stash_ai.state_results import ResultStore
+from stash_ai.storage import progress as stash_progress
+from stash_ai.storage import database as stash_state_db
+from stash_ai.storage.store import StateStore
+from stash_ai.storage.publications import PublicationStore
+from stash_ai.storage.results import ResultStore
 from stash_ai.runtime import RunReport
 
 

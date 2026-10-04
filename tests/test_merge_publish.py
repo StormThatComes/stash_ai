@@ -4,13 +4,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from stash_ai import merge, performance, progress
+from stash_ai import merge, performance
+from stash_ai.storage import progress
 from stash_ai.publication import parallel as merge_parallel
 from stash_ai.publication import merged as merge_sync
 from stash_ai.diagnostics import MergeDiagnostics
 from stash_ai.publication.publisher import MergePublisher
 from stash_ai.runtime import RunReport
-from stash_ai.state import StateStore
+from stash_ai.storage.store import StateStore
 from stash_ai.temporal import TemporalPolicy
 from tests.helpers.cli import runtime_args
 

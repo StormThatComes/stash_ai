@@ -10,9 +10,9 @@ zmian i usuwania wykluczonych extras. Moduły i testy importują je bezpośredni
 bez zależności trybu merged od reconciliation trybu separate.
 `commands/dispatch.py` wywołuje tryby CLI oraz obejmuje `MergedRun.run()`
 kontekstem diagnostyki przez `run_merged()`. Wywołania
-reconciliation korzystają bezpośrednio z `merge_sync` i `merge_cleanup`; CLI
+reconciliation korzystają bezpośrednio z `publication/merged.py` i `cleanup/scenes.py`; CLI
 uruchamia cleanup przez `CleanupRun.run()`. Kod i testy importują codec
-bezpośrednio z `stash_ai/state_codec.py`.
+bezpośrednio z `stash_ai/storage/codec.py`.
 Stanowy lifecycle jednego przebiegu merged-output (scan, rethreshold, inference,
 publikacja i pruning) obsługuje `stash_ai/runs/merged.py` / `MergedRun`, który otwiera
 oraz zamyka Stash i StateStore. `runs/merged_model.py` / `MergedModelRun` odpowiada
@@ -31,9 +31,13 @@ szeregowe, a awaria workerów nie uruchamia drugiego przebiegu publikacji.
 Planowanie i publikację zmian jednej sceny rozdziela `stash_ai/publication/merged.py`;
 `MergeSyncPlan` przechowuje wyłącznie plan snapshotów i mutacji Stash, a kolejne
 funkcje obsługują przygotowanie evidence, tagi, markery i publikację. Cleanup ma
-osobny lifecycle w `stash_ai/merge_cleanup.py` / `CleanupRun`; ten moduł zawiera
-też re-ewaluację wcześniej opublikowanego evidence oraz rekonsyliację pojedynczej
-sceny. Pozostała logika domenowa znajduje się m.in. w `stash_ai/scene.py`,
+osobny lifecycle w `stash_ai/cleanup/run.py` / `CleanupRun`. Rekonsyliację jednej
+sceny zawiera `cleanup/scenes.py`, a re-ewaluację opublikowanego evidence
+`cleanup/evidence.py`: kwalifikacja zmienionych dowodów, leniwy `EvidenceReplay`
+z indeksem sygnatur i cache replay oraz clipping do opublikowanych przedziałów.
+Stan i maski cleanupu znajdują się w `cleanup/state.py`, a odczyt katalogu tagów
+w `cleanup/client.py`. `cleanup/prune.py` i `cleanup/legacy.py` obsługują pruning
+zwykłych tagów oraz zachowanych wyników legacy. Pozostała logika domenowa znajduje się m.in. w `stash_ai/scene.py`,
 `stash_ai/fusion.py`, `stash_ai/temporal.py` i `stash_ai/occurrences.py`.
 
 `stash_ai/marker_index.py` buduje dla jednej sceny niemutowalny indeks istniejących
@@ -70,7 +74,7 @@ batchowanie z własnością i zamykaniem obrazów w workerach. `inference/predic
 odtwarza stan predykcji, wykonuje batche i finalizuje wyniki sceny.
 `inference/identity.py` buduje tożsamość modeli; `inference/checkpoints.py` zawiera
 `Checkpoint`, zapis i odtworzenie kompaktowego stanu oraz atomowe zakończenie inferencji.
-`stash_ai/progress.py` obsługuje indeks ukończenia, ponowne użycie wyników i resume/refresh.
+`stash_ai/storage/progress.py` obsługuje indeks ukończenia, ponowne użycie wyników i resume/refresh.
 `stash_ai/signatures.py` definiuje wspólny `digest()` dla sygnatur wejść, checkpointów
 i publikacji. Kanoniczny JSON, hashe, format BLOB-ów oraz schemat bazy pozostają takie same;
 zapis wyników, usunięcie checkpointu i zakończenie refresh nadal są atomowe.
@@ -101,12 +105,14 @@ podział budżetu pamięci oraz redukcję wyników do tego samego formatu co śc
 
 `stash_ai/models.py` definiuje wspólne typy `ModelSource`, `ModelSettings` i
 `Vocabulary`, katalog źródeł oraz walidację wyboru modeli i wyników predykcji.
-Moduł nie zależy od loaderów ani adapterów inferencji. `stash_ai/taggers.py`
+Moduł nie zależy od loaderów ani adapterów inferencji. `stash_ai/backends/loader.py`
 zawiera adapter JoyTag i wybór adaptera przez `load_tagger()`. Obsługa plików
-modelu oraz parsowanie słowników tagów znajduje się w `stash_ai/vocabulary.py`,
-a preprocessing, konfiguracja sesji i inference modeli ONNX w
-`stash_ai/onnx_tagger.py`. Kod, testy i benchmarki importują typy oraz helpery
-bezpośrednio z modułów, które je definiują; `taggers.py` nie re-eksportuje
+modelu oraz parsowanie słowników tagów znajduje się w `stash_ai/backends/vocabulary.py`.
+`backends/joytag.py` weryfikuje i ładuje przypiętą architekturę autora.
+ONNX jest rozdzielone na transformacje obrazów w `backends/onnx_preprocessing.py`,
+wybór providerów, fallback CPU i inspekcję wejść/wyjść w `backends/onnx_session.py`
+oraz adapter inferencji w `backends/onnx.py`. Kod, testy i benchmarki importują typy oraz helpery
+bezpośrednio z modułów, które je definiują; `backends/loader.py` nie re-eksportuje
 starego API. Wspólne typy i walidacja usuwają cykle między loaderami i adapterami.
 Genericzne komponenty (`TagResolver`, loader hierarchii i separate-output
 reconciliation) wymagają jawnego `ModelSource`; JoyTag nie jest ich ukrytym
@@ -120,16 +126,22 @@ i zamyka ją po transformacji. Fixture testowe zachowują te same kontrakty.
 
 ## Komunikacja ze Stash
 
+Pakiet `stash_ai/stash_api/` grupuje klienta domenowego, transport HTTP,
+odczyt snapshotów scen przez SQL i resolver tagów. `StashClient` pozostaje
+spójną klasą z dziedziczeniem po `StashTransport`; `sql.py` zawiera wyłącznie
+odczyty, a `tags.py` zarządza katalogiem i hierarchią tagów. Wywołania importują
+bezpośrednio te moduły, bez wrapperów pod dawnymi ścieżkami.
+
 | Moduł / klasa | Odpowiedzialność |
 | --- | --- |
-| `stash_ai/transport.py` / `StashTransport` | Sesje HTTP, uwierzytelnianie, retry odczytów, blokada zapisu podczas dry-run, dekodowanie GraphQL i przekierowania mediów. |
-| `stash_ai/client.py` / `StashClient` | Zapytania dotyczące scen, tagów i markerów, wymaganie Stash 0.31.1+, stronicowanie oraz fallback z SQL na GraphQL. |
+| `stash_ai/stash_api/transport.py` / `StashTransport` | Sesje HTTP, uwierzytelnianie, retry odczytów, blokada zapisu podczas dry-run, dekodowanie GraphQL i przekierowania mediów. |
+| `stash_ai/stash_api/client.py` / `StashClient` | Zapytania dotyczące scen, tagów i markerów, wymaganie Stash 0.31.1+, stronicowanie oraz fallback z SQL na GraphQL. |
 
 `StashClient` jest specjalizacją `StashTransport`. Wspólny transport utrzymuje
 jedną konfigurację połączenia i jeden raport żądań. Klient jest importowany z
-`stash_ai.client`, a funkcje pomocnicze HTTP bezpośrednio z
-`stash_ai.transport`. Pozostałe moduły używają analogicznych
-importów pakietowych, np. `from stash_ai.state import StateStore`.
+`stash_ai.stash_api.client`, a funkcje pomocnicze HTTP bezpośrednio z
+`stash_ai.stash_api.transport`. Pozostałe moduły używają analogicznych
+importów pakietowych, np. `from stash_ai.storage.store import StateStore`.
 
 Transport ponawia tylko odczyty, w tym ściśle dozwolone operacje SQL opakowane
 w mutację GraphQL. Zapisy nie są ponawiane. Nagłówek `ApiKey` nie jest przesyłany
@@ -137,26 +149,31 @@ przy przekierowaniu mediów do innego origin.
 
 ## Cleanup przez SQL
 
-`stash_ai/cleanup_sql_session.py` zawiera ograniczony allowlistą transport SQL/API,
-metryki odczytów i zapisów oraz keyset pagination. `stash_ai/cleanup_sql.py` /
+`stash_ai/cleanup/sql_session.py` zawiera ograniczony allowlistą transport SQL/API,
+metryki odczytów i zapisów oraz keyset pagination. `stash_ai/cleanup/sql.py` /
 `SQLCleanup` pozostaje warstwą domenową: wybiera kandydatów, usuwa markery i
 powiązania, obsługuje preview i pruning. Korzysta bezpośrednio ze swojej
 `CleanupSqlSession` do odczytów, zapisów, stronicowania i granic discovery.
 Stałe SQL i walidator odczytów są importowane bezpośrednio z
-`cleanup_sql_session.py`.
+`cleanup/sql_session.py`.
 
 
 ## Lokalny stan
 
+Pakiet `stash_ai/storage/` obejmuje bazę, magazyny wyników i publikacji,
+serializację, metadata, snapshoty, nakładkę preview oraz indeks ukończenia.
+Importy wskazują bezpośrednio moduły pakietu. Przeniesienie nie zmienia wersji
+schematu, identyfikatora bazy, formatu BLOB-ów ani domyślnej lokalizacji SQLite.
+
 | Moduł / klasa | Odpowiedzialność |
 | --- | --- |
-| `stash_ai/state_db.py` / `StateDatabase` | Cykl życia połączenia SQLite i blokady procesu, sprawdzenie identyfikatora/wersji bazy, podstawowe tabele i otwarcie źródła dry-run. |
-| `stash_ai/state.py` / `StateStore` | Façade i właściciel lifecycle/cache/serializacji; koordynuje inicjalizację schematów oraz deleguje trwałe dane do wyspecjalizowanych magazynów. |
-| `stash_ai/state_results.py` / `ResultStore` | Wyniki inferencji, indeksowanie źródeł i importy legacy. |
-| `stash_ai/state_publications.py` / `PublicationStore` | Snapshoty published/pending, trwały zamiar publikacji i atomowe zatwierdzanie przygotowanych publikacji. |
-| `stash_ai/preview.py` | Widoki nakładki dry-run, usunięcia w nakładce i wykrywanie zmian źródła. |
-| `stash_ai/state_codec.py` | Kodowanie i dekodowanie BLOB-ów. |
-| `stash_ai/state_snapshot.py` | Wersjonowana reprezentacja snapshotów ze współdzielonymi dowodami `extra_support` i odtwarzanie contributions przy odczycie. |
+| `stash_ai/storage/database.py` / `StateDatabase` | Cykl życia połączenia SQLite i blokady procesu, sprawdzenie identyfikatora/wersji bazy, podstawowe tabele i otwarcie źródła dry-run. |
+| `stash_ai/storage/store.py` / `StateStore` | Façade i właściciel lifecycle/cache/serializacji; koordynuje inicjalizację schematów oraz deleguje trwałe dane do wyspecjalizowanych magazynów. |
+| `stash_ai/storage/results.py` / `ResultStore` | Wyniki inferencji, indeksowanie źródeł i importy legacy. |
+| `stash_ai/storage/publications.py` / `PublicationStore` | Snapshoty published/pending, trwały zamiar publikacji i atomowe zatwierdzanie przygotowanych publikacji. |
+| `stash_ai/storage/preview.py` | Widoki nakładki dry-run, usunięcia w nakładce i wykrywanie zmian źródła. |
+| `stash_ai/storage/codec.py` | Kodowanie i dekodowanie BLOB-ów. |
+| `stash_ai/storage/snapshots.py` | Wersjonowana reprezentacja snapshotów ze współdzielonymi dowodami `extra_support` i odtwarzanie contributions przy odczycie. |
 
 `StateStore` posiada jeden `StateDatabase`, jeden `ResultStore` i jeden
 `PublicationStore`; udostępnia metody `records()/put()/snapshot()/prepare()`

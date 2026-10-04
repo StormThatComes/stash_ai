@@ -2,7 +2,7 @@
 from collections import Counter
 from copy import deepcopy
 
-from stash_ai.prune import REQUIRED_COUNTS
+from stash_ai.cleanup.prune import REQUIRED_COUNTS
 
 
 class PruneStash:

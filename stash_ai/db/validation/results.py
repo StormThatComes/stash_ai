@@ -33,7 +33,7 @@ def check_results_and_index(db, tables, errors, progress=None):
             if not valid_result_segments(segments, kind):
                 raise ValueError("Invalid result segment.")
             if metadata_format is not None:
-                from stash_ai.state_metadata import FORMAT, decode, encode, summarize
+                from stash_ai.storage.metadata import FORMAT, decode, encode, summarize
                 try:
                     if metadata_format != FORMAT:
                         raise ValueError('Unsupported result metadata format.')
@@ -42,7 +42,7 @@ def check_results_and_index(db, tables, errors, progress=None):
                 except (TypeError, ValueError):
                     errors['result_metadata_invalid'] += 1
             if threshold is not None:
-                from stash_ai.state_thresholds import overlay
+                from stash_ai.storage.thresholds import overlay
                 from stash_ai.thresholds import _score
                 if _score(threshold):
                     overlay(segments, kind, threshold)

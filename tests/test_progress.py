@@ -14,11 +14,11 @@ import pytest
 from stash_ai.inference.identity import model_identity
 from stash_ai.domain import Cue, FramePrediction
 from stash_ai.inference import checkpoints, prediction, preparation
-from stash_ai import state_codec
+from stash_ai.storage import codec as state_codec
 from stash_ai import cli as app
 from stash_ai import merge
-from stash_ai.state_db import APPLICATION_ID
-from stash_ai import progress
+from stash_ai.storage.database import APPLICATION_ID
+from stash_ai.storage import progress
 from stash_ai.models import ModelSettings, Vocabulary, WD, SOURCES
 from tests.helpers.stash import Stash
 
@@ -310,7 +310,7 @@ def test_v1_database_is_migrated_once_without_losing_sources(tmp_path,monkeypatc
 
 @pytest.mark.parametrize("failure",[False,True])
 def test_pruning_follows_only_successful_merge(pipeline,monkeypatch,failure):
-    from stash_ai import prune as stash_prune
+    from stash_ai.cleanup import prune as stash_prune
     p=pipeline;p.stash.fail_create=failure
     calls=[]
     monkeypatch.setattr(stash_prune,"prune_tags",lambda *args,**kwargs:calls.append(args) or {})
