@@ -36,8 +36,8 @@ def evidence(app, store, scene_id, core_policies, scene_policies, metrics=None, 
                 if label not in scene_policies[model] and reason:
                     eligible.append({**entry, "source": model, "meta": segment["meta"],
                                      **({"qualification": reason} if entry.get("statistics") else {})})
-            # Cap each inference pass separately. With replacement disabled,
-            # historical detections and their original confidence remain intact.
+            # Cap each saved inference segment separately; historical evidence
+            # keeps its original scores until verified reuse normalizes it.
             eligible.sort(key=lambda item: (-(item["score"] if item["score"] is not None else -1), item["tag"]))
             scene_hits.extend(eligible[:app.MAX_TAGS] if app.MAX_TAGS and segment["meta"]["origin"] != "legacy" else eligible)
     records = store.records(scene_id, 'markers', borrow=True)

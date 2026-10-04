@@ -231,7 +231,7 @@ def test_store_cache_is_detached_invalidated_and_rollback_safe(tmp_path):
         assert progress.completed(state, '1', 'wd', ['scene'], 'b')
         progress.request_refresh(state, ['1'], ['wd'], ['scene'])
         assert not progress.completed(state, '1', 'wd', ['scene'], 'b')
-        checkpoints.finish(state, '1', 'wd', {'scene': second}, {})
+        checkpoints.finish(state, '1', 'wd', {'scene': second})
         assert progress.completed(state, '1', 'wd', ['scene'], 'b')
 
 

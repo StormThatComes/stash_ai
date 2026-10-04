@@ -140,7 +140,6 @@ class MergedRun:
     def _run_inference(self):
         app, args, store = self.app, self.args, self.store
         kinds = progress.output_kinds(app)
-        replacement = {"scene": app.REPLACE_SCENE_TAGS, "markers": app.REPLACE_MARKERS}
         inputs = RunInputs(self.stash, store.cache, self.report)
         if args.merge_only:
             return
@@ -152,7 +151,7 @@ class MergedRun:
             MergedModelRun(
                 app, args, store, config, self.catalogs[config.source.key],
                 stats=self.stats, report=self.report,
-            ).run(self.scenes, kinds, replacement, inputs)
+            ).run(self.scenes, kinds, inputs)
 
     def _merge_scenes(self):
         MergePublisher(

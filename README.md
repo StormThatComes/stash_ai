@@ -19,8 +19,8 @@ pochodzi wyłącznie z VTT i sprite'ów Stash; aplikacja nie otwiera plików wid
 
 Wersja Stash jest sprawdzana przed odczytem scen i zmianami na serwerze, także
 w `--dry-run`. Komendy lokalne, np. `--db-update`, `--db-check` i `--db-report`,
-nie wymagają połączenia ze Stash. Markery punktowe (`end_seconds: null`)
-i ustawienie `MARKER_USE_END_TIME=False` pozostają obsługiwane.
+nie wymagają połączenia ze Stash. Znane przedziały zawsze publikują koniec;
+occurrence i importowane markery z nieznanym końcem mają `end_seconds: null`.
 
 Dla CPU zamień `onnxruntime-gpu` na zgodny `onnxruntime>=1.21,<2`.
 
@@ -207,9 +207,10 @@ w historii. Przy gotowych metadanych żadna z obu faz nie dekoduje BLOB-ów klat
 Dry-run uzupełnia wyłącznie tymczasową bazę; `--db-check`
 sprawdza zgodność istniejących metadanych z evidence bez ich naprawiania.
 
-Domyślnie `REPLACE_SCENE_TAGS=True` i `REPLACE_MARKERS=True`. Wyłączenie
-którejś flagi zachowuje historię danego rodzaju wyniku; ponowne włączenie
-normalizuje historię przy bezpiecznym reuse cache.
+Nowa inferencja zawsze zastępuje poprzednie wyniki danego modelu i rodzaju.
+Historyczne serie są normalizowane przy potwierdzonym reuse; import legacy
+nadal dopisuje dowody atomowo. Zwykłe przedziały opublikowane dawniej jako
+punkty odzyskują długość ze snapshotów przy uzgadnianiu, bez ponownej inferencji.
 
 ### Przejście z separate do merged
 

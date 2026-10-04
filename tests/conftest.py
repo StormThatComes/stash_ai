@@ -18,10 +18,9 @@ def reset_multimodel(monkeypatch):
     monkeypatch.setattr(app,"DEFAULT_RESUME",False)
     monkeypatch.setattr(app,"PREFETCH_BATCHES",0)
     for key, value in dict(DRY_RUN=False, APPLY_SCENE_TAGS=True, CREATE_MARKERS=True,
-        CREATE_MISSING=True, REPLACE_SCENE_TAGS=True,
-        REPLACE_MARKERS=True, MAX_TAGS=0, MAX_MARKERS_PER_SCENE=0,
+        CREATE_MISSING=True, MAX_TAGS=0, MAX_MARKERS_PER_SCENE=0,
         MARKER_MAX_TAGS_PER_FRAME=0, MARKER_MIN_HITS=2, MARKER_MERGE_GAP_SECONDS=0.0,
-        MARKER_USE_END_TIME=True, AGGREGATION="topk_mean", TOP_K_FRAMES=2).items():
+        AGGREGATION="topk_mean", TOP_K_FRAMES=2).items():
         monkeypatch.setattr(app,key,value)
 
 
@@ -33,10 +32,8 @@ def reset_merge(monkeypatch, tmp_path):
     monkeypatch.setattr(app,"TEMPORAL_POLICY",TemporalPolicy(enabled=False))
     for key, value in dict(DEFAULT_OUTPUT_MODE="merged", DEFAULT_RESUME=False, PREFETCH_BATCHES=0, MERGE_STATE_FILE=tmp_path/"sources.sqlite3",
         DRY_RUN=False, APPLY_SCENE_TAGS=True, CREATE_MARKERS=True, CREATE_MISSING=True,
-        REPLACE_SCENE_TAGS=True, REPLACE_MARKERS=True,
         MAX_TAGS=0, MAX_MARKERS_PER_SCENE=0, MARKER_MAX_TAGS_PER_FRAME=0, MARKER_MIN_HITS=2,
-        MARKER_MERGE_GAP_SECONDS=0.0, MARKER_USE_END_TIME=True,
-        AGGREGATION="topk_mean", TOP_K_FRAMES=2).items():
+        MARKER_MERGE_GAP_SECONDS=0.0, AGGREGATION="topk_mean", TOP_K_FRAMES=2).items():
         monkeypatch.setattr(app,key,value)
 
 
@@ -48,10 +45,8 @@ def reset_progress(monkeypatch,tmp_path):
     monkeypatch.setattr(app,"TEMPORAL_POLICY",TemporalPolicy(enabled=False))
     for key,value in dict(DEFAULT_OUTPUT_MODE="merged",DEFAULT_RESUME=True,PREFETCH_BATCHES=0,
         MERGE_STATE_FILE=tmp_path/"state.sqlite3",DRY_RUN=False,APPLY_SCENE_TAGS=True,CREATE_MARKERS=True,
-        CREATE_MISSING=True,REPLACE_SCENE_TAGS=True,REPLACE_MARKERS=True,
-        MAX_TAGS=0,MAX_MARKERS_PER_SCENE=0,MARKER_MAX_TAGS_PER_FRAME=0,MARKER_MIN_HITS=2,
-        MARKER_MERGE_GAP_SECONDS=0.0,MARKER_USE_END_TIME=True,
-        AGGREGATION="topk_mean",TOP_K_FRAMES=2).items(): monkeypatch.setattr(app,key,value)
+        CREATE_MISSING=True,MAX_TAGS=0,MAX_MARKERS_PER_SCENE=0,MARKER_MAX_TAGS_PER_FRAME=0,MARKER_MIN_HITS=2,
+        MARKER_MERGE_GAP_SECONDS=0.0,AGGREGATION="topk_mean",TOP_K_FRAMES=2).items(): monkeypatch.setattr(app,key,value)
 
 
 @pytest.fixture
@@ -61,10 +56,8 @@ def reset_temporal(monkeypatch, tmp_path):
     for key, value in dict(DEFAULT_OUTPUT_MODE="merged", DEFAULT_RESUME=True, DEFAULT_TEMPORAL=True,
         TEMPORAL_POLICY=TemporalPolicy(), PREFETCH_BATCHES=0,
         MERGE_STATE_FILE=tmp_path/"state.sqlite3", DRY_RUN=False, APPLY_SCENE_TAGS=True, CREATE_MARKERS=True,
-        CREATE_MISSING=True, REPLACE_SCENE_TAGS=True, REPLACE_MARKERS=True,
-        MAX_TAGS=0, MAX_MARKERS_PER_SCENE=0, MARKER_MAX_TAGS_PER_FRAME=0, MARKER_MIN_HITS=2,
-        MARKER_MERGE_GAP_SECONDS=0.0, MARKER_USE_END_TIME=True,
-        AGGREGATION="topk_mean", TOP_K_FRAMES=2).items():
+        CREATE_MISSING=True, MAX_TAGS=0, MAX_MARKERS_PER_SCENE=0, MARKER_MAX_TAGS_PER_FRAME=0, MARKER_MIN_HITS=2,
+        MARKER_MERGE_GAP_SECONDS=0.0, AGGREGATION="topk_mean", TOP_K_FRAMES=2).items():
         monkeypatch.setattr(app, key, value)
 
 

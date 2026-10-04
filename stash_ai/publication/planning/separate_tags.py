@@ -26,13 +26,7 @@ def _scene_tag_plan(app, source, existing_tags, scene_names, ids, scene_exclusio
     preserved = {
         str(tag["id"])
         for tag in existing_tags
-        if not (
-            tag["name"].startswith(source.prefix)
-            and (
-                app.REPLACE_SCENE_TAGS
-                or tag["name"][len(source.prefix):] in scene_exclusions
-            )
-        )
+        if not tag["name"].startswith(source.prefix)
     }
     final_ids = preserved | {
         ids[name]

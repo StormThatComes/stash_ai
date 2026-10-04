@@ -202,13 +202,10 @@ def test_refresh_keeps_checkpoint_resume_instead_of_restart(tmp_path):
     assert '--restart' not in actions(data)[0]['argv']
 
 
-@pytest.mark.parametrize('blocker', ['publication', 'outside_refresh', 'replacement'])
+@pytest.mark.parametrize('blocker', ['publication', 'outside_refresh'])
 def test_blocked_pairs_are_counted_and_receive_no_executable_plan(tmp_path, monkeypatch, blocker):
     path = tmp_path / 'state.sqlite3'
     outputs = pair()
-    if blocker == 'replacement':
-        outputs['markers']['meta']['marker_score_floor'] = .99
-        monkeypatch.setattr(app, 'REPLACE_MARKERS', False)
     seed(path, outputs=outputs)
     with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL)) as store:
         if blocker == 'publication':
@@ -261,15 +258,12 @@ def test_unselected_publication_dependencies_block_plan_without_expanding_target
     assert path.read_bytes() == before
 
 
-@pytest.mark.parametrize('blocker', ['replacement', 'unreadable'])
+@pytest.mark.parametrize('blocker', ['unreadable'])
 @pytest.mark.parametrize('order', [('wd', 'dtq'), ('dtq', 'wd')])
 def test_blocked_selected_pair_blocks_every_command_for_its_scene(
         tmp_path, monkeypatch, blocker, order):
     path = tmp_path / 'state.sqlite3'
     broken = pair()
-    if blocker == 'replacement':
-        broken['markers']['meta']['marker_score_floor'] = .8
-        monkeypatch.setattr(app, 'REPLACE_MARKERS', False)
     seed(path, outputs=broken)
     if blocker == 'unreadable':
         with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL)) as state:
@@ -291,11 +285,12 @@ def test_blocked_scene_is_not_added_back_by_publication_recovery(tmp_path, monke
     broken = pair()
     broken['markers']['meta']['marker_score_floor'] = .8
     seed(path, outputs=broken)
-    monkeypatch.setattr(app, 'REPLACE_MARKERS', False)
     with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL)) as state:
         state.prepare('1', {'scene': {'owned_ids': [], 'contributions': []}})
         from stash_ai.storage.recovery import abandon
         abandon(state, report=lambda _: None)
+        with state.connection:
+            state.connection.execute("UPDATE results SET data=? WHERE model='wd' AND kind='markers'", (b'broken',))
     data = report(path, settings=[config('wd'), config('dtq')])
     assert data['publication_recovery_scene_ids'] == ['1']
     assert not data['plan']

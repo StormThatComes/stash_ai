@@ -218,7 +218,7 @@ def test_preview_resumes_checkpoint_and_does_not_resurrect_deleted_source(pipeli
         checkpoint.flush()
         assert checkpoints.Checkpoint(preview, '1', 'wd', 'new', 10, 2).restore()[0] == 2
         checkpoints.finish(preview, '1', 'wd', {k: dict(mode='scene' if k == 'scene' else 'frames',
-            meta={'origin':'inference', 'inference_signature':'new'}, items=[]) for k in KINDS}, {})
+            meta={'origin':'inference', 'inference_signature':'new'}, items=[]) for k in KINDS})
         assert progress.completed(preview, '1', 'wd', KINDS, 'new')
         assert not preview.connection.execute('SELECT 1 FROM ' + preview.table('checkpoints')).fetchall()
     assert p.path.read_bytes() == before

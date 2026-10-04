@@ -35,7 +35,7 @@ def run_model(context):
     MergedModelRun(
         app, context.args, context.state, context.config, context.pipeline.vocab,
         stats=context.stats, report=context.args.report,
-    ).run(context.scenes, ['scene', 'markers'], {'scene': True, 'markers': True}, context.inputs)
+    ).run(context.scenes, ['scene', 'markers'], context.inputs)
 
 
 @pytest.mark.parametrize('error', [RuntimeError, KeyboardInterrupt])

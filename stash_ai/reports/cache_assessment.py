@@ -150,9 +150,6 @@ def assess_scene(app, scene, settings, evidence, indexes, refreshes, checkpoints
             blockers.append('unusable_evidence_for_unselected_model')
         if any(value.get('unreadable') for value in outputs.values()):
             blockers.append('unreadable_evidence_run_db_check')
-        if any(outputs[kind]['status'] in RESTART and not getattr(app,
-               'REPLACE_SCENE_TAGS' if kind == 'scene' else 'REPLACE_MARKERS') for kind in KINDS):
-            blockers.append('replacement_disabled')
         inspected.append(PairAssessment(scene, model, outputs, blockers, checkpoint, dependencies, []))
     # Every planned command attempts publication, so selected peers must all
     # inherit a blocked model's scene restriction, independent of model order.

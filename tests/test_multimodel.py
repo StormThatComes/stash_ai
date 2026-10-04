@@ -55,8 +55,6 @@ def test_source_isolation_and_idempotence(source):
 
 @pytest.mark.parametrize("source",list(SOURCES.values()))
 def test_global_blacklist_covers_markers_but_core_only_tags_remain_extras(source,monkeypatch):
-    monkeypatch.setattr(app,"REPLACE_SCENE_TAGS",False)
-    monkeypatch.setattr(app,"REPLACE_MARKERS",False)
     stash=Stash()
     stash.scene["tags"]=[stash.tag(source.prefix+"scene_ban"),stash.tag("scene_ban"),stash.tag(source.prefix+"keep")]
     stash.marker(source,"core_ban","remove")
@@ -65,8 +63,8 @@ def test_global_blacklist_covers_markers_but_core_only_tags_remain_extras(source
     specs=[MarkerSpec("core_ban",0,2,.9,2),MarkerSpec("scene_ban",4,6,.9,2,("core_ban",)),
            MarkerSpec('allowed',8,10,.9,2,('core_ban','scene_ban'))]
     result=sync(stash,source,[("core_ban",.9),("scene_ban",.9)],specs,frozenset({"core_ban"}),frozenset({"scene_ban"}))
-    assert {t["name"] for t in stash.scene["tags"]}=={"scene_ban",source.prefix+"keep",source.prefix+"core_ban"}
-    assert kept in stash.scene["scene_markers"] and manual in stash.scene["scene_markers"]
+    assert {t["name"] for t in stash.scene["tags"]}=={"scene_ban",source.prefix+"core_ban"}
+    assert kept not in stash.scene["scene_markers"] and manual in stash.scene["scene_markers"]
     assert not any(m['primary_tag']['name']==source.prefix+'scene_ban' for m in stash.scene['scene_markers'])
     generated=next(m for m in stash.scene["scene_markers"] if m["primary_tag"]["name"]==source.prefix+"allowed")
     assert source.prefix+"core_ban" in {t["name"] for t in generated["tags"]}

@@ -281,11 +281,11 @@ def test_finish_rolls_back_results_checkpoint_and_refresh_together(tmp_path, mon
         with monkeypatch.context() as patch:
             patch.setattr(checkpoints, 'clear_checkpoint', fail_after_checkpoint_removal)
             with pytest.raises(RuntimeError, match='checkpoint cleanup failed'):
-                checkpoints.finish(state, '1', 'wd', fresh, {})
+                checkpoints.finish(state, '1', 'wd', fresh)
         assert rows() == before
         assert {kind: state.records('1', kind) for kind in original} == cached
 
-        checkpoints.finish(state, '1', 'wd', fresh, {})
+        checkpoints.finish(state, '1', 'wd', fresh)
         for kind, segment in fresh.items():
             assert state.records('1', kind)['wd'] == [segment]
         for table in ('checkpoints', 'checkpoint_frames', 'checkpoint_analysis', 'refresh_requests'):

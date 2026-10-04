@@ -95,23 +95,16 @@ spowodować re-merge. Nie oznacza to automatycznie ponownej inferencji.
 python .\stash_ai.py --merge-only --scene-id 123 --force-merge
 ```
 
-## 5. Replace vs historia wyników
+## 5. Zastępowanie wyników
 
-Domyślnie:
+Nowy poprawny wynik inferencji zawsze zastępuje poprzedni wynik tego samego
+modelu i rodzaju. Historyczne serie są zwijane przy potwierdzonym reuse cache,
+bez uruchamiania modelu. Jawny import legacy nadal dopisuje dowody w jednej
+transakcji z historią importu.
 
-```text
-REPLACE_SCENE_TAGS = True
-REPLACE_MARKERS = True
-```
-
-Przy `True` nowy poprawny wynik modelu zastępuje poprzedni wynik tego samego
-rodzaju. Przy `False` aplikacja zachowuje wcześniejsze przebiegi jako historyczne
-dowody i merge może je uwzględniać.
-
-Po ponownym ustawieniu `True`, jeżeli bieżący wynik inferencji można
-jednoznacznie ponownie wykorzystać, aplikacja zwija zachowaną historię danego
-rodzaju bez uruchamiania modelu. Zmiana polityki publikacji nadal powoduje
-odpowiednie uzgodnienie Stash.
+Znane przedziały zawsze publikują koniec. Occurrence i importowane markery
+z nieznanym końcem pozostają punktami. Zwykłe przedziały opublikowane dawniej
+jako punkty odzyskują długość z zapisanych dowodów podczas uzgadniania.
 
 ## 6. Progi i rethreshold bez inferencji
 

@@ -39,13 +39,7 @@ def plan_marker_changes(app, existing: list[dict], wanted: list[dict],
         else:
             unchanged += 1
 
-    # The exclusion policy always wins over retaining obsolete generated runs.
-    deletes = sorted(
-        marker_id
-        for marker_id, marker in available.items()
-        if app.REPLACE_MARKERS
-        or marker_ops.marker_has_excluded_core(marker, core_exclusions, source)
-    )
+    deletes = sorted(available)
     return MarkerChanges(creates, updates, deletes, unchanged)
 
 

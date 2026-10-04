@@ -55,7 +55,7 @@ def marker_payload(app, spec, scene_id: str, ids: dict[str, str | None],
         "primary_tag_id": primary,
         "tag_ids": sorted(extras),
     }
-    payload["end_seconds"] = round(spec.end, 3) if app.MARKER_USE_END_TIME else None
+    payload["end_seconds"] = round(spec.end, 3) if spec.end is not None else None
     return payload
 
 def marker_differs(existing: dict, wanted: dict) -> bool:

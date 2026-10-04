@@ -152,9 +152,8 @@ def test_markers_only_always_loads_the_global_list(pipeline, monkeypatch, tmp_pa
 
 @pytest.mark.parametrize('source', list(SOURCES.values()))
 def test_separate_sync_removes_extras_from_retained_markers_and_scoped_manual_assignments(source, monkeypatch):
-    monkeypatch.setattr(app, 'REPLACE_MARKERS', False)
     stash = Stash()
-    retained = stash.marker(source, 'keep', 'retained')
+    retained = stash.marker(source, 'keep', 'retained', manual=True)
     retained['tags'].extend([stash.tag(source.prefix+'blocked'), stash.tag('manual')])
     manual = stash.marker(source, 'manual_core', 'manual', manual=True)
     manual['tags'].append(stash.tag(source.prefix+'blocked'))

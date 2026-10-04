@@ -32,7 +32,6 @@ class RuntimeSettings:
     STASH_API_KEY: str = field(default_factory=lambda: os.getenv("STASH_API_KEY", ""), repr=False)
     APPLY_SCENE_TAGS: bool = True
     MAX_TAGS: int = 0
-    REPLACE_SCENE_TAGS: bool = True
     AGGREGATION: str = "topk_mean"
     TOP_K_FRAMES: int = 2
     CREATE_MARKERS: bool = True
@@ -40,8 +39,6 @@ class RuntimeSettings:
     MARKER_MIN_HITS: int = 2
     MARKER_MERGE_GAP_SECONDS: float = 0.0
     MAX_MARKERS_PER_SCENE: int = 0
-    MARKER_USE_END_TIME: bool = True
-    REPLACE_MARKERS: bool = True
     MARKER_MATCH_TOLERANCE_SECONDS: float = 0.25
     CREATE_MISSING: bool = True
     DRY_RUN: bool = False
