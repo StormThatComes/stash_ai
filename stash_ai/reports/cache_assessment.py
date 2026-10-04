@@ -14,7 +14,7 @@ RESTART = frozenset(('legacy_only', 'insufficient', 'inconsistent'))
 
 def inspect_output(app, config, kind, segments, index, refresh, checkpoint, error):
     from stash_ai.scene_cache import scene_threshold, validate_scene
-    from stash_ai.temporal import marker_floor
+    from stash_ai.evidence.temporal.policy import marker_floor
     from stash_ai.thresholds import _score, indexed_signature, marker_threshold, validate_marker_blocklist
 
     def result(status, reason, **details):

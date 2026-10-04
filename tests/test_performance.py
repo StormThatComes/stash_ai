@@ -33,6 +33,7 @@ def fail(*args, **kwargs):
     'stash_api/tags.py', 'domain.py', 'storage/store.py', 'storage/database.py', 'storage/results.py', 'storage/thresholds.py', 'storage/publications.py',
     'models.py', 'backends/vocabulary.py', 'backends/onnx.py', 'backends/onnx_preprocessing.py', 'backends/onnx_session.py', 'inference/prediction.py', 'inference/sprites.py', 'inference/preparation.py', 'storage/progress.py', 'inference/inputs.py', 'inference/identity.py', 'inference/checkpoints.py', 'signatures.py',
     'runs/merged.py', 'runs/merged_model.py', 'publication/publisher.py', 'publication/parallel.py', 'publication/merged.py', 'publication/separate.py', 'publication/markers.py',
+    'evidence/temporal/policy.py', 'evidence/temporal/statistics.py', 'evidence/temporal/markers.py', 'evidence/temporal/extras.py', 'evidence/intervals.py', 'evidence/timeline.py', 'evidence/retention.py',
     'config.py', 'commands/hierarchy.py', 'commands/legacy.py', 'rethreshold/markers.py', 'rethreshold/scenes.py', 'cleanup/state.py', 'cleanup/client.py',
 ])
 def test_publication_code_tracks_extracted_modules(monkeypatch, filename):

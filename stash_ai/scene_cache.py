@@ -26,7 +26,7 @@ def project(app, segment):
     from stash_ai.domain import Cue
     from stash_ai.merge import marker_segment_signature
     from stash_ai.performance import StoredSegment
-    from stash_ai.temporal import SceneAccumulator
+    from stash_ai.evidence.temporal.statistics import SceneAccumulator
     if getattr(segment, '_scene_projected', False):
         return segment
     signature = marker_segment_signature(segment)

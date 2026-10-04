@@ -6,7 +6,9 @@ from collections import defaultdict
 from copy import deepcopy
 
 from stash_ai.models import SOURCES
-from stash_ai.temporal import append_interval, marker_floor, qualified_extras
+from stash_ai.evidence.intervals import append_interval
+from stash_ai.evidence.temporal.policy import marker_floor
+from stash_ai.evidence.temporal.extras import qualified_extras
 
 
 class ObservationIndex:
@@ -33,13 +35,13 @@ class ObservationIndex:
         if last <= first:
             return {}
         if self.disjoint:
-            from stash_ai.timeline import Timeline
+            from stash_ai.evidence.timeline import Timeline
             if allowed not in self.timelines:
                 self.timelines[allowed] = Timeline(self.events, self.context, allowed)
             support = self.timelines[allowed].support(first, last, end, policy, self.group)
         else:
             support = self.scan_support(first, last, end, policy, allowed)
-        from stash_ai.timeline import support_size
+        from stash_ai.evidence.timeline import support_size
         self.cache.put(key, support, retained_bytes=support_size(support))
         self.cache_keys.add(key)
         return support
@@ -264,7 +266,7 @@ def collect_extras(app, span, events, group, allowed=None):
 
 def enrich(app, records, policies, spans, signatures=None, index=None, metrics=None):
     """Add missing shared intervals and attach source-aware extras from compatible inputs."""
-    from stash_ai.temporal import build_options
+    from stash_ai.evidence.temporal.policy import build_options
     policy = app.TEMPORAL_POLICY
     if not policy.enabled or not (policy.shared_marker_frames or policy.shared_marker_extras):
         return spans

@@ -12,7 +12,7 @@ def _model_records(store, scene, kind, model, *, direct=False, metadata_only=Fal
 
 def validate(app, store, scene, config, *, check_scene=True, direct=False, metadata_only=False):
     """Reject incomplete evidence; a missing detection is never treated as zero."""
-    from stash_ai.temporal import marker_floor
+    from stash_ai.evidence.temporal.policy import marker_floor
     model = config.source.key
     segments = _model_records(store, scene, 'markers', model, direct=direct, metadata_only=metadata_only)
     if not segments:

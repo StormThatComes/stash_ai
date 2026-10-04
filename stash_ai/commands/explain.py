@@ -36,7 +36,7 @@ def _record_thresholds(app, kind, segment):
             **_effective_scene_thresholds(app, scene_threshold(segment)),
         }
         return result
-    from stash_ai.temporal import marker_floor
+    from stash_ai.evidence.temporal.policy import marker_floor
     from stash_ai.thresholds import OVERRIDE, marker_threshold
     effective = marker_threshold(segment)
     result = {

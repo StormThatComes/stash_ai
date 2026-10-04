@@ -12,7 +12,7 @@ from stash_ai import cli as app
 from stash_ai import merge
 from stash_ai.reports.model import report as model_report
 from stash_ai.reports.model import workers as model_workers
-from stash_ai.temporal import TemporalPolicy
+from stash_ai.evidence.temporal.policy import TemporalPolicy
 
 
 pytestmark = pytest.mark.usefixtures("reset_temporal")

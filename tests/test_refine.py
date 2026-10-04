@@ -19,7 +19,7 @@ from stash_ai.storage import codec as state_codec
 from stash_ai.cleanup import evidence as cleanup_evidence
 from stash_ai import cli as app
 from stash_ai import merge
-from stash_ai.temporal import TemporalPolicy, load_policy
+from stash_ai.evidence.temporal.policy import TemporalPolicy, load_policy
 from stash_ai.models import SOURCES
 from tests.helpers.evidence import segment
 

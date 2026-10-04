@@ -11,7 +11,7 @@ from stash_ai.inference import sprites
 from stash_ai.cleanup import evidence as cleanup_evidence
 from stash_ai import cli as app
 from stash_ai import merge
-from stash_ai.temporal import TemporalPolicy
+from stash_ai.evidence.temporal.policy import TemporalPolicy
 from stash_ai.models import SOURCES
 from tests.helpers.evidence import segment
 

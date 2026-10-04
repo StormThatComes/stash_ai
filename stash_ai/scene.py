@@ -4,7 +4,7 @@ from dataclasses import asdict
 import math
 
 from stash_ai.models import SOURCES
-from stash_ai.temporal import append_interval
+from stash_ai.evidence.intervals import append_interval
 
 
 def _scene_run_index(scene_records):
@@ -173,7 +173,7 @@ def cleanup_scene_support(app, store, scene_id, hits, selected, policies):
     from stash_ai.fusion import FrameIndex
     from stash_ai.merge import marker_segment_signature
     from stash_ai.signatures import digest
-    from stash_ai.temporal import TemporalPolicy
+    from stash_ai.evidence.temporal.policy import TemporalPolicy
     cleaned, rebuilt, records = [], {}, {}
     for hit in hits:
         if hit.get('derived') != 'shared_scene_frames':

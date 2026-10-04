@@ -33,7 +33,7 @@ class EvidenceReplay:
         return matching
 
     def _rebuild(self, options, matching):
-        from stash_ai.temporal import TemporalPolicy
+        from stash_ai.evidence.temporal.policy import TemporalPolicy
 
         context = SimpleNamespace(**vars(self.app))
         context.TEMPORAL_POLICY = TemporalPolicy.from_snapshot(options['policy'])

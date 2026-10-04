@@ -36,7 +36,7 @@ def main():
     from stash_ai.diagnostics import MergeDiagnostics
     from stash_ai.runtime import RunReport
     from stash_ai.models import SOURCES
-    from stash_ai.temporal import TemporalPolicy
+    from stash_ai.evidence.temporal.policy import TemporalPolicy
     from tests.helpers.stash import Stash
     app.TEMPORAL_POLICY = TemporalPolicy()
     app.MAX_MARKERS_PER_SCENE = app.MARKER_MAX_TAGS_PER_FRAME = 0

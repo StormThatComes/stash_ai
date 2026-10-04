@@ -38,7 +38,7 @@ z indeksem sygnatur i cache replay oraz clipping do opublikowanych przedziałów
 Stan i maski cleanupu znajdują się w `cleanup/state.py`, a odczyt katalogu tagów
 w `cleanup/client.py`. `cleanup/prune.py` i `cleanup/legacy.py` obsługują pruning
 zwykłych tagów oraz zachowanych wyników legacy. Pozostała logika domenowa znajduje się m.in. w `stash_ai/scene.py`,
-`stash_ai/fusion.py`, `stash_ai/temporal.py` i `stash_ai/occurrences.py`.
+`stash_ai/fusion.py`, `stash_ai/evidence/temporal/` i `stash_ai/occurrences.py`.
 
 `stash_ai/marker_index.py` buduje dla jednej sceny niemutowalny indeks istniejących
 markerów według primary tagu. Posortowane początki i drzewo maksymalnych końców
@@ -268,3 +268,12 @@ Pakiet `stash_ai/reports/` grupuje raporty offline bez re-eksportów starych mod
 `cache_coverage.py` agreguje liczniki oraz problemy, a `cache_plan.py` wybiera akcje
 i buduje uporządkowany plan komend w paczkach po 50 scen. `cache.py` koordynuje
 strumieniowy odczyt metadanych, kontrolę źródła preview i zapis istniejącego formatu JSON.
+
+### Reguły czasowe i obserwacje
+
+`stash_ai/evidence/temporal/` oddziela politykę i jej historyczne snapshoty (`policy.py`),
+rzadkie statystyki oraz kwalifikację scen (`statistics.py`), budowę markerów
+i consensus seeds (`markers.py`) oraz kwalifikację dodatkowych tagów (`extras.py`).
+`evidence/intervals.py` scala uporządkowane przedziały, `evidence/timeline.py`
+udostępnia indeksowane zapytania o obserwacje, a `evidence/retention.py` wyznacza
+progi retencji. Przeniesienie nie zmienia zapisanych dowodów ani reguł publikacji.

@@ -36,8 +36,9 @@ class _PredictionState:
 
 def _restore_prediction_state(app, tagger, cues, *, raw_scene, checkpoint, report):
     import numpy as np
-    from stash_ai.temporal import SceneAccumulator, marker_floor
-    from stash_ai.retention import scene_cache_floor, marker_cache_floor
+    from stash_ai.evidence.temporal.statistics import SceneAccumulator
+    from stash_ai.evidence.temporal.policy import marker_floor
+    from stash_ai.evidence.retention import scene_cache_floor, marker_cache_floor
 
     settings, labels = tagger.settings, tagger.labels
     policy = app.TEMPORAL_POLICY
@@ -185,7 +186,7 @@ def _run_prediction_batches(app, tagger, stash, paths, cues, state, *,
 
 def _finalize_predictions(app, tagger, scene_exclusions, state, *, raw_scene, analysis):
     import numpy as np
-    from stash_ai.temporal import scene_reason
+    from stash_ai.evidence.temporal.statistics import scene_reason
 
     settings, labels = tagger.settings, tagger.labels
     scene_scores = np.sort(state.top_scores, axis=0)[::-1].mean(axis=0)

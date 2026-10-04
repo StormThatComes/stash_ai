@@ -16,7 +16,8 @@ from stash_ai.publication import merged as merge_sync
 from stash_ai import cli as app
 from stash_ai import merge
 from stash_ai.occurrences import OCCURRENCE_TAG, occurrence_contributions
-from stash_ai.temporal import SceneAccumulator, TemporalPolicy
+from stash_ai.evidence.temporal.statistics import SceneAccumulator
+from stash_ai.evidence.temporal.policy import TemporalPolicy
 from tests.helpers.stash import Stash
 from tests.helpers.evidence import paired_records
 from tests.helpers.evidence import policies

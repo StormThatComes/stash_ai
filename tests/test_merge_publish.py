@@ -12,7 +12,7 @@ from stash_ai.diagnostics import MergeDiagnostics
 from stash_ai.publication.publisher import MergePublisher
 from stash_ai.runtime import RunReport
 from stash_ai.storage.store import StateStore
-from stash_ai.temporal import TemporalPolicy
+from stash_ai.evidence.temporal.policy import TemporalPolicy
 from tests.helpers.cli import runtime_args
 
 

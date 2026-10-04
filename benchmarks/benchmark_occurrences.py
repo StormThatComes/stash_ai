@@ -24,7 +24,7 @@ def main():
     from stash_ai.occurrences import occurrence_contributions
     from stash_ai.performance import StoredSegment, segment_digest
     from stash_ai.models import SOURCES
-    from stash_ai.temporal import TemporalPolicy
+    from stash_ai.evidence.temporal.policy import TemporalPolicy
     app.TEMPORAL_POLICY = TemporalPolicy()
     app.MAX_MARKERS_PER_SCENE = 0
     policies = {s: frozenset() for s in SOURCES}

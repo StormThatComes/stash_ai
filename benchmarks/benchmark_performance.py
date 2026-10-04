@@ -45,7 +45,7 @@ def main():
     from stash_ai import cli as app
     from stash_ai.inference import prediction
     from stash_ai import merge
-    from stash_ai.temporal import TemporalPolicy
+    from stash_ai.evidence.temporal.policy import TemporalPolicy
     from stash_ai.models import SOURCES
     app.TEMPORAL_POLICY = TemporalPolicy()
     app.MARKER_MIN_HITS = 2

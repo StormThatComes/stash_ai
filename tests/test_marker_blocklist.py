@@ -13,7 +13,7 @@ from stash_ai.inference import sprites
 from stash_ai import cli as app, merge, thresholds
 from stash_ai.storage import progress
 from stash_ai.models import ModelSettings, Vocabulary, WD
-from stash_ai.temporal import TemporalPolicy
+from stash_ai.evidence.temporal.policy import TemporalPolicy
 from tests.helpers.evidence import segment
 
 pytestmark = pytest.mark.usefixtures('reset_temporal')

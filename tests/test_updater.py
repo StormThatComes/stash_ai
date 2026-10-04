@@ -249,6 +249,40 @@ def test_report_subpackages_replace_modules_and_stale_bytecode(tmp_path, name):
     assert result.returncode == 0, result.stderr
 
 
+def test_temporal_modules_move_to_evidence_and_remove_old_bytecode(tmp_path):
+    files = application_files()
+    previous = {path: data for path, data in files.items()
+                if not path.startswith('stash_ai/evidence/')}
+    modules = ('temporal', 'timeline', 'retention')
+    previous.update({f'stash_ai/{name}.py': b'PREVIOUS_EVIDENCE = True\n' for name in modules})
+    installed(tmp_path, Remote(previous))
+    result = subprocess.run(
+        [sys.executable, '-c', 'from stash_ai import ' + ', '.join(modules)],
+        cwd=tmp_path, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    cache = tmp_path / 'stash_ai/__pycache__'
+    for name in modules:
+        assert list(cache.glob(name + '.*.pyc'))
+
+    assert updater.update(tmp_path, Remote(files)) == 0
+
+    for name in modules:
+        assert not (tmp_path / f'stash_ai/{name}.py').exists()
+        assert not list(cache.glob(name + '.*.pyc'))
+    result = subprocess.run([sys.executable, '-I', '-c', '''
+import sys
+sys.path.insert(0, '.')
+from stash_ai.evidence.temporal.policy import TemporalPolicy, marker_floor
+from stash_ai.evidence.temporal.statistics import SceneAccumulator
+from stash_ai.evidence import timeline, retention
+policy = TemporalPolicy()
+policy.validate()
+assert marker_floor(policy, 0.8) == 0.8 * policy.marker_continue_ratio
+assert SceneAccumulator(0.8, policy).state()['frames'] == 0
+'''], cwd=tmp_path, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+
 def test_inference_module_moves_to_package_and_removes_stale_inputs(tmp_path):
     files = application_files()
     previous = {name: data for name, data in files.items()

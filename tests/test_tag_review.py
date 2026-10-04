@@ -11,7 +11,7 @@ from stash_ai import cli as app, merge
 from stash_ai.reports.review import report as tag_review
 from stash_ai.reports.review.accumulator import ReviewAccumulator
 from stash_ai.models import SOURCES
-from stash_ai.temporal import TemporalPolicy
+from stash_ai.evidence.temporal.policy import TemporalPolicy
 from tests.test_model_report import inference_pair
 
 pytestmark = pytest.mark.usefixtures("reset_temporal")

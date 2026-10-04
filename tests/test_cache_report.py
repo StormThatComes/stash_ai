@@ -508,7 +508,7 @@ def test_cli_refuses_existing_report(tmp_path):
 
 @pytest.mark.usefixtures('reset_progress')
 def test_generated_backfill_resumes_actual_inference_checkpoint(pipeline, monkeypatch):
-    from stash_ai.temporal import TemporalPolicy
+    from stash_ai.evidence.temporal.policy import TemporalPolicy
     monkeypatch.setattr(app, 'DEFAULT_TEMPORAL', False)
     monkeypatch.setattr(app, 'TEMPORAL_POLICY', TemporalPolicy(enabled=False))
     p = pipeline
@@ -530,7 +530,7 @@ def test_generated_backfill_resumes_actual_inference_checkpoint(pipeline, monkey
 @pytest.mark.usefixtures('reset_progress')
 def test_generated_rethreshold_applies_yaml_without_loading_a_model(pipeline, monkeypatch, tmp_path):
     import yaml
-    from stash_ai.temporal import TemporalPolicy
+    from stash_ai.evidence.temporal.policy import TemporalPolicy
     monkeypatch.setattr(app, 'DEFAULT_TEMPORAL', False)
     monkeypatch.setattr(app, 'TEMPORAL_POLICY', TemporalPolicy(enabled=False))
     p = pipeline

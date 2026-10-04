@@ -1,4 +1,6 @@
 """Wide retained caches must preserve publication and label validation."""
+
+import stash_ai.evidence.temporal.policy as temporal_policy
 import builtins
 from copy import deepcopy
 from dataclasses import replace
@@ -6,7 +8,8 @@ import math
 
 import pytest
 
-from stash_ai import cli as app, fusion, merge, temporal, thresholds
+from stash_ai import cli as app, fusion, merge, thresholds
+from stash_ai.evidence.temporal import markers as temporal
 from tests.helpers.evidence import frames, policies, segment
 
 pytestmark = pytest.mark.usefixtures('reset_temporal')
@@ -72,7 +75,7 @@ def test_wide_cache_preserves_observations_ties_exclusions_and_empty_timestamps(
 
 
 def test_filter_uses_effective_per_source_threshold_and_preserves_exact_boundaries():
-    floor = temporal.marker_floor(app.TEMPORAL_POLICY, .8)
+    floor = temporal_policy.marker_floor(app.TEMPORAL_POLICY, .8)
     rows = [[('below', math.nextafter(floor, -math.inf)), ('edge', floor),
              ('above', math.nextafter(floor, math.inf)), ('high', .8),
              ('under_high', math.nextafter(.8, -math.inf))]]

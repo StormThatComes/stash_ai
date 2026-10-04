@@ -63,7 +63,7 @@ def validate_marker_blocklist(segment, identity, *, allow_unknown=False,
 def validate_marker_cache(app, records, *, allow_unknown_blocklist=False,
                           allow_unknown_retention=False, legacy_blocklist=frozenset()):
     """Check retained coverage before cached frames can build markers or votes."""
-    from stash_ai.temporal import marker_floor
+    from stash_ai.evidence.temporal.policy import marker_floor
     for model, segments in records.items():
         for segment in segments:
             meta = segment['meta']

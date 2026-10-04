@@ -77,7 +77,7 @@ def union_intervals(contributions, *, borrow=False):
             component["extra_tags"] = sorted({raw_label(tag) for item in contributors for tag in item.get("extra_tags", [])}
                                              - {tag})
             component["extra_ids"] = sorted({str(i) for item in contributors for i in item.get("extra_ids", [])})
-            from stash_ai.temporal import merged_extras
+            from stash_ai.evidence.temporal.extras import merged_extras
             merged_extras(component)
             component["extra_tags"] = sorted({raw_label(label) for label in component["extra_tags"]})
             merged.append(component)
@@ -90,7 +90,7 @@ def evidence(app, store, scene_id, core_policies, scene_policies, metrics=None, 
     selected_sources is an analysis-only view used for counterfactual reports:
     omitted sources are removed before every fusion/consensus/occurrence stage.
     """
-    from stash_ai.temporal import scene_reason
+    from stash_ai.evidence.temporal.statistics import scene_reason
     from stash_ai.fusion import FrameIndex
     from stash_ai.scene import shared_scene_contributions
     report = getattr(store, 'report', None)
@@ -184,7 +184,8 @@ def marker_contributions(app, records, core_policies, *, index=None, metrics=Non
 def _marker_contributions(app, records, core_policies, index, metrics, tag_policies, *,
                           allow_unknown_blocklist=False, allow_unknown_retention=False,
                           legacy_blocklist=frozenset()):
-    from stash_ai.temporal import consensus_seeds, build_options, build_markers as temporal_markers
+    from stash_ai.evidence.temporal.markers import consensus_seeds, build_markers as temporal_markers
+    from stash_ai.evidence.temporal.policy import build_options
     from stash_ai.exclusions import policies_or_empty, core_policies_with_global
     from stash_ai.thresholds import validate_marker_cache
     validate_marker_cache(app, records, allow_unknown_blocklist=allow_unknown_blocklist,
@@ -251,7 +252,7 @@ def overlaps(marker, wanted, tolerance):
 
 
 def capture_outputs(app, config, vocabulary, cues, predictions, frames, analysis=None):
-    from stash_ai.retention import marker_cache_floor
+    from stash_ai.evidence.retention import marker_cache_floor
     cue_data = [[cue.start, cue.end, cue.image, list(cue.rect)] for cue in cues]
     meta = {"origin": "inference", "captured_at": now(), "repo": config.source.repo,
             "revision": config.source.revision, "vocabulary_sha256": app.vocabulary_digest(vocabulary.labels),

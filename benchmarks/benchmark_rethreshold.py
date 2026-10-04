@@ -42,7 +42,7 @@ def main():
     from stash_ai.runtime import RunReport
     from stash_ai.storage.store import StateStore
     from stash_ai.models import ModelSettings, SOURCES
-    from stash_ai.temporal import TemporalPolicy
+    from stash_ai.evidence.temporal.policy import TemporalPolicy
     app = SimpleNamespace(TEMPORAL_POLICY=TemporalPolicy())
     settings = [ModelSettings(source, Path('.'), scene_threshold=.4 if args.mode == 'markers' else .55,
                               marker_threshold=.55)

@@ -68,7 +68,7 @@ from stash_ai.runs import separate
 from stash_ai.models import SOURCES, ModelSource, ModelSettings
 from stash_ai.backends.vocabulary import load_vocabulary, ensure_files, weight_files
 from stash_ai.backends.loader import load_tagger
-from stash_ai.temporal import TemporalPolicy
+from stash_ai.evidence.temporal.policy import TemporalPolicy
 from stash_ai.domain import FramePrediction, MarkerSpec
 from stash_ai.stash_api.client import StashClient
 from stash_ai.stash_api.transport import safe_error
@@ -155,7 +155,7 @@ def build_markers(frames: list[FramePrediction], core_exclusions: frozenset[str]
                   threshold=None, seeds=None, identity=None, cache=None) -> tuple[list[MarkerSpec], int]:
     """Group eligible cores independently; exclusions may still be extras."""
     if TEMPORAL_POLICY.enabled:
-        from stash_ai.temporal import build_markers as temporal_markers
+        from stash_ai.evidence.temporal.markers import build_markers as temporal_markers
         return temporal_markers(sys.modules[__name__], frames, core_exclusions,
                                 threshold=threshold, seeds=seeds, identity=identity, extra_cache=cache)
     if threshold is not None:
@@ -289,7 +289,7 @@ def main(argv: list[str] | None = None) -> int:
                 loader_path(config.download_missing)
             print(f"{config.source.title}: files ready in {config.model_dir}.")
         return 0
-    from stash_ai.temporal import load_policy
+    from stash_ai.evidence.temporal.policy import load_policy
     TEMPORAL_POLICY = load_policy(sys.modules[__name__], args.temporal_policy, not args.no_temporal) if not hierarchy_only else TemporalPolicy(enabled=False)
     validate_config(scene_work=not hierarchy_only and not cleanup_only and not args.explain_tag)
     empty_policies = {name: frozenset() for name in SOURCES}

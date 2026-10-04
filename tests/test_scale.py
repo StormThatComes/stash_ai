@@ -21,7 +21,8 @@ from stash_ai.storage import progress
 from stash_ai.runtime import RamCache, RunReport, retained_size
 from stash_ai.scene import shared_scene_contributions, cleanup_scene_support
 from stash_ai.models import SOURCES
-from stash_ai.temporal import SceneAccumulator, TemporalPolicy
+from stash_ai.evidence.temporal.statistics import SceneAccumulator
+from stash_ai.evidence.temporal.policy import TemporalPolicy
 from tests.helpers.evidence import segment
 from tests.helpers.evidence import frames
 

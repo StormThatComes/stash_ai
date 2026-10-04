@@ -5,9 +5,9 @@ from .signals import _score, _candidate, _flag
 
 
 def _supporting_scores(app, contribution, tag, segments, postings):
-    from stash_ai.temporal import marker_floor
+    from stash_ai.evidence.temporal.policy import marker_floor
     from stash_ai.thresholds import marker_threshold
-    from stash_ai.timeline import Series
+    from stash_ai.evidence.timeline import Series
 
     identity = contribution["meta"].get("frame_input_signature")
     if not identity:

@@ -37,7 +37,7 @@ def main():
     from stash_ai import cli as app, merge
     from stash_ai.publication import merged as merge_sync
     from stash_ai.runtime import RunReport
-    from stash_ai.temporal import TemporalPolicy
+    from stash_ai.evidence.temporal.policy import TemporalPolicy
     from tests.helpers.stash import Stash
 
     app.TEMPORAL_POLICY = TemporalPolicy(enabled=False)
