@@ -75,6 +75,11 @@ python .\stash_ai.py --explain-tag ai:blue_hair --scene-id 123
 # Usuwanie nieużywanych definicji tagów.
 python .\stash_ai.py --prune-empty-tags-only --dry-run
 
+# Jawny import wyników z trybu separate; zapisuje tylko lokalną bazę.
+python .\stash_ai.py --import-legacy-only --dry-run
+python .\stash_ai.py --import-legacy-only
+python .\stash_ai.py --merge-only
+
 # Usuwanie niepotrzebnej historii importu starych source-prefixed tagów/markerów.
 python .\stash_ai.py --prune-legacy-imports --dry-run
 python .\stash_ai.py --prune-legacy-imports
@@ -196,10 +201,29 @@ Domyślnie `REPLACE_SCENE_TAGS=True` i `REPLACE_MARKERS=True`. Wyłączenie
 którejś flagi zachowuje historię danego rodzaju wyniku; ponowne włączenie
 normalizuje historię przy bezpiecznym reuse cache.
 
+### Przejście z separate do merged
+
+Normalny merge korzysta z zapisanej bazy evidence. Stare obiekty `jt:`, `wd:`,
+`dtq:` i `op:` najpierw zaimportuj przez `--import-legacy-only`, potem uruchom
+`--merge-only`. Użyj tej samej bazy `--state-db` w obu krokach; starszy schemat
+zaktualizuj wcześniej przez `--db-update`.
+
+Import nie ładuje modeli, vocabularies, polityk YAML ani mediów i nie zmienia
+Stash. Zachowuje nieznane oceny jako `score: null`, punktowe markery z nieznanym
+końcem oraz ręczne extras. Nie przejmuje ręcznych markerów bez ownership tagu.
+Czyta wszystkie namespace'y modeli; `--scene-id`, `--markers-only` oraz
+`--scene-tags-only` ograniczają zakres. `--dry-run` zapisuje tylko tymczasową
+nakładkę. Przy pending merge/cleanup trzeba najpierw dokończyć lub porzucić plan.
+
+Ledger zapobiega ponownemu importowi tych samych obiektów. Późniejsze wyniki
+z separate wymagają ponownego jawnego importu i dopisują historię bez utraty
+istniejącego cache. Normalny merge zgłasza niezaimportowane obiekty; nie importuje
+ich automatycznie. Publikacja migruje tylko obiekty potwierdzone w ledgerze.
+
 ### Czyszczenie historii legacy imports
 
 `--prune-legacy-imports` usuwa wyłącznie wpisy `legacy_imports`, które nie są
-już potrzebne do ochrony przed ponownym bootstrapem starych tagów/markerów
+już potrzebne do ochrony przed ponownym importem starych tagów/markerów
 `jt:`, `wd:`, `dtq:` i `op:`. Polecenie łączy się ze Stash, ale nie ładuje
 modeli ani nie uruchamia inferencji.
 

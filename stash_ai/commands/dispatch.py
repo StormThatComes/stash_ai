@@ -18,6 +18,10 @@ def run_database_command(app, args) -> int | None:
 
 def run_standalone_command(app, args) -> int | None:
     """Run commands that bypass model loading and the normal tagging pipeline."""
+    if args.command is Command.IMPORT_LEGACY:
+        from stash_ai.commands.legacy import run_only
+        app.services.validate_config(scene_work=False)
+        return run_only(app, args)
     if args.command is Command.ABANDON:
         from stash_ai.commands.recovery import run_only
         app.services.validate_config(scene_work=False)
@@ -66,4 +70,3 @@ def run_saved_merge_command(app, settings, args, core_policies, scene_policies) 
         hierarchy = combined_hierarchy(app, args, scene_policies)
         return run_merged(app, settings, args, {}, hierarchy, core_policies, scene_policies)
     return None
-
