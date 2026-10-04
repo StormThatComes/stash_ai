@@ -45,7 +45,7 @@ def output_kinds(app):
     return [kind for kind, enabled in (("scene", app.APPLY_SCENE_TAGS), ("markers", app.CREATE_MARKERS)) if enabled]
 
 
-def completed(store, scene, model, kinds, signature=None):
+def completed(store, scene, model, kinds, signature):
     cache_key = ('status', str(scene), model)
     rows = store.cached(cache_key)
     if rows is None:
@@ -55,9 +55,8 @@ def completed(store, scene, model, kinds, signature=None):
         "r.scope=i.scope AND r.scene=i.scene AND r.model=i.model AND r.kind=i.kind)",
         (store.scope, str(scene), model))}
         store.retain(cache_key, rows)
-    return all(kind in rows and
-               ((rows[kind][0] and rows[kind][2] == signature) if signature is not None
-                else (rows[kind][0] or rows[kind][1])) for kind in kinds)
+    return signature is not None and all(kind in rows and rows[kind][0]
+                                        and rows[kind][2] == signature for kind in kinds)
 
 
 def reuse_replacement_policy(store, scene, model, kinds, signature, replace):

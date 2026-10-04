@@ -1,8 +1,6 @@
 """Capture raw predictions and check completion without publication side effects."""
 from datetime import datetime, timezone
 from stash_ai.config import vocabulary_digest
-from stash_ai.models import ModelSource
-from stash_ai.publication import markers as marker_ops
 import hashlib
 import json
 from .input_identity import cue_manifest
@@ -40,15 +38,3 @@ def capture_outputs(app, config, vocabulary, cues, predictions, frames, analysis
             **meta, "marker_tag_blocklist": []}, "items": [
             dict(start=frame.cue.start, end=frame.cue.end, tags=list(frame.tags)) for frame in frames]}
     return outputs
-
-
-def has_outputs(app, store, scene_id, model):
-    from stash_ai.storage.progress import completed, output_kinds
-    return completed(store, scene_id, model, output_kinds(app))
-
-
-
-def outputs_already_present(app, scene: dict, source: ModelSource) -> bool:
-    tagged = any(tag["name"].startswith(source.prefix) for tag in scene.get("tags") or [])
-    marked = any(marker_ops.owned_marker(marker, source) for marker in scene.get("scene_markers") or [])
-    return (not app.APPLY_SCENE_TAGS or tagged) and (not app.CREATE_MARKERS or marked)

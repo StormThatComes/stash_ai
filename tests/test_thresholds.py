@@ -299,7 +299,7 @@ def test_flag_requires_merge_with_marker_output(args):
 
 def test_marker_rethreshold_never_decodes_publication_snapshots(tmp_path, monkeypatch):
     scenes, markers = paired_records({'wd': [.9, .9, .9]}, threshold=.4, marker_threshold=.7)
-    config = ModelSettings(SOURCES['wd'], Path('.'), marker_threshold=.85, scene_threshold=.4)
+    config = ModelSettings(SOURCES['wd'], Path('.'), marker_threshold=.85, scene_threshold=.4, batch_size=4)
     with merge_store.StateStore(tmp_path/'state.sqlite3', 'scope') as state:
         state.put('1', 'wd', {'scene': scenes['wd'][0], 'markers': markers['wd'][0]})
         state.publish('1', {

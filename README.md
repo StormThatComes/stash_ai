@@ -41,6 +41,13 @@ Ustaw `STASH_API_KEY` jawnie w środowisku, jeśli Stash wymaga klucza.
 Bez tej zmiennej klient nie wysyła nagłówka `ApiKey`. Historyczny klucz
 został usunięty z bieżącego kodu; informacje o rotacji są w [SECURITY.md](SECURITY.md).
 
+W `tagger_models.yml` każdy wybrany model musi mieć jawne `scene_threshold`,
+`marker_threshold` i `batch_size`. Wybór modeli pochodzi z `--models` lub
+wymaganego wtedy `enabled_models`; brakujące wartości nie korzystają ze starych
+domyślnych ustawień JoyTag. Pola `scene_cache_floor` i `marker_cache_floor`
+pozostają opcjonalne. Dopasowany cache jest używany przez resume; sama obecność
+tagów lub markerów nie pomija nowej inferencji.
+
 ## Najczęstsze tryby
 
 ```powershell

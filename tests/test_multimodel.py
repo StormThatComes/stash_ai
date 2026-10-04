@@ -150,7 +150,7 @@ def test_every_label_and_streaming_aggregation(monkeypatch,aggregation,batch):
     cues=[Cue(i,i+1,"x",(0,0,1,1)) for i in range(5)]
     monkeypatch.setattr(app,"AGGREGATION",aggregation)
     monkeypatch.setattr(sprites,"iter_sprite_frames",lambda *args:sprite_frames(cues))
-    predictions,frames=prediction.predict_scene(app, Tagger(ModelSettings(WD,Path("."),batch_size=batch),labels,scores),Stash(),{},cues,frozenset({"scene_ban"}))
+    predictions,frames=prediction.predict_scene(app, Tagger(ModelSettings(WD,Path("."),batch_size=batch, scene_threshold=.4, marker_threshold=.65),labels,scores),Stash(),{},cues,frozenset({"scene_ban"}))
     expected=scores.max(axis=0) if aggregation=="max" else np.sort(scores,axis=0)[-2:].mean(axis=0)
     assert len(predictions)==len(labels)-1
     for tag,score in predictions: assert score==pytest.approx(expected[labels.index(tag)])
@@ -238,13 +238,13 @@ def test_scoped_policies_and_cleanup_without_model_files(tmp_path,monkeypatch):
 
 def test_vocabulary_order_and_categories(tmp_path):
     (tmp_path/"selected_tags.csv").write_text('tag_id,name,category\n999,rating,9\n10,tag,0\n1,character,4\n')
-    assert load_vocabulary(ModelSettings(WD,tmp_path,download_missing=False)).labels==["rating","tag","character"]
+    assert load_vocabulary(ModelSettings(WD,tmp_path,download_missing=False, scene_threshold=.4, marker_threshold=.65, batch_size=4)).labels==["rating","tag","character"]
     (tmp_path/"tag_to_id.json").write_text('{"copyright":2,"general":0,"character":1}')
     (tmp_path/"config.json").write_text('{"image_size":448,"num_classes":3}')
     (tmp_path/"tag_category.json").write_text('{"copyright":3,"general":0,"character":4}')
-    assert load_vocabulary(ModelSettings(DTQ,tmp_path,download_missing=False)).labels==["general","character","copyright"]
+    assert load_vocabulary(ModelSettings(DTQ,tmp_path,download_missing=False, scene_threshold=.4, marker_threshold=.65, batch_size=4)).labels==["general","character","copyright"]
     (tmp_path/"tag_to_id.json").write_text('{"a":0,"b":0,"c":2}')
-    with pytest.raises(ValueError): load_vocabulary(ModelSettings(DTQ,tmp_path,download_missing=False))
+    with pytest.raises(ValueError): load_vocabulary(ModelSettings(DTQ,tmp_path,download_missing=False, scene_threshold=.4, marker_threshold=.65, batch_size=4))
 
 
 @pytest.mark.parametrize("values",[np.array([[np.nan]]),np.array([[np.inf]]),np.array([[1.1]]),np.zeros((2,1))])
@@ -252,19 +252,13 @@ def test_bad_scores(values):
     with pytest.raises(RuntimeError): validate_scores(values,1,["tag"],"test")
 
 
-def test_preprocessing_and_only_untagged(monkeypatch):
+def test_preprocessing():
     from PIL import Image
     image=Image.new("RGB",(8,4),(255,0,0))
     wd,dtq=prepare_wd(image,8),prepare_dtq(image,8)
     np.testing.assert_array_equal(wd[4,4],[0,0,255])
     np.testing.assert_array_equal(wd[0,0],[255,255,255])
     np.testing.assert_allclose(dtq[:,0,0],-np.array([.485,.456,.406])/np.array([.229,.224,.225]),atol=1e-6)
-    stash=Stash();stash.scene["tags"].append(stash.tag("jt:seen"));stash.marker(JOYTAG,"seen","jt")
-    assert app.outputs_already_present(stash.scene,JOYTAG) and not app.outputs_already_present(stash.scene,WD)
-    stash.scene["tags"].append(stash.tag("wd:seen"))
-    assert not app.outputs_already_present(stash.scene,WD)
-    monkeypatch.setattr(app,"CREATE_MARKERS",False)
-    assert app.outputs_already_present(stash.scene,WD)
 
 
 def test_dry_run_api_guard(supported_stash_version):
@@ -291,7 +285,7 @@ def oppai_files(tmp_path):
 
 
 def test_oppai_vocabulary_preserves_indices_and_real_tags(oppai_files):
-    vocab=load_vocabulary(ModelSettings(OPPAI,oppai_files,download_missing=False))
+    vocab=load_vocabulary(ModelSettings(OPPAI,oppai_files,download_missing=False, scene_threshold=.4, marker_threshold=.65, batch_size=4))
     assert vocab.output_count==6 and vocab.output_indices==(2,3,4,5)
     assert vocab.labels==["watermark","rare_tag","<o>_<o>","rating:explicit"]
     assert set(vocab.categories)==set(vocab.labels)
@@ -310,7 +304,7 @@ def test_oppai_rejects_mismatched_assets(oppai_files,damage):
         elif damage=="resolution": data["image_size"]=320
         else: data["normalize_mean"]=[.485,.456,.406]
         (oppai_files/name).write_text(json.dumps(data))
-    with pytest.raises(ValueError): load_vocabulary(ModelSettings(OPPAI,oppai_files,download_missing=False))
+    with pytest.raises(ValueError): load_vocabulary(ModelSettings(OPPAI,oppai_files,download_missing=False, scene_threshold=.4, marker_threshold=.65, batch_size=4))
 
 
 @pytest.mark.parametrize("shape,valid_shape",[((896,448),(448,224)),((448,448),(448,448)),
@@ -372,7 +366,7 @@ def test_onnx_batches_activation_and_output_mapping(source,tmp_path,monkeypatch)
         SessionOptions=SimpleNamespace,GraphOptimizationLevel=SimpleNamespace(ORT_ENABLE_BASIC=1,ORT_DISABLE_ALL=0))
     monkeypatch.setitem(sys.modules,"onnxruntime",ort)
     (tmp_path/"model.onnx").touch()
-    tagger=OnnxTagger(ModelSettings(source,tmp_path,batch_size=4,device="cpu"),vocabulary)
+    tagger=OnnxTagger(ModelSettings(source,tmp_path,batch_size=4,device="cpu", scene_threshold=.4, marker_threshold=.65),vocabulary)
     with Image.new("RGB",(64,32),"red") as a, Image.new("RGB",(32,64),"blue") as b:
         result=tagger.predict_batch([tagger.prepare(a),tagger.prepare(b)])
     assert result.shape==(2,4)
@@ -389,9 +383,9 @@ def test_onnx_batches_activation_and_output_mapping(source,tmp_path,monkeypatch)
     tagger.close()
 
 
-def test_oppai_modes_and_old_config_compatibility(tmp_path,oppai_files,monkeypatch):
+def test_oppai_modes_with_explicit_model_config(tmp_path,oppai_files,monkeypatch):
     old=tmp_path/"models.yml"
-    old.write_text("version: 1\nenabled_models: [joytag]\n")
+    old.write_text("version: 1\nenabled_models: [joytag]\noppai:\n  scene_threshold: 0.80\n  marker_threshold: 0.85\n  batch_size: 4\n")
     monkeypatch.setenv("OPPAI_MODEL_PATH",str(oppai_files))
     settings=app.services.load_model_settings(old,["oppai"],None,True)[0]
     assert settings.source.prefix=="op:" and settings.model_dir==oppai_files

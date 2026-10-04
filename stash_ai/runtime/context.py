@@ -41,11 +41,7 @@ class RuntimeServices:
                 dry_run, url=runtime.STASH_URL, api_key=runtime.STASH_API_KEY,
                 request_timeout=runtime.REQUEST_TIMEOUT, http_retries=runtime.HTTP_RETRIES,
                 scene_page_size=runtime.SCENE_PAGE_SIZE, create_markers=runtime.CREATE_MARKERS),
-            load_model_settings=lambda *args, **kwargs: config.load_model_settings(
-                *args, **kwargs,
-                joytag_scene_threshold=runtime.JOYTAG_DEFAULT_SCENE_THRESHOLD,
-                default_marker_threshold=runtime.DEFAULT_MARKER_THRESHOLD,
-                joytag_batch_size=runtime.JOYTAG_DEFAULT_BATCH_SIZE),
+            load_model_settings=config.load_model_settings,
             validate_config=partial(validate_config, runtime),
         )
 

@@ -94,7 +94,7 @@ def test_main_database_command_bypasses_bootstrap(monkeypatch):
 def test_later_catalog_failure_prevents_stash_and_model_loading(monkeypatch, tmp_path, mode):
     from stash_ai.models import WD, DTQ, ModelSettings, Vocabulary, SOURCES
     calls = []
-    settings = [ModelSettings(source, tmp_path, download_missing=False) for source in (WD, DTQ)]
+    settings = [ModelSettings(source, tmp_path, download_missing=False, scene_threshold=.4, marker_threshold=.65, batch_size=4) for source in (WD, DTQ)]
     monkeypatch.setattr(app.services, 'load_model_settings', lambda *a: settings)
     monkeypatch.setattr(app.services, 'validate_config', lambda **k: None)
     monkeypatch.setattr(app.services, 'load_exclusion_policy', lambda *a: {key: frozenset() for key in SOURCES})

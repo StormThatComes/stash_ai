@@ -61,15 +61,16 @@ def load_exclusion_policy(path: Path, key: str) -> dict[str, frozenset[str]]:
     return {name: common | checked(additions.get(name, []), f"by_model.{name}") for name in SOURCES}
 
 def load_model_settings(path: Path, chosen: list[str] | None, device: str | None,
-                        offline: bool = False, *, joytag_scene_threshold: float,
-                        default_marker_threshold: float, joytag_batch_size: int) -> list[ModelSettings]:
+                        offline: bool = False) -> list[ModelSettings]:
     data = load_unique_yaml(path, "Model configuration")
     allowed = {"version", "enabled_models", "device", "download_missing", *SOURCES}
     if not isinstance(data, dict) or set(data) - allowed:
         raise ValueError("Unknown model configuration keys.")
     if type(data.get("version")) is not int or data["version"] != 1:
         raise ValueError("Model configuration version must be 1.")
-    selected = select_models(chosen if chosen is not None else data.get("enabled_models", ["joytag"]))
+    if chosen is None and "enabled_models" not in data:
+        raise ValueError("enabled_models is required when --models is omitted.")
+    selected = select_models(chosen if chosen is not None else data["enabled_models"])
     settings = []
     for name in SOURCES:
         values = data.get(name, {})
@@ -79,6 +80,9 @@ def load_model_settings(path: Path, chosen: list[str] | None, device: str | None
             raise ValueError(f"Invalid {name} settings in {path.name}.")
         if name not in selected:
             continue
+        required = {"scene_threshold", "marker_threshold", "batch_size"}
+        if missing := required - values.keys():
+            raise ValueError(f"Missing {name} settings: {', '.join(sorted(missing))}.")
         def local_path(key: str, default: Path) -> Path:
             environment_name = f"{name.upper()}_MODEL_PATH"
             raw = os.getenv(environment_name)
@@ -94,10 +98,9 @@ def load_model_settings(path: Path, chosen: list[str] | None, device: str | None
         model_dir = local_path("model_dir", path.resolve().parent / "models" / name)
         config = ModelSettings(
             source=SOURCES[name], model_dir=model_dir,
-            scene_threshold=values.get("scene_threshold", joytag_scene_threshold if name == "joytag" else
-                                       {"wd": 0.35, "dtq": 0.20, "oppai": 0.80}[name]),
-            marker_threshold=values.get("marker_threshold", 0.85 if name == "oppai" else default_marker_threshold),
-            batch_size=values.get("batch_size", joytag_batch_size if name == "joytag" else 4),
+            scene_threshold=values["scene_threshold"],
+            marker_threshold=values["marker_threshold"],
+            batch_size=values["batch_size"],
             scene_cache_floor=values.get("scene_cache_floor"),
             marker_cache_floor=values.get("marker_cache_floor"),
             device=device or data.get("device", "auto"),

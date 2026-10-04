@@ -289,11 +289,11 @@ def test_inspection_works_offline_without_stash_or_weights(merge_pipeline,monkey
     assert [(m["start"],m["end"]) for m in reports[0]["markers"]]==[(10,50),(70,90)]
 
 
-def test_only_untagged_uses_successful_records_even_with_no_predictions(merge_pipeline,monkeypatch):
+def test_resume_uses_successful_records_even_with_no_predictions(merge_pipeline,monkeypatch):
     p=merge_pipeline
     for scores in p.scores.values(): scores[:]=0
     assert app.main(p.args)==0
-    monkeypatch.setattr(app,"SKIP_EXISTING_OUTPUTS",True)
+    monkeypatch.setattr(app,"DEFAULT_RESUME",True)
     monkeypatch.setattr(app.services,"load_tagger",lambda *args:pytest.fail("already processed model loaded again"))
     assert app.main(p.args)==0
 

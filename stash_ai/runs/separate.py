@@ -1,6 +1,5 @@
 """Separate-output model orchestration using inference and reconciliation modules."""
 from __future__ import annotations
-from stash_ai.inference import results as result_ops
 from stash_ai.evidence import marker_building
 
 from collections import Counter
@@ -103,9 +102,6 @@ def _process_scene(app, stash, tagger, resolver, scene, scene_id, config, args,
             f"SKIP {source.key} scene {scene_id}: sprite/VTT missing; "
             "generate Stash sprites first."
         )
-        return Counter(skipped=1)
-
-    if app.SKIP_EXISTING_OUTPUTS and result_ops.outputs_already_present(app, scene, source):
         return Counter(skipped=1)
 
     cues, total_frames = sprites.fetch_cues(app, stash, paths)

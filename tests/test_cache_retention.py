@@ -42,7 +42,7 @@ def test_retention_settings_apply_to_all_models(tmp_path, value):
 
 
 def test_omitted_retention_preserves_legacy_model_identity(tmp_path, pipeline):
-    config = ModelSettings(SOURCES['wd'], tmp_path)
+    config = ModelSettings(SOURCES['wd'], tmp_path, scene_threshold=.4, marker_threshold=.65, batch_size=4)
     expected = model_identity(app, config, pipeline.vocab)
     assert expected['retention'] == dict(temporal=True, marker_ratio=.85, scene_ratio=.85)
     assert model_identity(app, replace(config, scene_cache_floor=None,

@@ -220,7 +220,10 @@ def test_status_lookup_does_not_decompress_results(pipeline,monkeypatch):
     assert app.main(p.args)==0
     with merge_store.StateStore(p.path,merge_store.scope_for(app.STASH_URL),True) as state:
         monkeypatch.setattr(state,"unpack",lambda *args:pytest.fail("status decompressed predictions"))
-        assert merge_results.has_outputs(app,state,"1","wd")
+        signature = state.connection.execute(
+            "SELECT signature FROM " + state.table('result_index') + " WHERE scope=? AND scene='1' AND model='wd' AND kind='scene'",
+            (state.scope,)).fetchone()[0]
+        assert progress.completed(state,"1","wd",['scene','markers'],signature)
         assert state.sources("1","markers")=={"wd"}
 
 
@@ -304,7 +307,7 @@ def test_api_failure_resumes_only_synchronization(pipeline,monkeypatch):
 
 
 def test_prefetch_is_bounded_and_closes_producer(pipeline,monkeypatch):
-    p=pipeline;config=ModelSettings(WD,Path("missing"),batch_size=2)
+    p=pipeline;config=ModelSettings(WD,Path("missing"),batch_size=2, scene_threshold=.4, marker_threshold=.65)
     model=IndexedTagger(config,p.scores["wd"],p.vocab.labels)
     prepared=threading.Event()
     original=model.prepare
@@ -335,10 +338,10 @@ def test_v1_database_is_migrated_once_without_losing_sources(tmp_path,monkeypatc
     with merge_store.StateStore(path,"fixture") as state:
         assert state.connection.execute("PRAGMA user_version").fetchone()==(12,)
         assert state.records("1","scene")["wd"]==[segment]
-        assert progress.completed(state,"1","wd",["scene"])
         assert not progress.completed(state,"1","wd",["scene"],"new-signature")
     monkeypatch.setattr(state_codec,"decode",lambda *args:pytest.fail("migration repeated"))
-    with merge_store.StateStore(path,"fixture") as state:assert progress.completed(state,"1","wd",["scene"])
+    with merge_store.StateStore(path,"fixture") as state:
+        assert not progress.completed(state,"1","wd",["scene"],"new-signature")
 
 
 @pytest.mark.parametrize("failure",[False,True])
@@ -357,7 +360,7 @@ def test_pruning_follows_only_successful_merge(pipeline,monkeypatch,failure):
 
 def test_ordered_vocabulary_changes_checkpoint_identity(pipeline):
     p=pipeline
-    config=ModelSettings(WD,Path("missing"))
+    config=ModelSettings(WD,Path("missing"), scene_threshold=.4, marker_threshold=.65, batch_size=4)
     original=model_identity(app,config,p.vocab)
     reordered=Vocabulary(list(reversed(p.vocab.labels)),p.vocab.categories)
     assert model_identity(app,config,reordered)!=original

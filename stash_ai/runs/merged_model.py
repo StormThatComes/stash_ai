@@ -45,10 +45,6 @@ class MergedModelRun:
         if not paths.get("sprite") or not paths.get("vtt"):
             self.stats["skipped"] += 1
             return False
-        if (self.app.SKIP_EXISTING_OUTPUTS and not self.args.restart
-                and merge_results.has_outputs(self.app, self.store, scene_id, self.key)):
-            self.stats["skipped"] += 1
-            return False
         return True
 
     def _reuse(self, scene_id, current, signature, cues, media, kinds, replacement):

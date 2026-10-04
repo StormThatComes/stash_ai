@@ -377,7 +377,7 @@ def test_scene_rethreshold_never_decodes_publication_snapshots(tmp_path, monkeyp
             {'start': 1, 'end': 2, 'tags': [('core', .6)]},
         ],
     }
-    config = ModelSettings(SOURCES['wd'], Path('.'), scene_threshold=.8, marker_threshold=.7)
+    config = ModelSettings(SOURCES['wd'], Path('.'), scene_threshold=.8, marker_threshold=.7, batch_size=4)
     with merge_store.StateStore(tmp_path/'state.sqlite3', 'scope') as state:
         state.put('1', 'wd', {'scene': segment})
         state.publish('1', {'scene': {'owned_ids': [], 'contributions': [{'payload': 'x' * 10000}]}})

@@ -31,13 +31,11 @@ class RuntimeSettings:
     STASH_URL: str = field(default_factory=lambda: os.getenv("STASH_URL", "http://localhost:9999"))
     STASH_API_KEY: str = field(default_factory=lambda: os.getenv("STASH_API_KEY", ""), repr=False)
     APPLY_SCENE_TAGS: bool = True
-    JOYTAG_DEFAULT_SCENE_THRESHOLD: float = 0.40
     MAX_TAGS: int = 0
     REPLACE_SCENE_TAGS: bool = True
     AGGREGATION: str = "topk_mean"
     TOP_K_FRAMES: int = 2
     CREATE_MARKERS: bool = True
-    DEFAULT_MARKER_THRESHOLD: float = 0.65
     MARKER_MAX_TAGS_PER_FRAME: int = 0
     MARKER_MIN_HITS: int = 2
     MARKER_MERGE_GAP_SECONDS: float = 0.0
@@ -47,9 +45,7 @@ class RuntimeSettings:
     MARKER_MATCH_TOLERANCE_SECONDS: float = 0.25
     CREATE_MISSING: bool = True
     DRY_RUN: bool = False
-    SKIP_EXISTING_OUTPUTS: bool = False
     MAX_FRAMES_PER_SCENE: int = 0
-    JOYTAG_DEFAULT_BATCH_SIZE: int = 16
     SCENE_PAGE_SIZE: int = 100
     REQUEST_TIMEOUT: tuple[int, int] = (5, 600)
     HTTP_RETRIES: int = 3
@@ -70,10 +66,7 @@ def validate_config(app, scene_work: bool = True) -> None:
     _ = parsed.port
     if scene_work and not app.APPLY_SCENE_TAGS and not app.CREATE_MARKERS:
         raise ValueError("Enable scene tags, markers, or both.")
-    for name, value in (("JOYTAG_DEFAULT_SCENE_THRESHOLD", app.JOYTAG_DEFAULT_SCENE_THRESHOLD), ("DEFAULT_MARKER_THRESHOLD", app.DEFAULT_MARKER_THRESHOLD)):
-        if not math.isfinite(value) or not 0 <= value <= 1:
-            raise ValueError(f"{name} must be between 0 and 1.")
-    for name, value in (("JOYTAG_DEFAULT_BATCH_SIZE", app.JOYTAG_DEFAULT_BATCH_SIZE), ("TOP_K_FRAMES", app.TOP_K_FRAMES),
+    for name, value in (("TOP_K_FRAMES", app.TOP_K_FRAMES),
                         ("MARKER_MIN_HITS", app.MARKER_MIN_HITS), ("SCENE_PAGE_SIZE", app.SCENE_PAGE_SIZE)):
         if not isinstance(value, int) or value < 1:
             raise ValueError(f"{name} must be a positive integer.")
