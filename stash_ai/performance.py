@@ -75,10 +75,10 @@ def initialize(store):
 # VTT parsing and maintenance-only cleanup/recovery code have independent
 # invalidation signals and must not force a library-wide re-merge.
 PUBLICATION_CODE_FILES = (
-    'cli.py', 'evidence/pipeline.py', 'evidence/source_markers.py', 'evidence/identity.py', 'evidence/labels.py', 'inference/results.py', 'commands/hierarchy.py', 'commands/legacy.py', 'runs/merged.py', 'runs/merged_model.py', 'publication/publisher.py', 'publication/parallel.py', 'publication/merged.py', 'marker_index.py', 'publication/separate.py', 'publication/markers.py',
+    'cli.py', 'evidence/pipeline.py', 'evidence/source_markers.py', 'evidence/identity.py', 'evidence/labels.py', 'inference/results.py', 'commands/hierarchy.py', 'commands/legacy.py', 'runs/merged.py', 'runs/merged_model.py', 'publication/publisher.py', 'publication/parallel.py', 'publication/merged.py', 'publication/planning/types.py', 'publication/planning/merged_evidence.py', 'publication/planning/merged_tags.py', 'publication/planning/merged_markers.py', 'publication/planning/separate_markers.py', 'publication/planning/separate_tags.py', 'publication/index.py', 'publication/separate.py', 'publication/markers.py',
     'evidence/temporal/policy.py', 'evidence/temporal/statistics.py', 'evidence/temporal/markers.py', 'evidence/temporal/extras.py', 'evidence/intervals.py', 'evidence/observations.py', 'evidence/frames.py', 'evidence/shared_markers.py', 'evidence/scenes.py', 'evidence/occurrences.py', 'exclusions.py', 'cleanup/state.py', 'cleanup/client.py',
     'models.py', 'backends/loader.py', 'backends/onnx.py', 'backends/onnx_preprocessing.py', 'backends/onnx_session.py', 'backends/vocabulary.py', 'inference/prediction.py', 'inference/sprites.py', 'inference/preparation.py', 'stash_api/tags.py', 'domain.py', 'performance.py',
-    'evidence/timeline.py', 'stash_api/sql.py', 'marker_groups.py',
+    'evidence/timeline.py', 'stash_api/sql.py', 'publication/groups.py',
     'evidence/thresholds.py', 'inference/reuse.py', 'evidence/retention.py', 'evidence/cache_views.py', 'rethreshold/markers.py', 'rethreshold/scenes.py', 'storage/progress.py', 'inference/inputs.py', 'inference/identity.py', 'inference/checkpoints.py', 'signatures.py', 'storage/store.py', 'storage/database.py',
     'storage/results.py', 'storage/thresholds.py', 'storage/metadata.py', 'storage/publications.py', 'config.py',
 )
@@ -137,7 +137,7 @@ def record_check(store, scene, policy, fingerprint):
 
 
 def catalog_fingerprint(resolver):
-    from stash_ai.marker_groups import PREFIX, ROOT
+    from stash_ai.publication.groups import PREFIX, ROOT
     return digest(sorted((name, str(t['id']), t.get('description'), t.get('ignore_auto_tag'), sorted(
         (str(p['id']), p['name'], p.get('description')) for p in t.get('parents', [])))
         for name, t in resolver.records.items() if t and (name.startswith(('ai:', PREFIX)) or name == ROOT)))

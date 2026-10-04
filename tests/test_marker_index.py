@@ -10,7 +10,7 @@ import stash_ai.evidence.intervals as merge_intervals
 import stash_ai.evidence.labels as merge_labels
 import stash_ai.storage.store as merge_store
 from stash_ai.publication import merged as merge_sync
-from stash_ai.marker_index import MarkerIntervalIndex, PreviousMarkerRanges
+from stash_ai.publication.index import MarkerIntervalIndex, PreviousMarkerRanges
 from tests.helpers.evidence import span
 from tests.helpers.stash import Stash
 
@@ -114,7 +114,9 @@ def test_publication_split_duplicates_cleanup_and_retry_match_scanner(
     variants = []
     for implementation in (ScanningIndex, MarkerIntervalIndex):
         with monkeypatch.context() as patch:
-            patch.setattr(merge_sync, 'MarkerIntervalIndex', implementation)
+            from stash_ai.publication.planning import merged_evidence, merged_markers
+            patch.setattr(merged_evidence, 'MarkerIntervalIndex', implementation)
+            patch.setattr(merged_markers, 'MarkerIntervalIndex', implementation)
             stash = Stash()
             manual = stash.marker(merge_labels.AI, 'location', 'manual', manual=True)
             manual.update(seconds=75, end_seconds=None)

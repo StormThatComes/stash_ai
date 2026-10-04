@@ -37,7 +37,7 @@ class SQLCleanup:
             self.progress.update(0)
 
     def delete_primary(self, identifier, name, source=None):
-        from stash_ai.marker_groups import PREFIX
+        from stash_ai.publication.groups import PREFIX
         group_ids = [int(i) for i, n in self.catalog.items() if n.startswith(PREFIX)]
         prefix, owner = (source.title_prefix, source.owner_tag) if source else ('', '')
         params = (int(identifier), name, prefix, prefix, prefix, owner)
@@ -142,7 +142,7 @@ class SQLCleanup:
         return candidates
 
     def marker_group_candidates(self, usage_delta=None):
-        from stash_ai.marker_groups import PREFIX
+        from stash_ai.publication.groups import PREFIX
         selected = {i for i, name in self.catalog.items() if name.startswith(PREFIX)}
         if not selected:
             return []
@@ -158,7 +158,7 @@ class SQLCleanup:
 
     def prune(self, policies=None, prefixes=None, *, skip_marker_groups=False):
         from stash_ai.exclusions import excluded_names
-        from stash_ai.marker_groups import PREFIX
+        from stash_ai.publication.groups import PREFIX
         from stash_ai.cleanup.prune import prefixes_checked, prune_tags
         names = excluded_names(policies, unused=True) if policies is not None else None
         prefixes = prefixes_checked(prefixes)

@@ -22,7 +22,7 @@ def run_standalone_command(app, args, *, cleanup_only: bool) -> int | None:
         app.validate_config(scene_work=False)
         return run_only(app, args)
     if args.sync_marker_groups_only:
-        from stash_ai.marker_groups import run_backfill
+        from stash_ai.commands.marker_groups import run_backfill
         app.validate_config(scene_work=False)
         return run_backfill(app, args)
     if args.prune_empty_tags_only:

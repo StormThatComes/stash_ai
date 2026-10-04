@@ -959,3 +959,38 @@ def test_interrupted_retired_file_removal_can_roll_back(tmp_path):
     (tmp_path / name).unlink()
     assert updater.recover(tmp_path) == 0
     assert (tmp_path / name).read_bytes() == old
+
+
+def test_publication_planning_replaces_root_modules_without_ml(tmp_path):
+    files = application_files()
+    previous = {path: data for path, data in files.items()
+                if not path.startswith('stash_ai/publication/planning/')
+                and path not in ('stash_ai/publication/groups.py', 'stash_ai/publication/index.py')}
+    previous.update({f'stash_ai/{name}.py': b'PREVIOUS_PUBLICATION = True\n'
+                     for name in ('marker_groups', 'marker_index')})
+    installed(tmp_path, Remote(previous))
+    result = subprocess.run([sys.executable, '-c', 'from stash_ai import marker_groups, marker_index'],
+                            cwd=tmp_path, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert updater.update(tmp_path, Remote(files)) == 0
+    for name in ('marker_groups', 'marker_index'):
+        assert not (tmp_path / f'stash_ai/{name}.py').exists()
+        assert not list((tmp_path / 'stash_ai/__pycache__').glob(name + '.*.pyc'))
+    result = subprocess.run([sys.executable, '-I', '-c', """
+import sys
+sys.path.insert(0, '.')
+from stash_ai.publication.planning.types import MergeSyncPlan
+from stash_ai.publication.planning.merged_evidence import prepare_sync_evidence
+from stash_ai.publication.planning.merged_tags import plan_scene_tags
+from stash_ai.publication.planning.merged_markers import plan_markers
+from stash_ai.publication.planning.separate_markers import plan_marker_changes
+from stash_ai.publication.groups import group_name, managed_group, group_description
+from stash_ai.publication.index import PreviousMarkerRanges
+from stash_ai.commands.marker_groups import run_backfill
+from stash_ai.cleanup.groups import prune_groups
+assert group_name('example') == 'm:example'
+assert managed_group({'name': 'm:example', 'description': group_description('example')})
+assert PreviousMarkerRanges([]).temporal({'seconds': 1, 'primary_tag': {'name': 'ai:example'}})['seconds'] == 1
+assert not {'torch', 'numpy', 'onnxruntime', 'tqdm'} & set(sys.modules)
+"""], cwd=tmp_path, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr

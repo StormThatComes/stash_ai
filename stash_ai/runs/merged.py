@@ -221,7 +221,8 @@ class MergedRun:
             self.stats.update(prune_excluded_definitions(
                 app, stash, self.scene_policies, self.report.detail))
         if app.CREATE_MARKERS:
-            from stash_ai.marker_groups import for_resolver, prune_groups
+            from stash_ai.publication.groups import for_resolver
+            from stash_ai.cleanup.groups import prune_groups
             delta = for_resolver(app, self.resolver).usage_delta
             candidates = sql.marker_group_candidates(delta) if sql is not None else None
             self.stats.update(prune_groups(
