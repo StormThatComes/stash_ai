@@ -13,10 +13,12 @@ from stash_ai.commands import legacy as legacy_commands
 from stash_ai.signatures import digest
 from stash_ai.inference.inputs import RunInputs
 from stash_ai.publication.publisher import MergePublisher
-from stash_ai import merge
-from stash_ai import performance
+import stash_ai.evidence.labels as merge_labels
+import stash_ai.storage.store as merge_store
+from stash_ai.publication import fingerprints
+import stash_ai.storage.merge_checks as merge_checks
 from stash_ai.storage import progress
-from stash_ai.runtime import stage
+from stash_ai.runtime.timing import stage
 from .merged_model import MergedModelRun
 
 
@@ -43,15 +45,15 @@ class MergedRun:
 
     def run(self):
         app, args = self.app, self.args
-        with merge.StateStore(
-                args.state_db, merge.scope_for(app.STASH_URL), app.DRY_RUN,
+        with merge_store.StateStore(
+                args.state_db, merge_store.scope_for(app.STASH_URL), app.DRY_RUN,
                 cache_bytes=int(args.ram_cache_gb * 2**30),
                 allow_cleanup=args.abandon_pending,
                 memory_budget_bytes=int(args.ram_budget_gb * 2**30)) as store:
             self.store = store
             store.report = self.report
             if args.abandon_pending:
-                from stash_ai.recovery import abandon
+                from stash_ai.storage.recovery import abandon
                 self.stats.update(abandon(store, self.report.write))
             self.stash = app.create_stash_client(app.DRY_RUN)
             self.stash.report = self.report
@@ -78,15 +80,15 @@ class MergedRun:
     def _prepare_resolver(self):
         app, args, stash = self.app, self.args, self.stash
         self.resolver = app.TagResolver(
-            stash, self.hierarchy, source=merge.AI, report=self.report.detail,
+            stash, self.hierarchy, source=merge_labels.AI, report=self.report.detail,
             create_missing=app.CREATE_MISSING)
         self.use_catalog = bool(self.hierarchy or app.CREATE_MARKERS)
         if self.use_catalog or not args.scene_id or len(args.scene_id) > 1:
             self.resolver.preload()
-        self.base_key = performance.publication_key(
+        self.base_key = fingerprints.publication_key(
             app, args, self.hierarchy, self.core_policies, self.scene_policies)
         self.merge_key = (
-            digest([self.base_key, performance.catalog_fingerprint(self.resolver)])
+            digest([self.base_key, fingerprints.catalog_fingerprint(self.resolver)])
             if self.use_catalog else self.base_key)
         self.store.preload_sources()
 
@@ -97,8 +99,8 @@ class MergedRun:
                 scene_id = str(current["id"])
                 try:
                     with stage(self.report, 'scan_fingerprint'):
-                        fingerprint = performance.scene_fingerprint(current)
-                    publication_reason = performance.check_reason(
+                        fingerprint = fingerprints.scene_fingerprint(current)
+                    publication_reason = merge_checks.check_reason(
                         self.store, scene_id, self.merge_key, fingerprint)
                     if publication_reason == 'reused':
                         self.stats['bootstrap_reused'] += 1
@@ -169,11 +171,11 @@ class MergedRun:
             # catalog the next run will observe without adding a read to the
             # unchanged hot path.
             resolver = self.app.TagResolver(
-                self.stash, self.hierarchy, source=merge.AI,
+                self.stash, self.hierarchy, source=merge_labels.AI,
                 create_missing=self.app.CREATE_MISSING)
             resolver.preload()
         final_key = digest([
-            self.base_key, performance.catalog_fingerprint(resolver)])
+            self.base_key, fingerprints.catalog_fingerprint(resolver)])
         if final_key != self.merge_key:
             with self.store.connection:
                 self.store.connection.execute(
@@ -220,7 +222,8 @@ class MergedRun:
             self.stats.update(prune_excluded_definitions(
                 app, stash, self.scene_policies, self.report.detail))
         if app.CREATE_MARKERS:
-            from stash_ai.marker_groups import for_resolver, prune_groups
+            from stash_ai.publication.groups import for_resolver
+            from stash_ai.cleanup.groups import prune_groups
             delta = for_resolver(app, self.resolver).usage_delta
             candidates = sql.marker_group_candidates(delta) if sql is not None else None
             self.stats.update(prune_groups(

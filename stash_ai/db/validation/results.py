@@ -43,7 +43,7 @@ def check_results_and_index(db, tables, errors, progress=None):
                     errors['result_metadata_invalid'] += 1
             if threshold is not None:
                 from stash_ai.storage.thresholds import overlay
-                from stash_ai.thresholds import _score
+                from stash_ai.evidence.thresholds import _score
                 if _score(threshold):
                     overlay(segments, kind, threshold)
             current = next(
@@ -55,7 +55,7 @@ def check_results_and_index(db, tables, errors, progress=None):
             expected_populated = int(any(segment["items"] for segment in segments))
             if current is not None:
                 if indexed_signature is None:
-                    from stash_ai.thresholds import indexed_signature as signature_for
+                    from stash_ai.evidence.thresholds import indexed_signature as signature_for
                     indexed_signature = signature_for
                 expected_signature = indexed_signature(current)
             else:

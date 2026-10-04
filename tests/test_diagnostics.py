@@ -9,9 +9,8 @@ import pytest
 from stash_ai.inference import sprites
 from stash_ai.storage import codec as state_codec
 from stash_ai import cli as app
-from stash_ai import merge
-from stash_ai.diagnostics import MergeDiagnostics
-from stash_ai.runtime import RunReport
+from stash_ai.runtime.diagnostics import MergeDiagnostics
+from stash_ai.runtime.report import RunReport
 
 
 pytestmark = pytest.mark.usefixtures("reset_progress")
@@ -23,8 +22,8 @@ def records(path):
 
 def test_nested_timings_are_exclusive_and_failures_are_recorded(tmp_path, monkeypatch):
     clock = SimpleNamespace(value=0.0)
-    monkeypatch.setattr('stash_ai.runtime.time.perf_counter', lambda: clock.value)
-    monkeypatch.setattr('stash_ai.runtime.time.process_time', lambda: clock.value / 2)
+    monkeypatch.setattr('stash_ai.runtime.timing.time.perf_counter', lambda: clock.value)
+    monkeypatch.setattr('stash_ai.runtime.timing.time.process_time', lambda: clock.value / 2)
     report = RunReport(write=lambda _: None)
     path = tmp_path/'profile.jsonl'
     with MergeDiagnostics(report, path) as diagnostics:
@@ -172,3 +171,28 @@ def test_invalid_profiling_flags_fail_before_stash_access(pipeline, arguments):
     with pytest.raises(SystemExit) as exc:
         app.main([*pipeline.args, *arguments])
     assert exc.value.code == 2 and not pipeline.stash.writes and not pipeline.loaded
+def test_independent_reports_keep_interleaved_timers_separate(monkeypatch):
+    ticks = iter((0.0, 1.0, 3.0, 5.0))
+    monkeypatch.setattr('stash_ai.runtime.timing.time.perf_counter', lambda: next(ticks))
+    first, second = RunReport(), RunReport()
+    with first.measure('outer'):
+        with second.measure('inner'):
+            pass
+    assert first.timings == {'outer': 5.0}
+    assert second.timings == {'inner': 2.0}
+    assert first.timing_calls == {'outer': 1}
+    assert second.timing_calls == {'inner': 1}
+
+
+def test_independent_reports_keep_request_sizes_and_diagnostics_separate():
+    first, second = RunReport(write=lambda _: None), RunReport(write=lambda _: None)
+    with MergeDiagnostics(first) as first_diagnostics, MergeDiagnostics(second) as second_diagnostics:
+        with first.request('first', True):
+            first.response_size(3)
+            with second.request('second', True):
+                second.response_size(7)
+                first.response_size(5)
+    assert first_diagnostics.api['first']['response_bytes'] == 8
+    assert second_diagnostics.api['second']['response_bytes'] == 7
+    assert set(first_diagnostics.api) == {'first'}
+    assert set(second_diagnostics.api) == {'second'}

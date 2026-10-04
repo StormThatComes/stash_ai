@@ -7,7 +7,7 @@ import numpy as np
 from stash_ai.domain import Cue, FramePrediction
 from stash_ai import cli as app
 from stash_ai.models import SOURCES
-from stash_ai.temporal import SceneAccumulator
+from stash_ai.evidence.temporal.statistics import SceneAccumulator
 
 
 def span(source, start, end, tag="common", score=.9, extras=()):

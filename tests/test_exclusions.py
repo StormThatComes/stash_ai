@@ -11,7 +11,11 @@ from stash_ai.commands import hierarchy as hierarchy_commands
 from stash_ai.inference import sprites
 from stash_ai.cleanup import evidence as cleanup_evidence
 from stash_ai import cli as app
-from stash_ai import merge
+from stash_ai.evidence import pipeline as merge
+import stash_ai.evidence.intervals as merge_intervals
+import stash_ai.evidence.labels as merge_labels
+import stash_ai.evidence.source_markers as merge_source_markers
+import stash_ai.storage.store as merge_store
 from stash_ai.exclusions import policies_or_empty
 from stash_ai.models import SOURCES, WD
 from tests.helpers.stash import Stash
@@ -36,7 +40,7 @@ def names_in_scene(stash):
 
 
 def raw_results(path):
-    with merge.StateStore(path, merge.scope_for(app.STASH_URL), True) as store:
+    with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL), True) as store:
         return store.connection.execute('SELECT model,kind,data FROM results ORDER BY model,kind').fetchall()
 
 
@@ -67,7 +71,7 @@ def test_cleanup_removes_shared_and_legacy_extras_without_images_or_models(pipel
     core = tmp_path/'core.yml'; core.write_text('version: 1\nexcluded_core_tags: [extra]\n')
     args = ['--models', 'wd', 'dtq', *p.args[2:], '--marker-core-exclusions', str(core)]
     assert app.main(args) == 0
-    marker = next(m for m in p.stash.scene['scene_markers'] if marker_ops.owned_marker(m, merge.AI))
+    marker = next(m for m in p.stash.scene['scene_markers'] if marker_ops.owned_marker(m, merge_labels.AI))
     assert 'ai:extra' in {t['name'] for t in marker['tags']}
     marker['tags'].append(p.stash.tag('op:extra'))
     manual = p.stash.marker(WD, 'keep', 'manual', manual=True)
@@ -104,21 +108,21 @@ def test_source_exclusion_rebuilds_extra_proofs_without_resurrecting_revoked_sou
     }
     cores = {source: frozenset({'detail'}) for source in SOURCES}
     empty = policies_or_empty()
-    with merge.StateStore(tmp_path/'state.sqlite3', 'fixture') as store:
+    with merge_store.StateStore(tmp_path/'state.sqlite3', 'fixture') as store:
         for source, items in records.items(): store.put('1', source, {'markers': items[0]})
         _, spans = merge.evidence(app, store, '1', cores, empty)
         if old_snapshot:
             for span in spans: span['build_options'].pop('tag_exclusions', None)
         tags = policies_or_empty({'wd': ['detail']})
         cleaned = cleanup_evidence.cleanup_support(app, store, '1', spans, {'wd'}, cores, tags)
-        marker = merge.union_intervals(cleaned)[0]
+        marker = merge_intervals.union_intervals(cleaned)[0]
         assert marker['extra_tags'] == ['detail']
         assert set(marker['extra_evidence']['detail']['source_evidence']) == {'dtq'}
         # The current file no longer bans WD. Cleanup must still retain that
         # earlier removal, using the frozen global exclusions from publication.
         tags = policies_or_empty({'dtq': ['detail']})
         cleaned = cleanup_evidence.cleanup_support(app, store, '1', cleaned, {'dtq'}, cores, tags)
-        marker = merge.union_intervals(cleaned)[0]
+        marker = merge_intervals.union_intervals(cleaned)[0]
         assert marker['extra_tags'] == []
         assert (marker['start'], marker['end']) == (0, 3)
 
@@ -126,8 +130,8 @@ def test_source_exclusion_rebuilds_extra_proofs_without_resurrecting_revoked_sou
 def test_global_exclusion_revokes_consensus_before_qualification():
     records = {'wd': [segment('wd', [[('core', .9)], [], [('core', .9)], []])],
                'dtq': [segment('dtq', [[], [('core', .9)], [], [('core', .9)]])]}
-    assert merge.marker_contributions(app, records, policies_or_empty())
-    assert merge.marker_contributions(app, records, policies_or_empty(),
+    assert merge_source_markers.marker_contributions(app, records, policies_or_empty())
+    assert merge_source_markers.marker_contributions(app, records, policies_or_empty(),
                                      tag_policies=policies_or_empty({'wd': ['core']})) == []
 
 

@@ -16,10 +16,16 @@ from stash_ai.commands import hierarchy as hierarchy_commands
 from stash_ai.domain import Cue, TagHierarchy
 from stash_ai.inference import checkpoints, prediction, preparation, sprites
 from stash_ai import cli as app
-from stash_ai import merge
-from stash_ai import performance
+from stash_ai.evidence import pipeline as merge
+import stash_ai.evidence.labels as merge_labels
+import stash_ai.storage.results as merge_results
+import stash_ai.storage.store as merge_store
+from stash_ai.publication import fingerprints as performance
+import stash_ai.storage.merge_checks as performance_merge_checks
+import stash_ai.storage.segments as performance_segments
 from stash_ai.storage import progress
-from stash_ai.runtime import RamCache, retained_size
+from stash_ai.runtime.cache import RamCache
+from stash_ai.runtime.memory import retained_size
 
 
 pytestmark = pytest.mark.usefixtures("reset_progress")
@@ -33,6 +39,11 @@ def fail(*args, **kwargs):
     'stash_api/tags.py', 'domain.py', 'storage/store.py', 'storage/database.py', 'storage/results.py', 'storage/thresholds.py', 'storage/publications.py',
     'models.py', 'backends/vocabulary.py', 'backends/onnx.py', 'backends/onnx_preprocessing.py', 'backends/onnx_session.py', 'inference/prediction.py', 'inference/sprites.py', 'inference/preparation.py', 'storage/progress.py', 'inference/inputs.py', 'inference/identity.py', 'inference/checkpoints.py', 'signatures.py',
     'runs/merged.py', 'runs/merged_model.py', 'publication/publisher.py', 'publication/parallel.py', 'publication/merged.py', 'publication/separate.py', 'publication/markers.py',
+    'evidence/temporal/policy.py', 'evidence/temporal/statistics.py', 'evidence/temporal/markers.py', 'evidence/temporal/extras.py', 'evidence/intervals.py', 'evidence/timeline.py', 'evidence/retention.py',
+    'evidence/pipeline.py', 'evidence/source_markers.py', 'evidence/identity.py', 'evidence/labels.py', 'inference/results.py', 'evidence/observations.py', 'evidence/frames.py', 'evidence/shared_markers.py', 'evidence/thresholds.py', 'inference/reuse.py', 'evidence/cache_views.py', 'evidence/scenes.py', 'evidence/occurrences.py',
+    'publication/groups.py', 'publication/index.py', 'publication/planning/types.py', 'publication/planning/merged_evidence.py', 'publication/planning/merged_tags.py', 'publication/planning/merged_markers.py', 'publication/planning/separate_markers.py', 'publication/planning/separate_tags.py',
+    'publication/fingerprints.py', 'storage/segments.py', 'storage/merge_checks.py',
+    'inference/scene_predictions.py', 'commands/bootstrap.py',
     'config.py', 'commands/hierarchy.py', 'commands/legacy.py', 'rethreshold/markers.py', 'rethreshold/scenes.py', 'cleanup/state.py', 'cleanup/client.py',
 ])
 def test_publication_code_tracks_extracted_modules(monkeypatch, filename):
@@ -48,8 +59,9 @@ def test_publication_code_tracks_extracted_modules(monkeypatch, filename):
 
 
 @pytest.mark.parametrize('filename', [
+    'runtime/cache.py', 'runtime/memory.py', 'runtime/timing.py', 'runtime/report.py', 'runtime/summary.py', 'runtime/diagnostics.py',
     'stash_api/client.py', 'stash_api/transport.py', 'vtt.py', 'commands/arguments.py', 'commands/validation.py', 'commands/dispatch.py', 'commands/explain.py',
-    'cleanup/run.py', 'recovery.py', 'cleanup/sql.py', 'cleanup/sql_session.py',
+    'commands/marker_groups.py', 'cleanup/groups.py', 'cleanup/markers.py', 'cleanup/run.py', 'storage/recovery.py', 'publication/recovery.py', 'commands/recovery.py', 'cleanup/sql.py', 'cleanup/sql_session.py',
     'rethreshold/execution.py', 'rethreshold/targets.py', 'db/checks.py',
     'db/validation/common.py', 'db/validation/schema.py', 'db/validation/results.py',
     'db/validation/checkpoints.py', 'db/validation/state.py', 'runs/separate.py', 'cleanup/evidence.py', 'cleanup/scenes.py',
@@ -73,8 +85,8 @@ def test_repeated_merge_avoids_decoding_evidence_and_publication(pipeline, monke
     find = p.stash.find_scene
     monkeypatch.setattr(p.stash, 'find_scene', lambda i: (reads.append(i), find(i))[1])
     monkeypatch.setattr(merge, 'evidence', fail)
-    monkeypatch.setattr(merge.StateStore, 'prepare', fail)
-    monkeypatch.setattr(merge.StateStore, 'unpack', fail)
+    monkeypatch.setattr(merge_store.StateStore, 'prepare', fail)
+    monkeypatch.setattr(merge_store.StateStore, 'unpack', fail)
     p.stash.writes.clear()
     assert app.main(p.args) == 0
     assert reads == ['1'] and p.stash.writes == []
@@ -93,7 +105,7 @@ def test_merge_check_invalidates_real_changes(pipeline, monkeypatch, tmp_path, c
         path.write_text('version: 1\nexcluded_scene_tags: [common]\n')
         args.extend(['--scene-tag-exclusions', str(path)])
     else:
-        with merge.StateStore(p.path, merge.scope_for(app.STASH_URL)) as state:
+        with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL)) as state:
             if change == 'result':
                 # Even an older writer using direct SQL invalidates the check.
                 with state.connection:
@@ -108,25 +120,25 @@ def test_merge_check_invalidates_real_changes(pipeline, monkeypatch, tmp_path, c
 
 
 def test_derived_invalidation_rolls_back_with_the_transaction(tmp_path):
-    with merge.StateStore(tmp_path/'state.db', 's') as state:
+    with merge_store.StateStore(tmp_path/'state.db', 's') as state:
         state.put('1', 'wd', {'scene': dict(meta={}, items=[])})
         with state.connection:
-            performance.record_check(state, '1', 'p', 'f')
+            performance_merge_checks.record_check(state, '1', 'p', 'f')
         with pytest.raises(RuntimeError):
             with state.connection:
                 state.connection.execute('UPDATE results SET data=data')
-                assert not performance.checked(state, '1', 'p', 'f')
+                assert not performance_merge_checks.checked(state, '1', 'p', 'f')
                 raise RuntimeError('rollback')
-        assert performance.checked(state, '1', 'p', 'f')
+        assert performance_merge_checks.checked(state, '1', 'p', 'f')
         with state.connection:
             state.connection.execute('DELETE FROM results')
-        assert not performance.checked(state, '1', 'p', 'f')
+        assert not performance_merge_checks.checked(state, '1', 'p', 'f')
 
 
 def test_manual_hierarchy_change_invalidates_unchanged_scene(pipeline, monkeypatch):
     p = pipeline
     hierarchy = TagHierarchy({'common': ('ai:category:General',), 'extra': ('ai:category:General',)},
-        {'ai:category:General': ()}, 'ai:category:', merge.AI.hierarchy_description)
+        {'ai:category:General': ()}, 'ai:category:', merge_labels.AI.hierarchy_description)
     monkeypatch.setattr(hierarchy_commands, 'combined_hierarchy', lambda *args: hierarchy)
     assert app.main(p.args) == 0
     original = merge.evidence
@@ -143,19 +155,19 @@ def test_manual_hierarchy_change_invalidates_unchanged_scene(pipeline, monkeypat
 
 def test_cleanup_generation_invalidates_only_its_scope(tmp_path):
     from stash_ai.cleanup.state import save_state
-    with merge.StateStore(tmp_path/'state.db', 'a') as state:
+    with merge_store.StateStore(tmp_path/'state.db', 'a') as state:
         with state.connection:
-            performance.record_check(state, '1', 'p', 'f')
+            performance_merge_checks.record_check(state, '1', 'p', 'f')
         with state.connection:
             state.connection.execute("INSERT INTO merge_checks VALUES ('b','1','p','f')")
         state.cleanup_generation = 1
         save_state(state)
-        assert not performance.checked(state, '1', 'p', 'f')
+        assert not performance_merge_checks.checked(state, '1', 'p', 'f')
         assert state.connection.execute("SELECT COUNT(*) FROM merge_checks WHERE scope='b'").fetchone() == (1,)
 
 
 def test_commit_promotes_exact_pending_bytes_and_is_atomic(tmp_path, monkeypatch):
-    with merge.StateStore(tmp_path/'state.db', 's') as state:
+    with merge_store.StateStore(tmp_path/'state.db', 's') as state:
         state.publish('1', {'scene': {'old': True}})
         state.prepare('1', {'scene': {'new': True}})
         pending = state.connection.execute('SELECT pending FROM snapshots').fetchone()[0]
@@ -169,13 +181,13 @@ def test_commit_promotes_exact_pending_bytes_and_is_atomic(tmp_path, monkeypatch
 
 def test_preview_reads_and_shadows_without_copying_large_unrelated_blobs(tmp_path):
     path = tmp_path/'state.db'
-    with merge.StateStore(path, 's') as state:
+    with merge_store.StateStore(path, 's') as state:
         state.put('1', 'wd', {'scene': dict(meta={}, items=[['old', .9]])})
         state.publish('1', {'scene': {'old': True}})
         with state.connection:
             state.connection.execute("INSERT INTO results VALUES ('s','unrelated','wd','scene',zeroblob(8000000))")
     before = hashlib.sha256(path.read_bytes()).digest()
-    with merge.StateStore(path, 's', True, cache_bytes=1000000) as preview:
+    with merge_store.StateStore(path, 's', True, cache_bytes=1000000) as preview:
         assert preview.preview_source
         assert preview.connection.execute('SELECT COUNT(*) FROM main.results').fetchone() == (0,)
         assert preview.records('1', 'scene')['wd'][0]['items'] == [['old', .9]]
@@ -195,7 +207,7 @@ def test_preview_resumes_checkpoint_and_does_not_resurrect_deleted_source(pipeli
     with pytest.raises(KeyboardInterrupt):
         app.main(p.args)
     before = p.path.read_bytes()
-    with merge.StateStore(p.path, merge.scope_for(app.STASH_URL), True) as preview:
+    with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), True) as preview:
         assert preview.connection.execute('SELECT processed FROM ' + preview.table('checkpoints')).fetchone() == (4,)
         progress.request_refresh(preview, ['1'], ['wd'], ['scene', 'markers'])
         checkpoint = checkpoints.Checkpoint(preview, '1', 'wd', 'new', 10, 2)
@@ -204,23 +216,23 @@ def test_preview_resumes_checkpoint_and_does_not_resurrect_deleted_source(pipeli
         checkpoint.record(2, np.zeros((2, 2), np.float32), [])
         checkpoint.flush()
         assert checkpoints.Checkpoint(preview, '1', 'wd', 'new', 10, 2).restore()[0] == 2
-        checkpoints.finish(preview, '1', 'wd', {k: dict(meta={'origin':'inference', 'inference_signature':'new'}, items=[]) for k in merge.KINDS}, {})
-        assert progress.completed(preview, '1', 'wd', merge.KINDS, 'new')
+        checkpoints.finish(preview, '1', 'wd', {k: dict(meta={'origin':'inference', 'inference_signature':'new'}, items=[]) for k in merge_results.KINDS}, {})
+        assert progress.completed(preview, '1', 'wd', merge_results.KINDS, 'new')
         assert not preview.connection.execute('SELECT 1 FROM ' + preview.table('checkpoints')).fetchall()
     assert p.path.read_bytes() == before
 
 
 def test_preview_detects_external_source_commit_even_for_fast_skip(tmp_path):
     path = tmp_path/'state.db'
-    with merge.StateStore(path, 's') as state:
+    with merge_store.StateStore(path, 's') as state:
         with state.connection:
-            performance.record_check(state, '1', 'p', 'f')
-    with merge.StateStore(path, 's', True) as preview:
-        assert performance.checked(preview, '1', 'p', 'f')
+            performance_merge_checks.record_check(state, '1', 'p', 'f')
+    with merge_store.StateStore(path, 's', True) as preview:
+        assert performance_merge_checks.checked(preview, '1', 'p', 'f')
         with sqlite3.connect(path) as writer:
             writer.execute('DELETE FROM merge_checks')
         with pytest.raises(RuntimeError, match='changed during dry-run'):
-            performance.checked(preview, '1', 'p', 'f')
+            performance_merge_checks.checked(preview, '1', 'p', 'f')
 
 
 @pytest.mark.parametrize('prefetch', [0, 2])
@@ -287,12 +299,12 @@ def test_vectorized_score_filter_preserves_float_boundaries_and_order(threshold)
 def test_cache_accounts_cue_attributes_and_evicts_under_process_pressure(monkeypatch):
     cue = Cue(0, 1, 's'*10000, (0,0,1,1))
     assert retained_size(cue) > 10000
-    monkeypatch.setattr('stash_ai.runtime.process_rss', lambda: 1000)
+    monkeypatch.setattr('stash_ai.runtime.memory.process_rss', lambda: 1000)
     cache = RamCache(20000, rss_budget=40000)
     for i in range(10):
         cache.put(i, bytes(900))
     before = cache.size
-    monkeypatch.setattr('stash_ai.runtime.process_rss', lambda: 39999)
+    monkeypatch.setattr('stash_ai.runtime.memory.process_rss', lambda: 39999)
     cache.pressure(force=True)
     assert cache.size < before and cache.stats['pressure_trims'] == 1
     assert cache.rss_peak == 39999
@@ -311,11 +323,11 @@ def test_shared_cache_stays_bounded_with_concurrent_media_and_result_access():
 
 
 def test_detached_records_cannot_reuse_a_stale_segment_digest(tmp_path):
-    with merge.StateStore(tmp_path/'state.db', 's', cache_bytes=1000000) as state:
+    with merge_store.StateStore(tmp_path/'state.db', 's', cache_bytes=1000000) as state:
         state.put('1', 'wd', {'markers': dict(meta={}, items=[])})
         borrowed = state.records('1', 'markers', borrow=True)['wd'][0]
-        original = performance.segment_digest(borrowed)
+        original = performance_segments.segment_digest(borrowed)
         detached = state.records('1', 'markers')['wd'][0]
         detached['items'].append({'new': True})
-        assert performance.segment_digest(detached) != original
-        assert performance.segment_digest(borrowed) == original and borrowed['items'] == []
+        assert performance_segments.segment_digest(detached) != original
+        assert performance_segments.segment_digest(borrowed) == original and borrowed['items'] == []

@@ -4,6 +4,7 @@ Run the same script against compatible revisions with --project; compare stage
 hashes and timings. No SQLite, Stash API, inference or GPU time is included.
 """
 
+
 import argparse
 from dataclasses import asdict, is_dataclass
 import gc
@@ -54,10 +55,15 @@ def main():
     if min(args.frames, args.labels, args.repeats) < 1 or args.weak_labels < 0:
         parser.error('frames, labels and repeats must be positive; weak-labels must be nonnegative')
     sys.path.insert(0, str(args.project.resolve()))
-    from stash_ai import cli as app, fusion, merge, temporal
+    from stash_ai import cli as app
+    from stash_ai.evidence import frames as fusion
+    import stash_ai.evidence.intervals as merge_intervals
+    import stash_ai.evidence.source_markers as merge_source_markers
+    from stash_ai.evidence.temporal import markers as temporal
+    from stash_ai.evidence.temporal import policy as temporal_policy
     from stash_ai.domain import Cue, FramePrediction
     from stash_ai.models import SOURCES
-    app.TEMPORAL_POLICY = temporal.TemporalPolicy()
+    app.TEMPORAL_POLICY = temporal_policy.TemporalPolicy()
     app.MARKER_MIN_HITS = 2
     app.MARKER_MERGE_GAP_SECONDS = 0
     app.MARKER_MAX_TAGS_PER_FRAME = app.MAX_MARKERS_PER_SCENE = 0
@@ -78,7 +84,7 @@ def main():
         observations=measure(lambda: [fusion.observations(app, group, policies) for group in groups], args.repeats),
         temporal_markers=measure(lambda: temporal.build_markers(app, frames, frozenset(), threshold=.8,
             identity='retained-benchmark'), args.repeats),
-        merge_cpu=measure(lambda: merge.union_intervals(merge.marker_contributions(app, records, policies),
+        merge_cpu=measure(lambda: merge_intervals.union_intervals(merge_source_markers.marker_contributions(app, records, policies),
             borrow=True), args.repeats))
     print(json.dumps(result, indent=2))
 

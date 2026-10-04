@@ -13,9 +13,9 @@ RESTART = frozenset(('legacy_only', 'insufficient', 'inconsistent'))
 
 
 def inspect_output(app, config, kind, segments, index, refresh, checkpoint, error):
-    from stash_ai.scene_cache import scene_threshold, validate_scene
-    from stash_ai.temporal import marker_floor
-    from stash_ai.thresholds import _score, indexed_signature, marker_threshold, validate_marker_blocklist
+    from stash_ai.evidence.cache_views import scene_threshold, validate_scene
+    from stash_ai.evidence.temporal.policy import marker_floor
+    from stash_ai.evidence.thresholds import _score, indexed_signature, marker_threshold, validate_marker_blocklist
 
     def result(status, reason, **details):
         return dict(status=status, reason=reason, **details)
@@ -78,9 +78,9 @@ def inspect_output(app, config, kind, segments, index, refresh, checkpoint, erro
 
 def publication_dependencies(app, evidence, selected):
     """Merge reads unselected cached models at their saved effective thresholds."""
-    from stash_ai.scene_cache import scene_threshold, validate_scene
+    from stash_ai.evidence.cache_views import scene_threshold, validate_scene
     from stash_ai.models import SOURCES
-    from stash_ai.thresholds import validate_marker_cache
+    from stash_ai.evidence.thresholds import validate_marker_cache
 
     dependencies = []
     context = SimpleNamespace(TEMPORAL_POLICY=app.TEMPORAL_POLICY)

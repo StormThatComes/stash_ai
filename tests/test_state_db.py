@@ -8,7 +8,7 @@ from stash_ai.storage import database as stash_state_db
 from stash_ai.storage.store import StateStore
 from stash_ai.storage.publications import PublicationStore
 from stash_ai.storage.results import ResultStore
-from stash_ai.runtime import RunReport
+from stash_ai.runtime.report import RunReport
 
 
 @pytest.mark.parametrize('stage', ['base_schema', 'feature_schema'])

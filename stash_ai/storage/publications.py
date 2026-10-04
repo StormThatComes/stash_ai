@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-from stash_ai.runtime import measured
+from stash_ai.runtime.timing import measured
 
 
 class PublicationStore:
@@ -73,7 +73,7 @@ class PublicationStore:
     def publish(self, scene, snapshots):
         store = self.store
         from stash_ai.cleanup.state import stamp_snapshot
-        from stash_ai.recovery import clear_publications
+        from stash_ai.storage.recovery import clear_publications
         with store.connection:
             for kind, data in snapshots.items():
                 store.cache.discard(('snapshot', str(scene), kind))
@@ -86,7 +86,7 @@ class PublicationStore:
     def commit_prepared(self, scene, kinds, *, publication=None):
         """Promote durable intent without encoding large evidence a second time."""
         store = self.store
-        from stash_ai.recovery import clear_publications
+        from stash_ai.storage.recovery import clear_publications
         with store.connection:
             for kind in kinds:
                 store.cache.discard(('snapshot', str(scene), kind))
@@ -98,5 +98,5 @@ class PublicationStore:
                     raise RuntimeError('Publication intent disappeared before commit.')
                 clear_publications(store, scene, kind)
             if publication is not None:
-                from stash_ai.performance import record_check
+                from stash_ai.storage.merge_checks import record_check
                 record_check(store, scene, *publication)

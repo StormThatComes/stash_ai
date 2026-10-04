@@ -168,7 +168,7 @@ def test_database_module_moves_to_package_and_remains_importable(tmp_path):
     # Exercise the existing API through the installed package with stdlib only.
     result = subprocess.run([sys.executable, '-c', '''
 from stash_ai.db import check_database, compact_database, inspect_database
-from stash_ai.reports.developer import build_report
+from stash_ai.reports.developer.report import build_report
 for operation, args in (
     (check_database, ('missing.sqlite3', 'scope')),
     (compact_database, ('missing.sqlite3', 'scope')),
@@ -210,7 +210,7 @@ def test_reports_move_to_nested_package_and_remove_old_bytecode(tmp_path):
         if name.startswith('stash_ai/reports/'):
             assert (tmp_path / name).read_bytes() == data
     result = subprocess.run([sys.executable, '-c', '''
-from stash_ai.reports.developer import build_report
+from stash_ai.reports.developer.report import build_report
 try:
     build_report('missing.sqlite3')
 except FileNotFoundError:
@@ -220,6 +220,142 @@ else:
 '''], cwd=tmp_path, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
     assert not (tmp_path / 'missing.sqlite3').exists()
+
+
+@pytest.mark.parametrize('name', ['developer', 'model', 'tag_review'])
+def test_report_subpackages_replace_modules_and_stale_bytecode(tmp_path, name):
+    files = application_files()
+    old_path = f'stash_ai/reports/{name}.py'
+    target = 'review' if name == 'tag_review' else name
+    previous = {path: data for path, data in files.items()
+                if not path.startswith(f'stash_ai/reports/{target}/')}
+    previous[old_path] = b'PREVIOUS_REPORT = True\n'
+    installed(tmp_path, Remote(previous))
+    result = subprocess.run(
+        [sys.executable, '-c', f'import stash_ai.reports.{name}'],
+        cwd=tmp_path, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    cache = tmp_path / 'stash_ai/reports/__pycache__'
+    assert list(cache.glob(name + '.*.pyc'))
+
+    assert updater.update(tmp_path, Remote(files)) == 0
+
+    assert not (tmp_path / old_path).exists()
+    assert not list(cache.glob(name + '.*.pyc'))
+    result = subprocess.run(
+        [sys.executable, '-I', '-c',
+         f"import sys; sys.path.insert(0, '.'); import stash_ai.reports.{target}"],
+        cwd=tmp_path, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+
+def test_temporal_modules_move_to_evidence_and_remove_old_bytecode(tmp_path):
+    files = application_files()
+    previous = {path: data for path, data in files.items()
+                if not path.startswith('stash_ai/evidence/')}
+    modules = ('temporal', 'timeline', 'retention')
+    previous.update({f'stash_ai/{name}.py': b'PREVIOUS_EVIDENCE = True\n' for name in modules})
+    installed(tmp_path, Remote(previous))
+    result = subprocess.run(
+        [sys.executable, '-c', 'from stash_ai import ' + ', '.join(modules)],
+        cwd=tmp_path, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    cache = tmp_path / 'stash_ai/__pycache__'
+    for name in modules:
+        assert list(cache.glob(name + '.*.pyc'))
+
+    assert updater.update(tmp_path, Remote(files)) == 0
+
+    for name in modules:
+        assert not (tmp_path / f'stash_ai/{name}.py').exists()
+        assert not list(cache.glob(name + '.*.pyc'))
+    result = subprocess.run([sys.executable, '-I', '-c', '''
+import sys
+sys.path.insert(0, '.')
+from stash_ai.evidence.temporal.policy import TemporalPolicy, marker_floor
+from stash_ai.evidence.temporal.statistics import SceneAccumulator
+from stash_ai.evidence import timeline, retention
+policy = TemporalPolicy()
+policy.validate()
+assert marker_floor(policy, 0.8) == 0.8 * policy.marker_continue_ratio
+assert SceneAccumulator(0.8, policy).state()['frames'] == 0
+'''], cwd=tmp_path, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+
+def test_evidence_pipeline_replaces_root_modules_and_imports_without_ml(tmp_path):
+    files = application_files()
+    previous = {path: data for path, data in files.items()
+                if not path.startswith('stash_ai/evidence/')}
+    modules = ('merge', 'fusion', 'scene', 'occurrences', 'scene_cache', 'thresholds')
+    previous.update({f'stash_ai/{name}.py': b'PREVIOUS_EVIDENCE = True\n' for name in modules})
+    installed(tmp_path, Remote(previous))
+    result = subprocess.run(
+        [sys.executable, '-c', 'from stash_ai import ' + ', '.join(modules)],
+        cwd=tmp_path, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    cache = tmp_path / 'stash_ai/__pycache__'
+
+    assert updater.update(tmp_path, Remote(files)) == 0
+
+    for name in modules:
+        assert not (tmp_path / f'stash_ai/{name}.py').exists()
+        assert not list(cache.glob(name + '.*.pyc'))
+    result = subprocess.run([sys.executable, '-I', '-c', '''
+import sys
+sys.path.insert(0, '.')
+from stash_ai.evidence.pipeline import evidence
+from stash_ai.evidence.frames import FrameIndex
+from stash_ai.evidence.observations import ObservationIndex
+from stash_ai.evidence.labels import raw_label
+from stash_ai.evidence.identity import marker_segment_signature, OVERRIDE, SCENE_OVERRIDE
+from stash_ai.inference.reuse import reuse
+segment = {'mode': 'frames', 'meta': {}, 'items': []}
+projected = {**segment, OVERRIDE: 0.2, SCENE_OVERRIDE: 0.7}
+assert marker_segment_signature(segment) == marker_segment_signature(projected)
+assert raw_label('plain_label') == 'plain_label'
+assert not {'torch', 'numpy', 'onnxruntime'} & set(sys.modules)
+'''], cwd=tmp_path, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+
+def test_runtime_package_replaces_module_and_imports_with_stdlib_only(tmp_path):
+    files = application_files()
+    previous = {path: data for path, data in files.items()
+                if not path.startswith('stash_ai/runtime/')}
+    previous['stash_ai/runtime.py'] = b'PREVIOUS_RUNTIME = True\n'
+    previous['stash_ai/diagnostics.py'] = b'PREVIOUS_DIAGNOSTICS = True\n'
+    installed(tmp_path, Remote(previous))
+    result = subprocess.run([sys.executable, '-c', 'from stash_ai import runtime, diagnostics'],
+                            cwd=tmp_path, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    cache = tmp_path / 'stash_ai/__pycache__'
+    assert list(cache.glob('runtime.*.pyc'))
+
+    assert updater.update(tmp_path, Remote(files)) == 0
+
+    for name in ('runtime', 'diagnostics'):
+        assert not (tmp_path / f'stash_ai/{name}.py').exists()
+        assert not list(cache.glob(name + '.*.pyc'))
+    result = subprocess.run([sys.executable, '-I', '-c', '''
+import sys
+sys.path.insert(0, '.')
+from stash_ai.runtime.cache import RamCache
+from stash_ai.runtime.report import RunReport
+from stash_ai.runtime.diagnostics import MergeDiagnostics
+cache = RamCache(4096)
+cache.put('key', [1, 2])
+assert cache.get('key') == [1, 2]
+messages = []
+report = RunReport(write=messages.append)
+with report.measure('stdlib'):
+    pass
+report.finish('Done', {'processed': 1}, cache)
+assert report.timing_calls['stdlib'] == 1
+assert messages[0] == 'Done'
+assert not {'torch', 'numpy', 'requests'} & set(sys.modules)
+'''], cwd=tmp_path, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
 
 
 def test_inference_module_moves_to_package_and_removes_stale_inputs(tmp_path):
@@ -823,3 +959,101 @@ def test_interrupted_retired_file_removal_can_roll_back(tmp_path):
     (tmp_path / name).unlink()
     assert updater.recover(tmp_path) == 0
     assert (tmp_path / name).read_bytes() == old
+
+
+def test_publication_planning_replaces_root_modules_without_ml(tmp_path):
+    files = application_files()
+    previous = {path: data for path, data in files.items()
+                if not path.startswith('stash_ai/publication/planning/')
+                and path not in ('stash_ai/publication/groups.py', 'stash_ai/publication/index.py')}
+    previous.update({f'stash_ai/{name}.py': b'PREVIOUS_PUBLICATION = True\n'
+                     for name in ('marker_groups', 'marker_index')})
+    installed(tmp_path, Remote(previous))
+    result = subprocess.run([sys.executable, '-c', 'from stash_ai import marker_groups, marker_index'],
+                            cwd=tmp_path, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert updater.update(tmp_path, Remote(files)) == 0
+    for name in ('marker_groups', 'marker_index'):
+        assert not (tmp_path / f'stash_ai/{name}.py').exists()
+        assert not list((tmp_path / 'stash_ai/__pycache__').glob(name + '.*.pyc'))
+    result = subprocess.run([sys.executable, '-I', '-c', """
+import sys
+sys.path.insert(0, '.')
+from stash_ai.publication.planning.types import MergeSyncPlan
+from stash_ai.publication.planning.merged_evidence import prepare_sync_evidence
+from stash_ai.publication.planning.merged_tags import plan_scene_tags
+from stash_ai.publication.planning.merged_markers import plan_markers
+from stash_ai.publication.planning.separate_markers import plan_marker_changes
+from stash_ai.publication.groups import group_name, managed_group, group_description
+from stash_ai.publication.index import PreviousMarkerRanges
+from stash_ai.commands.marker_groups import run_backfill
+from stash_ai.cleanup.groups import prune_groups
+assert group_name('example') == 'm:example'
+assert managed_group({'name': 'm:example', 'description': group_description('example')})
+assert PreviousMarkerRanges([]).temporal({'seconds': 1, 'primary_tag': {'name': 'ai:example'}})['seconds'] == 1
+assert not {'torch', 'numpy', 'onnxruntime', 'tqdm'} & set(sys.modules)
+"""], cwd=tmp_path, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+
+def test_recovery_and_fingerprints_migrate_without_ml_or_working_directory_dependency(tmp_path):
+    files = application_files()
+    moved = ('stash_ai/storage/recovery.py', 'stash_ai/publication/recovery.py',
+             'stash_ai/commands/recovery.py', 'stash_ai/publication/fingerprints.py',
+             'stash_ai/storage/segments.py', 'stash_ai/storage/merge_checks.py')
+    previous = {path: data for path, data in files.items() if path not in moved}
+    previous.update({f'stash_ai/{name}.py': b'PREVIOUS_STATE = True\n'
+                     for name in ('performance', 'recovery')})
+    installed(tmp_path, Remote(previous))
+    result = subprocess.run([sys.executable, '-c', 'from stash_ai import performance, recovery'],
+                            cwd=tmp_path, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert updater.update(tmp_path, Remote(files)) == 0
+    for name in ('performance', 'recovery'):
+        assert not (tmp_path / f'stash_ai/{name}.py').exists()
+        assert not list((tmp_path / 'stash_ai/__pycache__').glob(name + '.*.pyc'))
+    result = subprocess.run([sys.executable, '-I', '-c', """
+import os
+import sys
+from copy import deepcopy
+sys.path.insert(0, os.path.abspath('.'))
+from stash_ai.storage.segments import StoredSegment, segment_digest
+from stash_ai.publication.fingerprints import publication_code
+from stash_ai.storage.recovery import abandon
+from stash_ai.publication.recovery import reconcile
+from stash_ai.commands.recovery import run_only
+before = publication_code()
+os.chdir('stash_ai/publication')
+assert publication_code() == before
+borrowed = StoredSegment(meta={}, items=[])
+original = segment_digest(borrowed)
+detached = deepcopy(borrowed)
+detached['items'].append({'new': True})
+assert type(detached) is dict
+assert segment_digest(detached) != original
+assert segment_digest(borrowed) == original
+assert not {'torch', 'numpy', 'onnxruntime', 'tqdm'} & set(sys.modules)
+"""], cwd=tmp_path, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+
+def test_extracted_bootstrap_and_scene_selection_install_without_ml(tmp_path):
+    files = application_files()
+    previous = {path: data for path, data in files.items()
+                if path not in ('stash_ai/commands/bootstrap.py', 'stash_ai/inference/scene_predictions.py')}
+    installed(tmp_path, Remote(previous))
+    assert updater.update(tmp_path, Remote(files)) == 0
+    result = subprocess.run([sys.executable, '-I', '-c', """
+import sys
+sys.path.insert(0, '.')
+from stash_ai.commands.bootstrap import catalogs, policies, runtime_options
+from stash_ai.runs.separate import run
+from stash_ai.inference.prediction import predict_scene
+from stash_ai.inference.scene_predictions import retained_scores, temporal_scores
+from stash_ai.evidence.temporal.policy import TemporalPolicy
+assert retained_scores([0.8, 0.2], ['visible', 'retained'], [{'tags': [('retained', 0.3)]}]) == [('retained', 0.2)]
+assert temporal_scores([0.8, 0.2], ['visible', 'retained'], [0, 1], {}, 0.5,
+                       TemporalPolicy(), raw_scene=True, exclusions={'visible'}) == [('visible', 0.8), ('retained', 0.2)]
+assert not {'torch', 'numpy', 'onnxruntime', 'tqdm'} & set(sys.modules)
+"""], cwd=tmp_path, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr

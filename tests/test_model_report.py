@@ -1,15 +1,20 @@
 """Offline model utility and leave-one-model-out ablation reporting."""
 
+from stash_ai.reports.model.comparison import _marker_key, _marker_delta
+from stash_ai.evidence.occurrences import is_occurrence
+
 from dataclasses import replace
 import json
 
 import pytest
 
 from stash_ai import cli as app
-from stash_ai import merge
-from stash_ai.reports import model as model_report
-from stash_ai.reports import model_workers
-from stash_ai.temporal import TemporalPolicy
+from stash_ai.evidence import pipeline as merge
+import stash_ai.evidence.intervals as merge_intervals
+import stash_ai.storage.store as merge_store
+from stash_ai.reports.model import report as model_report
+from stash_ai.reports.model import workers as model_workers
+from stash_ai.evidence.temporal.policy import TemporalPolicy
 
 
 pytestmark = pytest.mark.usefixtures("reset_temporal")
@@ -59,7 +64,7 @@ def _report_marker(tag, start, end, *, occurrence=False, extras=()):
 
 
 def _naive_overlap(left, right):
-    if left["tag"] != right["tag"] or bool(model_report.is_occurrence(left)) != bool(model_report.is_occurrence(right)):
+    if left["tag"] != right["tag"] or bool(is_occurrence(left)) != bool(is_occurrence(right)):
         return False
     a0, b0 = float(left["start"]), float(right["start"])
     a1 = float(left["end"]) if left["end"] is not None else a0
@@ -68,21 +73,21 @@ def _naive_overlap(left, right):
 
 
 def _naive_marker_delta(full, reduced):
-    reduced_keys = {model_report._marker_key(item) for item in reduced}
-    full_keys = {model_report._marker_key(item) for item in full}
+    reduced_keys = {_marker_key(item) for item in reduced}
+    full_keys = {_marker_key(item) for item in full}
     full_overlap = [any(_naive_overlap(marker, other) for other in reduced) for marker in full]
     reduced_overlap = [any(_naive_overlap(marker, other) for other in full) for marker in reduced]
     return {
         "lost": sum(not overlap for overlap in full_overlap),
         "changed": sum(
-            overlap and model_report._marker_key(marker) not in reduced_keys
+            overlap and _marker_key(marker) not in reduced_keys
             for marker, overlap in zip(full, full_overlap)
         ),
         "added": sum(not overlap for overlap in reduced_overlap),
         "exact_removed": len(full_keys - reduced_keys),
         "exact_added": len(reduced_keys - full_keys),
         "occurrences_lost": sum(
-            model_report.is_occurrence(marker) and not overlap
+            is_occurrence(marker) and not overlap
             for marker, overlap in zip(full, full_overlap)
         ),
     }
@@ -107,7 +112,7 @@ def test_marker_delta_linear_overlap_matches_quadratic_reference():
     full.sort(key=lambda item: (item["start"], item["tag"]))
     reduced.sort(key=lambda item: (item["start"], item["tag"]))
 
-    assert model_report._marker_delta(full, reduced) == _naive_marker_delta(full, reduced)
+    assert _marker_delta(full, reduced) == _naive_marker_delta(full, reduced)
 
 
 def test_selected_sources_replays_consensus_instead_of_filtering_finished_markers(tmp_path):
@@ -121,7 +126,7 @@ def test_selected_sources_replays_consensus_instead_of_filtering_finished_marker
     )
 
     weak = .72
-    with merge.StateStore(path, "scope") as state:
+    with merge_store.StateStore(path, "scope") as state:
         for source in ("wd", "dtq"):
             outputs = inference_pair("consensus_only", score=weak, identity="identical-input")
             outputs["scene"]["items"] = []
@@ -129,13 +134,13 @@ def test_selected_sources_replays_consensus_instead_of_filtering_finished_marker
             outputs["markers"]["meta"]["inference_signature"] = source + "-markers"
             state.put("1", source, outputs)
 
-    with merge.StateStore(path, "scope", True) as state:
+    with merge_store.StateStore(path, "scope", True) as state:
         _, full = merge.evidence(app, state, "1", policies, policies)
         _, without_dtq = merge.evidence(
             app, state, "1", policies, policies, selected_sources={"wd"})
 
-    assert merge.union_intervals(full)
-    assert merge.union_intervals(without_dtq) == []
+    assert merge_intervals.union_intervals(full)
+    assert merge_intervals.union_intervals(without_dtq) == []
 
 
 def test_ablation_report_distinguishes_redundant_and_unique_models(tmp_path):
@@ -143,7 +148,7 @@ def test_ablation_report_distinguishes_redundant_and_unique_models(tmp_path):
     policies = empty_policies()
     app.TEMPORAL_POLICY = TemporalPolicy(enabled=False)
 
-    with merge.StateStore(path, "scope") as state:
+    with merge_store.StateStore(path, "scope") as state:
         state.put("1", "wd", inference_pair("shared"))
         dtq = inference_pair("shared")
         dtq["scene"]["meta"]["inference_signature"] = "dtq-scene"
@@ -155,7 +160,7 @@ def test_ablation_report_distinguishes_redundant_and_unique_models(tmp_path):
         unique["markers"]["meta"]["inference_signature"] = "joy-markers"
         state.put("1", "joytag", unique)
 
-    with merge.StateStore(path, "scope", True) as state:
+    with merge_store.StateStore(path, "scope", True) as state:
         report = model_report.build_report(app, state, ["1"], policies, policies)
 
     rows = {row["model"]: row for row in report["models"]}
@@ -194,7 +199,7 @@ def test_ablation_replays_only_models_present_in_scene(tmp_path, monkeypatch):
     policies = empty_policies()
     app.TEMPORAL_POLICY = TemporalPolicy(enabled=False)
 
-    with merge.StateStore(path, "scope") as state:
+    with merge_store.StateStore(path, "scope") as state:
         state.put("1", "wd", inference_pair("only"))
 
     calls = []
@@ -205,7 +210,7 @@ def test_ablation_replays_only_models_present_in_scene(tmp_path, monkeypatch):
         return original(*args, **kwargs)
 
     monkeypatch.setattr(merge, "evidence", evidence)
-    with merge.StateStore(path, "scope", True) as state:
+    with merge_store.StateStore(path, "scope", True) as state:
         report = model_report.build_report(
             app, state, ["1"], policies, policies)
 
@@ -239,21 +244,21 @@ def test_report_file_is_new_json(tmp_path):
 
 def test_cli_model_report_uses_saved_evidence_without_models_or_stash(tmp_path, monkeypatch, capsys):
     path = tmp_path / "state.sqlite3"
-    scope = merge.scope_for(app.STASH_URL)
-    with merge.StateStore(path, scope) as state:
+    scope = merge_store.scope_for(app.STASH_URL)
+    with merge_store.StateStore(path, scope) as state:
         state.put("1", "wd", inference_pair("saved"))
 
     destination = tmp_path / "model-report.json"
     monkeypatch.setattr(app, "load_model_settings", lambda *a, **k: pytest.fail("loaded model settings"))
     monkeypatch.setattr(app, "create_stash_client", lambda *a, **k: pytest.fail("connected to Stash"))
     preloaded = []
-    original_preload = merge.StateStore.preload_sources
+    original_preload = merge_store.StateStore.preload_sources
 
     def preload_sources(store):
         preloaded.append(True)
         return original_preload(store)
 
-    monkeypatch.setattr(merge.StateStore, "preload_sources", preload_sources)
+    monkeypatch.setattr(merge_store.StateStore, "preload_sources", preload_sources)
 
     assert app.main([
         "--state-db", str(path),
@@ -271,8 +276,8 @@ def test_cli_model_report_uses_saved_evidence_without_models_or_stash(tmp_path, 
 
 def test_cli_model_report_accepts_scene_filter_and_rejects_existing_output(tmp_path):
     path = tmp_path / "state.sqlite3"
-    scope = merge.scope_for(app.STASH_URL)
-    with merge.StateStore(path, scope) as state:
+    scope = merge_store.scope_for(app.STASH_URL)
+    with merge_store.StateStore(path, scope) as state:
         state.put("1", "wd", inference_pair("one"))
         state.put("2", "wd", inference_pair("two"))
 
@@ -292,8 +297,8 @@ def test_cli_model_report_accepts_scene_filter_and_rejects_existing_output(tmp_p
 
 def test_parallel_model_report_matches_serial_output(tmp_path):
     path = tmp_path / "state.sqlite3"
-    scope = merge.scope_for(app.STASH_URL)
-    with merge.StateStore(path, scope) as state:
+    scope = merge_store.scope_for(app.STASH_URL)
+    with merge_store.StateStore(path, scope) as state:
         for scene in range(1, 7):
             shared = inference_pair("shared-" + str(scene))
             shared["scene"]["meta"]["inference_signature"] = "wd-scene-" + str(scene)
@@ -343,12 +348,12 @@ def test_empty_parallel_report_does_not_open_database(tmp_path):
 @pytest.mark.parametrize("preload", [False, True])
 def test_parallel_report_single_scene_fallback_is_read_only(tmp_path, preload):
     path = tmp_path / "state.sqlite3"
-    scope = merge.scope_for(app.STASH_URL)
+    scope = merge_store.scope_for(app.STASH_URL)
     policies = empty_policies()
-    with merge.StateStore(path, scope) as state:
+    with merge_store.StateStore(path, scope) as state:
         state.put("1", "wd", inference_pair("common"))
     before = path.read_bytes()
-    with merge.StateStore(path, scope, True, allow_cleanup=True) as state:
+    with merge_store.StateStore(path, scope, True, allow_cleanup=True) as state:
         serial = model_report.build_report(app, state, ["1"], policies, policies)
     parallel = model_workers.build_report_parallel(
         app, path, scope, ["1"], policies, policies,

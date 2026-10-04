@@ -10,7 +10,7 @@ import pytest
 @pytest.fixture
 def reset_multimodel(monkeypatch):
     from stash_ai import cli as app
-    from stash_ai.temporal import TemporalPolicy
+    from stash_ai.evidence.temporal.policy import TemporalPolicy
     monkeypatch.setattr(app,"DEFAULT_TEMPORAL",False)
     monkeypatch.setattr(app,"TEMPORAL_POLICY",TemporalPolicy(enabled=False))
     # Preserve regression coverage of the explicitly available separate mode.
@@ -28,7 +28,7 @@ def reset_multimodel(monkeypatch):
 @pytest.fixture
 def reset_merge(monkeypatch, tmp_path):
     from stash_ai import cli as app
-    from stash_ai.temporal import TemporalPolicy
+    from stash_ai.evidence.temporal.policy import TemporalPolicy
     monkeypatch.setattr(app,"DEFAULT_TEMPORAL",False)
     monkeypatch.setattr(app,"TEMPORAL_POLICY",TemporalPolicy(enabled=False))
     for key, value in dict(DEFAULT_OUTPUT_MODE="merged", DEFAULT_RESUME=False, PREFETCH_BATCHES=0, MERGE_STATE_FILE=tmp_path/"sources.sqlite3",
@@ -43,7 +43,7 @@ def reset_merge(monkeypatch, tmp_path):
 @pytest.fixture
 def reset_progress(monkeypatch,tmp_path):
     from stash_ai import cli as app
-    from stash_ai.temporal import TemporalPolicy
+    from stash_ai.evidence.temporal.policy import TemporalPolicy
     monkeypatch.setattr(app,"DEFAULT_TEMPORAL",False)
     monkeypatch.setattr(app,"TEMPORAL_POLICY",TemporalPolicy(enabled=False))
     for key,value in dict(DEFAULT_OUTPUT_MODE="merged",DEFAULT_RESUME=True,PREFETCH_BATCHES=0,
@@ -57,7 +57,7 @@ def reset_progress(monkeypatch,tmp_path):
 @pytest.fixture
 def reset_temporal(monkeypatch, tmp_path):
     from stash_ai import cli as app
-    from stash_ai.temporal import TemporalPolicy
+    from stash_ai.evidence.temporal.policy import TemporalPolicy
     for key, value in dict(DEFAULT_OUTPUT_MODE="merged", DEFAULT_RESUME=True, DEFAULT_TEMPORAL=True,
         TEMPORAL_POLICY=TemporalPolicy(), PREFETCH_BATCHES=0,
         MERGE_STATE_FILE=tmp_path/"state.sqlite3", DRY_RUN=False, APPLY_SCENE_TAGS=True, CREATE_MARKERS=True,

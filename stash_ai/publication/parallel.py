@@ -69,7 +69,7 @@ def _worker_evidence(scene_id):
     """Return one scene's merge evidence or a serializable failure."""
     if _WORKER_APP is None or _WORKER_STORE is None:
         return str(scene_id), None, None, None, "Merge worker was not initialized."
-    from stash_ai import merge
+    from stash_ai.evidence import pipeline as merge
 
     diagnostics = Counter()
     try:

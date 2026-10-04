@@ -1,5 +1,7 @@
 """Privacy and usefulness guarantees for anonymous developer diagnostics."""
 
+from stash_ai.reports.developer.distribution import Distribution
+
 import hashlib
 import json
 import sqlite3
@@ -7,8 +9,8 @@ import sqlite3
 import pytest
 
 from stash_ai import cli as app
-from stash_ai.reports import developer as diagnostics
-from stash_ai import merge
+from stash_ai.reports.developer import report as diagnostics
+import stash_ai.storage.store as merge_store
 from stash_ai.storage.codec import encode
 
 
@@ -43,7 +45,7 @@ def segment(tag="private_tag_name"):
 
 
 def seed(path):
-    with merge.StateStore(path, "scope-secret-alpha") as state:
+    with merge_store.StateStore(path, "scope-secret-alpha") as state:
         state.put("scene-secret-123", "wd", {
             "scene": segment(),
             "markers": {
@@ -56,7 +58,7 @@ def seed(path):
                 ],
             },
         })
-    with merge.StateStore(path, "scope-secret-beta") as state:
+    with merge_store.StateStore(path, "scope-secret-beta") as state:
         state.put("scene-secret-999", "joytag", {"scene": segment("another_private_tag")})
 
     # Simulate unexpected/custom state. Names must never be copied into the report.
@@ -78,7 +80,7 @@ def serialized(report):
 
 
 def test_distribution_memory_is_bounded_for_many_distinct_values():
-    distribution = diagnostics.Distribution()
+    distribution = Distribution()
     for value in range(100_000):
         distribution.add(value)
 
@@ -93,12 +95,12 @@ def test_distribution_memory_is_bounded_for_many_distinct_values():
 
 
 def test_distribution_keeps_small_percentiles_exact_and_large_singletons_exact():
-    distribution = diagnostics.Distribution()
+    distribution = Distribution()
     for value in (0, 1, 2, 2, 3, 10_000, 10_000):
         distribution.add(value)
 
     assert distribution.summary()["p50"] == 2
-    single = diagnostics.Distribution()
+    single = Distribution()
     single.add(10_000)
     assert single.summary()["p50"] == single.summary()["p95"] == single.summary()["p99"] == 10_000
 

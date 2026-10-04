@@ -21,10 +21,10 @@ def main():
     if min(args.frames, args.labels, args.repeats) < 1:
         parser.error('frames, labels and repeats must be positive')
     from stash_ai import cli as app
-    from stash_ai.occurrences import occurrence_contributions
-    from stash_ai.performance import StoredSegment, segment_digest
+    from stash_ai.evidence.occurrences import occurrence_contributions
+    from stash_ai.storage.segments import StoredSegment, segment_digest
     from stash_ai.models import SOURCES
-    from stash_ai.temporal import TemporalPolicy
+    from stash_ai.evidence.temporal.policy import TemporalPolicy
     app.TEMPORAL_POLICY = TemporalPolicy()
     app.MAX_MARKERS_PER_SCENE = 0
     policies = {s: frozenset() for s in SOURCES}

@@ -81,7 +81,7 @@ class StashTransport:
         if self.dry_run and query.lstrip().startswith("mutation") and not read:
             raise RuntimeError("Internal error: mutation attempted during dry-run.")
         from requests import ConnectionError as RequestsConnectionError, Timeout as RequestsTimeout
-        from stash_ai.runtime import stage
+        from stash_ai.runtime.timing import stage
         import time
         report = getattr(self, 'report', None)
         attempts = self.http_retries + 1 if read else 1

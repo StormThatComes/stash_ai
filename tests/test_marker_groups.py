@@ -6,9 +6,11 @@ import pytest
 
 from stash_ai import cli as app
 from stash_ai.publication import merged as merge_sync
-from stash_ai import marker_groups as groups
-from stash_ai import merge
-from stash_ai.occurrences import OCCURRENCE_TAG
+from stash_ai.publication import groups as groups
+import stash_ai.cleanup.groups as groups_groups
+import stash_ai.evidence.labels as merge_labels
+import stash_ai.storage.store as merge_store
+from stash_ai.evidence.occurrences import OCCURRENCE_TAG
 from stash_ai.cleanup.prune import REQUIRED_COUNTS, prune_tags
 from stash_ai.models import WD
 from tests.helpers.cleanup import FastStash
@@ -24,7 +26,7 @@ pytestmark = pytest.mark.usefixtures("reset_progress")
 
 
 def manager(stash):
-    return groups.for_resolver(app, app.TagResolver(stash, source=merge.AI))
+    return groups.for_resolver(app, app.TagResolver(stash, source=merge_labels.AI))
 
 
 def attach(stash, marker, label, occurrence=False):
@@ -44,7 +46,7 @@ def backfill_args(tmp_path, *extra):
 
 
 def saved_marker_sources(tmp_path):
-    with merge.StateStore(tmp_path/'state.sqlite3', merge.scope_for(app.STASH_URL)) as state:
+    with merge_store.StateStore(tmp_path/'state.sqlite3', merge_store.scope_for(app.STASH_URL)) as state:
         state.publish('1', {'markers': {'contributions': [span('wd', 0, 2, 'blocked')]}})
 
 
@@ -52,8 +54,8 @@ def saved_marker_sources(tmp_path):
 def test_one_group_per_primary_independent_of_extra_labels_or_time_policy(tmp_path, monkeypatch, use_end):
     stash = Stash()
     monkeypatch.setattr(app, 'MARKER_USE_END_TIME', use_end)
-    with merge.StateStore(tmp_path/'state', 'fixture') as state:
-        resolver = app.TagResolver(stash, source=merge.AI)
+    with merge_store.StateStore(tmp_path/'state', 'fixture') as state:
+        resolver = app.TagResolver(stash, source=merge_labels.AI)
         contributions = [span('wd', 0, 5, 'abc', extras=['def']), span('joytag', 10, 15, 'abc')]
         merge_sync.sync_merged(app, stash, resolver, state, stash.find_scene('1'), [], contributions)
         assert len(stash.scene['scene_markers']) == 2
@@ -72,8 +74,8 @@ def test_one_group_per_primary_independent_of_extra_labels_or_time_policy(tmp_pa
 
 def test_union_and_split_drop_obsolete_managed_groups_but_keep_manual_extras(tmp_path):
     stash = Stash()
-    with merge.StateStore(tmp_path/'state', 'fixture') as state:
-        resolver = app.TagResolver(stash, source=merge.AI)
+    with merge_store.StateStore(tmp_path/'state', 'fixture') as state:
+        resolver = app.TagResolver(stash, source=merge_labels.AI)
         base = [span('wd', 0, 5, 'abc'), span('joytag', 10, 15, 'abc')]
         def sync(contributions):
             merge_sync.sync_merged(app, stash, resolver, state, stash.find_scene('1'), [], contributions)
@@ -88,7 +90,7 @@ def test_union_and_split_drop_obsolete_managed_groups_but_keep_manual_extras(tmp
         for marker in stash.scene['scene_markers']:
             assert group_names(marker) == {'m:abc', 'm:manual'}
             assert 'human' in {t['name'] for t in marker['tags']}
-        assert groups.prune_groups(stash, lambda _: None)['marker_group_tags_pruned'] == 1
+        assert groups_groups.prune_groups(stash, lambda _: None)['marker_group_tags_pruned'] == 1
         assert 'm:old' not in stash.tags and 'm:manual' in stash.tags
 
 
@@ -99,7 +101,7 @@ def test_repair_adds_direct_root_preserving_other_parents_and_disables_autotag(d
     tag = stash.tags['m:abc:occurance']
     tag.update(parents=[manual], ignore_auto_tag=False)
     stash.dry_run = dry; stash.writes.clear()
-    resolver = app.TagResolver(stash, source=merge.AI)
+    resolver = app.TagResolver(stash, source=merge_labels.AI)
     assert groups.for_resolver(app, resolver).resolve('abc', True) == identifier
     repaired = resolver.records['m:abc:occurance']
     assert {p['name'] for p in repaired['parents']} == {'ai_markers', 'human category'}
@@ -124,7 +126,7 @@ def test_name_collision_never_adopts_an_unrelated_group(existing):
 def test_changed_ownership_on_refresh_prevents_hierarchy_repair(monkeypatch):
     stash = Stash(); identifier = manager(stash).resolve('abc')
     stash.tags['m:abc']['parents'] = []
-    resolver = app.TagResolver(stash, source=merge.AI); resolver.preload()
+    resolver = app.TagResolver(stash, source=merge_labels.AI); resolver.preload()
     stash.tags['m:abc']['description'] = 'Now maintained manually'
     stash.writes.clear()
     with pytest.raises(ValueError, match='ownership changed'):
@@ -143,10 +145,10 @@ def test_missing_tags_respect_create_missing_switch(monkeypatch):
 @pytest.mark.parametrize('end', [None, 2])
 def test_backfill_uses_semantic_type_preserves_identity_and_ignores_manual_markers(tmp_path, monkeypatch, end):
     stash = FastStash()
-    regular = stash.marker(merge.AI, 'abc', '1'); regular['end_seconds'] = end
-    occurrence = stash.marker(merge.AI, 'abc', '2'); occurrence['tags'].append(stash.tag(OCCURRENCE_TAG))
+    regular = stash.marker(merge_labels.AI, 'abc', '1'); regular['end_seconds'] = end
+    occurrence = stash.marker(merge_labels.AI, 'abc', '2'); occurrence['tags'].append(stash.tag(OCCURRENCE_TAG))
     occurrence.update(title='[AI] custom title', seconds=12.125, end_seconds=None)
-    manual = stash.marker(merge.AI, 'abc', '3', manual=True)
+    manual = stash.marker(merge_labels.AI, 'abc', '3', manual=True)
     legacy = stash.marker(WD, 'abc', '4')
     for marker in (regular, occurrence): marker['tags'].append(stash.tag('human'))
     before = deepcopy(stash.scene)
@@ -169,7 +171,7 @@ def test_backfill_uses_semantic_type_preserves_identity_and_ignores_manual_marke
 @pytest.mark.parametrize('dry', [False, True])
 def test_backfill_replaces_core_and_type_groups_and_prunes_only_unused(tmp_path, monkeypatch, capsys, dry):
     stash = FastStash()
-    marker = stash.marker(merge.AI, 'abc', '1')
+    marker = stash.marker(merge_labels.AI, 'abc', '1')
     attach(stash, marker, 'abc', True)
     # Simulate a core/type edit after publication; the old group is still attached.
     marker['primary_tag'] = stash.tag('ai:def')
@@ -190,11 +192,11 @@ def test_backfill_replaces_core_and_type_groups_and_prunes_only_unused(tmp_path,
 
 def test_backfill_failure_keeps_orphans_for_retry_and_does_not_mutate_raw_evidence(tmp_path, monkeypatch):
     stash = FastStash()
-    for identifier in ('1', '2'): stash.marker(merge.AI, 'abc', identifier)
+    for identifier in ('1', '2'): stash.marker(merge_labels.AI, 'abc', identifier)
     manager(stash).resolve('orphan')
     install(monkeypatch, stash)
     path = tmp_path/'state.sqlite3'
-    with merge.StateStore(path, merge.scope_for(app.STASH_URL)) as state:
+    with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL)) as state:
         state.put('1', 'wd', {'markers': {'mode': 'frames', 'meta': {}, 'items': []}})
         raw = state.records('1', 'markers')
     update = stash.update_marker
@@ -207,7 +209,7 @@ def test_backfill_failure_keeps_orphans_for_retry_and_does_not_mutate_raw_eviden
     monkeypatch.setattr(stash, 'update_marker', update)
     assert app.main(backfill_args(tmp_path)) == 0
     assert 'm:orphan' not in stash.tags
-    with merge.StateStore(path, merge.scope_for(app.STASH_URL), True) as state:
+    with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL), True) as state:
         assert state.records('1', 'markers') == raw
 
 
@@ -246,7 +248,7 @@ def test_cleanup_removes_both_groups_with_matching_dry_run_counts(tmp_path, monk
     stash = SQLStash() if strategy == 'sql' else FastStash()
     saved_marker_sources(tmp_path)
     for identifier, occurrence in [('1', False), ('2', True)]:
-        attach(stash, stash.marker(merge.AI, 'blocked', identifier), 'blocked', occurrence)
+        attach(stash, stash.marker(merge_labels.AI, 'blocked', identifier), 'blocked', occurrence)
     stash.dry_run = dry; stash.writes.clear()
     before = deepcopy((stash.tags, stash.scenes))
     install(monkeypatch, stash)
@@ -268,7 +270,7 @@ def test_cleanup_removes_both_groups_with_matching_dry_run_counts(tmp_path, monk
 def test_scoped_cleanup_keeps_group_used_on_another_scene(tmp_path, monkeypatch, strategy):
     stash = SQLStash() if strategy == 'sql' else FastStash()
     saved_marker_sources(tmp_path)
-    marker = stash.marker(merge.AI, 'blocked', '1'); attach(stash, marker, 'blocked')
+    marker = stash.marker(merge_labels.AI, 'blocked', '1'); attach(stash, marker, 'blocked')
     second = deepcopy(stash.scene); second['id'] = '2'; second['scene_markers'][0]['id'] = '2'
     stash.scenes['2'] = second
     install(monkeypatch, stash)
@@ -279,7 +281,7 @@ def test_scoped_cleanup_keeps_group_used_on_another_scene(tmp_path, monkeypatch,
 
 def test_scene_tag_only_cleanup_does_not_touch_groups(tmp_path, monkeypatch):
     stash = FastStash()
-    attach(stash, stash.marker(merge.AI, 'blocked', '1'), 'blocked')
+    attach(stash, stash.marker(merge_labels.AI, 'blocked', '1'), 'blocked')
     before = deepcopy(stash.scene['scene_markers'])
     install(monkeypatch, stash)
     args = options(tmp_path, cores=['blocked'])

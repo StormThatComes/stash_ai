@@ -7,11 +7,12 @@ import pytest
 
 from stash_ai.rethreshold import markers as marker_updates
 from stash_ai import cli as app
-from stash_ai import merge
+from stash_ai.evidence import pipeline as merge
+import stash_ai.storage.store as merge_store
 from stash_ai.publication import parallel as merge_parallel
-from stash_ai import thresholds
+import stash_ai.evidence.identity as thresholds_identity
 from stash_ai.publication.parallel import iter_parallel_evidence
-from stash_ai.temporal import TemporalPolicy
+from stash_ai.evidence.temporal.policy import TemporalPolicy
 from stash_ai.models import ModelSettings, SOURCES
 from tests.helpers.evidence import empty_policies, segment
 
@@ -42,10 +43,10 @@ def _normalized(value):
 def test_parallel_worker_tolerates_parent_publication_commits(tmp_path, rethresholded):
     app.TEMPORAL_POLICY = TemporalPolicy(enabled=False)
     path = tmp_path / "state.sqlite3"
-    scope = merge.scope_for(app.STASH_URL)
+    scope = merge_store.scope_for(app.STASH_URL)
     policies = empty_policies()
 
-    with merge.StateStore(path, scope) as store:
+    with merge_store.StateStore(path, scope) as store:
         store.put("1", "wd", _outputs("wd", "one"))
         store.put("2", "dtq", _outputs("dtq", "two"))
         if rethresholded:
@@ -66,13 +67,13 @@ def test_parallel_worker_tolerates_parent_publication_commits(tmp_path, rethresh
     try:
         if rethresholded:
             assert worker.preview_source
-            assert worker.model_records('1', 'markers', 'wd')[0][thresholds.OVERRIDE] == .95
+            assert worker.model_records('1', 'markers', 'wd')[0][thresholds_identity.OVERRIDE] == .95
         first = merge_parallel._worker_evidence("1")
         assert first[-1] is None
 
         # The parent publishes one prepared scene while the same worker remains
         # alive for later scenes. This changes DB data_version but not results.
-        with merge.StateStore(path, scope) as parent:
+        with merge_store.StateStore(path, scope) as parent:
             parent.publish("1", {"scene": {"contributions": []}})
 
         second = merge_parallel._worker_evidence("2")
@@ -89,15 +90,15 @@ def test_parallel_worker_tolerates_parent_publication_commits(tmp_path, rethresh
 def test_parallel_evidence_matches_serial_read_only(tmp_path):
     app.TEMPORAL_POLICY = TemporalPolicy(enabled=False)
     path = tmp_path / "state.sqlite3"
-    scope = merge.scope_for(app.STASH_URL)
+    scope = merge_store.scope_for(app.STASH_URL)
     policies = empty_policies()
 
-    with merge.StateStore(path, scope) as store:
+    with merge_store.StateStore(path, scope) as store:
         store.put("1", "wd", _outputs("wd", "one"))
         store.put("2", "dtq", _outputs("dtq", "two"))
 
     expected = {}
-    with merge.StateStore(path, scope, True) as store:
+    with merge_store.StateStore(path, scope, True) as store:
         for scene_id in ("1", "2"):
             diagnostics = Counter()
             hits, spans = merge.evidence(
