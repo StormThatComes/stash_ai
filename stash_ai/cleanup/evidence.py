@@ -28,16 +28,13 @@ class EvidenceReplay:
 
     def _rebuild(self, options, matching):
         context = snapshot_context(self.app, options, 'markers')
-        # Retired blocklist remains only as part of the already published proof.
-        legacy_blocklist = frozenset(options.get('blocklist', []))
         policies = frozen_policies(options, 'core_exclusions', self.selected, self.core_policies)
-        frozen_tags = frozen_policies(options, 'tag_exclusions', self.selected, self.tag_policies,
-                                      legacy=legacy_blocklist)
+        frozen_tags = frozen_policies(options, 'tag_exclusions', self.selected, self.tag_policies)
         # Replay old proofs with frozen exclusions; clipping cannot admit new votes.
         candidates = merge_source_markers.marker_contributions(
             context, matching, policies, tag_policies=frozen_tags,
             allow_unknown_blocklist=True, allow_unknown_retention=True,
-            legacy_blocklist=legacy_blocklist)
+            frozen_exclusions=frozen_tags)
         return MarkerReplay(candidates, context, policies, matching, frozen_tags)
 
     def candidates(self, span):
@@ -71,9 +68,6 @@ def _clip_candidate(span, item, replay: MarkerReplay):
     if end <= start:
         return None
     clipped = {**item, 'start': start, 'end': end}
-    if span['build_options'].get('blocklist'):
-        # Later cleanup needs these frozen bans to validate the same legacy frames.
-        clipped['build_options'] = {**item['build_options'], 'blocklist': span['build_options']['blocklist']}
     if (start, end) != (item['start'], item['end']):
         clipped.update(hits=None, strong_hits=None, extra_evidence=[], cleanup_clipped=True)
         if clipped.get('derived') == 'shared_frames':

@@ -1,7 +1,7 @@
 """Versioned snapshot storage; callers continue to see expanded contributions."""
 
 FORMAT_KEY = '__stash_ai_snapshot__'
-FORMAT = 2
+FORMAT = 3
 
 
 def compact(snapshot):
@@ -82,9 +82,36 @@ def expand(value, *, version=FORMAT):
 
 def validate_policy(item):
     options = item.get('build_options')
-    if options is not None and 'policy' in options:
+    if options is not None:
         from stash_ai.evidence.temporal.policy import TemporalPolicy
+        from stash_ai.models import SOURCES
+        marker = {'policy', 'settings', 'marker_thresholds', 'core_exclusions', 'tag_exclusions'}
+        scene = {'policy', 'max_tags', 'scene_thresholds', 'scene_exclusions'}
+        if not isinstance(options, dict) or set(options) not in (marker, scene):
+            raise ValueError('Incomplete frozen build options; run --db-update.')
         TemporalPolicy.from_snapshot(options['policy'])
+        fields = ('core_exclusions', 'tag_exclusions') if set(options) == marker else ('scene_exclusions',)
+        for field in fields:
+            values = options[field]
+            if (not isinstance(values, dict) or set(values) != set(SOURCES)
+                    or any(not isinstance(tags, list) or any(not isinstance(tag, str) for tag in tags)
+                           for tags in values.values())):
+                raise ValueError('Incomplete frozen exclusions; run --db-update.')
+        thresholds = options['marker_thresholds' if set(options) == marker else 'scene_thresholds']
+        if not isinstance(thresholds, dict):
+            raise ValueError('Invalid frozen thresholds.')
+        if set(options) == marker:
+            settings = options['settings']
+            if not isinstance(settings, dict) or set(settings) != {
+                    'MARKER_MIN_HITS', 'MARKER_MERGE_GAP_SECONDS',
+                    'MARKER_MAX_TAGS_PER_FRAME', 'MAX_MARKERS_PER_SCENE'}:
+                raise ValueError('Incomplete frozen marker settings; run --db-update.')
+    if 'scene_evidence' in item:
+        if not isinstance(item['scene_evidence'], list) or any(
+                not isinstance(hit, dict) for hit in item['scene_evidence']):
+            raise ValueError('Invalid frozen scene evidence.')
+        for hit in item['scene_evidence']:
+            validate_policy(hit)
 
 
 def decode(value, report=None):

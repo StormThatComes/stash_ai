@@ -1,4 +1,4 @@
-"""Dictionary contracts at evidence boundaries; persisted JSON stays unchanged.
+"""Dictionary contracts at evidence boundaries.
 
 Retained records are discriminated by mode. Optional fields represent legacy
 records and derived evidence, rather than a new storage format or defaults.
@@ -21,13 +21,22 @@ class EvidenceMetadata(TypedDict, total=False):
     analysis_format: int
 
 
-class BuildOptions(TypedDict, total=False):
+class MarkerBuildOptions(TypedDict):
     policy: dict
     core_exclusions: dict[str, list[str]]
     tag_exclusions: dict[str, list[str]]
-    blocklist: list[str]
     marker_thresholds: dict[str, float]
+    settings: dict[str, int | float]
+
+
+class SceneBuildOptions(TypedDict):
+    policy: dict
+    max_tags: int
+    scene_exclusions: dict[str, list[str]]
     scene_thresholds: dict[str, float]
+
+
+BuildOptions = MarkerBuildOptions | SceneBuildOptions
 
 
 class SceneEntry(TypedDict):
