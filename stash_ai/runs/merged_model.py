@@ -5,7 +5,7 @@ from functools import partial
 
 from tqdm import tqdm
 
-from stash_ai import merge
+import stash_ai.inference.results as merge_results
 from stash_ai.storage import progress
 from stash_ai.inference import checkpoints, prediction, preparation
 from stash_ai.inference.identity import model_identity
@@ -45,7 +45,7 @@ class MergedModelRun:
             self.stats["skipped"] += 1
             return False
         if (self.app.SKIP_EXISTING_OUTPUTS and not self.args.restart
-                and merge.has_outputs(self.app, self.store, scene_id, self.key)):
+                and merge_results.has_outputs(self.app, self.store, scene_id, self.key)):
             self.stats["skipped"] += 1
             return False
         return True
@@ -63,7 +63,7 @@ class MergedModelRun:
             self.stats["reused"] += 1
             return True
         if args.resume and not args.restart:
-            from stash_ai.thresholds import reuse
+            from stash_ai.inference.reuse import reuse
             if reuse(self.app, store, scene_id, self.config, self.identity, cues, media.hashes, kinds):
                 if current['publication_reason'] != 'reused':
                     collapsed = progress.collapse_replacement_history(
@@ -122,7 +122,7 @@ class MergedModelRun:
             app, self.tagger, media, paths, cues, raw_scene=True, checkpoint=checkpoint,
             prefetch=args.prefetch_batches, analysis=analysis, report=self.report,
             prepare_workers=args.prepare_workers)
-        outputs = merge.capture_outputs(
+        outputs = merge_results.capture_outputs(
             app, self.config, self.vocabulary, cues, predictions, frames, analysis)
         for segment in outputs.values():
             segment["meta"].update(

@@ -18,7 +18,9 @@ from stash_ai.inference import sprites
 from stash_ai.storage import codec as state_codec
 from stash_ai.cleanup import evidence as cleanup_evidence
 from stash_ai import cli as app
-from stash_ai import merge
+from stash_ai.evidence import pipeline as merge
+import stash_ai.evidence.intervals as merge_intervals
+import stash_ai.storage.store as merge_store
 from stash_ai.evidence.temporal.policy import TemporalPolicy, load_policy
 from stash_ai.models import SOURCES
 from tests.helpers.evidence import segment
@@ -125,7 +127,7 @@ def test_v3_completed_vtt_results_are_reused_without_video_samples_or_model_load
     monkeypatch.setattr(app,'load_tagger',lambda *args:pytest.fail('base model results were recomputed'))
     assert app.main([*p.args,*(['--merge-only'] if mode=='merge-only' else [])])==0
     assert p.stash.scene==expected
-    with merge.StateStore(p.path,merge.scope_for(app.STASH_URL),True) as state:
+    with merge_store.StateStore(p.path,merge_store.scope_for(app.STASH_URL),True) as state:
         assert state.connection.execute('PRAGMA user_version').fetchone()==(5,)
         assert not state.connection.execute("SELECT 1 FROM sqlite_master WHERE name='refinement_progress'").fetchone()
         assert 'refinement' not in state.records('1','markers')['wd'][-1]
@@ -164,21 +166,21 @@ def test_explain_excludes_retired_video_evidence(pipeline,capsys):
 def test_frozen_old_policies_do_not_reenable_retired_options(tmp_path):
     policies={model:frozenset() for model in SOURCES}
     records={model:[segment(model,[[('core',.7)]]*3)] for model in ('wd','dtq','oppai')}
-    with merge.StateStore(tmp_path/'state.sqlite3','fixture') as state:
+    with merge_store.StateStore(tmp_path/'state.sqlite3','fixture') as state:
         for model,segments in records.items():state.put('1',model,{'markers':segments[0]})
         _,spans=merge.evidence(app,state,'1',policies,policies)
         for span in spans:
             span['build_options']['policy'].update(refine_enabled=True,refine_path_map=[{'stash':'/media','local':'/not-accessible'}])
-        assert merge.union_intervals(spans)[0]['sources']==['wd','dtq','oppai']
+        assert merge_intervals.union_intervals(spans)[0]['sources']==['wd','dtq','oppai']
         policies['wd']=frozenset({'core'})
         cleaned=cleanup_evidence.cleanup_support(app,state,'1',[s for s in spans if s['source']!='wd'],{'wd'},policies)
-        assert merge.union_intervals(cleaned)[0]['sources']==['dtq','oppai']
+        assert merge_intervals.union_intervals(cleaned)[0]['sources']==['dtq','oppai']
         assert all(not any(k.startswith('refine_') for k in span['build_options']['policy']) for span in cleaned)
 
 
 def test_appended_results_never_retain_retired_video_payload(tmp_path):
     data=segment('wd',[[('core',.9)]]*3)
-    with merge.StateStore(tmp_path/'state.sqlite3','fixture') as state:
+    with merge_store.StateStore(tmp_path/'state.sqlite3','fixture') as state:
         data['refinement']=old_video_payload()
         state.put('1','wd',{'markers':data},replace={'markers':False})
         state.put('1','wd',{'markers':data},replace={'markers':False})

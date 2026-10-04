@@ -226,7 +226,7 @@ class ResultStore:
         The evidence BLOB is never encoded or written by this path.
         """
         from stash_ai.storage.progress import index_result
-        from stash_ai.thresholds import _score
+        from stash_ai.evidence.thresholds import _score
         if model not in SOURCES or kind not in KINDS or not segments or not _score(threshold):
             raise ValueError('Invalid result threshold.')
         store = self.store

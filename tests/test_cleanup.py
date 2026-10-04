@@ -9,7 +9,9 @@ from stash_ai import cli as app
 from stash_ai.publication import merged as merge_sync
 from stash_ai.cleanup import state as cleanup
 from stash_ai.cleanup import client as cleanup_client
-from stash_ai import merge
+import stash_ai.evidence.labels as merge_labels
+import stash_ai.storage.results as merge_results
+import stash_ai.storage.store as merge_store
 from stash_ai.models import WD
 from tests.helpers.evidence import span
 from tests.helpers.evidence import hit
@@ -28,8 +30,8 @@ def test_global_cleanup_of_9000_scenes_never_fetches_scenes_or_predictions(tmp_p
     for i in range(1, 9001):
         stash.scenes[str(i)] = dict(id=str(i), tags=[blocked, human], scene_markers=[])
     stash.scene = stash.scenes['1']
-    stash.marker(merge.AI, 'blocked', '1', manual=True)
-    keep = stash.marker(merge.AI, 'keep', '2')
+    stash.marker(merge_labels.AI, 'blocked', '1', manual=True)
+    keep = stash.marker(merge_labels.AI, 'keep', '2')
     keep['tags'] += [stash.tag('op:blocked'), human]
     keep.update(seconds=10.125, end_seconds=63.625)
     stash.marker(WD, 'core_only', '3')
@@ -38,13 +40,13 @@ def test_global_cleanup_of_9000_scenes_never_fetches_scenes_or_predictions(tmp_p
     child['parents'] = [deepcopy(parent)]
     stash.images.append({'tags': [parent, human]})
     install(monkeypatch, stash)
-    monkeypatch.setattr(merge.StateStore, 'records', lambda *a, **k: pytest.fail('global cleanup decoded results'))
+    monkeypatch.setattr(merge_store.StateStore, 'records', lambda *a, **k: pytest.fail('global cleanup decoded results'))
     assert app.main(options(tmp_path, ['blocked'], ['core_only'], output=output)) == 0
     assert not stash.scene_reads
     assert all([t['name'] for t in s['tags']] == ['blocked'] for s in stash.scenes.values())
     assert {m['id'] for m in stash.scene['scene_markers']} == {'2', '4'}
     assert (keep['seconds'], keep['end_seconds']) == (10.125, 63.625)
-    assert {t['name'] for t in keep['tags']} == {merge.AI.owner_tag, 'blocked'}
+    assert {t['name'] for t in keep['tags']} == {merge_labels.AI.owner_tag, 'blocked'}
     assert child['name'] in stash.tags and child['parents'] == []
     assert [t['name'] for t in stash.images[0]['tags']] == ['blocked']
     assert 'wd:core_only' in stash.tags
@@ -59,7 +61,7 @@ def test_cursor_deletion_handles_overlapping_tags_once(tmp_path, monkeypatch):
     monkeypatch.setattr(cleanup_client, 'PAGE_SIZE', 3)
     stash = SQLStash()
     for i in range(1, 18):
-        marker = stash.marker(merge.AI, 'ban'+str(i % 5), str(i))
+        marker = stash.marker(merge_labels.AI, 'ban'+str(i % 5), str(i))
         marker['tags'] += [stash.tag('op:ban'+str(j)) for j in range(5)]
     install(monkeypatch, stash)
     assert app.main([*options(tmp_path, ['ban'+str(i) for i in range(5)]),
@@ -73,11 +75,11 @@ def test_cursor_deletion_handles_overlapping_tags_once(tmp_path, monkeypatch):
 
 def test_global_dry_run_changes_neither_stash_nor_existing_state(tmp_path, monkeypatch):
     stash = SQLStash(dry=True)
-    stash.marker(merge.AI, 'blocked', '1')
+    stash.marker(merge_labels.AI, 'blocked', '1')
     stash.scene['tags'] = [stash.tag('op:blocked')]
     args = options(tmp_path, ['blocked'])
     path = tmp_path/'state.sqlite3'
-    with merge.StateStore(path, merge.scope_for(app.STASH_URL)):
+    with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL)):
         pass
     before = deepcopy(stash.scenes), deepcopy(stash.tags), path.read_bytes(), path.stat().st_mtime_ns
     install(monkeypatch, stash)
@@ -89,7 +91,7 @@ def test_global_dry_run_changes_neither_stash_nor_existing_state(tmp_path, monke
 @pytest.mark.parametrize('failure', ['CleanupDeleteMarkers', 'CleanupDeleteTags'])
 def test_resume_reconciles_committed_batches_without_replaying_deleted_ids(tmp_path, monkeypatch, failure):
     stash = SQLStash()
-    stash.marker(merge.AI, 'blocked', '1')
+    stash.marker(merge_labels.AI, 'blocked', '1')
     stash.scene['tags'] = [stash.tag('op:blocked')]
     stash.fail_after = failure
     install(monkeypatch, stash)
@@ -97,18 +99,18 @@ def test_resume_reconciles_committed_batches_without_replaying_deleted_ids(tmp_p
     assert app.main(args) == 1
     path = tmp_path/'state.sqlite3'
     with pytest.raises(RuntimeError, match='Global cleanup is interrupted'):
-        merge.StateStore(path, merge.scope_for(app.STASH_URL))
+        merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL))
     with sqlite3.connect(path) as db:
         assert db.execute('SELECT pending FROM cleanup_state').fetchone()[0]
     assert app.main(args) == 0
     assert not stash.scene['scene_markers'] and not stash.scene['tags']
     assert len([op for op, _ in stash.writes if op == 'delete']) == 1
-    with merge.StateStore(path, merge.scope_for(app.STASH_URL)) as store:
+    with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL)) as store:
         assert store.cleanup_generation == 1 and store.cleanup_pending is None
 
 
 def test_changed_policy_during_interrupted_cleanup_is_rejected_before_mutations(tmp_path, monkeypatch):
-    stash = SQLStash(); stash.marker(merge.AI, 'blocked', '1')
+    stash = SQLStash(); stash.marker(merge_labels.AI, 'blocked', '1')
     stash.fail_after = 'CleanupDeleteMarkers'
     install(monkeypatch, stash)
     assert app.main(options(tmp_path, ['blocked'])) == 1
@@ -119,10 +121,10 @@ def test_changed_policy_during_interrupted_cleanup_is_rejected_before_mutations(
 
 
 def test_pending_merge_blocks_global_deletion_before_first_mutation(tmp_path, monkeypatch):
-    stash = SQLStash(); stash.marker(merge.AI, 'blocked', '1')
+    stash = SQLStash(); stash.marker(merge_labels.AI, 'blocked', '1')
     install(monkeypatch, stash)
     args = options(tmp_path, ['blocked'])
-    with merge.StateStore(tmp_path/'state.sqlite3', merge.scope_for(app.STASH_URL)) as store:
+    with merge_store.StateStore(tmp_path/'state.sqlite3', merge_store.scope_for(app.STASH_URL)) as store:
         store.prepare('1', {'markers': {'contributions': []}})
     assert app.main(args) == 1
     assert not stash.writes and 'ai:blocked' in stash.tags
@@ -144,11 +146,11 @@ def test_publication_masks_are_lazy_and_unbanning_restores_raw_evidence(pipeline
     before = blobs()
     args = options(tmp_path, ['common'])
     with monkeypatch.context() as patch:
-        patch.setattr(merge.StateStore, 'unpack', lambda *_: pytest.fail('cleanup decompressed per-scene evidence'))
+        patch.setattr(merge_store.StateStore, 'unpack', lambda *_: pytest.fail('cleanup decompressed per-scene evidence'))
         assert app.main(args) == 0
     assert blobs() == before
-    with merge.StateStore(p.path, merge.scope_for(app.STASH_URL), cache_bytes=2**20) as store:
-        for kind in merge.KINDS:
+    with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), cache_bytes=2**20) as store:
+        for kind in merge_results.KINDS:
             snapshot, _ = store.snapshot('1', kind)
             assert all(item['tag'] != 'common' for item in snapshot['contributions'])
             assert all('common' not in item.get('extra_tags', []) for item in snapshot['contributions'])
@@ -159,11 +161,11 @@ def test_publication_masks_are_lazy_and_unbanning_restores_raw_evidence(pipeline
     monkeypatch.setattr(app, 'load_tagger', lambda *_: pytest.fail('unban reran inference'))
     assert app.main(merge_args) == 0
     assert 'ai:common' in {t['name'] for t in stash.scene['tags']}
-    with merge.StateStore(p.path, merge.scope_for(app.STASH_URL)) as store:
+    with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL)) as store:
         assert any(item['tag'] == 'common' for item in store.snapshot('1', 'scene')[0]['contributions'])
     assert blobs()[0] == before[0]
     assert app.main(options(tmp_path, ['common'])) == 0
-    with merge.StateStore(p.path, merge.scope_for(app.STASH_URL)) as store:
+    with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL)) as store:
         assert store.cleanup_generation == 2
         assert not any(item['tag'] == 'common' for item in store.snapshot('1', 'scene')[0]['contributions'])
 
@@ -172,8 +174,8 @@ def test_source_specific_cleanup_only_revisits_matching_scene_and_splits_bridge(
     stash = SQLStash()
     for i in range(2, 100):
         stash.scenes[str(i)] = dict(id=str(i), tags=[stash.tag('ai:blocked')], scene_markers=[])
-    with merge.StateStore(tmp_path/'state.sqlite3', merge.scope_for(app.STASH_URL)) as store:
-        merge_sync.sync_merged(app, stash, app.TagResolver(stash, source=merge.AI), store, stash.find_scene('1'),
+    with merge_store.StateStore(tmp_path/'state.sqlite3', merge_store.scope_for(app.STASH_URL)) as store:
+        merge_sync.sync_merged(app, stash, app.TagResolver(stash, source=merge_labels.AI), store, stash.find_scene('1'),
             [hit('wd'), hit('oppai')], [span('joytag', 10, 20), span('oppai', 20, 30), span('wd', 30, 40)])
     install(monkeypatch, stash)
     stash.scene_reads.clear()
@@ -223,7 +225,7 @@ def test_lazy_global_mask_keeps_frozen_exclusions_during_later_source_cleanup(pi
     assert stash.scene['scene_markers']
     assert all(tag['name'] != 'ai:extra' for marker in stash.scene['scene_markers']
                for tag in [marker['primary_tag'], *marker['tags']])
-    with merge.StateStore(p.path, merge.scope_for(app.STASH_URL)) as store:
+    with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL)) as store:
         spans = store.snapshot('1', 'markers')[0]['contributions']
         assert spans and any(item.get('build_options') for item in spans)
         for item in spans:

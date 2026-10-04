@@ -4,7 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from stash_ai import merge, performance
+from stash_ai import performance
+from stash_ai.evidence import pipeline as merge
 from stash_ai.storage import progress
 from stash_ai.publication import parallel as merge_parallel
 from stash_ai.publication import merged as merge_sync

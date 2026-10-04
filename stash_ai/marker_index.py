@@ -3,7 +3,8 @@ from bisect import bisect_left, bisect_right
 from collections import defaultdict
 from math import inf, isfinite, nextafter
 
-from stash_ai import merge
+import stash_ai.evidence.intervals as merge_intervals
+import stash_ai.evidence.labels as merge_labels
 
 
 def _start_bounds(starts, start, tolerance):
@@ -22,7 +23,7 @@ class PreviousMarkerRanges:
         grouped = defaultdict(dict)
         for item in ranges:
             if item['end'] is not None:
-                name, start = merge.AI.prefix + item['tag'], round(item['start'], 3)
+                name, start = merge_labels.AI.prefix + item['tag'], round(item['start'], 3)
                 grouped[name][start] = max(grouped[name].get(start, -inf), item['end'])
         self.by_name = {name: (sorted(values), values) for name, values in grouped.items()}
 
@@ -74,7 +75,7 @@ class _IntervalBucket:
             lo, hi = _start_bounds(self.starts, start, tolerance)
             candidates.update(range(lo, hi))
         rows = [self.rows[offset] for offset in candidates
-                if merge.overlaps(self.rows[offset][2], interval, tolerance)]
+                if merge_intervals.overlaps(self.rows[offset][2], interval, tolerance)]
         return [row[1] for row in sorted(rows, key=lambda row: row[0])]
 
 

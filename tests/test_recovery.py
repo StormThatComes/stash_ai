@@ -8,9 +8,10 @@ from stash_ai import cli as app
 from stash_ai.cleanup import evidence as cleanup_evidence
 from stash_ai.publication import merged as merge_sync
 from stash_ai.cleanup import state as cleanup
-from stash_ai import merge
+import stash_ai.evidence.labels as merge_labels
+import stash_ai.storage.store as merge_store
 from stash_ai import recovery
-from stash_ai.occurrences import OCCURRENCE_TAG
+from stash_ai.evidence.occurrences import OCCURRENCE_TAG
 from tests.helpers.cleanup import FastStash
 from tests.helpers.cleanup import install
 from tests.helpers.cleanup import options
@@ -28,7 +29,7 @@ def state_path(tmp_path):
 
 
 def state(tmp_path, **kwargs):
-    return merge.StateStore(state_path(tmp_path), merge.scope_for(app.STASH_URL), **kwargs)
+    return merge_store.StateStore(state_path(tmp_path), merge_store.scope_for(app.STASH_URL), **kwargs)
 
 
 def seed(tmp_path, stash, spans=None):
@@ -38,7 +39,7 @@ def seed(tmp_path, stash, spans=None):
         store.put('1', 'wd', {
             'scene': dict(mode='scene', items=hits, meta={'origin': 'legacy'}),
             'markers': dict(mode='spans', items=spans, meta={'origin': 'legacy'})})
-        merge_sync.sync_merged(app, stash, app.TagResolver(stash, source=merge.AI), store, stash.find_scene('1'), hits, spans)
+        merge_sync.sync_merged(app, stash, app.TagResolver(stash, source=merge_labels.AI), store, stash.find_scene('1'), hits, spans)
 
 
 def raw_results(tmp_path):
@@ -136,7 +137,7 @@ def test_abandoned_merge_keeps_scene_association_ownership_after_lost_response(t
     with state(tmp_path) as store:
         monkeypatch.setattr(stash, 'update_scene_tags', lost)
         with pytest.raises(RuntimeError):
-            merge_sync.sync_merged(app, stash, app.TagResolver(stash, source=merge.AI), store,
+            merge_sync.sync_merged(app, stash, app.TagResolver(stash, source=merge_labels.AI), store,
                               stash.find_scene('1'), [hit('wd', 'abc')], [])
     monkeypatch.setattr(stash, 'update_scene_tags', actual)
     before = state_path(tmp_path).read_bytes()
@@ -145,7 +146,7 @@ def test_abandoned_merge_keeps_scene_association_ownership_after_lost_response(t
         assert recovery.abandon(store, lambda _: None)['publications_abandoned'] == 2
         assert not store.has_pending_publications()
         # New desired policy has no AI output. 'abc' must not become a manual tag.
-        merge_sync.sync_merged(app, stash, app.TagResolver(stash, source=merge.AI), store, stash.find_scene('1'), [], [])
+        merge_sync.sync_merged(app, stash, app.TagResolver(stash, source=merge_labels.AI), store, stash.find_scene('1'), [], [])
         assert not recovery.publications(store, '1', 'scene')
     if dry:
         assert state_path(tmp_path).read_bytes() == before and not stash.writes
@@ -161,7 +162,7 @@ def test_repeated_abandonment_retains_all_applied_scene_ownership(tmp_path):
             store.prepare('1', {'scene': {'owned_ids': [tag['id']], 'contributions': [hit('wd', name)]}})
             recovery.abandon(store, lambda _: None)
         assert len(recovery.publications(store, '1', 'scene')) == 2
-        merge_sync.sync_merged(app, stash, app.TagResolver(stash, source=merge.AI), store, stash.find_scene('1'), [], [])
+        merge_sync.sync_merged(app, stash, app.TagResolver(stash, source=merge_labels.AI), store, stash.find_scene('1'), [], [])
         assert stash.scene['tags'] == [human]
         assert not recovery.publications(store, '1', 'scene')
 
@@ -176,7 +177,7 @@ def test_abandoned_partial_merge_cleanup_preserves_observed_range_or_occurrence(
     with state(tmp_path) as store:
         store.prepare('1', {'markers': {'contributions': [point]}})
         # A new occurrence was created, but the old range was not yet removed.
-        created = stash.marker(merge.AI, 'core', '2000')
+        created = stash.marker(merge_labels.AI, 'core', '2000')
         created.update(seconds=8, end_seconds=None)
         created['tags'].append(stash.tag(OCCURRENCE_TAG))
         recovery.abandon(store, lambda _: None)
@@ -233,14 +234,14 @@ def test_recovery_metadata_survives_reopen_and_preview_clear_is_temporary(tmp_pa
 
 
 def test_abandon_refuses_active_writer_and_does_not_change_another_stash_scope(tmp_path):
-    with merge.StateStore(state_path(tmp_path), 'other') as other:
+    with merge_store.StateStore(state_path(tmp_path), 'other') as other:
         other.prepare('2', {'scene': {'owned_ids': [], 'contributions': []}})
     with state(tmp_path) as store:
         store.prepare('1', {'markers': {'contributions': []}})
         with pytest.raises(RuntimeError, match='Another merged-output process'):
             state(tmp_path, allow_cleanup=True)
         recovery.abandon(store, lambda _: None)
-    with merge.StateStore(state_path(tmp_path), 'other') as other:
+    with merge_store.StateStore(state_path(tmp_path), 'other') as other:
         assert other.has_pending_publications()
 
 

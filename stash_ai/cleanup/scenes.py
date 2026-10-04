@@ -4,7 +4,7 @@ from __future__ import annotations
 from collections import Counter
 from types import SimpleNamespace
 
-from stash_ai import merge
+import stash_ai.evidence.labels as merge_labels
 from stash_ai.publication import markers as marker_ops
 from stash_ai.publication import merged as merge_sync, separate as separate_sync
 from stash_ai.cleanup import evidence
@@ -14,7 +14,7 @@ def cleanup_scene(app, stash, resolver, store, current, settings, selected, args
                   core_policies, scene_policies, scoped_tags, report):
     """Reconcile one affected scene, rechecking prefetched data before writes."""
     from stash_ai.exclusions import excluded_names
-    from stash_ai.scene import cleanup_scene_support
+    from stash_ai.evidence.scenes import cleanup_scene_support
     scene_id, stats = str(current["id"]), Counter()
     if args.output_mode == 'merged':
         published = {}
@@ -28,7 +28,7 @@ def cleanup_scene(app, stash, resolver, store, current, settings, selected, args
             published[kind], recovered = reconcile(app, stash, store, current, kind, snapshot)
             stats['publications_reconciled'] += int(recovered)
         if app.CREATE_MARKERS and published.get("markers") is None and any(
-                marker_ops.owned_marker(marker, merge.AI) for marker in current.get("scene_markers", [])):
+                marker_ops.owned_marker(marker, merge_labels.AI) for marker in current.get("scene_markers", [])):
             raise RuntimeError("AI marker source state is missing; restore the original --state-db.")
         hits = (published.get("scene") or {}).get("contributions", [])
         spans = (published.get("markers") or {}).get("contributions", [])

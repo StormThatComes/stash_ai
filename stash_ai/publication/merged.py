@@ -11,7 +11,9 @@ from collections import Counter
 from dataclasses import dataclass, field
 
 from stash_ai.commands import legacy as legacy_commands
-from stash_ai import merge
+import stash_ai.evidence.intervals as merge_intervals
+import stash_ai.evidence.labels as merge_labels
+import stash_ai.models as merge_models
 from stash_ai.marker_index import MarkerIntervalIndex, PreviousMarkerRanges
 from stash_ai.runtime import stage
 
@@ -44,7 +46,7 @@ def _previous_ranges(app, store, scene_id):
     for snapshot in (*store.snapshot(scene_id, "markers", borrow=True),
                      *publications(store, scene_id, 'markers')):
         if snapshot:
-            result.extend(merge.union_intervals(snapshot.get("contributions", []), borrow=True))
+            result.extend(merge_intervals.union_intervals(snapshot.get("contributions", []), borrow=True))
     return result
 
 
@@ -53,21 +55,21 @@ def prepare_sync_evidence(app, stash, store, scene, scene_hits, spans, *, cleanu
     scene_id = str(scene["id"])
     previous_ranges = PreviousMarkerRanges(_previous_ranges(app, store, scene_id))
     with stage(report, 'marker_union'):
-        markers = merge.union_intervals(spans, borrow=True) if app.CREATE_MARKERS else []
+        markers = merge_intervals.union_intervals(spans, borrow=True) if app.CREATE_MARKERS else []
     if report is not None:
         report.record_counts(marker_contributions=len(spans), union_markers=len(markers),
                              scene_contributions=len(scene_hits))
-    scene_labels = {merge.raw_label(hit["tag"]) for hit in scene_hits} if app.APPLY_SCENE_TAGS else set()
+    scene_labels = {merge_labels.raw_label(hit["tag"]) for hit in scene_hits} if app.APPLY_SCENE_TAGS else set()
     if cleanup:
         # Cleanup never restores outputs that the user removed since the last sync.
-        scene_labels.intersection_update(tag["name"][len(merge.AI.prefix):] for tag in scene.get("tags", [])
-                                         if tag["name"].startswith(merge.AI.prefix))
+        scene_labels.intersection_update(tag["name"][len(merge_labels.AI.prefix):] for tag in scene.get("tags", [])
+                                         if tag["name"].startswith(merge_labels.AI.prefix))
         scene_hits = [hit for hit in scene_hits if hit["tag"] in scene_labels]
         present = [marker for marker in scene.get("scene_markers", [])
-                   if marker_ops.owned_marker(marker, merge.AI)]
+                   if marker_ops.owned_marker(marker, merge_labels.AI)]
         existing = MarkerIntervalIndex(present if markers else [], previous_ranges, by_name=True)
         markers = [marker for marker in markers if existing.overlapping(
-            merge.AI.prefix + marker["tag"], {"seconds": marker["start"], "end_seconds": marker["end"]})]
+            merge_labels.AI.prefix + marker["tag"], {"seconds": marker["start"], "end_seconds": marker["end"]})]
         spans = [item for marker in markers for item in marker["contributors"]]
     return scene_hits, spans, markers, scene_labels, previous_ranges
 
@@ -77,21 +79,21 @@ def resolve_sync_tags(app, stash, resolver, scene_id, scene, markers, spans, sce
     """Resolve generated tags, refresh the scene and suppress manual occurrences."""
     from stash_ai.exclusions import excluded_names
     from stash_ai.marker_groups import for_resolver
-    from stash_ai.occurrences import OCCURRENCE_TAG, is_occurrence
+    from stash_ai.evidence.occurrences import OCCURRENCE_TAG, is_occurrence
 
     groups = for_resolver(app, resolver)
     blocked_names = excluded_names(tag_policies)
-    names = {merge.AI.prefix + label for label in scene_labels}
+    names = {merge_labels.AI.prefix + label for label in scene_labels}
     for marker in markers:
-        names.update(merge.AI.prefix + label for label in [marker["tag"], *marker["extra_tags"]])
+        names.update(merge_labels.AI.prefix + label for label in [marker["tag"], *marker["extra_tags"]])
     if markers:
-        names.add(merge.AI.owner_tag)
+        names.add(merge_labels.AI.owner_tag)
     if any(is_occurrence(marker) for marker in markers):
         names.add(OCCURRENCE_TAG)
 
     with stage(report, 'tag_resolution'):
         ids = {name: resolver.resolve(name) for name in sorted(names)}
-    if markers and not ids.get(merge.AI.owner_tag):
+    if markers and not ids.get(merge_labels.AI.owner_tag):
         raise ValueError("Missing AI marker ownership tag; enable CREATE_MISSING.")
 
     # Refresh after tag creation/reparenting, preserving newly added manual tags.
@@ -104,9 +106,9 @@ def resolve_sync_tags(app, stash, resolver, scene_id, scene, markers, spans, sce
     # A manually maintained ai: marker already supplies a location. It remains
     # untouched, and must not receive a duplicate automatically generated point.
     manual_labels = {marker['primary_tag']['name'] for marker in scene.get('scene_markers', [])
-                     if not marker_ops.owned_marker(marker, merge.AI)}
+                     if not marker_ops.owned_marker(marker, merge_labels.AI)}
     suppressed = {marker['tag'] for marker in markers
-                  if is_occurrence(marker) and merge.AI.prefix + marker['tag'] in manual_labels}
+                  if is_occurrence(marker) and merge_labels.AI.prefix + marker['tag'] in manual_labels}
     if suppressed:
         markers = [marker for marker in markers
                    if not (is_occurrence(marker) and marker['tag'] in suppressed)]
@@ -136,9 +138,9 @@ def plan_scene_tags(app, store, scene_id, scene, scene_hits, scene_labels, ids, 
     owned_before.update(identifier for snapshot in publications(store, scene_id, 'scene')
                         for identifier in snapshot.get('owned_ids', []))
     existing_ids = {str(tag["id"]) for tag in current_tags}
-    desired_ids = {ids[merge.AI.prefix + label] for label in scene_labels
-                   if ids.get(merge.AI.prefix + label)}
-    unresolved_labels = {label for label in scene_labels if not ids.get(merge.AI.prefix + label)}
+    desired_ids = {ids[merge_labels.AI.prefix + label] for label in scene_labels
+                   if ids.get(merge_labels.AI.prefix + label)}
+    unresolved_labels = {label for label in scene_labels if not ids.get(merge_labels.AI.prefix + label)}
 
     # CREATE_MISSING=False must not remove a legacy association lacking a replacement.
     migrated_scene_ids.difference_update(str(tag["id"]) for tag in current_tags
@@ -154,7 +156,7 @@ def plan_scene_tags(app, store, scene_id, scene, scene_hits, scene_labels, ids, 
 
 
 def _wanted_markers(app, stash, resolver, scene_id, markers, ids, groups, blocked_names):
-    from stash_ai.occurrences import OCCURRENCE_TAG, is_occurrence
+    from stash_ai.evidence.occurrences import OCCURRENCE_TAG, is_occurrence
 
     def allowed_id(identifier):
         name = resolver.name_for_id(str(identifier))
@@ -162,21 +164,21 @@ def _wanted_markers(app, stash, resolver, scene_id, markers, ids, groups, blocke
 
     wanted, resolved_marker_labels = [], set()
     for marker in markers:
-        primary = ids.get(merge.AI.prefix + marker["tag"])
+        primary = ids.get(merge_labels.AI.prefix + marker["tag"])
         if not primary:
             continue
         resolved_marker_labels.add(marker["tag"])
-        extras = {ids[merge.AI.prefix + label] for label in marker["extra_tags"]
-                  if ids.get(merge.AI.prefix + label)}
+        extras = {ids[merge_labels.AI.prefix + label] for label in marker["extra_tags"]
+                  if ids.get(merge_labels.AI.prefix + label)}
         extras.update(identifier for identifier in marker["extra_ids"] if allowed_id(identifier))
-        extras.add(ids[merge.AI.owner_tag])
+        extras.add(ids[merge_labels.AI.owner_tag])
         extras.add(groups.resolve(marker['tag'], is_occurrence(marker)))
         if is_occurrence(marker) and ids.get(OCCURRENCE_TAG):
             extras.add(ids[OCCURRENCE_TAG])
         extras.discard(primary)
         payload = {"scene_id": scene_id, "primary_tag_id": primary, "tag_ids": sorted(extras),
-                   "title": merge.AI.title_prefix + marker["tag"] + " [" +
-                            "+".join(merge.source_codes(marker["sources"])) + "]",
+                   "title": merge_labels.AI.title_prefix + marker["tag"] + " [" +
+                            "+".join(merge_labels.source_codes(marker["sources"])) + "]",
                    "seconds": round(marker["start"], 3)}
         if is_occurrence(marker):
             payload['title'] += ' · wykrycie'
@@ -194,12 +196,12 @@ def plan_markers(app, stash, resolver, scene_id, scene, markers, ids, groups, bl
             app, stash, resolver, scene_id, markers, ids, groups, blocked_names)
         plan.wanted_markers = wanted
         current_markers = scene.get("scene_markers", [])
-        owned = [marker for marker in current_markers if marker_ops.owned_marker(marker, merge.AI)]
+        owned = [marker for marker in current_markers if marker_ops.owned_marker(marker, merge_labels.AI)]
         existing = MarkerIntervalIndex(owned if wanted else [], previous_ranges)
         available = {str(marker["id"]): marker for marker in owned}
 
         def manual_extra(tag):
-            return (not tag['name'].startswith(merge.AI.prefix) and tag['name'] not in blocked_names
+            return (not tag['name'].startswith(merge_labels.AI.prefix) and tag['name'] not in blocked_names
                     and not groups.owns(tag))
 
         for payload, interval in wanted:
@@ -238,7 +240,7 @@ def plan_markers(app, stash, resolver, scene_id, scene, markers, ids, groups, bl
             predicted_labels = {marker["tag"] for marker in markers}
             for marker in current_markers:
                 parsed = legacy_commands.legacy_label((marker.get("primary_tag") or {}).get("name", ""))
-                if parsed and marker_ops.owned_marker(marker, merge.SOURCES[parsed[0]]):
+                if parsed and marker_ops.owned_marker(marker, merge_models.SOURCES[parsed[0]]):
                     if parsed[1] not in predicted_labels or parsed[1] in resolved_marker_labels:
                         plan.deletes.add(str(marker["id"]))
         if app.CREATE_MARKERS and blocked_names:
@@ -255,7 +257,7 @@ def plan_markers(app, stash, resolver, scene_id, scene, markers, ids, groups, bl
 
 
 def sync_statistics(app, plan, markers, suppressed):
-    from stash_ai.occurrences import is_occurrence
+    from stash_ai.evidence.occurrences import is_occurrence
 
     stats = Counter(
         scene_tags_updated=int(app.APPLY_SCENE_TAGS and plan.scene_changed),
@@ -288,11 +290,11 @@ def publish_sync_plan(app, stash, resolver, store, scene_id, scene, markers, sce
               f"markers create={len(plan.creates)} update={len(plan.updates)} delete={len(plan.deletes)}; "
               f"migrate scene tags={stats['legacy_scene_tags_migrated']}.")
         if app.APPLY_SCENE_TAGS and (report is None or report.verbose):
-            write("  Scene tags: " + (", ".join(merge.AI.prefix + label for label in sorted(scene_labels)) or "(none)"))
+            write("  Scene tags: " + (", ".join(merge_labels.AI.prefix + label for label in sorted(scene_labels)) or "(none)"))
         for marker in markers if report is None or report.verbose else ():
             end = app.format_time(marker["end"]) if marker["end"] is not None else "point (end unknown)"
             write(f"  {app.format_time(marker['start'])} -> {end}: ai:{marker['tag']} "
-                  f"[{'+'.join(merge.source_codes(marker['sources']))}]")
+                  f"[{'+'.join(merge_labels.source_codes(marker['sources']))}]")
         store.publish(scene_id, plan.snapshots)  # temporary preview overlay only
         return stats
 

@@ -11,7 +11,7 @@ import pytest
 
 from stash_ai import cli as app
 
-from stash_ai.fusion import ObservationIndex
+from stash_ai.evidence.observations import ObservationIndex
 from stash_ai.stash_api.sql import SceneReader, OPERATION, SQL, is_read_only_merge
 from stash_ai.performance import scene_fingerprint
 from stash_ai.runtime import RamCache, RunReport, retained_size
@@ -310,7 +310,7 @@ def test_exclusive_timers_do_not_double_count_and_survive_failures(monkeypatch):
 
 
 def test_publication_check_and_snapshots_share_one_commit(tmp_path):
-    from stash_ai.merge import StateStore
+    from stash_ai.storage.store import StateStore
     from stash_ai.performance import checked
     with StateStore(tmp_path/'state.db','s') as state:
         state.prepare('1', {'scene': {'contributions': []}})

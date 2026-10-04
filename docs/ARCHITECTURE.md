@@ -3,7 +3,7 @@
 W katalogu głównym pozostają dwa pliki Pythona uruchamiane z linii poleceń:
 `stash_ai.py` i `update_stash_ai.py`. Launcher `stash_ai.py` przejmuje blokadę
 instalacji, a `stash_ai/cli.py` koordynuje CLI i uruchomienie pipeline.
-Algorytmy evidence/fusion i union przedziałów pozostają w `stash_ai/merge.py`.
+Algorytmy evidence/fusion i union przedziałów pozostają w `stash_ai/evidence/pipeline.py`.
 Pakiet `stash_ai/publication/` grupuje planowanie i publikację obu trybów wyjścia.
 `markers.py` zawiera wspólne reguły własności markerów, payloadów, porównywania
 zmian i usuwania wykluczonych extras. Moduły i testy importują je bezpośrednio,
@@ -37,8 +37,8 @@ sceny zawiera `cleanup/scenes.py`, a re-ewaluację opublikowanego evidence
 z indeksem sygnatur i cache replay oraz clipping do opublikowanych przedziałów.
 Stan i maski cleanupu znajdują się w `cleanup/state.py`, a odczyt katalogu tagów
 w `cleanup/client.py`. `cleanup/prune.py` i `cleanup/legacy.py` obsługują pruning
-zwykłych tagów oraz zachowanych wyników legacy. Pozostała logika domenowa znajduje się m.in. w `stash_ai/scene.py`,
-`stash_ai/fusion.py`, `stash_ai/evidence/temporal/` i `stash_ai/occurrences.py`.
+zwykłych tagów oraz zachowanych wyników legacy. Pozostała logika domenowa znajduje się m.in. w `stash_ai/evidence/scenes.py`,
+`stash_ai/evidence/observations.py`, `stash_ai/evidence/temporal/` i `stash_ai/evidence/occurrences.py`.
 
 `stash_ai/marker_index.py` buduje dla jednej sceny niemutowalny indeks istniejących
 markerów według primary tagu. Posortowane początki i drzewo maksymalnych końców
@@ -233,8 +233,8 @@ błędzie, a dopiero potem Apply z dotychczasową transakcją dla pojedynczej pa
 Marker-only nadal blokuje pending publication także przy niezmienionym progu;
 scene/combined dopuszcza pending no-op. Check i Apply korzystają z metadanych,
 zachowując surowe BLOB-y evidence oraz atomowy zapis progu i indeksu ukończenia.
-`thresholds.py` zachowuje efektywne progi markerów, podpisy i kontrakty retencji,
-a `scene_cache.py` projekcję scen i konwersję obserwacji do klatek. Reuse korzysta
+`evidence/thresholds.py` zachowuje efektywne progi markerów, podpisy i kontrakty retencji,
+a `evidence/cache_views.py` projekcję scen i konwersję obserwacji do klatek. Reuse korzysta
 bezpośrednio z planów w `rethreshold`, bez wrapperów pod dawnymi ścieżkami.
 
 Updater instaluje pliki Pythona z pakietu `stash_ai/`, również z jego podkatalogów.
@@ -277,3 +277,18 @@ i consensus seeds (`markers.py`) oraz kwalifikację dodatkowych tagów (`extras.
 `evidence/intervals.py` scala uporządkowane przedziały, `evidence/timeline.py`
 udostępnia indeksowane zapytania o obserwacje, a `evidence/retention.py` wyznacza
 progi retencji. Przeniesienie nie zmienia zapisanych dowodów ani reguł publikacji.
+
+### Potok zachowanych dowodów
+
+`stash_ai/evidence/pipeline.py` koordynuje kwalifikację scen, markerów i punktów
+wystąpień. `source_markers.py` buduje wkład pojedynczych źródeł, `frames.py`
+weryfikuje grupy klatek i przygotowuje obserwacje, a `observations.py` obsługuje
+wielokrotne zapytania o przedziały. `shared_markers.py` łączy kompatybilne źródła
+i odtwarza przycięte dowody; `scenes.py` kwalifikuje oraz odwołuje dowody scen.
+`occurrences.py` oddziela kwalifikację kandydatów, budowę strumieni i wybór punktu.
+
+`identity.py` definiuje tożsamość segmentów bez przejściowych override progów;
+`labels.py` waliduje surowe etykiety i opisuje namespace AI. `cache_views.py`
+i `thresholds.py` tworzą widoki kwalifikacji, a zapis zmian progów pozostaje
+w `rethreshold/`. `inference/results.py` zapisuje kształt raw prediction outputs,
+a `inference/reuse.py` dowodzi zgodności wcześniejszej inferencji przed zmianą progów.

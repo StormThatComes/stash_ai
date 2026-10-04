@@ -44,7 +44,8 @@ def main():
     import numpy as np
     from stash_ai import cli as app
     from stash_ai.inference import prediction
-    from stash_ai import merge
+    import stash_ai.evidence.intervals as merge_intervals
+    import stash_ai.evidence.source_markers as merge_source_markers
     from stash_ai.evidence.temporal.policy import TemporalPolicy
     from stash_ai.models import SOURCES
     app.TEMPORAL_POLICY = TemporalPolicy()
@@ -57,8 +58,8 @@ def main():
     for _ in range(args.repeats):
         gc.collect()
         start = time.perf_counter()
-        spans = merge.marker_contributions(app, records, policies)
-        merged = merge.union_intervals(spans, borrow=True)
+        spans = merge_source_markers.marker_contributions(app, records, policies)
+        merged = merge_intervals.union_intervals(spans, borrow=True)
         times.append(time.perf_counter()-start)
         hashes.add(fingerprint(merged))
         sizes = dict(contributions=len(spans), markers=len(merged))

@@ -32,7 +32,9 @@ def main():
     sys.path.insert(0, str(args.project.resolve()))
     from stash_ai import cli as app
     from stash_ai.publication import merged as merge_sync
-    from stash_ai import merge
+    from stash_ai.evidence import pipeline as merge
+    import stash_ai.evidence.labels as merge_labels
+    import stash_ai.storage.store as merge_store
     from stash_ai.diagnostics import MergeDiagnostics
     from stash_ai.runtime import RunReport
     from stash_ai.models import SOURCES
@@ -50,7 +52,7 @@ def main():
     for _ in range(args.repeats):
         gc.collect()
         report = RunReport(write=lambda _: None)
-        with tempfile.TemporaryDirectory() as directory, merge.StateStore(Path(directory)/'state.sqlite3',
+        with tempfile.TemporaryDirectory() as directory, merge_store.StateStore(Path(directory)/'state.sqlite3',
                 'offline-benchmark', cache_bytes=128*2**20) as state:
             for model, segments in source.items(): state.put('1', model, {'markers': segments[0]})
             state.report = report
@@ -60,7 +62,7 @@ def main():
                 with report.measure('merge_compute'):
                     hits, spans = merge.evidence(app, state, '1', policies, policies)
                 with report.measure('merge_plan'):
-                    counts = merge_sync.sync_merged(app, stash, app.TagResolver(stash, source=merge.AI), state,
+                    counts = merge_sync.sync_merged(app, stash, app.TagResolver(stash, source=merge_labels.AI), state,
                                               stash.find_scene('1'), hits, spans, report=report)
                 elapsed, cpu_elapsed = time.perf_counter()-start, time.process_time()-cpu
             stages = dict(report.timings)  # Verification below is outside the measured region.

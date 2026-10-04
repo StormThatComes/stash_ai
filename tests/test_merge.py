@@ -15,7 +15,11 @@ from stash_ai.commands import hierarchy as hierarchy_commands, legacy as legacy_
 from stash_ai.inference.identity import model_identity
 from stash_ai.publication import merged as merge_sync
 from stash_ai import cli as app
-from stash_ai import merge
+from stash_ai.evidence import pipeline as merge
+import stash_ai.evidence.intervals as merge_intervals
+import stash_ai.evidence.labels as merge_labels
+import stash_ai.storage.results as merge_results
+import stash_ai.storage.store as merge_store
 from stash_ai.inference.inputs import inspect_input
 from stash_ai.models import SOURCES, JOYTAG, WD, DTQ, OPPAI, ModelSettings, Vocabulary
 from tests.helpers.stash import Stash
@@ -30,12 +34,12 @@ pytestmark = pytest.mark.usefixtures("reset_merge")
 
 
 def store(tmp_path, scope="fixture", dry=False):
-    return merge.StateStore(tmp_path/"sources.sqlite3",scope,dry)
+    return merge_store.StateStore(tmp_path/"sources.sqlite3",scope,dry)
 
 
 def intervals(stash, label="common"):
     return sorted((marker["seconds"], marker.get("end_seconds")) for marker in stash.scene["scene_markers"]
-                  if marker["primary_tag"]["name"]=="ai:"+label and marker_ops.owned_marker(marker,merge.AI))
+                  if marker["primary_tag"]["name"]=="ai:"+label and marker_ops.owned_marker(marker,merge_labels.AI))
 
 
 def test_interval_union_retains_ends_separate_events_sources_and_extras():
@@ -43,7 +47,7 @@ def test_interval_union_retains_ends_separate_events_sources_and_extras():
             span("oppai",14,35,score=.83,extras=["extra","another"]),span("dtq",70,90)]
     expected=[(10,42,["joytag","wd","oppai"]),(70,90,["dtq"])]
     for sequence in permutations(inputs):
-        result=merge.union_intervals(sequence)
+        result=merge_intervals.union_intervals(sequence)
         assert [(m["start"],m["end"],m["sources"]) for m in result]==expected
         assert result[0]["extra_tags"]==["another","extra"]
         assert "score" not in result[0]
@@ -60,19 +64,19 @@ def test_interval_union_retains_ends_separate_events_sources_and_extras():
     ([(10,30),(20,None),(40,None)],[(10,30),(40,None)]),
 ])
 def test_union_touching_containment_chains_gaps_and_unknown_ends(values,expected):
-    merged=merge.union_intervals([span(key,start,end) for key,(start,end) in zip(SOURCES,values)])
+    merged=merge_intervals.union_intervals([span(key,start,end) for key,(start,end) in zip(SOURCES,values)])
     assert [(m["start"],m["end"]) for m in merged]==expected
 
 
 def test_union_keeps_different_labels_and_case_separate():
-    merged=merge.union_intervals([span("joytag",0,20,"blue_hair"),span("wd",0,20,"Blue_hair"),
+    merged=merge_intervals.union_intervals([span("joytag",0,20,"blue_hair"),span("wd",0,20,"Blue_hair"),
                                    span("oppai",0,20,"bikini"),span("dtq",0,20,"swimsuit")])
     assert len(merged)==4
 
 
 @pytest.mark.parametrize("start,end",[(-1,3),(3,1),(float("nan"),3),(0,float("inf")),(True,3)])
 def test_bad_intervals_are_rejected_before_writes(start,end):
-    with pytest.raises(ValueError): merge.union_intervals([span("wd",start,end)])
+    with pytest.raises(ValueError): merge_intervals.union_intervals([span("wd",start,end)])
 
 
 def test_state_is_durable_scoped_partial_and_dry_run_does_not_write(tmp_path):
@@ -95,7 +99,7 @@ def test_state_is_durable_scoped_partial_and_dry_run_does_not_write(tmp_path):
     with store(tmp_path,scope="different-stash") as state:
         assert state.records("1","scene")=={}
     empty=tmp_path/"missing"/"dry.sqlite3"
-    with merge.StateStore(empty,"fixture",True) as state:
+    with merge_store.StateStore(empty,"fixture",True) as state:
         state.put("1","wd",{"scene":first})
     assert not empty.parent.exists()
 
@@ -112,16 +116,16 @@ def test_sync_common_tag_union_idempotence_and_manual_ownership(tmp_path):
     manual=stash.marker(JOYTAG,"common","manual",True)
     inputs=[span("joytag",10,30),span("wd",20,50),span("oppai",60,80)]
     with store(tmp_path) as state:
-        merge_sync.sync_merged(app,stash,app.TagResolver(stash,source=merge.AI),state,stash.find_scene("1"),
+        merge_sync.sync_merged(app,stash,app.TagResolver(stash,source=merge_labels.AI),state,stash.find_scene("1"),
                           [hit("joytag"),hit("wd"),hit("oppai","unique_op")],inputs)
         assert {t["name"] for t in stash.scene["tags"]}=={"manual","ai:common","ai:unique_op"}
         assert intervals(stash)==[(10,50),(60,80)]
         assert manual in stash.scene["scene_markers"]
         shared=next(m for m in stash.scene["scene_markers"] if m["seconds"]==10)
         assert shared["title"]=="[AI] common [jt+wd]"
-        assert {t["name"] for t in shared["tags"]}=={merge.AI.owner_tag, "m:common"}
+        assert {t["name"] for t in shared["tags"]}=={merge_labels.AI.owner_tag, "m:common"}
         stash.writes.clear()
-        merge_sync.sync_merged(app,stash,app.TagResolver(stash,source=merge.AI),state,stash.find_scene("1"),
+        merge_sync.sync_merged(app,stash,app.TagResolver(stash,source=merge_labels.AI),state,stash.find_scene("1"),
                           [hit("joytag"),hit("wd"),hit("oppai","unique_op")],inputs)
         assert not stash.writes
 
@@ -130,7 +134,7 @@ def test_untracked_ai_scene_association_remains_manual(tmp_path):
     stash=Stash();tag=stash.tag("ai:common");stash.scene["tags"]=[tag]
     with store(tmp_path) as state:
         for hits in ([hit("wd")],[]):
-            merge_sync.sync_merged(app,stash,app.TagResolver(stash,source=merge.AI),state,stash.find_scene("1"),hits,[])
+            merge_sync.sync_merged(app,stash,app.TagResolver(stash,source=merge_labels.AI),state,stash.find_scene("1"),hits,[])
         assert stash.scene["tags"]==[tag]
 
 
@@ -138,7 +142,7 @@ def test_native_marker_id_survives_large_start_shift(tmp_path):
     stash=Stash()
     with store(tmp_path) as state:
         for inputs in ([span("wd",20,50)],[span("wd",20,50),span("joytag",10,30)]):
-            merge_sync.sync_merged(app,stash,app.TagResolver(stash,source=merge.AI),state,stash.find_scene("1"),[],inputs)
+            merge_sync.sync_merged(app,stash,app.TagResolver(stash,source=merge_labels.AI),state,stash.find_scene("1"),[],inputs)
             if len(inputs)==1: original=stash.scene["scene_markers"][0]["id"]
         assert len(stash.scene["scene_markers"])==1
         assert stash.scene["scene_markers"][0]["id"]==original and intervals(stash)==[(10,50)]
@@ -158,10 +162,10 @@ def test_legacy_import_migrates_all_sources_without_fabricating_scores(tmp_path)
         assert {s["source"] for s in hits}=={"joytag","wd","oppai"}
         assert all(s["score"] is None for s in hits+spans)
         assert {s["legacy_marker_id"] for s in spans}=={"joytag","wd"}
-        merge_sync.sync_merged(app,stash,app.TagResolver(stash,source=merge.AI),state,stash.find_scene("1"),hits,spans)
+        merge_sync.sync_merged(app,stash,app.TagResolver(stash,source=merge_labels.AI),state,stash.find_scene("1"),hits,spans)
         assert {t["name"] for t in stash.scene["tags"]}=={"ai:common","ai:unique_op","human"}
         assert intervals(stash)==[(10,50)] and manual in stash.scene["scene_markers"]
-        assert all("manual extra" in {t["name"] for t in m["tags"]} for m in stash.scene["scene_markers"] if marker_ops.owned_marker(m,merge.AI))
+        assert all("manual extra" in {t["name"] for t in m["tags"]} for m in stash.scene["scene_markers"] if marker_ops.owned_marker(m,merge_labels.AI))
         assert "jt:common" in stash.tags  # No global tag objects are deleted.
 
 
@@ -173,11 +177,11 @@ def test_failed_api_write_keeps_legacy_results_and_pending_merge_recovers(tmp_pa
         legacy_commands.bootstrap_legacy(app,state,stash.find_scene("1"))
         hits,spans=merge.evidence(app,state,"1",empty_policies(),empty_policies())
         with pytest.raises(RuntimeError,match="injected"):
-            merge_sync.sync_merged(app,stash,app.TagResolver(stash,source=merge.AI),state,stash.find_scene("1"),hits,spans)
+            merge_sync.sync_merged(app,stash,app.TagResolver(stash,source=merge_labels.AI),state,stash.find_scene("1"),hits,spans)
         assert old in stash.scene["scene_markers"] and stash.scene["tags"][0]["name"]=="jt:common"
         assert state.snapshot("1","markers")[1] is not None
         stash.fail_create=False
-        merge_sync.sync_merged(app,stash,app.TagResolver(stash,source=merge.AI),state,stash.find_scene("1"),hits,spans)
+        merge_sync.sync_merged(app,stash,app.TagResolver(stash,source=merge_labels.AI),state,stash.find_scene("1"),hits,spans)
         assert intervals(stash)==[(10,30)] and state.snapshot("1","markers")[1] is None
 
 
@@ -251,12 +255,12 @@ def test_partial_modes_preserve_other_output_and_cached_evidence(merge_pipeline,
     p=merge_pipeline
     assert app.main(p.args)==0
     before=deepcopy(p.stash.scene[untouched])
-    with merge.StateStore(p.path,merge.scope_for(app.STASH_URL),True) as state:
+    with merge_store.StateStore(p.path,merge_store.scope_for(app.STASH_URL),True) as state:
         old=state.records("1","scene" if untouched=="tags" else "markers")
     p.scores["oppai"][:]=0
     assert app.main(["--models","oppai",*p.args[2:],mode])==0
     assert p.stash.scene[untouched]==before
-    with merge.StateStore(p.path,merge.scope_for(app.STASH_URL),True) as state:
+    with merge_store.StateStore(p.path,merge_store.scope_for(app.STASH_URL),True) as state:
         assert state.records("1","scene" if untouched=="tags" else "markers")==old
 
 
@@ -307,21 +311,21 @@ def test_combined_hierarchy_has_one_namespace_and_all_labels(tmp_path):
     assert {name for name,parents in combined.category_parents.items() if not parents}=={"ai:category:AI"}
     assert all(name.startswith("ai:category:") for name in combined.category_parents)
     stash=Stash();manual=stash.tag("manual parent")
-    old=stash.tag("ai:category:Old");old["description"]=merge.AI.hierarchy_description
+    old=stash.tag("ai:category:Old");old["description"]=merge_labels.AI.hierarchy_description
     unowned=stash.tag("ai:category:Custom")
     foreign=stash.tag("wd:category:General");foreign["description"]=SOURCES["wd"].hierarchy_description
     stash.tag("ai:blue_hair")["parents"]=[manual,old,unowned,foreign]
-    app.TagResolver(stash,combined,source=merge.AI).resolve("ai:blue_hair")
+    app.TagResolver(stash,combined,source=merge_labels.AI).resolve("ai:blue_hair")
     assert {p["name"] for p in stash.tags["ai:blue_hair"]["parents"]}=={
         manual["name"],unowned["name"],foreign["name"],"ai:category:Appearance / Hair / Color"}
     assert old["name"] in stash.tags
     before=deepcopy(stash.writes)
-    app.TagResolver(stash,combined,source=merge.AI).resolve("ai:blue_hair")
+    app.TagResolver(stash,combined,source=merge_labels.AI).resolve("ai:blue_hair")
     assert stash.writes==before
 
 
 def test_missing_source_state_does_not_destroy_existing_ai_markers(tmp_path):
-    stash=Stash();marker=stash.marker(merge.AI,"common","owned")
+    stash=Stash();marker=stash.marker(merge_labels.AI,"common","owned")
     before=deepcopy(stash.scene)
     with store(tmp_path) as state:
         with pytest.raises(RuntimeError,match="source state"):
@@ -342,7 +346,7 @@ def test_no_frame_fusion_across_models(tmp_path):
 def test_manual_extras_survive_absorbed_ai_markers_and_later_split(tmp_path):
     stash=Stash()
     with store(tmp_path) as state:
-        resolver=app.TagResolver(stash,source=merge.AI)
+        resolver=app.TagResolver(stash,source=merge_labels.AI)
         base=[span("joytag",10,20),span("wd",30,40)]
         merge_sync.sync_merged(app,stash,resolver,state,stash.find_scene("1"),[],base)
         for marker,name in zip(stash.scene["scene_markers"],["manual A","manual B"]):
@@ -368,15 +372,15 @@ def test_recovery_after_partial_api_success_preserves_ownership(tmp_path,monkeyp
         hits,spans=merge.evidence(app,state,"1",empty_policies(),empty_policies())
         monkeypatch.setattr(stash,failure,interrupted)
         with pytest.raises(RuntimeError,match="lost response"):
-            merge_sync.sync_merged(app,stash,app.TagResolver(stash,source=merge.AI),state,stash.find_scene("1"),hits,spans)
+            merge_sync.sync_merged(app,stash,app.TagResolver(stash,source=merge_labels.AI),state,stash.find_scene("1"),hits,spans)
         monkeypatch.setattr(stash,failure,actual)
         legacy_commands.bootstrap_legacy(app,state,stash.find_scene("1"))
-        merge_sync.sync_merged(app,stash,app.TagResolver(stash,source=merge.AI),state,stash.find_scene("1"),hits,spans)
+        merge_sync.sync_merged(app,stash,app.TagResolver(stash,source=merge_labels.AI),state,stash.find_scene("1"),hits,spans)
         assert intervals(stash)==[(10,30)]
         assert {t["name"] for t in stash.scene["tags"]}=={"human","ai:common"}
-        assert all(state.snapshot("1",kind)[1] is None for kind in merge.KINDS)
+        assert all(state.snapshot("1",kind)[1] is None for kind in merge_results.KINDS)
         # It must remain managed after recovery, not accidentally become manual.
-        merge_sync.sync_merged(app,stash,app.TagResolver(stash,source=merge.AI),state,stash.find_scene("1"),[],[])
+        merge_sync.sync_merged(app,stash,app.TagResolver(stash,source=merge_labels.AI),state,stash.find_scene("1"),[],[])
         assert {t["name"] for t in stash.scene["tags"]}=={"human"} and not intervals(stash)
 
 
@@ -389,13 +393,13 @@ def test_new_legacy_results_are_imported_alongside_existing_cache_once(merge_pip
     assert app.main([*p.args,"--merge-only"])==0
     assert intervals(p.stash)==[(10,50),(70,100)]
     assert "ai:extra" in {t["name"] for t in p.stash.scene["tags"]}
-    with merge.StateStore(p.path,merge.scope_for(app.STASH_URL),True) as state:
+    with merge_store.StateStore(p.path,merge_store.scope_for(app.STASH_URL),True) as state:
         assert len(state.records("1","markers")["wd"])==2
     # Importing a later legacy segment must not replace the reusable inference
     # signature kept in result_index.
     assert app.main([*p.args,"--resume"])==0
     assert app.main([*p.args,"--merge-only"])==0
-    with merge.StateStore(p.path,merge.scope_for(app.STASH_URL),True) as state:
+    with merge_store.StateStore(p.path,merge_store.scope_for(app.STASH_URL),True) as state:
         assert len(state.records("1","markers")["wd"])==2
 
 
@@ -425,10 +429,10 @@ def test_merge_only_partial_modes_never_infer_or_edit_other_output(merge_pipelin
 
 def test_cleanup_selected_bridge_source_splits_union_and_keeps_manual_removals(merge_pipeline,tmp_path):
     p=merge_pipeline
-    scope=merge.scope_for(app.STASH_URL)
+    scope=merge_store.scope_for(app.STASH_URL)
     inputs=[span("joytag",10,20),span("oppai",20,30),span("wd",30,40),span("dtq",70,80,"extra")]
-    with merge.StateStore(p.path,scope) as state:
-        merge_sync.sync_merged(app,p.stash,app.TagResolver(p.stash,source=merge.AI),state,p.stash.find_scene("1"),
+    with merge_store.StateStore(p.path,scope) as state:
+        merge_sync.sync_merged(app,p.stash,app.TagResolver(p.stash,source=merge_labels.AI),state,p.stash.find_scene("1"),
                           [hit("joytag"),hit("oppai"),hit("dtq","extra")],inputs)
     assert intervals(p.stash)==[(10,40)]
     p.stash.scene["tags"]=[t for t in p.stash.scene["tags"] if t["name"]!="ai:extra"]
@@ -456,7 +460,7 @@ def test_enabling_replacement_collapses_reused_history_without_inference(merge_p
     config = app.load_model_settings(app.MODELS_CONFIG_FILE, ['oppai'], None)[0]
     identity = model_identity(app, config, app.load_vocabulary(config))
     _, _, current_signature = inspect_input(app, p.stash, p.stash.scene['paths'], identity)
-    with merge.StateStore(p.path, merge.scope_for(app.STASH_URL), True) as state:
+    with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), True) as state:
         scene_segments = state.records('1', 'scene')['oppai']
         marker_segments = state.records('1', 'markers')['oppai']
         assert len(scene_segments) == 2
@@ -473,7 +477,7 @@ def test_enabling_replacement_collapses_reused_history_without_inference(merge_p
 
     assert app.main(args) == 0
 
-    with merge.StateStore(p.path, merge.scope_for(app.STASH_URL), True) as state:
+    with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), True) as state:
         expected = {'scene': 1 if kind == 'scene' else 2,
                     'markers': 1 if kind == 'markers' else 2}
         assert len(state.records('1', 'scene')['oppai']) == expected['scene']
@@ -515,7 +519,7 @@ def test_caps_follow_blacklists_and_keep_all_qualified_evidence(merge_pipeline,m
     assert {t["name"] for t in p.stash.scene["tags"]}=={"ai:unique_op"}
     assert intervals(p.stash,"unique_op")==[(10,30)]
     assert not intervals(p.stash) and not intervals(p.stash,"extra")
-    with merge.StateStore(p.path,merge.scope_for(app.STASH_URL),True) as state:
+    with merge_store.StateStore(p.path,merge_store.scope_for(app.STASH_URL),True) as state:
         assert {item["tag"] for item in state.records("1","scene")["oppai"][0]["items"]}=={"common","unique_op","extra"}
 
 
@@ -525,9 +529,9 @@ def test_point_output_retains_full_source_ranges(merge_pipeline,monkeypatch,caps
     assert app.main(p.args)==0
     assert intervals(p.stash)==[(10,None),(70,None)]
     assert all(write[1]["end_seconds"] is None for write in p.stash.writes if write[0] in {"create","update"})
-    with merge.StateStore(p.path,merge.scope_for(app.STASH_URL),True) as state:
+    with merge_store.StateStore(p.path,merge_store.scope_for(app.STASH_URL),True) as state:
         snapshot,_=state.snapshot("1","markers")
-        assert [(m["start"],m["end"]) for m in merge.union_intervals(snapshot["contributions"]) if m["tag"]=="common"]==[(10,50),(70,90)]
+        assert [(m["start"],m["end"]) for m in merge_intervals.union_intervals(snapshot["contributions"]) if m["tag"]=="common"]==[(10,50),(70,90)]
 
 
 def test_merge_only_preserves_unknown_legacy_end_and_no_missing_tag_replacement(merge_pipeline,monkeypatch):
@@ -535,7 +539,7 @@ def test_merge_only_preserves_unknown_legacy_end_and_no_missing_tag_replacement(
     p.stash.scene["tags"]=[p.stash.tag("wd:common")]
     old=p.stash.marker(WD,"common","legacy");old.update(seconds=10,end_seconds=None)
     monkeypatch.setattr(app,"CREATE_MISSING",False)
-    p.stash.tag(merge.AI.owner_tag)
+    p.stash.tag(merge_labels.AI.owner_tag)
     assert app.main([*p.args,"--merge-only"])==0
     assert p.stash.scene["tags"][0]["name"]=="wd:common"
     assert p.stash.scene["scene_markers"]==[old]

@@ -8,7 +8,9 @@ from stash_ai import cli as app
 from stash_ai.cleanup import sql as fast
 from stash_ai.cleanup.sql_session import READ_OPERATION, SQL
 from stash_ai import marker_groups as groups
-from stash_ai import merge
+from stash_ai.evidence import pipeline as merge
+import stash_ai.evidence.labels as merge_labels
+import stash_ai.storage.store as merge_store
 from tests.helpers.cleanup import install, options
 from tests.helpers.cleanup_sql import SQLStash
 from tests.helpers.evidence import span
@@ -80,12 +82,12 @@ def test_merge_prefilters_used_groups_and_shares_one_lightweight_catalog(tmp_pat
 def test_merge_prunes_groups_losing_markers_and_preserves_global_usage(tmp_path, monkeypatch, capsys, dry, shared):
     stash = PruneStash(dry)
     tag = managed(stash, 'old')
-    stash.marker(merge.AI, 'old', '1')['tags'].append(tag)
+    stash.marker(merge_labels.AI, 'old', '1')['tags'].append(tag)
     if shared:
         other = deepcopy(stash.scene)
         other['id'], other['scene_markers'][0]['id'] = '2', '2'
         stash.scenes['2'] = other
-    with merge.StateStore(tmp_path/'state.sqlite3', merge.scope_for(app.STASH_URL)) as state:
+    with merge_store.StateStore(tmp_path/'state.sqlite3', merge_store.scope_for(app.STASH_URL)) as state:
         state.put('1', 'wd', {'markers': dict(mode='spans', items=[], meta={'origin': 'legacy'})})
         state.publish('1', {'markers': {'contributions': [span('wd', 0, 2, 'old')]}})
     before = deepcopy((stash.tags, stash.scenes))
@@ -192,7 +194,7 @@ def test_explicit_prefix_pruning_removes_newly_empty_parents(tmp_path, monkeypat
 def test_failed_merge_does_not_discover_or_prune_tags(tmp_path, monkeypatch):
     stash = PruneStash()
     managed(stash, 'orphan')
-    stash.marker(merge.AI, 'missing state', '1')
+    stash.marker(merge_labels.AI, 'missing state', '1')
     install(monkeypatch, stash)
     assert app.main(command(tmp_path)) == 1
     assert not stash.sql_calls and not stash.catalog_reads and not stash.usage_reads
@@ -223,7 +225,7 @@ def test_pruned_catalog_is_finalized_for_next_merge(tmp_path, monkeypatch, capsy
 def test_unchanged_merge_skips_native_counters_for_used_groups(tmp_path, monkeypatch, capsys):
     stash = PruneStash()
     tag = managed(stash, 'used')
-    stash.marker(merge.AI, 'used', '1', manual=True)['tags'].append(tag)
+    stash.marker(merge_labels.AI, 'used', '1', manual=True)['tags'].append(tag)
     install(monkeypatch, stash)
     args = command(tmp_path)
     assert app.main(args) == 0

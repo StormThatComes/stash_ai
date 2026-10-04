@@ -2,7 +2,7 @@
 from collections import defaultdict
 from stash_ai.domain import MarkerSpec
 from .policy import marker_floor
-from .extras import qualify_marker_extras
+from stash_ai.evidence.observations import qualify_marker_extras
 
 
 def consensus_seeds(records, policies, policy, *, thresholds=None):
@@ -14,7 +14,7 @@ def consensus_seeds(records, policies, policy, *, thresholds=None):
         for segment in segments:
             meta = segment["meta"]
             identity = meta.get("frame_input_signature")
-            from stash_ai.thresholds import marker_threshold
+            from stash_ai.evidence.thresholds import marker_threshold
             high = marker_threshold(segment, thresholds)
             if segment["mode"] != "frames" or not identity or high is None:
                 continue

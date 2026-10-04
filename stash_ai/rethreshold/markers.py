@@ -1,5 +1,6 @@
 """Validate marker coverage and update its effective publication threshold."""
-from stash_ai.thresholds import OVERRIDE, _score, marker_threshold, validate_marker_blocklist
+from stash_ai.evidence.identity import OVERRIDE
+from stash_ai.evidence.thresholds import _score, marker_threshold, validate_marker_blocklist
 
 
 def _model_records(store, scene, kind, model, *, direct=False, metadata_only=False):
@@ -17,7 +18,7 @@ def validate(app, store, scene, config, *, check_scene=True, direct=False, metad
     segments = _model_records(store, scene, 'markers', model, direct=direct, metadata_only=metadata_only)
     if not segments:
         raise ValueError(f'{scene}/{model}: no cached marker frames; run inference for this scene/model.')
-    from stash_ai.scene_cache import scene_threshold
+    from stash_ai.evidence.cache_views import scene_threshold
     scene_segments = (_model_records(store, scene, 'scene', model, direct=direct, metadata_only=metadata_only)
                       if check_scene else [])
     for segment in scene_segments:

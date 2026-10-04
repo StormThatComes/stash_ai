@@ -1,7 +1,7 @@
 """Replay source support and leave-one-model-out analysis for one scene."""
 from collections import Counter
 from stash_ai.models import SOURCES
-from stash_ai.occurrences import is_occurrence
+from stash_ai.evidence.occurrences import is_occurrence
 from .comparison import _extras, _marker_delta
 
 
@@ -10,7 +10,7 @@ def _scene_labels(hits):
 
 
 def _merged_markers(spans):
-    from stash_ai.merge import union_intervals
+    from stash_ai.evidence.intervals import union_intervals
     return union_intervals(spans, borrow=True)
 
 
@@ -19,7 +19,7 @@ def _sources_for_scene(store, scene):
 
 
 def _scene_baseline(app, store, scene, core_policies, scene_policies):
-    from stash_ai import merge as stash_merge
+    from stash_ai.evidence import pipeline as stash_merge
 
     hits, spans = stash_merge.evidence(
         app, store, scene, core_policies, scene_policies)
@@ -85,7 +85,7 @@ def _record_model_support(stats, model, baseline):
 
 def _record_model_ablation(app, store, scene, model, models, baseline, stats,
                            core_policies, scene_policies):
-    from stash_ai import merge as stash_merge
+    from stash_ai.evidence import pipeline as stash_merge
 
     reduced_hits, reduced_spans = stash_merge.evidence(
         app,

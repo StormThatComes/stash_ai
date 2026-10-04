@@ -7,7 +7,8 @@ import pytest
 from stash_ai.rethreshold import execution as rethreshold_execution, scenes as scene_updates
 from stash_ai import cli as app, db, performance
 from stash_ai.reports.developer import report as developer_report
-from stash_ai import scene_cache, thresholds
+import stash_ai.evidence.identity as scene_cache_identity
+import stash_ai.evidence.identity as thresholds_identity
 from stash_ai.runtime import RunReport
 from stash_ai.storage.store import StateStore
 from tests.test_result_thresholds import blobs, config, outputs, rethreshold, threshold_rows
@@ -140,8 +141,8 @@ def test_combined_pending_guard_keeps_noop_semantics(tmp_path, monkeypatch, same
 def test_old_database_backfills_once_and_keeps_inline_overrides(tmp_path, monkeypatch, dry_run, version):
     path = tmp_path/'legacy.sqlite3'
     saved = outputs()
-    saved['scene'][scene_cache.SCENE_OVERRIDE] = .9
-    saved['markers'][thresholds.OVERRIDE] = .9
+    saved['scene'][scene_cache_identity.SCENE_OVERRIDE] = .9
+    saved['markers'][thresholds_identity.OVERRIDE] = .9
     with StateStore(path, 'scope') as store:
         store.put('1', 'wd', saved)
         raw = blobs(store)
@@ -192,7 +193,7 @@ def test_preview_new_inference_metadata_hides_source_and_tracks_history(tmp_path
             assert metadata[-1]['meta']['inference_signature'] == 'new'
             assert metadata[-1]['meta']['scene_threshold'] == .6
             if not replace:
-                key = scene_cache.SCENE_OVERRIDE if kind == 'scene' else thresholds.OVERRIDE
+                key = scene_cache_identity.SCENE_OVERRIDE if kind == 'scene' else thresholds_identity.OVERRIDE
                 assert metadata[0][key] == .8
     if dry_run:
         assert path.read_bytes() == source

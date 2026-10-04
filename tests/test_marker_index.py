@@ -5,7 +5,10 @@ import random
 
 import pytest
 
-from stash_ai import cli as app, merge
+from stash_ai import cli as app
+import stash_ai.evidence.intervals as merge_intervals
+import stash_ai.evidence.labels as merge_labels
+import stash_ai.storage.store as merge_store
 from stash_ai.publication import merged as merge_sync
 from stash_ai.marker_index import MarkerIntervalIndex, PreviousMarkerRanges
 from tests.helpers.evidence import span
@@ -44,7 +47,7 @@ def test_lookup_matches_full_scan_for_nested_duplicates_points_and_boundaries(to
         for start, end in queries:
             interval = dict(seconds=start, end_seconds=end)
             expected = [m for m in markers if m['primary_tag']['name'] == 'ai:' + label
-                        and merge.overlaps(m, interval, tolerance)]
+                        and merge_intervals.overlaps(m, interval, tolerance)]
             assert index.overlapping(primary, interval, tolerance) == expected
     assert markers == saved
 
@@ -79,11 +82,11 @@ def test_nested_long_range_does_not_force_scanning_unrelated_short_ranges(monkey
     markers = [marker(i, i*3, i*3 + 1) for i in range(10000)]
     markers.append(marker('outer', 0, 40000))
     index = MarkerIntervalIndex(markers, PreviousMarkerRanges([]))
-    calls, overlaps = [], merge.overlaps
+    calls, overlaps = [], merge_intervals.overlaps
     def counted(*args):
         calls.append(args[0]['id'])
         return overlaps(*args)
-    monkeypatch.setattr(merge, 'overlaps', counted)
+    monkeypatch.setattr(merge_intervals, 'overlaps', counted)
     assert {m['id'] for m in index.overlapping('core', dict(seconds=15000, end_seconds=15001))} == {'5000', 'outer'}
     assert len(calls) == 2
 
@@ -99,7 +102,7 @@ class ScanningIndex:
     def overlapping(self, primary, interval, tolerance=0):
         field = 'name' if self.by_name else 'id'
         return [m for m in self.markers if str(m['primary_tag'][field]) == primary
-                and merge.overlaps(self.temporal(m), interval, tolerance)]
+                and merge_intervals.overlaps(self.temporal(m), interval, tolerance)]
 
 
 @pytest.mark.parametrize('use_end', [True, False])
@@ -113,14 +116,14 @@ def test_publication_split_duplicates_cleanup_and_retry_match_scanner(
         with monkeypatch.context() as patch:
             patch.setattr(merge_sync, 'MarkerIntervalIndex', implementation)
             stash = Stash()
-            manual = stash.marker(merge.AI, 'location', 'manual', manual=True)
+            manual = stash.marker(merge_labels.AI, 'location', 'manual', manual=True)
             manual.update(seconds=75, end_seconds=None)
             point = {**span('wd', 75, None, 'location'), 'derived': 'occurrence'}
             path = tmp_path/(implementation.__name__ + '.sqlite3')
-            resolver = app.TagResolver(stash, source=merge.AI)
+            resolver = app.TagResolver(stash, source=merge_labels.AI)
             # Seed a normal publication before testing cleanup and preview.
             base = [span('wd', 10, 20), span('dtq', 30, 40), point]
-            with merge.StateStore(path, 'scope') as store:
+            with merge_store.StateStore(path, 'scope') as store:
                 merge_sync.sync_merged(app, stash, resolver, store, stash.find_scene('1'), [], base)
             first = next(m for m in stash.scene['scene_markers'] if m['primary_tag']['name'] == 'ai:common')
             first['tags'].append(stash.tag('manual A'))
@@ -130,7 +133,7 @@ def test_publication_split_duplicates_cleanup_and_retry_match_scanner(
             stash.scene['scene_markers'].append(duplicate)
             stash.dry_run = dry
             source = path.read_bytes()
-            with merge.StateStore(path, 'scope', dry_run=dry, cache_bytes=2**20) as store:
+            with merge_store.StateStore(path, 'scope', dry_run=dry, cache_bytes=2**20) as store:
                 sync = lambda spans: merge_sync.sync_merged(app, stash, resolver, store, stash.find_scene('1'),
                                                      [], spans, cleanup=cleanup, migrate=False)
                 bridged = sync([span('wd', 11, 38), point])

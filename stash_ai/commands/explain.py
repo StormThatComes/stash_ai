@@ -2,7 +2,9 @@
 from collections import Counter
 import json
 
-from stash_ai import merge
+from stash_ai.evidence import pipeline as merge
+import stash_ai.evidence.intervals as merge_intervals
+import stash_ai.evidence.labels as merge_labels
 from stash_ai.storage.store import KINDS, StateStore, scope_for
 
 
@@ -29,7 +31,8 @@ def _record_thresholds(app, kind, segment):
     """Expose stored policy separately from the effective replay policy."""
     meta = segment.get("meta", {})
     if kind == "scene":
-        from stash_ai.scene_cache import SCENE_OVERRIDE, scene_threshold
+        from stash_ai.evidence.identity import SCENE_OVERRIDE
+        from stash_ai.evidence.cache_views import scene_threshold
         result = {
             "stored_scene_threshold": meta.get("scene_threshold"),
             "scene_threshold_override": segment.get(SCENE_OVERRIDE),
@@ -37,7 +40,8 @@ def _record_thresholds(app, kind, segment):
         }
         return result
     from stash_ai.evidence.temporal.policy import marker_floor
-    from stash_ai.thresholds import OVERRIDE, marker_threshold
+    from stash_ai.evidence.identity import OVERRIDE
+    from stash_ai.evidence.thresholds import marker_threshold
     effective = marker_threshold(segment)
     result = {
         "stored_marker_threshold": meta.get("marker_threshold"),
@@ -72,7 +76,7 @@ def _explain_scene_contributor(app, hit, recorded_scene_sources):
 
 
 def explain(app, args, core_policies, scene_policies):
-    label = merge.raw_label(args.explain_tag.removeprefix(merge.AI.prefix))
+    label = merge_labels.raw_label(args.explain_tag.removeprefix(merge_labels.AI.prefix))
     # Inspection always opens a read-only snapshot, even without --dry-run.
     with StateStore(args.state_db, scope_for(app.STASH_URL), True,
                     cache_bytes=int(args.ram_cache_gb * 2**30),
@@ -101,15 +105,15 @@ def explain(app, args, core_policies, scene_policies):
                         sources[source] = {"excluded": label in scene_policies[source] or (kind == 'markers' and label in core_policies[source]),
                                            "records": matches}
                 recorded_sources[kind] = sources
-            reports.append({"scene_id": str(scene_id), "tag": merge.AI.prefix + label, 'diagnostics': dict(diagnostics),
+            reports.append({"scene_id": str(scene_id), "tag": merge_labels.AI.prefix + label, 'diagnostics': dict(diagnostics),
                             "scene_contributors": [
                                 _explain_scene_contributor(app, hit, recorded_sources["scene"])
                                 for hit in hits if hit["tag"] == label
                             ],
-                            "markers": merge.union_intervals(matching), "recorded_sources": recorded_sources,
-                            "as_marker_extra": [dict(tag=merge.AI.prefix + marker["tag"], start=marker["start"], end=marker["end"],
+                            "markers": merge_intervals.union_intervals(matching), "recorded_sources": recorded_sources,
+                            "as_marker_extra": [dict(tag=merge_labels.AI.prefix + marker["tag"], start=marker["start"], end=marker["end"],
                                                      evidence=marker["extra_evidence"][label])
-                                                for marker in merge.union_intervals(spans) if label in marker.get("extra_evidence", {})],
+                                                for marker in merge_intervals.union_intervals(spans) if label in marker.get("extra_evidence", {})],
                             "pending_sync": any(store.snapshot(scene_id, kind, borrow=True)[1] is not None for kind in KINDS)})
     print(json.dumps(reports, ensure_ascii=False, indent=2, allow_nan=False))
     return 0

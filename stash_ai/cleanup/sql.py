@@ -175,7 +175,7 @@ class SQLCleanup:
 
 
 def candidate_names(app, selected, cores, tags):
-    from stash_ai.merge import AI
+    from stash_ai.evidence.labels import AI
     scene, primary, extra = set(), set(), set()
     for source in [AI, *(SOURCES[s] for s in selected)]:
         relevant = selected if source == AI else {source.key}
@@ -226,7 +226,7 @@ class SQLPreview:
 
 def run_sql_cleanup(app, sql, store, settings, args, cores, tags, stats):
     """Fast common bans; only source-dependent policies need scene reconciliation."""
-    from stash_ai.merge import AI
+    from stash_ai.evidence.labels import AI
     from stash_ai.signatures import digest
     selected = {config.source.key for config in settings}
     wide = not args.scene_id and selected == set(SOURCES)

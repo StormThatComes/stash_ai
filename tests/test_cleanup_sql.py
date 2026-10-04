@@ -11,7 +11,9 @@ from stash_ai.storage import codec as state_codec
 from stash_ai.publication import merged as merge_sync
 from stash_ai.cleanup import sql as fast
 from stash_ai.cleanup.sql_session import CleanupSqlSession, READ_OPERATION, SQL, is_read_only_cleanup
-from stash_ai import merge
+import stash_ai.evidence.labels as merge_labels
+import stash_ai.storage.results as merge_results
+import stash_ai.storage.store as merge_store
 from stash_ai.cleanup.client import CleanupClient
 from stash_ai.models import WD
 from tests.helpers.cleanup import FastStash
@@ -38,10 +40,10 @@ def test_global_uses_primary_ids_only_and_preserves_manual_cores(tmp_path, monke
     stash = SQLStash(dry=dry)
     blocked = stash.tag('ai:blocked')
     stash.scene['tags'] = [blocked, stash.tag('human')]
-    stash.marker(merge.AI, 'blocked', '1', manual=True)
+    stash.marker(merge_labels.AI, 'blocked', '1', manual=True)
     stash.marker(WD, 'core', '2')
     stash.marker(WD, 'core', '3', manual=True)
-    keep = stash.marker(merge.AI, 'keep', '4')
+    keep = stash.marker(merge_labels.AI, 'keep', '4')
     keep['tags'].append(blocked)
     stash.images = [{'tags': [blocked]}]
     before = deepcopy((stash.scenes, stash.tags, stash.images))
@@ -56,14 +58,14 @@ def test_global_uses_primary_ids_only_and_preserves_manual_cores(tmp_path, monke
     else:
         assert {m['id'] for m in stash.scene['scene_markers']} == {'3', '4'}
         assert 'ai:blocked' not in stash.tags and stash.images[0]['tags'] == []
-        assert {t['name'] for t in keep['tags']} == {merge.AI.owner_tag}
+        assert {t['name'] for t in keep['tags']} == {merge_labels.AI.owner_tag}
         assert app.main(command) == 0
 
 
 def test_streaming_primary_deletion_never_offsets_or_keeps_all_ids(tmp_path, monkeypatch):
     stash = SQLStash()
     for i in range(1, 18):
-        stash.marker(merge.AI, 'blocked', str(i))
+        stash.marker(merge_labels.AI, 'blocked', str(i))
     install(monkeypatch, stash)
     assert app.main(args(tmp_path, ['blocked'])) == 0
     assert not stash.scene['scene_markers']
@@ -79,8 +81,8 @@ def test_partial_modes_only_remove_their_associations(tmp_path, monkeypatch, mod
     stash = SQLStash(dry=dry)
     banned, human = stash.tag('ai:blocked'), stash.tag('human')
     stash.scene['tags'] = [banned, human]
-    stash.marker(merge.AI, 'blocked', '1', manual=True)
-    keep = stash.marker(merge.AI, 'keep', '2')
+    stash.marker(merge_labels.AI, 'blocked', '1', manual=True)
+    keep = stash.marker(merge_labels.AI, 'keep', '2')
     keep['tags'] += [banned, human]
     keep.update(seconds=10.125, end_seconds=17.875)
     before = deepcopy((stash.scenes, stash.tags))
@@ -103,15 +105,15 @@ def test_partial_modes_only_remove_their_associations(tmp_path, monkeypatch, mod
 def test_partial_lazy_masks_do_not_change_the_other_publication(tmp_path, monkeypatch, mode, changed):
     stash = SQLStash()
     stash.scene['tags'] = [stash.tag('ai:blocked')]
-    stash.marker(merge.AI, 'blocked', '1')
+    stash.marker(merge_labels.AI, 'blocked', '1')
     command = args(tmp_path, ['blocked'], mode=mode)
-    with merge.StateStore(tmp_path/'state.sqlite3', merge.scope_for(app.STASH_URL)) as store:
+    with merge_store.StateStore(tmp_path/'state.sqlite3', merge_store.scope_for(app.STASH_URL)) as store:
         store.publish('1', {'scene': {'contributions': [hit('wd', 'blocked')]},
                             'markers': {'contributions': [span('wd', 0, 2, tag='blocked')]}})
     install(monkeypatch, stash)
     assert app.main(command) == 0
-    with merge.StateStore(tmp_path/'state.sqlite3', merge.scope_for(app.STASH_URL)) as store:
-        for kind in merge.KINDS:
+    with merge_store.StateStore(tmp_path/'state.sqlite3', merge_store.scope_for(app.STASH_URL)) as store:
+        for kind in merge_results.KINDS:
             assert bool(store.snapshot('1', kind)[0]['contributions']) == (kind != changed)
 
 
@@ -119,7 +121,7 @@ def test_partial_lazy_masks_do_not_change_the_other_publication(tmp_path, monkey
                                         ('CleanupRemoveTags','cleanup-scene-tags-only')])
 def test_timeout_after_commit_resumes_without_replaying_deleted_ids(tmp_path, monkeypatch, failure, mode):
     stash = SQLStash()
-    stash.marker(merge.AI, 'blocked', '1')
+    stash.marker(merge_labels.AI, 'blocked', '1')
     stash.scene['tags'] = [stash.tag('ai:blocked')]
     stash.fail_after = failure
     install(monkeypatch, stash)
@@ -136,7 +138,7 @@ def test_recheck_preserves_renamed_primary_tag(tmp_path, monkeypatch, new_name):
     from tests.helpers import cleanup_sql as sql_helpers
     monkeypatch.setattr(sql_helpers, 'SCHEMA', SCHEMA.replace('name TEXT UNIQUE', 'name TEXT COLLATE NOCASE UNIQUE'))
     stash = SQLStash()
-    stash.marker(merge.AI, 'blocked', '1')
+    stash.marker(merge_labels.AI, 'blocked', '1')
     def rename(client, key):
         if key == 'primary_check':
             tag = client.tags.pop('ai:blocked')
@@ -153,8 +155,8 @@ def test_source_specific_cleanup_reconciles_only_candidates(tmp_path, monkeypatc
     stash = SQLStash()
     for i in range(2, 20):
         stash.scenes[str(i)] = dict(id=str(i), tags=[], scene_markers=[])
-    with merge.StateStore(tmp_path/'state.sqlite3', merge.scope_for(app.STASH_URL)) as store:
-        merge_sync.sync_merged(app, stash, app.TagResolver(stash, source=merge.AI), store, stash.find_scene('1'),
+    with merge_store.StateStore(tmp_path/'state.sqlite3', merge_store.scope_for(app.STASH_URL)) as store:
+        merge_sync.sync_merged(app, stash, app.TagResolver(stash, source=merge_labels.AI), store, stash.find_scene('1'),
                          [hit('wd'), hit('oppai')], [span('joytag',10,20),span('oppai',20,30),span('wd',30,40)])
     stash.scene_reads.clear()
     install(monkeypatch, stash)
@@ -204,7 +206,7 @@ def test_invalid_limits_fail_before_io(flag,value):
 
 def test_sql_cleanup_uses_bulk_mutations_without_capability_queries(tmp_path, monkeypatch):
     stash = SQLStash()
-    stash.marker(merge.AI, 'blocked', '1')
+    stash.marker(merge_labels.AI, 'blocked', '1')
     install(monkeypatch, stash)
     assert app.main(args(tmp_path, ['blocked'])) == 0
     assert not stash.scene['scene_markers'] and 'ai:blocked' not in stash.tags
@@ -215,7 +217,7 @@ def test_sql_cleanup_uses_bulk_mutations_without_capability_queries(tmp_path, mo
 @pytest.mark.parametrize('strategy', ['auto', 'sql'])
 def test_unavailable_sql_does_not_return_to_global_marker_filter(tmp_path, monkeypatch, strategy):
     stash = FastStash()
-    stash.marker(merge.AI, 'blocked', '1', manual=True)
+    stash.marker(merge_labels.AI, 'blocked', '1', manual=True)
     install(monkeypatch, stash)
     command = [*args(tmp_path, ['blocked']), '--cleanup-strategy', strategy]
     assert app.main(command) == (1 if strategy == 'sql' else 0)
@@ -227,11 +229,11 @@ def test_cleanup_preview_reads_only_requested_state_and_shadows_in_memory(tmp_pa
     path = tmp_path/'state.sqlite3'
     snapshot = {'contributions': [hit('wd')]}
     segment = {'mode':'spans', 'items': [span('wd',0,2)], 'meta': {'origin':'legacy'}}
-    with merge.StateStore(path,'fixture') as state:
+    with merge_store.StateStore(path,'fixture') as state:
         state.put('1','wd',{'markers':segment})
         state.publish('1',{'scene':snapshot})
     before = path.read_bytes(), path.stat().st_mtime_ns
-    with merge.StateStore(path,'fixture',dry_run=True,cleanup_preview=True) as state:
+    with merge_store.StateStore(path,'fixture',dry_run=True,cleanup_preview=True) as state:
         assert state.preview_source
         assert state.connection.execute('SELECT count(*) FROM main.results').fetchone() == (0,)
         assert state.connection.execute('SELECT count(*) FROM main.snapshots').fetchone() == (0,)
@@ -246,9 +248,9 @@ def test_cleanup_preview_reads_only_requested_state_and_shadows_in_memory(tmp_pa
 
 def test_cleanup_preview_detects_pending_publications_in_readonly_source(tmp_path):
     path = tmp_path/'state.sqlite3'
-    with merge.StateStore(path,'fixture') as state:
+    with merge_store.StateStore(path,'fixture') as state:
         state.prepare('1',{'markers':{'contributions':[]}})
-    with merge.StateStore(path,'fixture',dry_run=True,cleanup_preview=True) as state:
+    with merge_store.StateStore(path,'fixture',dry_run=True,cleanup_preview=True) as state:
         assert state.has_pending_publications()
         assert state.snapshot('1','markers')[1] is not None
 
@@ -273,11 +275,11 @@ def test_legacy_interrupted_global_cleanup_can_resume_using_sql(tmp_path, monkey
     from stash_ai.models import SOURCES
 
     stash = SQLStash(dry=dry)
-    stash.marker(merge.AI, 'blocked', '2')  # Marker 1 was already deleted by legacy.
+    stash.marker(merge_labels.AI, 'blocked', '2')  # Marker 1 was already deleted by legacy.
     tag_id = stash.tags['ai:blocked']['id']
     command = [*args(tmp_path, ['blocked']), '--cleanup-strategy', strategy]
     path = tmp_path/'state.sqlite3'
-    with merge.StateStore(path, merge.scope_for(app.STASH_URL)) as store:
+    with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL)) as store:
         store.publish('1', {'markers': {'contributions': [span('wd', 0, 2, tag='blocked')]}})
         # Persist the old full-cleanup format directly: no output_kinds in the
         # fingerprint and no marker_/scene_ prefixes in the lazy masks.
@@ -297,7 +299,7 @@ def test_legacy_interrupted_global_cleanup_can_resume_using_sql(tmp_path, monkey
     else:
         assert 'ai:blocked' not in stash.tags and not stash.scene['scene_markers']
         assert [identifier for op, identifier in stash.writes if op == 'delete'] == ['2']
-    with merge.StateStore(path, merge.scope_for(app.STASH_URL), allow_cleanup=dry) as store:
+    with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL), allow_cleanup=dry) as store:
         assert store.cleanup_generation == 1
         assert store.cleanup_pending == (fingerprint if dry else None)
         assert store.snapshot('1', 'markers')[0]['contributions'] == []
@@ -329,7 +331,7 @@ def test_switching_output_scope_during_recovery_is_rejected(tmp_path, monkeypatc
 def test_marker_preview_does_not_double_count_extras_on_deleted_cores(tmp_path, monkeypatch, capsys):
     stash = SQLStash(dry=True)
     blocked = stash.tag('ai:blocked')
-    for source, label, i in [(merge.AI,'blocked','1'), (merge.AI,'keep','2'), (WD,'core','3')]:
+    for source, label, i in [(merge_labels.AI,'blocked','1'), (merge_labels.AI,'keep','2'), (WD,'core','3')]:
         stash.marker(source,label,i)['tags'].append(blocked)
     install(monkeypatch, stash)
     assert app.main([*args(tmp_path,['blocked'],['core'],mode='cleanup-markers-only'),'--dry-run']) == 0

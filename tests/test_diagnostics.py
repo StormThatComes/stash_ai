@@ -9,7 +9,6 @@ import pytest
 from stash_ai.inference import sprites
 from stash_ai.storage import codec as state_codec
 from stash_ai import cli as app
-from stash_ai import merge
 from stash_ai.diagnostics import MergeDiagnostics
 from stash_ai.runtime import RunReport
 

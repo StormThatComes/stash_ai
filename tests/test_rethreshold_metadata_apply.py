@@ -6,7 +6,9 @@ import sqlite3
 import pytest
 
 from stash_ai.rethreshold import markers as marker_updates, execution as rethreshold_execution, scenes as scene_updates
-from stash_ai import cli as app, db, scene_cache, thresholds
+from stash_ai import cli as app, db
+import stash_ai.evidence.identity as scene_cache_identity
+import stash_ai.evidence.identity as thresholds_identity
 from stash_ai.storage import progress
 from stash_ai.storage import metadata as state_metadata
 from stash_ai.runtime import RunReport
@@ -103,8 +105,8 @@ def test_small_index_plan_retains_latest_inference_and_all_history_population(tm
     elif history == 'empty_inference_tail':
         saved[-1]['items'] = saved[-1]['frames'] = []
     else:
-        saved[-1][scene_cache.SCENE_OVERRIDE] = .8
-        saved[-1][thresholds.OVERRIDE] = .9
+        saved[-1][scene_cache_identity.SCENE_OVERRIDE] = .8
+        saved[-1][thresholds_identity.OVERRIDE] = .9
     with StateStore(tmp_path/'state.sqlite3', 'scope') as store:
         store.replace_records('1', 'wd', 'scene', saved)
         expected = index_rows(store)

@@ -8,12 +8,12 @@ import pytest
 
 from stash_ai import cli as app
 from stash_ai import db as stash_db
-from stash_ai import merge
+import stash_ai.storage.store as merge_store
 from stash_ai.storage.codec import encode
 
 
 def seed(path, scope):
-    with merge.StateStore(path, scope) as state:
+    with merge_store.StateStore(path, scope) as state:
         state.put("1", "wd", {
             "scene": {
                 "mode": "scene",
@@ -61,7 +61,7 @@ def test_compact_reclaims_free_pages_and_preserves_state(tmp_path):
 
     before = stash_db.inspect_database(path, scope)
     assert before["free_page_bytes"] > 0
-    with merge.StateStore(path, scope, True) as state:
+    with merge_store.StateStore(path, scope, True) as state:
         expected = state.records("1", "scene"), state.records("1", "markers")
 
     old, after = stash_db.compact_database(path, scope)
@@ -70,7 +70,7 @@ def test_compact_reclaims_free_pages_and_preserves_state(tmp_path):
     assert after["quick_check"] == "ok"
     assert after["file_bytes"] < before["file_bytes"]
     assert after["free_page_bytes"] <= before["free_page_bytes"]
-    with merge.StateStore(path, scope, True) as state:
+    with merge_store.StateStore(path, scope, True) as state:
         assert (state.records("1", "scene"), state.records("1", "markers")) == expected
 
 
@@ -78,13 +78,13 @@ def test_compact_refuses_pending_publication_or_cleanup(tmp_path):
     path = tmp_path / "state.sqlite3"
     scope = "scope-a"
     seed(path, scope)
-    with merge.StateStore(path, scope) as state:
+    with merge_store.StateStore(path, scope) as state:
         state.prepare("1", {"scene": {"owned_ids": [], "contributions": []}})
 
     with pytest.raises(RuntimeError, match="Pending publication"):
         stash_db.compact_database(path, scope)
 
-    with merge.StateStore(path, scope, allow_cleanup=True) as state:
+    with merge_store.StateStore(path, scope, allow_cleanup=True) as state:
         with state.connection:
             state.connection.execute(
                 "UPDATE snapshots SET pending=NULL WHERE scope=?", (scope,))
@@ -101,7 +101,7 @@ def test_compact_refuses_pending_publication_or_cleanup(tmp_path):
 def test_compact_refuses_pending_plan_in_another_scope(tmp_path):
     path = tmp_path / "state.sqlite3"
     seed(path, "scope-a")
-    with merge.StateStore(path, "scope-b") as state:
+    with merge_store.StateStore(path, "scope-b") as state:
         state.prepare("9", {"scene": {"owned_ids": [], "contributions": []}})
 
     report = stash_db.inspect_database(path, "scope-a")
@@ -130,7 +130,7 @@ def test_compact_dry_run_does_not_change_database(tmp_path):
 
 def test_db_cli_does_not_load_models_or_stash(tmp_path, monkeypatch, capsys):
     path = tmp_path / "state.sqlite3"
-    scope = merge.scope_for(app.STASH_URL)
+    scope = merge_store.scope_for(app.STASH_URL)
     seed(path, scope)
     monkeypatch.setattr(app, "load_model_settings", lambda *a, **k: pytest.fail("loaded model config"))
     monkeypatch.setattr(app, "create_stash_client", lambda *a, **k: pytest.fail("connected to Stash"))
@@ -318,7 +318,7 @@ def test_deep_check_relation_warnings_do_not_mark_database_failed(tmp_path):
 
 def test_db_check_cli_is_offline_and_returns_nonzero_for_inconsistency(tmp_path, monkeypatch, capsys):
     path = tmp_path / "state.sqlite3"
-    scope = merge.scope_for(app.STASH_URL)
+    scope = merge_store.scope_for(app.STASH_URL)
     seed(path, scope)
     monkeypatch.setattr(app, "load_model_settings", lambda *a, **k: pytest.fail("loaded model config"))
     monkeypatch.setattr(app, "create_stash_client", lambda *a, **k: pytest.fail("connected to Stash"))

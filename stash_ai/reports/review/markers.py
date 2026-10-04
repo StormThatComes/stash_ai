@@ -6,7 +6,7 @@ from .signals import _score, _candidate, _flag
 
 def _supporting_scores(app, contribution, tag, segments, postings):
     from stash_ai.evidence.temporal.policy import marker_floor
-    from stash_ai.thresholds import marker_threshold
+    from stash_ai.evidence.thresholds import marker_threshold
     from stash_ai.evidence.timeline import Series
 
     identity = contribution["meta"].get("frame_input_signature")
@@ -46,10 +46,11 @@ def _supporting_scores(app, contribution, tag, segments, postings):
 
 
 def _marker_signals(app, store, scene, spans, rows, options):
-    from stash_ai.merge import marker_segment_signature, union_intervals
-    from stash_ai.occurrences import is_occurrence
+    from stash_ai.evidence.identity import marker_segment_signature
+    from stash_ai.evidence.intervals import union_intervals
+    from stash_ai.evidence.occurrences import is_occurrence
     from stash_ai.signatures import digest
-    from stash_ai.thresholds import marker_threshold
+    from stash_ai.evidence.thresholds import marker_threshold
 
     effective, by_meta, segments_by_signature, postings = {}, defaultdict(set), {}, {}
     for model, segments in store.records(scene, "markers", borrow=True).items():

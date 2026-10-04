@@ -283,6 +283,42 @@ assert SceneAccumulator(0.8, policy).state()['frames'] == 0
     assert result.returncode == 0, result.stderr
 
 
+def test_evidence_pipeline_replaces_root_modules_and_imports_without_ml(tmp_path):
+    files = application_files()
+    previous = {path: data for path, data in files.items()
+                if not path.startswith('stash_ai/evidence/')}
+    modules = ('merge', 'fusion', 'scene', 'occurrences', 'scene_cache', 'thresholds')
+    previous.update({f'stash_ai/{name}.py': b'PREVIOUS_EVIDENCE = True\n' for name in modules})
+    installed(tmp_path, Remote(previous))
+    result = subprocess.run(
+        [sys.executable, '-c', 'from stash_ai import ' + ', '.join(modules)],
+        cwd=tmp_path, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    cache = tmp_path / 'stash_ai/__pycache__'
+
+    assert updater.update(tmp_path, Remote(files)) == 0
+
+    for name in modules:
+        assert not (tmp_path / f'stash_ai/{name}.py').exists()
+        assert not list(cache.glob(name + '.*.pyc'))
+    result = subprocess.run([sys.executable, '-I', '-c', '''
+import sys
+sys.path.insert(0, '.')
+from stash_ai.evidence.pipeline import evidence
+from stash_ai.evidence.frames import FrameIndex
+from stash_ai.evidence.observations import ObservationIndex
+from stash_ai.evidence.labels import raw_label
+from stash_ai.evidence.identity import marker_segment_signature, OVERRIDE, SCENE_OVERRIDE
+from stash_ai.inference.reuse import reuse
+segment = {'mode': 'frames', 'meta': {}, 'items': []}
+projected = {**segment, OVERRIDE: 0.2, SCENE_OVERRIDE: 0.7}
+assert marker_segment_signature(segment) == marker_segment_signature(projected)
+assert raw_label('plain_label') == 'plain_label'
+assert not {'torch', 'numpy', 'onnxruntime'} & set(sys.modules)
+'''], cwd=tmp_path, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+
 def test_inference_module_moves_to_package_and_removes_stale_inputs(tmp_path):
     files = application_files()
     previous = {name: data for name, data in files.items()

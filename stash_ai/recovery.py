@@ -45,7 +45,7 @@ def load_cleanups(store):
 
 def abandon(store, report):
     """One local transaction; the ordinary state DB writer lock stays held."""
-    from stash_ai.merge import now
+    from stash_ai.inference.results import now
     from stash_ai.storage.preview import check_source
     check_source(store)
     db = store.connection
@@ -120,9 +120,10 @@ def clear_publications(store, scene, kind):
 
 def reconcile(app, stash, store, scene, kind, published):
     """Observe surviving outputs; never replay an abandoned plan or infer votes."""
-    from stash_ai.merge import AI, union_intervals, source_codes
-    from stash_ai.occurrences import OCCURRENCE_TAG, is_occurrence
-    from stash_ai.fusion import prune_blocked_extras
+    from stash_ai.evidence.labels import AI, source_codes
+    from stash_ai.evidence.intervals import union_intervals
+    from stash_ai.evidence.occurrences import OCCURRENCE_TAG, is_occurrence
+    from stash_ai.evidence.shared_markers import prune_blocked_extras
     from stash_ai.performance import freeze
     archived = publications(store, scene['id'], kind)
     if not archived and not (published or {}).get('recovery_required'):

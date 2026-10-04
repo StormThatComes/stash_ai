@@ -6,7 +6,11 @@ import sqlite3
 import pytest
 
 from stash_ai.inference import sprites
-from stash_ai import cli as app, merge, thresholds
+from stash_ai import cli as app
+import stash_ai.evidence.identity as thresholds_identity
+import stash_ai.evidence.intervals as merge_intervals
+import stash_ai.evidence.source_markers as merge_source_markers
+import stash_ai.storage.store as merge_store
 from tests.test_thresholds import configure, raw
 
 pytestmark = pytest.mark.usefixtures('reset_temporal')
@@ -48,7 +52,7 @@ def test_enabling_temporal_checks_historical_retention_before_publication(
                 replace(config, scene_cache_floor=None, marker_cache_floor=None)
                 for config in settings(*a)])
         assert app.main([*args, '--no-temporal']) == 0
-    with merge.StateStore(p.path, merge.scope_for(app.STASH_URL), True) as state:
+    with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), True) as state:
         meta = state.records('1', 'markers')['wd'][0]['meta']
         assert ('marker_score_floor' not in meta) == old_cache
     before = stored_outputs(p.path), deepcopy(p.stash.scene)
@@ -95,12 +99,12 @@ def test_historical_floor_uses_capture_threshold_instead_of_override(override, u
     frames = segment('wd', [[('core', .95)]] * 2)
     frames['meta'].pop('marker_score_floor', None)
     frames['meta']['marker_threshold'] = .7
-    frames[thresholds.OVERRIDE] = override
+    frames[thresholds_identity.OVERRIDE] = override
     if usable:
-        assert merge.marker_contributions(app, {'wd': [frames]}, policies())
+        assert merge_source_markers.marker_contributions(app, {'wd': [frames]}, policies())
     else:
         with pytest.raises(ValueError, match='wd: marker cache floor.*run inference'):
-            merge.marker_contributions(app, {'wd': [frames]}, policies())
+            merge_source_markers.marker_contributions(app, {'wd': [frames]}, policies())
 
 
 def test_historical_incomplete_segment_cannot_hide_behind_complete_history():
@@ -109,7 +113,7 @@ def test_historical_incomplete_segment_cannot_hide_behind_complete_history():
     old['meta'].pop('marker_score_floor', None)
     current = segment('wd', [[('core', .9)]] * 2)
     with pytest.raises(ValueError, match='wd: marker cache floor.*run inference'):
-        merge.marker_contributions(app, {'wd': [old, current]}, policies())
+        merge_source_markers.marker_contributions(app, {'wd': [old, current]}, policies())
 
 
 @pytest.mark.parametrize('markers_only', [False, True])
@@ -202,7 +206,7 @@ def test_legacy_frames_and_imported_ranges_remain_usable():
     records = {'wd': [imported], 'joytag': [
         dict(mode='spans', meta={'origin': 'legacy'}, items=[
             dict(tag='legacy', start=3, end=5, extra_tags=[])])]}
-    markers = merge.union_intervals(merge.marker_contributions(app, records, policies()))
+    markers = merge_intervals.union_intervals(merge_source_markers.marker_contributions(app, records, policies()))
     assert [(m['tag'], m['start'], m['end']) for m in markers] == [('core', 0, 2), ('legacy', 3, 5)]
 
 
@@ -216,4 +220,4 @@ def test_incomplete_history_cannot_contribute_consensus_votes(source):
     incomplete['meta']['marker_score_floor'] = .75
     records[source].insert(0, incomplete)
     with pytest.raises(ValueError, match=source + ': marker cache floor.*run inference'):
-        merge.marker_contributions(app, records, policies())
+        merge_source_markers.marker_contributions(app, records, policies())

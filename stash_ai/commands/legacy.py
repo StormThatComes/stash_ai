@@ -2,7 +2,8 @@
 from stash_ai.publication import markers as marker_ops
 from collections import defaultdict
 
-from stash_ai import merge
+import stash_ai.evidence.labels as merge_labels
+import stash_ai.inference.results as merge_results
 from stash_ai.models import SOURCES
 
 
@@ -11,7 +12,7 @@ def legacy_label(name):
         if name.startswith(source.prefix) and name != source.owner_tag:
             label = name[len(source.prefix):]
             if label and not label.startswith(("category:", "marker:")):
-                return key, merge.raw_label(label)
+                return key, merge_labels.raw_label(label)
     return None
 
 
@@ -22,7 +23,7 @@ def bootstrap_legacy(app, store, scene):
         if not enabled:
             continue
         existing = store.sources(scene_id, kind)
-        if kind == "markers" and not existing and any(marker_ops.owned_marker(marker, merge.AI) for marker in scene.get("scene_markers", [])):
+        if kind == "markers" and not existing and any(marker_ops.owned_marker(marker, merge_labels.AI) for marker in scene.get("scene_markers", [])):
             raise RuntimeError("Merged markers exist without their source state. Restore the original --state-db before synchronization.")
         from stash_ai.performance import freeze
         imported = {freeze(item) for item in store.imported_legacy(scene_id, kind, borrow=True)}
@@ -57,7 +58,7 @@ def bootstrap_legacy(app, store, scene):
                     legacy_marker_id=str(marker["id"])))
         for model, items in by_model.items():
             segment = {"mode": "scene" if kind == "scene" else "spans", "items": items,
-                       "meta": {"origin": "legacy", "captured_at": merge.now(), "revision": None}}
+                       "meta": {"origin": "legacy", "captured_at": merge_results.now(), "revision": None}}
             # Fresh separate-mode outputs augment the cache. Only a successful
             # merged-mode inference replaces that model's previous evidence.
             store.put(scene_id, model, {kind: segment}, {kind: False})

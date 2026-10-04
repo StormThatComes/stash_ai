@@ -8,7 +8,11 @@ import math
 
 import pytest
 
-from stash_ai import cli as app, fusion, merge, thresholds
+from stash_ai import cli as app
+import stash_ai.evidence.identity as thresholds_identity
+from stash_ai.evidence import frames as fusion
+import stash_ai.evidence.intervals as merge_intervals
+import stash_ai.evidence.source_markers as merge_source_markers
 from stash_ai.evidence.temporal import markers as temporal
 from tests.helpers.evidence import frames, policies, segment
 
@@ -80,7 +84,7 @@ def test_filter_uses_effective_per_source_threshold_and_preserves_exact_boundari
              ('above', math.nextafter(floor, math.inf)), ('high', .8),
              ('under_high', math.nextafter(.8, -math.inf))]]
     wd, dtq = segment('wd', rows), segment('dtq', [[('dtq_core', .5), ('dtq_support', .425)]])
-    dtq[thresholds.OVERRIDE] = .5
+    dtq[thresholds_identity.OVERRIDE] = .5
     event = fusion.observations(app, group({'wd': [wd], 'dtq': [dtq]}), policies())[0]
     assert set(event['cores']) == {'edge', 'above', 'high', 'under_high', 'dtq_core', 'dtq_support'}
     assert set(event['extras']) == {'high', 'dtq_core'}
@@ -102,7 +106,7 @@ def test_low_score_invalid_labels_still_fail_merge_validation(label, shared, mon
         shared_marker_frames=shared, shared_marker_extras=shared))
     records = {'wd': [segment('wd', [[('core', .9), (label, .01)]] * 2)]}
     with pytest.raises(ValueError, match='Invalid or reserved merged label'):
-        merge.marker_contributions(app, records, policies())
+        merge_source_markers.marker_contributions(app, records, policies())
 
 
 def test_direct_observation_validation_checks_low_labels_but_keeps_exclusion_semantics():
@@ -141,7 +145,7 @@ def test_temporal_markers_keep_weak_continuations_gaps_extras_and_proofs(monkeyp
 def test_consensus_at_support_floor_survives_wider_retention():
     records = {source: [segment(source, [[('core', .7)] +
                 [(f'weak_{i}', .2) for i in range(100)]] * 3)] for source in ('wd', 'dtq')}
-    markers = merge.union_intervals(merge.marker_contributions(app, records, policies()))
+    markers = merge_intervals.union_intervals(merge_source_markers.marker_contributions(app, records, policies()))
     assert len(markers) == 1
     assert markers[0]['tag'] == 'core'
     assert (markers[0]['start'], markers[0]['end']) == (0, 3)

@@ -13,7 +13,8 @@ from stash_ai.commands import legacy as legacy_commands
 from stash_ai.signatures import digest
 from stash_ai.inference.inputs import RunInputs
 from stash_ai.publication.publisher import MergePublisher
-from stash_ai import merge
+import stash_ai.evidence.labels as merge_labels
+import stash_ai.storage.store as merge_store
 from stash_ai import performance
 from stash_ai.storage import progress
 from stash_ai.runtime import stage
@@ -43,8 +44,8 @@ class MergedRun:
 
     def run(self):
         app, args = self.app, self.args
-        with merge.StateStore(
-                args.state_db, merge.scope_for(app.STASH_URL), app.DRY_RUN,
+        with merge_store.StateStore(
+                args.state_db, merge_store.scope_for(app.STASH_URL), app.DRY_RUN,
                 cache_bytes=int(args.ram_cache_gb * 2**30),
                 allow_cleanup=args.abandon_pending,
                 memory_budget_bytes=int(args.ram_budget_gb * 2**30)) as store:
@@ -78,7 +79,7 @@ class MergedRun:
     def _prepare_resolver(self):
         app, args, stash = self.app, self.args, self.stash
         self.resolver = app.TagResolver(
-            stash, self.hierarchy, source=merge.AI, report=self.report.detail,
+            stash, self.hierarchy, source=merge_labels.AI, report=self.report.detail,
             create_missing=app.CREATE_MISSING)
         self.use_catalog = bool(self.hierarchy or app.CREATE_MARKERS)
         if self.use_catalog or not args.scene_id or len(args.scene_id) > 1:
@@ -169,7 +170,7 @@ class MergedRun:
             # catalog the next run will observe without adding a read to the
             # unchanged hot path.
             resolver = self.app.TagResolver(
-                self.stash, self.hierarchy, source=merge.AI,
+                self.stash, self.hierarchy, source=merge_labels.AI,
                 create_missing=self.app.CREATE_MISSING)
             resolver.preload()
         final_key = digest([

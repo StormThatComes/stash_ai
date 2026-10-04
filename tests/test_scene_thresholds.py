@@ -9,8 +9,9 @@ import pytest
 from stash_ai.rethreshold import execution as rethreshold_execution
 from stash_ai.inference import sprites
 from stash_ai import cli as app
-from stash_ai import merge
-from stash_ai import scene_cache as cache
+from stash_ai.evidence import pipeline as merge
+import stash_ai.storage.store as merge_store
+import stash_ai.evidence.identity as cache_identity
 from stash_ai.runtime import RunReport
 from stash_ai.models import ModelSettings, SOURCES
 from tests.helpers.evidence import policies
@@ -27,12 +28,12 @@ def configure(monkeypatch, scene=.4, marker=.7):
 
 
 def saved(path):
-    with merge.StateStore(path, merge.scope_for(app.STASH_URL), True) as state:
+    with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL), True) as state:
         return state.records('1', 'scene')
 
 
 def outputs(path):
-    with merge.StateStore(path, merge.scope_for(app.STASH_URL), True) as state:
+    with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL), True) as state:
         hits, spans = merge.evidence(app, state, '1', policies(), policies())
         return ([(h['source'], h['tag'], h['score'], h.get('statistics'), h.get('qualification')) for h in hits],
                 [(s['source'], s['tag'], s['start'], s['end'], s.get('derived'), s['score']) for s in spans])
@@ -56,7 +57,7 @@ def test_cached_scene_statistics_and_occurrences_match_fresh_inference(
     assert app.main([*args, '--merge-only', '--rethreshold-scenes']) == 0
     cached = outputs(p.path)
     value = saved(p.path)['wd'][0]
-    assert value.pop(cache.SCENE_OVERRIDE) == .8
+    assert value.pop(cache_identity.SCENE_OVERRIDE) == .8
     assert value == original['wd'][0]
     p.stash.scene['scene_markers'] = []
     p.stash.scene['tags'] = []
@@ -146,7 +147,7 @@ def test_support_ratio_change_rejects_incomplete_cache_before_publication(
     configure(monkeypatch)
     assert app.main(p.args) == 0
     if missing == 'frames':
-        with merge.StateStore(p.path, merge.scope_for(app.STASH_URL)) as state:
+        with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL)) as state:
             segment = state.records('1', 'scene')['wd'][0]
             segment.pop('frames')
             segment['meta'].pop('scene_frames_format')
@@ -168,7 +169,7 @@ def test_rethreshold_abort_report_is_explicit_and_groups_blockers(pipeline, monk
     assert app.main(p.args) == 0
     capsys.readouterr()
 
-    with merge.StateStore(p.path, merge.scope_for(app.STASH_URL)) as state:
+    with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL)) as state:
         segment = state.records('1', 'scene')['wd'][0]
         segment.pop('frames')
         segment['meta'].pop('scene_frames_format')
@@ -208,7 +209,7 @@ def test_both_thresholds_reuse_models_and_round_trip(pipeline, monkeypatch):
     configure(monkeypatch, scene=.8, marker=.9)
     monkeypatch.setattr(app, 'load_tagger', lambda *a: pytest.fail('loaded model'))
     assert app.main(p.args) == 0
-    assert saved(p.path)['wd'][0][cache.SCENE_OVERRIDE] == .8
+    assert saved(p.path)['wd'][0][cache_identity.SCENE_OVERRIDE] == .8
     expected = outputs(p.path)
     assert app.main([*p.args, '--merge-only']) == 0
     assert outputs(p.path) == expected
@@ -246,17 +247,17 @@ def test_invalid_scene_cache_preflight_does_not_publish(pipeline, monkeypatch, c
     configure(monkeypatch)
     assert app.main(p.args) == 0
     if change == 'old_cache':
-        with merge.StateStore(p.path, merge.scope_for(app.STASH_URL)) as state:
+        with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL)) as state:
             segment = state.records('1', 'scene')['wd'][0]
             segment.pop('frames')
             segment['meta'].pop('scene_frames_format')
             segment['meta'].pop('scene_score_floor')
             state.put('1', 'wd', {'scene': segment})
     elif change == 'pending':
-        with merge.StateStore(p.path, merge.scope_for(app.STASH_URL)) as state:
+        with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL)) as state:
             state.prepare('1', {'scene': state.snapshot('1', 'scene')[0]})
     elif change == 'missing_result':
-        with merge.StateStore(p.path, merge.scope_for(app.STASH_URL)) as state:
+        with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL)) as state:
             with state.connection:
                 state.connection.execute(
                     "DELETE FROM results WHERE scope=? AND scene='1' AND model='wd' AND kind='scene'",
@@ -273,7 +274,7 @@ def test_rethreshold_scenes_skips_model_with_marker_only_history(pipeline, monke
     p = pipeline
     configure(monkeypatch)
     assert app.main(p.args) == 0
-    with merge.StateStore(p.path, merge.scope_for(app.STASH_URL)) as state:
+    with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL)) as state:
         marker = state.records('1', 'markers')['wd'][0]
         state.put('1', 'dtq', {'markers': marker})
     capsys.readouterr()
@@ -283,7 +284,7 @@ def test_rethreshold_scenes_skips_model_with_marker_only_history(pipeline, monke
     assert app.main(args) == 0
     output = capsys.readouterr().out
     records = saved(p.path)
-    assert records['wd'][0][cache.SCENE_OVERRIDE] == pytest.approx(.8)
+    assert records['wd'][0][cache_identity.SCENE_OVERRIDE] == pytest.approx(.8)
     assert 'dtq' not in records
     assert ('Threshold preflight: checked=1, failed=0, applied=1, '
             'selected=2, skipped_no_evidence=1') in output
@@ -330,7 +331,7 @@ def test_shared_scene_cleanup_uses_frozen_scene_thresholds(pipeline, monkeypatch
     monkeypatch.setattr(app, 'load_tagger', lambda *a: pytest.fail('loaded model'))
     assert app.main([*args, '--cleanup-only', '--scene-tag-exclusions', str(exclusion)]) == 0
     assert [t['name'] for t in p.stash.scene['tags']] == ['ai:common']
-    with merge.StateStore(p.path, merge.scope_for(app.STASH_URL), True) as state:
+    with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), True) as state:
         hit = state.snapshot('1', 'scene')[0]['contributions'][0]
         assert hit['support_sources'] == ['wd', 'oppai']
         assert hit['meta']['scene_threshold'] == .6
@@ -340,7 +341,7 @@ def test_old_completed_cache_is_not_eagerly_reinferred(pipeline, monkeypatch):
     p = pipeline
     configure(monkeypatch)
     assert app.main(p.args) == 0
-    with merge.StateStore(p.path, merge.scope_for(app.STASH_URL)) as state:
+    with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL)) as state:
         segment = state.records('1', 'scene')['wd'][0]
         segment.pop('frames')
         segment['meta'].pop('scene_frames_format')
@@ -377,7 +378,7 @@ def test_scene_rethreshold_never_decodes_publication_snapshots(tmp_path, monkeyp
         ],
     }
     config = ModelSettings(SOURCES['wd'], Path('.'), scene_threshold=.8, marker_threshold=.7)
-    with merge.StateStore(tmp_path/'state.sqlite3', 'scope') as state:
+    with merge_store.StateStore(tmp_path/'state.sqlite3', 'scope') as state:
         state.put('1', 'wd', {'scene': segment})
         state.publish('1', {'scene': {'owned_ids': [], 'contributions': [{'payload': 'x' * 10000}]}})
         monkeypatch.setattr(
@@ -388,4 +389,4 @@ def test_scene_rethreshold_never_decodes_publication_snapshots(tmp_path, monkeyp
         result = rethreshold_execution.run(app, state, {'1': {}}, [config], report)
 
         assert result == {'scene_thresholds_updated': 1}
-        assert state.records('1', 'scene')['wd'][0][cache.SCENE_OVERRIDE] == .8
+        assert state.records('1', 'scene')['wd'][0][cache_identity.SCENE_OVERRIDE] == .8
