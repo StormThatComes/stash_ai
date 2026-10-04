@@ -192,7 +192,7 @@ class MergedRun:
             sql.session.probe()
             # Share one fresh, lightweight catalog between ordinary tags and
             # marker groups, including tags created during this merge.
-            sql.catalog = client.catalog()
+            sql.set_catalog(client.catalog())
             self.stats['merge_prune_sql_enabled'] += 1
             return sql
         except Exception as exc:
@@ -225,7 +225,7 @@ class MergedRun:
             from stash_ai.publication.groups import for_resolver
             from stash_ai.cleanup.groups import prune_groups
             delta = for_resolver(app, self.resolver).usage_delta
-            candidates = sql.marker_group_candidates(delta) if sql is not None else None
+            candidates = sql.discovery.marker_group_candidates(delta) if sql is not None else None
             self.stats.update(prune_groups(
                 stash, self.report.detail, candidate_ids=candidates, usage_delta=delta))
         pruned_after = self.stats['tags_pruned'] + self.stats['marker_group_tags_pruned']

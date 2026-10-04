@@ -352,3 +352,9 @@ dopasowaniem markerów; payloady i plan create/update/delete powstają z gotowyc
 danych. Wspólny `evidence/frozen_replay.py` wybiera dokładne podpisy opublikowanej
 evidence i odtwarza zamrożoną politykę. Recovery osobno rekonstruuje obserwowane
 snapshoty scen i markerów, po czym koordynator zapisuje baseline.
+
+`stash_api/scene_reads.py` koordynuje SQL snapshoty, pola mediów GraphQL
+i jednokierunkowy fallback po błędzie, wspólny dla find, batch i page.
+`cleanup/sql.py` ustala lifecycle i politykę cleanupu; `sql_discovery.py`
+wykonuje ograniczone SELECT-y, `sql_mutations.py` rewaliduje partie i potwierdza
+zapisy natywnym API, a `sql_preview.py` modeluje skutki dry-run bez zapisu źródła.
