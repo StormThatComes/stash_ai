@@ -10,6 +10,27 @@ from stash_ai.db.validation import results
 from tests.test_db import seed
 
 
+def test_historical_mixed_threshold_index_is_checked_without_runtime_adapter(tmp_path):
+    from collections import Counter
+    from stash_ai.storage.store import StateStore
+    from stash_ai.storage.codec import encode
+    from tests.test_result_thresholds import outputs
+    path = tmp_path / 'state.sqlite3'
+    segment = outputs()['scene']
+    with StateStore(path, 'scope') as store:
+        store.put('1', 'wd', {'scene': segment})
+    segment.update(scene_threshold_override=.8, marker_threshold_override=.9)
+    with sqlite3.connect(path) as db:
+        db.execute('PRAGMA user_version=9')
+        db.execute('UPDATE results SET data=?', (encode([segment]),))
+        db.execute('UPDATE result_index SET signature=?',
+                   (results.historical_indexed_signature(segment),))
+        tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        errors = Counter()
+        assert results.check_results_and_index(db, tables, errors) == 1
+        assert not any(errors.values())
+
+
 def test_checks_share_snapshot_when_another_writer_commits(tmp_path, monkeypatch):
     path = tmp_path / 'state.sqlite3'
     seed(path, 'scope')

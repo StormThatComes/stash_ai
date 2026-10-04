@@ -99,7 +99,7 @@ class StashTransport:
                     raise
                 time.sleep(0.5 * 2 ** attempt)
                 continue
-            if report is not None and isinstance(getattr(response, 'content', None), bytes):
+            if report is not None:
                 report.response_size(len(response.content))
             if response.status_code not in retry_statuses or attempt + 1 == attempts:
                 break

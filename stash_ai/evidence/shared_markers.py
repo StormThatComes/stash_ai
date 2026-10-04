@@ -90,8 +90,7 @@ def enrich(app, records, policies, spans, signatures=None, index=None, metrics=N
             return enrich(app, records, policies, spans, signatures, owned_index, metrics)
     groups, by_signature = index.groups, index.by_signature
     options = {**build_options(app), "core_exclusions": {k: sorted(v) for k, v in policies.items()},
-               "tag_exclusions": {k: sorted(v) for k, v in index.tag_policies.items()},
-               "blocklist": []}
+               "tag_exclusions": {k: sorted(v) for k, v in index.tag_policies.items()}}
     covered = defaultdict(list)
     for span in spans:
         key = by_signature.get(span.get("evidence_signature"))

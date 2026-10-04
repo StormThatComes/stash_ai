@@ -140,7 +140,7 @@ def client_for(db, *, end=True, deny=False):
                 result = dict(data={'findScene': native_scene(db,variables['id'],app.CREATE_MARKERS,end,full)})
             else:
                 raise AssertionError('Unexpected operation')
-        return SimpleNamespace(status_code=200,raise_for_status=lambda:None,json=lambda:result)
+        return SimpleNamespace(status_code=200,content=b'',raise_for_status=lambda:None,json=lambda:result)
     client.api.close()
     client.api = SimpleNamespace(post=post,close=lambda:None)
     client.calls = calls
@@ -321,4 +321,3 @@ def test_publication_check_and_snapshots_share_one_commit(tmp_path):
         state.commit_prepared('1', ['scene'], publication=('p','f'))
         assert checked(state,'1','p','f')
         assert sum(sql == 'COMMIT' for sql in statements) == 1
-

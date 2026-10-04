@@ -33,18 +33,17 @@ class PublishedRecords:
 def snapshot_context(runtime, options, kind):
     context = replace(runtime, TEMPORAL_POLICY=TemporalPolicy.from_snapshot(options['policy']))
     if kind == 'markers':
-        context.MARKER_THRESHOLDS = options.get('marker_thresholds', {})
+        context.MARKER_THRESHOLDS = options['marker_thresholds']
         for name, value in options['settings'].items():
             setattr(context, name, value)
     else:
         context.MAX_TAGS = options['max_tags']
-        context.SCENE_THRESHOLDS = options.get('scene_thresholds', {})
+        context.SCENE_THRESHOLDS = options['scene_thresholds']
     return context
 
 
-def frozen_policies(options, field, selected, current, *, legacy=frozenset()):
+def frozen_policies(options, field, selected, current):
     """New cleanup bans revoke proof; never admit votes excluded at publication."""
-    required = field in ('core_exclusions', 'scene_exclusions')
-    frozen = options[field] if required else options.get(field, {})
-    return {source: frozenset(frozen[source] if required else frozen.get(source, [])) | legacy |
+    frozen = options[field]
+    return {source: frozenset(frozen[source]) |
             (current[source] if source in selected else frozenset()) for source in SOURCES}

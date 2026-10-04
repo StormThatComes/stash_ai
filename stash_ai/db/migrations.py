@@ -66,7 +66,7 @@ def migrate(database):
             canonicalize_results(database)
     initialize_features(state)
     with db:
-        if database.version < 11:
+        if database.version < 12:
             from .snapshot_migration import migrate as migrate_snapshots
             migrate_snapshots(db)
         if database.version < 10:

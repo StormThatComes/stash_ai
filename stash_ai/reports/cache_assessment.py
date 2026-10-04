@@ -56,7 +56,7 @@ def inspect_output(app, config, kind, segments, index, refresh, checkpoint, erro
                 if segment['mode'] != 'frames' or meta.get('origin') != 'inference':
                     raise ValueError('Imported marker ranges cannot prove retained frame coverage.')
                 validate_marker_blocklist(segment, config.source.key)
-                floor = meta.get('marker_score_floor', meta.get('marker_threshold'))
+                floor = meta.get('marker_score_floor')
                 saved = marker_threshold(segment)
             if not _score(saved) or not _score(floor):
                 raise ValueError('Invalid saved threshold or retention floor; run --db-check.')
