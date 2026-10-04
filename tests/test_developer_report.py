@@ -1,5 +1,7 @@
 """Privacy and usefulness guarantees for anonymous developer diagnostics."""
 
+from stash_ai.reports.developer.distribution import Distribution
+
 import hashlib
 import json
 import sqlite3
@@ -7,7 +9,7 @@ import sqlite3
 import pytest
 
 from stash_ai import cli as app
-from stash_ai.reports import developer as diagnostics
+from stash_ai.reports.developer import report as diagnostics
 from stash_ai import merge
 from stash_ai.storage.codec import encode
 
@@ -78,7 +80,7 @@ def serialized(report):
 
 
 def test_distribution_memory_is_bounded_for_many_distinct_values():
-    distribution = diagnostics.Distribution()
+    distribution = Distribution()
     for value in range(100_000):
         distribution.add(value)
 
@@ -93,12 +95,12 @@ def test_distribution_memory_is_bounded_for_many_distinct_values():
 
 
 def test_distribution_keeps_small_percentiles_exact_and_large_singletons_exact():
-    distribution = diagnostics.Distribution()
+    distribution = Distribution()
     for value in (0, 1, 2, 2, 3, 10_000, 10_000):
         distribution.add(value)
 
     assert distribution.summary()["p50"] == 2
-    single = diagnostics.Distribution()
+    single = Distribution()
     single.add(10_000)
     assert single.summary()["p50"] == single.summary()["p95"] == single.summary()["p99"] == 10_000
 

@@ -168,7 +168,7 @@ def test_database_module_moves_to_package_and_remains_importable(tmp_path):
     # Exercise the existing API through the installed package with stdlib only.
     result = subprocess.run([sys.executable, '-c', '''
 from stash_ai.db import check_database, compact_database, inspect_database
-from stash_ai.reports.developer import build_report
+from stash_ai.reports.developer.report import build_report
 for operation, args in (
     (check_database, ('missing.sqlite3', 'scope')),
     (compact_database, ('missing.sqlite3', 'scope')),
@@ -210,7 +210,7 @@ def test_reports_move_to_nested_package_and_remove_old_bytecode(tmp_path):
         if name.startswith('stash_ai/reports/'):
             assert (tmp_path / name).read_bytes() == data
     result = subprocess.run([sys.executable, '-c', '''
-from stash_ai.reports.developer import build_report
+from stash_ai.reports.developer.report import build_report
 try:
     build_report('missing.sqlite3')
 except FileNotFoundError:
@@ -220,6 +220,33 @@ else:
 '''], cwd=tmp_path, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
     assert not (tmp_path / 'missing.sqlite3').exists()
+
+
+@pytest.mark.parametrize('name', ['developer', 'model', 'tag_review'])
+def test_report_subpackages_replace_modules_and_stale_bytecode(tmp_path, name):
+    files = application_files()
+    old_path = f'stash_ai/reports/{name}.py'
+    target = 'review' if name == 'tag_review' else name
+    previous = {path: data for path, data in files.items()
+                if not path.startswith(f'stash_ai/reports/{target}/')}
+    previous[old_path] = b'PREVIOUS_REPORT = True\n'
+    installed(tmp_path, Remote(previous))
+    result = subprocess.run(
+        [sys.executable, '-c', f'import stash_ai.reports.{name}'],
+        cwd=tmp_path, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    cache = tmp_path / 'stash_ai/reports/__pycache__'
+    assert list(cache.glob(name + '.*.pyc'))
+
+    assert updater.update(tmp_path, Remote(files)) == 0
+
+    assert not (tmp_path / old_path).exists()
+    assert not list(cache.glob(name + '.*.pyc'))
+    result = subprocess.run(
+        [sys.executable, '-I', '-c',
+         f"import sys; sys.path.insert(0, '.'); import stash_ai.reports.{target}"],
+        cwd=tmp_path, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
 
 
 def test_inference_module_moves_to_package_and_removes_stale_inputs(tmp_path):

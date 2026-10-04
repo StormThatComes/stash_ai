@@ -1,5 +1,8 @@
 """Offline model utility and leave-one-model-out ablation reporting."""
 
+from stash_ai.reports.model.comparison import _marker_key, _marker_delta
+from stash_ai.occurrences import is_occurrence
+
 from dataclasses import replace
 import json
 
@@ -7,8 +10,8 @@ import pytest
 
 from stash_ai import cli as app
 from stash_ai import merge
-from stash_ai.reports import model as model_report
-from stash_ai.reports import model_workers
+from stash_ai.reports.model import report as model_report
+from stash_ai.reports.model import workers as model_workers
 from stash_ai.temporal import TemporalPolicy
 
 
@@ -59,7 +62,7 @@ def _report_marker(tag, start, end, *, occurrence=False, extras=()):
 
 
 def _naive_overlap(left, right):
-    if left["tag"] != right["tag"] or bool(model_report.is_occurrence(left)) != bool(model_report.is_occurrence(right)):
+    if left["tag"] != right["tag"] or bool(is_occurrence(left)) != bool(is_occurrence(right)):
         return False
     a0, b0 = float(left["start"]), float(right["start"])
     a1 = float(left["end"]) if left["end"] is not None else a0
@@ -68,21 +71,21 @@ def _naive_overlap(left, right):
 
 
 def _naive_marker_delta(full, reduced):
-    reduced_keys = {model_report._marker_key(item) for item in reduced}
-    full_keys = {model_report._marker_key(item) for item in full}
+    reduced_keys = {_marker_key(item) for item in reduced}
+    full_keys = {_marker_key(item) for item in full}
     full_overlap = [any(_naive_overlap(marker, other) for other in reduced) for marker in full]
     reduced_overlap = [any(_naive_overlap(marker, other) for other in full) for marker in reduced]
     return {
         "lost": sum(not overlap for overlap in full_overlap),
         "changed": sum(
-            overlap and model_report._marker_key(marker) not in reduced_keys
+            overlap and _marker_key(marker) not in reduced_keys
             for marker, overlap in zip(full, full_overlap)
         ),
         "added": sum(not overlap for overlap in reduced_overlap),
         "exact_removed": len(full_keys - reduced_keys),
         "exact_added": len(reduced_keys - full_keys),
         "occurrences_lost": sum(
-            model_report.is_occurrence(marker) and not overlap
+            is_occurrence(marker) and not overlap
             for marker, overlap in zip(full, full_overlap)
         ),
     }
@@ -107,7 +110,7 @@ def test_marker_delta_linear_overlap_matches_quadratic_reference():
     full.sort(key=lambda item: (item["start"], item["tag"]))
     reduced.sort(key=lambda item: (item["start"], item["tag"]))
 
-    assert model_report._marker_delta(full, reduced) == _naive_marker_delta(full, reduced)
+    assert _marker_delta(full, reduced) == _naive_marker_delta(full, reduced)
 
 
 def test_selected_sources_replays_consensus_instead_of_filtering_finished_markers(tmp_path):

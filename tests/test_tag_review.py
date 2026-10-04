@@ -1,4 +1,6 @@
 """Review priorities must preserve model provenance and cache limitations."""
+
+from stash_ai.reports.review.options import ReviewOptions, REASONS
 from copy import deepcopy
 import json
 
@@ -6,8 +8,8 @@ import pytest
 
 from stash_ai.inference import sprites
 from stash_ai import cli as app, merge
-from stash_ai.reports import tag_review
-from stash_ai.reports.review_accumulator import ReviewAccumulator
+from stash_ai.reports.review import report as tag_review
+from stash_ai.reports.review.accumulator import ReviewAccumulator
 from stash_ai.models import SOURCES
 from stash_ai.temporal import TemporalPolicy
 from tests.test_model_report import inference_pair
@@ -28,7 +30,7 @@ def pair(label="common", score=.42, threshold=.4, identity="same"):
     return result
 
 
-def report(path, scenes=("1",), options=tag_review.ReviewOptions(), core=None, tags=None):
+def report(path, scenes=("1",), options=ReviewOptions(), core=None, tags=None):
     with merge.StateStore(path, merge.scope_for(app.STASH_URL), True, allow_cleanup=True) as state:
         return tag_review.build_report(app, state, list(scenes), core or policies(), tags or policies(), options)
 
@@ -43,7 +45,7 @@ def model_rows(data):
 
 
 def test_accumulator_preserves_global_counts_and_caps_examples():
-    accumulator = ReviewAccumulator(27, 1, tag_review.REASONS)
+    accumulator = ReviewAccumulator(27, 1, REASONS)
     rows = {
         ("wd", "shared"): dict(reasons={"long_marker", "weak_or_borderline"}, evidence=[]),
         ("dtq", "shared"): dict(reasons={"long_marker"}, evidence=[]),
@@ -83,7 +85,7 @@ def test_counts_deduplicate_models_scenes_history_and_marker_ranges(tmp_path):
     seed(path, "1", "dtq", pair(score=.28, threshold=.25))
     seed(path, "1", "joytag", pair(score=.95))
 
-    data = report(path, ("1", "2"), tag_review.ReviewOptions(examples=1))
+    data = report(path, ("1", "2"), ReviewOptions(examples=1))
     rows = model_rows(data)
     assert data["totals"]["unique_tags_flagged"] == 1
     assert data["totals"]["scene_tag_pairs_flagged"] == 2
@@ -165,7 +167,7 @@ def test_long_marker_flags_all_contributors_using_the_merged_range(tmp_path):
             {"start": start + 2., "end": start + 4., "tags": [["common", .95]]},
         ]
         seed(path, "1", model, outputs)
-    data = report(path, options=tag_review.ReviewOptions(long_marker_seconds=5.))
+    data = report(path, options=ReviewOptions(long_marker_seconds=5.))
     assert data["totals"]["scene_tag_pairs_flagged"] == 1
     for model in ("wd", "dtq"):
         assert model_rows(data)[model]["reasons"]["long_marker"] == 1

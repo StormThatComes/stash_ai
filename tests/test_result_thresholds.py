@@ -11,7 +11,7 @@ from stash_ai import cli as app
 from stash_ai import db, performance, recovery
 from stash_ai.storage import progress
 from stash_ai.cleanup import state as cleanup
-from stash_ai.reports import developer as developer_report
+from stash_ai.reports.developer import report as developer_report
 from stash_ai import scene_cache, thresholds
 from stash_ai.runtime import RunReport
 from stash_ai.storage.store import StateStore

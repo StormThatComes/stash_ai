@@ -8,7 +8,8 @@ from pathlib import Path
 from tqdm import tqdm
 
 from stash_ai.models import SOURCES
-from stash_ai.reports import model
+from stash_ai.reports.model import report as model
+from .analysis import scene_report, merge_scene_report
 from stash_ai.storage.store import StateStore
 
 _WORKER_APP = None
@@ -47,7 +48,7 @@ def _init_report_worker(state_db, scope, temporal_policy, core_policies,
 def _report_worker_scene(scene):
     if _WORKER_STORE is None or _WORKER_APP is None:
         raise RuntimeError("Model report worker was not initialized.")
-    return model.scene_report(
+    return scene_report(
         _WORKER_APP,
         _WORKER_STORE,
         scene,
@@ -105,6 +106,6 @@ def build_report_parallel(app, state_db, scope, scene_ids, core_policies,
             _report_worker_scene, scene_ids, chunksize=chunksize)
         for partial in tqdm(
                 partials, total=len(scene_ids), desc="Model report", unit="scene"):
-            model.merge_scene_report(totals, utility, partial)
+            merge_scene_report(totals, utility, partial)
 
     return model.report_payload(totals, utility)

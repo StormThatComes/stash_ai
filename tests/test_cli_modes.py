@@ -24,7 +24,7 @@ def test_database_dispatch_delegates_before_runtime(monkeypatch):
 
 
 def test_model_report_dispatch_skips_model_loading(monkeypatch, tmp_path):
-    from stash_ai.reports import model as model_report
+    from stash_ai.reports.model import report as model_report
 
     destination = tmp_path / "report.json"
     monkeypatch.setattr(model_report, "run", lambda selected_app, args:
