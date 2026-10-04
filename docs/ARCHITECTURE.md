@@ -315,3 +315,11 @@ obecnymi wynikami Stash) oraz `commands/recovery.py` (tryb abandon-pending).
 `storage/segments.py` za pożyczone segmenty i ich memoizowaną tożsamość, a
 `publication/fingerprints.py` za podpis kodu, polityki, katalogu i stanu sceny.
 Ścieżki kodu do hashowania są liczone względem pakietu, niezależnie od cwd.
+
+`commands/bootstrap.py` przygotowuje runtime, wybrane modele, polityki oraz
+katalogi i hierarchie w dotychczasowej kolejności CLI. Szybkie tryby bazy
+kończą się przed bootstrapem, a wszystkie katalogi są walidowane przed
+ładowaniem wag i zapisami Stash. `runs/separate.py` zarządza także wspólnym
+lifecycle Stash dla wybranych modeli. `inference/scene_predictions.py` oddziela
+wybór zachowanych etykiet od kwalifikacji temporal; finalizacja w `prediction.py`
+zachowuje raw evidence, limity i wykluczenia przed publikacją.
