@@ -1,4 +1,5 @@
 """Offline API-contract, scale and recovery tests for SQL discovery and shared cleanup state."""
+from stash_ai.storage.results import KINDS
 from copy import deepcopy
 import sqlite3
 
@@ -150,7 +151,7 @@ def test_publication_masks_are_lazy_and_unbanning_restores_raw_evidence(pipeline
         assert app.main(args) == 0
     assert blobs() == before
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), cache_bytes=2**20) as store:
-        for kind in merge_results.KINDS:
+        for kind in KINDS:
             snapshot, _ = store.snapshot('1', kind)
             assert all(item['tag'] != 'common' for item in snapshot['contributions'])
             assert all('common' not in item.get('extra_tags', []) for item in snapshot['contributions'])

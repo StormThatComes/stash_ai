@@ -104,7 +104,7 @@ def test_metadata_check_matches_payload_validation(tmp_path, problem):
         for metadata_only in (False, True):
             with pytest.raises(ValueError) as error:
                 scene_updates.plan(app, store, '1', config(.8), request=ThresholdRequest(kinds=('scene', 'markers'),
-                                     access=RecordAccess.METADATA if metadata_only else RecordAccess.MODEL))
+                                     access=RecordAccess.METADATA if metadata_only else RecordAccess.BATCH))
             messages.append(str(error.value))
         assert messages[0] == messages[1]
 

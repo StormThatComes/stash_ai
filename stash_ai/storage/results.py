@@ -20,7 +20,7 @@ class ResultStore:
 
     @property
     def report(self):
-        return getattr(self.store, 'report', None)
+        return self.store.report
 
     @staticmethod
     def _normalize_segments(segments, kind, threshold):

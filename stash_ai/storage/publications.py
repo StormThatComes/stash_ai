@@ -14,7 +14,7 @@ class PublicationStore:
 
     @property
     def report(self):
-        return getattr(self.store, 'report', None)
+        return self.store.report
 
     @measured('state_read')
     def snapshot(self, scene, kind, *, borrow=False):

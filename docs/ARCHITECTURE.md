@@ -372,3 +372,15 @@ wyboru, zachowując kolejność walidacji. `reports/runtime.py` współdzieli
 izolowane ustawienia, polityki i read-only store, a `reports/io.py` zapisuje
 nowy JSON z wyłącznym otwarciem pliku. Wybór scen i specyfika raportów pozostają
 w ich modułach.
+
+
+Runtime read contracts use declared optional state: StateStore.report and
+FrameIndex.report default to None, preview/recovery fields are initialized by
+StateStore, and TagResolver owns its lazy marker-group cache. Threshold plans
+select either full batch evidence or derived metadata; the unused model-only
+plan mode is removed. Native marker geometry is imported from interval_geometry.
+
+Shared marker extras consume ObservationIndex. FrameIndex owns indexes used
+throughout a scene, while clipped cleanup replay closes its temporary index
+even when qualification fails. Closing drops query cache references without
+changing the proof objects retained by result spans.

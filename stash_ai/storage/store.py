@@ -8,10 +8,10 @@ from urllib.parse import urlparse
 
 from stash_ai.runtime.timing import measured, stage
 from stash_ai.storage.codec import encode, decode
-from stash_ai.storage.database import APPLICATION_ID, StateDatabase
+from stash_ai.storage.database import StateDatabase
 
 
-from stash_ai.storage.results import KINDS, ResultStore
+from stash_ai.storage.results import ResultStore
 from stash_ai.storage.publications import PublicationStore
 from stash_ai.storage.metadata_store import MetadataStore
 from stash_ai.storage.legacy import LegacyStore
@@ -37,6 +37,9 @@ class StateStore(AbstractContextManager):
             raise ValueError("Parent publication updates are only valid for read-only preview stores.")
         self.cache = RamCache(cache_bytes, rss_budget=memory_budget_bytes)
         self.scope = scope
+        self.report = None
+        self.preview_data_version = None
+        self.abandoned_cleanups = {}
         # Parallel merge workers replay immutable inference evidence after the
         # inference phase has finished. The owning parent may legitimately
         # commit snapshots/merge_checks while those readers are still alive.
@@ -96,12 +99,12 @@ class StateStore(AbstractContextManager):
         return self.connection.execute(sql, params).fetchall()
 
     def pack(self, value):
-        return encode(value, getattr(self, 'report', None))
+        return encode(value, self.report)
 
     def pack_snapshot(self, value):
         """Encode shared proofs and mark their format inside the write transaction."""
         from stash_ai.storage.snapshots import compact
-        with stage(getattr(self, 'report', None), 'state_snapshot_compact'):
+        with stage(self.report, 'state_snapshot_compact'):
             packed = compact(value)
         if packed is not value:
             if not self.connection.in_transaction:
@@ -111,7 +114,7 @@ class StateStore(AbstractContextManager):
         return self.pack(packed)
 
     def unpack(self, value):
-        return decode(value, getattr(self, 'report', None))
+        return decode(value, self.report)
 
     def records(self, scene, kind, model=None, *, borrow=False):
         return self.results.records(scene, kind, model, borrow=borrow)

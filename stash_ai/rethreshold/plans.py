@@ -8,14 +8,11 @@ from stash_ai.evidence.thresholds import marker_threshold
 
 class RecordAccess(Enum):
     BATCH = 'batch'
-    MODEL = 'model'
     METADATA = 'metadata'
 
     def read(self, store, scene, kind, model):
         if self is RecordAccess.METADATA:
             return store.result_metadata(scene, kind, model)
-        if self is RecordAccess.MODEL:
-            return store.model_records(scene, kind, model, borrow=True)
         return store.records(scene, kind, model, borrow=True).get(model, [])
 
 

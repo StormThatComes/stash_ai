@@ -50,8 +50,7 @@ def delete(store, name, scene, model='', kind=''):
 
 
 def check_source(store):
-    if (store.preview_source and hasattr(store, 'preview_data_version')
-            and not getattr(store, 'allow_parent_publication_updates', False)):
+    if store.preview_source and not store.allow_parent_publication_updates:
         current = store.connection.execute('PRAGMA cleanup_source.data_version').fetchone()[0]
         if current != store.preview_data_version:
             raise RuntimeError('The source state DB changed during dry-run; repeat the preview.')

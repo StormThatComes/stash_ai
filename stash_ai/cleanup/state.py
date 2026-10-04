@@ -57,7 +57,7 @@ def mask_snapshot(store, snapshot, kind):
     if snapshot is None or snapshot.get('cleanup_generation', 0) >= store.cleanup_generation:
         return snapshot
     generation = snapshot.get('cleanup_generation', 0)
-    abandoned = getattr(store, 'abandoned_cleanups', {})
+    abandoned = store.abandoned_cleanups
     active = {key: {label for label, revision in values.items() if revision > generation and revision not in abandoned}
               for key, values in store.cleanup_masks.items()}
     prefix = 'marker_' if kind == 'markers' else 'scene_'

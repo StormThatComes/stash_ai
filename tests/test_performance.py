@@ -1,5 +1,6 @@
 """Publication invalidation, sparse previews and ordered CPU preparation, offline."""
 
+from stash_ai.storage.results import KINDS
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
@@ -216,8 +217,8 @@ def test_preview_resumes_checkpoint_and_does_not_resurrect_deleted_source(pipeli
         checkpoint.record(2, np.zeros((2, 2), np.float32), [])
         checkpoint.flush()
         assert checkpoints.Checkpoint(preview, '1', 'wd', 'new', 10, 2).restore()[0] == 2
-        checkpoints.finish(preview, '1', 'wd', {k: dict(meta={'origin':'inference', 'inference_signature':'new'}, items=[]) for k in merge_results.KINDS}, {})
-        assert progress.completed(preview, '1', 'wd', merge_results.KINDS, 'new')
+        checkpoints.finish(preview, '1', 'wd', {k: dict(meta={'origin':'inference', 'inference_signature':'new'}, items=[]) for k in KINDS}, {})
+        assert progress.completed(preview, '1', 'wd', KINDS, 'new')
         assert not preview.connection.execute('SELECT 1 FROM ' + preview.table('checkpoints')).fetchall()
     assert p.path.read_bytes() == before
 

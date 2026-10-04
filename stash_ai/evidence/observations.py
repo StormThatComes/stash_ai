@@ -1,7 +1,7 @@
 """Reusable interval queries over compatible cached observations."""
 from bisect import bisect_left
 from dataclasses import replace
-from stash_ai.evidence.intervals import append_interval
+from stash_ai.evidence.interval_geometry import append_interval
 from stash_ai.evidence.temporal.extras import qualified_extras
 
 

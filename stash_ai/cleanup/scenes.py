@@ -52,7 +52,7 @@ def cleanup_scene(app, stash, resolver, store, current, settings, selected, args
     # once for every configured model previously dominated no-op cleanup.
     for config in settings:
         source = config.source
-        if not stash.dry_run and getattr(stash, 'merge_only_reads', False):
+        if not stash.dry_run and stash.merge_only_reads:
             # Batch snapshots can age while earlier scenes are processed. Reuse
             # the dry-run planner to avoid extra reads for unchanged outputs.
             preview = SimpleNamespace(dry_run=True)

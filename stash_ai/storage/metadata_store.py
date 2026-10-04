@@ -9,7 +9,7 @@ class MetadataStore:
 
     @property
     def report(self):
-        return getattr(self.store, 'report', None)
+        return self.store.report
 
     @measured('state_read')
     def get(self, scene, kind, model):

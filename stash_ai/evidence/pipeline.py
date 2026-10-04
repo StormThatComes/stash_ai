@@ -15,7 +15,7 @@ def evidence(app, store, scene_id, core_policies, scene_policies, metrics=None, 
     from stash_ai.evidence.temporal.statistics import scene_reason
     from stash_ai.evidence.frames import FrameIndex
     from stash_ai.evidence.scenes import shared_scene_contributions
-    report = getattr(store, 'report', None)
+    report = store.report
     scene_hits, spans = [], []
     need_scene = app.APPLY_SCENE_TAGS or (app.CREATE_MARKERS and app.TEMPORAL_POLICY.enabled
                                         and app.TEMPORAL_POLICY.occurrence_markers)
@@ -52,8 +52,7 @@ def evidence(app, store, scene_id, core_policies, scene_policies, metrics=None, 
             frame_rows=sum(len(s['items']) for s in segments if s['mode'] == 'frames'),
             retained_detections=sum(len(row['tags']) for s in segments if s['mode'] == 'frames' for row in s['items']))
     with stage(report, 'frame_index'):
-        index = FrameIndex(app, records, core_policies, cache=store.cache, tag_policies=scene_policies)
-        index.report = report
+        index = FrameIndex(app, records, core_policies, cache=store.cache, tag_policies=scene_policies, report=report)
     with index:
         if app.CREATE_MARKERS:
             spans = marker_contributions(app, records, core_policies, index=index, metrics=metrics, tag_policies=scene_policies)
@@ -64,7 +63,7 @@ def evidence(app, store, scene_id, core_policies, scene_policies, metrics=None, 
                     scene_hits.extend(shared_scene_contributions(app, scene_index, scene_records, scene_policies, scene_hits, metrics))
     if app.CREATE_MARKERS:
         from stash_ai.evidence.occurrences import occurrence_contributions
-        report = getattr(store, 'report', None)
+        report = store.report
         with report.measure('occurrence_compute') if report is not None else nullcontext():
             spans.extend(occurrence_contributions(app, scene_hits, frame_records(scene_records, records), spans, core_policies, scene_policies, metrics))
     return sorted(scene_hits, key=lambda item: (item["tag"], item["source"])), spans

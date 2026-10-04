@@ -4,7 +4,7 @@ from dataclasses import asdict
 import math
 
 from stash_ai.models import SOURCES
-from stash_ai.evidence.intervals import append_interval
+from stash_ai.evidence.interval_geometry import append_interval
 
 
 def _scene_run_index(scene_records):

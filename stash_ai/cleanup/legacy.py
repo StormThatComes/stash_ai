@@ -40,11 +40,11 @@ def _legacy_meta(store):
 
 def _tracked_scenes(stash, identifiers):
     """Use batched SQL when available, but treat missing scene IDs as deleted."""
-    if getattr(stash, "merge_reader", None) is None:
+    if stash.merge_reader is None:
         yield from stash.iter_scenes()
         return
 
-    page_size = min(max(1, int(getattr(stash, "scene_page_size", 100))), 1000)
+    page_size = min(max(1, int(stash.scene_page_size)), 1000)
     for group in batched(identifiers, page_size):
         snapshots = stash.merge_snapshots(group)
         if snapshots is None:

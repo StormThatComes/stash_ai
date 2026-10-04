@@ -9,7 +9,7 @@ class LegacyStore:
 
     @property
     def report(self):
-        return getattr(self.store, 'report', None)
+        return self.store.report
 
     @measured('state_read')
     def records(self, scene, kind, *, borrow=False):

@@ -15,7 +15,7 @@ def measured(stage):
     def decorate(method):
         @wraps(method)
         def wrapped(self, *args, **kwargs):
-            report = getattr(self, 'report', None)
+            report = self.report
             if report is None:
                 return method(self, *args, **kwargs)
             with report.measure(stage):

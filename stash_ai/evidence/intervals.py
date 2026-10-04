@@ -1,5 +1,4 @@
 """Compose pure interval unions with temporal extra-label qualification."""
-from .interval_geometry import append_interval, overlaps
 from .interval_geometry import union_intervals as geometry_union
 from .contracts import MarkerContribution, MergedMarker
 from .labels import raw_label

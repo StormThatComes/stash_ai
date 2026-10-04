@@ -3,7 +3,7 @@ from bisect import bisect_left, bisect_right
 from collections import defaultdict
 from math import inf, isfinite, nextafter
 
-import stash_ai.evidence.intervals as merge_intervals
+import stash_ai.evidence.interval_geometry as merge_intervals
 import stash_ai.evidence.labels as merge_labels
 
 

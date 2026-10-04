@@ -125,6 +125,6 @@ class MarkerGroups:
 
 
 def for_resolver(app, resolver):
-    if not hasattr(resolver, 'marker_groups'):
+    if resolver.marker_groups is None:
         resolver.marker_groups = MarkerGroups(app, resolver)
     return resolver.marker_groups

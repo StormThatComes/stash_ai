@@ -1,6 +1,7 @@
 """Behavior tests for exact-label AI fusion; no live Stash or model downloads."""
 
 
+from stash_ai.storage.results import KINDS
 from stash_ai.publication import markers as marker_ops
 from copy import deepcopy
 from itertools import permutations
@@ -378,7 +379,7 @@ def test_recovery_after_partial_api_success_preserves_ownership(tmp_path,monkeyp
         merge_sync.sync_merged(app,stash,app.services.TagResolver(stash,source=merge_labels.AI),state,stash.find_scene("1"),hits,spans)
         assert intervals(stash)==[(10,30)]
         assert {t["name"] for t in stash.scene["tags"]}=={"human","ai:common"}
-        assert all(state.snapshot("1",kind)[1] is None for kind in merge_results.KINDS)
+        assert all(state.snapshot("1",kind)[1] is None for kind in KINDS)
         # It must remain managed after recovery, not accidentally become manual.
         merge_sync.sync_merged(app,stash,app.services.TagResolver(stash,source=merge_labels.AI),state,stash.find_scene("1"),[],[])
         assert {t["name"] for t in stash.scene["tags"]}=={"human"} and not intervals(stash)
