@@ -7,11 +7,12 @@ from .observations import ObservationIndex
 
 class FrameIndex:
     """Verify groups once; observations are prepared lazily and reused."""
-    def __init__(self, app, records, policies, signatures=None, cache=None, tag_policies=None):
+    def __init__(self, app, records, policies, signatures=None, cache=None, tag_policies=None, *, report=None):
         from stash_ai.evidence.identity import marker_segment_signature
         from stash_ai.exclusions import policies_or_empty
         self.app, self.policies, self.cache = app, policies, cache
         self.tag_policies = policies_or_empty(tag_policies)
+        self.report = report
         self.signatures = signatures if signatures is not None else {
             id(segment): marker_segment_signature(segment) for segments in records.values() for segment in segments}
         self.groups = make_groups(records, self.signatures)
@@ -65,7 +66,7 @@ def observations(app, group, core_policies, tag_policies=None):
     times = {}
     for source, segment, signature in group["members"]:
         from stash_ai.evidence.thresholds import marker_threshold
-        high = marker_threshold(segment, getattr(app, "MARKER_THRESHOLDS", None))
+        high = marker_threshold(segment, app.MARKER_THRESHOLDS)
         floor = marker_floor(app.TEMPORAL_POLICY, high)
         sort_floor = min(floor, high)
         for row in segment["items"]:

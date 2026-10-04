@@ -90,7 +90,7 @@ def sync_merged(app, stash, resolver, store, scene, scene_hits, spans, *, migrat
                 report=None, tag_policies=None, publication_key=None):
     """Reconcile only script-owned markers and recorded scene associations."""
     scene_id = str(scene["id"])
-    report = report or getattr(store, 'report', None)
+    report = report or store.report
     evidence = prepare_sync_evidence(
         app, stash, store, scene, scene_hits, spans, cleanup=cleanup, report=report)
     resolved = resolve_sync_tags(app, stash, resolver, scene_id, evidence, tag_policies, report)
@@ -101,11 +101,10 @@ def sync_merged(app, stash, resolver, store, scene, scene_hits, spans, *, migrat
     plan = plan_scene_tags(
         app, store, scene_id, scene, evidence.scene_hits, scene_labels,
         resolved.ids, resolved.blocked_names, migrate=migrate)
-    plan_markers(app, resolved, catalog, evidence.previous_ranges, plan, migrate=migrate, report=report)
+    plan_markers(app, store, resolved, catalog, evidence.previous_ranges, plan, migrate=migrate, report=report)
     if app.CREATE_MARKERS:
         plan.snapshots["markers"] = {"contributions": spans}
     stats = sync_statistics(app, plan, markers, suppressed)
     return publish_sync_plan(
         app, stash, resolver, store, scene_id, scene, markers, scene_labels, plan, stats,
         report=report, publication_key=publication_key)
-

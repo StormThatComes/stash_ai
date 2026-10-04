@@ -63,7 +63,7 @@ class StashTransport:
         return is_read_only_cleanup(query, variables) or is_read_only_merge(query, variables)
 
     def gql(self, query: str, variables: dict | None = None) -> dict:
-        report = getattr(self, 'report', None)
+        report = self.report
         if report is None:
             return self._gql(query, variables)
         read = self._read_only(query, variables)
@@ -83,7 +83,7 @@ class StashTransport:
         from requests import ConnectionError as RequestsConnectionError, Timeout as RequestsTimeout
         from stash_ai.runtime.timing import stage
         import time
-        report = getattr(self, 'report', None)
+        report = self.report
         attempts = self.http_retries + 1 if read else 1
         retry_statuses = {429, 500, 502, 503, 504}
         for attempt in range(attempts):

@@ -1,4 +1,5 @@
 """Shared VTT evidence, extra-only models, published-source cleanup and cache reuse."""
+from stash_ai.db.snapshot_migration import complete_policy
 
 from copy import deepcopy
 from dataclasses import replace
@@ -166,7 +167,7 @@ def test_independent_switches_and_legacy_snapshot_defaults(monkeypatch):
     assert fused(extra_records(),policies({'detail'}))[1][0]['extra_tags']==['detail']
     monkeypatch.setattr(app,'TEMPORAL_POLICY',replace(app.TEMPORAL_POLICY,shared_marker_extras=False))
     assert fused(extra_records(),policies({'detail'}))[1][0]['extra_tags']==[]
-    old=TemporalPolicy.from_snapshot({'enabled':True})
+    old=TemporalPolicy.from_snapshot(complete_policy({'enabled':True}))
     assert not old.shared_marker_frames and not old.shared_marker_extras
 
 
@@ -298,3 +299,37 @@ def test_shared_merge_dry_run_and_extra_explanation(pipeline,monkeypatch,tmp_pat
     assert report['as_marker_extra'][0]['tag']=='ai:common'
     assert set(report['as_marker_extra'][0]['evidence']['source_evidence'])=={'dtq'}
 
+
+
+@pytest.mark.parametrize('fail_collection', [False, True])
+def test_clipped_replay_closes_its_observation_cache(monkeypatch, fail_collection):
+    from stash_ai.evidence import shared_markers
+    from stash_ai.evidence.observations import ObservationIndex
+
+    records = {'wd': [segment('wd', [[('core', .95), ('detail', .9)]] * 4)]}
+    spans, _ = fused(records)
+    span = deepcopy(spans[0])
+    span.update(start=1, end=3)
+    original = deepcopy(records)
+    indexes = []
+
+    class TrackedIndex(ObservationIndex):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            indexes.append(self)
+
+    monkeypatch.setattr(shared_markers, 'ObservationIndex', TrackedIndex)
+    if fail_collection:
+        def fail(app, span, index, allowed=None):
+            index.support(span['start'], span['end'], app.TEMPORAL_POLICY)
+            raise RuntimeError('collection interrupted')
+        monkeypatch.setattr(shared_markers, 'collect_extras', fail)
+        with pytest.raises(RuntimeError, match='collection interrupted'):
+            shared_markers.refresh_clipped_evidence(app, span, records, policies())
+    else:
+        assert shared_markers.refresh_clipped_evidence(app, span, records, policies())
+        assert span['extra_tags'] == ['detail']
+        assert span['extra_support']['detail']['sources']['wd']['intervals'] == [[1, 3]]
+    assert len(indexes) == 1
+    assert indexes[0].cache_keys == set() and indexes[0].timelines == {}
+    assert records == original

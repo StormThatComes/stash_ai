@@ -24,8 +24,7 @@ def capture_outputs(app, config, vocabulary, cues, predictions, frames, analysis
     if app.TEMPORAL_POLICY.enabled:
         meta.update(analysis_format=3,
                     scene_support_floor=config.scene_threshold * app.TEMPORAL_POLICY.scene_support_ratio)
-    if app.TEMPORAL_POLICY.enabled or config.marker_cache_floor is not None:
-        meta['marker_score_floor'] = marker_cache_floor(config, app.TEMPORAL_POLICY)
+    meta['marker_score_floor'] = marker_cache_floor(config, app.TEMPORAL_POLICY)
     outputs = {}
     if app.APPLY_SCENE_TAGS:
         outputs["scene"] = {"mode": "scene", "meta": meta,
@@ -37,7 +36,7 @@ def capture_outputs(app, config, vocabulary, cues, predictions, frames, analysis
             outputs['scene']['meta'] = {**meta, 'scene_frames_format': 1,
                 'scene_score_floor': analysis['scene_score_floor']}
     if app.CREATE_MARKERS:
-        # Empty legacy metadata proves no labels were discarded before caching.
+        # An empty list proves no labels were discarded before caching.
         outputs["markers"] = {"mode": "frames", "meta": {
             **meta, "marker_tag_blocklist": []}, "items": [
             dict(start=frame.cue.start, end=frame.cue.end, tags=list(frame.tags)) for frame in frames]}

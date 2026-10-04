@@ -4,7 +4,7 @@ from dataclasses import asdict
 import math
 
 from stash_ai.models import SOURCES
-from stash_ai.evidence.intervals import append_interval
+from stash_ai.evidence.interval_geometry import append_interval
 
 
 def _scene_run_index(scene_records):
@@ -24,7 +24,7 @@ def _shared_members(group, scene_by_run):
     for source, segment, signature in group['members']:
         meta = segment['meta']
         threshold = meta.get('scene_threshold')
-        floor = meta.get('marker_score_floor', meta.get('marker_threshold'))
+        floor = meta.get('marker_score_floor')
         if any(type(value) not in (int, float) or not math.isfinite(value) or not 0 <= value <= 1
                for value in (threshold, floor)):
             continue

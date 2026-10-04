@@ -9,7 +9,7 @@ class LegacyStore:
 
     @property
     def report(self):
-        return getattr(self.store, 'report', None)
+        return self.store.report
 
     @measured('state_read')
     def records(self, scene, kind, *, borrow=False):
@@ -27,6 +27,11 @@ class LegacyStore:
 
     @measured('state_write')
     def remember(self, scene, kind, data):
+        with self.store.connection:
+            self.remember_in_transaction(scene, kind, data)
+
+    def remember_in_transaction(self, scene, kind, data):
+        """Store ledger entries under the caller's evidence transaction."""
         store = self.store
         from stash_ai.signatures import freeze
         previous = store.imported_legacy(scene, kind, borrow=True)
@@ -36,8 +41,6 @@ class LegacyStore:
             return
         previous = previous + fresh
         store.cache.discard(('legacy', str(scene), kind))
-        with store.connection:
-            store.connection.execute("INSERT INTO legacy_imports VALUES (?,?,?,?) "
-                "ON CONFLICT(scope,scene,kind) DO UPDATE SET data=excluded.data",
-                (store.scope, str(scene), kind, store.pack(previous)))
-
+        store.connection.execute("INSERT INTO legacy_imports VALUES (?,?,?,?) "
+            "ON CONFLICT(scope,scene,kind) DO UPDATE SET data=excluded.data",
+            (store.scope, str(scene), kind, store.pack(previous)))

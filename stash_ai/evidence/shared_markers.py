@@ -2,8 +2,9 @@
 from bisect import bisect_right
 from collections import defaultdict
 from copy import deepcopy
+from contextlib import closing
 from stash_ai.models import SOURCES
-from stash_ai.evidence.intervals import append_interval
+from stash_ai.evidence.interval_geometry import append_interval
 from .frames import FrameIndex, make_groups, observations
 from .observations import ObservationIndex
 
@@ -66,13 +67,12 @@ def shared_runs(app, events, group, key, options):
     return finished
 
 
-def collect_extras(app, span, events, group, allowed=None):
+def collect_extras(app, span, index: ObservationIndex, allowed=None):
     """Collect high detections inside this contribution, including extra-only models."""
     policy = app.TEMPORAL_POLICY
-    index = events if isinstance(events, ObservationIndex) else ObservationIndex(events, group['context'], span.get('frame_group'))
     support = {tag: value for tag, value in index.support(span['start'], span['end'], policy, allowed).items() if tag != span['tag']}
     span["extra_support"] = support
-    span["frame_context"] = group["context"]
+    span["frame_context"] = index.context
     # Final qualification is performed over the full union by merged_extras.
     extras = [item for item in index.qualified(span['start'], span['end'], policy, allowed) if item[0] != span['tag']]
     span["extra_tags"] = [item[0] for item in extras]
@@ -85,7 +85,9 @@ def enrich(app, records, policies, spans, signatures=None, index=None, metrics=N
     policy = app.TEMPORAL_POLICY
     if not policy.enabled or not (policy.shared_marker_frames or policy.shared_marker_extras):
         return spans
-    index = index if index is not None else FrameIndex(app, records, policies, signatures)
+    if index is None:
+        with FrameIndex(app, records, policies, signatures) as owned_index:
+            return enrich(app, records, policies, spans, signatures, owned_index, metrics)
     groups, by_signature = index.groups, index.by_signature
     options = {**build_options(app), "core_exclusions": {k: sorted(v) for k, v in policies.items()},
                "tag_exclusions": {k: sorted(v) for k, v in index.tag_policies.items()},
@@ -124,8 +126,7 @@ def enrich(app, records, policies, spans, signatures=None, index=None, metrics=N
         if key and (policy.shared_marker_extras or span.get("derived") == "shared_frames"):
             # Even with cross-model extras disabled, a newly shared interval can
             # collect extras supplied by its own primary contributors.
-            group = groups[key]
-            collect_extras(app, span, index.get(key), group, None if policy.shared_marker_extras else span['support_sources'])
+            collect_extras(app, span, index.get(key), None if policy.shared_marker_extras else span['support_sources'])
     return spans
 
 
@@ -172,7 +173,8 @@ def refresh_clipped_evidence(app, span, records, policies, tag_policies=None):
             events = [{**event, "extras": {tag: {source: score for source, score in values.items() if source in allowed}
                       for tag, values in event["extras"].items() if any(source in allowed for source in values)}}
                       for event in events]
-        collect_extras(app, span, events, group)
+        with closing(ObservationIndex(events, group['context'], key)) as extras_index:
+            collect_extras(app, span, extras_index)
     return True
 
 

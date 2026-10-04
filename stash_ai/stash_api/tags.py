@@ -28,6 +28,7 @@ class TagResolver:
         self.synced: set[str] = set()
         self.catalog_loaded = False
         self.hierarchy_stats = Counter()
+        self.marker_groups = None
 
     def preload(self) -> None:
         """Read all tags for a hierarchy-only backfill, avoiding 5,813 lookups."""

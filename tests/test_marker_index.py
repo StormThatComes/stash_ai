@@ -6,7 +6,7 @@ import random
 import pytest
 
 from tests.helpers.runtime import runtime as app
-import stash_ai.evidence.intervals as merge_intervals
+import stash_ai.evidence.interval_geometry as merge_intervals
 import stash_ai.evidence.labels as merge_labels
 import stash_ai.storage.store as merge_store
 from stash_ai.publication import merged as merge_sync

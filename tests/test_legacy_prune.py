@@ -50,6 +50,8 @@ def test_prune_removes_only_unreferenced_rows_and_preserves_merge_check(tmp_path
             END
         """)
 
+    from stash_ai.db import update_database
+    update_database(path)
     # The scene legacy tag still exists, but its imported source marker is gone.
     stash.scene["scene_markers"] = []
     _install(monkeypatch, stash)

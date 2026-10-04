@@ -20,7 +20,7 @@ from stash_ai.publication import merged as merge_sync
 from stash_ai.runtime.report import RunReport
 from stash_ai.storage.store import StateStore
 from stash_ai.storage.codec import decode, encode
-from stash_ai.storage.snapshots import FORMAT_KEY, compact, expand
+from stash_ai.storage.snapshots import FORMAT_KEY, FORMAT, compact, expand, decode as decode_snapshot
 from tests.helpers.evidence import empty_policies, segment, span
 from tests.helpers.stash import Stash
 from tests.test_result_thresholds import config, outputs
@@ -54,11 +54,11 @@ def test_codec_shares_only_repeated_proofs_and_preserves_borrowed_input():
     original = deepcopy(saved)
     packed = compact(saved)
     assert saved == original
-    assert packed[FORMAT_KEY] == 1 and len(packed['proofs']) == 1
+    assert packed[FORMAT_KEY] == FORMAT and len(packed['proofs']) == 1
     items = packed['snapshot']['contributions']
     assert items[0]['extra_support']['extra'] == items[1]['extra_support']['extra'] == 0
     assert isinstance(items[1]['extra_support']['unique'], dict)
-    restored = decode(encode(packed))
+    restored = decode_snapshot(encode(packed))
     assert restored == plain(saved)
     assert restored['contributions'][0]['extra_support']['extra'] is restored['contributions'][1]['extra_support']['extra']
     assert len(zlib.decompress(encode(packed))) < len(zlib.decompress(encode(saved)))
@@ -67,25 +67,35 @@ def test_codec_shares_only_repeated_proofs_and_preserves_borrowed_input():
     assert encode(compact(saved)) == encode(packed)
 
 
-@pytest.mark.parametrize('value', [None, [], {}, {'contributions': []},
-    {'contributions': [None]}, {'contributions': [{'extra_support': []}]},
+@pytest.mark.parametrize('value', [{}, {'contributions': []}])
+def test_unshared_snapshots_always_use_the_versioned_envelope(value):
+    packed = compact(value)
+    assert packed[FORMAT_KEY] == FORMAT and packed['proofs'] == []
+    assert decode_snapshot(encode(packed)) == value
+    assert decode(encode(packed)) == packed  # Plain JSON never guesses a domain.
+
+
+@pytest.mark.parametrize('value', [None, [], {'contributions': [None]},
+    {'contributions': [{'extra_support': []}]},
     {'contributions': [{'extra_support': {'tag': None}}]}])
-def test_unshared_or_incomplete_legacy_values_keep_the_original_encoding(value):
-    assert compact(value) is value
-    assert decode(encode(value)) == value
+def test_invalid_snapshot_inputs_are_rejected(value):
+    with pytest.raises(ValueError, match='compact snapshot'):
+        compact(value)
 
 
 def test_equal_independently_owned_proofs_remain_inline():
     saved = shared_snapshot()
     saved['contributions'][1]['extra_support']['extra'] = deepcopy(saved['contributions'][0]['extra_support']['extra'])
-    assert compact(saved) is saved
+    packed = compact(saved)
+    assert packed['proofs'] == []
+    assert packed['snapshot'] == saved
 
 
 @pytest.mark.parametrize('damage', ['format', 'bool_format', 'missing', 'unexpected', 'snapshot',
     'contributions', 'item', 'proofs', 'proof', 'support', 'negative', 'outside', 'bool_ref', 'null_ref', 'string_ref'])
 def test_invalid_envelopes_or_references_are_rejected(damage):
     value = plain(compact(shared_snapshot()))
-    if damage == 'format': value[FORMAT_KEY] = 2
+    if damage == 'format': value[FORMAT_KEY] = 999
     elif damage == 'bool_format': value[FORMAT_KEY] = True
     elif damage == 'missing': del value['proofs']
     elif damage == 'unexpected': value['unknown'] = True
@@ -100,7 +110,7 @@ def test_invalid_envelopes_or_references_are_rejected(damage):
             'negative': -1, 'outside': 1, 'bool_ref': True, 'null_ref': None, 'string_ref': '0'}[damage]
     before = deepcopy(value)
     with pytest.raises(ValueError, match='compact snapshot'):
-        decode(encode(value))
+        decode_snapshot(encode(value))
     with pytest.raises(ValueError, match='compact snapshot'):
         expand(value)
     assert value == before
@@ -117,14 +127,14 @@ def test_snapshot_storage_promotion_and_preview_are_transparent(tmp_path, monkey
         store.publish('1', {'markers': {'contributions': []}})
     source = path.read_bytes()
     with StateStore(path, 'scope', dry_run=dry_run, cache_bytes=cache_bytes) as store:
-        assert store.connection.execute('PRAGMA user_version').fetchone() == (5,)
+        assert store.connection.execute('PRAGMA user_version').fetchone() == (11,)
         store.report = RunReport(write=lambda _: None)
         raw_results = store.connection.execute('SELECT * FROM ' + store.table('results')).fetchall()
         getattr(store, operation)('1', {'markers': saved})
-        assert store.connection.execute('PRAGMA user_version').fetchone() == (9,)
+        assert store.connection.execute('PRAGMA user_version').fetchone() == (11,)
         column = 'pending' if operation == 'prepare' else 'published'
         blob = store.connection.execute('SELECT '+column+' FROM snapshots').fetchone()[0]
-        assert json.loads(zlib.decompress(blob))[FORMAT_KEY] == 1
+        assert json.loads(zlib.decompress(blob))[FORMAT_KEY] == FORMAT
         if operation == 'prepare':
             assert store.snapshot('1', 'markers')[1] == saved
             with monkeypatch.context() as patch:
@@ -170,16 +180,16 @@ def test_rethreshold_cleanup_and_abandonment_never_downgrade_v9(tmp_path):
         store.put('1', 'wd', outputs())
         store.publish('1', {'markers': shared_snapshot()})
         assert rethreshold_execution.run(app, store, ['1'], [config(.8)], RunReport(write=lambda _: None), markers=True) == {'scene_thresholds_updated': 1}
-        assert store.connection.execute('PRAGMA user_version').fetchone() == (9,)
+        assert store.connection.execute('PRAGMA user_version').fetchone() == (11,)
         cleanup.begin(store, 'policy', {'unused'}, set(), [])
         cleanup.finish(store)
         store.prepare('1', {'markers': shared_snapshot()})
         pending = store.connection.execute('SELECT pending FROM snapshots').fetchone()[0]
         recovery.abandon(store, lambda _: None)
         assert store.connection.execute('SELECT data FROM recovery_publications').fetchone()[0] == pending
-        assert store.connection.execute('PRAGMA user_version').fetchone() == (9,)
+        assert store.connection.execute('PRAGMA user_version').fetchone() == (11,)
         assert recovery.publications(store, '1', 'markers')[0]['contributions'] == shared_snapshot()['contributions']
-    assert db.inspect_database(path, 'scope')['schema_version'] == 9
+    assert db.inspect_database(path, 'scope')['schema_version'] == 11
     assert db.check_database(path, 'scope')['ok']
 
 
@@ -246,7 +256,8 @@ def test_merge_cleanup_and_partial_publication_recovery_match_old_snapshots(tmp_
         path = tmp_path/('compact.sqlite3' if compact_storage else 'old.sqlite3')
         with StateStore(path, merge_store.scope_for(app.STASH_URL), cache_bytes=2**20) as store:
             if not compact_storage:
-                monkeypatch.setattr(store, 'pack_snapshot', store.pack)
+                # Both variants use v2; one deliberately skips proof interning.
+                monkeypatch.setattr(store, 'pack_snapshot', lambda value: store.pack({FORMAT_KEY: FORMAT, 'snapshot': value, 'proofs': []}))
             stash = Stash()
             monkeypatch.setattr(app, 'MARKER_USE_END_TIME', use_end)
             resolver = app.services.TagResolver(stash, source=merge_labels.AI)
@@ -256,7 +267,7 @@ def test_merge_cleanup_and_partial_publication_recovery_match_old_snapshots(tmp_
             initial = merge_sync.sync_merged(app, stash, resolver, store, stash.find_scene('1'), hits, spans)
             snapshot = store.snapshot('1', 'markers')[0]
             stored = json.loads(zlib.decompress(store.connection.execute("SELECT published FROM snapshots WHERE kind='markers'").fetchone()[0]))
-            assert (FORMAT_KEY in stored) == compact_storage
+            assert stored[FORMAT_KEY] == FORMAT
             # Publication enriches provenance with build options; marker outputs stay identical.
             markers = lambda items: [{k: v for k, v in item.items() if k != 'contributors'}
                                      for item in merge_intervals.union_intervals(items)]

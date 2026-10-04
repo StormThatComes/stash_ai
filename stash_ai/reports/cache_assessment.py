@@ -1,6 +1,5 @@
 """Assess retained evidence and scene-wide publication blockers."""
-from dataclasses import dataclass
-from types import SimpleNamespace
+from dataclasses import dataclass, replace
 
 from stash_ai.storage.results import KINDS
 
@@ -83,7 +82,7 @@ def publication_dependencies(app, evidence, selected):
     from stash_ai.evidence.thresholds import validate_marker_cache
 
     dependencies = []
-    context = SimpleNamespace(TEMPORAL_POLICY=app.TEMPORAL_POLICY)
+    context = replace(app, MARKER_THRESHOLDS=None, SCENE_THRESHOLDS=None)
     for (model, kind), (segments, error) in sorted(evidence.items()):
         if model in selected:
             continue

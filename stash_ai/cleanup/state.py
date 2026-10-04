@@ -4,14 +4,12 @@ from __future__ import annotations
 from stash_ai.storage.codec import encode, decode
 from stash_ai.models import SOURCES
 
-def initialize(store, previous_version):
+def initialize(store):
     store.connection.executescript('''
         CREATE TABLE IF NOT EXISTS cleanup_state (
             scope TEXT PRIMARY KEY, generation INTEGER NOT NULL, data BLOB NOT NULL,
             pending TEXT);
     ''')
-    if previous_version < 5:
-        store.connection.execute('PRAGMA user_version=5')
     row = store.connection.execute(
         'SELECT generation,data,pending FROM cleanup_state WHERE scope=?', (store.scope,)).fetchone()
     store.cleanup_generation, store.cleanup_masks, store.cleanup_pending = (
@@ -35,10 +33,6 @@ def begin(store, fingerprint, global_labels, core_labels, tag_ids, *, kinds=('sc
         store.cleanup_generation += 1
     store.cleanup_pending = fingerprint
     scope = '' if set(kinds) == {'scene', 'markers'} else ('marker_' if 'markers' in kinds else 'scene_')
-    if scope:
-        # Old executables do not understand output-specific lazy masks.
-        if store.connection.execute('PRAGMA user_version').fetchone()[0] < 6:
-            store.connection.execute('PRAGMA user_version=6')
     for kind, values in ((scope + 'global', global_labels), ('core', core_labels), (scope + 'ids', tag_ids)):
         store.cleanup_masks.setdefault(kind, {}).update(
             (str(value), store.cleanup_generation) for value in values)
@@ -57,7 +51,7 @@ def mask_snapshot(store, snapshot, kind):
     if snapshot is None or snapshot.get('cleanup_generation', 0) >= store.cleanup_generation:
         return snapshot
     generation = snapshot.get('cleanup_generation', 0)
-    abandoned = getattr(store, 'abandoned_cleanups', {})
+    abandoned = store.abandoned_cleanups
     active = {key: {label for label, revision in values.items() if revision > generation and revision not in abandoned}
               for key, values in store.cleanup_masks.items()}
     prefix = 'marker_' if kind == 'markers' else 'scene_'

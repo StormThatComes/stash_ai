@@ -7,9 +7,13 @@ from tests.helpers.runtime import runtime as app
 
 
 class Stash:
+    merge_reader = None
+    merge_only_reads = False
+
     def __init__(self, dry=False):
         self.dry_run = dry
         self.create_markers = True
+        self.scene_page_size = 100
         self.merge_read_configurations = []
         self.tags, self.writes = {}, []
         self.fail_create = False

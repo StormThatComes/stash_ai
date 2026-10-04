@@ -34,9 +34,9 @@ def _marker_contributions(app, records, core_policies, index, metrics, tag_polic
     validate_marker_cache(app, records, allow_unknown_blocklist=allow_unknown_blocklist,
                           allow_unknown_retention=allow_unknown_retention,
                           legacy_blocklist=legacy_blocklist)
-    tag_policies = policies_or_empty(tag_policies if tag_policies is not None else getattr(index, 'tag_policies', None))
+    tag_policies = policies_or_empty(tag_policies if tag_policies is not None else index.tag_policies)
     effective_cores = core_policies_with_global(core_policies, tag_policies)
-    report = getattr(index, 'report', None)
+    report = index.report
     with stage(report, 'marker_seeds'):
         seeds = consensus_seeds(records, effective_cores, app.TEMPORAL_POLICY,
                                 thresholds=app.MARKER_THRESHOLDS)

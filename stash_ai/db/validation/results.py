@@ -15,8 +15,10 @@ def check_results_and_index(db, tables, errors, progress=None):
 
     indexed_signature = None
     checked = 0
+    canonical_results = db.execute('PRAGMA user_version').fetchone()[0] >= 10
     index_columns = 'i.inference,i.populated,i.signature' if 'result_index' in tables else 'NULL,NULL,NULL'
-    threshold_column = 't.threshold' if 'result_thresholds' in tables else 'NULL'
+    canonical = 'thresholds' in {row[1] for row in db.execute('PRAGMA table_info(result_thresholds)')}
+    threshold_column = ('t.thresholds' if canonical else 't.threshold') if 'result_thresholds' in tables else 'NULL'
     metadata_columns = 'm.format,m.data' if 'result_metadata' in tables else 'NULL,NULL'
     query = f'SELECT r.kind,r.data,{index_columns},{threshold_column},{metadata_columns} FROM results AS r'
     if 'result_index' in tables:
@@ -32,6 +34,10 @@ def check_results_and_index(db, tables, errors, progress=None):
             segments = decoded_payload(blob, list)
             if not valid_result_segments(segments, kind):
                 raise ValueError("Invalid result segment.")
+            if canonical_results and any(
+                    {'scene_threshold_override', 'marker_threshold_override', 'refinement'} & segment.keys()
+                    for segment in segments):
+                raise ValueError('Noncanonical result segment.')
             if metadata_format is not None:
                 from stash_ai.storage.metadata import FORMAT, decode, encode, summarize
                 try:
@@ -42,10 +48,19 @@ def check_results_and_index(db, tables, errors, progress=None):
                 except (TypeError, ValueError):
                     errors['result_metadata_invalid'] += 1
             if threshold is not None:
-                from stash_ai.storage.thresholds import overlay
+                from stash_ai.storage.thresholds import overlay, encode
                 from stash_ai.evidence.thresholds import _score
-                if _score(threshold):
-                    overlay(segments, kind, threshold)
+                try:
+                    if canonical:
+                        from stash_ai.storage.thresholds import decode
+                        values = decode(threshold)
+                        if len(values) != len(segments):
+                            errors['result_threshold_invalid'] += 1
+                        overlay(segments, kind, threshold)
+                    elif _score(threshold):
+                        overlay(segments, kind, encode([threshold] * len(segments)))
+                except (TypeError, ValueError):
+                    pass  # check_thresholds reports invalid policy separately.
             current = next(
                 (segment for segment in reversed(segments)
                  if segment["meta"].get("origin") == "inference"),
@@ -92,11 +107,20 @@ def check_results_and_index(db, tables, errors, progress=None):
 def check_thresholds(db, tables, errors):
     if 'result_thresholds' not in tables:
         return
-    errors['result_threshold_invalid'] += db.execute('''
-        SELECT COUNT(*) FROM result_thresholds
-        WHERE threshold IS NULL OR typeof(threshold) NOT IN ('integer','real')
-            OR threshold < 0 OR threshold > 1
-    ''').fetchone()[0]
+    canonical = 'thresholds' in {row[1] for row in db.execute('PRAGMA table_info(result_thresholds)')}
+    if canonical:
+        from stash_ai.storage.thresholds import decode
+        for data, in db.execute('SELECT thresholds FROM result_thresholds'):
+            try:
+                decode(data)
+            except (TypeError, ValueError):
+                errors['result_threshold_invalid'] += 1
+    else:
+        errors['result_threshold_invalid'] += db.execute('''
+            SELECT COUNT(*) FROM result_thresholds
+            WHERE threshold IS NULL OR typeof(threshold) NOT IN ('integer','real')
+                OR threshold < 0 OR threshold > 1
+        ''').fetchone()[0]
     if 'results' in tables:
         errors['result_threshold_orphan'] += db.execute('''
             SELECT COUNT(*) FROM result_thresholds AS t WHERE NOT EXISTS (

@@ -1,4 +1,5 @@
 """Real SQLite SELECT contracts and API-write semantics for large cleanup."""
+from stash_ai.storage.results import KINDS
 from collections import Counter
 from copy import deepcopy
 import json
@@ -113,7 +114,7 @@ def test_partial_lazy_masks_do_not_change_the_other_publication(tmp_path, monkey
     install(monkeypatch, stash)
     assert app.main(command) == 0
     with merge_store.StateStore(tmp_path/'state.sqlite3', merge_store.scope_for(app.STASH_URL)) as store:
-        for kind in merge_results.KINDS:
+        for kind in KINDS:
             assert bool(store.snapshot('1', kind)[0]['contributions']) == (kind != changed)
 
 
@@ -171,6 +172,7 @@ def test_sql_dry_run_allowlist_cannot_execute_writes_or_injected_statements():
         assert not is_read_only_cleanup(READ_OPERATION, {'sql': sql})
     stash = app.services.StashClient.__new__(app.services.StashClient)
     stash.dry_run = True
+    stash.report = None
     with pytest.raises(RuntimeError, match='dry-run'):
         stash.gql(READ_OPERATION, {'sql': 'DELETE FROM tags', 'args': []})
     with pytest.raises(RuntimeError, match='dry-run'):
@@ -290,6 +292,8 @@ def test_legacy_interrupted_global_cleanup_can_resume_using_sql(tmp_path, monkey
             store.connection.execute('INSERT INTO cleanup_state VALUES (?,?,?,?)',
                                      (store.scope, 1, state_codec.encode(masks), fingerprint))
             store.connection.execute('PRAGMA user_version=5')
+    from stash_ai.db import update_database
+    update_database(path)
     before = deepcopy((stash.scenes, stash.tags)), path.read_bytes(), path.stat().st_mtime_ns
     install(monkeypatch, stash)
     assert app.main(command + (['--dry-run'] if dry else [])) == 0

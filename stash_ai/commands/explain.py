@@ -5,7 +5,8 @@ import json
 from stash_ai.evidence import pipeline as merge
 import stash_ai.evidence.intervals as merge_intervals
 import stash_ai.evidence.labels as merge_labels
-from stash_ai.storage.store import KINDS, StateStore, scope_for
+from stash_ai.storage.store import StateStore, scope_for
+from stash_ai.storage.results import KINDS
 
 
 def _effective_scene_thresholds(app, threshold):

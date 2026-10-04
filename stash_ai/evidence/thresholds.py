@@ -76,13 +76,11 @@ def validate_marker_cache(app, records, *, allow_unknown_blocklist=False,
             if 'marker_score_floor' not in meta and (
                     meta.get('origin') != 'inference' or allow_unknown_retention):
                 continue
-            threshold = marker_threshold(segment, getattr(app, 'MARKER_THRESHOLDS', None))
+            threshold = marker_threshold(segment, app.MARKER_THRESHOLDS)
             if not _score(threshold):
                 raise ValueError(f'{model}: invalid cached marker threshold; run inference.')
             needed = marker_floor(app.TEMPORAL_POLICY, threshold)
-            # Before retention metadata existed, only high detections may have
-            # survived. Overrides change publication, not the capture floor.
-            floor = meta.get('marker_score_floor', meta.get('marker_threshold'))
+            floor = meta.get('marker_score_floor')
             if not _score(floor) or floor > needed:
                 raise ValueError(f'{model}: marker cache floor {floor!r} exceeds required {needed:g}; '
                                  'run inference with --restart for this scene/model.')

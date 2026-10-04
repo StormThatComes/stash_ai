@@ -113,15 +113,21 @@ def test_v7_inline_overrides_are_read_lazily_and_can_be_restored(tmp_path, dry_r
         store.put('1', 'wd', old)
         before = blobs(store)
     with sqlite3.connect(path) as connection:
+        from stash_ai.storage.codec import encode
+        for kind, segment in old.items():
+            connection.execute('UPDATE results SET data=? WHERE kind=?', (encode([segment]), kind))
         connection.execute('DROP TABLE result_thresholds')
         connection.execute('PRAGMA user_version=7')
+    db.update_database(path)
+    with sqlite3.connect(path) as connection:
+        before = connection.execute('SELECT * FROM results ORDER BY scope,scene,model,kind').fetchall()
     source_before = path.read_bytes()
     with StateStore(path, 'scope', dry_run=dry_run) as store:
-        assert store.connection.execute('PRAGMA user_version').fetchone() == (7,)
+        assert store.connection.execute('PRAGMA user_version').fetchone() == (11,)
         assert store.records('1', 'scene')['wd'] == [old['scene']]
         assert store.model_records('1', 'markers', 'wd') == [old['markers']]
         assert rethreshold(store, .4) == {'scene_thresholds_updated': 1}
-        assert store.connection.execute('PRAGMA user_version').fetchone() == (8,)
+        assert store.connection.execute('PRAGMA user_version').fetchone() == (11,)
         assert blobs(store) == ([] if dry_run else before)
         assert store.records('1', 'scene')['wd'] == [outputs()['scene']]
         assert store.model_records('1', 'markers', 'wd') == [outputs()['markers']]
@@ -138,14 +144,15 @@ def test_new_inference_resets_override_and_append_keeps_effective_history(tmp_pa
     with StateStore(path, 'scope') as store:
         store.put('1', 'wd', outputs())
         rethreshold(store, .8)
+    db.update_database(path)
     source_before = path.read_bytes()
     with StateStore(path, 'scope', dry_run=dry_run) as store:
         if dry_run:
             assert not threshold_rows(store)  # the source stays in the read-only attachment
         new = outputs(.6, 'new')
         store.put('1', 'wd', new, replace=dict(scene=replace, markers=replace))
-        assert not threshold_rows(store)
-        assert not store.connection.execute('SELECT * FROM ' + store.table('result_thresholds')).fetchall()
+        assert len(threshold_rows(store)) == (0 if replace else 2)
+        assert len(store.connection.execute('SELECT * FROM ' + store.table('result_thresholds')).fetchall()) == (0 if replace else 2)
         for kind, segment in new.items():
             effective = store.records('1', kind)['wd']
             assert effective[-1] == segment
@@ -274,7 +281,7 @@ def test_abandon_and_cleanup_preserve_v8_and_effective_thresholds(tmp_path):
         recovery.abandon(store, lambda _: None)
         cleanup.begin(store, 'cleanup', {'excluded'}, set(), [], kinds=('scene',))
         cleanup.finish(store)
-        assert store.connection.execute('PRAGMA user_version').fetchone() == (8,)
+        assert store.connection.execute('PRAGMA user_version').fetchone() == (11,)
         assert store.records('1', 'scene')['wd'][0][scene_cache_identity.SCENE_OVERRIDE] == .8
     assert db.check_database(path, 'scope')['ok']
 
@@ -310,8 +317,8 @@ def test_db_check_reports_orphan_invalid_threshold_and_signature_mismatch(tmp_pa
         rethreshold(store, .8)
         with store.connection:
             store.connection.execute('PRAGMA ignore_check_constraints=ON')
-            store.connection.execute("UPDATE result_thresholds SET threshold=1.5 WHERE kind='markers'")
-            store.connection.execute("INSERT INTO result_thresholds VALUES ('scope','orphan','wd','scene',.8)")
+            store.connection.execute("UPDATE result_thresholds SET thresholds='[1.5]' WHERE kind='markers'")
+            store.connection.execute("INSERT INTO result_thresholds VALUES ('scope','orphan','wd','scene','[0.8]')")
             store.connection.execute("UPDATE result_index SET signature='wrong' WHERE kind='scene'")
     report = db.check_database(path, 'scope')
     errors = {issue['code']: issue['count'] for issue in report['errors']}
