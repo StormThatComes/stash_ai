@@ -39,7 +39,7 @@ def main():
     sys.path.insert(0, str(args.project.resolve()))
     from stash_ai.rethreshold import (
         execution as rethreshold_execution, markers as marker_updates, scenes as scene_updates)
-    from stash_ai.runtime import RunReport
+    from stash_ai.runtime.report import RunReport
     from stash_ai.storage.store import StateStore
     from stash_ai.models import ModelSettings, SOURCES
     from stash_ai.evidence.temporal.policy import TemporalPolicy

@@ -4,7 +4,7 @@ from __future__ import annotations
 from copy import deepcopy
 import json
 
-from stash_ai.runtime import measured
+from stash_ai.runtime.timing import measured
 from stash_ai.storage.thresholds import overlay
 from stash_ai.models import SOURCES
 

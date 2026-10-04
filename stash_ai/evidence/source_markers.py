@@ -1,6 +1,6 @@
 """Build validated per-source markers before cross-model enrichment."""
 from stash_ai.domain import Cue, FramePrediction
-from stash_ai.runtime import stage
+from stash_ai.runtime.timing import stage
 from .labels import raw_label
 
 

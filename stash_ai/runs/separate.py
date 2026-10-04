@@ -32,7 +32,7 @@ def _build_markers(app, args, config, frame_predictions, core_exclusions):
     if not app.CREATE_MARKERS:
         return [], 0
 
-    from stash_ai.runtime import RamCache
+    from stash_ai.runtime.cache import RamCache
 
     return app.build_markers(
         frame_predictions,

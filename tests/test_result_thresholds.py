@@ -14,7 +14,7 @@ from stash_ai.cleanup import state as cleanup
 from stash_ai.reports.developer import report as developer_report
 import stash_ai.evidence.identity as scene_cache_identity
 import stash_ai.evidence.identity as thresholds_identity
-from stash_ai.runtime import RunReport
+from stash_ai.runtime.report import RunReport
 from stash_ai.storage.store import StateStore
 from stash_ai.models import ModelSettings, SOURCES
 

@@ -22,7 +22,8 @@ import stash_ai.storage.results as merge_results
 import stash_ai.storage.store as merge_store
 from stash_ai import performance
 from stash_ai.storage import progress
-from stash_ai.runtime import RamCache, retained_size
+from stash_ai.runtime.cache import RamCache
+from stash_ai.runtime.memory import retained_size
 
 
 pytestmark = pytest.mark.usefixtures("reset_progress")
@@ -53,6 +54,7 @@ def test_publication_code_tracks_extracted_modules(monkeypatch, filename):
 
 
 @pytest.mark.parametrize('filename', [
+    'runtime/cache.py', 'runtime/memory.py', 'runtime/timing.py', 'runtime/report.py', 'runtime/summary.py', 'runtime/diagnostics.py',
     'stash_api/client.py', 'stash_api/transport.py', 'vtt.py', 'commands/arguments.py', 'commands/validation.py', 'commands/dispatch.py', 'commands/explain.py',
     'cleanup/run.py', 'recovery.py', 'cleanup/sql.py', 'cleanup/sql_session.py',
     'rethreshold/execution.py', 'rethreshold/targets.py', 'db/checks.py',
@@ -292,12 +294,12 @@ def test_vectorized_score_filter_preserves_float_boundaries_and_order(threshold)
 def test_cache_accounts_cue_attributes_and_evicts_under_process_pressure(monkeypatch):
     cue = Cue(0, 1, 's'*10000, (0,0,1,1))
     assert retained_size(cue) > 10000
-    monkeypatch.setattr('stash_ai.runtime.process_rss', lambda: 1000)
+    monkeypatch.setattr('stash_ai.runtime.memory.process_rss', lambda: 1000)
     cache = RamCache(20000, rss_budget=40000)
     for i in range(10):
         cache.put(i, bytes(900))
     before = cache.size
-    monkeypatch.setattr('stash_ai.runtime.process_rss', lambda: 39999)
+    monkeypatch.setattr('stash_ai.runtime.memory.process_rss', lambda: 39999)
     cache.pressure(force=True)
     assert cache.size < before and cache.stats['pressure_trims'] == 1
     assert cache.rss_peak == 39999

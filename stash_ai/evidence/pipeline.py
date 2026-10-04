@@ -1,6 +1,6 @@
 """Coordinate scene, marker and occurrence qualification from retained results."""
 from contextlib import nullcontext
-from stash_ai.runtime import stage
+from stash_ai.runtime.timing import stage
 from .labels import raw_label
 from .source_markers import marker_contributions
 

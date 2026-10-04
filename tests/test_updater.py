@@ -319,6 +319,45 @@ assert not {'torch', 'numpy', 'onnxruntime'} & set(sys.modules)
     assert result.returncode == 0, result.stderr
 
 
+def test_runtime_package_replaces_module_and_imports_with_stdlib_only(tmp_path):
+    files = application_files()
+    previous = {path: data for path, data in files.items()
+                if not path.startswith('stash_ai/runtime/')}
+    previous['stash_ai/runtime.py'] = b'PREVIOUS_RUNTIME = True\n'
+    previous['stash_ai/diagnostics.py'] = b'PREVIOUS_DIAGNOSTICS = True\n'
+    installed(tmp_path, Remote(previous))
+    result = subprocess.run([sys.executable, '-c', 'from stash_ai import runtime, diagnostics'],
+                            cwd=tmp_path, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    cache = tmp_path / 'stash_ai/__pycache__'
+    assert list(cache.glob('runtime.*.pyc'))
+
+    assert updater.update(tmp_path, Remote(files)) == 0
+
+    for name in ('runtime', 'diagnostics'):
+        assert not (tmp_path / f'stash_ai/{name}.py').exists()
+        assert not list(cache.glob(name + '.*.pyc'))
+    result = subprocess.run([sys.executable, '-I', '-c', '''
+import sys
+sys.path.insert(0, '.')
+from stash_ai.runtime.cache import RamCache
+from stash_ai.runtime.report import RunReport
+from stash_ai.runtime.diagnostics import MergeDiagnostics
+cache = RamCache(4096)
+cache.put('key', [1, 2])
+assert cache.get('key') == [1, 2]
+messages = []
+report = RunReport(write=messages.append)
+with report.measure('stdlib'):
+    pass
+report.finish('Done', {'processed': 1}, cache)
+assert report.timing_calls['stdlib'] == 1
+assert messages[0] == 'Done'
+assert not {'torch', 'numpy', 'requests'} & set(sys.modules)
+'''], cwd=tmp_path, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+
 def test_inference_module_moves_to_package_and_removes_stale_inputs(tmp_path):
     files = application_files()
     previous = {name: data for name, data in files.items()

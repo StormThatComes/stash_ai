@@ -17,7 +17,7 @@ import stash_ai.evidence.labels as merge_labels
 import stash_ai.storage.store as merge_store
 from stash_ai import performance
 from stash_ai.storage import progress
-from stash_ai.runtime import stage
+from stash_ai.runtime.timing import stage
 from .merged_model import MergedModelRun
 
 

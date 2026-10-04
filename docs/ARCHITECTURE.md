@@ -292,3 +292,12 @@ i odtwarza przycięte dowody; `scenes.py` kwalifikuje oraz odwołuje dowody scen
 i `thresholds.py` tworzą widoki kwalifikacji, a zapis zmian progów pozostaje
 w `rethreshold/`. `inference/results.py` zapisuje kształt raw prediction outputs,
 a `inference/reuse.py` dowodzi zgodności wcześniejszej inferencji przed zmianą progów.
+
+### Runtime i raportowanie wykonania
+
+`stash_ai/runtime/cache.py` zawiera cache LRU, a `memory.py` estymację utrzymanych
+obiektów i odczyt RSS. `report.py` zachowuje licznikowy interfejs `RunReport`,
+lecz `timing.py` zarządza oddzielnym `RunTimings` dla każdego raportu, jego
+thread-local stosami i rozmiarem odpowiedzi API. `summary.py` renderuje dotychczasowe
+podsumowanie, a `diagnostics.py` strumieniuje profil JSONL. Moduły runtime
+pozostają poza fingerprintem kodu publikacji i nie wymagają zależności ML.

@@ -264,7 +264,7 @@ def main(argv: list[str] | None = None) -> int:
     if result is not None:
         return result
 
-    from stash_ai.runtime import RunReport
+    from stash_ai.runtime.report import RunReport
     from tqdm import tqdm
     args.report = RunReport(args.verbose, tqdm.write)
     DRY_RUN = DRY_RUN or args.dry_run

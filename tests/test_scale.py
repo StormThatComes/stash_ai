@@ -21,7 +21,9 @@ import stash_ai.evidence.intervals as merge_intervals
 import stash_ai.evidence.source_markers as merge_source_markers
 import stash_ai.storage.store as merge_store
 from stash_ai.storage import progress
-from stash_ai.runtime import RamCache, RunReport, retained_size
+from stash_ai.runtime.cache import RamCache
+from stash_ai.runtime.report import RunReport
+from stash_ai.runtime.memory import retained_size
 from stash_ai.evidence.scenes import shared_scene_contributions, cleanup_scene_support
 from stash_ai.models import SOURCES
 from stash_ai.evidence.temporal.statistics import SceneAccumulator

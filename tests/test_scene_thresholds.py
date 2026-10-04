@@ -12,7 +12,7 @@ from stash_ai import cli as app
 from stash_ai.evidence import pipeline as merge
 import stash_ai.storage.store as merge_store
 import stash_ai.evidence.identity as cache_identity
-from stash_ai.runtime import RunReport
+from stash_ai.runtime.report import RunReport
 from stash_ai.models import ModelSettings, SOURCES
 from tests.helpers.evidence import policies
 

@@ -9,7 +9,7 @@ from stash_ai import cli as app, db, performance
 from stash_ai.reports.developer import report as developer_report
 import stash_ai.evidence.identity as scene_cache_identity
 import stash_ai.evidence.identity as thresholds_identity
-from stash_ai.runtime import RunReport
+from stash_ai.runtime.report import RunReport
 from stash_ai.storage.store import StateStore
 from tests.test_result_thresholds import blobs, config, outputs, rethreshold, threshold_rows
 

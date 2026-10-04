@@ -15,7 +15,7 @@ import stash_ai.evidence.intervals as merge_intervals
 import stash_ai.evidence.labels as merge_labels
 import stash_ai.models as merge_models
 from stash_ai.marker_index import MarkerIntervalIndex, PreviousMarkerRanges
-from stash_ai.runtime import stage
+from stash_ai.runtime.timing import stage
 
 
 @dataclass

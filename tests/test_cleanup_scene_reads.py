@@ -11,7 +11,7 @@ from stash_ai.publication import merged as merge_sync
 from stash_ai.stash_api.client import StashClient
 from stash_ai.cleanup.sql import SQLPreview
 from stash_ai.stash_api.sql import OPERATION
-from stash_ai.runtime import RunReport
+from stash_ai.runtime.report import RunReport
 from stash_ai.models import WD
 from tests.helpers.cleanup import FastStash, install, options
 from tests.helpers.cleanup_sql import SQLStash

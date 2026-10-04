@@ -8,7 +8,7 @@ from stash_ai.evidence.temporal.extras import qualified_extras
 class ObservationIndex:
     """One timeline and reusable interval queries shared by all primary labels."""
     def __init__(self, events, context, group, cache=None):
-        from stash_ai.runtime import RamCache
+        from stash_ai.runtime.cache import RamCache
         self.events, self.context, self.group = events, context, group
         self.starts = [event['start'] for event in events]
         self.cache = cache if cache is not None else RamCache(256 * 2**20)
