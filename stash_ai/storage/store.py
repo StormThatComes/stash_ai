@@ -13,6 +13,8 @@ from stash_ai.storage.database import APPLICATION_ID, StateDatabase
 
 from stash_ai.storage.results import KINDS, ResultStore
 from stash_ai.storage.publications import PublicationStore
+from stash_ai.storage.metadata_store import MetadataStore
+from stash_ai.storage.legacy import LegacyStore
 
 
 def scope_for(url):
@@ -46,26 +48,16 @@ class StateStore(AbstractContextManager):
             self._database = database
             self.path = database.path
             self.connection = database.connection
+            self.metadata = MetadataStore(self)
+            self.legacy = LegacyStore(self)
             self.results = ResultStore(self)
             self.publications = PublicationStore(self)
             self.preview_source = database.preview_source
             if self.preview_source:
                 self.preview_data_version = database.preview_data_version
             version = database.version
-            from stash_ai.storage.progress import initialize_progress
-            initialize_progress(self, version)
-            from stash_ai.cleanup.state import initialize
-            initialize(self, version)
-            if self.preview_source:
-                self.connection.execute('INSERT INTO cleanup_state SELECT * FROM cleanup_source.cleanup_state WHERE scope=?', (self.scope,))
-                self.connection.commit()
-                initialize(self, version)
-            from stash_ai.storage.merge_checks import initialize as initialize_merge_checks
-            initialize_merge_checks(self)
-            from stash_ai.storage.recovery import initialize as initialize_recovery
-            initialize_recovery(self)
-            from stash_ai.storage.preview import initialize as initialize_preview
-            initialize_preview(self)
+            from stash_ai.storage.schema import initialize_features
+            initialize_features(self, version)
             if self.cleanup_pending and not allow_cleanup:
                 raise RuntimeError('Global cleanup is interrupted; rerun the same --models all cleanup mode '
                                    'with the same exclusion policies, or use --abandon-pending with current policies.')
@@ -128,7 +120,7 @@ class StateStore(AbstractContextManager):
         return self.results.model_records(scene, kind, model, borrow=borrow)
 
     def result_metadata(self, scene, kind, model):
-        return self.results.metadata(scene, kind, model)
+        return self.metadata.get(scene, kind, model)
 
     def result_presence(self, models):
         return self.results.result_presence(models)
@@ -153,10 +145,10 @@ class StateStore(AbstractContextManager):
                                           metadata_only=metadata_only)
 
     def imported_legacy(self, scene, kind, *, borrow=False):
-        return self.results.imported_legacy(scene, kind, borrow=borrow)
+        return self.legacy.records(scene, kind, borrow=borrow)
 
     def remember_legacy(self, scene, kind, data):
-        return self.results.remember_legacy(scene, kind, data)
+        return self.legacy.remember(scene, kind, data)
 
     def snapshot(self, scene, kind, *, borrow=False):
         return self.publications.snapshot(scene, kind, borrow=borrow)
@@ -178,3 +170,4 @@ class StateStore(AbstractContextManager):
 
     def commit_prepared(self, scene, kinds, *, publication=None):
         return self.publications.commit_prepared(scene, kinds, publication=publication)
+

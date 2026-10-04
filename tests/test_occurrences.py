@@ -17,7 +17,8 @@ from tests.helpers.runtime import runtime as app
 from stash_ai.evidence import pipeline as merge
 import stash_ai.evidence.labels as merge_labels
 import stash_ai.storage.store as merge_store
-from stash_ai.evidence.occurrences import OCCURRENCE_TAG, occurrence_contributions
+from stash_ai.evidence.marker_identity import OCCURRENCE_TAG
+from stash_ai.evidence.occurrences import occurrence_contributions
 from stash_ai.evidence.temporal.statistics import SceneAccumulator
 from stash_ai.evidence.temporal.policy import TemporalPolicy
 from tests.helpers.stash import Stash

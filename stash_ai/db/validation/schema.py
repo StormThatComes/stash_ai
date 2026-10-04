@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from ..common import BASE_TABLES, KNOWN_KINDS, KNOWN_MODELS, STATE_TABLES
 from .common import tick
+from stash_ai.storage.schema import TABLES
 
 
 def _invalid_enum_count(db, tables, table, column, allowed):
@@ -22,27 +23,14 @@ def check_schema(db, tables, version, errors, warnings, progress=None):
     errors["missing_base_tables"] += len(required - tables)
     warnings["missing_state_tables"] += len(missing - required)
 
-    enum_specs = (
-        ("results", "model", KNOWN_MODELS),
-        ("result_index", "model", KNOWN_MODELS),
-        ("result_thresholds", "model", KNOWN_MODELS),
-        ("result_metadata", "model", KNOWN_MODELS),
-        ("refresh_requests", "model", KNOWN_MODELS),
-        ("checkpoints", "model", KNOWN_MODELS),
-        ("checkpoint_frames", "model", KNOWN_MODELS),
-        ("checkpoint_analysis", "model", KNOWN_MODELS),
-        ("results", "kind", KNOWN_KINDS),
-        ("result_index", "kind", KNOWN_KINDS),
-        ("result_thresholds", "kind", KNOWN_KINDS),
-        ("result_metadata", "kind", KNOWN_KINDS),
-        ("refresh_requests", "kind", KNOWN_KINDS),
-        ("snapshots", "kind", KNOWN_KINDS),
-        ("legacy_imports", "kind", KNOWN_KINDS),
-        ("recovery_publications", "kind", KNOWN_KINDS),
-    )
+    enum_specs = [(table.name, column, allowed) for table in TABLES
+                  for column, enabled, allowed in (('model', table.model, KNOWN_MODELS),
+                                                    ('kind', table.kind, KNOWN_KINDS))
+                  if enabled]
     if progress is not None:
         progress.set_postfix_str("domains", refresh=True)
     for table, column, allowed in enum_specs:
         count = _invalid_enum_count(db, tables, table, column, allowed)
         errors["invalid_model" if column == "model" else "invalid_kind"] += count
     tick(progress)
+

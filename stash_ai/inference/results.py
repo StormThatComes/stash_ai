@@ -5,15 +5,17 @@ from stash_ai.models import ModelSource
 from stash_ai.publication import markers as marker_ops
 import hashlib
 import json
+from .input_identity import cue_manifest
+from stash_ai.evidence.contracts import RetainedRecord
 
 
 def now():
     return datetime.now(timezone.utc).isoformat()
 
 
-def capture_outputs(app, config, vocabulary, cues, predictions, frames, analysis=None):
+def capture_outputs(app, config, vocabulary, cues, predictions, frames, analysis=None) -> dict[str, RetainedRecord]:
     from stash_ai.evidence.retention import marker_cache_floor
-    cue_data = [[cue.start, cue.end, cue.image, list(cue.rect)] for cue in cues]
+    cue_data = cue_manifest(cues)
     meta = {"origin": "inference", "captured_at": now(), "repo": config.source.repo,
             "revision": config.source.revision, "vocabulary_sha256": vocabulary_digest(vocabulary.labels),
             "input_cues_sha256": hashlib.sha256(json.dumps(cue_data, ensure_ascii=False).encode()).hexdigest(),

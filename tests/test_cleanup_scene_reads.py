@@ -9,7 +9,8 @@ import stash_ai.evidence.labels as merge_labels
 import stash_ai.storage.store as merge_store
 from stash_ai.publication import merged as merge_sync
 from stash_ai.stash_api.client import StashClient
-from stash_ai.cleanup.sql import SQLPreview
+from stash_ai.stash_api.scene_reads import SceneReads
+from stash_ai.cleanup.sql_preview import SQLPreview
 from stash_ai.stash_api.sql import OPERATION
 from stash_ai.runtime.report import RunReport
 from stash_ai.models import WD
@@ -28,11 +29,13 @@ class SceneSQLStash(SQLStash):
     find_scene_for_merge = StashClient.find_scene_for_merge
     merge_snapshots = StashClient.merge_snapshots
     scene_fields = StashClient.scene_fields
+    merge_reader = StashClient.merge_reader
+    merge_only_reads = StashClient.merge_only_reads
 
     def __init__(self, dry=False):
         super().__init__(dry)
         self.scene_page_size = 100
-        self.merge_reader, self.merge_only_reads = None, False
+        self.scene_access = SceneReads(self)
         self.create_markers, self.api_key = True, ''
         self.snapshot_reads = []
         self.deny_snapshots = False

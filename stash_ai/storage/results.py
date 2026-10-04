@@ -65,43 +65,6 @@ class ResultStore:
         segments = self._normalize_segments(store.unpack(rows[0][0]), kind, rows[0][1]) if rows else []
         return segments if borrow else deepcopy(segments)
 
-    @measured('state_read')
-    def metadata(self, scene, kind, model):
-        """Validate from small SQL records; lazily backfill older result payloads."""
-        from stash_ai.storage.preview import check_source
-        from stash_ai.storage.metadata import FORMAT, backfill_batch, decode, summarize
-        store = self.store
-        check_source(store)
-        params = (store.scope, str(scene), model, kind)
-        rows = store.read_rows(
-            'SELECT m.format,m.data,t.threshold FROM ' + store.table('results') + ' AS r LEFT JOIN ' +
-            store.table('result_metadata') + ' AS m USING(scope,scene,model,kind) LEFT JOIN ' +
-            store.table('result_thresholds') + ' AS t USING(scope,scene,model,kind) '
-            'WHERE r.scope=? AND r.scene=? AND r.model=? AND r.kind=?', params)
-        if not rows:
-            return []
-        version, data, threshold = rows[0]
-        segments = None
-        if version == FORMAT:
-            try:
-                segments = decode(data)
-            except (TypeError, ValueError):
-                pass  # A damaged derived row is rebuilt from the authoritative evidence.
-        if segments is None:
-            payload = store.read_rows('SELECT data FROM ' + store.table('results') +
-                ' WHERE scope=? AND scene=? AND model=? AND kind=?', params)[0][0]
-            segments = summarize(store.unpack(payload))
-            with backfill_batch(store):
-                self._save_metadata(scene, model, kind, segments)
-        return overlay(segments, kind, threshold)
-
-    def _save_metadata(self, scene, model, kind, segments):
-        from stash_ai.storage.metadata import FORMAT, encode
-        store = self.store
-        store.connection.execute('INSERT INTO result_metadata VALUES (?,?,?,?,?,?) '
-            'ON CONFLICT(scope,scene,model,kind) DO UPDATE SET format=excluded.format,data=excluded.data',
-            (store.scope, str(scene), model, kind, FORMAT, encode(segments)))
-
     def result_presence(self, models):
         """Return lightweight saved-result keys without decoding payload BLOBs."""
         store = self.store
@@ -214,7 +177,7 @@ class ResultStore:
             # Leave those uncached rather than adding a new write-time constraint.
             metadata = None
         if metadata is not None:
-            self._save_metadata(scene, model, kind, metadata)
+            store.metadata.save(scene, model, kind, metadata)
         index_result(store, scene, model, kind, segments)
 
     @measured('state_write')
@@ -242,33 +205,3 @@ class ResultStore:
             'ON CONFLICT(scope,scene,model,kind) DO UPDATE SET threshold=excluded.threshold',
             (store.scope, str(scene), model, kind, threshold))
         index_result(store, scene, model, kind, segments, metadata_only=metadata_only)
-
-    @measured('state_read')
-    def imported_legacy(self, scene, kind, *, borrow=False):
-        store = self.store
-        key = ('legacy', str(scene), kind)
-        cached = store.cached(key)
-        if cached is not None:
-            return cached if borrow else deepcopy(cached)
-        rows = store.read_rows(
-            "SELECT data FROM " + store.table('legacy_imports') + " WHERE scope=? AND scene=? AND kind=?",
-            (store.scope, str(scene), kind))
-        values = store.unpack(rows[0][0]) if rows else []
-        store.retain(key, values)
-        return values if borrow else deepcopy(values)
-
-    @measured('state_write')
-    def remember_legacy(self, scene, kind, data):
-        store = self.store
-        from stash_ai.signatures import freeze
-        previous = store.imported_legacy(scene, kind, borrow=True)
-        known = {freeze(item) for item in previous}
-        fresh = [item for item in data if freeze(item) not in known]
-        if not fresh:
-            return
-        previous = previous + fresh
-        store.cache.discard(('legacy', str(scene), kind))
-        with store.connection:
-            store.connection.execute("INSERT INTO legacy_imports VALUES (?,?,?,?) "
-                "ON CONFLICT(scope,scene,kind) DO UPDATE SET data=excluded.data",
-                (store.scope, str(scene), kind, store.pack(previous)))

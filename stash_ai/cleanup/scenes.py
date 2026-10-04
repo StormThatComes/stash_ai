@@ -28,7 +28,7 @@ def cleanup_scene(app, stash, resolver, store, current, settings, selected, args
             if pending is not None:
                 raise RuntimeError("An interrupted merge is pending; run --merge-only before cleanup.")
             from stash_ai.publication.recovery import reconcile
-            published[kind], recovered = reconcile(app, stash, store, current, kind, snapshot)
+            published[kind], recovered = reconcile(store, current, kind, snapshot)
             stats['publications_reconciled'] += int(recovered)
         if app.CREATE_MARKERS and published.get("markers") is None and any(
                 marker_ops.owned_marker(marker, merge_labels.AI) for marker in current.get("scene_markers", [])):

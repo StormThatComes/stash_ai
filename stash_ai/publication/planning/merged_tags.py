@@ -4,16 +4,16 @@ from stash_ai.publication import markers as marker_ops
 from stash_ai.commands import legacy as legacy_commands
 import stash_ai.evidence.labels as merge_labels
 from stash_ai.runtime.timing import stage
-from .types import MergeSyncPlan
+from .types import MergeSyncPlan, ResolvedEvidence, MarkerCatalog
 
 
-def resolve_sync_tags(app, stash, resolver, scene_id, scene, markers, spans, scene_labels,
-                      tag_policies, previous_ranges, report):
+def resolve_sync_tags(app, stash, resolver, scene_id, evidence, tag_policies, report):
     """Resolve generated tags, refresh the scene and suppress manual occurrences."""
     from stash_ai.exclusions import excluded_names
     from stash_ai.publication.groups import for_resolver
-    from stash_ai.evidence.occurrences import OCCURRENCE_TAG, is_occurrence
+    from stash_ai.evidence.marker_identity import OCCURRENCE_TAG, is_occurrence
 
+    markers, spans, scene_labels = evidence.markers, evidence.spans, evidence.scene_labels
     groups = for_resolver(app, resolver)
     blocked_names = excluded_names(tag_policies)
     names = {merge_labels.AI.prefix + label for label in scene_labels}
@@ -56,7 +56,7 @@ def resolve_sync_tags(app, stash, resolver, scene_id, scene, markers, spans, sce
         for tag in [marker['primary_tag'], *marker.get('tags', [])]:
             resolver.names_by_id[str(tag['id'])] = tag['name']
 
-    return scene, markers, spans, ids, groups, blocked_names, suppressed
+    return ResolvedEvidence(scene, markers, spans, ids, groups, blocked_names, suppressed)
 
 
 def plan_scene_tags(app, store, scene_id, scene, scene_hits, scene_labels, ids, blocked_names, *, migrate):
@@ -86,3 +86,21 @@ def plan_scene_tags(app, store, scene_id, scene, scene_hits, scene_labels, ids, 
         snapshots["scene"] = {"owned_ids": sorted(desired_ids - preserved), "contributions": scene_hits}
 
     return MergeSyncPlan(snapshots, existing_ids, desired_ids, final_ids, migrated_scene_ids)
+
+
+
+def resolve_marker_catalog(resolver, resolved: ResolvedEvidence) -> MarkerCatalog:
+    """Complete catalog I/O before pure payload construction and marker matching."""
+    from stash_ai.evidence.marker_identity import is_occurrence
+    groups, ids = resolved.groups, resolved.ids
+    markers = [marker for marker in resolved.markers if ids.get(merge_labels.AI.prefix + marker['tag'])]
+    group_ids = {(marker['tag'], is_occurrence(marker)): groups.resolve(marker['tag'], is_occurrence(marker))
+                 for marker in markers}
+    identifiers = {str(identifier) for marker in markers for identifier in marker['extra_ids']}
+    tags = ([tag for marker in resolved.scene.get('scene_markers', []) for tag in marker.get('tags', [])]
+            if markers else [])
+    identifiers.update(str(tag['id']) for tag in tags)
+    names = {identifier: resolver.name_for_id(identifier) for identifier in sorted(identifiers)}
+    managed = frozenset(identifier for identifier, name in names.items()
+                        if name and groups.owns({'id': identifier, 'name': name}))
+    return MarkerCatalog(ids, group_ids, names, managed)

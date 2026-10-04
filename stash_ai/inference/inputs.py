@@ -6,6 +6,7 @@ import hashlib
 
 from stash_ai.inference import sprites
 from stash_ai.signatures import digest
+from .input_identity import cue_manifest, frame_signature, inference_signature
 
 
 class VerifiedMedia:
@@ -42,8 +43,8 @@ def inspect_input(app, stash, paths, identity):
         raise ValueError("No VTT cues to analyze.")
     for url in dict.fromkeys(cue.image for cue in cues):
         media.get_media(url)
-    cue_identity = [[cue.start, cue.end, cue.image, list(cue.rect)] for cue in cues]
-    signature = digest({"model": identity, "cues": cue_identity, "media": media.hashes})
+    cue_identity = cue_manifest(cues)
+    signature = inference_signature(identity, cue_identity, media.hashes)
     return cues, media, signature
 
 
@@ -84,8 +85,8 @@ class RunInputs:
         cached = self.cache.get(('input', self.token, key))
         if cached is None:
             cues, media, signature = inspect_input(app, self.media, paths, model_identity)
-            cue_identity = [[c.start, c.end, c.image, list(c.rect)] for c in cues]
-            frozen = digest({'cues': cue_identity, 'media': media.hashes})
+            cue_identity = cue_manifest(cues)
+            frozen = frame_signature(cue_identity, media.hashes)
             if key in self.identities and frozen != self.identities[key]:
                 raise RuntimeError('Stash VTT changed during model passes; rerun the analysis.')
             self.identities[key] = frozen
@@ -93,7 +94,8 @@ class RunInputs:
             return cues, media, signature
         cues, hashes, cue_identity = cached
         media = VerifiedMedia(self.media, limit=0, expected=hashes)
-        signature = digest({'model': model_identity, 'cues': cue_identity, 'media': hashes})
+        signature = inference_signature(model_identity, cue_identity, hashes)
         if self.report is not None:
             self.report.counts['input_manifest_hits'] += 1
         return cues, media, signature
+

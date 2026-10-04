@@ -48,7 +48,7 @@ def _supporting_scores(app, contribution, tag, segments, postings):
 def _marker_signals(app, store, scene, spans, rows, options):
     from stash_ai.evidence.identity import marker_segment_signature
     from stash_ai.evidence.intervals import union_intervals
-    from stash_ai.evidence.occurrences import is_occurrence
+    from stash_ai.evidence.marker_identity import is_occurrence
     from stash_ai.signatures import digest
     from stash_ai.evidence.thresholds import marker_threshold
 
@@ -83,3 +83,4 @@ def _marker_signals(app, store, scene, spans, rows, options):
                     _flag(row, "weak_or_borderline", detail)
                 if duration is not None and duration >= options.long_marker_seconds:
                     _flag(row, "long_marker", {**detail, "duration_seconds": duration})
+

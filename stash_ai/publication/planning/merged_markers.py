@@ -8,12 +8,14 @@ import stash_ai.models as merge_models
 from stash_ai.runtime.timing import stage
 
 
-def _wanted_markers(app, stash, resolver, scene_id, markers, ids, groups, blocked_names):
-    from stash_ai.evidence.occurrences import OCCURRENCE_TAG, is_occurrence
+def _wanted_markers(app, scene_id, markers, catalog, blocked_names):
+    from stash_ai.evidence.marker_identity import OCCURRENCE_TAG, is_occurrence
+
+    ids = catalog.ids
 
     def allowed_id(identifier):
-        name = resolver.name_for_id(str(identifier))
-        return name is not None and name not in blocked_names and not groups.owns_id(identifier)
+        name = catalog.names_by_id.get(str(identifier))
+        return name is not None and name not in blocked_names and str(identifier) not in catalog.managed_group_ids
 
     wanted, resolved_marker_labels = [], set()
     for marker in markers:
@@ -25,7 +27,7 @@ def _wanted_markers(app, stash, resolver, scene_id, markers, ids, groups, blocke
                   if ids.get(merge_labels.AI.prefix + label)}
         extras.update(identifier for identifier in marker["extra_ids"] if allowed_id(identifier))
         extras.add(ids[merge_labels.AI.owner_tag])
-        extras.add(groups.resolve(marker['tag'], is_occurrence(marker)))
+        extras.add(catalog.group_ids[marker['tag'], is_occurrence(marker)])
         if is_occurrence(marker) and ids.get(OCCURRENCE_TAG):
             extras.add(ids[OCCURRENCE_TAG])
         extras.discard(primary)
@@ -41,12 +43,13 @@ def _wanted_markers(app, stash, resolver, scene_id, markers, ids, groups, blocke
     return wanted, resolved_marker_labels
 
 
-def plan_markers(app, stash, resolver, scene_id, scene, markers, ids, groups, blocked_names,
-                 previous_ranges, plan, *, migrate, report):
+def plan_markers(app, resolved, catalog, previous_ranges, plan, *, migrate, report):
     """Match wanted markers to owned markers and populate create/update/delete actions."""
+    scene, markers, blocked_names = resolved.scene, resolved.markers, resolved.blocked_names
+    scene_id = str(scene['id'])
     with stage(report, 'marker_matching'):
         wanted, resolved_marker_labels = _wanted_markers(
-            app, stash, resolver, scene_id, markers, ids, groups, blocked_names)
+            app, scene_id, markers, catalog, blocked_names)
         plan.wanted_markers = wanted
         current_markers = scene.get("scene_markers", [])
         owned = [marker for marker in current_markers if marker_ops.owned_marker(marker, merge_labels.AI)]
@@ -55,7 +58,7 @@ def plan_markers(app, stash, resolver, scene_id, scene, markers, ids, groups, bl
 
         def manual_extra(tag):
             return (not tag['name'].startswith(merge_labels.AI.prefix) and tag['name'] not in blocked_names
-                    and not groups.owns(tag))
+                    and str(tag['id']) not in catalog.managed_group_ids)
 
         for payload, interval in wanted:
             related = existing.overlapping(payload["primary_tag_id"], interval)
@@ -107,3 +110,4 @@ def plan_markers(app, stash, resolver, scene_id, scene, markers, ids, groups, bl
                     marker, scene_id, blocked_names)
                 if payload is not None:
                     plan.updates.append(payload)
+

@@ -6,6 +6,7 @@ import sys
 
 from stash_ai.runs import separate
 from stash_ai.runtime.context import RuntimeContext
+from stash_ai.commands.modes import Command
 from stash_ai.stash_api.transport import safe_error
 
 
@@ -22,11 +23,11 @@ def main(argv: list[str] | None = None, *, runtime: RuntimeContext | None = None
         return result
 
     hierarchy_only, cleanup_only = bootstrap.runtime_options(app, args)
-    result = run_standalone_command(app, args, cleanup_only=cleanup_only)
+    result = run_standalone_command(app, args)
     if result is not None:
         return result
     settings = bootstrap.selected_settings(app, args)
-    if args.download_models:
+    if args.command is Command.DOWNLOAD:
         bootstrap.download_models(app, settings)
         return 0
     core_policies, scene_policies = bootstrap.policies(
@@ -39,11 +40,11 @@ def main(argv: list[str] | None = None, *, runtime: RuntimeContext | None = None
         return result
     catalogs, hierarchies, merged_hierarchy = bootstrap.catalogs(
         app, settings, args, scene_policies)
-    if args.validate_hierarchy:
+    if args.command is Command.VALIDATE_HIERARCHY:
         print("Vocabularies/hierarchies validated. No Stash requests or model weights loaded.")
         return 0
     if args.output_mode == "merged":
-        if args.sync_hierarchy_only:
+        if args.command is Command.SYNC_HIERARCHY:
             from stash_ai.commands.hierarchy import run_hierarchy
             return run_hierarchy(app, args, catalogs, merged_hierarchy, scene_policies)
         return run_merged(app, settings, args, catalogs, merged_hierarchy, core_policies, scene_policies)

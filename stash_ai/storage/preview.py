@@ -1,7 +1,6 @@
 """Sparse copy-on-write SQLite previews. Source files are attached read-only."""
 
-TABLES = ('results', 'result_thresholds', 'result_metadata', 'snapshots', 'legacy_imports', 'result_index', 'refresh_requests',
-          'checkpoints', 'checkpoint_frames', 'checkpoint_analysis', 'recovery_publications')
+from stash_ai.storage.schema import PREVIEW_TABLES as TABLES
 
 
 def initialize(store):
@@ -56,3 +55,4 @@ def check_source(store):
         current = store.connection.execute('PRAGMA cleanup_source.data_version').fetchone()[0]
         if current != store.preview_data_version:
             raise RuntimeError('The source state DB changed during dry-run; repeat the preview.')
+

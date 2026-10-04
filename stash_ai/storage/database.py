@@ -7,8 +7,7 @@ from pathlib import Path
 import sqlite3
 
 
-APPLICATION_ID = 0x53544D47
-LATEST_SCHEMA_VERSION = 9
+from stash_ai.storage.schema import APPLICATION_ID, LATEST_SCHEMA_VERSION
 
 
 class StateDatabase(AbstractContextManager):
@@ -134,3 +133,4 @@ class StateDatabase(AbstractContextManager):
 
     def __exit__(self, *args):
         self.close()
+

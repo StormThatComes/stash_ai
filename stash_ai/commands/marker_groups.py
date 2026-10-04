@@ -10,7 +10,7 @@ def run_backfill(app, args):
     from tqdm import tqdm
     from stash_ai.evidence.labels import AI
     from stash_ai.storage.store import StateStore, scope_for
-    from stash_ai.evidence.occurrences import OCCURRENCE_TAG
+    from stash_ai.evidence.marker_identity import OCCURRENCE_TAG
     stats, report = Counter(), args.report
     with StateStore(args.state_db, scope_for(app.STASH_URL), app.DRY_RUN) as store:
         if store.has_pending_publications():

@@ -1,6 +1,6 @@
 """Merged namespace and validated raw labels, independent of orchestration."""
 from stash_ai.models import ModelSource, SOURCES
-from stash_ai.evidence.occurrences import OCCURRENCE_TAG
+from stash_ai.evidence.marker_identity import OCCURRENCE_TAG
 
 
 AI = ModelSource("ai", "AI", "ai:", "ai:marker:stash-taggers", "[AI] ", "[AI hierarchy v1]")
@@ -15,3 +15,4 @@ def raw_label(value):
 
 def source_codes(sources):
     return [source.prefix.rstrip(":") for key, source in SOURCES.items() if key in sources]
+

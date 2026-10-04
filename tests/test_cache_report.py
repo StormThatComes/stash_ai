@@ -1,4 +1,5 @@
 """Coverage counts and advisory plans must never mistake absence for negative detections."""
+from stash_ai.rethreshold.plans import RecordAccess, ThresholdRequest
 from copy import deepcopy
 from dataclasses import replace
 import json
@@ -79,8 +80,8 @@ def test_rethreshold_uses_sql_overrides_and_has_no_gpu_action(tmp_path):
     assert first['totals']['rethreshold_pairs'] == 1 and not actions(first)
     assert first['plan'][0]['action'] == 'rethreshold'
     with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL)) as store:
-        updates = scene_updates.plan(app, store, '1', settings[0], markers=True, metadata_only=True)
-        scene_updates.apply(store, '1', 'wd', updates, metadata_only=True)
+        updates = scene_updates.plan(app, store, '1', settings[0], request=ThresholdRequest(kinds=('scene', 'markers'), access=RecordAccess.METADATA))
+        scene_updates.apply(store, '1', 'wd', updates)
     before = path.read_bytes()
     assert report(path, settings=settings)['totals']['fully_ready_scenes'] == 1
     assert path.read_bytes() == before
