@@ -64,7 +64,7 @@ def test_publication_code_tracks_extracted_modules(monkeypatch, filename):
     'commands/marker_groups.py', 'cleanup/groups.py', 'cleanup/markers.py', 'cleanup/run.py', 'storage/recovery.py', 'publication/recovery.py', 'commands/recovery.py', 'cleanup/sql.py', 'cleanup/sql_session.py',
     'rethreshold/execution.py', 'rethreshold/targets.py', 'db/checks.py',
     'db/validation/common.py', 'db/validation/schema.py', 'db/validation/results.py',
-    'db/validation/checkpoints.py', 'db/validation/state.py', 'runs/separate.py', 'cleanup/evidence.py', 'cleanup/scenes.py',
+    'db/validation/checkpoints.py', 'db/validation/state.py', 'runs/separate.py', 'cleanup/evidence.py', 'cleanup/scenes.py', 'evidence/frozen_replay.py', 'stash_api/scene_reads.py', 'commands/modes.py', 'reports/io.py', 'reports/runtime.py', 'cleanup/sql_discovery.py', 'cleanup/sql_mutations.py', 'cleanup/sql_preview.py',
 ])
 def test_publication_code_ignores_runtime_and_maintenance_modules(monkeypatch, filename):
     before = performance.publication_code()

@@ -2,11 +2,19 @@
 from __future__ import annotations
 
 import json
-from dataclasses import replace
+from dataclasses import dataclass
 
-import stash_ai.evidence.identity as merge_identity
 import stash_ai.evidence.source_markers as merge_source_markers
-from stash_ai.models import SOURCES
+from stash_ai.evidence.frozen_replay import PublishedRecords, snapshot_context, frozen_policies
+
+
+@dataclass
+class MarkerReplay:
+    candidates: list
+    context: object
+    core_policies: dict
+    records: dict
+    tag_policies: dict
 
 
 class EvidenceReplay:
@@ -15,51 +23,28 @@ class EvidenceReplay:
     def __init__(self, app, store, scene_id, selected, core_policies, tag_policies):
         self.app, self.store, self.scene_id = app, store, scene_id
         self.selected, self.core_policies, self.tag_policies = selected, core_policies, tag_policies
-        self.records = None
-        self.available_by_source, self.rebuilt = {}, {}
-
-    def _matching_records(self, required):
-        if self.records is None:
-            self.records = self.store.records(self.scene_id, 'markers', borrow=True)
-        matching = {}
-        for source, signatures in required.items():
-            if source not in self.available_by_source:
-                self.available_by_source[source] = {
-                    merge_identity.marker_segment_signature(segment): segment
-                    for segment in self.records.get(source, [])}
-            available = self.available_by_source[source]
-            if not set(signatures) <= set(available):
-                raise RuntimeError('Consensus sources changed since publication; run --merge-only before cleanup.')
-            matching[source] = [available[signature] for signature in signatures]
-        return matching
+        self.published = PublishedRecords(store, scene_id)
+        self.rebuilt = {}
 
     def _rebuild(self, options, matching):
-        from stash_ai.evidence.temporal.policy import TemporalPolicy
-
-        context = replace(self.app)
-        context.TEMPORAL_POLICY = TemporalPolicy.from_snapshot(options['policy'])
-        context.MARKER_THRESHOLDS = options.get('marker_thresholds', {})
-        for name, value in options['settings'].items():
-            setattr(context, name, value)
-        # Preserve the retired option only as part of this published proof.
+        context = snapshot_context(self.app, options, 'markers')
+        # Retired blocklist remains only as part of the already published proof.
         legacy_blocklist = frozenset(options.get('blocklist', []))
-        policies = {source: frozenset(options['core_exclusions'][source]) |
-                    (self.core_policies[source] if source in self.selected else frozenset())
-                    for source in SOURCES}
-        frozen_tags = {source: frozenset(options.get('tag_exclusions', {}).get(source, [])) | legacy_blocklist |
-                       (self.tag_policies[source] if source in self.selected else frozenset())
-                       for source in SOURCES}
+        policies = frozen_policies(options, 'core_exclusions', self.selected, self.core_policies)
+        frozen_tags = frozen_policies(options, 'tag_exclusions', self.selected, self.tag_policies,
+                                      legacy=legacy_blocklist)
         # Replay old proofs with frozen exclusions; clipping cannot admit new votes.
         candidates = merge_source_markers.marker_contributions(
             context, matching, policies, tag_policies=frozen_tags,
             allow_unknown_blocklist=True, allow_unknown_retention=True,
             legacy_blocklist=legacy_blocklist)
-        return candidates, context, policies, matching, frozen_tags
+        return MarkerReplay(candidates, context, policies, matching, frozen_tags)
 
     def candidates(self, span):
         required = span.get('frame_context') or {
             **span.get('support_context', {}), span['source']: [span['evidence_signature']]}
-        matching = self._matching_records(required)
+        matching = self.published.matching('markers', required, error=
+            'Consensus sources changed since publication; run --merge-only before cleanup.')
         key = json.dumps([span['build_options'], required], sort_keys=True)
         if key not in self.rebuilt:
             self.rebuilt[key] = self._rebuild(span['build_options'], matching)
@@ -75,7 +60,7 @@ def _needs_replay(span, selected, core_policies, tag_policies, extra_labels):
     return core_affected or extras_affected
 
 
-def _clip_candidate(span, item, context, matching, policies, frozen_tags):
+def _clip_candidate(span, item, replay: MarkerReplay):
     from stash_ai.evidence.shared_markers import refresh_clipped_evidence
 
     if item['tag'] != span['tag']:
@@ -99,7 +84,7 @@ def _clip_candidate(span, item, context, matching, policies, frozen_tags):
             intervals=[[max(a, start), min(b, end)] for a, b in evidence['intervals'] if min(b, end) > max(a, start)],
             sample_times=[t for t in evidence['sample_times'] if start <= t < end])
             for label, evidence in item.get('extra_support', {}).items()}
-        if not refresh_clipped_evidence(context, clipped, matching, policies, frozen_tags):
+        if not refresh_clipped_evidence(replay.context, clipped, replay.records, replay.core_policies, replay.tag_policies):
             return None
     return clipped
 
@@ -131,9 +116,9 @@ def cleanup_support(app, store, scene_id, spans, selected, core_policies, tag_po
             # Imported ranges have no frame proofs; remove only captured extras.
             cleaned.append(prune_blocked_extras(span, own_blocked))
             continue
-        candidates, context, policies, matching, frozen_tags = replay.candidates(span)
-        for item in candidates:
-            clipped = _clip_candidate(span, item, context, matching, policies, frozen_tags)
+        prepared = replay.candidates(span)
+        for item in prepared.candidates:
+            clipped = _clip_candidate(span, item, prepared)
             if clipped is None:
                 continue
             # Cleanup only revokes extras; normal merge may admit additional labels.

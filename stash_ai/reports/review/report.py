@@ -10,14 +10,13 @@ from .scenes import _scene_signals
 from .markers import _marker_signals
 
 from dataclasses import asdict
-import json
-from pathlib import Path
 import sqlite3
-from dataclasses import replace
 
 from tqdm import tqdm
 
 from stash_ai.reports.review.accumulator import ReviewAccumulator
+from stash_ai.reports.io import write_json_report
+from stash_ai.reports.runtime import report_context, report_policies, report_store, report_memory
 
 
 def _scene_ids(store, requested):
@@ -99,8 +98,6 @@ def format_summary(report):
 
 
 def run(app, args):
-    from stash_ai.storage.store import StateStore, scope_for
-    from stash_ai.evidence.temporal.policy import load_policy
 
     try:
         options = ReviewOptions(
@@ -108,25 +105,14 @@ def run(app, args):
             long_marker_seconds=300.0 if args.tag_review_long_marker_seconds is None
             else args.tag_review_long_marker_seconds,
             examples=3 if args.tag_review_examples is None else args.tag_review_examples)
-        local = replace(app, APPLY_SCENE_TAGS=True, CREATE_MARKERS=True,
-                        TEMPORAL_POLICY=load_policy(args.temporal_policy, not args.no_temporal))
-        core = app.services.load_exclusion_policy(args.marker_core_exclusions, "excluded_core_tags")
-        tags = app.services.load_exclusion_policy(args.scene_tag_exclusions, "excluded_scene_tags")
-        if not Path(args.state_db).expanduser().is_file():
-            raise FileNotFoundError(f"State database does not exist: {args.state_db}")
-        with StateStore(args.state_db, scope_for(app.STASH_URL), True,
-                        cache_bytes=int(args.ram_cache_gb * 2**30),
-                        memory_budget_bytes=int(args.ram_budget_gb * 2**30),
-                        allow_cleanup=True) as store:
+        local = report_context(app, args, both_outputs=True)
+        core, tags = report_policies(app, args)
+        with report_store(app, args, **report_memory(args)) as store:
             scenes = _scene_ids(store, args.scene_id)
             if not args.scene_id:
                 store.preload_sources()
             report = build_report(local, store, scenes, core, tags, options)
-        destination = Path(args.tag_review_report).expanduser().resolve()
-        payload = json.dumps(report, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False) + "\n"
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        with destination.open("x", encoding="utf-8", newline="\n") as stream:
-            stream.write(payload)
+        destination = write_json_report(report, args.tag_review_report)
         print(format_summary(report))
         print(f"Tag review report written to {destination}. No Stash requests or inference were performed.")
         return 0

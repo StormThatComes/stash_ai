@@ -126,7 +126,7 @@ class CleanupRun:
             delta = Counter(getattr(self.cleanup_stash, 'marker_group_usage_delta', {}))
             if self.resolver is not None:
                 delta.update(for_resolver(app, self.resolver).usage_delta)
-            candidates = self.sql.marker_group_candidates(delta) if self.sql is not None else None
+            candidates = self.sql.discovery.marker_group_candidates(delta) if self.sql is not None else None
             self.stats.update(prune_groups(
                 self.stash, self.report.detail, candidate_ids=candidates, usage_delta=delta))
 

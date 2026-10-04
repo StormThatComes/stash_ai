@@ -7,7 +7,7 @@ publication sequencing and durable snapshot promotion.
 from __future__ import annotations
 
 from .planning.merged_evidence import prepare_sync_evidence
-from .planning.merged_tags import resolve_sync_tags, plan_scene_tags
+from .planning.merged_tags import resolve_sync_tags, resolve_marker_catalog, plan_scene_tags
 from .planning.merged_markers import plan_markers
 
 from collections import Counter
@@ -91,16 +91,17 @@ def sync_merged(app, stash, resolver, store, scene, scene_hits, spans, *, migrat
     """Reconcile only script-owned markers and recorded scene associations."""
     scene_id = str(scene["id"])
     report = report or getattr(store, 'report', None)
-    scene_hits, spans, markers, scene_labels, previous_ranges = prepare_sync_evidence(
+    evidence = prepare_sync_evidence(
         app, stash, store, scene, scene_hits, spans, cleanup=cleanup, report=report)
-    scene, markers, spans, ids, groups, blocked_names, suppressed = resolve_sync_tags(
-        app, stash, resolver, scene_id, scene, markers, spans, scene_labels,
-        tag_policies, previous_ranges, report)
+    resolved = resolve_sync_tags(app, stash, resolver, scene_id, evidence, tag_policies, report)
+    with stage(report, 'tag_resolution'):
+        catalog = resolve_marker_catalog(resolver, resolved)
+    scene, markers, spans = resolved.scene, resolved.markers, resolved.spans
+    scene_labels, suppressed = evidence.scene_labels, resolved.suppressed
     plan = plan_scene_tags(
-        app, store, scene_id, scene, scene_hits, scene_labels, ids, blocked_names, migrate=migrate)
-    plan_markers(
-        app, stash, resolver, scene_id, scene, markers, ids, groups, blocked_names,
-        previous_ranges, plan, migrate=migrate, report=report)
+        app, store, scene_id, scene, evidence.scene_hits, scene_labels,
+        resolved.ids, resolved.blocked_names, migrate=migrate)
+    plan_markers(app, resolved, catalog, evidence.previous_ranges, plan, migrate=migrate, report=report)
     if app.CREATE_MARKERS:
         plan.snapshots["markers"] = {"contributions": spans}
     stats = sync_statistics(app, plan, markers, suppressed)
