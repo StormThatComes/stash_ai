@@ -31,7 +31,7 @@ def test_model_report_dispatch_skips_model_loading(monkeypatch, tmp_path):
                         9 if selected_app is app and args.model_report == destination else 1)
     args = arguments.parse_args(app, ["--model-report", str(destination)])
 
-    assert dispatch.run_standalone_command(app, args, cleanup_only=False) == 9
+    assert dispatch.run_standalone_command(app, args) == 9
 
 
 def test_prune_dispatch_runs_config_validation(monkeypatch):
@@ -42,7 +42,7 @@ def test_prune_dispatch_runs_config_validation(monkeypatch):
     monkeypatch.setattr(prune, "run_prune", lambda selected_app, args: 5)
     args = arguments.parse_args(app, ["--prune-empty-tags-only"])
 
-    assert dispatch.run_standalone_command(app, args, cleanup_only=False) == 5
+    assert dispatch.run_standalone_command(app, args) == 5
     assert validated == [False]
 
 

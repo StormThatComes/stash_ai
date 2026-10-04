@@ -9,13 +9,14 @@ from __future__ import annotations
 from .analysis import scene_report, merge_scene_report
 
 from collections import Counter
-import json
 from pathlib import Path
 
 from tqdm import tqdm
 
 from stash_ai.models import SOURCES
-from stash_ai.storage.store import StateStore, scope_for
+from stash_ai.storage.store import scope_for
+from stash_ai.reports.io import write_json_report
+from stash_ai.reports.runtime import report_context, report_policies, report_store, report_memory
 
 
 REPORT_FORMAT = 1
@@ -118,41 +119,23 @@ def write_report(report, destination):
     destination = Path(destination).expanduser().resolve()
     if destination.suffix.lower() != ".json":
         raise ValueError("Model utility report output must use a .json filename.")
-    payload = json.dumps(report, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False) + "\n"
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    with destination.open("x", encoding="utf-8", newline="\n") as stream:
-        stream.write(payload)
-    return destination
+    return write_json_report(report, destination)
 
 
 def run(app, args):
     from stash_ai.exclusions import policies_or_empty
-    from stash_ai.evidence.temporal.policy import load_policy
-
-    app.APPLY_SCENE_TAGS = True
-    app.CREATE_MARKERS = True
-    app.TEMPORAL_POLICY = load_policy(args.temporal_policy, not args.no_temporal)
-    core_policies = app.services.load_exclusion_policy(args.marker_core_exclusions, "excluded_core_tags")
-    scene_policies = app.services.load_exclusion_policy(args.scene_tag_exclusions, "excluded_scene_tags")
+    app = report_context(app, args, both_outputs=True)
+    core_policies, scene_policies = report_policies(app, args)
     core_policies = policies_or_empty(core_policies)
     scene_policies = policies_or_empty(scene_policies)
 
     try:
-        if not Path(args.state_db).expanduser().is_file():
-            raise FileNotFoundError(f"State database does not exist: {args.state_db}")
-        cache_bytes = int(args.ram_cache_gb * 2**30)
-        memory_budget_bytes = int(args.ram_budget_gb * 2**30)
+        budget = report_memory(args)
+        cache_bytes, memory_budget_bytes = budget['cache_bytes'], budget['memory_budget_bytes']
         scope = scope_for(app.STASH_URL)
         workers = max(1, int(args.model_report_workers))
         report = None
-        with StateStore(
-            args.state_db,
-            scope,
-            True,
-            cache_bytes=cache_bytes,
-            memory_budget_bytes=memory_budget_bytes,
-            allow_cleanup=True,
-        ) as store:
+        with report_store(app, args, **budget) as store:
             scenes = _scene_ids(store, args.scene_id)
             if args.scene_id and len(scenes) != len(dict.fromkeys(str(value) for value in args.scene_id)):
                 missing = sorted(set(map(str, args.scene_id)) - set(scenes))

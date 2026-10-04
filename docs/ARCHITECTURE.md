@@ -358,3 +358,10 @@ i jednokierunkowy fallback po błędzie, wspólny dla find, batch i page.
 `cleanup/sql.py` ustala lifecycle i politykę cleanupu; `sql_discovery.py`
 wykonuje ograniczone SELECT-y, `sql_mutations.py` rewaliduje partie i potwierdza
 zapisy natywnym API, a `sql_preview.py` modeluje skutki dry-run bez zapisu źródła.
+
+`commands/modes.py` ustala jeden `Command` przed normalizacją domyślnych
+opcji. Dispatch, grupy trybów i deklaratywne reguły raportów korzystają z tego
+wyboru, zachowując kolejność walidacji. `reports/runtime.py` współdzieli
+izolowane ustawienia, polityki i read-only store, a `reports/io.py` zapisuje
+nowy JSON z wyłącznym otwarciem pliku. Wybór scen i specyfika raportów pozostają
+w ich modułach.
