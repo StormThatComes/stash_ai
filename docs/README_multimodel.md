@@ -459,9 +459,9 @@ Zmodyfikowany kod wymaga `--force-code`.
 
 ## 19. Bezpieczeństwo kluczy
 
-Ustaw własny `STASH_API_KEY` w environment. Aktualny kod nadal zawiera
-historyczny fallback, który należy traktować jako skompromitowany; szczegóły
-są w [SECURITY.md](../SECURITY.md).
+Ustaw własny `STASH_API_KEY` w environment, jeśli Stash wymaga klucza.
+Wartość domyślna jest pusta; dawny fallback został usunięty. Informacje o
+rotacji historycznego klucza są w [SECURITY.md](../SECURITY.md).
 
 Token GitHub updatera powinien mieć wyłącznie dostęp do tego repozytorium i
 `Contents: read`.

@@ -97,8 +97,7 @@ class Stash:
                     'image_count':sum(any(t['id']==identifier for t in image['tags']) for image in getattr(self,'images',[]))}
         if 'PruneCapabilities' in query:
             return {'tag':{'fields':[{'name':n} for n in counts|{'id','name','description','parents','children'}]},
-                    'studio':{'fields':[{'name':'tags'}]},'group':{'fields':[{'name':'tags'}]},
-                    'movie':None,'mutation':{'fields':[{'name':'tagDestroy'}]}}
+                    'mutation':{'fields':[{'name':'tagDestroy'}]}}
         if 'PruneCatalog' in query:
             f=variables['filter']; values=list(self.tags.values()); start=(f['page']-1)*f['per_page']
             return {'findTags':{'count':len(values),'tags':[usage(t) for t in values[start:start+f['per_page']]]}}
@@ -117,4 +116,3 @@ class Stash:
 
 def sync(stash,source,predictions=(),specs=(),cores=frozenset(),scenes=frozenset()):
     return separate_sync.sync_scene(app, stash,app.services.TagResolver(stash,source=source),stash.find_scene("1"),list(predictions),list(specs),cores,source,scenes)
-

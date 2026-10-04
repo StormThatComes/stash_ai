@@ -51,16 +51,25 @@ def test_peak_time_is_compact_earliest_max_and_survives_resume():
     assert len(saved['items'][0]) == len(resumed.state()['items'][0])
 
 
-def test_old_checkpoint_never_assigns_a_new_time_to_an_unseen_old_maximum():
+def test_zero_score_checkpoint_keeps_the_first_actual_sample_time():
+    acc = SceneAccumulator(0, TemporalPolicy())
+    acc.add(np.array([[0.]]), [Cue(7, 8, '', (0, 0, 1, 1))])
+    resumed = SceneAccumulator(0, TemporalPolicy(), acc.state())
+    resumed.add(np.array([[0.]]), [Cue(8, 9, '', (0, 0, 1, 1))])
+    assert resumed.statistics(['core'])['core']['peak_time'] == 7
+
+
+@pytest.mark.parametrize('damage', ['format', 'peak_time'])
+def test_old_or_incomplete_checkpoint_analysis_requires_restart(damage):
     acc = SceneAccumulator(.2, TemporalPolicy())
     acc.add(np.array([[.9]]), [Cue(0, 10, '', (0, 0, 1, 1))])
     saved = acc.state()
-    saved['items'][0].pop('peak_time')
-    resumed = SceneAccumulator(.2, TemporalPolicy(), saved)
-    resumed.add(np.array([[.4]]), [Cue(10, 20, '', (0, 0, 1, 1))])
-    assert 'peak_time' not in resumed.statistics(['core'])['core']
-    resumed.add(np.array([[.95]]), [Cue(20, 30, '', (0, 0, 1, 1))])
-    assert resumed.statistics(['core'])['core']['peak_time'] == 20
+    if damage == 'format':
+        saved.pop('format')
+    else:
+        saved['items'][0].pop('peak_time')
+    with pytest.raises(ValueError, match='checkpoint analysis'):
+        SceneAccumulator(.2, TemporalPolicy(), saved)
 
 
 @pytest.mark.parametrize('cache', ['peak', 'old_frames', 'missing', 'different_run', 'different_input'])
@@ -331,4 +340,3 @@ def test_cleanup_never_restores_a_manually_deleted_point(tmp_path):
         assert cleaned
         merge_sync.sync_merged(app, stash, resolver, state, stash.find_scene('1'), hits, cleaned, migrate=False, cleanup=True)
         assert not stash.scene['scene_markers']
-

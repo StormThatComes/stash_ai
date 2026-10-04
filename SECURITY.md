@@ -5,9 +5,9 @@
 `STASH_API_KEY` powinien pochodzić z environment lub lokalnego mechanizmu
 sekretów i nigdy nie powinien być commitowany do repozytorium.
 
-Aktualny `stash_ai/cli.py` nadal zawiera historyczny fallback klucza API.
-Traktuj ten fallback jako **skompromitowany**. Nie używaj go do produkcyjnego
-Stash; wygeneruj nowy klucz i ustaw go jawnie:
+Historyczne wersje zawierały fallback klucza API. Bieżący runtime pobiera klucz
+wyłącznie ze środowiska, z pustą wartością domyślną. Traktuj dawny klucz jako
+**skompromitowany**; wygeneruj nowy klucz i ustaw go jawnie:
 
 ```powershell
 $env:STASH_URL = "http://localhost:9999"

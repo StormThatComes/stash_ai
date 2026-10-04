@@ -201,15 +201,14 @@ otwartym tylko do odczytu. Starszą bazę aktualizuje wyłącznie `--db-update`.
 
 `StateStore.pack_snapshot()` internuje powtarzające się obiekty dowodów według
 tożsamości, bez hashowania dużych struktur. Unikatowe dowody pozostają inline.
-Kompaktowy BLOB zawiera envelope `__stash_ai_snapshot__: 2`, `snapshot` oraz
+Kompaktowy BLOB zawiera envelope `__stash_ai_snapshot__: 3`, `snapshot` oraz
 tablicę `proofs`; wartości `extra_support` są pełnymi dowodami lub indeksami tej
 tablicy. `storage.snapshots.decode()` waliduje referencje i zwraca dotychczasową,
 rozwiniętą strukturę także dla cleanupu, recovery i kontroli bazy. Dowody są
 współdzielone i niemutowalne dla pożyczających je czytelników; odczyt publiczny
-nadal zwraca kopię oddzieloną od cache. Zapis nowego formatu i podniesienie wersji
-bazy do 9 odbywają się w jednej transakcji. Stare snapshoty oraz inne BLOB-y
-zachowują dotychczasowy format. Promocja pending i archiwizacja recovery kopiują
-już zapisany BLOB bez ponownej serializacji.
+nadal zwraca kopię oddzieloną od cache. Zmiany historycznych snapshotów i wersji
+bazy odbywają się wyłącznie offline przez `--db-update`. Promocja pending i
+archiwizacja recovery kopiują już zapisany BLOB bez ponownej serializacji.
 
 Obsługa samodzielnych komend bazy znajduje się w pakiecie `stash_ai/db/`:
 
@@ -388,8 +387,12 @@ Schema upgrades run only through `--db-update`. Runtime writers and dry-run read
 
 Schema v10 stores per-segment effective thresholds as JSON arrays in `result_thresholds.thresholds`; null entries use the segment's original inference threshold. Evidence BLOBs and derived metadata contain no publication overrides. The offline migration strips retired refinement and inline overrides once, preserving evidence signatures and mixed history. New inference always declares its actual marker capture floor and an empty marker blocklist. Unknown historical retention is rejected for new publication, while verified frozen cleanup replay keeps its narrower exception.
 
-Schema v11 uses snapshot envelope v2 for every new publication, including snapshots with no shared proofs. Generic compressed JSON decoding never dispatches by a magic key. Snapshot decoding validates the envelope and complete frozen policy; historical plain JSON/v1 envelopes and old policy defaults are handled only by offline snapshot migration. Pending promotion still copies the encoded intent, and migration preserves proof references, recovery operation IDs, ownership and old False flags.
+Schema v12 uses snapshot envelope v3 for every new publication, including snapshots with no shared proofs. Generic compressed JSON decoding never dispatches by a magic key. Snapshot decoding requires complete frozen marker/scene build options and every source's exclusion list, also inside occurrence scene evidence. Offline migration handles plain JSON and v1/v2 envelopes, completes historical empty maps and policies, and folds retired blocklists into frozen tag exclusions. Numeric marker settings and scene tag caps must already be saved; migration never substitutes today's runtime settings. Pending promotion still copies the encoded intent, and migration preserves proof references, recovery operation IDs, ownership and old False flags.
+
+Scene accumulator checkpoints carry a complete analysis format. Its version participates only in the checkpoint signature, so old unfinished batches restart for the affected scene/model. Completed inference signatures, retained frame evidence and historical statistics without a peak timestamp remain reusable.
 
 Legacy Stash conversion runs only through `--import-legacy-only`, before model/configuration loading. Each scene commits imported evidence and its exact-object ledger in one transaction. Ordinary merged scans only validate known inputs and lost-state guards; they cannot import evidence. Publication planning migrates only ledger-confirmed objects, preserving late or uncaptured source objects. SQL read fallback, unknown scores/end times, manual markers, pending plans and anti-duplication semantics remain in effect.
 
 New result writes require an explicit output mode, metadata dictionary and item list before changing SQL state. Scene inference capture requires retained frame analysis. Missing marker retention floors are insufficient in both cache reports and publication validation. Runtime index signatures accept only the output's own override; mixed historical policies are inspected only by offline DB validation. Spawned merge workers always carry both declared threshold maps, and HTTP timing uses the native Response body contract.
+
+Stash credentials have no bundled fallback: an unset STASH_API_KEY sends no ApiKey header. Pruning requires the native studio/group usage counters guaranteed by Stash 0.31.1+, checks all other exposed usage counters, and omits the deprecated movie_count alias of group_count. It never probes the retired Movie API.

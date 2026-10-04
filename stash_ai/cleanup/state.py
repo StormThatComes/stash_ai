@@ -80,7 +80,7 @@ def mask_snapshot(store, snapshot, kind):
             fields = (('tag_exclusions', blocked), ('core_exclusions', cores)) if kind == 'markers' else (
                 ('scene_exclusions', blocked),)
             for field, labels in fields:
-                options[field] = {source: sorted(set(options.get(field, {}).get(source, [])) | labels)
+                options[field] = {source: sorted(set(options[field][source]) | labels)
                                   for source in SOURCES}
             item['build_options'] = options
         contributions.append(item)

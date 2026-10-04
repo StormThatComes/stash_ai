@@ -106,13 +106,15 @@ class MergedModelRun:
         return True
 
     def _predict_scene(self, scene_id, paths, cues, media, signature, kinds, replacement):
+        from stash_ai.evidence.temporal.statistics import CHECKPOINT_FORMAT
         app, args, store = self.app, self.args, self.store
         if not args.resume:
             with store.connection:
                 checkpoints.clear_checkpoint(store, scene_id, self.key)
         checkpoint = checkpoints.Checkpoint(
             store, scene_id, self.key,
-            digest({"input": signature, "kinds": kinds, "scene_frames": 1}),
+            digest({"input": signature, "kinds": kinds, "scene_frames": 1,
+                    "scene_analysis": CHECKPOINT_FORMAT}),
             len(cues), len(self.vocabulary.labels), args.checkpoint_batches)
         analysis = {}
         predictions, frames = prediction.predict_scene(
@@ -132,4 +134,3 @@ class MergedModelRun:
         self.stats["errors"] += 1
         self.report.issue(stage, self.key, scene_id, exc,
                           self.app.services.safe_error(exc, api_key=self.app.STASH_API_KEY))
-

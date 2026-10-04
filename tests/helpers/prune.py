@@ -8,7 +8,7 @@ from stash_ai.cleanup.prune import REQUIRED_COUNTS
 class PruneStash:
     def __init__(self,dry=False):
         self.dry_run=dry;self.tags={};self.deleted=[];self.calls=Counter()
-        self.counts=set(REQUIRED_COUNTS)|{"studio_count","group_count","movie_count"}
+        self.counts=set(REQUIRED_COUNTS)
         self.before_refresh=None
     def add(self,name,parents=(),**counts):
         identifier=str(len(self.tags)+1)
@@ -25,10 +25,9 @@ class PruneStash:
         variables=variables or {}
         if "PruneCapabilities" in query:
             self.calls["capabilities"]+=1
-            fields=self.counts|{"id","name","description","children","parents","parent_count"}
+            fields=self.counts|{"id","name","description","children","parents","parent_count","movie_count"}
             return {"tag":{"fields":[{"name":n} for n in fields]},
-                    "studio":{"fields":[{"name":"tags"}]},"group":{"fields":[{"name":"tags"}]},
-                    "movie":None,"mutation":{"fields":[{"name":"tagDestroy"}]}}
+                    "mutation":{"fields":[{"name":"tagDestroy"}]}}
         if "PruneCatalog" in query:
             self.calls["catalog"]+=1
             page=variables["filter"]["page"];size=variables["filter"]["per_page"]
