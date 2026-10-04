@@ -12,8 +12,14 @@ from stash_ai.inference import prediction
 from stash_ai.cleanup import evidence as cleanup_evidence
 from stash_ai.publication import merged as merge_sync
 from stash_ai import cli as app
-from stash_ai import merge
-from stash_ai.temporal import TemporalPolicy, SceneAccumulator, scene_reason, consensus_seeds
+from stash_ai.evidence import pipeline as merge
+import stash_ai.evidence.intervals as merge_intervals
+import stash_ai.evidence.labels as merge_labels
+import stash_ai.evidence.source_markers as merge_source_markers
+import stash_ai.storage.store as merge_store
+from stash_ai.evidence.temporal.policy import TemporalPolicy
+from stash_ai.evidence.temporal.statistics import SceneAccumulator, scene_reason
+from stash_ai.evidence.temporal.markers import consensus_seeds
 from stash_ai.models import SOURCES
 from tests.helpers.inference import IndexedTagger
 
@@ -58,8 +64,8 @@ def test_extras_include_observations_inside_a_permitted_primary_gap(monkeypatch)
 def test_merged_extra_coverage_uses_the_whole_union_duration():
     records={'wd':[segment('wd',[[('core',.9),('extra',.9)]]*2)],
              'dtq':[segment('dtq',[[('core',.9)]]*20)]}
-    spans=merge.marker_contributions(app,records,{m:frozenset({'extra'}) for m in SOURCES})
-    result=merge.union_intervals(spans)[0]
+    spans=merge_source_markers.marker_contributions(app,records,{m:frozenset({'extra'}) for m in SOURCES})
+    result=merge_intervals.union_intervals(spans)[0]
     assert result['end']==20 and result['extra_tags']==[]
     assert result['extra_evidence']['extra']['coverage_fraction']==.1
 
@@ -69,9 +75,9 @@ def test_merged_extra_hits_combine_distinct_times_but_not_duplicate_model_votes(
     records={'wd':[segment('wd',[[('core',.9),('extra',.9)],[('core',.9)]])],
              'dtq':[segment('dtq',[[('core',.9)],[('core',.9),('extra',.9)]])]} 
     if same_time:records['dtq']=[segment('dtq',[[('core',.9),('extra',.9)],[('core',.9)]])]
-    spans=merge.marker_contributions(app,records,{m:frozenset({'extra'}) for m in SOURCES})
+    spans=merge_source_markers.marker_contributions(app,records,{m:frozenset({'extra'}) for m in SOURCES})
     assert all(span['extra_tags']==([] if same_time else ['extra']) for span in spans)
-    result=merge.union_intervals(spans)[0]
+    result=merge_intervals.union_intervals(spans)[0]
     assert result['extra_tags']==([] if same_time else ['extra'])
     assert result['extra_evidence']['extra']['support_seconds']==(1 if same_time else 2)
 
@@ -79,8 +85,8 @@ def test_merged_extra_hits_combine_distinct_times_but_not_duplicate_model_votes(
 def test_legacy_extra_tags_remain_when_coverage_is_unavailable():
     records={'wd':[segment('wd',[[('core',.9)]]*2)],'joytag':[
         dict(mode='spans',meta={'origin':'legacy'},items=[dict(tag='core',start=0,end=2,extra_tags=['old_extra'])])]}
-    spans=merge.marker_contributions(app,records,{m:frozenset() for m in SOURCES})
-    assert merge.union_intervals(spans)[0]['extra_tags']==['old_extra']
+    spans=merge_source_markers.marker_contributions(app,records,{m:frozenset() for m in SOURCES})
+    assert merge_intervals.union_intervals(spans)[0]['extra_tags']==['old_extra']
 
 
 def test_hysteresis_needs_a_seed_and_caps_weak_tail(monkeypatch):
@@ -108,8 +114,8 @@ def test_new_strong_hit_resets_weak_tail_limit(monkeypatch):
 def test_consensus_promotes_repeated_weak_detections_and_preserves_source_scores():
     records={m:[segment(m,[[('core',.7)]]*3)] for m in ('wd','dtq')}
     policies={m:frozenset() for m in SOURCES}
-    spans=merge.marker_contributions(app,records,policies)
-    result=merge.union_intervals(spans)
+    spans=merge_source_markers.marker_contributions(app,records,policies)
+    result=merge_intervals.union_intervals(spans)
     assert len(result)==1 and result[0]['sources']==['wd','dtq']
     assert (result[0]['start'],result[0]['end'])==(0,3)
     assert all(c['score']==.7 for c in result[0]['contributors'])
@@ -126,12 +132,12 @@ def test_consensus_rejects_incompatible_or_duplicate_votes(difference):
         for f in records['dtq'][0]['items']:f['start']+=10;f['end']+=10
     if difference=='same_model':records={'wd':[records['wd'][0],deepcopy(records['wd'][0])]}
     if difference=='exclusion':policies['dtq']=frozenset({'core'})
-    assert not merge.marker_contributions(app,records,policies)
+    assert not merge_source_markers.marker_contributions(app,records,policies)
 
 
 def test_single_model_unique_strong_tag_does_not_need_consensus():
     records={'oppai':[segment('oppai',[[('unique',.9)]]*2)]}
-    spans=merge.marker_contributions(app,records,{m:frozenset() for m in SOURCES})
+    spans=merge_source_markers.marker_contributions(app,records,{m:frozenset() for m in SOURCES})
     assert len(spans)==1 and spans[0]['tag']=='unique' and spans[0]['support_sources']==[]
 
 
@@ -182,7 +188,7 @@ def test_temporal_resume_preserves_statistics_and_all_sparse_scores(pipeline,mon
     expected=IndexedTagger(p.loaded[-1].settings,p.scores['wd'],p.vocab.labels)
     analysis={}
     predictions,output=prediction.predict_scene(app, expected,p.stash,{},p.cues,raw_scene=True,analysis=analysis)
-    with merge.StateStore(p.path,merge.scope_for(app.STASH_URL),True) as state:
+    with merge_store.StateStore(p.path,merge_store.scope_for(app.STASH_URL),True) as state:
         scene=state.records('1','scene')['wd'][-1]
         markers=state.records('1','markers')['wd'][-1]
         assert [(r['tag'],r['score']) for r in scene['items']]==predictions
@@ -211,15 +217,15 @@ def test_temporal_dry_run_preserves_database(pipeline):
 def test_cleanup_revokes_consensus_votes_without_restoring_manual_deletions(tmp_path):
     from tests.helpers.stash import Stash
     stash=Stash();policies={m:frozenset() for m in SOURCES}
-    with merge.StateStore(tmp_path/'state.sqlite3','fixture') as state:
+    with merge_store.StateStore(tmp_path/'state.sqlite3','fixture') as state:
         for model in ('wd','dtq','oppai'):
             state.put('1',model,{'markers':segment(model,[[('core',.7)]]*3)})
         hits,spans=merge.evidence(app,state,'1',policies,policies)
-        merge_sync.sync_merged(app,stash,app.TagResolver(stash,source=merge.AI),state,stash.find_scene('1'),hits,spans)
+        merge_sync.sync_merged(app,stash,app.TagResolver(stash,source=merge_labels.AI),state,stash.find_scene('1'),hits,spans)
         policies['wd']=frozenset({'core'})
         kept=[s for s in spans if s['source']!='wd']
         cleaned=cleanup_evidence.cleanup_support(app,state,'1',kept,{'wd'},policies)
-        assert merge.union_intervals(cleaned)[0]['sources']==['dtq','oppai']
+        assert merge_intervals.union_intervals(cleaned)[0]['sources']==['dtq','oppai']
         policies['dtq']=frozenset({'core'})
         cleaned=cleanup_evidence.cleanup_support(app,state,'1',[s for s in cleaned if s['source']!='dtq'],{'dtq'},policies)
         assert cleaned==[]
@@ -228,7 +234,7 @@ def test_cleanup_revokes_consensus_votes_without_restoring_manual_deletions(tmp_
 @pytest.mark.parametrize('change',['new_model','scores'])
 def test_cleanup_uses_published_evidence_and_does_not_adopt_new_votes(tmp_path,change):
     policies={m:frozenset() for m in SOURCES}
-    with merge.StateStore(tmp_path/'state.sqlite3','fixture') as state:
+    with merge_store.StateStore(tmp_path/'state.sqlite3','fixture') as state:
         for model in ('wd','dtq'):
             state.put('1',model,{'markers':segment(model,[[('core',.7)]]*3)})
         _,spans=merge.evidence(app,state,'1',policies,policies)
@@ -248,7 +254,7 @@ def test_cleanup_uses_published_evidence_and_does_not_adopt_new_votes(tmp_path,c
 def test_legacy_mode_filters_weaker_scores_retained_by_new_inference(monkeypatch):
     monkeypatch.setattr(app,'TEMPORAL_POLICY',TemporalPolicy(enabled=False))
     records={'wd':[segment('wd',[[('core',.9)],[('core',.7)],[('core',.7)]])]}
-    assert merge.marker_contributions(app,records,{m:frozenset() for m in SOURCES})==[]
+    assert merge_source_markers.marker_contributions(app,records,{m:frozenset() for m in SOURCES})==[]
 
 
 @pytest.mark.parametrize('field,value',[('extra_min_hits',True),('marker_continue_ratio',0),
@@ -258,7 +264,7 @@ def test_temporal_policy_rejects_invalid_settings(field,value):
 
 
 def test_old_cached_results_still_merge_without_new_evidence(tmp_path):
-    with merge.StateStore(tmp_path/'state.sqlite3','fixture') as state:
+    with merge_store.StateStore(tmp_path/'state.sqlite3','fixture') as state:
         state.put('1','wd',{'scene':dict(mode='scene',meta={'origin':'legacy'},items=[{'tag':'legacy','score':None}]),
                            'markers':dict(mode='spans',meta={'origin':'legacy'},items=[dict(tag='legacy',start=0,end=10,extra_tags=[])])})
         hits,spans=merge.evidence(app,state,'1',{m:frozenset() for m in SOURCES},{m:frozenset() for m in SOURCES})

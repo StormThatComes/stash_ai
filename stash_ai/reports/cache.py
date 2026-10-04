@@ -145,7 +145,7 @@ def format_summary(report):
 
 def run(app, args):
     from stash_ai.storage.store import StateStore, scope_for
-    from stash_ai.temporal import load_policy
+    from stash_ai.evidence.temporal.policy import load_policy
 
     try:
         if not Path(args.state_db).expanduser().is_file():

@@ -11,12 +11,14 @@ import pytest
 
 from stash_ai import cli as app
 
-from stash_ai.fusion import ObservationIndex
+from stash_ai.evidence.observations import ObservationIndex
 from stash_ai.stash_api.sql import SceneReader, OPERATION, SQL, is_read_only_merge
-from stash_ai.performance import scene_fingerprint
-from stash_ai.runtime import RamCache, RunReport, retained_size
-from stash_ai.temporal import TemporalPolicy
-from stash_ai.timeline import support_size
+from stash_ai.publication.fingerprints import scene_fingerprint
+from stash_ai.runtime.cache import RamCache
+from stash_ai.runtime.report import RunReport
+from stash_ai.runtime.memory import retained_size
+from stash_ai.evidence.temporal.policy import TemporalPolicy
+from stash_ai.evidence.timeline import support_size
 
 pytestmark = pytest.mark.usefixtures("supported_stash_version")
 
@@ -299,7 +301,7 @@ def test_snapshot_only_refresh_reads_current_sql_state(database):
 
 def test_exclusive_timers_do_not_double_count_and_survive_failures(monkeypatch):
     ticks = iter([0.,1.,4.,10.])
-    monkeypatch.setattr('stash_ai.runtime.time.perf_counter',lambda:next(ticks))
+    monkeypatch.setattr('stash_ai.runtime.timing.time.perf_counter',lambda:next(ticks))
     report = RunReport(write=lambda line:None)
     with pytest.raises(ValueError):
         with report.measure('merge_plan'):
@@ -310,8 +312,8 @@ def test_exclusive_timers_do_not_double_count_and_survive_failures(monkeypatch):
 
 
 def test_publication_check_and_snapshots_share_one_commit(tmp_path):
-    from stash_ai.merge import StateStore
-    from stash_ai.performance import checked
+    from stash_ai.storage.store import StateStore
+    from stash_ai.storage.merge_checks import checked
     with StateStore(tmp_path/'state.db','s') as state:
         state.prepare('1', {'scene': {'contributions': []}})
         statements = []

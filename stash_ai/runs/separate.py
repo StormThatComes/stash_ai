@@ -32,7 +32,7 @@ def _build_markers(app, args, config, frame_predictions, core_exclusions):
     if not app.CREATE_MARKERS:
         return [], 0
 
-    from stash_ai.runtime import RamCache
+    from stash_ai.runtime.cache import RamCache
 
     return app.build_markers(
         frame_predictions,
@@ -218,3 +218,32 @@ def run_model(app, stash, config, vocabulary, hierarchy, args: Any,
         tagger.close()
 
     return stats
+
+
+def run(app, settings, args, catalogs, hierarchies, core_policies, scene_policies,
+        *, hierarchy_only):
+    """Own the shared Stash lifecycle across all selected separate models."""
+    stash = app.create_stash_client(app.DRY_RUN)
+    stats = Counter()
+    try:
+        print("DRY RUN: all Stash changes below are planned." if app.DRY_RUN else "Synchronizing selected models.")
+        for config in settings:
+            try:
+                stats.update(run_model(
+                    app, stash, config, catalogs[config.source.key], hierarchies[config.source.key],
+                    args, core_policies[config.source.key], scene_policies[config.source.key]))
+            except Exception as exc:
+                stats["errors"] += 1
+                args.report.issue(
+                    'load model', config.source.key, None, exc,
+                    app.safe_error(exc, api_key=app.STASH_API_KEY))
+        if not hierarchy_only and not stats["errors"]:
+            from stash_ai.exclusions import prune_excluded_definitions, selected_policies
+            stats.update(prune_excluded_definitions(app, stash,
+                selected_policies(scene_policies, {config.source.key for config in settings}), args.report.detail))
+    finally:
+        stash.close()
+    args.report.finish('Done' + (' (planned)' if app.DRY_RUN else ''), stats)
+    if stats["errors"] and not app.DRY_RUN:
+        print("Failed scenes may have partial writes. Correct the error and rerun to reconcile them.")
+    return 1 if stats["errors"] else 0

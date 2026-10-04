@@ -42,7 +42,7 @@ def initialize_progress(store, previous_version):
 
 def index_result(store, scene, model, kind, segments, scope=None, *, metadata_only=False):
     """Index a validated effective view, including a frame-free threshold plan."""
-    from stash_ai.thresholds import indexed_signature
+    from stash_ai.evidence.thresholds import indexed_signature
     inference = next((segment for segment in reversed(segments)
                       if segment["meta"].get("origin") == "inference"), None)
     store.connection.execute("INSERT INTO result_index VALUES (?,?,?,?,?,?,?) "
@@ -75,7 +75,7 @@ def completed(store, scene, model, kinds, signature=None):
 
 def reuse_replacement_policy(store, scene, model, kinds, signature, replace):
     """Reuse current inference while applying replacement semantics to retained history."""
-    from stash_ai.thresholds import indexed_signature
+    from stash_ai.evidence.thresholds import indexed_signature
     matches = {}
     records = {}
     for kind in kinds:

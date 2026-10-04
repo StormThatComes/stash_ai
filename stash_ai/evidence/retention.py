@@ -11,7 +11,7 @@ def scene_cache_floor(config: ModelSettings, policy):
 
 
 def marker_cache_floor(config: ModelSettings, policy):
-    from stash_ai.temporal import marker_floor
+    from stash_ai.evidence.temporal.policy import marker_floor
     required = marker_floor(policy, config.marker_threshold)
     configured = config.marker_cache_floor
     return required if configured is None else min(required, configured)

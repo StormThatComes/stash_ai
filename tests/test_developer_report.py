@@ -10,7 +10,7 @@ import pytest
 
 from stash_ai import cli as app
 from stash_ai.reports.developer import report as diagnostics
-from stash_ai import merge
+import stash_ai.storage.store as merge_store
 from stash_ai.storage.codec import encode
 
 
@@ -45,7 +45,7 @@ def segment(tag="private_tag_name"):
 
 
 def seed(path):
-    with merge.StateStore(path, "scope-secret-alpha") as state:
+    with merge_store.StateStore(path, "scope-secret-alpha") as state:
         state.put("scene-secret-123", "wd", {
             "scene": segment(),
             "markers": {
@@ -58,7 +58,7 @@ def seed(path):
                 ],
             },
         })
-    with merge.StateStore(path, "scope-secret-beta") as state:
+    with merge_store.StateStore(path, "scope-secret-beta") as state:
         state.put("scene-secret-999", "joytag", {"scene": segment("another_private_tag")})
 
     # Simulate unexpected/custom state. Names must never be copied into the report.

@@ -7,7 +7,7 @@ import pytest
 from stash_ai import cli as app
 from stash_ai.inference import sprites
 from stash_ai.inference.inputs import VerifiedMedia, RunInputs, inspect_input
-from stash_ai.runtime import RamCache
+from stash_ai.runtime.cache import RamCache
 
 
 pytestmark = pytest.mark.usefixtures("reset_progress")

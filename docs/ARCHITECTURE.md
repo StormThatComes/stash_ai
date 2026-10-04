@@ -3,7 +3,7 @@
 W katalogu głównym pozostają dwa pliki Pythona uruchamiane z linii poleceń:
 `stash_ai.py` i `update_stash_ai.py`. Launcher `stash_ai.py` przejmuje blokadę
 instalacji, a `stash_ai/cli.py` koordynuje CLI i uruchomienie pipeline.
-Algorytmy evidence/fusion i union przedziałów pozostają w `stash_ai/merge.py`.
+Algorytmy evidence/fusion i union przedziałów pozostają w `stash_ai/evidence/pipeline.py`.
 Pakiet `stash_ai/publication/` grupuje planowanie i publikację obu trybów wyjścia.
 `markers.py` zawiera wspólne reguły własności markerów, payloadów, porównywania
 zmian i usuwania wykluczonych extras. Moduły i testy importują je bezpośrednio,
@@ -28,19 +28,20 @@ lifecycle. Opcjonalny `stash_ai/publication/parallel.py` uruchamia wyłącznie r
 replay evidence w izolowanych procesach; `MergePublisher` zachowuje pojedynczy
 writer dla TagResolver, Stash i StateStore. Dry-run i profilowanie pozostają
 szeregowe, a awaria workerów nie uruchamia drugiego przebiegu publikacji.
-Planowanie i publikację zmian jednej sceny rozdziela `stash_ai/publication/merged.py`;
-`MergeSyncPlan` przechowuje wyłącznie plan snapshotów i mutacji Stash, a kolejne
-funkcje obsługują przygotowanie evidence, tagi, markery i publikację. Cleanup ma
+Planowanie jednej sceny znajduje się w `stash_ai/publication/planning/`: osobne
+moduły przygotowują evidence, tagi i markery merged oraz tagi i markery separate.
+`types.py` definiuje `MergeSyncPlan`. Koordynatory `publication/merged.py` oraz
+`publication/separate.py` zachowują kolejność mutacji i zatwierdzania snapshotów. Cleanup ma
 osobny lifecycle w `stash_ai/cleanup/run.py` / `CleanupRun`. Rekonsyliację jednej
 sceny zawiera `cleanup/scenes.py`, a re-ewaluację opublikowanego evidence
 `cleanup/evidence.py`: kwalifikacja zmienionych dowodów, leniwy `EvidenceReplay`
 z indeksem sygnatur i cache replay oraz clipping do opublikowanych przedziałów.
 Stan i maski cleanupu znajdują się w `cleanup/state.py`, a odczyt katalogu tagów
 w `cleanup/client.py`. `cleanup/prune.py` i `cleanup/legacy.py` obsługują pruning
-zwykłych tagów oraz zachowanych wyników legacy. Pozostała logika domenowa znajduje się m.in. w `stash_ai/scene.py`,
-`stash_ai/fusion.py`, `stash_ai/temporal.py` i `stash_ai/occurrences.py`.
+zwykłych tagów oraz zachowanych wyników legacy. Pozostała logika domenowa znajduje się m.in. w `stash_ai/evidence/scenes.py`,
+`stash_ai/evidence/observations.py`, `stash_ai/evidence/temporal/` i `stash_ai/evidence/occurrences.py`.
 
-`stash_ai/marker_index.py` buduje dla jednej sceny niemutowalny indeks istniejących
+`stash_ai/publication/index.py` buduje dla jednej sceny niemutowalny indeks istniejących
 markerów według primary tagu. Posortowane początki i drzewo maksymalnych końców
 ograniczają kandydatów także dla zagnieżdżonych przedziałów; końcowy filtr używa
 dotychczasowego `merge.overlaps()`, z osobną tolerancją początku. Cleanup wyszukuje
@@ -233,8 +234,8 @@ błędzie, a dopiero potem Apply z dotychczasową transakcją dla pojedynczej pa
 Marker-only nadal blokuje pending publication także przy niezmienionym progu;
 scene/combined dopuszcza pending no-op. Check i Apply korzystają z metadanych,
 zachowując surowe BLOB-y evidence oraz atomowy zapis progu i indeksu ukończenia.
-`thresholds.py` zachowuje efektywne progi markerów, podpisy i kontrakty retencji,
-a `scene_cache.py` projekcję scen i konwersję obserwacji do klatek. Reuse korzysta
+`evidence/thresholds.py` zachowuje efektywne progi markerów, podpisy i kontrakty retencji,
+a `evidence/cache_views.py` projekcję scen i konwersję obserwacji do klatek. Reuse korzysta
 bezpośrednio z planów w `rethreshold`, bez wrapperów pod dawnymi ścieżkami.
 
 Updater instaluje pliki Pythona z pakietu `stash_ai/`, również z jego podkatalogów.
@@ -249,7 +250,7 @@ w `benchmarks/`.
 
 Moduły, które mogą zmienić wynik merged publication przy tej samej efektywnej
 polityce, zapisanym evidence i obserwowanym stanie Stash, trzeba uwzględniać w
-`PUBLICATION_CODE_FILES` w `stash_ai/performance.py`. Warstwy transportu,
+`PUBLICATION_CODE_FILES` w `stash_ai/publication/fingerprints.py`. Warstwy transportu,
 CLI, parser VTT oraz tryby maintenance/cleanup mają własne sygnały invalidacji
 i celowo nie należą do tego fingerprintu, aby ich refaktory nie wymuszały
 re-merge całej biblioteki. Zmiana publication fingerprintu nie unieważnia
@@ -268,3 +269,57 @@ Pakiet `stash_ai/reports/` grupuje raporty offline bez re-eksportów starych mod
 `cache_coverage.py` agreguje liczniki oraz problemy, a `cache_plan.py` wybiera akcje
 i buduje uporządkowany plan komend w paczkach po 50 scen. `cache.py` koordynuje
 strumieniowy odczyt metadanych, kontrolę źródła preview i zapis istniejącego formatu JSON.
+
+### Reguły czasowe i obserwacje
+
+`stash_ai/evidence/temporal/` oddziela politykę i jej historyczne snapshoty (`policy.py`),
+rzadkie statystyki oraz kwalifikację scen (`statistics.py`), budowę markerów
+i consensus seeds (`markers.py`) oraz kwalifikację dodatkowych tagów (`extras.py`).
+`evidence/intervals.py` scala uporządkowane przedziały, `evidence/timeline.py`
+udostępnia indeksowane zapytania o obserwacje, a `evidence/retention.py` wyznacza
+progi retencji. Przeniesienie nie zmienia zapisanych dowodów ani reguł publikacji.
+
+### Potok zachowanych dowodów
+
+`stash_ai/evidence/pipeline.py` koordynuje kwalifikację scen, markerów i punktów
+wystąpień. `source_markers.py` buduje wkład pojedynczych źródeł, `frames.py`
+weryfikuje grupy klatek i przygotowuje obserwacje, a `observations.py` obsługuje
+wielokrotne zapytania o przedziały. `shared_markers.py` łączy kompatybilne źródła
+i odtwarza przycięte dowody; `scenes.py` kwalifikuje oraz odwołuje dowody scen.
+`occurrences.py` oddziela kwalifikację kandydatów, budowę strumieni i wybór punktu.
+
+`identity.py` definiuje tożsamość segmentów bez przejściowych override progów;
+`labels.py` waliduje surowe etykiety i opisuje namespace AI. `cache_views.py`
+i `thresholds.py` tworzą widoki kwalifikacji, a zapis zmian progów pozostaje
+w `rethreshold/`. `inference/results.py` zapisuje kształt raw prediction outputs,
+a `inference/reuse.py` dowodzi zgodności wcześniejszej inferencji przed zmianą progów.
+
+### Runtime i raportowanie wykonania
+
+`stash_ai/runtime/cache.py` zawiera cache LRU, a `memory.py` estymację utrzymanych
+obiektów i odczyt RSS. `report.py` zachowuje licznikowy interfejs `RunReport`,
+lecz `timing.py` zarządza oddzielnym `RunTimings` dla każdego raportu, jego
+thread-local stosami i rozmiarem odpowiedzi API. `summary.py` renderuje dotychczasowe
+podsumowanie, a `diagnostics.py` strumieniuje profil JSONL. Moduły runtime
+pozostają poza fingerprintem kodu publikacji i nie wymagają zależności ML.
+
+Grupy markerów rozwiązuje `publication/groups.py`; ich backfill uruchamia
+`commands/marker_groups.py`, a pruning wraz z dry-run korektą liczników
+obsługuje `cleanup/groups.py`. `cleanup/markers.py` usuwa wykluczone rdzenie
+i extras w trybie separate, bez wyliczania nowych markerów.
+
+Recovery jest rozdzielone między `storage/recovery.py` (lokalna archiwizacja
+i odczyt intentów), `publication/recovery.py` (uzgodnienie dowodów z faktycznie
+obecnymi wynikami Stash) oraz `commands/recovery.py` (tryb abandon-pending).
+`storage/merge_checks.py` odpowiada za transakcyjnie unieważniany indeks publikacji,
+`storage/segments.py` za pożyczone segmenty i ich memoizowaną tożsamość, a
+`publication/fingerprints.py` za podpis kodu, polityki, katalogu i stanu sceny.
+Ścieżki kodu do hashowania są liczone względem pakietu, niezależnie od cwd.
+
+`commands/bootstrap.py` przygotowuje runtime, wybrane modele, polityki oraz
+katalogi i hierarchie w dotychczasowej kolejności CLI. Szybkie tryby bazy
+kończą się przed bootstrapem, a wszystkie katalogi są walidowane przed
+ładowaniem wag i zapisami Stash. `runs/separate.py` zarządza także wspólnym
+lifecycle Stash dla wybranych modeli. `inference/scene_predictions.py` oddziela
+wybór zachowanych etykiet od kwalifikacji temporal; finalizacja w `prediction.py`
+zachowuje raw evidence, limity i wykluczenia przed publikacją.

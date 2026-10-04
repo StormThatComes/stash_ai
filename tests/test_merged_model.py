@@ -4,7 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from stash_ai import cli as app, merge
+from stash_ai import cli as app
+import stash_ai.storage.store as merge_store
 from stash_ai.inference import prediction
 from stash_ai.inference.identity import model_identity
 from stash_ai.inference.inputs import RunInputs, inspect_input
@@ -23,7 +24,7 @@ def model_run(pipeline, tmp_path):
     scenes = {identifier: dict(paths=dict(pipeline.stash.scene['paths']),
                                publication_reason='missing')
               for identifier in ('1', '2')}
-    with merge.StateStore(pipeline.path, 'fixture') as state:
+    with merge_store.StateStore(pipeline.path, 'fixture') as state:
         stats = Counter()
         inputs = RunInputs(pipeline.stash, state.cache, args.report)
         yield SimpleNamespace(pipeline=pipeline, config=config, args=args, scenes=scenes,

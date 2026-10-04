@@ -34,10 +34,12 @@ def main():
     if min(args.markers, args.labels, args.repeats) < 1 or args.labels > args.markers:
         parser.error('markers/labels/repeats must be positive; labels cannot exceed markers')
     sys.path.insert(0, str(args.project.resolve()))
-    from stash_ai import cli as app, merge
+    from stash_ai import cli as app
+    import stash_ai.evidence.labels as merge_labels
+    import stash_ai.storage.store as merge_store
     from stash_ai.publication import merged as merge_sync
-    from stash_ai.runtime import RunReport
-    from stash_ai.temporal import TemporalPolicy
+    from stash_ai.runtime.report import RunReport
+    from stash_ai.evidence.temporal.policy import TemporalPolicy
     from tests.helpers.stash import Stash
 
     app.TEMPORAL_POLICY = TemporalPolicy(enabled=False)
@@ -49,10 +51,10 @@ def main():
     spans = [dict(source='wd', tag=f'core_{i % args.labels}', start=float(i*3), end=float(i*3 + 1),
                   score=.9, hits=2, extra_tags=[], meta={'origin': 'test'}) for i in range(args.markers)]
     trials = []
-    with tempfile.TemporaryDirectory() as directory, merge.StateStore(
+    with tempfile.TemporaryDirectory() as directory, merge_store.StateStore(
             Path(directory)/'state.sqlite3', 'marker-matching-benchmark', cache_bytes=128*2**20) as store:
         stash = Stash()
-        resolver = app.TagResolver(stash, source=merge.AI)
+        resolver = app.TagResolver(stash, source=merge_labels.AI)
         merge_sync.sync_merged(app, stash, resolver, store, stash.find_scene('1'), [], spans, migrate=False)
         for _ in range(args.repeats):
             gc.collect()

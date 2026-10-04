@@ -127,7 +127,7 @@ def write_report(report, destination):
 
 def run(app, args):
     from stash_ai.exclusions import policies_or_empty
-    from stash_ai.temporal import load_policy
+    from stash_ai.evidence.temporal.policy import load_policy
 
     app.APPLY_SCENE_TAGS = True
     app.CREATE_MARKERS = True

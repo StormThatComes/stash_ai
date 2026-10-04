@@ -1,7 +1,7 @@
 """Replay scene qualification from sparse frame evidence and exact aggregates."""
 from types import SimpleNamespace
 
-SCENE_OVERRIDE = 'scene_threshold_override'
+from stash_ai.evidence.identity import SCENE_OVERRIDE
 
 
 def scene_threshold(segment):
@@ -9,7 +9,7 @@ def scene_threshold(segment):
 
 
 def validate_scene(app, segment, threshold, *, has_frames=None):
-    from stash_ai.thresholds import _score
+    from stash_ai.evidence.thresholds import _score
     meta = segment['meta']
     needed = threshold * (app.TEMPORAL_POLICY.scene_support_ratio if app.TEMPORAL_POLICY.enabled else 1.0)
     floor = meta.get('scene_score_floor')
@@ -24,9 +24,9 @@ def validate_scene(app, segment, threshold, *, has_frames=None):
 def project(app, segment):
     """A transient view; original scores, statistics and provenance stay immutable."""
     from stash_ai.domain import Cue
-    from stash_ai.merge import marker_segment_signature
-    from stash_ai.performance import StoredSegment
-    from stash_ai.temporal import SceneAccumulator
+    from stash_ai.evidence.identity import marker_segment_signature
+    from stash_ai.storage.segments import StoredSegment
+    from stash_ai.evidence.temporal.statistics import SceneAccumulator
     if getattr(segment, '_scene_projected', False):
         return segment
     signature = marker_segment_signature(segment)
@@ -60,7 +60,7 @@ def project(app, segment):
 
 
 def views(app, records):
-    from stash_ai.merge import marker_segment_signature
+    from stash_ai.evidence.identity import marker_segment_signature
     if not hasattr(app, 'SCENE_THRESHOLDS'):
         app = SimpleNamespace(**vars(app), SCENE_THRESHOLDS={
             marker_segment_signature(s): s[SCENE_OVERRIDE]
@@ -69,8 +69,8 @@ def views(app, records):
 
 
 def as_frames(segment):
-    from stash_ai.merge import marker_segment_signature
-    from stash_ai.performance import StoredSegment
+    from stash_ai.evidence.identity import marker_segment_signature
+    from stash_ai.storage.segments import StoredSegment
     if segment['mode'] != 'scene':
         return segment
     value = StoredSegment(mode='frames', items=segment['frames'], meta={**segment['meta'],
@@ -88,29 +88,3 @@ def frame_records(scenes, markers):
         result[source] = [as_frames(s) for s in full] + [s for s in markers.get(source, [])
             if s['meta'].get('inference_signature') not in runs]
     return result
-
-
-def reuse(app, store, scene, config, identity, cues, hashes, kinds):
-    from stash_ai.storage.progress import completed
-    from stash_ai.rethreshold.scenes import plan, apply
-    from stash_ai.signatures import digest
-    from stash_ai.thresholds import indexed_signature
-    records = {kind: store.records(scene, kind, config.source.key, borrow=True).get(config.source.key, []) for kind in kinds}
-    if any(not segments for segments in records.values()):
-        return False
-    for kind, segments in records.items():
-        segment = segments[-1]
-        meta = segment['meta']
-        signature = digest({'model': {**identity, 'scene_threshold': meta.get('scene_threshold'),
-                                     'marker_threshold': meta.get('marker_threshold')},
-            'cues': [[c.start, c.end, c.image, list(c.rect)] for c in cues], 'media': hashes})
-        if not completed(store, scene, config.source.key, [kind], indexed_signature(segment, signature)):
-            return False
-    if 'scene' not in records:
-        return False
-    try:
-        outputs = plan(app, store, scene, config, markers='markers' in records)
-    except ValueError:
-        return False
-    apply(store, scene, config.source.key, outputs)
-    return True

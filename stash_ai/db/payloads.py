@@ -18,7 +18,7 @@ def _score(value):
 
 def _label(value):
     # Keep the same label contract as merge, including reserved namespaces.
-    from stash_ai.merge import raw_label
+    from stash_ai.evidence.labels import raw_label
     try:
         raw_label(value)
         return True

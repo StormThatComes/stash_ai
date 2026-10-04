@@ -1,5 +1,5 @@
 """Linear marker overlap and semantic differences for model ablation."""
-from stash_ai.occurrences import is_occurrence
+from stash_ai.evidence.occurrences import is_occurrence
 
 
 def _marker_key(marker):

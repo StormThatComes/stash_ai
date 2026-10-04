@@ -4,12 +4,14 @@ import json
 
 import pytest
 
-from stash_ai import cli as app, merge
+from stash_ai import cli as app
+import stash_ai.evidence.labels as merge_labels
+import stash_ai.storage.store as merge_store
 from stash_ai.publication import merged as merge_sync
 from stash_ai.stash_api.client import StashClient
 from stash_ai.cleanup.sql import SQLPreview
 from stash_ai.stash_api.sql import OPERATION
-from stash_ai.runtime import RunReport
+from stash_ai.runtime.report import RunReport
 from stash_ai.models import WD
 from tests.helpers.cleanup import FastStash, install, options
 from tests.helpers.cleanup_sql import SQLStash
@@ -88,7 +90,7 @@ def test_noop_candidates_use_three_batches_for_205_scenes(tmp_path, monkeypatch,
                     for i in range(1, 206)}
     command = options(tmp_path, by_model={'wd': ['common']})
     command[command.index('--cleanup-only')] = mode
-    with merge.StateStore(tmp_path/'state.sqlite3', merge.scope_for(app.STASH_URL)) as store:
+    with merge_store.StateStore(tmp_path/'state.sqlite3', merge_store.scope_for(app.STASH_URL)) as store:
         for i in stash.scenes:
             store.publish(i, {'scene': {'contributions': [hit('oppai')], 'owned_ids': [tag['id']]}})
     before = deepcopy((stash.scenes, stash.tags)), (tmp_path/'state.sqlite3').read_bytes()
@@ -118,8 +120,8 @@ def test_snapshot_failure_falls_back_and_scene_strategy_stays_graphql(tmp_path, 
 def test_prefetched_scene_is_refreshed_before_cleanup_writes(tmp_path, monkeypatch, output):
     stash = SceneSQLStash()
     if output == 'merged':
-        with merge.StateStore(tmp_path/'state.sqlite3', merge.scope_for(app.STASH_URL)) as store:
-            merge_sync.sync_merged(app, stash, app.TagResolver(stash, source=merge.AI), store,
+        with merge_store.StateStore(tmp_path/'state.sqlite3', merge_store.scope_for(app.STASH_URL)) as store:
+            merge_sync.sync_merged(app, stash, app.TagResolver(stash, source=merge_labels.AI), store,
                               stash.find_scene('1'), [hit('wd')], [])
     else:
         stash.scene['tags'] = [stash.tag('wd:common')]
@@ -149,10 +151,10 @@ def test_preview_masks_batch_and_fresh_reads_without_mutating_snapshots():
     stash = SceneSQLStash(dry=True)
     banned = stash.tag('ai:blocked')
     stash.scene['tags'] = [banned, stash.tag('human')]
-    stash.marker(merge.AI, 'blocked', '1')
+    stash.marker(merge_labels.AI, 'blocked', '1')
     stash.marker(WD, 'core', '2')
     stash.marker(WD, 'core', '3', manual=True)
-    stash.marker(merge.AI, 'keep', '4')['tags'].append(banned)
+    stash.marker(merge_labels.AI, 'keep', '4')['tags'].append(banned)
     before = deepcopy(stash.scene)
     stash.configure_merge_reads(RunReport(write=lambda _: None), merge_only=True)
     view = SQLPreview(stash, app, {'ai:blocked'}, {'wd:core': WD})
@@ -183,8 +185,8 @@ def test_batched_marker_cleanup_matches_graphql_with_global_preview(tmp_path, mo
         path = tmp_path / str(deny)
         path.mkdir()
         stash = SceneSQLStash()
-        with merge.StateStore(path/'state.sqlite3', merge.scope_for(app.STASH_URL)) as store:
-            merge_sync.sync_merged(app, stash, app.TagResolver(stash, source=merge.AI), store,
+        with merge_store.StateStore(path/'state.sqlite3', merge_store.scope_for(app.STASH_URL)) as store:
+            merge_sync.sync_merged(app, stash, app.TagResolver(stash, source=merge_labels.AI), store,
                 stash.find_scene('1'), [hit('wd'), hit('oppai'), hit('wd', 'blocked')],
                 [span('wd', 10, 20), span('oppai', 20, 30), span('wd', 40, 50, tag='blocked')])
         before = deepcopy((stash.scenes, stash.tags)), (path/'state.sqlite3').read_bytes()

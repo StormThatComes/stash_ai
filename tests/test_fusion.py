@@ -10,8 +10,11 @@ import pytest
 from stash_ai.inference import sprites
 from stash_ai.cleanup import evidence as cleanup_evidence
 from stash_ai import cli as app
-from stash_ai import merge
-from stash_ai.temporal import TemporalPolicy
+from stash_ai.evidence import pipeline as merge
+import stash_ai.evidence.intervals as merge_intervals
+import stash_ai.evidence.source_markers as merge_source_markers
+import stash_ai.storage.store as merge_store
+from stash_ai.evidence.temporal.policy import TemporalPolicy
 from stash_ai.models import SOURCES
 from tests.helpers.evidence import segment
 
@@ -29,8 +32,8 @@ def policies(excluded=()):
 
 
 def fused(records, exclusions=None):
-    spans=merge.marker_contributions(app, records, exclusions or policies())
-    return spans, merge.union_intervals(spans)
+    spans=merge_source_markers.marker_contributions(app, records, exclusions or policies())
+    return spans, merge_intervals.union_intervals(spans)
 
 
 def test_alternating_strong_hits_form_one_marker_with_original_source_scores():
@@ -170,13 +173,13 @@ def test_independent_switches_and_legacy_snapshot_defaults(monkeypatch):
 def test_cleanup_rebuilds_a_shared_range_when_its_anchor_source_is_excluded(tmp_path):
     records=records_for({'wd':[.9,0,0],'dtq':[0,.91,0],'oppai':[0,0,.92]})
     excluded=policies()
-    with merge.StateStore(tmp_path/'state.sqlite3','fixture') as state:
+    with merge_store.StateStore(tmp_path/'state.sqlite3','fixture') as state:
         for source,segments in records.items():state.put('1',source,{'markers':segments[0]})
         _,spans=merge.evidence(app,state,'1',excluded,policies())
         assert spans[0]['source']=='wd'
         excluded['wd']=frozenset({'core'})
         cleaned=cleanup_evidence.cleanup_support(app,state,'1',spans,{'wd'},excluded)
-        marker=merge.union_intervals(cleaned)[0]
+        marker=merge_intervals.union_intervals(cleaned)[0]
         assert (marker['start'],marker['end'],marker['sources'])==(1,3,['dtq','oppai'])
         excluded['dtq']=frozenset({'core'})
         assert cleanup_evidence.cleanup_support(app,state,'1',cleaned,{'dtq'},excluded)==[]
@@ -184,7 +187,7 @@ def test_cleanup_rebuilds_a_shared_range_when_its_anchor_source_is_excluded(tmp_
 
 def test_cleanup_does_not_adopt_new_unpublished_votes(tmp_path):
     records=records_for({'wd':[.9,0,0],'dtq':[0,.9,0]});excluded=policies()
-    with merge.StateStore(tmp_path/'state.sqlite3','fixture') as state:
+    with merge_store.StateStore(tmp_path/'state.sqlite3','fixture') as state:
         for source,segments in records.items():state.put('1',source,{'markers':segments[0]})
         _,spans=merge.evidence(app,state,'1',excluded,policies())
         state.put('1','oppai',{'markers':segment('oppai',[[],[],[('core',.9)]])})
@@ -196,7 +199,7 @@ def test_cleanup_clips_source_scores_and_extra_proofs_to_published_bounds(tmp_pa
     records=records_for({'wd':[.9,0,0,0,0], 'dtq':[0,.99,0,.91,0], 'oppai':[0,0,.92,0,.99]})
     records['joytag']=[segment('joytag',[[],[],[('detail',.81)],[('detail',.82)],[('detail',.99)]])]
     excluded=policies({'detail'})
-    with merge.StateStore(tmp_path/'state.sqlite3','fixture') as state:
+    with merge_store.StateStore(tmp_path/'state.sqlite3','fixture') as state:
         for source,segments in records.items():state.put('1',source,{'markers':segments[0]})
         _,spans=merge.evidence(app,state,'1',excluded,policies())
         # An already-published window bounds cleanup, even if rebuilding would
@@ -209,14 +212,14 @@ def test_cleanup_clips_source_scores_and_extra_proofs_to_published_bounds(tmp_pa
         assert (proof['dtq']['score'],proof['oppai']['score'])==(.91,.92)
         assert proof['dtq']['intervals']==[[3,4]] and proof['oppai']['intervals']==[[2,3]]
         assert proof['dtq']['hits']==proof['oppai']['hits']==1 and cleaned[0]['shared_hits']==2
-        extra=merge.union_intervals(cleaned)[0]['extra_evidence']['detail']['source_evidence']['joytag']
+        extra=merge_intervals.union_intervals(cleaned)[0]['extra_evidence']['detail']['source_evidence']['joytag']
         assert extra['score']==.82 and extra['support_seconds']==2 and extra['hits_at_least']==2
 
 
 def test_cleanup_refuses_changed_required_frame_records(tmp_path):
     records=records_for({'wd':[.9,0,0], 'dtq':[0,.9,0], 'oppai':[0,0,.9]})
     excluded=policies()
-    with merge.StateStore(tmp_path/'state.sqlite3','fixture') as state:
+    with merge_store.StateStore(tmp_path/'state.sqlite3','fixture') as state:
         for source,segments in records.items():state.put('1',source,{'markers':segments[0]})
         _,spans=merge.evidence(app,state,'1',excluded,policies())
         changed=deepcopy(records['dtq'][0]);changed['items'][1]['tags']=[('core',.99)]
@@ -248,13 +251,13 @@ def test_cleanup_command_rebuilds_shared_marker_and_then_removes_last_support(pi
 
 def test_cleanup_requires_published_evidence_and_preserves_extras_when_only_core_is_excluded(tmp_path):
     excluded=policies({'detail'})
-    with merge.StateStore(tmp_path/'state.sqlite3','fixture') as state:
+    with merge_store.StateStore(tmp_path/'state.sqlite3','fixture') as state:
         for source,segments in extra_records().items():state.put('1',source,{'markers':segments[0]})
         _,spans=merge.evidence(app,state,'1',excluded,policies())
         cleaned=cleanup_evidence.cleanup_support(app,state,'1',spans,{'dtq'},excluded)
-        assert merge.union_intervals(cleaned)[0]['extra_tags']==['detail']
+        assert merge_intervals.union_intervals(cleaned)[0]['extra_tags']==['detail']
         cleaned=cleanup_evidence.cleanup_support(app,state,'1',spans,{'wd','dtq'},excluded,policies({'detail'}))
-        assert merge.union_intervals(cleaned)[0]['extra_tags']==[]
+        assert merge_intervals.union_intervals(cleaned)[0]['extra_tags']==[]
 
 
 def test_merge_only_applies_shared_rules_without_inference_or_changing_source_results(pipeline,monkeypatch,tmp_path):
@@ -265,13 +268,13 @@ def test_merge_only_applies_shared_rules_without_inference_or_changing_source_re
     old=tmp_path/'old.yml';old.write_text('version: 1\nshared_marker_frames: false\nshared_marker_extras: false\noccurrence_markers: false\n')
     assert app.main([*args,'--temporal-policy',str(old)])==0
     assert not p.stash.scene['scene_markers']
-    with merge.StateStore(p.path,merge.scope_for(app.STASH_URL),True) as state:
+    with merge_store.StateStore(p.path,merge_store.scope_for(app.STASH_URL),True) as state:
         before=state.connection.execute('SELECT model,kind,data FROM results ORDER BY model,kind').fetchall()
     monkeypatch.setattr(app,'load_tagger',lambda *args:pytest.fail('shared merge loaded a model'))
     monkeypatch.setattr(sprites,'fetch_cues',lambda *args:pytest.fail('shared merge fetched images'))
     assert app.main([*args,'--merge-only'])==0
     assert [(m['seconds'],m['end_seconds']) for m in p.stash.scene['scene_markers']]==[(0,4)]
-    with merge.StateStore(p.path,merge.scope_for(app.STASH_URL),True) as state:
+    with merge_store.StateStore(p.path,merge_store.scope_for(app.STASH_URL),True) as state:
         assert before==state.connection.execute('SELECT model,kind,data FROM results ORDER BY model,kind').fetchall()
     p.stash.writes.clear()
     assert app.main([*args,'--merge-only'])==0 and not p.stash.writes

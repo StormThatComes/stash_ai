@@ -14,9 +14,12 @@ from stash_ai.inference import sprites
 from stash_ai.cleanup import evidence as cleanup_evidence
 from stash_ai.publication import merged as merge_sync
 from stash_ai import cli as app
-from stash_ai import merge
-from stash_ai.occurrences import OCCURRENCE_TAG, occurrence_contributions
-from stash_ai.temporal import SceneAccumulator, TemporalPolicy
+from stash_ai.evidence import pipeline as merge
+import stash_ai.evidence.labels as merge_labels
+import stash_ai.storage.store as merge_store
+from stash_ai.evidence.occurrences import OCCURRENCE_TAG, occurrence_contributions
+from stash_ai.evidence.temporal.statistics import SceneAccumulator
+from stash_ai.evidence.temporal.policy import TemporalPolicy
 from tests.helpers.stash import Stash
 from tests.helpers.evidence import paired_records
 from tests.helpers.evidence import policies
@@ -68,7 +71,7 @@ def test_one_representative_point_uses_only_matching_recorded_times(tmp_path, ca
     if cache == 'different_run': markers['wd'][0]['meta']['inference_signature'] = 'other'
     if cache == 'different_input': markers['wd'][0]['meta']['frame_input_signature'] = 'other'
     metrics = Counter()
-    with merge.StateStore(tmp_path/'state', 'fixture') as state:
+    with merge_store.StateStore(tmp_path/'state', 'fixture') as state:
         put(state, scenes, markers)
         hits, spans = merge.evidence(app, state, '1', policies(), policies(), metrics)
     assert len(hits) == 1
@@ -84,7 +87,7 @@ def test_one_representative_point_uses_only_matching_recorded_times(tmp_path, ca
 def test_scene_peak_below_marker_retention_floor_still_supplies_a_point(tmp_path):
     scenes, markers = paired_records({'wd': [.31, .32, .34, .31, 0]}, threshold=.35, marker_threshold=.65)
     assert all(not row['tags'] for row in markers['wd'][0]['items'])
-    with merge.StateStore(tmp_path/'state', 'fixture') as state:
+    with merge_store.StateStore(tmp_path/'state', 'fixture') as state:
         put(state, scenes, markers)
         hits, spans = merge.evidence(app, state, '1', policies(), policies())
     assert hits[0]['qualification'] == 'persistent_support'
@@ -97,7 +100,7 @@ def test_occurrences_respect_all_exclusions(tmp_path, block):
     cores, tags = policies(), policies()
     if block == 'core': cores['wd'] = frozenset({'core'})
     if block == 'scene': tags['wd'] = frozenset({'core'})
-    with merge.StateStore(tmp_path/'state', 'fixture') as state:
+    with merge_store.StateStore(tmp_path/'state', 'fixture') as state:
         put(state, scenes, markers)
         _, spans = merge.evidence(app, state, '1', cores, tags)
     assert spans == []
@@ -110,7 +113,7 @@ def test_occurrences_only_fill_missing_locations(tmp_path, monkeypatch, case):
     scenes, markers = paired_records({'wd': values}, threshold=.35, marker_threshold=.65)
     if case == 'disabled': monkeypatch.setattr(app, 'TEMPORAL_POLICY', replace(app.TEMPORAL_POLICY, occurrence_markers=False))
     if case == 'scene_only': monkeypatch.setattr(app, 'CREATE_MARKERS', False)
-    with merge.StateStore(tmp_path/'state', 'fixture') as state:
+    with merge_store.StateStore(tmp_path/'state', 'fixture') as state:
         put(state, scenes, markers)
         _, spans = merge.evidence(app, state, '1', policies(), policies())
     assert not any(s.get('derived') == 'occurrence' for s in spans)
@@ -122,7 +125,7 @@ def test_agreement_is_one_point_with_separate_scores_and_compatible_inputs(tmp_p
                                      threshold={'wd': .35, 'dtq': .20}, marker_threshold=.65)
     if different_input:
         for record in (scenes['dtq'][0], markers['dtq'][0]): record['meta']['frame_input_signature'] = 'other'
-    with merge.StateStore(tmp_path/'state', 'fixture') as state:
+    with merge_store.StateStore(tmp_path/'state', 'fixture') as state:
         put(state, scenes, markers)
         _, spans = merge.evidence(app, state, '1', policies(), policies())
     assert len(spans) == 1
@@ -138,7 +141,7 @@ def test_agreement_is_one_point_with_separate_scores_and_compatible_inputs(tmp_p
 def test_duplicate_records_do_not_count_as_two_model_votes(tmp_path):
     scenes, markers = paired_records({'wd': [0, .95, 0]}, threshold=.35, marker_threshold=.65)
     scenes['wd'] *= 2; markers['wd'] *= 2
-    with merge.StateStore(tmp_path/'state', 'fixture') as state:
+    with merge_store.StateStore(tmp_path/'state', 'fixture') as state:
         put(state, scenes, markers)
         _, spans = merge.evidence(app, state, '1', policies(), policies())
     assert len(spans) == len(spans[0]['occurrence_evidence']) == 1
@@ -149,16 +152,16 @@ def test_point_publication_is_idempotent_and_promotes_to_a_range(tmp_path, monke
     scenes, markers = paired_records({'wd': [0, .95, 0]}, threshold=.35, marker_threshold=.65)
     stash = Stash()
     monkeypatch.setattr(app, 'MARKER_USE_END_TIME', use_end)
-    with merge.StateStore(tmp_path/'state', 'fixture') as state:
+    with merge_store.StateStore(tmp_path/'state', 'fixture') as state:
         put(state, scenes, markers)
         hits, spans = merge.evidence(app, state, '1', policies(), policies())
-        resolver = app.TagResolver(stash, source=merge.AI)
+        resolver = app.TagResolver(stash, source=merge_labels.AI)
         merge_sync.sync_merged(app, stash, resolver, state, stash.find_scene('1'), hits, spans)
         point = deepcopy(stash.scene['scene_markers'][0]); stash.writes.clear()
         merge_sync.sync_merged(app, stash, resolver, state, stash.find_scene('1'), hits, spans)
         assert not stash.writes and len(stash.scene['scene_markers']) == 1
         assert point['seconds'] == 1 and point['end_seconds'] is None
-        assert {t['name'] for t in point['tags']} == {merge.AI.owner_tag, OCCURRENCE_TAG, 'm:core:occurance'}
+        assert {t['name'] for t in point['tags']} == {merge_labels.AI.owner_tag, OCCURRENCE_TAG, 'm:core:occurance'}
         assert point['title'].endswith(' · wykrycie')
         scenes, markers = paired_records({'wd': [.95, .95, .95]}, threshold=.35, marker_threshold=.65)
         for kind, value in (('scene', scenes), ('markers', markers)): state.put('1', 'wd', {kind: value['wd'][0]})
@@ -174,11 +177,11 @@ def test_point_publication_is_idempotent_and_promotes_to_a_range(tmp_path, monke
 
 def test_manual_location_suppresses_automatic_point_without_modifying_it(tmp_path):
     scenes, markers = paired_records({'wd': [0, .95, 0]}, threshold=.35, marker_threshold=.65)
-    stash = Stash(); manual = deepcopy(stash.marker(merge.AI, 'core', 'manual', manual=True))
-    with merge.StateStore(tmp_path/'state', 'fixture') as state:
+    stash = Stash(); manual = deepcopy(stash.marker(merge_labels.AI, 'core', 'manual', manual=True))
+    with merge_store.StateStore(tmp_path/'state', 'fixture') as state:
         put(state, scenes, markers)
         hits, spans = merge.evidence(app, state, '1', policies(), policies())
-        merge_sync.sync_merged(app, stash, app.TagResolver(stash, source=merge.AI), state, stash.find_scene('1'), hits, spans)
+        merge_sync.sync_merged(app, stash, app.TagResolver(stash, source=merge_labels.AI), state, stash.find_scene('1'), hits, spans)
         assert state.snapshot('1', 'markers')[0]['contributions'] == []
     assert stash.scene['scene_markers'] == [manual]
 
@@ -186,7 +189,7 @@ def test_manual_location_suppresses_automatic_point_without_modifying_it(tmp_pat
 @pytest.mark.parametrize('kind', ['core', 'scene'])
 def test_cleanup_revokes_only_selected_witness_and_never_moves_point(tmp_path, kind):
     scenes, markers = paired_records({'wd': [0, .95, 0], 'dtq': [0, .90, 0]}, threshold=.35, marker_threshold=.65)
-    with merge.StateStore(tmp_path/'state', 'fixture') as state:
+    with merge_store.StateStore(tmp_path/'state', 'fixture') as state:
         put(state, scenes, markers)
         _, spans = merge.evidence(app, state, '1', policies(), policies())
         original = deepcopy(spans)
@@ -203,7 +206,7 @@ def test_cleanup_revokes_only_selected_witness_and_never_moves_point(tmp_path, k
 def test_cleanup_rechecks_shared_scene_qualification_before_retaining_point(tmp_path, monkeypatch):
     monkeypatch.setattr(app, 'TEMPORAL_POLICY', replace(app.TEMPORAL_POLICY, shared_marker_frames=False))
     scenes, markers = paired_records({'wd': [.85, 0], 'dtq': [0, .86]})
-    with merge.StateStore(tmp_path/'state', 'fixture') as state:
+    with merge_store.StateStore(tmp_path/'state', 'fixture') as state:
         put(state, scenes, markers)
         hits, spans = merge.evidence(app, state, '1', policies(), policies())
         assert hits[0]['derived'] == 'shared_scene_frames' and spans[0]['derived'] == 'occurrence'
@@ -214,7 +217,7 @@ def test_cleanup_rechecks_shared_scene_qualification_before_retaining_point(tmp_
 def test_marker_cap_has_priority_over_additional_points(tmp_path, monkeypatch):
     scenes, markers = paired_records({'wd': [0, .95, 0]}, threshold=.35, marker_threshold=.65)
     monkeypatch.setattr(app, 'MAX_MARKERS_PER_SCENE', 1)
-    with merge.StateStore(tmp_path/'state', 'fixture') as state:
+    with merge_store.StateStore(tmp_path/'state', 'fixture') as state:
         put(state, scenes, markers)
         hits, _ = merge.evidence(app, state, '1', policies(), policies())
         metrics = Counter()
@@ -238,7 +241,7 @@ def test_pipeline_reuses_results_for_markers_only_dry_run_and_cleanup(pipeline, 
     assert app.main(p.args) == 0
     point = deepcopy(p.stash.scene['scene_markers'])
     assert len(point) == 1 and point[0]['seconds'] == 3 and point[0]['end_seconds'] is None
-    with merge.StateStore(p.path, merge.scope_for(app.STASH_URL), True) as state:
+    with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), True) as state:
         records = state.connection.execute('SELECT data FROM results ORDER BY kind').fetchall()
         assert state.records('1', 'scene')['wd'][0]['items'][0]['statistics']['peak_time'] == 3
     monkeypatch.setattr(app, 'load_tagger', lambda *a: pytest.fail('merge or cleanup loaded a model'))
@@ -254,7 +257,7 @@ def test_pipeline_reuses_results_for_markers_only_dry_run_and_cleanup(pipeline, 
     policy = tmp_path/'excluded.yml'; policy.write_text('version: 1\nexcluded_scene_tags: [common]\n')
     assert app.main([*p.args, '--cleanup-only', '--scene-tag-exclusions', str(policy)]) == 0
     assert not p.stash.scene['scene_markers'] and not p.stash.scene['tags']
-    with merge.StateStore(p.path, merge.scope_for(app.STASH_URL), True) as state:
+    with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), True) as state:
         assert state.connection.execute('SELECT data FROM results ORDER BY kind').fetchall() == records
 
 
@@ -262,7 +265,7 @@ def test_merge_only_recovers_old_cached_frames_without_rewriting_them(pipeline, 
     p = pipeline
     p.scores['wd'][:] = 0; p.scores['wd'][5, 0] = .95
     assert app.main(p.args) == 0
-    with merge.StateStore(p.path, merge.scope_for(app.STASH_URL)) as state:
+    with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL)) as state:
         record = state.records('1', 'scene')['wd'][0]
         for item in record['items']: item['statistics'].pop('peak_time', None)
         record['meta']['analysis_format'] = 2
@@ -289,20 +292,20 @@ def test_point_publication_recovers_after_api_failure_without_inference(pipeline
     p.scores['wd'][:] = 0; p.scores['wd'][3, 0] = .95
     p.stash.fail_create = True
     assert app.main(p.args) == 1
-    with merge.StateStore(p.path, merge.scope_for(app.STASH_URL), True) as state:
+    with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), True) as state:
         assert state.snapshot('1', 'markers')[1]['contributions'][0]['derived'] == 'occurrence'
     p.stash.fail_create = False
     monkeypatch.setattr(app, 'load_tagger', lambda *a: pytest.fail('API retry loaded a model'))
     assert app.main([*p.args, '--merge-only']) == 0
     assert len(p.stash.scene['scene_markers']) == 1
-    with merge.StateStore(p.path, merge.scope_for(app.STASH_URL), True) as state:
+    with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), True) as state:
         assert state.snapshot('1', 'markers')[1] is None
 
 
 def test_global_cleanup_masks_revoke_points_without_touching_raw_evidence(tmp_path):
     from stash_ai.cleanup.state import begin, finish
     scenes, markers = paired_records({'wd': [0, .95, 0]}, threshold=.35, marker_threshold=.65)
-    with merge.StateStore(tmp_path/'state', 'fixture') as state:
+    with merge_store.StateStore(tmp_path/'state', 'fixture') as state:
         put(state, scenes, markers)
         _, spans = merge.evidence(app, state, '1', policies(), policies())
         state.publish('1', {'markers': {'contributions': spans}})
@@ -315,10 +318,10 @@ def test_global_cleanup_masks_revoke_points_without_touching_raw_evidence(tmp_pa
 def test_cleanup_never_restores_a_manually_deleted_point(tmp_path):
     scenes, markers = paired_records({'wd': [0, .95, 0], 'dtq': [0, .90, 0]}, threshold=.35, marker_threshold=.65)
     stash = Stash()
-    with merge.StateStore(tmp_path/'state', 'fixture') as state:
+    with merge_store.StateStore(tmp_path/'state', 'fixture') as state:
         put(state, scenes, markers)
         hits, spans = merge.evidence(app, state, '1', policies(), policies())
-        resolver = app.TagResolver(stash, source=merge.AI)
+        resolver = app.TagResolver(stash, source=merge_labels.AI)
         merge_sync.sync_merged(app, stash, resolver, state, stash.find_scene('1'), hits, spans)
         stash.scene['scene_markers'] = []
         cores = policies(); cores['wd'] = frozenset({'core'})
