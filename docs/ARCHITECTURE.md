@@ -345,3 +345,10 @@ oraz jawnie ustala kolejność inicjalizacji funkcji i migracji.
 Re-threshold korzysta z `ThresholdRequest`, `RecordAccess` i `ThresholdPlan`.
 Executor sprawdza wszystkie cele przed zapisami, a apply używa tych samych
 planów metadanych bez ponownego odczytu lub dekodowania frame BLOB.
+
+Planowanie publikacji przekazuje nazwane `PreparedEvidence`, `ResolvedEvidence`,
+`MarkerCatalog` i `SeparateMarkerPlan`. Resolver kończy I/O katalogu przed
+dopasowaniem markerów; payloady i plan create/update/delete powstają z gotowych
+danych. Wspólny `evidence/frozen_replay.py` wybiera dokładne podpisy opublikowanej
+evidence i odtwarza zamrożoną politykę. Recovery osobno rekonstruuje obserwowane
+snapshoty scen i markerów, po czym koordynator zapisuje baseline.

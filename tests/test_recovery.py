@@ -182,7 +182,7 @@ def test_abandoned_partial_merge_cleanup_preserves_observed_range_or_occurrence(
         created.update(seconds=8, end_seconds=None)
         created['tags'].append(stash.tag(OCCURRENCE_TAG))
         recovery.abandon(store, lambda _: None)
-        observed, changed = recovery_recovery.reconcile(app, stash, store, stash.find_scene('1'), 'markers', store.snapshot('1', 'markers')[0])
+        observed, changed = recovery_recovery.reconcile(store, stash.find_scene('1'), 'markers', store.snapshot('1', 'markers')[0])
         assert changed
         assert {(s['start'], s['end'], s.get('derived')) for s in observed['contributions']} == {(0, 2, None), (8, None, 'occurrence')}
         assert not recovery.publications(store, '1', 'markers')
@@ -196,7 +196,7 @@ def test_unrecognized_survivor_keeps_recovery_evidence_and_requests_current_merg
         recovery.abandon(store, lambda _: None)
         stash.scene['scene_markers'][0]['seconds'] = 1.234
         with pytest.raises(RuntimeError, match='current YAML'):
-            recovery_recovery.reconcile(app, stash, store, stash.find_scene('1'), 'markers', store.snapshot('1', 'markers')[0])
+            recovery_recovery.reconcile(store, stash.find_scene('1'), 'markers', store.snapshot('1', 'markers')[0])
         assert recovery.publications(store, '1', 'markers')
 
 
@@ -296,7 +296,7 @@ def test_same_interval_selects_observed_extras_from_old_or_pending_plan(tmp_path
             marker = stash.scene['scene_markers'][0]
             marker['tags'] = [t for t in marker['tags'] if t['name'] != 'ai:old'] + [stash.tag('ai:new')]
         recovery.abandon(store, lambda _: None)
-        observed, _ = recovery_recovery.reconcile(app, stash, store, stash.find_scene('1'), 'markers', store.snapshot('1', 'markers')[0])
+        observed, _ = recovery_recovery.reconcile(store, stash.find_scene('1'), 'markers', store.snapshot('1', 'markers')[0])
         assert observed['contributions'][0]['extra_tags'] == ['new' if applied else 'old']
 
 
@@ -322,7 +322,7 @@ def test_marker_title_selects_observed_model_votes_before_source_cleanup(tmp_pat
         store.prepare('1', {'markers': {'contributions': [span('wd', 0, 2, 'core'), span('oppai', 0, 2, 'core')]}})
         if applied: stash.scene['scene_markers'][0]['title'] = '[AI] core [wd+op]'
         recovery.abandon(store, lambda _: None)
-        observed, _ = recovery_recovery.reconcile(app, stash, store, stash.find_scene('1'), 'markers', store.snapshot('1', 'markers')[0])
+        observed, _ = recovery_recovery.reconcile(store, stash.find_scene('1'), 'markers', store.snapshot('1', 'markers')[0])
         cores = empty_policies(); cores['wd'] = frozenset({'core'})
         kept = cleanup_evidence.cleanup_support(app, store, '1', observed['contributions'], {'wd'}, cores, empty_policies())
         assert {s['source'] for s in kept} == ({'oppai'} if applied else set())
