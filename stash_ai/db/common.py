@@ -4,28 +4,11 @@ from __future__ import annotations
 
 import sqlite3
 
-from stash_ai.storage.database import LATEST_SCHEMA_VERSION
+from stash_ai.storage.schema import (
+    LATEST_SCHEMA_VERSION, KNOWN_MODELS, KNOWN_KINDS, STATE_TABLES, BASE_TABLES, BLOB_COLUMNS,
+)
 
 KNOWN_VERSIONS = frozenset(range(1, LATEST_SCHEMA_VERSION + 1))
-KNOWN_MODELS = frozenset(("joytag", "wd", "dtq", "oppai"))
-KNOWN_KINDS = frozenset(("scene", "markers"))
-STATE_TABLES = frozenset((
-    "results", "result_thresholds", "result_metadata", "snapshots", "legacy_imports", "result_index", "refresh_requests",
-    "checkpoints", "checkpoint_frames", "checkpoint_analysis", "cleanup_state",
-    "merge_checks", "recovery_publications", "recovery_cleanups",
-))
-BASE_TABLES = frozenset(("results", "snapshots", "legacy_imports"))
-
-BLOB_COLUMNS = {
-    "results": ("data",),
-    "snapshots": ("published", "pending"),
-    "legacy_imports": ("data",),
-    "cleanup_state": ("data",),
-    "checkpoints": ("top_scores",),
-    "checkpoint_frames": ("data",),
-    "checkpoint_analysis": ("data",),
-    "recovery_publications": ("data",),
-}
 
 
 def format_bytes(value):
@@ -63,3 +46,4 @@ def count_rows(db, tables, table, scope=None, extra=""):
     if where:
         sql += " WHERE " + " AND ".join(where)
     return db.execute(sql, params).fetchone()[0]
+

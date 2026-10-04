@@ -337,3 +337,11 @@ geometrię bez algorytmów temporal; `intervals.py` dokłada kwalifikację extra
 Nazwy zarezerwowane i klasyfikacja occurrence żyją w `marker_identity.py`.
 `inference/input_identity.py` współdzieli manifest cue i historyczny format
 podpisów między preflightem, cache, reuse i inferencją.
+
+Storage rozdziela `ResultStore`, `MetadataStore` i `LegacyStore`; `StateStore`
+pozostaje właścicielem połączenia, cache i granic transakcji. Katalog
+`storage/schema.py` zasila diagnostykę, widoki preview i triggery invalidacji,
+oraz jawnie ustala kolejność inicjalizacji funkcji i migracji.
+Re-threshold korzysta z `ThresholdRequest`, `RecordAccess` i `ThresholdPlan`.
+Executor sprawdza wszystkie cele przed zapisami, a apply używa tych samych
+planów metadanych bez ponownego odczytu lub dekodowania frame BLOB.

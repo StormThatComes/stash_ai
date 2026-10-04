@@ -1,4 +1,5 @@
 """Frame-free Apply preserves completion indexes, history and preview isolation."""
+from stash_ai.rethreshold.plans import RecordAccess, PendingPolicy, ThresholdRequest
 from copy import deepcopy
 from dataclasses import replace
 import sqlite3
@@ -56,7 +57,7 @@ def test_metadata_apply_matches_full_payload_index_and_preserves_history(tmp_pat
         if mode == 'markers':
             assert marker_updates.apply(app, store, '1', target(mode))
         else:
-            planned = scene_updates.plan(app, store, '1', target(mode), markers=mode == 'combined')
+            planned = scene_updates.plan(app, store, '1', target(mode), request=ThresholdRequest(kinds=('scene', 'markers') if mode == 'combined' else ('scene',)))
             scene_updates.apply(store, '1', 'wd', planned)
         expected_index = index_rows(store)
         expected_records = {kind: store.records('1', kind) for kind in ('scene', 'markers')}

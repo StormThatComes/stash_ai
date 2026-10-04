@@ -3,23 +3,18 @@ from stash_ai.evidence.identity import OVERRIDE
 from stash_ai.evidence.thresholds import _score, marker_threshold, validate_marker_blocklist
 
 
-def _model_records(store, scene, kind, model, *, direct=False, metadata_only=False):
-    if metadata_only:
-        return store.result_metadata(scene, kind, model)
-    if direct:
-        return store.model_records(scene, kind, model, borrow=True)
-    return store.records(scene, kind, model, borrow=True).get(model, [])
+from .plans import RecordAccess, PendingPolicy, ThresholdPlan, apply_plan
 
 
-def validate(app, store, scene, config, *, check_scene=True, direct=False, metadata_only=False):
+def validate(app, store, scene, config, *, check_scene=True, access=RecordAccess.BATCH):
     """Reject incomplete evidence; a missing detection is never treated as zero."""
     from stash_ai.evidence.temporal.policy import marker_floor
     model = config.source.key
-    segments = _model_records(store, scene, 'markers', model, direct=direct, metadata_only=metadata_only)
+    segments = access.read(store, scene, 'markers', model)
     if not segments:
         raise ValueError(f'{scene}/{model}: no cached marker frames; run inference for this scene/model.')
     from stash_ai.evidence.cache_views import scene_threshold
-    scene_segments = (_model_records(store, scene, 'scene', model, direct=direct, metadata_only=metadata_only)
+    scene_segments = (access.read(store, scene, 'scene', model)
                       if check_scene else [])
     for segment in scene_segments:
         if segment['meta'].get('origin') == 'inference' and scene_threshold(segment) != config.scene_threshold:
@@ -39,14 +34,13 @@ def validate(app, store, scene, config, *, check_scene=True, direct=False, metad
     return segments
 
 
-def apply(app, store, scene, config, segments=None, *, direct=False, pending_checked=False,
-          metadata_only=False):
-    """Store policy separately; retain every original frame, score and signature."""
-    segments = validate(app, store, scene, config, direct=direct,
-                        metadata_only=metadata_only) if segments is None else segments
+
+def plan(app, store, scene, config, segments=None, *, access=RecordAccess.BATCH,
+         pending=PendingPolicy.VERIFY):
+    segments = validate(app, store, scene, config, access=access) if segments is None else segments
     if all(marker_threshold(s) == config.marker_threshold for s in segments):
-        return False
-    if not pending_checked and store.has_pending_publication(scene):
+        return ThresholdPlan({}, access)
+    if pending is PendingPolicy.VERIFY and store.has_pending_publication(scene):
         raise RuntimeError(f'{scene}: finish the pending merge or use --abandon-pending before changing thresholds.')
     updated = []
     for segment in segments:
@@ -55,7 +49,11 @@ def apply(app, store, scene, config, segments=None, *, direct=False, pending_che
         if config.marker_threshold != segment['meta']['marker_threshold']:
             value[OVERRIDE] = config.marker_threshold
         updated.append(value)
-    with store.connection:
-        store.set_result_threshold(scene, config.source.key, 'markers', config.marker_threshold, updated,
-                                   metadata_only=metadata_only)
-    return True
+    return ThresholdPlan({'markers': updated}, access)
+
+
+def apply(app, store, scene, config, segments=None):
+    """Validate and apply a marker threshold during inference evidence reuse."""
+    prepared = plan(app, store, scene, config, segments)
+    apply_plan(store, scene, config.source.key, prepared)
+    return bool(prepared)

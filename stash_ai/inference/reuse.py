@@ -1,5 +1,6 @@
 """Prove saved inference identity before applying threshold-only edits."""
 from .input_identity import cue_manifest, inference_signature
+from stash_ai.rethreshold.plans import ThresholdRequest
 
 
 def reuse(app, store, scene, config, identity, cues, hashes, kinds):
@@ -43,7 +44,7 @@ def reuse_scenes(app, store, scene, config, identity, cues, hashes, kinds):
     if 'scene' not in records:
         return False
     try:
-        outputs = plan(app, store, scene, config, markers='markers' in records)
+        outputs = plan(app, store, scene, config, request=ThresholdRequest(kinds=tuple(records)))
     except ValueError:
         return False
     apply(store, scene, config.source.key, outputs)
