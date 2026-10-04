@@ -19,7 +19,7 @@ def serve(monkeypatch, data):
 
     def post(self, url, **kwargs):
         calls.append((url, kwargs))
-        return SimpleNamespace(status_code=200, raise_for_status=lambda: None,
+        return SimpleNamespace(status_code=200, content=b'', raise_for_status=lambda: None,
                                json=lambda: {'data': data})
 
     def close(self):

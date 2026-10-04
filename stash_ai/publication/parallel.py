@@ -23,6 +23,8 @@ _RUNTIME_SETTINGS = (
     "MARKER_MERGE_GAP_SECONDS",
     "MARKER_MAX_TAGS_PER_FRAME",
     "MAX_MARKERS_PER_SCENE",
+    "MARKER_THRESHOLDS",
+    "SCENE_THRESHOLDS",
 )
 
 
@@ -30,9 +32,6 @@ def runtime_settings(app):
     """Capture mutable merge settings needed by spawned worker interpreters."""
     values = {name: getattr(app, name) for name in _RUNTIME_SETTINGS}
     values["TEMPORAL_POLICY"] = app.TEMPORAL_POLICY
-    for name in ("MARKER_THRESHOLDS", "SCENE_THRESHOLDS"):
-        if hasattr(app, name):
-            values[name] = getattr(app, name)
     return values
 
 
@@ -107,4 +106,3 @@ def iter_parallel_evidence(app, state_db, scope, scene_ids, core_policies,
             chunksize=1,
             buffersize=max(workers, 2),
         )
-

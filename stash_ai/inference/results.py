@@ -13,7 +13,7 @@ def now():
     return datetime.now(timezone.utc).isoformat()
 
 
-def capture_outputs(app, config, vocabulary, cues, predictions, frames, analysis=None) -> dict[str, RetainedRecord]:
+def capture_outputs(app, config, vocabulary, cues, predictions, frames, analysis) -> dict[str, RetainedRecord]:
     from stash_ai.evidence.retention import marker_cache_floor
     cue_data = cue_manifest(cues)
     meta = {"origin": "inference", "captured_at": now(), "repo": config.source.repo,
@@ -27,14 +27,13 @@ def capture_outputs(app, config, vocabulary, cues, predictions, frames, analysis
     meta['marker_score_floor'] = marker_cache_floor(config, app.TEMPORAL_POLICY)
     outputs = {}
     if app.APPLY_SCENE_TAGS:
-        outputs["scene"] = {"mode": "scene", "meta": meta,
+        outputs["scene"] = {"mode": "scene", "meta": {
+                                **meta, 'scene_frames_format': 1,
+                                'scene_score_floor': analysis['scene_score_floor']},
+                            "frames": analysis['scene_frames'],
                             "items": [dict(tag=tag, score=score,
-                                           **({"statistics": analysis["scene_statistics"][tag]} if analysis and
-                                              tag in analysis.get("scene_statistics", {}) else {})) for tag, score in predictions]}
-        if analysis is not None and 'scene_frames' in analysis:
-            outputs['scene']['frames'] = analysis['scene_frames']
-            outputs['scene']['meta'] = {**meta, 'scene_frames_format': 1,
-                'scene_score_floor': analysis['scene_score_floor']}
+                                           **({"statistics": analysis["scene_statistics"][tag]} if
+                                              tag in analysis['scene_statistics'] else {})) for tag, score in predictions]}
     if app.CREATE_MARKERS:
         # An empty list proves no labels were discarded before caching.
         outputs["markers"] = {"mode": "frames", "meta": {

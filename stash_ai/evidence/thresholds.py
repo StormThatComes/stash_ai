@@ -10,13 +10,12 @@ def indexed_signature(segment, inference=None):
     from stash_ai.signatures import digest
     signature = segment['meta'].get('inference_signature') if inference is None else inference
     from stash_ai.evidence.identity import SCENE_OVERRIDE
-    if SCENE_OVERRIDE in segment and OVERRIDE in segment:
-        return digest([signature, {
-            'scene_threshold': segment[SCENE_OVERRIDE],
-            'marker_threshold': segment[OVERRIDE],
-        }])
     if SCENE_OVERRIDE in segment:
+        if segment['mode'] != 'scene' or OVERRIDE in segment:
+            raise ValueError('Threshold override does not match result kind.')
         return digest([signature, {'scene_threshold': segment[SCENE_OVERRIDE]}])
+    if OVERRIDE in segment and segment['mode'] not in ('frames', 'spans'):
+        raise ValueError('Threshold override does not match result kind.')
     return digest([signature, segment[OVERRIDE]]) if OVERRIDE in segment else signature
 
 

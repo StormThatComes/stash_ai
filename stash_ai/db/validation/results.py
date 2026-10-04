@@ -9,6 +9,19 @@ from ..payloads import valid_result_segments
 from .common import decoded_payload, tick
 
 
+def historical_indexed_signature(segment):
+    """Inspect old inline policies without admitting them into runtime results."""
+    from stash_ai.evidence.identity import OVERRIDE, SCENE_OVERRIDE
+    from stash_ai.signatures import digest
+    signature = segment['meta'].get('inference_signature')
+    if SCENE_OVERRIDE in segment:
+        values = {'scene_threshold': segment[SCENE_OVERRIDE]}
+        if OVERRIDE in segment:
+            values['marker_threshold'] = segment[OVERRIDE]
+        return digest([signature, values])
+    return digest([signature, segment[OVERRIDE]]) if OVERRIDE in segment else signature
+
+
 def check_results_and_index(db, tables, errors, progress=None):
     if "results" not in tables:
         return 0
@@ -72,7 +85,8 @@ def check_results_and_index(db, tables, errors, progress=None):
                 if indexed_signature is None:
                     from stash_ai.evidence.thresholds import indexed_signature as signature_for
                     indexed_signature = signature_for
-                expected_signature = indexed_signature(current)
+                expected_signature = (indexed_signature(current) if canonical_results
+                                      else historical_indexed_signature(current))
             else:
                 expected_signature = None
         except (KeyError, TypeError, ValueError, UnicodeDecodeError, json.JSONDecodeError, zlib.error):

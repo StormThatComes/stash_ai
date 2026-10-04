@@ -26,7 +26,7 @@ def test_clients_keep_connection_and_output_settings_isolated(monkeypatch):
 
     def post(url, **kwargs):
         calls.append((url, kwargs))
-        return SimpleNamespace(status_code=200, raise_for_status=lambda: None,
+        return SimpleNamespace(status_code=200, content=b'', raise_for_status=lambda: None,
                                json=lambda: {'data': {'findScenes': {'scenes': [{'id': '1'}]}}})
 
     try:

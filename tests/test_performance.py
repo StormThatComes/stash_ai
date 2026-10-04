@@ -122,7 +122,7 @@ def test_merge_check_invalidates_real_changes(pipeline, monkeypatch, tmp_path, c
 
 def test_derived_invalidation_rolls_back_with_the_transaction(tmp_path):
     with merge_store.StateStore(tmp_path/'state.db', 's') as state:
-        state.put('1', 'wd', {'scene': dict(meta={}, items=[])})
+        state.put('1', 'wd', {'scene': dict(mode='scene', meta={}, items=[])})
         with state.connection:
             performance_merge_checks.record_check(state, '1', 'p', 'f')
         with pytest.raises(RuntimeError):
@@ -183,7 +183,7 @@ def test_commit_promotes_exact_pending_bytes_and_is_atomic(tmp_path, monkeypatch
 def test_preview_reads_and_shadows_without_copying_large_unrelated_blobs(tmp_path):
     path = tmp_path/'state.db'
     with merge_store.StateStore(path, 's') as state:
-        state.put('1', 'wd', {'scene': dict(meta={}, items=[['old', .9]])})
+        state.put('1', 'wd', {'scene': dict(mode='scene', meta={}, items=[dict(tag='old', score=.9)])})
         state.publish('1', {'scene': {'old': True}})
         with state.connection:
             state.connection.execute("INSERT INTO results VALUES ('s','unrelated','wd','scene',zeroblob(8000000))")
@@ -191,9 +191,9 @@ def test_preview_reads_and_shadows_without_copying_large_unrelated_blobs(tmp_pat
     with merge_store.StateStore(path, 's', True, cache_bytes=1000000) as preview:
         assert preview.preview_source
         assert preview.connection.execute('SELECT COUNT(*) FROM main.results').fetchone() == (0,)
-        assert preview.records('1', 'scene')['wd'][0]['items'] == [['old', .9]]
-        preview.put('1', 'wd', {'scene': dict(meta={}, items=[['new', .8]])})
-        assert preview.records('1', 'scene')['wd'][0]['items'] == [['new', .8]]
+        assert preview.records('1', 'scene')['wd'][0]['items'] == [dict(tag='old', score=.9)]
+        preview.put('1', 'wd', {'scene': dict(mode='scene', meta={}, items=[dict(tag='new', score=.8)])})
+        assert preview.records('1', 'scene')['wd'][0]['items'] == [dict(tag='new', score=.8)]
         preview.prepare('1', {'scene': {'new': True}})
         assert preview.snapshot('1', 'scene') == ({'old': True}, {'new': True})
         preview.commit_prepared('1', ['scene'])
@@ -217,7 +217,8 @@ def test_preview_resumes_checkpoint_and_does_not_resurrect_deleted_source(pipeli
         checkpoint.record(2, np.zeros((2, 2), np.float32), [])
         checkpoint.flush()
         assert checkpoints.Checkpoint(preview, '1', 'wd', 'new', 10, 2).restore()[0] == 2
-        checkpoints.finish(preview, '1', 'wd', {k: dict(meta={'origin':'inference', 'inference_signature':'new'}, items=[]) for k in KINDS}, {})
+        checkpoints.finish(preview, '1', 'wd', {k: dict(mode='scene' if k == 'scene' else 'frames',
+            meta={'origin':'inference', 'inference_signature':'new'}, items=[]) for k in KINDS}, {})
         assert progress.completed(preview, '1', 'wd', KINDS, 'new')
         assert not preview.connection.execute('SELECT 1 FROM ' + preview.table('checkpoints')).fetchall()
     assert p.path.read_bytes() == before
@@ -325,11 +326,10 @@ def test_shared_cache_stays_bounded_with_concurrent_media_and_result_access():
 
 def test_detached_records_cannot_reuse_a_stale_segment_digest(tmp_path):
     with merge_store.StateStore(tmp_path/'state.db', 's', cache_bytes=1000000) as state:
-        state.put('1', 'wd', {'markers': dict(meta={}, items=[])})
+        state.put('1', 'wd', {'markers': dict(mode='frames', meta={}, items=[])})
         borrowed = state.records('1', 'markers', borrow=True)['wd'][0]
         original = performance_segments.segment_digest(borrowed)
         detached = state.records('1', 'markers')['wd'][0]
         detached['items'].append({'new': True})
         assert performance_segments.segment_digest(detached) != original
         assert performance_segments.segment_digest(borrowed) == original and borrowed['items'] == []
-

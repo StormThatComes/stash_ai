@@ -87,6 +87,22 @@ def test_rethreshold_uses_sql_overrides_and_has_no_gpu_action(tmp_path):
     assert path.read_bytes() == before
 
 
+def test_missing_marker_floor_never_inherits_old_threshold_for_rethreshold_plan(tmp_path):
+    path = tmp_path / 'state.sqlite3'
+    saved = pair()
+    saved['markers']['meta'].pop('marker_score_floor')
+    seed(path, outputs=saved)
+    target = replace(config(), marker_threshold=.95)
+    data = report(path, settings=[target])
+    assert issue(data)['outputs']['markers']['status'] == 'insufficient'
+    assert '--restart' in actions(data)[0]['argv']
+    assert not any(row['action'] == 'rethreshold' for row in data['plan'])
+    with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL), True) as store:
+        from stash_ai.rethreshold import markers
+        with pytest.raises(ValueError, match='cache floor None'):
+            markers.plan(app, store, '1', target)
+
+
 @pytest.mark.parametrize('kind', ['scene', 'markers'])
 def test_required_retention_checks_explicit_yaml_floor_even_at_same_threshold(tmp_path, kind):
     path = tmp_path / 'state.sqlite3'
@@ -549,4 +565,3 @@ def test_generated_rethreshold_applies_yaml_without_loading_a_model(pipeline, mo
     monkeypatch.setattr(app.services, 'load_tagger', lambda *args: pytest.fail('model loaded for rethreshold'))
     assert app.main([*result['plan'][0]['argv'][2:], '--no-hierarchy']) == 0
     assert report(p.path, settings=settings)['totals']['fully_ready_scenes'] == 1
-

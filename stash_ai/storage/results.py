@@ -152,6 +152,12 @@ class ResultStore:
 
     def replace_records(self, scene, model, kind, segments):
         """Replace a segment list inside the caller's transaction, including previews."""
+        modes = ('scene',) if kind == 'scene' else ('frames', 'spans')
+        if (model not in SOURCES or kind not in KINDS or not isinstance(segments, list)
+                or any(not isinstance(segment, dict) or segment.get('mode') not in modes
+                       or not isinstance(segment.get('meta'), dict)
+                       or not isinstance(segment.get('items'), list) for segment in segments)):
+            raise ValueError('Incomplete result record: mode, metadata and items are required.')
         if any('refinement' in segment for segment in segments):
             raise ValueError('Retired refinement evidence is not supported; run --db-update for saved results.')
         store = self.store
@@ -162,6 +168,8 @@ class ResultStore:
         store.cache.discard(('status', str(scene), model))
         from stash_ai.storage.thresholds import separate
         raw, thresholds = separate(segments, kind)
+        from stash_ai.storage.metadata import summarize
+        metadata = summarize(raw)
         # History keeps its own effective thresholds. A new segment must not
         # inherit the previous result's policy.
         delete(store, 'result_thresholds', scene, model, kind)
@@ -174,15 +182,7 @@ class ResultStore:
         if thresholds is not None:
             store.connection.execute('INSERT INTO result_thresholds VALUES (?,?,?,?,?)',
                                      (store.scope, str(scene), model, kind, thresholds))
-        from stash_ai.storage.metadata import summarize
-        try:
-            metadata = summarize(raw)
-        except (KeyError, TypeError):
-            # Low-level replacement also accepts incomplete state records.
-            # Leave those uncached rather than adding a new write-time constraint.
-            metadata = None
-        if metadata is not None:
-            store.metadata.save(scene, model, kind, metadata)
+        store.metadata.save(scene, model, kind, metadata)
         index_result(store, scene, model, kind, segments)
 
     @measured('state_write')
