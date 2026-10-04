@@ -2,6 +2,7 @@
 from stash_ai import cli
 from stash_ai.commands import dispatch
 from stash_ai.runtime.context import RuntimeContext
+from stash_ai.runtime.settings import RuntimeSettings
 
 
 def test_default_cli_invocations_own_independent_runtime(monkeypatch):
@@ -29,3 +30,12 @@ def test_settings_and_services_are_owned_by_the_injected_runtime(monkeypatch):
     assert second.services.create_stash_client is not first.services.create_stash_client
     monkeypatch.setattr(dispatch, "run_database_command", lambda runtime, args: 7 if runtime is first else 9)
     assert cli.main([], runtime=first) == 7
+
+
+def test_api_key_has_no_historical_default_and_is_read_for_each_runtime(monkeypatch):
+    monkeypatch.delenv('STASH_API_KEY', raising=False)
+    assert RuntimeSettings().STASH_API_KEY == ''
+    monkeypatch.setenv('STASH_API_KEY', 'configured-test-key')
+    assert RuntimeSettings().STASH_API_KEY == 'configured-test-key'
+    monkeypatch.setenv('STASH_API_KEY', '')
+    assert RuntimeSettings().STASH_API_KEY == ''

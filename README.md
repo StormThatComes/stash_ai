@@ -37,9 +37,9 @@ python .\stash_ai.py --models all --scene-id 123 --dry-run --verbose
 python .\stash_ai.py --models all --scene-id 123
 ```
 
-Ustaw `STASH_API_KEY` jawnie w środowisku. W kodzie nadal istnieje historyczny
-fallback klucza; należy traktować go jako skompromitowany i nie używać.
-Szczegóły: [SECURITY.md](SECURITY.md).
+Ustaw `STASH_API_KEY` jawnie w środowisku, jeśli Stash wymaga klucza.
+Bez tej zmiennej klient nie wysyła nagłówka `ApiKey`. Historyczny klucz
+został usunięty z bieżącego kodu; informacje o rotacji są w [SECURITY.md](SECURITY.md).
 
 ## Najczęstsze tryby
 

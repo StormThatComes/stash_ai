@@ -10,7 +10,8 @@ from time import monotonic
 from tqdm import tqdm
 
 DEFAULT_PREFIXES = ("jt:", "wd:", "dtq:", "op:", "ai:", "m:")
-REQUIRED_COUNTS = {"scene_count", "scene_marker_count", "image_count", "gallery_count", "performer_count", "child_count"}
+REQUIRED_COUNTS = {"scene_count", "scene_marker_count", "image_count", "gallery_count",
+                   "performer_count", "studio_count", "group_count", "child_count"}
 
 
 def prefixes_checked(values):
@@ -51,21 +52,16 @@ class PruneClient:
         self.stash = stash
         data = stash.gql('''query StashAIPruneCapabilities {
             tag: __type(name: "Tag") { fields(includeDeprecated: true) { name } }
-            studio: __type(name: "Studio") { fields { name } }
-            group: __type(name: "Group") { fields { name } }
-            movie: __type(name: "Movie") { fields { name } }
             mutation: __type(name: "Mutation") { fields { name } }
         }''')
         fields = {f["name"] for f in (data.get("tag") or {}).get("fields", [])}
         required = REQUIRED_COUNTS | {"id", "name", "description", "parents", "children"}
-        for entity in ("studio", "group", "movie"):
-            entity_fields = {f["name"] for f in (data.get(entity) or {}).get("fields", [])}
-            if "tags" in entity_fields and not (entity == "movie" and "group_count" in fields):
-                required.add(entity + "_count")
         if not required <= fields or "tagDestroy" not in {f["name"] for f in (data.get("mutation") or {}).get("fields", [])}:
             raise RuntimeError("Stash does not expose all tag usage/child counters needed for safe pruning; nothing was deleted.")
-        # Include new usage counters exposed by future compatible servers too.
-        self.counts = sorted(name for name in fields if name.endswith("_count") and name != "parent_count")
+        # Since the supported Stash 0.31.1 floor, movie_count delegates to
+        # group_count. Keep all other exposed usage counters, including future ones.
+        self.counts = sorted(name for name in fields if name.endswith("_count")
+                            and name not in {"parent_count", "movie_count"})
         self.fields = "id name description parents { id } children { id } " + " ".join(self.counts)
 
     def catalog(self, ids=None):
@@ -207,4 +203,3 @@ def run_prune(app, args):
             stash.close()
     print("Pruning" + (" (planned)" if app.DRY_RUN else "") + ": " + ", ".join(f"{key}={value}" for key,value in sorted(stats.items())))
     return 0
-

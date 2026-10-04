@@ -29,7 +29,7 @@ class RuntimeSettings:
     TEMPORAL_POLICY: TemporalPolicy = field(default_factory=TemporalPolicy)
     TEMPORAL_POLICY_FILE: Path = INSTALL_ROOT / "temporal_policy.yml"
     STASH_URL: str = field(default_factory=lambda: os.getenv("STASH_URL", "http://localhost:9999"))
-    STASH_API_KEY: str = field(default_factory=lambda: os.getenv("STASH_API_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOiI0cmNoMG4iLCJzdWIiOiJBUElLZXkiLCJpYXQiOjE3ODg4ODI0MDl9.NjmFv7abYBiHnCbp1PwQrk8FYQ7I_A-8VA8PxhXhPog"), repr=False)
+    STASH_API_KEY: str = field(default_factory=lambda: os.getenv("STASH_API_KEY", ""), repr=False)
     APPLY_SCENE_TAGS: bool = True
     JOYTAG_DEFAULT_SCENE_THRESHOLD: float = 0.40
     MAX_TAGS: int = 0

@@ -220,7 +220,7 @@ def test_backfill_rejects_conflicting_modes(tmp_path, extra):
     assert exc.value.code == 2
 
 
-@pytest.mark.parametrize('counter', sorted(REQUIRED_COUNTS - {'child_count'} | {'studio_count', 'group_count', 'movie_count'}))
+@pytest.mark.parametrize('counter', sorted(REQUIRED_COUNTS - {'child_count'}))
 def test_group_pruning_keeps_global_usage_manual_names_and_root(counter):
     stash = PruneStash()
     root = stash.add('ai_markers')
@@ -308,4 +308,3 @@ def test_merge_cache_repairs_groups_with_no_category_hierarchy(pipeline, monkeyp
     p.stash.writes.clear()
     assert app.main([*p.args, '--merge-only']) == 0
     assert not p.stash.writes
-

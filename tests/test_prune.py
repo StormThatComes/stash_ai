@@ -21,7 +21,7 @@ def test_prunes_unused_leaves_and_recursively_empty_prefixed_categories():
     assert set(stash.tags)=={outside} and stats["tags_pruned"]==3
 
 
-@pytest.mark.parametrize("counter",sorted(REQUIRED_COUNTS-{"child_count"}|{"studio_count","group_count","movie_count"}))
+@pytest.mark.parametrize("counter",sorted(REQUIRED_COUNTS-{"child_count"}))
 def test_usage_in_any_supported_object_preserves_tag(counter):
     stash=PruneStash();identifier=stash.add("op:used",**{counter:1})
     assert prune_tags(stash,report=lambda _:None)["tags_pruned"]==0
@@ -81,6 +81,24 @@ def test_missing_usage_capabilities_abort_before_any_delete(missing):
     assert not stash.deleted
 
 
+def test_supported_schema_uses_group_count_once_and_keeps_future_usage(monkeypatch):
+    stash = PruneStash()
+    stash.counts.add('future_usage_count')
+    identifier = stash.add('op:used', future_usage_count=1)
+    calls, original = [], stash.gql
+    def gql(query, variables=None):
+        calls.append(query)
+        return original(query, variables)
+    monkeypatch.setattr(stash, 'gql', gql)
+    client = PruneClient(stash)
+    assert 'group_count' in client.counts and 'future_usage_count' in client.counts
+    assert 'movie_count' not in client.counts
+    assert not any('Movie' in query for query in calls)
+    assert prune_tags(stash, report=lambda _: None)['tags_pruned'] == 0
+    assert identifier in stash.tags
+    assert all('movie_count' not in query for query in calls)
+
+
 @pytest.mark.parametrize("value",[None,-1,False,"0"])
 def test_unknown_counter_is_not_interpreted_as_zero(value):
     stash=PruneStash();stash.add("op:empty");stash.add("op:broken",image_count=value)
@@ -110,4 +128,3 @@ def test_standalone_cli_needs_no_models_or_hierarchy(monkeypatch,tmp_path):
     monkeypatch.setattr(app.services,"load_vocabulary",lambda *args:pytest.fail("pruning loaded vocabulary"))
     assert app.main(["--prune-empty-tags-only","--state-db",str(tmp_path/"state.sqlite3")])==0
     assert len(stash.deleted)==1
-
