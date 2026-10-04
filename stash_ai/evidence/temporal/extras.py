@@ -1,6 +1,5 @@
 """Qualify extra labels over compatible observations and full interval unions."""
 from collections import defaultdict
-from dataclasses import replace
 from .policy import TemporalPolicy
 from stash_ai.evidence.intervals import append_interval
 
@@ -103,29 +102,3 @@ def merged_extras(component):
                         signatures=sorted({signature for record in records for signature in record["signatures"]}))
     component["extra_tags"] = sorted(accepted - {component["tag"]})
     component["extra_evidence"] = statistics
-
-
-def qualify_marker_extras(finished, extra_frames, policy, identity, extra_group, extra_cache):
-    """Attach interval-query proofs only to retained marker candidates."""
-    # Inspect every observation inside the finished interval, including a short
-    # permitted gap in primary detections. Compute this only for retained markers.
-    from stash_ai.fusion import ObservationIndex
-    from stash_ai.signatures import digest
-    events = {}
-    for start, end, extras in extra_frames:
-        event = events.setdefault(start, dict(start=start, end=end, extras={}))
-        event['end'] = max(event['end'], end)
-        for label, score in extras:
-            event['extras'].setdefault(label, {})[None] = max(score, event['extras'].get(label, {}).get(None, score))
-    index = ObservationIndex([events[t] for t in sorted(events)], {}, extra_group or digest(
-        {'input': identity, 'frames': extra_frames}), extra_cache)
-    qualified = []
-    try:
-        for marker in finished:
-            evidence = {label: value for label, value in index.support(marker.start, marker.end, policy).items() if label != marker.tag}
-            extras = [item for item in index.qualified(marker.start, marker.end, policy) if item[0] != marker.tag]
-            qualified.append(replace(marker, extra_tags=tuple(item[0] for item in extras), extra_evidence=tuple(extras),
-                                     extra_support=evidence))
-    finally:
-        index.close()
-    return qualified

@@ -6,7 +6,7 @@ from contextlib import AbstractContextManager
 import hashlib
 from urllib.parse import urlparse
 
-from stash_ai.runtime import measured, stage
+from stash_ai.runtime.timing import measured, stage
 from stash_ai.storage.codec import encode, decode
 from stash_ai.storage.database import APPLICATION_ID, StateDatabase
 
@@ -30,7 +30,7 @@ class StateStore(AbstractContextManager):
     """
     def __init__(self, path, scope, dry_run=False, cache_bytes=0, *, allow_cleanup=False, cleanup_preview=False,
                  memory_budget_bytes=0, allow_parent_publication_updates=False):
-        from stash_ai.runtime import RamCache
+        from stash_ai.runtime.cache import RamCache
         if allow_parent_publication_updates and not dry_run:
             raise ValueError("Parent publication updates are only valid for read-only preview stores.")
         self.cache = RamCache(cache_bytes, rss_budget=memory_budget_bytes)
@@ -60,9 +60,9 @@ class StateStore(AbstractContextManager):
                 self.connection.execute('INSERT INTO cleanup_state SELECT * FROM cleanup_source.cleanup_state WHERE scope=?', (self.scope,))
                 self.connection.commit()
                 initialize(self, version)
-            from stash_ai.performance import initialize as initialize_performance
-            initialize_performance(self)
-            from stash_ai.recovery import initialize as initialize_recovery
+            from stash_ai.storage.merge_checks import initialize as initialize_merge_checks
+            initialize_merge_checks(self)
+            from stash_ai.storage.recovery import initialize as initialize_recovery
             initialize_recovery(self)
             from stash_ai.storage.preview import initialize as initialize_preview
             initialize_preview(self)

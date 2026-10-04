@@ -7,8 +7,9 @@ import pytest
 from stash_ai import cli as app
 from stash_ai.cleanup import sql as fast
 from stash_ai.cleanup.sql_session import READ_OPERATION, SQL
-from stash_ai import marker_groups as groups
-from stash_ai import merge
+from stash_ai.publication import groups as groups
+import stash_ai.evidence.labels as merge_labels
+import stash_ai.storage.store as merge_store
 from tests.helpers.cleanup import install, options
 from tests.helpers.cleanup_sql import SQLStash
 from tests.helpers.evidence import span
@@ -45,7 +46,7 @@ def command(tmp_path, **kwargs):
 def test_17000_groups_fetch_counters_only_for_two_old_orphans(tmp_path, monkeypatch, capsys):
     stash = CountedStash()
     root = stash.tag(groups.ROOT)
-    primary, owner = stash.tag('ai:kept'), stash.tag(merge.AI.owner_tag)
+    primary, owner = stash.tag('ai:kept'), stash.tag(merge_labels.AI.owner_tag)
     group_ids = set()
     # Populate directly: fixture ID allocation scans all existing tags.
     for i in range(16998):
@@ -54,7 +55,7 @@ def test_17000_groups_fetch_counters_only_for_two_old_orphans(tmp_path, monkeypa
                    description=groups.group_description(label))
         stash.tags[tag['name']] = tag
         group_ids.add(identifier)
-        stash.scene['scene_markers'].append(dict(id=str(i + 1), title=merge.AI.title_prefix + 'kept',
+        stash.scene['scene_markers'].append(dict(id=str(i + 1), title=merge_labels.AI.title_prefix + 'kept',
             seconds=0, end_seconds=2, primary_tag=primary, tags=[owner, tag]))
     orphans = {managed(stash, 'old', occurrence)['id'] for occurrence in (False, True)}
     group_ids.update(orphans)
@@ -77,14 +78,14 @@ def test_17000_groups_fetch_counters_only_for_two_old_orphans(tmp_path, monkeypa
 def test_scoped_cleanup_preview_includes_groups_losing_members(tmp_path, monkeypatch, capsys, dry, shared):
     stash = CountedStash()
     tag = managed(stash, 'blocked')
-    marker = stash.marker(merge.AI, 'blocked', '1')
+    marker = stash.marker(merge_labels.AI, 'blocked', '1')
     marker['tags'].append(tag)
     if shared:
         second = deepcopy(stash.scene)
         second['id'] = '2'
         second['scene_markers'][0]['id'] = '2'
         stash.scenes['2'] = second
-    with merge.StateStore(tmp_path/'state.sqlite3', merge.scope_for(app.STASH_URL)) as state:
+    with merge_store.StateStore(tmp_path/'state.sqlite3', merge_store.scope_for(app.STASH_URL)) as state:
         state.publish('1', {'markers': {'contributions': [span('wd', 0, 2, 'blocked')]}})
     stash.dry_run = dry
     before = deepcopy((stash.tags, stash.scenes))
@@ -140,7 +141,7 @@ def test_new_usage_before_final_refresh_prevents_deletion(tmp_path, monkeypatch,
 def test_all_used_groups_skip_full_counter_reads(tmp_path, monkeypatch, capsys):
     stash = CountedStash()
     tag = managed(stash, 'used')
-    stash.marker(merge.AI, 'allowed', '1')['tags'].append(tag)
+    stash.marker(merge_labels.AI, 'allowed', '1')['tags'].append(tag)
     install(monkeypatch, stash)
     assert app.main(command(tmp_path)) == 0
     assert not stash.usage_reads and not stash.writes

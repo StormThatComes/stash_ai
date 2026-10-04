@@ -4,7 +4,8 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
-from stash_ai import merge
+import stash_ai.evidence.identity as merge_identity
+import stash_ai.evidence.source_markers as merge_source_markers
 from stash_ai.models import SOURCES
 
 
@@ -24,7 +25,7 @@ class EvidenceReplay:
         for source, signatures in required.items():
             if source not in self.available_by_source:
                 self.available_by_source[source] = {
-                    merge.marker_segment_signature(segment): segment
+                    merge_identity.marker_segment_signature(segment): segment
                     for segment in self.records.get(source, [])}
             available = self.available_by_source[source]
             if not set(signatures) <= set(available):
@@ -49,7 +50,7 @@ class EvidenceReplay:
                        (self.tag_policies[source] if source in self.selected else frozenset())
                        for source in SOURCES}
         # Replay old proofs with frozen exclusions; clipping cannot admit new votes.
-        candidates = merge.marker_contributions(
+        candidates = merge_source_markers.marker_contributions(
             context, matching, policies, tag_policies=frozen_tags,
             allow_unknown_blocklist=True, allow_unknown_retention=True,
             legacy_blocklist=legacy_blocklist)
@@ -75,7 +76,7 @@ def _needs_replay(span, selected, core_policies, tag_policies, extra_labels):
 
 
 def _clip_candidate(span, item, context, matching, policies, frozen_tags):
-    from stash_ai.fusion import refresh_clipped_evidence
+    from stash_ai.evidence.shared_markers import refresh_clipped_evidence
 
     if item['tag'] != span['tag']:
         return None
@@ -105,7 +106,7 @@ def _clip_candidate(span, item, context, matching, policies, frozen_tags):
 
 def cleanup_support(app, store, scene_id, spans, selected, core_policies, tag_policies=None):
     """Re-evaluate revoked votes, bounded by the already-published source ranges."""
-    from stash_ai.fusion import prune_blocked_extras
+    from stash_ai.evidence.shared_markers import prune_blocked_extras
     from stash_ai.exclusions import policies_or_empty
 
     tag_policies = policies_or_empty(tag_policies)
@@ -113,7 +114,7 @@ def cleanup_support(app, store, scene_id, spans, selected, core_policies, tag_po
     cleaned = []
     for span in spans:
         if span.get('derived') == 'occurrence':
-            from stash_ai.occurrences import cleanup_occurrence
+            from stash_ai.evidence.occurrences import cleanup_occurrence
             point = cleanup_occurrence(app, store, scene_id, span, selected, core_policies, tag_policies)
             if point is not None:
                 cleaned.append(point)

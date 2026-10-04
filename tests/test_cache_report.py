@@ -6,7 +6,8 @@ import json
 import pytest
 
 from stash_ai.rethreshold import scenes as scene_updates
-from stash_ai import cli as app, merge
+from stash_ai import cli as app
+import stash_ai.storage.store as merge_store
 from stash_ai.reports import cache as cache_report
 from stash_ai.models import ModelSettings, SOURCES
 from tests.test_model_report import inference_pair
@@ -28,13 +29,13 @@ def pair(label='common', **kwargs):
 
 
 def seed(path, scene='1', model='wd', outputs=None, history=False):
-    with merge.StateStore(path, merge.scope_for(app.STASH_URL)) as store:
+    with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL)) as store:
         store.put(scene, model, pair() if outputs is None else outputs,
                   {'scene': False, 'markers': False} if history else None)
 
 
 def report(path, scenes=None, settings=None):
-    with merge.StateStore(path, merge.scope_for(app.STASH_URL), True, allow_cleanup=True) as store:
+    with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL), True, allow_cleanup=True) as store:
         return cache_report.build_report(app, store, cache_report.scene_ids(store, scenes),
                                          [config()] if settings is None else settings)
 
@@ -77,7 +78,7 @@ def test_rethreshold_uses_sql_overrides_and_has_no_gpu_action(tmp_path):
     first = report(path, settings=settings)
     assert first['totals']['rethreshold_pairs'] == 1 and not actions(first)
     assert first['plan'][0]['action'] == 'rethreshold'
-    with merge.StateStore(path, merge.scope_for(app.STASH_URL)) as store:
+    with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL)) as store:
         updates = scene_updates.plan(app, store, '1', settings[0], markers=True, metadata_only=True)
         scene_updates.apply(store, '1', 'wd', updates, metadata_only=True)
     before = path.read_bytes()
@@ -140,7 +141,7 @@ def test_removed_frame_blocklist_labels_require_reinference(tmp_path):
 def test_index_without_results_is_inconsistent_and_not_ready(tmp_path):
     path = tmp_path / 'state.sqlite3'
     seed(path)
-    with merge.StateStore(path, merge.scope_for(app.STASH_URL)) as store:
+    with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL)) as store:
         with store.connection:
             store.connection.execute("DELETE FROM results WHERE kind='scene'")
     data = report(path)
@@ -151,7 +152,7 @@ def test_index_without_results_is_inconsistent_and_not_ready(tmp_path):
 def test_wrong_index_signature_is_detected_without_decoding_predictions(tmp_path):
     path = tmp_path / 'state.sqlite3'
     seed(path)
-    with merge.StateStore(path, merge.scope_for(app.STASH_URL)) as store:
+    with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL)) as store:
         with store.connection:
             store.connection.execute("UPDATE result_index SET signature='wrong' WHERE kind='scene'")
     assert issue(report(path))['outputs']['scene']['status'] == 'inconsistent'
@@ -160,7 +161,7 @@ def test_wrong_index_signature_is_detected_without_decoding_predictions(tmp_path
 def test_working_state_only_scene_and_checkpoint_progress_are_included(tmp_path):
     path = tmp_path / 'state.sqlite3'
     seed(path)
-    with merge.StateStore(path, merge.scope_for(app.STASH_URL)) as store:
+    with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL)) as store:
         with store.connection:
             store.connection.execute('INSERT INTO checkpoints VALUES (?,?,?,?,?,?,?,?)',
                                      (store.scope, '2', 'wd', 'partial', 3, 10, 2, b'not decoded'))
@@ -174,7 +175,7 @@ def test_working_state_only_scene_and_checkpoint_progress_are_included(tmp_path)
 def test_refresh_keeps_checkpoint_resume_instead_of_restart(tmp_path):
     path = tmp_path / 'state.sqlite3'
     seed(path)
-    with merge.StateStore(path, merge.scope_for(app.STASH_URL)) as store:
+    with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL)) as store:
         with store.connection:
             store.connection.execute('INSERT INTO refresh_requests VALUES (?,?,?,?)', (store.scope, '1', 'wd', 'scene'))
             store.connection.execute('INSERT INTO checkpoints VALUES (?,?,?,?,?,?,?,?)',
@@ -192,7 +193,7 @@ def test_blocked_pairs_are_counted_and_receive_no_executable_plan(tmp_path, monk
         outputs['markers']['meta']['marker_score_floor'] = .99
         monkeypatch.setattr(app, 'REPLACE_MARKERS', False)
     seed(path, outputs=outputs)
-    with merge.StateStore(path, merge.scope_for(app.STASH_URL)) as store:
+    with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL)) as store:
         if blocker == 'publication':
             store.prepare('1', {'scene': {'owned_ids': [], 'contributions': []}})
         elif blocker == 'outside_refresh':
@@ -223,13 +224,13 @@ def test_unselected_publication_dependencies_block_plan_without_expanding_target
     if problem == 'historical_floor':
         seed(path, model='dtq', history=True)
     elif problem == 'unreadable':
-        with merge.StateStore(path, merge.scope_for(app.STASH_URL)) as state:
+        with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL)) as state:
             with state.connection:
                 state.connection.execute("UPDATE results SET data=? WHERE model='dtq' AND kind='markers'",
                                          (b'broken',))
     before = path.read_bytes()
     if problem != 'unreadable':
-        monkeypatch.setattr(merge.StateStore, 'unpack', lambda *args: pytest.fail('prediction BLOB decoded'))
+        monkeypatch.setattr(merge_store.StateStore, 'unpack', lambda *args: pytest.fail('prediction BLOB decoded'))
     data = report(path, settings=[replace(config(), marker_threshold=.9)])
     assert [row['model'] for row in data['models']] == ['wd']
     assert data['totals']['scene_model_pairs'] == data['totals']['blocked_pairs'] == 1
@@ -254,7 +255,7 @@ def test_blocked_selected_pair_blocks_every_command_for_its_scene(
         monkeypatch.setattr(app, 'REPLACE_MARKERS', False)
     seed(path, outputs=broken)
     if blocker == 'unreadable':
-        with merge.StateStore(path, merge.scope_for(app.STASH_URL)) as state:
+        with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL)) as state:
             with state.connection:
                 state.connection.execute("UPDATE results SET data=? WHERE model='wd' AND kind='markers'",
                                          (b'broken',))
@@ -274,9 +275,9 @@ def test_blocked_scene_is_not_added_back_by_publication_recovery(tmp_path, monke
     broken['markers']['meta']['marker_score_floor'] = .8
     seed(path, outputs=broken)
     monkeypatch.setattr(app, 'REPLACE_MARKERS', False)
-    with merge.StateStore(path, merge.scope_for(app.STASH_URL)) as state:
+    with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL)) as state:
         state.prepare('1', {'scene': {'owned_ids': [], 'contributions': []}})
-        from stash_ai.recovery import abandon
+        from stash_ai.storage.recovery import abandon
         abandon(state, report=lambda _: None)
     data = report(path, settings=[config('wd'), config('dtq')])
     assert data['publication_recovery_scene_ids'] == ['1']
@@ -318,7 +319,7 @@ def test_unselected_dependency_checks_respect_scene_and_db_scope(tmp_path):
     peer = pair()
     peer['markers']['meta']['marker_score_floor'] = .8
     seed(path, scene='other', model='dtq', outputs=peer)
-    with merge.StateStore(path, merge.scope_for('http://other.example')) as state:
+    with merge_store.StateStore(path, merge_store.scope_for('http://other.example')) as state:
         state.put('1', 'dtq', peer)
     data = report(path, ['1'], [replace(config(), marker_threshold=.9)])
     assert data['totals']['blocked_pairs'] == 0
@@ -361,12 +362,12 @@ def test_including_unselected_dependency_produces_a_plan_that_completes(pipeline
     context = ['--state-db', str(p.path), '--model-config', str(yaml_path)]
     selected = app.load_model_settings(yaml_path, ['wd'], None, True)
     before = p.path.read_bytes()
-    with merge.StateStore(p.path, merge.scope_for(app.STASH_URL), True) as state:
+    with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), True) as state:
         blocked = cache_report.build_report(app, state, ['1'], selected, context)
     assert not blocked['plan'] and blocked['totals']['blocked_pairs'] == 1
     assert p.path.read_bytes() == before and not p.stash.writes
     settings = app.load_model_settings(yaml_path, ['wd', 'dtq'], None, True)
-    with merge.StateStore(p.path, merge.scope_for(app.STASH_URL), True) as state:
+    with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), True) as state:
         data = cache_report.build_report(app, state, ['1'], settings, context)
     assert data['totals']['blocked_pairs'] == 0
     assert [row['model'] for row in actions(data)] == ['dtq']
@@ -391,7 +392,7 @@ def test_pending_global_cleanup_blocks_backfill_without_changing_source(tmp_path
     from stash_ai.cleanup.state import begin
     path = tmp_path / 'state.sqlite3'
     seed(path)
-    with merge.StateStore(path, merge.scope_for(app.STASH_URL)) as store:
+    with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL)) as store:
         begin(store, 'interrupted', {}, {}, {})
     before = path.read_bytes()
     data = report(path, ['1', '404'])
@@ -403,9 +404,9 @@ def test_pending_global_cleanup_blocks_backfill_without_changing_source(tmp_path
 def test_archived_recovery_does_not_block_complete_cache_and_plans_reconciliation(tmp_path):
     path = tmp_path / 'state.sqlite3'
     seed(path)
-    with merge.StateStore(path, merge.scope_for(app.STASH_URL)) as store:
+    with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL)) as store:
         store.prepare('1', {'scene': {'owned_ids': [], 'contributions': []}})
-        from stash_ai.recovery import abandon
+        from stash_ai.storage.recovery import abandon
         abandon(store, report=lambda _: None)
     before = path.read_bytes()
     data = report(path)
@@ -418,7 +419,7 @@ def test_archived_recovery_does_not_block_complete_cache_and_plans_reconciliatio
 def test_unreadable_payload_is_reported_as_blocked_not_replacement(tmp_path):
     path = tmp_path / 'state.sqlite3'
     seed(path)
-    with merge.StateStore(path, merge.scope_for(app.STASH_URL)) as store:
+    with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL)) as store:
         with store.connection:
             store.connection.execute("UPDATE results SET data=? WHERE kind='scene'", (b'broken',))
     data = report(path)
@@ -429,7 +430,7 @@ def test_unreadable_payload_is_reported_as_blocked_not_replacement(tmp_path):
 def test_compact_metadata_path_does_not_read_prediction_blobs(tmp_path, monkeypatch):
     path = tmp_path / 'state.sqlite3'
     seed(path)
-    monkeypatch.setattr(merge.StateStore, 'unpack', lambda *args: pytest.fail('prediction BLOB decoded'))
+    monkeypatch.setattr(merge_store.StateStore, 'unpack', lambda *args: pytest.fail('prediction BLOB decoded'))
     assert report(path)['totals']['fully_ready_scenes'] == 1
 
 
@@ -437,7 +438,7 @@ def test_legacy_metadata_backfill_and_filter_do_not_change_source(tmp_path):
     path = tmp_path / 'state.sqlite3'
     seed(path)
     seed(path, scene='2')
-    with merge.StateStore(path, merge.scope_for(app.STASH_URL)) as store:
+    with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL)) as store:
         with store.connection:
             store.connection.execute('DELETE FROM result_metadata')
             store.connection.execute("UPDATE results SET data=? WHERE scene='2'", (b'broken',))
@@ -448,7 +449,7 @@ def test_legacy_metadata_backfill_and_filter_do_not_change_source(tmp_path):
 
 def test_scope_separation_and_empty_scope_are_explicit(tmp_path):
     path = tmp_path / 'state.sqlite3'
-    with merge.StateStore(path, merge.scope_for('http://other.example')) as store:
+    with merge_store.StateStore(path, merge_store.scope_for('http://other.example')) as store:
         store.put('foreign', 'wd', pair())
     data = report(path)
     assert data['totals']['scenes'] == data['totals']['scene_model_pairs'] == 0
@@ -516,7 +517,7 @@ def test_generated_backfill_resumes_actual_inference_checkpoint(pipeline, monkey
     with pytest.raises(KeyboardInterrupt):
         app.main(p.args)
     settings = app.load_model_settings(app.MODELS_CONFIG_FILE, ['wd'], None, True)
-    with merge.StateStore(p.path, merge.scope_for(app.STASH_URL), True) as store:
+    with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), True) as store:
         data = cache_report.build_report(app, store, ['1'], settings,
                                          ['--state-db', str(p.path), '--no-temporal'])
     assert actions(data)[0]['action'] == 'resume_or_infer'
@@ -540,7 +541,7 @@ def test_generated_rethreshold_applies_yaml_without_loading_a_model(pipeline, mo
     yaml_path = tmp_path / 'thresholds.yml'
     yaml_path.write_text(yaml.safe_dump(data))
     settings = app.load_model_settings(yaml_path, ['wd'], None, True)
-    with merge.StateStore(p.path, merge.scope_for(app.STASH_URL), True) as store:
+    with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), True) as store:
         result = cache_report.build_report(app, store, ['1'], settings,
             ['--state-db', str(p.path), '--model-config', str(yaml_path), '--no-temporal'])
     assert not actions(result) and result['plan'][0]['action'] == 'rethreshold'

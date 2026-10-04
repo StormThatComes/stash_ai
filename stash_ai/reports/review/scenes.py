@@ -4,8 +4,8 @@ from .signals import _score, _candidate, _flag
 
 
 def _scene_signals(app, store, scene, hits, rows, options, scene_policies):
-    from stash_ai.merge import marker_segment_signature
-    from stash_ai.scene_cache import views
+    from stash_ai.evidence.identity import marker_segment_signature
+    from stash_ai.evidence.cache_views import views
     from stash_ai.evidence.temporal.statistics import scene_reason
 
     _, projected = views(app, store.records(scene, "scene", borrow=True))

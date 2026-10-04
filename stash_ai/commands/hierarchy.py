@@ -1,7 +1,7 @@
 """Merged category composition and hierarchy-only synchronization."""
 from collections import defaultdict
 
-from stash_ai import merge
+import stash_ai.evidence.labels as merge_labels
 from stash_ai.domain import TagHierarchy
 from stash_ai.models import SOURCES
 
@@ -33,7 +33,7 @@ def combined_hierarchy(app, args, tag_policies=None):
                 raise ValueError(f"Conflicting AI hierarchy category: {mapped}")
             categories[mapped] = wanted
         for label, parents in hierarchy.leaf_parents.items():
-            merge.raw_label(label)
+            merge_labels.raw_label(label)
             if label in tag_policies[key]:
                 continue
             leaves[label].update(converted(parent) for parent in parents)
@@ -41,10 +41,10 @@ def combined_hierarchy(app, args, tag_policies=None):
     for parents in leaves.values():
         if parents - fallbacks:
             parents.difference_update(fallbacks)
-    if set(categories) & {merge.AI.prefix + label for label in leaves}:
+    if set(categories) & {merge_labels.AI.prefix + label for label in leaves}:
         raise ValueError("A merged hierarchy category collides with a predicted tag.")
     return TagHierarchy({label: tuple(sorted(parents)) for label, parents in leaves.items()},
-                            categories, prefix, merge.AI.hierarchy_description)
+                            categories, prefix, merge_labels.AI.hierarchy_description)
 
 
 def run_hierarchy(app, args, catalogs, hierarchy, tag_policies=None):
@@ -52,13 +52,13 @@ def run_hierarchy(app, args, catalogs, hierarchy, tag_policies=None):
     tag_policies = policies_or_empty(tag_policies)
     stash = app.create_stash_client(app.DRY_RUN)
     try:
-        resolver = app.TagResolver(stash, hierarchy, source=merge.AI, report=args.report.detail, create_missing=app.CREATE_MISSING)
+        resolver = app.TagResolver(stash, hierarchy, source=merge_labels.AI, report=args.report.detail, create_missing=app.CREATE_MISSING)
         resolver.preload()
         labels = sorted({label for source, vocabulary in catalogs.items() for label in vocabulary.labels
                          if label not in tag_policies[source]})
         for label in labels:
-            if args.create_all_tags or merge.AI.prefix + label in resolver.cache:
-                resolver.resolve(merge.AI.prefix + label)
+            if args.create_all_tags or merge_labels.AI.prefix + label in resolver.cache:
+                resolver.resolve(merge_labels.AI.prefix + label)
         app.print_hierarchy_summary(resolver)
     finally:
         stash.close()

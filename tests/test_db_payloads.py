@@ -10,7 +10,7 @@ import pytest
 
 from stash_ai import cli as app
 from stash_ai import db as stash_db
-from stash_ai import merge
+import stash_ai.storage.store as merge_store
 from tests.test_db import issues, seed
 
 
@@ -20,7 +20,7 @@ FRAME = {"start": 0.0, "end": 1.0, "tags": [["blue_hair", .9]]}
 def save_result(path, mode, items, **extra):
     kind = "scene" if mode == "scene" else "markers"
     segment = {"mode": mode, "meta": {"origin": "inference"}, "items": items, **extra}
-    with merge.StateStore(path, "scope") as state:
+    with merge_store.StateStore(path, "scope") as state:
         # Build a consistent index, then inject a decodable payload. JSON NaN/Inf
         # cannot be produced by the normal encoder, but must be detected on disk.
         state.put("1", "wd", {kind: {**segment, "items": [FRAME]}})
@@ -130,7 +130,7 @@ def test_check_rejects_invalid_checkpoint_frames(tmp_path, row):
 def test_check_preserves_legacy_and_sparse_formats(tmp_path):
     path = tmp_path / "state.sqlite3"
     seed(path, "scope")  # Old inference without retention metadata/statistics.
-    with merge.StateStore(path, "scope") as state:
+    with merge_store.StateStore(path, "scope") as state:
         state.put("legacy", "wd", {
             "scene": {"mode": "scene", "meta": {"origin": "legacy"},
                       "items": [{"tag": "blue_hair", "score": None}]},
@@ -154,7 +154,7 @@ def test_check_accepts_real_checkpoint_and_completed_inference(pipeline, scene_o
     p = pipeline
     args = [*p.args, *(["--scene-tags-only"] if scene_only else []),
             *([] if temporal else ["--no-temporal"])]
-    scope = merge.scope_for(app.STASH_URL)
+    scope = merge_store.scope_for(app.STASH_URL)
     p.fail["wd"] = 4
     with pytest.raises(KeyboardInterrupt):
         app.main(args)

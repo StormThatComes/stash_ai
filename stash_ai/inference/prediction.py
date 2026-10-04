@@ -1,6 +1,8 @@
 """Scene predictions, retained frame scores and resumable batch execution."""
 from __future__ import annotations
 
+from .scene_predictions import retained_scores, temporal_scores
+
 from dataclasses import dataclass
 from typing import Any, TYPE_CHECKING
 
@@ -186,7 +188,6 @@ def _run_prediction_batches(app, tagger, stash, paths, cues, state, *,
 
 def _finalize_predictions(app, tagger, scene_exclusions, state, *, raw_scene, analysis):
     import numpy as np
-    from stash_ai.evidence.temporal.statistics import scene_reason
 
     settings, labels = tagger.settings, tagger.labels
     scene_scores = np.sort(state.top_scores, axis=0)[::-1].mean(axis=0)
@@ -204,45 +205,16 @@ def _finalize_predictions(app, tagger, scene_exclusions, state, *, raw_scene, an
             )
 
     if state.retain_scene and settings.scene_cache_floor is not None:
-        # Keep exact aggregate scores for every retained label, including those
-        # below today's support floor. Temporal statistics still use today's
-        # publication policy; future rethreshold rebuilds them from the frames.
-        candidates = {tag for row in state.scene_frames for tag, _ in row['tags']}
-        predictions = [(tag, float(scene_scores[i])) for i, tag in enumerate(labels)
-                       if tag in candidates]
-        predictions.sort(key=lambda item: (-item[1], item[0]))
+        # Explicit retention keeps exact aggregate scores even below today's
+        # support floor. Future rethreshold rebuilds statistics from frames.
+        predictions = retained_scores(scene_scores, labels, state.scene_frames)
     elif state.accumulator is not None:
-        predictions = [
-            (labels[index], float(scene_scores[index]))
-            for index in state.accumulator.items
-        ]
-        predictions = [
-            (tag, score)
-            for tag, score in predictions
-            if raw_scene
-            or (
-                tag not in scene_exclusions
-                and scene_reason(
-                    score,
-                    statistics[tag],
-                    settings.scene_threshold,
-                    state.policy,
-                )
-            )
-        ]
-        predictions.sort(key=lambda item: (-item[1], item[0]))
+        predictions = temporal_scores(
+            scene_scores, labels, state.accumulator.items, statistics,
+            settings.scene_threshold, state.policy,
+            raw_scene=raw_scene, exclusions=scene_exclusions)
     elif state.retain_scene:
-        candidates = {
-            tag
-            for row in state.scene_frames
-            for tag, _ in row["tags"]
-        }
-        predictions = [
-            (tag, float(scene_scores[i]))
-            for i, tag in enumerate(labels)
-            if tag in candidates
-        ]
-        predictions.sort(key=lambda item: (-item[1], item[0]))
+        predictions = retained_scores(scene_scores, labels, state.scene_frames)
     else:
         predictions = [
             (tag, score)

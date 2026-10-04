@@ -34,7 +34,7 @@ def _scene_ids(store, requested):
 
 
 def build_report(app, store, scenes, core_policies, scene_policies, options=ReviewOptions()):
-    from stash_ai import merge
+    from stash_ai.evidence import pipeline as merge
 
     pending = store.pending_publication_scenes()
     refresh = {row[0] for row in store.connection.execute(

@@ -10,7 +10,9 @@ from stash_ai.rethreshold import targets as rethreshold_targets
 from stash_ai.inference.identity import model_identity
 from stash_ai.signatures import digest
 from stash_ai.inference import sprites
-from stash_ai import cli as app, merge, thresholds
+from stash_ai import cli as app
+from stash_ai.evidence import thresholds as thresholds
+import stash_ai.storage.store as merge_store
 from stash_ai.storage import progress
 from stash_ai.models import ModelSettings, Vocabulary, WD
 from stash_ai.evidence.temporal.policy import TemporalPolicy
@@ -53,7 +55,7 @@ def test_legacy_blocklist_rejects_merge_before_writes_and_restart_restores_range
             *([] if temporal else ['--no-temporal'])]
     assert app.main(args) == 0
     # Emulate frames captured by the old option, which discarded labels before storage.
-    with merge.StateStore(p.path, merge.scope_for(app.STASH_URL)) as state:
+    with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL)) as state:
         records = state.records('1', 'markers')['wd']
         saved = records[0]
         saved['meta']['marker_tag_blocklist'] = ['common', 'unrelated']
@@ -72,7 +74,7 @@ def test_legacy_blocklist_rejects_merge_before_writes_and_restart_restores_range
     output = capsys.readouterr().out
     assert 'unblocked marker tags' in output and 'common' in output and '--restart' in output
     assert p.stash.scene == before and not p.stash.writes
-    with merge.StateStore(p.path, merge.scope_for(app.STASH_URL), True) as state:
+    with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), True) as state:
         assert state.records('1', 'markers')['wd'][0] == saved
     assert app.main([*args, '--restart']) == 0
     assert [(m['seconds'], m.get('end_seconds')) for m in p.stash.scene['scene_markers']
@@ -86,7 +88,7 @@ def test_legacy_blocklist_aborts_rethreshold_before_any_policy_write(pipeline, m
     args = ['--models', 'wd', 'dtq', *p.args[2:]]
     assert app.main(args) == 0
     # WD is a safe earlier target; DTQ contains frames captured while common was blocked.
-    with merge.StateStore(p.path, merge.scope_for(app.STASH_URL)) as state:
+    with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL)) as state:
         records = state.records('1', 'markers')['dtq']
         records[0]['meta']['marker_tag_blocklist'] = ['common']
         for row in records[0]['items']:
@@ -104,7 +106,7 @@ def test_legacy_blocklist_aborts_rethreshold_before_any_policy_write(pipeline, m
         guard.setattr(app, 'load_tagger', lambda *values: pytest.fail('loaded a model'))
         assert app.main([*args, '--merge-only', '--rethreshold-markers',
                          *(['--rethreshold-scenes'] if combined else [])]) == 1
-    with merge.StateStore(p.path, merge.scope_for(app.STASH_URL), True) as state:
+    with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), True) as state:
         assert state.connection.execute(
             'SELECT * FROM ' + state.table('results') + ' ORDER BY model,kind').fetchall() == before
         assert state.connection.execute(
@@ -117,7 +119,7 @@ def test_unfiltered_cache_retains_labels_and_reuses_predictions_without_models(p
     configure(monkeypatch)
     p.scores['wd'][:, 0] = .9
     assert app.main(p.args) == 0
-    with merge.StateStore(p.path, merge.scope_for(app.STASH_URL), True) as state:
+    with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), True) as state:
         saved = state.records('1', 'markers')['wd'][0]
         assert saved['meta']['marker_tag_blocklist'] == []
         assert all(['common', pytest.approx(.9)] in row['tags'] for row in saved['items'])
@@ -131,7 +133,7 @@ def test_unfiltered_cache_retains_labels_and_reuses_predictions_without_models(p
     # YAML policy changes preserve the raw evidence and can be reversed without inference.
     assert app.main([*p.args, '--merge-only']) == 0
     assert any(m['primary_tag']['name'] == 'ai:common' for m in p.stash.scene['scene_markers'])
-    with merge.StateStore(p.path, merge.scope_for(app.STASH_URL), True) as state:
+    with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), True) as state:
         assert state.records('1', 'markers')['wd'][0] == saved
 
 
@@ -141,7 +143,7 @@ def test_unknown_blocklist_rejects_marker_replay_but_not_scene_only(
     p = pipeline
     configure(monkeypatch)
     assert app.main(p.args) == 0
-    with merge.StateStore(p.path, merge.scope_for(app.STASH_URL)) as state:
+    with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL)) as state:
         records = state.records('1', 'markers')['wd']
         if retained is None:
             records[0]['meta'].pop('marker_tag_blocklist')

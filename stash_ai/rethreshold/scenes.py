@@ -1,10 +1,11 @@
 """Plan scene and optional marker threshold changes from retained evidence."""
-from stash_ai.scene_cache import SCENE_OVERRIDE, scene_threshold, validate_scene
+from stash_ai.evidence.identity import SCENE_OVERRIDE
+from stash_ai.evidence.cache_views import scene_threshold, validate_scene
 
 
 def plan(app, store, scene, config, *, scenes=True, markers=False, direct=False,
          marker_check_scene=None, pending_checked=False, metadata_only=False):
-    from stash_ai.thresholds import OVERRIDE
+    from stash_ai.evidence.identity import OVERRIDE
     from .markers import validate
     result = {}
     if scenes:
@@ -43,7 +44,7 @@ def plan(app, store, scene, config, *, scenes=True, markers=False, direct=False,
 
 
 def apply(store, scene, model, outputs, *, metadata_only=False):
-    from stash_ai.thresholds import marker_threshold
+    from stash_ai.evidence.thresholds import marker_threshold
     with store.connection:
         for kind, segments in outputs.items():
             threshold = scene_threshold(segments[0]) if kind == 'scene' else marker_threshold(segments[0])

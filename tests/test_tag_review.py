@@ -7,7 +7,8 @@ import json
 import pytest
 
 from stash_ai.inference import sprites
-from stash_ai import cli as app, merge
+from stash_ai import cli as app
+import stash_ai.storage.store as merge_store
 from stash_ai.reports.review import report as tag_review
 from stash_ai.reports.review.accumulator import ReviewAccumulator
 from stash_ai.models import SOURCES
@@ -31,12 +32,12 @@ def pair(label="common", score=.42, threshold=.4, identity="same"):
 
 
 def report(path, scenes=("1",), options=ReviewOptions(), core=None, tags=None):
-    with merge.StateStore(path, merge.scope_for(app.STASH_URL), True, allow_cleanup=True) as state:
+    with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL), True, allow_cleanup=True) as state:
         return tag_review.build_report(app, state, list(scenes), core or policies(), tags or policies(), options)
 
 
 def seed(path, scene, model, outputs, replace=None):
-    with merge.StateStore(path, merge.scope_for(app.STASH_URL)) as state:
+    with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL)) as state:
         state.put(scene, model, outputs, replace)
 
 
@@ -144,7 +145,7 @@ def test_review_uses_effective_sql_thresholds_and_leaves_evidence_untouched(tmp_
     path = tmp_path / "state.sqlite3"
     seed(path, "1", "wd", pair(score=.82, threshold=.4))
     assert report(path)["totals"]["unique_tags_flagged"] == 0
-    with merge.StateStore(path, merge.scope_for(app.STASH_URL)) as state:
+    with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL)) as state:
         with state.connection:
             for kind in ("scene", "markers"):
                 state.set_result_threshold("1", "wd", kind, .8, state.model_records("1", kind, "wd"))
@@ -193,7 +194,7 @@ def test_unusable_scenes_are_skipped_without_negative_votes(tmp_path, pending):
     if pending == "incomplete":
         outputs["markers"]["meta"]["marker_score_floor"] = .99
     seed(path, "1", "wd", outputs)
-    with merge.StateStore(path, merge.scope_for(app.STASH_URL)) as state:
+    with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL)) as state:
         if pending == "refresh":
             from stash_ai.storage.progress import request_refresh
             request_refresh(state, ["1"], ["wd"], ["scene", "markers"])
@@ -274,7 +275,7 @@ def test_cli_scene_selection_options_missing_scene_and_empty_report(tmp_path):
     assert app.main(["--tag-review-report", str(missing), "--state-db", str(absent)]) == 1
     assert not absent.exists()
     empty = tmp_path / "empty.sqlite3"
-    with merge.StateStore(empty, merge.scope_for(app.STASH_URL)):
+    with merge_store.StateStore(empty, merge_store.scope_for(app.STASH_URL)):
         pass
     assert app.main(["--tag-review-report", str(missing), "--state-db", str(empty)]) == 0
     assert json.loads(missing.read_text())["totals"]["selected_scenes"] == 0

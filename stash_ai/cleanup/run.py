@@ -5,7 +5,8 @@ from collections import Counter
 
 from tqdm import tqdm
 
-from stash_ai import merge
+import stash_ai.evidence.labels as merge_labels
+import stash_ai.storage.store as merge_store
 from stash_ai.models import SOURCES
 from stash_ai.cleanup import scenes
 
@@ -27,12 +28,12 @@ class CleanupRun:
 
     def run(self):
         app, args = self.app, self.args
-        with merge.StateStore(args.state_db, merge.scope_for(app.STASH_URL), app.DRY_RUN,
+        with merge_store.StateStore(args.state_db, merge_store.scope_for(app.STASH_URL), app.DRY_RUN,
                 cache_bytes=int(args.ram_cache_gb * 2**30),
                 allow_cleanup=self.wide or args.abandon_pending, cleanup_preview=True,
                 memory_budget_bytes=int(args.ram_budget_gb * 2**30)) as self.store:
             if args.abandon_pending:
-                from stash_ai.recovery import abandon
+                from stash_ai.storage.recovery import abandon
                 self.stats.update(abandon(self.store, self.report.write))
             self.stash = self.cleanup_stash = app.create_stash_client(app.DRY_RUN)
             try:
@@ -87,7 +88,7 @@ class CleanupRun:
         if self.sql is not None:
             # Cleanup uses the same snapshots as merge-only; media paths are unused.
             self.stash.configure_merge_reads(self.report, merge_only=True)
-        self.resolver = app.TagResolver(self.cleanup_stash, source=merge.AI, report=self.report.detail,
+        self.resolver = app.TagResolver(self.cleanup_stash, source=merge_labels.AI, report=self.report.detail,
                                         create_missing=app.CREATE_MISSING)
         bar = tqdm(self.cleanup_stash.iter_scenes(self.scene_ids), desc="Affected scene cleanup", unit="scene")
         for current in bar:
@@ -120,7 +121,8 @@ class CleanupRun:
                 self.stats.update(prune_excluded_definitions(
                     app, self.stash, self.scoped_tags, self.report.detail))
         if app.CREATE_MARKERS:
-            from stash_ai.marker_groups import for_resolver, prune_groups
+            from stash_ai.publication.groups import for_resolver
+            from stash_ai.cleanup.groups import prune_groups
             delta = Counter(getattr(self.cleanup_stash, 'marker_group_usage_delta', {}))
             if self.resolver is not None:
                 delta.update(for_resolver(app, self.resolver).usage_delta)
