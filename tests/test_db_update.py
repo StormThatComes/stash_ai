@@ -6,7 +6,9 @@ import zlib
 import pytest
 
 from stash_ai import cli as app
-from stash_ai import db as stash_db, performance
+from stash_ai import db as stash_db
+from stash_ai.publication import fingerprints as performance
+import stash_ai.storage.merge_checks as performance_merge_checks
 from stash_ai.commands import arguments
 from stash_ai.storage.store import StateStore
 from stash_ai.storage.codec import encode
@@ -132,7 +134,7 @@ def test_failed_migration_can_be_retried_and_does_not_claim_latest_version(tmp_p
     with monkeypatch.context() as patch:
         def fail(_):
             raise RuntimeError('interrupted migration')
-        patch.setattr(performance, 'initialize', fail)
+        patch.setattr(performance_merge_checks, 'initialize', fail)
         with pytest.raises(RuntimeError, match='interrupted migration'):
             stash_db.update_database(path)
     with sqlite3.connect(path) as db:

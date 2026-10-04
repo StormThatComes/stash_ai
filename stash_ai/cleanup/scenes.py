@@ -6,7 +6,9 @@ from types import SimpleNamespace
 
 import stash_ai.evidence.labels as merge_labels
 from stash_ai.publication import markers as marker_ops
-from stash_ai.publication import merged as merge_sync, separate as separate_sync
+from stash_ai.publication import separate as separate_sync
+import stash_ai.cleanup.markers as separate_sync_markers
+from stash_ai.publication import merged as merge_sync
 from stash_ai.cleanup import evidence
 
 
@@ -24,7 +26,7 @@ def cleanup_scene(app, stash, resolver, store, current, settings, selected, args
             snapshot, pending = store.snapshot(scene_id, kind, borrow=True)
             if pending is not None:
                 raise RuntimeError("An interrupted merge is pending; run --merge-only before cleanup.")
-            from stash_ai.recovery import reconcile
+            from stash_ai.publication.recovery import reconcile
             published[kind], recovered = reconcile(app, stash, store, current, kind, snapshot)
             stats['publications_reconciled'] += int(recovered)
         if app.CREATE_MARKERS and published.get("markers") is None and any(
@@ -69,6 +71,6 @@ def _cleanup_source(app, stash, current, source, core_policies, scene_policies, 
     if app.APPLY_SCENE_TAGS:
         result.update(app.cleanup_scene_tags(stash, current, scene_policies[source.key], source, report))
     if app.CREATE_MARKERS:
-        result.update(separate_sync.cleanup_scene_marker_cores(
+        result.update(separate_sync_markers.cleanup_scene_marker_cores(
             app, stash, current, core_policies[source.key], source, report, scene_policies[source.key]))
     return result

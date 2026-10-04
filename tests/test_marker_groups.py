@@ -6,7 +6,8 @@ import pytest
 
 from stash_ai import cli as app
 from stash_ai.publication import merged as merge_sync
-from stash_ai import marker_groups as groups
+from stash_ai.publication import groups as groups
+import stash_ai.cleanup.groups as groups_groups
 import stash_ai.evidence.labels as merge_labels
 import stash_ai.storage.store as merge_store
 from stash_ai.evidence.occurrences import OCCURRENCE_TAG
@@ -89,7 +90,7 @@ def test_union_and_split_drop_obsolete_managed_groups_but_keep_manual_extras(tmp
         for marker in stash.scene['scene_markers']:
             assert group_names(marker) == {'m:abc', 'm:manual'}
             assert 'human' in {t['name'] for t in marker['tags']}
-        assert groups.prune_groups(stash, lambda _: None)['marker_group_tags_pruned'] == 1
+        assert groups_groups.prune_groups(stash, lambda _: None)['marker_group_tags_pruned'] == 1
         assert 'm:old' not in stash.tags and 'm:manual' in stash.tags
 
 

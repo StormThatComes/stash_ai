@@ -6,7 +6,9 @@ import zlib
 import pytest
 
 from stash_ai.rethreshold import execution as rethreshold_execution
-from stash_ai import cli as app, db, recovery
+from stash_ai import cli as app, db
+from stash_ai.storage import recovery as recovery
+import stash_ai.publication.recovery as recovery_recovery
 from stash_ai.evidence import pipeline as merge
 import stash_ai.evidence.intervals as merge_intervals
 import stash_ai.evidence.labels as merge_labels
@@ -282,7 +284,7 @@ def test_merge_cleanup_and_partial_publication_recovery_match_old_snapshots(tmp_
             pending = store.connection.execute("SELECT pending FROM snapshots WHERE kind='markers'").fetchone()[0]
             recovery.abandon(store, lambda _: None)
             assert store.connection.execute("SELECT data FROM recovery_publications WHERE kind='markers'").fetchone()[0] == pending
-            observed, reconciled = recovery.reconcile(app, stash, store, stash.find_scene('1'), 'markers',
+            observed, reconciled = recovery_recovery.reconcile(app, stash, store, stash.find_scene('1'), 'markers',
                                                       store.snapshot('1', 'markers')[0])
             assert reconciled and 'new' not in {s['tag'] for s in observed['contributions']}
             stash.create_marker = create

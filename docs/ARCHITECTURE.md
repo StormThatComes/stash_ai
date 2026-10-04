@@ -28,9 +28,10 @@ lifecycle. Opcjonalny `stash_ai/publication/parallel.py` uruchamia wyłącznie r
 replay evidence w izolowanych procesach; `MergePublisher` zachowuje pojedynczy
 writer dla TagResolver, Stash i StateStore. Dry-run i profilowanie pozostają
 szeregowe, a awaria workerów nie uruchamia drugiego przebiegu publikacji.
-Planowanie i publikację zmian jednej sceny rozdziela `stash_ai/publication/merged.py`;
-`MergeSyncPlan` przechowuje wyłącznie plan snapshotów i mutacji Stash, a kolejne
-funkcje obsługują przygotowanie evidence, tagi, markery i publikację. Cleanup ma
+Planowanie jednej sceny znajduje się w `stash_ai/publication/planning/`: osobne
+moduły przygotowują evidence, tagi i markery merged oraz tagi i markery separate.
+`types.py` definiuje `MergeSyncPlan`. Koordynatory `publication/merged.py` oraz
+`publication/separate.py` zachowują kolejność mutacji i zatwierdzania snapshotów. Cleanup ma
 osobny lifecycle w `stash_ai/cleanup/run.py` / `CleanupRun`. Rekonsyliację jednej
 sceny zawiera `cleanup/scenes.py`, a re-ewaluację opublikowanego evidence
 `cleanup/evidence.py`: kwalifikacja zmienionych dowodów, leniwy `EvidenceReplay`
@@ -40,7 +41,7 @@ w `cleanup/client.py`. `cleanup/prune.py` i `cleanup/legacy.py` obsługują prun
 zwykłych tagów oraz zachowanych wyników legacy. Pozostała logika domenowa znajduje się m.in. w `stash_ai/evidence/scenes.py`,
 `stash_ai/evidence/observations.py`, `stash_ai/evidence/temporal/` i `stash_ai/evidence/occurrences.py`.
 
-`stash_ai/marker_index.py` buduje dla jednej sceny niemutowalny indeks istniejących
+`stash_ai/publication/index.py` buduje dla jednej sceny niemutowalny indeks istniejących
 markerów według primary tagu. Posortowane początki i drzewo maksymalnych końców
 ograniczają kandydatów także dla zagnieżdżonych przedziałów; końcowy filtr używa
 dotychczasowego `merge.overlaps()`, z osobną tolerancją początku. Cleanup wyszukuje
@@ -249,7 +250,7 @@ w `benchmarks/`.
 
 Moduły, które mogą zmienić wynik merged publication przy tej samej efektywnej
 polityce, zapisanym evidence i obserwowanym stanie Stash, trzeba uwzględniać w
-`PUBLICATION_CODE_FILES` w `stash_ai/performance.py`. Warstwy transportu,
+`PUBLICATION_CODE_FILES` w `stash_ai/publication/fingerprints.py`. Warstwy transportu,
 CLI, parser VTT oraz tryby maintenance/cleanup mają własne sygnały invalidacji
 i celowo nie należą do tego fingerprintu, aby ich refaktory nie wymuszały
 re-merge całej biblioteki. Zmiana publication fingerprintu nie unieważnia
@@ -301,3 +302,24 @@ lecz `timing.py` zarządza oddzielnym `RunTimings` dla każdego raportu, jego
 thread-local stosami i rozmiarem odpowiedzi API. `summary.py` renderuje dotychczasowe
 podsumowanie, a `diagnostics.py` strumieniuje profil JSONL. Moduły runtime
 pozostają poza fingerprintem kodu publikacji i nie wymagają zależności ML.
+
+Grupy markerów rozwiązuje `publication/groups.py`; ich backfill uruchamia
+`commands/marker_groups.py`, a pruning wraz z dry-run korektą liczników
+obsługuje `cleanup/groups.py`. `cleanup/markers.py` usuwa wykluczone rdzenie
+i extras w trybie separate, bez wyliczania nowych markerów.
+
+Recovery jest rozdzielone między `storage/recovery.py` (lokalna archiwizacja
+i odczyt intentów), `publication/recovery.py` (uzgodnienie dowodów z faktycznie
+obecnymi wynikami Stash) oraz `commands/recovery.py` (tryb abandon-pending).
+`storage/merge_checks.py` odpowiada za transakcyjnie unieważniany indeks publikacji,
+`storage/segments.py` za pożyczone segmenty i ich memoizowaną tożsamość, a
+`publication/fingerprints.py` za podpis kodu, polityki, katalogu i stanu sceny.
+Ścieżki kodu do hashowania są liczone względem pakietu, niezależnie od cwd.
+
+`commands/bootstrap.py` przygotowuje runtime, wybrane modele, polityki oraz
+katalogi i hierarchie w dotychczasowej kolejności CLI. Szybkie tryby bazy
+kończą się przed bootstrapem, a wszystkie katalogi są walidowane przed
+ładowaniem wag i zapisami Stash. `runs/separate.py` zarządza także wspólnym
+lifecycle Stash dla wybranych modeli. `inference/scene_predictions.py` oddziela
+wybór zachowanych etykiet od kwalifikacji temporal; finalizacja w `prediction.py`
+zachowuje raw evidence, limity i wykluczenia przed publikacją.
