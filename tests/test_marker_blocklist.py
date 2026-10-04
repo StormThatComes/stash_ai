@@ -127,8 +127,8 @@ def test_unfiltered_cache_retains_labels_and_reuses_predictions_without_models(p
     monkeypatch.setattr(sprites, 'fetch_cues', lambda *args: pytest.fail('fetched VTT'))
     assert app.main([*p.args, '--merge-only', '--force-merge']) == 0
     excluded = tmp_path / 'tags.yml'
-    excluded.write_text('version: 1\nexcluded_tags: [common]\n')
-    assert app.main([*p.args, '--merge-only', '--tag-exclusions', str(excluded)]) == 0
+    excluded.write_text('version: 1\nexcluded_scene_tags: [common]\n')
+    assert app.main([*p.args, '--merge-only', '--scene-tag-exclusions', str(excluded)]) == 0
     assert all(m['primary_tag']['name'] != 'ai:common' for m in p.stash.scene['scene_markers'])
     # YAML policy changes preserve the raw evidence and can be reversed without inference.
     assert app.main([*p.args, '--merge-only']) == 0

@@ -24,7 +24,7 @@ def _shared_members(group, scene_by_run):
     for source, segment, signature in group['members']:
         meta = segment['meta']
         threshold = meta.get('scene_threshold')
-        floor = meta.get('marker_score_floor', meta.get('marker_threshold'))
+        floor = meta.get('marker_score_floor')
         if any(type(value) not in (int, float) or not math.isfinite(value) or not 0 <= value <= 1
                for value in (threshold, floor)):
             continue

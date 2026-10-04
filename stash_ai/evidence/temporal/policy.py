@@ -26,15 +26,9 @@ class TemporalPolicy:
 
     @classmethod
     def from_snapshot(cls, values):
-        # Old published markers may retain retired video options. Never use them.
-        saved = {key: value for key, value in values.items() if not key.startswith("refine_")}
-        # Cleanup must retain the algorithm used by older published snapshots.
-        saved.setdefault("shared_marker_frames", False)
-        saved.setdefault("shared_marker_extras", False)
-        saved.setdefault("short_marker_extras", False)
-        saved.setdefault("shared_scene_tags", False)
-        saved.setdefault("occurrence_markers", False)
-        policy = cls(**saved)
+        if not isinstance(values, dict) or set(values) != {field.name for field in fields(cls)}:
+            raise ValueError('Incomplete temporal snapshot policy; run --db-update.')
+        policy = cls(**values)
         policy.validate()
         return policy
 
@@ -86,4 +80,3 @@ def build_options(app):
         "marker_thresholds": dict(app.MARKER_THRESHOLDS or {}),
         "settings": {name: getattr(app, name) for name in (
         "MARKER_MIN_HITS", "MARKER_MERGE_GAP_SECONDS", "MARKER_MAX_TAGS_PER_FRAME", "MAX_MARKERS_PER_SCENE")}}
-

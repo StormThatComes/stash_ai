@@ -130,7 +130,7 @@ def test_v3_completed_vtt_results_are_reused_without_video_samples_or_model_load
     assert app.main([*p.args,*(['--merge-only'] if mode=='merge-only' else [])])==0
     assert p.stash.scene==expected
     with merge_store.StateStore(p.path,merge_store.scope_for(app.STASH_URL),True) as state:
-        assert state.connection.execute('PRAGMA user_version').fetchone()==(9,)
+        assert state.connection.execute('PRAGMA user_version').fetchone()==(11,)
         assert not state.connection.execute("SELECT 1 FROM sqlite_master WHERE name='refinement_progress'").fetchone()
         assert 'refinement' not in state.records('1','markers')['wd'][-1]
 
@@ -178,7 +178,9 @@ def test_frozen_old_policies_do_not_reenable_retired_options(tmp_path):
         for model,segments in records.items():state.put('1',model,{'markers':segments[0]})
         _,spans=merge.evidence(app,state,'1',policies,policies)
         for span in spans:
-            span['build_options']['policy'].update(refine_enabled=True,refine_path_map=[{'stash':'/media','local':'/not-accessible'}])
+            from stash_ai.db.snapshot_migration import complete_policy
+            old = {**span['build_options']['policy'], 'refine_enabled': True, 'refine_path_map': [{'stash': '/media', 'local': '/not-accessible'}]}
+            span['build_options']['policy'] = complete_policy(old)
         assert merge_intervals.union_intervals(spans)[0]['sources']==['wd','dtq','oppai']
         policies['wd']=frozenset({'core'})
         cleaned=cleanup_evidence.cleanup_support(app,state,'1',[s for s in spans if s['source']!='wd'],{'wd'},policies)
@@ -190,7 +192,9 @@ def test_appended_results_never_retain_retired_video_payload(tmp_path):
     data=segment('wd',[[('core',.9)]]*3)
     with merge_store.StateStore(tmp_path/'state.sqlite3','fixture') as state:
         data['refinement']=old_video_payload()
-        state.put('1','wd',{'markers':data},replace={'markers':False})
+        with pytest.raises(ValueError, match='Retired refinement'):
+            state.put('1','wd',{'markers':data},replace={'markers':False})
+        data.pop('refinement')
         state.put('1','wd',{'markers':data},replace={'markers':False})
         raw=state.connection.execute("SELECT data FROM results WHERE kind='markers'").fetchone()[0]
         records=state_codec.decode(raw)

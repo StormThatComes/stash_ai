@@ -27,7 +27,7 @@ class PublicationStore:
             "SELECT published,pending FROM " + store.table('snapshots') + " WHERE scope=? AND scene=? AND kind=?",
             (store.scope, str(scene), kind))
         from stash_ai.cleanup.state import mask_snapshot
-        values = tuple(mask_snapshot(store, store.unpack(item), kind) if item is not None else None
+        values = tuple(mask_snapshot(store, store.unpack_snapshot(item), kind) if item is not None else None
                        for item in rows[0]) if rows else (None, None)
         store.retain(key, values)
         return values if borrow else deepcopy(values)

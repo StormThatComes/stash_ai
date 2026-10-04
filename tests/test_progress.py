@@ -303,7 +303,7 @@ def test_v1_database_is_migrated_once_without_losing_sources(tmp_path,monkeypatc
     from stash_ai.db import update_database
     update_database(path)
     with merge_store.StateStore(path,"fixture") as state:
-        assert state.connection.execute("PRAGMA user_version").fetchone()==(9,)
+        assert state.connection.execute("PRAGMA user_version").fetchone()==(11,)
         assert state.records("1","scene")["wd"]==[segment]
         assert progress.completed(state,"1","wd",["scene"])
         assert not progress.completed(state,"1","wd",["scene"],"new-signature")

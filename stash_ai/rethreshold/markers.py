@@ -26,7 +26,7 @@ def validate(app, store, scene, config, *, check_scene=True, access=RecordAccess
             raise ValueError(f'{scene}/{model}: imported ranges cannot be rethresholded; run inference.')
         validate_marker_blocklist(segment, f'{scene}/{model}')
         # Before temporal retention was introduced, only high detections survived.
-        floor = meta.get('marker_score_floor', meta.get('marker_threshold'))
+        floor = meta.get('marker_score_floor')
         if not _score(floor) or floor > needed:
             raise ValueError(f'{scene}/{model}: cache floor {floor!r} exceeds required {needed:g}; run inference.')
         if check_scene and not scene_segments and meta.get('scene_threshold') != config.scene_threshold:

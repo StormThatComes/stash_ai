@@ -75,6 +75,11 @@ python .\stash_ai.py --explain-tag ai:blue_hair --scene-id 123
 # Usuwanie nieużywanych definicji tagów.
 python .\stash_ai.py --prune-empty-tags-only --dry-run
 
+# Jawny import wyników z trybu separate; zapisuje tylko lokalną bazę.
+python .\stash_ai.py --import-legacy-only --dry-run
+python .\stash_ai.py --import-legacy-only
+python .\stash_ai.py --merge-only
+
 # Usuwanie niepotrzebnej historii importu starych source-prefixed tagów/markerów.
 python .\stash_ai.py --prune-legacy-imports --dry-run
 python .\stash_ai.py --prune-legacy-imports
@@ -112,14 +117,17 @@ python .\stash_ai.py --abandon-pending
 Zmiana progów zapisuje małe wiersze w tabeli `result_thresholds`; skompresowane
 wyniki inferencji i evidence klatek pozostają bez zmian. Dotyczy to także
 automatycznego użycia cache po zmianie progów w YAML. Odczyt wyników, merge,
-cleanup i explain używają efektywnych progów z tej tabeli. Stare progi zapisane
-wewnątrz wyników są nadal odczytywane, bez przepisywania istniejącej bazy.
+cleanup i explain używają efektywnych progów z tej tabeli. Każdy segment historii ma własny efektywny próg zapisany w tej tabeli.
+`--db-update` przenosi dawne inline overrides i usuwa wycofane `refinement`;
+klatki, wyniki i podpisy dowodów zachowują swoje wartości.
 `--dry-run` zapisuje progi wyłącznie w tymczasowej bazie.
 
 Snapshoty merge zapisują współdzielone dowody `extra_support` raz, a contributions
 odwołują się do nich przez referencje. Zmniejsza to koszt serializacji i kompresji.
-Aktualny schemat to v9; starsze wersje programu odmówią jego otwarcia. Istniejące snapshoty są nadal odczytywane bez przepisywania, a wyniki
-inferencji pozostają bez zmian. `--dry-run` zmienia wyłącznie tymczasową bazę.
+Aktualny schemat to v11; starsze wersje programu odmówią jego otwarcia. Każdy nowy snapshot ma otoczkę formatu v2. `--db-update` konwertuje dawne
+snapshoty, także pending i recovery, oraz uzupełnia pełną politykę temporalną.
+Brakujące dawne przełączniki współdzielenia i occurrences zachowują `False`;
+wyniki inferencji pozostają bez zmian. `--dry-run` zmienia wyłącznie tymczasową bazę.
 
 Pełną listę opcji pokazuje:
 
@@ -193,10 +201,29 @@ Domyślnie `REPLACE_SCENE_TAGS=True` i `REPLACE_MARKERS=True`. Wyłączenie
 którejś flagi zachowuje historię danego rodzaju wyniku; ponowne włączenie
 normalizuje historię przy bezpiecznym reuse cache.
 
+### Przejście z separate do merged
+
+Normalny merge korzysta z zapisanej bazy evidence. Stare obiekty `jt:`, `wd:`,
+`dtq:` i `op:` najpierw zaimportuj przez `--import-legacy-only`, potem uruchom
+`--merge-only`. Użyj tej samej bazy `--state-db` w obu krokach; starszy schemat
+zaktualizuj wcześniej przez `--db-update`.
+
+Import nie ładuje modeli, vocabularies, polityk YAML ani mediów i nie zmienia
+Stash. Zachowuje nieznane oceny jako `score: null`, punktowe markery z nieznanym
+końcem oraz ręczne extras. Nie przejmuje ręcznych markerów bez ownership tagu.
+Czyta wszystkie namespace'y modeli; `--scene-id`, `--markers-only` oraz
+`--scene-tags-only` ograniczają zakres. `--dry-run` zapisuje tylko tymczasową
+nakładkę. Przy pending merge/cleanup trzeba najpierw dokończyć lub porzucić plan.
+
+Ledger zapobiega ponownemu importowi tych samych obiektów. Późniejsze wyniki
+z separate wymagają ponownego jawnego importu i dopisują historię bez utraty
+istniejącego cache. Normalny merge zgłasza niezaimportowane obiekty; nie importuje
+ich automatycznie. Publikacja migruje tylko obiekty potwierdzone w ledgerze.
+
 ### Czyszczenie historii legacy imports
 
 `--prune-legacy-imports` usuwa wyłącznie wpisy `legacy_imports`, które nie są
-już potrzebne do ochrony przed ponownym bootstrapem starych tagów/markerów
+już potrzebne do ochrony przed ponownym importem starych tagów/markerów
 `jt:`, `wd:`, `dtq:` i `op:`. Polecenie łączy się ze Stash, ale nie ładuje
 modeli ani nie uruchamia inferencji.
 
@@ -215,16 +242,17 @@ SQLite do systemu plików.
 ### Zdrowie, aktualizacja i kompaktowanie bazy stanu
 
 `--db-update` aktualizuje całą istniejącą bazę wskazaną przez `--state-db`
-do najnowszego obsługiwanego schematu (obecnie v9), we wszystkich scope'ach.
+do najnowszego obsługiwanego schematu (obecnie v11), we wszystkich scope'ach.
 Zwykłe uruchomienie oraz `--dry-run` wymagają aktualnego schematu: starszą bazę
-trzeba najpierw zaktualizować tą komendą. Nowa baza od razu otrzymuje v9.
+trzeba najpierw zaktualizować tą komendą. Nowa baza od razu otrzymuje v11.
 Updater korzysta z tego samego locka writera; migracje są wyłącznie offline.
 Tworzy aktualne tabele, indeksy i triggery, uzupełnia `result_index` dla baz
 sprzed v2, uzupełnia historyczne `result_metadata` we wszystkich scope'ach
 oraz usuwa wycofaną tabelę `refinement_progress`.
-Nie łączy się ze Stash ani nie ładuje konfiguracji modeli. Zachowuje wyniki,
-checkpointy, pending publication/cleanup i recovery; nie zmienia progów ani
-nie wymaga ponownej inferencji. Starsze, nadal czytelne formaty payloadów
+Nie łączy się ze Stash ani nie ładuje konfiguracji modeli. Zachowuje wyniki, checkpointy, pending publication/cleanup i recovery oraz
+efektywne progi każdego segmentu. Nie odtwarza utraconych detekcji: brakująca
+metadata retention lub niepusty historyczny marker blocklist może wymagać
+ponownej inferencji z `--restart`. Starsze, nadal czytelne formaty payloadów
 pozostają zapisane w swojej dotychczasowej postaci.
 
 `--dry-run` wykonuje odczytowy preflight i pokazuje wersję źródłową oraz
@@ -543,3 +571,5 @@ produkcyjnego serwera.
 
 Pliki w `docs/validation/` są historycznymi wynikami konkretnych walidacji i
 benchmarków. Nie opisują bieżącej liczby testów ani aktualnego kontraktu aplikacji.
+
+Nazwy konfiguracji i CLI są opisane w [instrukcji aktualizacji wykluczeń](docs/UPGRADE_exclusions.md#aktualizacja-starych-nazw). Używaj `excluded_scene_tags`, `--models`, `--scene-tag-exclusions` i `--cleanup-markers-only`; domyślny plik markerów to `marker_core_exclusions.yml`.
