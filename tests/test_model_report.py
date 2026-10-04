@@ -259,11 +259,16 @@ def test_cli_model_report_uses_saved_evidence_without_models_or_stash(tmp_path, 
         return original_preload(store)
 
     monkeypatch.setattr(merge_store.StateStore, "preload_sources", preload_sources)
+    monkeypatch.setattr(app, "APPLY_SCENE_TAGS", False)
+    monkeypatch.setattr(app, "CREATE_MARKERS", False)
+    policy_before = app.TEMPORAL_POLICY
 
     assert app.main([
         "--state-db", str(path),
         "--model-report", str(destination),
     ]) == 0
+    assert app.APPLY_SCENE_TAGS is app.CREATE_MARKERS is False
+    assert app.TEMPORAL_POLICY is policy_before
 
     captured = capsys.readouterr()
     assert preloaded == [True]
@@ -361,4 +366,3 @@ def test_parallel_report_single_scene_fallback_is_read_only(tmp_path, preload):
         preload_sources=preload)
     assert parallel == serial
     assert path.read_bytes() == before
-

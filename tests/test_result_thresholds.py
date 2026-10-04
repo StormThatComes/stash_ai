@@ -1,4 +1,5 @@
 """Threshold policy writes preserve evidence, preview isolation and completion."""
+from stash_ai.rethreshold.plans import RecordAccess, PendingPolicy, ThresholdRequest
 from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
@@ -208,7 +209,8 @@ def test_both_thresholds_and_version_roll_back_if_index_write_fails(tmp_path, mo
         old_records = store.records('1', 'scene')
         version = store.connection.execute('PRAGMA user_version').fetchone()
         index = store.connection.execute('SELECT * FROM result_index').fetchall()
-        planned = scene_updates.plan(app, store, '1', config(.8), markers=True, metadata_only=metadata_only)
+        planned = scene_updates.plan(app, store, '1', config(.8), request=ThresholdRequest(kinds=('scene', 'markers'),
+                                      access=RecordAccess.METADATA if metadata_only else RecordAccess.BATCH))
         original = progress.index_result
 
         def fail_second(store, scene, model, kind, segments, **options):
@@ -218,7 +220,7 @@ def test_both_thresholds_and_version_roll_back_if_index_write_fails(tmp_path, mo
 
         monkeypatch.setattr(progress, 'index_result', fail_second)
         with pytest.raises(RuntimeError, match='index write failed'):
-            scene_updates.apply(store, '1', 'wd', planned, metadata_only=metadata_only)
+            scene_updates.apply(store, '1', 'wd', planned)
         assert blobs(store) == raw
         assert threshold_rows(store) == old_thresholds
         assert store.connection.execute('PRAGMA user_version').fetchone() == version

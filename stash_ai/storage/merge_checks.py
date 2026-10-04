@@ -1,4 +1,5 @@
 """Transactionally invalidated publication checks, independent of Stash access."""
+from stash_ai.storage.schema import MERGE_INVALIDATING_TABLES
 
 
 def initialize(store):
@@ -17,7 +18,7 @@ def initialize(store):
     # force unrelated scenes through merge again.
     for event in ('insert', 'update', 'delete'):
         db.execute(f'DROP TRIGGER IF EXISTS perf_legacy_imports_{event}')
-    for table in ('results', 'result_thresholds', 'snapshots'):
+    for table in MERGE_INVALIDATING_TABLES:
         for event, row in (('INSERT', 'NEW'), ('UPDATE', 'NEW'), ('DELETE', 'OLD')):
             db.execute(f'''CREATE TRIGGER IF NOT EXISTS perf_{table}_{event.lower()}
                 AFTER {event} ON {table} BEGIN
@@ -54,3 +55,4 @@ def record_check(store, scene, policy, fingerprint):
     store.connection.execute('INSERT INTO merge_checks VALUES (?,?,?,?) '
         'ON CONFLICT(scope,scene) DO UPDATE SET policy=excluded.policy,fingerprint=excluded.fingerprint',
         (store.scope, str(scene), policy, fingerprint))
+
