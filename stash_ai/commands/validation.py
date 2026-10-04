@@ -3,46 +3,38 @@ from __future__ import annotations
 
 import argparse
 import math
+from .modes import (select_command, DATABASE_COMMANDS, HIERARCHY_COMMANDS, CLEANUP_COMMANDS,
+                    MODEL_OPTIONS, PUBLICATION_OPTIONS, supplied, CACHE_RULE, REVIEW_RULE, MODEL_RULE)
 
 
 def database_mode(args) -> bool:
-    return bool(args.db_report or args.db_check or args.db_update or args.db_compact
-                or args.anonymous_diagnostics is not None)
+    return args.command in DATABASE_COMMANDS
 
 
 def mode_flags(args) -> tuple[bool, bool]:
-    hierarchy_only = args.sync_hierarchy_only or args.validate_hierarchy
-    cleanup_only = args.cleanup_only or args.cleanup_markers_only or args.cleanup_scene_tags_only
-    return hierarchy_only, cleanup_only
+    return args.command in HIERARCHY_COMMANDS, args.command in CLEANUP_COMMANDS
+
+
+def _validate_report(parser, args, rule):
+    if args.command is not rule.command:
+        return
+    if args.output_mode != 'merged':
+        parser.error(rule.flag + ' requires --output-mode merged.')
+    if supplied(args, rule.inference_options):
+        parser.error(rule.inference_message)
+    if supplied(args, (*PUBLICATION_OPTIONS, 'dry_run')):
+        parser.error(rule.modifiers_message)
+    destination = getattr(args, rule.command.value)
+    checked = destination.expanduser() if rule.expand_destination else destination
+    if destination.suffix.lower() != '.json' or checked.exists():
+        parser.error(rule.flag + ' requires a new .json file; existing files are never overwritten.')
 
 
 def validate_reports(parser, args):
     """Reject report modifiers before applying runtime defaults."""
-    if args.cache_report is not None:
-        if args.output_mode != "merged":
-            parser.error("--cache-report requires --output-mode merged.")
-        if args.device or args.offline or args.resume is not None or args.restart:
-            parser.error("--cache-report does not use model execution/resume options.")
-        if (args.markers_only or args.scene_tags_only or args.profile_merge or args.force_merge
-                or args.rethreshold_scenes or args.rethreshold_markers or args.abandon_pending
-                or args.prune_empty_tags or args.prune_prefixes or args.create_all_tags or args.no_hierarchy
-                or args.dry_run):
-            parser.error("--cache-report is read-only and checks both outputs; tagging/recovery modifiers do not apply.")
-        if args.cache_report.suffix.lower() != ".json" or args.cache_report.expanduser().exists():
-            parser.error("--cache-report requires a new .json file; existing files are never overwritten.")
-    if args.tag_review_report is not None:
-        if args.output_mode != "merged":
-            parser.error("--tag-review-report requires --output-mode merged.")
-        if args.models or args.device or args.offline or args.resume is not None or args.restart:
-            parser.error("--tag-review-report uses all saved model evidence; model/inference options do not apply.")
-        if (args.markers_only or args.scene_tags_only or args.profile_merge or args.force_merge
-                or args.rethreshold_scenes or args.rethreshold_markers or args.abandon_pending
-                or args.prune_empty_tags or args.prune_prefixes or args.create_all_tags or args.no_hierarchy
-                or args.dry_run):
-            parser.error("--tag-review-report cannot be combined with tagging, threshold, pruning or dry-run modifiers.")
-        if args.tag_review_report.suffix.lower() != ".json" or args.tag_review_report.exists():
-            parser.error("--tag-review-report requires a new .json file; existing files are never overwritten.")
-    elif any(value is not None for value in (
+    _validate_report(parser, args, CACHE_RULE)
+    _validate_report(parser, args, REVIEW_RULE)
+    if args.tag_review_report is None and any(value is not None for value in (
             args.tag_review_margin, args.tag_review_long_marker_seconds, args.tag_review_examples)):
         parser.error("--tag-review-* settings require --tag-review-report.")
     if args.tag_review_margin is not None and (
@@ -53,18 +45,7 @@ def validate_reports(parser, args):
         parser.error("--tag-review-long-marker-seconds must be finite and positive.")
     if args.tag_review_examples is not None and not 1 <= args.tag_review_examples <= 20:
         parser.error("--tag-review-examples must be in 1..20.")
-    if args.model_report is not None:
-        if args.output_mode != "merged":
-            parser.error("--model-report requires --output-mode merged.")
-        if args.models or args.device or args.offline or args.resume is not None or args.restart:
-            parser.error("--model-report uses all saved model evidence; model/inference options do not apply.")
-        if (args.markers_only or args.scene_tags_only or args.profile_merge or args.force_merge
-                or args.rethreshold_scenes or args.rethreshold_markers or args.abandon_pending
-                or args.prune_empty_tags or args.prune_prefixes or args.create_all_tags or args.no_hierarchy
-                or args.dry_run):
-            parser.error("--model-report cannot be combined with tagging, threshold, pruning or dry-run modifiers.")
-        if args.model_report.suffix.lower() != ".json" or args.model_report.exists():
-            parser.error("--model-report requires a new .json file; existing files are never overwritten.")
+    _validate_report(parser, args, MODEL_RULE)
 
 
 def validate_maintenance(parser, args):
@@ -75,11 +56,9 @@ def validate_maintenance(parser, args):
             parser.error("--prune-legacy-imports requires --output-mode merged.")
         if args.scene_id:
             parser.error("--prune-legacy-imports covers the current Stash/state DB; --scene-id does not apply.")
-        if args.models or args.device or args.offline or args.resume is not None or args.restart:
+        if supplied(args, MODEL_OPTIONS):
             parser.error("--prune-legacy-imports does not use model/inference options.")
-        if (args.markers_only or args.scene_tags_only or args.profile_merge or args.force_merge
-                or args.rethreshold_scenes or args.rethreshold_markers or args.abandon_pending
-                or args.prune_empty_tags or args.prune_prefixes or args.create_all_tags or args.no_hierarchy):
+        if supplied(args, PUBLICATION_OPTIONS):
             parser.error("--prune-legacy-imports cannot be combined with tagging, threshold, recovery or tag-pruning modifiers.")
 
     if db_mode:
@@ -87,11 +66,9 @@ def validate_maintenance(parser, args):
             parser.error("--db-report/--db-check/--db-update/--db-compact require --output-mode merged.")
         if args.scene_id:
             parser.error("Database maintenance covers the state DB; --scene-id does not apply.")
-        if args.models or args.device or args.offline or args.no_temporal or args.resume is not None or args.restart:
+        if supplied(args, (*MODEL_OPTIONS, 'no_temporal')):
             parser.error("Database maintenance does not use model/inference options.")
-        if (args.markers_only or args.scene_tags_only or args.profile_merge or args.force_merge
-                or args.rethreshold_scenes or args.rethreshold_markers or args.abandon_pending
-                or args.prune_empty_tags or args.prune_prefixes or args.create_all_tags or args.no_hierarchy):
+        if supplied(args, PUBLICATION_OPTIONS):
             parser.error("Database maintenance cannot be combined with tagging, threshold, cleanup or pruning modifiers.")
         if args.anonymous_diagnostics is not None and args.dry_run:
             parser.error("--anonymous-diagnostics is already read-only for the state DB; --dry-run does not apply.")
@@ -163,7 +140,9 @@ def validate_pipeline(app, parser, args):
 
 
 def validate_args(app, parser: argparse.ArgumentParser, args: argparse.Namespace) -> argparse.Namespace:
+    args.command = select_command(args)
     validate_reports(parser, args)
     validate_maintenance(parser, args)
     validate_pipeline(app, parser, args)
     return args
+
