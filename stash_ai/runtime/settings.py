@@ -62,12 +62,6 @@ class RuntimeSettings:
     SCENE_THRESHOLDS: dict[str, float] | None = None
     MARKER_THRESHOLDS: dict[str, float] | None = None
 
-    def __post_init__(self):
-        if not self.MARKER_CORE_EXCLUSIONS_FILE.exists():
-            self.MARKER_CORE_EXCLUSIONS_FILE = self.MARKER_CORE_EXCLUSIONS_FILE.with_name(
-                "joytag_marker_core_exclusions.yml")
-
-
 def validate_config(app, scene_work: bool = True) -> None:
     parsed = urlparse(app.STASH_URL)
     if (parsed.scheme not in {"http", "https"} or not parsed.hostname

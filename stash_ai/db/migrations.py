@@ -66,6 +66,9 @@ def migrate(database):
             canonicalize_results(database)
     initialize_features(state)
     with db:
+        if database.version < 11:
+            from .snapshot_migration import migrate as migrate_snapshots
+            migrate_snapshots(db)
         if database.version < 10:
             from stash_ai.storage.thresholds import overlay
             for scope, scene, model, kind, payload, thresholds in db.execute(

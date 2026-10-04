@@ -1,4 +1,5 @@
 """Shared VTT evidence, extra-only models, published-source cleanup and cache reuse."""
+from stash_ai.db.snapshot_migration import complete_policy
 
 from copy import deepcopy
 from dataclasses import replace
@@ -166,7 +167,7 @@ def test_independent_switches_and_legacy_snapshot_defaults(monkeypatch):
     assert fused(extra_records(),policies({'detail'}))[1][0]['extra_tags']==['detail']
     monkeypatch.setattr(app,'TEMPORAL_POLICY',replace(app.TEMPORAL_POLICY,shared_marker_extras=False))
     assert fused(extra_records(),policies({'detail'}))[1][0]['extra_tags']==[]
-    old=TemporalPolicy.from_snapshot({'enabled':True})
+    old=TemporalPolicy.from_snapshot(complete_policy({'enabled':True}))
     assert not old.shared_marker_frames and not old.shared_marker_extras
 
 

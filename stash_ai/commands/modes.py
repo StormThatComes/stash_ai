@@ -16,6 +16,7 @@ class Command(Enum):
     EXPLAIN = 'explain_tag'
     PRUNE_TAGS = 'prune_empty_tags_only'
     PRUNE_LEGACY = 'prune_legacy_imports'
+    IMPORT_LEGACY = 'import_legacy_only'
     DB_REPORT = 'db_report'
     DB_CHECK = 'db_check'
     DB_UPDATE = 'db_update'

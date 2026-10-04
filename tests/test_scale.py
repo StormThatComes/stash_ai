@@ -1,4 +1,5 @@
 """Shared scene proof, short extras, bounded RAM/prefetch, and 9000-scene output."""
+from stash_ai.db.snapshot_migration import complete_policy
 
 
 from functools import partial
@@ -323,7 +324,7 @@ def test_new_policy_switches_do_not_invalidate_inference_or_old_snapshots(pipeli
     assert model_identity(app, config, pipeline.vocab) == before
     old = asdict(app.TEMPORAL_POLICY)
     for key in ('shared_scene_tags', 'short_marker_extras', 'extra_short_min_hits'): old.pop(key)
-    restored = TemporalPolicy.from_snapshot(old)
+    restored = TemporalPolicy.from_snapshot(complete_policy(old))
     assert not restored.shared_scene_tags and not restored.short_marker_extras
 
 

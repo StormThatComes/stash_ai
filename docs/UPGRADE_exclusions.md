@@ -22,6 +22,25 @@ historyczna blocklista wymaga `--restart` dla wskazanych scen/modeli przed
 zwykłym merge lub rethreshold markerów. Cleanup może nadal cofać opublikowane
 dowody bez inferencji, z zachowaniem ich historycznych reguł i granic.
 
+## Aktualizacja starych nazw
+
+Konfiguracja i CLI używają jednej nazwy dla każdej opcji:
+
+| Dawna nazwa | Aktualna nazwa |
+| --- | --- |
+| YAML `excluded_tags` | `excluded_scene_tags` |
+| `joytag_marker_core_exclusions.yml` wybierany automatycznie | `marker_core_exclusions.yml` |
+| `--model` | `--models` |
+| `--tag-exclusions` | `--scene-tag-exclusions` |
+| `--sync-marker-core-only` | `--cleanup-markers-only` |
+
+Zmień klucz listy w YAML, pozostawiając jej zawartość i `by_model` bez zmian.
+Przenieś własny plik wykluczeń markerów pod aktualną nazwę albo wskaż go
+jawnie przez `--marker-core-exclusions PATH`. Jeśli masz oba pliki, wybierz
+własną politykę zamiast nadpisywać ją pustym plikiem dostarczonym z aplikacją.
+Zaktualizuj argumenty w skryptach i harmonogramach. CLI wymaga pełnych nazw
+opcji, bez skrótów. Wycofane aliasy i klucz YAML zgłaszają błąd.
+
 ## Cleanup
 
 ```powershell

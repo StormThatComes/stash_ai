@@ -114,6 +114,10 @@ class StateStore(AbstractContextManager):
     def unpack(self, value):
         return decode(value, self.report)
 
+    def unpack_snapshot(self, value):
+        from stash_ai.storage.snapshots import decode
+        return decode(value, self.report)
+
     def records(self, scene, kind, model=None, *, borrow=False):
         return self.results.records(scene, kind, model, borrow=borrow)
 
