@@ -22,8 +22,9 @@ from stash_ai.models import (
     select_models,
     validate_scores,
 )
-from stash_ai.vocabulary import load_vocabulary
-from stash_ai.onnx_tagger import prepare_wd, prepare_dtq, prepare_oppai, OnnxTagger
+from stash_ai.backends.vocabulary import load_vocabulary
+from stash_ai.backends.onnx import OnnxTagger
+from stash_ai.backends.onnx_preprocessing import prepare_wd, prepare_dtq, prepare_oppai
 
 
 from tests.helpers.stash import Stash

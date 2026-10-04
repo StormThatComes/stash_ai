@@ -105,12 +105,14 @@ podział budżetu pamięci oraz redukcję wyników do tego samego formatu co śc
 
 `stash_ai/models.py` definiuje wspólne typy `ModelSource`, `ModelSettings` i
 `Vocabulary`, katalog źródeł oraz walidację wyboru modeli i wyników predykcji.
-Moduł nie zależy od loaderów ani adapterów inferencji. `stash_ai/taggers.py`
+Moduł nie zależy od loaderów ani adapterów inferencji. `stash_ai/backends/loader.py`
 zawiera adapter JoyTag i wybór adaptera przez `load_tagger()`. Obsługa plików
-modelu oraz parsowanie słowników tagów znajduje się w `stash_ai/vocabulary.py`,
-a preprocessing, konfiguracja sesji i inference modeli ONNX w
-`stash_ai/onnx_tagger.py`. Kod, testy i benchmarki importują typy oraz helpery
-bezpośrednio z modułów, które je definiują; `taggers.py` nie re-eksportuje
+modelu oraz parsowanie słowników tagów znajduje się w `stash_ai/backends/vocabulary.py`.
+`backends/joytag.py` weryfikuje i ładuje przypiętą architekturę autora.
+ONNX jest rozdzielone na transformacje obrazów w `backends/onnx_preprocessing.py`,
+wybór providerów, fallback CPU i inspekcję wejść/wyjść w `backends/onnx_session.py`
+oraz adapter inferencji w `backends/onnx.py`. Kod, testy i benchmarki importują typy oraz helpery
+bezpośrednio z modułów, które je definiują; `backends/loader.py` nie re-eksportuje
 starego API. Wspólne typy i walidacja usuwają cykle między loaderami i adapterami.
 Genericzne komponenty (`TagResolver`, loader hierarchii i separate-output
 reconciliation) wymagają jawnego `ModelSource`; JoyTag nie jest ich ukrytym
@@ -124,16 +126,22 @@ i zamyka ją po transformacji. Fixture testowe zachowują te same kontrakty.
 
 ## Komunikacja ze Stash
 
+Pakiet `stash_ai/stash_api/` grupuje klienta domenowego, transport HTTP,
+odczyt snapshotów scen przez SQL i resolver tagów. `StashClient` pozostaje
+spójną klasą z dziedziczeniem po `StashTransport`; `sql.py` zawiera wyłącznie
+odczyty, a `tags.py` zarządza katalogiem i hierarchią tagów. Wywołania importują
+bezpośrednio te moduły, bez wrapperów pod dawnymi ścieżkami.
+
 | Moduł / klasa | Odpowiedzialność |
 | --- | --- |
-| `stash_ai/transport.py` / `StashTransport` | Sesje HTTP, uwierzytelnianie, retry odczytów, blokada zapisu podczas dry-run, dekodowanie GraphQL i przekierowania mediów. |
-| `stash_ai/client.py` / `StashClient` | Zapytania dotyczące scen, tagów i markerów, wymaganie Stash 0.31.1+, stronicowanie oraz fallback z SQL na GraphQL. |
+| `stash_ai/stash_api/transport.py` / `StashTransport` | Sesje HTTP, uwierzytelnianie, retry odczytów, blokada zapisu podczas dry-run, dekodowanie GraphQL i przekierowania mediów. |
+| `stash_ai/stash_api/client.py` / `StashClient` | Zapytania dotyczące scen, tagów i markerów, wymaganie Stash 0.31.1+, stronicowanie oraz fallback z SQL na GraphQL. |
 
 `StashClient` jest specjalizacją `StashTransport`. Wspólny transport utrzymuje
 jedną konfigurację połączenia i jeden raport żądań. Klient jest importowany z
-`stash_ai.client`, a funkcje pomocnicze HTTP bezpośrednio z
-`stash_ai.transport`. Pozostałe moduły używają analogicznych
-importów pakietowych, np. `from stash_ai.state import StateStore`.
+`stash_ai.stash_api.client`, a funkcje pomocnicze HTTP bezpośrednio z
+`stash_ai.stash_api.transport`. Pozostałe moduły używają analogicznych
+importów pakietowych, np. `from stash_ai.storage.store import StateStore`.
 
 Transport ponawia tylko odczyty, w tym ściśle dozwolone operacje SQL opakowane
 w mutację GraphQL. Zapisy nie są ponawiane. Nagłówek `ApiKey` nie jest przesyłany

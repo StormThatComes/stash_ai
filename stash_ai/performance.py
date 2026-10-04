@@ -77,8 +77,8 @@ def initialize(store):
 PUBLICATION_CODE_FILES = (
     'cli.py', 'merge.py', 'commands/hierarchy.py', 'commands/legacy.py', 'runs/merged.py', 'runs/merged_model.py', 'publication/publisher.py', 'publication/parallel.py', 'publication/merged.py', 'marker_index.py', 'publication/separate.py', 'publication/markers.py',
     'temporal.py', 'fusion.py', 'scene.py', 'occurrences.py', 'exclusions.py', 'cleanup/state.py', 'cleanup/client.py',
-    'models.py', 'taggers.py', 'onnx_tagger.py', 'vocabulary.py', 'inference/prediction.py', 'inference/sprites.py', 'inference/preparation.py', 'tags.py', 'domain.py', 'performance.py',
-    'timeline.py', 'merge_sql.py', 'marker_groups.py',
+    'models.py', 'backends/loader.py', 'backends/onnx.py', 'backends/onnx_preprocessing.py', 'backends/onnx_session.py', 'backends/vocabulary.py', 'inference/prediction.py', 'inference/sprites.py', 'inference/preparation.py', 'stash_api/tags.py', 'domain.py', 'performance.py',
+    'timeline.py', 'stash_api/sql.py', 'marker_groups.py',
     'thresholds.py', 'retention.py', 'scene_cache.py', 'rethreshold/markers.py', 'rethreshold/scenes.py', 'storage/progress.py', 'inference/inputs.py', 'inference/identity.py', 'inference/checkpoints.py', 'signatures.py', 'storage/store.py', 'storage/database.py',
     'storage/results.py', 'storage/thresholds.py', 'storage/metadata.py', 'storage/publications.py', 'config.py',
 )

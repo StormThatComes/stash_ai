@@ -10,7 +10,7 @@ import pytest
 def test_pinned_loader_matches_upstream_safetensors_inference(tmp_path, monkeypatch):
     import torch
     from safetensors.torch import save_file
-    from stash_ai.joytag import loader_path, load_model
+    from stash_ai.backends.joytag import loader_path, load_model
 
     torch.set_num_threads(1)
     path = loader_path()
