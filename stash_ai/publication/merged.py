@@ -74,7 +74,7 @@ def publish_sync_plan(app, stash, resolver, store, scene_id, scene, markers, sce
     publication = None
     with stage(report, 'publication_fingerprint'):
         if publication_key is not None and not resolver.missing:
-            from stash_ai.performance import projected_scene, scene_fingerprint
+            from stash_ai.publication.fingerprints import projected_scene, scene_fingerprint
             observed = projected_scene(
                 scene, resolver, created, plan.updates, plan.deletes,
                 plan.final_scene_tag_ids if app.APPLY_SCENE_TAGS else plan.existing_scene_tag_ids)

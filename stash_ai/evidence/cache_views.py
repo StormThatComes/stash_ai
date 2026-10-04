@@ -25,7 +25,7 @@ def project(app, segment):
     """A transient view; original scores, statistics and provenance stay immutable."""
     from stash_ai.domain import Cue
     from stash_ai.evidence.identity import marker_segment_signature
-    from stash_ai.performance import StoredSegment
+    from stash_ai.storage.segments import StoredSegment
     from stash_ai.evidence.temporal.statistics import SceneAccumulator
     if getattr(segment, '_scene_projected', False):
         return segment
@@ -70,7 +70,7 @@ def views(app, records):
 
 def as_frames(segment):
     from stash_ai.evidence.identity import marker_segment_signature
-    from stash_ai.performance import StoredSegment
+    from stash_ai.storage.segments import StoredSegment
     if segment['mode'] != 'scene':
         return segment
     value = StoredSegment(mode='frames', items=segment['frames'], meta={**segment['meta'],

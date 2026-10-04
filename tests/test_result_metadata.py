@@ -5,7 +5,9 @@ import sqlite3
 import pytest
 
 from stash_ai.rethreshold import execution as rethreshold_execution, scenes as scene_updates
-from stash_ai import cli as app, db, performance
+from stash_ai import cli as app, db
+from stash_ai.publication import fingerprints as performance
+import stash_ai.storage.merge_checks as performance_merge_checks
 from stash_ai.reports.developer import report as developer_report
 import stash_ai.evidence.identity as scene_cache_identity
 import stash_ai.evidence.identity as thresholds_identity
@@ -288,14 +290,14 @@ def test_metadata_is_small_scoped_and_does_not_invalidate_merge(tmp_path):
             saved['markers']['items'] *= 1000
             store.put('1', 'wd', saved)
             with store.connection:
-                performance.record_check(store, '1', 'policy', 'fingerprint')
+                performance_merge_checks.record_check(store, '1', 'policy', 'fingerprint')
                 store.connection.execute('DELETE FROM result_metadata WHERE scope=?', (scope,))
             value = store.result_metadata('1', 'markers', 'wd')[0]
             assert value['meta']['inference_signature'] == scope
             assert value['populated'] is True
             assert 'items' not in value and 'frames' not in value
             assert len(metadata_rows(store)[-1][-1]) < 1000
-            assert performance.checked(store, '1', 'policy', 'fingerprint')
+            assert performance_merge_checks.checked(store, '1', 'policy', 'fingerprint')
     with StateStore(path, 'scope') as store:
         assert all(row[0] in ('scope', 'other') for row in metadata_rows(store))
 

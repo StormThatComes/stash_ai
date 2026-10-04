@@ -33,7 +33,7 @@ class CleanupRun:
                 allow_cleanup=self.wide or args.abandon_pending, cleanup_preview=True,
                 memory_budget_bytes=int(args.ram_budget_gb * 2**30)) as self.store:
             if args.abandon_pending:
-                from stash_ai.recovery import abandon
+                from stash_ai.storage.recovery import abandon
                 self.stats.update(abandon(self.store, self.report.write))
             self.stash = self.cleanup_stash = app.create_stash_client(app.DRY_RUN)
             try:

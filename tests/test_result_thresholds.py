@@ -8,7 +8,10 @@ import pytest
 
 from stash_ai.rethreshold import execution as rethreshold_execution, scenes as scene_updates
 from stash_ai import cli as app
-from stash_ai import db, performance, recovery
+from stash_ai import db
+from stash_ai.publication import fingerprints as performance
+import stash_ai.storage.merge_checks as performance_merge_checks
+from stash_ai.storage import recovery as recovery
 from stash_ai.storage import progress
 from stash_ai.cleanup import state as cleanup
 from stash_ai.reports.developer import report as developer_report
@@ -182,13 +185,13 @@ def test_override_invalidates_only_affected_scene_and_scope(tmp_path):
             for scene in ('1', '2'):
                 store.put(scene, 'wd', outputs())
                 with store.connection:
-                    performance.record_check(store, scene, 'policy', 'fingerprint')
+                    performance_merge_checks.record_check(store, scene, 'policy', 'fingerprint')
     with StateStore(path, 'scope') as store:
         rethreshold(store, .8)
-        assert not performance.checked(store, '1', 'policy', 'fingerprint')
-        assert performance.checked(store, '2', 'policy', 'fingerprint')
+        assert not performance_merge_checks.checked(store, '1', 'policy', 'fingerprint')
+        assert performance_merge_checks.checked(store, '2', 'policy', 'fingerprint')
     with StateStore(path, 'other', dry_run=True) as store:
-        assert performance.checked(store, '1', 'policy', 'fingerprint')
+        assert performance_merge_checks.checked(store, '1', 'policy', 'fingerprint')
         assert store.records('1', 'scene')['wd'] == [outputs()['scene']]
 
 

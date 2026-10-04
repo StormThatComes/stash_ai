@@ -44,7 +44,7 @@ def make_groups(records, signatures=None):
                 continue
             # A signature plus the actual timeline: shifted/missing cues never
             # become matching observations merely because metadata was copied.
-            from stash_ai.performance import frame_group
+            from stash_ai.storage.segments import frame_group
             key = frame_group(segment)
             signature = signatures[id(segment)] if signatures is not None else marker_segment_signature(segment)
             group = groups.setdefault(key, {"members": [], "context": defaultdict(set)})

@@ -61,7 +61,7 @@ def resolve_sync_tags(app, stash, resolver, scene_id, scene, markers, spans, sce
 
 def plan_scene_tags(app, store, scene_id, scene, scene_hits, scene_labels, ids, blocked_names, *, migrate):
     """Plan scene associations and the durable scene snapshot."""
-    from stash_ai.recovery import publications
+    from stash_ai.storage.recovery import publications
 
     current_tags = scene.get("tags", [])
     migrated_scene_ids = ({str(tag["id"]) for tag in current_tags if legacy_commands.legacy_label(tag["name"])}

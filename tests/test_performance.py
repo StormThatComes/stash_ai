@@ -20,7 +20,9 @@ from stash_ai.evidence import pipeline as merge
 import stash_ai.evidence.labels as merge_labels
 import stash_ai.storage.results as merge_results
 import stash_ai.storage.store as merge_store
-from stash_ai import performance
+from stash_ai.publication import fingerprints as performance
+import stash_ai.storage.merge_checks as performance_merge_checks
+import stash_ai.storage.segments as performance_segments
 from stash_ai.storage import progress
 from stash_ai.runtime.cache import RamCache
 from stash_ai.runtime.memory import retained_size
@@ -40,6 +42,8 @@ def fail(*args, **kwargs):
     'evidence/temporal/policy.py', 'evidence/temporal/statistics.py', 'evidence/temporal/markers.py', 'evidence/temporal/extras.py', 'evidence/intervals.py', 'evidence/timeline.py', 'evidence/retention.py',
     'evidence/pipeline.py', 'evidence/source_markers.py', 'evidence/identity.py', 'evidence/labels.py', 'inference/results.py', 'evidence/observations.py', 'evidence/frames.py', 'evidence/shared_markers.py', 'evidence/thresholds.py', 'inference/reuse.py', 'evidence/cache_views.py', 'evidence/scenes.py', 'evidence/occurrences.py',
     'publication/groups.py', 'publication/index.py', 'publication/planning/types.py', 'publication/planning/merged_evidence.py', 'publication/planning/merged_tags.py', 'publication/planning/merged_markers.py', 'publication/planning/separate_markers.py', 'publication/planning/separate_tags.py',
+    'publication/fingerprints.py', 'storage/segments.py', 'storage/merge_checks.py',
+    'inference/scene_predictions.py', 'commands/bootstrap.py',
     'config.py', 'commands/hierarchy.py', 'commands/legacy.py', 'rethreshold/markers.py', 'rethreshold/scenes.py', 'cleanup/state.py', 'cleanup/client.py',
 ])
 def test_publication_code_tracks_extracted_modules(monkeypatch, filename):
@@ -57,7 +61,7 @@ def test_publication_code_tracks_extracted_modules(monkeypatch, filename):
 @pytest.mark.parametrize('filename', [
     'runtime/cache.py', 'runtime/memory.py', 'runtime/timing.py', 'runtime/report.py', 'runtime/summary.py', 'runtime/diagnostics.py',
     'stash_api/client.py', 'stash_api/transport.py', 'vtt.py', 'commands/arguments.py', 'commands/validation.py', 'commands/dispatch.py', 'commands/explain.py',
-    'commands/marker_groups.py', 'cleanup/groups.py', 'cleanup/markers.py', 'cleanup/run.py', 'recovery.py', 'cleanup/sql.py', 'cleanup/sql_session.py',
+    'commands/marker_groups.py', 'cleanup/groups.py', 'cleanup/markers.py', 'cleanup/run.py', 'storage/recovery.py', 'publication/recovery.py', 'commands/recovery.py', 'cleanup/sql.py', 'cleanup/sql_session.py',
     'rethreshold/execution.py', 'rethreshold/targets.py', 'db/checks.py',
     'db/validation/common.py', 'db/validation/schema.py', 'db/validation/results.py',
     'db/validation/checkpoints.py', 'db/validation/state.py', 'runs/separate.py', 'cleanup/evidence.py', 'cleanup/scenes.py',
@@ -119,16 +123,16 @@ def test_derived_invalidation_rolls_back_with_the_transaction(tmp_path):
     with merge_store.StateStore(tmp_path/'state.db', 's') as state:
         state.put('1', 'wd', {'scene': dict(meta={}, items=[])})
         with state.connection:
-            performance.record_check(state, '1', 'p', 'f')
+            performance_merge_checks.record_check(state, '1', 'p', 'f')
         with pytest.raises(RuntimeError):
             with state.connection:
                 state.connection.execute('UPDATE results SET data=data')
-                assert not performance.checked(state, '1', 'p', 'f')
+                assert not performance_merge_checks.checked(state, '1', 'p', 'f')
                 raise RuntimeError('rollback')
-        assert performance.checked(state, '1', 'p', 'f')
+        assert performance_merge_checks.checked(state, '1', 'p', 'f')
         with state.connection:
             state.connection.execute('DELETE FROM results')
-        assert not performance.checked(state, '1', 'p', 'f')
+        assert not performance_merge_checks.checked(state, '1', 'p', 'f')
 
 
 def test_manual_hierarchy_change_invalidates_unchanged_scene(pipeline, monkeypatch):
@@ -153,12 +157,12 @@ def test_cleanup_generation_invalidates_only_its_scope(tmp_path):
     from stash_ai.cleanup.state import save_state
     with merge_store.StateStore(tmp_path/'state.db', 'a') as state:
         with state.connection:
-            performance.record_check(state, '1', 'p', 'f')
+            performance_merge_checks.record_check(state, '1', 'p', 'f')
         with state.connection:
             state.connection.execute("INSERT INTO merge_checks VALUES ('b','1','p','f')")
         state.cleanup_generation = 1
         save_state(state)
-        assert not performance.checked(state, '1', 'p', 'f')
+        assert not performance_merge_checks.checked(state, '1', 'p', 'f')
         assert state.connection.execute("SELECT COUNT(*) FROM merge_checks WHERE scope='b'").fetchone() == (1,)
 
 
@@ -222,13 +226,13 @@ def test_preview_detects_external_source_commit_even_for_fast_skip(tmp_path):
     path = tmp_path/'state.db'
     with merge_store.StateStore(path, 's') as state:
         with state.connection:
-            performance.record_check(state, '1', 'p', 'f')
+            performance_merge_checks.record_check(state, '1', 'p', 'f')
     with merge_store.StateStore(path, 's', True) as preview:
-        assert performance.checked(preview, '1', 'p', 'f')
+        assert performance_merge_checks.checked(preview, '1', 'p', 'f')
         with sqlite3.connect(path) as writer:
             writer.execute('DELETE FROM merge_checks')
         with pytest.raises(RuntimeError, match='changed during dry-run'):
-            performance.checked(preview, '1', 'p', 'f')
+            performance_merge_checks.checked(preview, '1', 'p', 'f')
 
 
 @pytest.mark.parametrize('prefetch', [0, 2])
@@ -322,8 +326,8 @@ def test_detached_records_cannot_reuse_a_stale_segment_digest(tmp_path):
     with merge_store.StateStore(tmp_path/'state.db', 's', cache_bytes=1000000) as state:
         state.put('1', 'wd', {'markers': dict(meta={}, items=[])})
         borrowed = state.records('1', 'markers', borrow=True)['wd'][0]
-        original = performance.segment_digest(borrowed)
+        original = performance_segments.segment_digest(borrowed)
         detached = state.records('1', 'markers')['wd'][0]
         detached['items'].append({'new': True})
-        assert performance.segment_digest(detached) != original
-        assert performance.segment_digest(borrowed) == original and borrowed['items'] == []
+        assert performance_segments.segment_digest(detached) != original
+        assert performance_segments.segment_digest(borrowed) == original and borrowed['items'] == []

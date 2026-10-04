@@ -25,7 +25,7 @@ def bootstrap_legacy(app, store, scene):
         existing = store.sources(scene_id, kind)
         if kind == "markers" and not existing and any(marker_ops.owned_marker(marker, merge_labels.AI) for marker in scene.get("scene_markers", [])):
             raise RuntimeError("Merged markers exist without their source state. Restore the original --state-db before synchronization.")
-        from stash_ai.performance import freeze
+        from stash_ai.signatures import freeze
         imported = {freeze(item) for item in store.imported_legacy(scene_id, kind, borrow=True)}
         originals = []
         by_model = defaultdict(list)

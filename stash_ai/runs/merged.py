@@ -15,7 +15,8 @@ from stash_ai.inference.inputs import RunInputs
 from stash_ai.publication.publisher import MergePublisher
 import stash_ai.evidence.labels as merge_labels
 import stash_ai.storage.store as merge_store
-from stash_ai import performance
+from stash_ai.publication import fingerprints
+import stash_ai.storage.merge_checks as merge_checks
 from stash_ai.storage import progress
 from stash_ai.runtime.timing import stage
 from .merged_model import MergedModelRun
@@ -52,7 +53,7 @@ class MergedRun:
             self.store = store
             store.report = self.report
             if args.abandon_pending:
-                from stash_ai.recovery import abandon
+                from stash_ai.storage.recovery import abandon
                 self.stats.update(abandon(store, self.report.write))
             self.stash = app.create_stash_client(app.DRY_RUN)
             self.stash.report = self.report
@@ -84,10 +85,10 @@ class MergedRun:
         self.use_catalog = bool(self.hierarchy or app.CREATE_MARKERS)
         if self.use_catalog or not args.scene_id or len(args.scene_id) > 1:
             self.resolver.preload()
-        self.base_key = performance.publication_key(
+        self.base_key = fingerprints.publication_key(
             app, args, self.hierarchy, self.core_policies, self.scene_policies)
         self.merge_key = (
-            digest([self.base_key, performance.catalog_fingerprint(self.resolver)])
+            digest([self.base_key, fingerprints.catalog_fingerprint(self.resolver)])
             if self.use_catalog else self.base_key)
         self.store.preload_sources()
 
@@ -98,8 +99,8 @@ class MergedRun:
                 scene_id = str(current["id"])
                 try:
                     with stage(self.report, 'scan_fingerprint'):
-                        fingerprint = performance.scene_fingerprint(current)
-                    publication_reason = performance.check_reason(
+                        fingerprint = fingerprints.scene_fingerprint(current)
+                    publication_reason = merge_checks.check_reason(
                         self.store, scene_id, self.merge_key, fingerprint)
                     if publication_reason == 'reused':
                         self.stats['bootstrap_reused'] += 1
@@ -174,7 +175,7 @@ class MergedRun:
                 create_missing=self.app.CREATE_MISSING)
             resolver.preload()
         final_key = digest([
-            self.base_key, performance.catalog_fingerprint(resolver)])
+            self.base_key, fingerprints.catalog_fingerprint(resolver)])
         if final_key != self.merge_key:
             with self.store.connection:
                 self.store.connection.execute(
