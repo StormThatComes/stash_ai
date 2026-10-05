@@ -1,6 +1,5 @@
 """Indexed native marker lookup must preserve the old full-scan reconciliation."""
 from copy import deepcopy
-import math
 import random
 
 import pytest
@@ -10,7 +9,7 @@ import stash_ai.evidence.interval_geometry as merge_intervals
 import stash_ai.evidence.labels as merge_labels
 import stash_ai.storage.store as merge_store
 from stash_ai.publication import merged as merge_sync
-from stash_ai.publication.index import MarkerIntervalIndex, PreviousMarkerRanges
+from stash_ai.publication.index import MarkerIntervalIndex
 from tests.helpers.evidence import span
 from tests.helpers.stash import Stash
 
@@ -20,13 +19,6 @@ pytestmark = pytest.mark.usefixtures('reset_merge')
 def marker(identifier, start, end, primary='core'):
     return dict(id=str(identifier), seconds=start, end_seconds=end,
                 primary_tag=dict(id=primary, name='ai:' + primary))
-
-
-def old_temporal(value, ranges):
-    ends = [row['end'] for row in ranges if row['end'] is not None
-            and 'ai:' + row['tag'] == value['primary_tag']['name']
-            and abs(round(row['start'], 3) - value['seconds']) <= .0005]
-    return {**value, 'end_seconds': max(ends)} if ends else value
 
 
 @pytest.mark.parametrize('tolerance', [0, .0005, .25, 1])
@@ -39,7 +31,7 @@ def test_lookup_matches_full_scan_for_nested_duplicates_points_and_boundaries(to
                 marker('rounding', -1e-17, None), marker('point', 20, None)]
     rng.shuffle(markers)
     saved = deepcopy(markers)
-    index = MarkerIntervalIndex(markers, PreviousMarkerRanges([]), by_name=by_name)
+    index = MarkerIntervalIndex(markers, by_name=by_name)
     queries = [(start, end) for start in (-100, 0, 1, 10, 20, 100) for end in (None, 0, 10, 20, 100)]
     queries += [(rng.uniform(-25, 65), rng.choice([None, rng.uniform(-25, 65)])) for _ in range(100)]
     for label in ('core', 'other', 'missing'):
@@ -53,35 +45,16 @@ def test_lookup_matches_full_scan_for_nested_duplicates_points_and_boundaries(to
 
 
 def test_start_tolerance_does_not_extend_interval_ends():
-    index = MarkerIntervalIndex([marker('old', 0, 5), marker('point', 10, None)], PreviousMarkerRanges([]))
+    index = MarkerIntervalIndex([marker('old', 0, 5), marker('point', 10, None)])
     assert index.overlapping('core', dict(seconds=5.1, end_seconds=6), .25) == []
     assert [m['id'] for m in index.overlapping('core', dict(seconds=10.2, end_seconds=None), .25)] == ['point']
     assert [m['id'] for m in index.overlapping('core', dict(seconds=5, end_seconds=6))] == ['old']
 
 
-def test_saved_point_extents_match_original_rounding_and_maximum_selection():
-    ranges = [dict(tag='core', start=10.0004, end=15), dict(tag='core', start=10.0003, end=30),
-              dict(tag='core', start=10.001, end=25), dict(tag='core', start=10, end=None),
-              dict(tag='other', start=10, end=50)]
-    ranges += [dict(tag='core', start=i * 3, end=i * 3 + 1) for i in range(200)]
-    saved = deepcopy(ranges)
-    previous = PreviousMarkerRanges(ranges)
-    for start in (10, 10.0005, math.nextafter(10.0005, -math.inf), math.nextafter(10.0005, math.inf),
-                  10.001, 11, 12, 999):
-        for label in ('core', 'other', 'missing'):
-            value = marker('id', start, None, label)
-            assert previous.temporal(value) == old_temporal(value, ranges)
-    value = marker('id', 10, None)
-    index = MarkerIntervalIndex([value], previous)
-    assert index.temporal(value)['end_seconds'] == 30
-    assert index.overlapping('core', dict(seconds=20, end_seconds=22)) == [value]
-    assert value['end_seconds'] is None and ranges == saved
-
-
 def test_nested_long_range_does_not_force_scanning_unrelated_short_ranges(monkeypatch):
     markers = [marker(i, i*3, i*3 + 1) for i in range(10000)]
     markers.append(marker('outer', 0, 40000))
-    index = MarkerIntervalIndex(markers, PreviousMarkerRanges([]))
+    index = MarkerIntervalIndex(markers)
     calls, overlaps = [], merge_intervals.overlaps
     def counted(*args):
         calls.append(args[0]['id'])
@@ -93,16 +66,13 @@ def test_nested_long_range_does_not_force_scanning_unrelated_short_ranges(monkey
 
 class ScanningIndex:
     """Reference semantics: visit every marker of the selected primary tag."""
-    def __init__(self, markers, previous_ranges, *, by_name=False):
-        self.markers, self.previous, self.by_name = markers, previous_ranges, by_name
-
-    def temporal(self, marker):
-        return self.previous.temporal(marker)
+    def __init__(self, markers, *, by_name=False):
+        self.markers, self.by_name = markers, by_name
 
     def overlapping(self, primary, interval, tolerance=0):
         field = 'name' if self.by_name else 'id'
         return [m for m in self.markers if str(m['primary_tag'][field]) == primary
-                and merge_intervals.overlaps(self.temporal(m), interval, tolerance)]
+                and merge_intervals.overlaps(m, interval, tolerance)]
 
 
 @pytest.mark.parametrize('dry', [False, True])
@@ -161,4 +131,5 @@ def test_publication_split_duplicates_cleanup_and_retry_match_scanner(
             if dry:
                 assert path.read_bytes() == source
     assert variants[0] == variants[1]
+
 

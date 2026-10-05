@@ -39,6 +39,8 @@ class MetadataStore:
             segments = summarize(store.unpack(payload))
             with backfill_batch(store):
                 self.save(scene, model, kind, segments)
+        from stash_ai.storage.archive import validate_active
+        validate_active(segments)
         return overlay(segments, kind, threshold)
 
     def save(self, scene, model, kind, segments):
@@ -47,3 +49,4 @@ class MetadataStore:
         store.connection.execute('INSERT INTO result_metadata VALUES (?,?,?,?,?,?) '
             'ON CONFLICT(scope,scene,model,kind) DO UPDATE SET format=excluded.format,data=excluded.data',
             (store.scope, str(scene), model, kind, FORMAT, encode(segments)))
+

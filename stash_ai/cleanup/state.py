@@ -10,6 +10,10 @@ def initialize(store):
             scope TEXT PRIMARY KEY, generation INTEGER NOT NULL, data BLOB NOT NULL,
             pending TEXT);
     ''')
+    load(store)
+
+
+def load(store):
     row = store.connection.execute(
         'SELECT generation,data,pending FROM cleanup_state WHERE scope=?', (store.scope,)).fetchone()
     store.cleanup_generation, store.cleanup_masks, store.cleanup_pending = (
@@ -62,7 +66,7 @@ def mask_snapshot(store, snapshot, kind):
     if any(revision > generation and kind in kinds for revision, kinds in abandoned.items()):
         result['recovery_required'] = True
     contributions = []
-    for item in snapshot.get('contributions', []):
+    for item in snapshot['contributions']:
         if item['tag'] in blocked or (kind == 'markers' and item['tag'] in cores):
             continue
         item = dict(item)
@@ -93,3 +97,4 @@ def mask_snapshot(store, snapshot, kind):
 def stamp_snapshot(store, snapshot):
     snapshot = {key: value for key, value in snapshot.items() if key != 'recovery_required'}
     return {**snapshot, 'cleanup_generation': store.cleanup_generation} if store.cleanup_generation else snapshot
+

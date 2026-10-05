@@ -55,6 +55,9 @@ def validate_maintenance(parser, args):
         modifiers = tuple(name for name in PUBLICATION_OPTIONS if name not in ('markers_only', 'scene_tags_only'))
         if supplied(args, modifiers):
             parser.error('--import-legacy-only cannot publish, rethreshold, prune or abandon plans.')
+    if args.migrate_point_markers_only:
+        if supplied(args, (*MODEL_OPTIONS, *PUBLICATION_OPTIONS)):
+            parser.error('--migrate-point-markers-only does not infer, publish new evidence or change policies.')
     if args.prune_legacy_imports:
         if args.scene_id:
             parser.error("--prune-legacy-imports covers the current Stash/state DB; --scene-id does not apply.")
@@ -141,3 +144,4 @@ def validate_args(app, parser: argparse.ArgumentParser, args: argparse.Namespace
     validate_maintenance(parser, args)
     validate_pipeline(app, parser, args)
     return args
+

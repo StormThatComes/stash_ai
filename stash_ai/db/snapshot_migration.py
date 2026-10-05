@@ -82,7 +82,7 @@ def normalize_item(item):
 def normalize(snapshot):
     # Preserve shared proof objects. Only contribution build options are copied.
     if 'contributions' not in snapshot:
-        return snapshot
+        return {**snapshot, 'contributions': []}
     if not isinstance(snapshot['contributions'], list) or any(
             not isinstance(item, dict) for item in snapshot['contributions']):
         raise ValueError('Invalid historical snapshot contributions.')

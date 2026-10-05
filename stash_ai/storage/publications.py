@@ -56,6 +56,7 @@ class PublicationStore:
     @measured('state_write')
     def prepare(self, scene, snapshots):
         store = self.store
+        from stash_ai.storage.archive import prune
         from stash_ai.cleanup.state import stamp_snapshot
         with store.connection:
             for kind, data in snapshots.items():
@@ -69,9 +70,12 @@ class PublicationStore:
                     "ON CONFLICT(scope,scene,kind) DO UPDATE SET pending=excluded.pending",
                     (store.scope, str(scene), kind, store.pack_snapshot(stamp_snapshot(store, data))))
 
+            prune(store, scene)
+
     @measured('state_write')
     def publish(self, scene, snapshots):
         store = self.store
+        from stash_ai.storage.archive import prune
         from stash_ai.cleanup.state import stamp_snapshot
         from stash_ai.storage.recovery import clear_publications
         with store.connection:
@@ -81,11 +85,13 @@ class PublicationStore:
                     "ON CONFLICT(scope,scene,kind) DO UPDATE SET published=excluded.published,pending=NULL",
                     (store.scope, str(scene), kind, store.pack_snapshot(stamp_snapshot(store, data))))
                 clear_publications(store, scene, kind)
+            prune(store, scene)
 
     @measured('state_write')
     def commit_prepared(self, scene, kinds, *, publication=None):
         """Promote durable intent without encoding large evidence a second time."""
         store = self.store
+        from stash_ai.storage.archive import prune
         from stash_ai.storage.recovery import clear_publications
         with store.connection:
             for kind in kinds:
@@ -97,6 +103,8 @@ class PublicationStore:
                 if changed != 1:
                     raise RuntimeError('Publication intent disappeared before commit.')
                 clear_publications(store, scene, kind)
+            prune(store, scene)
             if publication is not None:
                 from stash_ai.storage.merge_checks import record_check
                 record_check(store, scene, *publication)
+

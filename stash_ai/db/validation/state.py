@@ -11,6 +11,7 @@ from .common import decoded_payload, tick
 
 def check_state_payloads(db, tables, errors, progress=None):
     specs = (
+        ("inference_archive", "data", dict),
         ("snapshots", "published", dict),
         ("snapshots", "pending", dict),
         ("legacy_imports", "data", list),
@@ -20,25 +21,31 @@ def check_state_payloads(db, tables, errors, progress=None):
         ("recovery_publications", "data", dict),
     )
     checked = 0
-    version = db.execute('PRAGMA user_version').fetchone()[0]
     for table, column, expected in specs:
         if table not in tables or column not in column_names(db, table):
             continue
-        for blob, in db.execute(f"SELECT {column} FROM {table} WHERE {column} IS NOT NULL"):
+        details = ',signature,kind' if table == 'inference_archive' else ',NULL,NULL'
+        for blob, signature, kind in db.execute(f"SELECT {column}{details} FROM {table} WHERE {column} IS NOT NULL"):
             checked += 1
             tick(progress)
             try:
                 if table in ('snapshots', 'recovery_publications'):
-                    if version >= 12:
-                        from stash_ai.storage.snapshots import decode
-                    else:
-                        from stash_ai.db.snapshot_migration import decode_legacy as decode
+                    from stash_ai.storage.snapshots import decode
                     payload = decode(blob)
                 else:
                     payload = decoded_payload(blob, expected)
+                if table == 'inference_archive':
+                    from stash_ai.db.payloads import valid_result_segments
+                    from stash_ai.evidence.formats import validate_current
+                    if payload['meta'].get('origin') != 'inference' or not valid_result_segments([payload], kind):
+                        raise ValueError('Invalid archived inference proof.')
+                    validate_current(payload)
+                    from stash_ai.evidence.identity import marker_segment_signature
+                    if marker_segment_signature(payload) != signature:
+                        raise ValueError('Archived proof signature mismatch.')
                 if table == "checkpoint_frames" and not valid_frames(payload, checkpoint=True):
                     raise ValueError("Invalid checkpoint frame evidence.")
-            except (TypeError, ValueError, UnicodeDecodeError, json.JSONDecodeError, zlib.error):
+            except (KeyError, TypeError, ValueError, UnicodeDecodeError, json.JSONDecodeError, zlib.error):
                 errors["state_payload_invalid"] += 1
     return checked
 
@@ -123,3 +130,4 @@ def check_state_relations(db, tables, warnings):
         else:
             warnings["recovery_publication_without_snapshot"] += count_rows(
                 db, tables, "recovery_publications")
+

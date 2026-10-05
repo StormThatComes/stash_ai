@@ -131,8 +131,8 @@ klatki, wyniki i podpisy dowodów zachowują swoje wartości.
 
 Snapshoty merge zapisują współdzielone dowody `extra_support` raz, a contributions
 odwołują się do nich przez referencje. Zmniejsza to koszt serializacji i kompresji.
-Aktualny schemat to v12; starsze wersje programu odmówią jego otwarcia. Każdy nowy snapshot ma otoczkę formatu v3. `--db-update` konwertuje dawne
-snapshoty, także pending i recovery, oraz uzupełnia kompletne opcje odtwarzania, również w zagnieżdżonych dowodach scen.
+Aktualny schemat to v14; starsze wersje programu odmówią jego otwarcia. Każdy nowy snapshot ma otoczkę formatu v4. `--db-update` konwertuje dawne
+snapshoty, także pending i recovery, dopisuje wymagane `contributions: []` do pustych zapisów oraz uzupełnia kompletne opcje odtwarzania, również w zagnieżdżonych dowodach scen.
 Dawny `blocklist` zostaje połączony z zapisanymi `tag_exclusions` wszystkich źródeł.
 Brakujące dawne przełączniki współdzielenia i occurrences zachowują `False`.
 Wersjonowanie analizy checkpointu dotyczy wyłącznie niedokończonej inferencji:
@@ -209,7 +209,10 @@ sprawdza zgodność istniejących metadanych z evidence bez ich naprawiania.
 Nowa inferencja zawsze zastępuje poprzednie wyniki danego modelu i rodzaju.
 Historyczne serie są normalizowane przy potwierdzonym reuse; import legacy
 nadal dopisuje dowody atomowo. Zwykłe przedziały opublikowane dawniej jako
-punkty odzyskują długość ze snapshotów przy uzgadnianiu, bez ponownej inferencji.
+punkty wymagają jednorazowego `--migrate-point-markers-only` (także z `--dry-run`).
+Komenda zapisuje długość ze snapshotów published, pending i recovery w natywnym `end_seconds`,
+zachowując ID, tytuły i ręczne tagi. Punkty `OccurrenceTag` pozostają punktami.
+Zwykły merge/cleanup nie odtwarza już długości w pamięci.
 
 ### Import historycznych wyników modeli
 
@@ -252,9 +255,9 @@ SQLite do systemu plików.
 ### Zdrowie, aktualizacja i kompaktowanie bazy stanu
 
 `--db-update` aktualizuje całą istniejącą bazę wskazaną przez `--state-db`
-do najnowszego obsługiwanego schematu (obecnie v12), we wszystkich scope'ach.
+do najnowszego obsługiwanego schematu (obecnie v14), we wszystkich scope'ach.
 Zwykłe uruchomienie oraz `--dry-run` wymagają aktualnego schematu: starszą bazę
-trzeba najpierw zaktualizować tą komendą. Nowa baza od razu otrzymuje v12.
+trzeba najpierw zaktualizować tą komendą. Nowa baza od razu otrzymuje v14.
 Updater korzysta z tego samego locka writera; migracje są wyłącznie offline.
 Tworzy aktualne tabele, indeksy i triggery, uzupełnia `result_index` dla baz
 sprzed v2, uzupełnia historyczne `result_metadata` we wszystkich scope'ach
@@ -272,7 +275,8 @@ etapy pośrednie, ale najnowsza wersja jest ustawiana dopiero po ukończeniu
 inicjalizacji. Przerwaną aktualizację można uruchomić ponownie.
 
 `--db-check` wykonuje głęboki, wyłącznie odczytowy test spójności całej bazy
-(we wszystkich scope'ach). Oprócz pełnego SQLite `integrity_check` sprawdza m.in.
+(we wszystkich scope'ach). Dla starszego schematu wykonuje tylko preflight wersji i integralności SQLite,
+a przed głęboką walidacją wymaga `--db-update`. Oprócz pełnego SQLite `integrity_check` sprawdza m.in.
 zgodność `results` z `result_index` (łącznie z zapisaną sygnaturą ostatniej
 inferencji), dekodowalność trwałych BLOB-ów, dozwolone model/kind, relacje
 checkpoint/frames/analysis, wymiary checkpointów oraz generacje cleanup/recovery.
@@ -540,11 +544,17 @@ uruchamiania `pip`. Wymaga tokena GitHub z dostępem `Contents: read` do
 prywatnego repozytorium.
 
 Przy pierwszym przejściu ze starego układu (moduły `stash_*.py` obok launchera)
-uruchom updater **dwa razy**. Stara wersja pobiera tylko pliki z katalogu
-głównego; drugie uruchomienie nowego updatera pobierze pakiet `stash_ai/`.
-Zachowaj te same potrzebne opcje, np. `--force-code`. Przed ukończeniem migracji
-launcher wyświetla instrukcję ponownego uruchomienia updatera. Przy `git pull`
-lub użyciu najnowszego updatera od początku wystarczy jedna aktualizacja.
+uruchom starą wersję updatera raz, a potem nową wersję z jawną migracją:
+
+```powershell
+python .\update_stash_ai.py --migrate-flat-layout --dry-run
+python .\update_stash_ai.py --migrate-flat-layout
+```
+
+Migrator usuwa wyłącznie znane dawne moduły i wycofane ścieżki, zachowując backupy.
+Zmodyfikowany kod nadal wymaga `--force-code`. Kolejne zwykłe aktualizacje sprawdzają
+kod zarządzany w zapisanej historii; nie skanują już nieśledzonych plików starego układu.
+Przy `git pull` lub użyciu najnowszego updatera od początku nie ma etapu starego updatera.
 
 ```powershell
 $env:GH_TOKEN = "<fine-grained PAT>"
@@ -606,3 +616,10 @@ Pliki w `docs/validation/` są historycznymi wynikami konkretnych walidacji i
 benchmarków. Nie opisują bieżącej liczby testów ani aktualnego kontraktu aplikacji.
 
 Nazwy konfiguracji i CLI są opisane w [instrukcji aktualizacji wykluczeń](docs/UPGRADE_exclusions.md#aktualizacja-starych-nazw). Używaj `excluded_scene_tags`, `--models`, `--scene-tag-exclusions` i `--cleanup-markers-only`; domyślny plik markerów to `marker_core_exclusions.yml`.
+
+
+W schemacie v14 `results` zawiera najwyżej jedną aktywną inferencję na model i wyjście.
+`--db-update` przenosi starsze segmenty do `inference_archive` tylko wtedy, gdy dokładna
+sygnatura dowodu występuje w published, pending lub recovery. Nowa inferencja stosuje tę samą
+zasadę; archiwum służy wyłącznie frozen replay i jest przycinane po zmianie publikacji.
+Zwykły merge, raporty, progi i indeks ukończenia nie korzystają z historii inferencji.

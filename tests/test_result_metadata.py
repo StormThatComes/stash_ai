@@ -111,7 +111,7 @@ def test_metadata_check_matches_payload_validation(tmp_path, problem):
         assert messages[0] == messages[1]
 
 
-def test_late_historical_failure_applies_no_thresholds(tmp_path, monkeypatch):
+def test_retired_inference_floor_does_not_block_current_thresholds(tmp_path, monkeypatch):
     with StateStore(tmp_path/'state.sqlite3', 'scope') as store:
         store.put('1', 'wd', outputs())
         old = outputs()
@@ -120,8 +120,8 @@ def test_late_historical_failure_applies_no_thresholds(tmp_path, monkeypatch):
         seed_history(store, '2', 'wd', outputs(.6, 'new'), replace=dict(scene=False, markers=False))
         raw = blobs(store)
         monkeypatch.setattr(store, 'unpack', lambda *a: pytest.fail('Check decoded evidence'))
-        assert rethreshold(store, .8, scenes=('1', '2')) == {'errors': 1}
-        assert not threshold_rows(store)
+        assert rethreshold(store, .8, scenes=('1', '2')) == {'scene_thresholds_updated': 2}
+        assert len(threshold_rows(store)) == 4
         assert blobs(store) == raw
 
 
@@ -167,7 +167,7 @@ def test_old_database_backfills_once_and_keeps_inline_overrides(tmp_path, monkey
         store.connection.set_trace_callback(statements.append)
         assert scene_updates.plan(app, store, '1', config(.4), request=ThresholdRequest(kinds=('scene', 'markers'), access=RecordAccess.METADATA))
         assert report.timing_calls['state_json_decode'] == 0
-        assert store.connection.execute('PRAGMA user_version').fetchone() == (12,)
+        assert store.connection.execute('PRAGMA user_version').fetchone() == (14,)
         first = metadata_rows(store)
         assert len(first) == 2
         monkeypatch.setattr(store, 'unpack', lambda *a: pytest.fail('Repeated legacy decode'))
@@ -197,12 +197,9 @@ def test_preview_new_inference_metadata_hides_source_and_tracks_history(tmp_path
         seed_history(store, '1', 'wd', new, replace=dict(scene=replace, markers=replace))
         for kind in ('scene', 'markers'):
             metadata = store.result_metadata('1', kind, 'wd')
-            assert len(metadata) == (1 if replace else 2)
+            assert len(metadata) == 1
             assert metadata[-1]['meta']['inference_signature'] == 'new'
             assert metadata[-1]['meta']['scene_threshold'] == .6
-            if not replace:
-                key = scene_cache_identity.SCENE_OVERRIDE if kind == 'scene' else thresholds_identity.OVERRIDE
-                assert metadata[0][key] == .8
     if dry_run:
         assert path.read_bytes() == source
     else:
