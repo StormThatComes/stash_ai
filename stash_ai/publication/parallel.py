@@ -5,8 +5,9 @@ all Stash access, tag resolution, publication intent and SQLite writes serial.
 """
 from __future__ import annotations
 
-from collections import Counter
+from collections import Counter, deque
 from concurrent.futures import ProcessPoolExecutor
+from itertools import islice
 from multiprocessing import get_context
 from pathlib import Path
 
@@ -67,6 +68,27 @@ def _worker_evidence(scene_id):
         return str(scene_id), None, None, None, f"{type(exc).__name__}: {exc}"
 
 
+def _bounded_evidence(executor, scene_ids, limit):
+    """Keep at most limit queued results while yielding in scene order."""
+    scene_ids = iter(scene_ids)
+    pending = deque()
+    try:
+        for scene_id in islice(scene_ids, limit):
+            pending.append(executor.submit(_worker_evidence, scene_id))
+        while pending:
+            result = pending.popleft().result()
+            # Refill before publishing so workers can prepare the next scene
+            # while the parent writes this result to Stash.
+            scene_id = next(scene_ids, None)
+            if scene_id is not None:
+                pending.append(executor.submit(_worker_evidence, scene_id))
+            yield result
+            del result
+    finally:
+        for future in pending:
+            future.cancel()
+
+
 def iter_parallel_evidence(app, state_db, scope, scene_ids, core_policies,
                            scene_policies, *, workers, cache_bytes,
                            memory_budget_bytes):
@@ -98,9 +120,4 @@ def iter_parallel_evidence(app, state_db, scope, scene_ids, core_policies,
             worker_budget,
         ),
     ) as executor:
-        yield from executor.map(
-            _worker_evidence,
-            scene_ids,
-            chunksize=1,
-            buffersize=max(workers, 2),
-        )
+        yield from _bounded_evidence(executor, scene_ids, workers)

@@ -12,7 +12,7 @@ pochodzi wyłącznie z VTT i sprite'ów Stash; aplikacja nie otwiera plików wid
 
 ## Wymagania
 
-- Python **3.14.7** — to jedyna wspierana i testowana wersja;
+- Python **3.12.14 lub nowszy** — target projektu jest zapisany w `.python-version`;
 - Stash **0.31.1 lub nowszy** z wygenerowanymi sprite'ami/VTT;
 - zależności z `requirements.txt`;
 - CUDA jest zalecana; CPU działa, ale jest znacznie wolniejsze.
@@ -577,9 +577,25 @@ pip install -r requirements-dev.txt
 python -m pytest -q
 ```
 
-CI testuje Python 3.14.7. Pełny zestaw testów działa na Linux, a updater jest
-dodatkowo sprawdzany na Windows. Testy używają atrap Stash i modeli; nie wymagają
-produkcyjnego serwera.
+CI testuje target z `.python-version` (obecnie **3.12.14**) oraz **3.14.7**.
+Pełny zestaw testów, w tym integracyjny smoke test JoyTag na CPU, działa na Linux,
+a updater jest dodatkowo sprawdzany na Windows na obu wersjach Pythona.
+Testy nie wymagają produkcyjnego serwera Stash.
+
+Osobny workflow `Codex Python availability` sprawdza na PR-ach, po zmianach
+`main` i raz w tygodniu, czy dokładny target projektu jest już zainstalowany
+w najnowszym publicznym obrazie `ghcr.io/openai/codex-universal:latest`.
+Nie uruchamia instalacji Pythona ani setupu obrazu; brak tej wersji kończy job
+błędem i pokazuje dostępne interpretery. Wersja na domyślnym `PATH` jest wypisywana
+osobno — dostępność targetu nie oznacza, że jest on wybranym interpreterem.
+
+Publiczny obraz jest [według OpenAI](https://github.com/openai/codex-universal)
+tylko przybliżeniem środowiska Codex, a nie
+identycznym obrazem ChatGPT Work. Ten job monitoruje obraz referencyjny, nie
+gwarantuje wersji w konkretnym czacie. W rzeczywistym workspace można uruchomić
+`bash .github/scripts/check-codex-python.sh`; gdy dostępny jest
+`CODEX_PRIMARY_RUNTIME_PYTHON`, skrypt sprawdza dostarczony interpreter zamiast
+wersji zainstalowanych przez użytkownika.
 
 ## Dokumentacja
 

@@ -1,0 +1,36 @@
+name: Codex Python availability
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: '17 6 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  codex-python:
+    name: Preinstalled Python in Codex reference image
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pull latest Codex reference image
+        env:
+          CODEX_REFERENCE_IMAGE: ghcr.io/openai/codex-universal:latest
+        run: |
+          docker pull "$CODEX_REFERENCE_IMAGE"
+          docker image inspect --format '{{index .RepoDigests 0}}' "$CODEX_REFERENCE_IMAGE" >> "$GITHUB_STEP_SUMMARY"
+      - name: Check preinstalled target without setup or network
+        env:
+          CODEX_REFERENCE_IMAGE: ghcr.io/openai/codex-universal:latest
+        run: |
+          docker run --rm --network none --entrypoint /bin/bash \
+            --workdir /tmp \
+            --mount "type=bind,source=$PWD/.python-version,target=/project/.python-version,readonly" \
+            --mount "type=bind,source=$PWD/.github/scripts/check-codex-python.sh,target=/project/check-codex-python.sh,readonly" \
+            "$CODEX_REFERENCE_IMAGE" \
+            /project/check-codex-python.sh /project/.python-version

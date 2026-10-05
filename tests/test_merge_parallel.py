@@ -4,7 +4,9 @@ from tests.helpers.temporal import threshold_policy
 
 import json
 from collections import Counter
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
+from threading import Event
 
 import pytest
 
@@ -139,3 +141,59 @@ def test_parallel_evidence_matches_serial_read_only(tmp_path):
         memory_budget_bytes=256 * 2**20,
     ))
     assert path.read_bytes() == before
+
+
+def test_evidence_queue_preserves_order_and_bounds_fast_results(monkeypatch):
+    second_finished = Event()
+    consumed = []
+
+    def scenes():
+        for scene in range(100):
+            consumed.append(scene)
+            yield scene
+
+    def evidence(scene):
+        if scene == 0:
+            assert second_finished.wait(5), 'second scene did not finish'
+        elif scene == 1:
+            second_finished.set()
+        return scene
+
+    monkeypatch.setattr(merge_parallel, '_worker_evidence', evidence)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = merge_parallel._bounded_evidence(executor, scenes(), 2)
+        try:
+            # Scene 1 completes first; scene 0 must still be published first.
+            assert next(results) == 0
+            # Only two queued results plus the one held by the publisher are
+            # prepared, even when the workers finish faster than publication.
+            assert consumed == [0, 1, 2]
+            assert list(results) == list(range(1, 100))
+        finally:
+            results.close()
+
+
+@pytest.mark.parametrize('failure', [False, True])
+def test_evidence_queue_cancels_pending_work_on_stop(failure):
+    futures = []
+
+    class Executor:
+        def submit(self, function, scene):
+            future = Future()
+            if scene == 'first':
+                if failure:
+                    future.set_exception(RuntimeError('worker failed'))
+                else:
+                    future.set_result(scene)
+            futures.append(future)
+            return future
+
+    results = merge_parallel._bounded_evidence(
+        Executor(), ['first', 'second', 'third'], 2)
+    if failure:
+        with pytest.raises(RuntimeError, match='worker failed'):
+            next(results)
+    else:
+        assert next(results) == 'first'
+        results.close()
+    assert all(future.cancelled() for future in futures[1:])
