@@ -19,9 +19,8 @@ def capture_outputs(app, config, vocabulary, cues, predictions, frames, analysis
             "input_cues_sha256": hashlib.sha256(json.dumps(cue_data, ensure_ascii=False).encode()).hexdigest(),
             "scene_threshold": config.scene_threshold, "marker_threshold": config.marker_threshold,
             "aggregation": app.AGGREGATION, "top_k_frames": app.TOP_K_FRAMES}
-    if app.TEMPORAL_POLICY.enabled:
-        meta.update(analysis_format=3,
-                    scene_support_floor=config.scene_threshold * app.TEMPORAL_POLICY.scene_support_ratio)
+    meta.update(analysis_format=3,
+                scene_support_floor=config.scene_threshold * app.TEMPORAL_POLICY.scene_support_ratio)
     meta['marker_score_floor'] = marker_cache_floor(config, app.TEMPORAL_POLICY)
     outputs = {}
     if app.APPLY_SCENE_TAGS:

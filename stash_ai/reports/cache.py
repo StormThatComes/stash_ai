@@ -155,8 +155,6 @@ def run(app, args):
                            ('--marker-core-exclusions', args.marker_core_exclusions),
                            ('--scene-tag-exclusions', args.scene_tag_exclusions)):
             context.extend((flag, str(Path(path).expanduser().resolve())))
-        if args.no_temporal:
-            context.append('--no-temporal')
         with report_store(app, args) as store:
             report = build_report(local, store, scene_ids(store, args.scene_id), settings, context)
         destination = write_json_report(report, args.cache_report)

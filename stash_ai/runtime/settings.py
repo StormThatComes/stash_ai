@@ -17,7 +17,6 @@ class RuntimeSettings:
     """Own one invocation's settings; evidence workers use this data-only context."""
 
     INSTALL_ROOT: Path = INSTALL_ROOT
-    DEFAULT_OUTPUT_MODE: str = "merged"
     DEFAULT_RESUME: bool = True
     CHECKPOINT_BATCHES: int = 8
     PREFETCH_BATCHES: int = 4
@@ -25,7 +24,6 @@ class RuntimeSettings:
     RAM_BUDGET_GB: float = 32.0
     PREPARE_WORKERS: int = 4
     MERGE_STATE_FILE: Path = INSTALL_ROOT / "tagger_sources.sqlite3"
-    DEFAULT_TEMPORAL: bool = True
     TEMPORAL_POLICY: TemporalPolicy = field(default_factory=TemporalPolicy)
     TEMPORAL_POLICY_FILE: Path = INSTALL_ROOT / "temporal_policy.yml"
     STASH_URL: str = field(default_factory=lambda: os.getenv("STASH_URL", "http://localhost:9999"))

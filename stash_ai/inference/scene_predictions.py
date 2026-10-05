@@ -13,7 +13,7 @@ def retained_scores(scores, labels, scene_frames):
 
 def temporal_scores(scores, labels, indexes, statistics, threshold, policy,
                     *, raw_scene, exclusions):
-    """Raw evidence keeps candidates; separate publication applies qualification."""
+    """Raw evidence keeps candidates; direct callers apply qualification."""
     predictions = [(labels[index], float(scores[index])) for index in indexes]
     predictions = [(tag, score) for tag, score in predictions
                    if raw_scene or (tag not in exclusions and

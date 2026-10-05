@@ -46,7 +46,7 @@ def _restore_prediction_state(app, tagger, cues, *, raw_scene, checkpoint, repor
     policy = app.TEMPORAL_POLICY
     retain_scene = raw_scene and app.APPLY_SCENE_TAGS
     scene_floor = scene_cache_floor(settings, policy)
-    # Separate mode has no persistent evidence; use the publication floor there.
+    # Raw evidence retains the cache floor; direct callers use the publication floor.
     retained_marker_floor = (marker_cache_floor(settings, policy) if raw_scene
                              else marker_floor(policy, settings.marker_threshold))
     processed, top_scores, saved = (
@@ -60,7 +60,7 @@ def _restore_prediction_state(app, tagger, cues, *, raw_scene, checkpoint, repor
             policy,
             checkpoint.analysis if checkpoint else None,
         )
-        if policy.enabled and app.APPLY_SCENE_TAGS
+        if app.APPLY_SCENE_TAGS
         else None
     )
     if accumulator is not None and accumulator.frames != processed:
@@ -213,8 +213,6 @@ def _finalize_predictions(app, tagger, scene_exclusions, state, *, raw_scene, an
             scene_scores, labels, state.accumulator.items, statistics,
             settings.scene_threshold, state.policy,
             raw_scene=raw_scene, exclusions=scene_exclusions)
-    elif state.retain_scene:
-        predictions = retained_scores(scene_scores, labels, state.scene_frames)
     else:
         predictions = [
             (tag, score)

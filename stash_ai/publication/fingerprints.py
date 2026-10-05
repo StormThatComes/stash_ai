@@ -13,8 +13,8 @@ from stash_ai.signatures import digest
 PUBLICATION_CODE_FILES = (
     'storage/metadata_store.py', 'storage/legacy.py', 'storage/schema.py', 'rethreshold/plans.py',
     'evidence/contracts.py', 'evidence/marker_identity.py', 'evidence/interval_geometry.py', 'inference/input_identity.py',
-    'runtime/settings.py', 'runtime/context.py', 'runtime/workers.py', 'evidence/marker_building.py',
-    'cli.py', 'commands/bootstrap.py', 'evidence/pipeline.py', 'evidence/source_markers.py', 'evidence/identity.py', 'evidence/labels.py', 'inference/results.py', 'commands/hierarchy.py', 'commands/legacy.py', 'runs/merged.py', 'runs/merged_model.py', 'publication/publisher.py', 'publication/parallel.py', 'publication/merged.py', 'publication/planning/types.py', 'publication/planning/merged_evidence.py', 'publication/planning/merged_tags.py', 'publication/planning/merged_markers.py', 'publication/planning/separate_markers.py', 'publication/planning/separate_tags.py', 'publication/index.py', 'publication/separate.py', 'publication/markers.py',
+    'runtime/settings.py', 'runtime/context.py', 'runtime/workers.py',
+    'cli.py', 'commands/bootstrap.py', 'evidence/pipeline.py', 'evidence/source_markers.py', 'evidence/historical_markers.py', 'evidence/identity.py', 'evidence/labels.py', 'inference/results.py', 'commands/hierarchy.py', 'commands/legacy.py', 'runs/merged.py', 'runs/merged_model.py', 'publication/publisher.py', 'publication/parallel.py', 'publication/merged.py', 'publication/planning/types.py', 'publication/planning/merged_evidence.py', 'publication/planning/merged_tags.py', 'publication/planning/merged_markers.py', 'publication/index.py', 'publication/markers.py',
     'evidence/temporal/policy.py', 'evidence/temporal/statistics.py', 'evidence/temporal/markers.py', 'evidence/temporal/extras.py', 'evidence/intervals.py', 'evidence/observations.py', 'evidence/frames.py', 'evidence/shared_markers.py', 'evidence/scenes.py', 'evidence/occurrences.py', 'exclusions.py', 'cleanup/state.py', 'cleanup/client.py',
     'models.py', 'backends/loader.py', 'backends/onnx.py', 'backends/onnx_preprocessing.py', 'backends/onnx_session.py', 'backends/vocabulary.py', 'inference/prediction.py', 'inference/scene_predictions.py', 'inference/sprites.py', 'inference/preparation.py', 'stash_api/tags.py', 'domain.py', 'publication/fingerprints.py', 'storage/segments.py', 'storage/merge_checks.py',
     'evidence/timeline.py', 'stash_api/sql.py', 'publication/groups.py',
@@ -83,4 +83,3 @@ def projected_scene(scene, resolver, created, updates, deletes, final_tags):
         return dict(id=scene['id'], tags=[tag(i) for i in final_tags], scene_markers=list(values.values()))
     except KeyError:
         return None
-

@@ -242,8 +242,7 @@ def test_cli_offline_json_and_summary_preserve_database_and_skip_model_loading(t
         monkeypatch.setattr(app.services, name, lambda *a, **k: pytest.fail("accessed inference or Stash"))
     monkeypatch.setattr(sprites, 'fetch_cues', lambda *a, **k: pytest.fail("accessed inference or Stash"))
     destination = tmp_path / "review.json"
-    assert app.main(["--tag-review-report", str(destination), "--state-db", str(path),
-                     "--no-temporal"]) == 0
+    assert app.main(["--tag-review-report", str(destination), "--state-db", str(path)]) == 0
     assert path.read_bytes() == before
     captured = capsys.readouterr()
     assert "Tag review" in captured.err
@@ -262,7 +261,7 @@ def test_cli_scene_selection_options_missing_scene_and_empty_report(tmp_path):
     seed(path, "2", "wd", pair("other"))
     destination = tmp_path / "filtered.json"
     assert app.main(["--tag-review-report", str(destination), "--state-db", str(path),
-                     "--scene-id", "2", "--no-temporal", "--tag-review-margin", "0",
+                     "--scene-id", "2", "--tag-review-margin", "0",
                      "--tag-review-examples", "1"]) == 0
     data = json.loads(destination.read_text())
     assert data["totals"]["selected_scenes"] == 1
@@ -327,4 +326,3 @@ def test_cli_rejects_unsafe_or_invalid_review_options(tmp_path, flags):
 def test_review_modifiers_require_the_review_mode():
     with pytest.raises(SystemExit):
         app.main(["--tag-review-margin", ".1"])
-

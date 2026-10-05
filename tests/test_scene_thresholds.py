@@ -1,4 +1,6 @@
 """Scene threshold replay, provenance and restart/resume equivalence."""
+
+from tests.helpers.temporal import policy_args
 from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
@@ -50,7 +52,7 @@ def test_cached_scene_statistics_and_occurrences_match_fresh_inference(
     p.scores['wd'][:, 0] = .45
     p.scores['wd'][:, 1] = .1
     p.scores['wd'][3, 1] = .95
-    args = [*p.args, *(['--scene-tags-only'] if scene_only else []), *([] if temporal else ['--no-temporal'])]
+    args = [*p.args, *(['--scene-tags-only'] if scene_only else []), *policy_args(p.path.parent, temporal)]
     assert app.main(args) == 0
     original = saved(p.path)
     configure(monkeypatch, scene=.8)
@@ -390,4 +392,3 @@ def test_scene_rethreshold_never_decodes_publication_snapshots(tmp_path, monkeyp
 
         assert result == {'scene_thresholds_updated': 1}
         assert state.records('1', 'scene')['wd'][0][cache_identity.SCENE_OVERRIDE] == .8
-

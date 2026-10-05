@@ -1,5 +1,7 @@
 """The retired blocklist must not silently restore labels lost from legacy caches."""
 
+from tests.helpers.temporal import policy_args
+
 from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
@@ -52,7 +54,7 @@ def test_legacy_blocklist_rejects_merge_before_writes_and_restart_restores_range
     p.scores['wd'][:] = 0
     p.scores['wd'][:, 0] = .9
     args = [*p.args, *(['--markers-only'] if markers_only else []),
-            *([] if temporal else ['--no-temporal'])]
+            *policy_args(p.path.parent, temporal)]
     assert app.main(args) == 0
     # Emulate frames captured by the old option, which discarded labels before storage.
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL)) as state:
@@ -173,4 +175,3 @@ def test_blocklist_preflight_reasons_are_stable():
             'unblocked marker tags require inference')
     assert rethreshold_targets.threshold_failure_reason(ValueError(
         '123/wd: marker blocklist metadata is missing or invalid; run inference.')) == 'unknown marker blocklist'
-

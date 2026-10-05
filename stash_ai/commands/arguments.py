@@ -16,12 +16,8 @@ def build_parser(app) -> argparse.ArgumentParser:
     parser.add_argument("--offline", action="store_true", help="Require local model assets; never download.")
     parser.add_argument("--temporal-policy", type=Path, default=app.TEMPORAL_POLICY_FILE, metavar="YAML",
                         help="Automatic scene qualification, marker hysteresis and extras using Stash VTT/sprites only.")
-    parser.add_argument("--no-temporal", action="store_true", default=not app.DEFAULT_TEMPORAL,
-                        help="Restore original scene/marker qualification and first-frame extras.")
     parser.add_argument("--dry-run", action="store_true", help="Preview without writing to Stash.")
     parser.add_argument("--scene-id", action="append", metavar="ID", help="Limit to this scene; repeat for multiple scenes.")
-    parser.add_argument("--output-mode", choices=("merged", "separate"), default=app.DEFAULT_OUTPUT_MODE,
-                        help="merged (default): common ai: tags and interval union; separate: original model prefixes.")
     parser.add_argument("--state-db", type=Path, default=app.MERGE_STATE_FILE, metavar="SQLITE",
                         help="Durable per-model evidence for merged outputs; retain this file between runs.")
     resume = parser.add_mutually_exclusive_group()

@@ -23,7 +23,11 @@ import uuid
 
 REPOSITORY = "StormThatComes/stash_ai"
 UPDATER = "update_stash_ai.py"
-RETIRED_FILES = frozenset({"joytag_stash_markers.py", "stash_refine.py"})
+RETIRED_FILES = frozenset({
+    "joytag_stash_markers.py", "stash_refine.py", "stash_ai/runs/separate.py",
+    "stash_ai/publication/separate.py", "stash_ai/publication/planning/separate_markers.py",
+    "stash_ai/publication/planning/separate_tags.py", "stash_ai/evidence/marker_building.py",
+})
 LEGACY_MODULES = frozenset("stash_" + name + ".py" for name in (
     "cleanup", "cleanup_sql", "client", "db", "developer_report", "diagnostics", "domain",
     "exclusions", "fusion", "joytag", "marker_groups", "merge", "merge_sql", "model_report",

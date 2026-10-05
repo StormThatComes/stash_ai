@@ -1,5 +1,7 @@
 """Retune marker publication without inference or loss of source evidence."""
 
+from tests.helpers.temporal import policy_args
+
 from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
@@ -148,7 +150,7 @@ def test_return_to_original_thresholds_after_scene_edit(pipeline, monkeypatch, m
 def test_rethreshold_matches_fresh_marker_inference(pipeline, monkeypatch, tmp_path, temporal):
     p = pipeline
     configure(monkeypatch)
-    args = [*p.args, '--markers-only', *([] if temporal else ['--no-temporal'])]
+    args = [*p.args, '--markers-only', *policy_args(p.path.parent, temporal)]
     assert app.main(args) == 0
     configure(monkeypatch, marker=.88)
     assert app.main([*args, '--merge-only', '--rethreshold-markers']) == 0
