@@ -39,10 +39,10 @@ def fail(*args, **kwargs):
 @pytest.mark.parametrize('filename', [
     'stash_api/tags.py', 'domain.py', 'storage/store.py', 'storage/database.py', 'storage/results.py', 'storage/thresholds.py', 'storage/publications.py',
     'models.py', 'backends/vocabulary.py', 'backends/onnx.py', 'backends/onnx_preprocessing.py', 'backends/onnx_session.py', 'inference/prediction.py', 'inference/sprites.py', 'inference/preparation.py', 'storage/progress.py', 'inference/inputs.py', 'inference/identity.py', 'inference/checkpoints.py', 'signatures.py',
-    'runs/merged.py', 'runs/merged_model.py', 'publication/publisher.py', 'publication/parallel.py', 'publication/merged.py', 'publication/separate.py', 'publication/markers.py',
+    'runs/merged.py', 'runs/merged_model.py', 'publication/publisher.py', 'publication/parallel.py', 'publication/merged.py', 'publication/markers.py',
     'evidence/temporal/policy.py', 'evidence/temporal/statistics.py', 'evidence/temporal/markers.py', 'evidence/temporal/extras.py', 'evidence/intervals.py', 'evidence/timeline.py', 'evidence/retention.py',
-    'evidence/pipeline.py', 'evidence/source_markers.py', 'evidence/identity.py', 'evidence/labels.py', 'inference/results.py', 'evidence/observations.py', 'evidence/frames.py', 'evidence/shared_markers.py', 'evidence/thresholds.py', 'inference/reuse.py', 'evidence/cache_views.py', 'evidence/scenes.py', 'evidence/occurrences.py',
-    'publication/groups.py', 'publication/index.py', 'publication/planning/types.py', 'publication/planning/merged_evidence.py', 'publication/planning/merged_tags.py', 'publication/planning/merged_markers.py', 'publication/planning/separate_markers.py', 'publication/planning/separate_tags.py',
+    'evidence/pipeline.py', 'evidence/source_markers.py', 'evidence/historical_markers.py', 'evidence/identity.py', 'evidence/labels.py', 'inference/results.py', 'evidence/observations.py', 'evidence/frames.py', 'evidence/shared_markers.py', 'evidence/thresholds.py', 'inference/reuse.py', 'evidence/cache_views.py', 'evidence/scenes.py', 'evidence/occurrences.py',
+    'publication/groups.py', 'publication/index.py', 'publication/planning/types.py', 'publication/planning/merged_evidence.py', 'publication/planning/merged_tags.py', 'publication/planning/merged_markers.py',
     'publication/fingerprints.py', 'storage/segments.py', 'storage/merge_checks.py',
     'inference/scene_predictions.py', 'commands/bootstrap.py',
     'config.py', 'commands/hierarchy.py', 'commands/legacy.py', 'rethreshold/markers.py', 'rethreshold/scenes.py', 'cleanup/state.py', 'cleanup/client.py',
@@ -65,7 +65,7 @@ def test_publication_code_tracks_extracted_modules(monkeypatch, filename):
     'commands/marker_groups.py', 'cleanup/groups.py', 'cleanup/markers.py', 'cleanup/run.py', 'storage/recovery.py', 'publication/recovery.py', 'commands/recovery.py', 'cleanup/sql.py', 'cleanup/sql_session.py',
     'rethreshold/execution.py', 'rethreshold/targets.py', 'db/checks.py',
     'db/validation/common.py', 'db/validation/schema.py', 'db/validation/results.py',
-    'db/validation/checkpoints.py', 'db/validation/state.py', 'runs/separate.py', 'cleanup/evidence.py', 'cleanup/scenes.py', 'evidence/frozen_replay.py', 'stash_api/scene_reads.py', 'commands/modes.py', 'reports/io.py', 'reports/runtime.py', 'cleanup/sql_discovery.py', 'cleanup/sql_mutations.py', 'cleanup/sql_preview.py',
+    'db/validation/checkpoints.py', 'db/validation/state.py', 'cleanup/evidence.py', 'cleanup/scenes.py', 'evidence/frozen_replay.py', 'stash_api/scene_reads.py', 'commands/modes.py', 'reports/io.py', 'reports/runtime.py', 'cleanup/sql_discovery.py', 'cleanup/sql_mutations.py', 'cleanup/sql_preview.py',
 ])
 def test_publication_code_ignores_runtime_and_maintenance_modules(monkeypatch, filename):
     before = performance.publication_code()
@@ -218,7 +218,7 @@ def test_preview_resumes_checkpoint_and_does_not_resurrect_deleted_source(pipeli
         checkpoint.flush()
         assert checkpoints.Checkpoint(preview, '1', 'wd', 'new', 10, 2).restore()[0] == 2
         checkpoints.finish(preview, '1', 'wd', {k: dict(mode='scene' if k == 'scene' else 'frames',
-            meta={'origin':'inference', 'inference_signature':'new'}, items=[]) for k in KINDS}, {})
+            meta={'origin':'inference', 'inference_signature':'new'}, items=[]) for k in KINDS})
         assert progress.completed(preview, '1', 'wd', KINDS, 'new')
         assert not preview.connection.execute('SELECT 1 FROM ' + preview.table('checkpoints')).fetchall()
     assert p.path.read_bytes() == before

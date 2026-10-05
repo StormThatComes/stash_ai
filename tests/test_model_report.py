@@ -291,7 +291,6 @@ def test_cli_model_report_accepts_scene_filter_and_rejects_existing_output(tmp_p
         "--state-db", str(path),
         "--model-report", str(destination),
         "--scene-id", "2",
-        "--no-temporal",
     ]) == 0
     assert json.loads(destination.read_text(encoding="utf-8"))["totals"]["scenes"] == 1
 
@@ -323,7 +322,7 @@ def test_parallel_model_report_matches_serial_output(tmp_path):
 
     serial = tmp_path / "serial.json"
     parallel = tmp_path / "parallel.json"
-    common = ["--state-db", str(path), "--no-temporal"]
+    common = ["--state-db", str(path)]
 
     assert app.main([
         *common,

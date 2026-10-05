@@ -8,9 +8,20 @@ from stash_ai.runtime.timing import stage
 from .types import PreparedEvidence
 
 
-def _previous_ranges(app, store, scene_id):
-    if not app.CREATE_MARKERS or app.MARKER_USE_END_TIME:
+def _previous_ranges(app, store, scene):
+    """Migrate previously published point-only ranges using their saved proofs.
+
+    Current ranges publish their end time; occurrence points never need this
+    adapter. Keep it only for observed ordinary points from older publication.
+    """
+    from stash_ai.evidence.marker_identity import OCCURRENCE_TAG
+    if not app.CREATE_MARKERS or not any(
+            marker_ops.owned_marker(marker, merge_labels.AI)
+            and marker.get('end_seconds') is None
+            and not any(tag['name'] == OCCURRENCE_TAG for tag in marker.get('tags', []))
+            for marker in scene.get('scene_markers', [])):
         return []
+    scene_id = str(scene['id'])
     from stash_ai.storage.recovery import publications
     result = []
     for snapshot in (*store.snapshot(scene_id, "markers", borrow=True),
@@ -23,7 +34,7 @@ def _previous_ranges(app, store, scene_id):
 def prepare_sync_evidence(app, stash, store, scene, scene_hits, spans, *, cleanup, report):
     """Build merged markers/scene labels and apply cleanup-only retention rules."""
     scene_id = str(scene["id"])
-    previous_ranges = PreviousMarkerRanges(_previous_ranges(app, store, scene_id))
+    previous_ranges = PreviousMarkerRanges(_previous_ranges(app, store, scene))
     with stage(report, 'marker_union'):
         markers = merge_intervals.union_intervals(spans, borrow=True) if app.CREATE_MARKERS else []
     if report is not None:

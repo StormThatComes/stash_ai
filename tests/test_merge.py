@@ -446,67 +446,42 @@ def test_cleanup_selected_bridge_source_splits_union_and_keeps_manual_removals(m
     assert {t["name"] for t in p.stash.scene["tags"]}=={"ai:common"}
 
 
-@pytest.mark.parametrize('kind', ['scene', 'markers'])
-def test_enabling_replacement_collapses_reused_history_without_inference(merge_pipeline, monkeypatch, kind):
+def test_existing_inference_history_collapses_on_verified_reuse(merge_pipeline, monkeypatch):
     p = merge_pipeline
-    monkeypatch.setattr(app, 'REPLACE_SCENE_TAGS', False)
-    monkeypatch.setattr(app, 'REPLACE_MARKERS', False)
     args = ['--models', 'oppai', *p.args[2:], '--resume']
-
+    scope = merge_store.scope_for(app.STASH_URL)
     assert app.main(args) == 0
+    with merge_store.StateStore(p.path, scope, True) as state:
+        previous = {kind: state.records('1', kind)['oppai'][0] for kind in ('scene', 'markers')}
     p.scores['oppai'][:] = 0
-    # Force a genuinely new input signature, then keep it stable for the reuse run.
     monkeypatch.setattr(p.stash, 'get_media', lambda url: b'changed-media')
     assert app.main(args) == 0
-
-    config = app.services.load_model_settings(app.MODELS_CONFIG_FILE, ['oppai'], None)[0]
-    identity = model_identity(app, config, app.services.load_vocabulary(config))
-    _, _, current_signature = inspect_input(app, p.stash, p.stash.scene['paths'], identity)
-    with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), True) as state:
-        scene_segments = state.records('1', 'scene')['oppai']
-        marker_segments = state.records('1', 'markers')['oppai']
-        assert len(scene_segments) == 2
-        assert len(marker_segments) == 2
-        assert scene_segments[-1]['meta']['inference_signature'] == current_signature
-        assert marker_segments[-1]['meta']['inference_signature'] == current_signature
-    assert 'ai:unique_op' in {t['name'] for t in p.stash.scene['tags']}
-    assert intervals(p.stash, 'unique_op') == [(10, 30)]
-
-    monkeypatch.setattr(app, 'REPLACE_SCENE_TAGS', kind == 'scene')
-    monkeypatch.setattr(app, 'REPLACE_MARKERS', kind == 'markers')
-    monkeypatch.setattr(app.services, 'load_tagger', lambda *a: pytest.fail('replacement change reran inference'))
-    p.stash.writes.clear()
-
+    with merge_store.StateStore(p.path, scope) as state:
+        with state.connection:
+            for kind in ('scene', 'markers'):
+                current = state.records('1', kind)['oppai']
+                assert len(current) == 1
+                state.replace_records('1', 'oppai', kind, [previous[kind], *current])
+    # Simulate history retained by the retired append policy, then verify that
+    # the matching latest inference replaces it without another model pass.
+    monkeypatch.setattr(app.services, 'load_tagger', lambda *a: pytest.fail('history migration reran inference'))
     assert app.main(args) == 0
+    with merge_store.StateStore(p.path, scope, True) as state:
+        assert all(len(state.records('1', kind)['oppai']) == 1 for kind in ('scene', 'markers'))
+    assert 'ai:unique_op' not in {tag['name'] for tag in p.stash.scene['tags']}
+    assert not intervals(p.stash, 'unique_op')
 
+
+def test_new_inference_replaces_previous_results(merge_pipeline):
+    p = merge_pipeline
+    assert app.main(p.args) == 0
+    assert 'ai:unique_op' in {tag['name'] for tag in p.stash.scene['tags']}
+    p.scores['oppai'][:] = 0
+    assert app.main(['--models', 'oppai', *p.args[2:]]) == 0
+    assert 'ai:unique_op' not in {tag['name'] for tag in p.stash.scene['tags']}
+    assert not intervals(p.stash, 'unique_op')
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), True) as state:
-        expected = {'scene': 1 if kind == 'scene' else 2,
-                    'markers': 1 if kind == 'markers' else 2}
-        assert len(state.records('1', 'scene')['oppai']) == expected['scene']
-        assert len(state.records('1', 'markers')['oppai']) == expected['markers']
-
-    if kind == 'scene':
-        assert 'ai:unique_op' not in {t['name'] for t in p.stash.scene['tags']}
-        assert intervals(p.stash, 'unique_op') == [(10, 30)]
-    else:
-        assert 'ai:unique_op' in {t['name'] for t in p.stash.scene['tags']}
-        assert intervals(p.stash, 'unique_op') == []
-
-
-def test_replacement_disabled_keeps_evidence_but_blacklists_still_apply(merge_pipeline,monkeypatch,tmp_path):
-    p=merge_pipeline
-    assert app.main(p.args)==0
-    monkeypatch.setattr(app,"REPLACE_SCENE_TAGS",False)
-    monkeypatch.setattr(app,"REPLACE_MARKERS",False)
-    p.scores["oppai"][:]=0
-    assert app.main(["--models","oppai",*p.args[2:]])==0
-    assert intervals(p.stash)==[(10,50),(70,90)]
-    assert "ai:unique_op" in {t["name"] for t in p.stash.scene["tags"]}
-    core=tmp_path/"core.yml";core.write_text("version: 1\nexcluded_core_tags: [unique_op]\n")
-    scene=tmp_path/"scene.yml";scene.write_text("version: 1\nexcluded_scene_tags: [unique_op]\n")
-    assert app.main([*p.args,"--merge-only","--marker-core-exclusions",str(core),"--scene-tag-exclusions",str(scene)])==0
-    assert not intervals(p.stash,"unique_op")
-    assert "ai:unique_op" not in {t["name"] for t in p.stash.scene["tags"]}
+        assert all(len(state.records('1', kind)['oppai']) == 1 for kind in ('scene', 'markers'))
 
 
 def test_caps_follow_blacklists_and_keep_all_qualified_evidence(merge_pipeline,monkeypatch,tmp_path):
@@ -525,15 +500,30 @@ def test_caps_follow_blacklists_and_keep_all_qualified_evidence(merge_pipeline,m
         assert {item["tag"] for item in state.records("1","scene")["oppai"][0]["items"]}=={"common","unique_op","extra"}
 
 
-def test_point_output_retains_full_source_ranges(merge_pipeline,monkeypatch,capsys):
+def test_range_output_retains_full_source_ranges(merge_pipeline):
     p=merge_pipeline
-    monkeypatch.setattr(app,"MARKER_USE_END_TIME",False)
     assert app.main(p.args)==0
-    assert intervals(p.stash)==[(10,None),(70,None)]
-    assert all(write[1]["end_seconds"] is None for write in p.stash.writes if write[0] in {"create","update"})
+    assert intervals(p.stash)==[(10,50),(70,90)]
+    assert all(write[1]["end_seconds"] is not None for write in p.stash.writes if write[0] in {"create","update"})
     with merge_store.StateStore(p.path,merge_store.scope_for(app.STASH_URL),True) as state:
         snapshot,_=state.snapshot("1","markers")
         assert [(m["start"],m["end"]) for m in merge_intervals.union_intervals(snapshot["contributions"]) if m["tag"]=="common"]==[(10,50),(70,90)]
+
+
+def test_historical_point_ranges_gain_ends_without_inference_or_new_ids(merge_pipeline, monkeypatch):
+    p = merge_pipeline
+    assert app.main(p.args) == 0
+    expected = {m['id']: (m['seconds'], m['end_seconds']) for m in p.stash.scene['scene_markers']}
+    for marker in p.stash.scene['scene_markers']:
+        marker['end_seconds'] = None
+        marker['tags'].append(p.stash.tag('human'))
+    monkeypatch.setattr(app.services, 'load_tagger', lambda *a: pytest.fail('point migration loaded a model'))
+    assert app.main([*p.args, '--merge-only']) == 0
+    assert {m['id']: (m['seconds'], m['end_seconds']) for m in p.stash.scene['scene_markers']} == expected
+    assert all('human' in {tag['name'] for tag in m['tags']} for m in p.stash.scene['scene_markers'])
+    p.stash.writes.clear()
+    assert app.main([*p.args, '--merge-only']) == 0
+    assert not p.stash.writes
 
 
 def test_merge_only_preserves_unknown_legacy_end_and_no_missing_tag_replacement(merge_pipeline,monkeypatch):
@@ -565,14 +555,15 @@ def test_scene_cap_does_not_drop_previous_runs_or_legacy_confidence(tmp_path,mon
 
 def test_cleanup_point_output_uses_recorded_extent_when_start_moves(merge_pipeline,monkeypatch,tmp_path):
     p=merge_pipeline
-    monkeypatch.setattr(app,"MARKER_USE_END_TIME",False)
     assert app.main(p.args)==0
+    for marker in p.stash.scene["scene_markers"]:
+        marker["end_seconds"] = None  # Historical point-only publication.
     first=next(m for m in p.stash.scene["scene_markers"] if m["seconds"]==10 and m["primary_tag"]["name"]=="ai:common")
     first["tags"].append(p.stash.tag("manual extra"))
     core=tmp_path/"core.yml"
     core.write_text("version: 1\nexcluded_core_tags: []\nby_model:\n  joytag: [common]\n  wd: [common]\n")
     assert app.main([*p.args,"--cleanup-markers-only","--marker-core-exclusions",str(core)])==0
-    assert intervals(p.stash)==[(30,None),(70,None)]
+    assert intervals(p.stash)==[(30,50),(70,90)]
     moved=next(m for m in p.stash.scene["scene_markers"] if m["id"]==first["id"])
     assert moved["seconds"]==30 and "manual extra" in {t["name"] for t in moved["tags"]}
     p.stash.writes.clear()

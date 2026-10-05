@@ -24,7 +24,7 @@ class MergedModelRun:
         self.tagger = None
         self.identity = model_identity(app, config, vocabulary)
 
-    def run(self, scenes, kinds, replacement, inputs):
+    def run(self, scenes, kinds, inputs):
         try:
             bar = tqdm(scenes.items(), desc=self.key + " inference", unit="scene")
             for scene_id, current in bar:
@@ -33,7 +33,7 @@ class MergedModelRun:
                 if not self._eligible(scene_id, paths):
                     continue
                 try:
-                    if not self._process_scene(scene_id, current, paths, kinds, replacement, inputs):
+                    if not self._process_scene(scene_id, current, paths, kinds, inputs):
                         break
                 except Exception as exc:
                     self._record_error('inference', scene_id, exc)
@@ -47,11 +47,11 @@ class MergedModelRun:
             return False
         return True
 
-    def _reuse(self, scene_id, current, signature, cues, media, kinds, replacement):
+    def _reuse(self, scene_id, current, signature, cues, media, kinds):
         args, store, key = self.args, self.store, self.key
         if args.resume and not args.restart and current['publication_reason'] != 'reused':
-            collapsed = progress.reuse_replacement_policy(
-                store, scene_id, key, kinds, signature, replacement)
+            collapsed = progress.reuse_latest_results(
+                store, scene_id, key, kinds, signature)
             if collapsed is not None:
                 self.stats["replacement_history_collapsed"] += collapsed
                 self.stats["reused"] += 1
@@ -63,8 +63,8 @@ class MergedModelRun:
             from stash_ai.inference.reuse import reuse
             if reuse(self.app, store, scene_id, self.config, self.identity, cues, media.hashes, kinds):
                 if current['publication_reason'] != 'reused':
-                    collapsed = progress.collapse_replacement_history(
-                        store, scene_id, key, kinds, replacement)
+                    collapsed = progress.collapse_inference_history(
+                        store, scene_id, key, kinds)
                     if collapsed is None:
                         raise RuntimeError(
                             f'{scene_id}/{key}: threshold cache did not leave a current inference segment.')
@@ -82,12 +82,12 @@ class MergedModelRun:
             return False
         return True
 
-    def _process_scene(self, scene_id, current, paths, kinds, replacement, inputs):
+    def _process_scene(self, scene_id, current, paths, kinds, inputs):
         """Return False only when model loading fails and its remaining scenes must stop."""
         app, args, store = self.app, self.args, self.store
         store.cache.pressure(force=True)
         cues, media, signature = inputs.inspect(app, paths, self.identity)
-        if self._reuse(scene_id, current, signature, cues, media, kinds, replacement):
+        if self._reuse(scene_id, current, signature, cues, media, kinds):
             return True
         if not args.restart:
             stale = progress.request_stale_refresh(store, scene_id, self.key, kinds, signature)
@@ -98,10 +98,10 @@ class MergedModelRun:
             # Auto-download may just have supplied missing weight files.
             self.identity = model_identity(app, self.config, self.vocabulary)
             signature = inference_signature(self.identity, cue_manifest(cues), media.hashes)
-        self._predict_scene(scene_id, paths, cues, media, signature, kinds, replacement)
+        self._predict_scene(scene_id, paths, cues, media, signature, kinds)
         return True
 
-    def _predict_scene(self, scene_id, paths, cues, media, signature, kinds, replacement):
+    def _predict_scene(self, scene_id, paths, cues, media, signature, kinds):
         from stash_ai.evidence.temporal.statistics import CHECKPOINT_FORMAT
         app, args, store = self.app, self.args, self.store
         if not args.resume:
@@ -123,7 +123,7 @@ class MergedModelRun:
             segment["meta"].update(
                 inference_signature=signature,
                 frame_input_signature=frame_signature(cue_manifest(cues), media.hashes))
-        checkpoints.finish(store, scene_id, self.key, outputs, replacement)
+        checkpoints.finish(store, scene_id, self.key, outputs)
         self.stats["processed"] += 1
 
     def _record_error(self, stage, scene_id, exc):

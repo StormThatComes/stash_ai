@@ -17,7 +17,6 @@ class RuntimeSettings:
     """Own one invocation's settings; evidence workers use this data-only context."""
 
     INSTALL_ROOT: Path = INSTALL_ROOT
-    DEFAULT_OUTPUT_MODE: str = "merged"
     DEFAULT_RESUME: bool = True
     CHECKPOINT_BATCHES: int = 8
     PREFETCH_BATCHES: int = 4
@@ -25,14 +24,12 @@ class RuntimeSettings:
     RAM_BUDGET_GB: float = 32.0
     PREPARE_WORKERS: int = 4
     MERGE_STATE_FILE: Path = INSTALL_ROOT / "tagger_sources.sqlite3"
-    DEFAULT_TEMPORAL: bool = True
     TEMPORAL_POLICY: TemporalPolicy = field(default_factory=TemporalPolicy)
     TEMPORAL_POLICY_FILE: Path = INSTALL_ROOT / "temporal_policy.yml"
     STASH_URL: str = field(default_factory=lambda: os.getenv("STASH_URL", "http://localhost:9999"))
     STASH_API_KEY: str = field(default_factory=lambda: os.getenv("STASH_API_KEY", ""), repr=False)
     APPLY_SCENE_TAGS: bool = True
     MAX_TAGS: int = 0
-    REPLACE_SCENE_TAGS: bool = True
     AGGREGATION: str = "topk_mean"
     TOP_K_FRAMES: int = 2
     CREATE_MARKERS: bool = True
@@ -40,8 +37,6 @@ class RuntimeSettings:
     MARKER_MIN_HITS: int = 2
     MARKER_MERGE_GAP_SECONDS: float = 0.0
     MAX_MARKERS_PER_SCENE: int = 0
-    MARKER_USE_END_TIME: bool = True
-    REPLACE_MARKERS: bool = True
     MARKER_MATCH_TOLERANCE_SECONDS: float = 0.25
     CREATE_MISSING: bool = True
     DRY_RUN: bool = False

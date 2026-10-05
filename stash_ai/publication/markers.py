@@ -1,4 +1,4 @@
-"""Marker ownership, payloads and extra-tag reconciliation shared by output modes."""
+"""Marker ownership, payloads and extra-tag reconciliation used by publication and historical cleanup."""
 from __future__ import annotations
 
 from stash_ai.models import ModelSource
@@ -39,23 +39,6 @@ def marker_extra_cleanup_payload(marker: dict, scene_id: str,
         tag_ids=sorted(kept),
     )
     payload["end_seconds"] = marker.get("end_seconds")
-    return payload
-
-def marker_payload(app, spec, scene_id: str, ids: dict[str, str | None],
-                   source: ModelSource) -> dict:
-    primary = ids[source.prefix + spec.tag]
-    extras = {ids[source.prefix + tag] for tag in spec.extra_tags}
-    extras.add(ids[source.owner_tag])
-    extras.discard(primary)
-    extras.discard(None)
-    payload = {
-        "scene_id": scene_id,
-        "title": source.title_prefix + spec.tag,
-        "seconds": round(spec.start, 3),
-        "primary_tag_id": primary,
-        "tag_ids": sorted(extras),
-    }
-    payload["end_seconds"] = round(spec.end, 3) if app.MARKER_USE_END_TIME else None
     return payload
 
 def marker_differs(existing: dict, wanted: dict) -> bool:

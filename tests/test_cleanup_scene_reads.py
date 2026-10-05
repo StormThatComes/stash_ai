@@ -112,17 +112,17 @@ def test_snapshot_failure_falls_back_and_scene_strategy_stays_graphql(tmp_path, 
     stash.deny_snapshots = True
     stash.scene['tags'] = [stash.tag('wd:blocked'), stash.tag('human')]
     install(monkeypatch, stash)
-    command = options(tmp_path, by_model={'wd': ['blocked']}, output='separate')
+    command = options(tmp_path, by_model={'wd': ['blocked']})
     assert app.main([*command, '--cleanup-strategy', strategy]) == 0
     assert [t['name'] for t in stash.scene['tags']] == ['human']
     assert stash.scene_reads
     assert stash.snapshot_reads == ([] if strategy == 'scenes' else [[]])
 
 
-@pytest.mark.parametrize('output', ['merged', 'separate'])
-def test_prefetched_scene_is_refreshed_before_cleanup_writes(tmp_path, monkeypatch, output):
+@pytest.mark.parametrize('namespace', ['ai', 'legacy'])
+def test_prefetched_scene_is_refreshed_before_cleanup_writes(tmp_path, monkeypatch, namespace):
     stash = SceneSQLStash()
-    if output == 'merged':
+    if namespace == 'ai':
         with merge_store.StateStore(tmp_path/'state.sqlite3', merge_store.scope_for(app.STASH_URL)) as store:
             merge_sync.sync_merged(app, stash, app.services.TagResolver(stash, source=merge_labels.AI), store,
                               stash.find_scene('1'), [hit('wd')], [])
@@ -134,17 +134,17 @@ def test_prefetched_scene_is_refreshed_before_cleanup_writes(tmp_path, monkeypat
     def concurrent_edit(client):
         client.after_snapshot = None
         client.scene['tags'].append(human)
-        if output == 'separate':
+        if namespace == 'legacy':
             client.scene['scene_markers'][0]['tags'].append(human)
             client.scene['scene_markers'][1]['primary_tag'] = client.tag('wd:renamed')
     stash.after_snapshot = concurrent_edit
     stash.scene_reads.clear()
     install(monkeypatch, stash)
-    assert app.main(options(tmp_path, by_model={'wd': ['common']}, output=output)) == 0
+    assert app.main(options(tmp_path, by_model={'wd': ['common']})) == 0
     assert [t['name'] for t in stash.scene['tags']] == ['human']
     assert not stash.scene_reads
     assert len(stash.snapshot_reads) >= 3  # Probe, batch, fresh pre-write snapshot.
-    if output == 'separate':
+    if namespace == 'legacy':
         assert len(stash.scene['scene_markers']) == 2
         assert {t['name'] for t in stash.scene['scene_markers'][0]['tags']} == {WD.owner_tag, 'human'}
         assert stash.scene['scene_markers'][1]['primary_tag']['name'] == 'wd:renamed'
@@ -215,4 +215,3 @@ def test_batched_marker_cleanup_matches_graphql_with_global_preview(tmp_path, mo
             assert [(m['seconds'], m['end_seconds']) for m in stash.scene['scene_markers']] == [(10, 20)]
         assert bool(stash.scene_reads) == deny
     assert results[0] == results[1]
-

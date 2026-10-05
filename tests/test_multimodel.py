@@ -29,63 +29,8 @@ from stash_ai.backends.onnx_preprocessing import prepare_wd, prepare_dtq, prepar
 
 
 from tests.helpers.stash import Stash
-from tests.helpers.stash import sync
 from tests.helpers.inference import Tagger, sprite_frames
 pytestmark = pytest.mark.usefixtures("reset_multimodel")
-
-
-@pytest.mark.parametrize("source", list(SOURCES.values()))
-def test_source_isolation_and_idempotence(source):
-    stash=Stash()
-    stash.scene["tags"].append(stash.tag("manual"))
-    for item in SOURCES.values():
-        stash.scene["tags"].append(stash.tag(item.prefix+"old"))
-        stash.marker(item,"old",item.key)
-    manual=stash.marker(source,"old","manual",True)
-    other=deepcopy([m for m in stash.scene["scene_markers"] if m["id"]!=source.key])
-    spec=MarkerSpec("new",10,12,.9,2,("extra",))
-    sync(stash,source,[("new",.9)],[spec])
-    assert {t["name"] for t in stash.scene["tags"]} == {"manual",source.prefix+"new"}|{s.prefix+"old" for s in SOURCES.values() if s!=source}
-    assert all(m in stash.scene["scene_markers"] for m in other)
-    assert manual in stash.scene["scene_markers"]
-    stash.writes.clear()
-    result=sync(stash,source,[("new",.9)],[spec])
-    assert not stash.writes and result["markers_unchanged"]==1
-
-
-@pytest.mark.parametrize("source",list(SOURCES.values()))
-def test_global_blacklist_covers_markers_but_core_only_tags_remain_extras(source,monkeypatch):
-    monkeypatch.setattr(app,"REPLACE_SCENE_TAGS",False)
-    monkeypatch.setattr(app,"REPLACE_MARKERS",False)
-    stash=Stash()
-    stash.scene["tags"]=[stash.tag(source.prefix+"scene_ban"),stash.tag("scene_ban"),stash.tag(source.prefix+"keep")]
-    stash.marker(source,"core_ban","remove")
-    kept=stash.marker(source,"old","keep")
-    manual=stash.marker(source,"core_ban","manual",True)
-    specs=[MarkerSpec("core_ban",0,2,.9,2),MarkerSpec("scene_ban",4,6,.9,2,("core_ban",)),
-           MarkerSpec('allowed',8,10,.9,2,('core_ban','scene_ban'))]
-    result=sync(stash,source,[("core_ban",.9),("scene_ban",.9)],specs,frozenset({"core_ban"}),frozenset({"scene_ban"}))
-    assert {t["name"] for t in stash.scene["tags"]}=={"scene_ban",source.prefix+"keep",source.prefix+"core_ban"}
-    assert kept in stash.scene["scene_markers"] and manual in stash.scene["scene_markers"]
-    assert not any(m['primary_tag']['name']==source.prefix+'scene_ban' for m in stash.scene['scene_markers'])
-    generated=next(m for m in stash.scene["scene_markers"] if m["primary_tag"]["name"]==source.prefix+"allowed")
-    assert source.prefix+"core_ban" in {t["name"] for t in generated["tags"]}
-    assert source.prefix+'scene_ban' not in {t['name'] for t in generated['tags']}
-    assert result["markers_core_cleaned"]==result["scene_tags_cleaned"]==1
-
-
-@pytest.mark.parametrize("source",list(SOURCES.values()))
-def test_dry_run_and_failure_preserve_existing_markers(source):
-    stash=Stash(True)
-    old=stash.marker(source,"old","old")
-    specs=[MarkerSpec("new",0,2,.9,2)]
-    result=sync(stash,source,[("new",.9)],specs)
-    assert not stash.writes and result["markers_created"]==result["markers_deleted"]==1
-    stash.dry_run,stash.fail_create=False,True
-    with pytest.raises(RuntimeError,match="injected"):
-        sync(stash,source,[("new",.9)],specs)
-    assert old in stash.scene["scene_markers"]
-    assert not any(w[0] in {"scene","delete"} for w in stash.writes)
 
 
 @pytest.mark.parametrize("dry",[False,True])
@@ -100,7 +45,7 @@ def test_cleanup_all_refreshes_between_sources(tmp_path,monkeypatch,dry):
     monkeypatch.setattr(app.services,"create_stash_client",lambda _:stash)
     from tests.helpers.cleanup import options, install
     install(monkeypatch, stash)
-    command = [*options(tmp_path, ['blocked'], ['blocked'], output='separate'),
+    command = [*options(tmp_path, ['blocked'], ['blocked']),
                '--cleanup-strategy', 'scenes', '--scene-id', '1']
     assert app.main(command + (['--dry-run'] if dry else [])) == 0
     if dry: assert stash.scene==before and not stash.writes
@@ -109,20 +54,8 @@ def test_cleanup_all_refreshes_between_sources(tmp_path,monkeypatch,dry):
         assert stash.scene["scene_markers"]==[]
 
 
-@pytest.mark.parametrize("source",[WD,OPPAI])
-@pytest.mark.parametrize("mode",["markers","scenes"])
-def test_output_modes(monkeypatch,mode,source):
-    stash=Stash();stash.scene["tags"].append(stash.tag(source.prefix+"old"));stash.marker(source,"old","old")
-    before=deepcopy(stash.scene)
-    monkeypatch.setattr(app,"APPLY_SCENE_TAGS",mode=="scenes")
-    monkeypatch.setattr(app,"CREATE_MARKERS",mode=="markers")
-    sync(stash,source,[("new",.9)],[MarkerSpec("new",0,2,.9,2)])
-    key="tags" if mode=="markers" else "scene_markers"
-    assert stash.scene[key]==before[key]
-
-
 @pytest.mark.parametrize("fail_wd",[False,True])
-def test_main_all_releases_models_and_preserves_failed_source(monkeypatch,fail_wd):
+def test_main_all_releases_models_and_preserves_failed_source(monkeypatch,tmp_path,fail_wd):
     stash=Stash();stash.scene["tags"].append(stash.tag("wd:old"));old=stash.marker(WD,"old","old")
     vocab=Vocabulary(["tag"],{"tag":"General"})
     cues=[Cue(i,i+1,"x",(0,0,1,1)) for i in range(2)]
@@ -136,10 +69,12 @@ def test_main_all_releases_models_and_preserves_failed_source(monkeypatch,fail_w
         model=Tagger(settings,vocabulary.labels,np.full((2,1),np.nan if fail_wd and settings.source==WD else .9,np.float32))
         loaded.append(model);return model
     monkeypatch.setattr(app.services,"load_tagger",load)
-    assert app.main(["--models","all","--no-hierarchy"])==int(fail_wd)
+    args=["--models","all","--no-hierarchy","--state-db",str(tmp_path/"state.sqlite3")]
+    assert app.main(["--import-legacy-only","--state-db",str(tmp_path/"state.sqlite3")])==0
+    assert app.main(args)==int(fail_wd)
     assert all(t.closed for t in loaded) and len(loaded)==len(SOURCES)
-    assert {t["name"] for t in stash.scene["tags"]}=={"jt:tag","dtq:tag","op:tag","wd:old" if fail_wd else "wd:tag"}
-    assert (old in stash.scene["scene_markers"])==fail_wd
+    assert {t["name"] for t in stash.scene["tags"]}=={"ai:tag"}|({"ai:old"} if fail_wd else set())
+    assert any(m["primary_tag"]["name"]=="ai:old" for m in stash.scene["scene_markers"])==fail_wd
 
 
 @pytest.mark.parametrize("aggregation",["max","topk_mean"])
@@ -479,4 +414,3 @@ def test_bundled_hierarchy_migrates_old_metadata_parents_idempotently(bundled_ca
     before=deepcopy(stash.writes)
     app.services.TagResolver(stash,hierarchy,source=source).resolve(leaf["name"])
     assert stash.writes==before
-

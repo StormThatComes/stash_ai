@@ -35,7 +35,7 @@ def project(app, segment):
                  if app.SCENE_THRESHOLDS is not None else scene_threshold(segment))
     # Temporal statistics depend on the support floor as well as the high
     # threshold. Old aggregates without retention metadata keep their original
-    # behavior; frame-backed results can also gain statistics after --no-temporal.
+    # behavior; frame-backed results can also gain statistics for historical non-temporal results.
     support_changed = (app.TEMPORAL_POLICY.enabled
         and ('scene_support_floor' in meta or meta.get('scene_frames_format') == 1)
         and meta.get('scene_support_floor') != threshold * app.TEMPORAL_POLICY.scene_support_ratio)

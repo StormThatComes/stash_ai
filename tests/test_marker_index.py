@@ -105,12 +105,10 @@ class ScanningIndex:
                 and merge_intervals.overlaps(self.temporal(m), interval, tolerance)]
 
 
-@pytest.mark.parametrize('use_end', [True, False])
 @pytest.mark.parametrize('dry', [False, True])
 @pytest.mark.parametrize('cleanup', [False, True])
 def test_publication_split_duplicates_cleanup_and_retry_match_scanner(
-        tmp_path, monkeypatch, use_end, dry, cleanup):
-    monkeypatch.setattr(app, 'MARKER_USE_END_TIME', use_end)
+        tmp_path, monkeypatch, dry, cleanup):
     variants = []
     for implementation in (ScanningIndex, MarkerIntervalIndex):
         with monkeypatch.context() as patch:

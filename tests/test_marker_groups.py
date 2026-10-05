@@ -50,10 +50,8 @@ def saved_marker_sources(tmp_path):
         state.publish('1', {'markers': {'contributions': [span('wd', 0, 2, 'blocked')]}})
 
 
-@pytest.mark.parametrize('use_end', [False, True])
-def test_one_group_per_primary_independent_of_extra_labels_or_time_policy(tmp_path, monkeypatch, use_end):
+def test_one_group_per_primary_independent_of_extra_labels_or_time_policy(tmp_path, monkeypatch):
     stash = Stash()
-    monkeypatch.setattr(app, 'MARKER_USE_END_TIME', use_end)
     with merge_store.StateStore(tmp_path/'state', 'fixture') as state:
         resolver = app.services.TagResolver(stash, source=merge_labels.AI)
         contributions = [span('wd', 0, 5, 'abc', extras=['def']), span('joytag', 10, 15, 'abc')]

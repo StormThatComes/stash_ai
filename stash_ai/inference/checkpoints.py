@@ -12,10 +12,10 @@ def clear_checkpoint(store, scene, model):
                                  (store.scope, str(scene), model))
 
 
-def finish(store, scene, model, outputs, replace):
+def finish(store, scene, model, outputs):
     # Results and checkpoint removal commit together, including zero detections.
     with store.connection:
-        store.results.put_in_transaction(scene, model, outputs, replace)
+        store.results.put_in_transaction(scene, model, outputs)
         clear_checkpoint(store, scene, model)
         for kind in outputs:
             from stash_ai.storage.preview import delete

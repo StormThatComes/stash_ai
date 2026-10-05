@@ -10,7 +10,7 @@ dekoduje plików wideo.
 
 Obsługiwane modele:
 
-| Model | Klucz CLI | Prefiks w trybie `separate` |
+| Model | Klucz CLI | Historyczny prefiks modelu |
 |---|---|---|
 | JoyTag | `joytag` | `jt:` |
 | WD EVA02-Large v3 | `wd` | `wd:` |
@@ -20,9 +20,8 @@ Obsługiwane modele:
 Modele wykonują inferencję kolejno. W pamięci GPU znajduje się jeden model naraz;
 przygotowanie klatek może działać równolegle na CPU.
 
-Domyślny `--output-mode merged` publikuje wspólne tagi `ai:` i scala zgodne
-wyniki modeli. `--output-mode separate` zachowuje prefiksy źródłowe i nie używa
-mechanizmu wspólnego resume/merge.
+Publikacja zawsze tworzy wspólne tagi `ai:` i scala zgodne wyniki modeli.
+Historyczne prefiksy źródłowe pozostają obsługiwane przez jawny import i cleanup.
 
 ## 2. Dane wejściowe i baza stanu
 
@@ -95,23 +94,16 @@ spowodować re-merge. Nie oznacza to automatycznie ponownej inferencji.
 python .\stash_ai.py --merge-only --scene-id 123 --force-merge
 ```
 
-## 5. Replace vs historia wyników
+## 5. Zastępowanie wyników
 
-Domyślnie:
+Nowy poprawny wynik inferencji zawsze zastępuje poprzedni wynik tego samego
+modelu i rodzaju. Historyczne serie są zwijane przy potwierdzonym reuse cache,
+bez uruchamiania modelu. Jawny import legacy nadal dopisuje dowody w jednej
+transakcji z historią importu.
 
-```text
-REPLACE_SCENE_TAGS = True
-REPLACE_MARKERS = True
-```
-
-Przy `True` nowy poprawny wynik modelu zastępuje poprzedni wynik tego samego
-rodzaju. Przy `False` aplikacja zachowuje wcześniejsze przebiegi jako historyczne
-dowody i merge może je uwzględniać.
-
-Po ponownym ustawieniu `True`, jeżeli bieżący wynik inferencji można
-jednoznacznie ponownie wykorzystać, aplikacja zwija zachowaną historię danego
-rodzaju bez uruchamiania modelu. Zmiana polityki publikacji nadal powoduje
-odpowiednie uzgodnienie Stash.
+Znane przedziały zawsze publikują koniec. Occurrence i importowane markery
+z nieznanym końcem pozostają punktami. Zwykłe przedziały opublikowane dawniej
+jako punkty odzyskują długość z zapisanych dowodów podczas uzgadniania.
 
 ## 6. Progi i rethreshold bez inferencji
 
@@ -183,8 +175,7 @@ inferencji i częściowego checkpointu podczas zwykłego przebiegu. Trzeba ponow
 wykonać inferencję, aby uzupełnić wcześniej odrzucone obserwacje; sam merge ani
 rethreshold ich nie odtworzy. Pozostaw ustawienia retencji bez zmian podczas
 obniżania samych progów publikacji. Szerszy cache zajmuje więcej miejsca i może
-wymagać więcej RAM/CPU przy merge. `--output-mode separate` nie zapisuje tego
-trwałego evidence i ignoruje opcjonalne progi retencji.
+wymagać więcej RAM/CPU przy merge. Nowa inferencja zawsze zapisuje trwałe evidence według skonfigurowanej retencji.
 
 ## 7. Reguły temporalne
 
@@ -198,7 +189,9 @@ trwałego evidence i ignoruje opcjonalne progi retencji.
 - histereza kontynuacji markerów;
 - wymagane liczby trafień i pokrycie dodatków.
 
-`--no-temporal` wyłącza te reguły i przywraca prostsze zachowanie bazowe.
+Reguły zawsze wykonuje silnik temporalny. Usunięto `--no-temporal` oraz
+klucz YAML `enabled`; poszczególne reguły nadal mają własne ustawienia.
+Stary algorytm służy wyłącznie do odtwarzania zamrożonych snapshotów cleanupu.
 
 Po zmianie `marker_continue_ratio`, `--merge-only` sprawdza, czy zapisany cache
 markerów obejmuje wymagany próg kontynuacji. Jeśli próg retencji jest wyższy,
@@ -216,7 +209,7 @@ Pole `marker_tag_blocklist` pozostaje w metadanych historycznych wyników;
 nowe wyniki zapisują pustą listę. Cache z niepustą historyczną listą wymaga
 świeżej inferencji: odrzucone wcześniej detekcje nie istnieją w zapisanych klatkach.
 `--merge-only` i rethreshold markerów zgłoszą błąd przed publikacją takiej sceny,
-również przy `--markers-only`, `--no-temporal` i `--dry-run`.
+również przy `--markers-only` i `--dry-run`.
 Starszy cache inferencji bez metadanych blocklisty również wymaga jednorazowego
 odświeżenia przed zwykłym merge lub rethreshold markerów. Cleanup może nadal
 cofać głosy z wcześniej opublikowanych markerów konsensusowych bez inferencji:
