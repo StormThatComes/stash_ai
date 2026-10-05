@@ -101,10 +101,11 @@ def sync_merged(app, stash, resolver, store, scene, scene_hits, spans, *, migrat
     plan = plan_scene_tags(
         app, store, scene_id, scene, evidence.scene_hits, scene_labels,
         resolved.ids, resolved.blocked_names, migrate=migrate)
-    plan_markers(app, store, resolved, catalog, evidence.previous_ranges, plan, migrate=migrate, report=report)
+    plan_markers(app, store, resolved, catalog, plan, migrate=migrate, report=report)
     if app.CREATE_MARKERS:
         plan.snapshots["markers"] = {"contributions": spans}
     stats = sync_statistics(app, plan, markers, suppressed)
     return publish_sync_plan(
         app, stash, resolver, store, scene_id, scene, markers, scene_labels, plan, stats,
         report=report, publication_key=publication_key)
+

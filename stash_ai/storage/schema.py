@@ -2,7 +2,7 @@
 from dataclasses import dataclass
 
 APPLICATION_ID = 0x53544D47
-LATEST_SCHEMA_VERSION = 13
+LATEST_SCHEMA_VERSION = 14
 KNOWN_KINDS = frozenset(('scene', 'markers'))
 KNOWN_MODELS = frozenset(('joytag', 'wd', 'dtq', 'oppai'))
 
@@ -19,6 +19,7 @@ class TableSpec:
 
 
 TABLES = (
+    TableSpec('inference_archive', ('data',), model=True, kind=True),
     TableSpec('results', ('data',), True, True, base=True, invalidates_merge=True),
     TableSpec('result_thresholds', model=True, kind=True, invalidates_merge=True),
     TableSpec('result_metadata', model=True, kind=True),
@@ -48,6 +49,8 @@ def initialize_features(store):
     from stash_ai.storage.merge_checks import initialize as initialize_checks
     from stash_ai.storage.recovery import initialize as initialize_recovery
     from stash_ai.storage.preview import initialize as initialize_preview
+    from stash_ai.storage.archive import initialize as initialize_archive
+    initialize_archive(store)
     initialize_progress(store)
     initialize_cleanup(store)
     if store.preview_source:
@@ -71,6 +74,7 @@ def load_features(store):
 
 
 COLUMNS = {
+    'inference_archive': 'scope scene model kind signature data',
     'results': 'scope scene model kind data',
     'result_thresholds': 'scope scene model kind thresholds',
     'result_metadata': 'scope scene model kind format data',

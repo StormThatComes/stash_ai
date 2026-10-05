@@ -26,6 +26,10 @@ def run_standalone_command(app, args) -> int | None:
         from stash_ai.commands.recovery import run_only
         app.services.validate_config(scene_work=False)
         return run_only(app, args)
+    if args.command is Command.POINT_MIGRATION:
+        from stash_ai.commands.point_migration import run
+        app.services.validate_config(scene_work=False)
+        return run(app, args)
     if args.command is Command.MARKER_GROUPS:
         from stash_ai.commands.marker_groups import run_backfill
         app.services.validate_config(scene_work=False)
@@ -68,3 +72,4 @@ def run_saved_merge_command(app, settings, args, core_policies, scene_policies) 
         hierarchy = combined_hierarchy(app, args, scene_policies)
         return run_merged(app, settings, args, {}, hierarchy, core_policies, scene_policies)
     return None
+

@@ -139,13 +139,14 @@ def test_imported_history_is_not_completed_inference(tmp_path):
     assert actions(data)[0]['action'] == 'restart_inference'
 
 
-def test_old_history_is_validated_even_when_last_segment_has_enough_retention(tmp_path):
+def test_retired_history_does_not_block_current_retention(tmp_path):
     path = tmp_path / 'state.sqlite3'
     old = pair()
     old['markers']['meta']['marker_score_floor'] = .95
     seed(path, outputs=old)
     seed(path, outputs=pair('later'), history=True)
-    assert issue(report(path))['outputs']['markers']['status'] == 'insufficient'
+    data = report(path)
+    assert not data['issues'] and data['totals']['reusable_pairs'] == 1
 
 
 def test_removed_frame_blocklist_labels_require_reinference(tmp_path):
@@ -248,6 +249,12 @@ def test_unselected_publication_dependencies_block_plan_without_expanding_target
         monkeypatch.setattr(merge_store.StateStore, 'unpack', lambda *args: pytest.fail('prediction BLOB decoded'))
     data = report(path, settings=[replace(config(), marker_threshold=.9)])
     assert [row['model'] for row in data['models']] == ['wd']
+    if problem == 'historical_floor':
+        assert data['totals']['blocked_pairs'] == 0
+        assert data['totals']['reusable_pairs'] == 1
+        assert not actions(data)  # only publication/rethreshold work remains
+        assert path.read_bytes() == before
+        return
     assert data['totals']['scene_model_pairs'] == data['totals']['blocked_pairs'] == 1
     assert data['totals']['fully_ready_scenes'] == 0 and not data['plan']
     row = issue(data)

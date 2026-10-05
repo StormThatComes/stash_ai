@@ -111,7 +111,7 @@ def test_cleanup_rejects_changes_to_published_frame_proofs(old_consensus):
         records = state.records('1', 'markers')['dtq']
         records[0]['items'][0]['tags'][0][1] = .95
         with state.connection:
-            state.replace_records('1', 'dtq', 'markers', records)
+            state.connection.execute("UPDATE results SET data=? WHERE model='dtq' AND kind='markers'", (state.pack(records),))
     before = deepcopy(p.stash.scene)
     assert app.main(p.cleanup_args) == 1
     assert p.stash.scene == before and not p.stash.writes
@@ -187,3 +187,17 @@ def test_repeated_cleanup_preserves_nonempty_historical_bans(tmp_path):
         assert state.records('1', 'markers') == original
         with pytest.raises(ValueError, match='unblocked marker tags'):
             merge_source_markers.marker_contributions(app, original, policies)
+
+
+
+def test_controlled_replacement_retains_published_frame_proofs_for_cleanup(old_consensus):
+    p = old_consensus
+    with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL)) as state:
+        records = state.records('1', 'markers')['dtq']
+        records[0]['items'][0]['tags'][0][1] = .95
+        with state.connection:
+            state.replace_records('1', 'dtq', 'markers', records)
+        from stash_ai.storage.archive import records as archived_records
+        assert archived_records(state, '1', 'markers')['dtq']
+    assert app.main(p.cleanup_args) == 0
+    assert not p.stash.scene['scene_markers']

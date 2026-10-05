@@ -26,6 +26,8 @@ def check_results_and_index(db, tables, errors, progress=None):
             segments = decoded_payload(blob, list)
             if not valid_result_segments(segments, kind):
                 raise ValueError("Invalid result segment.")
+            from stash_ai.storage.archive import validate_active
+            validate_active(segments)
             from stash_ai.evidence.formats import validate_current
             for segment in segments:
                 validate_current(segment)
