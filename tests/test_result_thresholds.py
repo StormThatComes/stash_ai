@@ -1,4 +1,6 @@
 """Threshold policy writes preserve evidence, preview isolation and completion."""
+from tests.helpers.evidence import seed_history
+
 from stash_ai.rethreshold.plans import RecordAccess, PendingPolicy, ThresholdRequest
 from copy import deepcopy
 from dataclasses import replace
@@ -150,7 +152,7 @@ def test_new_inference_resets_override_and_append_keeps_effective_history(tmp_pa
         if dry_run:
             assert not threshold_rows(store)  # the source stays in the read-only attachment
         new = outputs(.6, 'new')
-        store.put('1', 'wd', new, replace=dict(scene=replace, markers=replace))
+        seed_history(store, '1', 'wd', new, replace=dict(scene=replace, markers=replace))
         assert len(threshold_rows(store)) == (0 if replace else 2)
         assert len(store.connection.execute('SELECT * FROM ' + store.table('result_thresholds')).fetchall()) == (0 if replace else 2)
         for kind, segment in new.items():
@@ -170,7 +172,7 @@ def test_new_inference_resets_override_and_append_keeps_effective_history(tmp_pa
 def test_override_applies_to_every_historical_segment_without_mutating_borrowed_records(tmp_path):
     with StateStore(tmp_path / 'state.sqlite3', 'scope', cache_bytes=2**20) as store:
         store.put('1', 'wd', outputs())
-        store.put('1', 'wd', outputs(.6, 'second'), replace=dict(scene=False, markers=False))
+        seed_history(store, '1', 'wd', outputs(.6, 'second'), replace=dict(scene=False, markers=False))
         borrowed = store.records('1', 'scene', borrow=True)['wd']
         before = deepcopy(borrowed)
         raw = blobs(store)
@@ -337,4 +339,3 @@ def test_v8_missing_threshold_table_is_a_db_check_error(tmp_path):
     report = db.check_database(path, 'scope')
     assert not report['ok']
     assert any(issue['code'] == 'missing_base_tables' for issue in report['errors'])
-

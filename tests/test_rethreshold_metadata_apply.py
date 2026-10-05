@@ -1,4 +1,6 @@
 """Frame-free Apply preserves completion indexes, history and preview isolation."""
+from tests.helpers.evidence import seed_history
+
 from stash_ai.rethreshold.plans import RecordAccess, PendingPolicy, ThresholdRequest
 from copy import deepcopy
 from dataclasses import replace
@@ -51,7 +53,7 @@ def test_metadata_apply_matches_full_payload_index_and_preserves_history(tmp_pat
                 if not populated:
                     saved['scene']['items'] = saved['scene']['frames'] = []
                     saved['markers']['items'] = []
-                store.put('1', 'wd', saved, replace=dict(scene=False, markers=False))
+                seed_history(store, '1', 'wd', saved, replace=dict(scene=False, markers=False))
     # Reference the established full-evidence path, including preview overlays.
     with StateStore(paths[0], 'scope', dry_run=dry_run) as store:
         if mode == 'markers':
@@ -138,4 +140,3 @@ def test_legacy_or_damaged_metadata_is_backfilled_once_before_apply(tmp_path, mo
         assert 'errors' not in update(store, mode, report)
         assert report.timing_calls['state_json_decode'] == (1 if mode == 'scene' else 2)
         assert blobs(store) == raw
-

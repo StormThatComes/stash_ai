@@ -187,7 +187,7 @@ def test_temporal_resume_preserves_statistics_and_all_sparse_scores(pipeline,mon
     assert p.loaded[-1].seen==list(range(4,10))
     expected=IndexedTagger(p.loaded[-1].settings,p.scores['wd'],p.vocab.labels)
     analysis={}
-    predictions,output=prediction.predict_scene(app, expected,p.stash,{},p.cues,raw_scene=True,analysis=analysis)
+    predictions,output=prediction.predict_scene(app, expected,p.stash,{},p.cues,analysis=analysis)
     with merge_store.StateStore(p.path,merge_store.scope_for(app.STASH_URL),True) as state:
         scene=state.records('1','scene')['wd'][-1]
         markers=state.records('1','markers')['wd'][-1]
@@ -269,4 +269,3 @@ def test_old_cached_results_still_merge_without_new_evidence(tmp_path):
                            'markers':dict(mode='spans',meta={'origin':'legacy'},items=[dict(tag='legacy',start=0,end=10,extra_tags=[])])})
         hits,spans=merge.evidence(app,state,'1',{m:frozenset() for m in SOURCES},{m:frozenset() for m in SOURCES})
         assert hits[0]['tag']=='legacy' and spans[0]['end']==10
-

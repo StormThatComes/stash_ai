@@ -1,4 +1,6 @@
 """SQL preflight preserves retention guards, history and legacy preview isolation."""
+from tests.helpers.evidence import seed_history
+
 from stash_ai.rethreshold.plans import RecordAccess, PendingPolicy, ThresholdRequest
 import json
 import sqlite3
@@ -115,7 +117,7 @@ def test_late_historical_failure_applies_no_thresholds(tmp_path, monkeypatch):
         old = outputs()
         old['markers']['meta']['marker_score_floor'] = .95
         store.put('2', 'wd', old)
-        store.put('2', 'wd', outputs(.6, 'new'), replace=dict(scene=False, markers=False))
+        seed_history(store, '2', 'wd', outputs(.6, 'new'), replace=dict(scene=False, markers=False))
         raw = blobs(store)
         monkeypatch.setattr(store, 'unpack', lambda *a: pytest.fail('Check decoded evidence'))
         assert rethreshold(store, .8, scenes=('1', '2')) == {'errors': 1}
@@ -192,7 +194,7 @@ def test_preview_new_inference_metadata_hides_source_and_tracks_history(tmp_path
     source = path.read_bytes()
     with StateStore(path, 'scope', dry_run=dry_run) as store:
         new = outputs(.6, 'new')
-        store.put('1', 'wd', new, replace=dict(scene=replace, markers=replace))
+        seed_history(store, '1', 'wd', new, replace=dict(scene=replace, markers=replace))
         for kind in ('scene', 'markers'):
             metadata = store.result_metadata('1', kind, 'wd')
             assert len(metadata) == (1 if replace else 2)
@@ -339,4 +341,3 @@ def test_compaction_and_anonymous_report_preserve_only_metadata_counts(tmp_path)
     assert report['database']['table_rows']['result_metadata'] == 2
     assert 'result_metadata' not in report['database']['blob_tables']
     assert 'marker_tag_blocklist' not in json.dumps(report)
-

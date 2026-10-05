@@ -84,7 +84,7 @@ def import_scene(app, store, scene):
             for model, items in by_model.items():
                 segment = {'mode': 'scene' if kind == 'scene' else 'spans', 'items': items,
                            'meta': {'origin': 'legacy', 'captured_at': merge_results.now(), 'revision': None}}
-                store.results.put_in_transaction(scene_id, model, {kind: segment}, {kind: False})
+                store.results.append_legacy_in_transaction(scene_id, model, kind, segment)
                 counts['legacy_scene_tags_imported' if kind == 'scene' else 'legacy_markers_imported'] += len(items)
             store.legacy.remember_in_transaction(scene_id, kind, originals)
     return counts

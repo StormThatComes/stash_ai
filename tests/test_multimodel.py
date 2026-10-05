@@ -85,13 +85,13 @@ def test_every_label_and_streaming_aggregation(monkeypatch,aggregation,batch):
     cues=[Cue(i,i+1,"x",(0,0,1,1)) for i in range(5)]
     monkeypatch.setattr(app,"AGGREGATION",aggregation)
     monkeypatch.setattr(sprites,"iter_sprite_frames",lambda *args:sprite_frames(cues))
-    predictions,frames=prediction.predict_scene(app, Tagger(ModelSettings(WD,Path("."),batch_size=batch, scene_threshold=.4, marker_threshold=.65),labels,scores),Stash(),{},cues,frozenset({"scene_ban"}))
+    predictions,frames=prediction.predict_scene(app, Tagger(ModelSettings(WD,Path("."),batch_size=batch, scene_threshold=.4, marker_threshold=.65),labels,scores),Stash(),{},cues)
     expected=scores.max(axis=0) if aggregation=="max" else np.sort(scores,axis=0)[-2:].mean(axis=0)
-    assert len(predictions)==len(labels)-1
+    assert len(predictions)==len(labels)
     for tag,score in predictions: assert score==pytest.approx(expected[labels.index(tag)])
     markers,_=app.build_markers(frames,frozenset({"core_ban"}))
-    assert len(markers)==len(labels)-2 and "core_ban" in markers[0].extra_tags
-    assert all('scene_ban' not in m.extra_tags for m in markers)
+    assert len(markers)==len(labels)-1 and "core_ban" in markers[0].extra_tags
+    assert any('scene_ban' in m.extra_tags for m in markers)
     assert all(m.start==0 and m.end==5 and m.hits==5 for m in markers)
 
 

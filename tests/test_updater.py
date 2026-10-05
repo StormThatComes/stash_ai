@@ -1123,11 +1123,10 @@ sys.path.insert(0, '.')
 from stash_ai.commands.bootstrap import catalogs, policies, runtime_options
 from stash_ai.evidence.historical_markers import replay_markers
 from stash_ai.inference.prediction import predict_scene
-from stash_ai.inference.scene_predictions import retained_scores, temporal_scores
+from stash_ai.inference.scene_predictions import retained_scores, candidate_scores
 from stash_ai.evidence.temporal.policy import TemporalPolicy
 assert retained_scores([0.8, 0.2], ['visible', 'retained'], [{'tags': [('retained', 0.3)]}]) == [('retained', 0.2)]
-assert temporal_scores([0.8, 0.2], ['visible', 'retained'], [0, 1], {}, 0.5,
-                       TemporalPolicy(), raw_scene=True, exclusions={'visible'}) == [('visible', 0.8), ('retained', 0.2)]
+assert candidate_scores([0.8, 0.2], ['visible', 'retained'], [0, 1]) == [('visible', 0.8), ('retained', 0.2)]
 assert not {'torch', 'numpy', 'onnxruntime', 'tqdm'} & set(sys.modules)
 """], cwd=tmp_path, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr

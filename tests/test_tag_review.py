@@ -1,4 +1,6 @@
 """Review priorities must preserve model provenance and cache limitations."""
+from tests.helpers.evidence import seed_history
+
 
 from stash_ai.reports.review.options import ReviewOptions, REASONS
 from copy import deepcopy
@@ -38,7 +40,7 @@ def report(path, scenes=("1",), options=ReviewOptions(), core=None, tags=None):
 
 def seed(path, scene, model, outputs, replace=None):
     with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL)) as state:
-        state.put(scene, model, outputs, replace)
+        seed_history(state, scene, model, outputs, replace)
 
 
 def model_rows(data):

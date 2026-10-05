@@ -1,7 +1,7 @@
 """Scene predictions, retained frame scores and resumable batch execution."""
 from __future__ import annotations
 
-from .scene_predictions import retained_scores, temporal_scores
+from .scene_predictions import retained_scores, candidate_scores
 
 from dataclasses import dataclass
 from typing import Any, TYPE_CHECKING
@@ -36,19 +36,16 @@ class _PredictionState:
     policy: Any
 
 
-def _restore_prediction_state(app, tagger, cues, *, raw_scene, checkpoint, report):
+def _restore_prediction_state(app, tagger, cues, *, checkpoint, report):
     import numpy as np
     from stash_ai.evidence.temporal.statistics import SceneAccumulator
-    from stash_ai.evidence.temporal.policy import marker_floor
     from stash_ai.evidence.retention import scene_cache_floor, marker_cache_floor
 
     settings, labels = tagger.settings, tagger.labels
     policy = app.TEMPORAL_POLICY
-    retain_scene = raw_scene and app.APPLY_SCENE_TAGS
+    retain_scene = app.APPLY_SCENE_TAGS
     scene_floor = scene_cache_floor(settings, policy)
-    # Raw evidence retains the cache floor; direct callers use the publication floor.
-    retained_marker_floor = (marker_cache_floor(settings, policy) if raw_scene
-                             else marker_floor(policy, settings.marker_threshold))
+    retained_marker_floor = marker_cache_floor(settings, policy)
     processed, top_scores, saved = (
         checkpoint.restore()
         if checkpoint
@@ -186,7 +183,7 @@ def _run_prediction_batches(app, tagger, stash, paths, cues, state, *,
         raise RuntimeError("Incomplete inference; scene sync was not started.")
 
 
-def _finalize_predictions(app, tagger, scene_exclusions, state, *, raw_scene, analysis):
+def _finalize_predictions(app, tagger, state, *, analysis):
     import numpy as np
 
     settings, labels = tagger.settings, tagger.labels
@@ -209,52 +206,24 @@ def _finalize_predictions(app, tagger, scene_exclusions, state, *, raw_scene, an
         # support floor. Future rethreshold rebuilds statistics from frames.
         predictions = retained_scores(scene_scores, labels, state.scene_frames)
     elif state.accumulator is not None:
-        predictions = temporal_scores(
-            scene_scores, labels, state.accumulator.items, statistics,
-            settings.scene_threshold, state.policy,
-            raw_scene=raw_scene, exclusions=scene_exclusions)
+        predictions = candidate_scores(scene_scores, labels, state.accumulator.items)
     else:
-        predictions = [
-            (tag, score)
-            for tag, score in select_scores(
-                scene_scores,
-                labels,
-                settings.scene_threshold,
-                0,
-            )
-            if raw_scene or tag not in scene_exclusions
-        ]
+        predictions = select_scores(scene_scores, labels, settings.scene_threshold, 0)
 
-    if app.MAX_TAGS and not raw_scene:
-        predictions = predictions[:app.MAX_TAGS]
-    if scene_exclusions and not raw_scene:
-        state.frame_predictions = [
-            FramePrediction(
-                frame.cue,
-                tuple(
-                    (tag, score)
-                    for tag, score in frame.tags
-                    if tag not in scene_exclusions
-                ),
-            )
-            for frame in state.frame_predictions
-        ]
     return predictions, state.frame_predictions
 
 
 def predict_scene(app, tagger: Any, stash, paths: dict, cues: list[Cue],
-                  scene_exclusions: frozenset[str] = frozenset(), *, raw_scene: bool = False,
-                  checkpoint=None, prefetch: int = 0, analysis: dict | None = None,
+                  *, checkpoint=None, prefetch: int = 0, analysis: dict | None = None,
                   report=None, prepare_workers: int = 1
                   ) -> tuple[list[tuple[str, float]], list[FramePrediction]]:
-    """Run local inference while preserving resumable checkpoint semantics."""
+    """Return raw retained evidence; publication applies exclusions and limits."""
     if not cues:
         raise ValueError("Cannot predict a scene without VTT cues.")
     state = _restore_prediction_state(
         app,
         tagger,
         cues,
-        raw_scene=raw_scene,
         checkpoint=checkpoint,
         report=report,
     )
@@ -272,8 +241,6 @@ def predict_scene(app, tagger: Any, stash, paths: dict, cues: list[Cue],
     return _finalize_predictions(
         app,
         tagger,
-        scene_exclusions,
         state,
-        raw_scene=raw_scene,
         analysis=analysis,
     )

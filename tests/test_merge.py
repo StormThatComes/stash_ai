@@ -1,4 +1,6 @@
 """Behavior tests for exact-label AI fusion; no live Stash or model downloads."""
+from tests.helpers.evidence import seed_history
+
 
 
 from stash_ai.storage.results import KINDS
@@ -546,8 +548,8 @@ def test_scene_cap_does_not_drop_previous_runs_or_legacy_confidence(tmp_path,mon
     with store(tmp_path) as state:
         for origin,items in [("inference",[("old",.95),("low",.7)]),
                              ("inference",[("new",.9)]),("legacy",[("old",None),("legacy",None)])]:
-            state.put("1","wd",{"scene":{"mode":"scene","meta":{"origin":origin},
-                      "items":[dict(tag=tag,score=score) for tag,score in items]}},{"scene":False})
+            seed_history(state, "1", "wd", {"scene":{"mode":"scene","meta":{"origin":origin},
+                      "items":[dict(tag=tag,score=score) for tag,score in items]}}, {"scene":False})
         hits,_=merge.evidence(app,state,"1",empty_policies(),empty_policies())
         assert {h["tag"] for h in hits}=={"old","new","legacy"}
         assert {h["score"] for h in hits if h["tag"]=="old"}=={.95,None}
@@ -569,4 +571,3 @@ def test_cleanup_point_output_uses_recorded_extent_when_start_moves(merge_pipeli
     p.stash.writes.clear()
     assert app.main([*p.args,"--cleanup-markers-only","--marker-core-exclusions",str(core)])==0
     assert not p.stash.writes
-

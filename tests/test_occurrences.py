@@ -1,4 +1,6 @@
 """Occurrence publication, old caches, revocation and exact sampled positions."""
+from tests.helpers.evidence import seed_history
+
 from stash_ai.db.snapshot_migration import complete_policy
 
 
@@ -34,7 +36,7 @@ def put(state, scenes, markers, scene='1'):
     for source in set(scenes) | set(markers):
         for kind, records in (('scene', scenes), ('markers', markers)):
             for segment in records.get(source, []):
-                state.put(scene, source, {kind: segment}, {kind: False})
+                seed_history(state, scene, source, {kind: segment}, {kind: False})
 
 
 def test_peak_time_is_compact_earliest_max_and_survives_resume():

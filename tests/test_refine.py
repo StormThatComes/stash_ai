@@ -193,9 +193,9 @@ def test_appended_results_never_retain_retired_video_payload(tmp_path):
     with merge_store.StateStore(tmp_path/'state.sqlite3','fixture') as state:
         data['refinement']=old_video_payload()
         with pytest.raises(ValueError, match='Retired refinement'):
-            state.put('1','wd',{'markers':data},replace={'markers':False})
+            state.put('1','wd',{'markers':data})
         data.pop('refinement')
-        state.put('1','wd',{'markers':data},replace={'markers':False})
+        state.put('1','wd',{'markers':data})
         raw=state.connection.execute("SELECT data FROM results WHERE kind='markers'").fetchone()[0]
         records=state_codec.decode(raw)
         assert len(records)==1 and 'refinement' not in records[0]

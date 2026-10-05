@@ -31,7 +31,8 @@ def pair(label='common', **kwargs):
 
 def seed(path, scene='1', model='wd', outputs=None, history=False):
     with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL)) as store:
-        store.put(scene, model, pair() if outputs is None else outputs,
+        from tests.helpers.evidence import seed_history
+        seed_history(store, scene, model, pair() if outputs is None else outputs,
                   {'scene': False, 'markers': False} if history else None)
 
 

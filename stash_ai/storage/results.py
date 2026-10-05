@@ -123,32 +123,30 @@ class ResultStore:
             store.cache.put(last, values)
 
     @measured('state_write')
-    def put(self, scene, model, outputs, replace=None):
+    def put(self, scene, model, outputs):
         with self.store.connection:
-            self.put_in_transaction(scene, model, outputs, replace)
+            self.put_in_transaction(scene, model, outputs)
 
-    def put_in_transaction(self, scene, model, outputs, replace=None):
-        """Write outputs while the caller owns the commit or rollback boundary."""
+    def put_in_transaction(self, scene, model, outputs):
+        """Replace inference outputs inside the caller's transaction."""
         if model not in SOURCES or set(outputs) - set(KINDS):
             raise ValueError("Unknown result source or output kind.")
         for kind, segment in outputs.items():
-            old = (self.records(scene, kind, model, borrow=True).get(model, [])
-                   if not (replace or {}).get(kind, True) else [])
-            # Explicit imports append evidence; repeating identical data need
-            # not accumulate duplicates merely due to its capture timestamp.
-            keep = []
-            if old:
-                # Only append mode needs comparison. A shallow metadata copy
-                # avoids duplicating all retained frame observations.
-                def semantic(value):
-                    data = dict(value)
-                    if 'meta' in data:
-                        data['meta'] = {key: item for key, item in data['meta'].items() if key != 'captured_at'}
-                    # JSON normalizes tuples in new results to stored lists.
-                    return json.dumps(data, sort_keys=True, allow_nan=False)
-                current = semantic(segment)
-                keep = [previous for previous in old if semantic(previous) != current]
-            self.replace_records(scene, model, kind, keep + [segment])
+            self.replace_records(scene, model, kind, [segment])
+
+    def append_legacy_in_transaction(self, scene, model, kind, segment):
+        """Append an explicit legacy import, deduplicating capture timestamps."""
+        if segment.get('meta', {}).get('origin') != 'legacy':
+            raise ValueError('Only imported legacy evidence may be appended.')
+        def semantic(value):
+            data = dict(value)
+            data['meta'] = {key: item for key, item in data['meta'].items()
+                            if key != 'captured_at'}
+            return json.dumps(data, sort_keys=True, allow_nan=False)
+        current = semantic(segment)
+        old = self.model_records(scene, kind, model, borrow=True)
+        keep = [previous for previous in old if semantic(previous) != current]
+        self.replace_records(scene, model, kind, keep + [segment])
 
     def replace_records(self, scene, model, kind, segments):
         """Replace a segment list inside the caller's transaction, including previews."""

@@ -139,8 +139,8 @@ class StateStore(AbstractContextManager):
     def preload_sources(self):
         return self.results.preload_sources()
 
-    def put(self, scene, model, outputs, replace=None):
-        return self.results.put(scene, model, outputs, replace)
+    def put(self, scene, model, outputs):
+        return self.results.put(scene, model, outputs)
 
     def replace_records(self, scene, model, kind, segments):
         return self.results.replace_records(scene, model, kind, segments)

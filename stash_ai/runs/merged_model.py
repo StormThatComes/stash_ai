@@ -114,7 +114,7 @@ class MergedModelRun:
             len(cues), len(self.vocabulary.labels), args.checkpoint_batches)
         analysis = {}
         predictions, frames = prediction.predict_scene(
-            app, self.tagger, media, paths, cues, raw_scene=True, checkpoint=checkpoint,
+            app, self.tagger, media, paths, cues, checkpoint=checkpoint,
             prefetch=args.prefetch_batches, analysis=analysis, report=self.report,
             prepare_workers=args.prepare_workers)
         outputs = merge_results.capture_outputs(

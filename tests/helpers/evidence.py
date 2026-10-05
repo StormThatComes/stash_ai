@@ -53,3 +53,18 @@ def paired_records(values, threshold=.8, marker_threshold=.8):
         markers[source], scenes[source] = [marker], [scene]
     return scenes, markers
 
+
+
+
+def seed_history(store, scene, model, outputs, replace=None):
+    """Construct historical multi-segment fixtures outside the inference API."""
+    import json
+    with store.connection:
+        for kind, segment in outputs.items():
+            previous = store.model_records(scene, kind, model) if replace is not None and not replace.get(kind, True) else []
+            def semantic(value):
+                value = deepcopy(value)
+                value['meta'].pop('captured_at', None)
+                return json.dumps(value, sort_keys=True)
+            previous = [value for value in previous if semantic(value) != semantic(segment)]
+            store.replace_records(scene, model, kind, previous + [segment])
