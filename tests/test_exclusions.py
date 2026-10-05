@@ -1,4 +1,6 @@
 """Global exclusions across cached outputs, shared proofs and Stash cleanup."""
+from functools import partial
+from stash_ai.tools.namespace_migration import main as namespace_main
 
 from tests.helpers.temporal import policy_args
 
@@ -13,6 +15,7 @@ from stash_ai.commands import hierarchy as hierarchy_commands
 from stash_ai.inference import sprites
 from stash_ai.cleanup import evidence as cleanup_evidence
 from tests.helpers.runtime import runtime as app
+migrate_namespace = partial(namespace_main, runtime=app)
 from stash_ai.evidence import pipeline as merge
 import stash_ai.evidence.intervals as merge_intervals
 import stash_ai.evidence.labels as merge_labels
@@ -235,7 +238,7 @@ def test_pruned_legacy_extra_id_cannot_reappear_or_break_the_next_merge(pipeline
     old = p.stash.marker(WD, 'legacy', 'legacy')
     old['tags'].append(p.stash.tag('ai:blocked'))
     path = policy_file(tmp_path, ['blocked'])
-    assert app.main([*p.args, '--migrate-legacy-only', '--scene-tag-exclusions', str(path)]) == 0
+    assert migrate_namespace([*p.args, '--scene-tag-exclusions', str(path)]) == 0
     args = [*p.args, '--merge-only', '--scene-tag-exclusions', str(path)]
     monkeypatch.setattr(app.services, 'load_tagger', lambda *args: pytest.fail('legacy merge loaded model'))
     assert app.main(args) == 0

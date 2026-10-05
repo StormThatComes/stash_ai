@@ -1,5 +1,7 @@
-from stash_ai.evidence.interval_geometry import union_intervals as geometry_union
 """Behavior tests for exact-label AI fusion; no live Stash or model downloads."""
+from functools import partial
+from stash_ai.tools.point_migration import main as point_main
+from stash_ai.evidence.interval_geometry import union_intervals as geometry_union
 from tests.helpers.evidence import inference_record
 
 
@@ -16,10 +18,12 @@ import numpy as np
 import pytest
 import yaml
 
-from stash_ai.commands import hierarchy as hierarchy_commands, namespace_migration
+from stash_ai.commands import hierarchy as hierarchy_commands
+from stash_ai.publication.preconditions import require_source_state
 from stash_ai.inference.identity import model_identity
 from stash_ai.publication import merged as merge_sync
 from tests.helpers.runtime import runtime as app
+migrate_points = partial(point_main, runtime=app)
 from stash_ai.evidence import pipeline as merge
 import stash_ai.evidence.intervals as merge_intervals
 import stash_ai.evidence.labels as merge_labels
@@ -301,7 +305,7 @@ def test_missing_source_state_does_not_destroy_existing_ai_markers(tmp_path):
     before=deepcopy(stash.scene)
     with store(tmp_path) as state:
         with pytest.raises(RuntimeError,match="source state"):
-            namespace_migration.check_sources(app,state,stash.find_scene("1"))
+            require_source_state(app,state,stash.find_scene("1"))
     assert stash.scene==before and not stash.writes
 
 
@@ -440,7 +444,7 @@ def test_historical_point_ranges_gain_ends_without_inference_or_new_ids(merge_pi
         marker['end_seconds'] = None
         marker['tags'].append(p.stash.tag('human'))
     monkeypatch.setattr(app.services, 'load_tagger', lambda *a: pytest.fail('point migration loaded a model'))
-    assert app.main(['--migrate-point-markers-only', '--state-db', str(p.path)]) == 0
+    assert migrate_points(['--state-db', str(p.path)]) == 0
     assert {m['id']: (m['seconds'], m['end_seconds']) for m in p.stash.scene['scene_markers']} == expected
     assert all('human' in {tag['name'] for tag in m['tags']} for m in p.stash.scene['scene_markers'])
     p.stash.writes.clear()
@@ -467,7 +471,7 @@ def test_cleanup_point_output_uses_recorded_extent_when_start_moves(merge_pipeli
         marker["end_seconds"] = None  # Historical point-only publication.
     first=next(m for m in p.stash.scene["scene_markers"] if m["seconds"]==10 and m["primary_tag"]["name"]=="ai:common")
     first["tags"].append(p.stash.tag("manual extra"))
-    assert app.main(["--migrate-point-markers-only", "--state-db", str(p.path)]) == 0
+    assert migrate_points(["--state-db", str(p.path)]) == 0
     core=tmp_path/"core.yml"
     core.write_text("version: 1\nexcluded_core_tags: []\nby_model:\n  joytag: [common]\n  wd: [common]\n")
     assert app.main([*p.args,"--cleanup-markers-only","--marker-core-exclusions",str(core)])==0

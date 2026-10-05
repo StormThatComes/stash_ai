@@ -9,7 +9,7 @@ def runtime_options(app, args):
     from tqdm import tqdm
     args.report = RunReport(args.verbose, tqdm.write)
     app.DRY_RUN = app.DRY_RUN or args.dry_run
-    if args.markers_only or args.cleanup_markers_only or args.sync_marker_groups_only or args.migrate_point_markers_only:
+    if args.markers_only or args.cleanup_markers_only or args.sync_marker_groups_only:
         app.APPLY_SCENE_TAGS, app.CREATE_MARKERS = False, True
     elif args.scene_tags_only or args.cleanup_scene_tags_only:
         app.APPLY_SCENE_TAGS, app.CREATE_MARKERS = True, False

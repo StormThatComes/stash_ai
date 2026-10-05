@@ -84,7 +84,7 @@ def publish_sync_plan(app, stash, resolver, store, scene_id, scene, markers, sce
     return stats
 
 
-def sync_merged(app, stash, resolver, store, scene, scene_hits, spans, *, transition=False, cleanup=False,
+def sync_merged(app, stash, resolver, store, scene, scene_hits, spans, *, cleanup=False,
                 report=None, tag_policies=None, publication_key=None):
     """Reconcile only script-owned markers and recorded scene associations."""
     scene_id = str(scene["id"])
@@ -100,15 +100,9 @@ def sync_merged(app, stash, resolver, store, scene, scene_hits, spans, *, transi
         app, store, scene_id, scene, evidence.scene_hits, scene_labels,
         resolved.ids, resolved.blocked_names)
     plan_markers(app, store, resolved, catalog, plan, report=report)
-    transition_stats = {}
-    if transition:
-        from stash_ai.commands.namespace_migration import extend_plan
-        transition_stats = extend_plan(app, scene, resolved, catalog, plan)
     if app.CREATE_MARKERS:
         plan.snapshots["markers"] = {"contributions": spans}
     stats = sync_statistics(app, plan, markers, suppressed)
-    stats.update(transition_stats)
     return publish_sync_plan(
         app, stash, resolver, store, scene_id, scene, markers, scene_labels, plan, stats,
         report=report, publication_key=publication_key)
-
