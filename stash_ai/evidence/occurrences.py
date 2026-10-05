@@ -88,18 +88,17 @@ def _candidate_streams(hits, records, blocked, policy):
 
     streams = [iter(sorted(peaks, key=lambda event: event[0]))]
     from stash_ai.evidence.identity import marker_segment_signature
-    for source, segments in records.items():
-        for segment in segments:
-            if segment['mode'] != 'frames':
-                continue
-            signature = marker_segment_signature(segment)
-            qualified = defaultdict(list)
-            for mapping in (by_run.get((source, _run(segment['meta'])), {}), by_frame.get((source, signature), {})):
-                for tag, proofs in mapping.items():
-                    if tag not in blocked[source]:
-                        qualified[tag].extend(proofs)
-            if qualified:
-                streams.append(_observations(source, segment, signature, qualified, policy))
+    for source, segment in records.items():
+        if segment['mode'] != 'frames':
+            continue
+        signature = marker_segment_signature(segment)
+        qualified = defaultdict(list)
+        for mapping in (by_run.get((source, _run(segment['meta'])), {}), by_frame.get((source, signature), {})):
+            for tag, proofs in mapping.items():
+                if tag not in blocked[source]:
+                    qualified[tag].extend(proofs)
+        if qualified:
+            streams.append(_observations(source, segment, signature, qualified, policy))
     return streams
 
 

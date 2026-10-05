@@ -192,9 +192,9 @@ def test_preview_reads_and_shadows_without_copying_large_unrelated_blobs(tmp_pat
     with merge_store.StateStore(path, 's', True, cache_bytes=1000000) as preview:
         assert preview.preview_source
         assert preview.connection.execute('SELECT COUNT(*) FROM main.results').fetchone() == (0,)
-        assert preview.records('1', 'scene')['wd'][0]['items'] == [dict(tag='old', score=.9)]
+        assert [(item['tag'], item['score']) for item in preview.records('1', 'scene')['wd']['items']] == [('old', .9)]
         preview.put('1', 'wd', {'scene': current_record(dict(mode='scene', meta={}, items=[dict(tag='new', score=.8)]))})
-        assert preview.records('1', 'scene')['wd'][0]['items'] == [dict(tag='new', score=.8)]
+        assert [(item['tag'], item['score']) for item in preview.records('1', 'scene')['wd']['items']] == [('new', .8)]
         preview.prepare('1', {'scene': {'new': True, 'contributions': []}})
         assert preview.snapshot('1', 'scene') == ({'old': True, 'contributions': []}, {'new': True, 'contributions': []})
         preview.commit_prepared('1', ['scene'])
@@ -328,9 +328,9 @@ def test_shared_cache_stays_bounded_with_concurrent_media_and_result_access():
 def test_detached_records_cannot_reuse_a_stale_segment_digest(tmp_path):
     with merge_store.StateStore(tmp_path/'state.db', 's', cache_bytes=1000000) as state:
         state.put('1', 'wd', {'markers': current_record(dict(mode='frames', meta={}, items=[]))})
-        borrowed = state.records('1', 'markers', borrow=True)['wd'][0]
+        borrowed = state.records('1', 'markers', borrow=True)['wd']
         original = performance_segments.segment_digest(borrowed)
-        detached = state.records('1', 'markers')['wd'][0]
+        detached = state.records('1', 'markers')['wd']
         detached['items'].append({'new': True, 'contributions': []})
         assert performance_segments.segment_digest(detached) != original
         assert performance_segments.segment_digest(borrowed) == original and borrowed['items'] == []

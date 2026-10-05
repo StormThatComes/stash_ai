@@ -55,8 +55,8 @@ def test_interruption_resume_matches_full_inference_and_counts_each_frame_once(p
     expected=IndexedTagger(p.loaded[-1].settings,p.scores["wd"],p.vocab.labels)
     predictions,frames=prediction.predict_scene(app, expected,p.stash,{},p.cues)
     with merge_store.StateStore(p.path,merge_store.scope_for(app.STASH_URL),True) as state:
-        scene=state.records("1","scene")["wd"][0]
-        markers=state.records("1","markers")["wd"][0]
+        scene=state.records("1","scene")["wd"]
+        markers=state.records("1","markers")["wd"]
         assert [(item["tag"],item["score"]) for item in scene["items"]]==predictions
         assert [(item["start"],item["tags"]) for item in markers["items"]]==[(f.cue.start,[list(t) for t in f.tags]) for f in frames]
         assert state.connection.execute("SELECT COUNT(*) FROM checkpoints").fetchone()[0]==0
@@ -102,7 +102,7 @@ def test_failed_restart_never_publishes_fresh_and_stale_model_mix(pipeline,monke
         assert progress.pending_refreshes(state,["scene","markers"])=={
             "1":[("dtq","markers"),("dtq","scene")]}
         assert {kind:state.snapshot("1",kind)[0] for kind in ("scene","markers")}==snapshots
-        assert state.records("1","scene")["wd"][0]["items"]==[]
+        assert state.records("1","scene")["wd"]["items"]==[]
 
     fail["dtq"]=False
     assert app.main(args)==0
@@ -138,7 +138,7 @@ def test_automatic_input_invalidation_never_publishes_fresh_and_stale_model_mix(
         assert progress.pending_refreshes(state,["scene","markers"])=={
             "1":[("dtq","markers"),("dtq","scene")]}
         assert {kind:state.snapshot("1",kind)[0] for kind in ("scene","markers")}==snapshots
-        assert state.records("1","scene")["wd"][0]["items"]==[]
+        assert state.records("1","scene")["wd"]["items"]==[]
 
     fail["dtq"]=False
     assert app.main(args)==0
@@ -287,14 +287,14 @@ def test_finish_rolls_back_results_checkpoint_and_refresh_together(tmp_path, mon
 
         checkpoints.finish(state, '1', 'wd', fresh)
         for kind, segment in fresh.items():
-            assert state.records('1', kind)['wd'] == [segment]
+            assert state.records('1', kind)['wd'] == segment
         for table in ('checkpoints', 'checkpoint_frames', 'checkpoint_analysis', 'refresh_requests'):
             assert state.connection.execute('SELECT COUNT(*) FROM ' + state.table(table)).fetchone() == (0,)
         assert progress.completed(state, '1', 'wd', ['scene', 'markers'], 'new')
 
     with merge_store.StateStore(path, 'fixture', True) as state:
         for kind, segment in (original if dry_run else fresh).items():
-            assert state.records('1', kind)['wd'] == [segment]
+            assert state.records('1', kind)['wd'] == segment
 
 
 def test_api_failure_resumes_only_synchronization(pipeline,monkeypatch):
@@ -336,8 +336,8 @@ def test_v1_database_is_migrated_once_without_losing_sources(tmp_path,monkeypatc
     from stash_ai.db import update_database
     update_database(path)
     with merge_store.StateStore(path,"fixture") as state:
-        assert state.connection.execute("PRAGMA user_version").fetchone()==(17,)
-        assert state.records("1","scene")["wd"]==[segment]
+        assert state.connection.execute("PRAGMA user_version").fetchone()==(18,)
+        assert state.records("1","scene")["wd"]==segment
         assert not progress.completed(state,"1","wd",["scene"],"new-signature")
     monkeypatch.setattr(state_codec,"decode",lambda *args:pytest.fail("migration repeated"))
     with merge_store.StateStore(path,"fixture") as state:

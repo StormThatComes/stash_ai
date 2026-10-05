@@ -53,7 +53,7 @@ def paired_records(values, threshold=.8, marker_threshold=.8):
                      frames=[dict(start=f.cue.start, end=f.cue.end, tags=list(f.tags)) for f in data],
                      items=[dict(tag='core', score=sum(sorted(scores, reverse=True)[:2]) / min(2, len(scores)),
                                  statistics=stats.get('core'))] if any(scores) else [])
-        markers[source], scenes[source] = [marker], [scene]
+        markers[source], scenes[source] = marker, scene
     return scenes, markers
 
 
@@ -62,7 +62,16 @@ def current_record(value):
     from stash_ai.signatures import digest
     meta = value['meta']
     if meta.get('origin') != 'inference':
-        return value
+        meta['origin'] = 'inference'
+        if value['mode'] == 'spans':
+            value['mode'] = 'frames'
+            value['items'] = [dict(start=item['start'] + (i / 3) * ((item['end'] or item['start']+1)-item['start']),
+                end=item['start'] + ((i+1) / 3) * ((item['end'] or item['start']+1)-item['start']),
+                tags=[[item['tag'], item.get('score') or .9]]) for item in value['items'] for i in range(3)]
+        elif value['mode'] == 'scene':
+            for item in value['items']:
+                if item['score'] is None:
+                    item['score'] = .9
     meta.pop('marker_tag_blocklist', None)
     meta.update(analysis_format=4)
     meta.setdefault('inference_signature', digest(value))
@@ -90,37 +99,24 @@ def current_record(value):
 
 
 def inject_records(store, scene, model, outputs):
-    """Emulate an old writer or on-disk corruption, outside today's write contract."""
+    """Emulate old writers or corruption outside today's active write contract."""
     from stash_ai.storage.metadata import FORMAT, summarize, encode
     from stash_ai.storage.progress import index_result
     from stash_ai.storage.thresholds import separate
+    from stash_ai.db import result_history
     for kind, value in outputs.items():
-        segments = value if isinstance(value, list) else [value]
         params = store.scope, scene, model, kind
-        raw, thresholds = separate(segments, kind)
+        old = isinstance(value, list)
+        raw, threshold = (result_history.separate(value, kind) if old else separate(value, kind))
+        metadata = result_history.summarize(raw) if old else summarize(raw)
         with store.connection:
-            store.connection.execute('INSERT OR REPLACE INTO results VALUES (?,?,?,?,?)',
-                                     (*params, store.pack(raw)))
+            store.connection.execute('INSERT OR REPLACE INTO results VALUES (?,?,?,?,?)', (*params, store.pack(raw)))
             store.connection.execute('DELETE FROM result_thresholds WHERE scope=? AND scene=? AND model=? AND kind=?', params)
-            if thresholds is not None:
-                store.connection.execute('INSERT INTO result_thresholds VALUES (?,?,?,?,?)', (*params, thresholds))
+            if threshold is not None:
+                store.connection.execute('PRAGMA ignore_check_constraints=ON')
+                store.connection.execute('INSERT OR REPLACE INTO result_thresholds VALUES (?,?,?,?,?)', (*params, threshold))
+                store.connection.execute('PRAGMA ignore_check_constraints=OFF')
             store.connection.execute('INSERT OR REPLACE INTO result_metadata VALUES (?,?,?,?,?,?)',
-                                     (*params, FORMAT, encode(summarize(raw))))
-            index_result(store, scene, model, kind, segments)
+                                     (*params, 3 if old else FORMAT, encode(metadata)))
+            (result_history.index_result if old else index_result)(store, scene, model, kind, value)
     store.cache.clear()
-
-
-
-
-def seed_history(store, scene, model, outputs, replace=None):
-    """Construct historical multi-segment fixtures outside the inference API."""
-    import json
-    with store.connection:
-        for kind, segment in outputs.items():
-            previous = store.model_records(scene, kind, model) if replace is not None and not replace.get(kind, True) else []
-            def semantic(value):
-                value = deepcopy(value)
-                value['meta'].pop('captured_at', None)
-                return json.dumps(value, sort_keys=True)
-            previous = [value for value in previous if semantic(value) != semantic(segment)]
-            store.replace_records(scene, model, kind, previous + [segment])

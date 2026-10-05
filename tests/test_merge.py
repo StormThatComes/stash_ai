@@ -1,6 +1,6 @@
 """Behavior tests for exact-label AI fusion; no live Stash or model downloads."""
 from tests.helpers.evidence import current_record
-from tests.helpers.evidence import seed_history
+
 
 
 
@@ -93,13 +93,13 @@ def test_state_is_durable_scoped_partial_and_dry_run_does_not_write(tmp_path):
     before=(path.read_bytes(),path.stat().st_mtime_ns)
     with store(tmp_path,dry=True) as state:
         state.put("1","joytag",{"scene":{**first,"items":[]}})
-        assert state.records("1","scene")["joytag"][0]["items"]==[]
+        assert state.records("1","scene")["joytag"]["items"]==[]
     assert (path.read_bytes(),path.stat().st_mtime_ns)==before
     with store(tmp_path) as state:
-        assert state.records("1","scene")["joytag"][0]==first
+        assert state.records("1","scene")["joytag"]==first
         state.put("1","joytag",{"scene":{**first,"items":[]}})
-        assert state.records("1","markers")["joytag"][0]==second
-        assert state.records("1","scene")["wd"][0]==first
+        assert state.records("1","markers")["joytag"]==second
+        assert state.records("1","scene")["wd"]==first
     with store(tmp_path,scope="different-stash") as state:
         assert state.records("1","scene")=={}
     empty=tmp_path/"missing"/"dry.sqlite3"
@@ -367,13 +367,13 @@ def test_cleanup_selected_bridge_source_splits_union_and_keeps_manual_removals(m
     assert {t["name"] for t in p.stash.scene["tags"]}=={"ai:common"}
 
 
-def test_result_writer_collapses_historical_input_before_verified_reuse(merge_pipeline, monkeypatch):
+def test_result_writer_replaces_one_record_before_verified_reuse(merge_pipeline, monkeypatch):
     p = merge_pipeline
     args = ['--models', 'oppai', *p.args[2:], '--resume']
     scope = merge_store.scope_for(app.STASH_URL)
     assert app.main(args) == 0
     with merge_store.StateStore(p.path, scope, True) as state:
-        previous = {kind: state.records('1', kind)['oppai'][0] for kind in ('scene', 'markers')}
+        previous = {kind: state.records('1', kind)['oppai'] for kind in ('scene', 'markers')}
     p.scores['oppai'][:] = 0
     monkeypatch.setattr(p.stash, 'get_media', lambda url: b'changed-media')
     assert app.main(args) == 0
@@ -381,14 +381,14 @@ def test_result_writer_collapses_historical_input_before_verified_reuse(merge_pi
         with state.connection:
             for kind in ('scene', 'markers'):
                 current = state.records('1', kind)['oppai']
-                assert len(current) == 1
-                state.replace_records('1', 'oppai', kind, [previous[kind], *current])
+                assert isinstance(current, dict)
+                state.replace_record('1', 'oppai', kind, current)
     # The canonical writer discarded unpinned history; completion reuses the
     # latest inference without another model pass.
     monkeypatch.setattr(app.services, 'load_tagger', lambda *a: pytest.fail('history migration reran inference'))
     assert app.main(args) == 0
     with merge_store.StateStore(p.path, scope, True) as state:
-        assert all(len(state.records('1', kind)['oppai']) == 1 for kind in ('scene', 'markers'))
+        assert all(isinstance(state.records('1', kind)['oppai'], dict) for kind in ('scene', 'markers'))
     assert 'ai:unique_op' not in {tag['name'] for tag in p.stash.scene['tags']}
     assert not intervals(p.stash, 'unique_op')
 
@@ -402,7 +402,7 @@ def test_new_inference_replaces_previous_results(merge_pipeline):
     assert 'ai:unique_op' not in {tag['name'] for tag in p.stash.scene['tags']}
     assert not intervals(p.stash, 'unique_op')
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), True) as state:
-        assert all(len(state.records('1', kind)['oppai']) == 1 for kind in ('scene', 'markers'))
+        assert all(isinstance(state.records('1', kind)['oppai'], dict) for kind in ('scene', 'markers'))
 
 
 def test_caps_follow_blacklists_and_keep_all_qualified_evidence(merge_pipeline,monkeypatch,tmp_path):
@@ -418,7 +418,7 @@ def test_caps_follow_blacklists_and_keep_all_qualified_evidence(merge_pipeline,m
     assert intervals(p.stash,"unique_op")==[(10,30)]
     assert not intervals(p.stash) and not intervals(p.stash,"extra")
     with merge_store.StateStore(p.path,merge_store.scope_for(app.STASH_URL),True) as state:
-        assert {item["tag"] for item in state.records("1","scene")["oppai"][0]["items"]}=={"common","unique_op","extra"}
+        assert {item["tag"] for item in state.records("1","scene")["oppai"]["items"]}=={"common","unique_op","extra"}
 
 
 def test_range_output_retains_full_source_ranges(merge_pipeline):
@@ -448,16 +448,15 @@ def test_historical_point_ranges_gain_ends_without_inference_or_new_ids(merge_pi
 
 
 
-def test_scene_cap_does_not_drop_previous_runs_or_legacy_confidence(tmp_path,monkeypatch):
+def test_scene_cap_applies_only_to_the_current_record(tmp_path,monkeypatch):
     monkeypatch.setattr(app,"MAX_TAGS",1)
     with store(tmp_path) as state:
-        for origin,items in [("inference",[("old",.95),("low",.7)]),
-                             ("inference",[("new",.9)]),("legacy",[("old",None),("legacy",None)])]:
-            seed_history(state, "1", "wd", {"scene":current_record({"mode":"scene","meta":{"origin":origin},
-                      "items":[dict(tag=tag,score=score) for tag,score in items]})}, {"scene":False})
+        for items in [[("old",.95),("low",.7)], [("latest",.95),("newer",.8)]]:
+            state.put("1", "wd", {"scene":current_record({"mode":"scene","meta":{},
+                      "items":[dict(tag=tag,score=score) for tag,score in items]})})
         hits,_=merge.evidence(app,state,"1",empty_policies(),empty_policies())
-        assert {h["tag"] for h in hits}=={"old","new","legacy"}
-        assert {h["score"] for h in hits if h["tag"]=="old"}=={None}
+        assert {h["tag"] for h in hits}=={"latest"}
+        assert all(h["tag"] != "old" for h in hits)
 
 
 def test_cleanup_point_output_uses_recorded_extent_when_start_moves(merge_pipeline,monkeypatch,tmp_path):

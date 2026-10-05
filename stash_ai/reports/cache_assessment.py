@@ -6,13 +6,13 @@ from stash_ai.storage.results import KINDS
 
 STATUSES = (
     'ready', 'rethreshold', 'missing', 'partial', 'refresh_required',
-    'legacy_only', 'insufficient', 'inconsistent',
+    'insufficient', 'inconsistent',
 )
 REUSABLE = frozenset(('ready', 'rethreshold'))
-RESTART = frozenset(('legacy_only', 'insufficient', 'inconsistent'))
+RESTART = frozenset(('insufficient', 'inconsistent'))
 
 
-def inspect_output(app, config, kind, segments, index, refresh, checkpoint, error):
+def inspect_output(app, config, kind, record, index, refresh, checkpoint, error):
     from stash_ai.evidence.cache_views import scene_threshold, validate_scene
     from stash_ai.evidence.temporal.policy import marker_floor
     from stash_ai.evidence.thresholds import _score, indexed_signature, marker_threshold
@@ -24,20 +24,16 @@ def inspect_output(app, config, kind, segments, index, refresh, checkpoint, erro
         return result('inconsistent', error, unreadable=True)
     if refresh:
         return result('refresh_required', 'An outstanding refresh invalidates the saved result.')
-    if segments is None:
+    if record is None:
         if index is not None:
             return result('inconsistent', 'Completion index exists without evidence; run --db-check.')
         return result('partial' if checkpoint else 'missing',
                       'Checkpoint exists; compatibility is checked when inference resumes.' if checkpoint
                       else 'No saved result for this output.')
-    if not segments:
-        return result('inconsistent', 'A result row has no segments; this is not completed zero-detection inference.')
-    inference = next((segment for segment in reversed(segments)
-                      if segment['meta'].get('origin') == 'inference'), None)
-    if inference is None:
-        return result('legacy_only', 'Imported output does not prove completed model inference.')
-    signature = inference['meta'].get('inference_signature')
-    expected = (1, int(any(segment['populated'] for segment in segments)), indexed_signature(inference))
+    if not isinstance(record, dict):
+        return result('inconsistent', 'A result row has no current record; run --db-check.')
+    signature = record['meta'].get('inference_signature')
+    expected = (1, int(record['populated']), indexed_signature(record))
     if not isinstance(signature, str) or not signature or index != expected:
         return result('inconsistent', 'Evidence and completion index disagree; run --db-check.')
 
@@ -46,34 +42,30 @@ def inspect_output(app, config, kind, segments, index, refresh, checkpoint, erro
               if kind == 'scene' else marker_floor(app.TEMPORAL_POLICY, threshold))
     requested = getattr(config, 'scene_cache_floor' if kind == 'scene' else 'marker_cache_floor')
     required_floor = min(needed, requested) if requested is not None else needed
-    floors, effective = [], []
     try:
-        for segment in segments:
-            meta = segment['meta']
-            if kind == 'scene':
-                validate_scene(app, segment, threshold, has_frames=segment['has_frames'])
-                floor, saved = meta['scene_score_floor'], scene_threshold(segment)
-            else:
-                if segment['mode'] != 'frames' or meta.get('origin') != 'inference':
-                    raise ValueError('Imported marker ranges cannot prove retained frame coverage.')
-                validate_current(segment)
-                floor = meta.get('marker_score_floor')
-                saved = marker_threshold(segment)
-            if not _score(saved) or not _score(floor):
-                raise ValueError('Invalid saved threshold or retention floor; run --db-check.')
-            if floor > required_floor:
-                raise ValueError(f'Retained floor {floor:g} exceeds required {required_floor:g}.')
-            floors.append(floor)
-            effective.append(saved)
+        meta = record['meta']
+        if kind == 'scene':
+            validate_scene(app, record, threshold, has_frames=record['has_frames'])
+            floor, saved = meta['scene_score_floor'], scene_threshold(record)
+        else:
+            if record['mode'] != 'frames' or meta.get('origin') != 'inference':
+                raise ValueError('Imported marker ranges cannot prove retained frame coverage.')
+            validate_current(record)
+            floor = meta.get('marker_score_floor')
+            saved = marker_threshold(record)
+        if not _score(saved) or not _score(floor):
+            raise ValueError('Invalid saved threshold or retention floor; run --db-check.')
+        if floor > required_floor:
+            raise ValueError(f'Retained floor {floor:g} exceeds required {required_floor:g}.')
     except (KeyError, ValueError) as exc:
         return result('insufficient', str(exc), required_floor=required_floor,
                       target_threshold=threshold)
-    changed = any(value != threshold for value in effective)
+    changed = saved != threshold
     return result('rethreshold' if changed else 'ready',
                   'Retained evidence supports YAML thresholds; apply rethreshold without inference.' if changed
                   else 'Completed evidence supports the selected thresholds and retention.',
-                  retained_floor_max=max(floors), required_floor=required_floor,
-                  target_threshold=threshold, saved_thresholds=sorted(set(effective)))
+                  retained_floor_max=floor, required_floor=required_floor,
+                  target_threshold=threshold, saved_thresholds=[saved])
 
 
 def publication_dependencies(app, evidence, selected):
@@ -84,7 +76,7 @@ def publication_dependencies(app, evidence, selected):
 
     dependencies = []
     context = replace(app, MARKER_THRESHOLDS=None, SCENE_THRESHOLDS=None)
-    for (model, kind), (segments, error) in sorted(evidence.items()):
+    for (model, kind), (record, error) in sorted(evidence.items()):
         if model in selected:
             continue
         try:
@@ -93,16 +85,10 @@ def publication_dependencies(app, evidence, selected):
             if model not in SOURCES:
                 raise ValueError('Unknown cached model; run --db-check.')
             if kind == 'markers':
-                if any(segment['mode'] not in ('frames', 'spans') for segment in segments):
-                    raise ValueError('Unsupported stored marker evidence; run --db-check.')
-                validate_marker_cache(context, {model: segments})
+                validate_marker_cache(context, {model: record})
             else:
-                for segment in segments:
-                    meta = segment['meta']
-                    if meta.get('origin') != 'inference':
-                        continue
-                    threshold = scene_threshold(segment)
-                    validate_scene(app, segment, threshold, has_frames=segment['has_frames'])
+                threshold = scene_threshold(record)
+                validate_scene(app, record, threshold, has_frames=record['has_frames'])
         except (KeyError, TypeError, ValueError) as exc:
             dependencies.append(dict(model=model, kind=kind, reason=str(exc),
                 resolution=f'Include {model} with --models and regenerate the report; '
@@ -132,8 +118,8 @@ def assess_scene(app, scene, settings, evidence, indexes, refreshes, checkpoints
         checkpoint = checkpoints.get((scene, model))
         outputs = {}
         for kind in KINDS:
-            segments, error = evidence.get((model, kind), (None, None))
-            outputs[kind] = inspect_output(app, config, kind, segments,
+            record, error = evidence.get((model, kind), (None, None))
+            outputs[kind] = inspect_output(app, config, kind, record,
                 indexes.get((scene, model, kind)), (scene, model, kind) in refreshes,
                 checkpoint, error)
         blockers = []

@@ -12,7 +12,7 @@ from stash_ai.signatures import digest
 
 PUBLICATION_CODE_FILES = (
     'storage/metadata_store.py', 'storage/schema.py', 'rethreshold/plans.py',
-    'evidence/contracts.py', 'evidence/formats.py', 'evidence/qualification.py', 'evidence/historical_evidence.py', 'evidence/marker_identity.py', 'evidence/interval_geometry.py', 'inference/input_identity.py',
+    'evidence/contracts.py', 'evidence/formats.py', 'evidence/qualification.py', 'evidence/marker_identity.py', 'evidence/interval_geometry.py', 'inference/input_identity.py',
     'runtime/settings.py', 'runtime/context.py', 'runtime/workers.py',
     'cli.py', 'commands/bootstrap.py', 'evidence/pipeline.py', 'evidence/source_markers.py', 'evidence/identity.py', 'evidence/labels.py', 'inference/results.py', 'commands/hierarchy.py', 'commands/namespace_migration.py', 'runs/merged.py', 'runs/merged_model.py', 'publication/publisher.py', 'publication/parallel.py', 'publication/merged.py', 'publication/planning/types.py', 'publication/planning/merged_evidence.py', 'publication/planning/merged_tags.py', 'publication/planning/merged_markers.py', 'publication/index.py', 'publication/markers.py',
     'evidence/temporal/policy.py', 'evidence/temporal/statistics.py', 'evidence/temporal/markers.py', 'evidence/temporal/extras.py', 'evidence/intervals.py', 'evidence/observations.py', 'evidence/frames.py', 'evidence/shared_markers.py', 'evidence/scenes.py', 'evidence/occurrences.py', 'exclusions.py', 'cleanup/state.py', 'cleanup/client.py',

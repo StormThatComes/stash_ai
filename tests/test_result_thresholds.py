@@ -1,6 +1,6 @@
 """Threshold policy writes preserve evidence, preview isolation and completion."""
 from tests.helpers.evidence import current_record
-from tests.helpers.evidence import seed_history, inject_records
+from tests.helpers.evidence import inject_records
 
 from stash_ai.rethreshold.plans import RecordAccess, PendingPolicy, ThresholdRequest
 from copy import deepcopy
@@ -75,13 +75,13 @@ def test_raise_lower_restore_never_encode_or_write_evidence(tmp_path, monkeypatc
             assert blobs(store) == before
             assert len(threshold_rows(store)) == 2
             for kind in ('scene', 'markers'):
-                segment = store.model_records('1', kind, 'wd')[0]
+                segment = store.model_record('1', kind, 'wd')
                 key = scene_cache_identity.SCENE_OVERRIDE if kind == 'scene' else thresholds_identity.OVERRIDE
                 if value == .4:
                     assert key not in segment
                 else:
                     assert segment.pop(key) == value
-                assert segment == original[kind]['wd'][0]
+                assert segment == original[kind]['wd']
             signature = store.connection.execute(
                 "SELECT signature FROM result_index WHERE kind='markers'").fetchone()[0]
             assert progress.completed(store, '1', 'wd', ['markers'], signature)
@@ -103,7 +103,7 @@ def test_marker_only_updates_policy_without_writing_blob(tmp_path, monkeypatch):
         result = rethreshold_execution.run(app, store, ['1'], [target], RunReport(write=lambda _: None), scenes=False, markers=True)
         assert result == {'marker_thresholds_updated': 1}
         assert blobs(store) == before
-        assert store.records('1', 'markers')['wd'][0][thresholds_identity.OVERRIDE] == .8
+        assert store.records('1', 'markers')['wd'][thresholds_identity.OVERRIDE] == .8
 
 
 @pytest.mark.parametrize('dry_run', [False, True])
@@ -126,14 +126,14 @@ def test_v7_inline_overrides_are_read_lazily_and_can_be_restored(tmp_path, dry_r
         before = connection.execute('SELECT * FROM results ORDER BY scope,scene,model,kind').fetchall()
     source_before = path.read_bytes()
     with StateStore(path, 'scope', dry_run=dry_run) as store:
-        assert store.connection.execute('PRAGMA user_version').fetchone() == (17,)
-        assert store.records('1', 'scene')['wd'] == [old['scene']]
-        assert store.model_records('1', 'markers', 'wd') == [old['markers']]
+        assert store.connection.execute('PRAGMA user_version').fetchone() == (18,)
+        assert store.records('1', 'scene')['wd'] == old['scene']
+        assert store.model_record('1', 'markers', 'wd') == old['markers']
         assert rethreshold(store, .4) == {'scene_thresholds_updated': 1}
-        assert store.connection.execute('PRAGMA user_version').fetchone() == (17,)
+        assert store.connection.execute('PRAGMA user_version').fetchone() == (18,)
         assert blobs(store) == ([] if dry_run else before)
-        assert store.records('1', 'scene')['wd'] == [outputs()['scene']]
-        assert store.model_records('1', 'markers', 'wd') == [outputs()['markers']]
+        assert store.records('1', 'scene')['wd'] == outputs()['scene']
+        assert store.model_record('1', 'markers', 'wd') == outputs()['markers']
     if dry_run:
         assert path.read_bytes() == source_before
     else:
@@ -141,8 +141,7 @@ def test_v7_inline_overrides_are_read_lazily_and_can_be_restored(tmp_path, dry_r
 
 
 @pytest.mark.parametrize('dry_run', [False, True])
-@pytest.mark.parametrize('replace', [False, True])
-def test_new_inference_resets_override_even_when_given_historical_segments(tmp_path, dry_run, replace):
+def test_new_inference_resets_override(tmp_path, dry_run):
     path = tmp_path / 'state.sqlite3'
     with StateStore(path, 'scope') as store:
         store.put('1', 'wd', outputs())
@@ -153,13 +152,13 @@ def test_new_inference_resets_override_even_when_given_historical_segments(tmp_p
         if dry_run:
             assert not threshold_rows(store)  # the source stays in the read-only attachment
         new = outputs(.6, 'new')
-        seed_history(store, '1', 'wd', new, replace=dict(scene=replace, markers=replace))
+        store.put('1', 'wd', new)
         assert len(threshold_rows(store)) == 0
         assert len(store.connection.execute('SELECT * FROM ' + store.table('result_thresholds')).fetchall()) == 0
         for kind, segment in new.items():
             effective = store.records('1', kind)['wd']
-            assert effective[-1] == segment
-            assert len(effective) == 1
+            assert effective == segment
+            assert isinstance(effective, dict)
         assert progress.completed(store, '1', 'wd', ['scene', 'markers'], 'new')
     if dry_run:
         assert path.read_bytes() == source_before
@@ -170,20 +169,20 @@ def test_new_inference_resets_override_even_when_given_historical_segments(tmp_p
 def test_override_applies_only_to_active_inference_without_mutating_borrowed_records(tmp_path):
     with StateStore(tmp_path / 'state.sqlite3', 'scope', cache_bytes=2**20) as store:
         store.put('1', 'wd', outputs())
-        seed_history(store, '1', 'wd', outputs(.6, 'second'), replace=dict(scene=False, markers=False))
+        store.put('1', 'wd', outputs(.6, 'second'))
         borrowed = store.records('1', 'scene', borrow=True)['wd']
         before = deepcopy(borrowed)
         raw = blobs(store)
         rethreshold(store, .6)
         assert borrowed == before
         effective = store.records('1', 'scene')['wd']
-        assert len(effective) == 1
-        assert scene_cache_identity.SCENE_OVERRIDE not in effective[0]
+        assert isinstance(effective, dict)
+        assert scene_cache_identity.SCENE_OVERRIDE not in effective
         assert blobs(store) == raw
         rethreshold(store, .4)
         effective = store.records('1', 'scene')['wd']
-        assert len(effective) == 1
-        assert effective[0][scene_cache_identity.SCENE_OVERRIDE] == .4
+        assert isinstance(effective, dict)
+        assert effective[scene_cache_identity.SCENE_OVERRIDE] == .4
 
 
 def test_override_invalidates_only_affected_scene_and_scope(tmp_path):
@@ -200,7 +199,7 @@ def test_override_invalidates_only_affected_scene_and_scope(tmp_path):
         assert performance_merge_checks.checked(store, '2', 'policy', 'fingerprint')
     with StateStore(path, 'other', dry_run=True) as store:
         assert performance_merge_checks.checked(store, '1', 'policy', 'fingerprint')
-        assert store.records('1', 'scene')['wd'] == [outputs()['scene']]
+        assert store.records('1', 'scene')['wd'] == outputs()['scene']
 
 
 @pytest.mark.parametrize('initial_threshold', [None, .7])
@@ -262,13 +261,13 @@ def test_sparse_v8_preview_can_change_and_restore_threshold_without_copying_resu
     before = path.read_bytes(), path.stat().st_mtime_ns
     with StateStore(path, 'scope', dry_run=True) as store:
         assert store.preview_source
-        assert store.records('1', 'scene')['wd'][0][scene_cache_identity.SCENE_OVERRIDE] == .8
+        assert store.records('1', 'scene')['wd'][scene_cache_identity.SCENE_OVERRIDE] == .8
         monkeypatch.setattr(store, 'pack', lambda *a: pytest.fail('encoded inference evidence'))
         rethreshold(store, .9)
         rethreshold(store, .4)
         assert not blobs(store)
         assert len(threshold_rows(store)) == 2
-        assert store.records('1', 'scene')['wd'] == [outputs()['scene']]
+        assert store.records('1', 'scene')['wd'] == outputs()['scene']
     assert (path.read_bytes(), path.stat().st_mtime_ns) == before
 
 
@@ -281,8 +280,8 @@ def test_abandon_and_cleanup_preserve_v8_and_effective_thresholds(tmp_path):
         recovery.abandon(store, lambda _: None)
         cleanup.begin(store, 'cleanup', {'excluded'}, set(), [], kinds=('scene',))
         cleanup.finish(store)
-        assert store.connection.execute('PRAGMA user_version').fetchone() == (17,)
-        assert store.records('1', 'scene')['wd'][0][scene_cache_identity.SCENE_OVERRIDE] == .8
+        assert store.connection.execute('PRAGMA user_version').fetchone() == (18,)
+        assert store.records('1', 'scene')['wd'][scene_cache_identity.SCENE_OVERRIDE] == .8
     assert db.check_database(path, 'scope')['ok']
 
 
@@ -298,7 +297,7 @@ def test_diagnostics_and_compaction_preserve_threshold_policy(tmp_path):
     assert before['result_thresholds'] == after['result_thresholds'] == 2
     assert db.check_database(path, 'scope')['ok']
     with StateStore(path, 'scope', dry_run=True) as store:
-        assert store.records('1', 'scene')['wd'][0][scene_cache_identity.SCENE_OVERRIDE] == .8
+        assert store.records('1', 'scene')['wd'][scene_cache_identity.SCENE_OVERRIDE] == .8
 
 
 def test_deleting_result_removes_its_threshold(tmp_path):
@@ -317,8 +316,8 @@ def test_db_check_reports_orphan_invalid_threshold_and_signature_mismatch(tmp_pa
         rethreshold(store, .8)
         with store.connection:
             store.connection.execute('PRAGMA ignore_check_constraints=ON')
-            store.connection.execute("UPDATE result_thresholds SET thresholds='[1.5]' WHERE kind='markers'")
-            store.connection.execute("INSERT INTO result_thresholds VALUES ('scope','orphan','wd','scene','[0.8]')")
+            store.connection.execute("UPDATE result_thresholds SET threshold='[1.5]' WHERE kind='markers'")
+            store.connection.execute("INSERT INTO result_thresholds VALUES ('scope','orphan','wd','scene',0.8)")
             store.connection.execute("UPDATE result_index SET signature='wrong' WHERE kind='scene'")
     report = db.check_database(path, 'scope')
     errors = {issue['code']: issue['count'] for issue in report['errors']}

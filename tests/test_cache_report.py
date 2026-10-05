@@ -29,14 +29,13 @@ def pair(label='common', **kwargs):
     return outputs
 
 
-def seed(path, scene='1', model='wd', outputs=None, history=False, corrupt=False):
+def seed(path, scene='1', model='wd', outputs=None, corrupt=False):
     with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL)) as store:
-        from tests.helpers.evidence import seed_history, inject_records
+        from tests.helpers.evidence import inject_records
         if corrupt:
             inject_records(store, scene, model, outputs)
             return
-        seed_history(store, scene, model, pair() if outputs is None else outputs,
-                  {'scene': False, 'markers': False} if history else None)
+        store.put(scene, model, pair() if outputs is None else outputs)
 
 
 def report(path, scenes=None, settings=None):
@@ -137,9 +136,9 @@ def test_imported_history_is_not_completed_inference(tmp_path):
     for segment in outputs.values():
         segment['meta']['origin'] = 'legacy'
         segment['meta'].pop('analysis_format')
-    seed(path, outputs=outputs)
+    seed(path, outputs=outputs, corrupt=True)
     data = report(path)
-    assert {row['status'] for row in issue(data)['outputs'].values()} == {'legacy_only'}
+    assert {row['status'] for row in issue(data)['outputs'].values()} == {'insufficient'}
     assert actions(data)[0]['action'] == 'restart_inference'
 
 
@@ -148,7 +147,7 @@ def test_retired_history_does_not_block_current_retention(tmp_path):
     old = pair()
     old['markers']['meta']['marker_score_floor'] = .95
     seed(path, outputs=old)
-    seed(path, outputs=pair('later'), history=True)
+    seed(path, outputs=pair('later'))
     data = report(path)
     assert not data['issues'] and data['totals']['reusable_pairs'] == 1
 
@@ -242,7 +241,7 @@ def test_unselected_publication_dependencies_block_plan_without_expanding_target
         peer['scene']['meta'].update(scene_support_floor=.4, scene_score_floor=.4)
     seed(path, model='dtq', outputs=peer, corrupt=True)
     if problem == 'historical_floor':
-        seed(path, model='dtq', history=True)
+        seed(path, model='dtq')
     elif problem == 'unreadable':
         with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL)) as state:
             with state.connection:
@@ -308,7 +307,7 @@ def test_blocked_scene_is_not_added_back_by_publication_recovery(tmp_path, monke
     assert not data['plan']
 
 
-@pytest.mark.parametrize('peer_kind', ['no_scene', 'no_markers', 'imported_spans',
+@pytest.mark.parametrize('peer_kind', ['no_scene', 'no_markers',
                                      'different_threshold', 'higher_override'])
 def test_usable_unselected_evidence_does_not_expand_or_block_selected_plan(tmp_path, peer_kind):
     path = tmp_path / 'state.sqlite3'

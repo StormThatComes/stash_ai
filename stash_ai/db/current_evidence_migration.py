@@ -1,12 +1,12 @@
 """Retire obsolete active inference without losing pinned publication proofs."""
 from types import SimpleNamespace
 
-from stash_ai.storage.codec import decode, encode
+from stash_ai.storage.codec import encode
 from stash_ai.storage.snapshots import decode as decode_snapshot
-from stash_ai.storage.archive import retain
-from stash_ai.storage.thresholds import overlay, separate
-from stash_ai.storage.metadata import FORMAT, summarize, encode as encode_metadata
-from stash_ai.storage.progress import index_result
+from .result_history import retain
+from .result_history import overlay, separate
+from .result_history import FORMAT, summarize, encode_metadata
+from .result_history import index_result
 from stash_ai.evidence.formats import current, validate_archived
 
 
@@ -17,14 +17,16 @@ def migrate(db):
 def retire(db, obsolete):
     store = SimpleNamespace(connection=db, table=lambda name: name,
                             unpack_snapshot=decode_snapshot, pack=encode)
+    from .result_history import history, threshold_column
+    column = threshold_column(db)
     keys = db.execute('SELECT scope,scene,model,kind FROM results').fetchall()
     for scope, scene, model, kind in keys:
         store.scope = scope
         blob, thresholds = db.execute(
-            'SELECT r.data,t.thresholds FROM results AS r LEFT JOIN result_thresholds AS t '
+            f'SELECT r.data,t.{column} FROM results AS r LEFT JOIN result_thresholds AS t '
             'USING(scope,scene,model,kind) WHERE r.scope=? AND r.scene=? AND r.model=? AND r.kind=?',
             (scope, scene, model, kind)).fetchone()
-        previous = overlay(decode(blob), kind, thresholds)
+        previous = overlay(history(blob), kind, thresholds)
         active = [segment for segment in previous
                   if not obsolete(segment)]
         if len(active) == len(previous):

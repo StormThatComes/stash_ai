@@ -51,12 +51,11 @@ def _marker_signals(app, store, scene, spans, rows, options):
     from stash_ai.evidence.thresholds import marker_threshold
 
     effective, segments_by_signature, postings = {}, {}, {}
-    for model, segments in store.records(scene, "markers", borrow=True).items():
-        for segment in segments:
-            threshold = marker_threshold(segment)
-            key = model, marker_segment_signature(segment)
-            effective[key] = threshold
-            segments_by_signature[key] = segment
+    for model, segment in store.records(scene, "markers", borrow=True).items():
+        threshold = marker_threshold(segment)
+        key = model, marker_segment_signature(segment)
+        effective[key] = threshold
+        segments_by_signature[key] = segment
 
     for marker in union_intervals(spans, borrow=True):
         if is_occurrence(marker):

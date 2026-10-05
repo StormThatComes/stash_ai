@@ -1,4 +1,5 @@
 """Temporal qualification, exclusions, source votes and exact checkpoint resume."""
+from tests.helpers.evidence import current_record
 from tests.helpers.temporal import threshold_policy
 
 
@@ -64,8 +65,8 @@ def test_extras_include_observations_inside_a_permitted_primary_gap(monkeypatch)
 
 
 def test_merged_extra_coverage_uses_the_whole_union_duration():
-    records={'wd':[segment('wd',[[('core',.9),('extra',.9)]]*2)],
-             'dtq':[segment('dtq',[[('core',.9)]]*20)]}
+    records={'wd':segment('wd',[[('core',.9),('extra',.9)]]*2),
+             'dtq':segment('dtq',[[('core',.9)]]*20)}
     spans=merge_source_markers.marker_contributions(app,records,{m:frozenset({'extra'}) for m in SOURCES})
     result=merge_intervals.union_intervals(spans)[0]
     assert result['end']==20 and result['extra_tags']==[]
@@ -74,9 +75,9 @@ def test_merged_extra_coverage_uses_the_whole_union_duration():
 
 @pytest.mark.parametrize('same_time',[False,True])
 def test_merged_extra_hits_combine_distinct_times_but_not_duplicate_model_votes(same_time):
-    records={'wd':[segment('wd',[[('core',.9),('extra',.9)],[('core',.9)]])],
-             'dtq':[segment('dtq',[[('core',.9)],[('core',.9),('extra',.9)]])]} 
-    if same_time:records['dtq']=[segment('dtq',[[('core',.9),('extra',.9)],[('core',.9)]])]
+    records={'wd':segment('wd',[[('core',.9),('extra',.9)],[('core',.9)]]),
+             'dtq':segment('dtq',[[('core',.9)],[('core',.9),('extra',.9)]])}
+    if same_time:records['dtq']=segment('dtq',[[('core',.9),('extra',.9)],[('core',.9)]])
     spans=merge_source_markers.marker_contributions(app,records,{m:frozenset({'extra'}) for m in SOURCES})
     assert all(span['extra_tags']==([] if same_time else ['extra']) for span in spans)
     result=merge_intervals.union_intervals(spans)[0]
@@ -84,11 +85,10 @@ def test_merged_extra_hits_combine_distinct_times_but_not_duplicate_model_votes(
     assert result['extra_evidence']['extra']['support_seconds']==(1 if same_time else 2)
 
 
-def test_unproved_extra_tags_do_not_join_temporal_evidence():
-    records={'wd':[segment('wd',[[('core',.9)]]*2)],'joytag':[
-        dict(mode='spans',meta={'origin':'legacy'},items=[dict(tag='core',start=0,end=2,extra_tags=['old_extra'])])]}
-    spans=merge_source_markers.marker_contributions(app,records,{m:frozenset() for m in SOURCES})
-    assert merge_intervals.union_intervals(spans)[0]['extra_tags']==[]
+def test_unproved_imported_ranges_cannot_join_active_temporal_evidence():
+    records={'joytag': dict(mode='spans',meta={'origin':'legacy'},items=[])}
+    with pytest.raises(ValueError, match='Active results require current inference'):
+        merge_source_markers.marker_contributions(app, records, {m:frozenset() for m in SOURCES})
 
 
 def test_hysteresis_needs_a_seed_and_caps_weak_tail(monkeypatch):
@@ -114,7 +114,7 @@ def test_new_strong_hit_resets_weak_tail_limit(monkeypatch):
 
 
 def test_consensus_promotes_repeated_weak_detections_and_preserves_source_scores():
-    records={m:[segment(m,[[('core',.7)]]*3)] for m in ('wd','dtq')}
+    records={m:segment(m,[[('core',.7)]]*3) for m in ('wd','dtq')}
     policies={m:frozenset() for m in SOURCES}
     spans=merge_source_markers.marker_contributions(app,records,policies)
     result=merge_intervals.union_intervals(spans)
@@ -127,18 +127,18 @@ def test_consensus_promotes_repeated_weak_detections_and_preserves_source_scores
 @pytest.mark.parametrize('difference',['input','time','same_model','exclusion'])
 def test_consensus_rejects_incompatible_or_duplicate_votes(difference):
     rows=[[('core',.7)]]*3
-    records={m:[segment(m,rows)] for m in ('wd','dtq')}
+    records={m:segment(m,rows) for m in ('wd','dtq')}
     policies={m:frozenset() for m in SOURCES}
-    if difference=='input':records['dtq'][0]['meta']['frame_input_signature']='different'
+    if difference=='input':records['dtq']['meta']['frame_input_signature']='different'
     if difference=='time':
-        for f in records['dtq'][0]['items']:f['start']+=10;f['end']+=10
-    if difference=='same_model':records={'wd':[records['wd'][0],deepcopy(records['wd'][0])]}
+        for f in records['dtq']['items']:f['start']+=10;f['end']+=10
+    if difference=='same_model':records={'wd':records['wd']}
     if difference=='exclusion':policies['dtq']=frozenset({'core'})
     assert not merge_source_markers.marker_contributions(app,records,policies)
 
 
 def test_single_model_unique_strong_tag_does_not_need_consensus():
-    records={'oppai':[segment('oppai',[[('unique',.9)]]*2)]}
+    records={'oppai':segment('oppai',[[('unique',.9)]]*2)}
     spans=merge_source_markers.marker_contributions(app,records,{m:frozenset() for m in SOURCES})
     assert len(spans)==1 and spans[0]['tag']=='unique' and spans[0]['support_sources']==[]
 
@@ -191,8 +191,8 @@ def test_temporal_resume_preserves_statistics_and_all_sparse_scores(pipeline,mon
     analysis={}
     predictions,output=prediction.predict_scene(app, expected,p.stash,{},p.cues,analysis=analysis)
     with merge_store.StateStore(p.path,merge_store.scope_for(app.STASH_URL),True) as state:
-        scene=state.records('1','scene')['wd'][-1]
-        markers=state.records('1','markers')['wd'][-1]
+        scene=state.records('1','scene')['wd']
+        markers=state.records('1','markers')['wd']
         assert [(r['tag'],r['score']) for r in scene['items']]==predictions
         assert {r['tag']:r['statistics'] for r in scene['items']}==analysis['scene_statistics']
         assert [r['tags'] for r in markers['items']]==[[list(pair) for pair in f.tags] for f in output]
@@ -261,7 +261,7 @@ def test_temporal_policy_rejects_invalid_settings(field,value):
 
 def test_old_cached_results_still_merge_without_new_evidence(tmp_path):
     with merge_store.StateStore(tmp_path/'state.sqlite3','fixture') as state:
-        state.put('1','wd',{'scene':dict(mode='scene',meta={'origin':'legacy'},items=[{'tag':'legacy','score':None}]),
-                           'markers':dict(mode='spans',meta={'origin':'legacy'},items=[dict(tag='legacy',start=0,end=10,extra_tags=[])])})
+        state.put('1','wd',{'scene':current_record(dict(mode='scene',meta={'origin':'legacy'},items=[{'tag':'legacy','score':None}])),
+                           'markers':current_record(dict(mode='spans',meta={'origin':'legacy'},items=[dict(tag='legacy',start=0,end=10,extra_tags=[])]))})
         hits,spans=merge.evidence(app,state,'1',{m:frozenset() for m in SOURCES},{m:frozenset() for m in SOURCES})
         assert hits[0]['tag']=='legacy' and spans[0]['end']==10

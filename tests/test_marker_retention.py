@@ -58,14 +58,13 @@ def test_wider_support_policy_checks_historical_retention_before_publication(
         from stash_ai.storage.codec import encode
         with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL)) as state:
             records = state.records('1', 'markers')['wd']
-            for segment in records:
-                segment['meta']['analysis_format'] = 3
-                segment['meta']['marker_tag_blocklist'] = []
-                segment['meta'].pop('marker_score_floor', None)
+            records['meta']['analysis_format'] = 3
+            records['meta']['marker_tag_blocklist'] = []
+            records['meta'].pop('marker_score_floor', None)
             with state.connection:
                 state.connection.execute("UPDATE results SET data=? WHERE kind='markers'", (encode(records),))
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), True) as state:
-        meta = state.unpack(state.connection.execute("SELECT data FROM " + state.table('results') + " WHERE kind='markers' AND model='wd'").fetchone()[0])[0]['meta']
+        meta = state.unpack(state.connection.execute("SELECT data FROM " + state.table('results') + " WHERE kind='markers' AND model='wd'").fetchone()[0])['meta']
         assert ('marker_score_floor' not in meta) == old_cache
     before = stored_outputs(p.path), deepcopy(p.stash.scene)
     database_bytes = p.path.read_bytes()
@@ -121,7 +120,7 @@ def test_unknown_historical_floor_requires_inference_even_at_high_threshold(over
     frames['meta']['marker_threshold'] = .7
     frames[thresholds_identity.OVERRIDE] = override
     with pytest.raises(ValueError, match='Obsolete active inference'):
-        merge_source_markers.marker_contributions(app, {'wd': [frames]}, policies())
+        merge_source_markers.marker_contributions(app, {'wd': frames}, policies())
 
 
 def test_historical_incomplete_segment_cannot_hide_behind_complete_history():
@@ -131,7 +130,7 @@ def test_historical_incomplete_segment_cannot_hide_behind_complete_history():
     old['meta']['marker_tag_blocklist'] = []
     old['meta'].pop('marker_score_floor', None)
     current = segment('wd', [[('core', .9)]] * 2)
-    with pytest.raises(ValueError, match='Obsolete active inference'):
+    with pytest.raises(ValueError, match='Invalid active inference record'):
         merge_source_markers.marker_contributions(app, {'wd': [old, current]}, policies())
 
 
@@ -222,18 +221,18 @@ def test_noninference_cannot_claim_current_retention_contract():
     imported = segment('wd', [[('core', .9)]] * 2)
     imported['meta'].update(origin='legacy')
     imported['meta'].pop('marker_score_floor', None)
-    with pytest.raises(ValueError, match='Current inference evidence'):
-        merge_source_markers.marker_contributions(app, {'wd': [imported]}, policies())
+    with pytest.raises(ValueError, match='Active results require current inference'):
+        merge_source_markers.marker_contributions(app, {'wd': imported}, policies())
 
 
 @pytest.mark.parametrize('source', ['wd', 'dtq'])
 def test_incomplete_history_cannot_contribute_consensus_votes(source):
     from tests.helpers.evidence import segment, policies
-    records = {key: [segment(key, [[('core', .7)]] * 3)] for key in ('wd', 'dtq')}
+    records = {key: segment(key, [[('core', .7)]] * 3) for key in ('wd', 'dtq')}
     for segments in records.values():
-        segments[0]['meta']['marker_score_floor'] = .6
-    incomplete = deepcopy(records[source][0])
+        segments['meta']['marker_score_floor'] = .6
+    incomplete = deepcopy(records[source])
     incomplete['meta']['marker_score_floor'] = .75
-    records[source].insert(0, incomplete)
+    records[source] = incomplete
     with pytest.raises(ValueError, match=source + ': marker cache floor.*run inference'):
         merge_source_markers.marker_contributions(app, records, policies())

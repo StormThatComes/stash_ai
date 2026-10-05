@@ -47,22 +47,15 @@ def pinned(store, scene):
 
 
 def retain(store, scene, model, kind, previous, active):
-    """Called in the result writer's transaction before replacing active evidence."""
-    active_signatures = {marker_segment_signature(segment) for segment in active}
-    retired = [segment for segment in previous if segment['meta'].get('origin') == 'inference'
-               and marker_segment_signature(segment) not in active_signatures]
-    if not retired:
+    if previous is None:
         return
-    required = pinned(store, scene)
-    for segment in retired:
-        signature = marker_segment_signature(segment)
-        if (model, signature) in required:
-            # Threshold views never enter proof storage or proof identity.
-            raw = {key: value for key, value in segment.items()
-                   if key not in ('scene_threshold_override', 'marker_threshold_override')}
-            store.connection.execute('INSERT OR IGNORE INTO inference_archive VALUES (?,?,?,?,?,?)',
-                                     (store.scope, str(scene), model, kind, signature, store.pack(raw)))
-
+    signature = marker_segment_signature(previous)
+    if signature == marker_segment_signature(active) or (model, signature) not in pinned(store, scene):
+        return
+    raw = {key: value for key, value in previous.items()
+           if key not in ('scene_threshold_override', 'marker_threshold_override')}
+    store.connection.execute('INSERT OR IGNORE INTO inference_archive VALUES (?,?,?,?,?,?)',
+                             (store.scope, str(scene), model, kind, signature, store.pack(raw)))
 
 def prune(store, scene):
     """Publication promotion releases proofs no longer referenced by any output."""
@@ -95,16 +88,3 @@ def records(store, scene, kind):
                                       (store.scope, str(scene), kind)):
         result.setdefault(model, []).append(StoredSegment(store.unpack(blob)))
     return result
-
-
-def active_segments(segments):
-    """One inference per model/output; explicit legacy imports retain their own ledger."""
-    latest = next((index for index in range(len(segments) - 1, -1, -1)
-                   if segments[index]['meta'].get('origin') == 'inference'), None)
-    return [segment for index, segment in enumerate(segments)
-            if segment['meta'].get('origin') != 'inference' or index == latest]
-
-
-def validate_active(segments):
-    if sum(segment['meta'].get('origin') == 'inference' for segment in segments) > 1:
-        raise ValueError('Multiple active inference segments; run --db-update.')

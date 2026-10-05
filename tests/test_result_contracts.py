@@ -32,20 +32,22 @@ def test_incomplete_replacement_preserves_evidence_policy_metadata_and_index(tmp
         else:
             invalid[field] = value
         with pytest.raises(ValueError, match='Incomplete result record'):
-            store.replace_records('1', 'wd', 'scene', [invalid])
+            store.replace_record('1', 'wd', 'scene', invalid)
         assert rows() == original
         assert store.records('1', 'scene') == before
     if dry_run:
         assert path.read_bytes() == before_file
 
 
-def test_complete_zero_detection_and_imported_unknown_scores_remain_supported(tmp_path):
+def test_zero_detection_is_current_inference_and_imported_ranges_are_rejected(tmp_path):
     with StateStore(tmp_path / 'state.sqlite3', 'scope') as store:
         empty = outputs()['scene']
         empty['items'] = empty['frames'] = []
         imported = dict(mode='spans', meta={'origin': 'legacy'}, items=[
             dict(tag='core', start=1., end=None, score=None, hits=None)])
-        store.put('1', 'wd', {'scene': empty, 'markers': imported})
-        assert store.records('1', 'scene')['wd'][0]['items'] == []
-        assert store.records('1', 'markers')['wd'][0] == imported
-        assert store.connection.execute('SELECT COUNT(*) FROM result_metadata').fetchone()[0] == 2
+        store.put('1', 'wd', {'scene': empty})
+        with pytest.raises(ValueError, match='Incomplete result record'):
+            store.put('1', 'wd', {'markers': imported})
+        assert store.records('1', 'scene')['wd']['items'] == []
+        assert store.records('1', 'markers') == {}
+        assert store.connection.execute('SELECT COUNT(*) FROM result_metadata').fetchone()[0] == 1

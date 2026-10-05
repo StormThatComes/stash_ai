@@ -15,7 +15,7 @@ def check_results_and_index(db, tables, errors, progress=None):
 
     indexed_signature = None
     checked = 0
-    query = ('SELECT r.kind,r.data,i.inference,i.populated,i.signature,t.thresholds,m.format,m.data '
+    query = ('SELECT r.kind,r.data,i.inference,i.populated,i.signature,t.threshold,m.format,m.data '
              'FROM results AS r LEFT JOIN result_index AS i USING(scope,scene,model,kind) '
              'LEFT JOIN result_thresholds AS t USING(scope,scene,model,kind) '
              'LEFT JOIN result_metadata AS m USING(scope,scene,model,kind)')
@@ -23,50 +23,34 @@ def check_results_and_index(db, tables, errors, progress=None):
         checked += 1
         tick(progress)
         try:
-            segments = decoded_payload(blob, list)
-            if not valid_result_segments(segments, kind):
-                raise ValueError("Invalid result segment.")
-            from stash_ai.storage.archive import validate_active
-            validate_active(segments)
+            record = decoded_payload(blob, dict)
+            if not valid_result_segments([record], kind):
+                raise ValueError('Invalid result record.')
             from stash_ai.evidence.formats import validate_current
-            for segment in segments:
-                validate_current(segment)
-            if any(
-                    {'scene_threshold_override', 'marker_threshold_override', 'refinement'} & segment.keys()
-                    for segment in segments):
-                raise ValueError('Noncanonical result segment.')
+            validate_current(record)
+            if {'scene_threshold_override', 'marker_threshold_override', 'refinement'} & record.keys():
+                raise ValueError('Noncanonical result record.')
             if metadata_format is not None:
                 from stash_ai.storage.metadata import FORMAT, decode, encode, summarize
                 try:
                     if metadata_format != FORMAT:
                         raise ValueError('Unsupported result metadata format.')
-                    if encode(decode(metadata)) != encode(summarize(segments)):
+                    if encode(decode(metadata)) != encode(summarize(record)):
                         errors['result_metadata_mismatch'] += 1
                 except (TypeError, ValueError):
                     errors['result_metadata_invalid'] += 1
             if threshold is not None:
-                from stash_ai.storage.thresholds import decode, overlay
+                from stash_ai.storage.thresholds import overlay
                 try:
-                    values = decode(threshold)
-                    if len(values) != len(segments):
-                        errors['result_threshold_invalid'] += 1
-                    overlay(segments, kind, threshold)
+                    overlay(record, kind, threshold)
                 except (TypeError, ValueError):
-                    pass  # check_thresholds reports invalid policy separately.
-            current = next(
-                (segment for segment in reversed(segments)
-                 if segment["meta"].get("origin") == "inference"),
-                None,
-            )
-            expected_inference = int(current is not None)
-            expected_populated = int(any(segment["items"] for segment in segments))
-            if current is not None:
-                if indexed_signature is None:
-                    from stash_ai.evidence.thresholds import indexed_signature as signature_for
-                    indexed_signature = signature_for
-                expected_signature = indexed_signature(current)
-            else:
-                expected_signature = None
+                    pass
+            expected_inference = 1
+            expected_populated = int(bool(record['items']))
+            if indexed_signature is None:
+                from stash_ai.evidence.thresholds import indexed_signature as signature_for
+                indexed_signature = signature_for
+            expected_signature = indexed_signature(record)
         except (KeyError, TypeError, ValueError, UnicodeDecodeError, json.JSONDecodeError, zlib.error):
             errors["result_payload_invalid"] += 1
             continue
@@ -99,10 +83,10 @@ def check_results_and_index(db, tables, errors, progress=None):
 def check_thresholds(db, tables, errors):
     if 'result_thresholds' not in tables:
         return
-    from stash_ai.storage.thresholds import decode
-    for data, in db.execute('SELECT thresholds FROM result_thresholds'):
+    from stash_ai.storage.thresholds import validate
+    for data, in db.execute('SELECT threshold FROM result_thresholds'):
         try:
-            decode(data)
+            validate(data)
         except (TypeError, ValueError):
             errors['result_threshold_invalid'] += 1
     if 'results' in tables:

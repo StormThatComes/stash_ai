@@ -10,15 +10,14 @@ def current(meta):
 
 def validate_current(segment):
     """Reject obsolete inference rather than guessing its missing provenance."""
+    if not isinstance(segment, dict) or not isinstance(segment.get('meta'), dict):
+        raise ValueError('Invalid active inference record; run --db-update.')
     meta = segment['meta']
-    if meta.get('origin') == 'inference' and not current(meta):
-        raise ValueError('Obsolete active inference evidence; run --db-update and inference again.')
-    version = meta.get('analysis_format')
-    if version is not None and (type(version) is not int or not 1 <= version <= ANALYSIS_FORMAT):
-        raise ValueError('Unsupported inference evidence format; update stash_ai.')
+    if meta.get('origin') != 'inference':
+        raise ValueError('Active results require current inference evidence; run --db-update and inference again.')
     if not current(meta):
-        return
-    if (meta.get('origin') != 'inference' or segment['mode'] not in ('scene', 'frames')
+        raise ValueError('Obsolete active inference evidence; run --db-update and inference again.')
+    if (segment.get('mode') not in ('scene', 'frames')
             or any(not isinstance(meta.get(key), str) or not meta[key]
                    for key in ('inference_signature', 'frame_input_signature'))):
         raise ValueError('Current inference evidence requires both input and inference signatures.')
@@ -62,7 +61,7 @@ def validate_statistics(stats):
 
 
 def validate_archived(segment):
-    """Only frozen replay may read pre-v4 inference, until publication rebasing."""
+    """Validate pinned proof storage, including retired pre-v4 inference."""
     version = segment['meta'].get('analysis_format')
     if version is not None and (type(version) is not int or not 1 <= version <= ANALYSIS_FORMAT):
         raise ValueError('Unsupported archived inference evidence format.')

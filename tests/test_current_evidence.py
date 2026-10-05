@@ -32,9 +32,10 @@ def test_current_missing_statistics_never_uses_aggregate_fallback():
     validate_current(saved)
     assert scene_qualification(item, saved['meta'], .4, TemporalPolicy()) is None
     old = {**saved['meta'], 'analysis_format': 3}
-    assert scene_qualification(item, old, .4, TemporalPolicy()) == 'aggregate'
+    assert scene_qualification(item, old, .4, TemporalPolicy()) is None
     imported = dict(tag='core', score=None)
-    assert scene_qualification(imported, {'origin': 'legacy'}, .4, TemporalPolicy()) == 'aggregate'
+    with pytest.raises(ValueError, match='Active results require current inference'):
+        validate_current(dict(mode='scene', items=[imported], meta={'origin':'legacy'}))
 
 
 def test_current_unfiltered_coverage_needs_no_retired_sentinel():

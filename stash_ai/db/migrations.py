@@ -2,15 +2,14 @@
 from types import SimpleNamespace
 
 from stash_ai.storage.codec import decode
-from stash_ai.storage.metadata import FORMAT, decode as decode_metadata, encode, summarize
-from stash_ai.storage.progress import index_result
+from .result_history import index_result, history
 from stash_ai.storage.schema import LATEST_SCHEMA_VERSION, initialize_features
 
 
 def canonicalize_results(database):
     """Move old inline policies to per-segment rows without changing proof identity."""
     from stash_ai.storage.codec import encode as pack
-    from stash_ai.storage.thresholds import encode as encode_thresholds, THRESHOLD_KEYS
+    from .result_history import encode_thresholds, THRESHOLD_KEYS, history
     db = database.connection
     old_policy = 'threshold' in {row[1] for row in db.execute('PRAGMA table_info(result_thresholds)')}
     column = 'threshold' if old_policy else 'thresholds'
@@ -26,12 +25,12 @@ def canonicalize_results(database):
             f'SELECT r.scope,r.scene,r.model,r.kind,r.data,t.{column} FROM results AS r '
             'LEFT JOIN result_thresholds AS t USING(scope,scene,model,kind)'):
         key = (scope, scene, model, kind)
-        segments = decode(blob)
+        segments = history(blob)
         override, _ = THRESHOLD_KEYS[kind]
         values = ([saved] * len(segments) if old_policy and saved is not None else
                   [segment.get(override) for segment in segments])
         if not old_policy and saved is not None:
-            from stash_ai.storage.thresholds import decode as decode_thresholds
+            from .result_history import decode_thresholds
             values = decode_thresholds(saved)
             if len(values) != len(segments):
                 raise ValueError('Result thresholds do not match segment history.')
@@ -57,6 +56,10 @@ def canonicalize_results(database):
 
 def migrate(database):
     db = database.connection
+    if database.version < 18:
+        from .single_record_migration import prepare_history
+        with db:
+            prepare_history(db, database.version)
     state = SimpleNamespace(connection=db, scope='', preview_source=False)
     # Rename/swap and payload edits are atomic. Retry never loses historical
     # overrides or pending plans, even if later feature setup is interrupted.
@@ -70,37 +73,41 @@ def migrate(database):
             from .snapshot_migration import migrate as migrate_snapshots
             migrate_snapshots(db)
         if database.version < 10:
-            from stash_ai.storage.thresholds import overlay
+            from .result_history import overlay
             for scope, scene, model, kind, payload, thresholds in db.execute(
                     'SELECT r.scope,r.scene,r.model,r.kind,r.data,t.thresholds FROM results AS r '
                     'LEFT JOIN result_thresholds AS t USING(scope,scene,model,kind)'):
-                index_result(state, scene, model, kind, overlay(decode(payload), kind, thresholds), scope=scope)
+                index_result(state, scene, model, kind, overlay(history(payload), kind, thresholds), scope=scope)
         if database.version < 17:
             from .publication_rebase import migrate as rebase_publications
             rebase_publications(db)
-        from .archive_migration import migrate as migrate_archive
-        migrate_archive(db)
-        if database.version < 15:
-            from .current_evidence_migration import migrate as retire_obsolete
-            retire_obsolete(db)
-        if database.version < 16:
-            from .current_evidence_migration import retire
-            retire(db, lambda value: value['meta'].get('origin') == 'legacy')
+        if database.version < 18:
+            from .archive_migration import migrate as migrate_archive
+            migrate_archive(db)
+            if database.version < 15:
+                from .current_evidence_migration import migrate as retire_obsolete
+                retire_obsolete(db)
+            if database.version < 16:
+                from .current_evidence_migration import retire
+                retire(db, lambda value: value['meta'].get('origin') == 'legacy')
         db.execute('DROP TABLE IF EXISTS legacy_imports')
         db.execute('DROP TABLE IF EXISTS refinement_progress')
         for event in ('insert', 'update', 'delete'):
             db.execute(f'DROP TRIGGER IF EXISTS perf_legacy_imports_{event}')
-        # Historical metadata is derived once here. Runtime repair remains
-        # necessary for corruption and invalidation by direct SQLite writers.
-        for scope, scene, model, kind, payload, version, data in db.execute(
-                'SELECT r.scope,r.scene,r.model,r.kind,r.data,m.format,m.data '
-                'FROM results AS r LEFT JOIN result_metadata AS m USING(scope,scene,model,kind)'):
-            if version == FORMAT:
-                try:
-                    decode_metadata(data)
-                    continue
-                except (TypeError, ValueError):
-                    pass
-            db.execute('INSERT OR REPLACE INTO result_metadata VALUES (?,?,?,?,?,?)',
-                       (scope, scene, model, kind, FORMAT, encode(summarize(decode(payload)))))
+        if database.version < 18:
+            from .single_record_migration import migrate as migrate_records
+            migrate_records(db)
+        else:
+            from stash_ai.storage.metadata import FORMAT, decode as decode_metadata, encode, summarize
+            for scope, scene, model, kind, payload, version, data in db.execute(
+                    'SELECT r.scope,r.scene,r.model,r.kind,r.data,m.format,m.data '
+                    'FROM results AS r LEFT JOIN result_metadata AS m USING(scope,scene,model,kind)'):
+                if version == FORMAT:
+                    try:
+                        decode_metadata(data)
+                        continue
+                    except (TypeError, ValueError):
+                        pass
+                db.execute('INSERT OR REPLACE INTO result_metadata VALUES (?,?,?,?,?,?)',
+                           (scope, scene, model, kind, FORMAT, encode(summarize(decode(payload)))))
         db.execute(f'PRAGMA user_version={LATEST_SCHEMA_VERSION}')

@@ -1,16 +1,19 @@
 """Move historical inference into a publication-pinned archive during --db-update."""
 from types import SimpleNamespace
 
-from stash_ai.storage.codec import decode, encode
-from stash_ai.storage.archive import active_segments, retain, prune
-from stash_ai.storage.thresholds import overlay, separate
-from stash_ai.storage.metadata import FORMAT, summarize, encode as encode_metadata
-from stash_ai.storage.progress import index_result
+from stash_ai.storage.codec import encode
+from stash_ai.storage.archive import prune
+from .result_history import active_segments, retain
+from .result_history import overlay, separate
+from .result_history import FORMAT, summarize, encode_metadata
+from .result_history import index_result
 from stash_ai.storage.snapshots import decode as decode_snapshot
 
 
 def migrate(db):
     # Fetch keys, not every large evidence BLOB at once.
+    from .result_history import history, threshold_column
+    column = threshold_column(db)
     keys = db.execute('SELECT scope,scene,model,kind FROM results').fetchall()
     store = SimpleNamespace(connection=db, table=lambda name: name,
                             unpack_snapshot=decode_snapshot,
@@ -18,10 +21,10 @@ def migrate(db):
     for scope, scene, model, kind in keys:
         store.scope = scope
         blob, thresholds = db.execute(
-            'SELECT r.data,t.thresholds FROM results AS r LEFT JOIN result_thresholds AS t '
+            f'SELECT r.data,t.{column} FROM results AS r LEFT JOIN result_thresholds AS t '
             'USING(scope,scene,model,kind) WHERE r.scope=? AND r.scene=? AND r.model=? AND r.kind=?',
             (scope, scene, model, kind)).fetchone()
-        previous = overlay(decode(blob), kind, thresholds)
+        previous = overlay(history(blob), kind, thresholds)
         active = active_segments(previous)
         if len(active) == len(previous):
             continue

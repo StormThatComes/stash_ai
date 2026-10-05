@@ -1,5 +1,5 @@
 """Occurrence publication, old caches, revocation and exact sampled positions."""
-from tests.helpers.evidence import seed_history
+
 
 from stash_ai.db.snapshot_migration import complete_policy
 
@@ -35,8 +35,8 @@ pytestmark = pytest.mark.usefixtures("reset_temporal")
 def put(state, scenes, markers, scene='1'):
     for source in set(scenes) | set(markers):
         for kind, records in (('scene', scenes), ('markers', markers)):
-            for segment in records.get(source, []):
-                seed_history(state, scene, source, {kind: segment}, {kind: False})
+            if source in records:
+                state.put(scene, source, {kind: records[source]})
 
 
 def test_peak_time_is_compact_earliest_max_and_survives_resume():
@@ -78,9 +78,9 @@ def test_old_or_incomplete_checkpoint_analysis_requires_restart(damage):
 def test_occurrences_use_scene_observations_independently_of_marker_cache(tmp_path, cache):
     scenes, markers = paired_records({'wd': [0, .95, 0, .8, 0]}, threshold=.35, marker_threshold=.65)
     if cache == 'missing':
-        for row in markers['wd'][0]['items']: row['tags'] = []
-    if cache == 'different_run': markers['wd'][0]['meta']['inference_signature'] = 'other'
-    if cache == 'different_input': markers['wd'][0]['meta']['frame_input_signature'] = 'other'
+        for row in markers['wd']['items']: row['tags'] = []
+    if cache == 'different_run': markers['wd']['meta']['inference_signature'] = 'other'
+    if cache == 'different_input': markers['wd']['meta']['frame_input_signature'] = 'other'
     with merge_store.StateStore(tmp_path/'state', 'fixture') as state:
         put(state, scenes, markers)
         hits, spans = merge.evidence(app, state, '1', policies(), policies())
@@ -93,7 +93,7 @@ def test_occurrences_use_scene_observations_independently_of_marker_cache(tmp_pa
 
 def test_scene_peak_below_marker_retention_floor_still_supplies_a_point(tmp_path):
     scenes, markers = paired_records({'wd': [.31, .32, .34, .31, 0]}, threshold=.35, marker_threshold=.65)
-    assert all(not row['tags'] for row in markers['wd'][0]['items'])
+    assert all(not row['tags'] for row in markers['wd']['items'])
     with merge_store.StateStore(tmp_path/'state', 'fixture') as state:
         put(state, scenes, markers)
         hits, spans = merge.evidence(app, state, '1', policies(), policies())
@@ -131,7 +131,7 @@ def test_agreement_is_one_point_with_separate_scores_and_compatible_inputs(tmp_p
     scenes, markers = paired_records({'wd': [.95, 0, .85, 0], 'dtq': [0, 0, .90, 0]},
                                      threshold={'wd': .35, 'dtq': .20}, marker_threshold=.65)
     if different_input:
-        for record in (scenes['dtq'][0], markers['dtq'][0]): record['meta']['frame_input_signature'] = 'other'
+        for record in (scenes['dtq'], markers['dtq']): record['meta']['frame_input_signature'] = 'other'
     with merge_store.StateStore(tmp_path/'state', 'fixture') as state:
         put(state, scenes, markers)
         _, spans = merge.evidence(app, state, '1', policies(), policies())
@@ -147,7 +147,7 @@ def test_agreement_is_one_point_with_separate_scores_and_compatible_inputs(tmp_p
 
 def test_duplicate_records_do_not_count_as_two_model_votes(tmp_path):
     scenes, markers = paired_records({'wd': [0, .95, 0]}, threshold=.35, marker_threshold=.65)
-    scenes['wd'] *= 2; markers['wd'] *= 2
+    assert set(scenes) == set(markers) == {'wd'}
     with merge_store.StateStore(tmp_path/'state', 'fixture') as state:
         put(state, scenes, markers)
         _, spans = merge.evidence(app, state, '1', policies(), policies())
@@ -169,7 +169,7 @@ def test_point_publication_is_idempotent_and_promotes_to_a_range(tmp_path, monke
         assert {t['name'] for t in point['tags']} == {merge_labels.AI.owner_tag, OCCURRENCE_TAG, 'm:core:occurance'}
         assert point['title'].endswith(' · wykrycie')
         scenes, markers = paired_records({'wd': [.95, .95, .95]}, threshold=.35, marker_threshold=.65)
-        for kind, value in (('scene', scenes), ('markers', markers)): state.put('1', 'wd', {kind: value['wd'][0]})
+        for kind, value in (('scene', scenes), ('markers', markers)): state.put('1', 'wd', {kind: value['wd']})
         hits, spans = merge.evidence(app, state, '1', policies(), policies())
         merge_sync.sync_merged(app, stash, resolver, state, stash.find_scene('1'), hits, spans)
         assert len(stash.scene['scene_markers']) == 1
@@ -248,7 +248,7 @@ def test_pipeline_reuses_results_for_markers_only_dry_run_and_cleanup(pipeline, 
     assert len(point) == 1 and point[0]['seconds'] == 3 and point[0]['end_seconds'] is None
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), True) as state:
         records = state.connection.execute('SELECT data FROM results ORDER BY kind').fetchall()
-        assert state.records('1', 'scene')['wd'][0]['items'][0]['statistics']['peak_time'] == 3
+        assert state.records('1', 'scene')['wd']['items'][0]['statistics']['peak_time'] == 3
     monkeypatch.setattr(app.services, 'load_tagger', lambda *a: pytest.fail('merge or cleanup loaded a model'))
     monkeypatch.setattr(sprites, 'fetch_cues', lambda *a: pytest.fail('merge or cleanup fetched media'))
     p.stash.writes.clear()
@@ -271,12 +271,12 @@ def test_incomplete_scene_statistics_are_rejected_without_replacing_evidence(pip
     p.scores['wd'][:] = 0; p.scores['wd'][5, 0] = .95
     assert app.main(p.args) == 0
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL)) as state:
-        original = state.records('1', 'scene')['wd'][0]
+        original = state.records('1', 'scene')['wd']
         record = deepcopy(original)
         for item in record['items']: item['statistics'].pop('peak_time', None)
         with pytest.raises(ValueError, match='statistics must be complete'):
             state.put('1', 'wd', {'scene': record})
-        assert state.records('1', 'scene')['wd'][0] == original
+        assert state.records('1', 'scene')['wd'] == original
 
 
 def test_enabling_points_does_not_invalidate_completed_inference(pipeline, monkeypatch, tmp_path):

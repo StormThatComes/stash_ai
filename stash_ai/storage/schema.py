@@ -2,7 +2,7 @@
 from dataclasses import dataclass
 
 APPLICATION_ID = 0x53544D47
-LATEST_SCHEMA_VERSION = 17
+LATEST_SCHEMA_VERSION = 18
 KNOWN_KINDS = frozenset(('scene', 'markers'))
 KNOWN_MODELS = frozenset(('joytag', 'wd', 'dtq', 'oppai'))
 
@@ -75,7 +75,7 @@ def load_features(store):
 COLUMNS = {
     'inference_archive': 'scope scene model kind signature data',
     'results': 'scope scene model kind data',
-    'result_thresholds': 'scope scene model kind thresholds',
+    'result_thresholds': 'scope scene model kind threshold',
     'result_metadata': 'scope scene model kind format data',
     'snapshots': 'scope scene kind published pending',
     'result_index': 'scope scene model kind inference populated signature',
