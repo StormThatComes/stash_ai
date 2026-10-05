@@ -83,24 +83,25 @@ def expand(value, *, version=FORMAT):
 def validate_policy(item):
     options = item.get('build_options')
     if options is not None:
-        from stash_ai.evidence.temporal.policy import TemporalPolicy
+        from stash_ai.evidence.historical_markers import frozen_policy
         from stash_ai.models import SOURCES
         marker = {'policy', 'settings', 'marker_thresholds', 'core_exclusions', 'tag_exclusions'}
         scene = {'policy', 'max_tags', 'scene_thresholds', 'scene_exclusions'}
-        if not isinstance(options, dict) or set(options) not in (marker, scene):
+        keys = set(options) - {"algorithm"} if isinstance(options, dict) else set()
+        if not isinstance(options, dict) or keys not in (marker, scene):
             raise ValueError('Incomplete frozen build options; run --db-update.')
-        TemporalPolicy.from_snapshot(options['policy'])
-        fields = ('core_exclusions', 'tag_exclusions') if set(options) == marker else ('scene_exclusions',)
+        frozen_policy(options)
+        fields = ('core_exclusions', 'tag_exclusions') if keys == marker else ('scene_exclusions',)
         for field in fields:
             values = options[field]
             if (not isinstance(values, dict) or set(values) != set(SOURCES)
                     or any(not isinstance(tags, list) or any(not isinstance(tag, str) for tag in tags)
                            for tags in values.values())):
                 raise ValueError('Incomplete frozen exclusions; run --db-update.')
-        thresholds = options['marker_thresholds' if set(options) == marker else 'scene_thresholds']
+        thresholds = options['marker_thresholds' if keys == marker else 'scene_thresholds']
         if not isinstance(thresholds, dict):
             raise ValueError('Invalid frozen thresholds.')
-        if set(options) == marker:
+        if keys == marker:
             settings = options['settings']
             if not isinstance(settings, dict) or set(settings) != {
                     'MARKER_MIN_HITS', 'MARKER_MERGE_GAP_SECONDS',

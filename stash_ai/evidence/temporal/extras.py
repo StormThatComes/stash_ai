@@ -37,9 +37,13 @@ def merged_extras(component):
     """Qualify extras over the whole union; duplicate model coverage counts once."""
     records = component["contributors"]
     settings = next((r["build_options"]["policy"] for r in records if r.get("build_options")), None)
-    if settings is None or not settings["enabled"]:
+    if settings is None:
         return
-    policy = TemporalPolicy.from_snapshot(settings)
+    from stash_ai.evidence.historical_markers import HistoricalPolicy, frozen_policy
+    options = next(r['build_options'] for r in records if r.get('build_options'))
+    policy = frozen_policy(options)
+    if isinstance(policy, HistoricalPolicy):
+        return
     known, legacy, intervals, times = set(), set(), defaultdict(list), defaultdict(set)
     source_evidence = defaultdict(lambda: defaultdict(list))
     support_records = defaultdict(list)
@@ -102,4 +106,3 @@ def merged_extras(component):
                         signatures=sorted({signature for record in records for signature in record["signatures"]}))
     component["extra_tags"] = sorted(accepted - {component["tag"]})
     component["extra_evidence"] = statistics
-

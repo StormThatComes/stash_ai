@@ -160,7 +160,7 @@ def test_snapshot_migration_preserves_pending_recovery_shared_proofs_and_old_fal
                           decode_snapshot(state.connection.execute('SELECT data FROM recovery_publications WHERE scope=?', (scope,)).fetchone()[0])):
                 policy = value['contributions'][0]['build_options']['policy']
                 assert set(policy) == set(asdict(TemporalPolicy()))
-                assert all(policy[name] is False for name in ('enabled', 'shared_marker_frames', 'shared_marker_extras',
+                assert all(policy[name] is False for name in ('shared_marker_frames', 'shared_marker_extras',
                     'short_marker_extras', 'shared_scene_tags', 'occurrence_markers'))
                 assert value['owned_ids'] == snapshot['owned_ids']
                 options = value['contributions'][0]['build_options']

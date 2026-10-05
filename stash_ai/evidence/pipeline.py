@@ -17,7 +17,7 @@ def evidence(app, store, scene_id, core_policies, scene_policies, metrics=None, 
     from stash_ai.evidence.scenes import shared_scene_contributions
     report = store.report
     scene_hits, spans = [], []
-    need_scene = app.APPLY_SCENE_TAGS or (app.CREATE_MARKERS and app.TEMPORAL_POLICY.enabled
+    need_scene = app.APPLY_SCENE_TAGS or (app.CREATE_MARKERS
                                         and app.TEMPORAL_POLICY.occurrence_markers)
     scene_records = store.records(scene_id, 'scene', borrow=True) if need_scene else {}
     if selected_sources is not None:
@@ -67,4 +67,3 @@ def evidence(app, store, scene_id, core_policies, scene_policies, metrics=None, 
         with report.measure('occurrence_compute') if report is not None else nullcontext():
             spans.extend(occurrence_contributions(app, scene_hits, frame_records(scene_records, records), spans, core_policies, scene_policies, metrics))
     return sorted(scene_hits, key=lambda item: (item["tag"], item["source"])), spans
-

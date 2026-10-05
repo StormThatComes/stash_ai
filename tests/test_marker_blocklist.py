@@ -30,12 +30,9 @@ def configure(monkeypatch):
         for config in original(*args)])
 
 
-@pytest.mark.parametrize('temporal,expected', [
-    (False, '90e2f394c8924f2f8b9ffea035ad04503434e8b7a5a0fb5e90607838f4a12a55'),
-    (True, 'b56223032268887b5f20c2129912f7cfee5c11ce98b50a2e721bd95eea601aa0'),
-])
-def test_default_empty_blocklist_keeps_pre_retirement_inference_identity(monkeypatch, tmp_path, temporal, expected):
-    monkeypatch.setattr(app, 'TEMPORAL_POLICY', TemporalPolicy(enabled=temporal))
+def test_default_empty_blocklist_keeps_temporal_inference_identity(monkeypatch, tmp_path):
+    expected = 'b56223032268887b5f20c2129912f7cfee5c11ce98b50a2e721bd95eea601aa0'
+    monkeypatch.setattr(app, 'TEMPORAL_POLICY', TemporalPolicy())
     config = ModelSettings(WD, tmp_path / 'missing', batch_size=2, scene_threshold=.4, marker_threshold=.7)
     vocabulary = Vocabulary(['common', 'extra'], {'common': 'General', 'extra': 'General'})
     identity = model_identity(app, config, vocabulary)

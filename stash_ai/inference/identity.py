@@ -27,9 +27,9 @@ def model_identity(app, config: ModelSettings, vocabulary):
             "vocabulary": digest(vocabulary.labels), "batch_size": config.batch_size,
             "scene_threshold": config.scene_threshold, "marker_threshold": config.marker_threshold,
             "aggregation": app.AGGREGATION, "top_k": app.TOP_K_FRAMES,
-            "retention": {"temporal": app.TEMPORAL_POLICY.enabled,
-                          "marker_ratio": app.TEMPORAL_POLICY.marker_continue_ratio if app.TEMPORAL_POLICY.enabled else 1.0,
-                          "scene_ratio": app.TEMPORAL_POLICY.scene_support_ratio if app.TEMPORAL_POLICY.enabled else 1.0},
+            "retention": {"temporal": True,
+                          "marker_ratio": app.TEMPORAL_POLICY.marker_continue_ratio,
+                          "scene_ratio": app.TEMPORAL_POLICY.scene_support_ratio},
             # Keep the old empty value so default-policy caches/checkpoints match.
             "frame_blocklist": []}
     # Omitted/null settings preserve legacy inference/checkpoint signatures.

@@ -1,4 +1,6 @@
 """Offline model utility and leave-one-model-out ablation reporting."""
+from tests.helpers.temporal import threshold_policy
+
 
 from stash_ai.reports.model.comparison import _marker_key, _marker_delta
 from stash_ai.evidence.marker_identity import is_occurrence
@@ -146,7 +148,7 @@ def test_selected_sources_replays_consensus_instead_of_filtering_finished_marker
 def test_ablation_report_distinguishes_redundant_and_unique_models(tmp_path):
     path = tmp_path / "state.sqlite3"
     policies = empty_policies()
-    app.TEMPORAL_POLICY = TemporalPolicy(enabled=False)
+    app.TEMPORAL_POLICY = threshold_policy()
 
     with merge_store.StateStore(path, "scope") as state:
         state.put("1", "wd", inference_pair("shared"))
@@ -197,7 +199,7 @@ def test_ablation_report_distinguishes_redundant_and_unique_models(tmp_path):
 def test_ablation_replays_only_models_present_in_scene(tmp_path, monkeypatch):
     path = tmp_path / "state.sqlite3"
     policies = empty_policies()
-    app.TEMPORAL_POLICY = TemporalPolicy(enabled=False)
+    app.TEMPORAL_POLICY = threshold_policy()
 
     with merge_store.StateStore(path, "scope") as state:
         state.put("1", "wd", inference_pair("only"))

@@ -7,8 +7,6 @@ from stash_ai.evidence.observations import qualify_marker_extras
 
 def consensus_seeds(records, policies, policy, *, thresholds=None):
     """Only identical sampled inputs/times can vote, at most once per model."""
-    if not policy.enabled:
-        return {}
     votes = defaultdict(set)
     for model, segments in records.items():
         for segment in segments:

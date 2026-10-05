@@ -10,7 +10,9 @@ def complete_policy(values):
     from stash_ai.evidence.temporal.policy import TemporalPolicy
     if not isinstance(values, dict):
         raise ValueError('Invalid historical temporal policy.')
-    saved = {key: value for key, value in values.items() if not key.startswith('refine_')}
+    if 'enabled' in values and type(values['enabled']) is not bool:
+        raise ValueError('Invalid historical temporal discriminator.')
+    saved = {key: value for key, value in values.items() if not key.startswith('refine_') and key != 'enabled'}
     for name in ('shared_marker_frames', 'shared_marker_extras', 'short_marker_extras',
                  'shared_scene_tags', 'occurrence_markers'):
         saved.setdefault(name, False)
@@ -34,7 +36,8 @@ def decode_legacy(blob):
 def complete_options(options):
     if not isinstance(options, dict) or 'policy' not in options:
         raise ValueError('Invalid historical build options.')
-    result = {**options, 'policy': complete_policy(options['policy'])}
+    result = {**options, 'algorithm': options.get('algorithm', 'temporal' if options['policy'].get('enabled', True) else 'historical'),
+              'policy': complete_policy(options['policy'])}
     if 'max_tags' in options:
         result.setdefault('scene_thresholds', {})
         fields = ('scene_exclusions',)

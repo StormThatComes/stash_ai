@@ -2,7 +2,7 @@
 from dataclasses import replace
 
 from stash_ai.evidence.identity import marker_segment_signature
-from stash_ai.evidence.temporal.policy import TemporalPolicy
+from stash_ai.evidence.historical_markers import frozen_policy
 from stash_ai.models import SOURCES
 
 
@@ -31,7 +31,7 @@ class PublishedRecords:
 
 
 def snapshot_context(runtime, options, kind):
-    context = replace(runtime, TEMPORAL_POLICY=TemporalPolicy.from_snapshot(options['policy']))
+    context = replace(runtime, TEMPORAL_POLICY=frozen_policy(options))
     if kind == 'markers':
         context.MARKER_THRESHOLDS = options['marker_thresholds']
         for name, value in options['settings'].items():
