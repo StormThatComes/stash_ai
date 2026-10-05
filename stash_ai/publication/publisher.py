@@ -49,7 +49,7 @@ class MergePublisher:
                 "Rerun without --merge-only to resume inference.")
         with stage(self.report, 'publication_check'):
             reason = (
-                'forced' if self.args.force_merge or self.args.migrate_legacy_only
+                'forced' if self.args.force_merge
                 else merge_checks.check_reason(
                     self.store, scene_id, self.publication_key, current['fingerprint']))
         self.stats['merge_' + reason] += 1
@@ -79,11 +79,7 @@ class MergePublisher:
                         self.app, self.store, scene_id, self.core_policies,
                         self.scene_policies, diagnostics)
             with self.report.measure('merge_plan'):
-                result = merge_sync.sync_merged(
-                    self.app, self.stash, self.resolver, self.store, current, scene_hits, spans,
-                    report=self.report, tag_policies=self.scene_policies,
-                    transition=self.args.migrate_legacy_only,
-                    publication_key=self.publication_key)
+                result = self._sync(current, scene_hits, spans)
             self.stats.update(result)
             self.report.record_counts(**{
                 'cache_' + key: value - cache_before[key]
@@ -97,6 +93,12 @@ class MergePublisher:
         except Exception as exc:
             self._issue(scene_id, exc)
             return None
+
+    def _sync(self, current, scene_hits, spans):
+        return merge_sync.sync_merged(
+            self.app, self.stash, self.resolver, self.store, current, scene_hits, spans,
+            report=self.report, tag_policies=self.scene_policies,
+            publication_key=self.publication_key)
 
     def _serial(self, scenes):
         bar = tqdm(scenes.items(), desc="Merge to ai:", unit="scene")

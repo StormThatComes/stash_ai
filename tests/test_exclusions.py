@@ -1,4 +1,6 @@
 """Global exclusions across cached outputs, shared proofs and Stash cleanup."""
+from functools import partial
+from stash_ai.tools.namespace_migration import main as namespace_main
 
 from tests.helpers.temporal import policy_args
 
@@ -13,6 +15,7 @@ from stash_ai.commands import hierarchy as hierarchy_commands
 from stash_ai.inference import sprites
 from stash_ai.cleanup import evidence as cleanup_evidence
 from tests.helpers.runtime import runtime as app
+migrate_namespace = partial(namespace_main, runtime=app)
 from stash_ai.evidence import pipeline as merge
 import stash_ai.evidence.intervals as merge_intervals
 import stash_ai.evidence.labels as merge_labels
@@ -65,7 +68,7 @@ def test_global_exclusions_reuse_raw_results_and_remove_all_roles(pipeline, monk
 
 
 @pytest.mark.parametrize('dry', [False, True])
-def test_cleanup_removes_shared_and_legacy_extras_without_images_or_models(pipeline, monkeypatch, tmp_path, dry):
+def test_cleanup_removes_ai_extras_and_preserves_foreign_tags_without_assets(pipeline, monkeypatch, tmp_path, dry):
     p = pipeline
     p.scores['wd'][:] = 0; p.scores['dtq'][:] = 0
     p.scores['wd'][:, 0] = .95; p.scores['dtq'][:, 1] = .94
@@ -91,11 +94,13 @@ def test_cleanup_removes_shared_and_legacy_extras_without_images_or_models(pipel
     if dry:
         assert p.stash.scene == before_scene and p.path.read_bytes() == before_db
         return
-    assert not {'ai:extra', 'op:extra', 'dtq:extra'} & names_in_scene(p.stash)
-    assert not {'ai:extra', 'op:extra', 'dtq:extra'} & set(p.stash.tags)
+    assert 'ai:extra' not in names_in_scene(p.stash)
+    assert {'op:extra', 'dtq:extra'} <= names_in_scene(p.stash)
+    assert 'ai:extra' not in p.stash.tags
+    assert {'op:extra', 'dtq:extra'} <= set(p.stash.tags)
     marker = next(m for m in p.stash.scene['scene_markers'] if m['id'] == before_marker[0])
     assert (marker['id'], marker['seconds'], marker['end_seconds'], marker['title']) == before_marker
-    assert next(m for m in p.stash.scene['scene_markers'] if m['id'] == 'manual')['tags'][0]['name'] == 'manual'
+    assert {t['name'] for m in p.stash.scene['scene_markers'] if m['id'] == 'manual' for t in m['tags']} == {'dtq:extra', 'manual'}
     assert raw_results(p.path) == before_raw
     p.stash.writes.clear()
     assert app.main(cleanup) == 0 and not p.stash.writes
@@ -151,8 +156,9 @@ def test_markers_only_always_loads_the_global_list(pipeline, monkeypatch, tmp_pa
     assert all(t['name'] != 'ai:extra' for m in p.stash.scene['scene_markers'] for t in [m['primary_tag'], *m['tags']])
 
 
-@pytest.mark.parametrize('source', list(SOURCES.values()))
-def test_legacy_cleanup_removes_extras_from_retained_markers_and_scoped_manual_assignments(source, monkeypatch):
+def test_current_cleanup_removes_extras_from_retained_manual_markers(monkeypatch, tmp_path):
+    from stash_ai.evidence.labels import AI as source
+    from tests.helpers.cleanup import options, install
     stash = Stash()
     retained = stash.marker(source, 'keep', 'retained', manual=True)
     retained['tags'].extend([stash.tag(source.prefix+'blocked'), stash.tag('manual')])
@@ -160,9 +166,8 @@ def test_legacy_cleanup_removes_extras_from_retained_markers_and_scoped_manual_a
     manual['tags'].append(stash.tag(source.prefix+'blocked'))
     removed = stash.marker(source, 'blocked', 'blocked', manual=True)
     before = retained['seconds'], retained['end_seconds'], retained['title']
-    from stash_ai.cleanup.markers import cleanup_scene_marker_cores
-    cleanup_scene_marker_cores(app, stash, stash.find_scene('1'), frozenset(), source,
-                               tag_exclusions=frozenset({'blocked'}))
+    install(monkeypatch, stash)
+    assert app.main([*options(tmp_path, ['blocked']), '--cleanup-strategy', 'scenes']) == 0
     kept = next(m for m in stash.scene['scene_markers'] if m['id'] == 'retained')
     assert (kept['seconds'], kept['end_seconds'], kept['title']) == before
     assert source.prefix+'blocked' not in names_in_scene(stash)
@@ -235,7 +240,7 @@ def test_pruned_legacy_extra_id_cannot_reappear_or_break_the_next_merge(pipeline
     old = p.stash.marker(WD, 'legacy', 'legacy')
     old['tags'].append(p.stash.tag('ai:blocked'))
     path = policy_file(tmp_path, ['blocked'])
-    assert app.main([*p.args, '--migrate-legacy-only', '--scene-tag-exclusions', str(path)]) == 0
+    assert migrate_namespace([*p.args, '--scene-tag-exclusions', str(path)]) == 0
     args = [*p.args, '--merge-only', '--scene-tag-exclusions', str(path)]
     monkeypatch.setattr(app.services, 'load_tagger', lambda *args: pytest.fail('legacy merge loaded model'))
     assert app.main(args) == 0
@@ -247,10 +252,10 @@ def test_pruned_legacy_extra_id_cannot_reappear_or_break_the_next_merge(pipeline
 
 def test_cleanup_pruning_flag_is_supported_and_does_not_load_assets(pipeline, monkeypatch):
     p = pipeline
-    p.stash.tag('op:unused')
+    p.stash.tag('ai:unused')
     monkeypatch.setattr(app.services, 'load_tagger', lambda *args: pytest.fail('cleanup loaded model'))
     assert app.main([*p.args, '--cleanup-only', '--prune-empty-tags']) == 0
-    assert 'op:unused' not in p.stash.tags
+    assert 'ai:unused' not in p.stash.tags
 
 
 def test_failed_cleanup_does_not_start_definition_pruning(pipeline, monkeypatch, tmp_path):

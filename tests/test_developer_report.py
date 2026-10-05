@@ -1,5 +1,5 @@
 """Privacy and usefulness guarantees for anonymous developer diagnostics."""
-from tests.helpers.evidence import current_record
+from tests.helpers.evidence import inference_record
 
 from stash_ai.reports.developer.distribution import Distribution
 
@@ -29,7 +29,7 @@ SECRETS = (
 
 
 def segment(tag="private_tag_name"):
-    return current_record({
+    return inference_record(**{
         "mode": "scene",
         "meta": {
             "origin": "inference",
@@ -49,7 +49,7 @@ def seed(path):
     with merge_store.StateStore(path, "scope-secret-alpha") as state:
         state.put("scene-secret-123", "wd", {
             "scene": segment(),
-            "markers": current_record({
+            "markers": inference_record(**{
                 "mode": "frames",
                 "meta": {"origin": "inference", "inference_signature": "secret-signature-value"},
                 "items": [

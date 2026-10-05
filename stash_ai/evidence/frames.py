@@ -49,13 +49,11 @@ def make_groups(records, signatures=None):
         from stash_ai.storage.segments import frame_group
         key = frame_group(segment)
         signature = signatures[id(segment)] if signatures is not None else marker_segment_signature(segment)
-        group = groups.setdefault(key, {"members": [], "context": defaultdict(set)})
-        if signature not in group["context"][source]:
-            group["members"].append((source, segment, signature))
-            group["context"][source].add(signature)
+        group = groups.setdefault(key, {"members": [], "context": {}})
+        group["members"].append((source, segment, signature))
+        group["context"][source] = signature
     for group in groups.values():
-        group["members"].sort(key=lambda item: (list(SOURCES).index(item[0]), item[2]))
-        group["context"] = {source: sorted(signatures) for source, signatures in group["context"].items()}
+        group["members"].sort(key=lambda item: list(SOURCES).index(item[0]))
     return dict(sorted(groups.items()))
 
 
@@ -67,7 +65,7 @@ def observations(app, group, core_policies, tag_policies=None):
     times = {}
     for source, segment, signature in group["members"]:
         from stash_ai.evidence.thresholds import marker_threshold
-        high = marker_threshold(segment, app.MARKER_THRESHOLDS)
+        high = marker_threshold(segment)
         floor = marker_floor(app.TEMPORAL_POLICY, high)
         sort_floor = min(floor, high)
         for row in segment["items"]:
@@ -91,10 +89,9 @@ def observations(app, group, core_policies, tag_policies=None):
                 extras = extras[:app.MARKER_MAX_TAGS_PER_FRAME]
             for tag, score in cores:
                 evidence = event["cores"].setdefault(tag, {}).setdefault(source,
-                    {"score": score, "strong": False, "signatures": set()})
+                    {"score": score, "strong": False, "signature": signature})
                 evidence["score"] = max(evidence["score"], score)
                 evidence["strong"] |= score >= high
-                evidence["signatures"].add(signature)
             for tag, score in extras:
                 sources = event["extras"].setdefault(tag, {})
                 sources[source] = max(sources.get(source, score), score)

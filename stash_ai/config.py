@@ -49,7 +49,7 @@ def load_exclusion_policy(path: Path, key: str) -> dict[str, frozenset[str]]:
         for label in entries:
             if (not isinstance(label, str) or not label or label != label.strip()
                     or "\n" in label or "\r" in label
-                    or label.startswith("ai:") or any(label.startswith(source.prefix) for source in SOURCES.values())):
+                    or label.startswith("ai:") or any(label.startswith(source.code + ':') for source in SOURCES.values())):
                 raise ValueError(f"Invalid excluded tag {label!r}; use a raw label without jt:/wd:/dtq:/op:/ai:.")
         if len(entries) != len(set(entries)):
             raise ValueError(f"Duplicate label in {context}.")

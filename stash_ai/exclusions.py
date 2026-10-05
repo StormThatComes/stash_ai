@@ -28,8 +28,7 @@ def excluded_names(policies, *, unused=False):
     """
     policies = policies_or_empty(policies)
     shared = (frozenset.union if unused else frozenset.intersection)(*policies.values())
-    return {SOURCES[source].prefix + label for source, labels in policies.items() for label in labels} | {
-        'ai:' + label for label in shared}
+    return {'ai:' + label for label in shared}
 
 
 def filter_spec(spec, excluded):

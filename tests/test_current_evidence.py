@@ -30,9 +30,9 @@ def test_current_missing_statistics_never_uses_aggregate_fallback():
     saved = record()
     item = saved['items'][0]
     validate_current(saved)
-    assert scene_qualification(item, saved['meta'], .4, TemporalPolicy()) is None
+    assert scene_qualification(item, .4, TemporalPolicy()) is None
     old = {**saved['meta'], 'analysis_format': 3}
-    assert scene_qualification(item, old, .4, TemporalPolicy()) is None
+    assert scene_qualification(item, .4, TemporalPolicy()) is None
     imported = dict(tag='core', score=None)
     with pytest.raises(ValueError, match='Active results require current inference'):
         validate_current(dict(mode='scene', items=[imported], meta={'origin':'legacy'}))
@@ -57,5 +57,19 @@ def test_current_plain_extras_are_not_imported_evidence():
     with pytest.raises(ValueError, match='temporal extra_support'):
         merged_extras(component)
     contribution['meta'] = {'origin': 'legacy'}
-    merged_extras(component)
-    assert component['extra_tags'] == ['unproved']
+    with pytest.raises(ValueError, match='temporal extra_support'):
+        merged_extras(component)
+
+
+def test_fixture_builder_rejects_legacy_instead_of_upgrading_it():
+    from tests.helpers.evidence import inference_record
+    for mode, meta in [('spans', {}), ('frames', {'origin': 'legacy'}),
+                       ('frames', {'analysis_format': 4}), ('frames', {'marker_tag_blocklist': []})]:
+        with pytest.raises(ValueError):
+            inference_record(mode=mode, meta=meta, items=[])
+
+
+def test_marker_builder_requires_an_explicit_threshold():
+    from stash_ai.evidence.temporal.markers import build_markers
+    with pytest.raises(TypeError, match='threshold'):
+        build_markers(None, [], frozenset())

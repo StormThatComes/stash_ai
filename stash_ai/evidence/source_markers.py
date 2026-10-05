@@ -8,8 +8,6 @@ from .labels import raw_label
 def marker_contributions(app, records: RecordsBySource, core_policies, *, index=None, metrics=None, cache=None,
                          tag_policies=None) -> list[MarkerContribution]:
     from stash_ai.evidence.frames import FrameIndex
-    from stash_ai.evidence.thresholds import marker_context
-    app = marker_context(app, records)
     if index is not None:
         return _marker_contributions(app, records, core_policies, index, metrics, tag_policies)
     with FrameIndex(app, records, core_policies, cache=cache, tag_policies=tag_policies) as index:
@@ -26,8 +24,7 @@ def _marker_contributions(app, records, core_policies, index, metrics, tag_polic
     effective_cores = core_policies_with_global(core_policies, tag_policies)
     report = index.report
     with stage(report, 'marker_seeds'):
-        seeds = consensus_seeds(records, effective_cores, app.TEMPORAL_POLICY,
-                                thresholds=app.MARKER_THRESHOLDS)
+        seeds = consensus_seeds(records, effective_cores, app.TEMPORAL_POLICY)
     signatures = index.signatures
     spans = []
     with stage(report, 'marker_build'):
@@ -38,21 +35,21 @@ def _marker_contributions(app, records, core_policies, index, metrics, tag_polic
                                  if tag not in tag_policies[model]))
                           for frame in segment["items"]]
                 from stash_ai.evidence.thresholds import marker_threshold
-                kwargs = dict(threshold=marker_threshold(segment, app.MARKER_THRESHOLDS), seeds=seeds,
+                kwargs = dict(threshold=marker_threshold(segment), seeds=seeds,
                               identity=segment["meta"].get("frame_input_signature"))
                 defer_extras = app.TEMPORAL_POLICY.shared_marker_extras and signatures[id(segment)] in index.by_signature
                 markers, _ = temporal_markers(app, frames, effective_cores[model], **kwargs,
                               collect_extras=not defer_extras,
                               extra_group=index.by_signature.get(signatures[id(segment)], signatures[id(segment)]),
                               extra_cache=index.cache)
-                options = {**build_options(app), "core_exclusions": {k: sorted(v) for k, v in core_policies.items()},
+                options = {**build_options(app, records), "core_exclusions": {k: sorted(v) for k, v in core_policies.items()},
                            "tag_exclusions": {k: sorted(v) for k, v in tag_policies.items()}}
                 values = [dict(tag=marker.tag, start=marker.start, end=marker.end, score=marker.score,
                                hits=marker.hits, extra_tags=list(marker.extra_tags),
                                extra_evidence=list(marker.extra_evidence), strong_hits=marker.strong_hits,
                                support_sources=list(marker.support_sources), extra_support=marker.extra_support,
                                build_options=options, evidence_signature=signatures[id(segment)],
-                               support_context={source: [signatures[id(records[source])]]
+                               support_context={source: signatures[id(records[source])]
                                    for source in marker.support_sources}) for marker in markers]
             else:
                 raise ValueError("Unsupported stored marker evidence.")
@@ -63,4 +60,4 @@ def _marker_contributions(app, records, core_policies, index, metrics, tag_polic
                                                      tag_policies[model]))
     from stash_ai.evidence.shared_markers import enrich
     with stage(report, 'marker_fusion'):
-        return enrich(app, records, core_policies, spans, signatures, index, metrics)
+        return enrich(app, core_policies, spans, index, metrics)

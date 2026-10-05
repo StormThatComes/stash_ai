@@ -1,5 +1,5 @@
 """Publication invalidation, sparse previews and ordered CPU preparation, offline."""
-from tests.helpers.evidence import current_record
+from tests.helpers.evidence import inference_record
 
 from stash_ai.storage.results import KINDS
 from collections import Counter
@@ -46,7 +46,7 @@ def fail(*args, **kwargs):
     'publication/groups.py', 'publication/index.py', 'publication/planning/types.py', 'publication/planning/merged_evidence.py', 'publication/planning/merged_tags.py', 'publication/planning/merged_markers.py',
     'publication/fingerprints.py', 'storage/segments.py', 'storage/merge_checks.py',
     'inference/scene_predictions.py', 'commands/bootstrap.py',
-    'config.py', 'commands/hierarchy.py', 'commands/namespace_migration.py', 'rethreshold/markers.py', 'rethreshold/scenes.py', 'cleanup/state.py', 'cleanup/client.py',
+    'config.py', 'commands/hierarchy.py', 'publication/preconditions.py', 'publication/namespace.py', 'rethreshold/markers.py', 'rethreshold/scenes.py', 'cleanup/state.py', 'cleanup/client.py',
 ])
 def test_publication_code_tracks_extracted_modules(monkeypatch, filename):
     before = performance.publication_code()
@@ -61,9 +61,9 @@ def test_publication_code_tracks_extracted_modules(monkeypatch, filename):
 
 
 @pytest.mark.parametrize('filename', [
-    'runtime/cache.py', 'runtime/memory.py', 'runtime/timing.py', 'runtime/report.py', 'runtime/summary.py', 'runtime/diagnostics.py',
+    'tools/namespace_migration.py', 'tools/point_migration.py', 'tools/_entrypoint.py', 'tools/legacy_namespaces.py', 'db/cleanup_fingerprint.py', 'runtime/cache.py', 'runtime/memory.py', 'runtime/timing.py', 'runtime/report.py', 'runtime/summary.py', 'runtime/diagnostics.py',
     'stash_api/client.py', 'stash_api/transport.py', 'vtt.py', 'commands/arguments.py', 'commands/validation.py', 'commands/dispatch.py', 'commands/explain.py',
-    'commands/marker_groups.py', 'cleanup/groups.py', 'cleanup/markers.py', 'cleanup/run.py', 'storage/recovery.py', 'publication/recovery.py', 'commands/recovery.py', 'cleanup/sql.py', 'cleanup/sql_session.py',
+    'commands/marker_groups.py', 'cleanup/groups.py', 'cleanup/run.py', 'storage/recovery.py', 'publication/recovery.py', 'commands/recovery.py', 'cleanup/sql.py', 'cleanup/sql_session.py',
     'rethreshold/execution.py', 'rethreshold/targets.py', 'db/checks.py',
     'db/validation/common.py', 'db/validation/schema.py', 'db/validation/results.py',
     'db/validation/checkpoints.py', 'db/validation/state.py', 'cleanup/evidence.py', 'cleanup/scenes.py', 'evidence/frozen_replay.py', 'stash_api/scene_reads.py', 'commands/modes.py', 'reports/io.py', 'reports/runtime.py', 'cleanup/sql_discovery.py', 'cleanup/sql_mutations.py', 'cleanup/sql_preview.py',
@@ -123,7 +123,7 @@ def test_merge_check_invalidates_real_changes(pipeline, monkeypatch, tmp_path, c
 
 def test_derived_invalidation_rolls_back_with_the_transaction(tmp_path):
     with merge_store.StateStore(tmp_path/'state.db', 's') as state:
-        state.put('1', 'wd', {'scene': current_record(dict(mode='scene', meta={}, items=[]))})
+        state.put('1', 'wd', {'scene': inference_record(**dict(mode='scene', meta={}, items=[]))})
         with state.connection:
             performance_merge_checks.record_check(state, '1', 'p', 'f')
         with pytest.raises(RuntimeError):
@@ -184,7 +184,7 @@ def test_commit_promotes_exact_pending_bytes_and_is_atomic(tmp_path, monkeypatch
 def test_preview_reads_and_shadows_without_copying_large_unrelated_blobs(tmp_path):
     path = tmp_path/'state.db'
     with merge_store.StateStore(path, 's') as state:
-        state.put('1', 'wd', {'scene': current_record(dict(mode='scene', meta={}, items=[dict(tag='old', score=.9)]))})
+        state.put('1', 'wd', {'scene': inference_record(**dict(mode='scene', meta={}, items=[dict(tag='old', score=.9)]))})
         state.publish('1', {'scene': {'old': True, 'contributions': []}})
         with state.connection:
             state.connection.execute("INSERT INTO results VALUES ('s','unrelated','wd','scene',zeroblob(8000000))")
@@ -193,7 +193,7 @@ def test_preview_reads_and_shadows_without_copying_large_unrelated_blobs(tmp_pat
         assert preview.preview_source
         assert preview.connection.execute('SELECT COUNT(*) FROM main.results').fetchone() == (0,)
         assert [(item['tag'], item['score']) for item in preview.records('1', 'scene')['wd']['items']] == [('old', .9)]
-        preview.put('1', 'wd', {'scene': current_record(dict(mode='scene', meta={}, items=[dict(tag='new', score=.8)]))})
+        preview.put('1', 'wd', {'scene': inference_record(**dict(mode='scene', meta={}, items=[dict(tag='new', score=.8)]))})
         assert [(item['tag'], item['score']) for item in preview.records('1', 'scene')['wd']['items']] == [('new', .8)]
         preview.prepare('1', {'scene': {'new': True, 'contributions': []}})
         assert preview.snapshot('1', 'scene') == ({'old': True, 'contributions': []}, {'new': True, 'contributions': []})
@@ -218,7 +218,7 @@ def test_preview_resumes_checkpoint_and_does_not_resurrect_deleted_source(pipeli
         checkpoint.record(2, np.zeros((2, 2), np.float32), [])
         checkpoint.flush()
         assert checkpoints.Checkpoint(preview, '1', 'wd', 'new', 10, 2).restore()[0] == 2
-        checkpoints.finish(preview, '1', 'wd', {k: current_record(dict(mode='scene' if k == 'scene' else 'frames',
+        checkpoints.finish(preview, '1', 'wd', {k: inference_record(**dict(mode='scene' if k == 'scene' else 'frames',
             meta={'origin':'inference', 'inference_signature':'new'}, items=[])) for k in KINDS})
         assert progress.completed(preview, '1', 'wd', KINDS, 'new')
         assert not preview.connection.execute('SELECT 1 FROM ' + preview.table('checkpoints')).fetchall()
@@ -327,7 +327,7 @@ def test_shared_cache_stays_bounded_with_concurrent_media_and_result_access():
 
 def test_detached_records_cannot_reuse_a_stale_segment_digest(tmp_path):
     with merge_store.StateStore(tmp_path/'state.db', 's', cache_bytes=1000000) as state:
-        state.put('1', 'wd', {'markers': current_record(dict(mode='frames', meta={}, items=[]))})
+        state.put('1', 'wd', {'markers': inference_record(**dict(mode='frames', meta={}, items=[]))})
         borrowed = state.records('1', 'markers', borrow=True)['wd']
         original = performance_segments.segment_digest(borrowed)
         detached = state.records('1', 'markers')['wd']

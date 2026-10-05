@@ -23,7 +23,7 @@ def config(model='wd', **changes):
 
 def pair(label='common', **kwargs):
     outputs = inference_pair(label, **kwargs)
-    outputs['scene']['meta'].update(scene_frames_format=1, scene_score_floor=.1,
+    outputs['scene']['meta'].update(scene_score_floor=.1,
                                     scene_support_floor=.34)
     outputs['scene']['frames'] = deepcopy(outputs['markers']['items'])
     return outputs
@@ -157,7 +157,7 @@ def test_removed_frame_blocklist_labels_require_reinference(tmp_path):
     outputs = pair()
     outputs['markers']['meta']['marker_tag_blocklist'] = ['formerly_blocked']
     seed(path, outputs=outputs, corrupt=True)
-    assert issue(report(path))['outputs']['markers']['status'] == 'insufficient'
+    assert issue(report(path))['outputs']['markers']['status'] == 'inconsistent'
 
 
 def test_index_without_results_is_inconsistent_and_not_ready(tmp_path):
@@ -248,7 +248,7 @@ def test_unselected_publication_dependencies_block_plan_without_expanding_target
                 state.connection.execute("UPDATE results SET data=? WHERE model='dtq' AND kind='markers'",
                                          (b'broken',))
     before = path.read_bytes()
-    if problem != 'unreadable':
+    if problem not in ('unreadable', 'blocklist'):
         monkeypatch.setattr(merge_store.StateStore, 'unpack', lambda *args: pytest.fail('prediction BLOB decoded'))
     data = report(path, settings=[replace(config(), marker_threshold=.9)])
     assert [row['model'] for row in data['models']] == ['wd']
@@ -328,7 +328,7 @@ def test_usable_unselected_evidence_does_not_expand_or_block_selected_plan(tmp_p
         peer['markers']['meta'].update(marker_threshold=.5, marker_score_floor=.4)
     elif peer_kind == 'higher_override':
         peer['markers']['meta']['marker_score_floor'] = .75
-        peer['markers']['marker_threshold_override'] = .9
+        peer['markers']['publication_threshold'] = .9
     seed(path, model='dtq', outputs=peer, corrupt=True)
     data = report(path, settings=[replace(config(), marker_threshold=.9)])
     assert data['totals']['rethreshold_pairs'] == 1 and data['totals']['blocked_pairs'] == 0

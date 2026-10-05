@@ -45,6 +45,7 @@ class FastStash(Stash):
         self.last_marker = max(self.last_marker, max((int(m['id']) for m in self.marker_rows()
                                if str(m['id']).isdigit()), default=0)) + 1
         self.scenes[str(payload['scene_id'])]['scene_markers'].append(self.record(payload, str(self.last_marker)))
+        return str(self.last_marker)
 
     def update_marker(self, payload):
         assert not self.dry_run

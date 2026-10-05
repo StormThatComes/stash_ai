@@ -69,6 +69,12 @@ def migrate(database):
             canonicalize_results(database)
     initialize_features(state)
     with db:
+        db.execute('BEGIN')
+        if 'inference' in {row[1] for row in db.execute('PRAGMA table_info(result_index)')}:
+            db.execute('ALTER TABLE result_index DROP COLUMN inference')
+        if database.version < 20:
+            from .scalar_evidence_migration import migrate as migrate_contexts
+            migrate_contexts(db)
         if database.version < 13:
             from .snapshot_migration import migrate as migrate_snapshots
             migrate_snapshots(db)
@@ -78,18 +84,18 @@ def migrate(database):
                     'SELECT r.scope,r.scene,r.model,r.kind,r.data,t.thresholds FROM results AS r '
                     'LEFT JOIN result_thresholds AS t USING(scope,scene,model,kind)'):
                 index_result(state, scene, model, kind, overlay(history(payload), kind, thresholds), scope=scope)
-        if database.version < 17:
+        if database.version < 19:
             from .publication_rebase import migrate as rebase_publications
             rebase_publications(db)
         if database.version < 18:
             from .archive_migration import migrate as migrate_archive
             migrate_archive(db)
-            if database.version < 15:
-                from .current_evidence_migration import migrate as retire_obsolete
-                retire_obsolete(db)
             if database.version < 16:
                 from .current_evidence_migration import retire
                 retire(db, lambda value: value['meta'].get('origin') == 'legacy')
+        if database.version < 19:
+            from .current_evidence_migration import migrate as retire_obsolete
+            retire_obsolete(db)
         db.execute('DROP TABLE IF EXISTS legacy_imports')
         db.execute('DROP TABLE IF EXISTS refinement_progress')
         for event in ('insert', 'update', 'delete'):

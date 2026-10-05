@@ -17,13 +17,12 @@ class EvidenceMetadata(TypedDict, total=False):
     scene_score_floor: float
     marker_score_floor: float
     scene_support_floor: float
-    marker_tag_blocklist: list[str]
     analysis_format: int
 
 
 class CurrentInferenceMetadata(TypedDict):
     origin: Literal['inference']
-    analysis_format: Literal[4]
+    analysis_format: Literal[5]
     inference_signature: str
     frame_input_signature: str
     scene_threshold: float
@@ -31,7 +30,6 @@ class CurrentInferenceMetadata(TypedDict):
     marker_score_floor: float
     scene_support_floor: float
     scene_score_floor: NotRequired[float]
-    scene_frames_format: NotRequired[Literal[1]]
 
 
 
@@ -73,8 +71,8 @@ class SceneContribution(SceneEntry):
     qualification: NotRequired[str]
     derived: NotRequired[Literal['shared_scene_frames']]
     support_sources: NotRequired[list[str]]
-    frame_context: NotRequired[dict[str, list[str]]]
-    scene_context: NotRequired[dict[str, list[str]]]
+    frame_context: NotRequired[dict[str, str]]
+    scene_context: NotRequired[dict[str, str]]
     build_options: NotRequired[BuildOptions]
 
 
@@ -87,7 +85,6 @@ class MarkerContribution(TypedDict):
     meta: EvidenceMetadata
     hits: NotRequired[int]
     extra_tags: NotRequired[list[str]]
-    extra_ids: NotRequired[list[str]]
     support_sources: NotRequired[list[str]]
     build_options: NotRequired[BuildOptions]
     derived: NotRequired[Literal['shared_frames', 'occurrence']]
@@ -118,5 +115,4 @@ class MergedMarker(TypedDict):
     sources: list[str]
     contributors: list[MarkerContribution]
     extra_tags: list[str]
-    extra_ids: list[str]
     extra_evidence: NotRequired[dict]

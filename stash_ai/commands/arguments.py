@@ -70,7 +70,7 @@ def build_parser(app) -> argparse.ArgumentParser:
     parser.add_argument("--prune-empty-tags", action="store_true",
                         help="After successful merged sync, delete unused leaf tags in the selected prefixes.")
     parser.add_argument("--prune-prefixes", nargs="+", default=None, metavar="PREFIX",
-                        help="Prefixes for empty-tag pruning (default: jt: wd: dtq: op: ai: m:). Global scope; m: requires managed group metadata.")
+                        help="Prefixes for empty-tag pruning (default: ai: m:). Global scope; m: requires managed group metadata.")
     parser.add_argument("--hierarchy", type=Path, default=app.JOYTAG_HIERARCHY_FILE, metavar="YAML", help="JoyTag hierarchy.")
     parser.add_argument("--wd-hierarchy", type=Path, default=app.JOYTAG_HIERARCHY_FILE.with_name("wd_hierarchy.yml"), metavar="YAML", help="WD hierarchy; defaults to bundled wd_hierarchy.yml.")
     parser.add_argument("--dtq-hierarchy", type=Path, default=app.JOYTAG_HIERARCHY_FILE.with_name("dtq_hierarchy.yml"), metavar="YAML", help="DTQ hierarchy; defaults to bundled dtq_hierarchy.yml.")
@@ -92,10 +92,6 @@ def build_parser(app) -> argparse.ArgumentParser:
     modes.add_argument("--cleanup-only", action="store_true", help="Apply both blacklists without inference; full all-model cleanup removes globally banned tags in batches.")
     modes.add_argument("--download-models", action="store_true", help="Download selected model assets from Hugging Face without Stash or inference.")
     modes.add_argument("--merge-only", action="store_true", help="Merge current saved evidence without models/inference.")
-    modes.add_argument("--migrate-legacy-only", action="store_true",
-                       help="Convert source-owned jt:/wd:/dtq:/op: outputs to ai: using fresh inference; honors --dry-run.")
-    modes.add_argument("--migrate-point-markers-only", action="store_true",
-                       help="Convert historical owned AI points to native ranges using saved publication proofs; preserves occurrence points and manual tags. Honors --dry-run.")
     modes.add_argument("--sync-marker-groups-only", action="store_true",
                        help="Repair m:<core> / m:<core>:occurance groups on existing owned ai: markers; no inference or time changes.")
     modes.add_argument("--explain-tag", metavar="TAG", help="Show saved sources, scores and intervals for a raw/ai: tag; requires --scene-id; no Stash access.")
@@ -124,4 +120,3 @@ def build_parser(app) -> argparse.ArgumentParser:
 def parse_args(app, argv: list[str] | None = None) -> argparse.Namespace:
     parser = build_parser(app)
     return validate_args(app, parser, parser.parse_args(argv))
-

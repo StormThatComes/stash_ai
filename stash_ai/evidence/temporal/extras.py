@@ -36,16 +36,16 @@ def qualified_extras(evidence, duration, policy):
 def merged_extras(component):
     """Qualify extras over the whole union; duplicate model coverage counts once."""
     records = component["contributors"]
-    from stash_ai.evidence.formats import current
-    if any(record.get('requires_rebase') for record in records):
-        # Offline migration retained geometry for recovery and point conversion.
-        return
+    from stash_ai.storage.snapshots import require_rebased
+    require_rebased(records)
     for record in records:
-        if current(record.get('meta', {})) and record.get('derived') != 'occurrence' and (
-                'extra_support' not in record or not record.get('build_options')):
+        if record.get('derived') != 'occurrence' and (
+                'extra_support' not in record or not record.get('build_options') or not record.get('evidence_signature')):
             raise ValueError('Current marker contributions require temporal extra_support evidence.')
     settings = next((r["build_options"]["policy"] for r in records if r.get("build_options")), None)
     if settings is None:
+        # Occurrence-only components have no range extras.
+        component['extra_tags'] = []
         return
     from stash_ai.evidence.temporal.policy import frozen_policy
     options = next(r['build_options'] for r in records if r.get('build_options'))
@@ -55,7 +55,7 @@ def merged_extras(component):
     support_records = defaultdict(list)
     seen_support = set()
     for record in records:
-        if "extra_support" not in record:
+        if record.get('derived') == 'occurrence':
             continue
         for tag, evidence in record["extra_support"].items():
             # Several source spans can share exactly the same indexed proof.
@@ -108,6 +108,6 @@ def merged_extras(component):
                     statistics[tag]["source_evidence"][source] = dict(
                         score=max(record["score"] for record in records),
                         support_seconds=sum(b-a for a,b in own_ranges), hits_at_least=len(own_times),
-                        signatures=sorted({signature for record in records for signature in record["signatures"]}))
+                        signature=records[0]["signature"])
     component["extra_tags"] = sorted(accepted - {component["tag"]})
     component["extra_evidence"] = statistics

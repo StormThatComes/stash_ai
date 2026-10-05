@@ -11,8 +11,16 @@ from stash_ai.evidence.temporal.statistics import SceneAccumulator
 
 
 def span(source, start, end, tag="common", score=.9, extras=()):
+    from stash_ai.evidence.temporal.policy import build_options
+    from stash_ai.signatures import digest
+    options = {**build_options(app), 'core_exclusions': {s: [] for s in SOURCES},
+               'tag_exclusions': {s: [] for s in SOURCES}}
+    support = {label: dict(intervals=[[start, end]], sample_times=[start, (start+end)/2])
+               for label in extras if end is not None and end > start}
     return dict(source=source, tag=tag, start=start, end=end, score=score,
-                hits=2, extra_tags=list(extras), meta={"origin":"test"})
+                hits=2, extra_tags=list(extras), meta={"origin":"test"},
+                build_options=options, evidence_signature=digest([source, start, end, tag]),
+                extra_support=support)
 
 
 def hit(source, label="common", score=.9):
@@ -29,7 +37,7 @@ def frames(rows, step=1):
 
 def segment(model, rows, identity='same'):
     # Synthetic evidence retains every supplied observation without filtering.
-    return dict(mode='frames',meta=dict(origin='inference',analysis_format=4, scene_threshold=.8, scene_support_floor=.8 * app.TEMPORAL_POLICY.scene_support_ratio, marker_threshold=.8,marker_score_floor=0.,frame_input_signature=identity,
+    return dict(mode='frames',meta=dict(origin='inference',analysis_format=5, scene_threshold=.8, scene_support_floor=.8 * app.TEMPORAL_POLICY.scene_support_ratio, marker_threshold=.8,marker_score_floor=0.,frame_input_signature=identity,
                 inference_signature=model+'-'+identity),items=[dict(start=f.cue.start,end=f.cue.end,tags=list(f.tags)) for f in frames(rows)])
 
 
@@ -49,7 +57,7 @@ def paired_records(values, threshold=.8, marker_threshold=.8):
         marker['meta'].update(scene_threshold=threshold_value, marker_threshold=marker_threshold,
                               marker_score_floor=marker_threshold * .85,
                               scene_support_floor=threshold_value * app.TEMPORAL_POLICY.scene_support_ratio)
-        scene = dict(mode='scene', meta={**marker['meta'], 'scene_frames_format': 1, 'scene_score_floor': 0.},
+        scene = dict(mode='scene', meta={**marker['meta'], 'scene_score_floor': 0.},
                      frames=[dict(start=f.cue.start, end=f.cue.end, tags=list(f.tags)) for f in data],
                      items=[dict(tag='core', score=sum(sorted(scores, reverse=True)[:2]) / min(2, len(scores)),
                                  statistics=stats.get('core'))] if any(scores) else [])
@@ -57,37 +65,28 @@ def paired_records(values, threshold=.8, marker_threshold=.8):
     return scenes, markers
 
 
-def current_record(value):
-    """Build explicit complete observations for synthetic current-inference fixtures."""
+def inference_record(*, mode, items, meta=None, frames=None):
+    """Construct current test evidence from explicit raw scores/observations.
+
+    This builder rejects legacy modes, origins and sentinels. Migration tests
+    construct historical payloads separately and use inject_records.
+    """
+    from stash_ai.evidence.formats import ANALYSIS_FORMAT, validate_current
     from stash_ai.signatures import digest
-    meta = value['meta']
-    if meta.get('origin') != 'inference':
-        meta['origin'] = 'inference'
-        if value['mode'] == 'spans':
-            value['mode'] = 'frames'
-            value['items'] = [dict(start=item['start'] + (i / 3) * ((item['end'] or item['start']+1)-item['start']),
-                end=item['start'] + ((i+1) / 3) * ((item['end'] or item['start']+1)-item['start']),
-                tags=[[item['tag'], item.get('score') or .9]]) for item in value['items'] for i in range(3)]
-        elif value['mode'] == 'scene':
-            for item in value['items']:
-                if item['score'] is None:
-                    item['score'] = .9
-    meta.pop('marker_tag_blocklist', None)
-    meta.update(analysis_format=4)
-    meta.setdefault('inference_signature', digest(value))
-    meta.setdefault('frame_input_signature', 'fixture-input')
-    meta.setdefault('scene_threshold', .4)
-    meta.setdefault('marker_threshold', .8)
-    meta.setdefault('marker_score_floor', 0.)
-    meta.setdefault('scene_support_floor', meta['scene_threshold'] * app.TEMPORAL_POLICY.scene_support_ratio)
-    if value['mode'] == 'scene':
-        meta.update(scene_frames_format=1)
-        meta.setdefault('scene_score_floor', 0.)
-        if 'frames' not in value:
-            value['frames'] = [dict(start=float(i), end=float(i + 1),
-                tags=[[item['tag'], item['score']] for item in value['items']]) for i in range(2)]
-        accumulator = SceneAccumulator(meta['scene_threshold'], app.TEMPORAL_POLICY)
-        labels = [item['tag'] for item in value['items']]
+    metadata = dict(origin='inference', analysis_format=ANALYSIS_FORMAT,
+        frame_input_signature='fixture-input', scene_threshold=.4,
+        marker_threshold=.8, marker_score_floor=0.)
+    metadata.update(meta or {})
+    metadata.setdefault("scene_support_floor", metadata["scene_threshold"] * app.TEMPORAL_POLICY.scene_support_ratio)
+    metadata.setdefault('inference_signature', digest(dict(mode=mode, items=items)))
+    value = dict(mode=mode, meta=metadata, items=deepcopy(items))
+    if mode == 'scene':
+        metadata.setdefault('scene_score_floor', 0.)
+        value['frames'] = deepcopy(frames) if frames is not None else [
+            dict(start=float(i), end=float(i+1), tags=[(item['tag'], item['score']) for item in items])
+            for i in range(2)]
+        accumulator = SceneAccumulator(metadata['scene_threshold'], app.TEMPORAL_POLICY)
+        labels = [item['tag'] for item in items]
         indexes = {tag: i for i, tag in enumerate(labels)}
         for row in value['frames']:
             accumulator.add_sparse(((indexes[tag], score) for tag, score in row['tags'] if tag in indexes),
@@ -95,7 +94,10 @@ def current_record(value):
         statistics = accumulator.statistics(labels)
         for item in value['items']:
             item.setdefault('statistics', statistics.get(item['tag']))
-    return value
+    validate_current(value)
+    import json
+    return json.loads(json.dumps(value))
+
 
 
 def inject_records(store, scene, model, outputs):
@@ -108,7 +110,12 @@ def inject_records(store, scene, model, outputs):
         params = store.scope, scene, model, kind
         old = isinstance(value, list)
         raw, threshold = (result_history.separate(value, kind) if old else separate(value, kind))
-        metadata = result_history.summarize(raw) if old else summarize(raw)
+        version = 3 if old else FORMAT
+        try:
+            metadata = result_history.summarize(raw) if old else summarize(raw)
+        except ValueError:
+            # Deliberately corrupt authoritative evidence; force metadata repair.
+            metadata, version = {}, 0
         with store.connection:
             store.connection.execute('INSERT OR REPLACE INTO results VALUES (?,?,?,?,?)', (*params, store.pack(raw)))
             store.connection.execute('DELETE FROM result_thresholds WHERE scope=? AND scene=? AND model=? AND kind=?', params)
@@ -117,6 +124,6 @@ def inject_records(store, scene, model, outputs):
                 store.connection.execute('INSERT OR REPLACE INTO result_thresholds VALUES (?,?,?,?,?)', (*params, threshold))
                 store.connection.execute('PRAGMA ignore_check_constraints=OFF')
             store.connection.execute('INSERT OR REPLACE INTO result_metadata VALUES (?,?,?,?,?,?)',
-                                     (*params, 3 if old else FORMAT, encode(metadata)))
+                                     (*params, version, encode(metadata)))
             (result_history.index_result if old else index_result)(store, scene, model, kind, value)
     store.cache.clear()

@@ -14,35 +14,34 @@ def _supporting_scores(app, contribution, tag, segments, postings):
     for model in contribution.get("support_sources", ()):
         if model == contribution["source"]:
             continue
-        for signature in contribution.get("support_context", {}).get(model, ()):
-            key = model, signature
-            segment = segments.get(key)
-            if (segment is None or segment["mode"] != "frames"
-                    or segment["meta"].get("frame_input_signature") != identity):
-                continue
-            threshold = marker_threshold(segment)
-            if not _score(threshold):
-                continue
-            if key not in postings:
-                series = {}
-                floor = marker_floor(app.TEMPORAL_POLICY, threshold)
-                for position, frame in enumerate(sorted(segment["items"], key=lambda row: row["start"])):
-                    for label, score in frame["tags"]:
-                        if _score(score) and score >= floor:
-                            if label not in series:
-                                series[label] = Series()
-                            series[label].append(position, frame["start"], frame["end"], score)
-                postings[key] = series
-            series = postings[key].get(tag)
-            if series is None:
-                continue
-            lo = bisect_left(series.starts, contribution["start"])
-            end = contribution["end"]
-            hi = (bisect_right(series.starts, contribution["start"]) if end is None
-                  else bisect_left(series.starts, end))
-            if lo < hi:
-                yield model, max(series.scores[lo:hi]), threshold
-
+        signature = contribution.get("support_context", {}).get(model)
+        key = model, signature
+        segment = segments.get(key)
+        if (segment is None or segment["mode"] != "frames"
+                or segment["meta"].get("frame_input_signature") != identity):
+            continue
+        threshold = marker_threshold(segment)
+        if not _score(threshold):
+            continue
+        if key not in postings:
+            series = {}
+            floor = marker_floor(app.TEMPORAL_POLICY, threshold)
+            for position, frame in enumerate(sorted(segment["items"], key=lambda row: row["start"])):
+                for label, score in frame["tags"]:
+                    if _score(score) and score >= floor:
+                        if label not in series:
+                            series[label] = Series()
+                        series[label].append(position, frame["start"], frame["end"], score)
+            postings[key] = series
+        series = postings[key].get(tag)
+        if series is None:
+            continue
+        lo = bisect_left(series.starts, contribution["start"])
+        end = contribution["end"]
+        hi = (bisect_right(series.starts, contribution["start"]) if end is None
+              else bisect_left(series.starts, end))
+        if lo < hi:
+            yield model, max(series.scores[lo:hi]), threshold
 
 def _marker_signals(app, store, scene, spans, rows, options):
     from stash_ai.evidence.identity import marker_segment_signature

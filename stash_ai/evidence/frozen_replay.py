@@ -12,8 +12,8 @@ class PublishedRecords:
         self.store, self.scene_id = store, scene_id
         self.indexes = {}
 
-    def matching(self, kind, required, *, scene_frames=False, error):
-        key = kind, scene_frames
+    def matching(self, kind, required, *, error):
+        key = kind
         if key not in self.indexes:
             from stash_ai.storage.archive import records as archived_records
             def with_archive(output):
@@ -22,33 +22,24 @@ class PublishedRecords:
                 return {source: [*archive.get(source, []), *([active[source]] if source in active else [])]
                         for source in archive.keys() | active.keys()}
             records = with_archive(kind)
-            if scene_frames:
-                from stash_ai.evidence.cache_views import as_frames
-                records = {source: [as_frames(record) for record in history
-                                   if record['meta'].get('analysis_format') == 4]
-                           for source, history in with_archive('scene').items()}
             self.indexes[key] = {source: {marker_segment_signature(segment): segment for segment in segments}
                                  for source, segments in records.items()}
         matching = {}
-        for source, signatures in required.items():
+        for source, signature in required.items():
             available = self.indexes[key].get(source, {})
-            if not set(signatures) <= set(available):
+            if not isinstance(signature, str) or signature not in available:
                 raise RuntimeError(error)
-            if len(signatures) != 1:
-                raise RuntimeError('Publication contains multiple inference runs per source; rebuild it with fresh inference.')
-            matching[source] = available[next(iter(signatures))]
+            matching[source] = available[signature]
         return matching
 
 
 def snapshot_context(runtime, options, kind):
     context = replace(runtime, TEMPORAL_POLICY=frozen_policy(options))
     if kind == 'markers':
-        context.MARKER_THRESHOLDS = options['marker_thresholds']
         for name, value in options['settings'].items():
             setattr(context, name, value)
     else:
         context.MAX_TAGS = options['max_tags']
-        context.SCENE_THRESHOLDS = options['scene_thresholds']
     return context
 
 
@@ -57,3 +48,11 @@ def frozen_policies(options, field, selected, current):
     frozen = options[field]
     return {source: frozenset(frozen[source]) |
             (current[source] if source in selected else frozenset()) for source in SOURCES}
+
+
+def frozen_records(options, kind, records):
+    from stash_ai.storage.thresholds import overlay
+    from stash_ai.storage.segments import StoredSegment
+    thresholds = options['scene_thresholds' if kind == 'scene' else 'marker_thresholds']
+    return {source: StoredSegment(overlay(dict(record), kind, thresholds.get(marker_segment_signature(record))))
+            for source, record in records.items()}

@@ -1,5 +1,5 @@
 """Temporal qualification, exclusions, source votes and exact checkpoint resume."""
-from tests.helpers.evidence import current_record
+from tests.helpers.evidence import inference_record
 from tests.helpers.temporal import threshold_policy
 
 
@@ -261,7 +261,7 @@ def test_temporal_policy_rejects_invalid_settings(field,value):
 
 def test_old_cached_results_still_merge_without_new_evidence(tmp_path):
     with merge_store.StateStore(tmp_path/'state.sqlite3','fixture') as state:
-        state.put('1','wd',{'scene':current_record(dict(mode='scene',meta={'origin':'legacy'},items=[{'tag':'legacy','score':None}])),
-                           'markers':current_record(dict(mode='spans',meta={'origin':'legacy'},items=[dict(tag='legacy',start=0,end=10,extra_tags=[])]))})
+        state.put('1','wd',{'scene':inference_record(**dict(mode='scene', items=[dict(tag='legacy', score=.9)])),
+                           'markers':inference_record(**dict(mode='frames', items=[dict(start=i*10/3, end=(i+1)*10/3, tags=[('legacy', .9)]) for i in range(3)]))})
         hits,spans=merge.evidence(app,state,'1',{m:frozenset() for m in SOURCES},{m:frozenset() for m in SOURCES})
         assert hits[0]['tag']=='legacy' and spans[0]['end']==10

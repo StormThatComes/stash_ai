@@ -128,7 +128,7 @@ def test_unfiltered_cache_retains_labels_and_reuses_predictions_without_models(p
     assert app.main(p.args) == 0
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), True) as state:
         saved = state.records('1', 'markers')['wd']
-        assert saved['meta']['analysis_format'] == 4
+        assert saved['meta']['analysis_format'] == 5
         assert 'marker_tag_blocklist' not in saved['meta']
         assert all(['common', pytest.approx(.9)] in row['tags'] for row in saved['items'])
     monkeypatch.setattr(app.services, 'load_tagger', lambda *args: pytest.fail('loaded a model'))

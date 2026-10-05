@@ -1,11 +1,10 @@
 """Replay scene qualification from sparse frame evidence and exact aggregates."""
-from dataclasses import replace
 
-from stash_ai.evidence.identity import SCENE_OVERRIDE
+from stash_ai.storage.thresholds import effective
 
 
 def scene_threshold(segment):
-    return segment.get(SCENE_OVERRIDE, segment['meta'].get('scene_threshold'))
+    return effective(segment)
 
 
 def validate_scene(app, segment, threshold, *, has_frames=None):
@@ -16,8 +15,7 @@ def validate_scene(app, segment, threshold, *, has_frames=None):
     needed = threshold * app.TEMPORAL_POLICY.scene_support_ratio
     floor = meta.get('scene_score_floor')
     has_frames = 'frames' in segment if has_frames is None else has_frames
-    if (segment['mode'] != 'scene' or meta.get('origin') != 'inference'
-            or meta.get('scene_frames_format') != 1 or not has_frames):
+    if segment['mode'] != 'scene' or not has_frames:
         raise ValueError('scene frame evidence is missing; run inference once to populate the cache.')
     if not _score(floor) or floor > needed:
         raise ValueError(f'scene cache floor {floor!r} exceeds required {needed:g}; run inference.')
@@ -35,8 +33,7 @@ def project(app, segment):
     meta = segment['meta']
     from stash_ai.evidence.formats import validate_current
     validate_current(segment)
-    threshold = (app.SCENE_THRESHOLDS.get(signature, meta.get('scene_threshold'))
-                 if app.SCENE_THRESHOLDS is not None else scene_threshold(segment))
+    threshold = scene_threshold(segment)
     support_changed = meta.get('scene_support_floor') != threshold * app.TEMPORAL_POLICY.scene_support_ratio
     if threshold == meta.get('scene_threshold') and not support_changed:
         return segment
@@ -59,10 +56,6 @@ def project(app, segment):
 
 def views(app, records):
     from stash_ai.evidence.identity import marker_segment_signature
-    if app.SCENE_THRESHOLDS is None:
-        app = replace(app, SCENE_THRESHOLDS={
-            marker_segment_signature(s): s[SCENE_OVERRIDE]
-            for s in records.values() if SCENE_OVERRIDE in s})
     return app, {source: project(app, record) for source, record in records.items()}
 
 

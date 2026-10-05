@@ -33,7 +33,7 @@ def inspect_output(app, config, kind, record, index, refresh, checkpoint, error)
     if not isinstance(record, dict):
         return result('inconsistent', 'A result row has no current record; run --db-check.')
     signature = record['meta'].get('inference_signature')
-    expected = (1, int(record['populated']), indexed_signature(record))
+    expected = (int(record['populated']), indexed_signature(record))
     if not isinstance(signature, str) or not signature or index != expected:
         return result('inconsistent', 'Evidence and completion index disagree; run --db-check.')
 
@@ -48,7 +48,7 @@ def inspect_output(app, config, kind, record, index, refresh, checkpoint, error)
             validate_scene(app, record, threshold, has_frames=record['has_frames'])
             floor, saved = meta['scene_score_floor'], scene_threshold(record)
         else:
-            if record['mode'] != 'frames' or meta.get('origin') != 'inference':
+            if record['mode'] != 'frames':
                 raise ValueError('Imported marker ranges cannot prove retained frame coverage.')
             validate_current(record)
             floor = meta.get('marker_score_floor')
@@ -75,7 +75,7 @@ def publication_dependencies(app, evidence, selected):
     from stash_ai.evidence.thresholds import validate_marker_cache
 
     dependencies = []
-    context = replace(app, MARKER_THRESHOLDS=None, SCENE_THRESHOLDS=None)
+    context = replace(app)
     for (model, kind), (record, error) in sorted(evidence.items()):
         if model in selected:
             continue

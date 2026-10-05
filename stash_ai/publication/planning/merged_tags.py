@@ -88,10 +88,9 @@ def resolve_marker_catalog(resolver, resolved: ResolvedEvidence) -> MarkerCatalo
     markers = [marker for marker in resolved.markers if ids.get(merge_labels.AI.prefix + marker['tag'])]
     group_ids = {(marker['tag'], is_occurrence(marker)): groups.resolve(marker['tag'], is_occurrence(marker))
                  for marker in markers}
-    identifiers = {str(identifier) for marker in markers for identifier in marker['extra_ids']}
     tags = ([tag for marker in resolved.scene.get('scene_markers', []) for tag in marker.get('tags', [])]
             if markers else [])
-    identifiers.update(str(tag['id']) for tag in tags)
+    identifiers = {str(tag['id']) for tag in tags}
     names = {identifier: resolver.name_for_id(identifier) for identifier in sorted(identifiers)}
     managed = frozenset(identifier for identifier, name in names.items()
                         if name and groups.owns({'id': identifier, 'name': name}))

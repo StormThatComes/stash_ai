@@ -24,7 +24,7 @@ def obsolete():
         value['meta']['marker_tag_blocklist'] = []
     saved['scene'].pop('frames')
     for field in ('scene_frames_format', 'scene_score_floor', 'scene_support_floor'):
-        saved['scene']['meta'].pop(field)
+        saved['scene']['meta'].pop(field, None)
     saved['scene']['items'][0]['statistics'].pop('peak_time')
     return saved
 
@@ -59,9 +59,9 @@ def test_upgrade_retires_old_results_across_scopes_and_preserves_exact_pins(tmp_
         snapshots = connection.execute('SELECT * FROM snapshots').fetchall()
         recovery = connection.execute('SELECT * FROM recovery_publications').fetchall()
     before = path.read_bytes()
-    assert db.update_database(path, dry_run=True) == (14, 18)
+    assert db.update_database(path, dry_run=True) == (14, 20)
     assert path.read_bytes() == before
-    assert db.update_database(path) == (14, 18)
+    assert db.update_database(path) == (14, 20)
     for scope in ('first', 'second'):
         with StateStore(path, scope) as store:
             assert 'wd' not in store.records('1', 'scene')
@@ -80,7 +80,7 @@ def test_upgrade_retires_old_results_across_scopes_and_preserves_exact_pins(tmp_
     with sqlite3.connect(path) as connection:
         assert connection.execute('SELECT * FROM snapshots').fetchall() == snapshots
         assert connection.execute('SELECT * FROM recovery_publications').fetchall() == recovery
-    assert db.update_database(path) == (18, 18)
+    assert db.update_database(path) == (20, 20)
 
 
 def test_retirement_and_archive_roll_back_together(tmp_path, monkeypatch):
@@ -109,7 +109,7 @@ def test_retirement_and_archive_roll_back_together(tmp_path, monkeypatch):
         assert not connection.execute('SELECT 1 FROM refresh_requests').fetchone()
 
 
-@pytest.mark.parametrize('version', [None, 1, 2, 3])
+@pytest.mark.parametrize('version', [None, 1, 2, 3, 4])
 def test_writer_rejects_obsolete_inference_without_changing_current_results(tmp_path, version):
     with StateStore(tmp_path / 'state.sqlite3', 'scope') as store:
         current = outputs()
@@ -175,6 +175,10 @@ def test_upgrade_then_reinference_keeps_publication_ownership(pipeline, monkeypa
     with monkeypatch.context() as old:
         old.setattr(results, 'capture_outputs', capture_old)
         old.setattr(formats, 'validate_current', lambda _: None)
+        from stash_ai.storage import metadata
+        old.setattr(metadata, 'summarize', lambda record: dict(mode=record['mode'],
+            meta={k: v for k, v in record['meta'].items() if k in metadata.META_KEYS},
+            has_frames='frames' in record, populated=bool(record['items'])))
         assert app.main(p.args) == 0
     published = deepcopy(p.stash.scene)
     with sqlite3.connect(p.path) as connection:
@@ -190,3 +194,43 @@ def test_upgrade_then_reinference_keeps_publication_ownership(pipeline, monkeypa
                    for value in store.records('1', kind).values())
         assert not store.connection.execute('SELECT 1 FROM refresh_requests').fetchone()
     assert db.check_database(p.path, scope_for(app.STASH_URL))['ok']
+
+
+@pytest.mark.parametrize('location', ['published', 'pending', 'recovery'])
+def test_v18_retires_v4_with_scalar_threshold_and_keeps_exact_publication_pins(tmp_path, location):
+    path = tmp_path/'state.sqlite3'
+    old = outputs(signature='v4')
+    for record in old.values():
+        record['meta']['analysis_format'] = 4
+    old['scene']['meta']['scene_frames_format'] = 1
+    with StateStore(path, 'scope') as store:
+        inject_records(store, '1', 'wd', old)
+        saved = {**proof(old['markers']), 'owned_ids': ['native-marker']}
+        saved['contributions'][0].update(meta=old['markers']['meta'], tag='core', start=0., end=1., extra_tags=['old-extra'])
+        if location == 'published':
+            store.publish('1', {'markers': saved})
+        else:
+            store.prepare('1', {'markers': saved})
+            if location == 'recovery':
+                from stash_ai.storage.recovery import abandon
+                abandon(store, lambda _: None)
+        store.connection.execute('INSERT INTO result_thresholds VALUES (?,?,?,?,?)',
+                                 ('scope', '1', 'wd', 'markers', .6))
+        store.connection.execute('PRAGMA user_version=18')
+        store.connection.commit()
+    assert db.update_database(path) == (18, 20)
+    with StateStore(path, 'scope') as store:
+        assert store.records('1', 'markers') == store.records('1', 'scene') == {}
+        archived = archived_records(store, '1', 'markers')['wd']
+        assert archived == [old['markers']]
+        assert not store.connection.execute('SELECT * FROM result_thresholds').fetchall()
+        assert set(store.connection.execute('SELECT model,kind FROM refresh_requests')) == {
+            ('wd', 'scene'), ('wd', 'markers')}
+        if location == 'recovery':
+            from stash_ai.storage.recovery import publications
+            result = publications(store, '1', 'markers')[0]
+        else:
+            result = store.snapshot('1', 'markers')[location == 'pending']
+        assert result['owned_ids'] == ['native-marker']
+        assert result['contributions'][0]['requires_rebase']
+    assert db.check_database(path, 'scope')['ok']

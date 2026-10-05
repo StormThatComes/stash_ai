@@ -1,5 +1,5 @@
 """State database reporting and safe compaction."""
-from tests.helpers.evidence import current_record
+from tests.helpers.evidence import inference_record
 from stash_ai.storage.snapshots import encode as encode_snapshot
 
 import hashlib
@@ -16,7 +16,7 @@ from stash_ai.storage.codec import encode
 
 def seed(path, scope):
     with merge_store.StateStore(path, scope) as state:
-        state.put("1", "wd", {kind: current_record(record) for kind, record in {
+        state.put("1", "wd", {kind: inference_record(**record) for kind, record in {
             "scene": {
                 "mode": "scene",
                 "meta": {"origin": "inference", "inference_signature": "scene-sig"},
@@ -186,8 +186,8 @@ def test_deep_check_detects_result_index_relationship_and_content_errors(tmp_pat
             (scope,),
         )
         db.execute(
-            "INSERT INTO result_index VALUES (?,?,?,?,?,?,?)",
-            (scope, "orphan", "dtq", "scene", 0, 0, None),
+            "INSERT INTO result_index VALUES (?,?,?,?,?,?)",
+            (scope, "orphan", "dtq", "scene", 0, None),
         )
 
     report = stash_db.check_database(path, scope)

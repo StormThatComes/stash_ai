@@ -30,8 +30,8 @@ def evidence(app, store, scene_id, core_policies, scene_policies, metrics=None, 
         eligible = []
         for entry in segment["items"]:
             label = raw_label(entry["tag"])
-            reason = scene_qualification(entry, segment["meta"],
-                                  segment["meta"].get("scene_threshold", 0.0), app.TEMPORAL_POLICY)
+            reason = scene_qualification(entry,
+                                  segment["meta"]["scene_threshold"], app.TEMPORAL_POLICY)
             if label not in scene_policies[model] and reason:
                 eligible.append({**entry, "source": model, "meta": segment["meta"],
                                  **({"qualification": reason} if entry.get("statistics") else {})})
@@ -42,8 +42,6 @@ def evidence(app, store, scene_id, core_policies, scene_policies, metrics=None, 
     if selected_sources is not None:
         records = {source: record for source, record in records.items()
                    if source in selected_sources}
-    from stash_ai.evidence.thresholds import marker_context
-    app = marker_context(app, records)
     if report is not None:
         inputs = records.values()
         report.record_counts(input_models=len(records), input_segments=len(inputs),
@@ -56,9 +54,8 @@ def evidence(app, store, scene_id, core_policies, scene_policies, metrics=None, 
             spans = marker_contributions(app, records, core_policies, index=index, metrics=metrics, tag_policies=scene_policies)
         if need_scene:
             with stage(report, 'scene_fusion'):
-                scene_frames = frame_records(scene_records)
-                with FrameIndex(app, scene_frames, core_policies, cache=store.cache, tag_policies=scene_policies) as scene_index:
-                    scene_hits.extend(shared_scene_contributions(app, scene_index, scene_records, scene_policies, scene_hits, metrics))
+                scene_hits.extend(shared_scene_contributions(
+                    app, scene_records, scene_policies, scene_hits, metrics, cache=store.cache))
     if app.CREATE_MARKERS:
         from stash_ai.evidence.occurrences import occurrence_contributions
         report = store.report

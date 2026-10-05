@@ -95,8 +95,8 @@ class CleanupRun:
             scene_id = str(current["id"])
             try:
                 self.stats.update(scenes.cleanup_scene(
-                    app, self.cleanup_stash, self.resolver, self.store, current, self.settings, self.selected,
-                    self.args, self.core_policies, self.scene_policies, self.scoped_tags, self.report))
+                    app, self.cleanup_stash, self.resolver, self.store, current, self.selected,
+                    self.core_policies, self.scene_policies, self.scoped_tags, self.report))
                 self.stats["processed"] += 1
             except Exception as exc:
                 self.stats["errors"] += 1
@@ -129,4 +129,3 @@ class CleanupRun:
             candidates = self.sql.discovery.marker_group_candidates(delta) if self.sql is not None else None
             self.stats.update(prune_groups(
                 self.stash, self.report.detail, candidate_ids=candidates, usage_delta=delta))
-

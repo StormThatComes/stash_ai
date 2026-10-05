@@ -2,5 +2,5 @@
 from stash_ai.evidence.temporal.statistics import scene_reason
 
 
-def scene_qualification(entry, meta, threshold, policy):
+def scene_qualification(entry, threshold, policy):
     return scene_reason(entry['score'], entry['statistics'], threshold, policy)

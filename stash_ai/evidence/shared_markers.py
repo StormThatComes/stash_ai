@@ -5,7 +5,7 @@ from copy import deepcopy
 from contextlib import closing
 from stash_ai.models import SOURCES
 from stash_ai.evidence.interval_geometry import append_interval
-from .frames import FrameIndex, make_groups, observations
+from .frames import make_groups, observations
 from .observations import ObservationIndex
 
 
@@ -22,8 +22,8 @@ def shared_runs(app, events, group, key, options):
         sources = [source for source in SOURCES if source in run["sources"]]
         anchor = sources[0]
         own = run["sources"][anchor]
-        signature = sorted(own["signatures"])[0]
-        source_evidence = {source: {**evidence, "signatures": sorted(evidence["signatures"])}
+        signature = own["signature"]
+        source_evidence = {source: dict(evidence)
                            for source, evidence in run["sources"].items()}
         finished.append(dict(tag=tag, start=run["start"], end=run["end"],
             source=anchor, score=own["score"], hits=own["hits"], strong_hits=own["strong_hits"],
@@ -56,11 +56,10 @@ def shared_runs(app, events, group, key, options):
             run["strong_hits"] += int(strong)
             for source, evidence in sources.items():
                 own = run["sources"].setdefault(source,
-                    dict(score=evidence["score"], hits=0, strong_hits=0, intervals=[], signatures=set()))
+                    dict(score=evidence["score"], hits=0, strong_hits=0, intervals=[], signature=evidence["signature"]))
                 own["score"] = max(own["score"], evidence["score"])
                 own["hits"] += 1
                 own["strong_hits"] += int(evidence["strong"])
-                own["signatures"].update(evidence["signatures"])
                 append_interval(own["intervals"], start, supported_end)
     for tag in list(active):
         finish(tag)
@@ -79,17 +78,14 @@ def collect_extras(app, span, index: ObservationIndex, allowed=None):
     span["extra_evidence"] = extras
 
 
-def enrich(app, records, policies, spans, signatures=None, index=None, metrics=None):
+def enrich(app, policies, spans, index, metrics=None):
     """Add missing shared intervals and attach source-aware extras from compatible inputs."""
     from stash_ai.evidence.temporal.policy import build_options
     policy = app.TEMPORAL_POLICY
     if not (policy.shared_marker_frames or policy.shared_marker_extras):
         return spans
-    if index is None:
-        with FrameIndex(app, records, policies, signatures) as owned_index:
-            return enrich(app, records, policies, spans, signatures, owned_index, metrics)
     groups, by_signature = index.groups, index.by_signature
-    options = {**build_options(app), "core_exclusions": {k: sorted(v) for k, v in policies.items()},
+    options = {**build_options(app, {source: record for group in index.groups.values() for source, record, _ in group['members']}), "core_exclusions": {k: sorted(v) for k, v in policies.items()},
                "tag_exclusions": {k: sorted(v) for k, v in index.tag_policies.items()}}
     covered = defaultdict(list)
     for span in spans:
@@ -153,7 +149,7 @@ def refresh_clipped_evidence(app, span, records, policies, tag_policies=None):
                 continue
             evidence[source] = dict(score=max(item["score"] for _, item in samples),
                 hits=len(samples), strong_hits=sum(item["strong"] for _, item in samples), intervals=ranges,
-                signatures=sorted({signature for _, item in samples for signature in item["signatures"]}))
+                signature=samples[0][1]["signature"])
             hits.update(event["start"] for event, _ in samples)
             strong_hits.update(event["start"] for event, item in samples if item["strong"])
         sources = [source for source in SOURCES if source in evidence]
@@ -161,7 +157,7 @@ def refresh_clipped_evidence(app, span, records, policies, tag_policies=None):
             return False
         anchor = sources[0]
         own = evidence[anchor]
-        signature = own["signatures"][0]
+        signature = own["signature"]
         meta = next(segment["meta"] for _, segment, sig in group["members"] if sig == signature)
         span.update(source_evidence=evidence, support_sources=sources, source=anchor,
                     score=own["score"], hits=own["hits"], strong_hits=own["strong_hits"],

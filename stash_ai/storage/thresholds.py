@@ -1,8 +1,6 @@
-"""One optional publication threshold, separate from immutable inference evidence."""
-THRESHOLD_KEYS = {
-    'scene': ('scene_threshold_override', 'scene_threshold'),
-    'markers': ('marker_threshold_override', 'marker_threshold'),
-}
+"""One effective publication threshold, separate from captured provenance."""
+PUBLICATION_THRESHOLD = 'publication_threshold'
+THRESHOLD_KEYS = {'scene': 'scene_threshold', 'markers': 'marker_threshold'}
 
 
 def validate(value):
@@ -12,22 +10,20 @@ def validate(value):
     return value
 
 
+def effective(record):
+    key = 'scene_threshold' if record['mode'] == 'scene' else 'marker_threshold'
+    return record.get(PUBLICATION_THRESHOLD, record['meta'][key])
+
+
 def overlay(record, kind, threshold):
-    if threshold is not None:
-        validate(threshold)
-        key, meta_key = THRESHOLD_KEYS[kind]
-        record.pop(key, None)
-        if threshold != record['meta'][meta_key]:
-            record[key] = threshold
+    record.pop(PUBLICATION_THRESHOLD, None)
+    if threshold is not None and validate(threshold) != record['meta'][THRESHOLD_KEYS[kind]]:
+        record[PUBLICATION_THRESHOLD] = threshold
     return record
 
 
 def separate(record, kind):
-    key, _ = THRESHOLD_KEYS[kind]
-    other = THRESHOLD_KEYS['markers' if kind == 'scene' else 'scene'][0]
-    if other in record:
-        raise ValueError('Threshold override does not match result kind.')
-    threshold = record.get(key)
+    threshold = record.get(PUBLICATION_THRESHOLD)
     if threshold is not None:
         validate(threshold)
-    return {field: value for field, value in record.items() if field != key}, threshold
+    return {k: v for k, v in record.items() if k != PUBLICATION_THRESHOLD}, threshold

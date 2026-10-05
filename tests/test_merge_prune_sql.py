@@ -1,5 +1,5 @@
 """Post-merge pruning limits native usage reads without weakening deletion checks."""
-from tests.helpers.evidence import current_record
+from tests.helpers.evidence import inference_record
 from copy import deepcopy
 import json
 
@@ -62,7 +62,7 @@ def test_merge_prefilters_used_groups_and_shares_one_lightweight_catalog(tmp_pat
         stash.scene['scene_markers'].append(dict(id=str(i + 1), title='Manual', seconds=i,
             end_seconds=i + 1, primary_tag=primary, tags=[tag]))
     orphan = managed(stash, 'orphan')
-    ordinary = stash.tag('op:empty')
+    ordinary = stash.tag('ai:empty')
     install(monkeypatch, stash)
     args = command(tmp_path, by_model={'oppai': ['empty']})
     assert app.main(args + (['--prune-empty-tags'] if explicit else [])) == 0
@@ -89,7 +89,7 @@ def test_merge_prunes_groups_losing_markers_and_preserves_global_usage(tmp_path,
         other['id'], other['scene_markers'][0]['id'] = '2', '2'
         stash.scenes['2'] = other
     with merge_store.StateStore(tmp_path/'state.sqlite3', merge_store.scope_for(app.STASH_URL)) as state:
-        state.put('1', 'wd', {'markers': current_record(dict(mode='spans', items=[], meta={'origin': 'legacy'}))})
+        state.put('1', 'wd', {'markers': inference_record(**dict(mode='frames', items=[]))})
         state.publish('1', {'markers': {'contributions': [span('wd', 0, 2, 'old')]}})
     before = deepcopy((stash.tags, stash.scenes))
     install(monkeypatch, stash)

@@ -3,25 +3,12 @@ from collections import Counter
 import math
 
 from stash_ai.evidence.labels import AI
-from stash_ai.evidence.marker_identity import OCCURRENCE_TAG
-from stash_ai.publication.markers import owned_marker
-
-
-def ordinary_points(scene):
-    return [marker for marker in scene.get('scene_markers', [])
-            if owned_marker(marker, AI) and marker.get('end_seconds') is None
-            and not any(tag['name'] == OCCURRENCE_TAG for tag in marker.get('tags', []))]
-
-
-def require_native_ranges(scene, spans):
-    if ordinary_points(scene):
-        raise RuntimeError(f"Scene {scene['id']} has historical AI point markers; "
-                           'run --migrate-point-markers-only before merging or cleaning ranges.')
+from stash_ai.publication.preconditions import ordinary_points
 
 
 def plan(store, scene):
     """Resolve all extents before writing; snapshots remain the durable retry proof."""
-    from stash_ai.evidence.intervals import union_intervals
+    from stash_ai.evidence.interval_geometry import union_intervals
     from stash_ai.storage.recovery import publications
     points = ordinary_points(scene)
     if not points:
@@ -75,3 +62,29 @@ def run(app, args):
             stash.close()
     report.finish('Point marker migration' + (' (planned)' if app.DRY_RUN else ''), stats)
     return int(bool(stats['errors']))
+
+
+def main(argv=None, *, runtime=None):
+    import argparse
+    from pathlib import Path
+    from tqdm import tqdm
+    from stash_ai.runtime.context import RuntimeContext
+    from stash_ai.runtime.report import RunReport
+    app = runtime if runtime is not None else RuntimeContext()
+    parser = argparse.ArgumentParser(allow_abbrev=False,
+        description='Convert owned AI points to native ranges from saved publication extents.')
+    parser.add_argument('--state-db', type=Path, default=app.MERGE_STATE_FILE)
+    parser.add_argument('--scene-id', action='append')
+    parser.add_argument('--dry-run', action='store_true')
+    parser.add_argument('--verbose', action='store_true')
+    args = parser.parse_args(argv)
+    args.report = RunReport(args.verbose, tqdm.write)
+    app.DRY_RUN = app.DRY_RUN or args.dry_run
+    app.APPLY_SCENE_TAGS, app.CREATE_MARKERS = False, True
+    app.services.validate_config(scene_work=False)
+    return run(app, args)
+
+
+if __name__ == '__main__':
+    from ._entrypoint import run as entrypoint
+    raise SystemExit(entrypoint(main))

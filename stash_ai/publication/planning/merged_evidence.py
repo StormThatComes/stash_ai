@@ -12,8 +12,8 @@ def prepare_sync_evidence(app, stash, store, scene, scene_hits, spans, *, cleanu
     """Build merged markers/scene labels and apply cleanup-only retention rules."""
     scene_id = str(scene["id"])
     if app.CREATE_MARKERS:
-        from stash_ai.commands.point_migration import require_native_ranges
-        require_native_ranges(scene, spans)
+        from stash_ai.publication.preconditions import require_native_ranges
+        require_native_ranges(scene)
     with stage(report, 'marker_union'):
         markers = merge_intervals.union_intervals(spans, borrow=True) if app.CREATE_MARKERS else []
     if report is not None:
@@ -32,5 +32,4 @@ def prepare_sync_evidence(app, stash, store, scene, scene_hits, spans, *, cleanu
             merge_labels.AI.prefix + marker["tag"], {"seconds": marker["start"], "end_seconds": marker["end"]})]
         spans = [item for marker in markers for item in marker["contributors"]]
     return PreparedEvidence(scene_hits, spans, markers, scene_labels)
-
 

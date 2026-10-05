@@ -15,11 +15,11 @@ def check_results_and_index(db, tables, errors, progress=None):
 
     indexed_signature = None
     checked = 0
-    query = ('SELECT r.kind,r.data,i.inference,i.populated,i.signature,t.threshold,m.format,m.data '
+    query = ('SELECT r.kind,r.data,i.populated,i.signature,t.threshold,m.format,m.data '
              'FROM results AS r LEFT JOIN result_index AS i USING(scope,scene,model,kind) '
              'LEFT JOIN result_thresholds AS t USING(scope,scene,model,kind) '
              'LEFT JOIN result_metadata AS m USING(scope,scene,model,kind)')
-    for kind, blob, inference, populated, signature, threshold, metadata_format, metadata in db.execute(query):
+    for kind, blob, populated, signature, threshold, metadata_format, metadata in db.execute(query):
         checked += 1
         tick(progress)
         try:
@@ -28,7 +28,7 @@ def check_results_and_index(db, tables, errors, progress=None):
                 raise ValueError('Invalid result record.')
             from stash_ai.evidence.formats import validate_current
             validate_current(record)
-            if {'scene_threshold_override', 'marker_threshold_override', 'refinement'} & record.keys():
+            if {'publication_threshold', 'scene_threshold_override', 'marker_threshold_override', 'refinement'} & record.keys():
                 raise ValueError('Noncanonical result record.')
             if metadata_format is not None:
                 from stash_ai.storage.metadata import FORMAT, decode, encode, summarize
@@ -45,7 +45,6 @@ def check_results_and_index(db, tables, errors, progress=None):
                     overlay(record, kind, threshold)
                 except (TypeError, ValueError):
                     pass
-            expected_inference = 1
             expected_populated = int(bool(record['items']))
             if indexed_signature is None:
                 from stash_ai.evidence.thresholds import indexed_signature as signature_for
@@ -55,10 +54,10 @@ def check_results_and_index(db, tables, errors, progress=None):
             errors["result_payload_invalid"] += 1
             continue
 
-        if inference is None and "result_index" in tables:
+        if populated is None and "result_index" in tables:
             errors["result_missing_index"] += 1
-        elif (inference not in (0, 1) or populated not in (0, 1)
-              or inference != expected_inference or populated != expected_populated
+        elif (populated not in (0, 1)
+              or populated != expected_populated
               or signature != expected_signature):
             errors["result_index_mismatch"] += 1
 

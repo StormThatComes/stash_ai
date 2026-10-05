@@ -14,7 +14,7 @@ import stash_ai.evidence.source_markers as merge_source_markers
 import stash_ai.inference.results as merge_results
 import stash_ai.storage.store as merge_store
 from stash_ai.models import SOURCES
-from tests.helpers.evidence import segment, current_record, inject_records
+from tests.helpers.evidence import segment, inference_record, inject_records
 from stash_ai.storage.archive import records as archived_records
 
 pytestmark = pytest.mark.usefixtures('reset_temporal')

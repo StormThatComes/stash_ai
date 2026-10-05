@@ -307,10 +307,10 @@ from stash_ai.evidence.pipeline import evidence
 from stash_ai.evidence.frames import FrameIndex
 from stash_ai.evidence.observations import ObservationIndex
 from stash_ai.evidence.labels import raw_label
-from stash_ai.evidence.identity import marker_segment_signature, OVERRIDE, SCENE_OVERRIDE
+from stash_ai.evidence.identity import marker_segment_signature, PUBLICATION_THRESHOLD
 from stash_ai.inference.reuse import reuse
 segment = {'mode': 'frames', 'meta': {}, 'items': []}
-projected = {**segment, OVERRIDE: 0.2, SCENE_OVERRIDE: 0.7}
+projected = {**segment, PUBLICATION_THRESHOLD: 0.7}
 assert marker_segment_signature(segment) == marker_segment_signature(projected)
 assert raw_label('plain_label') == 'plain_label'
 assert not {'torch', 'numpy', 'onnxruntime'} & set(sys.modules)

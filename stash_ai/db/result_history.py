@@ -1,7 +1,7 @@
 """List-shaped results and JSON threshold arrays, used only by offline upgrades."""
 import json
 from stash_ai.storage.archive import pinned
-from stash_ai.evidence.identity import marker_segment_signature
+from stash_ai.evidence.identity import marker_segment_signature as current_signature
 
 THRESHOLD_KEYS = {
     'scene': ('scene_threshold_override', 'scene_threshold'),
@@ -96,13 +96,12 @@ def index_result(store, scene, model, kind, segments, scope=None, *, metadata_on
     from stash_ai.evidence.thresholds import indexed_signature
     inference = next((segment for segment in reversed(segments)
                       if segment["meta"].get("origin") == "inference"), None)
-    store.connection.execute("INSERT INTO result_index VALUES (?,?,?,?,?,?,?) "
-        "ON CONFLICT(scope,scene,model,kind) DO UPDATE SET inference=excluded.inference,"
+    store.connection.execute("INSERT INTO result_index VALUES (?,?,?,?,?,?) "
+        "ON CONFLICT(scope,scene,model,kind) DO UPDATE SET "
         "populated=excluded.populated,signature=excluded.signature",
         (scope or store.scope, str(scene), model, kind,
-         int(inference is not None),
          int(any(s["populated"] if metadata_only else bool(s["items"]) for s in segments)),
-         indexed_signature(inference) if inference is not None else None))
+         indexed_signature(publication_record(inference, kind)) if inference is not None else None))
 
 
 def retain(store, scene, model, kind, previous, active):
@@ -140,3 +139,15 @@ def history(blob):
 
 def threshold_column(db):
     return 'threshold' if 'threshold' in {row[1] for row in db.execute('PRAGMA table_info(result_thresholds)')} else 'thresholds'
+
+
+def marker_segment_signature(segment):
+    return current_signature({k: v for k, v in segment.items()
+                              if k not in ('scene_threshold_override', 'marker_threshold_override')})
+
+
+def publication_record(segment, kind):
+    from stash_ai.storage.thresholds import overlay as current_overlay
+    key, _ = THRESHOLD_KEYS[kind]
+    raw = {k: v for k, v in segment.items() if k not in ('scene_threshold_override', 'marker_threshold_override')}
+    return current_overlay(raw, kind, segment.get(key))

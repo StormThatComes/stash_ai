@@ -3,7 +3,7 @@ from copy import deepcopy
 from stash_ai.publication import markers as marker_ops
 from stash_ai.storage.recovery import publications
 from stash_ai.evidence.labels import AI, source_codes
-from stash_ai.evidence.intervals import union_intervals
+from stash_ai.evidence.interval_geometry import union_intervals
 from stash_ai.evidence.marker_identity import OCCURRENCE_TAG, is_occurrence
 from stash_ai.evidence.shared_markers import prune_blocked_extras
 from stash_ai.signatures import freeze

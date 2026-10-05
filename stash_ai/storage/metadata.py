@@ -2,14 +2,16 @@
 from contextlib import contextmanager
 import json
 
-FORMAT = 4
+FORMAT = 5
 META_KEYS = frozenset((
     'origin', 'inference_signature', 'frame_input_signature', 'analysis_format', 'scene_threshold', 'marker_threshold',
-    'scene_frames_format', 'scene_score_floor', 'scene_support_floor', 'marker_score_floor', 'marker_tag_blocklist',
+    'scene_score_floor', 'scene_support_floor', 'marker_score_floor',
 ))
 
 
 def summarize(record):
+    if 'marker_tag_blocklist' in record['meta']:
+        raise ValueError('Current inference evidence cannot contain the retired marker blocklist.')
     return dict(mode=record['mode'], meta={key: value for key, value in record['meta'].items() if key in META_KEYS},
                 has_frames='frames' in record, populated=bool(record['items']))
 

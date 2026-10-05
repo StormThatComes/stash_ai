@@ -118,7 +118,7 @@ def test_unknown_historical_floor_requires_inference_even_at_high_threshold(over
     frames['meta']['marker_tag_blocklist'] = []
     frames['meta'].pop('marker_score_floor', None)
     frames['meta']['marker_threshold'] = .7
-    frames[thresholds_identity.OVERRIDE] = override
+    frames[thresholds_identity.PUBLICATION_THRESHOLD] = override
     with pytest.raises(ValueError, match='Obsolete active inference'):
         merge_source_markers.marker_contributions(app, {'wd': frames}, policies())
 

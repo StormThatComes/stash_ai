@@ -46,6 +46,10 @@ class Stash:
         self.writes.append(("parents",identifier))
         return deepcopy(tag)
     def marker(self,source,label,identifier,manual=False):
+        from stash_ai.models import ModelSource
+        if isinstance(source, ModelSource):
+            from stash_ai.tools.legacy_namespaces import NAMESPACES
+            source = NAMESPACES[source.key]
         marker=dict(id=identifier,title="Manual" if manual else source.title_prefix+label,seconds=0,end_seconds=2,
                     primary_tag=self.tag(source.prefix+label),tags=[] if manual else [self.tag(source.owner_tag)])
         self.scene["scene_markers"].append(marker)
@@ -70,7 +74,9 @@ class Stash:
         assert not self.dry_run
         if self.fail_create: raise RuntimeError("injected failure")
         self.writes.append(("create",payload))
-        self.scene["scene_markers"].append(self.record(payload,str(1000+len(self.writes))))
+        identifier = str(1000+len(self.writes))
+        self.scene["scene_markers"].append(self.record(payload,identifier))
+        return identifier
     def update_marker(self,payload):
         assert not self.dry_run
         self.writes.append(("update",payload))

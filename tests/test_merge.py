@@ -1,5 +1,8 @@
 """Behavior tests for exact-label AI fusion; no live Stash or model downloads."""
-from tests.helpers.evidence import current_record
+from functools import partial
+from stash_ai.tools.point_migration import main as point_main
+from stash_ai.evidence.interval_geometry import union_intervals as geometry_union
+from tests.helpers.evidence import inference_record
 
 
 
@@ -15,16 +18,19 @@ import numpy as np
 import pytest
 import yaml
 
-from stash_ai.commands import hierarchy as hierarchy_commands, namespace_migration
+from stash_ai.commands import hierarchy as hierarchy_commands
+from stash_ai.publication.preconditions import require_source_state
 from stash_ai.inference.identity import model_identity
 from stash_ai.publication import merged as merge_sync
 from tests.helpers.runtime import runtime as app
+migrate_points = partial(point_main, runtime=app)
 from stash_ai.evidence import pipeline as merge
 import stash_ai.evidence.intervals as merge_intervals
 import stash_ai.evidence.labels as merge_labels
 import stash_ai.storage.results as merge_results
 import stash_ai.storage.store as merge_store
 from stash_ai.inference.inputs import inspect_input
+from stash_ai.tools.legacy_namespaces import NAMESPACES as LEGACY_NAMESPACES
 from stash_ai.models import SOURCES, JOYTAG, WD, DTQ, OPPAI, ModelSettings, Vocabulary
 from tests.helpers.stash import Stash
 from tests.helpers.inference import Tagger
@@ -51,7 +57,7 @@ def test_interval_union_retains_ends_separate_events_sources_and_extras():
             span("oppai",14,35,score=.83,extras=["extra","another"]),span("dtq",70,90)]
     expected=[(10,42,["joytag","wd","oppai"]),(70,90,["dtq"])]
     for sequence in permutations(inputs):
-        result=merge_intervals.union_intervals(sequence)
+        result=geometry_union(sequence)
         assert [(m["start"],m["end"],m["sources"]) for m in result]==expected
         assert result[0]["extra_tags"]==["another","extra"]
         assert "score" not in result[0]
@@ -68,24 +74,24 @@ def test_interval_union_retains_ends_separate_events_sources_and_extras():
     ([(10,30),(20,None),(40,None)],[(10,30),(40,None)]),
 ])
 def test_union_touching_containment_chains_gaps_and_unknown_ends(values,expected):
-    merged=merge_intervals.union_intervals([span(key,start,end) for key,(start,end) in zip(SOURCES,values)])
+    merged=geometry_union([span(key,start,end) for key,(start,end) in zip(SOURCES,values)])
     assert [(m["start"],m["end"]) for m in merged]==expected
 
 
 def test_union_keeps_different_labels_and_case_separate():
-    merged=merge_intervals.union_intervals([span("joytag",0,20,"blue_hair"),span("wd",0,20,"Blue_hair"),
+    merged=geometry_union([span("joytag",0,20,"blue_hair"),span("wd",0,20,"Blue_hair"),
                                    span("oppai",0,20,"bikini"),span("dtq",0,20,"swimsuit")])
     assert len(merged)==4
 
 
 @pytest.mark.parametrize("start,end",[(-1,3),(3,1),(float("nan"),3),(0,float("inf")),(True,3)])
 def test_bad_intervals_are_rejected_before_writes(start,end):
-    with pytest.raises(ValueError): merge_intervals.union_intervals([span("wd",start,end)])
+    with pytest.raises(ValueError): geometry_union([span("wd",start,end)])
 
 
 def test_state_is_durable_scoped_partial_and_dry_run_does_not_write(tmp_path):
-    first=current_record({"mode":"scene","meta":{"origin":"inference"},"items":[dict(tag="common",score=.8)]})
-    second=current_record({"mode":"spans","meta":{"origin":"legacy"},"items":[]})
+    first=inference_record(**{"mode":"scene","meta":{"origin":"inference"},"items":[dict(tag="common",score=.8)]})
+    second=inference_record(**dict(mode="frames", items=[]))
     with store(tmp_path) as state:
         state.put("1","joytag",{"scene":first,"markers":second})
         state.put("1","wd",{"scene":first})
@@ -284,7 +290,7 @@ def test_combined_hierarchy_has_one_namespace_and_all_labels(tmp_path):
     stash=Stash();manual=stash.tag("manual parent")
     old=stash.tag("ai:category:Old");old["description"]=merge_labels.AI.hierarchy_description
     unowned=stash.tag("ai:category:Custom")
-    foreign=stash.tag("wd:category:General");foreign["description"]=SOURCES["wd"].hierarchy_description
+    foreign=stash.tag("wd:category:General");foreign["description"]=LEGACY_NAMESPACES["wd"].hierarchy_description
     stash.tag("ai:blue_hair")["parents"]=[manual,old,unowned,foreign]
     app.services.TagResolver(stash,combined,source=merge_labels.AI).resolve("ai:blue_hair")
     assert {p["name"] for p in stash.tags["ai:blue_hair"]["parents"]}=={
@@ -300,14 +306,14 @@ def test_missing_source_state_does_not_destroy_existing_ai_markers(tmp_path):
     before=deepcopy(stash.scene)
     with store(tmp_path) as state:
         with pytest.raises(RuntimeError,match="source state"):
-            namespace_migration.check_sources(app,state,stash.find_scene("1"))
+            require_source_state(app,state,stash.find_scene("1"))
     assert stash.scene==before and not stash.writes
 
 
 def test_no_frame_fusion_across_models(tmp_path):
     with store(tmp_path) as state:
         for source,indices in [("joytag",{0,2}),("wd",{1,3})]:
-            state.put("1",source,{"markers":current_record({"mode":"frames","meta":{"origin":"inference", "marker_tag_blocklist": [],
+            state.put("1",source,{"markers":inference_record(**{"mode":"frames","meta":{"origin":"inference",
                 "marker_threshold": .8, "marker_score_floor": .8},"items":[
                 dict(start=i*5,end=(i+1)*5,tags=[["common",.9]] if i in indices else []) for i in range(4)]})})
         _,spans=merge.evidence(app,state,"1",empty_policies(),empty_policies())
@@ -439,7 +445,7 @@ def test_historical_point_ranges_gain_ends_without_inference_or_new_ids(merge_pi
         marker['end_seconds'] = None
         marker['tags'].append(p.stash.tag('human'))
     monkeypatch.setattr(app.services, 'load_tagger', lambda *a: pytest.fail('point migration loaded a model'))
-    assert app.main(['--migrate-point-markers-only', '--state-db', str(p.path)]) == 0
+    assert migrate_points(['--state-db', str(p.path)]) == 0
     assert {m['id']: (m['seconds'], m['end_seconds']) for m in p.stash.scene['scene_markers']} == expected
     assert all('human' in {tag['name'] for tag in m['tags']} for m in p.stash.scene['scene_markers'])
     p.stash.writes.clear()
@@ -452,7 +458,7 @@ def test_scene_cap_applies_only_to_the_current_record(tmp_path,monkeypatch):
     monkeypatch.setattr(app,"MAX_TAGS",1)
     with store(tmp_path) as state:
         for items in [[("old",.95),("low",.7)], [("latest",.95),("newer",.8)]]:
-            state.put("1", "wd", {"scene":current_record({"mode":"scene","meta":{},
+            state.put("1", "wd", {"scene":inference_record(**{"mode":"scene","meta":{},
                       "items":[dict(tag=tag,score=score) for tag,score in items]})})
         hits,_=merge.evidence(app,state,"1",empty_policies(),empty_policies())
         assert {h["tag"] for h in hits}=={"latest"}
@@ -466,7 +472,7 @@ def test_cleanup_point_output_uses_recorded_extent_when_start_moves(merge_pipeli
         marker["end_seconds"] = None  # Historical point-only publication.
     first=next(m for m in p.stash.scene["scene_markers"] if m["seconds"]==10 and m["primary_tag"]["name"]=="ai:common")
     first["tags"].append(p.stash.tag("manual extra"))
-    assert app.main(["--migrate-point-markers-only", "--state-db", str(p.path)]) == 0
+    assert migrate_points(["--state-db", str(p.path)]) == 0
     core=tmp_path/"core.yml"
     core.write_text("version: 1\nexcluded_core_tags: []\nby_model:\n  joytag: [common]\n  wd: [common]\n")
     assert app.main([*p.args,"--cleanup-markers-only","--marker-core-exclusions",str(core)])==0

@@ -57,15 +57,15 @@ def test_v17_history_becomes_one_record_with_last_policy_and_exact_pins(tmp_path
         before = {table: connection.execute('SELECT * FROM ' + table).fetchall()
                   for table in ('snapshots', 'recovery_publications')}
     original = path.read_bytes()
-    assert db.update_database(path, dry_run=True) == (17, 18)
+    assert db.update_database(path, dry_run=True) == (17, 20)
     assert path.read_bytes() == original
-    assert db.update_database(path) == (17, 18)
+    assert db.update_database(path) == (17, 20)
     for scope in ('first', 'second'):
         with StateStore(path, scope) as store:
             for kind in ('scene', 'markers'):
                 effective = deepcopy(versions[-1][kind])
                 if threshold is not None:
-                    effective[kind.rstrip('s') + '_threshold_override'] = threshold
+                    effective['publication_threshold'] = threshold
                 assert store.records('1', kind) == {'wd': effective}
                 raw, = store.connection.execute('SELECT data FROM results WHERE scope=? AND kind=?',
                                                 (scope, kind)).fetchone()
@@ -76,7 +76,7 @@ def test_v17_history_becomes_one_record_with_last_policy_and_exact_pins(tmp_path
                 assert policies == ([] if threshold is None else [(threshold, 'real')])
                 format_, data = store.connection.execute(
                     'SELECT format,data FROM result_metadata WHERE scope=? AND kind=?', (scope, kind)).fetchone()
-                assert format_ == FORMAT == 4
+                assert format_ == FORMAT == 5
                 assert decode_metadata(data)['meta']['inference_signature'] == 'latest'
                 assert completed(store, '1', 'wd', [kind], indexed_signature(effective))
                 archive = archived_records(store, '1', kind)['wd']

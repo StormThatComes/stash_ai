@@ -5,7 +5,7 @@ from stash_ai.storage.metadata import FORMAT, summarize, encode as encode_metada
 from stash_ai.storage.progress import index_result
 from stash_ai.evidence.formats import validate_current
 from stash_ai.storage.thresholds import separate
-from .result_history import history, overlay, threshold_column
+from .result_history import history, overlay, threshold_column, publication_record
 
 
 def migrate(db):
@@ -37,7 +37,7 @@ def migrate(db):
             continue
         if len(active) != 1:
             raise ValueError('Multiple active inference records after history migration.')
-        record = active[0]
+        record = publication_record(active[0], kind)
         validate_current(record)
         raw, threshold = separate(record, kind)
         db.execute('UPDATE results SET data=? WHERE scope=? AND scene=? AND model=? AND kind=?', (encode(raw), *params))
