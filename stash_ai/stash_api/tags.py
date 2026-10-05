@@ -121,7 +121,7 @@ class TagResolver:
             return None
         tag = self._find(name)
         if tag is not None and not self.hierarchy.is_managed_category(tag):
-            raise ValueError(f"Category name {name!r} already belongs to an unrelated tag. Choose another category_prefix in YAML.")
+            raise ValueError(f"Category name {name!r} already belongs to an unrelated tag. Choose another category path in YAML.")
         if tag is None:
             tag = self._create(name, parents, category=True)
         else:

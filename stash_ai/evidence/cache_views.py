@@ -11,7 +11,9 @@ def scene_threshold(segment):
 def validate_scene(app, segment, threshold, *, has_frames=None):
     from stash_ai.evidence.thresholds import _score
     meta = segment['meta']
-    needed = threshold * (app.TEMPORAL_POLICY.scene_support_ratio if app.TEMPORAL_POLICY.enabled else 1.0)
+    from stash_ai.evidence.formats import validate_current
+    validate_current({**segment, **({'has_frames': has_frames} if has_frames is not None else {})})
+    needed = threshold * app.TEMPORAL_POLICY.scene_support_ratio
     floor = meta.get('scene_score_floor')
     has_frames = 'frames' in segment if has_frames is None else has_frames
     if (segment['mode'] != 'scene' or meta.get('origin') != 'inference'
@@ -36,24 +38,22 @@ def project(app, segment):
     # Temporal statistics depend on the support floor as well as the high
     # threshold. Old aggregates without retention metadata keep their original
     # behavior; frame-backed results can also gain statistics for historical non-temporal results.
-    support_changed = (app.TEMPORAL_POLICY.enabled
-        and ('scene_support_floor' in meta or meta.get('scene_frames_format') == 1)
+    support_changed = (('scene_support_floor' in meta or meta.get('scene_frames_format') == 1)
         and meta.get('scene_support_floor') != threshold * app.TEMPORAL_POLICY.scene_support_ratio)
     if threshold == meta.get('scene_threshold') and not support_changed:
         return segment
     validate_scene(app, segment, threshold)
     items = segment['items']
     meta = {**meta, 'scene_threshold': threshold}
-    if app.TEMPORAL_POLICY.enabled:
-        labels = [item['tag'] for item in items]
-        indexes = {tag: i for i, tag in enumerate(labels)}
-        accumulator = SceneAccumulator(threshold, app.TEMPORAL_POLICY)
-        for row in segment['frames']:
-            accumulator.add_sparse(((indexes[tag], score) for tag, score in row['tags']),
-                                   Cue(row['start'], row['end'], '', (0, 0, 1, 1)))
-        statistics = accumulator.statistics(labels)
-        items = [{**item, 'statistics': statistics[item['tag']]} for item in items if item['tag'] in statistics]
-        meta['scene_support_floor'] = threshold * app.TEMPORAL_POLICY.scene_support_ratio
+    labels = [item['tag'] for item in items]
+    indexes = {tag: i for i, tag in enumerate(labels)}
+    accumulator = SceneAccumulator(threshold, app.TEMPORAL_POLICY)
+    for row in segment['frames']:
+        accumulator.add_sparse(((indexes[tag], score) for tag, score in row['tags']),
+                               Cue(row['start'], row['end'], '', (0, 0, 1, 1)))
+    statistics = accumulator.statistics(labels)
+    items = [{**item, 'statistics': statistics.get(item['tag'])} for item in items]
+    meta['scene_support_floor'] = threshold * app.TEMPORAL_POLICY.scene_support_ratio
     result = StoredSegment({**segment, 'meta': meta, 'items': items})
     result._evidence_digest, result._scene_projected = signature, True
     return result

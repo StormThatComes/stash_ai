@@ -3,7 +3,9 @@
 Fresh inference always uses the temporal engine. This adapter preserves the
 first-frame extras and interval identities recorded by historical snapshots.
 """
+from dataclasses import asdict, dataclass
 from stash_ai.domain import FramePrediction, MarkerSpec
+from stash_ai.evidence.temporal.policy import TemporalPolicy
 
 
 def replay_markers(app, frames, core_exclusions, *, threshold):
@@ -42,3 +44,53 @@ def replay_markers(app, frames, core_exclusions, *, threshold):
     if app.MAX_MARKERS_PER_SCENE:
         finished = finished[:app.MAX_MARKERS_PER_SCENE]
     return sorted(finished, key=lambda marker: (marker.start, marker.tag)), total
+
+
+
+@dataclass(frozen=True)
+class HistoricalPolicy(TemporalPolicy):
+    """Type identifying a frozen pre-temporal publication, only for replay."""
+
+
+def frozen_policy(options):
+    """Decode the historical discriminator at the snapshot boundary."""
+    algorithm = options['algorithm']
+    if algorithm not in ('temporal', 'historical'):
+        raise ValueError('Invalid frozen publication algorithm.')
+    policy = TemporalPolicy.from_snapshot(options['policy'])
+    if algorithm == 'temporal':
+        return policy
+    return HistoricalPolicy(**{**asdict(policy),
+        'marker_continue_ratio': 1.0, 'scene_support_ratio': 1.0,
+        'shared_marker_frames': False, 'shared_marker_extras': False,
+        'shared_scene_tags': False, 'occurrence_markers': False})
+
+
+def marker_contributions(app, records, core_policies, *, tag_policies=None, **validation):
+    """Replay pre-temporal spans without entering the current temporal builder."""
+    from stash_ai.domain import Cue, FramePrediction
+    from stash_ai.evidence.labels import raw_label
+    from stash_ai.evidence.thresholds import marker_threshold, validate_marker_cache
+    from stash_ai.evidence.shared_markers import prune_blocked_extras
+    from stash_ai.exclusions import policies_or_empty, core_policies_with_global
+    tags = policies_or_empty(tag_policies)
+    cores = core_policies_with_global(core_policies, tags)
+    validate_marker_cache(app, records, **validation)
+    spans = []
+    for model, segments in records.items():
+        for segment in segments:
+            if segment['mode'] == 'frames':
+                frames = [FramePrediction(Cue(row['start'], row['end'], '', (0, 0, 1, 1)),
+                    tuple((raw_label(tag), score) for tag, score in row['tags'] if tag not in tags[model]))
+                    for row in segment['items']]
+                markers, _ = replay_markers(app, frames, cores[model],
+                                           threshold=marker_threshold(segment, app.MARKER_THRESHOLDS))
+                values = [dict(tag=m.tag, start=m.start, end=m.end, score=m.score, hits=m.hits,
+                               extra_tags=list(m.extra_tags)) for m in markers]
+            elif segment['mode'] == 'spans':
+                values = segment['items']
+            else:
+                raise ValueError('Unsupported stored marker evidence.')
+            spans.extend(prune_blocked_extras({**item, 'source': model, 'meta': segment['meta']}, tags[model])
+                         for item in values if item['tag'] not in cores[model])
+    return spans

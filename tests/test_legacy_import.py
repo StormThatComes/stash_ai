@@ -14,6 +14,27 @@ from stash_ai.storage import progress
 pytestmark = pytest.mark.usefixtures('reset_progress')
 
 
+def test_only_legacy_import_can_append_and_ignores_capture_time(tmp_path):
+    from tests.helpers.evidence import segment
+    with StateStore(tmp_path / 'state.sqlite3', 'scope') as state:
+        imported = dict(mode='spans', meta=dict(origin='legacy', captured_at='first'), items=[])
+        with state.connection:
+            state.results.append_legacy_in_transaction('1', 'wd', 'markers', imported)
+            imported['meta']['captured_at'] = 'second'
+            state.results.append_legacy_in_transaction('1', 'wd', 'markers', imported)
+        assert len(state.model_records('1', 'markers', 'wd')) == 1
+        with pytest.raises(ValueError, match='Only imported legacy'):
+            state.results.append_legacy_in_transaction('1', 'wd', 'markers', segment('wd', []))
+
+
+def test_empty_inference_replaces_previous_result(tmp_path):
+    from tests.helpers.evidence import segment
+    with StateStore(tmp_path / 'state.sqlite3', 'scope') as state:
+        state.put('1', 'wd', {'markers': segment('wd', [[('old', .9)]])})
+        state.put('1', 'wd', {'markers': segment('wd', [])})
+        assert state.model_records('1', 'markers', 'wd')[0]['items'] == []
+
+
 def command(path, *extra):
     return ['--import-legacy-only', '--state-db', str(path), '--scene-id', '1', *extra]
 

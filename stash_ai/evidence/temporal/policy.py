@@ -5,7 +5,6 @@ import math
 
 @dataclass(frozen=True)
 class TemporalPolicy:
-    enabled: bool = True
     shared_marker_frames: bool = True
     shared_marker_extras: bool = True
     short_marker_extras: bool = True
@@ -33,7 +32,7 @@ class TemporalPolicy:
         return policy
 
     def validate(self):
-        for name in ("enabled", "shared_marker_frames", "shared_marker_extras", "short_marker_extras", "shared_scene_tags", "occurrence_markers"):
+        for name in ("shared_marker_frames", "shared_marker_extras", "short_marker_extras", "shared_scene_tags", "occurrence_markers"):
             if type(getattr(self, name)) is not bool:
                 raise ValueError(f"{name} must be true or false.")
         for name in ("marker_continue_ratio", "scene_support_ratio"):
@@ -59,7 +58,7 @@ def load_policy(path):
     data = load_unique_yaml(path, "Temporal policy")
     if not isinstance(data, dict) or type(data.get("version")) is not int or data["version"] != 1:
         raise ValueError("Temporal policy requires version: 1.")
-    allowed = {f.name for f in fields(TemporalPolicy)} - {"enabled"}
+    allowed = {f.name for f in fields(TemporalPolicy)}
     if any(isinstance(key, str) and key.startswith("refine_") for key in data):
         raise ValueError("Video-file analysis has been removed. Remove refine_* settings from the temporal policy; only Stash VTT/sprites are supported.")
     if set(data) - allowed - {"version"}:
@@ -70,11 +69,11 @@ def load_policy(path):
 
 
 def marker_floor(policy, threshold):
-    return threshold * policy.marker_continue_ratio if policy.enabled else threshold
+    return threshold * policy.marker_continue_ratio
 
 
 def build_options(app):
-    return {"policy": asdict(app.TEMPORAL_POLICY),
+    return {"algorithm": "temporal", "policy": asdict(app.TEMPORAL_POLICY),
         "marker_thresholds": dict(app.MARKER_THRESHOLDS or {}),
         "settings": {name: getattr(app, name) for name in (
         "MARKER_MIN_HITS", "MARKER_MERGE_GAP_SECONDS", "MARKER_MAX_TAGS_PER_FRAME", "MAX_MARKERS_PER_SCENE")}}

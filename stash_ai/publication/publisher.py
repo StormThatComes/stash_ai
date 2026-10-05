@@ -25,7 +25,7 @@ class MergePublisher:
 
     def run(self, scenes):
         refresh_kinds = progress.output_kinds(self.app)
-        if (self.app.CREATE_MARKERS and self.app.TEMPORAL_POLICY.enabled
+        if (self.app.CREATE_MARKERS
                 and self.app.TEMPORAL_POLICY.occurrence_markers):
             refresh_kinds = [*refresh_kinds, "scene"]
         self.pending_refreshes = progress.pending_refreshes(self.store, refresh_kinds)
@@ -175,4 +175,3 @@ class MergePublisher:
                 self.report.progress(bar, self.stats)
         finally:
             bar.close()
-

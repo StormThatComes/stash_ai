@@ -58,8 +58,11 @@ class StateStore(AbstractContextManager):
             self.preview_source = database.preview_source
             if self.preview_source:
                 self.preview_data_version = database.preview_data_version
-            from stash_ai.storage.schema import initialize_features
-            initialize_features(self)
+            from stash_ai.storage.schema import initialize_features, load_features
+            if database.fresh:
+                initialize_features(self)
+            else:
+                load_features(self)
             if database.fresh:
                 from stash_ai.storage.schema import LATEST_SCHEMA_VERSION
                 self.connection.execute(f'PRAGMA user_version={LATEST_SCHEMA_VERSION}')
@@ -139,8 +142,8 @@ class StateStore(AbstractContextManager):
     def preload_sources(self):
         return self.results.preload_sources()
 
-    def put(self, scene, model, outputs, replace=None):
-        return self.results.put(scene, model, outputs, replace)
+    def put(self, scene, model, outputs):
+        return self.results.put(scene, model, outputs)
 
     def replace_records(self, scene, model, kind, segments):
         return self.results.replace_records(scene, model, kind, segments)

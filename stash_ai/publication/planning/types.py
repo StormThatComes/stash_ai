@@ -29,7 +29,6 @@ class PreparedEvidence:
     spans: list
     markers: list
     scene_labels: set[str]
-    previous_ranges: object
 
 
 @dataclass
@@ -49,3 +48,4 @@ class MarkerCatalog:
     group_ids: dict[tuple[str, bool], str]
     names_by_id: dict[str, str | None]
     managed_group_ids: frozenset[str]
+

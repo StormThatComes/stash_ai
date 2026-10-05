@@ -23,7 +23,6 @@ def initialize(store):
             AFTER {event} ON cleanup_state BEGIN
                 DELETE FROM merge_checks WHERE scope={row}.scope;
             END''')
-    db.execute('PRAGMA cache_size=-65536')
 
 
 def checked(store, scene, policy, fingerprint):
@@ -49,3 +48,4 @@ def record_check(store, scene, policy, fingerprint):
     store.connection.execute('INSERT INTO merge_checks VALUES (?,?,?,?) '
         'ON CONFLICT(scope,scene) DO UPDATE SET policy=excluded.policy,fingerprint=excluded.fingerprint',
         (store.scope, str(scene), policy, fingerprint))
+

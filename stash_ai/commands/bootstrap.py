@@ -9,7 +9,7 @@ def runtime_options(app, args):
     from tqdm import tqdm
     args.report = RunReport(args.verbose, tqdm.write)
     app.DRY_RUN = app.DRY_RUN or args.dry_run
-    if args.markers_only or args.cleanup_markers_only or args.sync_marker_groups_only:
+    if args.markers_only or args.cleanup_markers_only or args.sync_marker_groups_only or args.migrate_point_markers_only:
         app.APPLY_SCENE_TAGS, app.CREATE_MARKERS = False, True
     elif args.scene_tags_only or args.cleanup_scene_tags_only:
         app.APPLY_SCENE_TAGS, app.CREATE_MARKERS = True, False
@@ -39,7 +39,7 @@ def policies(app, args, *, hierarchy_only, cleanup_only):
     from stash_ai.evidence.temporal.policy import load_policy
     app.TEMPORAL_POLICY = (
         load_policy(args.temporal_policy)
-        if not hierarchy_only else TemporalPolicy(enabled=False))
+        if not hierarchy_only else TemporalPolicy())
     app.services.validate_config(scene_work=not hierarchy_only and not cleanup_only and not args.explain_tag)
     empty_policies = {name: frozenset() for name in SOURCES}
     core_policies = (

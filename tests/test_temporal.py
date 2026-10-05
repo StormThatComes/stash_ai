@@ -1,4 +1,6 @@
 """Temporal qualification, exclusions, source votes and exact checkpoint resume."""
+from tests.helpers.temporal import threshold_policy
+
 
 from copy import deepcopy
 from dataclasses import replace
@@ -187,7 +189,7 @@ def test_temporal_resume_preserves_statistics_and_all_sparse_scores(pipeline,mon
     assert p.loaded[-1].seen==list(range(4,10))
     expected=IndexedTagger(p.loaded[-1].settings,p.scores['wd'],p.vocab.labels)
     analysis={}
-    predictions,output=prediction.predict_scene(app, expected,p.stash,{},p.cues,raw_scene=True,analysis=analysis)
+    predictions,output=prediction.predict_scene(app, expected,p.stash,{},p.cues,analysis=analysis)
     with merge_store.StateStore(p.path,merge_store.scope_for(app.STASH_URL),True) as state:
         scene=state.records('1','scene')['wd'][-1]
         markers=state.records('1','markers')['wd'][-1]
@@ -252,9 +254,14 @@ def test_cleanup_uses_published_evidence_and_does_not_adopt_new_votes(tmp_path,c
 
 
 def test_legacy_mode_filters_weaker_scores_retained_by_new_inference(monkeypatch):
-    monkeypatch.setattr(app,'TEMPORAL_POLICY',TemporalPolicy(enabled=False))
+    from stash_ai.evidence.frozen_replay import snapshot_context
+    from stash_ai.evidence.temporal.policy import build_options
+    options = build_options(app)
+    options['algorithm'] = 'historical'
+    frozen = snapshot_context(app, options, 'markers')
     records={'wd':[segment('wd',[[('core',.9)],[('core',.7)],[('core',.7)]])]}
-    assert merge_source_markers.marker_contributions(app,records,{m:frozenset() for m in SOURCES})==[]
+    frozen.MARKER_THRESHOLDS = {'wd': .8}
+    assert merge_source_markers.marker_contributions(frozen,records,{m:frozenset() for m in SOURCES})==[]
 
 
 @pytest.mark.parametrize('field,value',[('extra_min_hits',True),('marker_continue_ratio',0),
@@ -269,4 +276,3 @@ def test_old_cached_results_still_merge_without_new_evidence(tmp_path):
                            'markers':dict(mode='spans',meta={'origin':'legacy'},items=[dict(tag='legacy',start=0,end=10,extra_tags=[])])})
         hits,spans=merge.evidence(app,state,'1',{m:frozenset() for m in SOURCES},{m:frozenset() for m in SOURCES})
         assert hits[0]['tag']=='legacy' and spans[0]['end']==10
-

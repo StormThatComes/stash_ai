@@ -6,6 +6,7 @@ from ..common import column_names, count_rows
 
 def check_work_units(db, tables):
     payload_specs = (
+        ("inference_archive", "data"),
         ("snapshots", "published"), ("snapshots", "pending"),
         ("legacy_imports", "data"), ("cleanup_state", "data"),
         ("checkpoint_frames", "data"), ("checkpoint_analysis", "data"),
@@ -38,3 +39,4 @@ def decoded_payload(blob, expected):
     if not isinstance(value, expected):
         raise ValueError("Unexpected persisted payload shape.")
     return value
+

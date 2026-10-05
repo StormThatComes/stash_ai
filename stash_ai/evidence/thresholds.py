@@ -47,6 +47,10 @@ def validate_marker_blocklist(segment, identity, *, allow_unknown=False,
     """Guard coverage lost to the retired option; cleanup can replay frozen bans."""
     if segment['mode'] != 'frames' or segment['meta'].get('origin') != 'inference':
         return
+    from stash_ai.evidence.formats import current, validate_current
+    if current(segment['meta']):
+        validate_current(segment)
+        return
     if allow_unknown and 'marker_tag_blocklist' not in segment['meta']:
         return
     retained = segment['meta'].get('marker_tag_blocklist')

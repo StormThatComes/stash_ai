@@ -26,7 +26,12 @@ class ResultStore:
     def _normalize_segments(segments, kind, threshold):
         """Apply separate publication policy to canonical evidence records."""
         from stash_ai.storage.segments import StoredSegment
+        from stash_ai.storage.archive import validate_active
+        validate_active(segments)
         overlay(segments, kind, threshold)
+        from stash_ai.evidence.formats import validate_current
+        for segment in segments:
+            validate_current(segment)
         for index, segment in enumerate(segments):
             segments[index] = StoredSegment(segment)
         return segments
@@ -123,32 +128,30 @@ class ResultStore:
             store.cache.put(last, values)
 
     @measured('state_write')
-    def put(self, scene, model, outputs, replace=None):
+    def put(self, scene, model, outputs):
         with self.store.connection:
-            self.put_in_transaction(scene, model, outputs, replace)
+            self.put_in_transaction(scene, model, outputs)
 
-    def put_in_transaction(self, scene, model, outputs, replace=None):
-        """Write outputs while the caller owns the commit or rollback boundary."""
+    def put_in_transaction(self, scene, model, outputs):
+        """Replace inference outputs inside the caller's transaction."""
         if model not in SOURCES or set(outputs) - set(KINDS):
             raise ValueError("Unknown result source or output kind.")
         for kind, segment in outputs.items():
-            old = (self.records(scene, kind, model, borrow=True).get(model, [])
-                   if not (replace or {}).get(kind, True) else [])
-            # Explicit imports append evidence; repeating identical data need
-            # not accumulate duplicates merely due to its capture timestamp.
-            keep = []
-            if old:
-                # Only append mode needs comparison. A shallow metadata copy
-                # avoids duplicating all retained frame observations.
-                def semantic(value):
-                    data = dict(value)
-                    if 'meta' in data:
-                        data['meta'] = {key: item for key, item in data['meta'].items() if key != 'captured_at'}
-                    # JSON normalizes tuples in new results to stored lists.
-                    return json.dumps(data, sort_keys=True, allow_nan=False)
-                current = semantic(segment)
-                keep = [previous for previous in old if semantic(previous) != current]
-            self.replace_records(scene, model, kind, keep + [segment])
+            self.replace_records(scene, model, kind, [segment])
+
+    def append_legacy_in_transaction(self, scene, model, kind, segment):
+        """Append an explicit legacy import, deduplicating capture timestamps."""
+        if segment.get('meta', {}).get('origin') != 'legacy':
+            raise ValueError('Only imported legacy evidence may be appended.')
+        def semantic(value):
+            data = dict(value)
+            data['meta'] = {key: item for key, item in data['meta'].items()
+                            if key != 'captured_at'}
+            return json.dumps(data, sort_keys=True, allow_nan=False)
+        current = semantic(segment)
+        old = self.model_records(scene, kind, model, borrow=True)
+        keep = [previous for previous in old if semantic(previous) != current]
+        self.replace_records(scene, model, kind, keep + [segment])
 
     def replace_records(self, scene, model, kind, segments):
         """Replace a segment list inside the caller's transaction, including previews."""
@@ -158,9 +161,17 @@ class ResultStore:
                        or not isinstance(segment.get('meta'), dict)
                        or not isinstance(segment.get('items'), list) for segment in segments)):
             raise ValueError('Incomplete result record: mode, metadata and items are required.')
+        from stash_ai.evidence.formats import validate_current
+        for segment in segments:
+            validate_current(segment)
         if any('refinement' in segment for segment in segments):
             raise ValueError('Retired refinement evidence is not supported; run --db-update for saved results.')
         store = self.store
+        from stash_ai.storage.archive import active_segments, retain
+        previous = self.model_records(scene, kind, model, borrow=True)
+        active = active_segments(segments)
+        retain(store, scene, model, kind, [*previous, *segments], active)
+        segments = active
         from stash_ai.storage.preview import delete
         from stash_ai.storage.progress import index_result
         store.cache.discard(('records', str(scene), kind))

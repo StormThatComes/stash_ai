@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 import yaml
 from stash_ai.domain import Cue, FramePrediction, MarkerSpec
+from stash_ai.evidence.labels import AI
 from stash_ai.config import vocabulary_digest
 from stash_ai.inference import prediction, sprites
 from tests.helpers.runtime import runtime as app
@@ -85,13 +86,13 @@ def test_every_label_and_streaming_aggregation(monkeypatch,aggregation,batch):
     cues=[Cue(i,i+1,"x",(0,0,1,1)) for i in range(5)]
     monkeypatch.setattr(app,"AGGREGATION",aggregation)
     monkeypatch.setattr(sprites,"iter_sprite_frames",lambda *args:sprite_frames(cues))
-    predictions,frames=prediction.predict_scene(app, Tagger(ModelSettings(WD,Path("."),batch_size=batch, scene_threshold=.4, marker_threshold=.65),labels,scores),Stash(),{},cues,frozenset({"scene_ban"}))
+    predictions,frames=prediction.predict_scene(app, Tagger(ModelSettings(WD,Path("."),batch_size=batch, scene_threshold=.4, marker_threshold=.65),labels,scores),Stash(),{},cues)
     expected=scores.max(axis=0) if aggregation=="max" else np.sort(scores,axis=0)[-2:].mean(axis=0)
-    assert len(predictions)==len(labels)-1
+    assert len(predictions)==len(labels)
     for tag,score in predictions: assert score==pytest.approx(expected[labels.index(tag)])
     markers,_=app.build_markers(frames,frozenset({"core_ban"}))
-    assert len(markers)==len(labels)-2 and "core_ban" in markers[0].extra_tags
-    assert all('scene_ban' not in m.extra_tags for m in markers)
+    assert len(markers)==len(labels)-1 and "core_ban" in markers[0].extra_tags
+    assert any('scene_ban' in m.extra_tags for m in markers)
     assert all(m.start==0 and m.end==5 and m.hits==5 for m in markers)
 
 
@@ -117,7 +118,7 @@ def test_hierarchy_loader_requires_explicit_source():
 def test_hierarchy_rejects_removed_sync_option(tmp_path, mode):
     path = tmp_path / "hierarchy.yml"
     path.write_text(yaml.safe_dump({
-        "version": 1, "root": "WD", "category_prefix": "wd:category:",
+        "version": 2,
         "parent_sync": mode, "groups": {"General": ["common"]},
     }), encoding="utf-8")
     with pytest.raises(ValueError, match="Hierarchy YAML must be a mapping using only:"):
@@ -130,7 +131,7 @@ def test_original_hierarchy_and_model_settings():
     labels=sorted({t for group in data["groups"].values() for t in group})
     hierarchy=app.services.load_tag_hierarchy(root/"joytag_hierarchy.yml",labels,JOYTAG)
     assert len(hierarchy.leaf_parents)==5813
-    assert hierarchy.description_prefix==JOYTAG.hierarchy_description
+    assert hierarchy.description_prefix==AI.hierarchy_description
     assert [s.source for s in app.services.load_model_settings(root/"tagger_models.yml",["all"],None)]==[JOYTAG,WD,DTQ,OPPAI]
     assert select_models(["dtq,wd","wd"])==["dtq","wd"]
 
@@ -138,18 +139,17 @@ def test_original_hierarchy_and_model_settings():
 def test_model_hierarchies_include_all_categories_and_keep_manual_parents(tmp_path):
     stash=Stash();manual=stash.tag("manual parent");other=stash.tag("jt:category:Other")
     other["description"]=JOYTAG.hierarchy_description
-    old=stash.tag("wd:category:Old");old["description"]=WD.hierarchy_description
-    stash.tag("wd:tag")["parents"]=[manual,other,old]
+    old=stash.tag("ai:category:Old");old["description"]=AI.hierarchy_description
+    stash.tag("ai:tag")["parents"]=[manual,other,old]
     vocab=Vocabulary(["tag","character","unknown"],{"tag":"General","character":"Character"})
     path = tmp_path / 'hierarchy.yml'
-    path.write_text(yaml.safe_dump(dict(version=1, root='WD',
-        category_prefix='wd:category:', groups={'General': ['tag'],
+    path.write_text(yaml.safe_dump(dict(version=2, groups={'General': ['tag'],
         'Character': ['character'], 'Uncategorized': ['unknown']})))
     hierarchy=app.services.load_tag_hierarchy(path,vocab.labels,WD)
-    resolver=app.services.TagResolver(stash,hierarchy,source=WD)
-    for name in vocab.labels: resolver.resolve("wd:"+name)
-    assert {p["name"] for p in stash.tags["wd:tag"]["parents"]}=={"manual parent","jt:category:Other","wd:category:General"}
-    assert all("wd:"+name in stash.tags for name in vocab.labels)
+    resolver=app.services.TagResolver(stash,hierarchy,source=AI)
+    for name in vocab.labels: resolver.resolve("ai:"+name)
+    assert {p["name"] for p in stash.tags["ai:tag"]["parents"]}=={"manual parent","jt:category:Other","ai:category:General"}
+    assert all("ai:"+name in stash.tags for name in vocab.labels)
 
 
 @pytest.mark.parametrize("body",['version: 1\nexcluded_core_tags: ["wd:tag"]','version: 1\nexcluded_core_tags: [a,a]',
@@ -328,8 +328,7 @@ def test_oppai_modes_with_explicit_model_config(tmp_path,oppai_files,monkeypatch
     monkeypatch.setattr(app.services,"create_stash_client",lambda _:pytest.fail("model-only mode contacted Stash"))
     monkeypatch.setattr(app.services,"load_tagger",lambda *args:pytest.fail("model-only mode loaded weights"))
     hierarchy_path=tmp_path/"fixture_hierarchy.yml"
-    hierarchy_path.write_text(yaml.safe_dump({"version":1,"root":OPPAI.title,
-        "category_prefix":"op:category:","groups":{"Fixture":load_vocabulary(settings).labels}}))
+    hierarchy_path.write_text(yaml.safe_dump({"version":2,"groups":{"Fixture":load_vocabulary(settings).labels}}))
     assert app.main(["--model-config",str(old),"--models","oppai","--validate-hierarchy",
                      "--oppai-hierarchy",str(hierarchy_path),"--offline"])==0
     downloads=[]
@@ -374,7 +373,7 @@ def bundled_catalogs():
         labels=sorted({label for group in data["groups"].values() for label in group})
         assert len(labels)==count and vocabulary_digest(labels)==digest
         hierarchy=app.services.load_tag_hierarchy(path,labels,SOURCES[key])
-        assert hierarchy.category_prefix==SOURCES[key].prefix+"category:"
+        assert hierarchy.category_prefix=="ai:category:"
         result[key]=(Vocabulary(labels,{}),hierarchy)
     return result
 
@@ -391,8 +390,7 @@ def test_default_hierarchies_cover_pinned_vocabularies_and_validate_without_weig
     for source in (WD,DTQ,OPPAI):
         hierarchy=bundled_catalogs[source.key][1]
         for label in set(joy.leaf_parents)&set(hierarchy.leaf_parents):
-            assert hierarchy.leaf_parents[label]==tuple(
-                source.prefix+parent[len(JOYTAG.prefix):] for parent in joy.leaf_parents[label])
+            assert hierarchy.leaf_parents[label] == joy.leaf_parents[label]
         # The fallback is an ordinary parent: its leaves remain in the vocabulary.
         assert any(parent.endswith("Other / Unclassified")
                    for parents in hierarchy.leaf_parents.values() for parent in parents)
@@ -403,14 +401,14 @@ def test_bundled_hierarchy_migrates_old_metadata_parents_idempotently(bundled_ca
     stash=Stash()
     manual=stash.tag("my manual group")
     foreign=stash.tag("jt:category:General");foreign["description"]=JOYTAG.hierarchy_description
-    old=stash.tag(source.prefix+"category:General");old["description"]=source.hierarchy_description
-    leaf=stash.tag(source.prefix+"blue_hair");leaf["parents"]=[manual,foreign,old]
+    old=stash.tag("ai:category:General");old["description"]=AI.hierarchy_description
+    leaf=stash.tag("ai:blue_hair");leaf["parents"]=[manual,foreign,old]
     hierarchy=bundled_catalogs[source.key][1]
-    resolver=app.services.TagResolver(stash,hierarchy,source=source)
+    resolver=app.services.TagResolver(stash,hierarchy,source=AI)
     resolver.resolve(leaf["name"])
     assert {parent["name"] for parent in leaf["parents"]}=={
-        manual["name"],foreign["name"],source.prefix+"category:Appearance / Hair / Color"}
+        manual["name"],foreign["name"],"ai:category:Appearance / Hair / Color"}
     assert old["name"] in stash.tags
     before=deepcopy(stash.writes)
-    app.services.TagResolver(stash,hierarchy,source=source).resolve(leaf["name"])
+    app.services.TagResolver(stash,hierarchy,source=AI).resolve(leaf["name"])
     assert stash.writes==before

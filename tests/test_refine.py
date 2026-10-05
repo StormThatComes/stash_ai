@@ -130,7 +130,7 @@ def test_v3_completed_vtt_results_are_reused_without_video_samples_or_model_load
     assert app.main([*p.args,*(['--merge-only'] if mode=='merge-only' else [])])==0
     assert p.stash.scene==expected
     with merge_store.StateStore(p.path,merge_store.scope_for(app.STASH_URL),True) as state:
-        assert state.connection.execute('PRAGMA user_version').fetchone()==(12,)
+        assert state.connection.execute('PRAGMA user_version').fetchone()==(14,)
         assert not state.connection.execute("SELECT 1 FROM sqlite_master WHERE name='refinement_progress'").fetchone()
         assert 'refinement' not in state.records('1','markers')['wd'][-1]
 
@@ -193,9 +193,9 @@ def test_appended_results_never_retain_retired_video_payload(tmp_path):
     with merge_store.StateStore(tmp_path/'state.sqlite3','fixture') as state:
         data['refinement']=old_video_payload()
         with pytest.raises(ValueError, match='Retired refinement'):
-            state.put('1','wd',{'markers':data},replace={'markers':False})
+            state.put('1','wd',{'markers':data})
         data.pop('refinement')
-        state.put('1','wd',{'markers':data},replace={'markers':False})
+        state.put('1','wd',{'markers':data})
         raw=state.connection.execute("SELECT data FROM results WHERE kind='markers'").fetchone()[0]
         records=state_codec.decode(raw)
         assert len(records)==1 and 'refinement' not in records[0]

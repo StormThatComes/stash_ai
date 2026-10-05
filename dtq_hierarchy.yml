@@ -5,7 +5,7 @@
 # Other / Unclassified is an ordinary group and does NOT exclude its labels.
 # Named references describe predicted/source content, not verified identities/authorship.
 # Move a label to change its parent; repeat it in another group for multiple parents.
-# Keep raw label spelling, root and category_prefix stable. Preserve full coverage.
+# Keep raw label spelling and full coverage; categories use the shared ai: namespace.
 # Synchronization replaces hierarchy-owned parents; manual parents remain.
 # Existing obsolete category objects are retained, not deleted.
 # Validate: python stash_ai.py --models dtq --validate-hierarchy
@@ -13,7 +13,7 @@
 # Apply: python stash_ai.py --models dtq --sync-hierarchy-only
 # Import all leaves: add --create-all-tags to the preceding command.
 # Normal inference creates/synchronizes parents only for labels it uses.
-"version": 1
+"version": 2
 "source":
   "model": "realphongha/danbooru-tag-query"
   "revision": "d2f8da27a23db4adf95c3e663af183b92784ad3e"
@@ -30,8 +30,6 @@
     "model_category": 2492
     "unclassified": 1126
     "reference_qualifier": 30
-"root": "DanbooruTagQuery L/16"
-"category_prefix": "dtq:category:"
 "groups":
   "Accessories / Eyewear and masks":
   - "adjusting_eyewear"

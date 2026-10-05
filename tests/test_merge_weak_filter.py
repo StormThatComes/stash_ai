@@ -58,7 +58,8 @@ def test_temporal_markers_sort_only_eligible_scores(monkeypatch):
 @pytest.mark.parametrize('enabled', [False, True])
 @pytest.mark.parametrize('cap', [0, 1, 2])
 def test_wide_cache_preserves_observations_ties_exclusions_and_empty_timestamps(monkeypatch, enabled, cap):
-    monkeypatch.setattr(app, 'TEMPORAL_POLICY', replace(app.TEMPORAL_POLICY, enabled=enabled))
+    from tests.helpers.temporal import threshold_policy
+    monkeypatch.setattr(app, 'TEMPORAL_POLICY', app.TEMPORAL_POLICY if enabled else threshold_policy())
     monkeypatch.setattr(app, 'MARKER_MAX_TAGS_PER_FRAME', cap)
     rows = [[('a', .95), ('c', .9), ('b', .9), ('support', .7), ('blocked', 1.)], [],
             [('b', .9), ('detail', .9)]]

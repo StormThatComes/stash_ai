@@ -1,4 +1,8 @@
 """Review priorities must preserve model provenance and cache limitations."""
+from tests.helpers.temporal import threshold_policy
+
+from tests.helpers.evidence import seed_history
+
 
 from stash_ai.reports.review.options import ReviewOptions, REASONS
 from copy import deepcopy
@@ -38,7 +42,7 @@ def report(path, scenes=("1",), options=ReviewOptions(), core=None, tags=None):
 
 def seed(path, scene, model, outputs, replace=None):
     with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL)) as state:
-        state.put(scene, model, outputs, replace)
+        seed_history(state, scene, model, outputs, replace)
 
 
 def model_rows(data):
@@ -73,7 +77,7 @@ def test_accumulator_preserves_global_counts_and_caps_examples():
 
 
 def test_counts_deduplicate_models_scenes_history_and_marker_ranges(tmp_path):
-    app.TEMPORAL_POLICY = TemporalPolicy(enabled=False)
+    app.TEMPORAL_POLICY = threshold_policy()
     path = tmp_path / "state.sqlite3"
     first = pair()
     first["markers"]["items"].extend([
@@ -106,7 +110,7 @@ def test_counts_deduplicate_models_scenes_history_and_marker_ranges(tmp_path):
     ("excluded", False), ("accepting_history", False),
 ])
 def test_disagreement_requires_retained_comparable_negative_evidence(tmp_path, peer_case, expected):
-    app.TEMPORAL_POLICY = TemporalPolicy(enabled=False)
+    app.TEMPORAL_POLICY = threshold_policy()
     path = tmp_path / "state.sqlite3"
     seed(path, "1", "wd", pair(score=.95))
     peer = pair(score=.2, identity="other" if peer_case == "other_input" else "same")
@@ -141,7 +145,7 @@ def test_isolated_peak_uses_scene_statistics_not_aggregate_count(tmp_path, high_
 
 
 def test_review_uses_effective_sql_thresholds_and_leaves_evidence_untouched(tmp_path):
-    app.TEMPORAL_POLICY = TemporalPolicy(enabled=False)
+    app.TEMPORAL_POLICY = threshold_policy()
     path = tmp_path / "state.sqlite3"
     seed(path, "1", "wd", pair(score=.82, threshold=.4))
     assert report(path)["totals"]["unique_tags_flagged"] == 0
@@ -159,7 +163,7 @@ def test_review_uses_effective_sql_thresholds_and_leaves_evidence_untouched(tmp_
 
 
 def test_long_marker_flags_all_contributors_using_the_merged_range(tmp_path):
-    app.TEMPORAL_POLICY = TemporalPolicy(enabled=False)
+    app.TEMPORAL_POLICY = threshold_policy()
     path = tmp_path / "state.sqlite3"
     for model, start in (("wd", 0.), ("dtq", 2.)):
         outputs = pair(score=.95)
@@ -177,7 +181,7 @@ def test_long_marker_flags_all_contributors_using_the_merged_range(tmp_path):
 
 
 def test_exclusions_remove_candidates_and_core_exclusions_preserve_scene_review(tmp_path):
-    app.TEMPORAL_POLICY = TemporalPolicy(enabled=False)
+    app.TEMPORAL_POLICY = threshold_policy()
     path = tmp_path / "state.sqlite3"
     seed(path, "1", "wd", pair())
     excluded = policies()

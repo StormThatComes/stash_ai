@@ -1,4 +1,6 @@
 """Publication scheduling preserves one writer, accounting and refresh guards."""
+from tests.helpers.temporal import threshold_policy
+
 from collections import Counter
 from types import SimpleNamespace
 
@@ -24,7 +26,7 @@ def publication(tmp_path, monkeypatch):
     messages, writes, computed, worker_jobs = [], [], [], []
     app = RuntimeContext(
         DRY_RUN=False, APPLY_SCENE_TAGS=True, CREATE_MARKERS=True,
-        TEMPORAL_POLICY=TemporalPolicy(enabled=False), STASH_API_KEY='',
+        TEMPORAL_POLICY=threshold_policy(), STASH_API_KEY='',
     )
     app.services.safe_error = lambda exc, **kwargs: str(exc)
     report = RunReport(False, messages.append)
@@ -46,7 +48,7 @@ def publication(tmp_path, monkeypatch):
 
     def sync(app, stash, resolver, store, current, hits, spans, **kwargs):
         assert kwargs['publication_key'] == 'policy'
-        store.publish(current['id'], {'scene': {'hits': hits, 'spans': spans}})
+        store.publish(current['id'], {'scene': {'hits': hits, 'spans': spans, 'contributions': []}})
         store.cache.stats['misses'] += 1
         writes.append(current['id'])
         return Counter(markers_updated=2)
@@ -86,7 +88,7 @@ def test_local_and_worker_evidence_share_publication_accounting(publication, wor
     assert p.publisher.stats['errors'] == 0
     assert p.diagnostics.counts['cache_misses'] == 2
     for scene_id in p.writes:
-        assert p.store.snapshot(scene_id, 'scene') == ({'hits': [scene_id], 'spans': []}, None)
+        assert p.store.snapshot(scene_id, 'scene') == ({'hits': [scene_id], 'spans': [], 'contributions': []}, None)
     if workers == 1:
         assert p.computed == ['1', '2']
         assert p.diagnostics.counts['cache_hits'] == 4
@@ -133,7 +135,7 @@ def test_pending_refresh_blocks_even_forced_publication(publication, workers, ki
     p = publication
     p.args.merge_workers, p.args.force_merge = workers, True
     p.app.APPLY_SCENE_TAGS = False
-    p.app.TEMPORAL_POLICY = TemporalPolicy(enabled=occurrences, occurrence_markers=occurrences)
+    p.app.TEMPORAL_POLICY = TemporalPolicy(occurrence_markers=occurrences)
     progress.request_refresh(p.store, ['1'], ['wd'], [kind])
     p.publisher.run(scenes('1', '2', '3'))
     assert p.writes == ['2', '3']
@@ -212,4 +214,3 @@ def test_pool_failure_never_retries_completed_scenes(publication, monkeypatch, c
     assert p.publisher.stats['errors'] == 3 - completed
     assert p.publisher.stats['scenes_synced'] == completed
     assert any('merge workers' in message and 'pool failed' in message for message in p.messages)
-

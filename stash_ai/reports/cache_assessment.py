@@ -41,7 +41,7 @@ def inspect_output(app, config, kind, segments, index, refresh, checkpoint, erro
         return result('inconsistent', 'Evidence and completion index disagree; run --db-check.')
 
     threshold = config.scene_threshold if kind == 'scene' else config.marker_threshold
-    needed = (threshold * (app.TEMPORAL_POLICY.scene_support_ratio if app.TEMPORAL_POLICY.enabled else 1.)
+    needed = (threshold * app.TEMPORAL_POLICY.scene_support_ratio
               if kind == 'scene' else marker_floor(app.TEMPORAL_POLICY, threshold))
     requested = getattr(config, 'scene_cache_floor' if kind == 'scene' else 'marker_cache_floor')
     required_floor = min(needed, requested) if requested is not None else needed
@@ -101,8 +101,7 @@ def publication_dependencies(app, evidence, selected):
                 for segment in segments:
                     meta = segment['meta']
                     threshold = scene_threshold(segment)
-                    support_changed = (app.TEMPORAL_POLICY.enabled
-                        and ('scene_support_floor' in meta or meta.get('scene_frames_format') == 1)
+                    support_changed = (('scene_support_floor' in meta or meta.get('scene_frames_format') == 1)
                         and meta.get('scene_support_floor') != threshold * app.TEMPORAL_POLICY.scene_support_ratio)
                     if threshold != meta.get('scene_threshold') or support_changed:
                         validate_scene(app, segment, threshold, has_frames=segment['has_frames'])

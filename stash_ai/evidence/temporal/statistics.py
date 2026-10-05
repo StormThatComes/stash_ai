@@ -72,9 +72,8 @@ class SceneAccumulator:
 
 
 def scene_reason(score, stats, threshold, policy):
-    # Legacy records do not contain missing per-frame evidence: keep their rule.
-    if not policy.enabled or stats is None:
-        return "aggregate" if score is None or score >= threshold else None
+    if stats is None:
+        return None
     if stats["max_score"] >= threshold + (1.0 - threshold) * policy.scene_strong_margin:
         return "strong_peak"
     if score >= threshold and stats["high_hits"] >= policy.scene_min_hits:

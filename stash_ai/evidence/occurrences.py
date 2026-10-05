@@ -137,7 +137,7 @@ def _best_points(streams):
 
 def occurrence_contributions(app, scene_hits, records, spans, core_policies, tag_policies, metrics=None):
     policy = app.TEMPORAL_POLICY
-    if not policy.enabled or not policy.occurrence_markers:
+    if not policy.occurrence_markers:
         return []
     covered = {item['tag'] for item in spans}
     blocked = {s: set(core_policies[s]) | set(tag_policies[s]) for s in SOURCES}
@@ -175,4 +175,3 @@ def cleanup_occurrence(app, store, scene_id, point, selected, cores, tags):
         return None
     return _point(point['tag'], point['start'], witnesses,
                   [hit for hit in hits if any(_matches(hit, w) for w in witnesses)])
-

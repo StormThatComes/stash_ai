@@ -1,4 +1,6 @@
 """Parallel merged evidence preparation stays read-only and deterministic."""
+from tests.helpers.temporal import threshold_policy
+
 import json
 from collections import Counter
 from pathlib import Path
@@ -41,7 +43,7 @@ def _normalized(value):
 
 @pytest.mark.parametrize('rethresholded', [False, True])
 def test_parallel_worker_tolerates_parent_publication_commits(tmp_path, rethresholded):
-    app.TEMPORAL_POLICY = TemporalPolicy(enabled=False)
+    app.TEMPORAL_POLICY = threshold_policy()
     path = tmp_path / "state.sqlite3"
     scope = merge_store.scope_for(app.STASH_URL)
     policies = empty_policies()
@@ -85,7 +87,7 @@ def test_parallel_worker_tolerates_parent_publication_commits(tmp_path, rethresh
 
 
 def test_parallel_evidence_matches_serial_read_only(tmp_path):
-    app.TEMPORAL_POLICY = TemporalPolicy(enabled=False)
+    app.TEMPORAL_POLICY = threshold_policy()
     path = tmp_path / "state.sqlite3"
     scope = merge_store.scope_for(app.STASH_URL)
     policies = empty_policies()
@@ -136,4 +138,3 @@ def test_parallel_evidence_matches_serial_read_only(tmp_path):
         memory_budget_bytes=256 * 2**20,
     ))
     assert path.read_bytes() == before
-

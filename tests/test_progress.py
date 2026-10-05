@@ -52,7 +52,7 @@ def test_interruption_resume_matches_full_inference_and_counts_each_frame_once(p
     assert app.main([*p.args,"--prefetch-batches",str(prefetch)])==0
     assert p.loaded[-1].seen==list(range(4,10))
     expected=IndexedTagger(p.loaded[-1].settings,p.scores["wd"],p.vocab.labels)
-    predictions,frames=prediction.predict_scene(app, expected,p.stash,{},p.cues,raw_scene=True)
+    predictions,frames=prediction.predict_scene(app, expected,p.stash,{},p.cues)
     with merge_store.StateStore(p.path,merge_store.scope_for(app.STASH_URL),True) as state:
         scene=state.records("1","scene")["wd"][0]
         markers=state.records("1","markers")["wd"][0]
@@ -335,7 +335,7 @@ def test_v1_database_is_migrated_once_without_losing_sources(tmp_path,monkeypatc
     from stash_ai.db import update_database
     update_database(path)
     with merge_store.StateStore(path,"fixture") as state:
-        assert state.connection.execute("PRAGMA user_version").fetchone()==(12,)
+        assert state.connection.execute("PRAGMA user_version").fetchone()==(14,)
         assert state.records("1","scene")["wd"]==[segment]
         assert not progress.completed(state,"1","wd",["scene"],"new-signature")
     monkeypatch.setattr(state_codec,"decode",lambda *args:pytest.fail("migration repeated"))

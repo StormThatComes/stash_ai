@@ -19,7 +19,6 @@ def policy_args(directory, extended=False):
         return ['--temporal-policy', str(Path(__file__).resolve().parents[2] / 'temporal_policy.yml')]
     path = Path(directory) / 'threshold_policy.yml'
     values = asdict(threshold_policy())
-    values.pop('enabled')
     path.write_text(yaml.safe_dump({'version': 1, **values}))
     return ['--temporal-policy', str(path)]
 
