@@ -1,5 +1,5 @@
 """Shared scene proof, short extras, bounded RAM/prefetch, and 9000-scene output."""
-from tests.helpers.evidence import current_record
+from tests.helpers.evidence import inference_record
 from stash_ai.db.snapshot_migration import complete_policy
 
 
@@ -214,7 +214,7 @@ def test_ram_cache_accounts_decoded_values_and_evicts_least_recent():
 
 
 def test_store_cache_is_detached_invalidated_and_rollback_safe(tmp_path):
-    first = current_record(dict(mode='scene', meta={'origin': 'inference', 'inference_signature': 'a'}, items=[{'tag': 'core', 'score': .8}]))
+    first = inference_record(**dict(mode='scene', meta={'origin': 'inference', 'inference_signature': 'a'}, items=[{'tag': 'core', 'score': .8}]))
     second = {**first, 'meta': {**first['meta'], 'inference_signature': 'b'}, 'items': []}
     with merge_store.StateStore(tmp_path/'state.sqlite3', 'fixture', cache_bytes=2**20) as state:
         state.put('1', 'wd', {'scene': first})
@@ -240,7 +240,7 @@ def test_store_cache_is_detached_invalidated_and_rollback_safe(tmp_path):
 
 
 def test_preloaded_collection_metadata_removes_pair_queries(tmp_path):
-    record = current_record(dict(mode='scene', meta={'origin': 'inference', 'inference_signature': 'a'}, items=[]))
+    record = inference_record(**dict(mode='scene', meta={'origin': 'inference', 'inference_signature': 'a'}, items=[]))
     with merge_store.StateStore(tmp_path/'state.sqlite3', 'fixture', cache_bytes=2**20) as state:
         for scene in range(50):
             for source in ('wd', 'dtq'): state.put(str(scene), source, {'scene': record})

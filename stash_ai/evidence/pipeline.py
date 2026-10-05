@@ -30,8 +30,8 @@ def evidence(app, store, scene_id, core_policies, scene_policies, metrics=None, 
         eligible = []
         for entry in segment["items"]:
             label = raw_label(entry["tag"])
-            reason = scene_qualification(entry, segment["meta"],
-                                  segment["meta"].get("scene_threshold", 0.0), app.TEMPORAL_POLICY)
+            reason = scene_qualification(entry,
+                                  segment["meta"]["scene_threshold"], app.TEMPORAL_POLICY)
             if label not in scene_policies[model] and reason:
                 eligible.append({**entry, "source": model, "meta": segment["meta"],
                                  **({"qualification": reason} if entry.get("statistics") else {})})

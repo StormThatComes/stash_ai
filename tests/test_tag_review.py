@@ -29,7 +29,7 @@ def policies():
 def pair(label="common", score=.42, threshold=.4, identity="same"):
     result = inference_pair(label, score=score, identity=identity, marker_threshold=threshold)
     result["scene"]["meta"]["scene_threshold"] = threshold
-    result["scene"]["meta"].update(scene_frames_format=1, scene_score_floor=.1,
+    result["scene"]["meta"].update(scene_score_floor=.1,
                                    scene_support_floor=threshold * .85)
     result["scene"]["frames"] = deepcopy(result["markers"]["items"])
     return result
@@ -222,7 +222,7 @@ def test_shared_scene_candidates_are_attributed_to_each_actual_supporting_model(
                                      "dtq": [.1, .6, .1, .6]}, threshold=.6, marker_threshold=.9)
     for model in scenes:
         values = [.6, .1, .6, .1] if model == "wd" else [.1, .6, .1, .6]
-        scenes[model]["meta"].update(scene_frames_format=1, scene_score_floor=.1,
+        scenes[model]["meta"].update(scene_score_floor=.1,
                                        scene_support_floor=.6 * .85)
         scenes[model]["frames"] = [
             dict(start=float(i), end=float(i + 1), tags=[["core", score]])

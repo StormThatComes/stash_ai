@@ -21,7 +21,7 @@ def require_native_ranges(scene, spans):
 
 def plan(store, scene):
     """Resolve all extents before writing; snapshots remain the durable retry proof."""
-    from stash_ai.evidence.intervals import union_intervals
+    from stash_ai.evidence.interval_geometry import union_intervals
     from stash_ai.storage.recovery import publications
     points = ordinary_points(scene)
     if not points:

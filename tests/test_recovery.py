@@ -1,5 +1,5 @@
 """Abandonment across partial API success, old state formats and new policies."""
-from tests.helpers.evidence import current_record
+from tests.helpers.evidence import inference_record
 from copy import deepcopy
 import sqlite3
 
@@ -37,10 +37,18 @@ def state(tmp_path, **kwargs):
 def seed(tmp_path, stash, spans=None):
     spans = spans if spans is not None else [span('wd', 0, 2, 'abc'), span('wd', 10, 12, 'abc'), span('wd', 20, 22, 'def')]
     hits = [hit('wd', label) for label in sorted({s['tag'] for s in spans})]
+    rows = [dict(start=s['start']+i*((s['end'] or s['start']+1)-s['start'])/3,
+                 end=s['start']+(i+1)*((s['end'] or s['start']+1)-s['start'])/3,
+                 tags=[(label, s['score']) for label in [s['tag'], *s['extra_tags']]])
+            for s in spans for i in range(3)]
+    marker_record = inference_record(mode='frames', items=rows)
     with state(tmp_path) as store:
         store.put('1', 'wd', {
-            'scene': current_record(dict(mode='scene', items=hits, meta={'origin': 'legacy'})),
-            'markers': current_record(dict(mode='spans', items=spans, meta={'origin': 'legacy'}))})
+            'scene': inference_record(mode='scene', items=[dict(tag=h['tag'], score=h['score']) for h in hits]),
+            'markers': marker_record})
+        from stash_ai.evidence.source_markers import marker_contributions
+        cores = {source: frozenset(label for s in spans for label in s['extra_tags']) for source in empty_policies()}
+        spans = marker_contributions(app, {'wd': marker_record}, cores)
         merge_sync.sync_merged(app, stash, app.services.TagResolver(stash, source=merge_labels.AI), store, stash.find_scene('1'), hits, spans)
 
 
@@ -64,7 +72,7 @@ def test_standalone_abandons_without_stash_models_or_source_changes(tmp_path, mo
     assert app.main(command(tmp_path)) == 0
     with state(tmp_path) as store:
         assert not store.cleanup_pending and not store.has_pending_publications()
-        assert store.connection.execute('PRAGMA user_version').fetchone() == (18,)
+        assert store.connection.execute('PRAGMA user_version').fetchone() == (19,)
         assert recovery.publications(store, '1', 'scene')[0]['owned_ids'] == ['999']
         assert store.snapshot('1', 'markers')[0]['recovery_required']
         assert any(i['tag'] == 'abc' for i in store.snapshot('1', 'markers')[0]['contributions'])
@@ -217,7 +225,7 @@ def test_old_pending_cleanup_state_can_be_abandoned_without_losing_earlier_masks
         assert [i['tag'] for i in snapshot['contributions']] == ['new']
         assert snapshot['owned_ids'] == ['2'] and snapshot['recovery_required']
         cleanup.begin(store, 'next', {'new'}, set(), ['2'], kinds=('scene',))
-        assert store.connection.execute('PRAGMA user_version').fetchone() == (18,)
+        assert store.connection.execute('PRAGMA user_version').fetchone() == (19,)
         assert not store.snapshot('1', 'scene')[0]['contributions']
 
 

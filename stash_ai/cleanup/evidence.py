@@ -92,6 +92,8 @@ def cleanup_support(app, store, scene_id, spans, selected, core_policies, tag_po
     replay = EvidenceReplay(app, store, scene_id, selected, core_policies, tag_policies)
     cleaned = []
     for span in spans:
+        if span.get('derived') != 'occurrence' and (not span.get('build_options') or not span.get('evidence_signature') or 'extra_support' not in span):
+            raise ValueError('Current marker contributions require temporal extra_support evidence; run --merge-only.')
         if span.get('derived') == 'occurrence':
             from stash_ai.evidence.occurrences import cleanup_occurrence
             point = cleanup_occurrence(app, store, scene_id, span, selected, core_policies, tag_policies)
@@ -105,10 +107,6 @@ def cleanup_support(app, store, scene_id, spans, selected, core_policies, tag_po
         extra_labels = set(span.get('extra_tags', [])) | set(span.get('extra_support', {}))
         if not _needs_replay(span, selected, core_policies, tag_policies, extra_labels):
             cleaned.append(span)
-            continue
-        if not span.get('build_options') or not span.get('evidence_signature'):
-            # Imported ranges have no frame proofs; remove only captured extras.
-            cleaned.append(prune_blocked_extras(span, own_blocked))
             continue
         prepared = replay.candidates(span)
         for item in prepared.candidates:

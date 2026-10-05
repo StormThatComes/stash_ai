@@ -1,5 +1,5 @@
 """Resource ownership across state-store initialization failures and previews."""
-from tests.helpers.evidence import current_record
+from tests.helpers.evidence import inference_record
 import sqlite3
 
 import pytest
@@ -49,8 +49,8 @@ def test_failed_initialization_closes_connection_and_releases_writer(tmp_path, m
 
 def test_preview_does_not_release_active_writer_or_change_source(tmp_path):
     path = tmp_path / 'state.sqlite3'
-    original = current_record({'mode': 'scene', 'meta': {'origin': 'inference'}, 'items': []})
-    changed = current_record({**original, 'items': [{'tag': 'example', 'score': .8}]})
+    original = inference_record(**{'mode': 'scene', 'meta': {'origin': 'inference'}, 'items': []})
+    changed = inference_record(**{**original, 'items': [{'tag': 'example', 'score': .8}]})
     with StateStore(path, 'scope') as writer:
         writer.put('1', 'wd', {'scene': original})
         before = path.read_bytes(), path.stat().st_mtime_ns
@@ -67,8 +67,8 @@ def test_preview_does_not_release_active_writer_or_change_source(tmp_path):
 
 def test_targeted_result_reads_do_not_decode_sibling_models(tmp_path):
     path = tmp_path / 'state.sqlite3'
-    wd = current_record({'mode': 'scene', 'meta': {'origin': 'inference'}, 'items': [{'tag': 'wd', 'score': .8}]})
-    dtq = current_record({'mode': 'scene', 'meta': {'origin': 'inference'}, 'items': [{'tag': 'dtq', 'score': .7}]})
+    wd = inference_record(**{'mode': 'scene', 'meta': {'origin': 'inference'}, 'items': [{'tag': 'wd', 'score': .8}]})
+    dtq = inference_record(**{'mode': 'scene', 'meta': {'origin': 'inference'}, 'items': [{'tag': 'dtq', 'score': .7}]})
     with StateStore(path, 'scope') as state:
         state.put('1', 'wd', {'scene': wd})
         state.put('1', 'dtq', {'scene': dtq})
@@ -114,7 +114,7 @@ def test_state_store_facade_delegates_components_and_preserves_timings(tmp_path)
         assert isinstance(state.results, ResultStore)
         assert isinstance(state.publications, PublicationStore)
 
-        segment = current_record({'mode': 'scene', 'meta': {'origin': 'inference'}, 'items': []})
+        segment = inference_record(**{'mode': 'scene', 'meta': {'origin': 'inference'}, 'items': []})
         state.put('1', 'wd', {'scene': segment})
         state.publish('1', {'scene': {'contributions': []}})
 

@@ -5,7 +5,7 @@ from copy import deepcopy
 from contextlib import closing
 from stash_ai.models import SOURCES
 from stash_ai.evidence.interval_geometry import append_interval
-from .frames import FrameIndex, make_groups, observations
+from .frames import make_groups, observations
 from .observations import ObservationIndex
 
 
@@ -79,15 +79,12 @@ def collect_extras(app, span, index: ObservationIndex, allowed=None):
     span["extra_evidence"] = extras
 
 
-def enrich(app, records, policies, spans, signatures=None, index=None, metrics=None):
+def enrich(app, policies, spans, index, metrics=None):
     """Add missing shared intervals and attach source-aware extras from compatible inputs."""
     from stash_ai.evidence.temporal.policy import build_options
     policy = app.TEMPORAL_POLICY
     if not (policy.shared_marker_frames or policy.shared_marker_extras):
         return spans
-    if index is None:
-        with FrameIndex(app, records, policies, signatures) as owned_index:
-            return enrich(app, records, policies, spans, signatures, owned_index, metrics)
     groups, by_signature = index.groups, index.by_signature
     options = {**build_options(app), "core_exclusions": {k: sorted(v) for k, v in policies.items()},
                "tag_exclusions": {k: sorted(v) for k, v in index.tag_policies.items()}}

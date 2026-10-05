@@ -70,7 +70,7 @@ def _result_evidence_report(db, tables):
                 bucket["scene_frame_format"]["1" if scene_format == 1 else "other"] += 1
             analysis_format = meta.get("analysis_format")
             if isinstance(analysis_format, int):
-                bucket["analysis_format"][str(analysis_format) if analysis_format in (1, 2, 3, 4) else "other"] += 1
+                bucket["analysis_format"][str(analysis_format) if analysis_format in (1, 2, 3, 4, 5) else "other"] += 1
 
         items = segment.get("items")
         if not isinstance(items, list):

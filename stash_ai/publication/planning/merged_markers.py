@@ -11,10 +11,6 @@ def _wanted_markers(app, scene_id, markers, catalog, blocked_names):
 
     ids = catalog.ids
 
-    def allowed_id(identifier):
-        name = catalog.names_by_id.get(str(identifier))
-        return name is not None and name not in blocked_names and str(identifier) not in catalog.managed_group_ids
-
     wanted = []
     for marker in markers:
         primary = ids.get(merge_labels.AI.prefix + marker["tag"])
@@ -22,7 +18,6 @@ def _wanted_markers(app, scene_id, markers, catalog, blocked_names):
             continue
         extras = {ids[merge_labels.AI.prefix + label] for label in marker["extra_tags"]
                   if ids.get(merge_labels.AI.prefix + label)}
-        extras.update(identifier for identifier in marker["extra_ids"] if allowed_id(identifier))
         extras.add(ids[merge_labels.AI.owner_tag])
         extras.add(catalog.group_ids[marker['tag'], is_occurrence(marker)])
         if is_occurrence(marker) and ids.get(OCCURRENCE_TAG):

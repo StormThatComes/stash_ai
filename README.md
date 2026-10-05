@@ -126,7 +126,7 @@ klatki, wyniki i podpisy dowodów zachowują swoje wartości.
 
 Snapshoty merge zapisują współdzielone dowody `extra_support` raz, a contributions
 odwołują się do nich przez referencje. Zmniejsza to koszt serializacji i kompresji.
-Aktualny schemat to v18; starsze wersje programu odmówią jego otwarcia. Każdy nowy snapshot ma otoczkę formatu v4. `--db-update` konwertuje dawne
+Aktualny schemat to v19; starsze wersje programu odmówią jego otwarcia. Każdy nowy snapshot ma otoczkę formatu v4. `--db-update` konwertuje dawne
 snapshoty, także pending i recovery, dopisuje wymagane `contributions: []` do pustych zapisów oraz uzupełnia kompletne opcje odtwarzania, również w zagnieżdżonych dowodach scen.
 Dawny `blocklist` zostaje połączony z zapisanymi `tag_exclusions` wszystkich źródeł.
 Brakujące dawne przełączniki współdzielenia i occurrences zachowują `False`.
@@ -228,9 +228,9 @@ Globalne definicje starych tagów pozostają dostępne dla ręcznych powiązań.
 ### Zdrowie, aktualizacja i kompaktowanie bazy stanu
 
 `--db-update` aktualizuje całą istniejącą bazę wskazaną przez `--state-db`
-do najnowszego obsługiwanego schematu (obecnie v18), we wszystkich scope'ach.
+do najnowszego obsługiwanego schematu (obecnie v19), we wszystkich scope'ach.
 Zwykłe uruchomienie oraz `--dry-run` wymagają aktualnego schematu: starszą bazę
-trzeba najpierw zaktualizować tą komendą. Nowa baza od razu otrzymuje v18.
+trzeba najpierw zaktualizować tą komendą. Nowa baza od razu otrzymuje v19.
 Updater korzysta z tego samego locka writera; migracje są wyłącznie offline.
 Tworzy aktualne tabele, indeksy i triggery, uzupełnia `result_index` dla baz
 sprzed v2, uzupełnia historyczne `result_metadata` we wszystkich scope'ach
@@ -597,7 +597,7 @@ zasadę; archiwum służy wyłącznie frozen replay i jest przycinane po zmianie
 Zwykły merge, raporty, progi i indeks ukończenia nie korzystają z historii inferencji.
 
 
-W schemacie v15 aktywna inferencja wymaga analysis_format=4. --db-update wycofuje
+W schemacie v19 aktywna inferencja wymaga analysis_format=5. --db-update wycofuje
 starsze wyniki, zaznacza konieczność ponownej inferencji i zachowuje tylko dokładne
 dowody przypięte przez published/pending/recovery. Snapshoty i owned_ids pozostają
 bez zmian. Uruchom następnie inferencję dla wszystkich wskazanych modeli i wyjść;
@@ -616,3 +616,12 @@ Schemat v18 zapisuje aktywny wynik jako jeden obiekt zamiast listy segmentów.
 jest opcjonalnym progiem liczbowym. Nowa inferencja zastępuje wynik i resetuje próg.
 Migracja zachowuje tylko ostatnią aktywną inferencję i dokładne przypięte dowody archiwalne;
 merge, rethreshold, raporty i indeks ukończenia nie odczytują dawnych list ani tablic progów.
+
+Schemat v19 wycofuje aktywną inferencję w formatach 1–4. Uruchom `--db-update`,
+a następnie inferencję; `--merge-only` wymaga nowych dowodów. Przypięte dowody
+archiwalne oraz geometria, identyfikatory i stan published/pending/recovery
+pozostają zachowane. Nowe publikacje wymagają pełnych dowodów czasowych;
+historyczna geometria służy wyłącznie odzyskiwaniu stanu i migracji punktów.
+Format analizy 5 identyfikuje kompletny kontrakt sceny, bez dodatkowego
+`scene_frames_format`. Ręczne tagi dodatkowe pochodzą z obserwowanych markerów
+Stash i są zachowywane podczas dopasowania, podziału i łączenia zakresów.

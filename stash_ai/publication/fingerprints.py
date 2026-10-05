@@ -59,11 +59,8 @@ def catalog_fingerprint(resolver):
 def projected_scene(scene, resolver, created, updates, deletes, final_tags):
     """Compute the expected fingerprint using native IDs returned on creation.
 
-    Hook-side changes are detected by the next observed fingerprint. A legacy
-    adapter that does not return created IDs falls back to a native readback.
+    Hook-side changes are detected by the next observed fingerprint.
     """
-    if any(identifier is None for _, identifier in created):
-        return None
     names = resolver.names_by_id
     def tag(identifier):
         identifier = str(identifier)

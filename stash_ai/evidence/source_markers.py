@@ -63,4 +63,4 @@ def _marker_contributions(app, records, core_policies, index, metrics, tag_polic
                                                      tag_policies[model]))
     from stash_ai.evidence.shared_markers import enrich
     with stage(report, 'marker_fusion'):
-        return enrich(app, records, core_policies, spans, signatures, index, metrics)
+        return enrich(app, core_policies, spans, index, metrics)

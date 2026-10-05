@@ -151,7 +151,7 @@ def test_upgrade_removes_imported_active_evidence_and_ledger_across_scopes(tmp_p
     with sqlite3.connect(path) as connection:
         connection.execute('CREATE TABLE legacy_imports(scope TEXT, scene TEXT, kind TEXT, data BLOB)')
         connection.execute('PRAGMA user_version=15')
-    assert db.update_database(path) == (15, 18)
+    assert db.update_database(path) == (15, 19)
     for scope in ('first', 'second'):
         with StateStore(path, scope) as store:
             assert store.model_record('1', 'markers', 'wd') == outputs()['markers']

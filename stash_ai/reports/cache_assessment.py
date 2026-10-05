@@ -48,7 +48,7 @@ def inspect_output(app, config, kind, record, index, refresh, checkpoint, error)
             validate_scene(app, record, threshold, has_frames=record['has_frames'])
             floor, saved = meta['scene_score_floor'], scene_threshold(record)
         else:
-            if record['mode'] != 'frames' or meta.get('origin') != 'inference':
+            if record['mode'] != 'frames':
                 raise ValueError('Imported marker ranges cannot prove retained frame coverage.')
             validate_current(record)
             floor = meta.get('marker_score_floor')

@@ -53,7 +53,6 @@ def union_intervals(contributions: list[MarkerContribution], *, borrow=False) ->
                                     key in item.get("support_sources", []) for item in contributors)]
             component["extra_tags"] = sorted({raw_label(tag) for item in contributors for tag in item.get("extra_tags", [])}
                                              - {tag})
-            component["extra_ids"] = sorted({str(i) for item in contributors for i in item.get("extra_ids", [])})
             merged.append(component)
     return sorted(merged, key=lambda item: (item["start"], item["tag"]))
 

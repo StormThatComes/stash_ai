@@ -70,7 +70,9 @@ class Stash:
         assert not self.dry_run
         if self.fail_create: raise RuntimeError("injected failure")
         self.writes.append(("create",payload))
-        self.scene["scene_markers"].append(self.record(payload,str(1000+len(self.writes))))
+        identifier = str(1000+len(self.writes))
+        self.scene["scene_markers"].append(self.record(payload,identifier))
+        return identifier
     def update_marker(self,payload):
         assert not self.dry_run
         self.writes.append(("update",payload))

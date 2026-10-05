@@ -1,5 +1,5 @@
 """Reject decodable evidence that cannot be consumed by merge/resume."""
-from tests.helpers.evidence import current_record
+from tests.helpers.evidence import inference_record
 
 from tests.helpers.temporal import policy_args
 
@@ -131,21 +131,19 @@ def test_check_rejects_invalid_checkpoint_frames(tmp_path, row):
     assert issues(report) == {"state_payload_invalid": 1}
 
 
-def test_check_preserves_legacy_and_sparse_formats(tmp_path):
+def test_check_accepts_current_and_sparse_formats(tmp_path):
     path = tmp_path / "state.sqlite3"
     seed(path, "scope")  # Old inference without retention metadata/statistics.
     with merge_store.StateStore(path, "scope") as state:
-        state.put("legacy", "wd", {
-            "scene": current_record({"mode": "scene", "meta": {"origin": "legacy"},
-                      "items": [{"tag": "blue_hair", "score": None}]}),
-            "markers": current_record({"mode": "spans", "meta": {"origin": "legacy"},
-                        "items": [{"tag": "blue_hair", "score": None, "hits": None,
-                                   "start": 0, "end": end, "extra_tags": [], "extra_ids": ["42"]}
-                                  for end in (None, 0, 1)]}),
+        state.put("raw", "wd", {
+            "scene": inference_record(mode="scene", items=[dict(tag="blue_hair", score=.9)]),
+            "markers": inference_record(mode="frames", items=[
+                dict(start=0, end=1, tags=[("blue_hair", .9)]),
+                dict(start=1, end=2, tags=[("blue_hair", .8)])]),
         })
         state.put("empty", "wd", {
-            "scene": current_record({"mode": "scene", "meta": {"origin": "inference"}, "items": []}),
-            "markers": current_record({"mode": "frames", "meta": {"origin": "inference"},
+            "scene": inference_record(**{"mode": "scene", "meta": {"origin": "inference"}, "items": []}),
+            "markers": inference_record(**{"mode": "frames", "meta": {"origin": "inference"},
                         "items": [{**FRAME, "tags": []}]}),
         })
     report = stash_db.check_database(path, "scope")

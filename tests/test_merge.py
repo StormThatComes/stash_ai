@@ -1,5 +1,6 @@
+from stash_ai.evidence.interval_geometry import union_intervals as geometry_union
 """Behavior tests for exact-label AI fusion; no live Stash or model downloads."""
-from tests.helpers.evidence import current_record
+from tests.helpers.evidence import inference_record
 
 
 
@@ -51,7 +52,7 @@ def test_interval_union_retains_ends_separate_events_sources_and_extras():
             span("oppai",14,35,score=.83,extras=["extra","another"]),span("dtq",70,90)]
     expected=[(10,42,["joytag","wd","oppai"]),(70,90,["dtq"])]
     for sequence in permutations(inputs):
-        result=merge_intervals.union_intervals(sequence)
+        result=geometry_union(sequence)
         assert [(m["start"],m["end"],m["sources"]) for m in result]==expected
         assert result[0]["extra_tags"]==["another","extra"]
         assert "score" not in result[0]
@@ -68,24 +69,24 @@ def test_interval_union_retains_ends_separate_events_sources_and_extras():
     ([(10,30),(20,None),(40,None)],[(10,30),(40,None)]),
 ])
 def test_union_touching_containment_chains_gaps_and_unknown_ends(values,expected):
-    merged=merge_intervals.union_intervals([span(key,start,end) for key,(start,end) in zip(SOURCES,values)])
+    merged=geometry_union([span(key,start,end) for key,(start,end) in zip(SOURCES,values)])
     assert [(m["start"],m["end"]) for m in merged]==expected
 
 
 def test_union_keeps_different_labels_and_case_separate():
-    merged=merge_intervals.union_intervals([span("joytag",0,20,"blue_hair"),span("wd",0,20,"Blue_hair"),
+    merged=geometry_union([span("joytag",0,20,"blue_hair"),span("wd",0,20,"Blue_hair"),
                                    span("oppai",0,20,"bikini"),span("dtq",0,20,"swimsuit")])
     assert len(merged)==4
 
 
 @pytest.mark.parametrize("start,end",[(-1,3),(3,1),(float("nan"),3),(0,float("inf")),(True,3)])
 def test_bad_intervals_are_rejected_before_writes(start,end):
-    with pytest.raises(ValueError): merge_intervals.union_intervals([span("wd",start,end)])
+    with pytest.raises(ValueError): geometry_union([span("wd",start,end)])
 
 
 def test_state_is_durable_scoped_partial_and_dry_run_does_not_write(tmp_path):
-    first=current_record({"mode":"scene","meta":{"origin":"inference"},"items":[dict(tag="common",score=.8)]})
-    second=current_record({"mode":"spans","meta":{"origin":"legacy"},"items":[]})
+    first=inference_record(**{"mode":"scene","meta":{"origin":"inference"},"items":[dict(tag="common",score=.8)]})
+    second=inference_record(**dict(mode="frames", items=[]))
     with store(tmp_path) as state:
         state.put("1","joytag",{"scene":first,"markers":second})
         state.put("1","wd",{"scene":first})
@@ -307,7 +308,7 @@ def test_missing_source_state_does_not_destroy_existing_ai_markers(tmp_path):
 def test_no_frame_fusion_across_models(tmp_path):
     with store(tmp_path) as state:
         for source,indices in [("joytag",{0,2}),("wd",{1,3})]:
-            state.put("1",source,{"markers":current_record({"mode":"frames","meta":{"origin":"inference", "marker_tag_blocklist": [],
+            state.put("1",source,{"markers":inference_record(**{"mode":"frames","meta":{"origin":"inference",
                 "marker_threshold": .8, "marker_score_floor": .8},"items":[
                 dict(start=i*5,end=(i+1)*5,tags=[["common",.9]] if i in indices else []) for i in range(4)]})})
         _,spans=merge.evidence(app,state,"1",empty_policies(),empty_policies())
@@ -452,7 +453,7 @@ def test_scene_cap_applies_only_to_the_current_record(tmp_path,monkeypatch):
     monkeypatch.setattr(app,"MAX_TAGS",1)
     with store(tmp_path) as state:
         for items in [[("old",.95),("low",.7)], [("latest",.95),("newer",.8)]]:
-            state.put("1", "wd", {"scene":current_record({"mode":"scene","meta":{},
+            state.put("1", "wd", {"scene":inference_record(**{"mode":"scene","meta":{},
                       "items":[dict(tag=tag,score=score) for tag,score in items]})})
         hits,_=merge.evidence(app,state,"1",empty_policies(),empty_policies())
         assert {h["tag"] for h in hits}=={"latest"}

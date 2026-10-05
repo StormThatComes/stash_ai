@@ -89,7 +89,7 @@ def test_every_label_and_streaming_aggregation(monkeypatch,aggregation,batch):
     expected=scores.max(axis=0) if aggregation=="max" else np.sort(scores,axis=0)[-2:].mean(axis=0)
     assert len(predictions)==len(labels)
     for tag,score in predictions: assert score==pytest.approx(expected[labels.index(tag)])
-    markers,_=app.build_markers(frames,frozenset({"core_ban"}))
+    markers,_=app.build_markers(frames,frozenset({"core_ban"}),threshold=.65)
     assert len(markers)==len(labels)-1 and "core_ban" in markers[0].extra_tags
     assert any('scene_ban' in m.extra_tags for m in markers)
     assert all(m.start==0 and m.end==5 and m.hits==5 for m in markers)
@@ -98,11 +98,11 @@ def test_every_label_and_streaming_aggregation(monkeypatch,aggregation,batch):
 def test_core_limit_and_gap_timing(monkeypatch):
     monkeypatch.setattr(app,"MARKER_MAX_TAGS_PER_FRAME",1)
     frames=[FramePrediction(Cue(i,i+1,"x",(0,0,1,1)),(("blocked",.99),("valid",.8))) for i in [0,1,4,5]]
-    markers,total=app.build_markers(frames,frozenset({"blocked"}))
+    markers,total=app.build_markers(frames,frozenset({"blocked"}),threshold=.65)
     assert total==2 and [(m.start,m.end) for m in markers]==[(0,2),(4,6)]
     assert all(m.extra_tags==("blocked",) for m in markers)
     monkeypatch.setattr(app,"MARKER_MERGE_GAP_SECONDS",2)
-    markers,_=app.build_markers(frames,frozenset({"blocked"}))
+    markers,_=app.build_markers(frames,frozenset({"blocked"}),threshold=.65)
     assert len(markers)==1 and markers[0].hits==4
 
 

@@ -1,5 +1,5 @@
 """Threshold policy writes preserve evidence, preview isolation and completion."""
-from tests.helpers.evidence import current_record
+from tests.helpers.evidence import inference_record
 from tests.helpers.evidence import inject_records
 
 from stash_ai.rethreshold.plans import RecordAccess, PendingPolicy, ThresholdRequest
@@ -31,10 +31,9 @@ pytestmark = pytest.mark.usefixtures('reset_temporal')
 def outputs(threshold=.4, signature='original'):
     meta = dict(origin='inference', inference_signature=signature,
                 scene_threshold=threshold, marker_threshold=threshold,
-                scene_frames_format=1, scene_score_floor=.1, marker_score_floor=.1,
-                marker_tag_blocklist=[])
+                scene_score_floor=.1, marker_score_floor=.1)
     frames = [dict(start=0., end=1., tags=[['core', .8]])]
-    return {kind: current_record(record) for kind, record in ({
+    return {kind: inference_record(**record) for kind, record in ({
         'scene': dict(mode='scene', meta=deepcopy(meta), frames=deepcopy(frames),
                       items=[dict(tag='core', score=.8)]),
         'markers': dict(mode='frames', meta=deepcopy(meta), items=frames),
@@ -126,11 +125,11 @@ def test_v7_inline_overrides_are_read_lazily_and_can_be_restored(tmp_path, dry_r
         before = connection.execute('SELECT * FROM results ORDER BY scope,scene,model,kind').fetchall()
     source_before = path.read_bytes()
     with StateStore(path, 'scope', dry_run=dry_run) as store:
-        assert store.connection.execute('PRAGMA user_version').fetchone() == (18,)
+        assert store.connection.execute('PRAGMA user_version').fetchone() == (19,)
         assert store.records('1', 'scene')['wd'] == old['scene']
         assert store.model_record('1', 'markers', 'wd') == old['markers']
         assert rethreshold(store, .4) == {'scene_thresholds_updated': 1}
-        assert store.connection.execute('PRAGMA user_version').fetchone() == (18,)
+        assert store.connection.execute('PRAGMA user_version').fetchone() == (19,)
         assert blobs(store) == ([] if dry_run else before)
         assert store.records('1', 'scene')['wd'] == outputs()['scene']
         assert store.model_record('1', 'markers', 'wd') == outputs()['markers']
@@ -280,7 +279,7 @@ def test_abandon_and_cleanup_preserve_v8_and_effective_thresholds(tmp_path):
         recovery.abandon(store, lambda _: None)
         cleanup.begin(store, 'cleanup', {'excluded'}, set(), [], kinds=('scene',))
         cleanup.finish(store)
-        assert store.connection.execute('PRAGMA user_version').fetchone() == (18,)
+        assert store.connection.execute('PRAGMA user_version').fetchone() == (19,)
         assert store.records('1', 'scene')['wd'][scene_cache_identity.SCENE_OVERRIDE] == .8
     assert db.check_database(path, 'scope')['ok']
 

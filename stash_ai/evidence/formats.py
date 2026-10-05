@@ -1,7 +1,7 @@
 """The active inference contract. Archived publication proofs are separate."""
 import math
 
-ANALYSIS_FORMAT = 4
+ANALYSIS_FORMAT = 5
 
 
 def current(meta):
@@ -27,7 +27,7 @@ def validate_current(segment):
     if segment['mode'] == 'scene':
         required_scores.append('scene_score_floor')
         has_frames = 'frames' in segment if 'items' in segment else segment.get('has_frames', False)
-        if type(meta.get('scene_frames_format')) is not int or meta['scene_frames_format'] != 1 or not has_frames:
+        if not has_frames:
             raise ValueError('Current scene evidence requires retained scene frames.')
         for item in segment.get('items', ()):
             if (type(item.get('score')) not in (int, float) or not math.isfinite(item['score'])
@@ -61,7 +61,7 @@ def validate_statistics(stats):
 
 
 def validate_archived(segment):
-    """Validate pinned proof storage, including retired pre-v4 inference."""
+    """Validate pinned proof storage, including retired pre-v5 inference."""
     version = segment['meta'].get('analysis_format')
     if version is not None and (type(version) is not int or not 1 <= version <= ANALYSIS_FORMAT):
         raise ValueError('Unsupported archived inference evidence format.')

@@ -28,7 +28,7 @@ def capture_outputs(app, config, vocabulary, cues, predictions, frames, analysis
     outputs = {}
     if app.APPLY_SCENE_TAGS:
         outputs["scene"] = {"mode": "scene", "meta": {
-                                **meta, 'scene_frames_format': 1,
+                                **meta,
                                 'scene_score_floor': analysis['scene_score_floor']},
                             "frames": analysis['scene_frames'],
                             "items": [dict(tag=tag, score=score,

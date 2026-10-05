@@ -25,7 +25,7 @@ class PublishedRecords:
             if scene_frames:
                 from stash_ai.evidence.cache_views import as_frames
                 records = {source: [as_frames(record) for record in history
-                                   if record['meta'].get('analysis_format') == 4]
+                                   if 'frames' in record]
                            for source, history in with_archive('scene').items()}
             self.indexes[key] = {source: {marker_segment_signature(segment): segment for segment in segments}
                                  for source, segments in records.items()}

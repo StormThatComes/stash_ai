@@ -2,7 +2,7 @@
 from dataclasses import dataclass
 
 APPLICATION_ID = 0x53544D47
-LATEST_SCHEMA_VERSION = 18
+LATEST_SCHEMA_VERSION = 19
 KNOWN_KINDS = frozenset(('scene', 'markers'))
 KNOWN_MODELS = frozenset(('joytag', 'wd', 'dtq', 'oppai'))
 

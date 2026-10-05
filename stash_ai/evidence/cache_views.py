@@ -16,8 +16,7 @@ def validate_scene(app, segment, threshold, *, has_frames=None):
     needed = threshold * app.TEMPORAL_POLICY.scene_support_ratio
     floor = meta.get('scene_score_floor')
     has_frames = 'frames' in segment if has_frames is None else has_frames
-    if (segment['mode'] != 'scene' or meta.get('origin') != 'inference'
-            or meta.get('scene_frames_format') != 1 or not has_frames):
+    if segment['mode'] != 'scene' or not has_frames:
         raise ValueError('scene frame evidence is missing; run inference once to populate the cache.')
     if not _score(floor) or floor > needed:
         raise ValueError(f'scene cache floor {floor!r} exceeds required {needed:g}; run inference.')

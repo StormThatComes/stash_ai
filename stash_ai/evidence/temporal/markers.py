@@ -23,11 +23,11 @@ def consensus_seeds(records, policies, policy, *, thresholds=None):
     return {key: tuple(sorted(models)) for key, models in votes.items() if len(models) >= policy.consensus_min_models}
 
 
-def build_markers(app, frames, core_exclusions, *, threshold=None, seeds=None, identity=None,
+def build_markers(app, frames, core_exclusions, *, threshold, seeds=None, identity=None,
                   collect_extras=True, extra_group=None, extra_cache=None):
     """High/consensus seeds start runs; weaker observations have a time limit."""
     policy = app.TEMPORAL_POLICY
-    high = threshold if threshold is not None else 0.0
+    high = threshold
     floor = marker_floor(policy, high)
     sort_floor = min(floor, high)
     seeds = seeds or {}

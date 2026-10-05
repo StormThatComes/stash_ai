@@ -1,5 +1,5 @@
 """Scene threshold replay, provenance and restart/resume equivalence."""
-from tests.helpers.evidence import current_record
+from tests.helpers.evidence import inference_record
 
 from tests.helpers.temporal import policy_args
 from copy import deepcopy
@@ -161,7 +161,7 @@ def test_support_ratio_change_rejects_incomplete_cache_before_publication(
         with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL)) as state:
             segment = state.records('1', 'scene')['wd']
             segment.pop('frames')
-            segment['meta'].pop('scene_frames_format')
+            segment['meta'].pop('scene_frames_format', None)
             segment['meta'].pop('scene_score_floor')
             segment['meta']['analysis_format'] = 3
             inject_records(state, '1', 'wd', {'scene': segment})
@@ -184,7 +184,7 @@ def test_rethreshold_abort_report_is_explicit_and_groups_blockers(pipeline, monk
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL)) as state:
         segment = state.records('1', 'scene')['wd']
         segment.pop('frames')
-        segment['meta'].pop('scene_frames_format')
+        segment['meta'].pop('scene_frames_format', None)
         segment['meta'].pop('scene_score_floor')
         segment['meta']['analysis_format'] = 3
         inject_records(state, '1', 'wd', {'scene': segment})
@@ -263,7 +263,7 @@ def test_invalid_scene_cache_preflight_does_not_publish(pipeline, monkeypatch, c
         with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL)) as state:
             segment = state.records('1', 'scene')['wd']
             segment.pop('frames')
-            segment['meta'].pop('scene_frames_format')
+            segment['meta'].pop('scene_frames_format', None)
             segment['meta'].pop('scene_score_floor')
             segment['meta']['analysis_format'] = 3
             inject_records(state, '1', 'wd', {'scene': segment})
@@ -358,7 +358,7 @@ def test_old_completed_cache_requires_database_update_then_reinference(pipeline,
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL)) as state:
         segment = state.records('1', 'scene')['wd']
         segment.pop('frames')
-        segment['meta'].pop('scene_frames_format')
+        segment['meta'].pop('scene_frames_format', None)
         segment['meta'].pop('scene_score_floor')
         segment['meta']['analysis_format'] = 3
         inject_records(state, '1', 'wd', {'scene': segment})
@@ -381,7 +381,7 @@ def test_scene_flag_requires_scene_merge(args):
 
 
 def test_scene_rethreshold_never_decodes_publication_snapshots(tmp_path, monkeypatch):
-    segment = current_record({
+    segment = inference_record(**{
         'mode': 'scene',
         'meta': {
             'origin': 'inference',

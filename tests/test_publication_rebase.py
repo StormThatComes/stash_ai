@@ -47,9 +47,9 @@ def test_offline_rebase_keeps_geometry_ownership_and_retry_proofs_across_scopes(
                                    (scope, '1', 'markers', 'lost-response', packed))
         connection.execute('PRAGMA user_version=16')
     before = path.read_bytes()
-    assert db.update_database(path, dry_run=True) == (16, 18)
+    assert db.update_database(path, dry_run=True) == (16, 19)
     assert path.read_bytes() == before
-    assert db.update_database(path) == (16, 18)
+    assert db.update_database(path) == (16, 19)
     for scope in ('scope-a', 'scope-b'):
         with StateStore(path, scope) as state:
             from stash_ai.storage.recovery import publications
@@ -72,7 +72,7 @@ def test_offline_rebase_keeps_geometry_ownership_and_retry_proofs_across_scopes(
     with sqlite3.connect(path) as connection:
         migrated = [connection.execute('SELECT * FROM ' + table).fetchall()
                     for table in ('snapshots', 'recovery_publications')]
-    assert db.update_database(path) == (18, 18)
+    assert db.update_database(path) == (19, 19)
     with sqlite3.connect(path) as connection:
         assert [connection.execute('SELECT * FROM ' + table).fetchall()
                 for table in ('snapshots', 'recovery_publications')] == migrated
@@ -101,7 +101,7 @@ def test_recovery_requires_exact_point_or_range_geometry(observed_end, saved_end
 def test_current_temporal_publication_remains_replayable(tmp_path):
     value = old_publication()
     item = value['contributions'][0]
-    item['meta']['analysis_format'] = 4
+    item['meta']['analysis_format'] = 5
     item['build_options']['algorithm'] = 'temporal'
     item['extra_support'] = {}
     path = tmp_path/'state.sqlite3'
