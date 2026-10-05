@@ -36,10 +36,10 @@ def check_state_payloads(db, tables, errors, progress=None):
                     payload = decoded_payload(blob, expected)
                 if table == 'inference_archive':
                     from stash_ai.db.payloads import valid_result_segments
-                    from stash_ai.evidence.formats import validate_current
+                    from stash_ai.evidence.formats import validate_archived
                     if payload['meta'].get('origin') != 'inference' or not valid_result_segments([payload], kind):
                         raise ValueError('Invalid archived inference proof.')
-                    validate_current(payload)
+                    validate_archived(payload)
                     from stash_ai.evidence.identity import marker_segment_signature
                     if marker_segment_signature(payload) != signature:
                         raise ValueError('Archived proof signature mismatch.')
@@ -130,4 +130,3 @@ def check_state_relations(db, tables, warnings):
         else:
             warnings["recovery_publication_without_snapshot"] += count_rows(
                 db, tables, "recovery_publications")
-

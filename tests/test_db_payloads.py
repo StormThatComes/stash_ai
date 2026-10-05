@@ -1,4 +1,5 @@
 """Reject decodable evidence that cannot be consumed by merge/resume."""
+from tests.helpers.evidence import current_record
 
 from tests.helpers.temporal import policy_args
 
@@ -14,6 +15,7 @@ from tests.helpers.runtime import runtime as app
 from stash_ai import db as stash_db
 import stash_ai.storage.store as merge_store
 from tests.test_db import issues, seed
+from tests.test_result_thresholds import outputs
 
 
 FRAME = {"start": 0.0, "end": 1.0, "tags": [["blue_hair", .9]]}
@@ -25,7 +27,7 @@ def save_result(path, mode, items, **extra):
     with merge_store.StateStore(path, "scope") as state:
         # Build a consistent index, then inject a decodable payload. JSON NaN/Inf
         # cannot be produced by the normal encoder, but must be detected on disk.
-        state.put("1", "wd", {kind: {**segment, "items": [FRAME]}})
+        state.put("1", "wd", {kind: outputs()[kind]})
         state.connection.execute("UPDATE results SET data=?",
                                  (zlib.compress(json.dumps([segment]).encode()),))
         state.connection.commit()
@@ -134,17 +136,17 @@ def test_check_preserves_legacy_and_sparse_formats(tmp_path):
     seed(path, "scope")  # Old inference without retention metadata/statistics.
     with merge_store.StateStore(path, "scope") as state:
         state.put("legacy", "wd", {
-            "scene": {"mode": "scene", "meta": {"origin": "legacy"},
-                      "items": [{"tag": "blue_hair", "score": None}]},
-            "markers": {"mode": "spans", "meta": {"origin": "legacy"},
+            "scene": current_record({"mode": "scene", "meta": {"origin": "legacy"},
+                      "items": [{"tag": "blue_hair", "score": None}]}),
+            "markers": current_record({"mode": "spans", "meta": {"origin": "legacy"},
                         "items": [{"tag": "blue_hair", "score": None, "hits": None,
                                    "start": 0, "end": end, "extra_tags": [], "extra_ids": ["42"]}
-                                  for end in (None, 0, 1)]},
+                                  for end in (None, 0, 1)]}),
         })
         state.put("empty", "wd", {
-            "scene": {"mode": "scene", "meta": {"origin": "inference"}, "items": []},
-            "markers": {"mode": "frames", "meta": {"origin": "inference"},
-                        "items": [{**FRAME, "tags": []}]},
+            "scene": current_record({"mode": "scene", "meta": {"origin": "inference"}, "items": []}),
+            "markers": current_record({"mode": "frames", "meta": {"origin": "inference"},
+                        "items": [{**FRAME, "tags": []}]}),
         })
     report = stash_db.check_database(path, "scope")
     assert report["ok"], report["errors"]

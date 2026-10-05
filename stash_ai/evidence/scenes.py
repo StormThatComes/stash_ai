@@ -1,7 +1,6 @@
 """Additional scene qualification using positive evidence already in the cache."""
 from collections import defaultdict
 from dataclasses import asdict
-import math
 
 from stash_ai.models import SOURCES
 from stash_ai.evidence.interval_geometry import append_interval
@@ -9,38 +8,27 @@ from stash_ai.evidence.interval_geometry import append_interval
 
 def _scene_run_index(scene_records):
     from stash_ai.evidence.identity import marker_segment_signature
-    result = defaultdict(list)
-    for source, segments in scene_records.items():
-        for segment in segments:
-            signature = segment['meta'].get('inference_signature')
-            if segment['mode'] == 'scene' and signature and segment['meta'].get('origin') == 'inference':
-                result[source, signature].append((segment, marker_segment_signature(segment)))
-    return result
+    return {(source, record['meta']['inference_signature']): (record, marker_segment_signature(record))
+            for source, record in scene_records.items()}
 
 
 def _shared_members(group, scene_by_run):
-    """Match frame members to scene outputs from the same inference/input run."""
-    members, frame_context, scene_context = [], defaultdict(set), defaultdict(set)
+    """Join the current frame and scene record from the same verified run."""
+    members, frame_context, scene_context = [], {}, {}
     for source, segment, signature in group['members']:
         meta = segment['meta']
-        threshold = meta.get('scene_threshold')
-        floor = meta.get('marker_score_floor')
-        if any(type(value) not in (int, float) or not math.isfinite(value) or not 0 <= value <= 1
-               for value in (threshold, floor)):
+        threshold, floor = meta['scene_threshold'], meta['marker_score_floor']
+        match = scene_by_run.get((source, meta['inference_signature']))
+        if match is None:
             continue
-        matches = [(scene, scene_sig) for scene, scene_sig in scene_by_run[source, meta.get('inference_signature')]
-                   if scene['meta'].get('scene_threshold') == threshold and
-                   scene['meta'].get('frame_input_signature') == meta.get('frame_input_signature')]
-        if not matches:
+        scene, scene_sig = match
+        if (scene['meta']['scene_threshold'] != threshold or
+                scene['meta']['frame_input_signature'] != meta['frame_input_signature']):
             continue
-        scores = defaultdict(list)
-        for scene, scene_sig in matches:
-            scene_context[source].add(scene_sig)
-            for entry in scene['items']:
-                if entry.get('score') is not None:
-                    scores[entry['tag']].append(entry['score'])
-        members.append((source, segment, signature, threshold, floor, scores))
-        frame_context[source].add(signature)
+        scores = {entry['tag']: [entry['score']] for entry in scene['items'] if entry['score'] is not None}
+        scene_context[source] = {scene_sig}
+        frame_context[source] = {signature}
+        members.append((source, segment, signature, threshold, floor, defaultdict(list, scores)))
     return members, frame_context, scene_context
 
 
@@ -172,6 +160,8 @@ def cleanup_scene_support(app, store, scene_id, hits, selected, policies):
     from stash_ai.evidence.frames import FrameIndex
     from stash_ai.signatures import digest
     from stash_ai.evidence.frozen_replay import PublishedRecords, snapshot_context, frozen_policies
+    from stash_ai.storage.snapshots import require_rebased
+    require_rebased(hits)
     cleaned, rebuilt = [], {}
     published = PublishedRecords(store, scene_id)
     for hit in hits:
@@ -191,9 +181,10 @@ def cleanup_scene_support(app, store, scene_id, hits, selected, policies):
                     'Shared scene sources changed since publication; run --merge-only before cleanup.')
             options = hit['build_options']
             context = snapshot_context(app, options, 'scene')
-            from stash_ai.evidence.cache_views import views, frame_records
+            from stash_ai.evidence.cache_views import views
+            from stash_ai.evidence.cache_views import frame_records
             context, matching['scene'] = views(context, matching['scene'])
-            matching['markers'] = frame_records(matching['scene'], matching['markers'])
+            matching['markers'] = frame_records(matching['scene'])
             frozen = frozen_policies(options, 'scene_exclusions', selected, policies)
             with FrameIndex(context, matching['markers'], {s: frozenset() for s in SOURCES}, cache=store.cache) as index:
                 rebuilt[key] = shared_scene_contributions(context, index, matching['scene'], frozen)

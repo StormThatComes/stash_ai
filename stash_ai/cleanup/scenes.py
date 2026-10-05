@@ -25,6 +25,8 @@ def cleanup_scene(app, stash, resolver, store, current, settings, selected, args
         snapshot, pending = store.snapshot(scene_id, kind, borrow=True)
         if pending is not None:
             raise RuntimeError("An interrupted merge is pending; run --merge-only before cleanup.")
+        from stash_ai.storage.snapshots import require_rebased
+        require_rebased((snapshot or {}).get('contributions', []))
         from stash_ai.publication.recovery import reconcile
         published[kind], recovered = reconcile(store, current, kind, snapshot)
         stats['publications_reconciled'] += int(recovered)
@@ -41,7 +43,7 @@ def cleanup_scene(app, stash, resolver, store, current, settings, selected, args
                                   for tag in [marker['primary_tag'], *marker.get('tags', [])]))
     if clean_hits != hits or clean_spans != spans or forbidden_present:
         result = merge_sync.sync_merged(app, stash, resolver, store, current, clean_hits, clean_spans,
-                                   migrate=False, cleanup=True, report=report, tag_policies=scoped_tags)
+                                   cleanup=True, report=report, tag_policies=scoped_tags)
         stats.update(result)
         if not stash.dry_run and any(result[name] for name in (
                 'scene_tags_updated', 'markers_created', 'markers_updated', 'markers_deleted')):

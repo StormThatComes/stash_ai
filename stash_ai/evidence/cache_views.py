@@ -33,13 +33,11 @@ def project(app, segment):
         return segment
     signature = marker_segment_signature(segment)
     meta = segment['meta']
+    from stash_ai.evidence.formats import validate_current
+    validate_current(segment)
     threshold = (app.SCENE_THRESHOLDS.get(signature, meta.get('scene_threshold'))
                  if app.SCENE_THRESHOLDS is not None else scene_threshold(segment))
-    # Temporal statistics depend on the support floor as well as the high
-    # threshold. Old aggregates without retention metadata keep their original
-    # behavior; frame-backed results can also gain statistics for historical non-temporal results.
-    support_changed = (('scene_support_floor' in meta or meta.get('scene_frames_format') == 1)
-        and meta.get('scene_support_floor') != threshold * app.TEMPORAL_POLICY.scene_support_ratio)
+    support_changed = meta.get('scene_support_floor') != threshold * app.TEMPORAL_POLICY.scene_support_ratio
     if threshold == meta.get('scene_threshold') and not support_changed:
         return segment
     validate_scene(app, segment, threshold)
@@ -64,8 +62,8 @@ def views(app, records):
     if app.SCENE_THRESHOLDS is None:
         app = replace(app, SCENE_THRESHOLDS={
             marker_segment_signature(s): s[SCENE_OVERRIDE]
-            for segments in records.values() for s in segments if SCENE_OVERRIDE in s})
-    return app, {source: [project(app, s) for s in segments] for source, segments in records.items()}
+            for s in records.values() if SCENE_OVERRIDE in s})
+    return app, {source: project(app, record) for source, record in records.items()}
 
 
 def as_frames(segment):
@@ -79,12 +77,6 @@ def as_frames(segment):
     return value
 
 
-def frame_records(scenes, markers):
-    """Prefer complete scene observations; retain old marker evidence as fallback."""
-    result = {}
-    for source in scenes.keys() | markers.keys():
-        full = [s for s in scenes.get(source, []) if s['meta'].get('scene_frames_format') == 1 and 'frames' in s]
-        runs = {s['meta'].get('inference_signature') for s in full}
-        result[source] = [as_frames(s) for s in full] + [s for s in markers.get(source, [])
-            if s['meta'].get('inference_signature') not in runs]
-    return result
+def frame_records(scenes):
+    """Scene qualification and occurrences use their own complete observations."""
+    return {source: as_frames(record) for source, record in scenes.items()}

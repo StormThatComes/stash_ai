@@ -61,7 +61,7 @@ def test_scene_failure_continues_but_interruption_stops_and_closes_tagger(model_
         run_model(context)
         assert calls == ['1', '2']
         assert context.stats['errors'] == context.stats['processed'] == 1
-        assert context.state.records('2', 'scene')['wd'][0]['meta']['origin'] == 'inference'
+        assert context.state.records('2', 'scene')['wd']['meta']['origin'] == 'inference'
         assert ('inference', 'wd', 'RuntimeError') in context.args.report.groups
     assert context.state.records('1', 'scene') == {}
     assert len(context.pipeline.loaded) == 1
@@ -129,7 +129,7 @@ def test_downloaded_weights_refresh_signatures_before_saving_and_enable_resume(m
     _, _, expected = inspect_input(app, context.pipeline.stash, context.scenes['1']['paths'], after)
     for scene_id in context.scenes:
         for kind in ('scene', 'markers'):
-            assert context.state.records(scene_id, kind)['wd'][0]['meta']['inference_signature'] == expected
+            assert context.state.records(scene_id, kind)['wd']['meta']['inference_signature'] == expected
 
     context.args.resume = True
     context.stats.clear()

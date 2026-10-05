@@ -77,3 +77,10 @@ def build_options(app):
         "marker_thresholds": dict(app.MARKER_THRESHOLDS or {}),
         "settings": {name: getattr(app, name) for name in (
         "MARKER_MIN_HITS", "MARKER_MERGE_GAP_SECONDS", "MARKER_MAX_TAGS_PER_FRAME", "MAX_MARKERS_PER_SCENE")}}
+
+
+def frozen_policy(options):
+    """Replay only the current temporal engine with its saved settings."""
+    if options.get('algorithm') != 'temporal':
+        raise ValueError('Retired frozen algorithm; run --db-update and rebuild publications with fresh inference.')
+    return TemporalPolicy.from_snapshot(options['policy'])

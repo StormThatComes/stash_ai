@@ -47,7 +47,7 @@ def compact(snapshot):
     return {FORMAT_KEY: FORMAT, 'snapshot': result, 'proofs': proofs}
 
 
-def expand(value, *, version=FORMAT):
+def expand(value, *, version=FORMAT, validate=True):
     """Validate/expand a declared envelope. Runtime accepts only the current format."""
     if (not isinstance(value, dict) or set(value) != {FORMAT_KEY, 'snapshot', 'proofs'}
             or type(value[FORMAT_KEY]) is not int
@@ -59,7 +59,7 @@ def expand(value, *, version=FORMAT):
     for item in value['snapshot'].get('contributions', []):
         if not isinstance(item, dict):
             raise ValueError('Invalid compact snapshot contribution.')
-        if version == FORMAT:
+        if version == FORMAT and validate:
             validate_policy(item)
         if 'extra_support' not in item:
             contributions.append(item)
@@ -83,7 +83,7 @@ def expand(value, *, version=FORMAT):
 def validate_policy(item):
     options = item.get('build_options')
     if options is not None:
-        from stash_ai.evidence.historical_markers import frozen_policy
+        from stash_ai.evidence.temporal.policy import frozen_policy
         from stash_ai.models import SOURCES
         marker = {'policy', 'settings', 'marker_thresholds', 'core_exclusions', 'tag_exclusions'}
         scene = {'policy', 'max_tags', 'scene_thresholds', 'scene_exclusions'}
@@ -131,3 +131,8 @@ def encode(value, report=None):
     with stage(report, 'state_snapshot_compact'):
         packed = compact(value)
     return encode_json(packed, report)
+
+
+def require_rebased(contributions):
+    if any(item.get('requires_rebase') for item in contributions):
+        raise RuntimeError('Retired publication proof; run fresh inference for its models and --merge-only before cleanup.')

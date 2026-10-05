@@ -58,14 +58,13 @@ def test_wider_support_policy_checks_historical_retention_before_publication(
         from stash_ai.storage.codec import encode
         with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL)) as state:
             records = state.records('1', 'markers')['wd']
-            for segment in records:
-                segment['meta']['analysis_format'] = 3
-                segment['meta']['marker_tag_blocklist'] = []
-                segment['meta'].pop('marker_score_floor', None)
+            records['meta']['analysis_format'] = 3
+            records['meta']['marker_tag_blocklist'] = []
+            records['meta'].pop('marker_score_floor', None)
             with state.connection:
                 state.connection.execute("UPDATE results SET data=? WHERE kind='markers'", (encode(records),))
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), True) as state:
-        meta = state.records('1', 'markers')['wd'][0]['meta']
+        meta = state.unpack(state.connection.execute("SELECT data FROM " + state.table('results') + " WHERE kind='markers' AND model='wd'").fetchone()[0])['meta']
         assert ('marker_score_floor' not in meta) == old_cache
     before = stored_outputs(p.path), deepcopy(p.stash.scene)
     database_bytes = p.path.read_bytes()
@@ -83,11 +82,16 @@ def test_wider_support_policy_checks_historical_retention_before_publication(
         assert p.path.read_bytes() == database_bytes
     if old_cache:
         output = capsys.readouterr().out
-        assert 'marker cache floor' in output and 'wd' in output and '--restart' in output
+        assert 'Obsolete active inference' in output and '--db-update' in output
     elif not dry_run:
         assert marker_ranges(p.stash) == [('ai:common', 0, 8)]
     monkeypatch.setattr(app, 'DRY_RUN', False)
     p.stash.dry_run = False
+    if old_cache:
+        from stash_ai.db import update_database
+        with sqlite3.connect(p.path) as connection:
+            connection.execute('PRAGMA user_version=14')
+        update_database(p.path)
     assert app.main([*args, '--restart']) == 0
     assert marker_ranges(p.stash) == [('ai:common', 0, 8)]
 
@@ -110,19 +114,23 @@ def test_old_high_only_cache_remains_usable_with_matching_support_policy(pipelin
 def test_unknown_historical_floor_requires_inference_even_at_high_threshold(override):
     from tests.helpers.evidence import segment, policies
     frames = segment('wd', [[('core', .95)]] * 2)
+    frames['meta']['analysis_format'] = 3
+    frames['meta']['marker_tag_blocklist'] = []
     frames['meta'].pop('marker_score_floor', None)
     frames['meta']['marker_threshold'] = .7
     frames[thresholds_identity.OVERRIDE] = override
-    with pytest.raises(ValueError, match='wd: marker cache floor.*run inference'):
-        merge_source_markers.marker_contributions(app, {'wd': [frames]}, policies())
+    with pytest.raises(ValueError, match='Obsolete active inference'):
+        merge_source_markers.marker_contributions(app, {'wd': frames}, policies())
 
 
 def test_historical_incomplete_segment_cannot_hide_behind_complete_history():
     from tests.helpers.evidence import segment, policies
     old = segment('wd', [[], []])
+    old['meta']['analysis_format'] = 3
+    old['meta']['marker_tag_blocklist'] = []
     old['meta'].pop('marker_score_floor', None)
     current = segment('wd', [[('core', .9)]] * 2)
-    with pytest.raises(ValueError, match='wd: marker cache floor.*run inference'):
+    with pytest.raises(ValueError, match='Invalid active inference record'):
         merge_source_markers.marker_contributions(app, {'wd': [old, current]}, policies())
 
 
@@ -208,26 +216,23 @@ def test_scene_tags_only_does_not_require_marker_cache(pipeline, monkeypatch, tm
     assert p.stash.scene == before
 
 
-def test_legacy_frames_and_imported_ranges_remain_usable():
+def test_noninference_cannot_claim_current_retention_contract():
     from tests.helpers.evidence import segment, policies
     imported = segment('wd', [[('core', .9)]] * 2)
     imported['meta'].update(origin='legacy')
     imported['meta'].pop('marker_score_floor', None)
-    records = {'wd': [imported], 'joytag': [
-        dict(mode='spans', meta={'origin': 'legacy'}, items=[
-            dict(tag='legacy', start=3, end=5, extra_tags=[])])]}
-    markers = merge_intervals.union_intervals(merge_source_markers.marker_contributions(app, records, policies()))
-    assert [(m['tag'], m['start'], m['end']) for m in markers] == [('core', 0, 2), ('legacy', 3, 5)]
+    with pytest.raises(ValueError, match='Active results require current inference'):
+        merge_source_markers.marker_contributions(app, {'wd': imported}, policies())
 
 
 @pytest.mark.parametrize('source', ['wd', 'dtq'])
 def test_incomplete_history_cannot_contribute_consensus_votes(source):
     from tests.helpers.evidence import segment, policies
-    records = {key: [segment(key, [[('core', .7)]] * 3)] for key in ('wd', 'dtq')}
+    records = {key: segment(key, [[('core', .7)]] * 3) for key in ('wd', 'dtq')}
     for segments in records.values():
-        segments[0]['meta']['marker_score_floor'] = .6
-    incomplete = deepcopy(records[source][0])
+        segments['meta']['marker_score_floor'] = .6
+    incomplete = deepcopy(records[source])
     incomplete['meta']['marker_score_floor'] = .75
-    records[source].insert(0, incomplete)
+    records[source] = incomplete
     with pytest.raises(ValueError, match=source + ': marker cache floor.*run inference'):
         merge_source_markers.marker_contributions(app, records, policies())

@@ -37,8 +37,7 @@ sceny zawiera `cleanup/scenes.py`, a re-ewaluację opublikowanego evidence
 `cleanup/evidence.py`: kwalifikacja zmienionych dowodów, leniwy `EvidenceReplay`
 z indeksem sygnatur i cache replay oraz clipping do opublikowanych przedziałów.
 Stan i maski cleanupu znajdują się w `cleanup/state.py`, a odczyt katalogu tagów
-w `cleanup/client.py`. `cleanup/prune.py` i `cleanup/legacy.py` obsługują pruning
-zwykłych tagów oraz zachowanych wyników legacy. Pozostała logika domenowa znajduje się m.in. w `stash_ai/evidence/scenes.py`,
+w `cleanup/client.py`. `cleanup/prune.py` obsługuje pruning zwykłych tagów. Pozostała logika domenowa znajduje się m.in. w `stash_ai/evidence/scenes.py`,
 `stash_ai/evidence/observations.py`, `stash_ai/evidence/temporal/` i `stash_ai/evidence/occurrences.py`.
 
 `stash_ai/publication/index.py` buduje dla jednej sceny niemutowalny indeks istniejących
@@ -62,10 +61,12 @@ procesów merge oraz model report, bez ładowania usług CLI.
 `stash_ai/cli.py` koordynuje jeden pipeline publikacji. Pobieranie cue/sprite,
 przygotowanie obrazów, filtrowanie score i resumowalna inferencja znajdują się
 w `stash_ai/inference/`. Nowa inferencja używa silnika temporalnego.
-`evidence/historical_markers.py` odtwarza dawny algorytm wyłącznie dla frozen
-snapshotów publikacji/cleanupu; zachowuje historyczne zakresy i first-frame extras.
+Frozen replay uses only the temporal engine. Schema v17 retains old contribution geometry,
+manual tag IDs, ownership and pending/recovery intent, but retires old build options under
+`retired_build_options`. Cleanup refuses contributions marked `requires_rebase`; fresh
+inference and merge replace them with current proofs. Offline snapshot migrations remain available.
 Usunięto aktywne moduły `runs/separate.py`, `publication/separate.py` i ich
-plannery. Source-prefixed wyniki nadal obsługują import legacy i moduły cleanupu.
+plannery. Source-prefixed wyniki przechodzą jednorazowo do ai: przez świeżą inferencję.
 Funkcje zależne od ustawień przebiegu otrzymują `app` jako jawny argument,
 a callback przygotowania obrazu JoyTag wiąże go przez `functools.partial`.
 `stash_ai/inference/inputs.py` zawiera `VerifiedMedia`, `RunMedia`, `RunInputs`
@@ -89,8 +90,7 @@ DB/maintenance i pipeline, zachowując kolejność błędów oraz normalizację 
 `dispatch.py` rozdziela komendy DB przed konfiguracją runtime, komendy samodzielne
 przed ładowaniem modeli oraz explain/merge-only przed dostępem do vocabularies i wag.
 `explain.py` zawiera odczytową diagnostykę tagów; `hierarchy.py` kompozycję hierarchii
-i jej samodzielną synchronizację, a `legacy.py` rozpoznanie namespace'ów, odczytowy source check oraz jawny
-import starych wyników. CLI używa bezpośrednich importów bez wrapperów pod dawnymi ścieżkami.
+i jej samodzielną synchronizację, a `namespace_migration.py` rozpoznanie starych namespace'ów, source check oraz jednorazowe przejście starych wyników. CLI używa bezpośrednich importów bez wrapperów pod dawnymi ścieżkami.
 Parsowanie konfiguracji,
 wykluczeń i hierarchii znajduje się w `stash_ai/config.py`, a parser cue WebVTT
 w `stash_ai/vtt.py`. Dzięki temu format argumentów, YAML i VTT oraz specjalne
@@ -175,7 +175,7 @@ schematu, identyfikatora bazy, formatu BLOB-ów ani domyślnej lokalizacji SQLit
 | --- | --- |
 | `stash_ai/storage/database.py` / `StateDatabase` | Cykl życia połączenia SQLite i blokady procesu, sprawdzenie identyfikatora/wersji bazy, podstawowe tabele i otwarcie źródła dry-run. |
 | `stash_ai/storage/store.py` / `StateStore` | Façade i właściciel lifecycle/cache/serializacji; koordynuje inicjalizację schematów oraz deleguje trwałe dane do wyspecjalizowanych magazynów. |
-| `stash_ai/storage/results.py` / `ResultStore` | Wyniki inferencji, indeksowanie źródeł i importy legacy. |
+| `stash_ai/storage/results.py` / `ResultStore` | Wyniki inferencji i indeksowanie źródeł. |
 | `stash_ai/storage/publications.py` / `PublicationStore` | Snapshoty published/pending, trwały zamiar publikacji i atomowe zatwierdzanie przygotowanych publikacji. |
 | `stash_ai/storage/preview.py` | Widoki nakładki dry-run, usunięcia w nakładce i wykrywanie zmian źródła. |
 | `stash_ai/storage/codec.py` | Kodowanie i dekodowanie BLOB-ów. |
@@ -381,13 +381,13 @@ changing the proof objects retained by result spans.
 
 Schema upgrades run only through `--db-update`. Runtime writers and dry-run readers require the current schema; fresh stores are created at the current version. Preview always attaches a current database read-only and writes into a sparse temporary overlay. The offline updater visits every scope, backfills derived result metadata, and preserves raw evidence and unfinished plans. Metadata invalidated or corrupted later is still rebuilt from authoritative evidence.
 
-Schema v10 stores per-segment effective thresholds as JSON arrays in `result_thresholds.thresholds`; null entries use the segment's original inference threshold. Evidence BLOBs and derived metadata contain no publication overrides. The offline migration strips retired refinement and inline overrides once, preserving evidence signatures and mixed history. New inference always declares its actual marker capture floor and an empty marker blocklist. Unknown historical retention is rejected for new publication, while verified frozen cleanup replay keeps its narrower exception.
+Schema v18 stores one current inference object per (scope, scene, model, output). `result_metadata` format 4 mirrors this single-record shape without frame payloads. Each result has an optional numeric policy in `result_thresholds.threshold`; evidence and metadata contain no publication overrides. New inference replaces the active object and resets its policy, retaining prior evidence only when a durable publication pins its exact signature. List-shaped history and JSON threshold arrays are read exclusively by offline migration helpers in `db/result_history.py`. The updater preserves the last active inference and its effective threshold, proof archives, ownership, pending and recovery state. Legacy DB and snapshot migrations remain available. Current-format retention is required for publication and cleanup replay.
 
 Schema v12 uses snapshot envelope v3 for every new publication, including snapshots with no shared proofs. Generic compressed JSON decoding never dispatches by a magic key. Snapshot decoding requires complete frozen marker/scene build options and every source's exclusion list, also inside occurrence scene evidence. Offline migration handles plain JSON and v1/v2 envelopes, completes historical empty maps and policies, and folds retired blocklists into frozen tag exclusions. Numeric marker settings and scene tag caps must already be saved; migration never substitutes today's runtime settings. Pending promotion still copies the encoded intent, and migration preserves proof references, recovery operation IDs, ownership and old False flags.
 
-Scene accumulator checkpoints carry a complete analysis format. Its version participates only in the checkpoint signature, so old unfinished batches restart for the affected scene/model. Completed inference signatures, retained frame evidence and historical statistics without a peak timestamp remain reusable.
+Scene accumulator checkpoints carry a complete analysis format. Its version participates only in the checkpoint signature, so old unfinished batches restart for the affected scene/model. Active inference requires complete format-4 evidence; obsolete active results are retired by schema 15 and require reinference. Historical publication proofs remain pinned outside the active cache until rebased.
 
-Legacy Stash conversion runs only through `--import-legacy-only`, before model/configuration loading. Each scene commits imported evidence and its exact-object ledger in one transaction. Ordinary merged scans only validate known inputs and lost-state guards; they cannot import evidence. Publication planning migrates only ledger-confirmed objects, preserving late or uncaptured source objects. SQL read fallback, unknown scores/end times, manual markers, pending plans and anti-duplication semantics remain in effect.
+Source-owned Stash conversion runs through `--migrate-legacy-only` using fresh inference and normal durable publication plans. The isolated namespace planner preserves manual objects and extras, reuses matching marker IDs and removes old source associations after new output is ready. Repeated conversion skips completed scenes; pending plans allow retries after partial API success. Schema 16 retires imported active evidence and drops its ledger. Normal publication has no imported-evidence or ledger branches.
 
 New result writes require an explicit output mode, metadata dictionary and item list before changing SQL state. Scene inference capture requires retained frame analysis. Missing marker retention floors are insufficient in both cache reports and publication validation. Runtime index signatures accept only the output's own override; mixed historical policies are inspected only by offline DB validation. Spawned merge workers always carry both declared threshold maps, and HTTP timing uses the native Response body contract.
 

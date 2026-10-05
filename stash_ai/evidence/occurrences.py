@@ -19,9 +19,7 @@ def _number(value, low=0.0, high=float('inf')):
 
 
 def _run(meta):
-    from stash_ai.signatures import digest
-    signature = meta.get('inference_signature')
-    return (signature, meta.get('frame_input_signature')) if signature else ('metadata', digest(meta))
+    return meta['inference_signature'], meta['frame_input_signature']
 
 
 def _sources(hit):
@@ -90,18 +88,17 @@ def _candidate_streams(hits, records, blocked, policy):
 
     streams = [iter(sorted(peaks, key=lambda event: event[0]))]
     from stash_ai.evidence.identity import marker_segment_signature
-    for source, segments in records.items():
-        for segment in segments:
-            if segment['mode'] != 'frames':
-                continue
-            signature = marker_segment_signature(segment)
-            qualified = defaultdict(list)
-            for mapping in (by_run.get((source, _run(segment['meta'])), {}), by_frame.get((source, signature), {})):
-                for tag, proofs in mapping.items():
-                    if tag not in blocked[source]:
-                        qualified[tag].extend(proofs)
-            if qualified:
-                streams.append(_observations(source, segment, signature, qualified, policy))
+    for source, segment in records.items():
+        if segment['mode'] != 'frames':
+            continue
+        signature = marker_segment_signature(segment)
+        qualified = defaultdict(list)
+        for mapping in (by_run.get((source, _run(segment['meta'])), {}), by_frame.get((source, signature), {})):
+            for tag, proofs in mapping.items():
+                if tag not in blocked[source]:
+                    qualified[tag].extend(proofs)
+        if qualified:
+            streams.append(_observations(source, segment, signature, qualified, policy))
     return streams
 
 
@@ -111,8 +108,7 @@ def _best_points(streams):
     for time, events in groupby(heapq.merge(*streams, key=lambda event: event[0]), key=lambda event: event[0]):
         groups = defaultdict(dict)
         for _, source, meta, signature, kind, values in events:
-            # Missing input identity never permits votes from different models.
-            identity = meta.get('frame_input_signature') or (source, _run(meta))
+            identity = meta['frame_input_signature']
             for tag, score, proofs in values:
                 group = groups[tag, identity]
                 witness = dict(source=source, score=score, meta=meta, evidence_kind=kind,

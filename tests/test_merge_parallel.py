@@ -1,4 +1,5 @@
 """Parallel merged evidence preparation stays read-only and deterministic."""
+from tests.helpers.evidence import current_record
 from tests.helpers.temporal import threshold_policy
 
 import json
@@ -29,11 +30,11 @@ def _outputs(source, label):
         identity="scene-input",
     )
     marker["meta"]["scene_threshold"] = .4
-    scene = {
+    scene = current_record({
         "mode": "scene",
         "meta": dict(marker["meta"]),
         "items": [{"tag": label, "score": .92}],
-    }
+    })
     return {"scene": scene, "markers": marker}
 
 
@@ -69,7 +70,7 @@ def test_parallel_worker_tolerates_parent_publication_commits(tmp_path, rethresh
     try:
         if rethresholded:
             assert worker.preview_source
-            assert worker.model_records('1', 'markers', 'wd')[0][thresholds_identity.OVERRIDE] == .95
+            assert worker.model_record('1', 'markers', 'wd')[thresholds_identity.OVERRIDE] == .95
         first = merge_parallel._worker_evidence("1")
         assert first[-1] is None
 

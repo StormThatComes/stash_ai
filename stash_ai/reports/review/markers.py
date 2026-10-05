@@ -1,5 +1,4 @@
 """Marker confidence and retained frame witnesses for review signals."""
-from collections import defaultdict
 from bisect import bisect_left, bisect_right
 from .signals import _score, _candidate, _flag
 
@@ -49,17 +48,14 @@ def _marker_signals(app, store, scene, spans, rows, options):
     from stash_ai.evidence.identity import marker_segment_signature
     from stash_ai.evidence.intervals import union_intervals
     from stash_ai.evidence.marker_identity import is_occurrence
-    from stash_ai.signatures import digest
     from stash_ai.evidence.thresholds import marker_threshold
 
-    effective, by_meta, segments_by_signature, postings = {}, defaultdict(set), {}, {}
-    for model, segments in store.records(scene, "markers", borrow=True).items():
-        for segment in segments:
-            threshold = marker_threshold(segment)
-            key = model, marker_segment_signature(segment)
-            effective[key] = threshold
-            segments_by_signature[key] = segment
-            by_meta[model, digest(segment["meta"])].add(threshold)
+    effective, segments_by_signature, postings = {}, {}, {}
+    for model, segment in store.records(scene, "markers", borrow=True).items():
+        threshold = marker_threshold(segment)
+        key = model, marker_segment_signature(segment)
+        effective[key] = threshold
+        segments_by_signature[key] = segment
 
     for marker in union_intervals(spans, borrow=True):
         if is_occurrence(marker):
@@ -68,9 +64,6 @@ def _marker_signals(app, store, scene, spans, rows, options):
         for contribution in marker["contributors"]:
             model, tag = contribution["source"], marker["tag"]
             threshold = effective.get((model, contribution.get("evidence_signature")))
-            if threshold is None:
-                values = by_meta.get((model, digest(contribution["meta"])), set())
-                threshold = next(iter(values)) if len(values) == 1 else None
             score = contribution.get("score")
             witnesses = [(model, score, threshold, False)]
             witnesses.extend((peer, score, threshold, True) for peer, score, threshold in
@@ -83,4 +76,3 @@ def _marker_signals(app, store, scene, spans, rows, options):
                     _flag(row, "weak_or_borderline", detail)
                 if duration is not None and duration >= options.long_marker_seconds:
                     _flag(row, "long_marker", {**detail, "duration_seconds": duration})
-

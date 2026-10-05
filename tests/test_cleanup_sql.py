@@ -1,4 +1,5 @@
 """Real SQLite SELECT contracts and API-write semantics for large cleanup."""
+from tests.helpers.evidence import current_record
 from stash_ai.storage.results import KINDS
 from stash_ai.stash_api.client import StashClient
 from collections import Counter
@@ -230,7 +231,7 @@ def test_unavailable_sql_does_not_return_to_global_marker_filter(tmp_path, monke
 def test_cleanup_preview_reads_only_requested_state_and_shadows_in_memory(tmp_path):
     path = tmp_path/'state.sqlite3'
     snapshot = {'contributions': [hit('wd')]}
-    segment = {'mode':'spans', 'items': [span('wd',0,2)], 'meta': {'origin':'legacy'}}
+    segment = current_record({'mode':'spans', 'items': [span('wd',0,2)], 'meta': {'origin':'legacy'}})
     with merge_store.StateStore(path,'fixture') as state:
         state.put('1','wd',{'markers':segment})
         state.publish('1',{'scene':snapshot})
@@ -240,7 +241,7 @@ def test_cleanup_preview_reads_only_requested_state_and_shadows_in_memory(tmp_pa
         assert state.connection.execute('SELECT count(*) FROM main.results').fetchone() == (0,)
         assert state.connection.execute('SELECT count(*) FROM main.snapshots').fetchone() == (0,)
         assert state.snapshot('1','scene')[0] == snapshot
-        assert state.records('1','markers')['wd'] == [segment]
+        assert state.records('1','markers')['wd'] == segment
         state.publish('1',{'scene':{'contributions':[]}})
         assert state.snapshot('1','scene')[0]['contributions'] == []
         with pytest.raises(sqlite3.OperationalError, match='readonly'):

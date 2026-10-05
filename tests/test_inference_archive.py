@@ -39,13 +39,13 @@ def test_replacement_preserves_exact_pins_and_replay_while_active_results_are_la
     before = path.read_bytes()
     with StateStore(path, 'scope', dry_run=preview) as store:
         store.put('1', 'wd', new)
-        assert store.model_records('1', 'markers', 'wd') == [new['markers']]
+        assert store.model_record('1', 'markers', 'wd') == new['markers']
         archived = archived_records(store, '1', 'markers')['wd']
         signature = marker_segment_signature(old['markers'])
         assert marker_segment_signature(archived[0]) == signature
         assert not archived_records(store, '1', 'scene')  # no scene proof pinned
         exact = PublishedRecords(store, '1').matching('markers', {'wd': [signature]}, error='lost proof')
-        assert marker_segment_signature(exact['wd'][0]) == signature
+        assert marker_segment_signature(exact['wd']) == signature
         # Repeated replacements do not retain unreferenced intermediate inference.
         store.put('1', 'wd', outputs(signature='third'))
         assert len(archived_records(store, '1', 'markers')['wd']) == 1
@@ -70,7 +70,7 @@ def test_archive_and_replacement_roll_back_together(tmp_path):
             with store.connection:
                 store.results.put_in_transaction('1', 'wd', outputs(signature='new'))
                 raise RuntimeError('rollback')
-        assert store.model_records('1', 'markers', 'wd') == [old['markers']]
+        assert store.model_record('1', 'markers', 'wd') == old['markers']
         assert not archived_records(store, '1', 'markers')
 
 
@@ -84,10 +84,10 @@ def test_v13_migration_keeps_latest_and_only_pinned_history_across_scopes(tmp_pa
     with sqlite3.connect(path) as connection:
         connection.execute('UPDATE results SET data=?', (encode(history),))
         connection.execute('PRAGMA user_version=13')
-    assert db.update_database(path) == (13, 14)
+    assert db.update_database(path) == (13, 18)
     for scope in ('first', 'second'):
         with StateStore(path, scope) as store:
-            assert store.model_records('1', 'markers', 'wd') == [history[-1]]
+            assert store.model_record('1', 'markers', 'wd') == history[-1]
             archived = archived_records(store, '1', 'markers')['wd']
             assert len(archived) == 1
             assert marker_segment_signature(archived[0]) == marker_segment_signature(history[1])
@@ -95,7 +95,7 @@ def test_v13_migration_keeps_latest_and_only_pinned_history_across_scopes(tmp_pa
     with sqlite3.connect(path) as connection:
         before = [connection.execute('SELECT * FROM ' + table).fetchall()
                   for table in ('results', 'inference_archive', 'snapshots')]
-    assert db.update_database(path) == (14, 14)
+    assert db.update_database(path) == (18, 18)
     with sqlite3.connect(path) as connection:
         assert [connection.execute('SELECT * FROM ' + table).fetchall()
                 for table in ('results', 'inference_archive', 'snapshots')] == before
@@ -111,8 +111,8 @@ def test_scene_frames_can_be_replayed_from_pinned_scene_archive(tmp_path):
         store.put('1', 'wd', outputs(signature='new'))
         matching = PublishedRecords(store, '1').matching('markers', {'wd': [signature]},
                                                         scene_frames=True, error='missing scene frames')
-        assert matching['wd'][0]['mode'] == 'frames'
-        assert marker_segment_signature(matching['wd'][0]) == signature
+        assert matching['wd']['mode'] == 'frames'
+        assert marker_segment_signature(matching['wd']) == signature
 
 
 

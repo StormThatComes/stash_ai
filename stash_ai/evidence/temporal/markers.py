@@ -8,19 +8,18 @@ from stash_ai.evidence.observations import qualify_marker_extras
 def consensus_seeds(records, policies, policy, *, thresholds=None):
     """Only identical sampled inputs/times can vote, at most once per model."""
     votes = defaultdict(set)
-    for model, segments in records.items():
-        for segment in segments:
-            meta = segment["meta"]
-            identity = meta.get("frame_input_signature")
-            from stash_ai.evidence.thresholds import marker_threshold
-            high = marker_threshold(segment, thresholds)
-            if segment["mode"] != "frames" or not identity or high is None:
-                continue
-            floor = marker_floor(policy, high)
-            for frame in segment["items"]:
-                for tag, score in frame["tags"]:
-                    if score >= floor and tag not in policies[model]:
-                        votes[(identity, frame["start"], tag)].add(model)
+    for model, segment in records.items():
+        meta = segment["meta"]
+        identity = meta.get("frame_input_signature")
+        from stash_ai.evidence.thresholds import marker_threshold
+        high = marker_threshold(segment, thresholds)
+        if segment["mode"] != "frames" or not identity or high is None:
+            continue
+        floor = marker_floor(policy, high)
+        for frame in segment["items"]:
+            for tag, score in frame["tags"]:
+                if score >= floor and tag not in policies[model]:
+                    votes[(identity, frame["start"], tag)].add(model)
     return {key: tuple(sorted(models)) for key, models in votes.items() if len(models) >= policy.consensus_min_models}
 
 

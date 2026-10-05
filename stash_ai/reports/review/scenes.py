@@ -13,14 +13,13 @@ def _scene_signals(app, store, scene, hits, rows, options, scene_policies):
     # for every accepted tag. Absence from this map is never a negative vote.
     peers = defaultdict(list)
     metadata = {}
-    for model, segments in projected.items():
-        for segment in segments:
-            meta = segment["meta"]
-            metadata[model, marker_segment_signature(segment)] = meta
-            identity = meta.get("frame_input_signature")
-            if identity and meta.get("origin") == "inference":
-                for entry in segment["items"]:
-                    peers[identity, entry["tag"]].append((model, meta, entry))
+    for model, segment in projected.items():
+        meta = segment["meta"]
+        metadata[model, marker_segment_signature(segment)] = meta
+        identity = meta.get("frame_input_signature")
+        if identity and meta.get("origin") == "inference":
+            for entry in segment["items"]:
+                peers[identity, entry["tag"]].append((model, meta, entry))
 
     for hit in hits:
         shared = hit.get("derived") == "shared_scene_frames"

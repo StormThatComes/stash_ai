@@ -21,12 +21,12 @@ pytestmark = pytest.mark.usefixtures('reset_temporal')
 
 def group(records):
     return {'members': [(source, item, source + '-proof')
-                        for source, items in records.items() for item in items]}
+                        for source, item in records.items()]}
 
 
 def test_shared_observations_sort_only_eligible_scores(monkeypatch):
     rows = [[('core', .9), ('support', .7)] + [(f'weak_{i}', .2) for i in range(100)]] * 4
-    records = {'wd': [segment('wd', rows)]}
+    records = {'wd': segment('wd', rows)}
     sorted_sizes = []
     def observe_sort(values, **kwargs):
         values = list(values)
@@ -64,10 +64,10 @@ def test_wide_cache_preserves_observations_ties_exclusions_and_empty_timestamps(
     rows = [[('a', .95), ('c', .9), ('b', .9), ('support', .7), ('blocked', 1.)], [],
             [('b', .9), ('detail', .9)]]
     core_policies, tag_policies = policies({'a', 'detail'}), policies({'c', 'blocked'})
-    lean = {source: [segment(source, rows)] for source in ('wd', 'dtq')}
+    lean = {source: segment(source, rows) for source in ('wd', 'dtq')}
     wide = deepcopy(lean)
     for items in wide.values():
-        for row in items[0]['items']:
+        for row in items['items']:
             row['tags'] += [(f'weak_{i}', .2) for i in range(100)]
     before = deepcopy(wide)
     expected = fusion.observations(app, group(lean), core_policies, tag_policies)
@@ -86,7 +86,7 @@ def test_filter_uses_effective_per_source_threshold_and_preserves_exact_boundari
              ('under_high', math.nextafter(.8, -math.inf))]]
     wd, dtq = segment('wd', rows), segment('dtq', [[('dtq_core', .5), ('dtq_support', .425)]])
     dtq[thresholds_identity.OVERRIDE] = .5
-    event = fusion.observations(app, group({'wd': [wd], 'dtq': [dtq]}), policies())[0]
+    event = fusion.observations(app, group({'wd': wd, 'dtq': dtq}), policies())[0]
     assert set(event['cores']) == {'edge', 'above', 'high', 'under_high', 'dtq_core', 'dtq_support'}
     assert set(event['extras']) == {'high', 'dtq_core'}
     assert not event['cores']['edge']['wd']['strong']
@@ -96,7 +96,7 @@ def test_filter_uses_effective_per_source_threshold_and_preserves_exact_boundari
 def test_zero_threshold_keeps_zero_score_observations():
     saved = segment('wd', [[('zero', 0.)]])
     saved['meta']['marker_threshold'] = 0.
-    event = fusion.observations(app, group({'wd': [saved]}), policies())[0]
+    event = fusion.observations(app, group({'wd': saved}), policies())[0]
     assert set(event['cores']) == set(event['extras']) == {'zero'}
 
 
@@ -105,13 +105,13 @@ def test_zero_threshold_keeps_zero_score_observations():
 def test_low_score_invalid_labels_still_fail_merge_validation(label, shared, monkeypatch):
     monkeypatch.setattr(app, 'TEMPORAL_POLICY', replace(app.TEMPORAL_POLICY,
         shared_marker_frames=shared, shared_marker_extras=shared))
-    records = {'wd': [segment('wd', [[('core', .9), (label, .01)]] * 2)]}
+    records = {'wd': segment('wd', [[('core', .9), (label, .01)]] * 2)}
     with pytest.raises(ValueError, match='Invalid or reserved merged label'):
         merge_source_markers.marker_contributions(app, records, policies())
 
 
 def test_direct_observation_validation_checks_low_labels_but_keeps_exclusion_semantics():
-    records = {'wd': [segment('wd', [[('core', .9), (' bad', .01)]])]}
+    records = {'wd': segment('wd', [[('core', .9), (' bad', .01)]])}
     with pytest.raises(ValueError, match='Invalid or reserved merged label'):
         fusion.observations(app, group(records), policies())
     assert set(fusion.observations(app, group(records), policies(), policies({' bad'}))[0]['cores']) == {'core'}
@@ -144,8 +144,8 @@ def test_temporal_markers_keep_weak_continuations_gaps_extras_and_proofs(monkeyp
 
 
 def test_consensus_at_support_floor_survives_wider_retention():
-    records = {source: [segment(source, [[('core', .7)] +
-                [(f'weak_{i}', .2) for i in range(100)]] * 3)] for source in ('wd', 'dtq')}
+    records = {source: segment(source, [[('core', .7)] +
+                [(f'weak_{i}', .2) for i in range(100)]] * 3) for source in ('wd', 'dtq')}
     markers = merge_intervals.union_intervals(merge_source_markers.marker_contributions(app, records, policies()))
     assert len(markers) == 1
     assert markers[0]['tag'] == 'core'

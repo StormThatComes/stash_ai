@@ -82,14 +82,9 @@ python .\stash_ai.py --explain-tag ai:blue_hair --scene-id 123
 # Usuwanie nieużywanych definicji tagów.
 python .\stash_ai.py --prune-empty-tags-only --dry-run
 
-# Jawny import wyników z trybu separate; zapisuje tylko lokalną bazę.
-python .\stash_ai.py --import-legacy-only --dry-run
-python .\stash_ai.py --import-legacy-only
-python .\stash_ai.py --merge-only
-
-# Usuwanie niepotrzebnej historii importu starych source-prefixed tagów/markerów.
-python .\stash_ai.py --prune-legacy-imports --dry-run
-python .\stash_ai.py --prune-legacy-imports
+# Jednorazowe przejście starych wyników do ai: ze świeżą inferencją.
+python .\stash_ai.py --models all --migrate-legacy-only --dry-run
+python .\stash_ai.py --models all --migrate-legacy-only
 
 # Zdrowie, aktualizacja schematu, spójność i kompaktowanie lokalnej bazy stanu.
 python .\stash_ai.py --db-report
@@ -124,20 +119,20 @@ python .\stash_ai.py --abandon-pending
 Zmiana progów zapisuje małe wiersze w tabeli `result_thresholds`; skompresowane
 wyniki inferencji i evidence klatek pozostają bez zmian. Dotyczy to także
 automatycznego użycia cache po zmianie progów w YAML. Odczyt wyników, merge,
-cleanup i explain używają efektywnych progów z tej tabeli. Każdy segment historii ma własny efektywny próg zapisany w tej tabeli.
+cleanup i explain używają efektywnych progów z tej tabeli. Każda para model–wyjście ma jeden aktywny wynik i opcjonalny liczbowy próg w `result_thresholds.threshold`.
 `--db-update` przenosi dawne inline overrides i usuwa wycofane `refinement`;
 klatki, wyniki i podpisy dowodów zachowują swoje wartości.
 `--dry-run` zapisuje progi wyłącznie w tymczasowej bazie.
 
 Snapshoty merge zapisują współdzielone dowody `extra_support` raz, a contributions
 odwołują się do nich przez referencje. Zmniejsza to koszt serializacji i kompresji.
-Aktualny schemat to v14; starsze wersje programu odmówią jego otwarcia. Każdy nowy snapshot ma otoczkę formatu v4. `--db-update` konwertuje dawne
+Aktualny schemat to v18; starsze wersje programu odmówią jego otwarcia. Każdy nowy snapshot ma otoczkę formatu v4. `--db-update` konwertuje dawne
 snapshoty, także pending i recovery, dopisuje wymagane `contributions: []` do pustych zapisów oraz uzupełnia kompletne opcje odtwarzania, również w zagnieżdżonych dowodach scen.
 Dawny `blocklist` zostaje połączony z zapisanymi `tag_exclusions` wszystkich źródeł.
 Brakujące dawne przełączniki współdzielenia i occurrences zachowują `False`.
 Wersjonowanie analizy checkpointu dotyczy wyłącznie niedokończonej inferencji:
 stare checkpointy są pomijane przy wznowieniu i dany model zaczyna scenę od początku.
-Ukończone wyniki inferencji pozostają bez zmian. `--dry-run` zmienia wyłącznie tymczasową bazę.
+Ukończone wyniki formatu 4 zachowują dowody i sygnatury; starsze aktywne wyniki wymagają ponownej inferencji. `--dry-run` zmienia wyłącznie tymczasową bazę.
 
 Pełną listę opcji pokazuje:
 
@@ -188,12 +183,9 @@ zwykłego przebiegu uruchamia świeżą inferencję i unieważnia częściowy ch
 `--merge-only` nie uzupełnia wcześniej odrzuconych wyników. Niższa retencja zwiększa
 rozmiar bazy i koszt przetwarzania cache. Ustawienia dotyczą trwałego cache inferencji.
 
-Stary cache inferencji bez `marker_score_floor` jest sprawdzany z użyciem
-zapisanego `marker_threshold` jako konserwatywnego progu retencji. Jeśli np.
-włączenie polityki temporalnej wymaga słabszych obserwacji, `--merge-only`
-odmawia publikacji i wymaga ponownej inferencji. Nadpisanie progu publikacji
-nie obniża historycznego floor. Cleanup może nadal cofać głosy ze zweryfikowanych
-opublikowanych markerów bez tych metadanych, w granicach zapisanych dowodów.
+Aktywny cache wymaga jawnych progów retencji i pełnego formatu analizy 4.
+`--db-update` wycofuje starszą inferencję; uruchom ją ponownie przed merge i cleanup.
+Nadpisanie progu publikacji nie uzupełnia wcześniej odrzuconych obserwacji.
 
 Fazy `Check` i `Apply` rethreshold korzystają z małych rekordów `result_metadata` w SQLite,
 zamiast dekodować klatki z `results.data`. Nowe wyniki zapisują je atomowo razem
@@ -207,66 +199,47 @@ Dry-run uzupełnia wyłącznie tymczasową bazę; `--db-check`
 sprawdza zgodność istniejących metadanych z evidence bez ich naprawiania.
 
 Nowa inferencja zawsze zastępuje poprzednie wyniki danego modelu i rodzaju.
-Historyczne serie są normalizowane przy potwierdzonym reuse; import legacy
-nadal dopisuje dowody atomowo. Zwykłe przedziały opublikowane dawniej jako
+Historyczne serie są normalizowane przez `--db-update`; stare importowane
+wyniki są wycofywane, a ich modele wymagają ponownej inferencji. Zwykłe przedziały opublikowane dawniej jako
 punkty wymagają jednorazowego `--migrate-point-markers-only` (także z `--dry-run`).
 Komenda zapisuje długość ze snapshotów published, pending i recovery w natywnym `end_seconds`,
 zachowując ID, tytuły i ręczne tagi. Punkty `OccurrenceTag` pozostają punktami.
 Zwykły merge/cleanup nie odtwarza już długości w pamięci.
 
-### Import historycznych wyników modeli
+### Jednorazowe przejście starych prefiksów do ai:
 
-Normalny merge korzysta z zapisanej bazy evidence. Stare obiekty `jt:`, `wd:`,
-`dtq:` i `op:` najpierw zaimportuj przez `--import-legacy-only`, potem uruchom
-`--merge-only`. Użyj tej samej bazy `--state-db` w obu krokach; starszy schemat
-zaktualizuj wcześniej przez `--db-update`.
+`--migrate-legacy-only --models all` wykonuje świeżą inferencję dla scen ze starymi
+wynikami `jt:`, `wd:`, `dtq:` i `op:` oraz zastępuje zarządzane obiekty wynikami `ai:`.
+Użyj dotychczasowej bazy `--state-db`, po wcześniejszym `--db-update`.
+`--scene-id`, `--markers-only` i `--scene-tags-only` ograniczają zakres;
+`--dry-run` wykonuje inferencję i pokazuje plan bez zmiany Stash lub bazy źródłowej.
 
-Import nie ładuje modeli, vocabularies, polityk YAML ani mediów i nie zmienia
-Stash. Zachowuje nieznane oceny jako `score: null`, punktowe markery z nieznanym
-końcem oraz ręczne extras. Nie przejmuje ręcznych markerów bez ownership tagu.
-Czyta wszystkie namespace'y modeli; `--scene-id`, `--markers-only` oraz
-`--scene-tags-only` ograniczają zakres. `--dry-run` zapisuje tylko tymczasową
-nakładkę. Przy pending merge/cleanup trzeba najpierw dokończyć lub porzucić plan.
+Ręczne markery bez tagu ownership, ręczne tagi sceny i dodatki markerów są zachowywane.
+Pasujące zarządzane markery zachowują ID; pozostałe stare wyniki są usuwane dopiero
+po przygotowaniu nowej publikacji. Snapshot pending umożliwia ponowienie po błędzie API.
+Sceny, które zakończyły przejście, są pomijane przy ponownym uruchomieniu tej komendy.
+Jeśli CREATE_MISSING jest wyłączone, stary obiekt bez dostępnego tagu zastępczego pozostaje.
 
-Ledger zapobiega ponownemu importowi tych samych obiektów. Później znalezione historyczne wyniki
-w namespace’ach modeli wymagają ponownego jawnego importu i dopisują historię bez utraty
-istniejącego cache. Normalny merge zgłasza niezaimportowane obiekty; nie importuje
-ich automatycznie. Publikacja migruje tylko obiekty potwierdzone w ledgerze.
-
-### Czyszczenie historii legacy imports
-
-`--prune-legacy-imports` usuwa wyłącznie wpisy `legacy_imports`, które nie są
-już potrzebne do ochrony przed ponownym importem starych tagów/markerów
-`jt:`, `wd:`, `dtq:` i `op:`. Polecenie łączy się ze Stash, ale nie ładuje
-modeli ani nie uruchamia inferencji.
-
-Każdy zapisany import jest porównywany z aktualnymi source-prefixed obiektami w
-Stash. Wpis pozostaje, jeśli dokładnie zaimportowany wcześniej tag lub marker
-nadal istnieje. Jeśli taki obiekt zniknął (albo cała scena została usunięta),
-ledger można usunąć bez zmiany `results`, `result_index` ani snapshotów.
-`--dry-run` pokazuje liczbę i rozmiar rekordów kwalifikujących się do usunięcia.
-Komenda odmawia pracy przy pending publication planie.
-
-Samo usunięcie `legacy_imports` nie unieważnia już `merge_checks`: nowy legacy
-evidence i tak zapisuje `results`, a ten zapis nadal prawidłowo unieważnia cache.
-Po większym czyszczeniu można użyć `--db-compact`, aby zwrócić zwolnione strony
-SQLite do systemu plików.
+Zwykły merge odmawia pracy ze starymi zarządzanymi prefiksami i wskazuje tę komendę.
+Import historycznych ocen oraz jego trwały rejestr nie są już używane. Schemat v17
+usuwa `legacy_imports` i importowane aktywne wyniki, zlecając świeżą inferencję.
+Globalne definicje starych tagów pozostają dostępne dla ręcznych powiązań.
 
 ### Zdrowie, aktualizacja i kompaktowanie bazy stanu
 
 `--db-update` aktualizuje całą istniejącą bazę wskazaną przez `--state-db`
-do najnowszego obsługiwanego schematu (obecnie v14), we wszystkich scope'ach.
+do najnowszego obsługiwanego schematu (obecnie v18), we wszystkich scope'ach.
 Zwykłe uruchomienie oraz `--dry-run` wymagają aktualnego schematu: starszą bazę
-trzeba najpierw zaktualizować tą komendą. Nowa baza od razu otrzymuje v14.
+trzeba najpierw zaktualizować tą komendą. Nowa baza od razu otrzymuje v18.
 Updater korzysta z tego samego locka writera; migracje są wyłącznie offline.
 Tworzy aktualne tabele, indeksy i triggery, uzupełnia `result_index` dla baz
 sprzed v2, uzupełnia historyczne `result_metadata` we wszystkich scope'ach
 oraz usuwa wycofaną tabelę `refinement_progress`.
 Nie łączy się ze Stash ani nie ładuje konfiguracji modeli. Zachowuje wyniki, checkpointy, pending publication/cleanup i recovery oraz
-efektywne progi każdego segmentu. Nie odtwarza utraconych detekcji: brakująca
-metadata retention lub niepusty historyczny marker blocklist może wymagać
-ponownej inferencji z `--restart`. Starsze, nadal czytelne formaty payloadów
-pozostają zapisane w swojej dotychczasowej postaci.
+efektywny próg bieżącej inferencji. Wynik aktywny jest pojedynczym obiektem,
+a polityka pojedynczą liczbą; dawne tablice odczytuje wyłącznie migracja offline.
+Nie odtwarza utraconych detekcji: starsze niepełne wyniki wymagają ponownej inferencji.
+Dowody przypięte przez publikacje pozostają w archiwum do czasu odświeżenia publikacji.
 
 `--dry-run` wykonuje odczytowy preflight i pokazuje wersję źródłową oraz
 docelową; nie uruchamia migracji ani nie tworzy locka. Polecenie odrzuca brakującą,
@@ -323,7 +296,7 @@ Dla optymalizacji schematu raport zawiera m.in.:
 - page size/count, freelist, rozmiar DB/WAL oraz liczbę scope'ów i scen;
 - liczbę rekordów znanych tabel i rozkłady rozmiarów BLOB-ów;
 - per model/rodzaj: percentyle rozmiaru compressed JSON, compression ratio,
-  segmenty/rekord, items/segment, detekcje/klatkę i scene observations;
+  items/rekord, detekcje/klatkę i scene observations;
 - zagregowany stan checkpointów, result index i refresh requests.
 
 Raport jest pozbawiony bezpośrednich identyfikatorów i treści, ale dokładne
@@ -422,13 +395,12 @@ liczniki osobno na scene/markers i rozłączne statusy:
 | `missing` | Brak wyniku danego rodzaju |
 | `partial` | Brak wyniku, lecz istnieje checkpoint do weryfikacji przy wznowieniu |
 | `refresh_required` | Oczekujące żądanie świeżej inferencji unieważnia stary wynik |
-| `legacy_only` | Importowane wyniki nie dowodzą ukończonej inferencji |
 | `insufficient` | Brak evidence klatek, za wysoki floor lub wcześniej odfiltrowane odblokowane etykiety |
 | `inconsistent` | Wynik i indeks są niespójne albo evidence jest nieczytelne; sprawdź `--db-check` |
 
 Ukończony wynik bez żadnych detekcji jest poprawnym cache, a nie brakiem.
 Retencja jest sprawdzana względem minimum floor z YAML i progu wsparcia
-potrzebnego do publikacji. Sprawdzana jest cała zachowana historia segmentów.
+potrzebnego do publikacji. Sprawdzany jest jeden aktywny wynik każdego modelu i wyjścia.
 Przy gotowych `result_metadata` raport nie dekoduje BLOB-ów predykcji; starsze
 metadane uzupełnia wyłącznie w tymczasowej bazie. Głęboka kontrola payloadów
 pozostaje zadaniem `--db-check`.
@@ -504,7 +476,7 @@ sygnatury wejścia i inferencji, jawne progi retencji oraz statystyki lub jawne
 już zapisywany; format gwarantuje nieprzefiltrowane obserwacje. Tożsamość cache
 ma wersję 3, więc zwykły przebieg po aktualizacji ponownie wykona inferencję.
 `--merge-only` nie aktualizuje formatu starych danych. Historyczne agregaty
-i import legacy mają osobne reguły kwalifikacji; brak informacji o retencji
+mają osobne reguły kwalifikacji; brak informacji o retencji
 lub odrzuconych tagach nie stanowi dowodu pełnego cache.
 
 ## Konfiguracja
@@ -623,3 +595,24 @@ W schemacie v14 `results` zawiera najwyżej jedną aktywną inferencję na model
 sygnatura dowodu występuje w published, pending lub recovery. Nowa inferencja stosuje tę samą
 zasadę; archiwum służy wyłącznie frozen replay i jest przycinane po zmianie publikacji.
 Zwykły merge, raporty, progi i indeks ukończenia nie korzystają z historii inferencji.
+
+
+W schemacie v15 aktywna inferencja wymaga analysis_format=4. --db-update wycofuje
+starsze wyniki, zaznacza konieczność ponownej inferencji i zachowuje tylko dokładne
+dowody przypięte przez published/pending/recovery. Snapshoty i owned_ids pozostają
+bez zmian. Uruchom następnie inferencję dla wszystkich wskazanych modeli i wyjść;
+--merge-only nie odtwarza brakującego cache. Raporty i occurrences używają pełnych
+obserwacji scen oraz jawnych sygnatur. statistics=null nadal oznacza brak
+kwalifikującego wsparcia, a nie zgodę na historyczną kwalifikację agregatu.
+
+Schemat v17 wycofuje odtwarzanie historycznego algorytmu i wyjątków dla starego cache.
+Dawne publikacje zachowują geometrię, ownership i stan pending/recovery, ale wymagają
+ponownej inferencji i publikacji przed cleanup. Stare zwykłe punkty AI trzeba najpierw
+przekształcić przez `--migrate-point-markers-only`; punkty wykryć pozostają punktami.
+Brak `end_seconds` w recovery oznacza dokładny punkt i nie pasuje do zakresu.
+
+Schemat v18 zapisuje aktywny wynik jako jeden obiekt zamiast listy segmentów.
+`result_metadata` w formacie 4 ma również jeden obiekt, a `result_thresholds.threshold`
+jest opcjonalnym progiem liczbowym. Nowa inferencja zastępuje wynik i resetuje próg.
+Migracja zachowuje tylko ostatnią aktywną inferencję i dokładne przypięte dowody archiwalne;
+merge, rethreshold, raporty i indeks ukończenia nie odczytują dawnych list ani tablic progów.

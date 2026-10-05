@@ -14,7 +14,6 @@ from stash_ai.storage.database import StateDatabase
 from stash_ai.storage.results import ResultStore
 from stash_ai.storage.publications import PublicationStore
 from stash_ai.storage.metadata_store import MetadataStore
-from stash_ai.storage.legacy import LegacyStore
 
 
 def scope_for(url):
@@ -52,7 +51,6 @@ class StateStore(AbstractContextManager):
             self.path = database.path
             self.connection = database.connection
             self.metadata = MetadataStore(self)
-            self.legacy = LegacyStore(self)
             self.results = ResultStore(self)
             self.publications = PublicationStore(self)
             self.preview_source = database.preview_source
@@ -124,8 +122,8 @@ class StateStore(AbstractContextManager):
     def records(self, scene, kind, model=None, *, borrow=False):
         return self.results.records(scene, kind, model, borrow=borrow)
 
-    def model_records(self, scene, kind, model, *, borrow=False):
-        return self.results.model_records(scene, kind, model, borrow=borrow)
+    def model_record(self, scene, kind, model, *, borrow=False):
+        return self.results.model_record(scene, kind, model, borrow=borrow)
 
     def result_metadata(self, scene, kind, model):
         return self.metadata.get(scene, kind, model)
@@ -145,15 +143,13 @@ class StateStore(AbstractContextManager):
     def put(self, scene, model, outputs):
         return self.results.put(scene, model, outputs)
 
-    def replace_records(self, scene, model, kind, segments):
-        return self.results.replace_records(scene, model, kind, segments)
+    def replace_record(self, scene, model, kind, record):
+        return self.results.replace_record(scene, model, kind, record)
 
-    def set_result_threshold(self, scene, model, kind, threshold, segments, *, metadata_only=False):
-        return self.results.set_threshold(scene, model, kind, threshold, segments,
+    def set_result_threshold(self, scene, model, kind, threshold, record, *, metadata_only=False):
+        return self.results.set_threshold(scene, model, kind, threshold, record,
                                           metadata_only=metadata_only)
 
-    def imported_legacy(self, scene, kind, *, borrow=False):
-        return self.legacy.records(scene, kind, borrow=borrow)
 
     def snapshot(self, scene, kind, *, borrow=False):
         return self.publications.snapshot(scene, kind, borrow=borrow)

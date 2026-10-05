@@ -1,5 +1,5 @@
 """SQL preflight preserves retention guards, history and legacy preview isolation."""
-from tests.helpers.evidence import seed_history
+from tests.helpers.evidence import inject_records
 
 from stash_ai.rethreshold.plans import RecordAccess, PendingPolicy, ThresholdRequest
 import json
@@ -78,7 +78,7 @@ def test_marker_check_uses_metadata_for_scene_threshold_guard(tmp_path, monkeypa
 
 @pytest.mark.parametrize('problem', [
     'scene_floor', 'marker_floor', 'frames', 'format', 'origin',
-    'blocklist_missing', 'blocklist_invalid', 'blocklist_unblocked', 'imported',
+    'floor_missing', 'blocklist_invalid', 'blocklist_unblocked', 'imported',
 ])
 def test_metadata_check_matches_payload_validation(tmp_path, problem):
     saved = outputs()
@@ -92,16 +92,19 @@ def test_metadata_check_matches_payload_validation(tmp_path, problem):
         saved['scene']['meta']['scene_frames_format'] = 2
     elif problem == 'origin':
         saved['scene']['meta']['origin'] = 'legacy'
-    elif problem == 'blocklist_missing':
-        saved['markers']['meta'].pop('marker_tag_blocklist')
+    elif problem == 'floor_missing':
+        saved['markers']['meta'].pop('marker_score_floor')
     elif problem == 'blocklist_invalid':
         saved['markers']['meta']['marker_tag_blocklist'] = None
     elif problem == 'blocklist_unblocked':
         saved['markers']['meta']['marker_tag_blocklist'] = ['core']
     elif problem == 'imported':
         saved['markers']['mode'] = 'spans'
+        saved['markers']['meta']['origin'] = 'legacy'
+        saved['markers']['meta'].pop('analysis_format')
+        saved['markers']['items'] = []
     with StateStore(tmp_path/'state.sqlite3', 'scope') as store:
-        store.put('1', 'wd', saved)
+        inject_records(store, '1', 'wd', saved)
         messages = []
         for metadata_only in (False, True):
             with pytest.raises(ValueError) as error:
@@ -117,7 +120,7 @@ def test_retired_inference_floor_does_not_block_current_thresholds(tmp_path, mon
         old = outputs()
         old['markers']['meta']['marker_score_floor'] = .95
         store.put('2', 'wd', old)
-        seed_history(store, '2', 'wd', outputs(.6, 'new'), replace=dict(scene=False, markers=False))
+        store.put('2', 'wd', outputs(.6, 'new'))
         raw = blobs(store)
         monkeypatch.setattr(store, 'unpack', lambda *a: pytest.fail('Check decoded evidence'))
         assert rethreshold(store, .8, scenes=('1', '2')) == {'scene_thresholds_updated': 2}
@@ -167,7 +170,7 @@ def test_old_database_backfills_once_and_keeps_inline_overrides(tmp_path, monkey
         store.connection.set_trace_callback(statements.append)
         assert scene_updates.plan(app, store, '1', config(.4), request=ThresholdRequest(kinds=('scene', 'markers'), access=RecordAccess.METADATA))
         assert report.timing_calls['state_json_decode'] == 0
-        assert store.connection.execute('PRAGMA user_version').fetchone() == (14,)
+        assert store.connection.execute('PRAGMA user_version').fetchone() == (18,)
         first = metadata_rows(store)
         assert len(first) == 2
         monkeypatch.setattr(store, 'unpack', lambda *a: pytest.fail('Repeated legacy decode'))
@@ -183,8 +186,7 @@ def test_old_database_backfills_once_and_keeps_inline_overrides(tmp_path, monkey
 
 
 @pytest.mark.parametrize('dry_run', [False, True])
-@pytest.mark.parametrize('replace', [False, True])
-def test_preview_new_inference_metadata_hides_source_and_tracks_history(tmp_path, dry_run, replace):
+def test_preview_new_inference_metadata_hides_source_and_tracks_replacement(tmp_path, dry_run):
     path = tmp_path/'state.sqlite3'
     with StateStore(path, 'scope') as store:
         store.put('1', 'wd', outputs())
@@ -194,12 +196,12 @@ def test_preview_new_inference_metadata_hides_source_and_tracks_history(tmp_path
     source = path.read_bytes()
     with StateStore(path, 'scope', dry_run=dry_run) as store:
         new = outputs(.6, 'new')
-        seed_history(store, '1', 'wd', new, replace=dict(scene=replace, markers=replace))
+        store.put('1', 'wd', new)
         for kind in ('scene', 'markers'):
             metadata = store.result_metadata('1', kind, 'wd')
-            assert len(metadata) == 1
-            assert metadata[-1]['meta']['inference_signature'] == 'new'
-            assert metadata[-1]['meta']['scene_threshold'] == .6
+            assert isinstance(metadata, dict)
+            assert metadata['meta']['inference_signature'] == 'new'
+            assert metadata['meta']['scene_threshold'] == .6
     if dry_run:
         assert path.read_bytes() == source
     else:
@@ -233,7 +235,7 @@ def test_raw_sql_writes_invalidate_metadata_even_without_new_writer(tmp_path, op
             if operation == 'update':
                 new = outputs()['markers']
                 new['meta']['marker_score_floor'] = .95
-                store.connection.execute("UPDATE results SET data=? WHERE kind='markers'", (store.pack([new]),))
+                store.connection.execute("UPDATE results SET data=? WHERE kind='markers'", (store.pack(new),))
             elif operation == 'replace':
                 store.connection.execute("INSERT OR REPLACE INTO results SELECT * FROM results WHERE kind='markers'")
             elif operation == 'delete':
@@ -244,9 +246,9 @@ def test_raw_sql_writes_invalidate_metadata_even_without_new_writer(tmp_path, op
         if operation == 'update':
             assert rethreshold(store, .8) == {'errors': 1}
         elif operation == 'delete':
-            assert store.result_metadata('1', 'markers', 'wd') == []
+            assert store.result_metadata('1', 'markers', 'wd') is None
         elif operation == 'move':
-            assert store.result_metadata('1', 'markers', 'wd') == []
+            assert store.result_metadata('1', 'markers', 'wd') is None
             assert store.result_metadata('2', 'markers', 'wd')
         else:
             assert store.result_metadata('1', 'markers', 'wd')
@@ -295,7 +297,7 @@ def test_metadata_is_small_scoped_and_does_not_invalidate_merge(tmp_path):
             with store.connection:
                 performance_merge_checks.record_check(store, '1', 'policy', 'fingerprint')
                 store.connection.execute('DELETE FROM result_metadata WHERE scope=?', (scope,))
-            value = store.result_metadata('1', 'markers', 'wd')[0]
+            value = store.result_metadata('1', 'markers', 'wd')
             assert value['meta']['inference_signature'] == scope
             assert value['populated'] is True
             assert 'items' not in value and 'frames' not in value
@@ -311,7 +313,7 @@ def test_db_check_reports_corrupt_mismatched_orphan_metadata_without_repair(tmp_
         store.put('1', 'wd', outputs())
         with store.connection:
             metadata = store.result_metadata('1', 'markers', 'wd')
-            metadata[0]['meta']['marker_score_floor'] = .9
+            metadata['meta']['marker_score_floor'] = .9
             store.connection.execute("UPDATE result_metadata SET data=? WHERE kind='markers'",
                                      (json.dumps(metadata),))
             store.connection.execute("UPDATE result_metadata SET data='{' WHERE kind='scene'")

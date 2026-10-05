@@ -1,7 +1,7 @@
 """Dictionary contracts at evidence boundaries.
 
-Retained records are discriminated by mode. Optional fields represent legacy
-records and derived evidence, rather than a new storage format or defaults.
+Active records contain current inference; contributions also describe derived
+publication evidence and geometry retained by offline migration.
 """
 from __future__ import annotations
 
@@ -34,11 +34,9 @@ class CurrentInferenceMetadata(TypedDict):
     scene_frames_format: NotRequired[Literal[1]]
 
 
-RetainedMetadata = CurrentInferenceMetadata | EvidenceMetadata
-
 
 class MarkerBuildOptions(TypedDict):
-    algorithm: Literal['temporal', 'historical']
+    algorithm: Literal['temporal']
     policy: dict
     core_exclusions: dict[str, list[str]]
     tag_exclusions: dict[str, list[str]]
@@ -47,7 +45,7 @@ class MarkerBuildOptions(TypedDict):
 
 
 class SceneBuildOptions(TypedDict):
-    algorithm: Literal['temporal', 'historical']
+    algorithm: Literal['temporal']
     policy: dict
     max_tags: int
     scene_exclusions: dict[str, list[str]]
@@ -60,7 +58,7 @@ BuildOptions = MarkerBuildOptions | SceneBuildOptions
 class SceneEntry(TypedDict):
     tag: str
     score: float | None
-    statistics: NotRequired[dict]
+    statistics: dict | None
 
 
 class FrameRow(TypedDict):
@@ -99,26 +97,19 @@ class MarkerContribution(TypedDict):
 
 class SceneRecord(TypedDict):
     mode: Literal['scene']
-    meta: RetainedMetadata
+    meta: CurrentInferenceMetadata
     items: list[SceneEntry]
-    frames: NotRequired[list[FrameRow]]
+    frames: list[FrameRow]
 
 
 class FrameRecord(TypedDict):
     mode: Literal['frames']
-    meta: RetainedMetadata
+    meta: CurrentInferenceMetadata
     items: list[FrameRow]
 
 
-class SpanRecord(TypedDict):
-    mode: Literal['spans']
-    meta: EvidenceMetadata
-    items: list[dict]
-
-
-RetainedRecord = SceneRecord | FrameRecord | SpanRecord
-RecordsBySource = dict[str, list[RetainedRecord]]
-
+InferenceRecord = SceneRecord | FrameRecord
+RecordsBySource = dict[str, InferenceRecord]
 
 class MergedMarker(TypedDict):
     tag: str

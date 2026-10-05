@@ -27,7 +27,7 @@ def decode_legacy(blob):
         version = value[FORMAT_KEY]
         if type(version) is not int or version not in range(1, FORMAT + 1):
             raise ValueError('Unsupported historical snapshot format.')
-        value = expand(value, version=version)
+        value = expand(value, version=version, validate=False)
     if not isinstance(value, dict):
         raise ValueError('Invalid historical snapshot format.')
     return value
@@ -87,7 +87,8 @@ def normalize(snapshot):
             not isinstance(item, dict) for item in snapshot['contributions']):
         raise ValueError('Invalid historical snapshot contributions.')
     contributions = [normalize_item(item) for item in snapshot['contributions']]
-    return {**snapshot, 'contributions': contributions}
+    from .publication_rebase import normalize
+    return normalize({**snapshot, 'contributions': contributions})
 
 
 def migrate(db):

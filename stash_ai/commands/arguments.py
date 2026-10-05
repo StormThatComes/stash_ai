@@ -91,9 +91,9 @@ def build_parser(app) -> argparse.ArgumentParser:
     modes.add_argument("--cleanup-scene-tags-only", action="store_true", help="Apply scene blacklist without inference or model files.")
     modes.add_argument("--cleanup-only", action="store_true", help="Apply both blacklists without inference; full all-model cleanup removes globally banned tags in batches.")
     modes.add_argument("--download-models", action="store_true", help="Download selected model assets from Hugging Face without Stash or inference.")
-    modes.add_argument("--merge-only", action="store_true", help="Merge saved evidence without models/inference; import source-prefixed outputs first with --import-legacy-only.")
-    modes.add_argument("--import-legacy-only", action="store_true",
-                       help="Capture source-prefixed Stash outputs in the state DB without models, media or Stash writes. Honors --dry-run and --scene-id.")
+    modes.add_argument("--merge-only", action="store_true", help="Merge current saved evidence without models/inference.")
+    modes.add_argument("--migrate-legacy-only", action="store_true",
+                       help="Convert source-owned jt:/wd:/dtq:/op: outputs to ai: using fresh inference; honors --dry-run.")
     modes.add_argument("--migrate-point-markers-only", action="store_true",
                        help="Convert historical owned AI points to native ranges using saved publication proofs; preserves occurrence points and manual tags. Honors --dry-run.")
     modes.add_argument("--sync-marker-groups-only", action="store_true",
@@ -101,8 +101,6 @@ def build_parser(app) -> argparse.ArgumentParser:
     modes.add_argument("--explain-tag", metavar="TAG", help="Show saved sources, scores and intervals for a raw/ai: tag; requires --scene-id; no Stash access.")
     modes.add_argument("--prune-empty-tags-only", action="store_true",
                        help="Remove unused leaf tag definitions without models/inference. Honors --dry-run.")
-    modes.add_argument("--prune-legacy-imports", action="store_true",
-                       help="Remove legacy-import ledger rows whose exact source objects no longer exist in Stash; no models/inference. Honors --dry-run.")
     modes.add_argument("--db-report", action="store_true",
                        help="Report state DB health, size and aggregate evidence/cache counts without Stash or model access.")
     modes.add_argument("--db-check", action="store_true",

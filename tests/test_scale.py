@@ -1,4 +1,5 @@
 """Shared scene proof, short extras, bounded RAM/prefetch, and 9000-scene output."""
+from tests.helpers.evidence import current_record
 from stash_ai.db.snapshot_migration import complete_policy
 
 
@@ -67,18 +68,18 @@ def test_joint_scene_needs_compatible_distinct_observations(change):
     if change == 'same_time':
         scenes, markers = paired_records({'wd': [.85, 0], 'dtq': [.86, 0]})
     elif change == 'different_input':
-        markers['dtq'][0]['meta']['frame_input_signature'] = 'other'
-        scenes['dtq'][0]['meta']['frame_input_signature'] = 'other'
+        markers['dtq']['meta']['frame_input_signature'] = 'other'
+        scenes['dtq']['meta']['frame_input_signature'] = 'other'
     elif change == 'different_timeline':
-        markers['dtq'][0]['items'][0]['end'] = .5
+        markers['dtq']['items'][0]['end'] = .5
     elif change == 'missing_scene':
         scenes.pop('dtq')
     elif change == 'different_run':
-        scenes['dtq'][0]['meta']['inference_signature'] = 'new'
+        scenes['dtq']['meta']['inference_signature'] = 'new'
     elif change == 'different_threshold':
-        scenes['dtq'][0]['meta']['scene_threshold'] = .5
+        scenes['dtq']['meta']['scene_threshold'] = .5
     elif change == 'duplicate_model':
-        markers = {'wd': markers['wd'] * 2}; scenes = {'wd': scenes['wd'] * 2}
+        markers = {'wd': markers['wd']}; scenes = {'wd': scenes['wd']}
     elif change == 'gaps':
         scenes, markers = paired_records({'wd': [.7, 0, 0, .7, 0, 0], 'dtq': [0, .7, 0, 0, .7, 0]})
     assert shared(scenes, markers) == []
@@ -105,13 +106,13 @@ def test_scene_rule_is_additive_and_can_be_disabled(tmp_path, monkeypatch):
     scenes, markers = paired_records({'wd': [.85, 0], 'dtq': [0, .86]})
     with merge_store.StateStore(tmp_path/'state.sqlite3', 'fixture', cache_bytes=2**20) as state:
         for source in scenes:
-            state.put('1', source, {'scene': scenes[source][0], 'markers': markers[source][0]})
+            state.put('1', source, {'scene': scenes[source], 'markers': markers[source]})
         assert merge.evidence(app, state, '1', policies(), policies())[0][0]['derived'] == 'shared_scene_frames'
         monkeypatch.setattr(app, 'TEMPORAL_POLICY', replace(app.TEMPORAL_POLICY, shared_scene_tags=False))
         assert merge.evidence(app, state, '1', policies(), policies())[0] == []
         # A strong single model remains sufficient under the existing rules.
         scenes, markers = paired_records({'wd': [.99, 0]})
-        state.put('2', 'wd', {'scene': scenes['wd'][0], 'markers': markers['wd'][0]})
+        state.put('2', 'wd', {'scene': scenes['wd'], 'markers': markers['wd']})
         hits, _ = merge.evidence(app, state, '2', policies(), policies())
         assert hits[0]['qualification'] == 'strong_peak' and 'derived' not in hits[0]
 
@@ -121,20 +122,23 @@ def test_shared_scene_cleanup_uses_only_frozen_published_inputs(tmp_path, change
     scenes, markers = paired_records({'wd': [.85, 0, 0], 'dtq': [0, .86, 0], 'oppai': [0, 0, .87]})
     with merge_store.StateStore(tmp_path/'state.sqlite3', 'fixture', cache_bytes=2**20) as state:
         for source in scenes:
-            state.put('1', source, {'scene': scenes[source][0], 'markers': markers[source][0]})
+            state.put('1', source, {'scene': scenes[source], 'markers': markers[source]})
         hits, _ = merge.evidence(app, state, '1', policies(), policies())
         excluded = policies(); excluded['wd'] = frozenset({'core'})
         if change in ('changed_frames', 'changed_scene'):
             kind = 'scene' if change == 'changed_scene' else 'markers'
-            changed = deepcopy(scenes['dtq'][0] if kind == 'scene' else markers['dtq'][0])
+            changed = deepcopy(scenes['dtq'] if kind == 'scene' else markers['dtq'])
             changed['meta']['captured_at'] = 'newer'
             state.put('1', 'dtq', {kind: changed})
+            if change == 'changed_frames':
+                assert cleanup_scene_support(app, state, '1', hits, {'wd'}, excluded)
+                return
             with pytest.raises(RuntimeError, match='sources changed'):
                 cleanup_scene_support(app, state, '1', hits, {'wd'}, excluded)
         else:
             if change == 'new_source':
                 new_scene, new_markers = paired_records({'joytag': [.99, .99, .99]})
-                state.put('1', 'joytag', {'scene': new_scene['joytag'][0], 'markers': new_markers['joytag'][0]})
+                state.put('1', 'joytag', {'scene': new_scene['joytag'], 'markers': new_markers['joytag']})
             cleaned = cleanup_scene_support(app, state, '1', hits, {'wd'}, excluded)
             assert cleaned[0]['support_sources'] == ['dtq', 'oppai']
             excluded['dtq'] = frozenset({'core'})
@@ -143,7 +147,7 @@ def test_shared_scene_cleanup_uses_only_frozen_published_inputs(tmp_path, change
 
 def test_short_extra_survives_a_long_marker_with_three_consecutive_high_samples(monkeypatch):
     rows = [[('core', .9)] + ([('detail', .9)] if 5 <= i < 8 else []) for i in range(100)]
-    records = {'wd': [segment('wd', rows)]}
+    records = {'wd': segment('wd', rows)}
     markers = merge_intervals.union_intervals(merge_source_markers.marker_contributions(app, records, policies({'detail'})))
     assert markers[0]['extra_tags'] == ['detail']
     proof = markers[0]['extra_evidence']['detail']
@@ -156,15 +160,15 @@ def test_short_extra_survives_a_long_marker_with_three_consecutive_high_samples(
 @pytest.mark.parametrize('times', [[5], [5, 6], [5, 7, 9]])
 def test_short_extra_does_not_accept_spikes_or_disconnected_hits(times):
     rows = [[('core', .9)] + ([('detail', .9)] if i in times else []) for i in range(100)]
-    result = merge_intervals.union_intervals(merge_source_markers.marker_contributions(app, {'wd': [segment('wd', rows)]}, policies({'detail'})))
+    result = merge_intervals.union_intervals(merge_source_markers.marker_contributions(app, {'wd': segment('wd', rows)}, policies({'detail'})))
     assert result[0]['extra_tags'] == []
 
 
 def test_short_extra_runs_join_across_union_and_sources_without_double_counting():
     records = {
-        'wd': [segment('wd', [[('core', .9)] if i < 50 else [] for i in range(100)])],
-        'dtq': [segment('dtq', [[('core', .9)] if i >= 50 else [] for i in range(100)])],
-        'oppai': [segment('oppai', [[('detail', .9)] if 49 <= i <= 51 else [] for i in range(100)])],
+        'wd': segment('wd', [[('core', .9)] if i < 50 else [] for i in range(100)]),
+        'dtq': segment('dtq', [[('core', .9)] if i >= 50 else [] for i in range(100)]),
+        'oppai': segment('oppai', [[('detail', .9)] if 49 <= i <= 51 else [] for i in range(100)]),
     }
     marker = merge_intervals.union_intervals(merge_source_markers.marker_contributions(app, records, policies({'detail'})))[0]
     assert marker['end'] == 100 and marker['extra_evidence']['detail']['longest_run_hits'] == 3
@@ -174,21 +178,21 @@ def test_short_extra_runs_join_across_union_and_sources_without_double_counting(
 
 def test_short_extra_respects_min_hits_and_vtt_time_gaps(monkeypatch):
     rows = [[('core', .9), ('detail', .9)] if i < 3 else [('core', .9)] for i in range(100)]
-    records = {'wd': [segment('wd', rows)]}
-    for row in records['wd'][0]['items'][1:]:
+    records = {'wd': segment('wd', rows)}
+    for row in records['wd']['items'][1:]:
         row['start'] += 10; row['end'] += 10
     monkeypatch.setattr(app, 'MARKER_MERGE_GAP_SECONDS', 20)
     marker = merge_intervals.union_intervals(merge_source_markers.marker_contributions(app, records, policies({'detail'})))[0]
     assert marker['extra_tags'] == []
     monkeypatch.setattr(app, 'TEMPORAL_POLICY', replace(app.TEMPORAL_POLICY, extra_min_hits=4))
-    records = {'wd': [segment('wd', rows)]}
+    records = {'wd': segment('wd', rows)}
     assert merge_intervals.union_intervals(merge_source_markers.marker_contributions(app, records, policies({'detail'})))[0]['extra_tags'] == []
 
 
 def test_extra_queries_are_reused_for_all_primary_tags_without_changing_outputs(monkeypatch):
     monkeypatch.setattr(app, 'TEMPORAL_POLICY', replace(app.TEMPORAL_POLICY, short_marker_extras=False))
     rows = [[(f'tag{i}', .9) for i in range(30)]] * 20
-    records = {source: [segment(source, rows)] for source in ('wd', 'dtq')}
+    records = {source: segment(source, rows) for source in ('wd', 'dtq')}
     cache = RamCache(8 * 2**20)
     index = fusion.FrameIndex(app, records, policies(), cache=cache)
     spans = merge_source_markers.marker_contributions(app, records, policies(), index=index)
@@ -210,23 +214,23 @@ def test_ram_cache_accounts_decoded_values_and_evicts_least_recent():
 
 
 def test_store_cache_is_detached_invalidated_and_rollback_safe(tmp_path):
-    first = dict(mode='scene', meta={'origin': 'inference', 'inference_signature': 'a'}, items=[{'tag': 'core', 'score': .8}])
+    first = current_record(dict(mode='scene', meta={'origin': 'inference', 'inference_signature': 'a'}, items=[{'tag': 'core', 'score': .8}]))
     second = {**first, 'meta': {**first['meta'], 'inference_signature': 'b'}, 'items': []}
     with merge_store.StateStore(tmp_path/'state.sqlite3', 'fixture', cache_bytes=2**20) as state:
         state.put('1', 'wd', {'scene': first})
         statements = []; state.connection.set_trace_callback(statements.append)
-        state.records('1', 'scene')['wd'][0]['items'].clear()
-        assert state.records('1', 'scene')['wd'][0]['items'] == first['items']
+        state.records('1', 'scene')['wd']['items'].clear()
+        assert state.records('1', 'scene')['wd']['items'] == first['items']
         assert sum(sql.startswith('SELECT r.model,r.data') for sql in statements) == 1
         assert progress.completed(state, '1', 'wd', ['scene'], 'a')
         try:
             with state.connection:
                 state.results.put_in_transaction('1', 'wd', {'scene': second})
-                assert state.records('1', 'scene')['wd'][0]['items'] == []
+                assert state.records('1', 'scene')['wd']['items'] == []
                 raise RuntimeError('rollback')
         except RuntimeError:
             pass
-        assert state.records('1', 'scene')['wd'][0]['items'] == first['items']
+        assert state.records('1', 'scene')['wd']['items'] == first['items']
         state.put('1', 'wd', {'scene': second})
         assert progress.completed(state, '1', 'wd', ['scene'], 'b')
         progress.request_refresh(state, ['1'], ['wd'], ['scene'])
@@ -236,7 +240,7 @@ def test_store_cache_is_detached_invalidated_and_rollback_safe(tmp_path):
 
 
 def test_preloaded_collection_metadata_removes_pair_queries(tmp_path):
-    record = dict(mode='scene', meta={'origin': 'inference', 'inference_signature': 'a'}, items=[])
+    record = current_record(dict(mode='scene', meta={'origin': 'inference', 'inference_signature': 'a'}, items=[]))
     with merge_store.StateStore(tmp_path/'state.sqlite3', 'fixture', cache_bytes=2**20) as state:
         for scene in range(50):
             for source in ('wd', 'dtq'): state.put(str(scene), source, {'scene': record})
@@ -258,7 +262,7 @@ def test_multi_batch_prefetch_resume_matches_uninterrupted_results(pipeline, pre
     assert p.loaded[-1].seen == list(range(4, 10))
     assert not any(thread.name.startswith('prepare-frames') for thread in threading.enumerate())
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), True) as state:
-        output = state.records('1', 'markers')['wd'][0]['items']
+        output = state.records('1', 'markers')['wd']['items']
     assert len(output) == 10 and [row['start'] for row in output] == list(range(10))
 
 

@@ -14,12 +14,7 @@ def ordinary_points(scene):
 
 
 def require_native_ranges(scene, spans):
-    # Explicit legacy imports may genuinely have unknown duration. They are
-    # native points, unlike old inference ranges published without an end.
-    known_points = {(AI.prefix + item['tag'], round(item['start'], 3)) for item in spans
-                    if item['end'] is None and item['meta'].get('origin') == 'legacy'}
-    if any((marker['primary_tag']['name'], marker['seconds']) not in known_points
-           for marker in ordinary_points(scene)):
+    if ordinary_points(scene):
         raise RuntimeError(f"Scene {scene['id']} has historical AI point markers; "
                            'run --migrate-point-markers-only before merging or cleaning ranges.')
 
@@ -35,14 +30,9 @@ def plan(store, scene):
                   *publications(store, scene['id'], 'markers')) if snapshot is not None]
     components = [component for snapshot in candidates
                   for component in union_intervals(snapshot['contributions'], borrow=True)]
-    known_points = {(AI.prefix + item['tag'], round(item['start'], 3))
-                    for snapshot in candidates for item in snapshot['contributions']
-                    if item['end'] is None and item['meta'].get('origin') == 'legacy'}
     ranges = [component for component in components if component['end'] is not None]
     updates = []
     for marker in points:
-        if (marker['primary_tag']['name'], marker['seconds']) in known_points:
-            continue
         ends = [component['end'] for component in ranges
                 if AI.prefix + component['tag'] == marker['primary_tag']['name']
                 and abs(round(component['start'], 3) - marker['seconds']) <= .0005]

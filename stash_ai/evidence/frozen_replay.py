@@ -2,7 +2,7 @@
 from dataclasses import replace
 
 from stash_ai.evidence.identity import marker_segment_signature
-from stash_ai.evidence.historical_markers import frozen_policy
+from stash_ai.evidence.temporal.policy import frozen_policy
 from stash_ai.models import SOURCES
 
 
@@ -19,12 +19,14 @@ class PublishedRecords:
             def with_archive(output):
                 active = self.store.records(self.scene_id, output, borrow=True)
                 archive = archived_records(self.store, self.scene_id, output)
-                return {source: [*archive.get(source, []), *active.get(source, [])]
+                return {source: [*archive.get(source, []), *([active[source]] if source in active else [])]
                         for source in archive.keys() | active.keys()}
             records = with_archive(kind)
             if scene_frames:
-                from stash_ai.evidence.cache_views import frame_records
-                records = frame_records(with_archive('scene'), records)
+                from stash_ai.evidence.cache_views import as_frames
+                records = {source: [as_frames(record) for record in history
+                                   if record['meta'].get('analysis_format') == 4]
+                           for source, history in with_archive('scene').items()}
             self.indexes[key] = {source: {marker_segment_signature(segment): segment for segment in segments}
                                  for source, segments in records.items()}
         matching = {}
@@ -32,7 +34,9 @@ class PublishedRecords:
             available = self.indexes[key].get(source, {})
             if not set(signatures) <= set(available):
                 raise RuntimeError(error)
-            matching[source] = [available[signature] for signature in signatures]
+            if len(signatures) != 1:
+                raise RuntimeError('Publication contains multiple inference runs per source; rebuild it with fresh inference.')
+            matching[source] = available[next(iter(signatures))]
         return matching
 
 

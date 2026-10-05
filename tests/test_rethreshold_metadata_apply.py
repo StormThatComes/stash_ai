@@ -1,5 +1,5 @@
 """Frame-free Apply preserves completion indexes, history and preview isolation."""
-from tests.helpers.evidence import seed_history
+
 
 from stash_ai.rethreshold.plans import RecordAccess, PendingPolicy, ThresholdRequest
 from copy import deepcopy
@@ -53,7 +53,7 @@ def test_metadata_apply_matches_full_payload_index_and_preserves_history(tmp_pat
                 if not populated:
                     saved['scene']['items'] = saved['scene']['frames'] = []
                     saved['markers']['items'] = []
-                seed_history(store, '1', 'wd', saved, replace=dict(scene=False, markers=False))
+                store.put('1', 'wd', saved)
     # Reference the established full-evidence path, including preview overlays.
     with StateStore(paths[0], 'scope', dry_run=dry_run) as store:
         if mode == 'markers':
@@ -74,7 +74,7 @@ def test_metadata_apply_matches_full_payload_index_and_preserves_history(tmp_pat
             guard.setattr(store, 'unpack', forbidden)
             guard.setattr(store, 'pack', forbidden)
             guard.setattr(store, 'records', forbidden)
-            guard.setattr(store, 'model_records', forbidden)
+            guard.setattr(store, 'model_record', forbidden)
             if not dry_run:
                 def authorize(action, table, column, database, trigger):
                     if action == sqlite3.SQLITE_READ and table == 'results' and column == 'data':
@@ -104,18 +104,24 @@ def test_small_index_plan_retains_latest_inference_and_all_history_population(tm
     if history == 'no_inference':
         for segment in saved:
             segment['meta']['origin'] = 'legacy'
+            segment['meta'].pop('analysis_format')
     elif history == 'legacy_tail':
         saved[-1]['meta']['origin'] = 'legacy'
+        saved[-1]['meta'].pop('analysis_format')
     elif history == 'empty_inference_tail':
         saved[-1]['items'] = saved[-1]['frames'] = []
     else:
         saved[-1][scene_cache_identity.SCENE_OVERRIDE] = .8
     with StateStore(tmp_path/'state.sqlite3', 'scope') as store:
-        store.replace_records('1', 'wd', 'scene', saved)
+        if saved[-1]['meta']['origin'] != 'inference':
+            with pytest.raises(ValueError, match='Active results require current inference'):
+                store.replace_record('1', 'wd', 'scene', saved[-1])
+            return
+        store.replace_record('1', 'wd', 'scene', saved[-1])
         expected = index_rows(store)
         small = store.result_metadata('1', 'scene', 'wd')
         before = deepcopy(small)
-        assert all('items' not in segment and 'frames' not in segment for segment in small)
+        assert 'items' not in small and 'frames' not in small
         with store.connection:
             progress.index_result(store, '1', 'wd', 'scene', small, metadata_only=True)
         assert index_rows(store) == expected

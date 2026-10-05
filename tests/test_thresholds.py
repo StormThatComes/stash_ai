@@ -1,4 +1,5 @@
 """Retune marker publication without inference or loss of source evidence."""
+from tests.helpers.evidence import current_record
 
 from tests.helpers.temporal import policy_args
 
@@ -50,11 +51,11 @@ def fail_inference(monkeypatch):
 
 
 def test_indexed_signature_preserves_canonical_hashes_and_rejects_mixed_policies():
-    segment = {
+    segment = current_record({
         'mode': 'frames',
         'meta': {'inference_signature': 'sig-a'},
         'items': [],
-    }
+    })
 
     assert thresholds.indexed_signature(segment) == 'sig-a'
 
@@ -90,9 +91,9 @@ def test_automatic_raise_and_return_to_original_keep_raw_evidence(pipeline, monk
     assert app.main(p.args) == 0
     after = records(p.path)
     assert after['scene'] == before['scene']
-    segment = after['markers']['wd'][0]
+    segment = after['markers']['wd']
     assert segment.pop(thresholds_identity.OVERRIDE) == .95
-    assert segment == before['markers']['wd'][0]
+    assert segment == before['markers']['wd']
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), True) as state:
         spans = state.snapshot('1', 'markers')[0]['contributions']
         assert all(s.get('derived') == 'occurrence' for s in spans)
@@ -175,7 +176,7 @@ def test_explicit_rethreshold_needs_no_models_media_or_vocabulary(pipeline, monk
     stderr = capsys.readouterr().err
     assert 'Check marker thresholds' in stderr
     assert 'Apply marker thresholds' in stderr
-    assert records(p.path)['markers']['wd'][0][thresholds_identity.OVERRIDE] == .85
+    assert records(p.path)['markers']['wd'][thresholds_identity.OVERRIDE] == .85
 
 
 @pytest.mark.parametrize('change', ['lower', 'scene', 'legacy', 'missing', 'pending'])
@@ -186,7 +187,8 @@ def test_unsafe_selection_is_rejected_before_any_policy_or_stash_write(pipeline,
     if change in ('legacy', 'missing', 'pending'):
         with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL)) as state:
             if change == 'legacy':
-                state.put('1', 'wd', {'markers': dict(mode='spans', meta={'origin': 'legacy'}, items=[])})
+                from tests.helpers.evidence import inject_records
+                inject_records(state, '1', 'wd', {'markers': dict(mode='spans', meta={'origin': 'legacy'}, items=[])})
             elif change == 'missing':
                 with state.connection:
                     state.connection.execute("DELETE FROM results WHERE model='wd' AND kind='markers'")
@@ -215,8 +217,8 @@ def test_dry_run_and_model_selection(pipeline, monkeypatch):
     p.stash.dry_run = False
     assert app.main([*p.args, '--merge-only', '--rethreshold-markers']) == 0
     saved = records(p.path)['markers']
-    assert saved['wd'][0][thresholds_identity.OVERRIDE] == .85
-    assert thresholds_identity.OVERRIDE not in saved['dtq'][0]
+    assert saved['wd'][thresholds_identity.OVERRIDE] == .85
+    assert thresholds_identity.OVERRIDE not in saved['dtq']
 
 
 def test_preflight_skips_second_model_with_scene_only_history(pipeline, monkeypatch, capsys):
@@ -224,14 +226,14 @@ def test_preflight_skips_second_model_with_scene_only_history(pipeline, monkeypa
     configure(monkeypatch)
     assert app.main(p.args) == 0
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL)) as state:
-        scene = state.records('1', 'scene')['wd'][0]
+        scene = state.records('1', 'scene')['wd']
         state.put('1', 'dtq', {'scene': scene})
     capsys.readouterr()
     configure(monkeypatch, marker=.85)
     p.stash.writes.clear()
     assert app.main(['--models', 'wd', 'dtq', *p.args[2:], '--merge-only', '--rethreshold-markers']) == 0
     output = capsys.readouterr().out
-    assert records(p.path)['markers']['wd'][0][thresholds_identity.OVERRIDE] == .85
+    assert records(p.path)['markers']['wd'][thresholds_identity.OVERRIDE] == .85
     assert ('Threshold preflight: checked=1, failed=0, applied=1, '
             'selected=2, skipped_no_evidence=1') in output
 
@@ -251,7 +253,7 @@ def test_failed_publication_resumes_with_saved_threshold_without_models(pipeline
     assert app.main(p.args) == 0
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), True) as state:
         assert not state.has_pending_publications()
-        assert state.records('1', 'markers')['wd'][0][thresholds_identity.OVERRIDE] == .85
+        assert state.records('1', 'markers')['wd'][thresholds_identity.OVERRIDE] == .85
 
 
 @pytest.mark.parametrize('change', ['media', 'restart', 'below_floor'])
@@ -272,7 +274,7 @@ def test_cleanup_replays_published_threshold_even_after_later_override(tmp_path)
                                     threshold=.4, marker_threshold=.7)
     with merge_store.StateStore(tmp_path/'state.sqlite3', 'test') as state:
         for model in markers:
-            state.put('1', model, {'scene': scenes[model][0], 'markers': markers[model][0]})
+            state.put('1', model, {'scene': scenes[model], 'markers': markers[model]})
         old_spans = merge_source_markers.marker_contributions(app, state.records('1', 'markers'), policies())
         for model in markers:
             config = type('Config', (), dict(source=SOURCES[model], marker_threshold=.9, scene_threshold=.4))
@@ -298,7 +300,7 @@ def test_marker_rethreshold_never_decodes_publication_snapshots(tmp_path, monkey
     scenes, markers = paired_records({'wd': [.9, .9, .9]}, threshold=.4, marker_threshold=.7)
     config = ModelSettings(SOURCES['wd'], Path('.'), marker_threshold=.85, scene_threshold=.4, batch_size=4)
     with merge_store.StateStore(tmp_path/'state.sqlite3', 'scope') as state:
-        state.put('1', 'wd', {'scene': scenes['wd'][0], 'markers': markers['wd'][0]})
+        state.put('1', 'wd', {'scene': scenes['wd'], 'markers': markers['wd']})
         state.publish('1', {
             'scene': {'owned_ids': [], 'contributions': []},
             'markers': {'contributions': [{'payload': 'x' * 10000}]},
@@ -311,5 +313,5 @@ def test_marker_rethreshold_never_decodes_publication_snapshots(tmp_path, monkey
         result = rethreshold_execution.run(app, state, {'1': {}}, [config], report, scenes=False, markers=True)
 
         assert result == {'marker_thresholds_updated': 1}
-        assert state.records('1', 'markers')['wd'][0][thresholds_identity.OVERRIDE] == .85
+        assert state.records('1', 'markers')['wd'][thresholds_identity.OVERRIDE] == .85
 
