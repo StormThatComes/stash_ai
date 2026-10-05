@@ -191,9 +191,10 @@ def cleanup_scene_support(app, store, scene_id, hits, selected, policies):
                     'Shared scene sources changed since publication; run --merge-only before cleanup.')
             options = hit['build_options']
             context = snapshot_context(app, options, 'scene')
-            from stash_ai.evidence.cache_views import views, frame_records
-            context, matching['scene'] = views(context, matching['scene'])
-            matching['markers'] = frame_records(matching['scene'], matching['markers'])
+            from stash_ai.evidence.cache_views import views
+            from stash_ai.evidence.frozen_replay import published_frames
+            context, matching['scene'] = views(context, matching['scene'], archived=True)
+            matching['markers'] = published_frames(matching['scene'], matching['markers'])
             frozen = frozen_policies(options, 'scene_exclusions', selected, policies)
             with FrameIndex(context, matching['markers'], {s: frozenset() for s in SOURCES}, cache=store.cache) as index:
                 rebuilt[key] = shared_scene_contributions(context, index, matching['scene'], frozen)

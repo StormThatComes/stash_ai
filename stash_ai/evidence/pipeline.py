@@ -58,12 +58,12 @@ def evidence(app, store, scene_id, core_policies, scene_policies, metrics=None, 
             spans = marker_contributions(app, records, core_policies, index=index, metrics=metrics, tag_policies=scene_policies)
         if need_scene:
             with stage(report, 'scene_fusion'):
-                scene_frames = frame_records(scene_records, records)
+                scene_frames = frame_records(scene_records)
                 with FrameIndex(app, scene_frames, core_policies, cache=store.cache, tag_policies=scene_policies) as scene_index:
                     scene_hits.extend(shared_scene_contributions(app, scene_index, scene_records, scene_policies, scene_hits, metrics))
     if app.CREATE_MARKERS:
         from stash_ai.evidence.occurrences import occurrence_contributions
         report = store.report
         with report.measure('occurrence_compute') if report is not None else nullcontext():
-            spans.extend(occurrence_contributions(app, scene_hits, frame_records(scene_records, records), spans, core_policies, scene_policies, metrics))
+            spans.extend(occurrence_contributions(app, scene_hits, frame_records(scene_records), spans, core_policies, scene_policies, metrics))
     return sorted(scene_hits, key=lambda item: (item["tag"], item["source"])), spans

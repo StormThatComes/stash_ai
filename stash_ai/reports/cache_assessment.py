@@ -96,15 +96,12 @@ def publication_dependencies(app, evidence, selected):
                     raise ValueError('Unsupported stored marker evidence; run --db-check.')
                 validate_marker_cache(context, {model: segments})
             else:
-                # Unchanged old aggregates remain publishable. Validate only
-                # projection required by an override or changed support policy.
                 for segment in segments:
                     meta = segment['meta']
+                    if meta.get('origin') != 'inference':
+                        continue
                     threshold = scene_threshold(segment)
-                    support_changed = (('scene_support_floor' in meta or meta.get('scene_frames_format') == 1)
-                        and meta.get('scene_support_floor') != threshold * app.TEMPORAL_POLICY.scene_support_ratio)
-                    if threshold != meta.get('scene_threshold') or support_changed:
-                        validate_scene(app, segment, threshold, has_frames=segment['has_frames'])
+                    validate_scene(app, segment, threshold, has_frames=segment['has_frames'])
         except (KeyError, TypeError, ValueError) as exc:
             dependencies.append(dict(model=model, kind=kind, reason=str(exc),
                 resolution=f'Include {model} with --models and regenerate the report; '

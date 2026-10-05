@@ -1,4 +1,5 @@
 """Retune marker publication without inference or loss of source evidence."""
+from tests.helpers.evidence import current_record
 
 from tests.helpers.temporal import policy_args
 
@@ -50,11 +51,11 @@ def fail_inference(monkeypatch):
 
 
 def test_indexed_signature_preserves_canonical_hashes_and_rejects_mixed_policies():
-    segment = {
+    segment = current_record({
         'mode': 'frames',
         'meta': {'inference_signature': 'sig-a'},
         'items': [],
-    }
+    })
 
     assert thresholds.indexed_signature(segment) == 'sig-a'
 

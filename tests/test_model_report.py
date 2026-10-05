@@ -1,4 +1,5 @@
 """Offline model utility and leave-one-model-out ablation reporting."""
+from tests.helpers.evidence import current_record
 from tests.helpers.temporal import threshold_policy
 
 
@@ -38,7 +39,7 @@ def inference_pair(label, *, score=.9, identity="same", marker_threshold=.8):
         "marker_tag_blocklist": [],
         "analysis_format": 3,
     }
-    return {
+    return {kind: current_record(record) for kind, record in ({
         "scene": {
             "mode": "scene",
             "meta": dict(meta),
@@ -52,7 +53,7 @@ def inference_pair(label, *, score=.9, identity="same", marker_threshold=.8):
                 {"start": 1.0, "end": 2.0, "tags": [[label, score]]},
             ],
         },
-    }
+    }).items()}
 
 
 def _report_marker(tag, start, end, *, occurrence=False, extras=()):

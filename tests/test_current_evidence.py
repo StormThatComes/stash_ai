@@ -13,7 +13,7 @@ from stash_ai.storage.store import StateStore
 def record():
     return dict(mode='scene', meta=dict(origin='inference', analysis_format=ANALYSIS_FORMAT,
         inference_signature='run', frame_input_signature='input', scene_frames_format=1,
-        scene_score_floor=.1, marker_score_floor=.1, scene_threshold=.4, marker_threshold=.4), frames=[],
+        scene_score_floor=.1, scene_support_floor=.34, marker_score_floor=.1, scene_threshold=.4, marker_threshold=.4), frames=[],
         items=[dict(tag='core', score=.95, statistics=None)])
 
 

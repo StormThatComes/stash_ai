@@ -29,9 +29,12 @@ def pair(label='common', **kwargs):
     return outputs
 
 
-def seed(path, scene='1', model='wd', outputs=None, history=False):
+def seed(path, scene='1', model='wd', outputs=None, history=False, corrupt=False):
     with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL)) as store:
-        from tests.helpers.evidence import seed_history
+        from tests.helpers.evidence import seed_history, inject_records
+        if corrupt:
+            inject_records(store, scene, model, outputs)
+            return
         seed_history(store, scene, model, pair() if outputs is None else outputs,
                   {'scene': False, 'markers': False} if history else None)
 
@@ -92,7 +95,7 @@ def test_missing_marker_floor_never_inherits_old_threshold_for_rethreshold_plan(
     path = tmp_path / 'state.sqlite3'
     saved = pair()
     saved['markers']['meta'].pop('marker_score_floor')
-    seed(path, outputs=saved)
+    seed(path, outputs=saved, corrupt=True)
     target = replace(config(), marker_threshold=.95)
     data = report(path, settings=[target])
     assert issue(data)['outputs']['markers']['status'] == 'insufficient'
@@ -100,7 +103,7 @@ def test_missing_marker_floor_never_inherits_old_threshold_for_rethreshold_plan(
     assert not any(row['action'] == 'rethreshold' for row in data['plan'])
     with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL), True) as store:
         from stash_ai.rethreshold import markers
-        with pytest.raises(ValueError, match='cache floor None'):
+        with pytest.raises(ValueError, match='retention floors'):
             markers.plan(app, store, '1', target)
 
 
@@ -133,6 +136,7 @@ def test_imported_history_is_not_completed_inference(tmp_path):
     outputs = pair()
     for segment in outputs.values():
         segment['meta']['origin'] = 'legacy'
+        segment['meta'].pop('analysis_format')
     seed(path, outputs=outputs)
     data = report(path)
     assert {row['status'] for row in issue(data)['outputs'].values()} == {'legacy_only'}
@@ -153,7 +157,7 @@ def test_removed_frame_blocklist_labels_require_reinference(tmp_path):
     path = tmp_path / 'state.sqlite3'
     outputs = pair()
     outputs['markers']['meta']['marker_tag_blocklist'] = ['formerly_blocked']
-    seed(path, outputs=outputs)
+    seed(path, outputs=outputs, corrupt=True)
     assert issue(report(path))['outputs']['markers']['status'] == 'insufficient'
 
 
@@ -236,7 +240,7 @@ def test_unselected_publication_dependencies_block_plan_without_expanding_target
         peer['markers']['meta']['marker_tag_blocklist'] = ['unblocked']
     elif problem == 'scene_projection':
         peer['scene']['meta'].update(scene_support_floor=.4, scene_score_floor=.4)
-    seed(path, model='dtq', outputs=peer)
+    seed(path, model='dtq', outputs=peer, corrupt=True)
     if problem == 'historical_floor':
         seed(path, model='dtq', history=True)
     elif problem == 'unreadable':
@@ -305,7 +309,7 @@ def test_blocked_scene_is_not_added_back_by_publication_recovery(tmp_path, monke
 
 
 @pytest.mark.parametrize('peer_kind', ['no_scene', 'no_markers', 'imported_spans',
-                                     'old_scene', 'different_threshold', 'higher_override'])
+                                     'different_threshold', 'higher_override'])
 def test_usable_unselected_evidence_does_not_expand_or_block_selected_plan(tmp_path, peer_kind):
     path = tmp_path / 'state.sqlite3'
     seed(path)
@@ -326,7 +330,7 @@ def test_usable_unselected_evidence_does_not_expand_or_block_selected_plan(tmp_p
     elif peer_kind == 'higher_override':
         peer['markers']['meta']['marker_score_floor'] = .75
         peer['markers']['marker_threshold_override'] = .9
-    seed(path, model='dtq', outputs=peer)
+    seed(path, model='dtq', outputs=peer, corrupt=True)
     data = report(path, settings=[replace(config(), marker_threshold=.9)])
     assert data['totals']['rethreshold_pairs'] == 1 and data['totals']['blocked_pairs'] == 0
     assert [row['model'] for row in data['plan'] if 'model' in row] == ['wd']

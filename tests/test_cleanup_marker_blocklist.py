@@ -14,7 +14,8 @@ import stash_ai.evidence.source_markers as merge_source_markers
 import stash_ai.inference.results as merge_results
 import stash_ai.storage.store as merge_store
 from stash_ai.models import SOURCES
-from tests.helpers.evidence import segment
+from tests.helpers.evidence import segment, current_record, inject_records
+from stash_ai.storage.archive import records as archived_records
 
 pytestmark = pytest.mark.usefixtures('reset_temporal')
 
@@ -44,18 +45,25 @@ def old_consensus(pipeline, monkeypatch, tmp_path, request):
                 outputs['markers']['meta'].pop('marker_score_floor')
             return outputs
         previous.setattr(merge_results, 'capture_outputs', capture_old)
+        from stash_ai.evidence import formats
+        previous.setattr(formats, 'validate_current', lambda *a, **k: None)
         previous.setattr(thresholds, 'validate_marker_cache', lambda *args, **kwargs: None)
         assert app.main(p.args) == 0
     assert len(p.stash.scene['scene_markers']) == 1
     assert p.stash.scene['scene_markers'][0]['primary_tag']['name'] == 'ai:common'
+    from stash_ai import db
+    import sqlite3
+    with sqlite3.connect(p.path) as connection:
+        connection.execute('PRAGMA user_version=14')
+    db.update_database(p.path)
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), True) as state:
         published, _ = state.snapshot('1', 'markers')
         assert any({span['source'], *span.get('support_sources', [])} == {'wd', 'dtq'}
                    for span in published['contributions'])
         assert all('marker_tag_blocklist' not in records[0]['meta']
-                   for records in state.records('1', 'markers').values())
+                   for records in archived_records(state, '1', 'markers').values())
         assert all(('marker_score_floor' not in records[0]['meta']) == request.param
-                   for records in state.records('1', 'markers').values())
+                   for records in archived_records(state, '1', 'markers').values())
     core = tmp_path/'exclude.yml'
     core.write_text('version: 1\nexcluded_core_tags: []\nby_model:\n  wd: [common]\n')
     p.cleanup_args = [*p.args, '--cleanup-markers-only', '--cleanup-strategy', 'scenes',
@@ -73,7 +81,7 @@ def test_cleanup_revokes_an_old_consensus_vote_without_inference(old_consensus, 
     before = deepcopy(p.stash.scene)
     p.stash.dry_run = dry_run
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), True) as state:
-        evidence = state.records('1', 'markers')
+        evidence = archived_records(state, '1', 'markers')
     assert app.main([*p.cleanup_args, *(['--dry-run'] if dry_run else [])]) == 0
     if dry_run:
         assert p.stash.scene == before and not p.stash.writes
@@ -82,7 +90,7 @@ def test_cleanup_revokes_an_old_consensus_vote_without_inference(old_consensus, 
         assert any(write[0] == 'delete' for write in p.stash.writes)
         assert all(write[0] != 'create' for write in p.stash.writes)
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), True) as state:
-        assert state.records('1', 'markers') == evidence
+        assert archived_records(state, '1', 'markers') == (evidence if dry_run else {})
 
 
 def test_old_cache_still_blocks_normal_merge_and_rethreshold(old_consensus):
@@ -99,7 +107,7 @@ def test_cleanup_does_not_adopt_a_new_unpublished_vote(old_consensus):
     p = old_consensus
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL)) as state:
         fresh = segment('oppai', [[('common', .7)]] * 10)
-        fresh['meta'].pop('marker_tag_blocklist')
+        fresh['meta'].pop('marker_tag_blocklist', None)
         state.put('1', 'oppai', {'markers': fresh})
     assert app.main(p.cleanup_args) == 0
     assert not p.stash.scene['scene_markers']
@@ -108,10 +116,10 @@ def test_cleanup_does_not_adopt_a_new_unpublished_vote(old_consensus):
 def test_cleanup_rejects_changes_to_published_frame_proofs(old_consensus):
     p = old_consensus
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL)) as state:
-        records = state.records('1', 'markers')['dtq']
+        records = archived_records(state, '1', 'markers')['dtq']
         records[0]['items'][0]['tags'][0][1] = .95
         with state.connection:
-            state.connection.execute("UPDATE results SET data=? WHERE model='dtq' AND kind='markers'", (state.pack(records),))
+            state.connection.execute("UPDATE inference_archive SET data=? WHERE model='dtq' AND kind='markers'", (state.pack(records[0]),))
     before = deepcopy(p.stash.scene)
     assert app.main(p.cleanup_args) == 1
     assert p.stash.scene == before and not p.stash.writes
@@ -120,6 +128,7 @@ def test_cleanup_rejects_changes_to_published_frame_proofs(old_consensus):
 @pytest.mark.parametrize('retained', [None, 'common', [None], ['common']])
 def test_cleanup_exception_does_not_accept_invalid_or_known_incomplete_metadata(retained):
     frames = segment('wd', [[('common', .9)]] * 2)
+    frames['meta']['analysis_format'] = 3
     frames['meta']['marker_tag_blocklist'] = retained
     with pytest.raises(ValueError, match='marker blocklist metadata|unblocked marker tags'):
         thresholds.validate_marker_cache(
@@ -129,6 +138,8 @@ def test_cleanup_exception_does_not_accept_invalid_or_known_incomplete_metadata(
 @pytest.mark.parametrize('floor', [None, float('nan'), .75])
 def test_cleanup_retention_exception_still_checks_explicit_floors(floor):
     frames = segment('wd', [[('common', .9)]] * 2)
+    frames['meta']['analysis_format'] = 3
+    frames['meta']['marker_tag_blocklist'] = []
     frames['meta']['marker_score_floor'] = floor
     with pytest.raises(ValueError, match='marker cache floor'):
         thresholds.validate_marker_cache(app, {'wd': [frames]}, allow_unknown_retention=True)
@@ -136,7 +147,8 @@ def test_cleanup_retention_exception_still_checks_explicit_floors(floor):
 
 def test_blocklist_exception_does_not_relax_historical_retention():
     frames = segment('wd', [[('common', .9)]] * 2)
-    frames['meta'].pop('marker_tag_blocklist')
+    frames['meta']['analysis_format'] = 3
+    frames['meta'].pop('marker_tag_blocklist', None)
     frames['meta'].pop('marker_score_floor')
     with pytest.raises(ValueError, match='marker cache floor'):
         thresholds.validate_marker_cache(app, {'wd': [frames]}, allow_unknown_blocklist=True)
@@ -144,6 +156,7 @@ def test_blocklist_exception_does_not_relax_historical_retention():
 
 def test_frozen_coverage_bans_are_scoped_to_the_model_with_missing_detections():
     frames = segment('wd', [[('core', .9)]] * 4)
+    frames['meta']['analysis_format'] = 3
     frames['meta']['marker_tag_blocklist'] = ['detail']
     frozen = {source: frozenset() for source in SOURCES}
     frozen['dtq'] = frozenset({'detail'})
@@ -161,6 +174,7 @@ def test_repeated_cleanup_preserves_nonempty_historical_bans(tmp_path):
     }
     # WD discarded detail at capture time; DTQ still has it in an older cache.
     # The published proof applied the old blocklist to both sources.
+    records['wd'][0]['meta']['analysis_format'] = 3
     records['wd'][0]['meta']['marker_tag_blocklist'] = ['detail']
     frozen_tags = {source: frozenset({'detail'}) for source in SOURCES}
     spans = merge_source_markers.marker_contributions(app, records, policies, tag_policies=frozen_tags,
@@ -174,8 +188,12 @@ def test_repeated_cleanup_preserves_nonempty_historical_bans(tmp_path):
 
     with merge_store.StateStore(tmp_path / 'state', 'fixture') as state:
         for source, segments in records.items():
-            state.put('1', source, {'markers': segments[0]})
-        original = state.records('1', 'markers')
+            from stash_ai.evidence.identity import marker_segment_signature
+            with state.connection:
+                state.connection.execute('INSERT INTO inference_archive VALUES (?,?,?,?,?,?)',
+                    (state.scope, '1', source, 'markers', marker_segment_signature(segments[0]), state.pack(segments[0])))
+        state.publish('1', {'markers': {'contributions': spans}})
+        original = archived_records(state, '1', 'markers')
         tags = {**policies, 'dtq': frozenset({'revoked'})}
         first = cleanup_evidence.cleanup_support(app, state, '1', spans, {'dtq'}, policies, tags)
         assert merge_intervals.union_intervals(first)[0]['extra_tags'] == ['remaining']
@@ -184,7 +202,7 @@ def test_repeated_cleanup_preserves_nonempty_historical_bans(tmp_path):
         tags['dtq'] = frozenset({'remaining', 'revoked'})
         second = cleanup_evidence.cleanup_support(app, state, '1', first, {'dtq'}, policies, tags)
         assert merge_intervals.union_intervals(second)[0]['extra_tags'] == []
-        assert state.records('1', 'markers') == original
+        assert archived_records(state, '1', 'markers') == original
         with pytest.raises(ValueError, match='unblocked marker tags'):
             merge_source_markers.marker_contributions(app, original, policies)
 
@@ -193,11 +211,11 @@ def test_repeated_cleanup_preserves_nonempty_historical_bans(tmp_path):
 def test_controlled_replacement_retains_published_frame_proofs_for_cleanup(old_consensus):
     p = old_consensus
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL)) as state:
-        records = state.records('1', 'markers')['dtq']
+        records = archived_records(state, '1', 'markers')['dtq']
         records[0]['items'][0]['tags'][0][1] = .95
+        current_record(records[0])
         with state.connection:
             state.replace_records('1', 'dtq', 'markers', records)
-        from stash_ai.storage.archive import records as archived_records
         assert archived_records(state, '1', 'markers')['dtq']
     assert app.main(p.cleanup_args) == 0
     assert not p.stash.scene['scene_markers']

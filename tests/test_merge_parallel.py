@@ -1,4 +1,5 @@
 """Parallel merged evidence preparation stays read-only and deterministic."""
+from tests.helpers.evidence import current_record
 from tests.helpers.temporal import threshold_policy
 
 import json
@@ -29,11 +30,11 @@ def _outputs(source, label):
         identity="scene-input",
     )
     marker["meta"]["scene_threshold"] = .4
-    scene = {
+    scene = current_record({
         "mode": "scene",
         "meta": dict(marker["meta"]),
         "items": [{"tag": label, "score": .92}],
-    }
+    })
     return {"scene": scene, "markers": marker}
 
 

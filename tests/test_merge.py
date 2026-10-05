@@ -1,4 +1,5 @@
 """Behavior tests for exact-label AI fusion; no live Stash or model downloads."""
+from tests.helpers.evidence import current_record
 from tests.helpers.evidence import seed_history
 
 
@@ -83,8 +84,8 @@ def test_bad_intervals_are_rejected_before_writes(start,end):
 
 
 def test_state_is_durable_scoped_partial_and_dry_run_does_not_write(tmp_path):
-    first={"mode":"scene","meta":{"origin":"inference"},"items":[dict(tag="common",score=.8)]}
-    second={"mode":"spans","meta":{"origin":"legacy"},"items":[]}
+    first=current_record({"mode":"scene","meta":{"origin":"inference"},"items":[dict(tag="common",score=.8)]})
+    second=current_record({"mode":"spans","meta":{"origin":"legacy"},"items":[]})
     with store(tmp_path) as state:
         state.put("1","joytag",{"scene":first,"markers":second})
         state.put("1","wd",{"scene":first})
@@ -339,9 +340,9 @@ def test_missing_source_state_does_not_destroy_existing_ai_markers(tmp_path):
 def test_no_frame_fusion_across_models(tmp_path):
     with store(tmp_path) as state:
         for source,indices in [("joytag",{0,2}),("wd",{1,3})]:
-            state.put("1",source,{"markers":{"mode":"frames","meta":{"origin":"inference", "marker_tag_blocklist": [],
+            state.put("1",source,{"markers":current_record({"mode":"frames","meta":{"origin":"inference", "marker_tag_blocklist": [],
                 "marker_threshold": .8, "marker_score_floor": .8},"items":[
-                dict(start=i*5,end=(i+1)*5,tags=[["common",.9]] if i in indices else []) for i in range(4)]}})
+                dict(start=i*5,end=(i+1)*5,tags=[["common",.9]] if i in indices else []) for i in range(4)]})})
         _,spans=merge.evidence(app,state,"1",empty_policies(),empty_policies())
         assert spans==[]  # Each model's MIN_HITS is still checked independently.
 
@@ -411,7 +412,7 @@ def test_retry_does_not_reimport_old_legacy_after_successful_new_inference(tmp_p
     stash=Stash();old=stash.marker(WD,"common","legacy")
     with store(tmp_path) as state:
         legacy_commands.import_scene(app,state,stash.find_scene("1"))
-        state.put("1","wd",{"markers":{"mode":"frames","meta":{"origin":"inference"},"items":[]}})
+        state.put("1","wd",{"markers":current_record({"mode":"frames","meta":{"origin":"inference"},"items":[]})})
         legacy_commands.import_scene(app,state,stash.find_scene("1"))
         assert state.records("1","markers")["wd"][0]["items"]==[]
         assert len(state.records("1","markers")["wd"])==1
@@ -548,8 +549,8 @@ def test_scene_cap_does_not_drop_previous_runs_or_legacy_confidence(tmp_path,mon
     with store(tmp_path) as state:
         for origin,items in [("inference",[("old",.95),("low",.7)]),
                              ("inference",[("new",.9)]),("legacy",[("old",None),("legacy",None)])]:
-            seed_history(state, "1", "wd", {"scene":{"mode":"scene","meta":{"origin":origin},
-                      "items":[dict(tag=tag,score=score) for tag,score in items]}}, {"scene":False})
+            seed_history(state, "1", "wd", {"scene":current_record({"mode":"scene","meta":{"origin":origin},
+                      "items":[dict(tag=tag,score=score) for tag,score in items]})}, {"scene":False})
         hits,_=merge.evidence(app,state,"1",empty_policies(),empty_policies())
         assert {h["tag"] for h in hits}=={"old","new","legacy"}
         assert {h["score"] for h in hits if h["tag"]=="old"}=={None}

@@ -1,5 +1,6 @@
 """Threshold policy writes preserve evidence, preview isolation and completion."""
-from tests.helpers.evidence import seed_history
+from tests.helpers.evidence import current_record
+from tests.helpers.evidence import seed_history, inject_records
 
 from stash_ai.rethreshold.plans import RecordAccess, PendingPolicy, ThresholdRequest
 from copy import deepcopy
@@ -33,11 +34,11 @@ def outputs(threshold=.4, signature='original'):
                 scene_frames_format=1, scene_score_floor=.1, marker_score_floor=.1,
                 marker_tag_blocklist=[])
     frames = [dict(start=0., end=1., tags=[['core', .8]])]
-    return {
+    return {kind: current_record(record) for kind, record in ({
         'scene': dict(mode='scene', meta=deepcopy(meta), frames=deepcopy(frames),
                       items=[dict(tag='core', score=.8)]),
         'markers': dict(mode='frames', meta=deepcopy(meta), items=frames),
-    }
+    }).items()}
 
 
 def config(threshold):
@@ -125,11 +126,11 @@ def test_v7_inline_overrides_are_read_lazily_and_can_be_restored(tmp_path, dry_r
         before = connection.execute('SELECT * FROM results ORDER BY scope,scene,model,kind').fetchall()
     source_before = path.read_bytes()
     with StateStore(path, 'scope', dry_run=dry_run) as store:
-        assert store.connection.execute('PRAGMA user_version').fetchone() == (14,)
+        assert store.connection.execute('PRAGMA user_version').fetchone() == (15,)
         assert store.records('1', 'scene')['wd'] == [old['scene']]
         assert store.model_records('1', 'markers', 'wd') == [old['markers']]
         assert rethreshold(store, .4) == {'scene_thresholds_updated': 1}
-        assert store.connection.execute('PRAGMA user_version').fetchone() == (14,)
+        assert store.connection.execute('PRAGMA user_version').fetchone() == (15,)
         assert blobs(store) == ([] if dry_run else before)
         assert store.records('1', 'scene')['wd'] == [outputs()['scene']]
         assert store.model_records('1', 'markers', 'wd') == [outputs()['markers']]
@@ -244,7 +245,7 @@ def test_preflight_failure_applies_no_table_changes(tmp_path, blocked):
         else:
             bad = outputs()
             bad['scene'].pop('frames')
-            store.put('2', 'wd', bad)
+            inject_records(store, '2', 'wd', bad)
         raw = blobs(store)
         version = store.connection.execute('PRAGMA user_version').fetchone()
         assert rethreshold(store, .8, scenes=('1', '2')) == {'errors': 1}
@@ -280,7 +281,7 @@ def test_abandon_and_cleanup_preserve_v8_and_effective_thresholds(tmp_path):
         recovery.abandon(store, lambda _: None)
         cleanup.begin(store, 'cleanup', {'excluded'}, set(), [], kinds=('scene',))
         cleanup.finish(store)
-        assert store.connection.execute('PRAGMA user_version').fetchone() == (14,)
+        assert store.connection.execute('PRAGMA user_version').fetchone() == (15,)
         assert store.records('1', 'scene')['wd'][0][scene_cache_identity.SCENE_OVERRIDE] == .8
     assert db.check_database(path, 'scope')['ok']
 

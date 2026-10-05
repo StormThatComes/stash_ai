@@ -136,7 +136,7 @@ def test_disagreement_requires_retained_comparable_negative_evidence(tmp_path, p
 def test_isolated_peak_uses_scene_statistics_not_aggregate_count(tmp_path, high_hits, expected):
     path = tmp_path / "state.sqlite3"
     outputs = pair(score=.99)
-    outputs["scene"]["items"][0]["statistics"] = dict(
+    outputs["scene"]["items"][0]["statistics"].update(
         max_score=.99, high_hits=high_hits, sampled_frames=10, peak_time=1.,
         hits=high_hits, longest_hits=high_hits, sample_fraction=high_hits / 10)
     seed(path, "1", "wd", outputs)
@@ -229,7 +229,7 @@ def test_shared_scene_candidates_are_attributed_to_each_actual_supporting_model(
             for i, score in enumerate(values)]
         for item in scenes[model][0]["items"]:
             item["score"] = .1
-            item["statistics"] = dict(max_score=.6, high_hits=2, hits=2,
+            item["statistics"].update(max_score=.6, high_hits=2, hits=2,
                                       longest_hits=1, sampled_frames=4, sample_fraction=.5)
         seed(path, "1", model, {"scene": scenes[model][0], "markers": markers[model][0]})
     data = report(path)

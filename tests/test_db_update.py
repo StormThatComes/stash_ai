@@ -1,4 +1,5 @@
 """Offline schema upgrades preserve evidence and resumable work in every scope."""
+from tests.helpers.evidence import current_record
 
 import sqlite3
 import zlib
@@ -18,6 +19,7 @@ from stash_ai.storage.database import APPLICATION_ID, LATEST_SCHEMA_VERSION
 def seed_version(path, version):
     segment = {'mode': 'scene', 'meta': {'origin': 'inference', 'inference_signature': 'saved'},
                'items': [{'tag': 'example', 'score': .9}]}
+    current_record(segment)
     if version < 2:
         with sqlite3.connect(path) as db:
             db.executescript(f'''
@@ -132,7 +134,7 @@ def test_snapshot_migration_preserves_pending_recovery_shared_proofs_and_old_fal
     from tests.test_snapshot_proofs import shared_snapshot
     path = tmp_path / 'state.sqlite3'
     with StateStore(path, 'scope-a') as state:
-        state.put('1', 'wd', {'scene': {'mode': 'scene', 'meta': {'origin': 'inference'}, 'items': []}})
+        state.put('1', 'wd', {'scene': {'mode': 'scene', 'meta': {'origin': 'legacy'}, 'items': []}})
     snapshot = shared_snapshot()
     packed = compact(snapshot) if old_format != 'plain' else snapshot
     if old_format != 'plain':
@@ -348,11 +350,11 @@ def test_db_update_cli_stays_offline_and_reports_dry_run_and_idempotence(tmp_pat
 
     assert app.main([*command, '--dry-run']) == 0
     assert path.read_bytes() == before
-    assert 'DRY RUN: state DB schema v1 -> v14' in capsys.readouterr().out
+    assert 'DRY RUN: state DB schema v1 -> v15' in capsys.readouterr().out
     assert app.main(command) == 0
-    assert 'State DB updated: schema v1 -> v14' in capsys.readouterr().out
+    assert 'State DB updated: schema v1 -> v15' in capsys.readouterr().out
     assert app.main(command) == 0
-    assert 'up to date: v14' in capsys.readouterr().out
+    assert 'up to date: v15' in capsys.readouterr().out
     assert app.main(['--state-db', str(tmp_path / 'missing.sqlite3'), '--db-update']) == 1
     assert 'does not exist' in capsys.readouterr().out
 

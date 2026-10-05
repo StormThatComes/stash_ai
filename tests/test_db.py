@@ -1,4 +1,5 @@
 """State database reporting and safe compaction."""
+from tests.helpers.evidence import current_record
 from stash_ai.storage.snapshots import encode as encode_snapshot
 
 import hashlib
@@ -15,7 +16,7 @@ from stash_ai.storage.codec import encode
 
 def seed(path, scope):
     with merge_store.StateStore(path, scope) as state:
-        state.put("1", "wd", {
+        state.put("1", "wd", {kind: current_record(record) for kind, record in {
             "scene": {
                 "mode": "scene",
                 "meta": {"origin": "inference", "inference_signature": "scene-sig"},
@@ -26,7 +27,7 @@ def seed(path, scope):
                 "meta": {"origin": "inference", "inference_signature": "marker-sig"},
                 "items": [{"start": 0.0, "end": 1.0, "tags": [["blue_hair", .9]]}],
             },
-        })
+        }.items()})
 
 
 def test_report_is_read_only_and_privacy_safe(tmp_path):

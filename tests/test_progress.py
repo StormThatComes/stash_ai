@@ -1,4 +1,5 @@
 """Resume equivalence and bounded preparation; never connects to Stash/HF."""
+from tests.helpers.evidence import current_record
 
 
 from copy import deepcopy
@@ -248,8 +249,8 @@ def test_finish_rolls_back_results_checkpoint_and_refresh_together(tmp_path, mon
     path = tmp_path / 'state.sqlite3'
     meta = dict(origin='inference', inference_signature='old')
     original = {
-        'scene': dict(mode='scene', meta=meta, items=[dict(tag='core', score=.8)]),
-        'markers': dict(mode='frames', meta=meta, items=[dict(start=0., end=1., tags=[['core', .8]])]),
+        'scene': current_record(dict(mode='scene', meta=meta, items=[dict(tag='core', score=.8)])),
+        'markers': current_record(dict(mode='frames', meta=meta, items=[dict(start=0., end=1., tags=[['core', .8]])])),
     }
     fresh = deepcopy(original)
     for segment in fresh.values():
@@ -326,7 +327,7 @@ def test_prefetch_is_bounded_and_closes_producer(pipeline,monkeypatch):
 
 def test_v1_database_is_migrated_once_without_losing_sources(tmp_path,monkeypatch):
     path=tmp_path/"v1.sqlite3"
-    segment={"mode":"scene","meta":{"origin":"inference"},"items":[{"tag":"common","score":.9}]}
+    segment=current_record({"mode":"scene","meta":{"origin":"inference"},"items":[{"tag":"common","score":.9}]})
     db=sqlite3.connect(path)
     db.executescript(f"PRAGMA application_id={APPLICATION_ID}; PRAGMA user_version=1; "
                     "CREATE TABLE results(scope TEXT,scene TEXT,model TEXT,kind TEXT,data BLOB,PRIMARY KEY(scope,scene,model,kind));")
@@ -335,7 +336,7 @@ def test_v1_database_is_migrated_once_without_losing_sources(tmp_path,monkeypatc
     from stash_ai.db import update_database
     update_database(path)
     with merge_store.StateStore(path,"fixture") as state:
-        assert state.connection.execute("PRAGMA user_version").fetchone()==(14,)
+        assert state.connection.execute("PRAGMA user_version").fetchone()==(15,)
         assert state.records("1","scene")["wd"]==[segment]
         assert not progress.completed(state,"1","wd",["scene"],"new-signature")
     monkeypatch.setattr(state_codec,"decode",lambda *args:pytest.fail("migration repeated"))

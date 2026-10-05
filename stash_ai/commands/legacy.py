@@ -25,6 +25,13 @@ def legacy_objects(scene, kind):
             yield (*parsed, item)
 
 
+def publication_state(store, scene_id, kind):
+    """Retiring active cache does not retire its durable publication ownership."""
+    from stash_ai.storage.recovery import publications
+    return any(snapshot is not None for snapshot in store.snapshot(scene_id, kind, borrow=True)) or bool(
+        publications(store, scene_id, kind))
+
+
 def check_sources(app, store, scene):
     """Validate source ownership without importing anything during normal merge."""
     from stash_ai.signatures import freeze
@@ -38,7 +45,7 @@ def check_sources(app, store, scene):
         if not objects and not owned_ai:
             continue
         existing = store.sources(scene_id, kind)
-        if owned_ai and not existing:
+        if owned_ai and not existing and not publication_state(store, scene_id, kind):
             raise RuntimeError('Merged markers exist without their source state. Restore the original --state-db before synchronization.')
         if objects:
             imported = {freeze(item) for item in store.imported_legacy(scene_id, kind, borrow=True)}
@@ -58,7 +65,7 @@ def import_scene(app, store, scene):
             if not enabled:
                 continue
             existing = store.sources(scene_id, kind)
-            if kind == 'markers' and not existing and any(
+            if kind == 'markers' and not existing and not publication_state(store, scene_id, kind) and any(
                     marker_ops.owned_marker(marker, merge_labels.AI) for marker in scene.get('scene_markers', [])):
                 raise RuntimeError('Merged markers exist without their source state. Restore the original --state-db before synchronization.')
             imported = {freeze(item) for item in store.imported_legacy(scene_id, kind, borrow=True)}

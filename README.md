@@ -131,7 +131,7 @@ klatki, wyniki i podpisy dowodów zachowują swoje wartości.
 
 Snapshoty merge zapisują współdzielone dowody `extra_support` raz, a contributions
 odwołują się do nich przez referencje. Zmniejsza to koszt serializacji i kompresji.
-Aktualny schemat to v14; starsze wersje programu odmówią jego otwarcia. Każdy nowy snapshot ma otoczkę formatu v4. `--db-update` konwertuje dawne
+Aktualny schemat to v15; starsze wersje programu odmówią jego otwarcia. Każdy nowy snapshot ma otoczkę formatu v4. `--db-update` konwertuje dawne
 snapshoty, także pending i recovery, dopisuje wymagane `contributions: []` do pustych zapisów oraz uzupełnia kompletne opcje odtwarzania, również w zagnieżdżonych dowodach scen.
 Dawny `blocklist` zostaje połączony z zapisanymi `tag_exclusions` wszystkich źródeł.
 Brakujące dawne przełączniki współdzielenia i occurrences zachowują `False`.
@@ -255,9 +255,9 @@ SQLite do systemu plików.
 ### Zdrowie, aktualizacja i kompaktowanie bazy stanu
 
 `--db-update` aktualizuje całą istniejącą bazę wskazaną przez `--state-db`
-do najnowszego obsługiwanego schematu (obecnie v14), we wszystkich scope'ach.
+do najnowszego obsługiwanego schematu (obecnie v15), we wszystkich scope'ach.
 Zwykłe uruchomienie oraz `--dry-run` wymagają aktualnego schematu: starszą bazę
-trzeba najpierw zaktualizować tą komendą. Nowa baza od razu otrzymuje v14.
+trzeba najpierw zaktualizować tą komendą. Nowa baza od razu otrzymuje v15.
 Updater korzysta z tego samego locka writera; migracje są wyłącznie offline.
 Tworzy aktualne tabele, indeksy i triggery, uzupełnia `result_index` dla baz
 sprzed v2, uzupełnia historyczne `result_metadata` we wszystkich scope'ach
@@ -623,3 +623,12 @@ W schemacie v14 `results` zawiera najwyżej jedną aktywną inferencję na model
 sygnatura dowodu występuje w published, pending lub recovery. Nowa inferencja stosuje tę samą
 zasadę; archiwum służy wyłącznie frozen replay i jest przycinane po zmianie publikacji.
 Zwykły merge, raporty, progi i indeks ukończenia nie korzystają z historii inferencji.
+
+
+W schemacie v15 aktywna inferencja wymaga analysis_format=4. --db-update wycofuje
+starsze wyniki, zaznacza konieczność ponownej inferencji i zachowuje tylko dokładne
+dowody przypięte przez published/pending/recovery. Snapshoty i owned_ids pozostają
+bez zmian. Uruchom następnie inferencję dla wszystkich wskazanych modeli i wyjść;
+--merge-only nie odtwarza brakującego cache. Raporty i occurrences używają pełnych
+obserwacji scen oraz jawnych sygnatur. statistics=null nadal oznacza brak
+kwalifikującego wsparcia, a nie zgodę na historyczną kwalifikację agregatu.

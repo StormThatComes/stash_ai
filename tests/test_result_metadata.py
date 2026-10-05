@@ -1,5 +1,5 @@
 """SQL preflight preserves retention guards, history and legacy preview isolation."""
-from tests.helpers.evidence import seed_history
+from tests.helpers.evidence import seed_history, inject_records
 
 from stash_ai.rethreshold.plans import RecordAccess, PendingPolicy, ThresholdRequest
 import json
@@ -78,7 +78,7 @@ def test_marker_check_uses_metadata_for_scene_threshold_guard(tmp_path, monkeypa
 
 @pytest.mark.parametrize('problem', [
     'scene_floor', 'marker_floor', 'frames', 'format', 'origin',
-    'blocklist_missing', 'blocklist_invalid', 'blocklist_unblocked', 'imported',
+    'floor_missing', 'blocklist_invalid', 'blocklist_unblocked', 'imported',
 ])
 def test_metadata_check_matches_payload_validation(tmp_path, problem):
     saved = outputs()
@@ -92,16 +92,19 @@ def test_metadata_check_matches_payload_validation(tmp_path, problem):
         saved['scene']['meta']['scene_frames_format'] = 2
     elif problem == 'origin':
         saved['scene']['meta']['origin'] = 'legacy'
-    elif problem == 'blocklist_missing':
-        saved['markers']['meta'].pop('marker_tag_blocklist')
+    elif problem == 'floor_missing':
+        saved['markers']['meta'].pop('marker_score_floor')
     elif problem == 'blocklist_invalid':
         saved['markers']['meta']['marker_tag_blocklist'] = None
     elif problem == 'blocklist_unblocked':
         saved['markers']['meta']['marker_tag_blocklist'] = ['core']
     elif problem == 'imported':
         saved['markers']['mode'] = 'spans'
+        saved['markers']['meta']['origin'] = 'legacy'
+        saved['markers']['meta'].pop('analysis_format')
+        saved['markers']['items'] = []
     with StateStore(tmp_path/'state.sqlite3', 'scope') as store:
-        store.put('1', 'wd', saved)
+        inject_records(store, '1', 'wd', saved)
         messages = []
         for metadata_only in (False, True):
             with pytest.raises(ValueError) as error:
@@ -167,7 +170,7 @@ def test_old_database_backfills_once_and_keeps_inline_overrides(tmp_path, monkey
         store.connection.set_trace_callback(statements.append)
         assert scene_updates.plan(app, store, '1', config(.4), request=ThresholdRequest(kinds=('scene', 'markers'), access=RecordAccess.METADATA))
         assert report.timing_calls['state_json_decode'] == 0
-        assert store.connection.execute('PRAGMA user_version').fetchone() == (14,)
+        assert store.connection.execute('PRAGMA user_version').fetchone() == (15,)
         first = metadata_rows(store)
         assert len(first) == 2
         monkeypatch.setattr(store, 'unpack', lambda *a: pytest.fail('Repeated legacy decode'))

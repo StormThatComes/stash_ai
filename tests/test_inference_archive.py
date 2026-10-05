@@ -84,7 +84,7 @@ def test_v13_migration_keeps_latest_and_only_pinned_history_across_scopes(tmp_pa
     with sqlite3.connect(path) as connection:
         connection.execute('UPDATE results SET data=?', (encode(history),))
         connection.execute('PRAGMA user_version=13')
-    assert db.update_database(path) == (13, 14)
+    assert db.update_database(path) == (13, 15)
     for scope in ('first', 'second'):
         with StateStore(path, scope) as store:
             assert store.model_records('1', 'markers', 'wd') == [history[-1]]
@@ -95,7 +95,7 @@ def test_v13_migration_keeps_latest_and_only_pinned_history_across_scopes(tmp_pa
     with sqlite3.connect(path) as connection:
         before = [connection.execute('SELECT * FROM ' + table).fetchall()
                   for table in ('results', 'inference_archive', 'snapshots')]
-    assert db.update_database(path) == (14, 14)
+    assert db.update_database(path) == (15, 15)
     with sqlite3.connect(path) as connection:
         assert [connection.execute('SELECT * FROM ' + table).fetchall()
                 for table in ('results', 'inference_archive', 'snapshots')] == before

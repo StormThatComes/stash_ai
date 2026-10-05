@@ -110,7 +110,8 @@ def test_core_exclusion_revokes_a_required_source(excluded_source):
 def test_old_cache_without_frame_identity_does_not_gain_shared_ranges():
     records=records_for({'wd':[.9,0],'dtq':[0,.9]})
     for segments in records.values():segments[0]['meta'].pop('frame_input_signature')
-    assert fused(records)[1]==[]
+    with pytest.raises(ValueError, match='signatures'):
+        fused(records)
 
 
 def extra_records(values=(.9,.9,.9,.9)):

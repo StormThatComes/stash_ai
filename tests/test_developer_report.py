@@ -1,4 +1,5 @@
 """Privacy and usefulness guarantees for anonymous developer diagnostics."""
+from tests.helpers.evidence import current_record
 
 from stash_ai.reports.developer.distribution import Distribution
 
@@ -28,7 +29,7 @@ SECRETS = (
 
 
 def segment(tag="private_tag_name"):
-    return {
+    return current_record({
         "mode": "scene",
         "meta": {
             "origin": "inference",
@@ -38,17 +39,17 @@ def segment(tag="private_tag_name"):
         },
         "items": [{"tag": tag, "score": .91}],
         "frames": [
-            {"start": 12.5, "end": 13.5, "tags": [[tag, .91], ["another_private_tag", .72]]},
+            {"start": 12.5, "end": 13.5, "tags": [[tag, .91], ["different_private_tag", .72]]},
             {"start": 13.5, "end": 14.5, "tags": [[tag, .83]]},
         ],
-    }
+    })
 
 
 def seed(path):
     with merge_store.StateStore(path, "scope-secret-alpha") as state:
         state.put("scene-secret-123", "wd", {
             "scene": segment(),
-            "markers": {
+            "markers": current_record({
                 "mode": "frames",
                 "meta": {"origin": "inference", "inference_signature": "secret-signature-value"},
                 "items": [
@@ -56,7 +57,7 @@ def seed(path):
                      "tags": [["private_tag_name", .91], ["another_private_tag", .72]]},
                     {"start": 13.5, "end": 14.5, "tags": [["private_tag_name", .83]]},
                 ],
-            },
+            }),
         })
     with merge_store.StateStore(path, "scope-secret-beta") as state:
         state.put("scene-secret-999", "joytag", {"scene": segment("another_private_tag")})

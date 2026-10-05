@@ -65,7 +65,7 @@ def test_wider_support_policy_checks_historical_retention_before_publication(
             with state.connection:
                 state.connection.execute("UPDATE results SET data=? WHERE kind='markers'", (encode(records),))
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), True) as state:
-        meta = state.records('1', 'markers')['wd'][0]['meta']
+        meta = state.unpack(state.connection.execute("SELECT data FROM " + state.table('results') + " WHERE kind='markers' AND model='wd'").fetchone()[0])[0]['meta']
         assert ('marker_score_floor' not in meta) == old_cache
     before = stored_outputs(p.path), deepcopy(p.stash.scene)
     database_bytes = p.path.read_bytes()
@@ -83,11 +83,16 @@ def test_wider_support_policy_checks_historical_retention_before_publication(
         assert p.path.read_bytes() == database_bytes
     if old_cache:
         output = capsys.readouterr().out
-        assert 'marker cache floor' in output and 'wd' in output and '--restart' in output
+        assert 'Obsolete active inference' in output and '--db-update' in output
     elif not dry_run:
         assert marker_ranges(p.stash) == [('ai:common', 0, 8)]
     monkeypatch.setattr(app, 'DRY_RUN', False)
     p.stash.dry_run = False
+    if old_cache:
+        from stash_ai.db import update_database
+        with sqlite3.connect(p.path) as connection:
+            connection.execute('PRAGMA user_version=14')
+        update_database(p.path)
     assert app.main([*args, '--restart']) == 0
     assert marker_ranges(p.stash) == [('ai:common', 0, 8)]
 
@@ -110,6 +115,8 @@ def test_old_high_only_cache_remains_usable_with_matching_support_policy(pipelin
 def test_unknown_historical_floor_requires_inference_even_at_high_threshold(override):
     from tests.helpers.evidence import segment, policies
     frames = segment('wd', [[('core', .95)]] * 2)
+    frames['meta']['analysis_format'] = 3
+    frames['meta']['marker_tag_blocklist'] = []
     frames['meta'].pop('marker_score_floor', None)
     frames['meta']['marker_threshold'] = .7
     frames[thresholds_identity.OVERRIDE] = override
@@ -120,6 +127,8 @@ def test_unknown_historical_floor_requires_inference_even_at_high_threshold(over
 def test_historical_incomplete_segment_cannot_hide_behind_complete_history():
     from tests.helpers.evidence import segment, policies
     old = segment('wd', [[], []])
+    old['meta']['analysis_format'] = 3
+    old['meta']['marker_tag_blocklist'] = []
     old['meta'].pop('marker_score_floor', None)
     current = segment('wd', [[('core', .9)]] * 2)
     with pytest.raises(ValueError, match='wd: marker cache floor.*run inference'):

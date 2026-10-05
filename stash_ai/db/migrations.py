@@ -77,6 +77,9 @@ def migrate(database):
                 index_result(state, scene, model, kind, overlay(decode(payload), kind, thresholds), scope=scope)
         from .archive_migration import migrate as migrate_archive
         migrate_archive(db)
+        if database.version < 15:
+            from .current_evidence_migration import migrate as retire_obsolete
+            retire_obsolete(db)
         db.execute('DROP TABLE IF EXISTS refinement_progress')
         for event in ('insert', 'update', 'delete'):
             db.execute(f'DROP TRIGGER IF EXISTS perf_legacy_imports_{event}')
@@ -94,4 +97,3 @@ def migrate(database):
             db.execute('INSERT OR REPLACE INTO result_metadata VALUES (?,?,?,?,?,?)',
                        (scope, scene, model, kind, FORMAT, encode(summarize(decode(payload)))))
         db.execute(f'PRAGMA user_version={LATEST_SCHEMA_VERSION}')
-

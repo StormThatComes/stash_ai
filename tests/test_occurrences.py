@@ -74,27 +74,21 @@ def test_old_or_incomplete_checkpoint_analysis_requires_restart(damage):
         SceneAccumulator(.2, TemporalPolicy(), saved)
 
 
-@pytest.mark.parametrize('cache', ['peak', 'old_frames', 'missing', 'different_run', 'different_input'])
-def test_one_representative_point_uses_only_matching_recorded_times(tmp_path, cache):
+@pytest.mark.parametrize('cache', ['peak', 'missing', 'different_run', 'different_input'])
+def test_occurrences_use_scene_observations_independently_of_marker_cache(tmp_path, cache):
     scenes, markers = paired_records({'wd': [0, .95, 0, .8, 0]}, threshold=.35, marker_threshold=.65)
-    if cache != 'peak':
-        scenes['wd'][0]['items'][0]['statistics'].pop('peak_time')
     if cache == 'missing':
         for row in markers['wd'][0]['items']: row['tags'] = []
     if cache == 'different_run': markers['wd'][0]['meta']['inference_signature'] = 'other'
     if cache == 'different_input': markers['wd'][0]['meta']['frame_input_signature'] = 'other'
-    metrics = Counter()
     with merge_store.StateStore(tmp_path/'state', 'fixture') as state:
         put(state, scenes, markers)
-        hits, spans = merge.evidence(app, state, '1', policies(), policies(), metrics)
-    assert len(hits) == 1
-    if cache in ('peak', 'old_frames'):
-        assert len(spans) == 1 and spans[0]['start'] == 1 and spans[0]['end'] is None
-        assert spans[0]['derived'] == 'occurrence'
-        assert len(spans[0]['occurrence_evidence']) == 1
-        assert spans[0]['occurrence_evidence'][0]['score'] == .95
-    else:
-        assert spans == [] and metrics['occurrence_missing_timestamps'] == 1
+        hits, spans = merge.evidence(app, state, '1', policies(), policies())
+    assert len(hits) == len(spans) == 1
+    assert spans[0]['start'] == 1 and spans[0]['end'] is None
+    assert spans[0]['derived'] == 'occurrence'
+    assert len(spans[0]['occurrence_evidence']) == 1
+    assert spans[0]['occurrence_evidence'][0]['score'] == .95
 
 
 def test_scene_peak_below_marker_retention_floor_still_supplies_a_point(tmp_path):
@@ -272,19 +266,17 @@ def test_pipeline_reuses_results_for_markers_only_dry_run_and_cleanup(pipeline, 
         assert state.connection.execute('SELECT data FROM results ORDER BY kind').fetchall() == records
 
 
-def test_merge_only_recovers_old_cached_frames_without_rewriting_them(pipeline, monkeypatch):
+def test_incomplete_scene_statistics_are_rejected_without_replacing_evidence(pipeline):
     p = pipeline
     p.scores['wd'][:] = 0; p.scores['wd'][5, 0] = .95
     assert app.main(p.args) == 0
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL)) as state:
-        record = state.records('1', 'scene')['wd'][0]
+        original = state.records('1', 'scene')['wd'][0]
+        record = deepcopy(original)
         for item in record['items']: item['statistics'].pop('peak_time', None)
-        record['meta']['analysis_format'] = 2
-        state.put('1', 'wd', {'scene': record})
-    p.stash.scene['scene_markers'] = []
-    monkeypatch.setattr(app.services, 'load_tagger', lambda *a: pytest.fail('old cache caused inference'))
-    assert app.main([*p.args, '--merge-only']) == 0
-    assert len(p.stash.scene['scene_markers']) == 1 and p.stash.scene['scene_markers'][0]['seconds'] == 5
+        with pytest.raises(ValueError, match='statistics must be complete'):
+            state.put('1', 'wd', {'scene': record})
+        assert state.records('1', 'scene')['wd'][0] == original
 
 
 def test_enabling_points_does_not_invalidate_completed_inference(pipeline, monkeypatch, tmp_path):

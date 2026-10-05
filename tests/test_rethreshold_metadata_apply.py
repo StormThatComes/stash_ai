@@ -104,8 +104,10 @@ def test_small_index_plan_retains_latest_inference_and_all_history_population(tm
     if history == 'no_inference':
         for segment in saved:
             segment['meta']['origin'] = 'legacy'
+            segment['meta'].pop('analysis_format')
     elif history == 'legacy_tail':
         saved[-1]['meta']['origin'] = 'legacy'
+        saved[-1]['meta'].pop('analysis_format')
     elif history == 'empty_inference_tail':
         saved[-1]['items'] = saved[-1]['frames'] = []
     else:
