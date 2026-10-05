@@ -38,7 +38,8 @@ def old_consensus(pipeline, monkeypatch, tmp_path, request):
     with monkeypatch.context() as previous:
         def capture_old(*args, **kwargs):
             outputs = capture(*args, **kwargs)
-            outputs['markers']['meta'].pop('marker_tag_blocklist')
+            outputs['markers']['meta']['analysis_format'] = 3
+            outputs['markers']['meta'].pop('marker_tag_blocklist', None)
             if request.param:
                 outputs['markers']['meta'].pop('marker_score_floor')
             return outputs

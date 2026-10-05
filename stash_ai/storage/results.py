@@ -27,6 +27,9 @@ class ResultStore:
         """Apply separate publication policy to canonical evidence records."""
         from stash_ai.storage.segments import StoredSegment
         overlay(segments, kind, threshold)
+        from stash_ai.evidence.formats import validate_current
+        for segment in segments:
+            validate_current(segment)
         for index, segment in enumerate(segments):
             segments[index] = StoredSegment(segment)
         return segments
@@ -156,6 +159,9 @@ class ResultStore:
                        or not isinstance(segment.get('meta'), dict)
                        or not isinstance(segment.get('items'), list) for segment in segments)):
             raise ValueError('Incomplete result record: mode, metadata and items are required.')
+        from stash_ai.evidence.formats import validate_current
+        for segment in segments:
+            validate_current(segment)
         if any('refinement' in segment for segment in segments):
             raise ValueError('Retired refinement evidence is not supported; run --db-update for saved results.')
         store = self.store

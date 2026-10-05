@@ -118,11 +118,9 @@ class MergedModelRun:
             prefetch=args.prefetch_batches, analysis=analysis, report=self.report,
             prepare_workers=args.prepare_workers)
         outputs = merge_results.capture_outputs(
-            app, self.config, self.vocabulary, cues, predictions, frames, analysis)
-        for segment in outputs.values():
-            segment["meta"].update(
-                inference_signature=signature,
-                frame_input_signature=frame_signature(cue_manifest(cues), media.hashes))
+            app, self.config, self.vocabulary, cues, predictions, frames, analysis,
+            inference_signature=signature,
+            frame_input_signature=frame_signature(cue_manifest(cues), media.hashes))
         checkpoints.finish(store, scene_id, self.key, outputs)
         self.stats["processed"] += 1
 

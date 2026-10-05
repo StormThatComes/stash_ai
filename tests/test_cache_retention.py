@@ -46,7 +46,7 @@ def test_retention_settings_apply_to_all_models(tmp_path, value):
 def test_omitted_retention_preserves_legacy_model_identity(tmp_path, pipeline):
     config = ModelSettings(SOURCES['wd'], tmp_path, scene_threshold=.4, marker_threshold=.65, batch_size=4)
     expected = model_identity(app, config, pipeline.vocab)
-    assert expected['retention'] == dict(temporal=True, marker_ratio=.85, scene_ratio=.85)
+    assert expected['retention'] == dict(marker_ratio=.85, scene_ratio=.85)
     assert model_identity(app, replace(config, scene_cache_floor=None,
         marker_cache_floor=None), pipeline.vocab) == expected
     for name in ('scene_cache_floor', 'marker_cache_floor'):
@@ -231,5 +231,5 @@ def test_exact_scene_aggregate_includes_scores_below_retention(pipeline, monkeyp
     args = [*p.args, *model_config(tmp_path/'models.yml', scene_cache_floor=.2), '--scene-tags-only']
     assert app.main(args) == 0
     scene = records(p.path)['scene']['wd'][0]
-    assert scene['items'] == [dict(tag='common', score=pytest.approx(.18))]
+    assert scene['items'] == [dict(tag='common', score=pytest.approx(.18), statistics=None)]
     assert len([row for row in scene['frames'] if row['tags']]) == 1

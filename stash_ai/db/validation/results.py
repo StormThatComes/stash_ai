@@ -47,6 +47,9 @@ def check_results_and_index(db, tables, errors, progress=None):
             segments = decoded_payload(blob, list)
             if not valid_result_segments(segments, kind):
                 raise ValueError("Invalid result segment.")
+            from stash_ai.evidence.formats import validate_current
+            for segment in segments:
+                validate_current(segment)
             if canonical_results and any(
                     {'scene_threshold_override', 'marker_threshold_override', 'refinement'} & segment.keys()
                     for segment in segments):

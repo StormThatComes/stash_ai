@@ -30,15 +30,14 @@ def configure(monkeypatch):
         for config in original(*args)])
 
 
-def test_default_empty_blocklist_keeps_temporal_inference_identity(monkeypatch, tmp_path):
-    expected = 'b56223032268887b5f20c2129912f7cfee5c11ce98b50a2e721bd95eea601aa0'
+def test_current_inference_identity_drops_retired_hash_fields(monkeypatch, tmp_path):
     monkeypatch.setattr(app, 'TEMPORAL_POLICY', TemporalPolicy())
     config = ModelSettings(WD, tmp_path / 'missing', batch_size=2, scene_threshold=.4, marker_threshold=.7)
-    vocabulary = Vocabulary(['common', 'extra'], {'common': 'General', 'extra': 'General'})
-    identity = model_identity(app, config, vocabulary)
-    # Digests captured before retirement; normalize only the machine-specific path.
-    identity['files'] = [[Path(path).name, size, mtime] for path, size, mtime in identity['files']]
-    assert digest(identity) == expected
+    identity = model_identity(app, config, Vocabulary(['common', 'extra'], {}))
+    assert identity['format'] == 3
+    assert 'frame_blocklist' not in identity and 'temporal' not in identity['retention']
+    old = {**identity, 'format': 2, 'frame_blocklist': []}
+    assert digest(identity) != digest(old)
 
 
 @pytest.mark.parametrize('temporal', [True, False])
@@ -57,6 +56,7 @@ def test_legacy_blocklist_rejects_merge_before_writes_and_restart_restores_range
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL)) as state:
         records = state.records('1', 'markers')['wd']
         saved = records[0]
+        saved['meta']['analysis_format'] = 3
         saved['meta']['marker_tag_blocklist'] = ['common', 'unrelated']
         for row in saved['items']:
             row['tags'] = []
@@ -89,6 +89,7 @@ def test_legacy_blocklist_aborts_rethreshold_before_any_policy_write(pipeline, m
     # WD is a safe earlier target; DTQ contains frames captured while common was blocked.
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL)) as state:
         records = state.records('1', 'markers')['dtq']
+        records[0]['meta']['analysis_format'] = 3
         records[0]['meta']['marker_tag_blocklist'] = ['common']
         for row in records[0]['items']:
             row['tags'] = [pair for pair in row['tags'] if pair[0] != 'common']
@@ -120,7 +121,8 @@ def test_unfiltered_cache_retains_labels_and_reuses_predictions_without_models(p
     assert app.main(p.args) == 0
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), True) as state:
         saved = state.records('1', 'markers')['wd'][0]
-        assert saved['meta']['marker_tag_blocklist'] == []
+        assert saved['meta']['analysis_format'] == 4
+        assert 'marker_tag_blocklist' not in saved['meta']
         assert all(['common', pytest.approx(.9)] in row['tags'] for row in saved['items'])
     monkeypatch.setattr(app.services, 'load_tagger', lambda *args: pytest.fail('loaded a model'))
     monkeypatch.setattr(sprites, 'fetch_cues', lambda *args: pytest.fail('fetched VTT'))
@@ -144,8 +146,9 @@ def test_unknown_blocklist_rejects_marker_replay_but_not_scene_only(
     assert app.main(p.args) == 0
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL)) as state:
         records = state.records('1', 'markers')['wd']
+        records[0]['meta']['analysis_format'] = 3
         if retained is None:
-            records[0]['meta'].pop('marker_tag_blocklist')
+            records[0]['meta'].pop('marker_tag_blocklist', None)
         else:
             records[0]['meta']['marker_tag_blocklist'] = retained
         with state.connection:

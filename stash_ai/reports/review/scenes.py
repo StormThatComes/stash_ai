@@ -6,7 +6,7 @@ from .signals import _score, _candidate, _flag
 def _scene_signals(app, store, scene, hits, rows, options, scene_policies):
     from stash_ai.evidence.identity import marker_segment_signature
     from stash_ai.evidence.cache_views import views
-    from stash_ai.evidence.temporal.statistics import scene_reason
+    from stash_ai.evidence.qualification import scene_qualification
 
     _, projected = views(app, store.records(scene, "scene", borrow=True))
     # Index retained labels once per scene, rather than scanning the vocabulary
@@ -62,7 +62,7 @@ def _scene_signals(app, store, scene, hits, rows, options, scene_policies):
                         and _score(entry.get("score")) and _score(meta.get("scene_threshold"))):
                     comparisons[peer].append((meta, entry))
             for peer, values in comparisons.items():
-                if all(scene_reason(entry["score"], entry.get("statistics"),
+                if all(scene_qualification(entry, meta,
                                     meta["scene_threshold"], app.TEMPORAL_POLICY) is None
                        for meta, entry in values):
                     meta, entry = max(values, key=lambda value: value[1]["score"])

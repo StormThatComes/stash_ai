@@ -494,9 +494,14 @@ zostały usunięte; usuń je ze skryptów i `temporal_policy.yml`. Poszczególne
 reguły nadal konfiguruje polityka YAML, w tym `occurrence_markers`.
 Historyczne namespace’y modeli nadal można importować i czyścić. Zamrożone
 snapshoty sprzed reguł temporalnych zachowują własny algorytm replay dla
-cleanupu. Aktualny cache nie wymaga ponownej inferencji wyłącznie z powodu
-usunięcia tych przełączników; retencja zapisanych obserwacji nadal podlega
-walidacji przy zmianie polityki.
+cleanupu. Nowa inferencja zapisuje evidence w formacie analizy 4: wymagane są
+sygnatury wejścia i inferencji, jawne progi retencji oraz statystyki lub jawne
+`null` dla niekwalifikujących się agregatów. Pusty `marker_tag_blocklist` nie jest
+już zapisywany; format gwarantuje nieprzefiltrowane obserwacje. Tożsamość cache
+ma wersję 3, więc zwykły przebieg po aktualizacji ponownie wykona inferencję.
+`--merge-only` nie aktualizuje formatu starych danych. Historyczne agregaty
+i import legacy mają osobne reguły kwalifikacji; brak informacji o retencji
+lub odrzuconych tagach nie stanowi dowodu pełnego cache.
 
 ## Konfiguracja
 
