@@ -39,7 +39,7 @@ def outputs(threshold=.4, signature='original'):
 
 
 def config(threshold):
-    return ModelSettings(SOURCES['wd'], Path('.'), scene_threshold=threshold, marker_threshold=threshold)
+    return ModelSettings(SOURCES['wd'], Path('.'), scene_threshold=threshold, marker_threshold=threshold, batch_size=4)
 
 
 def rethreshold(store, threshold, *, markers=True, scenes=('1',)):

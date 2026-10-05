@@ -1,6 +1,5 @@
 # Automatic postprocessing for all labels and models. No allowlist.
 version: 1
-enabled: true
 # Combine compatible models before rejecting runs with too few distinct times.
 shared_marker_frames: true
 # Include extras from models that did not detect the primary marker label.

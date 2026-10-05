@@ -37,7 +37,7 @@ def _wanted_markers(app, scene_id, markers, catalog, blocked_names):
         if is_occurrence(marker):
             payload['title'] += ' · wykrycie'
         payload["end_seconds"] = (round(marker["end"], 3)
-                                  if marker["end"] is not None and app.MARKER_USE_END_TIME else None)
+                                  if marker["end"] is not None else None)
         wanted.append((payload, {"seconds": marker["start"], "end_seconds": marker["end"]}))
     return wanted, resolved_marker_labels
 

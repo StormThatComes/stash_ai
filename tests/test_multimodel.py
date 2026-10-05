@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 import yaml
 from stash_ai.domain import Cue, FramePrediction, MarkerSpec
+from stash_ai.config import vocabulary_digest
 from stash_ai.inference import prediction, sprites
 from tests.helpers.runtime import runtime as app
 from stash_ai.models import (
@@ -28,63 +29,8 @@ from stash_ai.backends.onnx_preprocessing import prepare_wd, prepare_dtq, prepar
 
 
 from tests.helpers.stash import Stash
-from tests.helpers.stash import sync
 from tests.helpers.inference import Tagger, sprite_frames
 pytestmark = pytest.mark.usefixtures("reset_multimodel")
-
-
-@pytest.mark.parametrize("source", list(SOURCES.values()))
-def test_source_isolation_and_idempotence(source):
-    stash=Stash()
-    stash.scene["tags"].append(stash.tag("manual"))
-    for item in SOURCES.values():
-        stash.scene["tags"].append(stash.tag(item.prefix+"old"))
-        stash.marker(item,"old",item.key)
-    manual=stash.marker(source,"old","manual",True)
-    other=deepcopy([m for m in stash.scene["scene_markers"] if m["id"]!=source.key])
-    spec=MarkerSpec("new",10,12,.9,2,("extra",))
-    sync(stash,source,[("new",.9)],[spec])
-    assert {t["name"] for t in stash.scene["tags"]} == {"manual",source.prefix+"new"}|{s.prefix+"old" for s in SOURCES.values() if s!=source}
-    assert all(m in stash.scene["scene_markers"] for m in other)
-    assert manual in stash.scene["scene_markers"]
-    stash.writes.clear()
-    result=sync(stash,source,[("new",.9)],[spec])
-    assert not stash.writes and result["markers_unchanged"]==1
-
-
-@pytest.mark.parametrize("source",list(SOURCES.values()))
-def test_global_blacklist_covers_markers_but_core_only_tags_remain_extras(source,monkeypatch):
-    monkeypatch.setattr(app,"REPLACE_SCENE_TAGS",False)
-    monkeypatch.setattr(app,"REPLACE_MARKERS",False)
-    stash=Stash()
-    stash.scene["tags"]=[stash.tag(source.prefix+"scene_ban"),stash.tag("scene_ban"),stash.tag(source.prefix+"keep")]
-    stash.marker(source,"core_ban","remove")
-    kept=stash.marker(source,"old","keep")
-    manual=stash.marker(source,"core_ban","manual",True)
-    specs=[MarkerSpec("core_ban",0,2,.9,2),MarkerSpec("scene_ban",4,6,.9,2,("core_ban",)),
-           MarkerSpec('allowed',8,10,.9,2,('core_ban','scene_ban'))]
-    result=sync(stash,source,[("core_ban",.9),("scene_ban",.9)],specs,frozenset({"core_ban"}),frozenset({"scene_ban"}))
-    assert {t["name"] for t in stash.scene["tags"]}=={"scene_ban",source.prefix+"keep",source.prefix+"core_ban"}
-    assert kept in stash.scene["scene_markers"] and manual in stash.scene["scene_markers"]
-    assert not any(m['primary_tag']['name']==source.prefix+'scene_ban' for m in stash.scene['scene_markers'])
-    generated=next(m for m in stash.scene["scene_markers"] if m["primary_tag"]["name"]==source.prefix+"allowed")
-    assert source.prefix+"core_ban" in {t["name"] for t in generated["tags"]}
-    assert source.prefix+'scene_ban' not in {t['name'] for t in generated['tags']}
-    assert result["markers_core_cleaned"]==result["scene_tags_cleaned"]==1
-
-
-@pytest.mark.parametrize("source",list(SOURCES.values()))
-def test_dry_run_and_failure_preserve_existing_markers(source):
-    stash=Stash(True)
-    old=stash.marker(source,"old","old")
-    specs=[MarkerSpec("new",0,2,.9,2)]
-    result=sync(stash,source,[("new",.9)],specs)
-    assert not stash.writes and result["markers_created"]==result["markers_deleted"]==1
-    stash.dry_run,stash.fail_create=False,True
-    with pytest.raises(RuntimeError,match="injected"):
-        sync(stash,source,[("new",.9)],specs)
-    assert old in stash.scene["scene_markers"]
-    assert not any(w[0] in {"scene","delete"} for w in stash.writes)
 
 
 @pytest.mark.parametrize("dry",[False,True])
@@ -99,7 +45,7 @@ def test_cleanup_all_refreshes_between_sources(tmp_path,monkeypatch,dry):
     monkeypatch.setattr(app.services,"create_stash_client",lambda _:stash)
     from tests.helpers.cleanup import options, install
     install(monkeypatch, stash)
-    command = [*options(tmp_path, ['blocked'], ['blocked'], output='separate'),
+    command = [*options(tmp_path, ['blocked'], ['blocked']),
                '--cleanup-strategy', 'scenes', '--scene-id', '1']
     assert app.main(command + (['--dry-run'] if dry else [])) == 0
     if dry: assert stash.scene==before and not stash.writes
@@ -108,20 +54,8 @@ def test_cleanup_all_refreshes_between_sources(tmp_path,monkeypatch,dry):
         assert stash.scene["scene_markers"]==[]
 
 
-@pytest.mark.parametrize("source",[WD,OPPAI])
-@pytest.mark.parametrize("mode",["markers","scenes"])
-def test_output_modes(monkeypatch,mode,source):
-    stash=Stash();stash.scene["tags"].append(stash.tag(source.prefix+"old"));stash.marker(source,"old","old")
-    before=deepcopy(stash.scene)
-    monkeypatch.setattr(app,"APPLY_SCENE_TAGS",mode=="scenes")
-    monkeypatch.setattr(app,"CREATE_MARKERS",mode=="markers")
-    sync(stash,source,[("new",.9)],[MarkerSpec("new",0,2,.9,2)])
-    key="tags" if mode=="markers" else "scene_markers"
-    assert stash.scene[key]==before[key]
-
-
 @pytest.mark.parametrize("fail_wd",[False,True])
-def test_main_all_releases_models_and_preserves_failed_source(monkeypatch,fail_wd):
+def test_main_all_releases_models_and_preserves_failed_source(monkeypatch,tmp_path,fail_wd):
     stash=Stash();stash.scene["tags"].append(stash.tag("wd:old"));old=stash.marker(WD,"old","old")
     vocab=Vocabulary(["tag"],{"tag":"General"})
     cues=[Cue(i,i+1,"x",(0,0,1,1)) for i in range(2)]
@@ -135,10 +69,12 @@ def test_main_all_releases_models_and_preserves_failed_source(monkeypatch,fail_w
         model=Tagger(settings,vocabulary.labels,np.full((2,1),np.nan if fail_wd and settings.source==WD else .9,np.float32))
         loaded.append(model);return model
     monkeypatch.setattr(app.services,"load_tagger",load)
-    assert app.main(["--models","all","--no-hierarchy"])==int(fail_wd)
+    args=["--models","all","--no-hierarchy","--state-db",str(tmp_path/"state.sqlite3")]
+    assert app.main(["--import-legacy-only","--state-db",str(tmp_path/"state.sqlite3")])==0
+    assert app.main(args)==int(fail_wd)
     assert all(t.closed for t in loaded) and len(loaded)==len(SOURCES)
-    assert {t["name"] for t in stash.scene["tags"]}=={"jt:tag","dtq:tag","op:tag","wd:old" if fail_wd else "wd:tag"}
-    assert (old in stash.scene["scene_markers"])==fail_wd
+    assert {t["name"] for t in stash.scene["tags"]}=={"ai:tag"}|({"ai:old"} if fail_wd else set())
+    assert any(m["primary_tag"]["name"]=="ai:old" for m in stash.scene["scene_markers"])==fail_wd
 
 
 @pytest.mark.parametrize("aggregation",["max","topk_mean"])
@@ -149,7 +85,7 @@ def test_every_label_and_streaming_aggregation(monkeypatch,aggregation,batch):
     cues=[Cue(i,i+1,"x",(0,0,1,1)) for i in range(5)]
     monkeypatch.setattr(app,"AGGREGATION",aggregation)
     monkeypatch.setattr(sprites,"iter_sprite_frames",lambda *args:sprite_frames(cues))
-    predictions,frames=prediction.predict_scene(app, Tagger(ModelSettings(WD,Path("."),batch_size=batch),labels,scores),Stash(),{},cues,frozenset({"scene_ban"}))
+    predictions,frames=prediction.predict_scene(app, Tagger(ModelSettings(WD,Path("."),batch_size=batch, scene_threshold=.4, marker_threshold=.65),labels,scores),Stash(),{},cues,frozenset({"scene_ban"}))
     expected=scores.max(axis=0) if aggregation=="max" else np.sort(scores,axis=0)[-2:].mean(axis=0)
     assert len(predictions)==len(labels)-1
     for tag,score in predictions: assert score==pytest.approx(expected[labels.index(tag)])
@@ -199,13 +135,17 @@ def test_original_hierarchy_and_model_settings():
     assert select_models(["dtq,wd","wd"])==["dtq","wd"]
 
 
-def test_model_hierarchies_include_all_categories_and_keep_manual_parents():
+def test_model_hierarchies_include_all_categories_and_keep_manual_parents(tmp_path):
     stash=Stash();manual=stash.tag("manual parent");other=stash.tag("jt:category:Other")
     other["description"]=JOYTAG.hierarchy_description
     old=stash.tag("wd:category:Old");old["description"]=WD.hierarchy_description
     stash.tag("wd:tag")["parents"]=[manual,other,old]
     vocab=Vocabulary(["tag","character","unknown"],{"tag":"General","character":"Character"})
-    hierarchy=app.services.metadata_hierarchy(vocab,WD)
+    path = tmp_path / 'hierarchy.yml'
+    path.write_text(yaml.safe_dump(dict(version=1, root='WD',
+        category_prefix='wd:category:', groups={'General': ['tag'],
+        'Character': ['character'], 'Uncategorized': ['unknown']})))
+    hierarchy=app.services.load_tag_hierarchy(path,vocab.labels,WD)
     resolver=app.services.TagResolver(stash,hierarchy,source=WD)
     for name in vocab.labels: resolver.resolve("wd:"+name)
     assert {p["name"] for p in stash.tags["wd:tag"]["parents"]}=={"manual parent","jt:category:Other","wd:category:General"}
@@ -233,13 +173,13 @@ def test_scoped_policies_and_cleanup_without_model_files(tmp_path,monkeypatch):
 
 def test_vocabulary_order_and_categories(tmp_path):
     (tmp_path/"selected_tags.csv").write_text('tag_id,name,category\n999,rating,9\n10,tag,0\n1,character,4\n')
-    assert load_vocabulary(ModelSettings(WD,tmp_path,download_missing=False)).labels==["rating","tag","character"]
+    assert load_vocabulary(ModelSettings(WD,tmp_path,download_missing=False, scene_threshold=.4, marker_threshold=.65, batch_size=4)).labels==["rating","tag","character"]
     (tmp_path/"tag_to_id.json").write_text('{"copyright":2,"general":0,"character":1}')
     (tmp_path/"config.json").write_text('{"image_size":448,"num_classes":3}')
     (tmp_path/"tag_category.json").write_text('{"copyright":3,"general":0,"character":4}')
-    assert load_vocabulary(ModelSettings(DTQ,tmp_path,download_missing=False)).labels==["general","character","copyright"]
+    assert load_vocabulary(ModelSettings(DTQ,tmp_path,download_missing=False, scene_threshold=.4, marker_threshold=.65, batch_size=4)).labels==["general","character","copyright"]
     (tmp_path/"tag_to_id.json").write_text('{"a":0,"b":0,"c":2}')
-    with pytest.raises(ValueError): load_vocabulary(ModelSettings(DTQ,tmp_path,download_missing=False))
+    with pytest.raises(ValueError): load_vocabulary(ModelSettings(DTQ,tmp_path,download_missing=False, scene_threshold=.4, marker_threshold=.65, batch_size=4))
 
 
 @pytest.mark.parametrize("values",[np.array([[np.nan]]),np.array([[np.inf]]),np.array([[1.1]]),np.zeros((2,1))])
@@ -247,19 +187,13 @@ def test_bad_scores(values):
     with pytest.raises(RuntimeError): validate_scores(values,1,["tag"],"test")
 
 
-def test_preprocessing_and_only_untagged(monkeypatch):
+def test_preprocessing():
     from PIL import Image
     image=Image.new("RGB",(8,4),(255,0,0))
     wd,dtq=prepare_wd(image,8),prepare_dtq(image,8)
     np.testing.assert_array_equal(wd[4,4],[0,0,255])
     np.testing.assert_array_equal(wd[0,0],[255,255,255])
     np.testing.assert_allclose(dtq[:,0,0],-np.array([.485,.456,.406])/np.array([.229,.224,.225]),atol=1e-6)
-    stash=Stash();stash.scene["tags"].append(stash.tag("jt:seen"));stash.marker(JOYTAG,"seen","jt")
-    assert app.outputs_already_present(stash.scene,JOYTAG) and not app.outputs_already_present(stash.scene,WD)
-    stash.scene["tags"].append(stash.tag("wd:seen"))
-    assert not app.outputs_already_present(stash.scene,WD)
-    monkeypatch.setattr(app,"CREATE_MARKERS",False)
-    assert app.outputs_already_present(stash.scene,WD)
 
 
 def test_dry_run_api_guard(supported_stash_version):
@@ -286,7 +220,7 @@ def oppai_files(tmp_path):
 
 
 def test_oppai_vocabulary_preserves_indices_and_real_tags(oppai_files):
-    vocab=load_vocabulary(ModelSettings(OPPAI,oppai_files,download_missing=False))
+    vocab=load_vocabulary(ModelSettings(OPPAI,oppai_files,download_missing=False, scene_threshold=.4, marker_threshold=.65, batch_size=4))
     assert vocab.output_count==6 and vocab.output_indices==(2,3,4,5)
     assert vocab.labels==["watermark","rare_tag","<o>_<o>","rating:explicit"]
     assert set(vocab.categories)==set(vocab.labels)
@@ -305,7 +239,7 @@ def test_oppai_rejects_mismatched_assets(oppai_files,damage):
         elif damage=="resolution": data["image_size"]=320
         else: data["normalize_mean"]=[.485,.456,.406]
         (oppai_files/name).write_text(json.dumps(data))
-    with pytest.raises(ValueError): load_vocabulary(ModelSettings(OPPAI,oppai_files,download_missing=False))
+    with pytest.raises(ValueError): load_vocabulary(ModelSettings(OPPAI,oppai_files,download_missing=False, scene_threshold=.4, marker_threshold=.65, batch_size=4))
 
 
 @pytest.mark.parametrize("shape,valid_shape",[((896,448),(448,224)),((448,448),(448,448)),
@@ -367,7 +301,7 @@ def test_onnx_batches_activation_and_output_mapping(source,tmp_path,monkeypatch)
         SessionOptions=SimpleNamespace,GraphOptimizationLevel=SimpleNamespace(ORT_ENABLE_BASIC=1,ORT_DISABLE_ALL=0))
     monkeypatch.setitem(sys.modules,"onnxruntime",ort)
     (tmp_path/"model.onnx").touch()
-    tagger=OnnxTagger(ModelSettings(source,tmp_path,batch_size=4,device="cpu"),vocabulary)
+    tagger=OnnxTagger(ModelSettings(source,tmp_path,batch_size=4,device="cpu", scene_threshold=.4, marker_threshold=.65),vocabulary)
     with Image.new("RGB",(64,32),"red") as a, Image.new("RGB",(32,64),"blue") as b:
         result=tagger.predict_batch([tagger.prepare(a),tagger.prepare(b)])
     assert result.shape==(2,4)
@@ -384,9 +318,9 @@ def test_onnx_batches_activation_and_output_mapping(source,tmp_path,monkeypatch)
     tagger.close()
 
 
-def test_oppai_modes_and_old_config_compatibility(tmp_path,oppai_files,monkeypatch):
+def test_oppai_modes_with_explicit_model_config(tmp_path,oppai_files,monkeypatch):
     old=tmp_path/"models.yml"
-    old.write_text("version: 1\nenabled_models: [joytag]\n")
+    old.write_text("version: 1\nenabled_models: [joytag]\noppai:\n  scene_threshold: 0.80\n  marker_threshold: 0.85\n  batch_size: 4\n")
     monkeypatch.setenv("OPPAI_MODEL_PATH",str(oppai_files))
     settings=app.services.load_model_settings(old,["oppai"],None,True)[0]
     assert settings.source.prefix=="op:" and settings.model_dir==oppai_files
@@ -438,7 +372,7 @@ def bundled_catalogs():
         path=root/f"{key}_hierarchy.yml"
         data=yaml.safe_load(path.read_text(encoding="utf-8"))
         labels=sorted({label for group in data["groups"].values() for label in group})
-        assert len(labels)==count and app.services.vocabulary_digest(labels)==digest
+        assert len(labels)==count and vocabulary_digest(labels)==digest
         hierarchy=app.services.load_tag_hierarchy(path,labels,SOURCES[key])
         assert hierarchy.category_prefix==SOURCES[key].prefix+"category:"
         result[key]=(Vocabulary(labels,{}),hierarchy)
@@ -480,4 +414,3 @@ def test_bundled_hierarchy_migrates_old_metadata_parents_idempotently(bundled_ca
     before=deepcopy(stash.writes)
     app.services.TagResolver(stash,hierarchy,source=source).resolve(leaf["name"])
     assert stash.writes==before
-

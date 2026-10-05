@@ -1,5 +1,7 @@
 """Retune marker publication without inference or loss of source evidence."""
 
+from tests.helpers.temporal import policy_args
+
 from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
@@ -148,7 +150,7 @@ def test_return_to_original_thresholds_after_scene_edit(pipeline, monkeypatch, m
 def test_rethreshold_matches_fresh_marker_inference(pipeline, monkeypatch, tmp_path, temporal):
     p = pipeline
     configure(monkeypatch)
-    args = [*p.args, '--markers-only', *([] if temporal else ['--no-temporal'])]
+    args = [*p.args, '--markers-only', *policy_args(p.path.parent, temporal)]
     assert app.main(args) == 0
     configure(monkeypatch, marker=.88)
     assert app.main([*args, '--merge-only', '--rethreshold-markers']) == 0
@@ -299,7 +301,7 @@ def test_flag_requires_merge_with_marker_output(args):
 
 def test_marker_rethreshold_never_decodes_publication_snapshots(tmp_path, monkeypatch):
     scenes, markers = paired_records({'wd': [.9, .9, .9]}, threshold=.4, marker_threshold=.7)
-    config = ModelSettings(SOURCES['wd'], Path('.'), marker_threshold=.85, scene_threshold=.4)
+    config = ModelSettings(SOURCES['wd'], Path('.'), marker_threshold=.85, scene_threshold=.4, batch_size=4)
     with merge_store.StateStore(tmp_path/'state.sqlite3', 'scope') as state:
         state.put('1', 'wd', {'scene': scenes['wd'][0], 'markers': markers['wd'][0]})
         state.publish('1', {

@@ -202,13 +202,10 @@ def test_refresh_keeps_checkpoint_resume_instead_of_restart(tmp_path):
     assert '--restart' not in actions(data)[0]['argv']
 
 
-@pytest.mark.parametrize('blocker', ['publication', 'outside_refresh', 'replacement'])
+@pytest.mark.parametrize('blocker', ['publication', 'outside_refresh'])
 def test_blocked_pairs_are_counted_and_receive_no_executable_plan(tmp_path, monkeypatch, blocker):
     path = tmp_path / 'state.sqlite3'
     outputs = pair()
-    if blocker == 'replacement':
-        outputs['markers']['meta']['marker_score_floor'] = .99
-        monkeypatch.setattr(app, 'REPLACE_MARKERS', False)
     seed(path, outputs=outputs)
     with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL)) as store:
         if blocker == 'publication':
@@ -261,15 +258,12 @@ def test_unselected_publication_dependencies_block_plan_without_expanding_target
     assert path.read_bytes() == before
 
 
-@pytest.mark.parametrize('blocker', ['replacement', 'unreadable'])
+@pytest.mark.parametrize('blocker', ['unreadable'])
 @pytest.mark.parametrize('order', [('wd', 'dtq'), ('dtq', 'wd')])
 def test_blocked_selected_pair_blocks_every_command_for_its_scene(
         tmp_path, monkeypatch, blocker, order):
     path = tmp_path / 'state.sqlite3'
     broken = pair()
-    if blocker == 'replacement':
-        broken['markers']['meta']['marker_score_floor'] = .8
-        monkeypatch.setattr(app, 'REPLACE_MARKERS', False)
     seed(path, outputs=broken)
     if blocker == 'unreadable':
         with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL)) as state:
@@ -291,11 +285,12 @@ def test_blocked_scene_is_not_added_back_by_publication_recovery(tmp_path, monke
     broken = pair()
     broken['markers']['meta']['marker_score_floor'] = .8
     seed(path, outputs=broken)
-    monkeypatch.setattr(app, 'REPLACE_MARKERS', False)
     with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL)) as state:
         state.prepare('1', {'scene': {'owned_ids': [], 'contributions': []}})
         from stash_ai.storage.recovery import abandon
         abandon(state, report=lambda _: None)
+        with state.connection:
+            state.connection.execute("UPDATE results SET data=? WHERE model='wd' AND kind='markers'", (b'broken',))
     data = report(path, settings=[config('wd'), config('dtq')])
     assert data['publication_recovery_scene_ids'] == ['1']
     assert not data['plan']
@@ -491,10 +486,10 @@ def test_cli_is_offline_and_preserves_settings_in_plan(tmp_path, monkeypatch, ca
         monkeypatch.setattr(app.services, name, lambda *args: pytest.fail('model/Stash access'))
     before = path.read_bytes()
     assert app.main(['--cache-report', str(destination), '--state-db', str(path),
-                     '--models', 'wd', '--scene-id', '404', '--no-temporal']) == 0
+                     '--models', 'wd', '--scene-id', '404']) == 0
     data = json.loads(destination.read_text())
     assert data['targets'][0]['model'] == 'wd'
-    assert '--no-temporal' in data['plan'][0]['argv']
+    assert str(app.TEMPORAL_POLICY_FILE.resolve()) in data['plan'][0]['argv']
     assert str(path.resolve()) in data['plan'][0]['argv']
     assert path.read_bytes() == before
     assert 'freshness is unverified' in capsys.readouterr().out
@@ -526,9 +521,6 @@ def test_cli_refuses_existing_report(tmp_path):
 
 @pytest.mark.usefixtures('reset_progress')
 def test_generated_backfill_resumes_actual_inference_checkpoint(pipeline, monkeypatch):
-    from stash_ai.evidence.temporal.policy import TemporalPolicy
-    monkeypatch.setattr(app, 'DEFAULT_TEMPORAL', False)
-    monkeypatch.setattr(app, 'TEMPORAL_POLICY', TemporalPolicy(enabled=False))
     p = pipeline
     p.fail['wd'] = 4
     with pytest.raises(KeyboardInterrupt):
@@ -536,7 +528,7 @@ def test_generated_backfill_resumes_actual_inference_checkpoint(pipeline, monkey
     settings = app.services.load_model_settings(app.MODELS_CONFIG_FILE, ['wd'], None, True)
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), True) as store:
         data = cache_report.build_report(app, store, ['1'], settings,
-                                         ['--state-db', str(p.path), '--no-temporal'])
+                                         ['--state-db', str(p.path)])
     assert actions(data)[0]['action'] == 'resume_or_infer'
     assert issue(data)['checkpoint']['processed'] == 4
     p.fail.clear()
@@ -548,9 +540,6 @@ def test_generated_backfill_resumes_actual_inference_checkpoint(pipeline, monkey
 @pytest.mark.usefixtures('reset_progress')
 def test_generated_rethreshold_applies_yaml_without_loading_a_model(pipeline, monkeypatch, tmp_path):
     import yaml
-    from stash_ai.evidence.temporal.policy import TemporalPolicy
-    monkeypatch.setattr(app, 'DEFAULT_TEMPORAL', False)
-    monkeypatch.setattr(app, 'TEMPORAL_POLICY', TemporalPolicy(enabled=False))
     p = pipeline
     assert app.main(p.args) == 0
     data = app.services.load_unique_yaml(app.MODELS_CONFIG_FILE, 'test')
@@ -560,7 +549,7 @@ def test_generated_rethreshold_applies_yaml_without_loading_a_model(pipeline, mo
     settings = app.services.load_model_settings(yaml_path, ['wd'], None, True)
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), True) as store:
         result = cache_report.build_report(app, store, ['1'], settings,
-            ['--state-db', str(p.path), '--model-config', str(yaml_path), '--no-temporal'])
+            ['--state-db', str(p.path), '--model-config', str(yaml_path)])
     assert not actions(result) and result['plan'][0]['action'] == 'rethreshold'
     monkeypatch.setattr(app.services, 'load_tagger', lambda *args: pytest.fail('model loaded for rethreshold'))
     assert app.main([*result['plan'][0]['argv'][2:], '--no-hierarchy']) == 0

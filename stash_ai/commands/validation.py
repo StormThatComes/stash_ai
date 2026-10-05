@@ -18,8 +18,6 @@ def mode_flags(args) -> tuple[bool, bool]:
 def _validate_report(parser, args, rule):
     if args.command is not rule.command:
         return
-    if args.output_mode != 'merged':
-        parser.error(rule.flag + ' requires --output-mode merged.')
     if supplied(args, rule.inference_options):
         parser.error(rule.inference_message)
     if supplied(args, (*PUBLICATION_OPTIONS, 'dry_run')):
@@ -52,16 +50,12 @@ def validate_maintenance(parser, args):
     """Validate whole-database operations and legacy-ledger maintenance."""
     db_mode = database_mode(args)
     if args.import_legacy_only:
-        if args.output_mode != 'merged':
-            parser.error('--import-legacy-only requires --output-mode merged.')
         if supplied(args, MODEL_OPTIONS):
             parser.error('--import-legacy-only does not use model/inference options.')
         modifiers = tuple(name for name in PUBLICATION_OPTIONS if name not in ('markers_only', 'scene_tags_only'))
         if supplied(args, modifiers):
             parser.error('--import-legacy-only cannot publish, rethreshold, prune or abandon plans.')
     if args.prune_legacy_imports:
-        if args.output_mode != "merged":
-            parser.error("--prune-legacy-imports requires --output-mode merged.")
         if args.scene_id:
             parser.error("--prune-legacy-imports covers the current Stash/state DB; --scene-id does not apply.")
         if supplied(args, MODEL_OPTIONS):
@@ -70,11 +64,9 @@ def validate_maintenance(parser, args):
             parser.error("--prune-legacy-imports cannot be combined with tagging, threshold, recovery or tag-pruning modifiers.")
 
     if db_mode:
-        if args.output_mode != "merged":
-            parser.error("--db-report/--db-check/--db-update/--db-compact require --output-mode merged.")
         if args.scene_id:
             parser.error("Database maintenance covers the state DB; --scene-id does not apply.")
-        if supplied(args, (*MODEL_OPTIONS, 'no_temporal')):
+        if supplied(args, MODEL_OPTIONS):
             parser.error("Database maintenance does not use model/inference options.")
         if supplied(args, PUBLICATION_OPTIONS):
             parser.error("Database maintenance cannot be combined with tagging, threshold, cleanup or pruning modifiers.")
@@ -84,8 +76,6 @@ def validate_maintenance(parser, args):
 
 def validate_pipeline(app, parser, args):
     """Normalize execution defaults and validate tagging/recovery combinations."""
-    if args.output_mode != "merged" and (args.resume or args.restart):
-        parser.error("--resume/--restart require --output-mode merged; separate retains its original full-inference behavior.")
     args.resume = app.DEFAULT_RESUME if args.resume is None else args.resume
     if args.checkpoint_batches < 1:
         parser.error("--checkpoint-batches must be >= 1.")
@@ -99,7 +89,7 @@ def validate_pipeline(app, parser, args):
 
     hierarchy_only, cleanup_only = mode_flags(args)
     if args.abandon_pending:
-        if (args.output_mode != "merged" or hierarchy_only or args.download_models or args.explain_tag
+        if (hierarchy_only or args.download_models or args.explain_tag
                 or args.prune_empty_tags_only or args.sync_marker_groups_only or args.restart):
             parser.error("--abandon-pending is standalone or accompanies merged --merge-only/cleanup modes.")
         if not args.merge_only and not cleanup_only and (
@@ -112,7 +102,7 @@ def validate_pipeline(app, parser, args):
     if args.force_merge and not args.merge_only:
         parser.error("--force-merge requires --merge-only.")
     if args.profile_merge:
-        if (args.output_mode != "merged" or hierarchy_only or cleanup_only or args.download_models
+        if (hierarchy_only or cleanup_only or args.download_models
                 or args.explain_tag or args.prune_empty_tags_only or args.sync_marker_groups_only):
             parser.error("--profile-merge applies to merged tagging or --merge-only.")
         if args.profile_merge.suffix.lower() != ".jsonl" or args.profile_merge.exists():
@@ -127,15 +117,13 @@ def validate_pipeline(app, parser, args):
         parser.error("This mode operates on global/model files; --scene-id does not apply.")
     if args.create_all_tags and not args.sync_hierarchy_only:
         parser.error("--create-all-tags requires --sync-hierarchy-only.")
-    if (args.merge_only or args.explain_tag or args.sync_marker_groups_only) and args.output_mode != "merged":
-        parser.error("--merge-only, --explain-tag and --sync-marker-groups-only require --output-mode merged.")
     if args.explain_tag and not args.scene_id:
         parser.error("--explain-tag requires at least one --scene-id.")
     if args.prune_empty_tags_only and args.scene_id:
         parser.error("Empty-tag definitions have global scope; --scene-id does not apply to --prune-empty-tags-only.")
     if args.prune_empty_tags and (
             hierarchy_only or args.download_models or args.explain_tag
-            or args.output_mode != "merged" or args.sync_marker_groups_only):
+            or args.sync_marker_groups_only):
         parser.error("--prune-empty-tags follows merged tagging, --merge-only or merged cleanup; use --prune-empty-tags-only otherwise.")
     if args.prune_prefixes and not (args.prune_empty_tags or args.prune_empty_tags_only):
         parser.error("--prune-prefixes requires an empty-tag pruning mode.")

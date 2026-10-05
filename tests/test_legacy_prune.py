@@ -17,9 +17,9 @@ def _seed(path, stash):
     stash.scene["tags"] = [scene_tag]
     marker = stash.marker(WD, "common", "legacy-wd")
     with StateStore(path, scope_for(app.STASH_URL)) as store:
-        store.remember_legacy("1", "scene", [deepcopy(scene_tag)])
-        store.remember_legacy("1", "markers", [deepcopy(marker)])
         with store.connection:
+            store.legacy.remember_in_transaction("1", "scene", [deepcopy(scene_tag)])
+            store.legacy.remember_in_transaction("1", "markers", [deepcopy(marker)])
             store.connection.execute(
                 "INSERT INTO merge_checks VALUES (?,?,?,?)",
                 (store.scope, "1", "policy", "fingerprint"),
@@ -78,7 +78,8 @@ def test_prune_removes_only_unreferenced_rows_and_preserves_merge_check(tmp_path
 def test_sql_batch_path_treats_missing_scene_as_prunable(tmp_path):
     path = tmp_path / "state.sqlite3"
     with StateStore(path, scope_for(app.STASH_URL)) as store:
-        store.remember_legacy("99", "scene", [{"id": "7", "name": "jt:gone"}])
+        with store.connection:
+            store.legacy.remember_in_transaction("99", "scene", [{"id": "7", "name": "jt:gone"}])
 
         class SQLStash:
             merge_reader = object()

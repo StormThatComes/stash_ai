@@ -1,4 +1,6 @@
 """Scene threshold replay, provenance and restart/resume equivalence."""
+
+from tests.helpers.temporal import policy_args
 from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
@@ -50,7 +52,7 @@ def test_cached_scene_statistics_and_occurrences_match_fresh_inference(
     p.scores['wd'][:, 0] = .45
     p.scores['wd'][:, 1] = .1
     p.scores['wd'][3, 1] = .95
-    args = [*p.args, *(['--scene-tags-only'] if scene_only else []), *([] if temporal else ['--no-temporal'])]
+    args = [*p.args, *(['--scene-tags-only'] if scene_only else []), *policy_args(p.path.parent, temporal)]
     assert app.main(args) == 0
     original = saved(p.path)
     configure(monkeypatch, scene=.8)
@@ -377,7 +379,7 @@ def test_scene_rethreshold_never_decodes_publication_snapshots(tmp_path, monkeyp
             {'start': 1, 'end': 2, 'tags': [('core', .6)]},
         ],
     }
-    config = ModelSettings(SOURCES['wd'], Path('.'), scene_threshold=.8, marker_threshold=.7)
+    config = ModelSettings(SOURCES['wd'], Path('.'), scene_threshold=.8, marker_threshold=.7, batch_size=4)
     with merge_store.StateStore(tmp_path/'state.sqlite3', 'scope') as state:
         state.put('1', 'wd', {'scene': segment})
         state.publish('1', {'scene': {'owned_ids': [], 'contributions': [{'payload': 'x' * 10000}]}})
@@ -390,4 +392,3 @@ def test_scene_rethreshold_never_decodes_publication_snapshots(tmp_path, monkeyp
 
         assert result == {'scene_thresholds_updated': 1}
         assert state.records('1', 'scene')['wd'][0][cache_identity.SCENE_OVERRIDE] == .8
-

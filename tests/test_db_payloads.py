@@ -1,5 +1,7 @@
 """Reject decodable evidence that cannot be consumed by merge/resume."""
 
+from tests.helpers.temporal import policy_args
+
 import hashlib
 import json
 import sqlite3
@@ -153,7 +155,7 @@ def test_check_preserves_legacy_and_sparse_formats(tmp_path):
 def test_check_accepts_real_checkpoint_and_completed_inference(pipeline, scene_only, temporal):
     p = pipeline
     args = [*p.args, *(["--scene-tags-only"] if scene_only else []),
-            *([] if temporal else ["--no-temporal"])]
+            *policy_args(p.path.parent, temporal)]
     scope = merge_store.scope_for(app.STASH_URL)
     p.fail["wd"] = 4
     with pytest.raises(KeyboardInterrupt):
@@ -169,7 +171,6 @@ def test_check_accepts_real_checkpoint_and_completed_inference(pipeline, scene_o
 def test_cli_rejects_unusable_payload_offline(tmp_path, monkeypatch):
     path = tmp_path / "state.sqlite3"
     save_result(path, "frames", [{}])
-    for name in ("StashClient", "load_model_settings", "load_tagger"):
+    for name in ("create_stash_client", "load_model_settings", "load_tagger"):
         monkeypatch.setattr(app.services, name, lambda *a, **kw: pytest.fail("db-check must stay offline"))
     assert app.main(["--state-db", str(path), "--db-check"]) == 1
-

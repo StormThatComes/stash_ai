@@ -19,8 +19,8 @@ pochodzi wyłącznie z VTT i sprite'ów Stash; aplikacja nie otwiera plików wid
 
 Wersja Stash jest sprawdzana przed odczytem scen i zmianami na serwerze, także
 w `--dry-run`. Komendy lokalne, np. `--db-update`, `--db-check` i `--db-report`,
-nie wymagają połączenia ze Stash. Markery punktowe (`end_seconds: null`)
-i ustawienie `MARKER_USE_END_TIME=False` pozostają obsługiwane.
+nie wymagają połączenia ze Stash. Znane przedziały zawsze publikują koniec;
+occurrence i importowane markery z nieznanym końcem mają `end_seconds: null`.
 
 Dla CPU zamień `onnxruntime-gpu` na zgodny `onnxruntime>=1.21,<2`.
 
@@ -40,6 +40,13 @@ python .\stash_ai.py --models all --scene-id 123
 Ustaw `STASH_API_KEY` jawnie w środowisku, jeśli Stash wymaga klucza.
 Bez tej zmiennej klient nie wysyła nagłówka `ApiKey`. Historyczny klucz
 został usunięty z bieżącego kodu; informacje o rotacji są w [SECURITY.md](SECURITY.md).
+
+W `tagger_models.yml` każdy wybrany model musi mieć jawne `scene_threshold`,
+`marker_threshold` i `batch_size`. Wybór modeli pochodzi z `--models` lub
+wymaganego wtedy `enabled_models`; brakujące wartości nie korzystają ze starych
+domyślnych ustawień JoyTag. Pola `scene_cache_floor` i `marker_cache_floor`
+pozostają opcjonalne. Dopasowany cache jest używany przez resume; sama obecność
+tagów lub markerów nie pomija nowej inferencji.
 
 ## Najczęstsze tryby
 
@@ -179,8 +186,7 @@ Po świeżej inferencji można obniżyć progi publikacji w YAML i użyć
 retencji obejmują nowe wymagane progi wsparcia. Zmiana samej retencji podczas
 zwykłego przebiegu uruchamia świeżą inferencję i unieważnia częściowy checkpoint;
 `--merge-only` nie uzupełnia wcześniej odrzuconych wyników. Niższa retencja zwiększa
-rozmiar bazy i koszt przetwarzania cache. Ustawienia dotyczą trwałego cache trybu
-`merged`; tryb `separate` nadal używa progów publikacji.
+rozmiar bazy i koszt przetwarzania cache. Ustawienia dotyczą trwałego cache inferencji.
 
 Stary cache inferencji bez `marker_score_floor` jest sprawdzany z użyciem
 zapisanego `marker_threshold` jako konserwatywnego progu retencji. Jeśli np.
@@ -200,11 +206,12 @@ w historii. Przy gotowych metadanych żadna z obu faz nie dekoduje BLOB-ów klat
 Dry-run uzupełnia wyłącznie tymczasową bazę; `--db-check`
 sprawdza zgodność istniejących metadanych z evidence bez ich naprawiania.
 
-Domyślnie `REPLACE_SCENE_TAGS=True` i `REPLACE_MARKERS=True`. Wyłączenie
-którejś flagi zachowuje historię danego rodzaju wyniku; ponowne włączenie
-normalizuje historię przy bezpiecznym reuse cache.
+Nowa inferencja zawsze zastępuje poprzednie wyniki danego modelu i rodzaju.
+Historyczne serie są normalizowane przy potwierdzonym reuse; import legacy
+nadal dopisuje dowody atomowo. Zwykłe przedziały opublikowane dawniej jako
+punkty odzyskują długość ze snapshotów przy uzgadnianiu, bez ponownej inferencji.
 
-### Przejście z separate do merged
+### Import historycznych wyników modeli
 
 Normalny merge korzysta z zapisanej bazy evidence. Stare obiekty `jt:`, `wd:`,
 `dtq:` i `op:` najpierw zaimportuj przez `--import-legacy-only`, potem uruchom
@@ -218,8 +225,8 @@ Czyta wszystkie namespace'y modeli; `--scene-id`, `--markers-only` oraz
 `--scene-tags-only` ograniczają zakres. `--dry-run` zapisuje tylko tymczasową
 nakładkę. Przy pending merge/cleanup trzeba najpierw dokończyć lub porzucić plan.
 
-Ledger zapobiega ponownemu importowi tych samych obiektów. Późniejsze wyniki
-z separate wymagają ponownego jawnego importu i dopisują historię bez utraty
+Ledger zapobiega ponownemu importowi tych samych obiektów. Później znalezione historyczne wyniki
+w namespace’ach modeli wymagają ponownego jawnego importu i dopisują historię bez utraty
 istniejącego cache. Normalny merge zgłasza niezaimportowane obiekty; nie importuje
 ich automatycznie. Publikacja migruje tylko obiekty potwierdzone w ledgerze.
 
@@ -481,8 +488,15 @@ W trybie `merged`:
 Pisownia `:occurance` w nazwach grup jest celowa i pozostaje zgodna z istniejącym
 formatem.
 
-`--output-mode separate` zachowuje prefiksy poszczególnych modeli i nie używa
-wspólnego mechanizmu publikacji `ai:`.
+Nowe wyniki zawsze używają wspólnej publikacji `ai:` i reguł temporalnych.
+Przełączniki `--output-mode` i `--no-temporal` oraz klucz YAML `enabled`
+zostały usunięte; usuń je ze skryptów i `temporal_policy.yml`. Poszczególne
+reguły nadal konfiguruje polityka YAML, w tym `occurrence_markers`.
+Historyczne namespace’y modeli nadal można importować i czyścić. Zamrożone
+snapshoty sprzed reguł temporalnych zachowują własny algorytm replay dla
+cleanupu. Aktualny cache nie wymaga ponownej inferencji wyłącznie z powodu
+usunięcia tych przełączników; retencja zapisanych obserwacji nadal podlega
+walidacji przy zmianie polityki.
 
 ## Konfiguracja
 

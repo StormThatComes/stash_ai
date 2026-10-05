@@ -134,8 +134,8 @@ class ResultStore:
         for kind, segment in outputs.items():
             old = (self.records(scene, kind, model, borrow=True).get(model, [])
                    if not (replace or {}).get(kind, True) else [])
-            # Repeating an identical run with replacement disabled need not
-            # accumulate identical frame streams merely due to its timestamp.
+            # Explicit imports append evidence; repeating identical data need
+            # not accumulate duplicates merely due to its capture timestamp.
             keep = []
             if old:
                 # Only append mode needs comparison. A shallow metadata copy

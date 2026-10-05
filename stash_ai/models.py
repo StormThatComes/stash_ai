@@ -39,9 +39,9 @@ SOURCES = {source.key: source for source in (JOYTAG, WD, DTQ, OPPAI)}
 class ModelSettings:
     source: ModelSource
     model_dir: Path
-    scene_threshold: float = 0.4
-    marker_threshold: float = 0.65
-    batch_size: int = 4
+    scene_threshold: float
+    marker_threshold: float
+    batch_size: int
     device: str = "auto"
     download_missing: bool = True
     scene_cache_floor: float | None = None

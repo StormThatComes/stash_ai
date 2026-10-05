@@ -25,7 +25,7 @@ def longest_extra_run(evidence):
 def qualified_extras(evidence, duration, policy):
     accepted = []
     for label, item in evidence.items():
-        hits = item.get('hits', len(item['sample_times']))
+        hits = item['hits']
         fraction = min(1.0, sum(b-a for a,b in item['intervals']) / duration) if duration > 0 else 0
         short = policy.short_marker_extras and longest_extra_run([item]) >= policy.extra_short_min_hits
         if hits >= policy.extra_min_hits and (fraction + 1e-12 >= policy.extra_min_fraction or short):

@@ -25,11 +25,6 @@ class LegacyStore:
         store.retain(key, values)
         return values if borrow else deepcopy(values)
 
-    @measured('state_write')
-    def remember(self, scene, kind, data):
-        with self.store.connection:
-            self.remember_in_transaction(scene, kind, data)
-
     def remember_in_transaction(self, scene, kind, data):
         """Store ledger entries under the caller's evidence transaction."""
         store = self.store

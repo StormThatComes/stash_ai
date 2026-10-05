@@ -45,7 +45,7 @@ Jeżeli poprzednia publikacja została przerwana, najpierw należy wznowić
 `--merge-only` na tej samej bazie. Przerwane uzupełnienie grup można powtórzyć.
 
 `--no-hierarchy` wyłącza tylko hierarchie kategorii modeli. Grupy nadal są
-dziećmi `ai_markers`. Tryb `separate` nie nadaje grup `m:`.
+dziećmi `ai_markers`. Historyczne source-prefixed markery uzyskują grupy po imporcie i merge.
 
 ## Cleanup
 

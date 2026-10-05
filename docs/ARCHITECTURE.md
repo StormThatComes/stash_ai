@@ -4,10 +4,10 @@ W katalogu głównym pozostają dwa pliki Pythona uruchamiane z linii poleceń:
 `stash_ai.py` i `update_stash_ai.py`. Launcher `stash_ai.py` przejmuje blokadę
 instalacji, a `stash_ai/cli.py` koordynuje CLI i uruchomienie pipeline.
 Algorytmy evidence/fusion i union przedziałów pozostają w `stash_ai/evidence/pipeline.py`.
-Pakiet `stash_ai/publication/` grupuje planowanie i publikację obu trybów wyjścia.
+Pakiet `stash_ai/publication/` grupuje planowanie i publikację wspólnych wyników `ai:`.
 `markers.py` zawiera wspólne reguły własności markerów, payloadów, porównywania
 zmian i usuwania wykluczonych extras. Moduły i testy importują je bezpośrednio,
-bez zależności trybu merged od reconciliation trybu separate.
+bez ponownego eksportowania przez CLI.
 `commands/dispatch.py` wywołuje tryby CLI oraz obejmuje `MergedRun.run()`
 kontekstem diagnostyki przez `run_merged()`. Wywołania
 reconciliation korzystają bezpośrednio z `publication/merged.py` i `cleanup/scenes.py`; CLI
@@ -29,9 +29,9 @@ replay evidence w izolowanych procesach; `MergePublisher` zachowuje pojedynczy
 writer dla TagResolver, Stash i StateStore. Dry-run i profilowanie pozostają
 szeregowe, a awaria workerów nie uruchamia drugiego przebiegu publikacji.
 Planowanie jednej sceny znajduje się w `stash_ai/publication/planning/`: osobne
-moduły przygotowują evidence, tagi i markery merged oraz tagi i markery separate.
-`types.py` definiuje `MergeSyncPlan`. Koordynatory `publication/merged.py` oraz
-`publication/separate.py` zachowują kolejność mutacji i zatwierdzania snapshotów. Cleanup ma
+moduły przygotowują evidence, tagi i markery.
+`types.py` definiuje `MergeSyncPlan`. Koordynator `publication/merged.py`
+zachowuje kolejność mutacji i zatwierdzania snapshotów. Cleanup ma
 osobny lifecycle w `stash_ai/cleanup/run.py` / `CleanupRun`. Rekonsyliację jednej
 sceny zawiera `cleanup/scenes.py`, a re-ewaluację opublikowanego evidence
 `cleanup/evidence.py`: kwalifikacja zmienionych dowodów, leniwy `EvidenceReplay`
@@ -59,18 +59,15 @@ kontekst przy każdym wywołaniu; moduły domenowe nie importują CLI. Wspólny
 `runtime/workers.py` otwiera izolowany, read-only store i dane ustawień dla
 procesów merge oraz model report, bez ładowania usług CLI.
 
-`stash_ai/cli.py` koordynuje uruchomienie pipeline. Lifecycle jednego modelu
-w trybie `--output-mode separate` obsługuje `stash_ai/runs/separate.py`; lifecycle
-jest podzielony na synchronizację hierarchii, przetwarzanie pojedynczej sceny
-oraz raportowanie. Pobieranie cue/sprite, przygotowanie obrazów, filtrowanie
-score i resumowalny lokalny pipeline inferencji znajdują się w
-`stash_ai/inference/`. Reconciliation dla `--output-mode separate` (własność
-markerów, payloady, plan create/update/delete, cleanup wykluczeń i publikacja
-sceny) znajduje się w `stash_ai/publication/separate.py`. Wywołania i testy korzystają
-bezpośrednio z tych modułów; helpery inferencji i reconciliation nie są
-ponownie eksportowane przez `cli.py`. Funkcje zależne od ustawień przebiegu
-otrzymują `app` jako jawny argument, a callback przygotowania obrazu JoyTag
-wiąże ten argument przez `functools.partial`.
+`stash_ai/cli.py` koordynuje jeden pipeline publikacji. Pobieranie cue/sprite,
+przygotowanie obrazów, filtrowanie score i resumowalna inferencja znajdują się
+w `stash_ai/inference/`. Nowa inferencja używa silnika temporalnego.
+`evidence/historical_markers.py` odtwarza dawny algorytm wyłącznie dla frozen
+snapshotów publikacji/cleanupu; zachowuje historyczne zakresy i first-frame extras.
+Usunięto aktywne moduły `runs/separate.py`, `publication/separate.py` i ich
+plannery. Source-prefixed wyniki nadal obsługują import legacy i moduły cleanupu.
+Funkcje zależne od ustawień przebiegu otrzymują `app` jako jawny argument,
+a callback przygotowania obrazu JoyTag wiąże go przez `functools.partial`.
 `stash_ai/inference/inputs.py` zawiera `VerifiedMedia`, `RunMedia`, `RunInputs`
 i `inspect_input()`: weryfikuje wejścia VTT/sprite, tworzy ich sygnatury i
 współdzieli ograniczony cache mediów oraz manifestów między modelami wyłącznie
@@ -124,8 +121,7 @@ wybór providerów, fallback CPU i inspekcję wejść/wyjść w `backends/onnx_s
 oraz adapter inferencji w `backends/onnx.py`. Kod, testy i benchmarki importują typy oraz helpery
 bezpośrednio z modułów, które je definiują; `backends/loader.py` nie re-eksportuje
 starego API. Wspólne typy i walidacja usuwają cykle między loaderami i adapterami.
-Genericzne komponenty (`TagResolver`, loader hierarchii i separate-output
-reconciliation) wymagają jawnego `ModelSource`; JoyTag nie jest ich ukrytym
+Genericzne komponenty (`TagResolver`, loader hierarchii i cleanup źródłowy) wymagają jawnego `ModelSource`; JoyTag nie jest ich ukrytym
 domyślnym namespace'em.
 
 Kontrakty wewnętrzne są jawne: `select_scores()` przyjmuje tablicę NumPy,
@@ -317,7 +313,7 @@ pozostają poza fingerprintem kodu publikacji i nie wymagają zależności ML.
 Grupy markerów rozwiązuje `publication/groups.py`; ich backfill uruchamia
 `commands/marker_groups.py`, a pruning wraz z dry-run korektą liczników
 obsługuje `cleanup/groups.py`. `cleanup/markers.py` usuwa wykluczone rdzenie
-i extras w trybie separate, bez wyliczania nowych markerów.
+i extras historycznych wyników modeli, bez wyliczania nowych markerów.
 
 Recovery jest rozdzielone między `storage/recovery.py` (lokalna archiwizacja
 i odczyt intentów), `publication/recovery.py` (uzgodnienie dowodów z faktycznie
@@ -330,7 +326,7 @@ obecnymi wynikami Stash) oraz `commands/recovery.py` (tryb abandon-pending).
 `commands/bootstrap.py` przygotowuje runtime, wybrane modele, polityki oraz
 katalogi i hierarchie w dotychczasowej kolejności CLI. Szybkie tryby bazy
 kończą się przed bootstrapem, a wszystkie katalogi są walidowane przed
-ładowaniem wag i zapisami Stash. `runs/separate.py` zarządza także wspólnym
+ładowaniem wag i zapisami Stash. `runs/merged.py` zarządza wspólnym
 lifecycle Stash dla wybranych modeli. `inference/scene_predictions.py` oddziela
 wybór zachowanych etykiet od kwalifikacji temporal; finalizacja w `prediction.py`
 zachowuje raw evidence, limity i wykluczenia przed publikacją.

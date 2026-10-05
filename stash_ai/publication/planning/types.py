@@ -23,7 +23,6 @@ class MergeSyncPlan:
         return self.final_scene_tag_ids != self.existing_scene_tag_ids
 
 
-
 @dataclass
 class PreparedEvidence:
     scene_hits: list
@@ -50,17 +49,3 @@ class MarkerCatalog:
     group_ids: dict[tuple[str, bool], str]
     names_by_id: dict[str, str | None]
     managed_group_ids: frozenset[str]
-
-
-@dataclass
-class MarkerChanges:
-    creates: list[dict] = field(default_factory=list)
-    updates: list[dict] = field(default_factory=list)
-    deletes: list[str] = field(default_factory=list)
-    unchanged: int = 0
-
-
-@dataclass
-class SeparateMarkerPlan(MarkerChanges):
-    wanted: list[dict] = field(default_factory=list)
-    extra_updates: list[dict] = field(default_factory=list)

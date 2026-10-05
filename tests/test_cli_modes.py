@@ -46,9 +46,8 @@ def test_prune_dispatch_runs_config_validation(monkeypatch):
     assert validated == [False]
 
 
-@pytest.mark.parametrize('flags', [[], ['--output-mode', 'separate']])
-def test_saved_merge_dispatch_leaves_normal_tagging_to_pipeline(flags):
-    args = arguments.parse_args(app, flags)
+def test_saved_merge_dispatch_leaves_normal_tagging_to_pipeline():
+    args = arguments.parse_args(app, [])
     assert dispatch.run_saved_merge_command(app, [], args, {}, {}) is None
 
 
@@ -90,11 +89,10 @@ def test_main_database_command_bypasses_bootstrap(monkeypatch):
 
 
 @pytest.mark.usefixtures('reset_merge')
-@pytest.mark.parametrize('mode', ['merged', 'separate'])
-def test_later_catalog_failure_prevents_stash_and_model_loading(monkeypatch, tmp_path, mode):
+def test_later_catalog_failure_prevents_stash_and_model_loading(monkeypatch, tmp_path):
     from stash_ai.models import WD, DTQ, ModelSettings, Vocabulary, SOURCES
     calls = []
-    settings = [ModelSettings(source, tmp_path, download_missing=False) for source in (WD, DTQ)]
+    settings = [ModelSettings(source, tmp_path, download_missing=False, scene_threshold=.4, marker_threshold=.65, batch_size=4) for source in (WD, DTQ)]
     monkeypatch.setattr(app.services, 'load_model_settings', lambda *a: settings)
     monkeypatch.setattr(app.services, 'validate_config', lambda **k: None)
     monkeypatch.setattr(app.services, 'load_exclusion_policy', lambda *a: {key: frozenset() for key in SOURCES})
@@ -107,6 +105,5 @@ def test_later_catalog_failure_prevents_stash_and_model_loading(monkeypatch, tmp
     for name in ('create_stash_client', 'load_tagger'):
         monkeypatch.setattr(app.services, name, lambda *a: pytest.fail('catalog failure reached Stash or weights'))
     with pytest.raises(ValueError, match='invalid later vocabulary'):
-        app.main(['--models', 'all', '--no-hierarchy', '--no-temporal', '--output-mode', mode])
+        app.main(['--models', 'all', '--no-hierarchy'])
     assert calls == ['wd', 'dtq']
-

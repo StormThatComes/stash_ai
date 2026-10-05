@@ -60,8 +60,6 @@ def run_merged(app, settings, args, catalogs, hierarchy, core_policies, scene_po
 
 def run_saved_merge_command(app, settings, args, core_policies, scene_policies) -> int | None:
     """Dispatch offline explanation or saved-evidence merge before model assets."""
-    if args.output_mode != "merged":
-        return None
     if args.command is Command.EXPLAIN:
         from stash_ai.commands.explain import explain
         return explain(app, args, core_policies, scene_policies)

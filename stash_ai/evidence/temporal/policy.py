@@ -54,14 +54,12 @@ class TemporalPolicy:
             raise ValueError("Invalid marker_max_weak_seconds.")
 
 
-def load_policy(path, enabled=True):
-    if not enabled:
-        return TemporalPolicy(enabled=False)
+def load_policy(path):
     from stash_ai.config import load_unique_yaml
     data = load_unique_yaml(path, "Temporal policy")
     if not isinstance(data, dict) or type(data.get("version")) is not int or data["version"] != 1:
         raise ValueError("Temporal policy requires version: 1.")
-    allowed = {f.name for f in fields(TemporalPolicy)}
+    allowed = {f.name for f in fields(TemporalPolicy)} - {"enabled"}
     if any(isinstance(key, str) and key.startswith("refine_") for key in data):
         raise ValueError("Video-file analysis has been removed. Remove refine_* settings from the temporal policy; only Stash VTT/sprites are supported.")
     if set(data) - allowed - {"version"}:
