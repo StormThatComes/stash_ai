@@ -1,4 +1,5 @@
 """Post-merge pruning limits native usage reads without weakening deletion checks."""
+from tests.helpers.evidence import current_record
 from copy import deepcopy
 import json
 
@@ -88,7 +89,7 @@ def test_merge_prunes_groups_losing_markers_and_preserves_global_usage(tmp_path,
         other['id'], other['scene_markers'][0]['id'] = '2', '2'
         stash.scenes['2'] = other
     with merge_store.StateStore(tmp_path/'state.sqlite3', merge_store.scope_for(app.STASH_URL)) as state:
-        state.put('1', 'wd', {'markers': dict(mode='spans', items=[], meta={'origin': 'legacy'})})
+        state.put('1', 'wd', {'markers': current_record(dict(mode='spans', items=[], meta={'origin': 'legacy'}))})
         state.publish('1', {'markers': {'contributions': [span('wd', 0, 2, 'old')]}})
     before = deepcopy((stash.tags, stash.scenes))
     install(monkeypatch, stash)

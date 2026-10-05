@@ -72,7 +72,7 @@ def test_wider_cache_changes_no_publication_and_offline_lowering_matches_fresh(
     assert len(p.loaded) == 2  # Adding retention populates the previously missing scores.
     assert (outputs(p.path), marker_ranges(p.stash)) == baseline
     saved = records(p.path)
-    scene, marker = saved['scene']['wd'][0], saved['markers']['wd'][0]
+    scene, marker = saved['scene']['wd'], saved['markers']['wd']
     assert scene['meta']['scene_score_floor'] == .2
     assert marker['meta']['marker_score_floor'] == .25
     assert {item['tag'] for item in scene['items']} == {'common', 'extra'}
@@ -132,9 +132,9 @@ def test_retention_never_discards_current_publication_inputs(pipeline, tmp_path,
     assert app.main(args) == 0
     saved = records(p.path)
     required_scene, required_marker = (.68, .7225) if temporal else (.8, .85)
-    assert saved['scene']['wd'][0]['meta']['scene_score_floor'] == pytest.approx(
+    assert saved['scene']['wd']['meta']['scene_score_floor'] == pytest.approx(
         min(required_scene, floor) if floor is not None else required_scene)
-    meta = saved['markers']['wd'][0]['meta']
+    meta = saved['markers']['wd']['meta']
     assert meta.get('marker_score_floor', meta['marker_threshold']) == pytest.approx(
         min(required_marker, floor) if floor is not None else required_marker)
 
@@ -169,7 +169,7 @@ def test_checkpoint_retains_weak_scores_and_retention_edit_restarts_it(pipeline,
     assert app.main(args) == 0
     assert p.loaded[-1].seen == list(range(0 if changed else 4, 10))
     saved = records(p.path)
-    for rows in (saved['scene']['wd'][0]['frames'], saved['markers']['wd'][0]['items']):
+    for rows in (saved['scene']['wd']['frames'], saved['markers']['wd']['items']):
         assert [row['start'] for row in rows] == list(range(10))
         assert all(dict(row['tags']) == dict(common=.5, extra=.5) for row in rows)
     fresh = tmp_path/'fresh.sqlite3'
@@ -230,6 +230,6 @@ def test_exact_scene_aggregate_includes_scores_below_retention(pipeline, monkeyp
     p.scores['wd'][0, 0] = .5
     args = [*p.args, *model_config(tmp_path/'models.yml', scene_cache_floor=.2), '--scene-tags-only']
     assert app.main(args) == 0
-    scene = records(p.path)['scene']['wd'][0]
+    scene = records(p.path)['scene']['wd']
     assert scene['items'] == [dict(tag='common', score=pytest.approx(.18), statistics=None)]
     assert len([row for row in scene['frames'] if row['tags']]) == 1

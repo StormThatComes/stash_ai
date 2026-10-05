@@ -6,7 +6,6 @@ from stash_ai.evidence.formats import ANALYSIS_FORMAT, validate_current
 from stash_ai.evidence.qualification import scene_qualification
 from stash_ai.evidence.temporal.policy import TemporalPolicy
 from stash_ai.evidence.temporal.extras import merged_extras
-from stash_ai.evidence.thresholds import validate_marker_blocklist
 from stash_ai.storage.store import StateStore
 
 
@@ -33,23 +32,23 @@ def test_current_missing_statistics_never_uses_aggregate_fallback():
     validate_current(saved)
     assert scene_qualification(item, saved['meta'], .4, TemporalPolicy()) is None
     old = {**saved['meta'], 'analysis_format': 3}
-    assert scene_qualification(item, old, .4, TemporalPolicy()) == 'aggregate'
+    assert scene_qualification(item, old, .4, TemporalPolicy()) is None
     imported = dict(tag='core', score=None)
-    assert scene_qualification(imported, {'origin': 'legacy'}, .4, TemporalPolicy()) == 'aggregate'
+    with pytest.raises(ValueError, match='Active results require current inference'):
+        validate_current(dict(mode='scene', items=[imported], meta={'origin':'legacy'}))
 
 
 def test_current_unfiltered_coverage_needs_no_retired_sentinel():
     saved = record()
     saved.update(mode='frames', items=[])
-    validate_marker_blocklist(saved, 'wd')
+    validate_current(saved)
     saved['meta']['marker_tag_blocklist'] = []
     with pytest.raises(ValueError, match='retired marker blocklist'):
-        validate_marker_blocklist(saved, 'wd')
+        validate_current(saved)
     saved['meta'].update(analysis_format=3)
     saved['meta'].pop('marker_tag_blocklist')
-    with pytest.raises(ValueError, match='missing or invalid'):
-        validate_marker_blocklist(saved, 'wd')
-    validate_marker_blocklist(saved, 'wd', allow_unknown=True)
+    with pytest.raises(ValueError, match='Obsolete active inference'):
+        validate_current(saved)
 
 
 def test_current_plain_extras_are_not_imported_evidence():

@@ -57,7 +57,7 @@ def test_legacy_blocklist_rejects_merge_before_writes_and_restart_restores_range
     # Emulate frames captured by the old option, which discarded labels before storage.
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL)) as state:
         records = state.records('1', 'markers')['wd']
-        saved = records[0]
+        saved = records
         saved['meta']['analysis_format'] = 3
         saved['meta']['marker_tag_blocklist'] = ['common', 'unrelated']
         for row in saved['items']:
@@ -76,7 +76,7 @@ def test_legacy_blocklist_rejects_merge_before_writes_and_restart_restores_range
     assert 'Obsolete active inference' in output and '--db-update' in output
     assert p.stash.scene == before and not p.stash.writes
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), True) as state:
-        assert state.unpack(state.connection.execute("SELECT data FROM " + state.table('results') + " WHERE kind='markers' AND model='wd'").fetchone()[0])[0] == saved
+        assert state.unpack(state.connection.execute("SELECT data FROM " + state.table('results') + " WHERE kind='markers' AND model='wd'").fetchone()[0]) == saved
     import sqlite3
     from stash_ai.db import update_database
     with sqlite3.connect(p.path) as connection:
@@ -96,9 +96,9 @@ def test_legacy_blocklist_aborts_rethreshold_before_any_policy_write(pipeline, m
     # WD is a safe earlier target; DTQ contains frames captured while common was blocked.
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL)) as state:
         records = state.records('1', 'markers')['dtq']
-        records[0]['meta']['analysis_format'] = 3
-        records[0]['meta']['marker_tag_blocklist'] = ['common']
-        for row in records[0]['items']:
+        records['meta']['analysis_format'] = 3
+        records['meta']['marker_tag_blocklist'] = ['common']
+        for row in records['items']:
             row['tags'] = [pair for pair in row['tags'] if pair[0] != 'common']
         with state.connection:
             inject_records(state, '1', 'dtq', {'markers': records})
@@ -127,7 +127,7 @@ def test_unfiltered_cache_retains_labels_and_reuses_predictions_without_models(p
     p.scores['wd'][:, 0] = .9
     assert app.main(p.args) == 0
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), True) as state:
-        saved = state.records('1', 'markers')['wd'][0]
+        saved = state.records('1', 'markers')['wd']
         assert saved['meta']['analysis_format'] == 4
         assert 'marker_tag_blocklist' not in saved['meta']
         assert all(['common', pytest.approx(.9)] in row['tags'] for row in saved['items'])
@@ -142,7 +142,7 @@ def test_unfiltered_cache_retains_labels_and_reuses_predictions_without_models(p
     assert app.main([*p.args, '--merge-only']) == 0
     assert any(m['primary_tag']['name'] == 'ai:common' for m in p.stash.scene['scene_markers'])
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), True) as state:
-        assert state.unpack(state.connection.execute("SELECT data FROM " + state.table('results') + " WHERE kind='markers' AND model='wd'").fetchone()[0])[0] == saved
+        assert state.unpack(state.connection.execute("SELECT data FROM " + state.table('results') + " WHERE kind='markers' AND model='wd'").fetchone()[0]) == saved
 
 
 @pytest.mark.parametrize('retained', [None, 'common', [None]])
@@ -153,11 +153,11 @@ def test_unknown_blocklist_rejects_marker_replay_but_not_scene_only(
     assert app.main(p.args) == 0
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL)) as state:
         records = state.records('1', 'markers')['wd']
-        records[0]['meta']['analysis_format'] = 3
+        records['meta']['analysis_format'] = 3
         if retained is None:
-            records[0]['meta'].pop('marker_tag_blocklist', None)
+            records['meta'].pop('marker_tag_blocklist', None)
         else:
-            records[0]['meta']['marker_tag_blocklist'] = retained
+            records['meta']['marker_tag_blocklist'] = retained
         with state.connection:
             inject_records(state, '1', 'wd', {'markers': records})
     p.stash.writes.clear()
@@ -172,15 +172,13 @@ def test_each_history_segment_is_checked_and_imported_ranges_keep_their_semantic
     old['meta']['analysis_format'] = 3
     old['meta']['marker_tag_blocklist'] = ['missing']
     current = segment('wd', [[('common', .9)]] * 2, identity='new')
-    with pytest.raises(ValueError, match='unblocked marker tags'):
+    with pytest.raises(ValueError, match='Invalid active inference record'):
         thresholds.validate_marker_cache(app, {'wd': [old, current]})
     imported = dict(mode='spans', meta={'origin': 'legacy'}, items=[])
-    thresholds.validate_marker_cache(app, {'wd': [imported, current]})
+    with pytest.raises(ValueError, match='Active results require current inference'):
+        thresholds.validate_marker_cache(app, {'wd': imported})
 
 
-def test_blocklist_preflight_reasons_are_stable():
+def test_retired_cache_preflight_reason_is_stable():
     assert rethreshold_targets.threshold_failure_reason(ValueError(
-        '123/wd: unblocked marker tags [\'common\'] are absent from cached frames; run inference.')) == (
-            'unblocked marker tags require inference')
-    assert rethreshold_targets.threshold_failure_reason(ValueError(
-        '123/wd: marker blocklist metadata is missing or invalid; run inference.')) == 'unknown marker blocklist'
+        'Obsolete active inference evidence; run --db-update and inference again.')) == 'obsolete inference evidence'

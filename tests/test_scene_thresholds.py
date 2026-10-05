@@ -67,9 +67,9 @@ def test_cached_scene_statistics_and_occurrences_match_fresh_inference(
     configure(monkeypatch, scene=.8)
     assert app.main([*args, '--merge-only', '--rethreshold-scenes']) == 0
     cached = outputs(p.path)
-    value = saved(p.path)['wd'][0]
+    value = saved(p.path)['wd']
     assert value.pop(cache_identity.SCENE_OVERRIDE) == .8
-    assert value == original['wd'][0]
+    assert value == original['wd']
     p.stash.scene['scene_markers'] = []
     p.stash.scene['tags'] = []
     fresh = tmp_path/'fresh.sqlite3'
@@ -159,7 +159,7 @@ def test_support_ratio_change_rejects_incomplete_cache_before_publication(
     assert app.main(p.args) == 0
     if missing == 'frames':
         with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL)) as state:
-            segment = state.records('1', 'scene')['wd'][0]
+            segment = state.records('1', 'scene')['wd']
             segment.pop('frames')
             segment['meta'].pop('scene_frames_format')
             segment['meta'].pop('scene_score_floor')
@@ -182,7 +182,7 @@ def test_rethreshold_abort_report_is_explicit_and_groups_blockers(pipeline, monk
     capsys.readouterr()
 
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL)) as state:
-        segment = state.records('1', 'scene')['wd'][0]
+        segment = state.records('1', 'scene')['wd']
         segment.pop('frames')
         segment['meta'].pop('scene_frames_format')
         segment['meta'].pop('scene_score_floor')
@@ -222,7 +222,7 @@ def test_both_thresholds_reuse_models_and_round_trip(pipeline, monkeypatch):
     configure(monkeypatch, scene=.8, marker=.9)
     monkeypatch.setattr(app.services, 'load_tagger', lambda *a: pytest.fail('loaded model'))
     assert app.main(p.args) == 0
-    assert saved(p.path)['wd'][0][cache_identity.SCENE_OVERRIDE] == .8
+    assert saved(p.path)['wd'][cache_identity.SCENE_OVERRIDE] == .8
     expected = outputs(p.path)
     assert app.main([*p.args, '--merge-only']) == 0
     assert outputs(p.path) == expected
@@ -261,7 +261,7 @@ def test_invalid_scene_cache_preflight_does_not_publish(pipeline, monkeypatch, c
     assert app.main(p.args) == 0
     if change == 'old_cache':
         with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL)) as state:
-            segment = state.records('1', 'scene')['wd'][0]
+            segment = state.records('1', 'scene')['wd']
             segment.pop('frames')
             segment['meta'].pop('scene_frames_format')
             segment['meta'].pop('scene_score_floor')
@@ -289,7 +289,7 @@ def test_rethreshold_scenes_skips_model_with_marker_only_history(pipeline, monke
     configure(monkeypatch)
     assert app.main(p.args) == 0
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL)) as state:
-        marker = state.records('1', 'markers')['wd'][0]
+        marker = state.records('1', 'markers')['wd']
         state.put('1', 'dtq', {'markers': marker})
     capsys.readouterr()
 
@@ -298,7 +298,7 @@ def test_rethreshold_scenes_skips_model_with_marker_only_history(pipeline, monke
     assert app.main(args) == 0
     output = capsys.readouterr().out
     records = saved(p.path)
-    assert records['wd'][0][cache_identity.SCENE_OVERRIDE] == pytest.approx(.8)
+    assert records['wd'][cache_identity.SCENE_OVERRIDE] == pytest.approx(.8)
     assert 'dtq' not in records
     assert ('Threshold preflight: checked=1, failed=0, applied=1, '
             'selected=2, skipped_no_evidence=1') in output
@@ -314,7 +314,7 @@ def test_checkpoint_resume_retains_all_scene_frames_once(pipeline, monkeypatch, 
         app.main(args)
     p.fail.clear()
     assert app.main(args) == 0
-    frames = saved(p.path)['wd'][0]['frames']
+    frames = saved(p.path)['wd']['frames']
     assert len(frames) == len(p.cues) and [f['start'] for f in frames] == list(range(10))
     configure(monkeypatch, scene=.8)
     monkeypatch.setattr(app.services, 'load_tagger', lambda *a: pytest.fail('loaded model'))
@@ -356,7 +356,7 @@ def test_old_completed_cache_requires_database_update_then_reinference(pipeline,
     configure(monkeypatch)
     assert app.main(p.args) == 0
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL)) as state:
-        segment = state.records('1', 'scene')['wd'][0]
+        segment = state.records('1', 'scene')['wd']
         segment.pop('frames')
         segment['meta'].pop('scene_frames_format')
         segment['meta'].pop('scene_score_floor')
@@ -370,7 +370,7 @@ def test_old_completed_cache_requires_database_update_then_reinference(pipeline,
     update_database(p.path)
     configure(monkeypatch, scene=.8)
     assert app.main(p.args) == 0 and len(p.loaded) == 2
-    assert 'frames' in saved(p.path)['wd'][0]
+    assert 'frames' in saved(p.path)['wd']
 
 
 @pytest.mark.parametrize('args', [[], ['--merge-only', '--markers-only']])
@@ -409,5 +409,5 @@ def test_scene_rethreshold_never_decodes_publication_snapshots(tmp_path, monkeyp
         result = rethreshold_execution.run(app, state, {'1': {}}, [config], report)
 
         assert result == {'scene_thresholds_updated': 1}
-        assert state.records('1', 'scene')['wd'][0][cache_identity.SCENE_OVERRIDE] == .8
+        assert state.records('1', 'scene')['wd'][cache_identity.SCENE_OVERRIDE] == .8
 

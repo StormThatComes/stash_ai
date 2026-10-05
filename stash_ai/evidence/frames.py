@@ -13,8 +13,11 @@ class FrameIndex:
         self.app, self.policies, self.cache = app, policies, cache
         self.tag_policies = policies_or_empty(tag_policies)
         self.report = report
+        from stash_ai.evidence.formats import validate_current
+        for record in records.values():
+            validate_current(record)
         self.signatures = signatures if signatures is not None else {
-            id(segment): marker_segment_signature(segment) for segments in records.values() for segment in segments}
+            id(segment): marker_segment_signature(segment) for segment in records.values()}
         self.groups = make_groups(records, self.signatures)
         self.by_signature = {sig: key for key, group in self.groups.items() for _, _, sig in group['members']}
         self.indexes = {}
@@ -35,23 +38,21 @@ class FrameIndex:
 
 def make_groups(records, signatures=None):
     from stash_ai.evidence.identity import marker_segment_signature
-    from stash_ai.signatures import digest
     groups = {}
-    for source in SOURCES:
-        for segment in records.get(source, []):
-            meta = segment["meta"]
-            identity = meta.get("frame_input_signature")
-            if segment["mode"] != "frames" or not identity or meta.get("marker_threshold") is None:
-                continue
-            # A signature plus the actual timeline: shifted/missing cues never
-            # become matching observations merely because metadata was copied.
-            from stash_ai.storage.segments import frame_group
-            key = frame_group(segment)
-            signature = signatures[id(segment)] if signatures is not None else marker_segment_signature(segment)
-            group = groups.setdefault(key, {"members": [], "context": defaultdict(set)})
-            if signature not in group["context"][source]:
-                group["members"].append((source, segment, signature))
-                group["context"][source].add(signature)
+    for source, segment in records.items():
+        meta = segment["meta"]
+        identity = meta.get("frame_input_signature")
+        if segment["mode"] != "frames" or not identity or meta.get("marker_threshold") is None:
+            continue
+        # A signature plus the actual timeline: shifted/missing cues never
+        # become matching observations merely because metadata was copied.
+        from stash_ai.storage.segments import frame_group
+        key = frame_group(segment)
+        signature = signatures[id(segment)] if signatures is not None else marker_segment_signature(segment)
+        group = groups.setdefault(key, {"members": [], "context": defaultdict(set)})
+        if signature not in group["context"][source]:
+            group["members"].append((source, segment, signature))
+            group["context"][source].add(signature)
     for group in groups.values():
         group["members"].sort(key=lambda item: (list(SOURCES).index(item[0]), item[2]))
         group["context"] = {source: sorted(signatures) for source, signatures in group["context"].items()}

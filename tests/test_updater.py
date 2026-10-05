@@ -1121,7 +1121,7 @@ def test_extracted_bootstrap_and_scene_selection_install_without_ml(tmp_path):
 import sys
 sys.path.insert(0, '.')
 from stash_ai.commands.bootstrap import catalogs, policies, runtime_options
-from stash_ai.evidence.historical_markers import replay_markers
+from stash_ai.evidence.temporal.policy import frozen_policy
 from stash_ai.inference.prediction import predict_scene
 from stash_ai.inference.scene_predictions import retained_scores, candidate_scores
 from stash_ai.evidence.temporal.policy import TemporalPolicy

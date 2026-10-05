@@ -47,7 +47,7 @@ def _metadata_rows(store, scenes):
         store.connection.execute('DELETE FROM cache_report_scenes')
         store.connection.executemany('INSERT INTO cache_report_scenes VALUES (?)', ((scene,) for scene in scenes))
     rows = store.connection.execute(
-        'SELECT r.scene,r.model,r.kind,m.format,m.data,t.thresholds FROM ' +
+        'SELECT r.scene,r.model,r.kind,m.format,m.data,t.threshold FROM ' +
         store.table('results') + ' AS r LEFT JOIN ' + store.table('result_metadata') +
         ' AS m USING(scope,scene,model,kind) LEFT JOIN ' + store.table('result_thresholds') +
         ' AS t USING(scope,scene,model,kind) WHERE r.scope=? '
@@ -56,19 +56,19 @@ def _metadata_rows(store, scenes):
     for scene, model, kind, version, data, threshold in rows:
         if kind not in KINDS:
             continue
-        segments = None
+        record = None
         if version == FORMAT:
             try:
-                segments = overlay(decode(data), kind, threshold)
+                record = overlay(decode(data), kind, threshold)
             except (TypeError, ValueError):
                 pass
-        if segments is None:
+        if record is None:
             try:
-                segments = store.result_metadata(scene, kind, model)
+                record = store.result_metadata(scene, kind, model)
             except (TypeError, ValueError, KeyError, IndexError, zlib.error) as exc:
                 yield scene, model, kind, None, f'Unreadable evidence: {type(exc).__name__}; run --db-check.'
                 continue
-        yield scene, model, kind, segments, None
+        yield scene, model, kind, record, None
 
 
 def _scene_evidence(store, scenes):
@@ -81,8 +81,8 @@ def _scene_evidence(store, scenes):
         if current is None or current[0] != scene:
             evidence = {}
         else:
-            evidence = {(model, kind): (segments, error)
-                        for _, model, kind, segments, error in current[1]}
+            evidence = {(model, kind): (record, error)
+                        for _, model, kind, record, error in current[1]}
             current = next(grouped, None)
         yield scene, evidence
 

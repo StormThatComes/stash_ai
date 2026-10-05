@@ -104,13 +104,13 @@ def test_cleanup_removes_shared_and_legacy_extras_without_images_or_models(pipel
 @pytest.mark.parametrize('old_snapshot', [False, True])
 def test_source_exclusion_rebuilds_extra_proofs_without_resurrecting_revoked_sources(tmp_path, old_snapshot):
     records = {
-        'wd': [segment('wd', [[('core', .95), ('detail', .91)]] * 3)],
-        'dtq': [segment('dtq', [[('detail', .92)]] * 3)],
+        'wd': segment('wd', [[('core', .95), ('detail', .91)]] * 3),
+        'dtq': segment('dtq', [[('detail', .92)]] * 3),
     }
     cores = {source: frozenset({'detail'}) for source in SOURCES}
     empty = policies_or_empty()
     with merge_store.StateStore(tmp_path/'state.sqlite3', 'fixture') as store:
-        for source, items in records.items(): store.put('1', source, {'markers': items[0]})
+        for source, items in records.items(): store.put('1', source, {'markers': items})
         _, spans = merge.evidence(app, store, '1', cores, empty)
         if old_snapshot:
             for span in spans: span['build_options'].pop('tag_exclusions', None)
@@ -131,8 +131,8 @@ def test_source_exclusion_rebuilds_extra_proofs_without_resurrecting_revoked_sou
 
 
 def test_global_exclusion_revokes_consensus_before_qualification():
-    records = {'wd': [segment('wd', [[('core', .9)], [], [('core', .9)], []])],
-               'dtq': [segment('dtq', [[], [('core', .9)], [], [('core', .9)]])]}
+    records = {'wd': segment('wd', [[('core', .9)], [], [('core', .9)], []]),
+               'dtq': segment('dtq', [[], [('core', .9)], [], [('core', .9)]])}
     assert merge_source_markers.marker_contributions(app, records, policies_or_empty())
     assert merge_source_markers.marker_contributions(app, records, policies_or_empty(),
                                      tag_policies=policies_or_empty({'wd': ['core']})) == []
