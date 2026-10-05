@@ -8,7 +8,7 @@ from stash_ai.storage.store import StateStore, scope_for
 
 
 def report_context(runtime, args, *, both_outputs=False):
-    settings = dict(TEMPORAL_POLICY=load_policy(args.temporal_policy, not args.no_temporal))
+    settings = dict(TEMPORAL_POLICY=load_policy(args.temporal_policy))
     if both_outputs:
         settings.update(APPLY_SCENE_TAGS=True, CREATE_MARKERS=True)
     return replace(runtime, **settings)

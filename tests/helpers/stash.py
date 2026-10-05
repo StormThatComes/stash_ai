@@ -2,7 +2,6 @@
 
 from copy import deepcopy
 
-from stash_ai.publication import separate as separate_sync
 from tests.helpers.runtime import runtime as app
 
 
@@ -112,7 +111,3 @@ class Stash:
             return {'tagDestroy':True}
         tag=self.find_tag_by_id(variables['id'],required=False)
         return {'findTag':usage(tag) if tag is not None else None}
-
-
-def sync(stash,source,predictions=(),specs=(),cores=frozenset(),scenes=frozenset()):
-    return separate_sync.sync_scene(app, stash,app.services.TagResolver(stash,source=source),stash.find_scene("1"),list(predictions),list(specs),cores,source,scenes)

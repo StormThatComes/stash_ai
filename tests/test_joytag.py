@@ -56,7 +56,7 @@ def hf_assets(tmp_path, monkeypatch):
     monkeypatch.setitem(sys.modules, "huggingface_hub", SimpleNamespace(hf_hub_download=download))
     monkeypatch.delenv("JOYTAG_MODEL_PATH", raising=False)
     config = tmp_path / "models.yml"
-    config.write_text("version: 1\njoytag:\n  model_dir: models/joytag\n")
+    config.write_text("version: 1\njoytag:\n  model_dir: models/joytag\n  scene_threshold: 0.45\n  marker_threshold: 0.70\n  batch_size: 16\n")
     monkeypatch.setattr(app.services, "create_stash_client", lambda _: pytest.fail("model download accessed Stash"))
     return SimpleNamespace(model_dir=model_dir, cache=cache, config=config, assets=assets, requests=requests)
 
@@ -110,7 +110,7 @@ def test_model_pt_never_substitutes_for_safetensors(hf_assets, offline):
 
 def test_inference_uses_verified_hf_loader_and_safetensors_only(hf_assets, monkeypatch):
     f = hf_assets
-    settings = ModelSettings(JOYTAG, f.model_dir, device='cpu')
+    settings = ModelSettings(JOYTAG, f.model_dir, device='cpu', scene_threshold=.4, marker_threshold=.65, batch_size=4)
     vocabulary = load_vocabulary(settings)
     (f.model_dir/'Models.py').write_text("raise AssertionError('local code was executed')")
     monkeypatch.setitem(sys.modules, 'Models', SimpleNamespace())
@@ -152,7 +152,7 @@ def test_joytag_defaults_to_managed_models_directory_and_rejects_code_dir(tmp_pa
     monkeypatch.delenv('JOYTAG_MODEL_PATH', raising=False)
     monkeypatch.setenv('JOYTAG_CODE_PATH', str(tmp_path/'unused-checkout'))
     config = tmp_path/'models.yml'
-    config.write_text('version: 1\n')
+    config.write_text('version: 1\njoytag:\n  scene_threshold: 0.45\n  marker_threshold: 0.70\n  batch_size: 16\n')
     settings = app.services.load_model_settings(config, ['joytag'], None)[0]
     assert settings.model_dir == tmp_path/'models/joytag'
     config.write_text('version: 1\njoytag:\n  code_dir: old-checkout\n')
@@ -162,7 +162,7 @@ def test_joytag_defaults_to_managed_models_directory_and_rejects_code_dir(tmp_pa
 
 def test_loader_revision_changes_only_joytag_inference_identity(tmp_path, monkeypatch):
     vocabulary = Vocabulary(['tag'], {})
-    configs = [ModelSettings(s, tmp_path/s.key) for s in (JOYTAG, WD)]
+    configs = [ModelSettings(s, tmp_path/s.key, scene_threshold=.4, marker_threshold=.65, batch_size=4) for s in (JOYTAG, WD)]
     before = [model_identity(app, c, vocabulary) for c in configs]
     monkeypatch.setattr(joytag, 'LOADER_REVISION', 'a'*40)
     after = [model_identity(app, c, vocabulary) for c in configs]

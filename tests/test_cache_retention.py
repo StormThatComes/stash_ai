@@ -1,5 +1,7 @@
 """Wider cache must support offline retuning without changing publication."""
 
+from tests.helpers.temporal import policy_args
+
 from copy import deepcopy
 from dataclasses import replace
 
@@ -42,7 +44,7 @@ def test_retention_settings_apply_to_all_models(tmp_path, value):
 
 
 def test_omitted_retention_preserves_legacy_model_identity(tmp_path, pipeline):
-    config = ModelSettings(SOURCES['wd'], tmp_path)
+    config = ModelSettings(SOURCES['wd'], tmp_path, scene_threshold=.4, marker_threshold=.65, batch_size=4)
     expected = model_identity(app, config, pipeline.vocab)
     assert expected['retention'] == dict(temporal=True, marker_ratio=.85, scene_ratio=.85)
     assert model_identity(app, replace(config, scene_cache_floor=None,
@@ -60,7 +62,7 @@ def test_wider_cache_changes_no_publication_and_offline_lowering_matches_fresh(
     p.scores['wd'][:, 0] = .5
     p.scores['wd'][:, 1] = .95
     path = tmp_path/'models.yml'
-    args = [*p.args, *model_config(path), *([] if temporal else ['--no-temporal'])]
+    args = [*p.args, *model_config(path), *policy_args(p.path.parent, temporal)]
     assert app.main(args) == 0
     baseline = outputs(p.path), marker_ranges(p.stash)
     assert {t['name'] for t in p.stash.scene['tags']} == {'ai:extra'}
@@ -126,7 +128,7 @@ def test_individual_retention_supports_automatic_threshold_reuse(pipeline, monke
 def test_retention_never_discards_current_publication_inputs(pipeline, tmp_path, floor, temporal):
     p = pipeline
     args = [*p.args, *model_config(tmp_path/'models.yml', scene_cache_floor=floor,
-        marker_cache_floor=floor), *([] if temporal else ['--no-temporal'])]
+        marker_cache_floor=floor), *policy_args(p.path.parent, temporal)]
     assert app.main(args) == 0
     saved = records(p.path)
     required_scene, required_marker = (.68, .7225) if temporal else (.8, .85)
@@ -195,20 +197,6 @@ def test_wider_marker_retention_can_replay_lower_continuation_ratio(pipeline, mo
     assert marker_ranges(p.stash) == [('ai:common', 0, 8)]
 
 
-@pytest.mark.parametrize('temporal', [True, False])
-def test_separate_output_ignores_persistent_retention_settings(pipeline, monkeypatch, tmp_path, temporal):
-    p = pipeline
-    monkeypatch.setattr(app, 'DEFAULT_RESUME', False)
-    path = tmp_path/'models.yml'
-    args = [*p.args, *model_config(path), '--output-mode', 'separate',
-            *([] if temporal else ['--no-temporal'])]
-    assert app.main(args) == 0
-    before = {t['name'] for t in p.stash.scene['tags']}, marker_ranges(p.stash)
-    model_config(path, scene_cache_floor=.1, marker_cache_floor=.1)
-    assert app.main(args) == 0
-    assert ({t['name'] for t in p.stash.scene['tags']}, marker_ranges(p.stash)) == before
-
-
 def test_retained_weak_scores_do_not_become_consensus_votes(pipeline, monkeypatch, tmp_path):
     p = pipeline
     for scores in p.scores.values():
@@ -245,4 +233,3 @@ def test_exact_scene_aggregate_includes_scores_below_retention(pipeline, monkeyp
     scene = records(p.path)['scene']['wd'][0]
     assert scene['items'] == [dict(tag='common', score=pytest.approx(.18))]
     assert len([row for row in scene['frames'] if row['tags']]) == 1
-

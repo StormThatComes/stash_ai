@@ -158,11 +158,9 @@ def test_duplicate_records_do_not_count_as_two_model_votes(tmp_path):
     assert len(spans) == len(spans[0]['occurrence_evidence']) == 1
 
 
-@pytest.mark.parametrize('use_end', [False, True])
-def test_point_publication_is_idempotent_and_promotes_to_a_range(tmp_path, monkeypatch, use_end):
+def test_point_publication_is_idempotent_and_promotes_to_a_range(tmp_path, monkeypatch):
     scenes, markers = paired_records({'wd': [0, .95, 0]}, threshold=.35, marker_threshold=.65)
     stash = Stash()
-    monkeypatch.setattr(app, 'MARKER_USE_END_TIME', use_end)
     with merge_store.StateStore(tmp_path/'state', 'fixture') as state:
         put(state, scenes, markers)
         hits, spans = merge.evidence(app, state, '1', policies(), policies())
@@ -183,7 +181,7 @@ def test_point_publication_is_idempotent_and_promotes_to_a_range(tmp_path, monke
         assert marker['id'] == point['id'] and not marker['title'].endswith('wykrycie')
         assert OCCURRENCE_TAG not in {t['name'] for t in marker['tags']}
         assert {t['name'] for t in marker['tags'] if t['name'].startswith('m:')} == {'m:core'}
-        assert marker['end_seconds'] == (3 if use_end else None)
+        assert marker['end_seconds'] == 3
 
 
 def test_manual_location_suppresses_automatic_point_without_modifying_it(tmp_path):

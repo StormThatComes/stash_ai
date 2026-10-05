@@ -19,7 +19,7 @@ pytestmark = pytest.mark.usefixtures('reset_progress')
 
 @pytest.fixture
 def model_run(pipeline, tmp_path):
-    config = ModelSettings(WD, tmp_path / 'model', batch_size=2)
+    config = ModelSettings(WD, tmp_path / 'model', batch_size=2, scene_threshold=.4, marker_threshold=.65)
     args = runtime_args(resume=False, restart=False)
     scenes = {identifier: dict(paths=dict(pipeline.stash.scene['paths']),
                                publication_reason='missing')
@@ -35,7 +35,7 @@ def run_model(context):
     MergedModelRun(
         app, context.args, context.state, context.config, context.pipeline.vocab,
         stats=context.stats, report=context.args.report,
-    ).run(context.scenes, ['scene', 'markers'], {'scene': True, 'markers': True}, context.inputs)
+    ).run(context.scenes, ['scene', 'markers'], context.inputs)
 
 
 @pytest.mark.parametrize('error', [RuntimeError, KeyboardInterrupt])
@@ -93,7 +93,7 @@ def test_loading_failure_stops_remaining_scenes_without_retrying(model_run, monk
     assert not context.state.records('1', 'scene') and not context.state.records('2', 'scene')
 
 
-@pytest.mark.parametrize('reason', ['missing-input', 'existing-output', 'completed'])
+@pytest.mark.parametrize('reason', ['missing-input', 'completed'])
 def test_skipped_and_completed_scenes_do_not_load_a_model(model_run, monkeypatch, reason):
     context = model_run
     if reason == 'missing-input':
@@ -102,10 +102,7 @@ def test_skipped_and_completed_scenes_do_not_load_a_model(model_run, monkeypatch
     else:
         run_model(context)
         assert context.pipeline.loaded[0].closed
-        if reason == 'existing-output':
-            monkeypatch.setattr(app, 'SKIP_EXISTING_OUTPUTS', True)
-        else:
-            context.args.resume = True
+        context.args.resume = True
     context.stats.clear()
     monkeypatch.setattr(app.services, 'load_tagger', lambda *args: pytest.fail('unnecessary model load'))
 

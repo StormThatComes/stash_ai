@@ -19,7 +19,7 @@ def _batches(scenes):
 
 
 def _argv(command_context, batch, *flags):
-    argv = ['python', 'stash_ai.py', *command_context, '--output-mode', 'merged', *flags]
+    argv = ['python', 'stash_ai.py', *command_context, *flags]
     for scene in batch:
         argv.extend(('--scene-id', scene))
     return argv

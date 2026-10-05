@@ -449,7 +449,8 @@ def test_run_modules_move_to_package_and_remove_stale_bytecode(tmp_path):
     result = subprocess.run([sys.executable, 'stash_ai.py', '--help'], cwd=tmp_path,
                             capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
-    assert '--output-mode' in result.stdout
+    assert '--merge-only' in result.stdout
+    assert '--output-mode' not in result.stdout
 
 
 @pytest.mark.parametrize('package,modules', [
@@ -484,7 +485,8 @@ def test_domain_modules_move_to_packages_and_remove_stale_bytecode(tmp_path, pac
     result = subprocess.run([sys.executable, 'stash_ai.py', '--help'], cwd=tmp_path,
                             capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
-    assert '--output-mode' in result.stdout
+    assert '--merge-only' in result.stdout
+    assert '--output-mode' not in result.stdout
 
 
 def test_installed_storage_preserves_publication_round_trip_without_runtime_dependencies(tmp_path):
@@ -993,7 +995,11 @@ def test_retired_files_are_removed_with_history_and_backups(tmp_path, name, trac
     remote = Remote()
     installed(tmp_path, remote)
     old = b"# retired installation file\n"
+    (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
     (tmp_path / name).write_bytes(old)
+    import py_compile
+    bytecode = Path(py_compile.compile(str(tmp_path / name), doraise=True))
+    assert bytecode.exists()
     if tracked:
         state = updater.load_state(tmp_path)
         for key in ("baseline", "upstream"):
@@ -1008,10 +1014,12 @@ def test_retired_files_are_removed_with_history_and_backups(tmp_path, name, trac
         assert snapshot(tmp_path) == before
     assert updater.update(tmp_path, remote, force_code=not tracked) == 0
     assert not (tmp_path / name).exists()
+    assert not bytecode.exists()
     assert all(name not in updater.load_state(tmp_path)[key] for key in ("baseline", "upstream"))
     assert old in [p.read_bytes() for p in (tmp_path / updater.META / "transactions").glob("*/old-*")]
-    assert updater.blob_sha(remote.files[name]) not in {
-        c.split("/")[-1] for c in remote.calls if c.startswith("git/blobs/")}
+    if name in remote.files:
+        assert updater.blob_sha(remote.files[name]) not in {
+            c.split("/")[-1] for c in remote.calls if c.startswith("git/blobs/")}
 
 
 def test_interrupted_retired_file_removal_can_roll_back(tmp_path):
@@ -1019,6 +1027,7 @@ def test_interrupted_retired_file_removal_can_roll_back(tmp_path):
     installed(tmp_path, remote)
     name = "joytag_stash_markers.py"
     old = b"# old launcher\n"
+    (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
     (tmp_path / name).write_bytes(old)
     identity, directory = stage(tmp_path, remote, force_code=True)
     updater.journal_write(tmp_path, identity, "applying")
@@ -1049,7 +1058,6 @@ from stash_ai.publication.planning.types import MergeSyncPlan
 from stash_ai.publication.planning.merged_evidence import prepare_sync_evidence
 from stash_ai.publication.planning.merged_tags import plan_scene_tags
 from stash_ai.publication.planning.merged_markers import plan_markers
-from stash_ai.publication.planning.separate_markers import plan_marker_changes
 from stash_ai.publication.groups import group_name, managed_group, group_description
 from stash_ai.publication.index import PreviousMarkerRanges
 from stash_ai.commands.marker_groups import run_backfill
@@ -1113,7 +1121,7 @@ def test_extracted_bootstrap_and_scene_selection_install_without_ml(tmp_path):
 import sys
 sys.path.insert(0, '.')
 from stash_ai.commands.bootstrap import catalogs, policies, runtime_options
-from stash_ai.runs.separate import run
+from stash_ai.evidence.historical_markers import replay_markers
 from stash_ai.inference.prediction import predict_scene
 from stash_ai.inference.scene_predictions import retained_scores, temporal_scores
 from stash_ai.evidence.temporal.policy import TemporalPolicy

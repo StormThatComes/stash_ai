@@ -51,7 +51,7 @@ def test_parallel_worker_tolerates_parent_publication_commits(tmp_path, rethresh
         store.put("2", "dtq", _outputs("dtq", "two"))
         if rethresholded:
             for scene, model in (('1', 'wd'), ('2', 'dtq')):
-                config = ModelSettings(SOURCES[model], Path('.'), scene_threshold=.4, marker_threshold=.95)
+                config = ModelSettings(SOURCES[model], Path('.'), scene_threshold=.4, marker_threshold=.95, batch_size=4)
                 assert marker_updates.apply(app, store, scene, config)
 
     merge_parallel._init_worker(

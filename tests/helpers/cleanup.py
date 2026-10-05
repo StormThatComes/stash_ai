@@ -107,11 +107,11 @@ class FastStash(Stash):
         return {key: {'count': len(rows), field: deepcopy(rows[offset:offset + f['per_page']])}}
 
 
-def options(tmp_path, labels=(), cores=(), by_model=None, *, output='merged'):
+def options(tmp_path, labels=(), cores=(), by_model=None):
     tags, core = tmp_path/'tags.yml', tmp_path/'cores.yml'
     tags.write_text(yaml.safe_dump(dict(version=1, excluded_scene_tags=list(labels), by_model=by_model or {})))
     core.write_text(yaml.safe_dump(dict(version=1, excluded_core_tags=list(cores))))
-    return ['--models', 'all', '--output-mode', output, '--no-hierarchy', '--cleanup-only',
+    return ['--models', 'all', '--no-hierarchy', '--cleanup-only',
             '--cleanup-strategy', 'auto',
             '--state-db', str(tmp_path/'state.sqlite3'), '--scene-tag-exclusions', str(tags),
             '--marker-core-exclusions', str(core)]
@@ -123,4 +123,3 @@ def install(monkeypatch, stash):
         monkeypatch.setattr(app.services, name, lambda *args: pytest.fail('cleanup accessed model or media assets'))
     monkeypatch.setattr(sprites, 'fetch_cues', lambda *args: pytest.fail('cleanup accessed model or media assets'))
     monkeypatch.setattr(sprites, 'iter_sprite_frames', lambda *args: pytest.fail('cleanup accessed model or media assets'))
-
