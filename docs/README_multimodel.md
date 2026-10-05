@@ -98,12 +98,11 @@ python .\stash_ai.py --merge-only --scene-id 123 --force-merge
 
 Nowy poprawny wynik inferencji zawsze zastępuje poprzedni wynik tego samego
 modelu i rodzaju. Historyczne serie są zwijane przy potwierdzonym reuse cache,
-bez uruchamiania modelu. Jawny import legacy nadal dopisuje dowody w jednej
-transakcji z historią importu.
+bez uruchamiania modelu. Stare prefiksy przechodzą do ai: przez `--migrate-legacy-only`, ze świeżą inferencją;
+rejestr importu nie jest już używany.
 
-Znane przedziały zawsze publikują koniec. Occurrence i importowane markery
-z nieznanym końcem pozostają punktami. Zwykłe przedziały opublikowane dawniej
-jako punkty odzyskują długość z zapisanych dowodów podczas uzgadniania.
+Znane przedziały zawsze publikują koniec. Occurrence pozostają punktami. Zwykłe przedziały opublikowane dawniej
+jako punkty wymagają jawnego `--migrate-point-markers-only`.
 
 ## 6. Progi i rethreshold bez inferencji
 

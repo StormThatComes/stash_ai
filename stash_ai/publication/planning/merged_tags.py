@@ -1,7 +1,6 @@
 """Merged publication tags."""
 from __future__ import annotations
 from stash_ai.publication import markers as marker_ops
-from stash_ai.commands import legacy as legacy_commands
 import stash_ai.evidence.labels as merge_labels
 from stash_ai.runtime.timing import stage
 from .types import MergeSyncPlan, ResolvedEvidence, MarkerCatalog
@@ -59,15 +58,11 @@ def resolve_sync_tags(app, stash, resolver, scene_id, evidence, tag_policies, re
     return ResolvedEvidence(scene, markers, spans, ids, groups, blocked_names, suppressed)
 
 
-def plan_scene_tags(app, store, scene_id, scene, scene_hits, scene_labels, ids, blocked_names, *, migrate):
+def plan_scene_tags(app, store, scene_id, scene, scene_hits, scene_labels, ids, blocked_names):
     """Plan scene associations and the durable scene snapshot."""
     from stash_ai.storage.recovery import publications
 
     current_tags = scene.get("tags", [])
-    legacy_tags = [tag for tag in current_tags if legacy_commands.legacy_label(tag['name'])] if migrate else []
-    from stash_ai.signatures import freeze
-    imported = {freeze(item) for item in store.imported_legacy(scene_id, 'scene', borrow=True)} if legacy_tags else set()
-    migrated_scene_ids = {str(tag['id']) for tag in legacy_tags if freeze(tag) in imported}
     published, pending = store.snapshot(scene_id, "scene", borrow=True)
     owned_before = set((published or {}).get("owned_ids", [])) | set((pending or {}).get("owned_ids", []))
     owned_before.update(identifier for snapshot in publications(store, scene_id, 'scene')
@@ -75,19 +70,14 @@ def plan_scene_tags(app, store, scene_id, scene, scene_hits, scene_labels, ids, 
     existing_ids = {str(tag["id"]) for tag in current_tags}
     desired_ids = {ids[merge_labels.AI.prefix + label] for label in scene_labels
                    if ids.get(merge_labels.AI.prefix + label)}
-    unresolved_labels = {label for label in scene_labels if not ids.get(merge_labels.AI.prefix + label)}
-
-    # CREATE_MISSING=False must not remove a legacy association lacking a replacement.
-    migrated_scene_ids.difference_update(str(tag["id"]) for tag in current_tags
-        if (parsed := legacy_commands.legacy_label(tag["name"])) and parsed[1] in unresolved_labels)
     forbidden_ids = {str(tag['id']) for tag in current_tags if tag['name'] in blocked_names}
-    preserved = existing_ids - owned_before - migrated_scene_ids - forbidden_ids
+    preserved = existing_ids - owned_before - forbidden_ids
     final_ids = preserved | desired_ids
     snapshots = {}
     if app.APPLY_SCENE_TAGS:
         snapshots["scene"] = {"owned_ids": sorted(desired_ids - preserved), "contributions": scene_hits}
 
-    return MergeSyncPlan(snapshots, existing_ids, desired_ids, final_ids, migrated_scene_ids)
+    return MergeSyncPlan(snapshots, existing_ids, desired_ids, final_ids)
 
 
 

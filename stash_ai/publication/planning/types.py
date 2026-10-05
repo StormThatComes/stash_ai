@@ -11,7 +11,6 @@ class MergeSyncPlan:
     existing_scene_tag_ids: set[str]
     desired_scene_tag_ids: set[str]
     final_scene_tag_ids: set[str]
-    migrated_scene_tag_ids: set[str]
     wanted_markers: list[tuple[dict, dict]] = field(default_factory=list)
     creates: list[dict] = field(default_factory=list)
     updates: list[dict] = field(default_factory=list)

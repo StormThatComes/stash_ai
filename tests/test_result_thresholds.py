@@ -126,11 +126,11 @@ def test_v7_inline_overrides_are_read_lazily_and_can_be_restored(tmp_path, dry_r
         before = connection.execute('SELECT * FROM results ORDER BY scope,scene,model,kind').fetchall()
     source_before = path.read_bytes()
     with StateStore(path, 'scope', dry_run=dry_run) as store:
-        assert store.connection.execute('PRAGMA user_version').fetchone() == (15,)
+        assert store.connection.execute('PRAGMA user_version').fetchone() == (16,)
         assert store.records('1', 'scene')['wd'] == [old['scene']]
         assert store.model_records('1', 'markers', 'wd') == [old['markers']]
         assert rethreshold(store, .4) == {'scene_thresholds_updated': 1}
-        assert store.connection.execute('PRAGMA user_version').fetchone() == (15,)
+        assert store.connection.execute('PRAGMA user_version').fetchone() == (16,)
         assert blobs(store) == ([] if dry_run else before)
         assert store.records('1', 'scene')['wd'] == [outputs()['scene']]
         assert store.model_records('1', 'markers', 'wd') == [outputs()['markers']]
@@ -281,7 +281,7 @@ def test_abandon_and_cleanup_preserve_v8_and_effective_thresholds(tmp_path):
         recovery.abandon(store, lambda _: None)
         cleanup.begin(store, 'cleanup', {'excluded'}, set(), [], kinds=('scene',))
         cleanup.finish(store)
-        assert store.connection.execute('PRAGMA user_version').fetchone() == (15,)
+        assert store.connection.execute('PRAGMA user_version').fetchone() == (16,)
         assert store.records('1', 'scene')['wd'][0][scene_cache_identity.SCENE_OVERRIDE] == .8
     assert db.check_database(path, 'scope')['ok']
 

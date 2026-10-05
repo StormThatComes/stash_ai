@@ -59,13 +59,13 @@ def test_upgrade_retires_old_results_across_scopes_and_preserves_exact_pins(tmp_
         snapshots = connection.execute('SELECT * FROM snapshots').fetchall()
         recovery = connection.execute('SELECT * FROM recovery_publications').fetchall()
     before = path.read_bytes()
-    assert db.update_database(path, dry_run=True) == (14, 15)
+    assert db.update_database(path, dry_run=True) == (14, 16)
     assert path.read_bytes() == before
-    assert db.update_database(path) == (14, 15)
+    assert db.update_database(path) == (14, 16)
     for scope in ('first', 'second'):
         with StateStore(path, scope) as store:
             assert 'wd' not in store.records('1', 'scene')
-            assert store.model_records('1', 'markers', 'wd') == [legacy]
+            assert store.model_records('1', 'markers', 'wd') == []
             assert store.model_records('1', 'scene', 'dtq') == [outputs(signature='current')['scene']]
             assert archived_records(store, '1', 'scene') == {}
             archived = archived_records(store, '1', 'markers')['wd']
@@ -80,7 +80,7 @@ def test_upgrade_retires_old_results_across_scopes_and_preserves_exact_pins(tmp_
     with sqlite3.connect(path) as connection:
         assert connection.execute('SELECT * FROM snapshots').fetchall() == snapshots
         assert connection.execute('SELECT * FROM recovery_publications').fetchall() == recovery
-    assert db.update_database(path) == (15, 15)
+    assert db.update_database(path) == (16, 16)
 
 
 def test_retirement_and_archive_roll_back_together(tmp_path, monkeypatch):

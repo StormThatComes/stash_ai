@@ -235,7 +235,7 @@ def test_pruned_legacy_extra_id_cannot_reappear_or_break_the_next_merge(pipeline
     old = p.stash.marker(WD, 'legacy', 'legacy')
     old['tags'].append(p.stash.tag('ai:blocked'))
     path = policy_file(tmp_path, ['blocked'])
-    assert app.main(['--import-legacy-only', '--scene-id', '1', '--state-db', str(p.path)]) == 0
+    assert app.main([*p.args, '--migrate-legacy-only', '--scene-tag-exclusions', str(path)]) == 0
     args = [*p.args, '--merge-only', '--scene-tag-exclusions', str(path)]
     monkeypatch.setattr(app.services, 'load_tagger', lambda *args: pytest.fail('legacy merge loaded model'))
     assert app.main(args) == 0

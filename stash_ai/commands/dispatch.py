@@ -18,10 +18,6 @@ def run_database_command(app, args) -> int | None:
 
 def run_standalone_command(app, args) -> int | None:
     """Run commands that bypass model loading and the normal tagging pipeline."""
-    if args.command is Command.IMPORT_LEGACY:
-        from stash_ai.commands.legacy import run_only
-        app.services.validate_config(scene_work=False)
-        return run_only(app, args)
     if args.command is Command.ABANDON:
         from stash_ai.commands.recovery import run_only
         app.services.validate_config(scene_work=False)
@@ -38,10 +34,6 @@ def run_standalone_command(app, args) -> int | None:
         from stash_ai.cleanup.prune import run_prune
         app.services.validate_config(scene_work=False)
         return run_prune(app, args)
-    if args.command is Command.PRUNE_LEGACY:
-        from stash_ai.cleanup.legacy import run as run_legacy_prune
-        app.services.validate_config(scene_work=False)
-        return run_legacy_prune(app, args)
     if args.command is Command.MODEL_REPORT:
         from stash_ai.reports.model.report import run as run_model_report
         return run_model_report(app, args)

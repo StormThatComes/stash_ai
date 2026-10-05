@@ -47,25 +47,13 @@ def validate_reports(parser, args):
 
 
 def validate_maintenance(parser, args):
-    """Validate whole-database operations and legacy-ledger maintenance."""
+    """Validate database operations and one-time Stash migrations."""
     db_mode = database_mode(args)
-    if args.import_legacy_only:
-        if supplied(args, MODEL_OPTIONS):
-            parser.error('--import-legacy-only does not use model/inference options.')
-        modifiers = tuple(name for name in PUBLICATION_OPTIONS if name not in ('markers_only', 'scene_tags_only'))
-        if supplied(args, modifiers):
-            parser.error('--import-legacy-only cannot publish, rethreshold, prune or abandon plans.')
+    if args.migrate_legacy_only and supplied(args, ('resume', 'rethreshold_scenes', 'rethreshold_markers', 'abandon_pending')):
+        parser.error('--migrate-legacy-only requires fresh inference and cannot resume old evidence or abandon plans.')
     if args.migrate_point_markers_only:
         if supplied(args, (*MODEL_OPTIONS, *PUBLICATION_OPTIONS)):
             parser.error('--migrate-point-markers-only does not infer, publish new evidence or change policies.')
-    if args.prune_legacy_imports:
-        if args.scene_id:
-            parser.error("--prune-legacy-imports covers the current Stash/state DB; --scene-id does not apply.")
-        if supplied(args, MODEL_OPTIONS):
-            parser.error("--prune-legacy-imports does not use model/inference options.")
-        if supplied(args, PUBLICATION_OPTIONS):
-            parser.error("--prune-legacy-imports cannot be combined with tagging, threshold, recovery or tag-pruning modifiers.")
-
     if db_mode:
         if args.scene_id:
             parser.error("Database maintenance covers the state DB; --scene-id does not apply.")
@@ -80,6 +68,8 @@ def validate_maintenance(parser, args):
 def validate_pipeline(app, parser, args):
     """Normalize execution defaults and validate tagging/recovery combinations."""
     args.resume = app.DEFAULT_RESUME if args.resume is None else args.resume
+    if args.migrate_legacy_only:
+        args.resume, args.restart = False, True
     if args.checkpoint_batches < 1:
         parser.error("--checkpoint-batches must be >= 1.")
     if not 1 <= args.cleanup_page_size <= 10000 or not 1 <= args.cleanup_write_batch_size <= 1000:
@@ -144,4 +134,3 @@ def validate_args(app, parser: argparse.ArgumentParser, args: argparse.Namespace
     validate_maintenance(parser, args)
     validate_pipeline(app, parser, args)
     return args
-

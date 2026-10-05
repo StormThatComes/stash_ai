@@ -1,8 +1,7 @@
-"""Inference result and legacy-evidence persistence behind StateStore."""
+"""Inference result persistence behind StateStore."""
 from __future__ import annotations
 
 from copy import deepcopy
-import json
 
 from stash_ai.runtime.timing import measured
 from stash_ai.storage.thresholds import overlay
@@ -138,20 +137,6 @@ class ResultStore:
             raise ValueError("Unknown result source or output kind.")
         for kind, segment in outputs.items():
             self.replace_records(scene, model, kind, [segment])
-
-    def append_legacy_in_transaction(self, scene, model, kind, segment):
-        """Append an explicit legacy import, deduplicating capture timestamps."""
-        if segment.get('meta', {}).get('origin') != 'legacy':
-            raise ValueError('Only imported legacy evidence may be appended.')
-        def semantic(value):
-            data = dict(value)
-            data['meta'] = {key: item for key, item in data['meta'].items()
-                            if key != 'captured_at'}
-            return json.dumps(data, sort_keys=True, allow_nan=False)
-        current = semantic(segment)
-        old = self.model_records(scene, kind, model, borrow=True)
-        keep = [previous for previous in old if semantic(previous) != current]
-        self.replace_records(scene, model, kind, keep + [segment])
 
     def replace_records(self, scene, model, kind, segments):
         """Replace a segment list inside the caller's transaction, including previews."""

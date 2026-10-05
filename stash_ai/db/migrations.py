@@ -80,6 +80,10 @@ def migrate(database):
         if database.version < 15:
             from .current_evidence_migration import migrate as retire_obsolete
             retire_obsolete(db)
+        if database.version < 16:
+            from .current_evidence_migration import retire
+            retire(db, lambda value: value['meta'].get('origin') == 'legacy')
+        db.execute('DROP TABLE IF EXISTS legacy_imports')
         db.execute('DROP TABLE IF EXISTS refinement_progress')
         for event in ('insert', 'update', 'delete'):
             db.execute(f'DROP TRIGGER IF EXISTS perf_legacy_imports_{event}')

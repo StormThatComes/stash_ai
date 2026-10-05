@@ -14,7 +14,6 @@ from stash_ai.storage.database import StateDatabase
 from stash_ai.storage.results import ResultStore
 from stash_ai.storage.publications import PublicationStore
 from stash_ai.storage.metadata_store import MetadataStore
-from stash_ai.storage.legacy import LegacyStore
 
 
 def scope_for(url):
@@ -52,7 +51,6 @@ class StateStore(AbstractContextManager):
             self.path = database.path
             self.connection = database.connection
             self.metadata = MetadataStore(self)
-            self.legacy = LegacyStore(self)
             self.results = ResultStore(self)
             self.publications = PublicationStore(self)
             self.preview_source = database.preview_source
@@ -152,8 +150,6 @@ class StateStore(AbstractContextManager):
         return self.results.set_threshold(scene, model, kind, threshold, segments,
                                           metadata_only=metadata_only)
 
-    def imported_legacy(self, scene, kind, *, borrow=False):
-        return self.legacy.records(scene, kind, borrow=borrow)
 
     def snapshot(self, scene, kind, *, borrow=False):
         return self.publications.snapshot(scene, kind, borrow=borrow)

@@ -46,7 +46,7 @@ def fail(*args, **kwargs):
     'publication/groups.py', 'publication/index.py', 'publication/planning/types.py', 'publication/planning/merged_evidence.py', 'publication/planning/merged_tags.py', 'publication/planning/merged_markers.py',
     'publication/fingerprints.py', 'storage/segments.py', 'storage/merge_checks.py',
     'inference/scene_predictions.py', 'commands/bootstrap.py',
-    'config.py', 'commands/hierarchy.py', 'commands/legacy.py', 'rethreshold/markers.py', 'rethreshold/scenes.py', 'cleanup/state.py', 'cleanup/client.py',
+    'config.py', 'commands/hierarchy.py', 'commands/namespace_migration.py', 'rethreshold/markers.py', 'rethreshold/scenes.py', 'cleanup/state.py', 'cleanup/client.py',
 ])
 def test_publication_code_tracks_extracted_modules(monkeypatch, filename):
     before = performance.publication_code()

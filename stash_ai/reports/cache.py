@@ -33,7 +33,7 @@ def scene_ids(store, requested):
         return sorted(set(map(str, requested)))
     known = set()
     for table in ('results', 'result_index', 'refresh_requests', 'checkpoints',
-                  'snapshots', 'legacy_imports', 'recovery_publications'):
+                  'snapshots', 'recovery_publications'):
         known.update(row[0] for row in _keys(store, table, 'DISTINCT scene'))
     return sorted(known)
 

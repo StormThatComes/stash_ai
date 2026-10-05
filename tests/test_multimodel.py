@@ -70,12 +70,11 @@ def test_main_all_releases_models_and_preserves_failed_source(monkeypatch,tmp_pa
         model=Tagger(settings,vocabulary.labels,np.full((2,1),np.nan if fail_wd and settings.source==WD else .9,np.float32))
         loaded.append(model);return model
     monkeypatch.setattr(app.services,"load_tagger",load)
-    args=["--models","all","--no-hierarchy","--state-db",str(tmp_path/"state.sqlite3")]
-    assert app.main(["--import-legacy-only","--state-db",str(tmp_path/"state.sqlite3")])==0
+    args=["--models","all","--no-hierarchy","--migrate-legacy-only","--state-db",str(tmp_path/"state.sqlite3")]
     assert app.main(args)==int(fail_wd)
     assert all(t.closed for t in loaded) and len(loaded)==len(SOURCES)
-    assert {t["name"] for t in stash.scene["tags"]}=={"ai:tag"}|({"ai:old"} if fail_wd else set())
-    assert any(m["primary_tag"]["name"]=="ai:old" for m in stash.scene["scene_markers"])==fail_wd
+    assert {t["name"] for t in stash.scene["tags"]}==({"wd:old"} if fail_wd else {"ai:tag"})
+    assert (old in stash.scene["scene_markers"])==fail_wd
 
 
 @pytest.mark.parametrize("aggregation",["max","topk_mean"])

@@ -49,7 +49,7 @@ class MergePublisher:
                 "Rerun without --merge-only to resume inference.")
         with stage(self.report, 'publication_check'):
             reason = (
-                'forced' if self.args.force_merge
+                'forced' if self.args.force_merge or self.args.migrate_legacy_only
                 else merge_checks.check_reason(
                     self.store, scene_id, self.publication_key, current['fingerprint']))
         self.stats['merge_' + reason] += 1
@@ -82,6 +82,7 @@ class MergePublisher:
                 result = merge_sync.sync_merged(
                     self.app, self.stash, self.resolver, self.store, current, scene_hits, spans,
                     report=self.report, tag_policies=self.scene_policies,
+                    transition=self.args.migrate_legacy_only,
                     publication_key=self.publication_key)
             self.stats.update(result)
             self.report.record_counts(**{

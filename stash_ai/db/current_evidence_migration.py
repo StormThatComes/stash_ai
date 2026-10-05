@@ -11,6 +11,10 @@ from stash_ai.evidence.formats import current, validate_archived
 
 
 def migrate(db):
+    retire(db, lambda value: value['meta'].get('origin') == 'inference' and not current(value['meta']))
+
+
+def retire(db, obsolete):
     store = SimpleNamespace(connection=db, table=lambda name: name,
                             unpack_snapshot=decode_snapshot, pack=encode)
     keys = db.execute('SELECT scope,scene,model,kind FROM results').fetchall()
@@ -22,7 +26,7 @@ def migrate(db):
             (scope, scene, model, kind)).fetchone()
         previous = overlay(decode(blob), kind, thresholds)
         active = [segment for segment in previous
-                  if segment['meta'].get('origin') != 'inference' or current(segment['meta'])]
+                  if not obsolete(segment)]
         if len(active) == len(previous):
             continue
         for segment in previous:

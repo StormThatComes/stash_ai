@@ -134,7 +134,7 @@ def test_snapshot_migration_preserves_pending_recovery_shared_proofs_and_old_fal
     from tests.test_snapshot_proofs import shared_snapshot
     path = tmp_path / 'state.sqlite3'
     with StateStore(path, 'scope-a') as state:
-        state.put('1', 'wd', {'scene': {'mode': 'scene', 'meta': {'origin': 'legacy'}, 'items': []}})
+        state.put('1', 'wd', {'scene': current_record({'mode': 'scene', 'meta': {'origin': 'inference'}, 'items': []})})
     snapshot = shared_snapshot()
     packed = compact(snapshot) if old_format != 'plain' else snapshot
     if old_format != 'plain':
@@ -270,12 +270,12 @@ def test_update_preserves_pending_and_recovery_work_checkpoints_and_thresholds(t
                        ('scope-a', '2', 'wd', encode({})))
             db.execute('INSERT INTO refresh_requests VALUES (?,?,?,?)', ('scope-a', '2', 'wd', 'scene'))
             db.execute('INSERT INTO result_thresholds VALUES (?,?,?,?,?)', ('scope-a', '1', 'wd', 'scene', '[0.8]'))
-            db.execute('INSERT INTO legacy_imports VALUES (?,?,?,?)', ('scope-a', '1', 'scene', encode([])))
+
     with sqlite3.connect(path) as connection:
         connection.execute('PRAGMA user_version=8')
     preserved = ('results', 'snapshots', 'cleanup_state', 'recovery_cleanups', 'recovery_publications',
                  'checkpoints', 'checkpoint_frames', 'checkpoint_analysis', 'refresh_requests',
-                 'result_thresholds', 'result_metadata', 'legacy_imports')
+                 'result_thresholds', 'result_metadata')
     before = {table: rows(path, table) for table in preserved}
 
     stash_db.update_database(path)
@@ -350,11 +350,11 @@ def test_db_update_cli_stays_offline_and_reports_dry_run_and_idempotence(tmp_pat
 
     assert app.main([*command, '--dry-run']) == 0
     assert path.read_bytes() == before
-    assert 'DRY RUN: state DB schema v1 -> v15' in capsys.readouterr().out
+    assert 'DRY RUN: state DB schema v1 -> v16' in capsys.readouterr().out
     assert app.main(command) == 0
-    assert 'State DB updated: schema v1 -> v15' in capsys.readouterr().out
+    assert 'State DB updated: schema v1 -> v16' in capsys.readouterr().out
     assert app.main(command) == 0
-    assert 'up to date: v15' in capsys.readouterr().out
+    assert 'up to date: v16' in capsys.readouterr().out
     assert app.main(['--state-db', str(tmp_path / 'missing.sqlite3'), '--db-update']) == 1
     assert 'does not exist' in capsys.readouterr().out
 

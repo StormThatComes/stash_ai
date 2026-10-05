@@ -330,5 +330,5 @@ def test_cleanup_never_restores_a_manually_deleted_point(tmp_path):
         cores = policies(); cores['wd'] = frozenset({'core'})
         cleaned = cleanup_evidence.cleanup_support(app, state, '1', spans, {'wd'}, cores, policies())
         assert cleaned
-        merge_sync.sync_merged(app, stash, resolver, state, stash.find_scene('1'), hits, cleaned, migrate=False, cleanup=True)
+        merge_sync.sync_merged(app, stash, resolver, state, stash.find_scene('1'), hits, cleaned, cleanup=True)
         assert not stash.scene['scene_markers']

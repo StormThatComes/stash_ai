@@ -114,9 +114,6 @@ class StateDatabase(AbstractContextManager):
                 scope TEXT NOT NULL, scene TEXT NOT NULL, kind TEXT NOT NULL,
                 published BLOB, pending BLOB,
                 PRIMARY KEY(scope, scene, kind));
-            CREATE TABLE IF NOT EXISTS legacy_imports (
-                scope TEXT NOT NULL, scene TEXT NOT NULL, kind TEXT NOT NULL,
-                data BLOB NOT NULL, PRIMARY KEY(scope, scene, kind));
         """)
         # Derived metadata stays safe when older executables write results.
         # INSERT also covers SQLite REPLACE, whose DELETE triggers may be disabled.
