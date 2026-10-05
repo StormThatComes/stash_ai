@@ -5,7 +5,7 @@
 # Other / Unclassified is an ordinary group and does NOT exclude its labels.
 # Named references describe predicted/source content, not verified identities/authorship.
 # Move a label to change its parent; repeat it in another group for multiple parents.
-# Keep raw label spelling, root and category_prefix stable. Preserve full coverage.
+# Keep raw label spelling and full coverage; categories use the shared ai: namespace.
 # Synchronization replaces hierarchy-owned parents; manual parents remain.
 # Existing obsolete category objects are retained, not deleted.
 # Validate: python stash_ai.py --models oppai --validate-hierarchy
@@ -13,7 +13,7 @@
 # Apply: python stash_ai.py --models oppai --sync-hierarchy-only
 # Import all leaves: add --create-all-tags to the preceding command.
 # Normal inference creates/synchronizes parents only for labels it uses.
-"version": 1
+"version": 2
 "source":
   "model": "Grio43/OppaiOracle"
   "revision": "96992fa30568c386e9fe7c8a1a68f798a3202c09"
@@ -30,8 +30,6 @@
     "compound_extension": 356
     "unclassified": 6689
     "reference_qualifier": 548
-"root": "OppaiOracle V1.1"
-"category_prefix": "op:category:"
 "groups":
   "Accessories / Eyewear and masks":
   - "adjusting_eyewear"

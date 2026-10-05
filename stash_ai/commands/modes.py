@@ -12,6 +12,7 @@ class Command(Enum):
     CLEANUP_SCENES = 'cleanup_scene_tags_only'
     DOWNLOAD = 'download_models'
     MERGE = 'merge_only'
+    POINT_MIGRATION = 'migrate_point_markers_only'
     MARKER_GROUPS = 'sync_marker_groups_only'
     EXPLAIN = 'explain_tag'
     PRUNE_TAGS = 'prune_empty_tags_only'
@@ -79,3 +80,4 @@ MODEL_RULE = ReportRule(
     Command.MODEL_REPORT, MODEL_OPTIONS,
     '--model-report uses all saved model evidence; model/inference options do not apply.',
     '--model-report cannot be combined with tagging, threshold, pruning or dry-run modifiers.')
+

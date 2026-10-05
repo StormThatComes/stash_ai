@@ -1,7 +1,7 @@
 """Versioned snapshot storage; callers continue to see expanded contributions."""
 
 FORMAT_KEY = '__stash_ai_snapshot__'
-FORMAT = 3
+FORMAT = 4
 
 
 def compact(snapshot):
@@ -11,10 +11,10 @@ def compact(snapshot):
     Equal but independently owned proofs stay independent; unique proofs remain
     inline. Neither the snapshot nor its borrowed evidence is modified.
     """
-    if not isinstance(snapshot, dict) or not isinstance(snapshot.get('contributions', []), list):
+    if not isinstance(snapshot, dict) or not isinstance(snapshot.get('contributions'), list):
         raise ValueError('Invalid compact snapshot format.')
     counts = {}
-    for item in snapshot.get('contributions', []):
+    for item in snapshot['contributions']:
         if not isinstance(item, dict):
             raise ValueError('Invalid compact snapshot contribution.')
         validate_policy(item)
@@ -26,7 +26,7 @@ def compact(snapshot):
             identity = id(proof)
             counts[identity] = counts.get(identity, 0) + 1
     proofs, indexes, contributions = [], {}, []
-    for item in snapshot.get('contributions', []):
+    for item in snapshot['contributions']:
         support = item.get('extra_support', {})
         if not any(counts[id(proof)] > 1 for proof in support.values()):
             contributions.append(item)
@@ -43,7 +43,7 @@ def compact(snapshot):
                 proofs.append(proof)
             references[tag] = indexes[identity]
         contributions.append({**item, 'extra_support': references})
-    result = {**snapshot, **({'contributions': contributions} if 'contributions' in snapshot else {})}
+    result = {**snapshot, 'contributions': contributions}
     return {FORMAT_KEY: FORMAT, 'snapshot': result, 'proofs': proofs}
 
 
@@ -52,7 +52,7 @@ def expand(value, *, version=FORMAT):
     if (not isinstance(value, dict) or set(value) != {FORMAT_KEY, 'snapshot', 'proofs'}
             or type(value[FORMAT_KEY]) is not int
             or value[FORMAT_KEY] != version or not isinstance(value['snapshot'], dict)
-            or not isinstance(value['snapshot'].get('contributions', []), list)
+            or not isinstance(value['snapshot'].get('contributions', [] if version < FORMAT else None), list)
             or not isinstance(value['proofs'], list) or any(not isinstance(proof, dict) for proof in value['proofs'])):
         raise ValueError('Invalid compact snapshot format.')
     proofs, contributions = value['proofs'], []
@@ -77,7 +77,7 @@ def expand(value, *, version=FORMAT):
             else:
                 raise ValueError('Invalid compact snapshot proof reference.')
         contributions.append({**item, 'extra_support': support})
-    return {**value['snapshot'], **({'contributions': contributions} if 'contributions' in value['snapshot'] else {})}
+    return {**value['snapshot'], 'contributions': contributions}
 
 
 def validate_policy(item):
@@ -90,6 +90,8 @@ def validate_policy(item):
         keys = set(options) - {"algorithm"} if isinstance(options, dict) else set()
         if not isinstance(options, dict) or keys not in (marker, scene):
             raise ValueError('Incomplete frozen build options; run --db-update.')
+        if 'algorithm' not in options:
+            raise ValueError('Missing frozen algorithm; run --db-update.')
         frozen_policy(options)
         fields = ('core_exclusions', 'tag_exclusions') if keys == marker else ('scene_exclusions',)
         for field in fields:

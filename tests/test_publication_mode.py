@@ -37,7 +37,9 @@ def test_frozen_classic_snapshot_preserves_first_frame_extras():
     options.pop('algorithm')  # Original snapshots stored only the policy flag.
     options['policy'] = {**asdict(TemporalPolicy()), 'enabled': False}
     options['marker_thresholds'] = {source: .8 for source in policies()}
-    frozen = snapshot_context(app, options, 'markers')
+    options['core_exclusions'] = {source: [] for source in policies()}
+    from stash_ai.db.snapshot_migration import complete_options
+    frozen = snapshot_context(app, complete_options(options), 'markers')
     records = {'wd': [segment('wd', [
         [('core', .9), ('first', .9)],
         [('core', .9), ('later', .9)],
@@ -58,8 +60,8 @@ def test_frozen_algorithm_is_validated_at_the_snapshot_boundary():
     options['algorithm'] = 'historical'
     assert isinstance(frozen_policy(options), HistoricalPolicy)
     options['policy']['enabled'] = True
-    with pytest.raises(ValueError, match='Invalid frozen publication algorithm'):
+    with pytest.raises(ValueError, match='Incomplete temporal snapshot policy'):
         frozen_policy(options)
     options['policy']['enabled'] = 0
-    with pytest.raises(ValueError, match='Invalid historical temporal discriminator'):
+    with pytest.raises(ValueError, match='Incomplete temporal snapshot policy'):
         frozen_policy(options)

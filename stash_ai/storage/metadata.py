@@ -2,9 +2,9 @@
 from contextlib import contextmanager
 import json
 
-FORMAT = 2
+FORMAT = 3
 META_KEYS = frozenset((
-    'origin', 'inference_signature', 'scene_threshold', 'marker_threshold',
+    'origin', 'inference_signature', 'frame_input_signature', 'analysis_format', 'scene_threshold', 'marker_threshold',
     'scene_frames_format', 'scene_score_floor', 'scene_support_floor',
     'marker_score_floor', 'marker_tag_blocklist',
 ))

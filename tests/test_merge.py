@@ -448,7 +448,7 @@ def test_cleanup_selected_bridge_source_splits_union_and_keeps_manual_removals(m
     assert {t["name"] for t in p.stash.scene["tags"]}=={"ai:common"}
 
 
-def test_existing_inference_history_collapses_on_verified_reuse(merge_pipeline, monkeypatch):
+def test_result_writer_collapses_historical_input_before_verified_reuse(merge_pipeline, monkeypatch):
     p = merge_pipeline
     args = ['--models', 'oppai', *p.args[2:], '--resume']
     scope = merge_store.scope_for(app.STASH_URL)
@@ -464,8 +464,8 @@ def test_existing_inference_history_collapses_on_verified_reuse(merge_pipeline, 
                 current = state.records('1', kind)['oppai']
                 assert len(current) == 1
                 state.replace_records('1', 'oppai', kind, [previous[kind], *current])
-    # Simulate history retained by the retired append policy, then verify that
-    # the matching latest inference replaces it without another model pass.
+    # The canonical writer discarded unpinned history; completion reuses the
+    # latest inference without another model pass.
     monkeypatch.setattr(app.services, 'load_tagger', lambda *a: pytest.fail('history migration reran inference'))
     assert app.main(args) == 0
     with merge_store.StateStore(p.path, scope, True) as state:
@@ -520,7 +520,7 @@ def test_historical_point_ranges_gain_ends_without_inference_or_new_ids(merge_pi
         marker['end_seconds'] = None
         marker['tags'].append(p.stash.tag('human'))
     monkeypatch.setattr(app.services, 'load_tagger', lambda *a: pytest.fail('point migration loaded a model'))
-    assert app.main([*p.args, '--merge-only']) == 0
+    assert app.main(['--migrate-point-markers-only', '--state-db', str(p.path)]) == 0
     assert {m['id']: (m['seconds'], m['end_seconds']) for m in p.stash.scene['scene_markers']} == expected
     assert all('human' in {tag['name'] for tag in m['tags']} for m in p.stash.scene['scene_markers'])
     p.stash.writes.clear()
@@ -552,7 +552,7 @@ def test_scene_cap_does_not_drop_previous_runs_or_legacy_confidence(tmp_path,mon
                       "items":[dict(tag=tag,score=score) for tag,score in items]}}, {"scene":False})
         hits,_=merge.evidence(app,state,"1",empty_policies(),empty_policies())
         assert {h["tag"] for h in hits}=={"old","new","legacy"}
-        assert {h["score"] for h in hits if h["tag"]=="old"}=={.95,None}
+        assert {h["score"] for h in hits if h["tag"]=="old"}=={None}
 
 
 def test_cleanup_point_output_uses_recorded_extent_when_start_moves(merge_pipeline,monkeypatch,tmp_path):
@@ -562,6 +562,7 @@ def test_cleanup_point_output_uses_recorded_extent_when_start_moves(merge_pipeli
         marker["end_seconds"] = None  # Historical point-only publication.
     first=next(m for m in p.stash.scene["scene_markers"] if m["seconds"]==10 and m["primary_tag"]["name"]=="ai:common")
     first["tags"].append(p.stash.tag("manual extra"))
+    assert app.main(["--migrate-point-markers-only", "--state-db", str(p.path)]) == 0
     core=tmp_path/"core.yml"
     core.write_text("version: 1\nexcluded_core_tags: []\nby_model:\n  joytag: [common]\n  wd: [common]\n")
     assert app.main([*p.args,"--cleanup-markers-only","--marker-core-exclusions",str(core)])==0

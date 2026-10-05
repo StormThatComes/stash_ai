@@ -59,62 +59,6 @@ def completed(store, scene, model, kinds, signature):
                                         and rows[kind][2] == signature for kind in kinds)
 
 
-def reuse_latest_results(store, scene, model, kinds, signature):
-    """Reuse current inference while applying replacement semantics to retained history."""
-    from stash_ai.evidence.thresholds import indexed_signature
-    matches = {}
-    records = {}
-    for kind in kinds:
-        if store.connection.execute(
-                "SELECT 1 FROM " + store.table('refresh_requests') +
-                " WHERE scope=? AND scene=? AND model=? AND kind=?",
-                (store.scope, str(scene), model, kind)).fetchone():
-            return None
-        segments = store.records(scene, kind, model, borrow=True).get(model, [])
-        # Match the effective policy as completed() does. A raw inference
-        # signature can match restored thresholds while overrides still retain
-        # the raised values; let threshold reuse reconcile those first.
-        current = next((segment for segment in reversed(segments)
-                        if segment['meta'].get('origin') == 'inference'
-                        and indexed_signature(segment) == signature), None)
-        if current is None:
-            return None
-        records[kind] = segments
-        matches[kind] = current
-
-    targets = [(kind, matches[kind]) for kind in kinds
-               if (len(records[kind]) != 1 or records[kind][0] != matches[kind])]
-    if not targets:
-        return 0
-    # Never rewrite source evidence underneath an interrupted publication plan.
-    if any(store.snapshot(scene, kind, borrow=True)[1] is not None for kind in ('scene', 'markers')):
-        raise RuntimeError(f'{scene}: finish the pending merge or use --abandon-pending before collapsing inference history.')
-    with store.connection:
-        for kind, segment in targets:
-            store.replace_records(scene, model, kind, [segment])
-    return len(targets)
-
-def collapse_inference_history(store, scene, model, kinds):
-    """Apply replacement after another cache path has already proven the latest result."""
-    targets = []
-    for kind in kinds:
-        segments = store.records(scene, kind, model, borrow=True).get(model, [])
-        if len(segments) <= 1:
-            continue
-        segment = segments[-1]
-        if segment['meta'].get('origin') != 'inference':
-            return None
-        targets.append((kind, segment))
-    if not targets:
-        return 0
-    if any(store.snapshot(scene, kind, borrow=True)[1] is not None for kind in ('scene', 'markers')):
-        raise RuntimeError(f'{scene}: finish the pending merge or use --abandon-pending before collapsing inference history.')
-    with store.connection:
-        for kind, segment in targets:
-            store.replace_records(scene, model, kind, [segment])
-    return len(targets)
-
-
 def request_refresh(store, scenes, models, kinds):
     with store.connection:
         for scene in scenes:
@@ -183,3 +127,4 @@ def preload_status(store):
         values[kind] = (inference, populated, signature)
     if last is not None:
         store.cache.put(last, values)
+

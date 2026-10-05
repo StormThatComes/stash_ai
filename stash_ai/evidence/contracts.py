@@ -21,7 +21,24 @@ class EvidenceMetadata(TypedDict, total=False):
     analysis_format: int
 
 
+class CurrentInferenceMetadata(TypedDict):
+    origin: Literal['inference']
+    analysis_format: Literal[4]
+    inference_signature: str
+    frame_input_signature: str
+    scene_threshold: float
+    marker_threshold: float
+    marker_score_floor: float
+    scene_support_floor: float
+    scene_score_floor: NotRequired[float]
+    scene_frames_format: NotRequired[Literal[1]]
+
+
+RetainedMetadata = CurrentInferenceMetadata | EvidenceMetadata
+
+
 class MarkerBuildOptions(TypedDict):
+    algorithm: Literal['temporal', 'historical']
     policy: dict
     core_exclusions: dict[str, list[str]]
     tag_exclusions: dict[str, list[str]]
@@ -30,6 +47,7 @@ class MarkerBuildOptions(TypedDict):
 
 
 class SceneBuildOptions(TypedDict):
+    algorithm: Literal['temporal', 'historical']
     policy: dict
     max_tags: int
     scene_exclusions: dict[str, list[str]]
@@ -81,14 +99,14 @@ class MarkerContribution(TypedDict):
 
 class SceneRecord(TypedDict):
     mode: Literal['scene']
-    meta: EvidenceMetadata
+    meta: RetainedMetadata
     items: list[SceneEntry]
     frames: NotRequired[list[FrameRow]]
 
 
 class FrameRecord(TypedDict):
     mode: Literal['frames']
-    meta: EvidenceMetadata
+    meta: RetainedMetadata
     items: list[FrameRow]
 
 

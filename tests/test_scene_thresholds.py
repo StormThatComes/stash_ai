@@ -154,6 +154,7 @@ def test_support_ratio_change_rejects_incomplete_cache_before_publication(
             segment.pop('frames')
             segment['meta'].pop('scene_frames_format')
             segment['meta'].pop('scene_score_floor')
+            segment['meta']['analysis_format'] = 3
             state.put('1', 'wd', {'scene': segment})
     before = saved(p.path), deepcopy(p.stash.scene)
     p.stash.writes.clear()
@@ -176,6 +177,7 @@ def test_rethreshold_abort_report_is_explicit_and_groups_blockers(pipeline, monk
         segment.pop('frames')
         segment['meta'].pop('scene_frames_format')
         segment['meta'].pop('scene_score_floor')
+        segment['meta']['analysis_format'] = 3
         state.put('1', 'wd', {'scene': segment})
 
     configure(monkeypatch, scene=.8)
@@ -254,6 +256,7 @@ def test_invalid_scene_cache_preflight_does_not_publish(pipeline, monkeypatch, c
             segment.pop('frames')
             segment['meta'].pop('scene_frames_format')
             segment['meta'].pop('scene_score_floor')
+            segment['meta']['analysis_format'] = 3
             state.put('1', 'wd', {'scene': segment})
     elif change == 'pending':
         with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL)) as state:
@@ -348,6 +351,7 @@ def test_old_completed_cache_is_not_eagerly_reinferred(pipeline, monkeypatch):
         segment.pop('frames')
         segment['meta'].pop('scene_frames_format')
         segment['meta'].pop('scene_score_floor')
+        segment['meta']['analysis_format'] = 3
         state.put('1', 'wd', {'scene': segment})
     assert app.main(p.args) == 0 and len(p.loaded) == 1
     configure(monkeypatch, scene=.8)
@@ -392,3 +396,4 @@ def test_scene_rethreshold_never_decodes_publication_snapshots(tmp_path, monkeyp
 
         assert result == {'scene_thresholds_updated': 1}
         assert state.records('1', 'scene')['wd'][0][cache_identity.SCENE_OVERRIDE] == .8
+
