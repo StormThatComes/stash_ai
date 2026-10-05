@@ -20,32 +20,11 @@ def seed_version(path, version):
     segment = {'mode': 'scene', 'meta': {'origin': 'inference', 'inference_signature': 'saved'},
                'items': [{'tag': 'example', 'score': .9}]}
     segment = inference_record(**segment)
-    if version < 2:
-        with sqlite3.connect(path) as db:
-            db.executescript(f'''
-                PRAGMA application_id={APPLICATION_ID};
-                CREATE TABLE results (
-                    scope TEXT, scene TEXT, model TEXT, kind TEXT, data BLOB,
-                    PRIMARY KEY(scope,scene,model,kind));
-                CREATE TABLE snapshots (
-                    scope TEXT, scene TEXT, kind TEXT, published BLOB, pending BLOB,
-                    PRIMARY KEY(scope,scene,kind));
-                CREATE TABLE legacy_imports (
-                    scope TEXT, scene TEXT, kind TEXT, data BLOB,
-                    PRIMARY KEY(scope,scene,kind));
-            ''')
-            for scope in ('scope-a', 'scope-b'):
-                db.execute('INSERT INTO results VALUES (?,?,?,?,?)',
-                           (scope, '1', 'wd', 'scene', encode([segment])))
-    else:
-        for scope in ('scope-a', 'scope-b'):
-            with StateStore(path, scope) as state:
-                state.put('1', 'wd', {'scene': segment})
+    for scope in ('scope-a', 'scope-b'):
+        with StateStore(path, scope) as state:
+            state.put('1', 'wd', {'scene': segment})
     with sqlite3.connect(path) as db:
         db.execute(f'PRAGMA user_version={version}')
-        if version < 4:
-            db.execute('CREATE TABLE refinement_progress (data BLOB)')
-            db.execute('INSERT INTO refinement_progress VALUES (?)', (encode({'retired': True}),))
 
 
 def rows(path, table):
@@ -53,7 +32,7 @@ def rows(path, table):
         return db.execute(f'SELECT * FROM {table} ORDER BY 1,2').fetchall()
 
 
-@pytest.mark.parametrize('version', [0, 1, 5, 8])
+@pytest.mark.parametrize('version', [18, 19, 20])
 @pytest.mark.parametrize('dry_run', [False, True])
 def test_runtime_requires_explicit_upgrade_without_changing_old_database(tmp_path, version, dry_run):
     path = tmp_path / 'state.sqlite3'
@@ -85,110 +64,6 @@ def test_update_backfills_missing_and_corrupt_metadata_in_every_scope(tmp_path):
             assert state.result_metadata('1', 'scene', 'wd')['populated']
 
 
-@pytest.mark.parametrize('table_threshold', [None, .7])
-def test_v9_migration_preserves_mixed_history_and_frozen_proof_identity(tmp_path, table_threshold):
-    from stash_ai.db.result_history import marker_segment_signature, publication_record
-    from stash_ai.storage.codec import decode
-    from tests.test_result_thresholds import outputs
-    path = tmp_path / 'state.sqlite3'
-    old = [outputs()['markers'], outputs(.6)['markers']]
-    old[0]['marker_threshold_override'] = .8
-    old[0]['refinement'] = {'retired': True}
-    expected = [{k: v for k, v in segment.items() if k != 'refinement'} for segment in old]
-    if table_threshold is not None:
-        for segment in expected:
-            segment['marker_threshold_override'] = table_threshold
-    signatures = [marker_segment_signature(segment) for segment in expected]
-    with StateStore(path, 'scope-a') as state:
-        state.prepare('1', {'markers': {'contributions': [{'source': 'wd', 'evidence_signature': signature} for signature in signatures], 'frozen_signatures': signatures}})
-        with state.connection as db:
-            db.execute('INSERT INTO results VALUES (?,?,?,?,?)', ('scope-a', '1', 'wd', 'markers', encode(old)))
-            db.execute('DROP TABLE result_thresholds')
-            db.execute('CREATE TABLE result_thresholds(scope TEXT,scene TEXT,model TEXT,kind TEXT,threshold REAL,PRIMARY KEY(scope,scene,model,kind))')
-            if table_threshold is not None:
-                db.execute('INSERT INTO result_thresholds VALUES (?,?,?,?,?)', ('scope-a', '1', 'wd', 'markers', table_threshold))
-            db.execute('PRAGMA user_version=9')
-    pending = rows(path, 'snapshots')
-    stash_db.update_database(path)
-    with StateStore(path, 'scope-a') as state:
-        effective = state.model_record('1', 'markers', 'wd')
-        assert effective == publication_record(expected[-1], "markers")
-        assert marker_segment_signature(effective) == signatures[-1]
-        from stash_ai.storage.archive import records as archived_records
-        archived = archived_records(state, '1', 'markers')['wd']
-        assert [marker_segment_signature(segment) for segment in archived] == signatures[:1]
-        raw = decode(state.connection.execute('SELECT data FROM results').fetchone()[0])
-        assert 'marker_threshold_override' not in raw and 'refinement' not in raw
-        assert state.connection.execute('SELECT threshold FROM result_thresholds').fetchone() == (None if table_threshold is None else (.7,))
-    from stash_ai.storage.snapshots import decode as decode_snapshot
-    assert decode_snapshot(rows(path, 'snapshots')[0][-1]) == decode_snapshot(pending[0][-1])
-    evidence = rows(path, 'results')
-    stash_db.update_database(path)
-    from stash_ai.storage.codec import decode
-    assert [(row[:-1], decode(row[-1])) for row in rows(path, 'results')] == [
-        (row[:-1], decode(row[-1])[-1] if isinstance(decode(row[-1]), list) else decode(row[-1])) for row in evidence]
-
-
-@pytest.mark.parametrize('old_format', ['plain', 'v1', 'v2'])
-def test_snapshot_migration_preserves_pending_recovery_shared_proofs_and_old_false_flags(tmp_path, old_format):
-    from dataclasses import asdict
-    from stash_ai.evidence.temporal.policy import TemporalPolicy
-    from stash_ai.models import SOURCES
-    from stash_ai.storage.snapshots import FORMAT_KEY, compact, decode as decode_snapshot
-    from tests.test_snapshot_proofs import shared_snapshot
-    path = tmp_path / 'state.sqlite3'
-    with StateStore(path, 'scope-a') as state:
-        state.put('1', 'wd', {'scene': inference_record(**{'mode': 'scene', 'meta': {'origin': 'inference'}, 'items': []})})
-    snapshot = shared_snapshot()
-    packed = compact(snapshot) if old_format != 'plain' else snapshot
-    if old_format != 'plain':
-        packed[FORMAT_KEY] = int(old_format[1:])
-    contributions = packed['snapshot']['contributions'] if old_format != 'plain' else packed['contributions']
-    for item in contributions:
-        from stash_ai.evidence.temporal.policy import build_options
-        from tests.helpers.runtime import runtime
-        item['build_options'] = {**build_options(runtime),
-            'policy': {'enabled': False, 'shared_marker_frames': False, 'refine_enabled': True},
-            'core_exclusions': {source: [] for source in SOURCES},
-            'blocklist': ['retired-ban'], 'tag_exclusions': {'wd': ['existing-ban']}}
-        item['build_options'].pop('marker_thresholds')
-        item['scene_evidence'] = [{'tag': 'nested-scene-proof', 'build_options': {
-            'policy': {'enabled': False}, 'max_tags': 7,
-            'scene_exclusions': {source: ['frozen-scene-ban'] if source == 'dtq' else []
-                                 for source in SOURCES}}}]
-    with sqlite3.connect(path) as db:
-        for scope in ('scope-a', 'scope-b'):
-            db.execute('INSERT INTO snapshots VALUES (?,?,?,?,?)', (scope, '1', 'markers', encode(packed), encode(packed)))
-            db.execute('INSERT INTO recovery_publications VALUES (?,?,?,?,?)', (scope, '1', 'markers', 'operation', encode(packed)))
-        db.execute('PRAGMA user_version=11')
-    evidence = rows(path, 'results')
-    stash_db.update_database(path)
-    for scope in ('scope-a', 'scope-b'):
-        with StateStore(path, scope) as state:
-            for value in (*state.snapshot('1', 'markers', borrow=True),
-                          decode_snapshot(state.connection.execute('SELECT data FROM recovery_publications WHERE scope=?', (scope,)).fetchone()[0])):
-                assert value['owned_ids'] == snapshot['owned_ids']
-                options = value['contributions'][0]['retired_build_options']
-                assert value['contributions'][0]['requires_rebase']
-                assert set(options['policy']) == set(asdict(TemporalPolicy()))
-                assert all(options['policy'][name] is False for name in ('shared_marker_frames', 'shared_marker_extras',
-                    'short_marker_extras', 'shared_scene_tags', 'occurrence_markers'))
-                assert 'blocklist' not in options and options['marker_thresholds'] == {}
-                assert options['tag_exclusions']['wd'] == ['existing-ban', 'retired-ban']
-                nested = value['contributions'][0]['scene_evidence'][0]['retired_build_options']
-                assert nested['max_tags'] == 7 and nested['scene_thresholds'] == {}
-                assert nested['scene_exclusions']['dtq'] == ['frozen-scene-ban']
-                if old_format != 'plain':
-                    first, second = value['contributions']
-                    assert first['extra_support']['extra'] is second['extra_support']['extra']
-    from stash_ai.storage.codec import decode
-    assert [(row[:-1], decode(row[-1])) for row in rows(path, 'results')] == [
-        (row[:-1], decode(row[-1])[-1] if isinstance(decode(row[-1]), list) else decode(row[-1])) for row in evidence]
-    migrated = rows(path, 'snapshots'), rows(path, 'recovery_publications')
-    stash_db.update_database(path)
-    assert (rows(path, 'snapshots'), rows(path, 'recovery_publications')) == migrated
-
-
 @pytest.mark.parametrize('damage', ['snapshot', 'build_options', 'core_exclusions', 'scene_exclusions'])
 def test_invalid_snapshot_upgrade_rolls_back_all_publication_changes(tmp_path, damage):
     path = tmp_path / 'state.sqlite3'
@@ -209,17 +84,17 @@ def test_invalid_snapshot_upgrade_rolls_back_all_publication_changes(tmp_path, d
             else:
                 malformed['contributions'][0]['build_options'] = {'policy': options['policy'], 'max_tags': 0}
         with state.connection:
-            state.connection.execute("UPDATE snapshots SET published=? WHERE scene='2'", (encode(malformed),))
-            state.connection.execute('PRAGMA user_version=11')
+            state.connection.execute("UPDATE snapshots SET published=? WHERE scene='2'", (encode({'__stash_ai_snapshot__': 4, 'snapshot': malformed, 'proofs': []}),))
+            state.connection.execute('PRAGMA user_version=18')
     before = rows(path, 'snapshots')
     with pytest.raises(ValueError, match='historical snapshot|frozen build options|historical frozen exclusions'):
         stash_db.update_database(path)
     assert rows(path, 'snapshots') == before
     with sqlite3.connect(path) as db:
-        assert db.execute('PRAGMA user_version').fetchone() == (11,)
+        assert db.execute('PRAGMA user_version').fetchone() == (18,)
 
 
-@pytest.mark.parametrize('version', range(LATEST_SCHEMA_VERSION + 1))
+@pytest.mark.parametrize('version', range(18, LATEST_SCHEMA_VERSION + 1))
 def test_update_migrates_every_supported_version_and_all_scopes(tmp_path, version):
     path = tmp_path / 'state.sqlite3'
     seed_version(path, version)
@@ -244,7 +119,7 @@ def test_update_migrates_every_supported_version_and_all_scopes(tmp_path, versio
         (row[:-1], decode(row[-1])[-1] if isinstance(decode(row[-1]), list) else decode(row[-1])) for row in evidence]
 
 
-@pytest.mark.parametrize('version', [0, 1, 3, 5, LATEST_SCHEMA_VERSION])
+@pytest.mark.parametrize('version', [18, 19, 20, LATEST_SCHEMA_VERSION])
 def test_dry_run_only_reports_target_without_modifying_database_or_lock(tmp_path, version):
     path = tmp_path / 'state.sqlite3'
     seed_version(path, version)
@@ -268,7 +143,7 @@ def test_update_preserves_pending_and_recovery_work_checkpoints_and_thresholds(t
                        ('scope-b', 1, encode({'global': {'example': 1}}), 'pending-cleanup'))
             db.execute('INSERT INTO recovery_cleanups VALUES (?,?,?)', ('scope-b', 0, '["scene"]'))
             db.execute('INSERT INTO recovery_publications VALUES (?,?,?,?,?)',
-                       ('scope-a', '1', 'scene', 'old-operation', encode({'contributions': []})))
+                       ('scope-a', '1', 'scene', 'old-operation', encode({'__stash_ai_snapshot__': 4, 'snapshot': {'contributions': []}, 'proofs': []})))
             db.execute('INSERT INTO checkpoints VALUES (?,?,?,?,?,?,?,?)',
                        ('scope-a', '2', 'wd', 'partial', 1, 2, 1, zlib.compress(b'\0' * 4)))
             db.execute('INSERT INTO checkpoint_frames VALUES (?,?,?,?,?)',
@@ -279,7 +154,7 @@ def test_update_preserves_pending_and_recovery_work_checkpoints_and_thresholds(t
             db.execute('INSERT INTO result_thresholds VALUES (?,?,?,?,?)', ('scope-a', '1', 'wd', 'scene', .8))
 
     with sqlite3.connect(path) as connection:
-        connection.execute('PRAGMA user_version=8')
+        connection.execute('PRAGMA user_version=18')
     preserved = ('results', 'snapshots', 'cleanup_state', 'recovery_cleanups', 'recovery_publications',
                  'checkpoints', 'checkpoint_frames', 'checkpoint_analysis', 'refresh_requests',
                  'result_thresholds', 'result_metadata')
@@ -309,7 +184,7 @@ def test_update_refuses_an_active_writer_and_releases_failed_lock(tmp_path):
 
 def test_failed_migration_can_be_retried_and_does_not_claim_latest_version(tmp_path, monkeypatch):
     path = tmp_path / 'state.sqlite3'
-    seed_version(path, 1)
+    seed_version(path, 18)
     evidence = rows(path, 'results')
     with monkeypatch.context() as patch:
         def fail(_):
@@ -350,7 +225,7 @@ def test_update_rejects_unsupported_databases_without_changing_them(tmp_path, dr
 
 def test_db_update_cli_stays_offline_and_reports_dry_run_and_idempotence(tmp_path, monkeypatch, capsys):
     path = tmp_path / 'state.sqlite3'
-    seed_version(path, 1)
+    seed_version(path, 18)
     for name in ('load_model_settings', 'create_stash_client', 'validate_config', 'load_tagger'):
         monkeypatch.setattr(app.services, name, lambda *a, **kw: pytest.fail('db-update must stay offline'))
     monkeypatch.setattr(app, 'STASH_URL', 'unused-invalid-url')
@@ -359,18 +234,18 @@ def test_db_update_cli_stays_offline_and_reports_dry_run_and_idempotence(tmp_pat
 
     assert app.main([*command, '--dry-run']) == 0
     assert path.read_bytes() == before
-    assert 'DRY RUN: state DB schema v1 -> v20' in capsys.readouterr().out
+    assert 'DRY RUN: state DB schema v18 -> v21' in capsys.readouterr().out
     assert app.main(command) == 0
-    assert 'State DB updated: schema v1 -> v20' in capsys.readouterr().out
+    assert 'State DB updated: schema v18 -> v21' in capsys.readouterr().out
     assert app.main(command) == 0
-    assert 'up to date: v20' in capsys.readouterr().out
+    assert 'up to date: v21' in capsys.readouterr().out
     assert app.main(['--state-db', str(tmp_path / 'missing.sqlite3'), '--db-update']) == 1
     assert 'does not exist' in capsys.readouterr().out
 
 
 def test_db_update_cli_reports_unreadable_legacy_evidence_without_claiming_success(tmp_path, capsys):
     path = tmp_path / 'state.sqlite3'
-    seed_version(path, 1)
+    seed_version(path, 18)
     with sqlite3.connect(path) as db:
         db.execute('UPDATE results SET data=?', (b'not-compressed-json',))
     evidence = rows(path, 'results')
@@ -380,7 +255,7 @@ def test_db_update_cli_reports_unreadable_legacy_evidence_without_claiming_succe
     assert 'Saved state could not be migrated' in capsys.readouterr().out
     assert rows(path, 'results') == evidence
     with sqlite3.connect(path) as db:
-        assert db.execute('PRAGMA user_version').fetchone() == (1,)
+        assert db.execute('PRAGMA user_version').fetchone() == (18,)
 
 
 @pytest.mark.parametrize('extra', [
@@ -393,21 +268,72 @@ def test_db_update_cli_rejects_unrelated_modes_and_modifiers(extra):
     assert error.value.code == 2
 
 
-def test_v12_empty_snapshots_are_canonicalized_in_all_scopes_and_recovery(tmp_path):
-    from stash_ai.storage.codec import encode
-    from stash_ai.storage.snapshots import FORMAT_KEY, decode as decode_snapshot
-    path = tmp_path / 'state.sqlite3'
+@pytest.mark.parametrize('version', range(18))
+@pytest.mark.parametrize('dry_run', [False, True])
+def test_pre_v18_upgrade_requires_bridge_without_lock_or_mutation(tmp_path, version, dry_run):
+    from stash_ai.storage.schema import UPGRADE_BRIDGE_COMMIT
+    path = tmp_path / 'unsupported.sqlite3'
+    seed_version(path, version)
+    lock = path.with_name(path.name + '.lock')
+    lock.unlink()
+    before = path.read_bytes(), path.stat().st_mtime_ns
+    with pytest.raises(ValueError, match='supported minimum v18') as error:
+        stash_db.update_database(path, dry_run=dry_run)
+    assert UPGRADE_BRIDGE_COMMIT in str(error.value) and '--db-update' in str(error.value)
+    assert (path.read_bytes(), path.stat().st_mtime_ns) == before
+    assert not lock.exists()
+    with pytest.raises(ValueError, match='supported minimum v18'):
+        StateStore(path, 'scope-a', dry_run=dry_run)
+    assert (path.read_bytes(), path.stat().st_mtime_ns) == before
+
+
+def test_pre_v18_cli_reports_bridge_before_accessing_stash(tmp_path, monkeypatch, capsys):
+    path = tmp_path / 'unsupported.sqlite3'
+    seed_version(path, 17)
+    before = path.read_bytes()
+    monkeypatch.setattr(app.services, 'create_stash_client', lambda *_: pytest.fail('accessed Stash'))
+    assert app.main(['--state-db', str(path), '--db-update']) == 1
+    assert 'supported minimum v18' in capsys.readouterr().out
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize('version', [18, 19, 20])
+def test_publication_upgrade_decodes_each_blob_once_and_drops_only_retired_options(tmp_path, monkeypatch, version):
+    from copy import deepcopy
+    from stash_ai.db import snapshot_migration
+    from stash_ai.storage.snapshots import compact, decode as decode_snapshot
+    from tests.test_snapshot_proofs import shared_snapshot
+    path = tmp_path / 'publications.sqlite3'
     with StateStore(path, 'first'):
         pass
-    old = encode({FORMAT_KEY: 3, 'snapshot': {'owned_ids': ['manual']}, 'proofs': []})
-    with sqlite3.connect(path) as db:
-        db.execute('PRAGMA user_version=12')
+    saved = shared_snapshot()
+    for item in saved['contributions']:
+        item['requires_rebase'] = True
+        item['retired_build_options'] = {'algorithm': 'historical', 'unused': 'old policy'}
+    old = compact(saved)
+    old['__stash_ai_snapshot__'] = 4 if version < 20 else 5
+    packed = encode(old)
+    with sqlite3.connect(path) as connection:
         for scope in ('first', 'second'):
-            db.execute('INSERT INTO snapshots VALUES (?,?,?,?,?)', (scope, '1', 'markers', old, old))
-            db.execute('INSERT INTO recovery_publications VALUES (?,?,?,?,?)', (scope, '1', 'markers', 'op', old))
-    assert stash_db.update_database(path) == (12, LATEST_SCHEMA_VERSION)
-    with sqlite3.connect(path) as db:
-        blobs = [blob for row in db.execute('SELECT published,pending FROM snapshots') for blob in row]
-        blobs += [row[0] for row in db.execute('SELECT data FROM recovery_publications')]
-        assert len(blobs) == 6
-        assert all(decode_snapshot(blob) == {'owned_ids': ['manual'], 'contributions': []} for blob in blobs)
+            connection.execute('INSERT INTO snapshots VALUES (?,?,?,?,?)', (scope, '1', 'markers', packed, packed))
+            connection.execute('INSERT INTO recovery_publications VALUES (?,?,?,?,?)', (scope, '1', 'markers', 'op', packed))
+        connection.execute(f'PRAGMA user_version={version}')
+    calls = []
+    decode = snapshot_migration.decode
+    def counted(blob):
+        calls.append(blob)
+        return decode(blob)
+    monkeypatch.setattr(snapshot_migration, 'decode', counted)
+    assert stash_db.update_database(path) == (version, LATEST_SCHEMA_VERSION)
+    assert len(calls) == 6
+    expected = deepcopy(saved)
+    for item in expected['contributions']:
+        item.pop('retired_build_options')
+        item.pop('build_options')
+    with sqlite3.connect(path) as connection:
+        blobs = [blob for row in connection.execute('SELECT published,pending FROM snapshots') for blob in row]
+        blobs += [row[0] for row in connection.execute('SELECT data FROM recovery_publications')]
+    for blob in blobs:
+        restored = decode_snapshot(blob)
+        assert restored == expected
+        assert restored['contributions'][0]['extra_support']['extra'] is restored['contributions'][1]['extra_support']['extra']

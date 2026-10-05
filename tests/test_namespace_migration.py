@@ -146,26 +146,6 @@ def test_transition_recovers_after_each_partial_publication(pipeline, monkeypatc
         assert not store.has_pending_publication('1')
 
 
-def test_upgrade_removes_imported_active_evidence_and_ledger_across_scopes(tmp_path):
-    path = tmp_path / 'state.sqlite3'
-    legacy = dict(mode='spans', meta={'origin': 'legacy'}, items=[])
-    for scope in ('first', 'second'):
-        with StateStore(path, scope) as store:
-            inject_records(store, '1', 'wd', {'markers': [legacy, outputs()['markers']]})
-            inject_records(store, '2', 'joytag', {'markers': legacy})
-    with sqlite3.connect(path) as connection:
-        connection.execute('CREATE TABLE legacy_imports(scope TEXT, scene TEXT, kind TEXT, data BLOB)')
-        connection.execute('PRAGMA user_version=15')
-    assert db.update_database(path) == (15, 20)
-    for scope in ('first', 'second'):
-        with StateStore(path, scope) as store:
-            assert store.model_record('1', 'markers', 'wd') == outputs()['markers']
-            assert store.model_record('2', 'markers', 'joytag') is None
-            assert set(store.connection.execute('SELECT scene,model,kind FROM refresh_requests WHERE scope=?', (scope,))) == {
-                ('1', 'wd', 'markers'), ('2', 'joytag', 'markers')}
-        assert db.check_database(path, scope)['ok']
-    with sqlite3.connect(path) as connection:
-        assert not connection.execute("SELECT 1 FROM sqlite_master WHERE name='legacy_imports'").fetchone()
 
 
 @pytest.mark.parametrize('flag', ['--import-legacy-only', '--prune-legacy-imports', '--migrate-legacy-only', '--migrate-point-markers-only'])

@@ -54,7 +54,7 @@ def old_consensus(pipeline, monkeypatch, tmp_path, request):
     from stash_ai import db
     import sqlite3
     with sqlite3.connect(p.path) as connection:
-        connection.execute('PRAGMA user_version=14')
+        connection.execute('PRAGMA user_version=18')
     db.update_database(p.path)
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), True) as state:
         published, _ = state.snapshot('1', 'markers')

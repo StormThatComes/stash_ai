@@ -1,4 +1,5 @@
 """Schema 19 proof contexts become scalar without losing durable archive pins."""
+from stash_ai.storage.schema import LATEST_SCHEMA_VERSION
 from copy import deepcopy
 import sqlite3
 
@@ -61,9 +62,9 @@ def test_v19_conversion_keeps_active_inference_thresholds_and_exact_pins(tmp_pat
         before = connection.execute('SELECT * FROM results').fetchall()
         completion = connection.execute('SELECT scope,scene,model,kind,populated,signature FROM result_index').fetchall()
     raw = path.read_bytes()
-    assert db.update_database(path, dry_run=True) == (19, 20)
+    assert db.update_database(path, dry_run=True) == (19, LATEST_SCHEMA_VERSION)
     assert path.read_bytes() == raw
-    assert db.update_database(path) == (19, 20)
+    assert db.update_database(path) == (19, LATEST_SCHEMA_VERSION)
     with sqlite3.connect(path) as connection:
         assert connection.execute('SELECT * FROM results').fetchall() == before
         assert connection.execute('SELECT * FROM result_index').fetchall() == completion

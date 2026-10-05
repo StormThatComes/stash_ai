@@ -1,4 +1,5 @@
 """Only durable publication proofs survive replacement, without voting in active fusion."""
+from stash_ai.storage.schema import LATEST_SCHEMA_VERSION
 import sqlite3
 
 import pytest
@@ -74,7 +75,7 @@ def test_archive_and_replacement_roll_back_together(tmp_path):
         assert not archived_records(store, '1', 'markers')
 
 
-def test_v13_migration_keeps_latest_and_only_pinned_history_across_scopes(tmp_path):
+def test_v18_upgrade_preserves_latest_record_and_existing_pinned_archive(tmp_path):
     path = tmp_path/'state.sqlite3'
     history = [outputs(signature=signature)['markers'] for signature in ('unpinned', 'pinned', 'latest')]
     for scope in ('first', 'second'):
@@ -82,9 +83,11 @@ def test_v13_migration_keeps_latest_and_only_pinned_history_across_scopes(tmp_pa
             store.put('1', 'wd', {'markers': history[-1]})
             store.prepare('1', {'markers': proof(history[1])})
     with sqlite3.connect(path) as connection:
-        connection.execute('UPDATE results SET data=?', (encode(history),))
-        connection.execute('PRAGMA user_version=13')
-    assert db.update_database(path) == (13, 20)
+
+        for scope in ('first', 'second'):
+            connection.execute('INSERT INTO inference_archive VALUES (?,?,?,?,?,?)', (scope, '1', 'wd', 'markers', marker_segment_signature(history[1]), encode(history[1])))
+        connection.execute('PRAGMA user_version=18')
+    assert db.update_database(path) == (18, 21)
     for scope in ('first', 'second'):
         with StateStore(path, scope) as store:
             assert store.model_record('1', 'markers', 'wd') == history[-1]
@@ -95,7 +98,7 @@ def test_v13_migration_keeps_latest_and_only_pinned_history_across_scopes(tmp_pa
     with sqlite3.connect(path) as connection:
         before = [connection.execute('SELECT * FROM ' + table).fetchall()
                   for table in ('results', 'inference_archive', 'snapshots')]
-    assert db.update_database(path) == (20, 20)
+    assert db.update_database(path) == (LATEST_SCHEMA_VERSION, LATEST_SCHEMA_VERSION)
     with sqlite3.connect(path) as connection:
         assert [connection.execute('SELECT * FROM ' + table).fetchall()
                 for table in ('results', 'inference_archive', 'snapshots')] == before

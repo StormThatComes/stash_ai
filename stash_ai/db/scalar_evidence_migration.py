@@ -16,7 +16,7 @@ def convert(value, memo=None):
         return value
     result = {}
     memo[id(value)] = result
-    result.update((key, convert(item, memo)) for key, item in value.items())
+    result.update((key, convert(item, memo)) for key, item in value.items() if key != 'retired_build_options')
     for field in ('frame_context', 'scene_context', 'support_context'):
         if field not in result:
             continue
@@ -58,17 +58,24 @@ def convert(value, memo=None):
         return isinstance(item, list) and any(retired(v) for v in item)
     if any(retired(result.get(field)) for field in ('scene_evidence', 'extra_support', 'source_evidence')):
         result['requires_rebase'] = True
+    if result.get('requires_rebase'):
+        result.pop('build_options', None)
     return result
 
 
 def migrate(db):
-    for scope, scene, kind, published, pending in db.execute(
-            'SELECT scope,scene,kind,published,pending FROM snapshots').fetchall():
+    for scope, scene, kind in db.execute('SELECT scope,scene,kind FROM snapshots').fetchall():
+        published, pending = db.execute(
+            'SELECT published,pending FROM snapshots WHERE scope=? AND scene=? AND kind=?',
+            (scope, scene, kind)).fetchone()
         values = [encode(convert(normalize(decode_legacy(blob)))) if blob is not None else None
                   for blob in (published, pending)]
         db.execute('UPDATE snapshots SET published=?,pending=? WHERE scope=? AND scene=? AND kind=?',
                    (*values, scope, scene, kind))
-    for scope, scene, kind, operation, blob in db.execute(
-            'SELECT scope,scene,kind,operation,data FROM recovery_publications').fetchall():
+    for scope, scene, kind, operation in db.execute(
+            'SELECT scope,scene,kind,operation FROM recovery_publications').fetchall():
+        blob = db.execute(
+            'SELECT data FROM recovery_publications WHERE scope=? AND scene=? AND kind=? AND operation=?',
+            (scope, scene, kind, operation)).fetchone()[0]
         db.execute('UPDATE recovery_publications SET data=? WHERE scope=? AND scene=? AND kind=? AND operation=?',
                    (encode(convert(normalize(decode_legacy(blob)))), scope, scene, kind, operation))

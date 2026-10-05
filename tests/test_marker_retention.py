@@ -90,7 +90,7 @@ def test_wider_support_policy_checks_historical_retention_before_publication(
     if old_cache:
         from stash_ai.db import update_database
         with sqlite3.connect(p.path) as connection:
-            connection.execute('PRAGMA user_version=14')
+            connection.execute('PRAGMA user_version=18')
         update_database(p.path)
     assert app.main([*args, '--restart']) == 0
     assert marker_ranges(p.stash) == [('ai:common', 0, 8)]

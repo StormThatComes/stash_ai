@@ -105,7 +105,7 @@ def inject_records(store, scene, model, outputs):
     from stash_ai.storage.metadata import FORMAT, summarize, encode
     from stash_ai.storage.progress import index_result
     from stash_ai.storage.thresholds import separate
-    from stash_ai.db import result_history
+    from tests.helpers import history as result_history
     for kind, value in outputs.items():
         params = store.scope, scene, model, kind
         old = isinstance(value, list)

@@ -1,7 +1,6 @@
 """Retire obsolete replay engines while retaining publication geometry and ownership."""
-from stash_ai.db.snapshot_migration import decode_legacy
 from stash_ai.evidence.formats import ANALYSIS_FORMAT, current
-from stash_ai.storage.snapshots import encode, validate_policy
+from stash_ai.storage.snapshots import validate_policy
 
 
 def retire(item):
@@ -25,22 +24,9 @@ def retire(item):
     if obsolete:
         result['requires_rebase'] = True
         if options is not None:
-            result['retired_build_options'] = result.pop('build_options')
+            result.pop('build_options')
     return result
 
 
 def normalize(snapshot):
     return {**snapshot, 'contributions': [retire(item) for item in snapshot['contributions']]}
-
-
-def migrate(db):
-    for scope, scene, kind, published, pending in db.execute(
-            'SELECT scope,scene,kind,published,pending FROM snapshots').fetchall():
-        values = [encode(normalize(decode_legacy(blob))) if blob is not None else None
-                  for blob in (published, pending)]
-        db.execute('UPDATE snapshots SET published=?,pending=? WHERE scope=? AND scene=? AND kind=?',
-                   (*values, scope, scene, kind))
-    for scope, scene, kind, operation, blob in db.execute(
-            'SELECT scope,scene,kind,operation,data FROM recovery_publications').fetchall():
-        db.execute('UPDATE recovery_publications SET data=? WHERE scope=? AND scene=? AND kind=? AND operation=?',
-                   (encode(normalize(decode_legacy(blob))), scope, scene, kind, operation))

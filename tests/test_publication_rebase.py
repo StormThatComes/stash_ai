@@ -1,4 +1,5 @@
 """Retired proofs preserve retry geometry; cleanup and recovery cannot guess ranges."""
+from stash_ai.storage.schema import LATEST_SCHEMA_VERSION
 from copy import deepcopy
 import sqlite3
 
@@ -45,11 +46,11 @@ def test_offline_rebase_keeps_geometry_ownership_and_retry_proofs_across_scopes(
             if location == 'recovery':
                 connection.execute('INSERT INTO recovery_publications VALUES (?,?,?,?,?)',
                                    (scope, '1', 'markers', 'lost-response', packed))
-        connection.execute('PRAGMA user_version=16')
+        connection.execute('PRAGMA user_version=18')
     before = path.read_bytes()
-    assert db.update_database(path, dry_run=True) == (16, 20)
+    assert db.update_database(path, dry_run=True) == (18, 21)
     assert path.read_bytes() == before
-    assert db.update_database(path) == (16, 20)
+    assert db.update_database(path) == (18, 21)
     for scope in ('scope-a', 'scope-b'):
         with StateStore(path, scope) as state:
             from stash_ai.storage.recovery import publications
@@ -57,7 +58,7 @@ def test_offline_rebase_keeps_geometry_ownership_and_retry_proofs_across_scopes(
                      else state.snapshot('1', 'markers')[location == 'pending'])
             item = saved['contributions'][0]
             assert saved['owned_ids'] == value['owned_ids']
-            assert item['retired_build_options'] == value['contributions'][0]['build_options']
+            assert 'retired_build_options' not in item and 'build_options' not in item
             assert item['evidence_signature'] == 'old-proof' and item['requires_rebase']
             assert (item['start'], item['end'], item['extra_tags']) == (10, 20, ['extra'])
             with pytest.raises(RuntimeError, match='fresh inference'):
@@ -72,7 +73,7 @@ def test_offline_rebase_keeps_geometry_ownership_and_retry_proofs_across_scopes(
     with sqlite3.connect(path) as connection:
         migrated = [connection.execute('SELECT * FROM ' + table).fetchall()
                     for table in ('snapshots', 'recovery_publications')]
-    assert db.update_database(path) == (20, 20)
+    assert db.update_database(path) == (LATEST_SCHEMA_VERSION, LATEST_SCHEMA_VERSION)
     with sqlite3.connect(path) as connection:
         assert [connection.execute('SELECT * FROM ' + table).fetchall()
                 for table in ('snapshots', 'recovery_publications')] == migrated
@@ -107,7 +108,7 @@ def test_current_temporal_publication_remains_replayable(tmp_path):
     path = tmp_path/'state.sqlite3'
     with StateStore(path, 'scope') as state:
         state.publish('1', {'markers': value})
-        state.connection.execute('PRAGMA user_version=16')
+        state.connection.execute('PRAGMA user_version=18')
     db.update_database(path)
     with StateStore(path, 'scope') as state:
         assert state.snapshot('1', 'markers')[0] == value
@@ -127,9 +128,9 @@ def test_unknown_publication_contract_rolls_back_migration(tmp_path, damage):
     packed = encode({'__stash_ai_snapshot__': 4, 'snapshot': value, 'proofs': []})
     with sqlite3.connect(path) as connection:
         connection.execute('INSERT INTO snapshots VALUES (?,?,?,?,NULL)', ('scope', '1', 'markers', packed))
-        connection.execute('PRAGMA user_version=16')
+        connection.execute('PRAGMA user_version=18')
     with pytest.raises(ValueError, match='Unsupported'):
         db.update_database(path)
     with sqlite3.connect(path) as connection:
-        assert connection.execute('PRAGMA user_version').fetchone() == (16,)
+        assert connection.execute('PRAGMA user_version').fetchone() == (18,)
         assert connection.execute('SELECT published FROM snapshots').fetchone()[0] == packed

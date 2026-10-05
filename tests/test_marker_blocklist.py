@@ -80,7 +80,7 @@ def test_legacy_blocklist_rejects_merge_before_writes_and_restart_restores_range
     import sqlite3
     from stash_ai.db import update_database
     with sqlite3.connect(p.path) as connection:
-        connection.execute('PRAGMA user_version=14')
+        connection.execute('PRAGMA user_version=18')
     update_database(p.path)
     assert app.main([*args, '--restart']) == 0
     assert [(m['seconds'], m.get('end_seconds')) for m in p.stash.scene['scene_markers']

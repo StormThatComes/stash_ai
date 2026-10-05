@@ -1,4 +1,5 @@
 """Threshold policy writes preserve evidence, preview isolation and completion."""
+from stash_ai.storage.schema import LATEST_SCHEMA_VERSION
 from tests.helpers.evidence import inference_record
 from tests.helpers.evidence import inject_records
 
@@ -106,30 +107,26 @@ def test_marker_only_updates_policy_without_writing_blob(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize('dry_run', [False, True])
-def test_v7_inline_overrides_are_read_lazily_and_can_be_restored(tmp_path, dry_run):
+def test_v18_scalar_overrides_survive_upgrade_and_can_be_restored(tmp_path, dry_run):
     path = tmp_path / 'old.sqlite3'
     old = outputs()
-    old['scene']['scene_threshold_override'] = .9
-    old['markers']['marker_threshold_override'] = .9
     with StateStore(path, 'scope') as store:
         inject_records(store, '1', 'wd', old)
         before = blobs(store)
     with sqlite3.connect(path) as connection:
-        from stash_ai.storage.codec import encode
-        for kind, segment in old.items():
-            connection.execute('UPDATE results SET data=? WHERE kind=?', (encode([segment]), kind))
-        connection.execute('DROP TABLE result_thresholds')
-        connection.execute('PRAGMA user_version=7')
+        for kind in old:
+            connection.execute('INSERT INTO result_thresholds VALUES (?,?,?,?,?)', ('scope', '1', 'wd', kind, .9))
+        connection.execute('PRAGMA user_version=18')
     db.update_database(path)
     with sqlite3.connect(path) as connection:
         before = connection.execute('SELECT * FROM results ORDER BY scope,scene,model,kind').fetchall()
     source_before = path.read_bytes()
     with StateStore(path, 'scope', dry_run=dry_run) as store:
-        assert store.connection.execute('PRAGMA user_version').fetchone() == (20,)
+        assert store.connection.execute('PRAGMA user_version').fetchone() == (LATEST_SCHEMA_VERSION,)
         assert store.records('1', 'scene')['wd'] == {**outputs()['scene'], 'publication_threshold': .9}
         assert store.model_record('1', 'markers', 'wd') == {**outputs()['markers'], 'publication_threshold': .9}
         assert rethreshold(store, .4) == {'scene_thresholds_updated': 1}
-        assert store.connection.execute('PRAGMA user_version').fetchone() == (20,)
+        assert store.connection.execute('PRAGMA user_version').fetchone() == (LATEST_SCHEMA_VERSION,)
         assert blobs(store) == ([] if dry_run else before)
         assert store.records('1', 'scene')['wd'] == outputs()['scene']
         assert store.model_record('1', 'markers', 'wd') == outputs()['markers']
@@ -279,7 +276,7 @@ def test_abandon_and_cleanup_preserve_v8_and_effective_thresholds(tmp_path):
         recovery.abandon(store, lambda _: None)
         cleanup.begin(store, 'cleanup', {'excluded'}, set(), [], kinds=('scene',))
         cleanup.finish(store)
-        assert store.connection.execute('PRAGMA user_version').fetchone() == (20,)
+        assert store.connection.execute('PRAGMA user_version').fetchone() == (LATEST_SCHEMA_VERSION,)
         assert store.records('1', 'scene')['wd'][scene_cache_identity.PUBLICATION_THRESHOLD] == .8
     assert db.check_database(path, 'scope')['ok']
 

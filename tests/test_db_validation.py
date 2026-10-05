@@ -14,7 +14,7 @@ def test_historical_schema_reports_upgrade_without_decoding(tmp_path, monkeypatc
     path = tmp_path / 'state.sqlite3'
     seed(path, 'scope')
     with sqlite3.connect(path) as db:
-        db.execute('PRAGMA user_version=9')
+        db.execute('PRAGMA user_version=18')
         db.execute("UPDATE results SET data=x'01'")
     before = path.read_bytes()
     def forbidden(*args, **kwargs):

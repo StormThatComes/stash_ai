@@ -7,7 +7,7 @@ from pathlib import Path
 import sqlite3
 
 
-from stash_ai.storage.schema import APPLICATION_ID, LATEST_SCHEMA_VERSION, shape_issues
+from stash_ai.storage.schema import APPLICATION_ID, LATEST_SCHEMA_VERSION, require_supported_version, shape_issues
 
 
 class StateDatabase(AbstractContextManager):
@@ -76,9 +76,11 @@ class StateDatabase(AbstractContextManager):
         application = db.execute("PRAGMA application_id").fetchone()[0]
         version = db.execute("PRAGMA user_version").fetchone()[0]
         tables = db.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
-        if (application not in (0, APPLICATION_ID) or version not in range(LATEST_SCHEMA_VERSION + 1)
+        if (application not in (0, APPLICATION_ID) or version < 0 or version > LATEST_SCHEMA_VERSION
                 or (tables and application != APPLICATION_ID)):
             raise ValueError("Not a supported stash-taggers state DB; choose another --state-db.")
+        if tables:
+            require_supported_version(version)
         if tables and version != LATEST_SCHEMA_VERSION and not self.migration:
             raise ValueError(f'State DB schema v{version} requires --db-update before use (including --dry-run).')
         if tables and not self.migration and shape_issues(db):
@@ -91,18 +93,20 @@ class StateDatabase(AbstractContextManager):
         db.execute('PRAGMA cache_size=-65536')
         if not self.fresh and not self.migration:
             return
-        threshold_sql = ('thresholds TEXT NOT NULL CHECK(json_valid(thresholds))'
-                         if self.migration and not self.fresh and self.version < 18 else
-                         'threshold REAL NOT NULL CHECK(typeof(threshold) IN (\'real\',\'integer\') AND threshold BETWEEN 0 AND 1)')
+        # A new installation already owns the current base schema. If feature
+        # initialization fails, --db-update can repair it without a historical upgrade.
+        version_sql = f'PRAGMA user_version={LATEST_SCHEMA_VERSION};' if self.fresh else ''
         db.executescript(f"""
             PRAGMA application_id={APPLICATION_ID};
+            {version_sql}
             CREATE TABLE IF NOT EXISTS results (
                 scope TEXT NOT NULL, scene TEXT NOT NULL, model TEXT NOT NULL,
                 kind TEXT NOT NULL, data BLOB NOT NULL,
                 PRIMARY KEY(scope, scene, model, kind));
             CREATE TABLE IF NOT EXISTS result_thresholds (
                 scope TEXT NOT NULL, scene TEXT NOT NULL, model TEXT NOT NULL,
-                kind TEXT NOT NULL, {threshold_sql},
+                kind TEXT NOT NULL, threshold REAL NOT NULL
+                    CHECK(typeof(threshold) IN ('real','integer') AND threshold BETWEEN 0 AND 1),
                 PRIMARY KEY(scope, scene, model, kind));
             CREATE TABLE IF NOT EXISTS result_metadata (
                 scope TEXT NOT NULL, scene TEXT NOT NULL, model TEXT NOT NULL,
@@ -141,4 +145,3 @@ class StateDatabase(AbstractContextManager):
 
     def __exit__(self, *args):
         self.close()
-

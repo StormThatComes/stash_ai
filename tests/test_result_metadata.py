@@ -1,4 +1,5 @@
 """SQL preflight preserves retention guards, history and legacy preview isolation."""
+from stash_ai.storage.schema import LATEST_SCHEMA_VERSION
 from tests.helpers.evidence import inject_records
 
 from stash_ai.rethreshold.plans import RecordAccess, PendingPolicy, ThresholdRequest
@@ -146,14 +147,16 @@ def test_combined_pending_guard_keeps_noop_semantics(tmp_path, monkeypatch, same
 
 
 @pytest.mark.parametrize('dry_run', [False, True])
-@pytest.mark.parametrize('version', [5, 7, 8])
-def test_old_database_backfills_once_and_keeps_inline_overrides(tmp_path, monkeypatch, dry_run, version):
+@pytest.mark.parametrize('version', [18, 19, 20])
+def test_supported_database_backfills_once_and_keeps_scalar_policy(tmp_path, monkeypatch, dry_run, version):
     path = tmp_path/'legacy.sqlite3'
     saved = outputs()
-    saved['scene']['scene_threshold_override'] = .9
-    saved['markers']['marker_threshold_override'] = .9
     with StateStore(path, 'scope') as store:
-        inject_records(store, '1', 'wd', saved)
+        store.put('1', 'wd', saved)
+        from stash_ai.storage.thresholds import overlay
+        with store.connection:
+            for kind in saved:
+                store.set_result_threshold('1', 'wd', kind, .9, overlay(saved[kind], kind, .9))
         raw = blobs(store)
     with sqlite3.connect(path) as connection:
         for event in ('insert', 'update', 'delete'):
@@ -172,7 +175,7 @@ def test_old_database_backfills_once_and_keeps_inline_overrides(tmp_path, monkey
         store.connection.set_trace_callback(statements.append)
         assert scene_updates.plan(app, store, '1', config(.4), request=ThresholdRequest(kinds=('scene', 'markers'), access=RecordAccess.METADATA))
         assert report.timing_calls['state_json_decode'] == 0
-        assert store.connection.execute('PRAGMA user_version').fetchone() == (20,)
+        assert store.connection.execute('PRAGMA user_version').fetchone() == (LATEST_SCHEMA_VERSION,)
         first = metadata_rows(store)
         assert len(first) == 2
         monkeypatch.setattr(store, 'unpack', lambda *a: pytest.fail('Repeated legacy decode'))

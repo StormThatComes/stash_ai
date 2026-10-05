@@ -1,4 +1,5 @@
 """Compact snapshots retain publication, cleanup, recovery and preview semantics."""
+from stash_ai.storage.schema import LATEST_SCHEMA_VERSION
 from copy import deepcopy
 import json
 import zlib
@@ -162,11 +163,11 @@ def test_snapshot_storage_promotion_and_preview_are_transparent(tmp_path, monkey
         store.publish('1', {'markers': {'contributions': []}})
     source = path.read_bytes()
     with StateStore(path, 'scope', dry_run=dry_run, cache_bytes=cache_bytes) as store:
-        assert store.connection.execute('PRAGMA user_version').fetchone() == (20,)
+        assert store.connection.execute('PRAGMA user_version').fetchone() == (LATEST_SCHEMA_VERSION,)
         store.report = RunReport(write=lambda _: None)
         raw_results = store.connection.execute('SELECT * FROM ' + store.table('results')).fetchall()
         getattr(store, operation)('1', {'markers': saved})
-        assert store.connection.execute('PRAGMA user_version').fetchone() == (20,)
+        assert store.connection.execute('PRAGMA user_version').fetchone() == (LATEST_SCHEMA_VERSION,)
         column = 'pending' if operation == 'prepare' else 'published'
         blob = store.connection.execute('SELECT '+column+' FROM snapshots').fetchone()[0]
         assert json.loads(zlib.decompress(blob))[FORMAT_KEY] == FORMAT
@@ -195,7 +196,7 @@ def test_snapshot_storage_promotion_and_preview_are_transparent(tmp_path, monkey
 
 
 @pytest.mark.parametrize('operation', ['prepare', 'publish'])
-@pytest.mark.parametrize('version', [5, 8])
+@pytest.mark.parametrize('version', [18, 19, 20])
 def test_compact_write_and_schema_upgrade_roll_back_together(tmp_path, operation, version):
     with StateStore(tmp_path/'state.sqlite3', 'scope', cache_bytes=2**20) as store:
         store.put('1', 'wd', outputs())
@@ -215,16 +216,16 @@ def test_rethreshold_cleanup_and_abandonment_never_downgrade_v9(tmp_path):
         store.put('1', 'wd', outputs())
         store.publish('1', {'markers': shared_snapshot()})
         assert rethreshold_execution.run(app, store, ['1'], [config(.8)], RunReport(write=lambda _: None), markers=True) == {'scene_thresholds_updated': 1}
-        assert store.connection.execute('PRAGMA user_version').fetchone() == (20,)
+        assert store.connection.execute('PRAGMA user_version').fetchone() == (LATEST_SCHEMA_VERSION,)
         cleanup.begin(store, 'policy', {'unused'}, set(), [])
         cleanup.finish(store)
         store.prepare('1', {'markers': shared_snapshot()})
         pending = store.connection.execute('SELECT pending FROM snapshots').fetchone()[0]
         recovery.abandon(store, lambda _: None)
         assert store.connection.execute('SELECT data FROM recovery_publications').fetchone()[0] == pending
-        assert store.connection.execute('PRAGMA user_version').fetchone() == (20,)
+        assert store.connection.execute('PRAGMA user_version').fetchone() == (LATEST_SCHEMA_VERSION,)
         assert recovery.publications(store, '1', 'markers')[0]['contributions'] == shared_snapshot()['contributions']
-    assert db.inspect_database(path, 'scope')['schema_version'] == 20
+    assert db.inspect_database(path, 'scope')['schema_version'] == LATEST_SCHEMA_VERSION
     assert db.check_database(path, 'scope')['ok']
 
 
