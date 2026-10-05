@@ -85,7 +85,7 @@ def test_filter_uses_effective_per_source_threshold_and_preserves_exact_boundari
              ('above', math.nextafter(floor, math.inf)), ('high', .8),
              ('under_high', math.nextafter(.8, -math.inf))]]
     wd, dtq = segment('wd', rows), segment('dtq', [[('dtq_core', .5), ('dtq_support', .425)]])
-    dtq[thresholds_identity.OVERRIDE] = .5
+    dtq[thresholds_identity.PUBLICATION_THRESHOLD] = .5
     event = fusion.observations(app, group({'wd': wd, 'dtq': dtq}), policies())[0]
     assert set(event['cores']) == {'edge', 'above', 'high', 'under_high', 'dtq_core', 'dtq_support'}
     assert set(event['extras']) == {'high', 'dtq_core'}

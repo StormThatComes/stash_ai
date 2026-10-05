@@ -31,21 +31,21 @@ def _record_thresholds(app, kind, segment):
     """Expose stored policy separately from the effective replay policy."""
     meta = segment.get("meta", {})
     if kind == "scene":
-        from stash_ai.evidence.identity import SCENE_OVERRIDE
+        from stash_ai.storage.thresholds import PUBLICATION_THRESHOLD
         from stash_ai.evidence.cache_views import scene_threshold
         result = {
             "stored_scene_threshold": meta.get("scene_threshold"),
-            "scene_threshold_override": segment.get(SCENE_OVERRIDE),
+            "publication_threshold": segment.get(PUBLICATION_THRESHOLD),
             **_effective_scene_thresholds(app, scene_threshold(segment)),
         }
         return result
     from stash_ai.evidence.temporal.policy import marker_floor
-    from stash_ai.evidence.identity import OVERRIDE
+    from stash_ai.storage.thresholds import PUBLICATION_THRESHOLD
     from stash_ai.evidence.thresholds import marker_threshold
     effective = marker_threshold(segment)
     result = {
         "stored_marker_threshold": meta.get("marker_threshold"),
-        "marker_threshold_override": segment.get(OVERRIDE),
+        "publication_threshold": segment.get(PUBLICATION_THRESHOLD),
         "effective_marker_threshold": effective,
     }
     if type(effective) in (int, float):
@@ -70,7 +70,7 @@ def _explain_scene_contributor(app, hit, recorded_scene_sources):
     ]
     if len(matching) == 1:
         thresholds["stored_scene_threshold"] = matching[0].get("stored_scene_threshold")
-        thresholds["scene_threshold_override"] = matching[0].get("scene_threshold_override")
+        thresholds["publication_threshold"] = matching[0].get("publication_threshold")
     value["thresholds"] = thresholds
     return value
 

@@ -5,14 +5,14 @@ from .policy import marker_floor
 from stash_ai.evidence.observations import qualify_marker_extras
 
 
-def consensus_seeds(records, policies, policy, *, thresholds=None):
+def consensus_seeds(records, policies, policy, ):
     """Only identical sampled inputs/times can vote, at most once per model."""
     votes = defaultdict(set)
     for model, segment in records.items():
         meta = segment["meta"]
         identity = meta.get("frame_input_signature")
         from stash_ai.evidence.thresholds import marker_threshold
-        high = marker_threshold(segment, thresholds)
+        high = marker_threshold(segment)
         if segment["mode"] != "frames" or not identity or high is None:
             continue
         floor = marker_floor(policy, high)

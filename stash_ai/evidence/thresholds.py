@@ -1,41 +1,20 @@
 """Marker publication thresholds over immutable, bounded inference evidence."""
 
 import math
-from dataclasses import replace
-
-from stash_ai.evidence.identity import OVERRIDE
+from stash_ai.storage.thresholds import PUBLICATION_THRESHOLD, effective
 
 
 def indexed_signature(segment, inference=None):
     from stash_ai.signatures import digest
     signature = segment['meta'].get('inference_signature') if inference is None else inference
-    from stash_ai.evidence.identity import SCENE_OVERRIDE
-    if SCENE_OVERRIDE in segment:
-        if segment['mode'] != 'scene' or OVERRIDE in segment:
-            raise ValueError('Threshold override does not match result kind.')
-        return digest([signature, {'scene_threshold': segment[SCENE_OVERRIDE]}])
-    if OVERRIDE in segment and segment['mode'] != 'frames':
-        raise ValueError('Threshold override does not match result kind.')
-    return digest([signature, segment[OVERRIDE]]) if OVERRIDE in segment else signature
+    if PUBLICATION_THRESHOLD not in segment:
+        return signature
+    value = segment[PUBLICATION_THRESHOLD]
+    return digest([signature, {'scene_threshold': value} if segment['mode'] == 'scene' else value])
 
 
-def marker_context(app, records):
-    """Freeze effective thresholds with each publication, including cleanup replay."""
-    if app.MARKER_THRESHOLDS is not None:
-        return app
-    from stash_ai.evidence.identity import marker_segment_signature
-    context = replace(app)
-    context.MARKER_THRESHOLDS = {
-        marker_segment_signature(segment): segment[OVERRIDE]
-        for segment in records.values() if OVERRIDE in segment}
-    return context
-
-
-def marker_threshold(segment, thresholds=None):
-    from stash_ai.evidence.identity import marker_segment_signature
-    if thresholds is not None:
-        return thresholds.get(marker_segment_signature(segment), segment['meta'].get('marker_threshold'))
-    return segment.get(OVERRIDE, segment['meta'].get('marker_threshold'))
+def marker_threshold(segment):
+    return effective(segment)
 
 
 def _score(value):
@@ -51,7 +30,7 @@ def validate_marker_cache(app, records):
         if segment['mode'] != 'frames':
             continue
         meta = segment['meta']
-        threshold = marker_threshold(segment, app.MARKER_THRESHOLDS)
+        threshold = marker_threshold(segment)
         if not _score(threshold):
             raise ValueError(f'{model}: invalid cached marker threshold; run inference.')
         needed = marker_floor(app.TEMPORAL_POLICY, threshold)

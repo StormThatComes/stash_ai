@@ -5,7 +5,7 @@ import json
 from dataclasses import dataclass
 
 import stash_ai.evidence.source_markers as merge_source_markers
-from stash_ai.evidence.frozen_replay import PublishedRecords, snapshot_context, frozen_policies
+from stash_ai.evidence.frozen_replay import PublishedRecords, snapshot_context, frozen_policies, frozen_records
 
 
 @dataclass
@@ -28,6 +28,7 @@ class EvidenceReplay:
 
     def _rebuild(self, options, matching):
         context = snapshot_context(self.app, options, 'markers')
+        matching = frozen_records(options, 'markers', matching)
         policies = frozen_policies(options, 'core_exclusions', self.selected, self.core_policies)
         frozen_tags = frozen_policies(options, 'tag_exclusions', self.selected, self.tag_policies)
         # Replay old proofs with frozen exclusions; clipping cannot admit new votes.
@@ -37,7 +38,7 @@ class EvidenceReplay:
 
     def candidates(self, span):
         required = span.get('frame_context') or {
-            **span.get('support_context', {}), span['source']: [span['evidence_signature']]}
+            **span.get('support_context', {}), span['source']: span['evidence_signature']}
         matching = self.published.matching('markers', required, error=
             'Consensus sources changed since publication; run --merge-only before cleanup.')
         key = json.dumps([span['build_options'], required], sort_keys=True)

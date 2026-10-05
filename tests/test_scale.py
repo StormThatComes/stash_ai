@@ -40,7 +40,7 @@ pytestmark = pytest.mark.usefixtures("reset_temporal")
 
 
 def shared(scenes, markers, excluded=None, metrics=None):
-    return shared_scene_contributions(app, fusion.FrameIndex(app, markers, policies()), scenes,
+    return shared_scene_contributions(app, scenes,
                                       excluded or policies(), metrics=metrics)
 
 
@@ -62,7 +62,7 @@ def test_joint_scene_repeated_weak_support_can_alternate_between_models():
 
 
 @pytest.mark.parametrize('change', ['same_time', 'different_input', 'different_timeline', 'missing_scene',
-                                   'different_run', 'different_threshold', 'duplicate_model', 'gaps'])
+                                   'duplicate_model', 'gaps'])
 def test_joint_scene_needs_compatible_distinct_observations(change):
     scenes, markers = paired_records({'wd': [.85, 0], 'dtq': [0, .86]})
     if change == 'same_time':
@@ -71,13 +71,9 @@ def test_joint_scene_needs_compatible_distinct_observations(change):
         markers['dtq']['meta']['frame_input_signature'] = 'other'
         scenes['dtq']['meta']['frame_input_signature'] = 'other'
     elif change == 'different_timeline':
-        markers['dtq']['items'][0]['end'] = .5
+        scenes['dtq']['frames'][0]['end'] = .5
     elif change == 'missing_scene':
         scenes.pop('dtq')
-    elif change == 'different_run':
-        scenes['dtq']['meta']['inference_signature'] = 'new'
-    elif change == 'different_threshold':
-        scenes['dtq']['meta']['scene_threshold'] = .5
     elif change == 'duplicate_model':
         markers = {'wd': markers['wd']}; scenes = {'wd': scenes['wd']}
     elif change == 'gaps':
@@ -85,20 +81,34 @@ def test_joint_scene_needs_compatible_distinct_observations(change):
     assert shared(scenes, markers) == []
 
 
+def test_shared_scene_uses_its_own_observations_when_marker_records_differ():
+    scenes, markers = paired_records({'wd': [.85, 0], 'dtq': [0, .86]})
+    expected = shared(scenes, markers)
+    markers['dtq']['meta']['inference_signature'] = 'other-run'
+    markers['dtq']['meta']['marker_threshold'] = .99
+    markers['dtq']['items'] = []
+    assert shared(scenes, markers) == expected
+
+
 def test_scene_thresholds_are_per_model_and_marker_exclusions_do_not_apply():
     scenes, markers = paired_records({'wd': [.75, 0], 'dtq': [0, .9]}, {'wd': .7, 'dtq': .85})
-    index = fusion.FrameIndex(app, markers, policies({'core'}))
-    assert shared_scene_contributions(app, index, scenes, policies())[0]['tag'] == 'core'
+    assert shared_scene_contributions(app, scenes, policies())[0]['tag'] == 'core'
     excluded = policies(); excluded['wd'] = frozenset({'core'})
     assert shared(scenes, markers, excluded) == []
 
 
 def test_partial_cache_can_prove_positive_counts_but_does_not_invent_missing_scores():
     scenes, markers = paired_records({'wd': [.85, 0], 'dtq': [0, .86]}, marker_threshold=.95)
+    for record in scenes.values():
+        record['meta']['scene_score_floor'] = .75
     metrics = Counter()
     assert shared(scenes, markers, metrics=metrics)[0]['joint_statistics']['cache_partial']
     assert metrics['scene_cache_partial'] == 1
     scenes, markers = paired_records({'wd': [.7, 0, .7, 0], 'dtq': [0, .7, 0, .7]}, marker_threshold=.95)
+    for record in scenes.values():
+        record['meta']['scene_score_floor'] = .75
+        for row in record['frames']:
+            row['tags'] = [(tag, score) for tag, score in row['tags'] if score >= .75]
     assert shared(scenes, markers) == []
 
 
@@ -380,4 +390,3 @@ def test_shared_scene_cleanup_command_preserves_sources_and_manual_removals(pipe
         assert not hits if manual_delete else hits[0]['support_sources'] == ['wd', 'oppai']
     p.stash.writes.clear()
     assert app.main(cleanup) == 0 and not p.stash.writes
-

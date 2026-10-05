@@ -1,6 +1,6 @@
 """Validate marker coverage and update its effective publication threshold."""
 from stash_ai.evidence.formats import validate_current
-from stash_ai.evidence.identity import OVERRIDE
+from stash_ai.storage.thresholds import PUBLICATION_THRESHOLD
 from stash_ai.evidence.thresholds import _score, marker_threshold
 
 
@@ -35,9 +35,9 @@ def plan(app, store, scene, config, record=None, *, access=RecordAccess.BATCH,
     if pending is PendingPolicy.VERIFY and store.has_pending_publication(scene):
         raise RuntimeError(f'{scene}: finish the pending merge or use --abandon-pending before changing thresholds.')
     updated = dict(record)
-    updated.pop(OVERRIDE, None)
+    updated.pop(PUBLICATION_THRESHOLD, None)
     if config.marker_threshold != record['meta']['marker_threshold']:
-        updated[OVERRIDE] = config.marker_threshold
+        updated[PUBLICATION_THRESHOLD] = config.marker_threshold
     return ThresholdPlan({'markers': updated}, access)
 
 

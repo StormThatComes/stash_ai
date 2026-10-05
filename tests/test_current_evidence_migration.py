@@ -59,9 +59,9 @@ def test_upgrade_retires_old_results_across_scopes_and_preserves_exact_pins(tmp_
         snapshots = connection.execute('SELECT * FROM snapshots').fetchall()
         recovery = connection.execute('SELECT * FROM recovery_publications').fetchall()
     before = path.read_bytes()
-    assert db.update_database(path, dry_run=True) == (14, 19)
+    assert db.update_database(path, dry_run=True) == (14, 20)
     assert path.read_bytes() == before
-    assert db.update_database(path) == (14, 19)
+    assert db.update_database(path) == (14, 20)
     for scope in ('first', 'second'):
         with StateStore(path, scope) as store:
             assert 'wd' not in store.records('1', 'scene')
@@ -80,7 +80,7 @@ def test_upgrade_retires_old_results_across_scopes_and_preserves_exact_pins(tmp_
     with sqlite3.connect(path) as connection:
         assert connection.execute('SELECT * FROM snapshots').fetchall() == snapshots
         assert connection.execute('SELECT * FROM recovery_publications').fetchall() == recovery
-    assert db.update_database(path) == (19, 19)
+    assert db.update_database(path) == (20, 20)
 
 
 def test_retirement_and_archive_roll_back_together(tmp_path, monkeypatch):
@@ -218,7 +218,7 @@ def test_v18_retires_v4_with_scalar_threshold_and_keeps_exact_publication_pins(t
                                  ('scope', '1', 'wd', 'markers', .6))
         store.connection.execute('PRAGMA user_version=18')
         store.connection.commit()
-    assert db.update_database(path) == (18, 19)
+    assert db.update_database(path) == (18, 20)
     with StateStore(path, 'scope') as store:
         assert store.records('1', 'markers') == store.records('1', 'scene') == {}
         archived = archived_records(store, '1', 'markers')['wd']

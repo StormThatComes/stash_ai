@@ -15,7 +15,7 @@ from tests.test_result_thresholds import outputs
 def test_incomplete_replacement_preserves_evidence_policy_metadata_and_index(tmp_path, field, value, dry_run):
     path = tmp_path / 'state.sqlite3'
     initial = outputs()['scene']
-    initial['scene_threshold_override'] = .8
+    initial['publication_threshold'] = .8
     with StateStore(path, 'scope') as store:
         store.put('1', 'wd', {'scene': initial})
     before_file = path.read_bytes()

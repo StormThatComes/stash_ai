@@ -126,7 +126,7 @@ klatki, wyniki i podpisy dowodów zachowują swoje wartości.
 
 Snapshoty merge zapisują współdzielone dowody `extra_support` raz, a contributions
 odwołują się do nich przez referencje. Zmniejsza to koszt serializacji i kompresji.
-Aktualny schemat to v19; starsze wersje programu odmówią jego otwarcia. Każdy nowy snapshot ma otoczkę formatu v4. `--db-update` konwertuje dawne
+Aktualny schemat to v20; starsze wersje programu odmówią jego otwarcia. Każdy nowy snapshot ma otoczkę formatu v5. `--db-update` konwertuje dawne
 snapshoty, także pending i recovery, dopisuje wymagane `contributions: []` do pustych zapisów oraz uzupełnia kompletne opcje odtwarzania, również w zagnieżdżonych dowodach scen.
 Dawny `blocklist` zostaje połączony z zapisanymi `tag_exclusions` wszystkich źródeł.
 Brakujące dawne przełączniki współdzielenia i occurrences zachowują `False`.
@@ -228,9 +228,9 @@ Globalne definicje starych tagów pozostają dostępne dla ręcznych powiązań.
 ### Zdrowie, aktualizacja i kompaktowanie bazy stanu
 
 `--db-update` aktualizuje całą istniejącą bazę wskazaną przez `--state-db`
-do najnowszego obsługiwanego schematu (obecnie v19), we wszystkich scope'ach.
+do najnowszego obsługiwanego schematu (obecnie v20), we wszystkich scope'ach.
 Zwykłe uruchomienie oraz `--dry-run` wymagają aktualnego schematu: starszą bazę
-trzeba najpierw zaktualizować tą komendą. Nowa baza od razu otrzymuje v19.
+trzeba najpierw zaktualizować tą komendą. Nowa baza od razu otrzymuje v20.
 Updater korzysta z tego samego locka writera; migracje są wyłącznie offline.
 Tworzy aktualne tabele, indeksy i triggery, uzupełnia `result_index` dla baz
 sprzed v2, uzupełnia historyczne `result_metadata` we wszystkich scope'ach
@@ -625,3 +625,10 @@ historyczna geometria służy wyłącznie odzyskiwaniu stanu i migracji punktów
 Format analizy 5 identyfikuje kompletny kontrakt sceny, bez dodatkowego
 `scene_frames_format`. Ręczne tagi dodatkowe pochodzą z obserwowanych markerów
 Stash i są zachowywane podczas dopasowania, podziału i łączenia zakresów.
+
+Schemat v20 usuwa stałą kolumnę `result_index.inference` i konwertuje historyczne
+konteksty `[signature]` na jeden `signature` per źródło. Nowe snapshoty mają
+format 5. Dawne konteksty wielu inferencji jednego źródła pozostają przypięte
+jako retired i wymagają przebudowy publikacji. Efektywny próg publikacji jest
+jednym polem `publication_threshold` w widoku rekordu; nie trafia do surowego
+BLOB-a inferencji. Cleanup odtwarza zamrożony próg w tym samym widoku rekordu.

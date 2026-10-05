@@ -21,6 +21,8 @@ def validate_current(segment):
             or any(not isinstance(meta.get(key), str) or not meta[key]
                    for key in ('inference_signature', 'frame_input_signature'))):
         raise ValueError('Current inference evidence requires both input and inference signatures.')
+    if {'scene_threshold_override', 'marker_threshold_override'} & segment.keys():
+        raise ValueError('Retired inline publication policy; run --db-update.')
     if 'marker_tag_blocklist' in meta:
         raise ValueError('Current inference evidence cannot contain the retired marker blocklist.')
     required_scores = ['marker_score_floor', 'scene_support_floor', 'scene_threshold', 'marker_threshold']

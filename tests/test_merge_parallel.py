@@ -70,7 +70,7 @@ def test_parallel_worker_tolerates_parent_publication_commits(tmp_path, rethresh
     try:
         if rethresholded:
             assert worker.preview_source
-            assert worker.model_record('1', 'markers', 'wd')[thresholds_identity.OVERRIDE] == .95
+            assert worker.model_record('1', 'markers', 'wd')[thresholds_identity.PUBLICATION_THRESHOLD] == .95
         first = merge_parallel._worker_evidence("1")
         assert first[-1] is None
 

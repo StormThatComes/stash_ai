@@ -80,18 +80,16 @@ def _grouped_counts(db, tables):
 
     if "result_index" in tables:
         rows = Counter()
-        inference = Counter()
         populated = Counter()
-        for model, kind, inf, pop, count in db.execute(
-                """SELECT model,kind,inference,populated,COUNT(*)
-                   FROM result_index GROUP BY model,kind,inference,populated"""):
+        for model, kind, pop, count in db.execute(
+                """SELECT model,kind,populated,COUNT(*)
+                   FROM result_index GROUP BY model,kind,populated"""):
             key = (_safe_model(model), _safe_kind(kind))
             rows[key] += count
-            inference[key] += count * int(bool(inf))
             populated[key] += count * int(bool(pop))
         result["result_index"] = [
             {"model": model, "kind": kind, "rows": rows[model, kind],
-             "inference_rows": inference[model, kind], "populated_rows": populated[model, kind]}
+             "populated_rows": populated[model, kind]}
             for model, kind in sorted(rows)
         ]
 

@@ -1,7 +1,7 @@
 """Versioned snapshot storage; callers continue to see expanded contributions."""
 
 FORMAT_KEY = '__stash_ai_snapshot__'
-FORMAT = 4
+FORMAT = 5
 
 
 def compact(snapshot):
@@ -81,6 +81,11 @@ def expand(value, *, version=FORMAT, validate=True):
 
 
 def validate_policy(item):
+    for field in ('frame_context', 'scene_context', 'support_context'):
+        if field in item and (not isinstance(item[field], dict) or any(
+                not isinstance(source, str) or not isinstance(signature, str) or not signature
+                for source, signature in item[field].items())):
+            raise ValueError('Current publication contexts require one signature per source; run --db-update.')
     options = item.get('build_options')
     if options is not None:
         from stash_ai.evidence.temporal.policy import frozen_policy

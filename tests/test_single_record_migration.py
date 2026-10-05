@@ -57,15 +57,15 @@ def test_v17_history_becomes_one_record_with_last_policy_and_exact_pins(tmp_path
         before = {table: connection.execute('SELECT * FROM ' + table).fetchall()
                   for table in ('snapshots', 'recovery_publications')}
     original = path.read_bytes()
-    assert db.update_database(path, dry_run=True) == (17, 19)
+    assert db.update_database(path, dry_run=True) == (17, 20)
     assert path.read_bytes() == original
-    assert db.update_database(path) == (17, 19)
+    assert db.update_database(path) == (17, 20)
     for scope in ('first', 'second'):
         with StateStore(path, scope) as store:
             for kind in ('scene', 'markers'):
                 effective = deepcopy(versions[-1][kind])
                 if threshold is not None:
-                    effective[kind.rstrip('s') + '_threshold_override'] = threshold
+                    effective['publication_threshold'] = threshold
                 assert store.records('1', kind) == {'wd': effective}
                 raw, = store.connection.execute('SELECT data FROM results WHERE scope=? AND kind=?',
                                                 (scope, kind)).fetchone()

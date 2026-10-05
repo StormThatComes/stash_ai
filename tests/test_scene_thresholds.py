@@ -68,7 +68,7 @@ def test_cached_scene_statistics_and_occurrences_match_fresh_inference(
     assert app.main([*args, '--merge-only', '--rethreshold-scenes']) == 0
     cached = outputs(p.path)
     value = saved(p.path)['wd']
-    assert value.pop(cache_identity.SCENE_OVERRIDE) == .8
+    assert value.pop(cache_identity.PUBLICATION_THRESHOLD) == .8
     assert value == original['wd']
     p.stash.scene['scene_markers'] = []
     p.stash.scene['tags'] = []
@@ -100,7 +100,7 @@ def test_explain_reports_effective_thresholds_after_rethreshold(pipeline, monkey
     )
     thresholds = contributor['thresholds']
     assert thresholds['stored_scene_threshold'] == pytest.approx(.4)
-    assert thresholds['scene_threshold_override'] == pytest.approx(.8)
+    assert thresholds['publication_threshold'] == pytest.approx(.8)
     assert thresholds['effective_scene_threshold'] == pytest.approx(.8)
     assert thresholds['scene_support_ratio'] == pytest.approx(.85)
     assert thresholds['effective_support_floor'] == pytest.approx(.68)
@@ -111,7 +111,7 @@ def test_explain_reports_effective_thresholds_after_rethreshold(pipeline, monkey
 
     marker = report['recorded_sources']['markers']['wd']['records'][0]['thresholds']
     assert marker['stored_marker_threshold'] == pytest.approx(.7)
-    assert marker['marker_threshold_override'] == pytest.approx(.9)
+    assert marker['publication_threshold'] == pytest.approx(.9)
     assert marker['effective_marker_threshold'] == pytest.approx(.9)
     assert marker['marker_continue_ratio'] == pytest.approx(.85)
     assert marker['effective_support_floor'] == pytest.approx(.765)
@@ -222,7 +222,7 @@ def test_both_thresholds_reuse_models_and_round_trip(pipeline, monkeypatch):
     configure(monkeypatch, scene=.8, marker=.9)
     monkeypatch.setattr(app.services, 'load_tagger', lambda *a: pytest.fail('loaded model'))
     assert app.main(p.args) == 0
-    assert saved(p.path)['wd'][cache_identity.SCENE_OVERRIDE] == .8
+    assert saved(p.path)['wd'][cache_identity.PUBLICATION_THRESHOLD] == .8
     expected = outputs(p.path)
     assert app.main([*p.args, '--merge-only']) == 0
     assert outputs(p.path) == expected
@@ -298,7 +298,7 @@ def test_rethreshold_scenes_skips_model_with_marker_only_history(pipeline, monke
     assert app.main(args) == 0
     output = capsys.readouterr().out
     records = saved(p.path)
-    assert records['wd'][cache_identity.SCENE_OVERRIDE] == pytest.approx(.8)
+    assert records['wd'][cache_identity.PUBLICATION_THRESHOLD] == pytest.approx(.8)
     assert 'dtq' not in records
     assert ('Threshold preflight: checked=1, failed=0, applied=1, '
             'selected=2, skipped_no_evidence=1') in output
@@ -409,5 +409,5 @@ def test_scene_rethreshold_never_decodes_publication_snapshots(tmp_path, monkeyp
         result = rethreshold_execution.run(app, state, {'1': {}}, [config], report)
 
         assert result == {'scene_thresholds_updated': 1}
-        assert state.records('1', 'scene')['wd'][cache_identity.SCENE_OVERRIDE] == .8
+        assert state.records('1', 'scene')['wd'][cache_identity.PUBLICATION_THRESHOLD] == .8
 

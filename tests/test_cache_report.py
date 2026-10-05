@@ -328,7 +328,7 @@ def test_usable_unselected_evidence_does_not_expand_or_block_selected_plan(tmp_p
         peer['markers']['meta'].update(marker_threshold=.5, marker_score_floor=.4)
     elif peer_kind == 'higher_override':
         peer['markers']['meta']['marker_score_floor'] = .75
-        peer['markers']['marker_threshold_override'] = .9
+        peer['markers']['publication_threshold'] = .9
     seed(path, model='dtq', outputs=peer, corrupt=True)
     data = report(path, settings=[replace(config(), marker_threshold=.9)])
     assert data['totals']['rethreshold_pairs'] == 1 and data['totals']['blocked_pairs'] == 0
