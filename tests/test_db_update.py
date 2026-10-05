@@ -96,7 +96,7 @@ def test_v9_migration_preserves_mixed_history_and_frozen_proof_identity(tmp_path
             segment['marker_threshold_override'] = table_threshold
     signatures = [marker_segment_signature(segment) for segment in expected]
     with StateStore(path, 'scope-a') as state:
-        state.prepare('1', {'markers': {'contributions': [], 'frozen_signatures': signatures}})
+        state.prepare('1', {'markers': {'contributions': [{'source': 'wd', 'evidence_signature': signature} for signature in signatures], 'frozen_signatures': signatures}})
         with state.connection as db:
             db.execute('INSERT INTO results VALUES (?,?,?,?,?)', ('scope-a', '1', 'wd', 'markers', encode(old)))
             db.execute('DROP TABLE result_thresholds')
@@ -108,11 +108,14 @@ def test_v9_migration_preserves_mixed_history_and_frozen_proof_identity(tmp_path
     stash_db.update_database(path)
     with StateStore(path, 'scope-a') as state:
         effective = state.model_records('1', 'markers', 'wd')
-        assert effective == expected
-        assert [marker_segment_signature(segment) for segment in effective] == signatures
+        assert effective == [expected[-1]]
+        assert [marker_segment_signature(segment) for segment in effective] == signatures[-1:]
+        from stash_ai.storage.archive import records as archived_records
+        archived = archived_records(state, '1', 'markers')['wd']
+        assert [marker_segment_signature(segment) for segment in archived] == signatures[:1]
         raw = decode(state.connection.execute('SELECT data FROM results').fetchone()[0])
         assert all('marker_threshold_override' not in segment and 'refinement' not in segment for segment in raw)
-        assert state.connection.execute('SELECT thresholds FROM result_thresholds').fetchone() == (('[0.8,null]' if table_threshold is None else '[0.7,0.7]'),)
+        assert state.connection.execute('SELECT thresholds FROM result_thresholds').fetchone() == (None if table_threshold is None else ('[0.7]',))
     from stash_ai.storage.snapshots import decode as decode_snapshot
     assert decode_snapshot(rows(path, 'snapshots')[0][-1]) == decode_snapshot(pending[0][-1])
     evidence = rows(path, 'results')
@@ -345,11 +348,11 @@ def test_db_update_cli_stays_offline_and_reports_dry_run_and_idempotence(tmp_pat
 
     assert app.main([*command, '--dry-run']) == 0
     assert path.read_bytes() == before
-    assert 'DRY RUN: state DB schema v1 -> v13' in capsys.readouterr().out
+    assert 'DRY RUN: state DB schema v1 -> v14' in capsys.readouterr().out
     assert app.main(command) == 0
-    assert 'State DB updated: schema v1 -> v13' in capsys.readouterr().out
+    assert 'State DB updated: schema v1 -> v14' in capsys.readouterr().out
     assert app.main(command) == 0
-    assert 'up to date: v13' in capsys.readouterr().out
+    assert 'up to date: v14' in capsys.readouterr().out
     assert app.main(['--state-db', str(tmp_path / 'missing.sqlite3'), '--db-update']) == 1
     assert 'does not exist' in capsys.readouterr().out
 

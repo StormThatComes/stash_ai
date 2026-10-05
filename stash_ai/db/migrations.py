@@ -75,6 +75,8 @@ def migrate(database):
                     'SELECT r.scope,r.scene,r.model,r.kind,r.data,t.thresholds FROM results AS r '
                     'LEFT JOIN result_thresholds AS t USING(scope,scene,model,kind)'):
                 index_result(state, scene, model, kind, overlay(decode(payload), kind, thresholds), scope=scope)
+        from .archive_migration import migrate as migrate_archive
+        migrate_archive(db)
         db.execute('DROP TABLE IF EXISTS refinement_progress')
         for event in ('insert', 'update', 'delete'):
             db.execute(f'DROP TRIGGER IF EXISTS perf_legacy_imports_{event}')

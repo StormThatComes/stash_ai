@@ -1059,12 +1059,12 @@ from stash_ai.publication.planning.merged_evidence import prepare_sync_evidence
 from stash_ai.publication.planning.merged_tags import plan_scene_tags
 from stash_ai.publication.planning.merged_markers import plan_markers
 from stash_ai.publication.groups import group_name, managed_group, group_description
-from stash_ai.publication.index import PreviousMarkerRanges
+from stash_ai.publication.index import MarkerIntervalIndex
 from stash_ai.commands.marker_groups import run_backfill
 from stash_ai.cleanup.groups import prune_groups
 assert group_name('example') == 'm:example'
 assert managed_group({'name': 'm:example', 'description': group_description('example')})
-assert PreviousMarkerRanges([]).temporal({'seconds': 1, 'primary_tag': {'name': 'ai:example'}})['seconds'] == 1
+assert MarkerIntervalIndex([]).overlapping('example', {'seconds': 1}) == []
 assert not {'torch', 'numpy', 'onnxruntime', 'tqdm'} & set(sys.modules)
 """], cwd=tmp_path, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr

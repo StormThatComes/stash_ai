@@ -47,28 +47,14 @@ class MergedModelRun:
             return False
         return True
 
-    def _reuse(self, scene_id, current, signature, cues, media, kinds):
+    def _reuse(self, scene_id, signature, cues, media, kinds):
         args, store, key = self.args, self.store, self.key
-        if args.resume and not args.restart and current['publication_reason'] != 'reused':
-            collapsed = progress.reuse_latest_results(
-                store, scene_id, key, kinds, signature)
-            if collapsed is not None:
-                self.stats["replacement_history_collapsed"] += collapsed
-                self.stats["reused"] += 1
-                return True
         if args.resume and progress.completed(store, scene_id, key, kinds, signature):
             self.stats["reused"] += 1
             return True
         if args.resume and not args.restart:
             from stash_ai.inference.reuse import reuse
             if reuse(self.app, store, scene_id, self.config, self.identity, cues, media.hashes, kinds):
-                if current['publication_reason'] != 'reused':
-                    collapsed = progress.collapse_inference_history(
-                        store, scene_id, key, kinds)
-                    if collapsed is None:
-                        raise RuntimeError(
-                            f'{scene_id}/{key}: threshold cache did not leave a current inference segment.')
-                    self.stats["replacement_history_collapsed"] += collapsed
                 self.stats['threshold_cache_reused'] += 1
                 return True
         return False
@@ -87,7 +73,7 @@ class MergedModelRun:
         app, args, store = self.app, self.args, self.store
         store.cache.pressure(force=True)
         cues, media, signature = inputs.inspect(app, paths, self.identity)
-        if self._reuse(scene_id, current, signature, cues, media, kinds):
+        if self._reuse(scene_id, signature, cues, media, kinds):
             return True
         if not args.restart:
             stale = progress.request_stale_refresh(store, scene_id, self.key, kinds, signature)
