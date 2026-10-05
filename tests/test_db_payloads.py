@@ -136,12 +136,12 @@ def test_check_preserves_legacy_and_sparse_formats(tmp_path):
     seed(path, "scope")  # Old inference without retention metadata/statistics.
     with merge_store.StateStore(path, "scope") as state:
         state.put("legacy", "wd", {
-            "scene": {"mode": "scene", "meta": {"origin": "legacy"},
-                      "items": [{"tag": "blue_hair", "score": None}]},
-            "markers": {"mode": "spans", "meta": {"origin": "legacy"},
+            "scene": current_record({"mode": "scene", "meta": {"origin": "legacy"},
+                      "items": [{"tag": "blue_hair", "score": None}]}),
+            "markers": current_record({"mode": "spans", "meta": {"origin": "legacy"},
                         "items": [{"tag": "blue_hair", "score": None, "hits": None,
                                    "start": 0, "end": end, "extra_tags": [], "extra_ids": ["42"]}
-                                  for end in (None, 0, 1)]},
+                                  for end in (None, 0, 1)]}),
         })
         state.put("empty", "wd", {
             "scene": current_record({"mode": "scene", "meta": {"origin": "inference"}, "items": []}),

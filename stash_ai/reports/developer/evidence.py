@@ -21,14 +21,13 @@ def _group_bucket(groups, model, kind):
             "compressed_bytes": Distribution(),
             "json_bytes": Distribution(),
             "compression_pct": Distribution(),
-            "segments_per_row": Distribution(),
-            "items_per_segment": Distribution(),
+            "items_per_record": Distribution(),
             "frame_detections": Distribution(),
             "scene_candidates": Distribution(),
             "scene_observation_frames": Distribution(),
             "scene_observations": Distribution(),
             "span_items": Distribution(),
-            "segment_modes": Counter(),
+            "record_modes": Counter(),
             "origins": Counter(),
             "scene_frame_format": Counter(),
             "analysis_format": Counter(),
@@ -46,7 +45,7 @@ def _result_evidence_report(db, tables):
         bucket["rows"] += 1
         bucket["compressed_bytes"].add(len(blob))
         try:
-            raw, segments = _decode_result_blob(blob)
+            raw, segment = _decode_result_blob(blob)
         except (ValueError, TypeError, UnicodeDecodeError, json.JSONDecodeError, zlib.error):
             bucket["decode_errors"] += 1
             continue
@@ -54,50 +53,45 @@ def _result_evidence_report(db, tables):
         bucket["json_bytes"].add(len(raw))
         if raw:
             bucket["compression_pct"].add(round(len(blob) * 100 / len(raw)))
-        if not isinstance(segments, list):
+        if not isinstance(segment, dict):
             bucket["decode_errors"] += 1
             continue
 
-        bucket["segments_per_row"].add(len(segments))
-        for segment in segments:
-            if not isinstance(segment, dict):
-                bucket["decode_errors"] += 1
-                continue
-            mode = segment.get("mode")
-            safe_mode = mode if mode in ("scene", "frames", "spans") else "other"
-            bucket["segment_modes"][safe_mode] += 1
+        mode = segment.get("mode")
+        safe_mode = mode if mode in ("scene", "frames", "spans") else "other"
+        bucket["record_modes"][safe_mode] += 1
 
-            meta = segment.get("meta")
-            if isinstance(meta, dict):
-                origin = meta.get("origin")
-                bucket["origins"][origin if origin in ("inference", "legacy") else "other"] += 1
-                scene_format = meta.get("scene_frames_format")
-                if isinstance(scene_format, int):
-                    bucket["scene_frame_format"]["1" if scene_format == 1 else "other"] += 1
-                analysis_format = meta.get("analysis_format")
-                if isinstance(analysis_format, int):
-                    bucket["analysis_format"][str(analysis_format) if analysis_format in (1, 2, 3, 4) else "other"] += 1
+        meta = segment.get("meta")
+        if isinstance(meta, dict):
+            origin = meta.get("origin")
+            bucket["origins"][origin if origin in ("inference", "legacy") else "other"] += 1
+            scene_format = meta.get("scene_frames_format")
+            if isinstance(scene_format, int):
+                bucket["scene_frame_format"]["1" if scene_format == 1 else "other"] += 1
+            analysis_format = meta.get("analysis_format")
+            if isinstance(analysis_format, int):
+                bucket["analysis_format"][str(analysis_format) if analysis_format in (1, 2, 3, 4) else "other"] += 1
 
-            items = segment.get("items")
-            if not isinstance(items, list):
-                bucket["decode_errors"] += 1
-                continue
-            bucket["items_per_segment"].add(len(items))
+        items = segment.get("items")
+        if not isinstance(items, list):
+            bucket["decode_errors"] += 1
+            continue
+        bucket["items_per_record"].add(len(items))
 
-            if safe_mode == "frames":
-                for frame in items:
+        if safe_mode == "frames":
+            for frame in items:
+                tags = frame.get("tags") if isinstance(frame, dict) else None
+                bucket["frame_detections"].add(len(tags) if isinstance(tags, list) else 0)
+        elif safe_mode == "scene":
+            bucket["scene_candidates"].add(len(items))
+            frames = segment.get("frames")
+            if isinstance(frames, list):
+                bucket["scene_observation_frames"].add(len(frames))
+                for frame in frames:
                     tags = frame.get("tags") if isinstance(frame, dict) else None
-                    bucket["frame_detections"].add(len(tags) if isinstance(tags, list) else 0)
-            elif safe_mode == "scene":
-                bucket["scene_candidates"].add(len(items))
-                frames = segment.get("frames")
-                if isinstance(frames, list):
-                    bucket["scene_observation_frames"].add(len(frames))
-                    for frame in frames:
-                        tags = frame.get("tags") if isinstance(frame, dict) else None
-                        bucket["scene_observations"].add(len(tags) if isinstance(tags, list) else 0)
-            elif safe_mode == "spans":
-                bucket["span_items"].add(len(items))
+                    bucket["scene_observations"].add(len(tags) if isinstance(tags, list) else 0)
+        elif safe_mode == "spans":
+            bucket["span_items"].add(len(items))
 
     result = []
     for (model, kind), bucket in sorted(groups.items()):
@@ -109,14 +103,13 @@ def _result_evidence_report(db, tables):
             "compressed_bytes": bucket["compressed_bytes"].summary(total=True),
             "json_bytes": bucket["json_bytes"].summary(total=True),
             "compressed_to_json_pct": bucket["compression_pct"].summary(),
-            "segments_per_row": bucket["segments_per_row"].summary(),
-            "items_per_segment": bucket["items_per_segment"].summary(),
+            "items_per_record": bucket["items_per_record"].summary(),
             "frame_detections_per_frame": bucket["frame_detections"].summary(),
-            "scene_candidates_per_segment": bucket["scene_candidates"].summary(),
-            "scene_observation_frames_per_segment": bucket["scene_observation_frames"].summary(),
+            "scene_candidates_per_record": bucket["scene_candidates"].summary(),
+            "scene_observation_frames_per_record": bucket["scene_observation_frames"].summary(),
             "scene_observations_per_frame": bucket["scene_observations"].summary(),
-            "span_items_per_segment": bucket["span_items"].summary(),
-            "segment_modes": _safe_counter(bucket["segment_modes"], {"scene", "frames", "spans", "other"}),
+            "span_items_per_record": bucket["span_items"].summary(),
+            "record_modes": _safe_counter(bucket["record_modes"], {"scene", "frames", "spans", "other"}),
             "origins": _safe_counter(bucket["origins"], {"inference", "legacy", "other"}),
             "scene_frame_formats": _safe_counter(bucket["scene_frame_format"]),
             "analysis_formats": _safe_counter(bucket["analysis_format"]),

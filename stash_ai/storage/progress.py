@@ -27,18 +27,13 @@ def initialize_progress(store):
             scope TEXT NOT NULL, scene TEXT NOT NULL, model TEXT NOT NULL, data BLOB NOT NULL,
             PRIMARY KEY(scope,scene,model));
     """)
-def index_result(store, scene, model, kind, segments, scope=None, *, metadata_only=False):
-    """Index a validated effective view, including a frame-free threshold plan."""
+def index_result(store, scene, model, kind, record, scope=None, *, metadata_only=False):
     from stash_ai.evidence.thresholds import indexed_signature
-    inference = next((segment for segment in reversed(segments)
-                      if segment["meta"].get("origin") == "inference"), None)
     store.connection.execute("INSERT INTO result_index VALUES (?,?,?,?,?,?,?) "
         "ON CONFLICT(scope,scene,model,kind) DO UPDATE SET inference=excluded.inference,"
         "populated=excluded.populated,signature=excluded.signature",
-        (scope or store.scope, str(scene), model, kind,
-         int(inference is not None),
-         int(any(s["populated"] if metadata_only else bool(s["items"]) for s in segments)),
-         indexed_signature(inference) if inference is not None else None))
+        (scope or store.scope, str(scene), model, kind, 1,
+         int(record['populated'] if metadata_only else bool(record['items'])), indexed_signature(record)))
 
 
 def output_kinds(app):

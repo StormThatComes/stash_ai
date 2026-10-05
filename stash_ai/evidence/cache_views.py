@@ -8,11 +8,11 @@ def scene_threshold(segment):
     return segment.get(SCENE_OVERRIDE, segment['meta'].get('scene_threshold'))
 
 
-def validate_scene(app, segment, threshold, *, has_frames=None, archived=False):
+def validate_scene(app, segment, threshold, *, has_frames=None):
     from stash_ai.evidence.thresholds import _score
     meta = segment['meta']
-    from stash_ai.evidence.formats import validate_archived, validate_current
-    (validate_archived if archived else validate_current)({**segment, **({'has_frames': has_frames} if has_frames is not None else {})})
+    from stash_ai.evidence.formats import validate_current
+    validate_current({**segment, **({'has_frames': has_frames} if has_frames is not None else {})})
     needed = threshold * app.TEMPORAL_POLICY.scene_support_ratio
     floor = meta.get('scene_score_floor')
     has_frames = 'frames' in segment if has_frames is None else has_frames
@@ -23,7 +23,7 @@ def validate_scene(app, segment, threshold, *, has_frames=None, archived=False):
         raise ValueError(f'scene cache floor {floor!r} exceeds required {needed:g}; run inference.')
 
 
-def project(app, segment, *, archived=False):
+def project(app, segment):
     """A transient view; original scores, statistics and provenance stay immutable."""
     from stash_ai.domain import Cue
     from stash_ai.evidence.identity import marker_segment_signature
@@ -33,18 +33,14 @@ def project(app, segment, *, archived=False):
         return segment
     signature = marker_segment_signature(segment)
     meta = segment['meta']
-    from stash_ai.evidence.formats import validate_archived, validate_current, current
-    (validate_archived if archived else validate_current)(segment)
+    from stash_ai.evidence.formats import validate_current
+    validate_current(segment)
     threshold = (app.SCENE_THRESHOLDS.get(signature, meta.get('scene_threshold'))
                  if app.SCENE_THRESHOLDS is not None else scene_threshold(segment))
-    if meta.get('origin') != 'inference':
-        return segment
-    if archived and not current(meta) and 'scene_support_floor' not in meta and threshold == meta.get('scene_threshold'):
-        return segment
     support_changed = meta.get('scene_support_floor') != threshold * app.TEMPORAL_POLICY.scene_support_ratio
     if threshold == meta.get('scene_threshold') and not support_changed:
         return segment
-    validate_scene(app, segment, threshold, archived=archived)
+    validate_scene(app, segment, threshold)
     items = segment['items']
     meta = {**meta, 'scene_threshold': threshold}
     labels = [item['tag'] for item in items]
@@ -61,13 +57,13 @@ def project(app, segment, *, archived=False):
     return result
 
 
-def views(app, records, *, archived=False):
+def views(app, records):
     from stash_ai.evidence.identity import marker_segment_signature
     if app.SCENE_THRESHOLDS is None:
         app = replace(app, SCENE_THRESHOLDS={
             marker_segment_signature(s): s[SCENE_OVERRIDE]
-            for segments in records.values() for s in segments if SCENE_OVERRIDE in s})
-    return app, {source: [project(app, s, archived=archived) for s in segments] for source, segments in records.items()}
+            for s in records.values() if SCENE_OVERRIDE in s})
+    return app, {source: project(app, record) for source, record in records.items()}
 
 
 def as_frames(segment):
@@ -83,5 +79,4 @@ def as_frames(segment):
 
 def frame_records(scenes):
     """Scene qualification and occurrences use their own complete observations."""
-    return {source: [as_frames(s) for s in segments if s['meta'].get('origin') == 'inference']
-            for source, segments in scenes.items()}
+    return {source: as_frames(record) for source, record in scenes.items()}

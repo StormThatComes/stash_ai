@@ -42,8 +42,8 @@ def test_transition_infers_fresh_preserves_manual_data_and_marker_ids_and_is_one
     assert 'wd:common' in p.stash.tags
     with StateStore(p.path, scope_for(app.STASH_URL)) as store:
         assert not store.connection.execute("SELECT 1 FROM sqlite_master WHERE name='legacy_imports'").fetchone()
-        assert len(store.model_records('1', 'markers', 'wd')) == 1
-        assert store.model_records('1', 'markers', 'wd')[0]['meta']['origin'] == 'inference'
+        assert store.model_record('1', 'markers', 'wd')['mode'] == 'frames'
+        assert store.model_record('1', 'markers', 'wd')['meta']['origin'] == 'inference'
     before = deepcopy(p.stash.scene)
     p.stash.writes.clear()
     assert app.main([*p.args, '--migrate-legacy-only']) == 0
@@ -151,11 +151,11 @@ def test_upgrade_removes_imported_active_evidence_and_ledger_across_scopes(tmp_p
     with sqlite3.connect(path) as connection:
         connection.execute('CREATE TABLE legacy_imports(scope TEXT, scene TEXT, kind TEXT, data BLOB)')
         connection.execute('PRAGMA user_version=15')
-    assert db.update_database(path) == (15, 17)
+    assert db.update_database(path) == (15, 18)
     for scope in ('first', 'second'):
         with StateStore(path, scope) as store:
-            assert store.model_records('1', 'markers', 'wd') == [outputs()['markers']]
-            assert store.model_records('2', 'markers', 'joytag') == []
+            assert store.model_record('1', 'markers', 'wd') == outputs()['markers']
+            assert store.model_record('2', 'markers', 'joytag') is None
             assert set(store.connection.execute('SELECT scene,model,kind FROM refresh_requests WHERE scope=?', (scope,))) == {
                 ('1', 'wd', 'markers'), ('2', 'joytag', 'markers')}
         assert db.check_database(path, scope)['ok']

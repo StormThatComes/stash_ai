@@ -1,4 +1,5 @@
 """Marker group lifecycle, native API safety and backfill without inference."""
+from tests.helpers.evidence import segment
 from copy import deepcopy
 import json
 
@@ -195,7 +196,7 @@ def test_backfill_failure_keeps_orphans_for_retry_and_does_not_mutate_raw_eviden
     install(monkeypatch, stash)
     path = tmp_path/'state.sqlite3'
     with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL)) as state:
-        state.put('1', 'wd', {'markers': {'mode': 'frames', 'meta': {}, 'items': []}})
+        state.put('1', 'wd', {'markers': segment('wd', [])})
         raw = state.records('1', 'markers')
     update = stash.update_marker
     def fail_second(payload):

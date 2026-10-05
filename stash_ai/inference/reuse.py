@@ -13,16 +13,16 @@ def reuse(app, store, scene, config, identity, cues, hashes, kinds):
     if not app.CREATE_MARKERS:
         return False
     try:
-        segments = validate(app, store, scene, config)
+        record = validate(app, store, scene, config)
     except ValueError:
         return False
-    original = segments[-1]['meta'].get('marker_threshold')
+    original = record['meta'].get('marker_threshold')
     signature = inference_signature({**identity, 'marker_threshold': original}, cue_manifest(cues), hashes)
     for kind in kinds:
-        expected = indexed_signature(segments[-1], signature) if kind == 'markers' else signature
+        expected = indexed_signature(record, signature) if kind == 'markers' else signature
         if not completed(store, scene, config.source.key, [kind], expected):
             return False
-    apply(app, store, scene, config, segments)
+    apply(app, store, scene, config, record)
     return True
 
 
@@ -30,16 +30,15 @@ def reuse_scenes(app, store, scene, config, identity, cues, hashes, kinds):
     from stash_ai.storage.progress import completed
     from stash_ai.rethreshold.scenes import plan, apply
     from stash_ai.evidence.thresholds import indexed_signature
-    records = {kind: store.records(scene, kind, config.source.key, borrow=True).get(config.source.key, []) for kind in kinds}
-    if any(not segments for segments in records.values()):
+    records = {kind: store.model_record(scene, kind, config.source.key, borrow=True) for kind in kinds}
+    if any(not record for record in records.values()):
         return False
-    for kind, segments in records.items():
-        segment = segments[-1]
-        meta = segment['meta']
+    for kind, record in records.items():
+        meta = record['meta']
         signature = inference_signature({**identity, 'scene_threshold': meta.get('scene_threshold'),
                                          'marker_threshold': meta.get('marker_threshold')},
                                         cue_manifest(cues), hashes)
-        if not completed(store, scene, config.source.key, [kind], indexed_signature(segment, signature)):
+        if not completed(store, scene, config.source.key, [kind], indexed_signature(record, signature)):
             return False
     if 'scene' not in records:
         return False

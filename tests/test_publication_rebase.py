@@ -47,9 +47,9 @@ def test_offline_rebase_keeps_geometry_ownership_and_retry_proofs_across_scopes(
                                    (scope, '1', 'markers', 'lost-response', packed))
         connection.execute('PRAGMA user_version=16')
     before = path.read_bytes()
-    assert db.update_database(path, dry_run=True) == (16, 17)
+    assert db.update_database(path, dry_run=True) == (16, 18)
     assert path.read_bytes() == before
-    assert db.update_database(path) == (16, 17)
+    assert db.update_database(path) == (16, 18)
     for scope in ('scope-a', 'scope-b'):
         with StateStore(path, scope) as state:
             from stash_ai.storage.recovery import publications
@@ -72,7 +72,7 @@ def test_offline_rebase_keeps_geometry_ownership_and_retry_proofs_across_scopes(
     with sqlite3.connect(path) as connection:
         migrated = [connection.execute('SELECT * FROM ' + table).fetchall()
                     for table in ('snapshots', 'recovery_publications')]
-    assert db.update_database(path) == (17, 17)
+    assert db.update_database(path) == (18, 18)
     with sqlite3.connect(path) as connection:
         assert [connection.execute('SELECT * FROM ' + table).fetchall()
                 for table in ('snapshots', 'recovery_publications')] == migrated

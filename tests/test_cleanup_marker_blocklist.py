@@ -92,14 +92,14 @@ def test_cleanup_has_the_same_current_retention_contract(floor):
     frames = segment('wd', [[('common', .9)]] * 2)
     frames['meta']['marker_score_floor'] = floor
     with pytest.raises(ValueError, match='marker cache floor|retention floors'):
-        thresholds.validate_marker_cache(app, {'wd': [frames]})
+        thresholds.validate_marker_cache(app, {'wd': frames})
 
 
 def test_repeated_cleanup_preserves_frozen_temporal_bans(tmp_path):
     policies = {source: frozenset() for source in SOURCES}
     records = {
-        'wd': [segment('wd', [[('core', .9)]] * 4)],
-        'dtq': [segment('dtq', [[('detail', .9), ('revoked', .9), ('remaining', .9)]] * 4)],
+        'wd': segment('wd', [[('core', .9)]] * 4),
+        'dtq': segment('dtq', [[('detail', .9), ('revoked', .9), ('remaining', .9)]] * 4),
     }
     frozen_tags = {source: frozenset({'detail'}) for source in SOURCES}
     spans = merge_source_markers.marker_contributions(app, records, policies, tag_policies=frozen_tags)
@@ -110,7 +110,7 @@ def test_repeated_cleanup_preserves_frozen_temporal_bans(tmp_path):
             from stash_ai.evidence.identity import marker_segment_signature
             with state.connection:
                 state.connection.execute('INSERT INTO inference_archive VALUES (?,?,?,?,?,?)',
-                    (state.scope, '1', source, 'markers', marker_segment_signature(segments[0]), state.pack(segments[0])))
+                    (state.scope, '1', source, 'markers', marker_segment_signature(segments), state.pack(segments)))
         state.publish('1', {'markers': {'contributions': spans}})
         original = archived_records(state, '1', 'markers')
         tags = {**policies, 'dtq': frozenset({'revoked'})}
@@ -122,7 +122,7 @@ def test_repeated_cleanup_preserves_frozen_temporal_bans(tmp_path):
         second = cleanup_evidence.cleanup_support(app, state, '1', first, {'dtq'}, policies, tags)
         assert merge_intervals.union_intervals(second)[0]['extra_tags'] == []
         assert archived_records(state, '1', 'markers') == original
-        assert merge_source_markers.marker_contributions(app, original, policies)
+        assert merge_source_markers.marker_contributions(app, {source: versions[0] for source, versions in original.items()}, policies)
 
 
 

@@ -91,6 +91,9 @@ class StateDatabase(AbstractContextManager):
         db.execute('PRAGMA cache_size=-65536')
         if not self.fresh and not self.migration:
             return
+        threshold_sql = ('thresholds TEXT NOT NULL CHECK(json_valid(thresholds))'
+                         if self.migration and not self.fresh and self.version < 18 else
+                         'threshold REAL NOT NULL CHECK(typeof(threshold) IN (\'real\',\'integer\') AND threshold BETWEEN 0 AND 1)')
         db.executescript(f"""
             PRAGMA application_id={APPLICATION_ID};
             CREATE TABLE IF NOT EXISTS results (
@@ -99,7 +102,7 @@ class StateDatabase(AbstractContextManager):
                 PRIMARY KEY(scope, scene, model, kind));
             CREATE TABLE IF NOT EXISTS result_thresholds (
                 scope TEXT NOT NULL, scene TEXT NOT NULL, model TEXT NOT NULL,
-                kind TEXT NOT NULL, thresholds TEXT NOT NULL CHECK(json_valid(thresholds)),
+                kind TEXT NOT NULL, {threshold_sql},
                 PRIMARY KEY(scope, scene, model, kind));
             CREATE TABLE IF NOT EXISTS result_metadata (
                 scope TEXT NOT NULL, scene TEXT NOT NULL, model TEXT NOT NULL,

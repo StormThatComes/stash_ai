@@ -122,8 +122,8 @@ class StateStore(AbstractContextManager):
     def records(self, scene, kind, model=None, *, borrow=False):
         return self.results.records(scene, kind, model, borrow=borrow)
 
-    def model_records(self, scene, kind, model, *, borrow=False):
-        return self.results.model_records(scene, kind, model, borrow=borrow)
+    def model_record(self, scene, kind, model, *, borrow=False):
+        return self.results.model_record(scene, kind, model, borrow=borrow)
 
     def result_metadata(self, scene, kind, model):
         return self.metadata.get(scene, kind, model)
@@ -143,11 +143,11 @@ class StateStore(AbstractContextManager):
     def put(self, scene, model, outputs):
         return self.results.put(scene, model, outputs)
 
-    def replace_records(self, scene, model, kind, segments):
-        return self.results.replace_records(scene, model, kind, segments)
+    def replace_record(self, scene, model, kind, record):
+        return self.results.replace_record(scene, model, kind, record)
 
-    def set_result_threshold(self, scene, model, kind, threshold, segments, *, metadata_only=False):
-        return self.results.set_threshold(scene, model, kind, threshold, segments,
+    def set_result_threshold(self, scene, model, kind, threshold, record, *, metadata_only=False):
+        return self.results.set_threshold(scene, model, kind, threshold, record,
                                           metadata_only=metadata_only)
 
 

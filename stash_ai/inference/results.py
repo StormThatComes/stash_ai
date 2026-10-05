@@ -4,7 +4,7 @@ from stash_ai.config import vocabulary_digest
 import hashlib
 import json
 from .input_identity import cue_manifest
-from stash_ai.evidence.contracts import RetainedRecord
+from stash_ai.evidence.contracts import InferenceRecord
 from stash_ai.evidence.formats import ANALYSIS_FORMAT
 
 
@@ -13,7 +13,7 @@ def now():
 
 
 def capture_outputs(app, config, vocabulary, cues, predictions, frames, analysis, *,
-                    inference_signature, frame_input_signature) -> dict[str, RetainedRecord]:
+                    inference_signature, frame_input_signature) -> dict[str, InferenceRecord]:
     from stash_ai.evidence.retention import marker_cache_floor
     cue_data = cue_manifest(cues)
     meta = {"origin": "inference", "captured_at": now(),

@@ -20,33 +20,31 @@ class MetadataStore:
         check_source(store)
         params = (store.scope, str(scene), model, kind)
         rows = store.read_rows(
-            'SELECT m.format,m.data,t.thresholds FROM ' + store.table('results') + ' AS r LEFT JOIN ' +
+            'SELECT m.format,m.data,t.threshold FROM ' + store.table('results') + ' AS r LEFT JOIN ' +
             store.table('result_metadata') + ' AS m USING(scope,scene,model,kind) LEFT JOIN ' +
             store.table('result_thresholds') + ' AS t USING(scope,scene,model,kind) '
             'WHERE r.scope=? AND r.scene=? AND r.model=? AND r.kind=?', params)
         if not rows:
-            return []
+            return None
         version, data, threshold = rows[0]
-        segments = None
+        record = None
         if version == FORMAT:
             try:
-                segments = decode(data)
+                record = decode(data)
             except (TypeError, ValueError):
                 pass  # A damaged derived row is rebuilt from the authoritative evidence.
-        if segments is None:
+        if record is None:
             payload = store.read_rows('SELECT data FROM ' + store.table('results') +
                 ' WHERE scope=? AND scene=? AND model=? AND kind=?', params)[0][0]
-            segments = summarize(store.unpack(payload))
+            record = summarize(store.unpack(payload))
             with backfill_batch(store):
-                self.save(scene, model, kind, segments)
-        from stash_ai.storage.archive import validate_active
-        validate_active(segments)
-        return overlay(segments, kind, threshold)
+                self.save(scene, model, kind, record)
+        return overlay(record, kind, threshold)
 
-    def save(self, scene, model, kind, segments):
+    def save(self, scene, model, kind, record):
         from stash_ai.storage.metadata import FORMAT, encode
         store = self.store
         store.connection.execute('INSERT INTO result_metadata VALUES (?,?,?,?,?,?) '
             'ON CONFLICT(scope,scene,model,kind) DO UPDATE SET format=excluded.format,data=excluded.data',
-            (store.scope, str(scene), model, kind, FORMAT, encode(segments)))
+            (store.scope, str(scene), model, kind, FORMAT, encode(record)))
 

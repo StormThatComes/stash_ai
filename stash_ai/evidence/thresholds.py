@@ -14,7 +14,7 @@ def indexed_signature(segment, inference=None):
         if segment['mode'] != 'scene' or OVERRIDE in segment:
             raise ValueError('Threshold override does not match result kind.')
         return digest([signature, {'scene_threshold': segment[SCENE_OVERRIDE]}])
-    if OVERRIDE in segment and segment['mode'] not in ('frames', 'spans'):
+    if OVERRIDE in segment and segment['mode'] != 'frames':
         raise ValueError('Threshold override does not match result kind.')
     return digest([signature, segment[OVERRIDE]]) if OVERRIDE in segment else signature
 
@@ -27,7 +27,7 @@ def marker_context(app, records):
     context = replace(app)
     context.MARKER_THRESHOLDS = {
         marker_segment_signature(segment): segment[OVERRIDE]
-        for segments in records.values() for segment in segments if OVERRIDE in segment}
+        for segment in records.values() if OVERRIDE in segment}
     return context
 
 
@@ -46,19 +46,16 @@ def validate_marker_cache(app, records):
     """Current inference must retain all observations needed by the frozen policy."""
     from stash_ai.evidence.temporal.policy import marker_floor
     from stash_ai.evidence.formats import validate_current
-    for model, segments in records.items():
-        for segment in segments:
-            validate_current(segment)
-            if segment['mode'] != 'frames':
-                continue
-            meta = segment['meta']
-            if meta.get('origin') != 'inference':
-                continue
-            threshold = marker_threshold(segment, app.MARKER_THRESHOLDS)
-            if not _score(threshold):
-                raise ValueError(f'{model}: invalid cached marker threshold; run inference.')
-            needed = marker_floor(app.TEMPORAL_POLICY, threshold)
-            floor = meta['marker_score_floor']
-            if not _score(floor) or floor > needed:
-                raise ValueError(f'{model}: marker cache floor {floor!r} exceeds required {needed:g}; '
-                                 'run inference with --restart for this scene/model.')
+    for model, segment in records.items():
+        validate_current(segment)
+        if segment['mode'] != 'frames':
+            continue
+        meta = segment['meta']
+        threshold = marker_threshold(segment, app.MARKER_THRESHOLDS)
+        if not _score(threshold):
+            raise ValueError(f'{model}: invalid cached marker threshold; run inference.')
+        needed = marker_floor(app.TEMPORAL_POLICY, threshold)
+        floor = meta['marker_score_floor']
+        if not _score(floor) or floor > needed:
+            raise ValueError(f'{model}: marker cache floor {floor!r} exceeds required {needed:g}; '
+                             'run inference with --restart for this scene/model.')
