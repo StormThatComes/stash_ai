@@ -6,6 +6,7 @@ import tempfile
 
 from stash_ai.config import hierarchy_from_data, load_unique_yaml
 from stash_ai.models import SOURCES
+from stash_ai.tools.legacy_namespaces import NAMESPACES
 
 
 def convert(data):
@@ -25,7 +26,7 @@ def convert(data):
         if any(not isinstance(value, str) or not value or value != value.strip()
                or '\n' in value or '\r' in value for value in (root, prefix)):
             raise ValueError('Invalid historical hierarchy root or prefix.')
-        source = next((source for source in SOURCES.values() if prefix.startswith(source.prefix)), None)
+        source = next((SOURCES[key] for key, namespace in NAMESPACES.items() if prefix.startswith(namespace.prefix)), None)
         if source is None:
             raise ValueError('Unknown historical hierarchy namespace.')
         result = {key: value for key, value in data.items() if key not in ('root', 'category_prefix')}

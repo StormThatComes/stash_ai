@@ -62,7 +62,7 @@ def test_merge_prefilters_used_groups_and_shares_one_lightweight_catalog(tmp_pat
         stash.scene['scene_markers'].append(dict(id=str(i + 1), title='Manual', seconds=i,
             end_seconds=i + 1, primary_tag=primary, tags=[tag]))
     orphan = managed(stash, 'orphan')
-    ordinary = stash.tag('op:empty')
+    ordinary = stash.tag('ai:empty')
     install(monkeypatch, stash)
     args = command(tmp_path, by_model={'oppai': ['empty']})
     assert app.main(args + (['--prune-empty-tags'] if explicit else [])) == 0

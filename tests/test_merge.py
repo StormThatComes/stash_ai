@@ -30,6 +30,7 @@ import stash_ai.evidence.labels as merge_labels
 import stash_ai.storage.results as merge_results
 import stash_ai.storage.store as merge_store
 from stash_ai.inference.inputs import inspect_input
+from stash_ai.tools.legacy_namespaces import NAMESPACES as LEGACY_NAMESPACES
 from stash_ai.models import SOURCES, JOYTAG, WD, DTQ, OPPAI, ModelSettings, Vocabulary
 from tests.helpers.stash import Stash
 from tests.helpers.inference import Tagger
@@ -289,7 +290,7 @@ def test_combined_hierarchy_has_one_namespace_and_all_labels(tmp_path):
     stash=Stash();manual=stash.tag("manual parent")
     old=stash.tag("ai:category:Old");old["description"]=merge_labels.AI.hierarchy_description
     unowned=stash.tag("ai:category:Custom")
-    foreign=stash.tag("wd:category:General");foreign["description"]=SOURCES["wd"].hierarchy_description
+    foreign=stash.tag("wd:category:General");foreign["description"]=LEGACY_NAMESPACES["wd"].hierarchy_description
     stash.tag("ai:blue_hair")["parents"]=[manual,old,unowned,foreign]
     app.services.TagResolver(stash,combined,source=merge_labels.AI).resolve("ai:blue_hair")
     assert {p["name"] for p in stash.tags["ai:blue_hair"]["parents"]}=={
