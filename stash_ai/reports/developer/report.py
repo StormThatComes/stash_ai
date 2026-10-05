@@ -17,10 +17,10 @@ import sqlite3
 import struct
 import sys
 
-from stash_ai.db.common import KNOWN_VERSIONS, connect_readonly, table_names
+from stash_ai.db.common import connect_readonly, table_names
 from stash_ai.reports.io import write_json_report
 
-REPORT_FORMAT = 1
+REPORT_FORMAT = 2
 
 
 def build_report(path):
@@ -29,20 +29,25 @@ def build_report(path):
     if not path.is_file():
         raise FileNotFoundError(f"State database does not exist: {path}")
 
-    from stash_ai.storage.schema import APPLICATION_ID
+    from stash_ai.storage.schema import APPLICATION_ID, LATEST_SCHEMA_VERSION, require_supported_version
 
     with connect_readonly(path) as db:
+        db.execute("BEGIN")
         application_id = db.execute("PRAGMA application_id").fetchone()[0]
         schema_version = db.execute("PRAGMA user_version").fetchone()[0]
-        if application_id != APPLICATION_ID or schema_version not in KNOWN_VERSIONS:
+        if application_id != APPLICATION_ID:
             raise ValueError("Not a supported stash-taggers state DB.")
 
+        require_supported_version(schema_version)
         tables = table_names(db)
         database = database_report(path, db, tables, schema_version)
 
-        evidence = _result_evidence_report(db, tables)
-        checkpoints = _checkpoint_report(db, tables)
-        grouped = _grouped_counts(db, tables)
+        database['upgrade_required'] = schema_version != LATEST_SCHEMA_VERSION
+        evidence, checkpoints, grouped = [], [], {}
+        if not database['upgrade_required']:
+            evidence = _result_evidence_report(db, tables)
+            checkpoints = _checkpoint_report(db, tables)
+            grouped = _grouped_counts(db, tables)
 
     return {
         "format": REPORT_FORMAT,
@@ -91,6 +96,8 @@ def run(args):
             f"Anonymous developer diagnostics written to {destination}. "
             f"Report format={report['format']}; no upload was performed."
         )
+        if report['database']['upgrade_required']:
+            print('Run --db-update before collecting detailed evidence statistics.')
         print(
             "Review the JSON before sharing it. It contains no direct content/identifiers, "
             "but aggregate counts and size distributions describe this installation."
@@ -99,4 +106,3 @@ def run(args):
     except (OSError, sqlite3.DatabaseError, ValueError, RuntimeError) as exc:
         print("Anonymous diagnostics failed: " + str(exc))
         return 1
-

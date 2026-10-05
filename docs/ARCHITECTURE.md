@@ -225,6 +225,14 @@ i zapis JSON. `developer/database.py` zbiera agregaty bazy i checkpointów,
 przechowuje ograniczone pamięciowo rozkłady. Pakiet `db` nie uruchamia migracji ani nie
 zmienia protokołu blokady używanego przez `StateStore`.
 
+Anonymous diagnostics format 2 scans detailed evidence only on the current schema.
+Supported v18–v20 databases receive aggregate database facts and `upgrade_required`,
+without historical payload adapters. Current evidence counters expose only scene/frames,
+inference origin and the current analysis format; obsolete values become `other`.
+Retired import tables are never parsed. DB checks report their presence as a schema error.
+Tag explanations retain the scene-report list, mark each report `format: 2`, and expose
+one `record` per source instead of a singleton `records` list.
+
 `stash_ai/rethreshold/` oddziela lokalną zmianę progów od projekcji evidence.
 `targets.py` wybiera pary scena/model z małych indeksów i grupuje przyczyny błędów;
 `markers.py` waliduje pokrycie markerów i zapisuje ich próg, a `scenes.py` planuje

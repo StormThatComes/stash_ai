@@ -115,7 +115,7 @@ def test_report_is_read_only_content_free_and_cross_scope(tmp_path):
     text = serialized(report)
 
     assert hashlib.sha256(path.read_bytes()).digest() == before
-    assert report["format"] == 1
+    assert report["format"] == 2
     assert report["database"]["quick_check_ok"]
     assert report["database"]["scope_count"] == 2
     assert report["database"]["scene_count"] == 3
@@ -138,7 +138,9 @@ def test_report_is_read_only_content_free_and_cross_scope(tmp_path):
     assert ("wd", "markers") in groups
     assert ("other", "other") in groups
     assert groups["other", "other"]["analysis_formats"] == {"other": 1}
-    assert groups["other", "other"]["scene_frame_formats"] == {"other": 1}
+    assert "scene_frame_formats" not in groups["other", "other"]
+    assert "span_items_per_record" not in groups["other", "other"]
+    assert not report["database"]["upgrade_required"]
 
     markers = groups["wd", "markers"]
     assert markers["rows"] == 1
@@ -208,3 +210,96 @@ def test_cli_rejects_dry_run_because_report_itself_is_the_only_write(tmp_path):
         ])
     assert exc.value.code == 2
 
+
+
+@pytest.mark.parametrize('version', [18, 19, 20])
+def test_supported_older_schemas_get_read_only_preflight_without_payload_adapters(tmp_path, monkeypatch, version):
+    path = tmp_path / 'old.sqlite3'
+    seed(path)
+    with sqlite3.connect(path) as connection:
+        connection.execute(f'PRAGMA user_version={version}')
+        connection.execute("UPDATE results SET data=x'01'")
+    before = path.read_bytes()
+    def forbidden(*args, **kwargs):
+        pytest.fail('Older schemas must be upgraded before detailed evidence statistics.')
+    for name in ('_result_evidence_report', '_checkpoint_report', '_grouped_counts'):
+        monkeypatch.setattr(diagnostics, name, forbidden)
+    report = diagnostics.build_report(path)
+    assert report['format'] == 2
+    assert report['database']['schema_version'] == version
+    assert report['database']['quick_check_ok'] and report['database']['upgrade_required']
+    assert report['evidence'] == report['checkpoints'] == [] and report['state_groups'] == {}
+    assert path.read_bytes() == before
+    for secret in SECRETS:
+        assert secret not in serialized(report)
+
+
+@pytest.mark.parametrize('mode,origin,version', [
+    ('spans', 'legacy', 1), ('scene', 'legacy', 4), ('frames', 'inference', 3),
+])
+def test_retired_record_metadata_is_reported_as_other_without_old_shape_fields(tmp_path, mode, origin, version):
+    path = tmp_path / 'state.sqlite3'
+    saved = segment()
+    saved['mode'] = mode
+    saved['meta'].update(origin=origin, analysis_format=version)
+    with merge_store.StateStore(path, 'private-scope'):
+        pass
+    with sqlite3.connect(path) as connection:
+        connection.execute('INSERT INTO results VALUES (?,?,?,?,?)',
+            ('private-scope', 'private-scene', 'wd', 'scene' if mode == 'scene' else 'markers', encode(saved)))
+    report = diagnostics.build_report(path)
+    group = report['evidence'][0]
+    assert group['record_modes'] == {mode if mode in ('scene', 'frames') else 'other': 1}
+    assert group['origins'] == {'inference' if origin == 'inference' else 'other': 1}
+    assert group['analysis_formats'] == {'other': 1}
+    assert 'scene_frame_formats' not in group and 'span_items_per_record' not in group
+    assert 'private_tag_name' not in serialized(report)
+
+
+def test_diagnostics_never_query_retired_import_table(tmp_path, monkeypatch):
+    path = tmp_path / 'state.sqlite3'
+    seed(path)
+    with sqlite3.connect(path) as connection:
+        connection.execute('CREATE TABLE legacy_imports(private_payload BLOB)')
+        connection.execute('INSERT INTO legacy_imports VALUES (?)', (b'private-import-payload',))
+    before = path.read_bytes()
+    original = diagnostics.connect_readonly
+    def protected(*args, **kwargs):
+        connection = original(*args, **kwargs)
+        def authorize(action, name, *rest):
+            return sqlite3.SQLITE_DENY if action == sqlite3.SQLITE_READ and name == 'legacy_imports' else sqlite3.SQLITE_OK
+        connection.set_authorizer(authorize)
+        return connection
+    monkeypatch.setattr(diagnostics, 'connect_readonly', protected)
+    report = diagnostics.build_report(path)
+    assert 'legacy_imports' not in report['state_groups']
+    assert report['database']['unknown_table_count'] == 2
+    assert 'private-import-payload' not in serialized(report)
+    assert path.read_bytes() == before
+
+
+def test_current_diagnostics_count_list_history_as_invalid_data(tmp_path):
+    path = tmp_path / 'state.sqlite3'
+    with merge_store.StateStore(path, 'private-scope'):
+        pass
+    with sqlite3.connect(path) as connection:
+        connection.execute('INSERT INTO results VALUES (?,?,?,?,?)',
+            ('private-scope', 'private-scene', 'wd', 'scene', encode([segment()])))
+    report = diagnostics.build_report(path)
+    group = report['evidence'][0]
+    assert group['decode_errors'] == 1 and group['items_per_record']['count'] == 0
+    assert group['record_modes'] == group['origins'] == group['analysis_formats'] == {}
+    assert 'private_tag_name' not in serialized(report)
+
+
+def test_cli_reports_upgrade_required_for_supported_v18_database(tmp_path, capsys):
+    path = tmp_path / 'state.sqlite3'
+    seed(path)
+    with sqlite3.connect(path) as connection:
+        connection.execute('PRAGMA user_version=18')
+    before = path.read_bytes()
+    destination = tmp_path / 'preflight.json'
+    assert app.main(['--state-db', str(path), '--anonymous-diagnostics', str(destination)]) == 0
+    assert json.loads(destination.read_text())['database']['upgrade_required']
+    assert 'Run --db-update' in capsys.readouterr().out
+    assert path.read_bytes() == before

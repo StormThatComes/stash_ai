@@ -107,3 +107,29 @@ def test_current_schema_shape_preflight_is_read_only(tmp_path, damage, code):
     with pytest.raises(ValueError, match='Incomplete state DB'):
         StateStore(path, 'scope')
     assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize('table', ['legacy_imports', 'refinement_progress'])
+@pytest.mark.parametrize('with_payload', [False, True])
+def test_retired_tables_are_rejected_without_reading_their_shape_or_payload(tmp_path, monkeypatch, table, with_payload):
+    from stash_ai.db import checks
+    path = tmp_path / 'state.sqlite3'
+    seed(path, 'scope')
+    with sqlite3.connect(path) as connection:
+        connection.execute(f'CREATE TABLE {table}(private_payload BLOB)')
+        if with_payload:
+            connection.execute(f'INSERT INTO {table} VALUES (?)', (b'private-invalid-payload',))
+    before = path.read_bytes()
+    original = checks.connect_readonly
+    def protected(*args, **kwargs):
+        connection = original(*args, **kwargs)
+        def authorize(action, name, *rest):
+            return sqlite3.SQLITE_DENY if action == sqlite3.SQLITE_READ and name == table else sqlite3.SQLITE_OK
+        connection.set_authorizer(authorize)
+        return connection
+    monkeypatch.setattr(checks, 'connect_readonly', protected)
+    report = check_database(path, 'scope', show_progress=True)
+    assert not report['ok'] and report['integrity_check_ok']
+    assert [(issue['code'], issue['count']) for issue in report['errors']] == [('retired_state_tables', 1)]
+    assert report['results_checked'] == report['state_payloads_checked'] == 0
+    assert path.read_bytes() == before
