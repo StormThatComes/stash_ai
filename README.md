@@ -131,8 +131,8 @@ klatki, wyniki i podpisy dowodów zachowują swoje wartości.
 
 Snapshoty merge zapisują współdzielone dowody `extra_support` raz, a contributions
 odwołują się do nich przez referencje. Zmniejsza to koszt serializacji i kompresji.
-Aktualny schemat to v12; starsze wersje programu odmówią jego otwarcia. Każdy nowy snapshot ma otoczkę formatu v3. `--db-update` konwertuje dawne
-snapshoty, także pending i recovery, oraz uzupełnia kompletne opcje odtwarzania, również w zagnieżdżonych dowodach scen.
+Aktualny schemat to v13; starsze wersje programu odmówią jego otwarcia. Każdy nowy snapshot ma otoczkę formatu v4. `--db-update` konwertuje dawne
+snapshoty, także pending i recovery, dopisuje wymagane `contributions: []` do pustych zapisów oraz uzupełnia kompletne opcje odtwarzania, również w zagnieżdżonych dowodach scen.
 Dawny `blocklist` zostaje połączony z zapisanymi `tag_exclusions` wszystkich źródeł.
 Brakujące dawne przełączniki współdzielenia i occurrences zachowują `False`.
 Wersjonowanie analizy checkpointu dotyczy wyłącznie niedokończonej inferencji:
@@ -252,9 +252,9 @@ SQLite do systemu plików.
 ### Zdrowie, aktualizacja i kompaktowanie bazy stanu
 
 `--db-update` aktualizuje całą istniejącą bazę wskazaną przez `--state-db`
-do najnowszego obsługiwanego schematu (obecnie v12), we wszystkich scope'ach.
+do najnowszego obsługiwanego schematu (obecnie v13), we wszystkich scope'ach.
 Zwykłe uruchomienie oraz `--dry-run` wymagają aktualnego schematu: starszą bazę
-trzeba najpierw zaktualizować tą komendą. Nowa baza od razu otrzymuje v12.
+trzeba najpierw zaktualizować tą komendą. Nowa baza od razu otrzymuje v13.
 Updater korzysta z tego samego locka writera; migracje są wyłącznie offline.
 Tworzy aktualne tabele, indeksy i triggery, uzupełnia `result_index` dla baz
 sprzed v2, uzupełnia historyczne `result_metadata` we wszystkich scope'ach
@@ -272,7 +272,8 @@ etapy pośrednie, ale najnowsza wersja jest ustawiana dopiero po ukończeniu
 inicjalizacji. Przerwaną aktualizację można uruchomić ponownie.
 
 `--db-check` wykonuje głęboki, wyłącznie odczytowy test spójności całej bazy
-(we wszystkich scope'ach). Oprócz pełnego SQLite `integrity_check` sprawdza m.in.
+(we wszystkich scope'ach). Dla starszego schematu wykonuje tylko preflight wersji i integralności SQLite,
+a przed głęboką walidacją wymaga `--db-update`. Oprócz pełnego SQLite `integrity_check` sprawdza m.in.
 zgodność `results` z `result_index` (łącznie z zapisaną sygnaturą ostatniej
 inferencji), dekodowalność trwałych BLOB-ów, dozwolone model/kind, relacje
 checkpoint/frames/analysis, wymiary checkpointów oraz generacje cleanup/recovery.

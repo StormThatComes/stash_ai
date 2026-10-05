@@ -27,7 +27,7 @@ def _previous_ranges(app, store, scene):
     for snapshot in (*store.snapshot(scene_id, "markers", borrow=True),
                      *publications(store, scene_id, 'markers')):
         if snapshot:
-            result.extend(merge_intervals.union_intervals(snapshot.get("contributions", []), borrow=True))
+            result.extend(merge_intervals.union_intervals(snapshot["contributions"], borrow=True))
     return result
 
 
@@ -53,4 +53,5 @@ def prepare_sync_evidence(app, stash, store, scene, scene_hits, spans, *, cleanu
             merge_labels.AI.prefix + marker["tag"], {"seconds": marker["start"], "end_seconds": marker["end"]})]
         spans = [item for marker in markers for item in marker["contributors"]]
     return PreparedEvidence(scene_hits, spans, markers, scene_labels, previous_ranges)
+
 

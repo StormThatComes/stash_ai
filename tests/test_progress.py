@@ -335,7 +335,7 @@ def test_v1_database_is_migrated_once_without_losing_sources(tmp_path,monkeypatc
     from stash_ai.db import update_database
     update_database(path)
     with merge_store.StateStore(path,"fixture") as state:
-        assert state.connection.execute("PRAGMA user_version").fetchone()==(12,)
+        assert state.connection.execute("PRAGMA user_version").fetchone()==(13,)
         assert state.records("1","scene")["wd"]==[segment]
         assert not progress.completed(state,"1","wd",["scene"],"new-signature")
     monkeypatch.setattr(state_codec,"decode",lambda *args:pytest.fail("migration repeated"))

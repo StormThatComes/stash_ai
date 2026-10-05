@@ -78,11 +78,6 @@ def test_indexed_signature_preserves_canonical_hashes_and_rejects_mixed_policies
     with pytest.raises(ValueError, match='override does not match'):
         thresholds.indexed_signature({**marker_only, 'mode': 'scene'})
 
-    from stash_ai.db.validation.results import historical_indexed_signature
-    assert historical_indexed_signature(both) == digest([
-        'sig-a',
-        {'scene_threshold': .8, 'marker_threshold': .9},
-    ])
 
 
 def test_automatic_raise_and_return_to_original_keep_raw_evidence(pipeline, monkeypatch):
@@ -317,3 +312,4 @@ def test_marker_rethreshold_never_decodes_publication_snapshots(tmp_path, monkey
 
         assert result == {'marker_thresholds_updated': 1}
         assert state.records('1', 'markers')['wd'][0][thresholds_identity.OVERRIDE] == .85
+

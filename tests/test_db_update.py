@@ -345,11 +345,11 @@ def test_db_update_cli_stays_offline_and_reports_dry_run_and_idempotence(tmp_pat
 
     assert app.main([*command, '--dry-run']) == 0
     assert path.read_bytes() == before
-    assert 'DRY RUN: state DB schema v1 -> v12' in capsys.readouterr().out
+    assert 'DRY RUN: state DB schema v1 -> v13' in capsys.readouterr().out
     assert app.main(command) == 0
-    assert 'State DB updated: schema v1 -> v12' in capsys.readouterr().out
+    assert 'State DB updated: schema v1 -> v13' in capsys.readouterr().out
     assert app.main(command) == 0
-    assert 'up to date: v12' in capsys.readouterr().out
+    assert 'up to date: v13' in capsys.readouterr().out
     assert app.main(['--state-db', str(tmp_path / 'missing.sqlite3'), '--db-update']) == 1
     assert 'does not exist' in capsys.readouterr().out
 
@@ -377,3 +377,23 @@ def test_db_update_cli_rejects_unrelated_modes_and_modifiers(extra):
     with pytest.raises(SystemExit) as error:
         arguments.parse_args(app, ['--db-update', *extra])
     assert error.value.code == 2
+
+
+def test_v12_empty_snapshots_are_canonicalized_in_all_scopes_and_recovery(tmp_path):
+    from stash_ai.storage.codec import encode
+    from stash_ai.storage.snapshots import FORMAT_KEY, decode as decode_snapshot
+    path = tmp_path / 'state.sqlite3'
+    with StateStore(path, 'first'):
+        pass
+    old = encode({FORMAT_KEY: 3, 'snapshot': {'owned_ids': ['manual']}, 'proofs': []})
+    with sqlite3.connect(path) as db:
+        db.execute('PRAGMA user_version=12')
+        for scope in ('first', 'second'):
+            db.execute('INSERT INTO snapshots VALUES (?,?,?,?,?)', (scope, '1', 'markers', old, old))
+            db.execute('INSERT INTO recovery_publications VALUES (?,?,?,?,?)', (scope, '1', 'markers', 'op', old))
+    assert stash_db.update_database(path) == (12, LATEST_SCHEMA_VERSION)
+    with sqlite3.connect(path) as db:
+        blobs = [blob for row in db.execute('SELECT published,pending FROM snapshots') for blob in row]
+        blobs += [row[0] for row in db.execute('SELECT data FROM recovery_publications')]
+        assert len(blobs) == 6
+        assert all(decode_snapshot(blob) == {'owned_ids': ['manual'], 'contributions': []} for blob in blobs)

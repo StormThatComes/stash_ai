@@ -18,7 +18,11 @@ from .validation import (
 CHECK_MESSAGES = {
     "sqlite_integrity_check": "SQLite integrity_check reported a storage/index-level problem.",
     "missing_base_tables": "Core state tables are missing.",
-    "missing_state_tables": "Tables used by the current application are missing; a normal writer run may need to migrate/recreate them.",
+    "missing_state_tables": "Current state tables are missing; run --db-update.",
+    "schema_upgrade_required": "Historical schema requires --db-update before a deep --db-check.",
+    "invalid_table_columns": "Current state table columns do not match the schema; restore or migrate the database.",
+    "missing_state_triggers": "State invalidation triggers are missing; run --db-update.",
+    "missing_state_indexes": "Current state indexes are missing; run --db-update.",
     "invalid_model": "Rows contain an unknown model key.",
     "invalid_kind": "Rows contain an unknown output kind.",
     "result_missing_index": "Saved results have no matching result_index row.",
@@ -57,7 +61,7 @@ def check_database(path, scope, *, show_progress=False):
     if not path.is_file():
         raise FileNotFoundError(f"State database does not exist: {path}")
 
-    from stash_ai.storage.schema import APPLICATION_ID
+    from stash_ai.storage.schema import APPLICATION_ID, LATEST_SCHEMA_VERSION, shape_issues
 
     errors, warnings = Counter(), Counter()
     with connect_readonly(path) as db:
@@ -70,6 +74,23 @@ def check_database(path, scope, *, show_progress=False):
         # process commits through WAL while this command is running.
         db.execute("BEGIN")
         tables = table_names(db)
+        # Historical payload adapters belong exclusively to offline migration.
+        # Diagnose the version/shape before running queries against current SQL.
+        preflight = (Counter(schema_upgrade_required=1) if version != LATEST_SCHEMA_VERSION
+                     else shape_issues(db))
+        if preflight:
+            integrity_ok = [row[0] for row in db.execute('PRAGMA integrity_check')] == ['ok']
+            if not integrity_ok:
+                preflight['sqlite_integrity_check'] += 1
+            return {
+                'path': str(path), 'sqlite_version': sqlite3.sqlite_version,
+                'schema_version': version, 'integrity_check_ok': integrity_ok, 'ok': False,
+                'errors': _issue_list(preflight), 'warnings': [],
+                'error_count': sum(preflight.values()), 'warning_count': 0,
+                **dict.fromkeys(('known_scopes', 'current_scope_results', 'results_checked',
+                                 'state_payloads_checked', 'pending_publications', 'pending_cleanups',
+                                 'refresh_requests', 'checkpoints'), 0),
+            }
         progress = None
         if show_progress:
             from tqdm import tqdm
@@ -188,3 +209,4 @@ def format_check_report(report):
     if report["ok"] and not report["warnings"]:
         lines.append("No logical consistency problems found.")
     return "\n".join(lines)
+

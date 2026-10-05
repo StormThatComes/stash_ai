@@ -20,7 +20,6 @@ def check_state_payloads(db, tables, errors, progress=None):
         ("recovery_publications", "data", dict),
     )
     checked = 0
-    version = db.execute('PRAGMA user_version').fetchone()[0]
     for table, column, expected in specs:
         if table not in tables or column not in column_names(db, table):
             continue
@@ -29,10 +28,7 @@ def check_state_payloads(db, tables, errors, progress=None):
             tick(progress)
             try:
                 if table in ('snapshots', 'recovery_publications'):
-                    if version >= 12:
-                        from stash_ai.storage.snapshots import decode
-                    else:
-                        from stash_ai.db.snapshot_migration import decode_legacy as decode
+                    from stash_ai.storage.snapshots import decode
                     payload = decode(blob)
                 else:
                     payload = decoded_payload(blob, expected)
@@ -123,3 +119,4 @@ def check_state_relations(db, tables, warnings):
         else:
             warnings["recovery_publication_without_snapshot"] += count_rows(
                 db, tables, "recovery_publications")
+

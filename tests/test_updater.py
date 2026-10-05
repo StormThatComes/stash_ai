@@ -497,7 +497,7 @@ from stash_ai.storage.database import APPLICATION_ID
 from stash_ai.storage.store import StateStore
 snapshot = {'scene': {'owned_ids': [], 'contributions': []}}
 assert codec.decode(codec.encode(snapshot)) == snapshot
-assert snapshots.expand(snapshots.compact(snapshot)) == snapshot
+assert snapshots.expand(snapshots.compact(snapshot['scene'])) == snapshot['scene']
 assert callable(progress.completed)
 with StateStore('state.sqlite3', 'fixture') as store:
     assert store.connection.execute('PRAGMA application_id').fetchone()[0] == APPLICATION_ID

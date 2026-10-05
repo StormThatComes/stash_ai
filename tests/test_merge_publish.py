@@ -48,7 +48,7 @@ def publication(tmp_path, monkeypatch):
 
     def sync(app, stash, resolver, store, current, hits, spans, **kwargs):
         assert kwargs['publication_key'] == 'policy'
-        store.publish(current['id'], {'scene': {'hits': hits, 'spans': spans}})
+        store.publish(current['id'], {'scene': {'hits': hits, 'spans': spans, 'contributions': []}})
         store.cache.stats['misses'] += 1
         writes.append(current['id'])
         return Counter(markers_updated=2)
@@ -88,7 +88,7 @@ def test_local_and_worker_evidence_share_publication_accounting(publication, wor
     assert p.publisher.stats['errors'] == 0
     assert p.diagnostics.counts['cache_misses'] == 2
     for scene_id in p.writes:
-        assert p.store.snapshot(scene_id, 'scene') == ({'hits': [scene_id], 'spans': []}, None)
+        assert p.store.snapshot(scene_id, 'scene') == ({'hits': [scene_id], 'spans': [], 'contributions': []}, None)
     if workers == 1:
         assert p.computed == ['1', '2']
         assert p.diagnostics.counts['cache_hits'] == 4

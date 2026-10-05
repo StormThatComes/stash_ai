@@ -66,7 +66,7 @@ def migrate(database):
             canonicalize_results(database)
     initialize_features(state)
     with db:
-        if database.version < 12:
+        if database.version < 13:
             from .snapshot_migration import migrate as migrate_snapshots
             migrate_snapshots(db)
         if database.version < 10:
@@ -92,3 +92,4 @@ def migrate(database):
             db.execute('INSERT OR REPLACE INTO result_metadata VALUES (?,?,?,?,?,?)',
                        (scope, scene, model, kind, FORMAT, encode(summarize(decode(payload)))))
         db.execute(f'PRAGMA user_version={LATEST_SCHEMA_VERSION}')
+
