@@ -13,7 +13,9 @@ import pytest
 
 from stash_ai.rethreshold import execution as rethreshold_execution, scenes as scene_updates
 from tests.helpers.runtime import runtime as app
-from stash_ai import db
+from stash_ai.db.checks import check_database
+from stash_ai.db.compaction import compact_database
+from stash_ai.db.update import update_database
 from stash_ai.publication import fingerprints as performance
 import stash_ai.storage.merge_checks as performance_merge_checks
 from stash_ai.storage import recovery as recovery
@@ -91,7 +93,7 @@ def test_raise_lower_restore_never_encode_or_write_evidence(tmp_path, monkeypatc
         assert store.preview_source
         assert {kind: store.records('1', kind) for kind in original} == original
         assert progress.completed(store, '1', 'wd', ['scene', 'markers'], 'original')
-    assert db.check_database(path, 'scope')['ok']
+    assert check_database(path, 'scope')['ok']
 
 
 def test_marker_only_updates_policy_without_writing_blob(tmp_path, monkeypatch):
@@ -117,7 +119,7 @@ def test_v18_scalar_overrides_survive_upgrade_and_can_be_restored(tmp_path, dry_
         for kind in old:
             connection.execute('INSERT INTO result_thresholds VALUES (?,?,?,?,?)', ('scope', '1', 'wd', kind, .9))
         connection.execute('PRAGMA user_version=18')
-    db.update_database(path)
+    update_database(path)
     with sqlite3.connect(path) as connection:
         before = connection.execute('SELECT * FROM results ORDER BY scope,scene,model,kind').fetchall()
     source_before = path.read_bytes()
@@ -133,7 +135,7 @@ def test_v18_scalar_overrides_survive_upgrade_and_can_be_restored(tmp_path, dry_
     if dry_run:
         assert path.read_bytes() == source_before
     else:
-        assert db.check_database(path, 'scope')['ok']
+        assert check_database(path, 'scope')['ok']
 
 
 @pytest.mark.parametrize('dry_run', [False, True])
@@ -142,7 +144,7 @@ def test_new_inference_resets_override(tmp_path, dry_run):
     with StateStore(path, 'scope') as store:
         store.put('1', 'wd', outputs())
         rethreshold(store, .8)
-    db.update_database(path)
+    update_database(path)
     source_before = path.read_bytes()
     with StateStore(path, 'scope', dry_run=dry_run) as store:
         if dry_run:
@@ -159,7 +161,7 @@ def test_new_inference_resets_override(tmp_path, dry_run):
     if dry_run:
         assert path.read_bytes() == source_before
     else:
-        assert db.check_database(path, 'scope')['ok']
+        assert check_database(path, 'scope')['ok']
 
 
 def test_override_applies_only_to_active_inference_without_mutating_borrowed_records(tmp_path):
@@ -278,7 +280,7 @@ def test_abandon_and_cleanup_preserve_v8_and_effective_thresholds(tmp_path):
         cleanup.finish(store)
         assert store.connection.execute('PRAGMA user_version').fetchone() == (LATEST_SCHEMA_VERSION,)
         assert store.records('1', 'scene')['wd'][scene_cache_identity.PUBLICATION_THRESHOLD] == .8
-    assert db.check_database(path, 'scope')['ok']
+    assert check_database(path, 'scope')['ok']
 
 
 def test_diagnostics_and_compaction_preserve_threshold_policy(tmp_path):
@@ -289,9 +291,9 @@ def test_diagnostics_and_compaction_preserve_threshold_policy(tmp_path):
     report = developer_report.build_report(path)
     assert report['database']['table_rows']['result_thresholds'] == 2
     assert 'threshold' not in report['database']['blob_tables'].get('result_thresholds', {})
-    before, after = db.compact_database(path, 'scope')
+    before, after = compact_database(path, 'scope')
     assert before['result_thresholds'] == after['result_thresholds'] == 2
-    assert db.check_database(path, 'scope')['ok']
+    assert check_database(path, 'scope')['ok']
     with StateStore(path, 'scope', dry_run=True) as store:
         assert store.records('1', 'scene')['wd'][scene_cache_identity.PUBLICATION_THRESHOLD] == .8
 
@@ -315,7 +317,7 @@ def test_db_check_reports_orphan_invalid_threshold_and_signature_mismatch(tmp_pa
             store.connection.execute("UPDATE result_thresholds SET threshold='[1.5]' WHERE kind='markers'")
             store.connection.execute("INSERT INTO result_thresholds VALUES ('scope','orphan','wd','scene',0.8)")
             store.connection.execute("UPDATE result_index SET signature='wrong' WHERE kind='scene'")
-    report = db.check_database(path, 'scope')
+    report = check_database(path, 'scope')
     errors = {issue['code']: issue['count'] for issue in report['errors']}
     assert errors['result_threshold_invalid'] == 1
     assert errors['result_threshold_orphan'] == 1
@@ -329,6 +331,6 @@ def test_v8_missing_threshold_table_is_a_db_check_error(tmp_path):
         rethreshold(store, .8)
     with sqlite3.connect(path) as connection:
         connection.execute('DROP TABLE result_thresholds')
-    report = db.check_database(path, 'scope')
+    report = check_database(path, 'scope')
     assert not report['ok']
     assert any(issue['code'] == 'missing_state_tables' for issue in report['errors'])

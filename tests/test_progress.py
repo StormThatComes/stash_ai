@@ -332,7 +332,7 @@ def test_v18_database_is_migrated_once_without_losing_sources(tmp_path,monkeypat
     with merge_store.StateStore(path, 'fixture') as state:
         state.put('1', 'wd', {'scene': segment})
         state.connection.execute('PRAGMA user_version=18')
-    from stash_ai.db import update_database
+    from stash_ai.db.update import update_database
     update_database(path)
     with merge_store.StateStore(path,"fixture") as state:
         assert state.connection.execute("PRAGMA user_version").fetchone()== (LATEST_SCHEMA_VERSION,)

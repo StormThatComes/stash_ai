@@ -39,7 +39,7 @@ def test_failed_initialization_closes_connection_and_releases_writer(tmp_path, m
     with pytest.raises(sqlite3.ProgrammingError, match='closed'):
         connections[0].execute('SELECT 1')
     if stage == 'feature_schema':
-        from stash_ai.db import update_database
+        from stash_ai.db.update import update_database
         update_database(path)
     # Reopening verifies that failure on either side of the ownership boundary
     # released the advisory lock, not only the SQLite connection.

@@ -364,7 +364,7 @@ def test_old_completed_cache_requires_database_update_then_reinference(pipeline,
         inject_records(state, '1', 'wd', {'scene': segment})
     assert app.main(p.args) == 1 and len(p.loaded) == 1
     import sqlite3
-    from stash_ai.db import update_database
+    from stash_ai.db.update import update_database
     with sqlite3.connect(p.path) as connection:
         connection.execute('PRAGMA user_version=18')
     update_database(p.path)

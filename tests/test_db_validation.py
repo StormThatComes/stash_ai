@@ -5,7 +5,7 @@ import sqlite3
 import pytest
 from tqdm import tqdm
 
-from stash_ai import db as stash_db
+from stash_ai.db.checks import check_database, format_check_report
 from stash_ai.db.validation import results
 from tests.test_db import seed
 
@@ -20,11 +20,11 @@ def test_historical_schema_reports_upgrade_without_decoding(tmp_path, monkeypatc
     def forbidden(*args, **kwargs):
         raise AssertionError('Historical payloads require migration first.')
     monkeypatch.setattr(results, 'check_results_and_index', forbidden)
-    report = stash_db.check_database(path, 'scope')
+    report = check_database(path, 'scope')
     assert not report['ok'] and report['integrity_check_ok']
     assert report['results_checked'] == 0
     assert [issue['code'] for issue in report['errors']] == ['schema_upgrade_required']
-    assert '--db-update' in stash_db.format_check_report(report)
+    assert '--db-update' in format_check_report(report)
     assert path.read_bytes() == before
 
 
@@ -44,10 +44,10 @@ def test_checks_share_snapshot_when_another_writer_commits(tmp_path, monkeypatch
         return original(connection, tables, errors, progress)
 
     monkeypatch.setattr(results, 'check_results_and_index', concurrent_update)
-    report = stash_db.check_database(path, 'scope')
+    report = check_database(path, 'scope')
     assert report['ok'] and report['results_checked'] == 2
     monkeypatch.setattr(results, 'check_results_and_index', original)
-    later = stash_db.check_database(path, 'scope')
+    later = check_database(path, 'scope')
     assert {issue['code']: issue['count'] for issue in later['errors']} == {'result_index_mismatch': 2}
 
 
@@ -62,7 +62,7 @@ def test_db_progress_counts_all_work_and_closes(tmp_path, monkeypatch):
             bars.append(self)
 
     monkeypatch.setattr('tqdm.tqdm', Progress)
-    report = stash_db.check_database(path, 'scope', show_progress=True)
+    report = check_database(path, 'scope', show_progress=True)
     assert report['ok']
     assert len(bars) == 1
     assert bars[0].n == bars[0].total == 8
@@ -101,7 +101,7 @@ def test_current_schema_shape_preflight_is_read_only(tmp_path, damage, code):
     with sqlite3.connect(path) as db:
         db.execute(damage)
     before = path.read_bytes()
-    report = stash_db.check_database(path, 'scope')
+    report = check_database(path, 'scope')
     assert not report['ok'] and report['results_checked'] == 0
     assert [issue['code'] for issue in report['errors']] == [code]
     with pytest.raises(ValueError, match='Incomplete state DB'):

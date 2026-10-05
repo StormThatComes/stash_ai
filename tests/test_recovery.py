@@ -218,7 +218,7 @@ def test_old_pending_cleanup_state_can_be_abandoned_without_losing_earlier_masks
     # These are precisely the recovery data available in pre-abandon releases.
     with sqlite3.connect(state_path(tmp_path)) as db:
         db.execute('DROP TABLE recovery_publications'); db.execute('DROP TABLE recovery_cleanups')
-    from stash_ai.db import update_database
+    from stash_ai.db.update import update_database
     update_database(state_path(tmp_path))
     with state(tmp_path, allow_cleanup=True) as store:
         recovery.abandon(store, lambda _: None)

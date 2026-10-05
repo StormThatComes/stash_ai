@@ -340,7 +340,7 @@ def test_legacy_interrupted_global_cleanup_can_resume_using_sql(tmp_path, monkey
             store.connection.execute('INSERT INTO cleanup_state VALUES (?,?,?,?)',
                                      (store.scope, 1, state_codec.encode(masks), fingerprint))
             store.connection.execute('PRAGMA user_version=18')
-    from stash_ai.db import update_database
+    from stash_ai.db.update import update_database
     update_database(path)
     before = deepcopy((stash.scenes, stash.tags)), path.read_bytes(), path.stat().st_mtime_ns
     install(monkeypatch, stash)

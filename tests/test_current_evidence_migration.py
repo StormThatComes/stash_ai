@@ -6,7 +6,8 @@ import zlib
 
 import pytest
 
-from stash_ai import db
+from stash_ai.db.checks import check_database
+from stash_ai.db.update import update_database
 from stash_ai.evidence import formats
 from stash_ai.evidence.identity import marker_segment_signature
 from stash_ai.storage.archive import records as archived_records
@@ -59,9 +60,9 @@ def test_upgrade_retires_old_results_across_scopes_and_preserves_exact_pins(tmp_
         snapshots = connection.execute('SELECT * FROM snapshots').fetchall()
         recovery = connection.execute('SELECT * FROM recovery_publications').fetchall()
     before = path.read_bytes()
-    assert db.update_database(path, dry_run=True) == (18, 21)
+    assert update_database(path, dry_run=True) == (18, 21)
     assert path.read_bytes() == before
-    assert db.update_database(path) == (18, 21)
+    assert update_database(path) == (18, 21)
     for scope in ('first', 'second'):
         with StateStore(path, scope) as store:
             assert 'wd' not in store.records('1', 'scene')
@@ -76,11 +77,11 @@ def test_upgrade_retires_old_results_across_scopes_and_preserves_exact_pins(tmp_
             assert list(store.connection.execute('SELECT model FROM checkpoints WHERE scope=?', (scope,))) == [('dtq',)]
             for table in ('checkpoint_frames', 'checkpoint_analysis'):
                 assert not store.connection.execute('SELECT 1 FROM ' + table + ' WHERE scope=?', (scope,)).fetchone()
-        assert db.check_database(path, scope)['ok']
+        assert check_database(path, scope)['ok']
     with sqlite3.connect(path) as connection:
         assert connection.execute('SELECT * FROM snapshots').fetchall() == snapshots
         assert connection.execute('SELECT * FROM recovery_publications').fetchall() == recovery
-    assert db.update_database(path) == (LATEST_SCHEMA_VERSION, LATEST_SCHEMA_VERSION)
+    assert update_database(path) == (LATEST_SCHEMA_VERSION, LATEST_SCHEMA_VERSION)
 
 
 def test_retirement_and_archive_roll_back_together(tmp_path, monkeypatch):
@@ -101,7 +102,7 @@ def test_retirement_and_archive_roll_back_together(tmp_path, monkeypatch):
 
     monkeypatch.setattr(current_evidence_migration, 'retain', fail)
     with pytest.raises(RuntimeError, match='interrupted migration'):
-        db.update_database(path)
+        update_database(path)
     with sqlite3.connect(path) as connection:
         assert connection.execute('PRAGMA user_version').fetchone() == (18,)
         assert connection.execute('SELECT * FROM results').fetchall() == before
@@ -154,7 +155,7 @@ def test_upgrade_does_not_discard_unknown_future_evidence(tmp_path):
         connection.execute('PRAGMA user_version=18')
         before = connection.execute('SELECT * FROM results').fetchall()
     with pytest.raises(ValueError, match='Unsupported archived inference'):
-        db.update_database(path)
+        update_database(path)
     with sqlite3.connect(path) as connection:
         assert connection.execute('SELECT * FROM results').fetchall() == before
         assert connection.execute('PRAGMA user_version').fetchone() == (18,)
@@ -183,7 +184,7 @@ def test_upgrade_then_reinference_keeps_publication_ownership(pipeline, monkeypa
     published = deepcopy(p.stash.scene)
     with sqlite3.connect(p.path) as connection:
         connection.execute('PRAGMA user_version=18')
-    db.update_database(p.path)
+    update_database(p.path)
     assert p.stash.scene == published
     assert app.main(p.args) == 0
     assert len(p.loaded) == 2
@@ -193,7 +194,7 @@ def test_upgrade_then_reinference_keeps_publication_ownership(pipeline, monkeypa
         assert all(formats.current(value['meta']) for kind in ('scene', 'markers')
                    for value in store.records('1', kind).values())
         assert not store.connection.execute('SELECT 1 FROM refresh_requests').fetchone()
-    assert db.check_database(p.path, scope_for(app.STASH_URL))['ok']
+    assert check_database(p.path, scope_for(app.STASH_URL))['ok']
 
 
 @pytest.mark.parametrize('location', ['published', 'pending', 'recovery'])
@@ -218,7 +219,7 @@ def test_v18_retires_v4_with_scalar_threshold_and_keeps_exact_publication_pins(t
                                  ('scope', '1', 'wd', 'markers', .6))
         store.connection.execute('PRAGMA user_version=18')
         store.connection.commit()
-    assert db.update_database(path) == (18, LATEST_SCHEMA_VERSION)
+    assert update_database(path) == (18, LATEST_SCHEMA_VERSION)
     with StateStore(path, 'scope') as store:
         assert store.records('1', 'markers') == store.records('1', 'scene') == {}
         archived = archived_records(store, '1', 'markers')['wd']
@@ -233,4 +234,4 @@ def test_v18_retires_v4_with_scalar_threshold_and_keeps_exact_publication_pins(t
             result = store.snapshot('1', 'markers')[location == 'pending']
         assert result['owned_ids'] == ['native-marker']
         assert result['contributions'][0]['requires_rebase']
-    assert db.check_database(path, 'scope')['ok']
+    assert check_database(path, 'scope')['ok']

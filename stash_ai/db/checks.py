@@ -33,7 +33,7 @@ CHECK_MESSAGES = {
     "result_metadata_invalid": "Derived result validation metadata is malformed or uses an unsupported format.",
     "result_metadata_mismatch": "Derived result validation metadata disagrees with its evidence payload.",
     "result_metadata_orphan": "Derived result validation metadata has no matching saved result.",
-    "result_payload_invalid": "Saved result payloads cannot be decoded or contain invalid segments, evidence rows, or values.",
+    "result_payload_invalid": "Saved result payloads cannot be decoded or contain an invalid inference record, evidence rows, or values.",
     "state_payload_invalid": "Non-result application state contains an unreadable or structurally invalid compressed payload.",
     "checkpoint_orphan_frames": "Checkpoint frame chunks have no parent checkpoint.",
     "checkpoint_orphan_analysis": "Checkpoint analysis rows have no parent checkpoint.",
@@ -209,4 +209,3 @@ def format_check_report(report):
     if report["ok"] and not report["warnings"]:
         lines.append("No logical consistency problems found.")
     return "\n".join(lines)
-

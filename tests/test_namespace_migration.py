@@ -6,7 +6,7 @@ import sqlite3
 
 import pytest
 
-from stash_ai import db
+from stash_ai.db.checks import check_database
 from stash_ai.evidence.labels import AI
 from stash_ai.models import WD, JOYTAG
 from stash_ai.storage.store import StateStore, scope_for
@@ -53,7 +53,7 @@ def test_transition_infers_fresh_preserves_manual_data_and_marker_ids_and_is_one
     assert len(p.loaded) == 1 and not p.stash.writes and p.stash.scene == before
     assert app.main([*p.args, '--merge-only']) == 0
     assert len(p.loaded) == 1
-    assert db.check_database(p.path, scope_for(app.STASH_URL))['ok']
+    assert check_database(p.path, scope_for(app.STASH_URL))['ok']
 
 
 def test_ordinary_cli_does_not_import_migration_tools(pipeline, monkeypatch):

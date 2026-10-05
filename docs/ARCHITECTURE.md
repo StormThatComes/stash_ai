@@ -210,7 +210,7 @@ Obsługa samodzielnych komend bazy znajduje się w pakiecie `stash_ai/db/`:
 
 | Moduł | Odpowiedzialność |
 | --- | --- |
-| `stash_ai/db/__init__.py` | Dotychczasowe importy `stash_ai.db` i dispatch komend `--db-report`, `--db-check`, `--db-update`, `--db-compact`. |
+| `stash_ai/commands/database.py` | Dispatch komend `--db-report`, `--db-check`, `--db-update`, `--db-compact` przed inicjalizacją runtime. Funkcje utrzymania bazy są importowane bezpośrednio z modułów poniżej. |
 | `stash_ai/db/update.py` | Jawna, lokalna aktualizacja całej bazy do najnowszego schematu przez istniejące migracje stanu; odczytowy preflight i dry-run. |
 | `stash_ai/db/inspection.py` | Odczyt stanu i zajętości bazy oraz formatowanie raportu agregatów. |
 | `stash_ai/db/checks.py` | Koordynacja głębokiej kontroli bazy w jednej transakcji odczytu oraz format raportu błędów i ostrzeżeń. |
