@@ -30,7 +30,7 @@ def reconcile_scene_snapshot(scene, candidates):
     # supply newly attached labels; never combine different inference runs.
     labels = set()
     for snapshot in candidates:
-        selected = [i for i in snapshot.get('contributions', [])
+        selected = [i for i in snapshot['contributions']
                     if AI.prefix + i['tag'] in current_names and i['tag'] not in labels]
         for item in selected:
             proofs.append(item)
@@ -42,7 +42,7 @@ def reconcile_scene_snapshot(scene, candidates):
 def reconcile_marker_snapshot(scene, candidates):
     """Reconstruct surviving marker proof without writes or inference."""
     proofs = ObservedContributions()
-    versions = [union_intervals(s.get('contributions', []), borrow=True) for s in candidates]
+    versions = [union_intervals(s['contributions'], borrow=True) for s in candidates]
     for marker in scene.get('scene_markers', []):
         if not marker_ops.owned_marker(marker, AI):
             continue
@@ -93,3 +93,4 @@ def reconcile(store, scene, kind, published):
     # Dry-run writes only its temporary overlay; no Stash mutations happen here.
     store.publish(str(scene['id']), {kind: result})
     return result, True
+

@@ -169,12 +169,12 @@ def test_cleanup_generation_invalidates_only_its_scope(tmp_path):
 
 def test_commit_promotes_exact_pending_bytes_and_is_atomic(tmp_path, monkeypatch):
     with merge_store.StateStore(tmp_path/'state.db', 's') as state:
-        state.publish('1', {'scene': {'old': True}})
-        state.prepare('1', {'scene': {'new': True}})
+        state.publish('1', {'scene': {'old': True, 'contributions': []}})
+        state.prepare('1', {'scene': {'new': True, 'contributions': []}})
         pending = state.connection.execute('SELECT pending FROM snapshots').fetchone()[0]
         with pytest.raises(RuntimeError, match='intent disappeared'):
             state.commit_prepared('1', ['scene', 'markers'])
-        assert state.snapshot('1', 'scene') == ({'old': True}, {'new': True})
+        assert state.snapshot('1', 'scene') == ({'old': True, 'contributions': []}, {'new': True, 'contributions': []})
         monkeypatch.setattr(state, 'pack', fail)
         state.commit_prepared('1', ['scene'])
         assert state.connection.execute('SELECT published,pending FROM snapshots').fetchone() == (pending, None)
@@ -184,7 +184,7 @@ def test_preview_reads_and_shadows_without_copying_large_unrelated_blobs(tmp_pat
     path = tmp_path/'state.db'
     with merge_store.StateStore(path, 's') as state:
         state.put('1', 'wd', {'scene': dict(mode='scene', meta={}, items=[dict(tag='old', score=.9)])})
-        state.publish('1', {'scene': {'old': True}})
+        state.publish('1', {'scene': {'old': True, 'contributions': []}})
         with state.connection:
             state.connection.execute("INSERT INTO results VALUES ('s','unrelated','wd','scene',zeroblob(8000000))")
     before = hashlib.sha256(path.read_bytes()).digest()
@@ -194,10 +194,10 @@ def test_preview_reads_and_shadows_without_copying_large_unrelated_blobs(tmp_pat
         assert preview.records('1', 'scene')['wd'][0]['items'] == [dict(tag='old', score=.9)]
         preview.put('1', 'wd', {'scene': dict(mode='scene', meta={}, items=[dict(tag='new', score=.8)])})
         assert preview.records('1', 'scene')['wd'][0]['items'] == [dict(tag='new', score=.8)]
-        preview.prepare('1', {'scene': {'new': True}})
-        assert preview.snapshot('1', 'scene') == ({'old': True}, {'new': True})
+        preview.prepare('1', {'scene': {'new': True, 'contributions': []}})
+        assert preview.snapshot('1', 'scene') == ({'old': True, 'contributions': []}, {'new': True, 'contributions': []})
         preview.commit_prepared('1', ['scene'])
-        assert preview.snapshot('1', 'scene') == ({'new': True}, None)
+        assert preview.snapshot('1', 'scene') == ({'new': True, 'contributions': []}, None)
         assert preview.connection.execute('SELECT COUNT(*) FROM main.results').fetchone() == (1,)
     assert hashlib.sha256(path.read_bytes()).digest() == before
 
@@ -330,6 +330,7 @@ def test_detached_records_cannot_reuse_a_stale_segment_digest(tmp_path):
         borrowed = state.records('1', 'markers', borrow=True)['wd'][0]
         original = performance_segments.segment_digest(borrowed)
         detached = state.records('1', 'markers')['wd'][0]
-        detached['items'].append({'new': True})
+        detached['items'].append({'new': True, 'contributions': []})
         assert performance_segments.segment_digest(detached) != original
         assert performance_segments.segment_digest(borrowed) == original and borrowed['items'] == []
+

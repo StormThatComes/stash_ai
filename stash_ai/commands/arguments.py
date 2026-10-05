@@ -94,6 +94,8 @@ def build_parser(app) -> argparse.ArgumentParser:
     modes.add_argument("--merge-only", action="store_true", help="Merge saved evidence without models/inference; import source-prefixed outputs first with --import-legacy-only.")
     modes.add_argument("--import-legacy-only", action="store_true",
                        help="Capture source-prefixed Stash outputs in the state DB without models, media or Stash writes. Honors --dry-run and --scene-id.")
+    modes.add_argument("--migrate-point-markers-only", action="store_true",
+                       help="Convert historical owned AI points to native ranges using saved publication proofs; preserves occurrence points and manual tags. Honors --dry-run.")
     modes.add_argument("--sync-marker-groups-only", action="store_true",
                        help="Repair m:<core> / m:<core>:occurance groups on existing owned ai: markers; no inference or time changes.")
     modes.add_argument("--explain-tag", metavar="TAG", help="Show saved sources, scores and intervals for a raw/ai: tag; requires --scene-id; no Stash access.")
@@ -124,3 +126,4 @@ def build_parser(app) -> argparse.ArgumentParser:
 def parse_args(app, argv: list[str] | None = None) -> argparse.Namespace:
     parser = build_parser(app)
     return validate_args(app, parser, parser.parse_args(argv))
+

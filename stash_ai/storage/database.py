@@ -7,7 +7,7 @@ from pathlib import Path
 import sqlite3
 
 
-from stash_ai.storage.schema import APPLICATION_ID, LATEST_SCHEMA_VERSION, STATE_TABLES
+from stash_ai.storage.schema import APPLICATION_ID, LATEST_SCHEMA_VERSION, shape_issues
 
 
 class StateDatabase(AbstractContextManager):
@@ -81,13 +81,16 @@ class StateDatabase(AbstractContextManager):
             raise ValueError("Not a supported stash-taggers state DB; choose another --state-db.")
         if tables and version != LATEST_SCHEMA_VERSION and not self.migration:
             raise ValueError(f'State DB schema v{version} requires --db-update before use (including --dry-run).')
-        if tables and not self.migration and STATE_TABLES - {name for name, in tables}:
+        if tables and not self.migration and shape_issues(db):
             raise ValueError('Incomplete state DB schema; run --db-update before use.')
         return version, not tables
 
     def _initialize_schema(self):
         db = self.connection
         self.version, self.fresh = self._validate(db)
+        db.execute('PRAGMA cache_size=-65536')
+        if not self.fresh and not self.migration:
+            return
         db.executescript(f"""
             PRAGMA application_id={APPLICATION_ID};
             CREATE TABLE IF NOT EXISTS results (
@@ -138,3 +141,4 @@ class StateDatabase(AbstractContextManager):
 
     def __exit__(self, *args):
         self.close()
+

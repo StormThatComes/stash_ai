@@ -9,37 +9,16 @@ from ..payloads import valid_result_segments
 from .common import decoded_payload, tick
 
 
-def historical_indexed_signature(segment):
-    """Inspect old inline policies without admitting them into runtime results."""
-    from stash_ai.evidence.identity import OVERRIDE, SCENE_OVERRIDE
-    from stash_ai.signatures import digest
-    signature = segment['meta'].get('inference_signature')
-    if SCENE_OVERRIDE in segment:
-        values = {'scene_threshold': segment[SCENE_OVERRIDE]}
-        if OVERRIDE in segment:
-            values['marker_threshold'] = segment[OVERRIDE]
-        return digest([signature, values])
-    return digest([signature, segment[OVERRIDE]]) if OVERRIDE in segment else signature
-
-
 def check_results_and_index(db, tables, errors, progress=None):
     if "results" not in tables:
         return 0
 
     indexed_signature = None
     checked = 0
-    canonical_results = db.execute('PRAGMA user_version').fetchone()[0] >= 10
-    index_columns = 'i.inference,i.populated,i.signature' if 'result_index' in tables else 'NULL,NULL,NULL'
-    canonical = 'thresholds' in {row[1] for row in db.execute('PRAGMA table_info(result_thresholds)')}
-    threshold_column = ('t.thresholds' if canonical else 't.threshold') if 'result_thresholds' in tables else 'NULL'
-    metadata_columns = 'm.format,m.data' if 'result_metadata' in tables else 'NULL,NULL'
-    query = f'SELECT r.kind,r.data,{index_columns},{threshold_column},{metadata_columns} FROM results AS r'
-    if 'result_index' in tables:
-        query += ' LEFT JOIN result_index AS i USING(scope,scene,model,kind)'
-    if 'result_thresholds' in tables:
-        query += ' LEFT JOIN result_thresholds AS t USING(scope,scene,model,kind)'
-    if 'result_metadata' in tables:
-        query += ' LEFT JOIN result_metadata AS m USING(scope,scene,model,kind)'
+    query = ('SELECT r.kind,r.data,i.inference,i.populated,i.signature,t.thresholds,m.format,m.data '
+             'FROM results AS r LEFT JOIN result_index AS i USING(scope,scene,model,kind) '
+             'LEFT JOIN result_thresholds AS t USING(scope,scene,model,kind) '
+             'LEFT JOIN result_metadata AS m USING(scope,scene,model,kind)')
     for kind, blob, inference, populated, signature, threshold, metadata_format, metadata in db.execute(query):
         checked += 1
         tick(progress)
@@ -47,10 +26,12 @@ def check_results_and_index(db, tables, errors, progress=None):
             segments = decoded_payload(blob, list)
             if not valid_result_segments(segments, kind):
                 raise ValueError("Invalid result segment.")
+            from stash_ai.storage.archive import validate_active
+            validate_active(segments)
             from stash_ai.evidence.formats import validate_current
             for segment in segments:
                 validate_current(segment)
-            if canonical_results and any(
+            if any(
                     {'scene_threshold_override', 'marker_threshold_override', 'refinement'} & segment.keys()
                     for segment in segments):
                 raise ValueError('Noncanonical result segment.')
@@ -64,17 +45,12 @@ def check_results_and_index(db, tables, errors, progress=None):
                 except (TypeError, ValueError):
                     errors['result_metadata_invalid'] += 1
             if threshold is not None:
-                from stash_ai.storage.thresholds import overlay, encode
-                from stash_ai.evidence.thresholds import _score
+                from stash_ai.storage.thresholds import decode, overlay
                 try:
-                    if canonical:
-                        from stash_ai.storage.thresholds import decode
-                        values = decode(threshold)
-                        if len(values) != len(segments):
-                            errors['result_threshold_invalid'] += 1
-                        overlay(segments, kind, threshold)
-                    elif _score(threshold):
-                        overlay(segments, kind, encode([threshold] * len(segments)))
+                    values = decode(threshold)
+                    if len(values) != len(segments):
+                        errors['result_threshold_invalid'] += 1
+                    overlay(segments, kind, threshold)
                 except (TypeError, ValueError):
                     pass  # check_thresholds reports invalid policy separately.
             current = next(
@@ -88,8 +64,7 @@ def check_results_and_index(db, tables, errors, progress=None):
                 if indexed_signature is None:
                     from stash_ai.evidence.thresholds import indexed_signature as signature_for
                     indexed_signature = signature_for
-                expected_signature = (indexed_signature(current) if canonical_results
-                                      else historical_indexed_signature(current))
+                expected_signature = indexed_signature(current)
             else:
                 expected_signature = None
         except (KeyError, TypeError, ValueError, UnicodeDecodeError, json.JSONDecodeError, zlib.error):
@@ -124,20 +99,12 @@ def check_results_and_index(db, tables, errors, progress=None):
 def check_thresholds(db, tables, errors):
     if 'result_thresholds' not in tables:
         return
-    canonical = 'thresholds' in {row[1] for row in db.execute('PRAGMA table_info(result_thresholds)')}
-    if canonical:
-        from stash_ai.storage.thresholds import decode
-        for data, in db.execute('SELECT thresholds FROM result_thresholds'):
-            try:
-                decode(data)
-            except (TypeError, ValueError):
-                errors['result_threshold_invalid'] += 1
-    else:
-        errors['result_threshold_invalid'] += db.execute('''
-            SELECT COUNT(*) FROM result_thresholds
-            WHERE threshold IS NULL OR typeof(threshold) NOT IN ('integer','real')
-                OR threshold < 0 OR threshold > 1
-        ''').fetchone()[0]
+    from stash_ai.storage.thresholds import decode
+    for data, in db.execute('SELECT thresholds FROM result_thresholds'):
+        try:
+            decode(data)
+        except (TypeError, ValueError):
+            errors['result_threshold_invalid'] += 1
     if 'results' in tables:
         errors['result_threshold_orphan'] += db.execute('''
             SELECT COUNT(*) FROM result_thresholds AS t WHERE NOT EXISTS (

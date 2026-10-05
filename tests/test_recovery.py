@@ -63,7 +63,7 @@ def test_standalone_abandons_without_stash_models_or_source_changes(tmp_path, mo
     assert app.main(command(tmp_path)) == 0
     with state(tmp_path) as store:
         assert not store.cleanup_pending and not store.has_pending_publications()
-        assert store.connection.execute('PRAGMA user_version').fetchone() == (12,)
+        assert store.connection.execute('PRAGMA user_version').fetchone() == (14,)
         assert recovery.publications(store, '1', 'scene')[0]['owned_ids'] == ['999']
         assert store.snapshot('1', 'markers')[0]['recovery_required']
         assert any(i['tag'] == 'abc' for i in store.snapshot('1', 'markers')[0]['contributions'])
@@ -216,7 +216,7 @@ def test_old_pending_cleanup_state_can_be_abandoned_without_losing_earlier_masks
         assert [i['tag'] for i in snapshot['contributions']] == ['new']
         assert snapshot['owned_ids'] == ['2'] and snapshot['recovery_required']
         cleanup.begin(store, 'next', {'new'}, set(), ['2'], kinds=('scene',))
-        assert store.connection.execute('PRAGMA user_version').fetchone() == (12,)
+        assert store.connection.execute('PRAGMA user_version').fetchone() == (14,)
         assert not store.snapshot('1', 'scene')[0]['contributions']
 
 
@@ -326,4 +326,5 @@ def test_marker_title_selects_observed_model_votes_before_source_cleanup(tmp_pat
         cores = empty_policies(); cores['wd'] = frozenset({'core'})
         kept = cleanup_evidence.cleanup_support(app, store, '1', observed['contributions'], {'wd'}, cores, empty_policies())
         assert {s['source'] for s in kept} == ({'oppai'} if applied else set())
+
 

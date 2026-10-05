@@ -1,14 +1,14 @@
 # JoyTag tag hierarchy. Keep this file beside stash_ai.py.
 # All 5,813 raw model labels are assigned explicitly below; top_tags.txt stays unchanged.
 # Example native Stash chain:
-#   jt:category:JoyTag -> jt:category:Appearance -> jt:category:Appearance / Hair
-#   -> jt:category:Appearance / Hair / Color -> jt:blue_hair
+#   ai:category:AI -> ai:category:Appearance -> ai:category:Appearance / Hair
+#   -> ai:category:Appearance / Hair / Color -> ai:blue_hair
 # Move a label between groups to change its generated parent; repeat it in another
 # group for multiple parents. Keep every raw label exactly as written, with quotes.
 # Category paths use / separators. They become real parent tags, not leaf renames.
 # Parents outside this script's category namespace/ownership are preserved.
 # Synchronization replaces hierarchy-owned parents; manual parents remain.
-# Keep root/category_prefix stable after first use. Old category objects are not deleted.
+# Categories use the shared ai: namespace. Old category objects are not deleted.
 # Parent categories are not attached directly to scenes/markers: enable Include sub-tags
 # when filtering in Stash. The marker ownership tag is not part of this vocabulary.
 # Labels under Names and references identify depicted/source content, not verified
@@ -18,7 +18,7 @@
 # Apply existing-tag migration: python stash_ai.py --sync-hierarchy-only
 # Import every label: python stash_ai.py --sync-hierarchy-only --create-all-tags
 # Normal inference creates/syncs hierarchy lazily for the tags it uses.
-"version": 1
+"version": 2
 "source":
   "model": "fancyfeast/joytag"
   "vocabulary_url": "https://huggingface.co/fancyfeast/joytag/blob/main/top_tags.txt"
@@ -26,8 +26,6 @@
   "vocabulary_sha256": "ad82c7dd5746bffdb3de832c44dc348af74cbc240a0c17960d068b4eccb8b8f3"
   "category_reference": "https://huggingface.co/SmilingWolf/wd-vit-tagger-v3/blob/main/selected_tags.csv"
   "note": "Proposed organizational taxonomy; editable, not model-learned tag implications."
-"root": "JoyTag"
-"category_prefix": "jt:category:"
 "groups":
   "Accessories / Eyewear and masks":
   - "adjusting_eyewear"

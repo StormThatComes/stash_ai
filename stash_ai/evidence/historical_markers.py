@@ -54,15 +54,10 @@ class HistoricalPolicy(TemporalPolicy):
 
 def frozen_policy(options):
     """Decode the historical discriminator at the snapshot boundary."""
-    values = dict(options['policy'])
-    enabled = values.pop('enabled', True)
-    if type(enabled) is not bool:
-        raise ValueError('Invalid historical temporal discriminator.')
-    algorithm = options.get('algorithm', 'temporal' if enabled else 'historical')
-    if algorithm not in ('temporal', 'historical') or ('enabled' in options['policy'] and
-            enabled != (algorithm == 'temporal')):
+    algorithm = options['algorithm']
+    if algorithm not in ('temporal', 'historical'):
         raise ValueError('Invalid frozen publication algorithm.')
-    policy = TemporalPolicy.from_snapshot(values)
+    policy = TemporalPolicy.from_snapshot(options['policy'])
     if algorithm == 'temporal':
         return policy
     return HistoricalPolicy(**{**asdict(policy),

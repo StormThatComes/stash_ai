@@ -91,7 +91,7 @@ def test_metadata_apply_matches_full_payload_index_and_preserves_history(tmp_pat
         assert blobs(store) == before
         assert {kind: store.records('1', kind) for kind in expected_records} == expected_records
         for row in index_rows(store):
-            assert row[4:6] == (1, int(any(history_populated)))
+            assert row[4:6] == (1, int(history_populated[-1]))
             assert progress.completed(store, '1', 'wd', [row[3]], row[6])
     if dry_run:
         assert paths[1].read_bytes() == source

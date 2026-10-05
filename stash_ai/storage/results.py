@@ -26,6 +26,8 @@ class ResultStore:
     def _normalize_segments(segments, kind, threshold):
         """Apply separate publication policy to canonical evidence records."""
         from stash_ai.storage.segments import StoredSegment
+        from stash_ai.storage.archive import validate_active
+        validate_active(segments)
         overlay(segments, kind, threshold)
         from stash_ai.evidence.formats import validate_current
         for segment in segments:
@@ -165,6 +167,11 @@ class ResultStore:
         if any('refinement' in segment for segment in segments):
             raise ValueError('Retired refinement evidence is not supported; run --db-update for saved results.')
         store = self.store
+        from stash_ai.storage.archive import active_segments, retain
+        previous = self.model_records(scene, kind, model, borrow=True)
+        active = active_segments(segments)
+        retain(store, scene, model, kind, [*previous, *segments], active)
+        segments = active
         from stash_ai.storage.preview import delete
         from stash_ai.storage.progress import index_result
         store.cache.discard(('records', str(scene), kind))
