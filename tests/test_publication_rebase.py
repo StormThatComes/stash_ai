@@ -12,7 +12,7 @@ from stash_ai.storage.store import StateStore
 from stash_ai.storage.codec import encode
 from stash_ai.storage.snapshots import compact, require_rebased
 from stash_ai.publication.recovery import reconcile_marker_snapshot
-from stash_ai.commands.point_migration import plan
+from stash_ai.tools.point_migration import plan
 from tests.helpers.runtime import runtime as app
 from tests.helpers.evidence import span, segment
 from tests.helpers.stash import Stash
@@ -47,9 +47,9 @@ def test_offline_rebase_keeps_geometry_ownership_and_retry_proofs_across_scopes(
                                    (scope, '1', 'markers', 'lost-response', packed))
         connection.execute('PRAGMA user_version=16')
     before = path.read_bytes()
-    assert db.update_database(path, dry_run=True) == (16, 19)
+    assert db.update_database(path, dry_run=True) == (16, 20)
     assert path.read_bytes() == before
-    assert db.update_database(path) == (16, 19)
+    assert db.update_database(path) == (16, 20)
     for scope in ('scope-a', 'scope-b'):
         with StateStore(path, scope) as state:
             from stash_ai.storage.recovery import publications
@@ -72,7 +72,7 @@ def test_offline_rebase_keeps_geometry_ownership_and_retry_proofs_across_scopes(
     with sqlite3.connect(path) as connection:
         migrated = [connection.execute('SELECT * FROM ' + table).fetchall()
                     for table in ('snapshots', 'recovery_publications')]
-    assert db.update_database(path) == (19, 19)
+    assert db.update_database(path) == (20, 20)
     with sqlite3.connect(path) as connection:
         assert [connection.execute('SELECT * FROM ' + table).fetchall()
                 for table in ('snapshots', 'recovery_publications')] == migrated

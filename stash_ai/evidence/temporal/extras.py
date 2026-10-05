@@ -108,6 +108,6 @@ def merged_extras(component):
                     statistics[tag]["source_evidence"][source] = dict(
                         score=max(record["score"] for record in records),
                         support_seconds=sum(b-a for a,b in own_ranges), hits_at_least=len(own_times),
-                        signatures=sorted({signature for record in records for signature in record["signatures"]}))
+                        signature=records[0]["signature"])
     component["extra_tags"] = sorted(accepted - {component["tag"]})
     component["extra_evidence"] = statistics

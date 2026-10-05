@@ -31,6 +31,53 @@ from tests.helpers.cleanup_sql import SQLStash
 pytestmark = pytest.mark.usefixtures("reset_progress")
 
 
+@pytest.mark.parametrize('strategy', ['sql', 'scenes'])
+def test_cleanup_and_exclusion_pruning_preserve_retired_namespaces(tmp_path, monkeypatch, strategy):
+    from stash_ai.tools.legacy_namespaces import NAMESPACES
+    stash = SQLStash()
+    for namespace in NAMESPACES.values():
+        tag = stash.tag(namespace.prefix + 'blocked')
+        stash.scene['tags'].append(tag)
+        stash.marker(namespace, 'blocked', str(len(stash.scene['scene_markers']) + 1))
+    legacy = deepcopy((stash.scene, stash.tags))
+    stash.scene['tags'].append(stash.tag('ai:blocked'))
+    stash.marker(merge_labels.AI, 'blocked', '99', manual=True)
+    install(monkeypatch, stash)
+    assert app.main([*args(tmp_path, ['blocked']), '--cleanup-strategy', strategy]) == 0
+    assert stash.scene == legacy[0]
+    assert all(stash.tags[name] == tag for name, tag in legacy[1].items())
+    assert 'ai:blocked' not in stash.tags
+
+
+@pytest.mark.parametrize('mode,kind,operation', [
+    ('cleanup-markers-only', 'markers', 'CleanupDeleteMarkers'),
+    ('cleanup-scene-tags-only', 'scene', 'CleanupRemoveTags'),
+])
+def test_pending_partial_cleanup_accepts_only_its_matching_historical_fingerprint(tmp_path, monkeypatch, mode, kind, operation):
+    from stash_ai.signatures import digest
+    from stash_ai.models import SOURCES
+    stash = SQLStash()
+    stash.scene['tags'] = [stash.tag('ai:blocked')]
+    stash.marker(merge_labels.AI, 'blocked', '1', manual=True)
+    stash.fail_after = operation
+    install(monkeypatch, stash)
+    command = args(tmp_path, ['blocked'], mode=mode)
+    assert app.main(command) == 1
+    old = {'tags': {source: ['blocked'] for source in SOURCES},
+           'cores': {source: [] for source in SOURCES}, 'marker_blocklist': [], 'output_kinds': [kind]}
+    path = tmp_path/'state.sqlite3'
+    with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL), allow_cleanup=True) as store:
+        assert store.cleanup_pending == digest({key: value for key, value in old.items() if key != 'marker_blocklist'})
+        with store.connection:
+            store.connection.execute('UPDATE cleanup_state SET pending=?', (digest(old),))
+    stash.writes.clear()
+    assert app.main(args(tmp_path, ['different'], mode=mode)) == 1
+    assert not stash.writes
+    assert app.main(args(tmp_path, ['blocked'], mode=mode)) == 0
+    with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL)) as store:
+        assert store.cleanup_pending is None and store.cleanup_generation == 1
+
+
 def args(tmp_path, labels=(), cores=(), by_model=None, mode='cleanup-only'):
     result = options(tmp_path, labels, cores, by_model)
     result[result.index('--cleanup-only')] = '--' + mode
@@ -43,8 +90,8 @@ def test_global_uses_primary_ids_only_and_preserves_manual_cores(tmp_path, monke
     blocked = stash.tag('ai:blocked')
     stash.scene['tags'] = [blocked, stash.tag('human')]
     stash.marker(merge_labels.AI, 'blocked', '1', manual=True)
-    stash.marker(WD, 'core', '2')
-    stash.marker(WD, 'core', '3', manual=True)
+    stash.marker(merge_labels.AI, 'core', '2')
+    stash.marker(merge_labels.AI, 'core', '3', manual=True)
     keep = stash.marker(merge_labels.AI, 'keep', '4')
     keep['tags'].append(blocked)
     stash.images = [{'tags': [blocked]}]
@@ -260,14 +307,14 @@ def test_cleanup_preview_detects_pending_publications_in_readonly_source(tmp_pat
 
 def test_sql_pruning_limits_counters_to_possible_empty_tags(tmp_path, monkeypatch):
     stash = SQLStash()
-    unused, image_tag = stash.tag('wd:unused'), stash.tag('wd:image_only')
+    unused, image_tag = stash.tag('ai:unused'), stash.tag('ai:image_only')
     used = stash.tag('ai:used')
     stash.scene['tags'] = [used]
     stash.images = [{'tags':[image_tag]}]
     install(monkeypatch, stash)
     assert app.main([*args(tmp_path), '--prune-empty-tags']) == 0
-    assert 'wd:unused' not in stash.tags
-    assert 'wd:image_only' in stash.tags and 'ai:used' in stash.tags
+    assert 'ai:unused' not in stash.tags
+    assert 'ai:image_only' in stash.tags and 'ai:used' in stash.tags
     assert any(key == 'unused_candidates' for key, _ in stash.sql_calls)
 
 
@@ -336,7 +383,7 @@ def test_switching_output_scope_during_recovery_is_rejected(tmp_path, monkeypatc
 def test_marker_preview_does_not_double_count_extras_on_deleted_cores(tmp_path, monkeypatch, capsys):
     stash = SQLStash(dry=True)
     blocked = stash.tag('ai:blocked')
-    for source, label, i in [(merge_labels.AI,'blocked','1'), (merge_labels.AI,'keep','2'), (WD,'core','3')]:
+    for source, label, i in [(merge_labels.AI,'blocked','1'), (merge_labels.AI,'keep','2'), (merge_labels.AI,'core','3')]:
         stash.marker(source,label,i)['tags'].append(blocked)
     install(monkeypatch, stash)
     assert app.main([*args(tmp_path,['blocked'],['core'],mode='cleanup-markers-only'),'--dry-run']) == 0

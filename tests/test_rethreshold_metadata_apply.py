@@ -91,8 +91,8 @@ def test_metadata_apply_matches_full_payload_index_and_preserves_history(tmp_pat
         assert blobs(store) == before
         assert {kind: store.records('1', kind) for kind in expected_records} == expected_records
         for row in index_rows(store):
-            assert row[4:6] == (1, int(history_populated[-1]))
-            assert progress.completed(store, '1', 'wd', [row[3]], row[6])
+            assert row[4] == int(history_populated[-1])
+            assert progress.completed(store, '1', 'wd', [row[3]], row[5])
     if dry_run:
         assert paths[1].read_bytes() == source
     assert db.check_database(paths[1], 'scope')['ok']
@@ -111,7 +111,7 @@ def test_small_index_plan_retains_latest_inference_and_all_history_population(tm
     elif history == 'empty_inference_tail':
         saved[-1]['items'] = saved[-1]['frames'] = []
     else:
-        saved[-1][scene_cache_identity.SCENE_OVERRIDE] = .8
+        saved[-1][scene_cache_identity.PUBLICATION_THRESHOLD] = .8
     with StateStore(tmp_path/'state.sqlite3', 'scope') as store:
         if saved[-1]['meta']['origin'] != 'inference':
             with pytest.raises(ValueError, match='Active results require current inference'):

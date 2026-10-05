@@ -59,8 +59,9 @@ def validate_labels(labels: list[str], source: models.ModelSource) -> None:
     if any(not isinstance(label, str) or not label or label != label.strip() or "\n" in label or "\r" in label
            for label in labels):
         raise ValueError(f"{source.title}: invalid raw label in vocabulary.")
-    if source.owner_tag in {source.prefix + label for label in labels}:
-        raise ValueError(f"{source.title}: a model label collides with the marker ownership tag.")
+    from stash_ai.evidence.labels import raw_label
+    for label in labels:
+        raw_label(label)
 
 
 def load_vocabulary(settings: models.ModelSettings) -> models.Vocabulary:

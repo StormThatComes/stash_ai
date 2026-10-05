@@ -27,11 +27,8 @@ def _scene_signals(app, store, scene, hits, rows, options, scene_policies):
         for model, own in sources.items():
             row = _candidate(rows, model, hit["tag"])
             if shared:
-                metas = [metadata[model, signature]
-                         for signature in hit["scene_context"].get(model, ())
-                         if (model, signature) in metadata]
-                thresholds = {meta.get("scene_threshold") for meta in metas}
-                threshold = next(iter(thresholds)) if len(thresholds) == 1 else None
+                meta = metadata.get((model, hit['scene_context'].get(model)))
+                threshold = meta.get('scene_threshold') if meta is not None else None
                 score, stats = own.get("max_score"), None
             else:
                 threshold = hit["meta"].get("scene_threshold")

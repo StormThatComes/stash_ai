@@ -130,7 +130,7 @@ def test_v3_completed_vtt_results_are_reused_without_video_samples_or_model_load
     assert app.main([*p.args,*(['--merge-only'] if mode=='merge-only' else [])])==0
     assert p.stash.scene==expected
     with merge_store.StateStore(p.path,merge_store.scope_for(app.STASH_URL),True) as state:
-        assert state.connection.execute('PRAGMA user_version').fetchone()==(19,)
+        assert state.connection.execute('PRAGMA user_version').fetchone()==(20,)
         assert not state.connection.execute("SELECT 1 FROM sqlite_master WHERE name='refinement_progress'").fetchone()
         assert 'refinement' not in state.records('1','markers')['wd']
 

@@ -9,7 +9,7 @@ def initialize_progress(store):
     db.executescript("""
         CREATE TABLE IF NOT EXISTS result_index (
             scope TEXT NOT NULL, scene TEXT NOT NULL, model TEXT NOT NULL, kind TEXT NOT NULL,
-            inference INTEGER NOT NULL, populated INTEGER NOT NULL, signature TEXT,
+            populated INTEGER NOT NULL, signature TEXT,
             PRIMARY KEY(scope,scene,model,kind));
         CREATE TABLE IF NOT EXISTS refresh_requests (
             scope TEXT NOT NULL, scene TEXT NOT NULL, model TEXT NOT NULL, kind TEXT NOT NULL,
@@ -29,10 +29,10 @@ def initialize_progress(store):
     """)
 def index_result(store, scene, model, kind, record, scope=None, *, metadata_only=False):
     from stash_ai.evidence.thresholds import indexed_signature
-    store.connection.execute("INSERT INTO result_index VALUES (?,?,?,?,?,?,?) "
-        "ON CONFLICT(scope,scene,model,kind) DO UPDATE SET inference=excluded.inference,"
+    store.connection.execute("INSERT INTO result_index VALUES (?,?,?,?,?,?) "
+        "ON CONFLICT(scope,scene,model,kind) DO UPDATE SET "
         "populated=excluded.populated,signature=excluded.signature",
-        (scope or store.scope, str(scene), model, kind, 1,
+        (scope or store.scope, str(scene), model, kind,
          int(record['populated'] if metadata_only else bool(record['items'])), indexed_signature(record)))
 
 
@@ -44,14 +44,13 @@ def completed(store, scene, model, kinds, signature):
     cache_key = ('status', str(scene), model)
     rows = store.cached(cache_key)
     if rows is None:
-        rows = {kind: (inference, populated, saved) for kind, inference, populated, saved in store.connection.execute(
-        "SELECT kind,inference,populated,signature FROM " + store.table('result_index') + " AS i WHERE scope=? AND scene=? AND model=? "
+        rows = {kind: (populated, saved) for kind, populated, saved in store.connection.execute(
+        "SELECT kind,populated,signature FROM " + store.table('result_index') + " AS i WHERE scope=? AND scene=? AND model=? "
         "AND NOT EXISTS (SELECT 1 FROM " + store.table('refresh_requests') + " AS r WHERE "
         "r.scope=i.scope AND r.scene=i.scene AND r.model=i.model AND r.kind=i.kind)",
         (store.scope, str(scene), model))}
         store.retain(cache_key, rows)
-    return signature is not None and all(kind in rows and rows[kind][0]
-                                        and rows[kind][2] == signature for kind in kinds)
+    return signature is not None and all(kind in rows and rows[kind][1] == signature for kind in kinds)
 
 
 def request_refresh(store, scenes, models, kinds):
@@ -74,7 +73,7 @@ def request_stale_refresh(store, scene, model, kinds, signature):
     rows = store.connection.execute(
         "SELECT kind FROM " + store.table('result_index') +
         f" WHERE scope=? AND scene=? AND model=? AND kind IN ({placeholders}) "
-        "AND inference=1 AND (signature IS NULL OR signature<>?) ORDER BY kind",
+        "AND (signature IS NULL OR signature<>?) ORDER BY kind",
         (store.scope, str(scene), model, *kinds, signature)).fetchall()
     stale = [kind for kind, in rows]
     if not stale:
@@ -110,16 +109,16 @@ def preload_status(store):
         return
     last, values = None, {}
     rows = store.connection.execute(
-        "SELECT i.scene,i.model,i.kind,i.inference,i.populated,i.signature FROM " + store.table('result_index') + " AS i "
+        "SELECT i.scene,i.model,i.kind,i.populated,i.signature FROM " + store.table('result_index') + " AS i "
         "LEFT JOIN " + store.table('refresh_requests') + " AS r ON r.scope=i.scope AND r.scene=i.scene AND r.model=i.model AND r.kind=i.kind "
         "WHERE i.scope=? AND r.kind IS NULL ORDER BY i.scene,i.model", (store.scope,))
-    for scene, model, kind, inference, populated, signature in rows:
+    for scene, model, kind, populated, signature in rows:
         key = ('status', scene, model)
         if key != last:
             if last is not None:
                 store.cache.put(last, values)
             last, values = key, {}
-        values[kind] = (inference, populated, signature)
+        values[kind] = (populated, signature)
     if last is not None:
         store.cache.put(last, values)
 

@@ -71,8 +71,8 @@ class SceneContribution(SceneEntry):
     qualification: NotRequired[str]
     derived: NotRequired[Literal['shared_scene_frames']]
     support_sources: NotRequired[list[str]]
-    frame_context: NotRequired[dict[str, list[str]]]
-    scene_context: NotRequired[dict[str, list[str]]]
+    frame_context: NotRequired[dict[str, str]]
+    scene_context: NotRequired[dict[str, str]]
     build_options: NotRequired[BuildOptions]
 
 

@@ -173,13 +173,14 @@ def test_tag_resolver_requires_explicit_source():
 
 
 def test_resolvers_choose_missing_tag_behavior_independently():
+    from stash_ai.evidence.labels import AI
     stash = SimpleNamespace(dry_run=True, find_tag=lambda name: None)
-    skip = TagResolver(stash, source=JOYTAG, create_missing=False)
-    create = TagResolver(stash, source=JOYTAG, create_missing=True)
-    assert skip.resolve('jt:label') is None
-    assert create.resolve('jt:label') == 'dry-run:jt:label'
-    assert skip.cache['jt:label'] is None
-    assert create.cache['jt:label'] == 'dry-run:jt:label'
+    skip = TagResolver(stash, source=AI, create_missing=False)
+    create = TagResolver(stash, source=AI, create_missing=True)
+    assert skip.resolve('ai:label') is None
+    assert create.resolve('ai:label') == 'dry-run:ai:label'
+    assert skip.cache['ai:label'] is None
+    assert create.cache['ai:label'] == 'dry-run:ai:label'
 
 
 def test_state_codec_preserves_pre_refactor_blob_format():

@@ -72,9 +72,11 @@ def marker_floor(policy, threshold):
     return threshold * policy.marker_continue_ratio
 
 
-def build_options(app):
+def build_options(app, records=()):
+    from stash_ai.evidence.identity import marker_segment_signature
+    from stash_ai.storage.thresholds import effective
     return {"algorithm": "temporal", "policy": asdict(app.TEMPORAL_POLICY),
-        "marker_thresholds": dict(app.MARKER_THRESHOLDS or {}),
+        "marker_thresholds": {marker_segment_signature(record): effective(record) for record in dict(records).values()},
         "settings": {name: getattr(app, name) for name in (
         "MARKER_MIN_HITS", "MARKER_MERGE_GAP_SECONDS", "MARKER_MAX_TAGS_PER_FRAME", "MAX_MARKERS_PER_SCENE")}}
 

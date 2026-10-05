@@ -46,6 +46,10 @@ class Stash:
         self.writes.append(("parents",identifier))
         return deepcopy(tag)
     def marker(self,source,label,identifier,manual=False):
+        from stash_ai.models import ModelSource
+        if isinstance(source, ModelSource):
+            from stash_ai.tools.legacy_namespaces import NAMESPACES
+            source = NAMESPACES[source.key]
         marker=dict(id=identifier,title="Manual" if manual else source.title_prefix+label,seconds=0,end_seconds=2,
                     primary_tag=self.tag(source.prefix+label),tags=[] if manual else [self.tag(source.owner_tag)])
         self.scene["scene_markers"].append(marker)

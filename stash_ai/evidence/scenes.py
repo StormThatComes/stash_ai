@@ -6,30 +6,16 @@ from stash_ai.models import SOURCES
 from stash_ai.evidence.interval_geometry import append_interval
 
 
-def _scene_run_index(scene_records):
-    from stash_ai.evidence.identity import marker_segment_signature
-    return {(source, record['meta']['inference_signature']): (record, marker_segment_signature(record))
-            for source, record in scene_records.items()}
-
-
-def _shared_members(group, scene_by_run):
-    """Join the current frame and scene record from the same verified run."""
-    members, frame_context, scene_context = [], {}, {}
+def _shared_members(group, scene_records):
+    """Frames are derived directly from these current scene records."""
+    members, context = [], {}
     for source, segment, signature in group['members']:
         meta = segment['meta']
-        threshold, floor = meta['scene_threshold'], meta['marker_score_floor']
-        match = scene_by_run.get((source, meta['inference_signature']))
-        if match is None:
-            continue
-        scene, scene_sig = match
-        if (scene['meta']['scene_threshold'] != threshold or
-                scene['meta']['frame_input_signature'] != meta['frame_input_signature']):
-            continue
-        scores = {entry['tag']: [entry['score']] for entry in scene['items'] if entry['score'] is not None}
-        scene_context[source] = {scene_sig}
-        frame_context[source] = {signature}
-        members.append((source, segment, signature, threshold, floor, defaultdict(list, scores)))
-    return members, frame_context, scene_context
+        scores = {entry['tag']: [entry['score']] for entry in scene_records[source]['items']}
+        context[source] = signature
+        members.append((source, segment, signature, meta['scene_threshold'], meta['marker_score_floor'],
+                        defaultdict(list, scores)))
+    return members, context
 
 
 def _shared_timeline(members, policies, policy):
@@ -47,10 +33,9 @@ def _shared_timeline(members, policies, policy):
                 if label in policies[source] or score < threshold * policy.scene_support_ratio:
                     continue
                 own = event['tags'].setdefault(label, {}).setdefault(source,
-                    dict(max_score=score, high=False, signatures=set(), aggregates=[]))
+                    dict(max_score=score, high=False, signature=signature, aggregates=[]))
                 own['max_score'] = max(own['max_score'], score)
                 own['high'] |= score >= threshold
-                own['signatures'].add(signature)
                 own['aggregates'].extend(aggregates[label])
     return [timeline[position] for position in sorted(timeline)]
 
@@ -71,11 +56,10 @@ def _shared_statistics(events, existing):
             append_interval(item['intervals'], event['start'], event['end'])
             for source, values in sources.items():
                 own = item['sources'].setdefault(source, dict(hits=0, high_hits=0, max_score=values['max_score'],
-                    score=None, signatures=set()))
+                    score=None, signature=values['signature']))
                 own['hits'] += 1
                 own['high_hits'] += int(values['high'])
                 own['max_score'] = max(own['max_score'], values['max_score'])
-                own['signatures'].update(values['signatures'])
                 if values['aggregates']:
                     own['score'] = max([own['score']] + values['aggregates']) if own['score'] is not None else max(values['aggregates'])
                 if values['high']:
@@ -83,7 +67,7 @@ def _shared_statistics(events, existing):
     return stats
 
 
-def _shared_candidates(group_key, members, frame_context, scene_context, stats, events,
+def _shared_candidates(group_key, members, scene_context, stats, events,
                        policy, options, incomplete):
     candidates = []
     for tag, item in stats.items():
@@ -97,42 +81,42 @@ def _shared_candidates(group_key, members, frame_context, scene_context, stats, 
             continue
         sources = [source for source in SOURCES if source in sources]
         anchor = sources[0]
-        evidence = {source: {**item['sources'][source], 'signatures': sorted(item['sources'][source]['signatures'])}
+        evidence = {source: dict(item['sources'][source])
                     for source in sources}
         meta = next(segment['meta'] for source, segment, signature, *_ in members
-                    if source == anchor and signature in evidence[anchor]['signatures'])
+                    if source == anchor and signature == evidence[anchor]['signature'])
         candidates.append(dict(tag=tag, source=anchor, score=evidence[anchor]['score'], meta=meta,
             qualification=reason, derived='shared_scene_frames', source_evidence=evidence,
             support_sources=sources, frame_group=group_key,
-            frame_context={source: sorted(values) for source, values in frame_context.items()},
-            scene_context={source: sorted(values) for source, values in scene_context.items()},
+            scene_context=scene_context,
             build_options=options,
             joint_statistics=dict(hits=item['hits'], high_hits=item['high_hits'], longest_hits=item['longest'],
                 sampled_frames=len(events), sample_fraction=item['hits']/len(events), cache_partial=incomplete)))
     return candidates
 
 
-def shared_scene_contributions(app, index, scene_records, policies, existing=(), metrics=None):
+def _shared_scene_contributions(app, index, scene_records, policies, existing, metrics):
     """Never average model scores or interpret unretained detections as zero.
 
     Sparse positive evidence can prove a minimum count/run even when weaker
     observations were not retained. An incomplete cache cannot prove absence.
-    Only matching scene/frame inference records can support a shared scene tag.
+    Frame observations come from the same scene records as aggregate scores.
     """
+    from stash_ai.evidence.identity import marker_segment_signature
+    from stash_ai.evidence.cache_views import scene_threshold
     policy = app.TEMPORAL_POLICY
     if not policy.shared_scene_tags:
         return []
 
-    scene_by_run = _scene_run_index(scene_records)
     existing = {entry['tag'] for entry in existing}
     options = dict(algorithm="temporal", policy=asdict(policy), max_tags=app.MAX_TAGS,
-                   scene_thresholds=dict(app.SCENE_THRESHOLDS or {}),
+                   scene_thresholds={marker_segment_signature(record): scene_threshold(record) for record in scene_records.values()},
                    scene_exclusions={source: sorted(values) for source, values in policies.items()})
     candidates, usable, partial = [], False, False
 
     for group_key, group in index.groups.items():
-        members, frame_context, scene_context = _shared_members(group, scene_by_run)
-        if len(frame_context) < policy.consensus_min_models:
+        members, scene_context = _shared_members(group, scene_records)
+        if len(scene_context) < policy.consensus_min_models:
             continue
         usable = True
         incomplete = any(floor > threshold * policy.scene_support_ratio + 1e-12
@@ -141,7 +125,7 @@ def shared_scene_contributions(app, index, scene_records, policies, existing=(),
         events = _shared_timeline(members, policies, policy)
         stats = _shared_statistics(events, existing)
         candidates.extend(_shared_candidates(
-            group_key, members, frame_context, scene_context, stats, events,
+            group_key, members, scene_context, stats, events,
             policy, options, incomplete))
 
     candidates.sort(key=lambda item: (-item['joint_statistics']['high_hits'], -item['joint_statistics']['hits'],
@@ -157,9 +141,8 @@ def shared_scene_contributions(app, index, scene_records, policies, existing=(),
 
 def cleanup_scene_support(app, store, scene_id, hits, selected, policies):
     """Revoke only published sources, under their frozen rules and input records."""
-    from stash_ai.evidence.frames import FrameIndex
     from stash_ai.signatures import digest
-    from stash_ai.evidence.frozen_replay import PublishedRecords, snapshot_context, frozen_policies
+    from stash_ai.evidence.frozen_replay import PublishedRecords, snapshot_context, frozen_policies, frozen_records
     from stash_ai.storage.snapshots import require_rebased
     require_rebased(hits)
     cleaned, rebuilt = [], {}
@@ -172,23 +155,24 @@ def cleanup_scene_support(app, store, scene_id, hits, selected, policies):
         if not any(source in selected and hit['tag'] in policies[source] for source in hit['support_sources']):
             cleaned.append(hit)
             continue
-        key = digest([hit['build_options'], hit['frame_context'], hit['scene_context']])
+        key = digest([hit['build_options'], hit['scene_context']])
         if key not in rebuilt:
-            matching = {}
-            for kind, field in (('scene', 'scene_context'), ('markers', 'frame_context')):
-                matching[kind] = published.matching(
-                    kind, hit[field], scene_frames=kind == 'markers', error=
-                    'Shared scene sources changed since publication; run --merge-only before cleanup.')
+            matching = published.matching('scene', hit['scene_context'], error=
+                'Shared scene sources changed since publication; run --merge-only before cleanup.')
             options = hit['build_options']
             context = snapshot_context(app, options, 'scene')
             from stash_ai.evidence.cache_views import views
-            from stash_ai.evidence.cache_views import frame_records
-            context, matching['scene'] = views(context, matching['scene'])
-            matching['markers'] = frame_records(matching['scene'])
+            context, matching = views(context, frozen_records(options, 'scene', matching))
             frozen = frozen_policies(options, 'scene_exclusions', selected, policies)
-            with FrameIndex(context, matching['markers'], {s: frozenset() for s in SOURCES}, cache=store.cache) as index:
-                rebuilt[key] = shared_scene_contributions(context, index, matching['scene'], frozen)
+            rebuilt[key] = shared_scene_contributions(context, matching, frozen, cache=store.cache)
         for candidate in rebuilt[key]:
             if candidate['tag'] == hit['tag'] and candidate not in cleaned:
                 cleaned.append(candidate)
     return cleaned
+
+
+def shared_scene_contributions(app, scene_records, policies, existing=(), metrics=None, *, cache=None):
+    from stash_ai.evidence.cache_views import frame_records
+    from stash_ai.evidence.frames import FrameIndex
+    with FrameIndex(app, frame_records(scene_records), {s: frozenset() for s in SOURCES}, cache=cache) as index:
+        return _shared_scene_contributions(app, index, scene_records, policies, existing, metrics)

@@ -85,7 +85,7 @@ class ObservationIndex:
                     if source is None:
                         continue
                     own = item.setdefault('sources', {}).setdefault(source,
-                        dict(intervals=[], sample_times=[], score=score, signatures=self.context[source]))
+                        dict(intervals=[], sample_times=[], score=score, signature=self.context[source]))
                     own['score'] = max(own['score'], score)
                     append_interval(own['intervals'], time, stop)
                     if len(own['sample_times']) < policy.extra_min_hits:

@@ -1,4 +1,6 @@
 """Offline behavior tests. Run: python -m pytest -q tests/test_multimodel.py"""
+from functools import partial
+from stash_ai.tools.namespace_migration import main as namespace_main
 
 from copy import deepcopy
 from pathlib import Path
@@ -13,6 +15,8 @@ from stash_ai.evidence.labels import AI
 from stash_ai.config import vocabulary_digest
 from stash_ai.inference import prediction, sprites
 from tests.helpers.runtime import runtime as app
+migrate_namespace = partial(namespace_main, runtime=app)
+from stash_ai.tools.legacy_namespaces import NAMESPACES as LEGACY_NAMESPACES
 from stash_ai.models import (
     JOYTAG,
     WD,
@@ -35,13 +39,16 @@ pytestmark = pytest.mark.usefixtures("reset_multimodel")
 
 
 @pytest.mark.parametrize("dry",[False,True])
-def test_cleanup_all_refreshes_between_sources(tmp_path,monkeypatch,dry):
+def test_cleanup_all_leaves_retired_namespaces_untouched(tmp_path,monkeypatch,dry):
     stash=Stash(dry)
-    for source in SOURCES.values():
+    for source in LEGACY_NAMESPACES.values():
         stash.scene["tags"].append(stash.tag(source.prefix+"blocked"))
         stash.marker(source,"blocked",source.key)
     stash.scene["tags"].append(stash.tag("blocked"))
     stash.marker(WD,"blocked","manual",True)
+    legacy = deepcopy(stash.scene)
+    stash.scene['tags'].append(stash.tag('ai:blocked'))
+    stash.marker(AI, 'blocked', 'current-manual', manual=True)
     before=deepcopy(stash.scene)
     monkeypatch.setattr(app.services,"create_stash_client",lambda _:stash)
     from tests.helpers.cleanup import options, install
@@ -51,8 +58,7 @@ def test_cleanup_all_refreshes_between_sources(tmp_path,monkeypatch,dry):
     assert app.main(command + (['--dry-run'] if dry else [])) == 0
     if dry: assert stash.scene==before and not stash.writes
     else:
-        assert [t["name"] for t in stash.scene["tags"]]==["blocked"]
-        assert stash.scene["scene_markers"]==[]
+        assert stash.scene == legacy
 
 
 @pytest.mark.parametrize("fail_wd",[False,True])
@@ -70,8 +76,8 @@ def test_main_all_releases_models_and_preserves_failed_source(monkeypatch,tmp_pa
         model=Tagger(settings,vocabulary.labels,np.full((2,1),np.nan if fail_wd and settings.source==WD else .9,np.float32))
         loaded.append(model);return model
     monkeypatch.setattr(app.services,"load_tagger",load)
-    args=["--models","all","--no-hierarchy","--migrate-legacy-only","--state-db",str(tmp_path/"state.sqlite3")]
-    assert app.main(args)==int(fail_wd)
+    args=["--models","all","--no-hierarchy","--state-db",str(tmp_path/"state.sqlite3")]
+    assert migrate_namespace(args)==int(fail_wd)
     assert all(t.closed for t in loaded) and len(loaded)==len(SOURCES)
     assert {t["name"] for t in stash.scene["tags"]}==({"wd:old"} if fail_wd else {"ai:tag"})
     assert (old in stash.scene["scene_markers"])==fail_wd
@@ -137,7 +143,7 @@ def test_original_hierarchy_and_model_settings():
 
 def test_model_hierarchies_include_all_categories_and_keep_manual_parents(tmp_path):
     stash=Stash();manual=stash.tag("manual parent");other=stash.tag("jt:category:Other")
-    other["description"]=JOYTAG.hierarchy_description
+    other["description"]=LEGACY_NAMESPACES["joytag"].hierarchy_description
     old=stash.tag("ai:category:Old");old["description"]=AI.hierarchy_description
     stash.tag("ai:tag")["parents"]=[manual,other,old]
     vocab=Vocabulary(["tag","character","unknown"],{"tag":"General","character":"Character"})
@@ -163,7 +169,11 @@ def test_scoped_policies_and_cleanup_without_model_files(tmp_path,monkeypatch):
     path=tmp_path/"policy.yml";path.write_text('version: 1\nexcluded_core_tags: [common]\nby_model: {wd: [special]}')
     policies=app.services.load_exclusion_policy(path,"excluded_core_tags")
     assert policies["wd"]==frozenset({"common","special"}) and policies["dtq"]==frozenset({"common"})
-    stash=Stash();stash.marker(WD,"watermark","delete")
+    stash=Stash();stash.marker(AI,"watermark","delete")
+    from stash_ai.storage.store import StateStore, scope_for
+    from tests.helpers.evidence import span
+    with StateStore(tmp_path/'state.sqlite3', scope_for(app.STASH_URL)) as store:
+        store.publish('1', {'markers': {'contributions': [span('wd', 0, 2, tag='watermark')]}})
     monkeypatch.setattr(app.services,"create_stash_client",lambda _:stash)
     monkeypatch.setattr(app.services,"load_vocabulary",lambda _:pytest.fail("cleanup read vocabulary"))
     assert app.main(["--models","wd","--cleanup-markers-only","--state-db",str(tmp_path/"state.sqlite3"),"--offline"])==0
@@ -322,7 +332,7 @@ def test_oppai_modes_with_explicit_model_config(tmp_path,oppai_files,monkeypatch
     old.write_text("version: 1\nenabled_models: [joytag]\noppai:\n  scene_threshold: 0.80\n  marker_threshold: 0.85\n  batch_size: 4\n")
     monkeypatch.setenv("OPPAI_MODEL_PATH",str(oppai_files))
     settings=app.services.load_model_settings(old,["oppai"],None,True)[0]
-    assert settings.source.prefix=="op:" and settings.model_dir==oppai_files
+    assert settings.source.code=="op" and settings.model_dir==oppai_files
     assert settings.scene_threshold==.80 and settings.marker_threshold==.85
     monkeypatch.setattr(app.services,"create_stash_client",lambda _:pytest.fail("model-only mode contacted Stash"))
     monkeypatch.setattr(app.services,"load_tagger",lambda *args:pytest.fail("model-only mode loaded weights"))
@@ -342,7 +352,11 @@ def test_oppai_scoped_blacklist_and_cleanup_without_assets(tmp_path,monkeypatch)
     policies=app.services.load_exclusion_policy(policy,"excluded_core_tags")
     assert policies["oppai"]==frozenset({"common","special"})
     assert policies["wd"]==frozenset({"common"})
-    stash=Stash();stash.marker(OPPAI,"special","delete");stash.marker(OPPAI,"keep","keep")
+    stash=Stash();stash.marker(AI,"special","delete");stash.marker(OPPAI,"keep","keep")
+    from stash_ai.storage.store import StateStore, scope_for
+    from tests.helpers.evidence import span
+    with StateStore(tmp_path/'state.sqlite3', scope_for(app.STASH_URL)) as store:
+        store.publish('1', {'markers': {'contributions': [span('oppai', 0, 2, tag='special')]}})
     stash.marker(WD,"special","other");stash.marker(OPPAI,"special","manual",True)
     monkeypatch.setattr(app.services,"create_stash_client",lambda _:stash)
     monkeypatch.setattr(app.services,"load_vocabulary",lambda _:pytest.fail("cleanup accessed model files"))
@@ -399,7 +413,7 @@ def test_default_hierarchies_cover_pinned_vocabularies_and_validate_without_weig
 def test_bundled_hierarchy_migrates_old_metadata_parents_idempotently(bundled_catalogs,source):
     stash=Stash()
     manual=stash.tag("my manual group")
-    foreign=stash.tag("jt:category:General");foreign["description"]=JOYTAG.hierarchy_description
+    foreign=stash.tag("jt:category:General");foreign["description"]=LEGACY_NAMESPACES["joytag"].hierarchy_description
     old=stash.tag("ai:category:General");old["description"]=AI.hierarchy_description
     leaf=stash.tag("ai:blue_hair");leaf["parents"]=[manual,foreign,old]
     hierarchy=bundled_catalogs[source.key][1]

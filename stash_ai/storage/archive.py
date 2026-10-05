@@ -25,6 +25,8 @@ def references(snapshot):
             if isinstance(source, str) and isinstance(signature, str):
                 required.add((source, signature))
             for field in ('frame_context', 'scene_context', 'support_context'):
+                required.update(value.get(field, {}).items())
+            for field in ('retired_frame_context', 'retired_scene_context', 'retired_support_context'):
                 for source, signatures in value.get(field, {}).items():
                     required.update((source, signature) for signature in signatures)
             pending.extend(value.values())
@@ -53,7 +55,7 @@ def retain(store, scene, model, kind, previous, active):
     if signature == marker_segment_signature(active) or (model, signature) not in pinned(store, scene):
         return
     raw = {key: value for key, value in previous.items()
-           if key not in ('scene_threshold_override', 'marker_threshold_override')}
+           if key != 'publication_threshold'}
     store.connection.execute('INSERT OR IGNORE INTO inference_archive VALUES (?,?,?,?,?,?)',
                              (store.scope, str(scene), model, kind, signature, store.pack(raw)))
 

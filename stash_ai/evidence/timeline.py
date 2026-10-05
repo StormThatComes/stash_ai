@@ -83,7 +83,7 @@ class Timeline:
                 if a < b:
                     own[source] = dict(intervals=series.intervals(a, b, end),
                         sample_times=series.starts[a:min(b, a+policy.extra_min_hits)],
-                        score=max(series.scores[a:b]), signatures=self.context[source])
+                        score=max(series.scores[a:b]), signature=self.context[source])
             if own:
                 item['sources'] = own
             support[tag] = item
@@ -107,5 +107,5 @@ def support_size(support):
         for source, own in item.get('sources', {}).items():
             size += sys.getsizeof(source) + sys.getsizeof(own) + 1024
             size += 192 * len(own['intervals']) + 64 * len(own['sample_times'])
-            size += sum(sys.getsizeof(signature) + 32 for signature in own['signatures'])
+            size += sys.getsizeof(own['signature']) + 32
     return size

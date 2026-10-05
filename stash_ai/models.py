@@ -11,26 +11,19 @@ from typing import Any
 class ModelSource:
     key: str
     title: str
-    prefix: str
-    owner_tag: str
-    title_prefix: str
-    hierarchy_description: str
+    code: str
     repo: str = ""
     revision: str = ""
     subdirectory: str = ""
 
 
-JOYTAG = ModelSource("joytag", "JoyTag", "jt:", "jt:marker:joytag", "[JoyTag] ",
-                     "[JoyTag hierarchy v1]", "fancyfeast/joytag",
+JOYTAG = ModelSource("joytag", "JoyTag", "jt", "fancyfeast/joytag",
                      "6b7f16331a6ccf0fdce37d5a9564715f6e772b22")
-WD = ModelSource("wd", "WD EVA02-Large v3", "wd:", "wd:marker:wd", "[WD] ",
-                 "[WD hierarchy v1]", "SmilingWolf/wd-eva02-large-tagger-v3",
+WD = ModelSource("wd", "WD EVA02-Large v3", "wd", "SmilingWolf/wd-eva02-large-tagger-v3",
                  "b25b82a03f7282e41aa2f257a52c7583b710bd1c")
-DTQ = ModelSource("dtq", "DanbooruTagQuery L/16", "dtq:", "dtq:marker:dtq", "[DTQ] ",
-                  "[DTQ hierarchy v1]", "realphongha/danbooru-tag-query",
+DTQ = ModelSource("dtq", "DanbooruTagQuery L/16", "dtq", "realphongha/danbooru-tag-query",
                   "d2f8da27a23db4adf95c3e663af183b92784ad3e", "models/DanbooruTagQuery_l16_448x448")
-OPPAI = ModelSource("oppai", "OppaiOracle V1.1", "op:", "op:marker:oppai", "[OppaiOracle] ",
-                    "[OppaiOracle hierarchy v1]", "Grio43/OppaiOracle",
+OPPAI = ModelSource("oppai", "OppaiOracle V1.1", "op", "Grio43/OppaiOracle",
                     "96992fa30568c386e9fe7c8a1a68f798a3202c09", "V1.1_onnx")
 SOURCES = {source.key: source for source in (JOYTAG, WD, DTQ, OPPAI)}
 

@@ -93,9 +93,9 @@ def build_report(app, store, scenes, settings, command_context=()):
     from stash_ai.storage.metadata import backfill_batch
 
     models = [config.source.key for config in settings]
-    indexes = {(scene, model, kind): (inference, populated, signature)
-               for scene, model, kind, inference, populated, signature in
-               _keys(store, 'result_index', 'scene,model,kind,inference,populated,signature')}
+    indexes = {(scene, model, kind): (populated, signature)
+               for scene, model, kind, populated, signature in
+               _keys(store, 'result_index', 'scene,model,kind,populated,signature')}
     refreshes = set(_keys(store, 'refresh_requests', 'scene,model,kind'))
     checkpoints = {(scene, model): dict(processed=processed, total=total, compatibility='unverified')
                    for scene, model, processed, total in

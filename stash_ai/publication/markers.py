@@ -1,18 +1,13 @@
-"""Marker ownership, payloads and extra-tag reconciliation used by publication and historical cleanup."""
+"""Marker ownership, payloads and extra-tag reconciliation used by publication and explicit migration tools."""
 from __future__ import annotations
 
-from stash_ai.models import ModelSource
+from stash_ai.publication.namespace import OutputNamespace
 
-def owned_marker(marker: dict, source: ModelSource) -> bool:
+def owned_marker(marker: dict, source: OutputNamespace) -> bool:
     return bool(
         (marker.get("title") or "").startswith(source.title_prefix)
         and any(tag.get("name") == source.owner_tag for tag in marker.get("tags") or [])
     )
-
-def marker_has_excluded_core(marker: dict, core_exclusions: frozenset[str],
-                             source: ModelSource) -> bool:
-    name = (marker.get("primary_tag") or {}).get("name") or ""
-    return name.startswith(source.prefix) and name[len(source.prefix):] in core_exclusions
 
 def marker_extra_cleanup_payload(marker: dict, scene_id: str,
                                  blocked_names: set[str]):

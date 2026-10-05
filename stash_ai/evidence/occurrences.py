@@ -28,7 +28,7 @@ def _sources(hit):
 
 def _matches(hit, witness):
     if hit.get('derived') == 'shared_scene_frames':
-        return witness.get('evidence_signature') in hit['frame_context'].get(witness['source'], [])
+        return witness.get('evidence_signature') == hit['scene_context'].get(witness['source'])
     return hit['source'] == witness['source'] and _run(hit['meta']) == _run(witness['meta'])
 
 
@@ -72,10 +72,9 @@ def _candidate_streams(hits, records, blocked, policy):
     for hit in hits:
         tag, source, meta = hit['tag'], hit['source'], hit['meta']
         if hit.get('derived') == 'shared_scene_frames':
-            for member, signatures in hit['frame_context'].items():
-                for signature in signatures:
-                    if tag not in blocked[member]:
-                        by_frame[member, signature][tag].append(hit)
+            for member, signature in hit['scene_context'].items():
+                if tag not in blocked[member]:
+                    by_frame[member, signature][tag].append(hit)
             continue
         if tag in blocked[source]:
             continue

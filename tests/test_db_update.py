@@ -87,7 +87,7 @@ def test_update_backfills_missing_and_corrupt_metadata_in_every_scope(tmp_path):
 
 @pytest.mark.parametrize('table_threshold', [None, .7])
 def test_v9_migration_preserves_mixed_history_and_frozen_proof_identity(tmp_path, table_threshold):
-    from stash_ai.evidence.identity import marker_segment_signature
+    from stash_ai.db.result_history import marker_segment_signature, publication_record
     from stash_ai.storage.codec import decode
     from tests.test_result_thresholds import outputs
     path = tmp_path / 'state.sqlite3'
@@ -112,7 +112,7 @@ def test_v9_migration_preserves_mixed_history_and_frozen_proof_identity(tmp_path
     stash_db.update_database(path)
     with StateStore(path, 'scope-a') as state:
         effective = state.model_record('1', 'markers', 'wd')
-        assert effective == expected[-1]
+        assert effective == publication_record(expected[-1], "markers")
         assert marker_segment_signature(effective) == signatures[-1]
         from stash_ai.storage.archive import records as archived_records
         archived = archived_records(state, '1', 'markers')['wd']
@@ -235,8 +235,8 @@ def test_update_migrates_every_supported_version_and_all_scopes(tmp_path, versio
         tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert stash_db.STATE_TABLES <= tables
         assert 'refinement_progress' not in tables
-        assert db.execute('SELECT scope,inference,populated,signature FROM result_index ORDER BY scope').fetchall() == [
-            ('scope-a', 1, 1, 'saved'), ('scope-b', 1, 1, 'saved')]
+        assert db.execute('SELECT scope,populated,signature FROM result_index ORDER BY scope').fetchall() == [
+            ('scope-a', 1, 'saved'), ('scope-b', 1, 'saved')]
     assert stash_db.check_database(path, 'scope-a')['ok']
     assert stash_db.update_database(path) == (LATEST_SCHEMA_VERSION, LATEST_SCHEMA_VERSION)
     from stash_ai.storage.codec import decode
@@ -359,11 +359,11 @@ def test_db_update_cli_stays_offline_and_reports_dry_run_and_idempotence(tmp_pat
 
     assert app.main([*command, '--dry-run']) == 0
     assert path.read_bytes() == before
-    assert 'DRY RUN: state DB schema v1 -> v19' in capsys.readouterr().out
+    assert 'DRY RUN: state DB schema v1 -> v20' in capsys.readouterr().out
     assert app.main(command) == 0
-    assert 'State DB updated: schema v1 -> v19' in capsys.readouterr().out
+    assert 'State DB updated: schema v1 -> v20' in capsys.readouterr().out
     assert app.main(command) == 0
-    assert 'up to date: v19' in capsys.readouterr().out
+    assert 'up to date: v20' in capsys.readouterr().out
     assert app.main(['--state-db', str(tmp_path / 'missing.sqlite3'), '--db-update']) == 1
     assert 'does not exist' in capsys.readouterr().out
 

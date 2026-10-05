@@ -9,7 +9,7 @@ from collections import Counter
 
 from tqdm import tqdm
 
-from stash_ai.commands import namespace_migration
+from stash_ai.publication.preconditions import require_source_state
 from stash_ai.signatures import digest
 from stash_ai.inference.inputs import RunInputs
 from stash_ai.publication.publisher import MergePublisher
@@ -106,12 +106,7 @@ class MergedRun:
                         self.stats['source_check_reused'] += 1
                     else:
                         with self.report.measure('source_check'):
-                            namespace_migration.check_sources(app, self.store, current, transition=args.migrate_legacy_only)
-                    if args.migrate_legacy_only:
-                        has_source = any(any(namespace_migration.source_objects(current, kind)) for kind, enabled in
-                            (('scene', app.APPLY_SCENE_TAGS), ('markers', app.CREATE_MARKERS)) if enabled)
-                        if not has_source and not self.store.has_pending_publication(scene_id):
-                            continue
+                            require_source_state(app, self.store, current)
                     # Keep only input paths/ID between passes; marker bodies need
                     # no collection-sized in-memory cache and are refreshed at sync.
                     self.scenes[scene_id] = {

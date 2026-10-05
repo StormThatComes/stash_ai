@@ -59,26 +59,16 @@ def test_indexed_signature_preserves_canonical_hashes_and_rejects_mixed_policies
 
     assert thresholds.indexed_signature(segment) == 'sig-a'
 
-    marker_only = {**segment, thresholds_identity.OVERRIDE: .9}
+    marker_only = {**segment, thresholds_identity.PUBLICATION_THRESHOLD: .9}
     assert thresholds.indexed_signature(marker_only) == digest(['sig-a', .9])
 
-    scene_only = {**segment, 'mode': 'scene', scene_cache_identity.SCENE_OVERRIDE: .8}
+    scene_only = {**segment, 'mode': 'scene', scene_cache_identity.PUBLICATION_THRESHOLD: .8}
     assert thresholds.indexed_signature(scene_only) == digest([
         'sig-a', {'scene_threshold': .8}
     ])
 
-    both = {
-        **segment,
-        thresholds_identity.OVERRIDE: .9,
-        scene_cache_identity.SCENE_OVERRIDE: .8,
-    }
-    with pytest.raises(ValueError, match='override does not match'):
-        thresholds.indexed_signature(both)
-    with pytest.raises(ValueError, match='override does not match'):
-        thresholds.indexed_signature({**scene_only, 'mode': 'frames'})
-    with pytest.raises(ValueError, match='override does not match'):
-        thresholds.indexed_signature({**marker_only, 'mode': 'scene'})
-
+    assert thresholds.indexed_signature({**marker_only, 'mode': 'scene'}) == digest([
+        'sig-a', {'scene_threshold': .9}])
 
 
 def test_automatic_raise_and_return_to_original_keep_raw_evidence(pipeline, monkeypatch):
@@ -92,7 +82,7 @@ def test_automatic_raise_and_return_to_original_keep_raw_evidence(pipeline, monk
     after = records(p.path)
     assert after['scene'] == before['scene']
     segment = after['markers']['wd']
-    assert segment.pop(thresholds_identity.OVERRIDE) == .95
+    assert segment.pop(thresholds_identity.PUBLICATION_THRESHOLD) == .95
     assert segment == before['markers']['wd']
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), True) as state:
         spans = state.snapshot('1', 'markers')[0]['contributions']
@@ -176,7 +166,7 @@ def test_explicit_rethreshold_needs_no_models_media_or_vocabulary(pipeline, monk
     stderr = capsys.readouterr().err
     assert 'Check marker thresholds' in stderr
     assert 'Apply marker thresholds' in stderr
-    assert records(p.path)['markers']['wd'][thresholds_identity.OVERRIDE] == .85
+    assert records(p.path)['markers']['wd'][thresholds_identity.PUBLICATION_THRESHOLD] == .85
 
 
 @pytest.mark.parametrize('change', ['lower', 'scene', 'legacy', 'missing', 'pending'])
@@ -217,8 +207,8 @@ def test_dry_run_and_model_selection(pipeline, monkeypatch):
     p.stash.dry_run = False
     assert app.main([*p.args, '--merge-only', '--rethreshold-markers']) == 0
     saved = records(p.path)['markers']
-    assert saved['wd'][thresholds_identity.OVERRIDE] == .85
-    assert thresholds_identity.OVERRIDE not in saved['dtq']
+    assert saved['wd'][thresholds_identity.PUBLICATION_THRESHOLD] == .85
+    assert thresholds_identity.PUBLICATION_THRESHOLD not in saved['dtq']
 
 
 def test_preflight_skips_second_model_with_scene_only_history(pipeline, monkeypatch, capsys):
@@ -233,7 +223,7 @@ def test_preflight_skips_second_model_with_scene_only_history(pipeline, monkeypa
     p.stash.writes.clear()
     assert app.main(['--models', 'wd', 'dtq', *p.args[2:], '--merge-only', '--rethreshold-markers']) == 0
     output = capsys.readouterr().out
-    assert records(p.path)['markers']['wd'][thresholds_identity.OVERRIDE] == .85
+    assert records(p.path)['markers']['wd'][thresholds_identity.PUBLICATION_THRESHOLD] == .85
     assert ('Threshold preflight: checked=1, failed=0, applied=1, '
             'selected=2, skipped_no_evidence=1') in output
 
@@ -253,7 +243,7 @@ def test_failed_publication_resumes_with_saved_threshold_without_models(pipeline
     assert app.main(p.args) == 0
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), True) as state:
         assert not state.has_pending_publications()
-        assert state.records('1', 'markers')['wd'][thresholds_identity.OVERRIDE] == .85
+        assert state.records('1', 'markers')['wd'][thresholds_identity.PUBLICATION_THRESHOLD] == .85
 
 
 @pytest.mark.parametrize('change', ['media', 'restart', 'below_floor'])
@@ -313,5 +303,5 @@ def test_marker_rethreshold_never_decodes_publication_snapshots(tmp_path, monkey
         result = rethreshold_execution.run(app, state, {'1': {}}, [config], report, scenes=False, markers=True)
 
         assert result == {'marker_thresholds_updated': 1}
-        assert state.records('1', 'markers')['wd'][thresholds_identity.OVERRIDE] == .85
+        assert state.records('1', 'markers')['wd'][thresholds_identity.PUBLICATION_THRESHOLD] == .85
 

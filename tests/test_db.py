@@ -186,8 +186,8 @@ def test_deep_check_detects_result_index_relationship_and_content_errors(tmp_pat
             (scope,),
         )
         db.execute(
-            "INSERT INTO result_index VALUES (?,?,?,?,?,?,?)",
-            (scope, "orphan", "dtq", "scene", 0, 0, None),
+            "INSERT INTO result_index VALUES (?,?,?,?,?,?)",
+            (scope, "orphan", "dtq", "scene", 0, None),
         )
 
     report = stash_db.check_database(path, scope)

@@ -50,8 +50,6 @@ class RuntimeSettings:
     MODELS_CONFIG_FILE: Path = INSTALL_ROOT / "tagger_models.yml"
     JOYTAG_CLIP_MEAN: list[float] = field(default_factory=lambda: [0.48145466, 0.4578275, 0.40821073])
     JOYTAG_CLIP_STD: list[float] = field(default_factory=lambda: [0.26862954, 0.26130258, 0.27577711])
-    SCENE_THRESHOLDS: dict[str, float] | None = None
-    MARKER_THRESHOLDS: dict[str, float] | None = None
 
 def validate_config(app, scene_work: bool = True) -> None:
     parsed = urlparse(app.STASH_URL)
