@@ -25,18 +25,15 @@ def combined_hierarchy(app, args, tag_policies=None):
             raise ValueError(f"Invalid hierarchy labels: {path}")
         labels = sorted({label for group in groups for label in group})
         hierarchy = app.services.load_tag_hierarchy(path, labels, source)
-        def converted(name):
-            return root if not hierarchy.category_parents[name] else prefix + name[len(hierarchy.category_prefix):]
         for name, parents in hierarchy.category_parents.items():
-            mapped, wanted = converted(name), tuple(converted(parent) for parent in parents)
-            if mapped in categories and categories[mapped] != wanted:
-                raise ValueError(f"Conflicting AI hierarchy category: {mapped}")
-            categories[mapped] = wanted
+            if name in categories and categories[name] != parents:
+                raise ValueError(f"Conflicting AI hierarchy category: {name}")
+            categories[name] = parents
         for label, parents in hierarchy.leaf_parents.items():
             merge_labels.raw_label(label)
             if label in tag_policies[key]:
                 continue
-            leaves[label].update(converted(parent) for parent in parents)
+            leaves[label].update(parents)
     fallbacks = {prefix + suffix for suffix in ("Other / Unclassified", "General", "Uncategorized")}
     for parents in leaves.values():
         if parents - fallbacks:
@@ -63,4 +60,3 @@ def run_hierarchy(app, args, catalogs, hierarchy, tag_policies=None):
     finally:
         stash.close()
     return 0
-

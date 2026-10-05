@@ -36,17 +36,27 @@ def qualified_extras(evidence, duration, policy):
 def merged_extras(component):
     """Qualify extras over the whole union; duplicate model coverage counts once."""
     records = component["contributors"]
+    from stash_ai.evidence.formats import current
+    for record in records:
+        if current(record.get('meta', {})) and record.get('derived') != 'occurrence' and (
+                'extra_support' not in record or not record.get('build_options')):
+            raise ValueError('Current marker contributions require temporal extra_support evidence.')
     settings = next((r["build_options"]["policy"] for r in records if r.get("build_options")), None)
-    if settings is None or not settings["enabled"]:
+    if settings is None:
         return
-    policy = TemporalPolicy.from_snapshot(settings)
+    from stash_ai.evidence.historical_markers import HistoricalPolicy, frozen_policy
+    options = next(r['build_options'] for r in records if r.get('build_options'))
+    policy = frozen_policy(options)
+    if isinstance(policy, HistoricalPolicy):
+        return
     known, legacy, intervals, times = set(), set(), defaultdict(list), defaultdict(set)
     source_evidence = defaultdict(lambda: defaultdict(list))
     support_records = defaultdict(list)
     seen_support = set()
     for record in records:
         if "extra_support" not in record:
-            legacy.update(record.get("extra_tags", []))
+            from stash_ai.evidence.historical_evidence import plain_extras
+            legacy.update(plain_extras(record))
             continue
         for tag, evidence in record["extra_support"].items():
             # Several source spans can share exactly the same indexed proof.
@@ -102,4 +112,3 @@ def merged_extras(component):
                         signatures=sorted({signature for record in records for signature in record["signatures"]}))
     component["extra_tags"] = sorted(accepted - {component["tag"]})
     component["extra_evidence"] = statistics
-

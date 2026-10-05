@@ -1,40 +1,19 @@
 """Merged publication evidence."""
 from __future__ import annotations
 from stash_ai.publication import markers as marker_ops
-from stash_ai.publication.index import MarkerIntervalIndex, PreviousMarkerRanges
+from stash_ai.publication.index import MarkerIntervalIndex
 import stash_ai.evidence.intervals as merge_intervals
 import stash_ai.evidence.labels as merge_labels
 from stash_ai.runtime.timing import stage
 from .types import PreparedEvidence
 
 
-def _previous_ranges(app, store, scene):
-    """Migrate previously published point-only ranges using their saved proofs.
-
-    Current ranges publish their end time; occurrence points never need this
-    adapter. Keep it only for observed ordinary points from older publication.
-    """
-    from stash_ai.evidence.marker_identity import OCCURRENCE_TAG
-    if not app.CREATE_MARKERS or not any(
-            marker_ops.owned_marker(marker, merge_labels.AI)
-            and marker.get('end_seconds') is None
-            and not any(tag['name'] == OCCURRENCE_TAG for tag in marker.get('tags', []))
-            for marker in scene.get('scene_markers', [])):
-        return []
-    scene_id = str(scene['id'])
-    from stash_ai.storage.recovery import publications
-    result = []
-    for snapshot in (*store.snapshot(scene_id, "markers", borrow=True),
-                     *publications(store, scene_id, 'markers')):
-        if snapshot:
-            result.extend(merge_intervals.union_intervals(snapshot.get("contributions", []), borrow=True))
-    return result
-
-
 def prepare_sync_evidence(app, stash, store, scene, scene_hits, spans, *, cleanup, report):
     """Build merged markers/scene labels and apply cleanup-only retention rules."""
     scene_id = str(scene["id"])
-    previous_ranges = PreviousMarkerRanges(_previous_ranges(app, store, scene))
+    if app.CREATE_MARKERS:
+        from stash_ai.commands.point_migration import require_native_ranges
+        require_native_ranges(scene, spans)
     with stage(report, 'marker_union'):
         markers = merge_intervals.union_intervals(spans, borrow=True) if app.CREATE_MARKERS else []
     if report is not None:
@@ -48,9 +27,10 @@ def prepare_sync_evidence(app, stash, store, scene, scene_hits, spans, *, cleanu
         scene_hits = [hit for hit in scene_hits if hit["tag"] in scene_labels]
         present = [marker for marker in scene.get("scene_markers", [])
                    if marker_ops.owned_marker(marker, merge_labels.AI)]
-        existing = MarkerIntervalIndex(present if markers else [], previous_ranges, by_name=True)
+        existing = MarkerIntervalIndex(present if markers else [], by_name=True)
         markers = [marker for marker in markers if existing.overlapping(
             merge_labels.AI.prefix + marker["tag"], {"seconds": marker["start"], "end_seconds": marker["end"]})]
         spans = [item for marker in markers for item in marker["contributors"]]
-    return PreparedEvidence(scene_hits, spans, markers, scene_labels, previous_ranges)
+    return PreparedEvidence(scene_hits, spans, markers, scene_labels)
+
 

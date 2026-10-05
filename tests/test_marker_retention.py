@@ -59,6 +59,8 @@ def test_wider_support_policy_checks_historical_retention_before_publication(
         with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL)) as state:
             records = state.records('1', 'markers')['wd']
             for segment in records:
+                segment['meta']['analysis_format'] = 3
+                segment['meta']['marker_tag_blocklist'] = []
                 segment['meta'].pop('marker_score_floor', None)
             with state.connection:
                 state.connection.execute("UPDATE results SET data=? WHERE kind='markers'", (encode(records),))

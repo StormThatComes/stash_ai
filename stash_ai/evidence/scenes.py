@@ -132,12 +132,12 @@ def shared_scene_contributions(app, index, scene_records, policies, existing=(),
     Only matching scene/frame inference records can support a shared scene tag.
     """
     policy = app.TEMPORAL_POLICY
-    if not policy.enabled or not policy.shared_scene_tags:
+    if not policy.shared_scene_tags:
         return []
 
     scene_by_run = _scene_run_index(scene_records)
     existing = {entry['tag'] for entry in existing}
-    options = dict(policy=asdict(policy), max_tags=app.MAX_TAGS,
+    options = dict(algorithm="temporal", policy=asdict(policy), max_tags=app.MAX_TAGS,
                    scene_thresholds=dict(app.SCENE_THRESHOLDS or {}),
                    scene_exclusions={source: sorted(values) for source, values in policies.items()})
     candidates, usable, partial = [], False, False

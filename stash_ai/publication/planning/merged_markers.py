@@ -42,7 +42,7 @@ def _wanted_markers(app, scene_id, markers, catalog, blocked_names):
     return wanted, resolved_marker_labels
 
 
-def plan_markers(app, store, resolved, catalog, previous_ranges, plan, *, migrate, report):
+def plan_markers(app, store, resolved, catalog, plan, *, migrate, report):
     """Match wanted markers to owned markers and populate create/update/delete actions."""
     scene, markers, blocked_names = resolved.scene, resolved.markers, resolved.blocked_names
     scene_id = str(scene['id'])
@@ -52,7 +52,7 @@ def plan_markers(app, store, resolved, catalog, previous_ranges, plan, *, migrat
         plan.wanted_markers = wanted
         current_markers = scene.get("scene_markers", [])
         owned = [marker for marker in current_markers if marker_ops.owned_marker(marker, merge_labels.AI)]
-        existing = MarkerIntervalIndex(owned if wanted else [], previous_ranges)
+        existing = MarkerIntervalIndex(owned if wanted else [])
         available = {str(marker["id"]): marker for marker in owned}
 
         def manual_extra(tag):
@@ -73,7 +73,6 @@ def plan_markers(app, store, resolved, catalog, previous_ranges, plan, *, migrat
                 continue
 
             def match_key(marker):
-                marker = existing.temporal(marker)
                 old_end = marker.get("end_seconds") if marker.get("end_seconds") is not None else marker["seconds"]
                 new_end = interval["end_seconds"] if interval["end_seconds"] is not None else interval["seconds"]
                 shared = max(0, min(old_end, new_end) - max(marker["seconds"], payload["seconds"]))
@@ -110,3 +109,4 @@ def plan_markers(app, store, resolved, catalog, previous_ranges, plan, *, migrat
                     marker, scene_id, blocked_names)
                 if payload is not None:
                     plan.updates.append(payload)
+

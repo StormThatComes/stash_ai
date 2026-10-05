@@ -25,6 +25,11 @@ def initialize(store):
         db.execute('INSERT INTO recovery_cleanups SELECT * FROM cleanup_source.recovery_cleanups WHERE scope=?',
                    (store.scope,))
         db.commit()
+    load(store)
+
+
+def load(store):
+    db = store.connection
     store.recovery_available = bool(db.execute('SELECT 1 FROM recovery_publications WHERE scope=? LIMIT 1',
                                               (store.scope,)).fetchone())
     if store.preview_source:
@@ -108,3 +113,4 @@ def clear_publications(store, scene, kind):
     store.connection.execute('DELETE FROM recovery_publications WHERE scope=? AND scene=? AND kind=?',
                              (store.scope, str(scene), kind))
     store.cache.discard(('recovery', str(scene), kind))
+

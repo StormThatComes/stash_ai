@@ -83,7 +83,7 @@ def enrich(app, records, policies, spans, signatures=None, index=None, metrics=N
     """Add missing shared intervals and attach source-aware extras from compatible inputs."""
     from stash_ai.evidence.temporal.policy import build_options
     policy = app.TEMPORAL_POLICY
-    if not policy.enabled or not (policy.shared_marker_frames or policy.shared_marker_extras):
+    if not (policy.shared_marker_frames or policy.shared_marker_extras):
         return spans
     if index is None:
         with FrameIndex(app, records, policies, signatures) as owned_index:

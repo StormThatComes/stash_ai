@@ -15,16 +15,15 @@ def _effective_scene_thresholds(app, threshold):
     if type(threshold) not in (int, float):
         return result
     policy = app.TEMPORAL_POLICY
-    ratio = policy.scene_support_ratio if policy.enabled else 1.0
+    ratio = policy.scene_support_ratio
     result.update(
-        temporal_enabled=policy.enabled,
+        temporal_enabled=True,
         scene_support_ratio=ratio,
         effective_support_floor=threshold * ratio,
     )
-    if policy.enabled:
-        result["strong_peak_threshold"] = (
-            threshold + (1.0 - threshold) * policy.scene_strong_margin
-        )
+    result["strong_peak_threshold"] = (
+        threshold + (1.0 - threshold) * policy.scene_strong_margin
+    )
     return result
 
 
@@ -52,8 +51,8 @@ def _record_thresholds(app, kind, segment):
     if type(effective) in (int, float):
         policy = app.TEMPORAL_POLICY
         result.update(
-            temporal_enabled=policy.enabled,
-            marker_continue_ratio=policy.marker_continue_ratio if policy.enabled else 1.0,
+            temporal_enabled=True,
+            marker_continue_ratio=policy.marker_continue_ratio,
             effective_support_floor=marker_floor(policy, effective),
         )
     return result

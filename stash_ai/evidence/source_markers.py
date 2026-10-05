@@ -1,5 +1,5 @@
 """Build validated per-source markers before cross-model enrichment."""
-from stash_ai.evidence.historical_markers import replay_markers
+from stash_ai.evidence.historical_markers import HistoricalPolicy
 from .contracts import RecordsBySource, MarkerContribution
 from stash_ai.domain import Cue, FramePrediction
 from stash_ai.runtime.timing import stage
@@ -12,6 +12,11 @@ def marker_contributions(app, records: RecordsBySource, core_policies, *, index=
     from stash_ai.evidence.frames import FrameIndex
     from stash_ai.evidence.thresholds import marker_context
     app = marker_context(app, records)
+    if isinstance(app.TEMPORAL_POLICY, HistoricalPolicy):
+        from stash_ai.evidence.historical_markers import marker_contributions as historical_contributions
+        return historical_contributions(app, records, core_policies, tag_policies=tag_policies,
+            allow_unknown_blocklist=allow_unknown_blocklist, allow_unknown_retention=allow_unknown_retention,
+            frozen_exclusions=frozen_exclusions)
     if index is not None:
         return _marker_contributions(app, records, core_policies, index, metrics, tag_policies,
                                      allow_unknown_blocklist=allow_unknown_blocklist,
@@ -54,22 +59,20 @@ def _marker_contributions(app, records, core_policies, index, metrics, tag_polic
                     kwargs = dict(threshold=marker_threshold(segment, app.MARKER_THRESHOLDS), seeds=seeds,
                                   identity=segment["meta"].get("frame_input_signature"))
                     defer_extras = app.TEMPORAL_POLICY.shared_marker_extras and signatures[id(segment)] in index.by_signature
-                    markers, _ = (temporal_markers(app, frames, effective_cores[model], **kwargs,
+                    markers, _ = temporal_markers(app, frames, effective_cores[model], **kwargs,
                                   collect_extras=not defer_extras,
                                   extra_group=index.by_signature.get(signatures[id(segment)], signatures[id(segment)]),
-                                  extra_cache=index.cache) if app.TEMPORAL_POLICY.enabled else
-                                  replay_markers(app, frames, effective_cores[model], threshold=kwargs["threshold"]))
+                                  extra_cache=index.cache)
                     options = {**build_options(app), "core_exclusions": {k: sorted(v) for k, v in core_policies.items()},
                                "tag_exclusions": {k: sorted(v) for k, v in tag_policies.items()}}
                     values = [dict(tag=marker.tag, start=marker.start, end=marker.end, score=marker.score,
                                    hits=marker.hits, extra_tags=list(marker.extra_tags),
-                                   **(dict(extra_evidence=list(marker.extra_evidence), strong_hits=marker.strong_hits,
-                                           support_sources=list(marker.support_sources), extra_support=marker.extra_support, build_options=options,
-                                           evidence_signature=signatures[id(segment)],
-                                           support_context={source: sorted({signatures[id(s)] for s in records[source]
-                                               if s["meta"].get("frame_input_signature") == segment["meta"].get("frame_input_signature")})
-                                               for source in marker.support_sources})
-                                      if app.TEMPORAL_POLICY.enabled else {})) for marker in markers]
+                                   extra_evidence=list(marker.extra_evidence), strong_hits=marker.strong_hits,
+                                   support_sources=list(marker.support_sources), extra_support=marker.extra_support,
+                                   build_options=options, evidence_signature=signatures[id(segment)],
+                                   support_context={source: sorted({signatures[id(s)] for s in records[source]
+                                       if s["meta"].get("frame_input_signature") == segment["meta"].get("frame_input_signature")})
+                                       for source in marker.support_sources}) for marker in markers]
                 elif segment["mode"] == "spans":
                     values = segment["items"]
                 else:

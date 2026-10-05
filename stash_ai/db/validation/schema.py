@@ -17,12 +17,6 @@ def _invalid_enum_count(db, tables, table, column, allowed):
 
 
 def check_schema(db, tables, version, errors, warnings, progress=None):
-    # Validation metadata is a lazy derived cache; older databases may lack it.
-    missing = STATE_TABLES - tables - {'result_metadata'}
-    required = BASE_TABLES | {'result_thresholds'} if version >= 8 else BASE_TABLES
-    errors["missing_base_tables"] += len(required - tables)
-    warnings["missing_state_tables"] += len(missing - required)
-
     enum_specs = [(table.name, column, allowed) for table in TABLES
                   for column, enabled, allowed in (('model', table.model, KNOWN_MODELS),
                                                     ('kind', table.kind, KNOWN_KINDS))
@@ -33,4 +27,5 @@ def check_schema(db, tables, version, errors, warnings, progress=None):
         count = _invalid_enum_count(db, tables, table, column, allowed)
         errors["invalid_model" if column == "model" else "invalid_kind"] += count
     tick(progress)
+
 

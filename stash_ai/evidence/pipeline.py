@@ -12,12 +12,12 @@ def evidence(app, store, scene_id, core_policies, scene_policies, metrics=None, 
     selected_sources is an analysis-only view used for counterfactual reports:
     omitted sources are removed before every fusion/consensus/occurrence stage.
     """
-    from stash_ai.evidence.temporal.statistics import scene_reason
+    from stash_ai.evidence.qualification import scene_qualification
     from stash_ai.evidence.frames import FrameIndex
     from stash_ai.evidence.scenes import shared_scene_contributions
     report = store.report
     scene_hits, spans = [], []
-    need_scene = app.APPLY_SCENE_TAGS or (app.CREATE_MARKERS and app.TEMPORAL_POLICY.enabled
+    need_scene = app.APPLY_SCENE_TAGS or (app.CREATE_MARKERS
                                         and app.TEMPORAL_POLICY.occurrence_markers)
     scene_records = store.records(scene_id, 'scene', borrow=True) if need_scene else {}
     if selected_sources is not None:
@@ -31,7 +31,7 @@ def evidence(app, store, scene_id, core_policies, scene_policies, metrics=None, 
             eligible = []
             for entry in segment["items"]:
                 label = raw_label(entry["tag"])
-                reason = scene_reason(entry["score"], entry.get("statistics"),
+                reason = scene_qualification(entry, segment["meta"],
                                       segment["meta"].get("scene_threshold", 0.0), app.TEMPORAL_POLICY)
                 if label not in scene_policies[model] and reason:
                     eligible.append({**entry, "source": model, "meta": segment["meta"],
@@ -67,4 +67,3 @@ def evidence(app, store, scene_id, core_policies, scene_policies, metrics=None, 
         with report.measure('occurrence_compute') if report is not None else nullcontext():
             spans.extend(occurrence_contributions(app, scene_hits, frame_records(scene_records, records), spans, core_policies, scene_policies, metrics))
     return sorted(scene_hits, key=lambda item: (item["tag"], item["source"])), spans
-
