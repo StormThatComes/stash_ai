@@ -2,8 +2,8 @@
 
 Automatyczne tagowanie scen i tworzenie markerów czasowych dla [Stash](https://github.com/stashapp/stash).
 
-Stash AI używa czterech modeli: JoyTag (`jt:`), WD EVA02-Large v3 (`wd:`),
-DanbooruTagQuery L/16 (`dtq:`) i OppaiOracle V1.1 (`op:`). Modele są
+Stash AI używa czterech modeli: JoyTag (`jt`), WD EVA02-Large v3 (`wd`),
+DanbooruTagQuery L/16 (`dtq`) i OppaiOracle V1.1 (`op`). Modele są
 uruchamiane kolejno — w GPU znajduje się jeden model naraz.
 
 Domyślny tryb `merged` publikuje wspólne tagi `ai:`, łączy zgodne wyniki modeli
@@ -83,8 +83,8 @@ python .\stash_ai.py --explain-tag ai:blue_hair --scene-id 123
 python .\stash_ai.py --prune-empty-tags-only --dry-run
 
 # Jednorazowe przejście starych wyników do ai: ze świeżą inferencją.
-python .\stash_ai.py --models all --migrate-legacy-only --dry-run
-python .\stash_ai.py --models all --migrate-legacy-only
+python -m stash_ai.tools.namespace_migration --models all --dry-run
+python -m stash_ai.tools.namespace_migration --models all
 
 # Zdrowie, aktualizacja schematu, spójność i kompaktowanie lokalnej bazy stanu.
 python .\stash_ai.py --db-report
@@ -201,14 +201,16 @@ sprawdza zgodność istniejących metadanych z evidence bez ich naprawiania.
 Nowa inferencja zawsze zastępuje poprzednie wyniki danego modelu i rodzaju.
 Historyczne serie są normalizowane przez `--db-update`; stare importowane
 wyniki są wycofywane, a ich modele wymagają ponownej inferencji. Zwykłe przedziały opublikowane dawniej jako
-punkty wymagają jednorazowego `--migrate-point-markers-only` (także z `--dry-run`).
+punkty wymagają jednorazowego `python -m stash_ai.tools.point_migration` (także z `--dry-run`).
 Komenda zapisuje długość ze snapshotów published, pending i recovery w natywnym `end_seconds`,
 zachowując ID, tytuły i ręczne tagi. Punkty `OccurrenceTag` pozostają punktami.
-Zwykły merge/cleanup nie odtwarza już długości w pamięci.
+Zwykły merge/cleanup wymaga natywnych zakresów i nie odtwarza długości w pamięci.
+Oba migratory są osobnymi modułami w `stash_ai.tools`; dawne flagi głównego CLI
+`--migrate-legacy-only` i `--migrate-point-markers-only` zostały usunięte.
 
 ### Jednorazowe przejście starych prefiksów do ai:
 
-`--migrate-legacy-only --models all` wykonuje świeżą inferencję dla scen ze starymi
+`python -m stash_ai.tools.namespace_migration --models all` wykonuje świeżą inferencję dla scen ze starymi
 wynikami `jt:`, `wd:`, `dtq:` i `op:` oraz zastępuje zarządzane obiekty wynikami `ai:`.
 Użyj dotychczasowej bazy `--state-db`, po wcześniejszym `--db-update`.
 `--scene-id`, `--markers-only` i `--scene-tags-only` ograniczają zakres;
@@ -220,7 +222,8 @@ po przygotowaniu nowej publikacji. Snapshot pending umożliwia ponowienie po bł
 Sceny, które zakończyły przejście, są pomijane przy ponownym uruchomieniu tej komendy.
 Jeśli CREATE_MISSING jest wyłączone, stary obiekt bez dostępnego tagu zastępczego pozostaje.
 
-Zwykły merge odmawia pracy ze starymi zarządzanymi prefiksami i wskazuje tę komendę.
+Zwykły merge obsługuje wyłącznie bieżący namespace `ai:`. Przed jego uruchomieniem
+przenieś stare zarządzane prefiksy osobnym narzędziem; zwykły przebieg ich nie konwertuje.
 Import historycznych ocen oraz jego trwały rejestr nie są już używane. Schemat v17
 usuwa `legacy_imports` i importowane aktywne wyniki, zlecając świeżą inferencję.
 Globalne definicje starych tagów pozostają dostępne dla ręcznych powiązań.
@@ -468,16 +471,24 @@ Nowe wyniki zawsze używają wspólnej publikacji `ai:` i reguł temporalnych.
 Przełączniki `--output-mode` i `--no-temporal` oraz klucz YAML `enabled`
 zostały usunięte; usuń je ze skryptów i `temporal_policy.yml`. Poszczególne
 reguły nadal konfiguruje polityka YAML, w tym `occurrence_markers`.
-Historyczne namespace’y modeli nadal można importować i czyścić. Zamrożone
-snapshoty sprzed reguł temporalnych zachowują własny algorytm replay dla
-cleanupu. Nowa inferencja zapisuje evidence w formacie analizy 4: wymagane są
-sygnatury wejścia i inferencji, jawne progi retencji oraz statystyki lub jawne
-`null` dla niekwalifikujących się agregatów. Pusty `marker_tag_blocklist` nie jest
-już zapisywany; format gwarantuje nieprzefiltrowane obserwacje. Tożsamość cache
-ma wersję 3, więc zwykły przebieg po aktualizacji ponownie wykona inferencję.
-`--merge-only` nie aktualizuje formatu starych danych. Historyczne agregaty
-mają osobne reguły kwalifikacji; brak informacji o retencji
-lub odrzuconych tagach nie stanowi dowodu pełnego cache.
+Historyczne namespace’y modeli przenosi osobny migrator; zwykłe publikowanie,
+cleanup i domyślne pruning obsługują bieżące wyniki `ai:` oraz zarządzane grupy
+`m:`. Definicje dawnych prefiksów można usuwać jawnie, np.
+`--prune-empty-tags-only --prune-prefixes jt: wd: dtq: op:`. Ręczne dodatki
+z innych namespace’ów pozostają zachowane.
+
+Nowa inferencja zapisuje kompletny format analizy 5: sygnatury wejścia i
+inferencji, jawne progi retencji oraz statystyki lub jawne `null` dla
+niekwalifikujących się agregatów. `--db-update` wycofuje starsze aktywne wyniki,
+które wymagają ponownej inferencji. Przypięte archiwum zachowuje dokładne dowody
+publikacji, a geometria i ownership dawnych snapshotów pozostają dostępne dla
+recovery i migracji punktów. Cleanup wymaga przebudowy wycofanych publikacji
+przez świeżą inferencję i `--merge-only`.
+
+Nowy fingerprint cleanupu zawsze zawiera zakres wyjść i nie zawiera stałego
+pustego blocklist. Przerwany cleanup zachowuje generację i maski: adapter
+historycznego podpisu pozwala dokończyć go wyłącznie z tym samym zakresem wyjść
+i polityką wykluczeń. Nowe operacje zapisują tylko bieżący podpis.
 
 ## Konfiguracja
 
@@ -608,7 +619,7 @@ kwalifikującego wsparcia, a nie zgodę na historyczną kwalifikację agregatu.
 Schemat v17 wycofuje odtwarzanie historycznego algorytmu i wyjątków dla starego cache.
 Dawne publikacje zachowują geometrię, ownership i stan pending/recovery, ale wymagają
 ponownej inferencji i publikacji przed cleanup. Stare zwykłe punkty AI trzeba najpierw
-przekształcić przez `--migrate-point-markers-only`; punkty wykryć pozostają punktami.
+przekształcić przez `python -m stash_ai.tools.point_migration`; punkty wykryć pozostają punktami.
 Brak `end_seconds` w recovery oznacza dokładny punkt i nie pasuje do zakresu.
 
 Schemat v18 zapisuje aktywny wynik jako jeden obiekt zamiast listy segmentów.

@@ -34,11 +34,11 @@ def test_global_cleanup_of_9000_scenes_never_fetches_scenes_or_predictions(tmp_p
     stash.scene = stash.scenes['1']
     stash.marker(merge_labels.AI, 'blocked', '1', manual=True)
     keep = stash.marker(merge_labels.AI, 'keep', '2')
-    keep['tags'] += [stash.tag('op:blocked'), human]
+    keep['tags'] += [stash.tag('ai:blocked'), human]
     keep.update(seconds=10.125, end_seconds=63.625)
-    stash.marker(WD, 'core_only', '3')
-    stash.marker(WD, 'core_only', '4', manual=True)
-    parent, child = stash.tag('jt:blocked'), stash.tag('jt:allowed_child')
+    stash.marker(merge_labels.AI, 'core_only', '3')
+    stash.marker(merge_labels.AI, 'core_only', '4', manual=True)
+    parent, child = stash.tag('ai:blocked'), stash.tag('ai:allowed_child')
     child['parents'] = [deepcopy(parent)]
     stash.images.append({'tags': [parent, human]})
     install(monkeypatch, stash)
@@ -51,7 +51,7 @@ def test_global_cleanup_of_9000_scenes_never_fetches_scenes_or_predictions(tmp_p
     assert {t['name'] for t in keep['tags']} == {merge_labels.AI.owner_tag, 'blocked'}
     assert child['name'] in stash.tags and child['parents'] == []
     assert [t['name'] for t in stash.images[0]['tags']] == ['blocked']
-    assert 'wd:core_only' in stash.tags
+    assert 'ai:core_only' in stash.tags
     assert len(stash.calls) < 15
     assert 'cleanup_candidate_scenes=0' in capsys.readouterr().out
     stash.writes.clear()
@@ -78,7 +78,7 @@ def test_cursor_deletion_handles_overlapping_tags_once(tmp_path, monkeypatch):
 def test_global_dry_run_changes_neither_stash_nor_existing_state(tmp_path, monkeypatch):
     stash = SQLStash(dry=True)
     stash.marker(merge_labels.AI, 'blocked', '1')
-    stash.scene['tags'] = [stash.tag('op:blocked')]
+    stash.scene['tags'] = [stash.tag('ai:blocked')]
     args = options(tmp_path, ['blocked'])
     path = tmp_path/'state.sqlite3'
     with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL)):
@@ -94,7 +94,7 @@ def test_global_dry_run_changes_neither_stash_nor_existing_state(tmp_path, monke
 def test_resume_reconciles_committed_batches_without_replaying_deleted_ids(tmp_path, monkeypatch, failure):
     stash = SQLStash()
     stash.marker(merge_labels.AI, 'blocked', '1')
-    stash.scene['tags'] = [stash.tag('op:blocked')]
+    stash.scene['tags'] = [stash.tag('ai:blocked')]
     stash.fail_after = failure
     install(monkeypatch, stash)
     args = options(tmp_path, ['blocked'])

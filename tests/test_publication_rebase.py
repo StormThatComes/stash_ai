@@ -12,7 +12,7 @@ from stash_ai.storage.store import StateStore
 from stash_ai.storage.codec import encode
 from stash_ai.storage.snapshots import compact, require_rebased
 from stash_ai.publication.recovery import reconcile_marker_snapshot
-from stash_ai.commands.point_migration import plan
+from stash_ai.tools.point_migration import plan
 from tests.helpers.runtime import runtime as app
 from tests.helpers.evidence import span, segment
 from tests.helpers.stash import Stash

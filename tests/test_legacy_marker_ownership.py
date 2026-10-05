@@ -1,10 +1,14 @@
-"""Historical source ownership and cleanup require an explicit source."""
+"""Publishing metadata is independent of inference model identity."""
+from dataclasses import fields
 import inspect
-from stash_ai.publication import markers as marker_ops
-from stash_ai.cleanup.markers import cleanup_scene_marker_cores
+from stash_ai.models import ModelSource, SOURCES
+from stash_ai.evidence.labels import source_codes
+from stash_ai.publication.markers import owned_marker
+from stash_ai.tools.legacy_namespaces import NAMESPACES
 
 
-def test_historical_marker_helpers_require_explicit_source():
-    for helper in (marker_ops.owned_marker, marker_ops.marker_has_excluded_core,
-                   cleanup_scene_marker_cores):
-        assert inspect.signature(helper).parameters['source'].default is inspect.Parameter.empty
+def test_historical_ownership_requires_explicit_namespace():
+    assert inspect.signature(owned_marker).parameters['source'].default is inspect.Parameter.empty
+    assert set(NAMESPACES) == set(SOURCES)
+    assert not {'prefix', 'owner_tag', 'title_prefix', 'hierarchy_description'} & {field.name for field in fields(ModelSource)}
+    assert source_codes(SOURCES) == ['jt', 'wd', 'dtq', 'op']

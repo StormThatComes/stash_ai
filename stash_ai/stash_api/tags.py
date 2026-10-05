@@ -1,11 +1,11 @@
-"""Resolve model tags and synchronize their managed hierarchy."""
+"""Resolve AI tags and synchronize their managed hierarchy."""
 from __future__ import annotations
 
 from collections import Counter
 from typing import TYPE_CHECKING
 
 from stash_ai.domain import TagHierarchy
-from stash_ai.models import ModelSource
+from stash_ai.publication.namespace import OutputNamespace
 
 if TYPE_CHECKING:
     from stash_ai.stash_api.client import StashClient
@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 class TagResolver:
     def __init__(self, stash: StashClient, hierarchy: TagHierarchy | None = None, report=None,
-                 *, source: ModelSource, exclusions: frozenset[str] = frozenset(),
+                 *, source: OutputNamespace, exclusions: frozenset[str] = frozenset(),
                  create_missing: bool = True):
         self.stash = stash
         self.create_missing = create_missing

@@ -61,15 +61,13 @@ class SQLCleanup:
 def candidate_names(app, selected, cores, tags):
     from stash_ai.evidence.labels import AI
     scene, primary, extra = set(), set(), set()
-    for source in [AI, *(SOURCES[s] for s in selected)]:
-        relevant = selected if source == AI else {source.key}
-        bans = set().union(*(tags[s] for s in relevant))
-        core_bans = set().union(*(cores[s] for s in relevant))
-        if app.APPLY_SCENE_TAGS:
-            scene.update(source.prefix + label for label in bans)
-        if app.CREATE_MARKERS:
-            primary.update(source.prefix + label for label in bans | core_bans)
-            extra.update(source.prefix + label for label in bans)
+    bans = set().union(*(tags[source] for source in selected))
+    core_bans = set().union(*(cores[source] for source in selected))
+    if app.APPLY_SCENE_TAGS:
+        scene.update(AI.prefix + label for label in bans)
+    if app.CREATE_MARKERS:
+        primary.update(AI.prefix + label for label in bans | core_bans)
+        extra.update(AI.prefix + label for label in bans)
     return scene, primary, extra
 
 
@@ -81,24 +79,23 @@ def run_sql_cleanup(app, sql, store, settings, args, cores, tags, stats):
     wide = not args.scene_id and selected == set(SOURCES)
     global_labels = frozenset.intersection(*tags.values()) if wide else frozenset()
     common_cores = (frozenset.intersection(*cores.values()) - global_labels) if wide and app.CREATE_MARKERS else frozenset()
-    sources = [AI, *SOURCES.values()]
-    names = {s.prefix + label for s in sources for label in global_labels}
-    core_names = {s.prefix + label: s for s in sources for label in common_cores}
+    names = {AI.prefix + label for label in global_labels}
+    core_names = {AI.prefix + label: AI for label in common_cores}
     catalog = sql.client.catalog()
     sql.set_catalog(catalog)
     # Validate all recovery gates before discovery and before the first write.
     if wide and store.has_pending_publications():
         raise RuntimeError('An interrupted merge is pending; run --merge-only before cleanup.')
+    kinds = [kind for kind, enabled in [('scene', app.APPLY_SCENE_TAGS), ('markers', app.CREATE_MARKERS)] if enabled] if wide else []
     fingerprint_data = {'tags': {s: sorted(tags[s]) for s in SOURCES},
-                        'cores': {s: sorted(cores[s]) for s in SOURCES},
-                        # Preserve resumability of cleanups started with the default empty list.
-                        'marker_blocklist': []}
-    kinds = [k for k, enabled in [('scene', app.APPLY_SCENE_TAGS), ('markers', app.CREATE_MARKERS)] if enabled] if wide else []
-    if kinds != ['scene', 'markers']:
-        fingerprint_data['output_kinds'] = kinds
+                        'cores': {s: sorted(cores[s]) for s in SOURCES}, 'output_kinds': kinds}
     fingerprint = digest(fingerprint_data)
     if store.cleanup_pending and store.cleanup_pending != fingerprint:
-        raise RuntimeError('Global cleanup is interrupted; rerun the same cleanup mode and exclusion policies.')
+        from stash_ai.db.cleanup_fingerprint import historical
+        if store.cleanup_pending != historical(fingerprint_data['tags'], fingerprint_data['cores'], kinds):
+            raise RuntimeError('Global cleanup is interrupted; rerun the same cleanup mode and exclusion policies.')
+        # Finish the already persisted intent with its original generation/key.
+        fingerprint = store.cleanup_pending
     if wide and (global_labels or common_cores or store.cleanup_pending):
         begin(store, fingerprint, global_labels, common_cores,
               [i for i, n in catalog.items() if n in names], kinds=kinds)
