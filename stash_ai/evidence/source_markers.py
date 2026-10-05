@@ -1,44 +1,27 @@
 """Build validated per-source markers before cross-model enrichment."""
-from stash_ai.evidence.historical_markers import HistoricalPolicy
 from .contracts import RecordsBySource, MarkerContribution
 from stash_ai.domain import Cue, FramePrediction
 from stash_ai.runtime.timing import stage
 from .labels import raw_label
 
 
-def marker_contributions(app, records: RecordsBySource, core_policies, *, index=None, metrics=None, cache=None, tag_policies=None,
-                         allow_unknown_blocklist=False, allow_unknown_retention=False,
-                         frozen_exclusions=None) -> list[MarkerContribution]:
+def marker_contributions(app, records: RecordsBySource, core_policies, *, index=None, metrics=None, cache=None,
+                         tag_policies=None) -> list[MarkerContribution]:
     from stash_ai.evidence.frames import FrameIndex
     from stash_ai.evidence.thresholds import marker_context
     app = marker_context(app, records)
-    if isinstance(app.TEMPORAL_POLICY, HistoricalPolicy):
-        from stash_ai.evidence.historical_markers import marker_contributions as historical_contributions
-        return historical_contributions(app, records, core_policies, tag_policies=tag_policies,
-            allow_unknown_blocklist=allow_unknown_blocklist, allow_unknown_retention=allow_unknown_retention,
-            frozen_exclusions=frozen_exclusions)
     if index is not None:
-        return _marker_contributions(app, records, core_policies, index, metrics, tag_policies,
-                                     allow_unknown_blocklist=allow_unknown_blocklist,
-                                     allow_unknown_retention=allow_unknown_retention,
-                                     frozen_exclusions=frozen_exclusions)
+        return _marker_contributions(app, records, core_policies, index, metrics, tag_policies)
     with FrameIndex(app, records, core_policies, cache=cache, tag_policies=tag_policies) as index:
-        return _marker_contributions(app, records, core_policies, index, metrics, tag_policies,
-                                     allow_unknown_blocklist=allow_unknown_blocklist,
-                                     allow_unknown_retention=allow_unknown_retention,
-                                     frozen_exclusions=frozen_exclusions)
+        return _marker_contributions(app, records, core_policies, index, metrics, tag_policies)
 
 
-def _marker_contributions(app, records, core_policies, index, metrics, tag_policies, *,
-                          allow_unknown_blocklist=False, allow_unknown_retention=False,
-                          frozen_exclusions=None):
+def _marker_contributions(app, records, core_policies, index, metrics, tag_policies):
     from stash_ai.evidence.temporal.markers import consensus_seeds, build_markers as temporal_markers
     from stash_ai.evidence.temporal.policy import build_options
     from stash_ai.exclusions import policies_or_empty, core_policies_with_global
     from stash_ai.evidence.thresholds import validate_marker_cache
-    validate_marker_cache(app, records, allow_unknown_blocklist=allow_unknown_blocklist,
-                          allow_unknown_retention=allow_unknown_retention,
-                          frozen_exclusions=frozen_exclusions)
+    validate_marker_cache(app, records)
     tag_policies = policies_or_empty(tag_policies if tag_policies is not None else index.tag_policies)
     effective_cores = core_policies_with_global(core_policies, tag_policies)
     report = index.report

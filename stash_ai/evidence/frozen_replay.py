@@ -2,7 +2,7 @@
 from dataclasses import replace
 
 from stash_ai.evidence.identity import marker_segment_signature
-from stash_ai.evidence.historical_markers import frozen_policy
+from stash_ai.evidence.temporal.policy import frozen_policy
 from stash_ai.models import SOURCES
 
 
@@ -23,7 +23,8 @@ class PublishedRecords:
                         for source in archive.keys() | active.keys()}
             records = with_archive(kind)
             if scene_frames:
-                records = published_frames(with_archive('scene'), records)
+                from stash_ai.evidence.cache_views import frame_records
+                records = frame_records(with_archive('scene'))
             self.indexes[key] = {source: {marker_segment_signature(segment): segment for segment in segments}
                                  for source, segments in records.items()}
         matching = {}
@@ -52,15 +53,3 @@ def frozen_policies(options, field, selected, current):
     frozen = options[field]
     return {source: frozenset(frozen[source]) |
             (current[source] if source in selected else frozenset()) for source in SOURCES}
-
-
-def published_frames(scenes, markers):
-    """Historical snapshots retain exact pre-v4 frame identities until rebased."""
-    from stash_ai.evidence.cache_views import as_frames
-    result = {}
-    for source in scenes.keys() | markers.keys():
-        full = [s for s in scenes.get(source, []) if s['meta'].get('scene_frames_format') == 1 and 'frames' in s]
-        runs = {s['meta'].get('inference_signature') for s in full}
-        result[source] = [as_frames(s) for s in full] + [s for s in markers.get(source, [])
-            if s['meta'].get('inference_signature') not in runs]
-    return result

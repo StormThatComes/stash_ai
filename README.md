@@ -126,7 +126,7 @@ klatki, wyniki i podpisy dowodów zachowują swoje wartości.
 
 Snapshoty merge zapisują współdzielone dowody `extra_support` raz, a contributions
 odwołują się do nich przez referencje. Zmniejsza to koszt serializacji i kompresji.
-Aktualny schemat to v16; starsze wersje programu odmówią jego otwarcia. Każdy nowy snapshot ma otoczkę formatu v4. `--db-update` konwertuje dawne
+Aktualny schemat to v17; starsze wersje programu odmówią jego otwarcia. Każdy nowy snapshot ma otoczkę formatu v4. `--db-update` konwertuje dawne
 snapshoty, także pending i recovery, dopisuje wymagane `contributions: []` do pustych zapisów oraz uzupełnia kompletne opcje odtwarzania, również w zagnieżdżonych dowodach scen.
 Dawny `blocklist` zostaje połączony z zapisanymi `tag_exclusions` wszystkich źródeł.
 Brakujące dawne przełączniki współdzielenia i occurrences zachowują `False`.
@@ -224,16 +224,16 @@ Sceny, które zakończyły przejście, są pomijane przy ponownym uruchomieniu t
 Jeśli CREATE_MISSING jest wyłączone, stary obiekt bez dostępnego tagu zastępczego pozostaje.
 
 Zwykły merge odmawia pracy ze starymi zarządzanymi prefiksami i wskazuje tę komendę.
-Import historycznych ocen oraz jego trwały rejestr nie są już używane. Schemat v16
+Import historycznych ocen oraz jego trwały rejestr nie są już używane. Schemat v17
 usuwa `legacy_imports` i importowane aktywne wyniki, zlecając świeżą inferencję.
 Globalne definicje starych tagów pozostają dostępne dla ręcznych powiązań.
 
 ### Zdrowie, aktualizacja i kompaktowanie bazy stanu
 
 `--db-update` aktualizuje całą istniejącą bazę wskazaną przez `--state-db`
-do najnowszego obsługiwanego schematu (obecnie v16), we wszystkich scope'ach.
+do najnowszego obsługiwanego schematu (obecnie v17), we wszystkich scope'ach.
 Zwykłe uruchomienie oraz `--dry-run` wymagają aktualnego schematu: starszą bazę
-trzeba najpierw zaktualizować tą komendą. Nowa baza od razu otrzymuje v16.
+trzeba najpierw zaktualizować tą komendą. Nowa baza od razu otrzymuje v17.
 Updater korzysta z tego samego locka writera; migracje są wyłącznie offline.
 Tworzy aktualne tabele, indeksy i triggery, uzupełnia `result_index` dla baz
 sprzed v2, uzupełnia historyczne `result_metadata` we wszystkich scope'ach
@@ -601,10 +601,16 @@ zasadę; archiwum służy wyłącznie frozen replay i jest przycinane po zmianie
 Zwykły merge, raporty, progi i indeks ukończenia nie korzystają z historii inferencji.
 
 
-W schemacie v16 aktywna inferencja wymaga analysis_format=4. --db-update wycofuje
+W schemacie v15 aktywna inferencja wymaga analysis_format=4. --db-update wycofuje
 starsze wyniki, zaznacza konieczność ponownej inferencji i zachowuje tylko dokładne
 dowody przypięte przez published/pending/recovery. Snapshoty i owned_ids pozostają
 bez zmian. Uruchom następnie inferencję dla wszystkich wskazanych modeli i wyjść;
 --merge-only nie odtwarza brakującego cache. Raporty i occurrences używają pełnych
 obserwacji scen oraz jawnych sygnatur. statistics=null nadal oznacza brak
 kwalifikującego wsparcia, a nie zgodę na historyczną kwalifikację agregatu.
+
+Schemat v17 wycofuje odtwarzanie historycznego algorytmu i wyjątków dla starego cache.
+Dawne publikacje zachowują geometrię, ownership i stan pending/recovery, ale wymagają
+ponownej inferencji i publikacji przed cleanup. Stare zwykłe punkty AI trzeba najpierw
+przekształcić przez `--migrate-point-markers-only`; punkty wykryć pozostają punktami.
+Brak `end_seconds` w recovery oznacza dokładny punkt i nie pasuje do zakresu.

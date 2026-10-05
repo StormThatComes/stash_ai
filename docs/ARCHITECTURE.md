@@ -61,8 +61,10 @@ procesów merge oraz model report, bez ładowania usług CLI.
 `stash_ai/cli.py` koordynuje jeden pipeline publikacji. Pobieranie cue/sprite,
 przygotowanie obrazów, filtrowanie score i resumowalna inferencja znajdują się
 w `stash_ai/inference/`. Nowa inferencja używa silnika temporalnego.
-`evidence/historical_markers.py` odtwarza dawny algorytm wyłącznie dla frozen
-snapshotów publikacji/cleanupu; zachowuje historyczne zakresy i first-frame extras.
+Frozen replay uses only the temporal engine. Schema v17 retains old contribution geometry,
+manual tag IDs, ownership and pending/recovery intent, but retires old build options under
+`retired_build_options`. Cleanup refuses contributions marked `requires_rebase`; fresh
+inference and merge replace them with current proofs. Offline snapshot migrations remain available.
 Usunięto aktywne moduły `runs/separate.py`, `publication/separate.py` i ich
 plannery. Source-prefixed wyniki przechodzą jednorazowo do ai: przez świeżą inferencję.
 Funkcje zależne od ustawień przebiegu otrzymują `app` jako jawny argument,
@@ -379,7 +381,7 @@ changing the proof objects retained by result spans.
 
 Schema upgrades run only through `--db-update`. Runtime writers and dry-run readers require the current schema; fresh stores are created at the current version. Preview always attaches a current database read-only and writes into a sparse temporary overlay. The offline updater visits every scope, backfills derived result metadata, and preserves raw evidence and unfinished plans. Metadata invalidated or corrupted later is still rebuilt from authoritative evidence.
 
-Schema v10 stores per-segment effective thresholds as JSON arrays in `result_thresholds.thresholds`; null entries use the segment's original inference threshold. Evidence BLOBs and derived metadata contain no publication overrides. The offline migration strips retired refinement and inline overrides once, preserving evidence signatures and mixed history. New inference always declares its actual marker capture floor and an empty marker blocklist. Unknown historical retention is rejected for new publication, while verified frozen cleanup replay keeps its narrower exception.
+Schema v10 stores per-segment effective thresholds as JSON arrays in `result_thresholds.thresholds`; null entries use the segment's original inference threshold. Evidence BLOBs and derived metadata contain no publication overrides. The offline migration strips retired refinement and inline overrides once, preserving evidence signatures and mixed history. New inference always declares its actual marker capture floor and an empty marker blocklist. Current-format retention is required for both publication and frozen cleanup replay.
 
 Schema v12 uses snapshot envelope v3 for every new publication, including snapshots with no shared proofs. Generic compressed JSON decoding never dispatches by a magic key. Snapshot decoding requires complete frozen marker/scene build options and every source's exclusion list, also inside occurrence scene evidence. Offline migration handles plain JSON and v1/v2 envelopes, completes historical empty maps and policies, and folds retired blocklists into frozen tag exclusions. Numeric marker settings and scene tag caps must already be saved; migration never substitutes today's runtime settings. Pending promotion still copies the encoded intent, and migration preserves proof references, recovery operation IDs, ownership and old False flags.
 

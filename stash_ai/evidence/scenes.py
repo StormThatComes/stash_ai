@@ -172,6 +172,8 @@ def cleanup_scene_support(app, store, scene_id, hits, selected, policies):
     from stash_ai.evidence.frames import FrameIndex
     from stash_ai.signatures import digest
     from stash_ai.evidence.frozen_replay import PublishedRecords, snapshot_context, frozen_policies
+    from stash_ai.storage.snapshots import require_rebased
+    require_rebased(hits)
     cleaned, rebuilt = [], {}
     published = PublishedRecords(store, scene_id)
     for hit in hits:
@@ -192,9 +194,9 @@ def cleanup_scene_support(app, store, scene_id, hits, selected, policies):
             options = hit['build_options']
             context = snapshot_context(app, options, 'scene')
             from stash_ai.evidence.cache_views import views
-            from stash_ai.evidence.frozen_replay import published_frames
+            from stash_ai.evidence.cache_views import frame_records
             context, matching['scene'] = views(context, matching['scene'], archived=True)
-            matching['markers'] = published_frames(matching['scene'], matching['markers'])
+            matching['markers'] = frame_records(matching['scene'])
             frozen = frozen_policies(options, 'scene_exclusions', selected, policies)
             with FrameIndex(context, matching['markers'], {s: frozenset() for s in SOURCES}, cache=store.cache) as index:
                 rebuilt[key] = shared_scene_contributions(context, index, matching['scene'], frozen)

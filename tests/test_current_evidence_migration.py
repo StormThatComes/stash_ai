@@ -59,9 +59,9 @@ def test_upgrade_retires_old_results_across_scopes_and_preserves_exact_pins(tmp_
         snapshots = connection.execute('SELECT * FROM snapshots').fetchall()
         recovery = connection.execute('SELECT * FROM recovery_publications').fetchall()
     before = path.read_bytes()
-    assert db.update_database(path, dry_run=True) == (14, 16)
+    assert db.update_database(path, dry_run=True) == (14, 17)
     assert path.read_bytes() == before
-    assert db.update_database(path) == (14, 16)
+    assert db.update_database(path) == (14, 17)
     for scope in ('first', 'second'):
         with StateStore(path, scope) as store:
             assert 'wd' not in store.records('1', 'scene')
@@ -80,7 +80,7 @@ def test_upgrade_retires_old_results_across_scopes_and_preserves_exact_pins(tmp_
     with sqlite3.connect(path) as connection:
         assert connection.execute('SELECT * FROM snapshots').fetchall() == snapshots
         assert connection.execute('SELECT * FROM recovery_publications').fetchall() == recovery
-    assert db.update_database(path) == (16, 16)
+    assert db.update_database(path) == (17, 17)
 
 
 def test_retirement_and_archive_roll_back_together(tmp_path, monkeypatch):

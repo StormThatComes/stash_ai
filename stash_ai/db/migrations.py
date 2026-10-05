@@ -75,6 +75,9 @@ def migrate(database):
                     'SELECT r.scope,r.scene,r.model,r.kind,r.data,t.thresholds FROM results AS r '
                     'LEFT JOIN result_thresholds AS t USING(scope,scene,model,kind)'):
                 index_result(state, scene, model, kind, overlay(decode(payload), kind, thresholds), scope=scope)
+        if database.version < 17:
+            from .publication_rebase import migrate as rebase_publications
+            rebase_publications(db)
         from .archive_migration import migrate as migrate_archive
         migrate_archive(db)
         if database.version < 15:

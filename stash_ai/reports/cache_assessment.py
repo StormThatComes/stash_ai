@@ -1,4 +1,5 @@
 """Assess retained evidence and scene-wide publication blockers."""
+from stash_ai.evidence.formats import validate_current
 from dataclasses import dataclass, replace
 
 from stash_ai.storage.results import KINDS
@@ -14,7 +15,7 @@ RESTART = frozenset(('legacy_only', 'insufficient', 'inconsistent'))
 def inspect_output(app, config, kind, segments, index, refresh, checkpoint, error):
     from stash_ai.evidence.cache_views import scene_threshold, validate_scene
     from stash_ai.evidence.temporal.policy import marker_floor
-    from stash_ai.evidence.thresholds import _score, indexed_signature, marker_threshold, validate_marker_blocklist
+    from stash_ai.evidence.thresholds import _score, indexed_signature, marker_threshold
 
     def result(status, reason, **details):
         return dict(status=status, reason=reason, **details)
@@ -55,7 +56,7 @@ def inspect_output(app, config, kind, segments, index, refresh, checkpoint, erro
             else:
                 if segment['mode'] != 'frames' or meta.get('origin') != 'inference':
                     raise ValueError('Imported marker ranges cannot prove retained frame coverage.')
-                validate_marker_blocklist(segment, config.source.key)
+                validate_current(segment)
                 floor = meta.get('marker_score_floor')
                 saved = marker_threshold(segment)
             if not _score(saved) or not _score(floor):

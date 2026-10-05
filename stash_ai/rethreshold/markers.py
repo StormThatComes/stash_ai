@@ -1,6 +1,7 @@
 """Validate marker coverage and update its effective publication threshold."""
+from stash_ai.evidence.formats import validate_current
 from stash_ai.evidence.identity import OVERRIDE
-from stash_ai.evidence.thresholds import _score, marker_threshold, validate_marker_blocklist
+from stash_ai.evidence.thresholds import _score, marker_threshold
 
 
 from .plans import RecordAccess, PendingPolicy, ThresholdPlan, apply_plan
@@ -24,7 +25,7 @@ def validate(app, store, scene, config, *, check_scene=True, access=RecordAccess
         meta = segment['meta']
         if segment['mode'] != 'frames' or meta.get('origin') != 'inference':
             raise ValueError(f'{scene}/{model}: imported ranges cannot be rethresholded; run inference.')
-        validate_marker_blocklist(segment, f'{scene}/{model}')
+        validate_current(segment)
         # Before temporal retention was introduced, only high detections survived.
         floor = meta.get('marker_score_floor')
         if not _score(floor) or floor > needed:

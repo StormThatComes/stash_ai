@@ -120,7 +120,7 @@ def test_unknown_historical_floor_requires_inference_even_at_high_threshold(over
     frames['meta'].pop('marker_score_floor', None)
     frames['meta']['marker_threshold'] = .7
     frames[thresholds_identity.OVERRIDE] = override
-    with pytest.raises(ValueError, match='wd: marker cache floor.*run inference'):
+    with pytest.raises(ValueError, match='Obsolete active inference'):
         merge_source_markers.marker_contributions(app, {'wd': [frames]}, policies())
 
 
@@ -131,7 +131,7 @@ def test_historical_incomplete_segment_cannot_hide_behind_complete_history():
     old['meta']['marker_tag_blocklist'] = []
     old['meta'].pop('marker_score_floor', None)
     current = segment('wd', [[('core', .9)]] * 2)
-    with pytest.raises(ValueError, match='wd: marker cache floor.*run inference'):
+    with pytest.raises(ValueError, match='Obsolete active inference'):
         merge_source_markers.marker_contributions(app, {'wd': [old, current]}, policies())
 
 
@@ -217,16 +217,13 @@ def test_scene_tags_only_does_not_require_marker_cache(pipeline, monkeypatch, tm
     assert p.stash.scene == before
 
 
-def test_legacy_frames_and_imported_ranges_remain_usable():
+def test_noninference_cannot_claim_current_retention_contract():
     from tests.helpers.evidence import segment, policies
     imported = segment('wd', [[('core', .9)]] * 2)
     imported['meta'].update(origin='legacy')
     imported['meta'].pop('marker_score_floor', None)
-    records = {'wd': [imported], 'joytag': [
-        dict(mode='spans', meta={'origin': 'legacy'}, items=[
-            dict(tag='legacy', start=3, end=5, extra_tags=[])])]}
-    markers = merge_intervals.union_intervals(merge_source_markers.marker_contributions(app, records, policies()))
-    assert [(m['tag'], m['start'], m['end']) for m in markers] == [('core', 0, 2), ('legacy', 3, 5)]
+    with pytest.raises(ValueError, match='Current inference evidence'):
+        merge_source_markers.marker_contributions(app, {'wd': [imported]}, policies())
 
 
 @pytest.mark.parametrize('source', ['wd', 'dtq'])

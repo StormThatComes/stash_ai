@@ -84,11 +84,11 @@ def test_merged_extra_hits_combine_distinct_times_but_not_duplicate_model_votes(
     assert result['extra_evidence']['extra']['support_seconds']==(1 if same_time else 2)
 
 
-def test_legacy_extra_tags_remain_when_coverage_is_unavailable():
+def test_unproved_extra_tags_do_not_join_temporal_evidence():
     records={'wd':[segment('wd',[[('core',.9)]]*2)],'joytag':[
         dict(mode='spans',meta={'origin':'legacy'},items=[dict(tag='core',start=0,end=2,extra_tags=['old_extra'])])]}
     spans=merge_source_markers.marker_contributions(app,records,{m:frozenset() for m in SOURCES})
-    assert merge_intervals.union_intervals(spans)[0]['extra_tags']==['old_extra']
+    assert merge_intervals.union_intervals(spans)[0]['extra_tags']==[]
 
 
 def test_hysteresis_needs_a_seed_and_caps_weak_tail(monkeypatch):
@@ -251,17 +251,6 @@ def test_cleanup_uses_published_evidence_and_does_not_adopt_new_votes(tmp_path,c
             state.put('1','wd',{'markers':altered})
             with pytest.raises(RuntimeError,match='merge-only'):
                 cleanup_evidence.cleanup_support(app,state,'1',kept,{'wd'},policies)
-
-
-def test_legacy_mode_filters_weaker_scores_retained_by_new_inference(monkeypatch):
-    from stash_ai.evidence.frozen_replay import snapshot_context
-    from stash_ai.evidence.temporal.policy import build_options
-    options = build_options(app)
-    options['algorithm'] = 'historical'
-    frozen = snapshot_context(app, options, 'markers')
-    records={'wd':[segment('wd',[[('core',.9)],[('core',.7)],[('core',.7)]])]}
-    frozen.MARKER_THRESHOLDS = {'wd': .8}
-    assert merge_source_markers.marker_contributions(frozen,records,{m:frozenset() for m in SOURCES})==[]
 
 
 @pytest.mark.parametrize('field,value',[('extra_min_hits',True),('marker_continue_ratio',0),

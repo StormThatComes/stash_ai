@@ -37,6 +37,9 @@ def merged_extras(component):
     """Qualify extras over the whole union; duplicate model coverage counts once."""
     records = component["contributors"]
     from stash_ai.evidence.formats import current
+    if any(record.get('requires_rebase') for record in records):
+        # Offline migration retained geometry for recovery and point conversion.
+        return
     for record in records:
         if current(record.get('meta', {})) and record.get('derived') != 'occurrence' and (
                 'extra_support' not in record or not record.get('build_options')):
@@ -44,19 +47,15 @@ def merged_extras(component):
     settings = next((r["build_options"]["policy"] for r in records if r.get("build_options")), None)
     if settings is None:
         return
-    from stash_ai.evidence.historical_markers import HistoricalPolicy, frozen_policy
+    from stash_ai.evidence.temporal.policy import frozen_policy
     options = next(r['build_options'] for r in records if r.get('build_options'))
     policy = frozen_policy(options)
-    if isinstance(policy, HistoricalPolicy):
-        return
-    known, legacy, intervals, times = set(), set(), defaultdict(list), defaultdict(set)
+    known, intervals, times = set(), defaultdict(list), defaultdict(set)
     source_evidence = defaultdict(lambda: defaultdict(list))
     support_records = defaultdict(list)
     seen_support = set()
     for record in records:
         if "extra_support" not in record:
-            from stash_ai.evidence.historical_evidence import plain_extras
-            legacy.update(plain_extras(record))
             continue
         for tag, evidence in record["extra_support"].items():
             # Several source spans can share exactly the same indexed proof.
@@ -72,7 +71,7 @@ def merged_extras(component):
             for source, values in evidence.get("sources", {}).items():
                 source_evidence[tag][source].append(values)
     duration = component["end"] - component["start"] if component["end"] is not None else 0.0
-    accepted, statistics = set(legacy), {}
+    accepted, statistics = set(), {}
     def bounded_ranges(intervals):
         ranges = []
         for start, end in sorted(intervals):

@@ -163,20 +163,17 @@ def test_snapshot_migration_preserves_pending_recovery_shared_proofs_and_old_fal
         with StateStore(path, scope) as state:
             for value in (*state.snapshot('1', 'markers', borrow=True),
                           decode_snapshot(state.connection.execute('SELECT data FROM recovery_publications WHERE scope=?', (scope,)).fetchone()[0])):
-                policy = value['contributions'][0]['build_options']['policy']
-                assert set(policy) == set(asdict(TemporalPolicy()))
-                assert all(policy[name] is False for name in ('shared_marker_frames', 'shared_marker_extras',
-                    'short_marker_extras', 'shared_scene_tags', 'occurrence_markers'))
                 assert value['owned_ids'] == snapshot['owned_ids']
-                options = value['contributions'][0]['build_options']
+                options = value['contributions'][0]['retired_build_options']
+                assert value['contributions'][0]['requires_rebase']
+                assert set(options['policy']) == set(asdict(TemporalPolicy()))
+                assert all(options['policy'][name] is False for name in ('shared_marker_frames', 'shared_marker_extras',
+                    'short_marker_extras', 'shared_scene_tags', 'occurrence_markers'))
                 assert 'blocklist' not in options and options['marker_thresholds'] == {}
                 assert options['tag_exclusions']['wd'] == ['existing-ban', 'retired-ban']
-                assert all('retired-ban' in tags for tags in options['tag_exclusions'].values())
-                nested = value['contributions'][0]['scene_evidence'][0]['build_options']
+                nested = value['contributions'][0]['scene_evidence'][0]['retired_build_options']
                 assert nested['max_tags'] == 7 and nested['scene_thresholds'] == {}
                 assert nested['scene_exclusions']['dtq'] == ['frozen-scene-ban']
-                assert nested['scene_exclusions']['wd'] == []
-                assert not nested['policy']['occurrence_markers']
                 if old_format != 'plain':
                     first, second = value['contributions']
                     assert first['extra_support']['extra'] is second['extra_support']['extra']
@@ -350,11 +347,11 @@ def test_db_update_cli_stays_offline_and_reports_dry_run_and_idempotence(tmp_pat
 
     assert app.main([*command, '--dry-run']) == 0
     assert path.read_bytes() == before
-    assert 'DRY RUN: state DB schema v1 -> v16' in capsys.readouterr().out
+    assert 'DRY RUN: state DB schema v1 -> v17' in capsys.readouterr().out
     assert app.main(command) == 0
-    assert 'State DB updated: schema v1 -> v16' in capsys.readouterr().out
+    assert 'State DB updated: schema v1 -> v17' in capsys.readouterr().out
     assert app.main(command) == 0
-    assert 'up to date: v16' in capsys.readouterr().out
+    assert 'up to date: v17' in capsys.readouterr().out
     assert app.main(['--state-db', str(tmp_path / 'missing.sqlite3'), '--db-update']) == 1
     assert 'does not exist' in capsys.readouterr().out
 

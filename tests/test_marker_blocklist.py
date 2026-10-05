@@ -172,15 +172,12 @@ def test_each_history_segment_is_checked_and_imported_ranges_keep_their_semantic
     old['meta']['analysis_format'] = 3
     old['meta']['marker_tag_blocklist'] = ['missing']
     current = segment('wd', [[('common', .9)]] * 2, identity='new')
-    with pytest.raises(ValueError, match='unblocked marker tags'):
+    with pytest.raises(ValueError, match='Obsolete active inference'):
         thresholds.validate_marker_cache(app, {'wd': [old, current]})
     imported = dict(mode='spans', meta={'origin': 'legacy'}, items=[])
     thresholds.validate_marker_cache(app, {'wd': [imported, current]})
 
 
-def test_blocklist_preflight_reasons_are_stable():
+def test_retired_cache_preflight_reason_is_stable():
     assert rethreshold_targets.threshold_failure_reason(ValueError(
-        '123/wd: unblocked marker tags [\'common\'] are absent from cached frames; run inference.')) == (
-            'unblocked marker tags require inference')
-    assert rethreshold_targets.threshold_failure_reason(ValueError(
-        '123/wd: marker blocklist metadata is missing or invalid; run inference.')) == 'unknown marker blocklist'
+        'Obsolete active inference evidence; run --db-update and inference again.')) == 'obsolete inference evidence'
