@@ -544,11 +544,17 @@ uruchamiania `pip`. Wymaga tokena GitHub z dostępem `Contents: read` do
 prywatnego repozytorium.
 
 Przy pierwszym przejściu ze starego układu (moduły `stash_*.py` obok launchera)
-uruchom updater **dwa razy**. Stara wersja pobiera tylko pliki z katalogu
-głównego; drugie uruchomienie nowego updatera pobierze pakiet `stash_ai/`.
-Zachowaj te same potrzebne opcje, np. `--force-code`. Przed ukończeniem migracji
-launcher wyświetla instrukcję ponownego uruchomienia updatera. Przy `git pull`
-lub użyciu najnowszego updatera od początku wystarczy jedna aktualizacja.
+uruchom starą wersję updatera raz, a potem nową wersję z jawną migracją:
+
+```powershell
+python .\update_stash_ai.py --migrate-flat-layout --dry-run
+python .\update_stash_ai.py --migrate-flat-layout
+```
+
+Migrator usuwa wyłącznie znane dawne moduły i wycofane ścieżki, zachowując backupy.
+Zmodyfikowany kod nadal wymaga `--force-code`. Kolejne zwykłe aktualizacje sprawdzają
+kod zarządzany w zapisanej historii; nie skanują już nieśledzonych plików starego układu.
+Przy `git pull` lub użyciu najnowszego updatera od początku nie ma etapu starego updatera.
 
 ```powershell
 $env:GH_TOKEN = "<fine-grained PAT>"
