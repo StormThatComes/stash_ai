@@ -58,7 +58,7 @@ def mark_as_v3(path, *, add_video_result=False):
             rows=db.execute("SELECT scope,scene,model,data FROM results WHERE kind='markers'").fetchall()
             for scope,scene,model,data in rows:
                 records=state_codec.decode(data)
-                records[-1]['refinement']=old_video_payload()
+                records['refinement']=old_video_payload()
                 db.execute("UPDATE results SET data=? WHERE scope=? AND scene=? AND model=? AND kind='markers'",
                            (state_codec.encode(records),scope,scene,model))
         db.execute('CREATE TABLE refinement_progress(scope TEXT,scene TEXT,model TEXT,signature TEXT,data BLOB,PRIMARY KEY(scope,scene,model))')
@@ -130,9 +130,9 @@ def test_v3_completed_vtt_results_are_reused_without_video_samples_or_model_load
     assert app.main([*p.args,*(['--merge-only'] if mode=='merge-only' else [])])==0
     assert p.stash.scene==expected
     with merge_store.StateStore(p.path,merge_store.scope_for(app.STASH_URL),True) as state:
-        assert state.connection.execute('PRAGMA user_version').fetchone()==(15,)
+        assert state.connection.execute('PRAGMA user_version').fetchone()==(18,)
         assert not state.connection.execute("SELECT 1 FROM sqlite_master WHERE name='refinement_progress'").fetchone()
-        assert 'refinement' not in state.records('1','markers')['wd'][-1]
+        assert 'refinement' not in state.records('1','markers')['wd']
 
 
 def test_v3_partial_vtt_checkpoint_survives_removing_video_progress(pipeline):
@@ -173,9 +173,9 @@ def test_explain_excludes_retired_video_evidence(pipeline,capsys):
 
 def test_frozen_old_policies_do_not_reenable_retired_options(tmp_path):
     policies={model:frozenset() for model in SOURCES}
-    records={model:[segment(model,[[('core',.7)]]*3)] for model in ('wd','dtq','oppai')}
+    records={model:segment(model,[[('core',.7)]]*3) for model in ('wd','dtq','oppai')}
     with merge_store.StateStore(tmp_path/'state.sqlite3','fixture') as state:
-        for model,segments in records.items():state.put('1',model,{'markers':segments[0]})
+        for model,segments in records.items():state.put('1',model,{'markers':segments})
         _,spans=merge.evidence(app,state,'1',policies,policies)
         for span in spans:
             from stash_ai.db.snapshot_migration import complete_policy
@@ -198,5 +198,5 @@ def test_appended_results_never_retain_retired_video_payload(tmp_path):
         state.put('1','wd',{'markers':data})
         raw=state.connection.execute("SELECT data FROM results WHERE kind='markers'").fetchone()[0]
         records=state_codec.decode(raw)
-        assert len(records)==1 and 'refinement' not in records[0]
+        assert isinstance(records, dict) and 'refinement' not in records
         assert not any(key.startswith('refine_') for key in asdict(TemporalPolicy()))

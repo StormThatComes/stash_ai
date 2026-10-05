@@ -13,7 +13,7 @@ class RecordAccess(Enum):
     def read(self, store, scene, kind, model):
         if self is RecordAccess.METADATA:
             return store.result_metadata(scene, kind, model)
-        return store.records(scene, kind, model, borrow=True).get(model, [])
+        return store.model_record(scene, kind, model, borrow=True)
 
 
 class PendingPolicy(Enum):
@@ -45,7 +45,7 @@ class ThresholdPlan:
 def apply_plan(store, scene, model, plan: ThresholdPlan):
     """Apply a validated plan without reopening payloads or changing their bytes."""
     with store.connection:
-        for kind, segments in plan.outputs.items():
-            threshold = scene_threshold(segments[0]) if kind == 'scene' else marker_threshold(segments[0])
-            store.set_result_threshold(scene, model, kind, threshold, segments,
+        for kind, record in plan.outputs.items():
+            threshold = scene_threshold(record) if kind == 'scene' else marker_threshold(record)
+            store.set_result_threshold(scene, model, kind, threshold, record,
                                        metadata_only=plan.access is RecordAccess.METADATA)

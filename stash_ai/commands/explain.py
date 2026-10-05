@@ -89,18 +89,17 @@ def explain(app, args, core_policies, scene_policies):
             recorded_sources = {}
             for kind in KINDS:
                 sources = {}
-                for source, segments in store.records(scene_id, kind).items():
+                for source, segment in store.records(scene_id, kind).items():
                     matches = []
-                    for segment in segments:
-                        items = ([dict(start=frame["start"], end=frame["end"], score=score)
-                                  for frame in segment["items"] for tag, score in frame["tags"] if tag == label]
-                                 if segment["mode"] == "frames" else [entry for entry in segment["items"] if entry["tag"] == label])
-                        if items:
-                            matches.append({
-                                "meta": segment["meta"],
-                                "thresholds": _record_thresholds(app, kind, segment),
-                                "detections": items,
-                            })
+                    items = ([dict(start=frame["start"], end=frame["end"], score=score)
+                              for frame in segment["items"] for tag, score in frame["tags"] if tag == label]
+                             if segment["mode"] == "frames" else [entry for entry in segment["items"] if entry["tag"] == label])
+                    if items:
+                        matches.append({
+                            "meta": segment["meta"],
+                            "thresholds": _record_thresholds(app, kind, segment),
+                            "detections": items,
+                        })
                     if matches:
                         sources[source] = {"excluded": label in scene_policies[source] or (kind == 'markers' and label in core_policies[source]),
                                            "records": matches}

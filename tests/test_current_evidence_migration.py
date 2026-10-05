@@ -59,14 +59,14 @@ def test_upgrade_retires_old_results_across_scopes_and_preserves_exact_pins(tmp_
         snapshots = connection.execute('SELECT * FROM snapshots').fetchall()
         recovery = connection.execute('SELECT * FROM recovery_publications').fetchall()
     before = path.read_bytes()
-    assert db.update_database(path, dry_run=True) == (14, 15)
+    assert db.update_database(path, dry_run=True) == (14, 18)
     assert path.read_bytes() == before
-    assert db.update_database(path) == (14, 15)
+    assert db.update_database(path) == (14, 18)
     for scope in ('first', 'second'):
         with StateStore(path, scope) as store:
             assert 'wd' not in store.records('1', 'scene')
-            assert store.model_records('1', 'markers', 'wd') == [legacy]
-            assert store.model_records('1', 'scene', 'dtq') == [outputs(signature='current')['scene']]
+            assert store.model_record('1', 'markers', 'wd') is None
+            assert store.model_record('1', 'scene', 'dtq') == outputs(signature='current')['scene']
             assert archived_records(store, '1', 'scene') == {}
             archived = archived_records(store, '1', 'markers')['wd']
             assert len(archived) == 1
@@ -80,7 +80,7 @@ def test_upgrade_retires_old_results_across_scopes_and_preserves_exact_pins(tmp_
     with sqlite3.connect(path) as connection:
         assert connection.execute('SELECT * FROM snapshots').fetchall() == snapshots
         assert connection.execute('SELECT * FROM recovery_publications').fetchall() == recovery
-    assert db.update_database(path) == (15, 15)
+    assert db.update_database(path) == (18, 18)
 
 
 def test_retirement_and_archive_roll_back_together(tmp_path, monkeypatch):
@@ -119,14 +119,14 @@ def test_writer_rejects_obsolete_inference_without_changing_current_results(tmp_
             value['meta']['analysis_format'] = version
         with pytest.raises(ValueError, match='Obsolete active inference'):
             store.put('1', 'wd', old)
-        assert store.model_records('1', 'scene', 'wd') == [current['scene']]
-        assert store.model_records('1', 'markers', 'wd') == [current['markers']]
+        assert store.model_record('1', 'scene', 'wd') == current['scene']
+        assert store.model_record('1', 'markers', 'wd') == current['markers']
 
 
 @pytest.mark.parametrize('field', sorted(formats.STATISTIC_FIELDS))
 def test_nonnull_statistics_require_every_field(field):
     scenes, _ = paired_records({'wd': [.9, .9]})
-    saved = scenes['wd'][0]
+    saved = scenes['wd']
     saved['items'][0]['statistics'].pop(field)
     with pytest.raises(ValueError, match='statistics must be complete'):
         formats.validate_current(saved)
@@ -138,7 +138,7 @@ def test_nonnull_statistics_require_every_field(field):
 ])
 def test_statistics_reject_impossible_counts_and_scores(changes):
     scenes, _ = paired_records({'wd': [.9, .9]})
-    saved = scenes['wd'][0]
+    saved = scenes['wd']
     saved['items'][0]['statistics'].update(changes)
     with pytest.raises(ValueError, match='internally consistent'):
         formats.validate_current(saved)
@@ -187,6 +187,6 @@ def test_upgrade_then_reinference_keeps_publication_ownership(pipeline, monkeypa
         marker['id'] for marker in published['scene_markers']}
     with StateStore(p.path, scope_for(app.STASH_URL)) as store:
         assert all(formats.current(value['meta']) for kind in ('scene', 'markers')
-                   for values in store.records('1', kind).values() for value in values)
+                   for value in store.records('1', kind).values())
         assert not store.connection.execute('SELECT 1 FROM refresh_requests').fetchone()
     assert db.check_database(p.path, scope_for(app.STASH_URL))['ok']

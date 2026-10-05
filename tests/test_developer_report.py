@@ -72,7 +72,7 @@ def seed(path):
         db.execute(
             "INSERT INTO results(scope,scene,model,kind,data) VALUES (?,?,?,?,?)",
             ("scope-secret-alpha", "secret-extra-scene", "custom-secret-model", "custom-kind",
-             encode([custom])),
+             encode(custom)),
         )
 
 
@@ -142,14 +142,13 @@ def test_report_is_read_only_content_free_and_cross_scope(tmp_path):
 
     markers = groups["wd", "markers"]
     assert markers["rows"] == 1
-    assert markers["segments_per_row"]["p50"] == 1
     assert markers["frame_detections_per_frame"]["count"] == 2
     assert markers["frame_detections_per_frame"]["max"] == 2
     assert markers["compressed_bytes"]["total"] > 0
     assert markers["json_bytes"]["total"] > markers["compressed_bytes"]["total"]
 
     scenes = groups["wd", "scene"]
-    assert scenes["scene_observation_frames_per_segment"]["p50"] == 2
+    assert scenes["scene_observation_frames_per_record"]["p50"] == 2
     assert scenes["scene_observations_per_frame"]["count"] == 2
     assert scenes["scene_observations_per_frame"]["max"] == 2
 

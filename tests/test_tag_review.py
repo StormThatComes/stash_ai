@@ -1,7 +1,7 @@
 """Review priorities must preserve model provenance and cache limitations."""
 from tests.helpers.temporal import threshold_policy
 
-from tests.helpers.evidence import seed_history
+
 
 
 from stash_ai.reports.review.options import ReviewOptions, REASONS
@@ -40,9 +40,9 @@ def report(path, scenes=("1",), options=ReviewOptions(), core=None, tags=None):
         return tag_review.build_report(app, state, list(scenes), core or policies(), tags or policies(), options)
 
 
-def seed(path, scene, model, outputs, replace=None):
+def seed(path, scene, model, outputs):
     with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL)) as state:
-        seed_history(state, scene, model, outputs, replace)
+        state.put(scene, model, outputs)
 
 
 def model_rows(data):
@@ -85,7 +85,7 @@ def test_counts_deduplicate_models_scenes_history_and_marker_ranges(tmp_path):
         {"start": 11., "end": 12., "tags": [["common", .42]]},
     ])
     seed(path, "1", "wd", first)
-    seed(path, "1", "wd", first, {"scene": False, "markers": False})
+    seed(path, "1", "wd", first)
     seed(path, "2", "wd", pair(score=.43))
     seed(path, "1", "dtq", pair(score=.28, threshold=.25))
     seed(path, "1", "joytag", pair(score=.95))
@@ -123,7 +123,7 @@ def test_disagreement_requires_retained_comparable_negative_evidence(tmp_path, p
     if peer_case == "excluded":
         tags["dtq"] = frozenset({"common"})
     if peer_case == "accepting_history":
-        seed(path, "1", "dtq", pair(score=.95), {"scene": False, "markers": False})
+        seed(path, "1", "dtq", pair(score=.95))
     data = report(path, tags=tags)
     assert bool(model_rows(data)["wd"]["reasons"]["model_disagreement"]) == expected
     assert model_rows(data)["dtq"]["unique_tags_flagged"] == 0
@@ -152,7 +152,7 @@ def test_review_uses_effective_sql_thresholds_and_leaves_evidence_untouched(tmp_
     with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL)) as state:
         with state.connection:
             for kind in ("scene", "markers"):
-                state.set_result_threshold("1", "wd", kind, .8, state.model_records("1", kind, "wd"))
+                state.set_result_threshold("1", "wd", kind, .8, state.model_record("1", kind, "wd"))
     before = path.read_bytes()
     data = report(path)
     assert path.read_bytes() == before
@@ -222,16 +222,16 @@ def test_shared_scene_candidates_are_attributed_to_each_actual_supporting_model(
                                      "dtq": [.1, .6, .1, .6]}, threshold=.6, marker_threshold=.9)
     for model in scenes:
         values = [.6, .1, .6, .1] if model == "wd" else [.1, .6, .1, .6]
-        scenes[model][0]["meta"].update(scene_frames_format=1, scene_score_floor=.1,
+        scenes[model]["meta"].update(scene_frames_format=1, scene_score_floor=.1,
                                        scene_support_floor=.6 * .85)
-        scenes[model][0]["frames"] = [
+        scenes[model]["frames"] = [
             dict(start=float(i), end=float(i + 1), tags=[["core", score]])
             for i, score in enumerate(values)]
-        for item in scenes[model][0]["items"]:
+        for item in scenes[model]["items"]:
             item["score"] = .1
             item["statistics"].update(max_score=.6, high_hits=2, hits=2,
                                       longest_hits=1, sampled_frames=4, sample_fraction=.5)
-        seed(path, "1", model, {"scene": scenes[model][0], "markers": markers[model][0]})
+        seed(path, "1", model, {"scene": scenes[model], "markers": markers[model]})
     data = report(path)
     rows = model_rows(data)
     assert rows["wd"]["unique_tags_flagged"] == rows["dtq"]["unique_tags_flagged"] == 1
@@ -304,7 +304,7 @@ def test_marker_consensus_vote_is_counted_even_without_an_independent_range(tmp_
     scenes, markers = paired_records({"wd": [.72, .72], "dtq": [.72, 0]},
                                      threshold=.9, marker_threshold=.8)
     for model in scenes:
-        seed(path, "1", model, {"scene": scenes[model][0], "markers": markers[model][0]})
+        seed(path, "1", model, {"scene": scenes[model], "markers": markers[model]})
     data = report(path)
     rows = model_rows(data)
     assert rows["wd"]["unique_tags_flagged"] == rows["dtq"]["unique_tags_flagged"] == 1

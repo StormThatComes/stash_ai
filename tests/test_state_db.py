@@ -56,13 +56,13 @@ def test_preview_does_not_release_active_writer_or_change_source(tmp_path):
         before = path.read_bytes(), path.stat().st_mtime_ns
         with StateStore(path, 'scope', dry_run=True) as preview:
             preview.put('1', 'wd', {'scene': changed})
-            assert preview.records('1', 'scene')['wd'] == [changed]
-            assert writer.records('1', 'scene')['wd'] == [original]
+            assert preview.records('1', 'scene')['wd'] == changed
+            assert writer.records('1', 'scene')['wd'] == original
         assert (path.read_bytes(), path.stat().st_mtime_ns) == before
         with pytest.raises(RuntimeError, match='Another merged-output process'):
             StateStore(path, 'scope')
     with StateStore(path, 'scope') as reopened:
-        assert reopened.records('1', 'scene')['wd'] == [original]
+        assert reopened.records('1', 'scene')['wd'] == original
 
 
 def test_targeted_result_reads_do_not_decode_sibling_models(tmp_path):
@@ -78,7 +78,7 @@ def test_targeted_result_reads_do_not_decode_sibling_models(tmp_path):
         assert state.result_index_presence(['wd']) == {('1', 'wd', 'scene')}
         assert state.report.timing_calls['state_json_decode'] == 0
 
-        assert state.model_records('1', 'scene', 'wd')[0]['items'][0]['tag'] == 'wd'
+        assert state.model_record('1', 'scene', 'wd')['items'][0]['tag'] == 'wd'
         assert state.report.timing_calls['state_json_decode'] == 1
 
 
@@ -118,7 +118,7 @@ def test_state_store_facade_delegates_components_and_preserves_timings(tmp_path)
         state.put('1', 'wd', {'scene': segment})
         state.publish('1', {'scene': {'contributions': []}})
 
-        assert state.records('1', 'scene')['wd'] == [segment]
+        assert state.records('1', 'scene')['wd'] == segment
         assert state.snapshot('1', 'scene')[0] == {'contributions': []}
         assert state.report.timing_calls['state_write'] >= 2
         assert state.report.timing_calls['state_read'] >= 2

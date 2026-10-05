@@ -52,8 +52,9 @@ def reconcile_marker_snapshot(scene, candidates):
         matches = [component for version in versions for component in version
             if marker['primary_tag']['name'] == AI.prefix + component['tag']
             and abs(round(component['start'], 3) - marker['seconds']) <= .0005
-            and (marker.get('end_seconds') is None or (component['end'] is not None
-                 and abs(round(component['end'], 3) - marker['end_seconds']) <= .0005))
+            and ((marker.get('end_seconds') is None and component['end'] is None)
+                 or (marker.get('end_seconds') is not None and component['end'] is not None
+                     and abs(round(component['end'], 3) - marker['end_seconds']) <= .0005))
             and is_occurrence(component) == occurrence]
         if not matches:
             raise RuntimeError(f"Cannot identify surviving marker {marker['id']} from saved publications. "

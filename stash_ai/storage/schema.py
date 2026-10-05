@@ -2,7 +2,7 @@
 from dataclasses import dataclass
 
 APPLICATION_ID = 0x53544D47
-LATEST_SCHEMA_VERSION = 15
+LATEST_SCHEMA_VERSION = 18
 KNOWN_KINDS = frozenset(('scene', 'markers'))
 KNOWN_MODELS = frozenset(('joytag', 'wd', 'dtq', 'oppai'))
 
@@ -24,7 +24,6 @@ TABLES = (
     TableSpec('result_thresholds', model=True, kind=True, invalidates_merge=True),
     TableSpec('result_metadata', model=True, kind=True),
     TableSpec('snapshots', ('published', 'pending'), kind=True, base=True, invalidates_merge=True),
-    TableSpec('legacy_imports', ('data',), kind=True, base=True),
     TableSpec('result_index', model=True, kind=True),
     TableSpec('refresh_requests', model=True, kind=True),
     TableSpec('checkpoints', ('top_scores',), model=True),
@@ -76,10 +75,9 @@ def load_features(store):
 COLUMNS = {
     'inference_archive': 'scope scene model kind signature data',
     'results': 'scope scene model kind data',
-    'result_thresholds': 'scope scene model kind thresholds',
+    'result_thresholds': 'scope scene model kind threshold',
     'result_metadata': 'scope scene model kind format data',
     'snapshots': 'scope scene kind published pending',
-    'legacy_imports': 'scope scene kind data',
     'result_index': 'scope scene model kind inference populated signature',
     'refresh_requests': 'scope scene model kind',
     'checkpoints': 'scope scene model signature processed total top_rows top_scores',

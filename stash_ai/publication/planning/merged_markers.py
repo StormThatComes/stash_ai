@@ -2,7 +2,6 @@
 from __future__ import annotations
 from stash_ai.publication import markers as marker_ops
 from stash_ai.publication.index import MarkerIntervalIndex
-from stash_ai.commands import legacy as legacy_commands
 import stash_ai.evidence.labels as merge_labels
 from stash_ai.runtime.timing import stage
 
@@ -16,12 +15,11 @@ def _wanted_markers(app, scene_id, markers, catalog, blocked_names):
         name = catalog.names_by_id.get(str(identifier))
         return name is not None and name not in blocked_names and str(identifier) not in catalog.managed_group_ids
 
-    wanted, resolved_marker_labels = [], set()
+    wanted = []
     for marker in markers:
         primary = ids.get(merge_labels.AI.prefix + marker["tag"])
         if not primary:
             continue
-        resolved_marker_labels.add(marker["tag"])
         extras = {ids[merge_labels.AI.prefix + label] for label in marker["extra_tags"]
                   if ids.get(merge_labels.AI.prefix + label)}
         extras.update(identifier for identifier in marker["extra_ids"] if allowed_id(identifier))
@@ -39,15 +37,15 @@ def _wanted_markers(app, scene_id, markers, catalog, blocked_names):
         payload["end_seconds"] = (round(marker["end"], 3)
                                   if marker["end"] is not None else None)
         wanted.append((payload, {"seconds": marker["start"], "end_seconds": marker["end"]}))
-    return wanted, resolved_marker_labels
+    return wanted
 
 
-def plan_markers(app, store, resolved, catalog, plan, *, migrate, report):
+def plan_markers(app, store, resolved, catalog, plan, *, report):
     """Match wanted markers to owned markers and populate create/update/delete actions."""
     scene, markers, blocked_names = resolved.scene, resolved.markers, resolved.blocked_names
     scene_id = str(scene['id'])
     with stage(report, 'marker_matching'):
-        wanted, resolved_marker_labels = _wanted_markers(
+        wanted = _wanted_markers(
             app, scene_id, markers, catalog, blocked_names)
         plan.wanted_markers = wanted
         current_markers = scene.get("scene_markers", [])
@@ -90,14 +88,6 @@ def plan_markers(app, store, resolved, catalog, plan, *, migrate, report):
                 plan.unchanged += 1
 
         plan.deletes = set(available) if app.CREATE_MARKERS else set()
-        if migrate and app.CREATE_MARKERS:
-            from stash_ai.signatures import freeze
-            legacy_markers = list(legacy_commands.legacy_objects(scene, 'markers'))
-            imported = {freeze(item) for item in store.imported_legacy(scene_id, 'markers', borrow=True)} if legacy_markers else set()
-            predicted_labels = {marker["tag"] for marker in markers}
-            for _, label, marker in legacy_markers:
-                if freeze(marker) in imported and (label not in predicted_labels or label in resolved_marker_labels):
-                    plan.deletes.add(str(marker["id"]))
         if app.CREATE_MARKERS and blocked_names:
             plan.deletes.update(str(marker['id']) for marker in current_markers
                                 if marker['primary_tag']['name'] in blocked_names)
@@ -109,4 +99,3 @@ def plan_markers(app, store, resolved, catalog, plan, *, migrate, report):
                     marker, scene_id, blocked_names)
                 if payload is not None:
                     plan.updates.append(payload)
-

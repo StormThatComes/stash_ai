@@ -21,7 +21,6 @@ def sync_statistics(app, plan, markers, suppressed):
 
     stats = Counter(
         scene_tags_updated=int(app.APPLY_SCENE_TAGS and plan.scene_changed),
-        legacy_scene_tags_migrated=len(plan.migrated_scene_tag_ids) if app.APPLY_SCENE_TAGS else 0,
         markers_created=len(plan.creates),
         markers_updated=len(plan.updates),
         markers_deleted=len(plan.deletes),
@@ -47,8 +46,7 @@ def publish_sync_plan(app, stash, resolver, store, scene_id, scene, markers, sce
         for_resolver(app, resolver).record_preview(scene, plan.creates, plan.updates, plan.deletes)
         write = report.detail if report is not None else print
         write(f"[DRY] scene {scene_id}: ai scene tags={len(plan.desired_scene_tag_ids)}, "
-              f"markers create={len(plan.creates)} update={len(plan.updates)} delete={len(plan.deletes)}; "
-              f"migrate scene tags={stats['legacy_scene_tags_migrated']}.")
+              f"markers create={len(plan.creates)} update={len(plan.updates)} delete={len(plan.deletes)}.")
         if app.APPLY_SCENE_TAGS and (report is None or report.verbose):
             write("  Scene tags: " + (", ".join(merge_labels.AI.prefix + label for label in sorted(scene_labels)) or "(none)"))
         for marker in markers if report is None or report.verbose else ():
@@ -86,7 +84,7 @@ def publish_sync_plan(app, stash, resolver, store, scene_id, scene, markers, sce
     return stats
 
 
-def sync_merged(app, stash, resolver, store, scene, scene_hits, spans, *, migrate=True, cleanup=False,
+def sync_merged(app, stash, resolver, store, scene, scene_hits, spans, *, transition=False, cleanup=False,
                 report=None, tag_policies=None, publication_key=None):
     """Reconcile only script-owned markers and recorded scene associations."""
     scene_id = str(scene["id"])
@@ -100,11 +98,16 @@ def sync_merged(app, stash, resolver, store, scene, scene_hits, spans, *, migrat
     scene_labels, suppressed = evidence.scene_labels, resolved.suppressed
     plan = plan_scene_tags(
         app, store, scene_id, scene, evidence.scene_hits, scene_labels,
-        resolved.ids, resolved.blocked_names, migrate=migrate)
-    plan_markers(app, store, resolved, catalog, plan, migrate=migrate, report=report)
+        resolved.ids, resolved.blocked_names)
+    plan_markers(app, store, resolved, catalog, plan, report=report)
+    transition_stats = {}
+    if transition:
+        from stash_ai.commands.namespace_migration import extend_plan
+        transition_stats = extend_plan(app, scene, resolved, catalog, plan)
     if app.CREATE_MARKERS:
         plan.snapshots["markers"] = {"contributions": spans}
     stats = sync_statistics(app, plan, markers, suppressed)
+    stats.update(transition_stats)
     return publish_sync_plan(
         app, stash, resolver, store, scene_id, scene, markers, scene_labels, plan, stats,
         report=report, publication_key=publication_key)

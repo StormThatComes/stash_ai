@@ -32,9 +32,7 @@ class EvidenceReplay:
         frozen_tags = frozen_policies(options, 'tag_exclusions', self.selected, self.tag_policies)
         # Replay old proofs with frozen exclusions; clipping cannot admit new votes.
         candidates = merge_source_markers.marker_contributions(
-            context, matching, policies, tag_policies=frozen_tags,
-            allow_unknown_blocklist=True, allow_unknown_retention=True,
-            frozen_exclusions=frozen_tags)
+            context, matching, policies, tag_policies=frozen_tags)
         return MarkerReplay(candidates, context, policies, matching, frozen_tags)
 
     def candidates(self, span):
@@ -88,6 +86,8 @@ def cleanup_support(app, store, scene_id, spans, selected, core_policies, tag_po
     from stash_ai.evidence.shared_markers import prune_blocked_extras
     from stash_ai.exclusions import policies_or_empty
 
+    from stash_ai.storage.snapshots import require_rebased
+    require_rebased(spans)
     tag_policies = policies_or_empty(tag_policies)
     replay = EvidenceReplay(app, store, scene_id, selected, core_policies, tag_policies)
     cleaned = []

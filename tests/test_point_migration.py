@@ -71,12 +71,14 @@ def test_missing_extent_fails_before_any_marker_can_be_updated(tmp_path):
 
 
 
-def test_explicit_legacy_unknown_duration_remains_a_native_point(tmp_path):
+def test_ordinary_unknown_duration_requires_a_verified_extent(tmp_path):
     stash = Stash()
     observed, _ = scene(stash)
     imported = span('wd', 10, None)
     imported['meta']['origin'] = 'legacy'
     with StateStore(tmp_path/'state.sqlite3', 'scope') as store:
         store.publish('1', {'markers': {'contributions': [imported]}})
-        assert plan(store, observed) == []
-        require_native_ranges(observed, [imported])
+        with pytest.raises(RuntimeError, match='No saved extent'):
+            plan(store, observed)
+        with pytest.raises(RuntimeError, match='migrate-point-markers-only'):
+            require_native_ranges(observed, [imported])

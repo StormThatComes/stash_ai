@@ -34,8 +34,7 @@ def threshold_failure_reason(exc):
         ('marker cache floor', 'marker cache floor too high'),
         ('cache floor', 'marker cache floor too high'),
         ('invalid cached marker threshold', 'invalid cached marker threshold'),
-        ('marker blocklist metadata', 'unknown marker blocklist'),
-        ('unblocked marker tags', 'unblocked marker tags require inference'),
+        ('obsolete active inference', 'obsolete inference evidence'),
         ('scene_threshold changed', 'scene threshold requires inference'),
         ('finish the pending merge', 'pending publication'),
     )

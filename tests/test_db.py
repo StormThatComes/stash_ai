@@ -219,8 +219,8 @@ def test_deep_check_detects_corrupt_state_blobs_and_unknown_domains(tmp_path):
             (scope, "2", "unknown-model", "scene"),
         )
         db.execute(
-            "INSERT INTO legacy_imports VALUES (?,?,?,?)",
-            (scope, "2", "unknown-kind", encode([])),
+            "INSERT INTO refresh_requests VALUES (?,?,?,?)",
+            (scope, "2", "wd", "unknown-kind"),
         )
 
     report = stash_db.check_database(path, scope)
@@ -296,6 +296,7 @@ def test_deep_check_relation_warnings_do_not_mark_database_failed(tmp_path):
     seed(path, scope)
 
     with sqlite3.connect(path) as db:
+        db.execute("CREATE TABLE legacy_imports(scope TEXT,scene TEXT,kind TEXT,data BLOB)")
         db.execute(
             "INSERT INTO snapshots VALUES (?,?,?,?,?)",
             (scope, "unused", "scene", None, None),

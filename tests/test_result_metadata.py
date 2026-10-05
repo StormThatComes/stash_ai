@@ -1,5 +1,5 @@
 """SQL preflight preserves retention guards, history and legacy preview isolation."""
-from tests.helpers.evidence import seed_history, inject_records
+from tests.helpers.evidence import inject_records
 
 from stash_ai.rethreshold.plans import RecordAccess, PendingPolicy, ThresholdRequest
 import json
@@ -120,7 +120,7 @@ def test_retired_inference_floor_does_not_block_current_thresholds(tmp_path, mon
         old = outputs()
         old['markers']['meta']['marker_score_floor'] = .95
         store.put('2', 'wd', old)
-        seed_history(store, '2', 'wd', outputs(.6, 'new'), replace=dict(scene=False, markers=False))
+        store.put('2', 'wd', outputs(.6, 'new'))
         raw = blobs(store)
         monkeypatch.setattr(store, 'unpack', lambda *a: pytest.fail('Check decoded evidence'))
         assert rethreshold(store, .8, scenes=('1', '2')) == {'scene_thresholds_updated': 2}
@@ -170,7 +170,7 @@ def test_old_database_backfills_once_and_keeps_inline_overrides(tmp_path, monkey
         store.connection.set_trace_callback(statements.append)
         assert scene_updates.plan(app, store, '1', config(.4), request=ThresholdRequest(kinds=('scene', 'markers'), access=RecordAccess.METADATA))
         assert report.timing_calls['state_json_decode'] == 0
-        assert store.connection.execute('PRAGMA user_version').fetchone() == (15,)
+        assert store.connection.execute('PRAGMA user_version').fetchone() == (18,)
         first = metadata_rows(store)
         assert len(first) == 2
         monkeypatch.setattr(store, 'unpack', lambda *a: pytest.fail('Repeated legacy decode'))
@@ -186,8 +186,7 @@ def test_old_database_backfills_once_and_keeps_inline_overrides(tmp_path, monkey
 
 
 @pytest.mark.parametrize('dry_run', [False, True])
-@pytest.mark.parametrize('replace', [False, True])
-def test_preview_new_inference_metadata_hides_source_and_tracks_history(tmp_path, dry_run, replace):
+def test_preview_new_inference_metadata_hides_source_and_tracks_replacement(tmp_path, dry_run):
     path = tmp_path/'state.sqlite3'
     with StateStore(path, 'scope') as store:
         store.put('1', 'wd', outputs())
@@ -197,12 +196,12 @@ def test_preview_new_inference_metadata_hides_source_and_tracks_history(tmp_path
     source = path.read_bytes()
     with StateStore(path, 'scope', dry_run=dry_run) as store:
         new = outputs(.6, 'new')
-        seed_history(store, '1', 'wd', new, replace=dict(scene=replace, markers=replace))
+        store.put('1', 'wd', new)
         for kind in ('scene', 'markers'):
             metadata = store.result_metadata('1', kind, 'wd')
-            assert len(metadata) == 1
-            assert metadata[-1]['meta']['inference_signature'] == 'new'
-            assert metadata[-1]['meta']['scene_threshold'] == .6
+            assert isinstance(metadata, dict)
+            assert metadata['meta']['inference_signature'] == 'new'
+            assert metadata['meta']['scene_threshold'] == .6
     if dry_run:
         assert path.read_bytes() == source
     else:
@@ -236,7 +235,7 @@ def test_raw_sql_writes_invalidate_metadata_even_without_new_writer(tmp_path, op
             if operation == 'update':
                 new = outputs()['markers']
                 new['meta']['marker_score_floor'] = .95
-                store.connection.execute("UPDATE results SET data=? WHERE kind='markers'", (store.pack([new]),))
+                store.connection.execute("UPDATE results SET data=? WHERE kind='markers'", (store.pack(new),))
             elif operation == 'replace':
                 store.connection.execute("INSERT OR REPLACE INTO results SELECT * FROM results WHERE kind='markers'")
             elif operation == 'delete':
@@ -247,9 +246,9 @@ def test_raw_sql_writes_invalidate_metadata_even_without_new_writer(tmp_path, op
         if operation == 'update':
             assert rethreshold(store, .8) == {'errors': 1}
         elif operation == 'delete':
-            assert store.result_metadata('1', 'markers', 'wd') == []
+            assert store.result_metadata('1', 'markers', 'wd') is None
         elif operation == 'move':
-            assert store.result_metadata('1', 'markers', 'wd') == []
+            assert store.result_metadata('1', 'markers', 'wd') is None
             assert store.result_metadata('2', 'markers', 'wd')
         else:
             assert store.result_metadata('1', 'markers', 'wd')
@@ -298,7 +297,7 @@ def test_metadata_is_small_scoped_and_does_not_invalidate_merge(tmp_path):
             with store.connection:
                 performance_merge_checks.record_check(store, '1', 'policy', 'fingerprint')
                 store.connection.execute('DELETE FROM result_metadata WHERE scope=?', (scope,))
-            value = store.result_metadata('1', 'markers', 'wd')[0]
+            value = store.result_metadata('1', 'markers', 'wd')
             assert value['meta']['inference_signature'] == scope
             assert value['populated'] is True
             assert 'items' not in value and 'frames' not in value
@@ -314,7 +313,7 @@ def test_db_check_reports_corrupt_mismatched_orphan_metadata_without_repair(tmp_
         store.put('1', 'wd', outputs())
         with store.connection:
             metadata = store.result_metadata('1', 'markers', 'wd')
-            metadata[0]['meta']['marker_score_floor'] = .9
+            metadata['meta']['marker_score_floor'] = .9
             store.connection.execute("UPDATE result_metadata SET data=? WHERE kind='markers'",
                                      (json.dumps(metadata),))
             store.connection.execute("UPDATE result_metadata SET data='{' WHERE kind='scene'")

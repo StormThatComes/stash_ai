@@ -24,7 +24,7 @@ pytestmark = pytest.mark.usefixtures("reset_temporal")
 
 
 def records_for(values, tag='core'):
-    return {source: [segment(source, [[(tag, value)] if value else [] for value in scores])]
+    return {source: segment(source, [[(tag, value)] if value else [] for value in scores])
             for source, scores in values.items()}
 
 
@@ -48,23 +48,20 @@ def test_alternating_strong_hits_form_one_marker_with_original_source_scores():
     assert 'score' not in markers[0]
 
 
-@pytest.mark.parametrize('difference',['identity','timeline','duplicate_passes','weak_only'])
+@pytest.mark.parametrize('difference',['identity','timeline','weak_only'])
 def test_shared_evidence_does_not_invent_compatible_frames_or_strong_hits(difference):
     records=records_for({'wd':[.9,0],'dtq':[0,.9]})
-    if difference=='identity':records['dtq'][0]['meta']['frame_input_signature']='other'
+    if difference=='identity':records['dtq']['meta']['frame_input_signature']='other'
     if difference=='timeline':
-        for row in records['dtq'][0]['items']:row['start']+=10;row['end']+=10
-    if difference=='duplicate_passes':
-        records=records_for({'wd':[.9],'dtq':[.9]})
-        for source in records:records[source].append(deepcopy(records[source][0]))
+        for row in records['dtq']['items']:row['start']+=10;row['end']+=10
     if difference=='weak_only':records=records_for({'wd':[.7,0,.7,0],'dtq':[0,.7,0,.7]})
     assert fused(records)[1]==[]
 
 
 def test_each_source_uses_its_own_threshold():
     records=records_for({'wd':[.6,0],'dtq':[0,.96]})
-    records['wd'][0]['meta']['marker_threshold']=.5
-    records['dtq'][0]['meta']['marker_threshold']=.95
+    records['wd']['meta']['marker_threshold']=.5
+    records['dtq']['meta']['marker_threshold']=.95
     assert fused(records)[1][0]['end']==2
 
 
@@ -96,7 +93,7 @@ def test_no_redundant_shared_range_when_original_union_already_covers_it():
 
 def test_shared_candidate_limit_is_bounded_and_deterministic(monkeypatch):
     monkeypatch.setattr(app,'MAX_MARKERS_PER_SCENE',1)
-    records={source:[segment(source,[[(tag,.9) for tag in ('b','a')] if i==offset else [] for i in range(2)])]
+    records={source:segment(source,[[(tag,.9) for tag in ('b','a')] if i==offset else [] for i in range(2)])
              for source,offset in [('wd',0),('dtq',1)]}
     assert [m['tag'] for m in fused(records)[1]]==['a']
 
@@ -109,14 +106,14 @@ def test_core_exclusion_revokes_a_required_source(excluded_source):
 
 def test_old_cache_without_frame_identity_does_not_gain_shared_ranges():
     records=records_for({'wd':[.9,0],'dtq':[0,.9]})
-    for segments in records.values():segments[0]['meta'].pop('frame_input_signature')
+    for segments in records.values():segments['meta'].pop('frame_input_signature')
     with pytest.raises(ValueError, match='signatures'):
         fused(records)
 
 
 def extra_records(values=(.9,.9,.9,.9)):
-    return {'wd':[segment('wd',[[('core',.9)]]*len(values))],
-            'dtq':[segment('dtq',[[('detail',score)] if score else [] for score in values])]}
+    return {'wd':segment('wd',[[('core',.9)]]*len(values)),
+            'dtq':segment('dtq',[[('detail',score)] if score else [] for score in values])}
 
 
 def test_extra_only_model_adds_detail_with_separate_provenance():
@@ -131,16 +128,16 @@ def test_extra_only_model_adds_detail_with_separate_provenance():
 @pytest.mark.parametrize('difference',['identity','timeline','low_score','single_time'])
 def test_extra_only_evidence_obeys_input_threshold_and_unique_hit_requirements(difference):
     records=extra_records()
-    if difference=='identity':records['dtq'][0]['meta']['frame_input_signature']='other'
-    if difference=='timeline':records['dtq'][0]['items'][0]['end']=.5
+    if difference=='identity':records['dtq']['meta']['frame_input_signature']='other'
+    if difference=='timeline':records['dtq']['items'][0]['end']=.5
     if difference=='low_score':records=extra_records((.7,.7,.7,.7))
     if difference=='single_time':
-        records=extra_records((.9,0,0,0));records['oppai']=[deepcopy(records['dtq'][0])]
+        records=extra_records((.9,0,0,0));records['oppai']=deepcopy(records['dtq'])
     assert fused(records,policies({'detail'}))[1][0]['extra_tags']==[]
 
 
 def test_extra_hits_can_come_from_different_models_at_different_times():
-    records=extra_records((.9,0));records['oppai']=[segment('oppai',[[],[('detail',.97)]])]
+    records=extra_records((.9,0));records['oppai']=segment('oppai',[[],[('detail',.97)]])
     marker=fused(records,policies({'detail'}))[1][0]
     assert marker['extra_tags']==['detail']
     assert set(marker['extra_evidence']['detail']['source_evidence'])=={'dtq','oppai'}
@@ -148,8 +145,8 @@ def test_extra_hits_can_come_from_different_models_at_different_times():
 
 def test_extra_coverage_is_checked_over_the_final_longest_union():
     records=extra_records((.9,.9)+((0,)*18))
-    records['oppai']=[segment('oppai',[[('core',.9)]]*20)]
-    records['wd'][0]['items'][2:]=[dict(start=i,end=i+1,tags=[]) for i in range(2,20)]
+    records['oppai']=segment('oppai',[[('core',.9)]]*20)
+    records['wd']['items'][2:]=[dict(start=i,end=i+1,tags=[]) for i in range(2,20)]
     marker=fused(records,policies({'detail'}))[1][0]
     assert marker['end']==20 and marker['extra_tags']==[]
     assert marker['extra_evidence']['detail']['coverage_fraction']==.1
@@ -158,7 +155,7 @@ def test_extra_coverage_is_checked_over_the_final_longest_union():
 def test_extra_model_can_supply_observations_inside_a_permitted_core_gap(monkeypatch):
     monkeypatch.setattr(app,'MARKER_MERGE_GAP_SECONDS',2)
     records=extra_records((0,.9,.9,0))
-    records['wd'][0]['items'][1]['tags']=[];records['wd'][0]['items'][2]['tags']=[]
+    records['wd']['items'][1]['tags']=[];records['wd']['items'][2]['tags']=[]
     assert fused(records,policies({'detail'}))[1][0]['extra_tags']==['detail']
 
 
@@ -176,7 +173,7 @@ def test_cleanup_rebuilds_a_shared_range_when_its_anchor_source_is_excluded(tmp_
     records=records_for({'wd':[.9,0,0],'dtq':[0,.91,0],'oppai':[0,0,.92]})
     excluded=policies()
     with merge_store.StateStore(tmp_path/'state.sqlite3','fixture') as state:
-        for source,segments in records.items():state.put('1',source,{'markers':segments[0]})
+        for source,segments in records.items():state.put('1',source,{'markers':segments})
         _,spans=merge.evidence(app,state,'1',excluded,policies())
         assert spans[0]['source']=='wd'
         excluded['wd']=frozenset({'core'})
@@ -190,7 +187,7 @@ def test_cleanup_rebuilds_a_shared_range_when_its_anchor_source_is_excluded(tmp_
 def test_cleanup_does_not_adopt_new_unpublished_votes(tmp_path):
     records=records_for({'wd':[.9,0,0],'dtq':[0,.9,0]});excluded=policies()
     with merge_store.StateStore(tmp_path/'state.sqlite3','fixture') as state:
-        for source,segments in records.items():state.put('1',source,{'markers':segments[0]})
+        for source,segments in records.items():state.put('1',source,{'markers':segments})
         _,spans=merge.evidence(app,state,'1',excluded,policies())
         state.put('1','oppai',{'markers':segment('oppai',[[],[],[('core',.9)]])})
         excluded['wd']=frozenset({'core'})
@@ -199,10 +196,10 @@ def test_cleanup_does_not_adopt_new_unpublished_votes(tmp_path):
 
 def test_cleanup_clips_source_scores_and_extra_proofs_to_published_bounds(tmp_path):
     records=records_for({'wd':[.9,0,0,0,0], 'dtq':[0,.99,0,.91,0], 'oppai':[0,0,.92,0,.99]})
-    records['joytag']=[segment('joytag',[[],[],[('detail',.81)],[('detail',.82)],[('detail',.99)]])]
+    records['joytag']=segment('joytag',[[],[],[('detail',.81)],[('detail',.82)],[('detail',.99)]])
     excluded=policies({'detail'})
     with merge_store.StateStore(tmp_path/'state.sqlite3','fixture') as state:
-        for source,segments in records.items():state.put('1',source,{'markers':segments[0]})
+        for source,segments in records.items():state.put('1',source,{'markers':segments})
         _,spans=merge.evidence(app,state,'1',excluded,policies())
         # An already-published window bounds cleanup, even if rebuilding would
         # otherwise return a longer interval from the same frozen inputs.
@@ -222,9 +219,9 @@ def test_cleanup_refuses_changed_required_frame_records(tmp_path):
     records=records_for({'wd':[.9,0,0], 'dtq':[0,.9,0], 'oppai':[0,0,.9]})
     excluded=policies()
     with merge_store.StateStore(tmp_path/'state.sqlite3','fixture') as state:
-        for source,segments in records.items():state.put('1',source,{'markers':segments[0]})
+        for source,segments in records.items():state.put('1',source,{'markers':segments})
         _,spans=merge.evidence(app,state,'1',excluded,policies())
-        changed=deepcopy(records['dtq'][0]);changed['items'][1]['tags']=[('core',.99)]
+        changed=deepcopy(records['dtq']);changed['items'][1]['tags']=[('core',.99)]
         state.put('1','dtq',{'markers':changed})
         excluded['wd']=frozenset({'core'})
         with pytest.raises(RuntimeError,match='sources changed'):
@@ -254,7 +251,7 @@ def test_cleanup_command_rebuilds_shared_marker_and_then_removes_last_support(pi
 def test_cleanup_requires_published_evidence_and_preserves_extras_when_only_core_is_excluded(tmp_path):
     excluded=policies({'detail'})
     with merge_store.StateStore(tmp_path/'state.sqlite3','fixture') as state:
-        for source,segments in extra_records().items():state.put('1',source,{'markers':segments[0]})
+        for source,segments in extra_records().items():state.put('1',source,{'markers':segments})
         _,spans=merge.evidence(app,state,'1',excluded,policies())
         cleaned=cleanup_evidence.cleanup_support(app,state,'1',spans,{'dtq'},excluded)
         assert merge_intervals.union_intervals(cleaned)[0]['extra_tags']==['detail']
@@ -307,7 +304,7 @@ def test_clipped_replay_closes_its_observation_cache(monkeypatch, fail_collectio
     from stash_ai.evidence import shared_markers
     from stash_ai.evidence.observations import ObservationIndex
 
-    records = {'wd': [segment('wd', [[('core', .95), ('detail', .9)]] * 4)]}
+    records = {'wd': segment('wd', [[('core', .95), ('detail', .9)]] * 4)}
     spans, _ = fused(records)
     span = deepcopy(spans[0])
     span.update(start=1, end=3)
