@@ -70,7 +70,7 @@ def build_parser(app) -> argparse.ArgumentParser:
     parser.add_argument("--prune-empty-tags", action="store_true",
                         help="After successful merged sync, delete unused leaf tags in the selected prefixes.")
     parser.add_argument("--prune-prefixes", nargs="+", default=None, metavar="PREFIX",
-                        help="Prefixes for empty-tag pruning (default: jt: wd: dtq: op: ai: m:). Global scope; m: requires managed group metadata.")
+                        help="Prefixes for empty-tag pruning (default: ai: m:). Global scope; m: requires managed group metadata.")
     parser.add_argument("--hierarchy", type=Path, default=app.JOYTAG_HIERARCHY_FILE, metavar="YAML", help="JoyTag hierarchy.")
     parser.add_argument("--wd-hierarchy", type=Path, default=app.JOYTAG_HIERARCHY_FILE.with_name("wd_hierarchy.yml"), metavar="YAML", help="WD hierarchy; defaults to bundled wd_hierarchy.yml.")
     parser.add_argument("--dtq-hierarchy", type=Path, default=app.JOYTAG_HIERARCHY_FILE.with_name("dtq_hierarchy.yml"), metavar="YAML", help="DTQ hierarchy; defaults to bundled dtq_hierarchy.yml.")

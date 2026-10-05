@@ -2,8 +2,8 @@
 
 Automatyczne tagowanie scen i tworzenie markerów czasowych dla [Stash](https://github.com/stashapp/stash).
 
-Stash AI używa czterech modeli: JoyTag (`jt:`), WD EVA02-Large v3 (`wd:`),
-DanbooruTagQuery L/16 (`dtq:`) i OppaiOracle V1.1 (`op:`). Modele są
+Stash AI używa czterech modeli: JoyTag (`jt`), WD EVA02-Large v3 (`wd`),
+DanbooruTagQuery L/16 (`dtq`) i OppaiOracle V1.1 (`op`). Modele są
 uruchamiane kolejno — w GPU znajduje się jeden model naraz.
 
 Domyślny tryb `merged` publikuje wspólne tagi `ai:`, łączy zgodne wyniki modeli
@@ -471,16 +471,24 @@ Nowe wyniki zawsze używają wspólnej publikacji `ai:` i reguł temporalnych.
 Przełączniki `--output-mode` i `--no-temporal` oraz klucz YAML `enabled`
 zostały usunięte; usuń je ze skryptów i `temporal_policy.yml`. Poszczególne
 reguły nadal konfiguruje polityka YAML, w tym `occurrence_markers`.
-Historyczne namespace’y modeli nadal można importować i czyścić. Zamrożone
-snapshoty sprzed reguł temporalnych zachowują własny algorytm replay dla
-cleanupu. Nowa inferencja zapisuje evidence w formacie analizy 4: wymagane są
-sygnatury wejścia i inferencji, jawne progi retencji oraz statystyki lub jawne
-`null` dla niekwalifikujących się agregatów. Pusty `marker_tag_blocklist` nie jest
-już zapisywany; format gwarantuje nieprzefiltrowane obserwacje. Tożsamość cache
-ma wersję 3, więc zwykły przebieg po aktualizacji ponownie wykona inferencję.
-`--merge-only` nie aktualizuje formatu starych danych. Historyczne agregaty
-mają osobne reguły kwalifikacji; brak informacji o retencji
-lub odrzuconych tagach nie stanowi dowodu pełnego cache.
+Historyczne namespace’y modeli przenosi osobny migrator; zwykłe publikowanie,
+cleanup i domyślne pruning obsługują bieżące wyniki `ai:` oraz zarządzane grupy
+`m:`. Definicje dawnych prefiksów można usuwać jawnie, np.
+`--prune-empty-tags-only --prune-prefixes jt: wd: dtq: op:`. Ręczne dodatki
+z innych namespace’ów pozostają zachowane.
+
+Nowa inferencja zapisuje kompletny format analizy 5: sygnatury wejścia i
+inferencji, jawne progi retencji oraz statystyki lub jawne `null` dla
+niekwalifikujących się agregatów. `--db-update` wycofuje starsze aktywne wyniki,
+które wymagają ponownej inferencji. Przypięte archiwum zachowuje dokładne dowody
+publikacji, a geometria i ownership dawnych snapshotów pozostają dostępne dla
+recovery i migracji punktów. Cleanup wymaga przebudowy wycofanych publikacji
+przez świeżą inferencję i `--merge-only`.
+
+Nowy fingerprint cleanupu zawsze zawiera zakres wyjść i nie zawiera stałego
+pustego blocklist. Przerwany cleanup zachowuje generację i maski: adapter
+historycznego podpisu pozwala dokończyć go wyłącznie z tym samym zakresem wyjść
+i polityką wykluczeń. Nowe operacje zapisują tylko bieżący podpis.
 
 ## Konfiguracja
 

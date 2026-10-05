@@ -110,7 +110,10 @@ def test_noop_candidates_use_three_batches_for_205_scenes(tmp_path, monkeypatch,
 def test_snapshot_failure_falls_back_and_scene_strategy_stays_graphql(tmp_path, monkeypatch, strategy):
     stash = SceneSQLStash()
     stash.deny_snapshots = True
-    stash.scene['tags'] = [stash.tag('wd:blocked'), stash.tag('human')]
+    blocked = stash.tag('ai:blocked')
+    stash.scene['tags'] = [blocked, stash.tag('human')]
+    with merge_store.StateStore(tmp_path/'state.sqlite3', merge_store.scope_for(app.STASH_URL)) as store:
+        store.publish('1', {'scene': {'contributions': [hit('wd', 'blocked')], 'owned_ids': [blocked['id']]}})
     install(monkeypatch, stash)
     command = options(tmp_path, by_model={'wd': ['blocked']})
     assert app.main([*command, '--cleanup-strategy', strategy]) == 0
@@ -119,24 +122,15 @@ def test_snapshot_failure_falls_back_and_scene_strategy_stays_graphql(tmp_path, 
     assert stash.snapshot_reads == ([] if strategy == 'scenes' else [[]])
 
 
-@pytest.mark.parametrize('namespace', ['ai', 'legacy'])
-def test_prefetched_scene_is_refreshed_before_cleanup_writes(tmp_path, monkeypatch, namespace):
+def test_prefetched_scene_is_refreshed_before_cleanup_writes(tmp_path, monkeypatch):
     stash = SceneSQLStash()
-    if namespace == 'ai':
-        with merge_store.StateStore(tmp_path/'state.sqlite3', merge_store.scope_for(app.STASH_URL)) as store:
-            merge_sync.sync_merged(app, stash, app.services.TagResolver(stash, source=merge_labels.AI), store,
-                              stash.find_scene('1'), [hit('wd')], [])
-    else:
-        stash.scene['tags'] = [stash.tag('wd:common')]
-        stash.marker(WD, 'keep', '1')['tags'].append(stash.tag('wd:common'))
-        stash.marker(WD, 'common', '2')
+    with merge_store.StateStore(tmp_path/'state.sqlite3', merge_store.scope_for(app.STASH_URL)) as store:
+        merge_sync.sync_merged(app, stash, app.services.TagResolver(stash, source=merge_labels.AI), store,
+                          stash.find_scene('1'), [hit('wd')], [])
     human = stash.tag('human')
     def concurrent_edit(client):
         client.after_snapshot = None
         client.scene['tags'].append(human)
-        if namespace == 'legacy':
-            client.scene['scene_markers'][0]['tags'].append(human)
-            client.scene['scene_markers'][1]['primary_tag'] = client.tag('wd:renamed')
     stash.after_snapshot = concurrent_edit
     stash.scene_reads.clear()
     install(monkeypatch, stash)
@@ -144,10 +138,6 @@ def test_prefetched_scene_is_refreshed_before_cleanup_writes(tmp_path, monkeypat
     assert [t['name'] for t in stash.scene['tags']] == ['human']
     assert not stash.scene_reads
     assert len(stash.snapshot_reads) >= 3  # Probe, batch, fresh pre-write snapshot.
-    if namespace == 'legacy':
-        assert len(stash.scene['scene_markers']) == 2
-        assert {t['name'] for t in stash.scene['scene_markers'][0]['tags']} == {WD.owner_tag, 'human'}
-        assert stash.scene['scene_markers'][1]['primary_tag']['name'] == 'wd:renamed'
 
 
 def test_preview_masks_batch_and_fresh_reads_without_mutating_snapshots():
@@ -155,12 +145,12 @@ def test_preview_masks_batch_and_fresh_reads_without_mutating_snapshots():
     banned = stash.tag('ai:blocked')
     stash.scene['tags'] = [banned, stash.tag('human')]
     stash.marker(merge_labels.AI, 'blocked', '1')
-    stash.marker(WD, 'core', '2')
-    stash.marker(WD, 'core', '3', manual=True)
+    stash.marker(merge_labels.AI, 'core', '2')
+    stash.marker(merge_labels.AI, 'core', '3', manual=True)
     stash.marker(merge_labels.AI, 'keep', '4')['tags'].append(banned)
     before = deepcopy(stash.scene)
     stash.configure_merge_reads(RunReport(write=lambda _: None), merge_only=True)
-    view = SQLPreview(stash, app, {'ai:blocked'}, {'wd:core': WD})
+    view = SQLPreview(stash, app, {'ai:blocked'}, {'ai:core': merge_labels.AI})
     reads = [list(view.iter_scenes(['1']))[0], view.find_scene('1'), view.find_scene_for_merge('1')]
     for scene in reads:
         assert [t['name'] for t in scene['tags']] == ['human']

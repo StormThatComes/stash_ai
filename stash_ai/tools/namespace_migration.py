@@ -1,5 +1,5 @@
 """One-time conversion of source-owned Stash outputs using fresh inference."""
-from stash_ai.models import SOURCES
+from stash_ai.tools.legacy_namespaces import NAMESPACES
 from stash_ai.evidence.labels import AI, raw_label
 from stash_ai.publication.markers import owned_marker, marker_differs
 from stash_ai.publication.index import MarkerIntervalIndex
@@ -8,7 +8,7 @@ from stash_ai.runs.merged import MergedRun
 
 
 def source_label(name):
-    for model, source in SOURCES.items():
+    for model, source in NAMESPACES.items():
         if name.startswith(source.prefix) and name != source.owner_tag:
             label = name[len(source.prefix):]
             if label and not label.startswith(('category:', 'marker:')):
@@ -19,7 +19,7 @@ def source_label(name):
 def source_objects(scene, kind):
     for item in scene.get('tags' if kind == 'scene' else 'scene_markers', []):
         parsed = source_label(item['name'] if kind == 'scene' else item['primary_tag']['name'])
-        if parsed and (kind == 'scene' or owned_marker(item, SOURCES[parsed[0]])):
+        if parsed and (kind == 'scene' or owned_marker(item, NAMESPACES[parsed[0]])):
             yield *parsed, item
 
 
@@ -32,7 +32,7 @@ def extend_plan(app, scene, resolved, catalog, plan):
     old = [(label, marker) for _, label, marker in source_objects(scene, 'markers')] if app.CREATE_MARKERS else []
     index = MarkerIntervalIndex([dict(marker, primary_tag={'name': label, 'id': label}) for label, marker in old], by_name=True)
     available = {str(marker['id']) for _, marker in old}
-    owners = {source.owner_tag for source in SOURCES.values()}
+    owners = {source.owner_tag for source in NAMESPACES.values()}
     labels = {str(identifier): name[len(AI.prefix):] for name, identifier in catalog.ids.items()
               if identifier and name.startswith(AI.prefix)}
 

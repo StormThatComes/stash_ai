@@ -9,7 +9,7 @@ from time import monotonic
 
 from tqdm import tqdm
 
-DEFAULT_PREFIXES = ("jt:", "wd:", "dtq:", "op:", "ai:", "m:")
+DEFAULT_PREFIXES = ("ai:", "m:")
 REQUIRED_COUNTS = {"scene_count", "scene_marker_count", "image_count", "gallery_count",
                    "performer_count", "studio_count", "group_count", "child_count"}
 

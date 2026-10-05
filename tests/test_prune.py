@@ -16,7 +16,7 @@ def test_prunes_unused_leaves_and_recursively_empty_prefixed_categories():
     category=stash.add("op:category:General",[root])
     leaf=stash.add("op:old",[category])
     outside=stash.add("human empty")
-    stats=prune_tags(stash,report=lambda _:None)
+    stats=prune_tags(stash,["op:"],report=lambda _:None)
     assert stash.deleted==[leaf,category,root]
     assert set(stash.tags)=={outside} and stats["tags_pruned"]==3
 
@@ -24,13 +24,13 @@ def test_prunes_unused_leaves_and_recursively_empty_prefixed_categories():
 @pytest.mark.parametrize("counter",sorted(REQUIRED_COUNTS-{"child_count"}))
 def test_usage_in_any_supported_object_preserves_tag(counter):
     stash=PruneStash();identifier=stash.add("op:used",**{counter:1})
-    assert prune_tags(stash,report=lambda _:None)["tags_pruned"]==0
+    assert prune_tags(stash,["op:"],report=lambda _:None)["tags_pruned"]==0
     assert identifier in stash.tags and not stash.deleted
 
 
 def test_parent_with_a_nonmatching_child_is_preserved():
     stash=PruneStash();parent=stash.add("op:parent");stash.add("manual child",[parent])
-    assert prune_tags(stash,report=lambda _:None)["tags_pruned"]==0
+    assert prune_tags(stash,["op:"],report=lambda _:None)["tags_pruned"]==0
 
 
 def test_global_blacklist_prunes_only_exact_unused_definitions_and_reports_remaining_usage():
@@ -62,7 +62,7 @@ def test_refresh_prevents_deleting_a_tag_that_changed_after_catalog(change):
         else:stash.tags[identifier]["name"]="manual renamed"
         stash.before_refresh=None
     stash.before_refresh=mutate
-    assert prune_tags(stash,report=lambda _:None)["tags_retained_after_refresh"]==1
+    assert prune_tags(stash,["op:"],report=lambda _:None)["tags_retained_after_refresh"]==1
     assert identifier in stash.tags and not stash.deleted
 
 
@@ -70,14 +70,14 @@ def test_dry_run_simulates_full_branch_without_mutation():
     stash=PruneStash(True)
     parent=stash.add("op:parent");stash.add("op:leaf",[parent])
     before=deepcopy(stash.tags)
-    assert prune_tags(stash,report=lambda _:None)["tags_pruned"]==2
+    assert prune_tags(stash,["op:"],report=lambda _:None)["tags_pruned"]==2
     assert stash.tags==before and not stash.deleted and not stash.calls["refresh"]
 
 
 @pytest.mark.parametrize("missing",["scene_marker_count","studio_count","group_count"])
 def test_missing_usage_capabilities_abort_before_any_delete(missing):
     stash=PruneStash();stash.counts.remove(missing);stash.add("op:empty")
-    with pytest.raises(RuntimeError,match="all tag usage"):prune_tags(stash,report=lambda _:None)
+    with pytest.raises(RuntimeError,match="all tag usage"):prune_tags(stash,["op:"],report=lambda _:None)
     assert not stash.deleted
 
 
@@ -94,7 +94,7 @@ def test_supported_schema_uses_group_count_once_and_keeps_future_usage(monkeypat
     assert 'group_count' in client.counts and 'future_usage_count' in client.counts
     assert 'movie_count' not in client.counts
     assert not any('Movie' in query for query in calls)
-    assert prune_tags(stash, report=lambda _: None)['tags_pruned'] == 0
+    assert prune_tags(stash, ["op:"], report=lambda _: None)['tags_pruned'] == 0
     assert identifier in stash.tags
     assert all('movie_count' not in query for query in calls)
 
@@ -102,14 +102,14 @@ def test_supported_schema_uses_group_count_once_and_keeps_future_usage(monkeypat
 @pytest.mark.parametrize("value",[None,-1,False,"0"])
 def test_unknown_counter_is_not_interpreted_as_zero(value):
     stash=PruneStash();stash.add("op:empty");stash.add("op:broken",image_count=value)
-    with pytest.raises(ValueError,match="usage count"):prune_tags(stash,report=lambda _:None)
+    with pytest.raises(ValueError,match="usage count"):prune_tags(stash,["op:"],report=lambda _:None)
     assert not stash.deleted
 
 
 def test_pagination_completes_before_deletion():
     stash=PruneStash()
     for i in range(1002):stash.add(f"op:empty_{i}")
-    assert prune_tags(stash,report=lambda _:None)["tags_pruned"]==1002
+    assert prune_tags(stash,["op:"],report=lambda _:None)["tags_pruned"]==1002
     assert stash.calls["catalog"]==2
 
 
@@ -126,5 +126,14 @@ def test_standalone_cli_needs_no_models_or_hierarchy(monkeypatch,tmp_path):
     monkeypatch.setattr(app.services,"create_stash_client",lambda _:stash)
     monkeypatch.setattr(app.services,"load_model_settings",lambda *args:pytest.fail("pruning loaded model configuration"))
     monkeypatch.setattr(app.services,"load_vocabulary",lambda *args:pytest.fail("pruning loaded vocabulary"))
-    assert app.main(["--prune-empty-tags-only","--state-db",str(tmp_path/"state.sqlite3")])==0
+    assert app.main(["--prune-empty-tags-only", "--prune-prefixes", "op:","--state-db",str(tmp_path/"state.sqlite3")])==0
     assert len(stash.deleted)==1
+
+
+def test_default_pruning_keeps_retired_namespaces_until_explicit_opt_in():
+    stash = PruneStash()
+    current = stash.add('ai:empty')
+    retired = {stash.add(prefix + 'empty') for prefix in ('jt:', 'wd:', 'dtq:', 'op:')}
+    assert prune_tags(stash, report=lambda _: None)['tags_pruned'] == 1
+    assert stash.deleted == [current] and retired <= set(stash.tags)
+    assert prune_tags(stash, ['jt:', 'wd:', 'dtq:', 'op:'], report=lambda _: None)['tags_pruned'] == 4

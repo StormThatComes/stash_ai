@@ -21,7 +21,7 @@ def runtime_options(app, args):
 
 def selected_settings(app, args):
     settings = app.services.load_model_settings(args.model_config, args.models, args.device, args.offline)
-    print("Selected models: " + ", ".join(f"{item.source.title} ({item.source.prefix})" for item in settings))
+    print("Selected models: " + ", ".join(f"{item.source.title} ({item.source.code})" for item in settings))
     return settings
 
 
