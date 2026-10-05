@@ -505,6 +505,17 @@ lub odrzuconych tagach nie stanowi dowodu pełnego cache.
 
 ## Konfiguracja
 
+Hierarchie mają `version: 2` i pola `source` oraz `groups`. Ścieżki grup tworzą
+bezpośrednio kategorie `ai:category:` pod korzeniem `ai:category:AI`.
+Własne YAML-e v1 przekonwertuj lokalnie, bez ładowania modeli ani połączenia ze Stash:
+
+```powershell
+python -m stash_ai.commands.hierarchy_migration joytag_hierarchy.yml wd_hierarchy.yml dtq_hierarchy.yml oppai_hierarchy.yml
+```
+
+Dodaj `--dry-run`, aby sprawdzić migrację. Oryginały są zachowywane jako
+`*.v1.yml`; migrator zachowuje przypisania grup, surowe etykiety i metadane źródła.
+
 | Plik / opcja | Rola |
 |---|---|
 | `tagger_models.yml` | modele, katalogi, progi, batch size |

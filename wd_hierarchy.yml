@@ -5,7 +5,7 @@
 # Other / Unclassified is an ordinary group and does NOT exclude its labels.
 # Named references describe predicted/source content, not verified identities/authorship.
 # Move a label to change its parent; repeat it in another group for multiple parents.
-# Keep raw label spelling, root and category_prefix stable. Preserve full coverage.
+# Keep raw label spelling and full coverage; categories use the shared ai: namespace.
 # Synchronization replaces hierarchy-owned parents; manual parents remain.
 # Existing obsolete category objects are retained, not deleted.
 # Validate: python stash_ai.py --models wd --validate-hierarchy
@@ -13,7 +13,7 @@
 # Apply: python stash_ai.py --models wd --sync-hierarchy-only
 # Import all leaves: add --create-all-tags to the preceding command.
 # Normal inference creates/synchronizes parents only for labels it uses.
-"version": 1
+"version": 2
 "source":
   "model": "SmilingWolf/wd-eva02-large-tagger-v3"
   "revision": "b25b82a03f7282e41aa2f257a52c7583b710bd1c"
@@ -30,8 +30,6 @@
     "compound_extension": 258
     "unclassified": 1385
     "reference_qualifier": 21
-"root": "WD EVA02-Large v3"
-"category_prefix": "wd:category:"
 "groups":
   "Accessories / Eyewear and masks":
   - "adjusting_eyewear"
