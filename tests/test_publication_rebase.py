@@ -14,7 +14,7 @@ from stash_ai.storage.store import StateStore
 from stash_ai.storage.codec import encode
 from stash_ai.storage.snapshots import compact, require_rebased
 from stash_ai.publication.recovery import reconcile_marker_snapshot
-from stash_ai.tools.point_migration import plan
+from stash_ai.publication.preconditions import require_native_ranges
 from tests.helpers.runtime import runtime as app
 from tests.helpers.evidence import span, segment
 from tests.helpers.stash import Stash
@@ -68,9 +68,10 @@ def test_offline_rebase_keeps_geometry_ownership_and_retry_proofs_across_scopes(
             marker = stash.marker(AI, 'common', 'old')
             marker.update(seconds=10, end_seconds=None)
             marker['tags'].append(stash.tag('human'))
-            update = plan(state, stash.find_scene('1'))[0]
-            assert update['id'] == marker['id'] and update['end_seconds'] == 20
-            assert update['tag_ids'] == [t['id'] for t in marker['tags']]
+            before_marker = deepcopy(marker)
+            with pytest.raises(RuntimeError, match='migration tools from commit'):
+                require_native_ranges(stash.find_scene('1'))
+            assert marker == before_marker and not stash.writes
     with sqlite3.connect(path) as connection:
         migrated = [connection.execute('SELECT * FROM ' + table).fetchall()
                     for table in ('snapshots', 'recovery_publications')]

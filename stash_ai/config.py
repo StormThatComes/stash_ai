@@ -119,15 +119,14 @@ def load_tag_hierarchy(path: Path, labels: list[str], source: ModelSource) -> Ta
 def hierarchy_from_data(data, labels, source):
     """Validate model vocabulary directly into the canonical AI taxonomy."""
     from stash_ai.evidence.labels import AI, raw_label
+    from stash_ai.tools import MIGRATION_BRIDGE_HINT
     allowed = {"version", "source", "groups"}
     if isinstance(data, dict) and type(data.get('version')) is int and data['version'] == 1:
-        raise ValueError('Hierarchy YAML requires version: 2; migrate v1 with '
-                         'python -m stash_ai.commands.hierarchy_migration FILE [FILE ...].')
+        raise ValueError('Hierarchy YAML requires version: 2. ' + MIGRATION_BRIDGE_HINT)
     if not isinstance(data, dict) or set(data) - allowed:
         raise ValueError("Hierarchy YAML must be a mapping using only: " + ", ".join(sorted(allowed)))
     if type(data.get("version")) is not int or data["version"] != 2:
-        raise ValueError('Hierarchy YAML requires version: 2; migrate v1 with '
-                         'python -m stash_ai.commands.hierarchy_migration FILE [FILE ...].')
+        raise ValueError('Hierarchy YAML requires version: 2. ' + MIGRATION_BRIDGE_HINT)
     prefix, root_name = 'ai:category:', 'ai:category:AI'
     groups = data.get("groups")
     if not isinstance(groups, dict) or not groups:
