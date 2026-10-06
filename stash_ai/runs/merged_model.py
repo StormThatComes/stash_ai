@@ -41,6 +41,9 @@ class MergedModelRun:
                 except Exception as exc:
                     progress.block_publication(self.store, [scene_id], self.key, kinds)
                     self._record_error('inference', scene_id, exc)
+                except BaseException:
+                    progress.block_publication(self.store, [scene_id], self.key, kinds)
+                    raise
                 remaining.discard(scene_id)
         finally:
             if self.tagger is not None:

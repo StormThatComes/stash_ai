@@ -163,7 +163,7 @@ def test_unknown_blocklist_rejects_marker_replay_but_not_scene_only(
     p.stash.writes.clear()
     assert app.main([*p.args, '--merge-only', '--force-merge']) == 1
     assert not p.stash.writes
-    assert app.main([*p.args, '--scene-tags-only', '--merge-only']) == 1
+    assert app.main([*p.args, '--scene-tags-only', '--merge-only']) == 0
     assert not p.stash.writes
 
 

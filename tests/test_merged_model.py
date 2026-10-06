@@ -64,6 +64,8 @@ def test_scene_failure_continues_but_interruption_stops_and_closes_tagger(model_
         assert context.state.records('2', 'scene')['wd']['meta']['origin'] == 'inference'
         assert ('inference', 'wd', 'RuntimeError') in context.args.report.groups
     assert context.state.records('1', 'scene') == {}
+    from stash_ai.storage.progress import pending_refreshes
+    assert pending_refreshes(context.state, ['scene', 'markers'])['1'] == [('wd', 'markers'), ('wd', 'scene')]
     assert len(context.pipeline.loaded) == 1
     assert context.pipeline.loaded[0].closed
     # The borrowed database remains usable after the model's finally block.
@@ -136,4 +138,3 @@ def test_downloaded_weights_refresh_signatures_before_saving_and_enable_resume(m
     monkeypatch.setattr(app.services, 'load_tagger', lambda *args: pytest.fail('downloaded weights invalidated resume'))
     run_model(context)
     assert context.stats['reused'] == 2 and not context.stats['processed']
-
