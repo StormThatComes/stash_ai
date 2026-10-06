@@ -17,7 +17,7 @@ def reset_multimodel(monkeypatch, tmp_path):
     monkeypatch.setattr(app,"PREFETCH_BATCHES",0)
     monkeypatch.setattr(app,"MERGE_STATE_FILE",tmp_path/"state.sqlite3")
     for key, value in dict(DRY_RUN=False, APPLY_SCENE_TAGS=True, CREATE_MARKERS=True,
-        CREATE_MISSING=True, MAX_TAGS=0, MAX_MARKERS_PER_SCENE=0,
+        CREATE_MISSING=True,
         MARKER_MAX_TAGS_PER_FRAME=0, MARKER_MIN_HITS=2, MARKER_MERGE_GAP_SECONDS=0.0,
         AGGREGATION="topk_mean", TOP_K_FRAMES=2).items():
         monkeypatch.setattr(app,key,value)
@@ -30,7 +30,7 @@ def reset_merge(monkeypatch, tmp_path):
     install_threshold_policy(monkeypatch, app, tmp_path)
     for key, value in dict(DEFAULT_RESUME=False, PREFETCH_BATCHES=0, MERGE_STATE_FILE=tmp_path/"sources.sqlite3",
         DRY_RUN=False, APPLY_SCENE_TAGS=True, CREATE_MARKERS=True, CREATE_MISSING=True,
-        MAX_TAGS=0, MAX_MARKERS_PER_SCENE=0, MARKER_MAX_TAGS_PER_FRAME=0, MARKER_MIN_HITS=2,
+        MARKER_MAX_TAGS_PER_FRAME=0, MARKER_MIN_HITS=2,
         MARKER_MERGE_GAP_SECONDS=0.0, AGGREGATION="topk_mean", TOP_K_FRAMES=2).items():
         monkeypatch.setattr(app,key,value)
 
@@ -42,7 +42,7 @@ def reset_progress(monkeypatch,tmp_path):
     install_threshold_policy(monkeypatch, app, tmp_path)
     for key,value in dict(DEFAULT_RESUME=True,PREFETCH_BATCHES=0,
         MERGE_STATE_FILE=tmp_path/"state.sqlite3",DRY_RUN=False,APPLY_SCENE_TAGS=True,CREATE_MARKERS=True,
-        CREATE_MISSING=True,MAX_TAGS=0,MAX_MARKERS_PER_SCENE=0,MARKER_MAX_TAGS_PER_FRAME=0,MARKER_MIN_HITS=2,
+        CREATE_MISSING=True,MARKER_MAX_TAGS_PER_FRAME=0,MARKER_MIN_HITS=2,
         MARKER_MERGE_GAP_SECONDS=0.0,AGGREGATION="topk_mean",TOP_K_FRAMES=2).items(): monkeypatch.setattr(app,key,value)
 
 
@@ -53,7 +53,7 @@ def reset_temporal(monkeypatch, tmp_path):
     for key, value in dict(DEFAULT_RESUME=True,
         TEMPORAL_POLICY=TemporalPolicy(), TEMPORAL_POLICY_FILE=Path(__file__).resolve().parents[1]/'temporal_policy.yml', PREFETCH_BATCHES=0,
         MERGE_STATE_FILE=tmp_path/"state.sqlite3", DRY_RUN=False, APPLY_SCENE_TAGS=True, CREATE_MARKERS=True,
-        CREATE_MISSING=True, MAX_TAGS=0, MAX_MARKERS_PER_SCENE=0, MARKER_MAX_TAGS_PER_FRAME=0, MARKER_MIN_HITS=2,
+        CREATE_MISSING=True, MARKER_MAX_TAGS_PER_FRAME=0, MARKER_MIN_HITS=2,
         MARKER_MERGE_GAP_SECONDS=0.0, AGGREGATION="topk_mean", TOP_K_FRAMES=2).items():
         monkeypatch.setattr(app, key, value)
 
@@ -105,7 +105,7 @@ def merge_pipeline(monkeypatch,tmp_path):
     for key,indices in {"joytag":[0,1],"wd":[1,2],"oppai":[2,3],"dtq":[4,5]}.items():
         scores[key][indices,0]=.9
     # Keep Oppai common safely above its 0.85 marker threshold but below
-    # unique_op (.92), preserving tests that exercise scene-tag ranking caps.
+    # unique_op (.92), preserving deterministic score ordering in merge tests.
     scores["oppai"][2:4,0]=.91
     scores["oppai"][:2,1]=.92
     monkeypatch.setattr(app.services,"create_stash_client",lambda _:stash)

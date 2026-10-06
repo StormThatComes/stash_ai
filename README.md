@@ -122,8 +122,8 @@ obsługiwane schematy przechowują już pojedynczy rekord i liczbowy próg.
 
 Snapshoty merge zapisują współdzielone dowody `extra_support` raz, a contributions
 odwołują się do nich przez referencje. Zmniejsza to koszt serializacji i kompresji.
-Aktualny schemat to v24, z obsługą aktualizacji od v18. Każdy nowy snapshot ma
-otoczkę formatu v6. `--db-update` konwertuje snapshoty v4/v5/v6, także pending i recovery,
+Aktualny schemat to v25, z obsługą aktualizacji od v18. Każdy nowy snapshot ma
+otoczkę formatu v7. `--db-update` konwertuje snapshoty v4/v5/v6/v7, także pending i recovery,
 w jednym przebiegu. Zachowuje geometrię i własność publikacji, normalizuje zamrożone opcje
 odtwarzania oraz usuwa `extra_ids` i zbędne `algorithm: temporal`. Pełne payloady
 archiwalnych inferencji sprzed formatu 5 są usuwane; ich publikacje otrzymują
@@ -246,7 +246,7 @@ Ręczne powiązania ze starymi definicjami tagów pozostają zachowane.
 Trzy zakończone migracje nie należą już do bieżącego pakietu. W razie potrzeby uruchom je
 z osobnego checkoutu niezmiennego commita
 [`9fcaa52502cd487455457547860b5db7d8710ad8`](https://github.com/StormThatComes/stash_ai/commit/9fcaa52502cd487455457547860b5db7d8710ad8).
-Ta wersja obsługuje bieżący schemat v24. Bazy sprzed v18 wymagają najpierw starszego
+Bieżący pakiet korzysta ze schematu v25. Bazy sprzed v18 wymagają najpierw starszego
 mostka opisanego w sekcji aktualizacji bazy. Zrób kopię bazy i konfiguracji oraz zainstaluj
 zależności checkoutu w osobnym środowisku Python 3.14 zgodnie z instrukcją instalacji.
 
@@ -280,14 +280,14 @@ Następnie wróć do bieżącej instalacji, wykonaj `--db-check` i potrzebną in
 ### Zdrowie, aktualizacja i kompaktowanie bazy stanu
 
 `--db-update` aktualizuje bazę wskazaną przez `--state-db` ze schematu **v18 lub nowszego**
-do aktualnego **v24**, we wszystkich scope'ach. Zwykłe uruchomienie oraz `--dry-run`
-wymagają aktualnego schematu; nowa baza od razu otrzymuje v24.
+do aktualnego **v25**, we wszystkich scope'ach. Zwykłe uruchomienie oraz `--dry-run`
+wymagają aktualnego schematu; nowa baza od razu otrzymuje v25.
 Migracja dodaje stan odbudowy, ale nie przejmuje istniejących wyników Stash.
 To uprawnienie powstaje wyłącznie po jawnym `--db-init` na nowej/pustej bazie.
 Updater korzysta z tego samego locka writera. Pracuje offline, bez Stash i konfiguracji modeli.
 Zachowuje liczbowe progi bieżących wyników, własność publikacji, pending publication/cleanup
 i recovery. Starsze wyniki są kierowane do ponownej inferencji, a ich checkpointy usuwane.
-Snapshoty v4/v5/v6 są konwertowane w jednym przebiegu, z zachowaniem współdzielonych dowodów.
+Snapshoty v4/v5/v6/v7 są konwertowane w jednym przebiegu, z zachowaniem współdzielonych dowodów.
 Wycofane konfiguracje algorytmów są usuwane; geometria i referencje do dowodów pozostają.
 Aktualizacja nie odtwarza utraconych detekcji. Wyniki inferencji sprzed formatu 5 wymagają ponownej inferencji.
 Metadane wyników są uzupełniane dopiero po zakończeniu konwersji. Klatki bieżących wyników
@@ -604,10 +604,24 @@ Bieżący walidator wymaga v2 i wskazuje commit migratora bez zmiany pliku.
 | `--state-db` | lokalizacja trwałej bazy stanu |
 | `--db-init` | odbudowa nowej/pustej bazy z przejęciem istniejących wyników AI |
 
-`MAX_MARKERS_PER_SCENE` ogranicza wkłady osobno dla każdego modelu.
-Zakresy mają pierwszeństwo przed dodatkowymi punktami Occurrence. Punkt
-wspierany przez kilka modeli zajmuje slot jednego modelu, który ma jeszcze
-wolne miejsce; marker WD nie wyczerpuje limitu DTQ.
+Publikacja nie ogranicza liczby tagów ani markerów na scenę. Wszystkie wyniki
+spełniające progi, reguły temporalne i wykluczenia mogą zostać opublikowane;
+dotyczy to każdego modelu, wspólnych wyników i punktów Occurrence.
+`MAX_TAGS` i `MAX_MARKERS_PER_SCENE` zostały usunięte. Limit tagów na klatkę
+`MARKER_MAX_TAGS_PER_FRAME` pozostaje osobnym ustawieniem (domyślnie 0).
+
+Bazy v18–v24 wymagają `--db-update`. Migracja do v25 zapisuje snapshoty v7
+bez dawnych limitów liczby wyników, zachowując geometrię, własność i plany
+pending/recovery. Nie zmienia cache inferencji i nie zapisuje do Stash.
+Aby uzupełnić wcześniej obcięte wyniki z zachowanego cache, wykonaj:
+
+```powershell
+python .\stash_ai.py --db-update
+python .\stash_ai.py --merge-only
+```
+
+`--merge-only` stosuje aktualne reguły publikacji bez GPU; wymagania dotyczące
+kompletności cache nadal obowiązują. `--dry-run` pozwala obejrzeć plan publikacji.
 
 Aktualne domyślne ustawienia pamięci i równoległości:
 - `--ram-budget-gb 32`;

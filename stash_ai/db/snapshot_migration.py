@@ -22,15 +22,15 @@ def complete_policy(values):
 
 
 def decode_legacy(blob):
-    """Schema v18+ stores declared v4/v5/v6 snapshot envelopes."""
+    """Schema v18+ stores declared v4/v5/v6/v7 snapshot envelopes."""
     value = decode(blob)
     if (not isinstance(value, dict) or set(value) != {FORMAT_KEY, 'snapshot', 'proofs'}
-            or type(value[FORMAT_KEY]) is not int or value[FORMAT_KEY] not in (4, 5, FORMAT)
+            or type(value[FORMAT_KEY]) is not int or value[FORMAT_KEY] not in (4, 5, 6, FORMAT)
             or not isinstance(value['snapshot'], dict)
             or not isinstance(value['snapshot'].get('contributions'), list)
             or not isinstance(value['proofs'], list)
             or any(not isinstance(proof, dict) for proof in value['proofs'])):
-        raise ValueError('Invalid historical snapshot format; schema v18 requires v4/v5/v6 envelopes.')
+        raise ValueError('Invalid historical snapshot format; schema v18 requires v4/v5/v6/v7 envelopes.')
     return _expand_proofs(value['snapshot'], value['proofs'])
 
 
@@ -39,10 +39,19 @@ def complete_options(options):
         raise ValueError('Invalid historical build options.')
     result = {**options, 'algorithm': options.get('algorithm', 'temporal' if options['policy'].get('enabled', True) else 'historical'),
               'policy': complete_policy(options['policy'])}
-    if 'max_tags' in options:
+    if 'max_tags' in options or 'scene_exclusions' in options:
+        limit = result.pop('max_tags', 0)
+        if type(limit) is not int or limit < 0:
+            raise ValueError('Invalid historical scene tag limit.')
         result.setdefault('scene_thresholds', {})
         fields = ('scene_exclusions',)
     else:
+        if isinstance(options.get('settings'), dict):
+            settings = dict(options['settings'])
+            limit = settings.pop('MAX_MARKERS_PER_SCENE', 0)
+            if type(limit) is not int or limit < 0:
+                raise ValueError('Invalid historical scene marker limit.')
+            result['settings'] = settings
         result.setdefault('marker_thresholds', {})
         fields = ('core_exclusions', 'tag_exclusions')
     for field in fields:

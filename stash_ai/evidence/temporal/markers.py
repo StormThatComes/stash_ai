@@ -82,9 +82,6 @@ def build_markers(app, frames, core_exclusions, *, threshold, seeds=None, identi
     for tag in list(active):
         finish(tag)
     total = len(finished)
-    finished.sort(key=lambda marker: (-marker.score, marker.start, marker.tag))
-    if app.MAX_MARKERS_PER_SCENE:
-        finished = finished[:app.MAX_MARKERS_PER_SCENE]
     if not collect_extras:
         return sorted(finished, key=lambda marker: (marker.start, marker.tag)), total
     qualified = qualify_marker_extras(finished, extra_frames, policy, identity, extra_group, extra_cache)

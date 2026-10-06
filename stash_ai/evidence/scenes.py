@@ -109,7 +109,7 @@ def _shared_scene_contributions(app, index, scene_records, policies, existing, m
         return []
 
     existing = {entry['tag'] for entry in existing}
-    options = dict(policy=asdict(policy), max_tags=app.MAX_TAGS,
+    options = dict(policy=asdict(policy),
                    scene_thresholds={marker_segment_signature(record): scene_threshold(record) for record in scene_records.values()},
                    scene_exclusions={source: sorted(values) for source, values in policies.items()})
     candidates, usable, partial = [], False, False
@@ -130,9 +130,6 @@ def _shared_scene_contributions(app, index, scene_records, policies, existing, m
 
     candidates.sort(key=lambda item: (-item['joint_statistics']['high_hits'], -item['joint_statistics']['hits'],
                                      item['tag'], item['frame_group']))
-    if app.MAX_TAGS:
-        selected = list(dict.fromkeys(item['tag'] for item in candidates))[:app.MAX_TAGS]
-        candidates = [item for item in candidates if item['tag'] in selected]
     if metrics is not None:
         metrics['shared_scene_tags'] += len({item['tag'] for item in candidates})
         metrics['scene_cache_partial'] += int(partial)

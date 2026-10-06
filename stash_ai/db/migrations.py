@@ -13,9 +13,11 @@ def migrate(database):
         db.execute('BEGIN')
         if 'inference' in {row[1] for row in db.execute('PRAGMA table_info(result_index)')}:
             db.execute('ALTER TABLE result_index DROP COLUMN inference')
+        retired = {}
         if database.version < 23:
             from .current_evidence_migration import migrate as retire_obsolete
             retired = retire_obsolete(db)
+        if database.version < 25:
             from .scalar_evidence_migration import migrate as migrate_publications
             migrate_publications(db, retired)
         from stash_ai.storage.metadata import FORMAT, decode as decode_metadata, encode, summarize

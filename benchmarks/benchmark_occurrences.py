@@ -27,7 +27,6 @@ def main():
     from stash_ai.models import SOURCES
     from stash_ai.evidence.temporal.policy import TemporalPolicy
     app.TEMPORAL_POLICY = TemporalPolicy()
-    app.MAX_MARKERS_PER_SCENE = 0
     policies = {s: frozenset() for s in SOURCES}
     labels = [f'tag_{i}' for i in range(args.labels)]
     output = dict(frames=args.frames, labels=args.labels, models=len(SOURCES), repeats=args.repeats, cases={})

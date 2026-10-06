@@ -142,30 +142,10 @@ def occurrence_contributions(app, scene_hits, records, spans, core_policies, tag
     streams = _candidate_streams(hits, records, blocked, policy)
     best = _best_points(streams)
 
-    ranked = sorted(best.values(), key=lambda item: (tuple(-v for v in item[0]), item[1]['tag']))
-    limited = 0
-    if app.MAX_MARKERS_PER_SCENE:
-        from collections import Counter
-        used = Counter(span['source'] for span in spans)
-        retained = []
-        for ranking, point in ranked:
-            sources = [source for source in SOURCES
-                       if any(w['source'] == source for w in point['occurrence_evidence'])]
-            anchor = next((source for source in sources
-                           if used[source] < app.MAX_MARKERS_PER_SCENE), None)
-            if anchor is None:
-                limited += 1
-                continue
-            used[anchor] += 1
-            point = {**point, 'source': anchor,
-                     'support_sources': [source for source in sources if source != anchor]}
-            retained.append((ranking, point))
-        ranked = retained
     if metrics is not None:
-        metrics['occurrence_candidates'] += len(ranked)
+        metrics['occurrence_candidates'] += len(best)
         metrics['occurrence_missing_timestamps'] += len(missing - set(best))
-        metrics['occurrence_limited'] += limited
-    return sorted((point for _, point in ranked), key=lambda item: (item['start'], item['tag']))
+    return sorted((point for _, point in best.values()), key=lambda item: (item['start'], item['tag']))
 
 
 def cleanup_occurrence(app, store, scene_id, point, selected, cores, tags):

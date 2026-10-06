@@ -81,5 +81,5 @@ ani `--abandon-pending`. Niedokończona odbudowa blokuje również zmianę
 zakresu, wyjścia częściowe, restart, porzucenie planu i rethreshold w zwykłym
 przebiegu inference/merge.
 
-Schemat SQLite ma wersję v24. Istniejące bazy v18–v23 aktualizuj przez
+Schemat SQLite ma wersję v25. Istniejące bazy v18–v24 aktualizuj przez
 `--db-update`; migracja zachowuje stan i nie uruchamia przejęcia wyników AI.

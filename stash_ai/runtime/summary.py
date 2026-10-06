@@ -10,7 +10,7 @@ def write_summary(report, title, counts, cache=None):
         ('Scenes/models', ('processed', 'reused', 'skipped', 'errors', 'scenes_synced', 'merge_reused', 'bootstrap_reused', 'checkpoint_resumes')),
         ('Scene tags', ('merged_scene_tags', 'scene_tags_updated', 'shared_scene_tags', 'scene_cache_partial', 'scene_cache_missing')),
         ('Markers', ('merged_markers', 'markers_created', 'markers_updated', 'markers_deleted', 'markers_unchanged')),
-        ('Occurrence points', ('occurrence_markers', 'occurrence_missing_timestamps', 'occurrence_limited',
+        ('Occurrence points', ('occurrence_markers', 'occurrence_missing_timestamps',
                                'occurrence_manual_locations')),
         ('Cleanup', ('cleanup_fast_path', 'cleanup_resumed', 'cleanup_candidate_scenes', 'blacklisted_tags_deleted',
                      'cleanup_markers_changed_or_gone', 'cleanup_tags_changed_or_gone')),

@@ -220,16 +220,17 @@ def test_cleanup_rechecks_shared_scene_qualification_before_retaining_point(tmp_
         assert cleanup_evidence.cleanup_support(app, state, '1', spans, {'wd'}, policies(), blocked) == []
 
 
-def test_marker_cap_has_priority_over_additional_points(tmp_path, monkeypatch):
+def test_existing_ranges_do_not_limit_points_for_other_tags(tmp_path):
     scenes, markers = paired_records({'wd': [0, .95, 0]}, threshold=.35, marker_threshold=.65)
-    monkeypatch.setattr(app, 'MAX_MARKERS_PER_SCENE', 1)
     with merge_store.StateStore(tmp_path/'state', 'fixture') as state:
         put(state, scenes, markers)
         hits, _ = merge.evidence(app, state, '1', policies(), policies())
         metrics = Counter()
         existing = [dict(tag='other', source='wd', start=0, end=3)]
-        assert occurrence_contributions(app, hits, markers, existing, policies(), policies(), metrics) == []
-        assert metrics['occurrence_limited'] == 1
+        points = occurrence_contributions(app, hits, markers, existing, policies(), policies(), metrics)
+        assert len(points) == 1 and points[0]['tag'] == 'core'
+        assert metrics['occurrence_candidates'] == 1
+        assert 'occurrence_limited' not in metrics
 
 
 def test_old_policy_snapshots_and_inference_identity_remain_compatible(pipeline, monkeypatch):

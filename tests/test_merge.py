@@ -394,18 +394,16 @@ def test_new_inference_replaces_previous_results(merge_pipeline):
         assert all(isinstance(state.records('1', kind)['oppai'], dict) for kind in ('scene', 'markers'))
 
 
-def test_caps_follow_blacklists_and_keep_all_qualified_evidence(merge_pipeline,monkeypatch,tmp_path):
+def test_frame_cap_follows_blacklists_and_scene_output_keeps_all_qualified_tags(merge_pipeline,monkeypatch,tmp_path):
     p=merge_pipeline
     p.scores["oppai"][:2,2]=.95
-    monkeypatch.setattr(app,"MAX_TAGS",1)
     monkeypatch.setattr(app,"MARKER_MAX_TAGS_PER_FRAME",1)
-    monkeypatch.setattr(app,"MAX_MARKERS_PER_SCENE",1)
     core=tmp_path/"core.yml";core.write_text("version: 1\nexcluded_core_tags: [extra]\n")
     scene=tmp_path/"scene.yml";scene.write_text("version: 1\nexcluded_scene_tags: [extra]\n")
     assert app.main(["--models","oppai",*p.args[2:],"--marker-core-exclusions",str(core),"--scene-tag-exclusions",str(scene)])==0
-    assert {t["name"] for t in p.stash.scene["tags"]}=={"ai:unique_op"}
+    assert {t["name"] for t in p.stash.scene["tags"]}=={"ai:unique_op", "ai:common"}
     assert intervals(p.stash,"unique_op")==[(10,30)]
-    assert not intervals(p.stash) and not intervals(p.stash,"extra")
+    assert intervals(p.stash)==[(30,50)] and not intervals(p.stash,"extra")
     with merge_store.StateStore(p.path,merge_store.scope_for(app.STASH_URL),True) as state:
         assert {item["tag"] for item in state.records("1","scene")["oppai"]["items"]}=={"common","unique_op","extra"}
 
@@ -420,14 +418,13 @@ def test_range_output_retains_full_source_ranges(merge_pipeline):
         assert [(m["start"],m["end"]) for m in merge_intervals.union_intervals(snapshot["contributions"]) if m["tag"]=="common"]==[(10,50),(70,90)]
 
 
-def test_scene_cap_applies_only_to_the_current_record(tmp_path,monkeypatch):
-    monkeypatch.setattr(app,"MAX_TAGS",1)
+def test_scene_output_keeps_all_qualified_tags_from_the_current_record(tmp_path):
     with store(tmp_path) as state:
         for items in [[("old",.95),("low",.7)], [("latest",.95),("newer",.8)]]:
             state.put("1", "wd", {"scene":inference_record(**{"mode":"scene","meta":{},
                       "items":[dict(tag=tag,score=score) for tag,score in items]})})
         hits,_=merge.evidence(app,state,"1",empty_policies(),empty_policies())
-        assert {h["tag"] for h in hits}=={"latest"}
+        assert {h["tag"] for h in hits}=={"latest", "newer"}
         assert all(h["tag"] != "old" for h in hits)
 
 

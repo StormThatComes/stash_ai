@@ -38,8 +38,6 @@ def snapshot_context(runtime, options, kind):
     if kind == 'markers':
         for name, value in options['settings'].items():
             setattr(context, name, value)
-    else:
-        context.MAX_TAGS = options['max_tags']
     return context
 
 

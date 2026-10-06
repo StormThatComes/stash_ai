@@ -1,7 +1,7 @@
 """Versioned snapshot storage; callers continue to see expanded contributions."""
 
 FORMAT_KEY = '__stash_ai_snapshot__'
-FORMAT = 6
+FORMAT = 7
 
 
 def compact(snapshot):
@@ -101,7 +101,7 @@ def validate_policy(item):
         from stash_ai.evidence.temporal.policy import frozen_policy
         from stash_ai.models import SOURCES
         marker = {'policy', 'settings', 'marker_thresholds', 'core_exclusions', 'tag_exclusions'}
-        scene = {'policy', 'max_tags', 'scene_thresholds', 'scene_exclusions'}
+        scene = {'policy', 'scene_thresholds', 'scene_exclusions'}
         keys = set(options) if isinstance(options, dict) else set()
         if not isinstance(options, dict) or keys not in (marker, scene):
             raise ValueError('Incomplete frozen build options; run --db-update.')
@@ -120,7 +120,7 @@ def validate_policy(item):
             settings = options['settings']
             if not isinstance(settings, dict) or set(settings) != {
                     'MARKER_MIN_HITS', 'MARKER_MERGE_GAP_SECONDS',
-                    'MARKER_MAX_TAGS_PER_FRAME', 'MAX_MARKERS_PER_SCENE'}:
+                    'MARKER_MAX_TAGS_PER_FRAME'}:
                 raise ValueError('Incomplete frozen marker settings; run --db-update.')
     if 'scene_evidence' in item:
         if not isinstance(item['scene_evidence'], list) or any(

@@ -52,7 +52,7 @@ def main():
     app.TEMPORAL_POLICY = TemporalPolicy()
     app.MARKER_MIN_HITS = 2
     app.MARKER_MERGE_GAP_SECONDS = 0
-    app.MARKER_MAX_TAGS_PER_FRAME = app.MAX_MARKERS_PER_SCENE = 0
+    app.MARKER_MAX_TAGS_PER_FRAME = 0
     records = synthetic_records(SOURCES, args.frames, args.labels)
     policies = {source: frozenset() for source in SOURCES}
     times, hashes = [], set()
