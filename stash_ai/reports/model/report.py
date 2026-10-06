@@ -123,11 +123,8 @@ def write_report(report, destination):
 
 
 def run(app, args):
-    from stash_ai.exclusions import policies_or_empty
     app = report_context(app, args, both_outputs=True)
     core_policies, scene_policies = report_policies(app, args)
-    core_policies = policies_or_empty(core_policies)
-    scene_policies = policies_or_empty(scene_policies)
 
     try:
         budget = report_memory(args)

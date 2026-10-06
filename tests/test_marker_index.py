@@ -1,4 +1,5 @@
 """Indexed native marker lookup must preserve the old full-scan reconciliation."""
+from tests.helpers.evidence import empty_policies as empty_tag_policies
 from copy import deepcopy
 import random
 
@@ -94,7 +95,7 @@ def test_publication_split_duplicates_cleanup_and_retry_match_scanner(
             # Seed a normal publication before testing cleanup and preview.
             base = [span('wd', 10, 20), span('dtq', 30, 40), point]
             with merge_store.StateStore(path, 'scope') as store:
-                merge_sync.sync_merged(app, stash, resolver, store, stash.find_scene('1'), [], base)
+                merge_sync.sync_merged(app, stash, resolver, store, stash.find_scene('1'), [], base, tag_policies=empty_tag_policies())
             first = next(m for m in stash.scene['scene_markers'] if m['primary_tag']['name'] == 'ai:common')
             first['tags'].append(stash.tag('manual A'))
             duplicate = deepcopy(first)
@@ -105,7 +106,7 @@ def test_publication_split_duplicates_cleanup_and_retry_match_scanner(
             source = path.read_bytes()
             with merge_store.StateStore(path, 'scope', dry_run=dry, cache_bytes=2**20) as store:
                 sync = lambda spans: merge_sync.sync_merged(app, stash, resolver, store, stash.find_scene('1'),
-                                                     [], spans, cleanup=cleanup)
+                                                     [], spans, cleanup=cleanup, tag_policies=empty_tag_policies())
                 bridged = sync([span('wd', 11, 38), point])
                 split = [span('wd', 12, 16), span('dtq', 34, 37), point]
                 if not dry:

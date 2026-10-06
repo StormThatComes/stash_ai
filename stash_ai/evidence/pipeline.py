@@ -15,6 +15,9 @@ def evidence(app, store, scene_id, core_policies, scene_policies, metrics=None, 
     from stash_ai.evidence.qualification import scene_qualification
     from stash_ai.evidence.frames import FrameIndex
     from stash_ai.evidence.scenes import shared_scene_contributions
+    from stash_ai.exclusions import require_policies
+    require_policies(core_policies)
+    require_policies(scene_policies)
     report = store.report
     scene_hits, spans = [], []
     need_scene = app.APPLY_SCENE_TAGS or (app.CREATE_MARKERS
@@ -34,7 +37,7 @@ def evidence(app, store, scene_id, core_policies, scene_policies, metrics=None, 
                                   segment["meta"]["scene_threshold"], app.TEMPORAL_POLICY)
             if label not in scene_policies[model] and reason:
                 eligible.append({**entry, "source": model, "meta": segment["meta"],
-                                 **({"qualification": reason} if entry.get("statistics") else {})})
+                                 "qualification": reason})
         # Apply the scene cap once per current model record.
         eligible.sort(key=lambda item: (-(item["score"] if item["score"] is not None else -1), item["tag"]))
         scene_hits.extend(eligible[:app.MAX_TAGS] if app.MAX_TAGS else eligible)

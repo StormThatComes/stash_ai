@@ -89,9 +89,7 @@ def enrich(app, policies, spans, index, metrics=None):
                "tag_exclusions": {k: sorted(v) for k, v in index.tag_policies.items()}}
     covered = defaultdict(list)
     for span in spans:
-        key = by_signature.get(span.get("evidence_signature"))
-        if key:
-            span["frame_group"] = key
+        span["frame_group"] = by_signature[span["evidence_signature"]]
         if span["end"] is not None:
             covered[span["tag"]].append((span["start"], span["end"]))
     for tag, intervals in covered.items():
@@ -125,7 +123,7 @@ def enrich(app, policies, spans, index, metrics=None):
     return spans
 
 
-def refresh_clipped_evidence(app, span, records, policies, tag_policies=None):
+def refresh_clipped_evidence(app, span, records, policies, tag_policies):
     """Recompute scores and sample proofs within cleanup's published bounds."""
     groups = make_groups(records)
     key = span.get("frame_group")

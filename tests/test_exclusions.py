@@ -1,6 +1,5 @@
 """Global exclusions across cached outputs, shared proofs and Stash cleanup."""
-from functools import partial
-from stash_ai.tools.namespace_migration import main as namespace_main
+from tests.helpers.evidence import empty_policies as empty_tag_policies
 
 from tests.helpers.temporal import policy_args
 
@@ -15,13 +14,12 @@ from stash_ai.commands import hierarchy as hierarchy_commands
 from stash_ai.inference import sprites
 from stash_ai.cleanup import evidence as cleanup_evidence
 from tests.helpers.runtime import runtime as app
-migrate_namespace = partial(namespace_main, runtime=app)
 from stash_ai.evidence import pipeline as merge
 import stash_ai.evidence.intervals as merge_intervals
 import stash_ai.evidence.labels as merge_labels
 import stash_ai.evidence.source_markers as merge_source_markers
 import stash_ai.storage.store as merge_store
-from stash_ai.exclusions import policies_or_empty
+from tests.helpers.evidence import empty_policies
 from stash_ai.models import SOURCES, WD
 from tests.helpers.stash import Stash
 from tests.helpers.evidence import segment
@@ -113,7 +111,7 @@ def test_source_exclusion_rebuilds_extra_proofs_without_resurrecting_revoked_sou
         'dtq': segment('dtq', [[('detail', .92)]] * 3),
     }
     cores = {source: frozenset({'detail'}) for source in SOURCES}
-    empty = policies_or_empty()
+    empty = empty_policies()
     with merge_store.StateStore(tmp_path/'state.sqlite3', 'fixture') as store:
         for source, items in records.items(): store.put('1', source, {'markers': items})
         _, spans = merge.evidence(app, store, '1', cores, empty)
@@ -121,14 +119,14 @@ def test_source_exclusion_rebuilds_extra_proofs_without_resurrecting_revoked_sou
             for span in spans: span['build_options'].pop('tag_exclusions', None)
             from stash_ai.db.snapshot_migration import normalize
             spans = normalize({'contributions': spans})['contributions']
-        tags = policies_or_empty({'wd': ['detail']})
+        tags = {**empty_policies(), 'wd': frozenset({'detail'})}
         cleaned = cleanup_evidence.cleanup_support(app, store, '1', spans, {'wd'}, cores, tags)
         marker = merge_intervals.union_intervals(cleaned)[0]
         assert marker['extra_tags'] == ['detail']
         assert set(marker['extra_evidence']['detail']['source_evidence']) == {'dtq'}
         # The current file no longer bans WD. Cleanup must still retain that
         # earlier removal, using the frozen global exclusions from publication.
-        tags = policies_or_empty({'dtq': ['detail']})
+        tags = {**empty_policies(), 'dtq': frozenset({'detail'})}
         cleaned = cleanup_evidence.cleanup_support(app, store, '1', cleaned, {'dtq'}, cores, tags)
         marker = merge_intervals.union_intervals(cleaned)[0]
         assert marker['extra_tags'] == []
@@ -138,9 +136,9 @@ def test_source_exclusion_rebuilds_extra_proofs_without_resurrecting_revoked_sou
 def test_global_exclusion_revokes_consensus_before_qualification():
     records = {'wd': segment('wd', [[('core', .9)], [], [('core', .9)], []]),
                'dtq': segment('dtq', [[], [('core', .9)], [], [('core', .9)]])}
-    assert merge_source_markers.marker_contributions(app, records, policies_or_empty())
-    assert merge_source_markers.marker_contributions(app, records, policies_or_empty(),
-                                     tag_policies=policies_or_empty({'wd': ['core']})) == []
+    assert merge_source_markers.marker_contributions(app, records, empty_policies(), tag_policies=empty_tag_policies())
+    assert merge_source_markers.marker_contributions(app, records, empty_policies(),
+                                     tag_policies={**empty_policies(), 'wd': frozenset({'core'})}) == []
 
 
 @pytest.mark.parametrize('mode', ['--markers-only', '--cleanup-markers-only'])
@@ -233,21 +231,6 @@ def test_missing_canonical_marker_policy_is_not_redirected_to_an_old_filename(tm
     with pytest.raises(FileNotFoundError, match='marker_core_exclusions.yml'):
         app.services.load_exclusion_policy(runtime.MARKER_CORE_EXCLUSIONS_FILE, 'excluded_core_tags')
     assert app.services.load_exclusion_policy(old, 'excluded_core_tags')['wd'] == frozenset({'common'})
-
-
-def test_pruned_legacy_extra_id_cannot_reappear_or_break_the_next_merge(pipeline, tmp_path, monkeypatch):
-    p = pipeline
-    old = p.stash.marker(WD, 'legacy', 'legacy')
-    old['tags'].append(p.stash.tag('ai:blocked'))
-    path = policy_file(tmp_path, ['blocked'])
-    assert migrate_namespace([*p.args, '--scene-tag-exclusions', str(path)]) == 0
-    args = [*p.args, '--merge-only', '--scene-tag-exclusions', str(path)]
-    monkeypatch.setattr(app.services, 'load_tagger', lambda *args: pytest.fail('legacy merge loaded model'))
-    assert app.main(args) == 0
-    assert 'ai:blocked' not in p.stash.tags
-    p.stash.writes.clear()
-    assert app.main(args) == 0 and not p.stash.writes
-    assert 'ai:blocked' not in names_in_scene(p.stash)
 
 
 def test_cleanup_pruning_flag_is_supported_and_does_not_load_assets(pipeline, monkeypatch):

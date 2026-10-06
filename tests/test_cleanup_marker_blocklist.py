@@ -1,5 +1,6 @@
 """Cleanup can revoke published proofs from caches predating blocklist metadata."""
 
+from tests.helpers.evidence import empty_policies as empty_tag_policies
 from copy import deepcopy
 from dataclasses import replace
 
@@ -122,7 +123,7 @@ def test_repeated_cleanup_preserves_frozen_temporal_bans(tmp_path):
         second = cleanup_evidence.cleanup_support(app, state, '1', first, {'dtq'}, policies, tags)
         assert merge_intervals.union_intervals(second)[0]['extra_tags'] == []
         assert archived_records(state, '1', 'markers') == original
-        assert merge_source_markers.marker_contributions(app, {source: versions[0] for source, versions in original.items()}, policies)
+        assert merge_source_markers.marker_contributions(app, {source: versions[0] for source, versions in original.items()}, policies, tag_policies=empty_tag_policies())
 
 
 

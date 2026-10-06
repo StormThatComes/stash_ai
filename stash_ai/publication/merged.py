@@ -85,7 +85,7 @@ def publish_sync_plan(app, stash, resolver, store, scene_id, scene, markers, sce
 
 
 def sync_merged(app, stash, resolver, store, scene, scene_hits, spans, *, cleanup=False,
-                report=None, tag_policies=None, publication_key=None):
+                report=None, tag_policies, publication_key=None):
     """Reconcile only script-owned markers and recorded scene associations."""
     scene_id = str(scene["id"])
     report = report or store.report

@@ -1,4 +1,5 @@
 """Temporal qualification, exclusions, source votes and exact checkpoint resume."""
+from tests.helpers.evidence import empty_policies as empty_tag_policies
 from tests.helpers.evidence import inference_record
 from tests.helpers.temporal import threshold_policy
 
@@ -67,7 +68,7 @@ def test_extras_include_observations_inside_a_permitted_primary_gap(monkeypatch)
 def test_merged_extra_coverage_uses_the_whole_union_duration():
     records={'wd':segment('wd',[[('core',.9),('extra',.9)]]*2),
              'dtq':segment('dtq',[[('core',.9)]]*20)}
-    spans=merge_source_markers.marker_contributions(app,records,{m:frozenset({'extra'}) for m in SOURCES})
+    spans=merge_source_markers.marker_contributions(app,records,{m:frozenset({'extra'}) for m in SOURCES}, tag_policies=empty_tag_policies())
     result=merge_intervals.union_intervals(spans)[0]
     assert result['end']==20 and result['extra_tags']==[]
     assert result['extra_evidence']['extra']['coverage_fraction']==.1
@@ -78,7 +79,7 @@ def test_merged_extra_hits_combine_distinct_times_but_not_duplicate_model_votes(
     records={'wd':segment('wd',[[('core',.9),('extra',.9)],[('core',.9)]]),
              'dtq':segment('dtq',[[('core',.9)],[('core',.9),('extra',.9)]])}
     if same_time:records['dtq']=segment('dtq',[[('core',.9),('extra',.9)],[('core',.9)]])
-    spans=merge_source_markers.marker_contributions(app,records,{m:frozenset({'extra'}) for m in SOURCES})
+    spans=merge_source_markers.marker_contributions(app,records,{m:frozenset({'extra'}) for m in SOURCES}, tag_policies=empty_tag_policies())
     assert all(span['extra_tags']==([] if same_time else ['extra']) for span in spans)
     result=merge_intervals.union_intervals(spans)[0]
     assert result['extra_tags']==([] if same_time else ['extra'])
@@ -88,7 +89,7 @@ def test_merged_extra_hits_combine_distinct_times_but_not_duplicate_model_votes(
 def test_unproved_imported_ranges_cannot_join_active_temporal_evidence():
     records={'joytag': dict(mode='spans',meta={'origin':'legacy'},items=[])}
     with pytest.raises(ValueError, match='Active results require current inference'):
-        merge_source_markers.marker_contributions(app, records, {m:frozenset() for m in SOURCES})
+        merge_source_markers.marker_contributions(app, records, {m:frozenset() for m in SOURCES}, tag_policies=empty_tag_policies())
 
 
 def test_hysteresis_needs_a_seed_and_caps_weak_tail(monkeypatch):
@@ -116,7 +117,7 @@ def test_new_strong_hit_resets_weak_tail_limit(monkeypatch):
 def test_consensus_promotes_repeated_weak_detections_and_preserves_source_scores():
     records={m:segment(m,[[('core',.7)]]*3) for m in ('wd','dtq')}
     policies={m:frozenset() for m in SOURCES}
-    spans=merge_source_markers.marker_contributions(app,records,policies)
+    spans=merge_source_markers.marker_contributions(app,records,policies, tag_policies=empty_tag_policies())
     result=merge_intervals.union_intervals(spans)
     assert len(result)==1 and result[0]['sources']==['wd','dtq']
     assert (result[0]['start'],result[0]['end'])==(0,3)
@@ -134,12 +135,12 @@ def test_consensus_rejects_incompatible_or_duplicate_votes(difference):
         for f in records['dtq']['items']:f['start']+=10;f['end']+=10
     if difference=='same_model':records={'wd':records['wd']}
     if difference=='exclusion':policies['dtq']=frozenset({'core'})
-    assert not merge_source_markers.marker_contributions(app,records,policies)
+    assert not merge_source_markers.marker_contributions(app,records,policies, tag_policies=empty_tag_policies())
 
 
 def test_single_model_unique_strong_tag_does_not_need_consensus():
     records={'oppai':segment('oppai',[[('unique',.9)]]*2)}
-    spans=merge_source_markers.marker_contributions(app,records,{m:frozenset() for m in SOURCES})
+    spans=merge_source_markers.marker_contributions(app,records,{m:frozenset() for m in SOURCES}, tag_policies=empty_tag_policies())
     assert len(spans)==1 and spans[0]['tag']=='unique' and spans[0]['support_sources']==[]
 
 
@@ -223,13 +224,13 @@ def test_cleanup_revokes_consensus_votes_without_restoring_manual_deletions(tmp_
         for model in ('wd','dtq','oppai'):
             state.put('1',model,{'markers':segment(model,[[('core',.7)]]*3)})
         hits,spans=merge.evidence(app,state,'1',policies,policies)
-        merge_sync.sync_merged(app,stash,app.services.TagResolver(stash,source=merge_labels.AI),state,stash.find_scene('1'),hits,spans)
+        merge_sync.sync_merged(app,stash,app.services.TagResolver(stash,source=merge_labels.AI),state,stash.find_scene('1'),hits,spans, tag_policies=empty_tag_policies())
         policies['wd']=frozenset({'core'})
         kept=[s for s in spans if s['source']!='wd']
-        cleaned=cleanup_evidence.cleanup_support(app,state,'1',kept,{'wd'},policies)
+        cleaned=cleanup_evidence.cleanup_support(app,state,'1',kept,{'wd'},policies, tag_policies=empty_tag_policies())
         assert merge_intervals.union_intervals(cleaned)[0]['sources']==['dtq','oppai']
         policies['dtq']=frozenset({'core'})
-        cleaned=cleanup_evidence.cleanup_support(app,state,'1',[s for s in cleaned if s['source']!='dtq'],{'dtq'},policies)
+        cleaned=cleanup_evidence.cleanup_support(app,state,'1',[s for s in cleaned if s['source']!='dtq'],{'dtq'},policies, tag_policies=empty_tag_policies())
         assert cleaned==[]
 
 
@@ -244,13 +245,13 @@ def test_cleanup_uses_published_evidence_and_does_not_adopt_new_votes(tmp_path,c
         kept=[span for span in spans if span['source']=='dtq']
         if change=='new_model':
             state.put('1','oppai',{'markers':segment('oppai',[[('core',.7)]]*3)})
-            assert cleanup_evidence.cleanup_support(app,state,'1',kept,{'wd'},policies)==[]
+            assert cleanup_evidence.cleanup_support(app,state,'1',kept,{'wd'},policies, tag_policies=empty_tag_policies())==[]
         else:
             altered=segment('wd',[[('core',.7)]]*3)
             altered['items'][0]['tags']=[('core',.71)]
             state.put('1','wd',{'markers':altered})
             with pytest.raises(RuntimeError,match='merge-only'):
-                cleanup_evidence.cleanup_support(app,state,'1',kept,{'wd'},policies)
+                cleanup_evidence.cleanup_support(app,state,'1',kept,{'wd'},policies, tag_policies=empty_tag_policies())
 
 
 @pytest.mark.parametrize('field,value',[('extra_min_hits',True),('marker_continue_ratio',0),

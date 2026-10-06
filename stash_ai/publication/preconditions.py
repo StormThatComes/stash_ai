@@ -1,4 +1,5 @@
 """Required source state and native range contract for current publication."""
+from stash_ai.tools import MIGRATION_BRIDGE_HINT
 from stash_ai.evidence.labels import AI
 from stash_ai.evidence.marker_identity import OCCURRENCE_TAG
 from stash_ai.publication.markers import owned_marker
@@ -13,7 +14,7 @@ def ordinary_points(scene):
 def require_native_ranges(scene):
     if ordinary_points(scene):
         raise RuntimeError(f"Scene {scene['id']} has AI markers without native ranges; "
-                           'run python -m stash_ai.tools.point_migration before merging or cleaning ranges.')
+                           + MIGRATION_BRIDGE_HINT)
 
 
 def require_source_state(app, store, scene):

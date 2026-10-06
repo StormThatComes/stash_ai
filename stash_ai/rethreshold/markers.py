@@ -1,10 +1,9 @@
 """Validate marker coverage and update its effective publication threshold."""
 from stash_ai.evidence.formats import validate_current
-from stash_ai.storage.thresholds import PUBLICATION_THRESHOLD
-from stash_ai.evidence.thresholds import _score, marker_threshold
+from stash_ai.evidence.thresholds import _score
 
 
-from .plans import RecordAccess, PendingPolicy, ThresholdPlan, apply_plan
+from .plans import RecordAccess
 
 
 def validate(app, store, scene, config, *, check_scene=True, access=RecordAccess.BATCH):
@@ -25,24 +24,3 @@ def validate(app, store, scene, config, *, check_scene=True, access=RecordAccess
     if check_scene and scene_record is None and record['meta']['scene_threshold'] != config.scene_threshold:
         raise ValueError(f'{scene}/{model}: scene_threshold changed; scene statistics require inference.')
     return record
-
-
-def plan(app, store, scene, config, record=None, *, access=RecordAccess.BATCH,
-         pending=PendingPolicy.VERIFY):
-    record = validate(app, store, scene, config, access=access) if record is None else record
-    if marker_threshold(record) == config.marker_threshold:
-        return ThresholdPlan({}, access)
-    if pending is PendingPolicy.VERIFY and store.has_pending_publication(scene):
-        raise RuntimeError(f'{scene}: finish the pending merge or use --abandon-pending before changing thresholds.')
-    updated = dict(record)
-    updated.pop(PUBLICATION_THRESHOLD, None)
-    if config.marker_threshold != record['meta']['marker_threshold']:
-        updated[PUBLICATION_THRESHOLD] = config.marker_threshold
-    return ThresholdPlan({'markers': updated}, access)
-
-
-def apply(app, store, scene, config, record=None):
-    """Validate and apply a marker threshold during inference evidence reuse."""
-    prepared = plan(app, store, scene, config, record)
-    apply_plan(store, scene, config.source.key, prepared)
-    return bool(prepared)

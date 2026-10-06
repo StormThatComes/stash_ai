@@ -1,4 +1,5 @@
 """Cleanup candidate snapshots use the production reader against real SQLite."""
+from tests.helpers.evidence import empty_policies as empty_tag_policies
 from copy import deepcopy
 import json
 
@@ -126,7 +127,7 @@ def test_prefetched_scene_is_refreshed_before_cleanup_writes(tmp_path, monkeypat
     stash = SceneSQLStash()
     with merge_store.StateStore(tmp_path/'state.sqlite3', merge_store.scope_for(app.STASH_URL)) as store:
         merge_sync.sync_merged(app, stash, app.services.TagResolver(stash, source=merge_labels.AI), store,
-                          stash.find_scene('1'), [hit('wd')], [])
+                          stash.find_scene('1'), [hit('wd')], [], tag_policies=empty_tag_policies())
     human = stash.tag('human')
     def concurrent_edit(client):
         client.after_snapshot = None
@@ -181,7 +182,7 @@ def test_batched_marker_cleanup_matches_graphql_with_global_preview(tmp_path, mo
         with merge_store.StateStore(path/'state.sqlite3', merge_store.scope_for(app.STASH_URL)) as store:
             merge_sync.sync_merged(app, stash, app.services.TagResolver(stash, source=merge_labels.AI), store,
                 stash.find_scene('1'), [hit('wd'), hit('oppai'), hit('wd', 'blocked')],
-                [span('wd', 10, 20), span('oppai', 20, 30), span('wd', 40, 50, tag='blocked')])
+                [span('wd', 10, 20), span('oppai', 20, 30), span('wd', 40, 50, tag='blocked')], tag_policies=empty_tag_policies())
         before = deepcopy((stash.scenes, stash.tags)), (path/'state.sqlite3').read_bytes()
         stash.dry_run, stash.deny_snapshots = dry, deny
         stash.writes.clear()

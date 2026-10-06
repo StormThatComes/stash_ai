@@ -101,9 +101,10 @@ def test_missing_marker_floor_never_inherits_old_threshold_for_rethreshold_plan(
     assert not data['plan']
     assert not any(row['action'] == 'rethreshold' for row in data['plan'])
     with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL), True) as store:
-        from stash_ai.rethreshold import markers
+        from stash_ai.rethreshold import scenes
+        from stash_ai.rethreshold.plans import ThresholdRequest
         with pytest.raises(ValueError, match='retention floors'):
-            markers.plan(app, store, '1', target)
+            scenes.plan(app, store, '1', target, request=ThresholdRequest(kinds=('markers',)))
 
 
 @pytest.mark.parametrize('kind', ['scene', 'markers'])

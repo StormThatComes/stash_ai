@@ -1,4 +1,5 @@
 """Corrupt provenance fails early; unsorted timelines are retired without rewriting."""
+from tests.helpers.evidence import empty_policies as empty_tag_policies
 from copy import deepcopy
 import json
 import sqlite3
@@ -55,7 +56,7 @@ def test_grouping_and_occurrences_fail_instead_of_silently_losing_model_votes(fi
     value['meta'].pop(field)
     before = deepcopy(value)
     with pytest.raises(ValueError, match='requires'):
-        FrameIndex(app, {'wd': value}, policies())
+        FrameIndex(app, {'wd': value}, policies(), tag_policies=empty_tag_policies())
     with pytest.raises(ValueError, match='requires'):
         occurrence_contributions(app, [], {'wd': value}, [], policies(), policies())
     assert value == before
@@ -187,3 +188,29 @@ def test_upgrade_then_reinference_reuses_marker_ids_and_preserves_manual_tags(pi
         assert not store.connection.execute('SELECT * FROM refresh_requests').fetchall()
         assert all(not item.get('requires_rebase') for item in store.snapshot('1', 'markers')[0]['contributions'])
     assert check_database(p.path, scope_for(app.STASH_URL))['ok']
+
+
+@pytest.mark.parametrize('incomplete', [None, {}, {'wd': frozenset()},
+                                       {'wd': [], 'dtq': [], 'joytag': [], 'oppai': []}])
+def test_internal_policy_boundaries_reject_implicit_empty_bans(incomplete):
+    from stash_ai.exclusions import selected_policies, excluded_names
+    for operation in (lambda: FrameIndex(app, {}, policies(), tag_policies=incomplete),
+                      lambda: selected_policies(incomplete, {'wd'}),
+                      lambda: excluded_names(incomplete)):
+        with pytest.raises(ValueError, match='every model'):
+            operation()
+
+
+def test_frame_grouping_does_not_silently_ignore_scene_records():
+    from stash_ai.evidence.frames import make_groups
+    with pytest.raises(ValueError, match='frame evidence'):
+        make_groups({'wd': records()['scene']})
+
+
+def test_marker_builder_rejects_policies_different_from_its_frame_index():
+    from stash_ai.evidence.source_markers import marker_contributions
+    value = {'wd': records()['markers']}
+    bans = policies()
+    with FrameIndex(app, value, bans, tag_policies=bans) as index:
+        with pytest.raises(ValueError, match='same exclusion policies'):
+            marker_contributions(app, value, bans, index=index, tag_policies=policies({'core'}))

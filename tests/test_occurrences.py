@@ -1,6 +1,7 @@
 """Occurrence publication, old caches, revocation and exact sampled positions."""
 
 
+from tests.helpers.evidence import empty_policies as empty_tag_policies
 from stash_ai.db.snapshot_migration import complete_policy
 
 
@@ -161,9 +162,9 @@ def test_point_publication_is_idempotent_and_promotes_to_a_range(tmp_path, monke
         put(state, scenes, markers)
         hits, spans = merge.evidence(app, state, '1', policies(), policies())
         resolver = app.services.TagResolver(stash, source=merge_labels.AI)
-        merge_sync.sync_merged(app, stash, resolver, state, stash.find_scene('1'), hits, spans)
+        merge_sync.sync_merged(app, stash, resolver, state, stash.find_scene('1'), hits, spans, tag_policies=empty_tag_policies())
         point = deepcopy(stash.scene['scene_markers'][0]); stash.writes.clear()
-        merge_sync.sync_merged(app, stash, resolver, state, stash.find_scene('1'), hits, spans)
+        merge_sync.sync_merged(app, stash, resolver, state, stash.find_scene('1'), hits, spans, tag_policies=empty_tag_policies())
         assert not stash.writes and len(stash.scene['scene_markers']) == 1
         assert point['seconds'] == 1 and point['end_seconds'] is None
         assert {t['name'] for t in point['tags']} == {merge_labels.AI.owner_tag, OCCURRENCE_TAG, 'm:core:occurance'}
@@ -171,7 +172,7 @@ def test_point_publication_is_idempotent_and_promotes_to_a_range(tmp_path, monke
         scenes, markers = paired_records({'wd': [.95, .95, .95]}, threshold=.35, marker_threshold=.65)
         for kind, value in (('scene', scenes), ('markers', markers)): state.put('1', 'wd', {kind: value['wd']})
         hits, spans = merge.evidence(app, state, '1', policies(), policies())
-        merge_sync.sync_merged(app, stash, resolver, state, stash.find_scene('1'), hits, spans)
+        merge_sync.sync_merged(app, stash, resolver, state, stash.find_scene('1'), hits, spans, tag_policies=empty_tag_policies())
         assert len(stash.scene['scene_markers']) == 1
         marker = stash.scene['scene_markers'][0]
         assert marker['id'] == point['id'] and not marker['title'].endswith('wykrycie')
@@ -186,7 +187,7 @@ def test_manual_location_suppresses_automatic_point_without_modifying_it(tmp_pat
     with merge_store.StateStore(tmp_path/'state', 'fixture') as state:
         put(state, scenes, markers)
         hits, spans = merge.evidence(app, state, '1', policies(), policies())
-        merge_sync.sync_merged(app, stash, app.services.TagResolver(stash, source=merge_labels.AI), state, stash.find_scene('1'), hits, spans)
+        merge_sync.sync_merged(app, stash, app.services.TagResolver(stash, source=merge_labels.AI), state, stash.find_scene('1'), hits, spans, tag_policies=empty_tag_policies())
         assert state.snapshot('1', 'markers')[0]['contributions'] == []
     assert stash.scene['scene_markers'] == [manual]
 
@@ -325,10 +326,10 @@ def test_cleanup_never_restores_a_manually_deleted_point(tmp_path):
         put(state, scenes, markers)
         hits, spans = merge.evidence(app, state, '1', policies(), policies())
         resolver = app.services.TagResolver(stash, source=merge_labels.AI)
-        merge_sync.sync_merged(app, stash, resolver, state, stash.find_scene('1'), hits, spans)
+        merge_sync.sync_merged(app, stash, resolver, state, stash.find_scene('1'), hits, spans, tag_policies=empty_tag_policies())
         stash.scene['scene_markers'] = []
         cores = policies(); cores['wd'] = frozenset({'core'})
         cleaned = cleanup_evidence.cleanup_support(app, state, '1', spans, {'wd'}, cores, policies())
         assert cleaned
-        merge_sync.sync_merged(app, stash, resolver, state, stash.find_scene('1'), hits, cleaned, cleanup=True)
+        merge_sync.sync_merged(app, stash, resolver, state, stash.find_scene('1'), hits, cleaned, cleanup=True, tag_policies=empty_tag_policies())
         assert not stash.scene['scene_markers']

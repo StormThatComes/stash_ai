@@ -1,4 +1,5 @@
 """Marker group lifecycle, native API safety and backfill without inference."""
+from tests.helpers.evidence import empty_policies as empty_tag_policies
 from tests.helpers.evidence import segment
 from copy import deepcopy
 import json
@@ -56,7 +57,7 @@ def test_one_group_per_primary_independent_of_extra_labels_or_time_policy(tmp_pa
     with merge_store.StateStore(tmp_path/'state', 'fixture') as state:
         resolver = app.services.TagResolver(stash, source=merge_labels.AI)
         contributions = [span('wd', 0, 5, 'abc', extras=['def']), span('joytag', 10, 15, 'abc')]
-        merge_sync.sync_merged(app, stash, resolver, state, stash.find_scene('1'), [], contributions)
+        merge_sync.sync_merged(app, stash, resolver, state, stash.find_scene('1'), [], contributions, tag_policies=empty_tag_policies())
         assert len(stash.scene['scene_markers']) == 2
         assert all(group_names(m) == {'m:abc'} for m in stash.scene['scene_markers'])
         assert 'm:def' not in stash.tags and 'm:abc:occurance' not in stash.tags
@@ -67,7 +68,7 @@ def test_one_group_per_primary_independent_of_extra_labels_or_time_policy(tmp_pa
         assert groups.managed_group(group)
         assert 'm:abc' not in json.dumps(state.snapshot('1', 'markers')[0]['contributions'])
         stash.writes.clear()
-        merge_sync.sync_merged(app, stash, resolver, state, stash.find_scene('1'), [], contributions)
+        merge_sync.sync_merged(app, stash, resolver, state, stash.find_scene('1'), [], contributions, tag_policies=empty_tag_policies())
         assert not stash.writes
 
 
@@ -77,7 +78,7 @@ def test_union_and_split_drop_obsolete_managed_groups_but_keep_manual_extras(tmp
         resolver = app.services.TagResolver(stash, source=merge_labels.AI)
         base = [span('wd', 0, 5, 'abc'), span('joytag', 10, 15, 'abc')]
         def sync(contributions):
-            merge_sync.sync_merged(app, stash, resolver, state, stash.find_scene('1'), [], contributions)
+            merge_sync.sync_merged(app, stash, resolver, state, stash.find_scene('1'), [], contributions, tag_policies=empty_tag_policies())
         sync(base)
         stale = groups.for_resolver(app, resolver).resolve('old')
         for marker in stash.scene['scene_markers']:

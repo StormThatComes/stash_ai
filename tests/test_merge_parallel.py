@@ -1,4 +1,6 @@
 """Parallel merged evidence preparation stays read-only and deterministic."""
+from stash_ai.rethreshold.plans import ThresholdRequest
+from stash_ai.rethreshold import scenes as scene_updates
 from tests.helpers.evidence import inference_record
 from tests.helpers.temporal import threshold_policy
 
@@ -8,7 +10,6 @@ from pathlib import Path
 
 import pytest
 
-from stash_ai.rethreshold import markers as marker_updates
 from tests.helpers.runtime import runtime as app
 from stash_ai.evidence import pipeline as merge
 import stash_ai.storage.store as merge_store
@@ -55,7 +56,9 @@ def test_parallel_worker_tolerates_parent_publication_commits(tmp_path, rethresh
         if rethresholded:
             for scene, model in (('1', 'wd'), ('2', 'dtq')):
                 config = ModelSettings(SOURCES[model], Path('.'), scene_threshold=.4, marker_threshold=.95, batch_size=4)
-                assert marker_updates.apply(app, store, scene, config)
+                prepared = scene_updates.plan(app, store, scene, config, request=ThresholdRequest(kinds=('markers',)))
+                assert prepared
+                scene_updates.apply(store, scene, config.source.key, prepared)
 
     merge_parallel._init_worker(
         str(path),

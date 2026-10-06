@@ -3,7 +3,7 @@ from collections import Counter
 
 from tqdm import tqdm
 
-from . import markers as marker_updates, scenes as scene_updates
+from . import scenes as scene_updates
 from .targets import threshold_failure_reason, threshold_targets
 from .plans import RecordAccess, PendingPolicy, ThresholdRequest, apply_plan
 
@@ -19,9 +19,10 @@ def _plan_target(app, store, scene, config, available, pending_scenes, *, scenes
                 marker_check_scene=False if markers else None))
         blocked = bool(prepared)
     else:
-        prepared = marker_updates.plan(
-            app, store, scene, config, access=RecordAccess.METADATA,
-            pending=PendingPolicy.CHECKED_BY_EXECUTOR)
+        prepared = scene_updates.plan(
+            app, store, scene, config, request=ThresholdRequest(
+                kinds=('markers',), access=RecordAccess.METADATA,
+                pending=PendingPolicy.CHECKED_BY_EXECUTOR))
         # Marker-only preflight rejects pending publications even for no-ops.
         blocked = True
     if blocked and str(scene) in pending_scenes:

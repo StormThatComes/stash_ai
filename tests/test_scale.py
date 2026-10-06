@@ -1,4 +1,5 @@
 """Shared scene proof, short extras, bounded RAM/prefetch, and 9000-scene output."""
+from tests.helpers.evidence import empty_policies as empty_tag_policies
 from tests.helpers.evidence import inference_record
 from stash_ai.db.snapshot_migration import complete_policy
 
@@ -158,19 +159,19 @@ def test_shared_scene_cleanup_uses_only_frozen_published_inputs(tmp_path, change
 def test_short_extra_survives_a_long_marker_with_three_consecutive_high_samples(monkeypatch):
     rows = [[('core', .9)] + ([('detail', .9)] if 5 <= i < 8 else []) for i in range(100)]
     records = {'wd': segment('wd', rows)}
-    markers = merge_intervals.union_intervals(merge_source_markers.marker_contributions(app, records, policies({'detail'})))
+    markers = merge_intervals.union_intervals(merge_source_markers.marker_contributions(app, records, policies({'detail'}), tag_policies=empty_tag_policies()))
     assert markers[0]['extra_tags'] == ['detail']
     proof = markers[0]['extra_evidence']['detail']
     assert proof['qualification'] == 'short_episode' and proof['longest_run_hits'] == 3
     assert proof['coverage_fraction'] == .03
     monkeypatch.setattr(app, 'TEMPORAL_POLICY', replace(app.TEMPORAL_POLICY, short_marker_extras=False))
-    assert merge_intervals.union_intervals(merge_source_markers.marker_contributions(app, records, policies({'detail'})))[0]['extra_tags'] == []
+    assert merge_intervals.union_intervals(merge_source_markers.marker_contributions(app, records, policies({'detail'}), tag_policies=empty_tag_policies()))[0]['extra_tags'] == []
 
 
 @pytest.mark.parametrize('times', [[5], [5, 6], [5, 7, 9]])
 def test_short_extra_does_not_accept_spikes_or_disconnected_hits(times):
     rows = [[('core', .9)] + ([('detail', .9)] if i in times else []) for i in range(100)]
-    result = merge_intervals.union_intervals(merge_source_markers.marker_contributions(app, {'wd': segment('wd', rows)}, policies({'detail'})))
+    result = merge_intervals.union_intervals(merge_source_markers.marker_contributions(app, {'wd': segment('wd', rows)}, policies({'detail'}), tag_policies=empty_tag_policies()))
     assert result[0]['extra_tags'] == []
 
 
@@ -180,7 +181,7 @@ def test_short_extra_runs_join_across_union_and_sources_without_double_counting(
         'dtq': segment('dtq', [[('core', .9)] if i >= 50 else [] for i in range(100)]),
         'oppai': segment('oppai', [[('detail', .9)] if 49 <= i <= 51 else [] for i in range(100)]),
     }
-    marker = merge_intervals.union_intervals(merge_source_markers.marker_contributions(app, records, policies({'detail'})))[0]
+    marker = merge_intervals.union_intervals(merge_source_markers.marker_contributions(app, records, policies({'detail'}), tag_policies=empty_tag_policies()))[0]
     assert marker['end'] == 100 and marker['extra_evidence']['detail']['longest_run_hits'] == 3
     assert marker['extra_tags'] == ['detail'] and marker['sources'] == ['wd', 'dtq']
     assert set(marker['extra_evidence']['detail']['source_evidence']) == {'oppai'}
@@ -192,11 +193,11 @@ def test_short_extra_respects_min_hits_and_vtt_time_gaps(monkeypatch):
     for row in records['wd']['items'][1:]:
         row['start'] += 10; row['end'] += 10
     monkeypatch.setattr(app, 'MARKER_MERGE_GAP_SECONDS', 20)
-    marker = merge_intervals.union_intervals(merge_source_markers.marker_contributions(app, records, policies({'detail'})))[0]
+    marker = merge_intervals.union_intervals(merge_source_markers.marker_contributions(app, records, policies({'detail'}), tag_policies=empty_tag_policies()))[0]
     assert marker['extra_tags'] == []
     monkeypatch.setattr(app, 'TEMPORAL_POLICY', replace(app.TEMPORAL_POLICY, extra_min_hits=4))
     records = {'wd': segment('wd', rows)}
-    assert merge_intervals.union_intervals(merge_source_markers.marker_contributions(app, records, policies({'detail'})))[0]['extra_tags'] == []
+    assert merge_intervals.union_intervals(merge_source_markers.marker_contributions(app, records, policies({'detail'}), tag_policies=empty_tag_policies()))[0]['extra_tags'] == []
 
 
 def test_extra_queries_are_reused_for_all_primary_tags_without_changing_outputs(monkeypatch):
@@ -204,10 +205,10 @@ def test_extra_queries_are_reused_for_all_primary_tags_without_changing_outputs(
     rows = [[(f'tag{i}', .9) for i in range(30)]] * 20
     records = {source: segment(source, rows) for source in ('wd', 'dtq')}
     cache = RamCache(8 * 2**20)
-    index = fusion.FrameIndex(app, records, policies(), cache=cache)
-    spans = merge_source_markers.marker_contributions(app, records, policies(), index=index)
+    index = fusion.FrameIndex(app, records, policies(), cache=cache, tag_policies=empty_tag_policies())
+    spans = merge_source_markers.marker_contributions(app, records, policies(), index=index, tag_policies=empty_tag_policies())
     assert len(index.indexes) == 1 and next(iter(index.indexes.values())).scans == 1
-    uncached = merge_source_markers.marker_contributions(app, records, policies(), cache=RamCache(0))
+    uncached = merge_source_markers.marker_contributions(app, records, policies(), cache=RamCache(0), tag_policies=empty_tag_policies())
     assert json.dumps(spans, sort_keys=True) == json.dumps(uncached, sort_keys=True)
     assert len(merge_intervals.union_intervals(spans)) == 30
 

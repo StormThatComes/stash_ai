@@ -6,21 +6,23 @@ from .labels import raw_label
 
 
 def marker_contributions(app, records: RecordsBySource, core_policies, *, index=None, metrics=None, cache=None,
-                         tag_policies=None) -> list[MarkerContribution]:
+                         tag_policies) -> list[MarkerContribution]:
     from stash_ai.evidence.frames import FrameIndex
     if index is not None:
-        return _marker_contributions(app, records, core_policies, index, metrics, tag_policies)
+        if index.tag_policies != tag_policies or index.policies != core_policies:
+            raise ValueError("Marker evidence and frame index require the same exclusion policies.")
+        return _marker_contributions(app, records, core_policies, index, metrics)
     with FrameIndex(app, records, core_policies, cache=cache, tag_policies=tag_policies) as index:
-        return _marker_contributions(app, records, core_policies, index, metrics, tag_policies)
+        return _marker_contributions(app, records, core_policies, index, metrics)
 
 
-def _marker_contributions(app, records, core_policies, index, metrics, tag_policies):
+def _marker_contributions(app, records, core_policies, index, metrics):
     from stash_ai.evidence.temporal.markers import consensus_seeds, build_markers as temporal_markers
     from stash_ai.evidence.temporal.policy import build_options
-    from stash_ai.exclusions import policies_or_empty, core_policies_with_global
+    from stash_ai.exclusions import core_policies_with_global
     from stash_ai.evidence.thresholds import validate_marker_cache
     validate_marker_cache(app, records)
-    tag_policies = policies_or_empty(tag_policies if tag_policies is not None else index.tag_policies)
+    tag_policies = index.tag_policies
     effective_cores = core_policies_with_global(core_policies, tag_policies)
     report = index.report
     with stage(report, 'marker_seeds'):
@@ -37,10 +39,10 @@ def _marker_contributions(app, records, core_policies, index, metrics, tag_polic
                 from stash_ai.evidence.thresholds import marker_threshold
                 kwargs = dict(threshold=marker_threshold(segment), seeds=seeds,
                               identity=segment["meta"]["frame_input_signature"])
-                defer_extras = app.TEMPORAL_POLICY.shared_marker_extras and signatures[id(segment)] in index.by_signature
+                defer_extras = app.TEMPORAL_POLICY.shared_marker_extras
                 markers, _ = temporal_markers(app, frames, effective_cores[model], **kwargs,
                               collect_extras=not defer_extras,
-                              extra_group=index.by_signature.get(signatures[id(segment)], signatures[id(segment)]),
+                              extra_group=index.by_signature[signatures[id(segment)]],
                               extra_cache=index.cache)
                 options = {**build_options(app, records), "core_exclusions": {k: sorted(v) for k, v in core_policies.items()},
                            "tag_exclusions": {k: sorted(v) for k, v in tag_policies.items()}}
