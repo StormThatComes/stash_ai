@@ -567,18 +567,27 @@ Aktualne domyślne limity procesu:
 uruchamiania `pip`. Wymaga tokena GitHub z dostępem `Contents: read` do
 prywatnego repozytorium.
 
-Przy pierwszym przejściu ze starego układu (moduły `stash_*.py` obok launchera)
-uruchom starą wersję updatera raz, a potem nową wersję z jawną migracją:
+Bieżący updater obsługuje układ pakietowy (`stash_ai/`). Stare instalacje z
+modułami `stash_*.py` wymagają jednorazowego przejścia przez updater z commita
+[`9fcaa52502cd487455457547860b5db7d8710ad8`](https://github.com/StormThatComes/stash_ai/commit/9fcaa52502cd487455457547860b5db7d8710ad8).
+Zatrzymaj aplikację i pobierz tę wersję jako osobny plik w katalogu instalacji:
 
 ```powershell
-python .\update_stash_ai.py --migrate-flat-layout --dry-run
-python .\update_stash_ai.py --migrate-flat-layout
+$env:GH_TOKEN = "<fine-grained PAT>"
+$bridge = "9fcaa52502cd487455457547860b5db7d8710ad8"
+$headers = @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = "application/vnd.github.raw+json" }
+Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/StormThatComes/stash_ai/contents/update_stash_ai.py?ref=$bridge" -OutFile .\update_stash_ai_bridge.py
+python .\update_stash_ai_bridge.py --install-dir . --migrate-flat-layout --dry-run
+python .\update_stash_ai_bridge.py --install-dir . --migrate-flat-layout
 ```
 
-Migrator usuwa wyłącznie znane dawne moduły i wycofane ścieżki, zachowując backupy.
-Zmodyfikowany kod nadal wymaga `--force-code`. Kolejne zwykłe aktualizacje sprawdzają
-kod zarządzany w zapisanej historii; nie skanują już nieśledzonych plików starego układu.
-Przy `git pull` lub użyciu najnowszego updatera od początku nie ma etapu starego updatera.
+Jeśli dawna aktualizacja została przerwana, najpierw uruchom
+`python .\update_stash_ai_bridge.py --install-dir . --recover`.
+Updater pomostowy instaluje bieżący pakiet, zachowuje backupy, lokalne YAML,
+bazę i modele; zmodyfikowany kod wymaga `--force-code`. Następnie używaj
+zwykłego `update_stash_ai.py`. Bieżący updater nie skanuje ani nie usuwa
+nieśledzonych dawnych modułów. Przy `git pull` do układu pakietowego nie ma
+etapu pomostowego updatera.
 
 ```powershell
 $env:GH_TOKEN = "<fine-grained PAT>"
