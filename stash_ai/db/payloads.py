@@ -28,7 +28,7 @@ def _label(value):
 
 def _detections(values):
     return isinstance(values, list) and all(
-        isinstance(pair, list) and len(pair) == 2
+        isinstance(pair, (list, tuple)) and len(pair) == 2
         and _label(pair[0]) and _score(pair[1])
         for pair in values
     )

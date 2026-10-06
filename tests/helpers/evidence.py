@@ -125,5 +125,12 @@ def inject_records(store, scene, model, outputs):
                 store.connection.execute('PRAGMA ignore_check_constraints=OFF')
             store.connection.execute('INSERT OR REPLACE INTO result_metadata VALUES (?,?,?,?,?,?)',
                                      (*params, version, encode(metadata)))
-            (result_history.index_result if old else index_result)(store, scene, model, kind, value)
+            if old:
+                result_history.index_result(store, scene, model, kind, value)
+            elif 'inference_signature' in value['meta']:
+                index_result(store, scene, model, kind, value)
+            else:
+                # Deliberately incomplete provenance outside the current writer.
+                store.connection.execute('INSERT OR REPLACE INTO result_index VALUES (?,?,?,?,?,?)',
+                                         (*params, int(bool(value['items'])), None))
     store.cache.clear()

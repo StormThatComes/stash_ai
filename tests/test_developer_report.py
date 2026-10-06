@@ -37,7 +37,7 @@ def segment(tag="private_tag_name"):
             "frame_input_signature": "also-secret",
             "captured_at": "2026-01-02T03:04:05Z",
         },
-        "items": [{"tag": tag, "score": .91}],
+        "items": [{"tag": tag, "score": .91}, {"tag": "different_private_tag", "score": .72}],
         "frames": [
             {"start": 12.5, "end": 13.5, "tags": [[tag, .91], ["different_private_tag", .72]]},
             {"start": 13.5, "end": 14.5, "tags": [[tag, .83]]},

@@ -257,6 +257,8 @@ def test_finish_rolls_back_results_checkpoint_and_refresh_together(tmp_path, mon
     for segment in fresh.values():
         segment['meta']['inference_signature'] = 'new'
         segment['items'] = []
+        if 'frames' in segment:
+            segment['frames'] = []
     with merge_store.StateStore(path, 'fixture') as state:
         state.put('1', 'wd', original)
         checkpoint = checkpoints.Checkpoint(state, '1', 'wd', 'new', 2, 1, every=1)

@@ -225,7 +225,7 @@ def test_ram_cache_accounts_decoded_values_and_evicts_least_recent():
 
 def test_store_cache_is_detached_invalidated_and_rollback_safe(tmp_path):
     first = inference_record(**dict(mode='scene', meta={'origin': 'inference', 'inference_signature': 'a'}, items=[{'tag': 'core', 'score': .8}]))
-    second = {**first, 'meta': {**first['meta'], 'inference_signature': 'b'}, 'items': []}
+    second = {**first, 'meta': {**first['meta'], 'inference_signature': 'b'}, 'items': [], 'frames': []}
     with merge_store.StateStore(tmp_path/'state.sqlite3', 'fixture', cache_bytes=2**20) as state:
         state.put('1', 'wd', {'scene': first})
         statements = []; state.connection.set_trace_callback(statements.append)

@@ -126,7 +126,7 @@ obsługiwane schematy przechowują już pojedynczy rekord i liczbowy próg.
 
 Snapshoty merge zapisują współdzielone dowody `extra_support` raz, a contributions
 odwołują się do nich przez referencje. Zmniejsza to koszt serializacji i kompresji.
-Aktualny schemat to v22, z obsługą aktualizacji od v18. Każdy nowy snapshot ma
+Aktualny schemat to v23, z obsługą aktualizacji od v18. Każdy nowy snapshot ma
 otoczkę formatu v6. `--db-update` konwertuje snapshoty v4/v5/v6, także pending i recovery,
 w jednym przebiegu. Zachowuje geometrię i własność publikacji, normalizuje zamrożone opcje
 odtwarzania oraz usuwa `extra_ids` i zbędne `algorithm: temporal`. Pełne payloady
@@ -238,15 +238,20 @@ Globalne definicje starych tagów pozostają dostępne dla ręcznych powiązań.
 ### Zdrowie, aktualizacja i kompaktowanie bazy stanu
 
 `--db-update` aktualizuje bazę wskazaną przez `--state-db` ze schematu **v18 lub nowszego**
-do aktualnego **v22**, we wszystkich scope'ach. Zwykłe uruchomienie oraz `--dry-run`
-wymagają aktualnego schematu; nowa baza od razu otrzymuje v22.
+do aktualnego **v23**, we wszystkich scope'ach. Zwykłe uruchomienie oraz `--dry-run`
+wymagają aktualnego schematu; nowa baza od razu otrzymuje v23.
 Updater korzysta z tego samego locka writera. Pracuje offline, bez Stash i konfiguracji modeli.
 Zachowuje liczbowe progi bieżących wyników, własność publikacji, pending publication/cleanup
 i recovery. Starsze wyniki są kierowane do ponownej inferencji, a ich checkpointy usuwane.
 Snapshoty v4/v5/v6 są konwertowane w jednym przebiegu, z zachowaniem współdzielonych dowodów.
 Wycofane konfiguracje algorytmów są usuwane; geometria i referencje do dowodów pozostają.
 Aktualizacja nie odtwarza utraconych detekcji. Wyniki inferencji sprzed formatu 5 wymagają ponownej inferencji.
-Metadane wyników są uzupełniane dopiero po zakończeniu konwersji.
+Metadane wyników są uzupełniane dopiero po zakończeniu konwersji. Klatki bieżących wyników
+muszą być zapisane chronologicznie. Aktualizacja do v23 kieruje nieuporządkowane
+rekordy do ponownej inferencji i oznacza zależne publikacje `requires_rebase`.
+Nie sortuje zapisanych payloadów ani nie zmienia ich sygnatur. Uporządkowane
+wyniki formatu 5 pozostają ważne. Odczyt i zapis odrzucają brakujące metadane
+pochodzenia, progów oraz retention floors, zamiast pomijać głosy modelu.
 
 Zwykły cleanup przyjmuje tylko aktualny fingerprint. Przerwany cleanup ze starym
 fingerprintem wymaga jawnej konwersji offline, z **tymi samymi** plikami YAML

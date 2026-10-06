@@ -393,7 +393,7 @@ def test_scene_rethreshold_never_decodes_publication_snapshots(tmp_path, monkeyp
             'scene_frames_format': 1,
             'scene_score_floor': .3,
         },
-        'items': [],
+        'items': [dict(tag='core', score=.55)],
         'frames': [
             {'start': 0, 'end': 1, 'tags': [('core', .5)]},
             {'start': 1, 'end': 2, 'tags': [('core', .6)]},

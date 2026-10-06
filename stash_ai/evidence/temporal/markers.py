@@ -9,12 +9,12 @@ def consensus_seeds(records, policies, policy, ):
     """Only identical sampled inputs/times can vote, at most once per model."""
     votes = defaultdict(set)
     for model, segment in records.items():
+        if segment["mode"] != "frames":
+            continue
         meta = segment["meta"]
-        identity = meta.get("frame_input_signature")
+        identity = meta["frame_input_signature"]
         from stash_ai.evidence.thresholds import marker_threshold
         high = marker_threshold(segment)
-        if segment["mode"] != "frames" or not identity or high is None:
-            continue
         floor = marker_floor(policy, high)
         for frame in segment["items"]:
             for tag, score in frame["tags"]:
