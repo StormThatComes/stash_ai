@@ -82,7 +82,9 @@ class InitializationStore:
                     or (self.run.selection is not None and scene not in self.run.selection)):
                 raise ValueError('Invalid DB initialization scene.')
             self.scenes[scene] = bool(completed)
-            self.owned[scene] = set(string_list(owned))
+            identifiers = string_list(owned)
+            if not completed:
+                self.owned[scene] = set(identifiers)
 
     @property
     def active(self):
@@ -189,6 +191,7 @@ class InitializationStore:
     def published(self, scene):
         if self.pending(scene):
             self.scenes[str(scene)] = True
+            self.owned.pop(str(scene), None)
 
     def report(self, report, stats):
         if self.run is None:
