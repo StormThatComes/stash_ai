@@ -36,6 +36,8 @@ CHECK_MESSAGES = {
     "result_metadata_orphan": "Derived result validation metadata has no matching saved result.",
     "result_payload_invalid": "Saved result payloads cannot be decoded or contain an invalid inference record, evidence rows, or values.",
     "state_payload_invalid": "Non-result application state contains an unreadable or structurally invalid compressed payload.",
+    "snapshot_proof_missing": "Publication references an inference proof missing from active results and the archive.",
+    "checkpoint_analysis_progress": "Checkpoint analysis disagrees with processed frames or label dimensions.",
     "checkpoint_orphan_frames": "Checkpoint frame chunks have no parent checkpoint.",
     "checkpoint_orphan_analysis": "Checkpoint analysis rows have no parent checkpoint.",
     "checkpoint_dimensions": "Checkpoint progress/top-row dimensions are impossible.",

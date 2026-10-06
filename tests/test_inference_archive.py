@@ -16,10 +16,10 @@ from tests.test_result_thresholds import outputs
 
 def proof(segment, *, nested=False):
     signature = marker_segment_signature(segment)
-    item = {'source': 'wd', 'evidence_signature': signature}
+    item = dict(source='wd', tag='core', score=.9, start=0., end=1.,
+                extra_tags=[], meta={'origin': 'test'}, evidence_signature=signature)
     if nested:
-        item = {'scene_evidence': [{'frame_context': {'wd': signature},
-                                    'scene_context': {'wd': signature}}]}
+        item['extra_support'] = {'core': {'frame_context': {'wd': signature}}}
     return {'contributions': [item]}
 
 
@@ -130,7 +130,7 @@ def test_deep_check_rejects_archived_proof_signature_corruption(tmp_path):
     with sqlite3.connect(path) as connection:
         connection.execute("UPDATE inference_archive SET signature='tampered'")
     report = check_database(path, 'scope')
-    assert [issue['code'] for issue in report['errors']] == ['state_payload_invalid']
+    assert {issue['code'] for issue in report['errors']} == {'state_payload_invalid', 'snapshot_proof_missing'}
 
 
 @pytest.mark.parametrize('version', [18, 19, 20, 21])

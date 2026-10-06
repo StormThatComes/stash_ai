@@ -90,7 +90,8 @@ class MergedModelRun:
             if not self._load_tagger():
                 return False
             # Auto-download may just have supplied missing weight files.
-            self.identity = model_identity(app, self.config, self.vocabulary)
+            self.identity = model_identity(app, self.config, self.vocabulary,
+                                           known_files=self.identity['files'])
             signature = inference_signature(self.identity, cue_manifest(cues), media.hashes)
         self._predict_scene(scene_id, paths, cues, media, signature, kinds)
         return True

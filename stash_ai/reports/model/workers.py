@@ -11,11 +11,12 @@ from stash_ai.reports.model import report as model
 from .analysis import scene_report, merge_scene_report
 from stash_ai.storage.store import StateStore
 from stash_ai.runtime.workers import open_read_worker
+from stash_ai.runtime.settings import evidence_settings
 
 _WORKER_CONTEXT = None
 
 
-def _init_report_worker(state_db, scope, temporal_policy, core_policies,
+def _init_report_worker(state_db, scope, settings, core_policies,
                         scene_policies, cache_bytes, memory_budget_bytes,
                         preload_sources):
     """Initialize one isolated read-only worker and keep its DB/cache hot."""
@@ -24,7 +25,7 @@ def _init_report_worker(state_db, scope, temporal_policy, core_policies,
         _WORKER_CONTEXT.close()
     _WORKER_CONTEXT = open_read_worker(
         state_db, scope,
-        dict(APPLY_SCENE_TAGS=True, CREATE_MARKERS=True, TEMPORAL_POLICY=temporal_policy),
+        settings,
         core_policies, scene_policies, cache_bytes, memory_budget_bytes,
         preload_sources=preload_sources,
     )
@@ -79,7 +80,7 @@ def build_report_parallel(app, state_db, scope, scene_ids, core_policies,
         initargs=(
             str(Path(state_db).expanduser().resolve()),
             scope,
-            app.TEMPORAL_POLICY,
+            evidence_settings(app),
             core_policies,
             scene_policies,
             worker_cache,
