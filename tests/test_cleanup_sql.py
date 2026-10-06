@@ -34,7 +34,7 @@ pytestmark = pytest.mark.usefixtures("reset_progress")
 
 @pytest.mark.parametrize('strategy', ['sql', 'scenes'])
 def test_cleanup_and_exclusion_pruning_preserve_retired_namespaces(tmp_path, monkeypatch, strategy):
-    from stash_ai.tools.legacy_namespaces import NAMESPACES
+    from tests.helpers.legacy_namespaces import NAMESPACES
     stash = SQLStash()
     for namespace in NAMESPACES.values():
         tag = stash.tag(namespace.prefix + 'blocked')

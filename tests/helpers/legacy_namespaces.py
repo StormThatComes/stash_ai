@@ -1,4 +1,4 @@
-"""Retired per-model publishing metadata used only by explicit migrations."""
+"""Foreign historical outputs used to verify current ownership boundaries."""
 from stash_ai.publication.namespace import OutputNamespace
 
 

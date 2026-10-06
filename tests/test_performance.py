@@ -61,7 +61,7 @@ def test_publication_code_tracks_extracted_modules(monkeypatch, filename):
 
 
 @pytest.mark.parametrize('filename', [
-    'tools/namespace_migration.py', 'tools/point_migration.py', 'tools/_entrypoint.py', 'tools/legacy_namespaces.py', 'db/cleanup_fingerprint.py', 'runtime/cache.py', 'runtime/memory.py', 'runtime/timing.py', 'runtime/report.py', 'runtime/summary.py', 'runtime/diagnostics.py',
+    'tools/cleanup_pending_migration.py', 'tools/_entrypoint.py', 'runtime/cache.py', 'runtime/memory.py', 'runtime/timing.py', 'runtime/report.py', 'runtime/summary.py', 'runtime/diagnostics.py',
     'stash_api/client.py', 'stash_api/transport.py', 'vtt.py', 'commands/arguments.py', 'commands/validation.py', 'commands/dispatch.py', 'commands/explain.py',
     'commands/marker_groups.py', 'cleanup/groups.py', 'cleanup/run.py', 'storage/recovery.py', 'publication/recovery.py', 'commands/recovery.py', 'cleanup/sql.py', 'cleanup/sql_session.py',
     'rethreshold/execution.py', 'rethreshold/targets.py', 'db/checks.py',
