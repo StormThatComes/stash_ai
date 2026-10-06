@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from itertools import batched
 
 from tqdm import tqdm
 
@@ -38,7 +39,41 @@ class MergePublisher:
             return self._serial(scenes)
         return self._parallel(scenes, workers)
 
-    def _reason(self, scene_id, current):
+    def _observed_scenes(self, scenes):
+        """Refresh reuse candidates in bounded batches immediately before checks."""
+        from stash_ai.publication.fingerprints import scene_fingerprint
+        size = min(self.app.SCENE_PAGE_SIZE, 1000)
+        for group in batched(scenes.items(), size):
+            candidates = [scene_id for scene_id, current in group
+                          if not self.args.force_merge and not self.pending_refreshes.get(str(scene_id))
+                          and merge_checks.check_reason(self.store, scene_id, self.publication_key,
+                                                        current['fingerprint']) == 'reused']
+            refreshed, errors = {}, {}
+            if candidates:
+                with stage(self.report, 'reuse_refresh'):
+                    try:
+                        bulk = getattr(self.stash, 'merge_snapshots', None)
+                        snapshots = bulk(candidates) if bulk is not None else None
+                    except Exception as exc:
+                        errors.update((scene_id, exc) for scene_id in candidates)
+                    else:
+                        for scene_id in candidates:
+                            try:
+                                if snapshots is None:
+                                    find = getattr(self.stash, 'find_scene_for_merge', None) or self.stash.find_scene
+                                    observed = find(scene_id)
+                                else:
+                                    observed = snapshots.get(str(scene_id))
+                                if observed is None or str(observed['id']) != str(scene_id):
+                                    raise RuntimeError(f'Scene {scene_id} no longer exists or returned an inconsistent ID.')
+                                refreshed[scene_id] = scene_fingerprint(observed)
+                            except Exception as exc:
+                                errors[scene_id] = exc
+            for scene_id, current in group:
+                yield scene_id, ({**current, 'fingerprint': refreshed[scene_id]}
+                                 if scene_id in refreshed else current), errors.get(scene_id)
+
+    def _reason(self, scene_id, current, refresh_error=None):
         pending = self.pending_refreshes.get(str(scene_id), ())
         if pending:
             self.stats["merge_refresh_blocked"] += 1
@@ -47,6 +82,8 @@ class MergePublisher:
                 "Fresh inference is still pending for " + details +
                 "; merge skipped to avoid reusing stale evidence. "
                 "Rerun without --merge-only to resume inference.")
+        if refresh_error is not None:
+            raise refresh_error
         with stage(self.report, 'publication_check'):
             reason = (
                 'forced' if self.args.force_merge
@@ -101,11 +138,11 @@ class MergePublisher:
             publication_key=self.publication_key)
 
     def _serial(self, scenes):
-        bar = tqdm(scenes.items(), desc="Merge to ai:", unit="scene")
-        for scene_id, current in bar:
+        bar = tqdm(self._observed_scenes(scenes), total=len(scenes), desc="Merge to ai:", unit="scene")
+        for scene_id, current, refresh_error in bar:
             with self.report.diagnostics.scene(scene_id) as sample:
                 try:
-                    reason = self._reason(scene_id, current)
+                    reason = self._reason(scene_id, current, refresh_error)
                     sample['reason'] = reason
                     if reason == 'reused':
                         sample['status'] = 'reused'
@@ -128,9 +165,9 @@ class MergePublisher:
         bar = tqdm(total=len(scenes), desc="Merge to ai:", unit="scene")
         try:
             # Check in the writer process before scheduling expensive replay.
-            for scene_id, current in scenes.items():
+            for scene_id, current, refresh_error in self._observed_scenes(scenes):
                 try:
-                    if self._reason(scene_id, current) != 'reused':
+                    if self._reason(scene_id, current, refresh_error) != 'reused':
                         pending.append((scene_id, current))
                         continue
                 except Exception as exc:
