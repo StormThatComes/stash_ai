@@ -91,7 +91,8 @@ def test_repeated_merge_avoids_decoding_evidence_and_publication(pipeline, monke
     monkeypatch.setattr(merge_store.StateStore, 'unpack', fail)
     p.stash.writes.clear()
     assert app.main(p.args) == 0
-    assert reads == ['1'] and p.stash.writes == []
+    # Initial scan plus a fresh observation before accepting publication reuse.
+    assert reads == ['1', '1'] and p.stash.writes == []
     assert 'merge_reused=1' in capsys.readouterr().out
 
 

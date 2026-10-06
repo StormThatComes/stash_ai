@@ -1,5 +1,6 @@
 """Thread-safe LRU bounded by retained bytes and measured RSS headroom."""
 from collections import Counter, OrderedDict
+from contextlib import contextmanager
 import time
 import threading
 from . import memory
@@ -84,3 +85,23 @@ class RamCache:
         with self._lock:
             self.entries.clear()
             self.size = 0
+
+
+    @contextmanager
+    def temporary_budget(self, *, limit, rss_budget):
+        """Reserve this process's share while parallel readers own other shares."""
+        with self._lock:
+            previous = self.limit, self.rss_budget, self._effective_limit
+            self.limit = max(0, int(limit))
+            self.rss_budget = max(0, int(rss_budget))
+            self._effective_limit = self.limit
+            self.trim(self.limit)
+            self.pressure(force=True)
+        try:
+            yield
+        finally:
+            with self._lock:
+                self.limit, self.rss_budget, self._effective_limit = previous
+                self._next_pressure_check = 0.0
+                self.trim(self._effective_limit)
+                self.pressure(force=True)

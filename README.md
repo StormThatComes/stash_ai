@@ -145,6 +145,10 @@ python .\stash_ai.py --help
 
 ## Jak działa stan i cache
 
+Przed pominięciem merge na podstawie cache aplikacja odświeża stan sceny
+w Stash. Odczyty SQL są grupowane w paczki; zmiana markera przez inną
+automatyzację po początkowym skanie uruchamia ponowne scalenie.
+
 Tożsamość inferencji obejmuje SHA-256 zawartości plików modelu oraz normalizację
 JoyTag (`JOYTAG_CLIP_MEAN` i `JOYTAG_CLIP_STD`). Zmiana wag jest wykrywana także
 przy zachowanym rozmiarze i czasie modyfikacji pliku. Pliki są hashowane raz na
@@ -569,13 +573,22 @@ Zakresy mają pierwszeństwo przed dodatkowymi punktami Occurrence. Punkt
 wspierany przez kilka modeli zajmuje slot jednego modelu, który ma jeszcze
 wolne miejsce; marker WD nie wyczerpuje limitu DTQ.
 
-Aktualne domyślne limity procesu:
+Aktualne domyślne ustawienia pamięci i równoległości:
 - `--ram-budget-gb 32`;
 - `--ram-cache-gb 24` — cache jest przydzielany na żądanie i ograniczony do
   maksymalnie 75% budżetu;
 - `--prepare-workers 4`;
 - `--merge-workers 4` — równoległy CPU replay evidence; zapisy Stash/SQLite pozostają sekwencyjne;
 - `--prefetch-batches 4`.
+
+`--db-compact` utrzymuje blokadę zapisu aż do końcowej kontroli bazy i
+porównania liczników po VACUUM.
+
+Równoległy merge dzieli budżet RAM i cache pomiędzy procesy pomocnicze oraz
+proces nadrzędny zapisujący publikacje. Przy czterech procesach pomocniczych
+każdy proces dostaje jedną piątą budżetu; po ich zamknięciu proces nadrzędny
+odzyskuje pełny budżet. Procesy raportu modeli używają tych samych ustawień
+kwalifikacji i limitów co raport sekwencyjny.
 
 ## Aktualizacje
 
