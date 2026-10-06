@@ -37,7 +37,7 @@ Przechowuje m.in.:
 Baza nie zawiera obrazów ani klucza API. Powinna być backupowana razem z
 konfiguracją.
 
-Aplikacja obsługuje migrację starszych wspieranych formatów bazy automatycznie.
+Starszą wspieraną bazę aktualizuje jawne `--db-update`; bieżący schemat to v24.
 Po użyciu nowszej funkcji recovery/cleanup nie uruchamiaj starszej kopii programu
 na tej samej bazie.
 
@@ -69,6 +69,26 @@ Do tych zadań istnieją tryby bez inferencji.
 
 Checkpointy są zapisywane domyślnie co 8 batchy oraz przy kontrolowanym
 przerwaniu/błędzie. `--checkpoint-batches` zmienia częstotliwość.
+
+### Odbudowa nowej bazy: `--db-init`
+
+Po utracie bazy, gdy w Stash pozostały już wspólne wyniki AI, użyj:
+
+```powershell
+python .\stash_ai.py --db-init --models all --state-db .\tagger_sources_fresh.sqlite3
+```
+
+Opcja przyjmuje wyłącznie nową/pustą bazę i pełną inferencję obu wyjść.
+Każda scena zachowuje stare wyniki do ukończenia wszystkich wybranych modeli.
+Przejmowane są przypisania tagów `ai:<label>` oraz markery z tytułem `[AI] `
+i tagiem właściciela; kategorie, zarezerwowane tagi i obce markery zachowują
+zwykłe reguły publikacji. Wybranie tylko części modeli odbudowuje wynik z tej
+części, dlatego zalecane jest `--models all`.
+
+Wznowienie wymaga tej samej ścieżki bazy, zestawu modeli i zakresu `--scene-id`.
+Flaga może zostać pominięta; jej powtórzenie nie kasuje postępu.
+`--dry-run` symuluje odbudowę w nakładce. Szczegóły i ograniczenia:
+[Odbudowa nowej bazy](UPGRADE_db_init.md).
 
 ## 4. Merge i cache publikacji
 
@@ -490,6 +510,7 @@ Token GitHub updatera powinien mieć wyłącznie dostęp do tego repozytorium i
 - [Occurrence](UPGRADE_occurrences.md)
 - [Grupy markerów](UPGRADE_marker_groups.md)
 - [Porzucanie pending](UPGRADE_abandon_pending.md)
+- [Odbudowa nowej bazy](UPGRADE_db_init.md)
 - [Profilowanie merge](UPGRADE_diagnostics.md)
 
 Nazwy `UPGRADE_*.md` są zachowane dla stabilności linków. Dokumenty opisują

@@ -20,6 +20,7 @@ PUBLICATION_CODE_FILES = (
     'evidence/timeline.py', 'stash_api/sql.py', 'publication/groups.py',
     'evidence/thresholds.py', 'inference/reuse.py', 'evidence/retention.py', 'evidence/cache_views.py', 'rethreshold/markers.py', 'rethreshold/scenes.py', 'storage/progress.py', 'inference/inputs.py', 'inference/identity.py', 'inference/checkpoints.py', 'signatures.py', 'storage/store.py', 'storage/database.py',
     'storage/archive.py', 'storage/snapshots.py', 'storage/results.py', 'storage/thresholds.py', 'storage/metadata.py', 'storage/publications.py', 'config.py',
+    'storage/initialization.py',
 )
 
 

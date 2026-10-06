@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 APPLICATION_ID = 0x53544D47
 MIN_SUPPORTED_SCHEMA_VERSION = 18
-LATEST_SCHEMA_VERSION = 23
+LATEST_SCHEMA_VERSION = 24
 UPGRADE_BRIDGE_COMMIT = 'c5bcd887bafe76b7ee2a9de944666799c9a0fc30'
 KNOWN_KINDS = frozenset(('scene', 'markers'))
 KNOWN_MODELS = frozenset(('joytag', 'wd', 'dtq', 'oppai'))
@@ -43,6 +43,8 @@ TABLES = (
     TableSpec('merge_checks', preview=False),
     TableSpec('recovery_publications', ('data',), kind=True),
     TableSpec('recovery_cleanups', preview=False),
+    TableSpec('db_initializations', preview=False),
+    TableSpec('db_init_scenes', invalidates_merge=True),
 )
 STATE_TABLES = frozenset(table.name for table in TABLES)
 BASE_TABLES = frozenset(table.name for table in TABLES if table.base)
@@ -59,6 +61,7 @@ def initialize_features(store):
     from stash_ai.storage.recovery import initialize as initialize_recovery
     from stash_ai.storage.preview import initialize as initialize_preview
     from stash_ai.storage.archive import initialize as initialize_archive
+    from stash_ai.storage.initialization import initialize as initialize_db_init
     initialize_archive(store)
     initialize_progress(store)
     initialize_cleanup(store)
@@ -68,6 +71,7 @@ def initialize_features(store):
             (store.scope,))
         store.connection.commit()
         load_cleanup(store)
+    initialize_db_init(store)
     initialize_checks(store)
     initialize_recovery(store)
     initialize_preview(store)
@@ -97,6 +101,8 @@ COLUMNS = {
     'merge_checks': 'scope scene policy fingerprint',
     'recovery_publications': 'scope scene kind operation data',
     'recovery_cleanups': 'scope generation kinds',
+    'db_initializations': 'scope models selection scanned',
+    'db_init_scenes': 'scope scene owned_ids completed',
 }
 TRIGGERS = frozenset(
     ['results_delete_threshold']

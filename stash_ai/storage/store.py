@@ -68,6 +68,8 @@ class StateStore(AbstractContextManager):
             if self.cleanup_pending and not allow_cleanup:
                 raise RuntimeError('Global cleanup is interrupted; rerun the same --models all cleanup mode '
                                    'with the same exclusion policies, or use --abandon-pending with current policies.')
+            from stash_ai.storage.initialization import InitializationStore
+            self.initialization = InitializationStore(self)
         except BaseException:
             self.close()
             raise

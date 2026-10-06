@@ -20,6 +20,9 @@ def build_parser(app) -> argparse.ArgumentParser:
     parser.add_argument("--scene-id", action="append", metavar="ID", help="Limit to this scene; repeat for multiple scenes.")
     parser.add_argument("--state-db", type=Path, default=app.MERGE_STATE_FILE, metavar="SQLITE",
                         help="Durable per-model evidence for merged outputs; retain this file between runs.")
+    parser.add_argument("--db-init", action="store_true",
+                        help="Rebuild a new/empty state DB from fresh inference, adopting existing AI outputs. "
+                             "Requires both outputs; interrupted initialization resumes normally.")
     resume = parser.add_mutually_exclusive_group()
     resume.add_argument("--resume", action="store_true", default=None,
                         help="Reuse matching completed results and resume checkpoints (default; merged output).")

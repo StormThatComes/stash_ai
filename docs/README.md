@@ -15,6 +15,7 @@ artefakty pomiarowe.
 - [Punkty Occurrence](UPGRADE_occurrences.md)
 - [Grupy markerów](UPGRADE_marker_groups.md)
 - [Porzucanie przerwanych operacji](UPGRADE_abandon_pending.md)
+- [Odbudowa nowej bazy](UPGRADE_db_init.md)
 - [Profilowanie merge](UPGRADE_diagnostics.md)
 - [Benchmarki](../benchmarks/README.md)
 

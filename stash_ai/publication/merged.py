@@ -88,6 +88,7 @@ def sync_merged(app, stash, resolver, store, scene, scene_hits, spans, *, cleanu
                 report=None, tag_policies, publication_key=None):
     """Reconcile only script-owned markers and recorded scene associations."""
     scene_id = str(scene["id"])
+    store.initialization.require_ready(scene_id)
     report = report or store.report
     evidence = prepare_sync_evidence(
         app, stash, store, scene, scene_hits, spans, cleanup=cleanup, report=report)

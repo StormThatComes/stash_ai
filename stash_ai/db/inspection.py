@@ -81,6 +81,8 @@ def inspect_database(path, scope):
         merge_checks = count_rows(db, tables, "merge_checks", scope)
         result_thresholds = count_rows(db, tables, "result_thresholds", scope)
         result_metadata = count_rows(db, tables, "result_metadata", scope)
+        init_completed = count_rows(db, tables, 'db_init_scenes', scope, 'completed=1')
+        init_pending = count_rows(db, tables, 'db_init_scenes', scope, 'completed=0')
 
     wal_path = Path(str(path) + "-wal")
     shm_path = Path(str(path) + "-shm")
@@ -126,6 +128,8 @@ def inspect_database(path, scope):
         merge_checks=merge_checks,
         result_thresholds=result_thresholds,
         result_metadata=result_metadata,
+        db_init_completed_scenes=init_completed,
+        db_init_pending_scenes=init_pending,
         warnings=warnings,
     )
 
@@ -174,6 +178,7 @@ def format_report(report):
             f"result thresholds={report['result_thresholds']:,}, result metadata={report['result_metadata']:,}"
         ),
         f"Estimated immediately reclaimable pages: {format_bytes(report['reclaimable_estimate_bytes'])}",
+        f"DB initialization (current scope): rebuilt={report['db_init_completed_scenes']:,}, pending={report['db_init_pending_scenes']:,}",
     ])
     if report["warnings"]:
         lines.append("Warnings:")

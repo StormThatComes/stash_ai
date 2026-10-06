@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import argparse
 import math
-from .modes import (select_command, DATABASE_COMMANDS, HIERARCHY_COMMANDS, CLEANUP_COMMANDS,
+from .modes import (Command, select_command, DATABASE_COMMANDS, HIERARCHY_COMMANDS, CLEANUP_COMMANDS,
                     MODEL_OPTIONS, PUBLICATION_OPTIONS, supplied, CACHE_RULE, REVIEW_RULE, MODEL_RULE)
 
 
@@ -123,6 +123,9 @@ def validate_pipeline(app, parser, args):
 
 def validate_args(app, parser: argparse.ArgumentParser, args: argparse.Namespace) -> argparse.Namespace:
     args.command = select_command(args)
+    if args.db_init and (args.command is not Command.INFERENCE or args.markers_only
+                        or args.scene_tags_only or args.restart or args.abandon_pending):
+        parser.error('--db-init requires normal inference with both outputs; restart/recovery modifiers do not apply.')
     validate_reports(parser, args)
     validate_maintenance(parser, args)
     validate_pipeline(app, parser, args)

@@ -42,7 +42,7 @@ def select_command(args):
 
 EXECUTION_OPTIONS = ('device', 'offline', 'resume', 'restart')
 MODEL_OPTIONS = ('models', *EXECUTION_OPTIONS)
-PUBLICATION_OPTIONS = ('markers_only', 'scene_tags_only', 'profile_merge', 'force_merge',
+PUBLICATION_OPTIONS = ('db_init', 'markers_only', 'scene_tags_only', 'profile_merge', 'force_merge',
                        'rethreshold_scenes', 'rethreshold_markers', 'abandon_pending',
                        'prune_empty_tags', 'prune_prefixes', 'create_all_tags', 'no_hierarchy')
 
