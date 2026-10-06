@@ -17,6 +17,7 @@ def check_work_units(db, tables):
     total += count_rows(db, tables, "checkpoints")
     total += count_rows(db, tables, "cleanup_state")
     total += count_rows(db, tables, "recovery_cleanups")
+    total += count_rows(db, tables, "db_initializations") + count_rows(db, tables, "db_init_scenes")
     for table, column in payload_specs:
         if table in tables and column in column_names(db, table):
             total += db.execute(

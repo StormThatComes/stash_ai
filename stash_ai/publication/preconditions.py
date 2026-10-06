@@ -23,6 +23,7 @@ def require_source_state(app, store, scene):
         known = (store.sources(scene['id'], 'markers') or
                  any(value is not None for value in store.snapshot(scene['id'], 'markers', borrow=True)) or
                  publications(store, scene['id'], 'markers'))
-        if not known:
-            raise RuntimeError('Merged markers exist without their source state. Restore the original --state-db before synchronization.')
+        if not known and not store.initialization.pending(scene['id']):
+            raise RuntimeError('Merged markers exist without their source state. Restore the original --state-db '
+                               'or rebuild a new/empty database with --db-init.')
         require_native_ranges(scene)

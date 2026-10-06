@@ -122,7 +122,7 @@ obsługiwane schematy przechowują już pojedynczy rekord i liczbowy próg.
 
 Snapshoty merge zapisują współdzielone dowody `extra_support` raz, a contributions
 odwołują się do nich przez referencje. Zmniejsza to koszt serializacji i kompresji.
-Aktualny schemat to v23, z obsługą aktualizacji od v18. Każdy nowy snapshot ma
+Aktualny schemat to v24, z obsługą aktualizacji od v18. Każdy nowy snapshot ma
 otoczkę formatu v6. `--db-update` konwertuje snapshoty v4/v5/v6, także pending i recovery,
 w jednym przebiegu. Zachowuje geometrię i własność publikacji, normalizuje zamrożone opcje
 odtwarzania oraz usuwa `extra_ids` i zbędne `algorithm: temporal`. Pełne payloady
@@ -168,6 +168,27 @@ W trybie `merged` domyślne `resume`:
 
 `--restart` wymusza świeżą inferencję dla wybranych modeli/scen. Nie używaj go
 do zwykłego przeliczenia merge, cleanupu ani zmiany progów.
+
+### Nowa baza przy istniejących wynikach AI
+
+`--db-init` pozwala odbudować stan po utracie bazy albo rozpocząć od nowa,
+zachowując stare wyniki w Stash do czasu ukończenia inferencji danej sceny:
+
+```powershell
+python .\stash_ai.py --db-init --models all --state-db .\tagger_sources_fresh.sqlite3
+```
+
+Wymaga nowej lub pustej bazy i obu wyjść: tagów scen oraz markerów. Przejmuje
+istniejące przypisania tagów `ai:<label>` i markery należące do aplikacji.
+Po udanej inferencji wszystkich wybranych modeli usuwa nieaktualne wyniki AI;
+brak VTT/sprite'a lub błąd modelu pozostawia dotychczasowe wyniki sceny.
+Ręcznie przypisane tagi z prefiksem `ai:` również podlegają temu przejęciu,
+z wyjątkiem kategorii i zarezerwowanych tagów markerów.
+
+Przerwany przebieg wznów tą samą komendą bez `--db-init`, zachowując modele,
+ścieżkę bazy i ewentualny zakres `--scene-id`. Ponowienie flagi też zachowuje
+postęp. `--dry-run` korzysta wyłącznie z tymczasowej nakładki i nie zapisuje do
+Stash ani źródłowej bazy. Szczegóły: [Odbudowa bazy](docs/UPGRADE_db_init.md).
 
 ### Retencja niezależna od progów publikacji
 
@@ -225,7 +246,7 @@ Ręczne powiązania ze starymi definicjami tagów pozostają zachowane.
 Trzy zakończone migracje nie należą już do bieżącego pakietu. W razie potrzeby uruchom je
 z osobnego checkoutu niezmiennego commita
 [`9fcaa52502cd487455457547860b5db7d8710ad8`](https://github.com/StormThatComes/stash_ai/commit/9fcaa52502cd487455457547860b5db7d8710ad8).
-Ta wersja obsługuje bieżący schemat v23. Bazy sprzed v18 wymagają najpierw starszego
+Ta wersja obsługuje bieżący schemat v24. Bazy sprzed v18 wymagają najpierw starszego
 mostka opisanego w sekcji aktualizacji bazy. Zrób kopię bazy i konfiguracji oraz zainstaluj
 zależności checkoutu w osobnym środowisku Python 3.14 zgodnie z instrukcją instalacji.
 
@@ -259,8 +280,10 @@ Następnie wróć do bieżącej instalacji, wykonaj `--db-check` i potrzebną in
 ### Zdrowie, aktualizacja i kompaktowanie bazy stanu
 
 `--db-update` aktualizuje bazę wskazaną przez `--state-db` ze schematu **v18 lub nowszego**
-do aktualnego **v23**, we wszystkich scope'ach. Zwykłe uruchomienie oraz `--dry-run`
-wymagają aktualnego schematu; nowa baza od razu otrzymuje v23.
+do aktualnego **v24**, we wszystkich scope'ach. Zwykłe uruchomienie oraz `--dry-run`
+wymagają aktualnego schematu; nowa baza od razu otrzymuje v24.
+Migracja dodaje stan odbudowy, ale nie przejmuje istniejących wyników Stash.
+To uprawnienie powstaje wyłącznie po jawnym `--db-init` na nowej/pustej bazie.
 Updater korzysta z tego samego locka writera. Pracuje offline, bez Stash i konfiguracji modeli.
 Zachowuje liczbowe progi bieżących wyników, własność publikacji, pending publication/cleanup
 i recovery. Starsze wyniki są kierowane do ponownej inferencji, a ich checkpointy usuwane.
@@ -268,7 +291,7 @@ Snapshoty v4/v5/v6 są konwertowane w jednym przebiegu, z zachowaniem współdzi
 Wycofane konfiguracje algorytmów są usuwane; geometria i referencje do dowodów pozostają.
 Aktualizacja nie odtwarza utraconych detekcji. Wyniki inferencji sprzed formatu 5 wymagają ponownej inferencji.
 Metadane wyników są uzupełniane dopiero po zakończeniu konwersji. Klatki bieżących wyników
-muszą być zapisane chronologicznie. Aktualizacja do v23 kieruje nieuporządkowane
+muszą być zapisane chronologicznie. Aktualizacja bazy sprzed v23 kieruje nieuporządkowane
 rekordy do ponownej inferencji i oznacza zależne publikacje `requires_rebase`.
 Nie sortuje zapisanych payloadów ani nie zmienia ich sygnatur. Uporządkowane
 wyniki formatu 5 pozostają ważne. Odczyt i zapis odrzucają brakujące metadane
@@ -579,6 +602,7 @@ Bieżący walidator wymaga v2 i wskazuje commit migratora bez zmiany pliku.
 | `marker_core_exclusions.yml` | wykluczenia głównych tagów markerów |
 | `tag_hierarchy.yml` | wspólna hierarchia kategorii wszystkich modeli |
 | `--state-db` | lokalizacja trwałej bazy stanu |
+| `--db-init` | odbudowa nowej/pustej bazy z przejęciem istniejących wyników AI |
 
 `MAX_MARKERS_PER_SCENE` ogranicza wkłady osobno dla każdego modelu.
 Zakresy mają pierwszeństwo przed dodatkowymi punktami Occurrence. Punkt
@@ -683,6 +707,7 @@ produkcyjnego serwera.
 - [Occurrence](docs/UPGRADE_occurrences.md)
 - [Grupy markerów](docs/UPGRADE_marker_groups.md)
 - [Porzucanie przerwanych operacji](docs/UPGRADE_abandon_pending.md)
+- [Odbudowa nowej bazy](docs/UPGRADE_db_init.md)
 - [Profilowanie merge](docs/UPGRADE_diagnostics.md)
 - [Benchmarki](benchmarks/README.md)
 

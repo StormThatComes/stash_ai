@@ -47,6 +47,7 @@ CHECK_MESSAGES = {
     "recovery_cleanup_invalid": "Recovery cleanup metadata is invalid or refers to an impossible generation.",
     "empty_snapshot_without_recovery": "Snapshot rows contain neither published nor pending state and have no archived recovery publication.",
     "recovery_publication_without_snapshot": "Archived publication recovery exists without a matching snapshot row.",
+    "db_init_invalid": "DB initialization has invalid model/scene authorization or ownership state.",
 }
 
 
@@ -134,6 +135,8 @@ def check_database(path, scope, *, show_progress=False):
             if progress is not None:
                 progress.set_postfix_str("cleanup/recovery", refresh=True)
             state_checks.check_cleanup_state(db, tables, errors, progress)
+            from .validation.initialization import check_initializations
+            check_initializations(db, errors, progress)
 
             if progress is not None:
                 progress.set_postfix_str("relations", refresh=True)

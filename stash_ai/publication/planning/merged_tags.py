@@ -67,6 +67,7 @@ def plan_scene_tags(app, store, scene_id, scene, scene_hits, scene_labels, ids, 
     owned_before = set((published or {}).get("owned_ids", [])) | set((pending or {}).get("owned_ids", []))
     owned_before.update(identifier for snapshot in publications(store, scene_id, 'scene')
                         for identifier in snapshot.get('owned_ids', []))
+    owned_before.update(store.initialization.adopt(scene_id, current_tags))
     existing_ids = {str(tag["id"]) for tag in current_tags}
     desired_ids = {ids[merge_labels.AI.prefix + label] for label in scene_labels
                    if ids.get(merge_labels.AI.prefix + label)}

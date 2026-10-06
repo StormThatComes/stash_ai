@@ -85,7 +85,9 @@ class PublicationStore:
                     "ON CONFLICT(scope,scene,kind) DO UPDATE SET published=excluded.published,pending=NULL",
                     (store.scope, str(scene), kind, store.pack_snapshot(stamp_snapshot(store, data))))
                 clear_publications(store, scene, kind)
+            store.initialization.finish_in_transaction(scene, snapshots)
             prune(store, scene)
+        store.initialization.published(scene)
 
     @measured('state_write')
     def commit_prepared(self, scene, kinds, *, publication=None):
@@ -103,8 +105,9 @@ class PublicationStore:
                 if changed != 1:
                     raise RuntimeError('Publication intent disappeared before commit.')
                 clear_publications(store, scene, kind)
+            store.initialization.finish_in_transaction(scene, kinds)
             prune(store, scene)
             if publication is not None:
                 from stash_ai.storage.merge_checks import record_check
                 record_check(store, scene, *publication)
-
+        store.initialization.published(scene)

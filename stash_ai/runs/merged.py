@@ -52,6 +52,7 @@ class MergedRun:
                 memory_budget_bytes=int(args.ram_budget_gb * 2**30)) as store:
             self.store = store
             store.report = self.report
+            store.initialization.configure(app, args, self.settings)
             if args.abandon_pending:
                 from stash_ai.storage.recovery import abandon
                 self.stats.update(abandon(store, self.report.write))
@@ -70,6 +71,7 @@ class MergedRun:
                 self._finalize_catalog_key(refresh=catalog_pruned)
             finally:
                 self.stash.close()
+            store.initialization.report(self.report, self.stats)
             self.report.finish('Merged' + (' (planned)' if app.DRY_RUN else ''), self.stats, store.cache)
         return int(bool(self.stats["errors"]))
 
@@ -98,6 +100,10 @@ class MergedRun:
             for current in tqdm(self.stash.iter_scenes(args.scene_id), desc="Read sources", unit="scene"):
                 scene_id = str(current["id"])
                 try:
+                    if self.store.initialization.active:
+                        from stash_ai.publication.preconditions import require_native_ranges
+                        require_native_ranges(current)
+                        self.store.initialization.enroll(current)
                     with stage(self.report, 'scan_fingerprint'):
                         fingerprint = fingerprints.scene_fingerprint(current)
                     publication_reason = merge_checks.check_reason(
@@ -120,6 +126,7 @@ class MergedRun:
                     self.report.issue(
                         'read sources', '', scene_id, exc,
                         app.services.safe_error(exc, api_key=app.STASH_API_KEY))
+            self.store.initialization.finish_scan(self.scenes, errors=self.stats['errors'])
 
     def _apply_thresholds(self):
         args, app = self.args, self.app

@@ -74,6 +74,7 @@ class MergePublisher:
                                  if scene_id in refreshed else current), errors.get(scene_id)
 
     def _reason(self, scene_id, current, refresh_error=None):
+        self.store.initialization.require_ready(scene_id)
         pending = self.pending_refreshes.get(str(scene_id), ())
         if pending:
             self.stats["merge_refresh_blocked"] += 1

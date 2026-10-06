@@ -45,7 +45,7 @@ def fail(*args, **kwargs):
     'evidence/pipeline.py', 'evidence/source_markers.py', 'evidence/identity.py', 'evidence/labels.py', 'inference/results.py', 'evidence/observations.py', 'evidence/frames.py', 'evidence/shared_markers.py', 'evidence/thresholds.py', 'inference/reuse.py', 'evidence/cache_views.py', 'evidence/scenes.py', 'evidence/occurrences.py',
     'publication/groups.py', 'publication/index.py', 'publication/planning/types.py', 'publication/planning/merged_evidence.py', 'publication/planning/merged_tags.py', 'publication/planning/merged_markers.py',
     'publication/fingerprints.py', 'storage/segments.py', 'storage/merge_checks.py',
-    'inference/scene_predictions.py', 'commands/bootstrap.py',
+    'inference/scene_predictions.py', 'commands/bootstrap.py', 'storage/initialization.py',
     'config.py', 'commands/hierarchy.py', 'publication/preconditions.py', 'publication/namespace.py', 'rethreshold/markers.py', 'rethreshold/scenes.py', 'cleanup/state.py', 'cleanup/client.py',
 ])
 def test_publication_code_tracks_extracted_modules(monkeypatch, filename):
