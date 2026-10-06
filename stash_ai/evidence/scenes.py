@@ -109,7 +109,7 @@ def _shared_scene_contributions(app, index, scene_records, policies, existing, m
         return []
 
     existing = {entry['tag'] for entry in existing}
-    options = dict(algorithm="temporal", policy=asdict(policy), max_tags=app.MAX_TAGS,
+    options = dict(policy=asdict(policy), max_tags=app.MAX_TAGS,
                    scene_thresholds={marker_segment_signature(record): scene_threshold(record) for record in scene_records.values()},
                    scene_exclusions={source: sorted(values) for source, values in policies.items()})
     candidates, usable, partial = [], False, False

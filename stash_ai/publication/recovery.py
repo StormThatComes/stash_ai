@@ -68,12 +68,9 @@ def reconcile_marker_snapshot(scene, candidates):
             return (title != marker['title'], len(present - set(component['extra_tags'])),
                     len(set(component['extra_tags']) - present))
         match = min(matches, key=rank)
-        present_ids = {str(t['id']) for t in marker.get('tags', [])}
         for item in match['contributors']:
             extras = set(item.get('extra_tags', [])) | set(item.get('extra_support', {}))
             observed = prune_blocked_extras(deepcopy(item), extras - present)
-            if 'extra_ids' in observed:
-                observed['extra_ids'] = [i for i in observed['extra_ids'] if str(i) in present_ids]
             proofs.append(observed)
 
     return {'contributions': proofs.values}
@@ -94,4 +91,3 @@ def reconcile(store, scene, kind, published):
     # Dry-run writes only its temporary overlay; no Stash mutations happen here.
     store.publish(str(scene['id']), {kind: result})
     return result, True
-

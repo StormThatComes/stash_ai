@@ -1,4 +1,4 @@
-"""The active inference contract. Archived publication proofs are separate."""
+"""The inference contract shared by active records and archived replay proofs."""
 import math
 
 ANALYSIS_FORMAT = 5
@@ -60,12 +60,3 @@ def validate_statistics(stats):
             or stats['high_hits'] > stats['hits'] or stats['longest_hits'] > stats['hits']
             or stats['hits'] > stats['sampled_frames']):
         raise ValueError('Current scene statistics must be complete and internally consistent; run inference.')
-
-
-def validate_archived(segment):
-    """Validate pinned proof storage, including retired pre-v5 inference."""
-    version = segment['meta'].get('analysis_format')
-    if version is not None and (type(version) is not int or not 1 <= version <= ANALYSIS_FORMAT):
-        raise ValueError('Unsupported archived inference evidence format.')
-    if current(segment['meta']):
-        validate_current(segment)

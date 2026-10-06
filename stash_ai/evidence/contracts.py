@@ -34,7 +34,6 @@ class CurrentInferenceMetadata(TypedDict):
 
 
 class MarkerBuildOptions(TypedDict):
-    algorithm: Literal['temporal']
     policy: dict
     core_exclusions: dict[str, list[str]]
     tag_exclusions: dict[str, list[str]]
@@ -43,7 +42,6 @@ class MarkerBuildOptions(TypedDict):
 
 
 class SceneBuildOptions(TypedDict):
-    algorithm: Literal['temporal']
     policy: dict
     max_tags: int
     scene_exclusions: dict[str, list[str]]

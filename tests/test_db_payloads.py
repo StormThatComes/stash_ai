@@ -184,7 +184,7 @@ def test_cli_rejects_unusable_payload_offline(tmp_path, monkeypatch):
     ('spans', [{'tag': 'blue_hair', 'score': .9, 'start': 0, 'end': 1}]),
     ('spans', [{'tag': 'blue_hair', 'score': .9, 'start': 0, 'end': None}]),
 ])
-def test_retired_inference_shapes_are_valid_only_in_archives(tmp_path, mode, items):
+def test_retired_inference_shapes_are_rejected_in_current_archives(tmp_path, mode, items):
     from stash_ai.evidence.identity import marker_segment_signature
     from stash_ai.storage.codec import encode
     path = tmp_path / 'state.sqlite3'
@@ -196,11 +196,11 @@ def test_retired_inference_shapes_are_valid_only_in_archives(tmp_path, mode, ite
             ('scope', 'old', 'wd', kind, marker_segment_signature(record), encode(record)))
     before = path.read_bytes()
     report = check_database(path, 'scope')
-    assert report['ok'], report['errors']
+    assert issues(report) == {'state_payload_invalid': 1}
     assert path.read_bytes() == before
     with sqlite3.connect(path) as connection:
         connection.execute('UPDATE results SET data=? WHERE kind=?', (encode(record), kind))
-    assert issues(check_database(path, 'scope')) == {'result_payload_invalid': 1}
+    assert issues(check_database(path, 'scope')) == {'result_payload_invalid': 1, 'state_payload_invalid': 1}
 
 
 @pytest.mark.parametrize('record', [

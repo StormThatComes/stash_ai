@@ -88,7 +88,7 @@ def test_v18_upgrade_preserves_latest_record_and_existing_pinned_archive(tmp_pat
         for scope in ('first', 'second'):
             connection.execute('INSERT INTO inference_archive VALUES (?,?,?,?,?,?)', (scope, '1', 'wd', 'markers', marker_segment_signature(history[1]), encode(history[1])))
         connection.execute('PRAGMA user_version=18')
-    assert update_database(path) == (18, 21)
+    assert update_database(path) == (18, LATEST_SCHEMA_VERSION)
     for scope in ('first', 'second'):
         with StateStore(path, scope) as store:
             assert store.model_record('1', 'markers', 'wd') == history[-1]
@@ -131,3 +131,60 @@ def test_deep_check_rejects_archived_proof_signature_corruption(tmp_path):
         connection.execute("UPDATE inference_archive SET signature='tampered'")
     report = check_database(path, 'scope')
     assert [issue['code'] for issue in report['errors']] == ['state_payload_invalid']
+
+
+@pytest.mark.parametrize('version', [18, 19, 20, 21])
+def test_upgrade_removes_only_obsolete_archives_and_rebases_their_publication(tmp_path, version):
+    from copy import deepcopy
+    from stash_ai.storage.snapshots import FORMAT_KEY
+    path = tmp_path/'state.sqlite3'
+    current = outputs(signature='current')['markers']
+    old = deepcopy(current)
+    old['meta']['analysis_format'] = 3
+    for scope in ('first', 'second'):
+        with StateStore(path, scope) as store:
+            store.connection.execute('INSERT INTO inference_archive VALUES (?,?,?,?,?,?)',
+                (scope, '1', 'wd', 'markers', marker_segment_signature(old), encode(old)))
+            store.connection.execute('INSERT INTO inference_archive VALUES (?,?,?,?,?,?)',
+                (scope, '1', 'wd', 'markers', marker_segment_signature(current), encode(current)))
+            snapshot = {**proof(old), 'owned_ids': ['marker']}
+            snapshot['contributions'][0].update(tag='core', start=1., end=2., extra_ids=['old-tag-id'])
+            blob = encode({FORMAT_KEY: 5, 'snapshot': snapshot, 'proofs': []})
+            store.connection.execute('INSERT INTO snapshots VALUES (?,?,?,?,?)', (scope, '1', 'markers', blob, blob))
+            store.connection.commit()
+    with sqlite3.connect(path) as db:
+        db.execute(f'PRAGMA user_version={version}')
+    update_database(path)
+    for scope in ('first', 'second'):
+        with StateStore(path, scope) as store:
+            assert archived_records(store, '1', 'markers')['wd'] == [current]
+            for snapshot in store.snapshot('1', 'markers'):
+                assert snapshot['owned_ids'] == ['marker']
+                item = snapshot['contributions'][0]
+                assert item['requires_rebase'] and 'extra_ids' not in item
+                assert (item['tag'], item['start'], item['end']) == ('core', 1., 2.)
+        assert check_database(path, scope)['ok']
+
+
+def test_unknown_archive_format_rolls_back_retirement(tmp_path):
+    from tests.helpers.evidence import inject_records
+    path = tmp_path/'state.sqlite3'
+    old = outputs(signature='old')
+    for record in old.values():
+        record['meta']['analysis_format'] = 3
+    future = outputs(signature='future')['markers']
+    future['meta']['analysis_format'] = 99
+    with StateStore(path, 'scope') as store:
+        inject_records(store, '1', 'wd', old)
+        store.connection.execute('INSERT INTO inference_archive VALUES (?,?,?,?,?,?)',
+            ('scope', '1', 'wd', 'markers', marker_segment_signature(future), encode(future)))
+        store.connection.execute('PRAGMA user_version=21')
+        store.connection.commit()
+    with sqlite3.connect(path) as db:
+        before = db.execute('SELECT * FROM results').fetchall()
+    with pytest.raises(ValueError, match='Unsupported inference'):
+        update_database(path)
+    with sqlite3.connect(path) as db:
+        assert db.execute('SELECT * FROM results').fetchall() == before
+        assert not db.execute('SELECT * FROM refresh_requests').fetchall()
+        assert db.execute('PRAGMA user_version').fetchone() == (21,)

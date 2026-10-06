@@ -100,7 +100,7 @@ def test_current_snapshots_reject_incomplete_build_options_on_write_and_read(kin
     from stash_ai.evidence.temporal.policy import build_options
     options = ({**build_options(app), 'core_exclusions': {s: [] for s in empty_policies()},
                 'tag_exclusions': {s: [] for s in empty_policies()}} if kind == 'markers' else
-               {'algorithm': 'temporal', 'policy': asdict(app.TEMPORAL_POLICY), 'max_tags': 0, 'scene_thresholds': {},
+               {'policy': asdict(app.TEMPORAL_POLICY), 'max_tags': 0, 'scene_thresholds': {},
                 'scene_exclusions': {s: [] for s in empty_policies()}})
     threshold_field = 'marker_thresholds' if kind == 'markers' else 'scene_thresholds'
     exclusion_field = 'tag_exclusions' if kind == 'markers' else 'scene_exclusions'
@@ -342,3 +342,14 @@ def test_merge_cleanup_and_partial_publication_recovery_match_old_snapshots(tmp_
         assert check_database(path, merge_store.scope_for(app.STASH_URL))['ok']
     assert variants[0] == variants[1]
 
+
+
+@pytest.mark.parametrize('field,value', [('extra_ids', ['old-id']),
+                                         ('retired_support_context', {'wd': ['old-signature']})])
+def test_current_snapshots_reject_retired_fields(field, value):
+    saved = {'contributions': [{'source': 'wd', field: value}]}
+    with pytest.raises(ValueError, match='Retired publication fields'):
+        compact(saved)
+    packed = {'__stash_ai_snapshot__': FORMAT, 'snapshot': saved, 'proofs': []}
+    with pytest.raises(ValueError, match='Retired publication fields'):
+        expand(packed)

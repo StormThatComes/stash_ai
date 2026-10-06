@@ -22,15 +22,15 @@ def complete_policy(values):
 
 
 def decode_legacy(blob):
-    """Schema v18+ stores declared v4/v5 snapshot envelopes."""
+    """Schema v18+ stores declared v4/v5/v6 snapshot envelopes."""
     value = decode(blob)
     if (not isinstance(value, dict) or set(value) != {FORMAT_KEY, 'snapshot', 'proofs'}
-            or type(value[FORMAT_KEY]) is not int or value[FORMAT_KEY] not in (4, FORMAT)
+            or type(value[FORMAT_KEY]) is not int or value[FORMAT_KEY] not in (4, 5, FORMAT)
             or not isinstance(value['snapshot'], dict)
             or not isinstance(value['snapshot'].get('contributions'), list)
             or not isinstance(value['proofs'], list)
             or any(not isinstance(proof, dict) for proof in value['proofs'])):
-        raise ValueError('Invalid historical snapshot format; schema v18 requires v4/v5 envelopes.')
+        raise ValueError('Invalid historical snapshot format; schema v18 requires v4/v5/v6 envelopes.')
     return _expand_proofs(value['snapshot'], value['proofs'])
 
 

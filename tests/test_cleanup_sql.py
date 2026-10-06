@@ -53,7 +53,7 @@ def test_cleanup_and_exclusion_pruning_preserve_retired_namespaces(tmp_path, mon
     ('cleanup-markers-only', 'markers', 'CleanupDeleteMarkers'),
     ('cleanup-scene-tags-only', 'scene', 'CleanupRemoveTags'),
 ])
-def test_pending_partial_cleanup_accepts_only_its_matching_historical_fingerprint(tmp_path, monkeypatch, mode, kind, operation):
+def test_pending_partial_cleanup_requires_explicit_fingerprint_migration(tmp_path, monkeypatch, mode, kind, operation):
     from stash_ai.signatures import digest
     from stash_ai.models import SOURCES
     stash = SQLStash()
@@ -73,6 +73,11 @@ def test_pending_partial_cleanup_accepts_only_its_matching_historical_fingerprin
     stash.writes.clear()
     assert app.main(args(tmp_path, ['different'], mode=mode)) == 1
     assert not stash.writes
+    assert app.main(args(tmp_path, ['blocked'], mode=mode)) == 1
+    assert not stash.writes
+    from stash_ai.tools.cleanup_pending_migration import migrate
+    with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL), allow_cleanup=True) as store:
+        assert migrate(store, old['tags'], old['cores'], [kind])
     assert app.main(args(tmp_path, ['blocked'], mode=mode)) == 0
     with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL)) as store:
         assert store.cleanup_pending is None and store.cleanup_generation == 1
@@ -342,6 +347,12 @@ def test_legacy_interrupted_global_cleanup_can_resume_using_sql(tmp_path, monkey
             store.connection.execute('PRAGMA user_version=18')
     from stash_ai.db.update import update_database
     update_database(path)
+    from stash_ai.tools.cleanup_pending_migration import migrate
+    from stash_ai.cleanup.fingerprint import fingerprint as current_fingerprint
+    tags, cores = {s: ['blocked'] for s in SOURCES}, {s: [] for s in SOURCES}
+    with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL), allow_cleanup=True) as store:
+        assert migrate(store, tags, cores, ['scene', 'markers'])
+    fingerprint = current_fingerprint(tags, cores, ['scene', 'markers'])
     before = deepcopy((stash.scenes, stash.tags)), path.read_bytes(), path.stat().st_mtime_ns
     install(monkeypatch, stash)
     assert app.main(command + (['--dry-run'] if dry else [])) == 0

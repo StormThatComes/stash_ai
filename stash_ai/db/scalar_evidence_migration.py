@@ -1,4 +1,4 @@
-"""Offline conversion of list-shaped proof contexts; archive pins remain exact."""
+"""Offline proof conversion; unreplayable proofs retain geometry, not old payloads."""
 from stash_ai.storage.snapshots import encode
 from .snapshot_migration import decode_legacy, normalize
 
@@ -16,7 +16,10 @@ def convert(value, memo=None):
         return value
     result = {}
     memo[id(value)] = result
-    result.update((key, convert(item, memo)) for key, item in value.items() if key != 'retired_build_options')
+    result.update((key, convert(item, memo)) for key, item in value.items()
+                  if key != 'extra_ids' and not key.startswith('retired_'))
+    if any(key.startswith('retired_') for key in value):
+        result['requires_rebase'] = True
     for field in ('frame_context', 'scene_context', 'support_context'):
         if field not in result:
             continue
@@ -36,7 +39,6 @@ def convert(value, memo=None):
                 raise ValueError('Invalid historical proof signature.')
         result[field] = scalar
         if retired:
-            result['retired_' + field] = retired
             result['requires_rebase'] = True
     if 'signatures' in result:
         signatures = result.pop('signatures')
@@ -45,12 +47,10 @@ def convert(value, memo=None):
         if len(set(signatures)) == 1:
             result['signature'] = signatures[0]
         else:
-            result['retired_signatures'] = signatures
             result['requires_rebase'] = True
     if result.get('derived') == 'shared_scene_frames' and 'frame_context' in result:
         frames = result.pop('frame_context')
         if frames != result.get('scene_context'):
-            result['retired_frame_context'] = {source: [signature] for source, signature in frames.items()}
             result['requires_rebase'] = True
     def retired(item):
         if isinstance(item, dict):
@@ -63,12 +63,21 @@ def convert(value, memo=None):
     return result
 
 
-def migrate(db):
+def migrate(db, retired):
+    from stash_ai.storage.archive import references
+    def migrated(blob, scope, scene):
+        snapshot = convert(normalize(decode_legacy(blob)))
+        removed = retired.get((scope, scene), set())
+        for item in snapshot['contributions']:
+            if references(item) & removed:
+                item['requires_rebase'] = True
+                item.pop('build_options', None)
+        return encode(snapshot)
     for scope, scene, kind in db.execute('SELECT scope,scene,kind FROM snapshots').fetchall():
         published, pending = db.execute(
             'SELECT published,pending FROM snapshots WHERE scope=? AND scene=? AND kind=?',
             (scope, scene, kind)).fetchone()
-        values = [encode(convert(normalize(decode_legacy(blob)))) if blob is not None else None
+        values = [migrated(blob, scope, scene) if blob is not None else None
                   for blob in (published, pending)]
         db.execute('UPDATE snapshots SET published=?,pending=? WHERE scope=? AND scene=? AND kind=?',
                    (*values, scope, scene, kind))
@@ -78,4 +87,4 @@ def migrate(db):
             'SELECT data FROM recovery_publications WHERE scope=? AND scene=? AND kind=? AND operation=?',
             (scope, scene, kind, operation)).fetchone()[0]
         db.execute('UPDATE recovery_publications SET data=? WHERE scope=? AND scene=? AND kind=? AND operation=?',
-                   (encode(convert(normalize(decode_legacy(blob)))), scope, scene, kind, operation))
+                   (migrated(blob, scope, scene), scope, scene, kind, operation))

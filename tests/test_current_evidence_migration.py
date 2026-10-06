@@ -32,7 +32,7 @@ def obsolete():
 
 
 @pytest.mark.parametrize('location', ['published', 'pending', 'recovery', 'nested'])
-def test_upgrade_retires_old_results_across_scopes_and_preserves_exact_pins(tmp_path, location):
+def test_upgrade_retires_old_results_across_scopes_and_preserves_publication_geometry(tmp_path, location):
     path = tmp_path / 'state.sqlite3'
     old = obsolete()
     for scope in ('first', 'second'):
@@ -60,18 +60,16 @@ def test_upgrade_retires_old_results_across_scopes_and_preserves_exact_pins(tmp_
         snapshots = connection.execute('SELECT * FROM snapshots').fetchall()
         recovery = connection.execute('SELECT * FROM recovery_publications').fetchall()
     before = path.read_bytes()
-    assert update_database(path, dry_run=True) == (18, 21)
+    assert update_database(path, dry_run=True) == (18, LATEST_SCHEMA_VERSION)
     assert path.read_bytes() == before
-    assert update_database(path) == (18, 21)
+    assert update_database(path) == (18, LATEST_SCHEMA_VERSION)
     for scope in ('first', 'second'):
         with StateStore(path, scope) as store:
             assert 'wd' not in store.records('1', 'scene')
             assert store.model_record('1', 'markers', 'wd') is None
             assert store.model_record('1', 'scene', 'dtq') == outputs(signature='current')['scene']
             assert archived_records(store, '1', 'scene') == {}
-            archived = archived_records(store, '1', 'markers')['wd']
-            assert len(archived) == 1
-            assert marker_segment_signature(archived[0]) == marker_segment_signature(old['markers'])
+            assert archived_records(store, '1', 'markers') == {}
             assert set(store.connection.execute('SELECT model,kind FROM refresh_requests WHERE scope=?', (scope,))) == {
                 ('wd', 'scene'), ('wd', 'markers')}
             assert list(store.connection.execute('SELECT model FROM checkpoints WHERE scope=?', (scope,))) == [('dtq',)]
@@ -79,8 +77,20 @@ def test_upgrade_retires_old_results_across_scopes_and_preserves_exact_pins(tmp_
                 assert not store.connection.execute('SELECT 1 FROM ' + table + ' WHERE scope=?', (scope,)).fetchone()
         assert check_database(path, scope)['ok']
     with sqlite3.connect(path) as connection:
-        assert connection.execute('SELECT * FROM snapshots').fetchall() == snapshots
-        assert connection.execute('SELECT * FROM recovery_publications').fetchall() == recovery
+        from stash_ai.storage.snapshots import decode as decode_snapshot
+        for table, original, columns in [('snapshots', snapshots, (3, 4)),
+                                          ('recovery_publications', recovery, (4,))]:
+            migrated = connection.execute('SELECT * FROM ' + table).fetchall()
+            assert len(migrated) == len(original)
+            for before_row, after_row in zip(original, migrated):
+                assert before_row[:3] == after_row[:3]
+                for column in columns:
+                    if before_row[column] is None:
+                        assert after_row[column] is None
+                        continue
+                    saved = decode_snapshot(after_row[column])
+                    assert saved['owned_ids'] == ['900']
+                    assert saved['contributions'][0]['requires_rebase']
     assert update_database(path) == (LATEST_SCHEMA_VERSION, LATEST_SCHEMA_VERSION)
 
 
@@ -94,13 +104,13 @@ def test_retirement_and_archive_roll_back_together(tmp_path, monkeypatch):
         connection.execute('PRAGMA user_version=18')
         before = connection.execute('SELECT * FROM results').fetchall()
     from stash_ai.db import current_evidence_migration
-    retain = current_evidence_migration.retain
+    migrate = current_evidence_migration.migrate
 
-    def fail(*args):
-        retain(*args)
+    def fail(db):
+        migrate(db)
         raise RuntimeError('interrupted migration')
 
-    monkeypatch.setattr(current_evidence_migration, 'retain', fail)
+    monkeypatch.setattr(current_evidence_migration, 'migrate', fail)
     with pytest.raises(RuntimeError, match='interrupted migration'):
         update_database(path)
     with sqlite3.connect(path) as connection:
@@ -154,7 +164,7 @@ def test_upgrade_does_not_discard_unknown_future_evidence(tmp_path):
     with sqlite3.connect(path) as connection:
         connection.execute('PRAGMA user_version=18')
         before = connection.execute('SELECT * FROM results').fetchall()
-    with pytest.raises(ValueError, match='Unsupported archived inference'):
+    with pytest.raises(ValueError, match='Unsupported inference'):
         update_database(path)
     with sqlite3.connect(path) as connection:
         assert connection.execute('SELECT * FROM results').fetchall() == before
@@ -222,8 +232,7 @@ def test_v18_retires_v4_with_scalar_threshold_and_keeps_exact_publication_pins(t
     assert update_database(path) == (18, LATEST_SCHEMA_VERSION)
     with StateStore(path, 'scope') as store:
         assert store.records('1', 'markers') == store.records('1', 'scene') == {}
-        archived = archived_records(store, '1', 'markers')['wd']
-        assert archived == [old['markers']]
+        assert archived_records(store, '1', 'markers') == {}
         assert not store.connection.execute('SELECT * FROM result_thresholds').fetchall()
         assert set(store.connection.execute('SELECT model,kind FROM refresh_requests')) == {
             ('wd', 'scene'), ('wd', 'markers')}

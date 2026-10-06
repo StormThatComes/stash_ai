@@ -75,7 +75,7 @@ def marker_floor(policy, threshold):
 def build_options(app, records=()):
     from stash_ai.evidence.identity import marker_segment_signature
     from stash_ai.storage.thresholds import effective
-    return {"algorithm": "temporal", "policy": asdict(app.TEMPORAL_POLICY),
+    return {"policy": asdict(app.TEMPORAL_POLICY),
         "marker_thresholds": {marker_segment_signature(record): effective(record) for record in dict(records).values()},
         "settings": {name: getattr(app, name) for name in (
         "MARKER_MIN_HITS", "MARKER_MERGE_GAP_SECONDS", "MARKER_MAX_TAGS_PER_FRAME", "MAX_MARKERS_PER_SCENE")}}
@@ -83,6 +83,4 @@ def build_options(app, records=()):
 
 def frozen_policy(options):
     """Replay only the current temporal engine with its saved settings."""
-    if options.get('algorithm') != 'temporal':
-        raise ValueError('Retired frozen algorithm; run --db-update and rebuild publications with fresh inference.')
     return TemporalPolicy.from_snapshot(options['policy'])
