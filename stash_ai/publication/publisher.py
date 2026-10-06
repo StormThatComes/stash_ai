@@ -151,30 +151,36 @@ class MergePublisher:
 
             # Inference/scan caches are not shared with spawned processes.
             self.store.cache.clear()
-            evidence = iter_parallel_evidence(
-                self.app, self.args.state_db, self.store.scope,
-                [scene_id for scene_id, _ in pending],
-                self.core_policies, self.scene_policies,
-                workers=workers,
-                cache_bytes=int(self.args.ram_cache_gb * 2**30),
-                memory_budget_bytes=int(self.args.ram_budget_gb * 2**30),
-            )
-            completed = 0
-            try:
-                for (scene_id, current), prepared in zip(pending, evidence):
-                    self._merge_one(scene_id, current, prepared)
-                    completed += 1
-                    bar.update(1)
+            cache_share = int(self.args.ram_cache_gb * 2**30) // (workers + 1)
+            budget_share = max(1, int(self.args.ram_budget_gb * 2**30) // (workers + 1))
+            with self.store.cache.temporary_budget(
+                    limit=min(self.store.cache.limit, cache_share), rss_budget=budget_share):
+                evidence = iter_parallel_evidence(
+                    self.app, self.args.state_db, self.store.scope,
+                    [scene_id for scene_id, _ in pending],
+                    self.core_policies, self.scene_policies,
+                    workers=workers,
+                    cache_bytes=int(self.args.ram_cache_gb * 2**30),
+                    memory_budget_bytes=int(self.args.ram_budget_gb * 2**30),
+                )
+                completed = 0
+                try:
+                    for (scene_id, current), prepared in zip(pending, evidence):
+                        self._merge_one(scene_id, current, prepared)
+                        completed += 1
+                        bar.update(1)
+                        self.report.progress(bar, self.stats)
+                except Exception as exc:
+                    # Never retry a second merge pass after a pool failure: some
+                    # scenes may already have been published by the parent.
+                    remaining = len(pending) - completed
+                    self.stats["errors"] += max(1, remaining)
+                    self.report.issue(
+                        'merge workers', '', None, exc,
+                        self.app.services.safe_error(exc, api_key=self.app.STASH_API_KEY))
+                    bar.update(remaining)
                     self.report.progress(bar, self.stats)
-            except Exception as exc:
-                # Never retry a second merge pass after a pool failure: some
-                # scenes may already have been published by the parent.
-                remaining = len(pending) - completed
-                self.stats["errors"] += max(1, remaining)
-                self.report.issue(
-                    'merge workers', '', None, exc,
-                    self.app.services.safe_error(exc, api_key=self.app.STASH_API_KEY))
-                bar.update(remaining)
-                self.report.progress(bar, self.stats)
+                finally:
+                    evidence.close()
         finally:
             bar.close()

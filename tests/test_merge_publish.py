@@ -214,3 +214,39 @@ def test_pool_failure_never_retries_completed_scenes(publication, monkeypatch, c
     assert p.publisher.stats['errors'] == 3 - completed
     assert p.publisher.stats['scenes_synced'] == completed
     assert any('merge workers' in message and 'pool failed' in message for message in p.messages)
+
+
+@pytest.mark.parametrize('failure', [None, RuntimeError, KeyboardInterrupt])
+def test_parent_budget_is_shared_until_workers_close_and_restored(publication, monkeypatch, failure):
+    from stash_ai.runtime.cache import RamCache
+    p = publication
+    p.args.merge_workers = 2
+    p.args.ram_cache_gb, p.args.ram_budget_gb = 3 / 1024, 9 / 1024
+    p.store.cache = RamCache(3 * 2**20, rss_budget=9 * 2**20)
+    monkeypatch.setattr('stash_ai.runtime.memory.process_rss', lambda: 0)
+    closed = []
+    def workers(*args, **kwargs):
+        try:
+            assert p.store.cache.limit == 2**20
+            assert p.store.cache.rss_budget == 3 * 2**20
+            p.store.cache.put('oversized-parent-snapshot', bytes(2 * 2**20))
+            assert p.store.cache.get('oversized-parent-snapshot') is None
+            if failure:
+                raise failure('pool failed')
+            yield '1', ['1'], [], Counter(), None
+            yield '2', ['2'], [], Counter(), None
+        finally:
+            # Pool shutdown completes before the parent can reclaim its budget.
+            assert p.store.cache.limit == 2**20
+            closed.append(True)
+    monkeypatch.setattr(merge_parallel, 'iter_parallel_evidence', workers)
+    if failure is KeyboardInterrupt:
+        with pytest.raises(KeyboardInterrupt):
+            p.publisher.run(scenes('1', '2'))
+    else:
+        p.publisher.run(scenes('1', '2'))
+    assert closed == [True]
+    assert p.store.cache.limit == 3 * 2**20
+    assert p.store.cache.rss_budget == 9 * 2**20
+    p.store.cache.put('after-workers', bytes(2 * 2**20))
+    assert p.store.cache.get('after-workers') is not None

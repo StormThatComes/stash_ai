@@ -73,3 +73,15 @@ def validate_config(app, scene_work: bool = True) -> None:
             raise ValueError("Marker time gaps/tolerances must be finite and nonnegative.")
     if app.AGGREGATION not in {"max", "topk_mean"}:
         raise ValueError("AGGREGATION must be max or topk_mean.")
+
+
+EVIDENCE_SETTINGS = (
+    "APPLY_SCENE_TAGS", "CREATE_MARKERS", "MAX_TAGS", "MARKER_MIN_HITS",
+    "MARKER_MERGE_GAP_SECONDS", "MARKER_MAX_TAGS_PER_FRAME", "MAX_MARKERS_PER_SCENE",
+    "TEMPORAL_POLICY",
+)
+
+
+def evidence_settings(app):
+    """Capture every mutable setting used by evidence replay in spawned workers."""
+    return {name: getattr(app, name) for name in EVIDENCE_SETTINGS}

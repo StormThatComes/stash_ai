@@ -11,27 +11,10 @@ from multiprocessing import get_context
 from pathlib import Path
 
 from stash_ai.runtime.workers import open_read_worker
+from stash_ai.runtime.settings import evidence_settings as runtime_settings
 
 
 _WORKER_CONTEXT = None
-
-_RUNTIME_SETTINGS = (
-    "APPLY_SCENE_TAGS",
-    "CREATE_MARKERS",
-    "MAX_TAGS",
-    "MARKER_MIN_HITS",
-    "MARKER_MERGE_GAP_SECONDS",
-    "MARKER_MAX_TAGS_PER_FRAME",
-    "MAX_MARKERS_PER_SCENE",
-)
-
-
-def runtime_settings(app):
-    """Capture mutable merge settings needed by spawned worker interpreters."""
-    values = {name: getattr(app, name) for name in _RUNTIME_SETTINGS}
-    values["TEMPORAL_POLICY"] = app.TEMPORAL_POLICY
-    return values
-
 
 def _init_worker(state_db, scope, settings, core_policies, scene_policies,
                  cache_bytes, memory_budget_bytes):
