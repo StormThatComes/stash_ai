@@ -87,7 +87,7 @@ def compact_database(path, scope, *, dry_run=False):
             if check != "ok":
                 raise RuntimeError("SQLite quick_check failed after VACUUM.")
 
-    after = inspect_database(path, scope)
-    if not _same_logical_counts(before, after):
-        raise RuntimeError("Database aggregates changed unexpectedly during VACUUM; restore from backup and inspect the DB.")
+        after = inspect_database(path, scope)
+        if not _same_logical_counts(before, after):
+            raise RuntimeError("Database aggregates changed unexpectedly during VACUUM; restore from backup and inspect the DB.")
     return before, after

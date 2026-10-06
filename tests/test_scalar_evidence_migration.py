@@ -15,14 +15,16 @@ from stash_ai.storage.store import StateStore
 from tests.test_result_thresholds import outputs
 
 
-def old_snapshot(signatures):
+def old_snapshot(signatures, scene_signature):
     return encode({FORMAT_KEY: 4, 'proofs': [], 'snapshot': {
         'owned_ids': ['native-marker'], 'contributions': [{
-            'source': 'wd', 'support_context': {'wd': signatures},
+            'source': 'wd', 'tag': 'core', 'score': .9, 'start': 0., 'end': 1.,
+            'meta': {'origin': 'test'}, 'evidence_signature': signatures[0], 'support_context': {'wd': signatures},
             'source_evidence': {'wd': {'signatures': signatures}},
-            'scene_evidence': [{'derived': 'shared_scene_frames',
-                'scene_context': {'wd': [signatures[0]]},
-                'frame_context': {'wd': [signatures[0]]}}],
+            'scene_evidence': [{'source': 'wd', 'tag': 'core', 'score': .9, 'meta': {'origin': 'test'},
+                'derived': 'shared_scene_frames',
+                'scene_context': {'wd': [scene_signature]},
+                'frame_context': {'wd': [scene_signature]}}],
         }]}})
 
 
@@ -44,7 +46,8 @@ def test_v19_conversion_keeps_active_inference_thresholds_and_exact_pins(tmp_pat
     old = outputs(signature='old')
     signature = marker_segment_signature(old['markers'])
     signatures = [signature, 'second-pin'] if multiple else [signature]
-    blob = old_snapshot(signatures)
+    scene_signature = marker_segment_signature(old['scene'])
+    blob = old_snapshot(signatures, scene_signature)
     for scope in ('first', 'second'):
         with StateStore(path, scope) as store:
             current = deepcopy(old)
@@ -72,7 +75,7 @@ def test_v19_conversion_keeps_active_inference_thresholds_and_exact_pins(tmp_pat
         assert 'inference' not in {row[1] for row in connection.execute('PRAGMA table_info(result_index)')}
     for scope in ('first', 'second'):
         with StateStore(path, scope) as store:
-            assert pinned(store, '1') == (set() if multiple else {('wd', signature)})
+            assert pinned(store, '1') == (set() if multiple else {('wd', signature), ('wd', scene_signature)})
             if location == 'recovery':
                 saved = store.unpack_snapshot(store.connection.execute(
                     'SELECT data FROM recovery_publications WHERE scope=?', (scope,)).fetchone()[0])
@@ -82,7 +85,7 @@ def test_v19_conversion_keeps_active_inference_thresholds_and_exact_pins(tmp_pat
                     f'SELECT {column} FROM snapshots WHERE scope=?', (scope,)).fetchone()[0])
             assert saved['owned_ids'] == ['native-marker']
             item = saved['contributions'][0]
-            assert item['scene_evidence'][0]['scene_context'] == {'wd': signature}
+            assert item['scene_evidence'][0]['scene_context'] == {'wd': scene_signature}
             assert 'frame_context' not in item['scene_evidence'][0]
             if multiple:
                 assert 'retired_support_context' not in item and 'retired_signatures' not in item['source_evidence']['wd']
@@ -105,13 +108,13 @@ def test_invalid_context_rolls_back_snapshot_and_index_migration(tmp_path):
     path = tmp_path/'state.sqlite3'
     with StateStore(path, 'scope') as store:
         store.put('1', 'wd', outputs())
-        blob = old_snapshot([None])
+        blob = old_snapshot([None], 'scene-proof')
         store.connection.execute('INSERT INTO snapshots VALUES (?,?,?,?,?)', ('scope', '1', 'markers', blob, None))
         store.connection.commit()
     with sqlite3.connect(path) as connection:
         old_index(connection)
         before = connection.execute('SELECT * FROM snapshots').fetchall()
-    with pytest.raises(ValueError, match='historical proof signature'):
+    with pytest.raises(ValueError, match='historical .*signature'):
         update_database(path)
     with sqlite3.connect(path) as connection:
         assert connection.execute('PRAGMA user_version').fetchone() == (19,)

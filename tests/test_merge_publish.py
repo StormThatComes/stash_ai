@@ -63,7 +63,8 @@ def publication(tmp_path, monkeypatch):
     monkeypatch.setattr(merge_parallel, 'iter_parallel_evidence', workers)
     with StateStore(args.state_db, 'scope') as store, MergeDiagnostics(report) as diagnostics:
         publisher = MergePublisher(
-            app, args, store, object(), object(), {}, {},
+            app, args, store, SimpleNamespace(find_scene_for_merge=lambda identifier:
+                dict(id=identifier, tags=[], scene_markers=[])), object(), {}, {},
             publication_key='policy', stats=Counter(), report=report)
         yield SimpleNamespace(
             publisher=publisher, app=app, args=args, store=store,
@@ -214,3 +215,78 @@ def test_pool_failure_never_retries_completed_scenes(publication, monkeypatch, c
     assert p.publisher.stats['errors'] == 3 - completed
     assert p.publisher.stats['scenes_synced'] == completed
     assert any('merge workers' in message and 'pool failed' in message for message in p.messages)
+
+
+@pytest.mark.parametrize('failure', [None, RuntimeError, KeyboardInterrupt])
+def test_parent_budget_is_shared_until_workers_close_and_restored(publication, monkeypatch, failure):
+    from stash_ai.runtime.cache import RamCache
+    p = publication
+    p.args.merge_workers = 2
+    p.args.ram_cache_gb, p.args.ram_budget_gb = 3 / 1024, 9 / 1024
+    p.store.cache = RamCache(3 * 2**20, rss_budget=9 * 2**20)
+    monkeypatch.setattr('stash_ai.runtime.memory.process_rss', lambda: 0)
+    closed = []
+    def workers(*args, **kwargs):
+        try:
+            assert p.store.cache.limit == 2**20
+            assert p.store.cache.rss_budget == 3 * 2**20
+            p.store.cache.put('oversized-parent-snapshot', bytes(2 * 2**20))
+            assert p.store.cache.get('oversized-parent-snapshot') is None
+            if failure:
+                raise failure('pool failed')
+            yield '1', ['1'], [], Counter(), None
+            yield '2', ['2'], [], Counter(), None
+        finally:
+            # Pool shutdown completes before the parent can reclaim its budget.
+            assert p.store.cache.limit == 2**20
+            closed.append(True)
+    monkeypatch.setattr(merge_parallel, 'iter_parallel_evidence', workers)
+    if failure is KeyboardInterrupt:
+        with pytest.raises(KeyboardInterrupt):
+            p.publisher.run(scenes('1', '2'))
+    else:
+        p.publisher.run(scenes('1', '2'))
+    assert closed == [True]
+    assert p.store.cache.limit == 3 * 2**20
+    assert p.store.cache.rss_budget == 9 * 2**20
+    p.store.cache.put('after-workers', bytes(2 * 2**20))
+    assert p.store.cache.get('after-workers') is not None
+
+
+@pytest.mark.parametrize('workers', [1, 4])
+@pytest.mark.parametrize('failure', ['missing', 'read_error', 'wrong_id'])
+def test_reuse_refresh_failure_is_reported_per_scene_without_publishing(publication, monkeypatch, workers, failure):
+    p = publication
+    p.args.merge_workers = workers
+    p.reasons.update({'1': 'reused', '2': 'reused'})
+    def find(identifier):
+        if identifier == '1':
+            if failure == 'read_error':
+                raise OSError('fresh read failed')
+            if failure == 'missing':
+                return None
+            return dict(id='wrong', tags=[], scene_markers=[])
+        return dict(id=identifier, tags=[], scene_markers=[])
+    monkeypatch.setattr(p.publisher.stash, 'find_scene_for_merge', find)
+    p.publisher.run(scenes('1', '2', '3'))
+    assert p.writes == ['3']
+    assert p.publisher.stats['errors'] == 1
+    assert p.publisher.stats['merge_reused'] == 1
+
+
+@pytest.mark.parametrize('workers', [1, 4])
+def test_reuse_refresh_uses_bounded_bulk_queries_and_no_per_scene_reads(publication, monkeypatch, workers):
+    p = publication
+    p.args.merge_workers = workers
+    p.app.SCENE_PAGE_SIZE = 2
+    p.reasons.update({str(i): 'reused' for i in range(5)})
+    batches = []
+    def bulk(ids):
+        batches.append(ids)
+        return {identifier: dict(id=identifier, tags=[], scene_markers=[]) for identifier in ids}
+    monkeypatch.setattr(p.publisher.stash, 'merge_snapshots', bulk, raising=False)
+    monkeypatch.setattr(p.publisher.stash, 'find_scene_for_merge', lambda *_: pytest.fail('redundant per-scene read'))
+    p.publisher.run(scenes('0', '1', '2', '3', '4'))
+    assert batches == [['0', '1'], ['2', '3'], ['4']]
+    assert p.publisher.stats['merge_reused'] == 5
+    assert not p.writes and not p.computed

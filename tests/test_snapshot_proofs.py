@@ -32,14 +32,17 @@ pytestmark = pytest.mark.usefixtures('reset_temporal')
 
 
 def shared_snapshot():
+    from stash_ai.evidence.identity import marker_segment_signature
+    signature = marker_segment_signature(outputs()['markers'])
     proof = dict(intervals=[[float(i), float(i)+.75] for i in range(200)],
                  sample_times=[0., 1., 2.], hits=200,
                  runs=[[0, 200, 0., 200.]], run_group='original-input',
                  sources={'wd': dict(score=.9, intervals=[[0., 200.]],
-                                     sample_times=[0., 1.], signature='original-signature')})
+                                     sample_times=[0., 1.], signature=signature)})
     contributions = [span('wd', 0, 200, tag, extras=['extra']) for tag in ('first', 'second')]
     for item in contributions:
         item['extra_support'] = {'extra': proof}
+        item['evidence_signature'] = signature
     contributions[-1]['extra_support']['unique'] = dict(intervals=[[10., 11.]], sample_times=[10.])
     return dict(contributions=contributions, owned_ids=['manual-id'], cleanup_generation=4)
 
@@ -236,6 +239,7 @@ def test_lazy_cleanup_masks_shared_proofs_and_recovery_without_rewriting_blobs(t
     saved = shared_snapshot()
     saved['cleanup_generation'] = 0
     with StateStore(path, 'scope', cache_bytes=2**20) as store:
+        store.put('1', 'wd', outputs())
         store.publish('1', {'markers': saved})
         store.prepare('1', {'markers': saved})
         recovery.abandon(store, lambda _: None)

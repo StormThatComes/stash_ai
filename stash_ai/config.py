@@ -51,6 +51,8 @@ def load_exclusion_policy(path: Path, key: str) -> dict[str, frozenset[str]]:
                     or "\n" in label or "\r" in label
                     or label.startswith("ai:") or any(label.startswith(source.code + ':') for source in SOURCES.values())):
                 raise ValueError(f"Invalid excluded tag {label!r}; use a raw label without jt:/wd:/dtq:/op:/ai:.")
+            from stash_ai.evidence.labels import raw_label
+            raw_label(label)
         if len(entries) != len(set(entries)):
             raise ValueError(f"Duplicate label in {context}.")
         return frozenset(entries)

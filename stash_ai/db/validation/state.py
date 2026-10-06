@@ -19,18 +19,25 @@ def check_state_payloads(db, tables, errors, progress=None):
         ("checkpoint_analysis", "data", dict),
         ("recovery_publications", "data", dict),
     )
+    from .publications import validate_snapshot, proof_checker
+    missing_proof = proof_checker(db)
     checked = 0
     for table, column, expected in specs:
         if table not in tables or column not in column_names(db, table):
             continue
-        details = ',signature,kind' if table == 'inference_archive' else ',NULL,NULL'
-        for blob, signature, kind in db.execute(f"SELECT {column}{details} FROM {table} WHERE {column} IS NOT NULL"):
+        details = (',signature,kind,scope,scene' if table == 'inference_archive'
+                   else ',NULL,kind,scope,scene' if table in ('snapshots', 'recovery_publications')
+                   else ',NULL,NULL,NULL,NULL')
+        for blob, signature, kind, scope, scene in db.execute(f"SELECT {column}{details} FROM {table} WHERE {column} IS NOT NULL"):
             checked += 1
             tick(progress)
             try:
                 if table in ('snapshots', 'recovery_publications'):
                     from stash_ai.storage.snapshots import decode
                     payload = decode(blob)
+                    validate_snapshot(payload, kind)
+                    if missing_proof(payload, scope, scene, kind):
+                        errors['snapshot_proof_missing'] += 1
                 else:
                     payload = decoded_payload(blob, expected)
                 if table == 'inference_archive':
@@ -42,6 +49,9 @@ def check_state_payloads(db, tables, errors, progress=None):
                     from stash_ai.evidence.identity import marker_segment_signature
                     if marker_segment_signature(payload) != signature:
                         raise ValueError('Archived proof signature mismatch.')
+                if table == 'checkpoint_analysis':
+                    from stash_ai.evidence.temporal.statistics import validate_checkpoint
+                    validate_checkpoint(payload)
                 if table == "checkpoint_frames" and not valid_frames(payload, checkpoint=True):
                     raise ValueError("Invalid checkpoint frame evidence.")
             except (KeyError, TypeError, ValueError, UnicodeDecodeError, json.JSONDecodeError, zlib.error):

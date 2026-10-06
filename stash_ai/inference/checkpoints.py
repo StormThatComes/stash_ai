@@ -45,7 +45,7 @@ class Checkpoint:
         if not 0 <= processed <= self.total or not 0 <= rows <= processed:
             raise ValueError("Invalid checkpoint dimensions.")
         top = np.frombuffer(zlib.decompress(blob), dtype="<f4").reshape(rows, self.labels).copy()
-        if not np.isfinite(top).all():
+        if not np.isfinite(top).all() or ((top < 0) | (top > 1)).any():
             raise ValueError("Invalid checkpoint scores.")
         frames = []
         for data, in self.store.connection.execute(
@@ -58,6 +58,12 @@ class Checkpoint:
             "SELECT data FROM " + self.store.table('checkpoint_analysis') + " WHERE scope=? AND scene=? AND model=?",
             (self.store.scope, self.scene, self.model)).fetchone()
         self.analysis = decode(state[0]) if state else None
+        if self.analysis is not None:
+            from stash_ai.evidence.temporal.statistics import validate_checkpoint
+            validate_checkpoint(self.analysis, processed=processed, labels=self.labels)
+        from stash_ai.db.payloads import valid_frames
+        if not valid_frames(frames, checkpoint=True):
+            raise ValueError('Invalid checkpoint frame evidence; use --restart.')
         return processed, top, frames
 
     def record(self, processed, top_scores, frames, analysis=None, *, scene_frames=None):

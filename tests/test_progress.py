@@ -120,7 +120,7 @@ def test_automatic_input_invalidation_never_publishes_fresh_and_stale_model_mix(
         snapshots={kind:state.snapshot("1",kind)[0] for kind in ("scene","markers")}
 
     # Same media URLs, but changed cue timing invalidates both models' inference signatures.
-    p.cues=[Cue(c.start,c.end+.1,c.image,c.rect) for c in p.cues]
+    p.cues=[Cue(c.start,c.end-.1,c.image,c.rect) for c in p.cues]
     p.scores["wd"][:]=0;p.scores["dtq"][:]=0
     fail={"dtq":True}
     def load(settings,*_):
@@ -188,7 +188,7 @@ def test_analysis_version_restarts_only_partial_model_and_preserves_completed_re
 def test_vtt_timing_change_invalidates_but_scene_threshold_reuses_frames(pipeline,monkeypatch):
     p=pipeline
     assert app.main(p.args)==0
-    p.cues=[Cue(c.start,c.end+.1,c.image,c.rect) for c in p.cues]
+    p.cues=[Cue(c.start,c.end-.1,c.image,c.rect) for c in p.cues]
     assert app.main(p.args)==0 and len(p.loaded)==2
     original=app.services.load_model_settings
     from dataclasses import replace

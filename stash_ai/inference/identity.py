@@ -1,26 +1,37 @@
 """Model identity used by retained evidence and checkpoint signatures."""
 from pathlib import Path
+import hashlib
 
 from stash_ai.models import ModelSettings
 from stash_ai.signatures import digest
 from stash_ai.backends.vocabulary import metadata_files, weight_files
 
-PREDICTION_FORMAT = 3
+PREDICTION_FORMAT = 4
 
 
-def model_identity(app, config: ModelSettings, vocabulary):
+def model_identity(app, config: ModelSettings, vocabulary, *, known_files=()):
+    """Hash assets once per run; only retry missing files after model download.
+
+    Callers must not reuse known_files across runs: same-size replacements with
+    preserved timestamps still need a new content hash.
+    """
+    known = {path: checksum for path, checksum in known_files if checksum is not None}
     def stamp(path):
         path = Path(path).resolve()
         try:
-            stat = path.stat()
-            return [str(path), stat.st_size, stat.st_mtime_ns]
+            checksum = known.get(str(path))
+            if checksum is None:
+                with path.open('rb') as stream:
+                    checksum = hashlib.file_digest(stream, 'sha256').hexdigest()
+            return [str(path), checksum]
         except FileNotFoundError:
-            return [str(path), None, None]
+            return [str(path), None]
     files = [stamp(config.model_dir / name) for name in (*metadata_files(config.source), *weight_files(config))]
     loader = {}
     if config.source.key == "joytag":
         from stash_ai.backends.joytag import LOADER_REVISION, LOADER_SHA256
-        loader = {"loader": {"revision": LOADER_REVISION, "sha256": LOADER_SHA256}}
+        loader = {"loader": {"revision": LOADER_REVISION, "sha256": LOADER_SHA256},
+                  "preprocessing": {"mean": list(app.JOYTAG_CLIP_MEAN), "std": list(app.JOYTAG_CLIP_STD)}}
     identity = {"format": PREDICTION_FORMAT, "source": config.source.key, "repo": config.source.repo,
             "revision": config.source.revision, "files": files, **loader,
             # Checkpoint score columns depend on label order, not just the set.

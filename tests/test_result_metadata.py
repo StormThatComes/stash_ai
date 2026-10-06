@@ -300,7 +300,8 @@ def test_metadata_is_small_scoped_and_does_not_invalidate_merge(tmp_path):
     for scope in ('scope', 'other'):
         with StateStore(path, scope) as store:
             saved = outputs(signature=scope)
-            saved['markers']['items'] *= 1000
+            saved['markers']['items'] = [dict(start=i, end=i+1, tags=[['core', .9]])
+                                         for i in range(1000)]
             store.put('1', 'wd', saved)
             with store.connection:
                 performance_merge_checks.record_check(store, '1', 'policy', 'fingerprint')

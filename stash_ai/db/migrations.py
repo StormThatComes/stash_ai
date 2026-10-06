@@ -22,12 +22,13 @@ def migrate(database):
         for scope, scene, model, kind, payload, version, data in db.execute(
                 'SELECT r.scope,r.scene,r.model,r.kind,r.data,m.format,m.data '
                 'FROM results AS r LEFT JOIN result_metadata AS m USING(scope,scene,model,kind)'):
+            derived = encode(summarize(decode(payload)))
             if version == FORMAT:
                 try:
-                    decode_metadata(data)
-                    continue
+                    if encode(decode_metadata(data)) == derived:
+                        continue
                 except (TypeError, ValueError):
                     pass
             db.execute('INSERT OR REPLACE INTO result_metadata VALUES (?,?,?,?,?,?)',
-                       (scope, scene, model, kind, FORMAT, encode(summarize(decode(payload)))))
+                       (scope, scene, model, kind, FORMAT, derived))
         db.execute(f'PRAGMA user_version={LATEST_SCHEMA_VERSION}')
