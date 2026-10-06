@@ -1,6 +1,4 @@
 """Offline behavior tests. Run: python -m pytest -q tests/test_multimodel.py"""
-from functools import partial
-from stash_ai.tools.namespace_migration import main as namespace_main
 
 from copy import deepcopy
 from pathlib import Path
@@ -15,8 +13,7 @@ from stash_ai.evidence.labels import AI
 from stash_ai.config import vocabulary_digest
 from stash_ai.inference import prediction, sprites
 from tests.helpers.runtime import runtime as app
-migrate_namespace = partial(namespace_main, runtime=app)
-from stash_ai.tools.legacy_namespaces import NAMESPACES as LEGACY_NAMESPACES
+from tests.helpers.legacy_namespaces import NAMESPACES as LEGACY_NAMESPACES
 from stash_ai.models import (
     JOYTAG,
     WD,
@@ -59,28 +56,6 @@ def test_cleanup_all_leaves_retired_namespaces_untouched(tmp_path,monkeypatch,dr
     if dry: assert stash.scene==before and not stash.writes
     else:
         assert stash.scene == legacy
-
-
-@pytest.mark.parametrize("fail_wd",[False,True])
-def test_main_all_releases_models_and_preserves_failed_source(monkeypatch,tmp_path,fail_wd):
-    stash=Stash();stash.scene["tags"].append(stash.tag("wd:old"));old=stash.marker(WD,"old","old")
-    vocab=Vocabulary(["tag"],{"tag":"General"})
-    cues=[Cue(i,i+1,"x",(0,0,1,1)) for i in range(2)]
-    monkeypatch.setattr(app.services,"create_stash_client",lambda _:stash)
-    monkeypatch.setattr(app.services,"load_vocabulary",lambda _:vocab)
-    monkeypatch.setattr(sprites,"fetch_cues",lambda *args:(cues,2))
-    monkeypatch.setattr(sprites,"iter_sprite_frames",lambda *args:sprite_frames(cues))
-    loaded=[]
-    def load(settings,vocabulary,prepare):
-        assert all(t.closed for t in loaded)
-        model=Tagger(settings,vocabulary.labels,np.full((2,1),np.nan if fail_wd and settings.source==WD else .9,np.float32))
-        loaded.append(model);return model
-    monkeypatch.setattr(app.services,"load_tagger",load)
-    args=["--models","all","--no-hierarchy","--state-db",str(tmp_path/"state.sqlite3")]
-    assert migrate_namespace(args)==int(fail_wd)
-    assert all(t.closed for t in loaded) and len(loaded)==len(SOURCES)
-    assert {t["name"] for t in stash.scene["tags"]}==({"wd:old"} if fail_wd else {"ai:tag"})
-    assert (old in stash.scene["scene_markers"])==fail_wd
 
 
 @pytest.mark.parametrize("aggregation",["max","topk_mean"])

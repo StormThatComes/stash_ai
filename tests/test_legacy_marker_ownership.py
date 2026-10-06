@@ -4,7 +4,7 @@ import inspect
 from stash_ai.models import ModelSource, SOURCES
 from stash_ai.evidence.labels import source_codes
 from stash_ai.publication.markers import owned_marker
-from stash_ai.tools.legacy_namespaces import NAMESPACES
+from tests.helpers.legacy_namespaces import NAMESPACES
 
 
 def test_historical_ownership_requires_explicit_namespace():

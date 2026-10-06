@@ -1,7 +1,5 @@
 """Global exclusions across cached outputs, shared proofs and Stash cleanup."""
 from tests.helpers.evidence import empty_policies as empty_tag_policies
-from functools import partial
-from stash_ai.tools.namespace_migration import main as namespace_main
 
 from tests.helpers.temporal import policy_args
 
@@ -16,7 +14,6 @@ from stash_ai.commands import hierarchy as hierarchy_commands
 from stash_ai.inference import sprites
 from stash_ai.cleanup import evidence as cleanup_evidence
 from tests.helpers.runtime import runtime as app
-migrate_namespace = partial(namespace_main, runtime=app)
 from stash_ai.evidence import pipeline as merge
 import stash_ai.evidence.intervals as merge_intervals
 import stash_ai.evidence.labels as merge_labels
@@ -234,21 +231,6 @@ def test_missing_canonical_marker_policy_is_not_redirected_to_an_old_filename(tm
     with pytest.raises(FileNotFoundError, match='marker_core_exclusions.yml'):
         app.services.load_exclusion_policy(runtime.MARKER_CORE_EXCLUSIONS_FILE, 'excluded_core_tags')
     assert app.services.load_exclusion_policy(old, 'excluded_core_tags')['wd'] == frozenset({'common'})
-
-
-def test_pruned_legacy_extra_id_cannot_reappear_or_break_the_next_merge(pipeline, tmp_path, monkeypatch):
-    p = pipeline
-    old = p.stash.marker(WD, 'legacy', 'legacy')
-    old['tags'].append(p.stash.tag('ai:blocked'))
-    path = policy_file(tmp_path, ['blocked'])
-    assert migrate_namespace([*p.args, '--scene-tag-exclusions', str(path)]) == 0
-    args = [*p.args, '--merge-only', '--scene-tag-exclusions', str(path)]
-    monkeypatch.setattr(app.services, 'load_tagger', lambda *args: pytest.fail('legacy merge loaded model'))
-    assert app.main(args) == 0
-    assert 'ai:blocked' not in p.stash.tags
-    p.stash.writes.clear()
-    assert app.main(args) == 0 and not p.stash.writes
-    assert 'ai:blocked' not in names_in_scene(p.stash)
 
 
 def test_cleanup_pruning_flag_is_supported_and_does_not_load_assets(pipeline, monkeypatch):

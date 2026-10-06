@@ -90,7 +90,7 @@ def application_files():
 
 
 def flat_installation(root):
-    files = {name: ('# previous ' + name + '\n').encode() for name in updater.LEGACY_MODULES}
+    files = {name: ('# previous ' + name + '\n').encode() for name in ("stash_merge.py", "joytag_stash_markers.py")}
     files['stash_ai.py'] = b"print('previous application')\n"
     files[updater.UPDATER] = b'# previous updater\n'
     for name, data in files.items():
@@ -537,65 +537,13 @@ def test_failed_database_package_migration_restores_module(tmp_path, monkeypatch
     assert result.returncode == 0, result.stderr
 
 
-def test_flat_installation_moves_modules_and_preserves_user_data(tmp_path):
-    flat_installation(tmp_path)
-    preserved = {'tagger_sources.sqlite3': b'cached inference', '.env': b'credentials',
-                 'tagger_models.yml': b'local configuration', 'stash_custom.py': b'user script'}
-    for name, data in preserved.items():
-        (tmp_path / name).write_bytes(data)
-    (tmp_path / 'models').mkdir()
-    (tmp_path / 'models/weights.bin').write_bytes(b'weights')
-    assert updater.update(tmp_path, Remote(application_files()), migrate_flat_layout=True) == 0
-    assert not any((tmp_path / name).exists() for name in updater.LEGACY_MODULES)
-    assert all((tmp_path / name).read_bytes() == data for name, data in preserved.items())
-    assert (tmp_path / 'models/weights.bin').read_bytes() == b'weights'
-    # Absolute invocation from another working directory still locates the package.
-    result = subprocess.run([sys.executable, str(tmp_path / 'stash_ai.py'), '--help'],
-                            cwd=tmp_path.parent, capture_output=True, text=True)
-    assert result.returncode == 0, result.stderr
 
 
-def test_modified_legacy_module_requires_force_and_is_backed_up(tmp_path):
-    flat_installation(tmp_path)
-    local = b'# my modifications\n'
-    (tmp_path / 'stash_merge.py').write_bytes(local)
-    before = snapshot(tmp_path)
-    remote = Remote()
-    with pytest.raises(updater.UpdateError, match='force-code'):
-        updater.update(tmp_path, remote, migrate_flat_layout=True)
-    assert snapshot(tmp_path) == before
-    assert updater.update(tmp_path, remote, force_code=True, migrate_flat_layout=True) == 0
-    assert not (tmp_path / 'stash_merge.py').exists()
-    assert local in [p.read_bytes() for p in (tmp_path / updater.META / 'transactions').glob('*/old-*')]
 
 
-def test_failed_layout_migration_restores_flat_installation(tmp_path, monkeypatch):
-    flat_installation(tmp_path)
-    before = snapshot(tmp_path)
-    previous_state = (tmp_path / updater.STATE).read_bytes()
-    identity, _ = stage(tmp_path, Remote(), migrate_flat_layout=True)
-    original = updater.put_entry
-    failed = False
-
-    def fail_first_package_file(root, entry, data):
-        nonlocal failed
-        if entry.path.startswith('stash_ai/') and not failed:
-            failed = True
-            raise OSError('package write failed')
-        original(root, entry, data)
-
-    monkeypatch.setattr(updater, 'put_entry', fail_first_package_file)
-    with pytest.raises(OSError, match='package write failed'):
-        updater.apply_transaction(tmp_path, identity)
-    assert snapshot(tmp_path) == before
-    assert (tmp_path / updater.STATE).read_bytes() == previous_state
-    assert not (tmp_path / updater.JOURNAL).exists()
 
 
-def test_root_only_upgrade_explains_second_pass_then_installs_package(tmp_path):
-    # A pre-package updater sees only root files in the new commit. Reproduce
-    # its completed first pass; the new updater must then install missing files
-    # even though the recorded commit SHA already equals main.
+def test_root_only_installation_launch_explains_bridge(tmp_path):
     files = application_files()
     root_files = {name: data for name, data in files.items() if '/' not in name}
     for name, data in root_files.items():
@@ -606,12 +554,14 @@ def test_root_only_upgrade_explains_second_pass_then_installs_package(tmp_path):
     result = subprocess.run([sys.executable, str(tmp_path / 'stash_ai.py'), '--help'],
                             cwd=tmp_path, capture_output=True, text=True)
     assert result.returncode == 1
-    assert '--migrate-flat-layout' in result.stderr and 'update_stash_ai.py' in result.stderr
+    assert updater.LAYOUT_BRIDGE_COMMIT in result.stderr
     assert 'Traceback' not in result.stderr
-    assert updater.update(tmp_path, Remote(files), migrate_flat_layout=True) == 0
-    result = subprocess.run([sys.executable, str(tmp_path / 'stash_ai.py'), '--help'],
-                            cwd=tmp_path, capture_output=True, text=True)
-    assert result.returncode == 0, result.stderr
+    before = snapshot(tmp_path)
+    remote = Remote(files)
+    with pytest.raises(updater.UpdateError, match=updater.LAYOUT_BRIDGE_COMMIT):
+        updater.update(tmp_path, remote)
+    assert snapshot(tmp_path) == before
+    assert not any(call.startswith('git/blobs/') for call in remote.calls)
 
 
 @pytest.mark.parametrize("option", ["check", "dry_run"])
@@ -991,48 +941,30 @@ def test_unavailable_helper_preserves_offline_recovery(tmp_path, monkeypatch):
     assert updater.recover(tmp_path) == 0
 
 
-@pytest.mark.parametrize("name", sorted(updater.RETIRED_FILES))
-@pytest.mark.parametrize("tracked", [False, True])
-def test_retired_files_are_removed_with_history_and_backups(tmp_path, name, tracked):
+@pytest.mark.parametrize("name", ['stash_ai/runs/separate.py', 'stash_ai/publication/planning/separate_tags.py'])
+def test_tracked_obsolete_package_files_are_removed_with_backups(tmp_path, name):
     remote = Remote()
-    installed(tmp_path, remote)
-    old = b"# retired installation file\n"
-    (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
-    (tmp_path / name).write_bytes(old)
+    old = b"# obsolete package module\n"
+    previous = dict(remote.files, **{name: old})
+    installed(tmp_path, Remote(previous))
     import py_compile
     bytecode = Path(py_compile.compile(str(tmp_path / name), doraise=True))
-    assert bytecode.exists()
-    if tracked:
-        state = updater.load_state(tmp_path)
-        for key in ("baseline", "upstream"):
-            state[key][name] = updater.blob_sha(old)
-        updater.atomic_write(tmp_path / updater.STATE, updater.json_bytes(state))
     before = snapshot(tmp_path)
-    assert updater.update(tmp_path, remote, dry_run=True, migrate_flat_layout=not tracked) == (0 if tracked else 2)
+    assert updater.update(tmp_path, remote, dry_run=True) == 0
     assert snapshot(tmp_path) == before
-    if not tracked:
-        with pytest.raises(updater.UpdateError, match="force-code"):
-            updater.update(tmp_path, remote, migrate_flat_layout=True)
-        assert snapshot(tmp_path) == before
-    assert updater.update(tmp_path, remote, force_code=not tracked, migrate_flat_layout=not tracked) == 0
-    assert not (tmp_path / name).exists()
-    assert not bytecode.exists()
-    assert all(name not in updater.load_state(tmp_path)[key] for key in ("baseline", "upstream"))
-    assert old in [p.read_bytes() for p in (tmp_path / updater.META / "transactions").glob("*/old-*")]
-    if name in remote.files:
-        assert updater.blob_sha(remote.files[name]) not in {
-            c.split("/")[-1] for c in remote.calls if c.startswith("git/blobs/")}
+    assert updater.update(tmp_path, remote) == 0
+    assert not (tmp_path / name).exists() and not bytecode.exists()
+    assert all(name not in updater.load_state(tmp_path)[key] for key in ('baseline', 'upstream'))
+    assert old in [p.read_bytes() for p in (tmp_path / updater.META / 'transactions').glob('*/old-*')]
 
 
-def test_interrupted_retired_file_removal_can_roll_back(tmp_path):
+def test_interrupted_obsolete_package_removal_can_roll_back(tmp_path):
     remote = Remote()
-    installed(tmp_path, remote)
-    name = "joytag_stash_markers.py"
-    old = b"# old launcher\n"
-    (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
-    (tmp_path / name).write_bytes(old)
-    identity, directory = stage(tmp_path, remote, force_code=True, migrate_flat_layout=True)
-    updater.journal_write(tmp_path, identity, "applying")
+    name = 'stash_ai/runs/separate.py'
+    old = b"# obsolete package module\n"
+    installed(tmp_path, Remote(dict(remote.files, **{name: old})))
+    identity, directory = stage(tmp_path, remote)
+    updater.journal_write(tmp_path, identity, 'applying')
     (tmp_path / name).unlink()
     assert updater.recover(tmp_path) == 0
     assert (tmp_path / name).read_bytes() == old
@@ -1134,7 +1066,7 @@ assert not {'torch', 'numpy', 'onnxruntime', 'tqdm'} & set(sys.modules)
     assert result.returncode == 0, result.stderr
 
 
-@pytest.mark.parametrize('name', ['stash_custom.py', 'stash_future_compat.py', 'stash_unknown.py'])
+@pytest.mark.parametrize('name', ['stash_custom.py', 'stash_merge.py', 'joytag_stash_markers.py'])
 def test_unknown_flat_paths_are_rejected_in_history_and_recovery_plans(tmp_path, name):
     remote = Remote()
     installed(tmp_path, remote)
@@ -1149,13 +1081,13 @@ def test_unknown_flat_paths_are_rejected_in_history_and_recovery_plans(tmp_path,
     ]}
     with pytest.raises(updater.UpdateError, match='Invalid transaction plan'):
         updater.transaction_entries(tmp_path, transaction)
-    assert not updater.historical_file(name)
+    assert not updater.allowed(name)
 
 
 def test_current_update_does_not_probe_untracked_flat_or_retired_files(tmp_path, monkeypatch):
     remote = Remote()
     installed(tmp_path, remote)
-    untracked = updater.LEGACY_MODULES | updater.RETIRED_FILES
+    untracked = {'stash_merge.py', 'joytag_stash_markers.py', 'stash_ai/untracked_old.py'}
     for name in untracked:
         path = tmp_path / name
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -1172,56 +1104,39 @@ def test_current_update_does_not_probe_untracked_flat_or_retired_files(tmp_path,
     assert all((tmp_path / name).exists() for name in untracked)
 
 
-def test_tracked_flat_layout_requires_explicit_migration_before_downloading(tmp_path):
+def test_tracked_flat_layout_requires_bridge_without_downloading(tmp_path):
     flat_installation(tmp_path)
     remote = Remote()
-    before = snapshot(tmp_path)
-    state = (tmp_path / updater.STATE).read_bytes()
-    with pytest.raises(updater.UpdateError, match='--migrate-flat-layout'):
+    before = snapshot(tmp_path), (tmp_path / updater.STATE).read_bytes()
+    with pytest.raises(updater.UpdateError, match=updater.LAYOUT_BRIDGE_COMMIT):
         updater.update(tmp_path, remote, force_code=True)
-    assert snapshot(tmp_path) == before
-    assert (tmp_path / updater.STATE).read_bytes() == state
+    assert (snapshot(tmp_path), (tmp_path / updater.STATE).read_bytes()) == before
     assert not (tmp_path / updater.JOURNAL).exists()
-    assert not any(call.startswith('git/blobs/') for call in remote.calls)
-    assert updater.update(tmp_path, remote, dry_run=True, migrate_flat_layout=True) == 0
-    assert snapshot(tmp_path) == before
-    assert (tmp_path / updater.STATE).read_bytes() == state
+    assert not remote.calls
 
 
-def test_explicit_migration_is_idempotent_and_keeps_unknown_user_scripts(tmp_path):
-    flat_installation(tmp_path)
-    custom = tmp_path / 'stash_custom.py'
-    custom.write_bytes(b'USER_CODE = True\n')
-    remote = Remote()
-    assert updater.update(tmp_path, remote, migrate_flat_layout=True) == 0
-    state = (tmp_path / updater.STATE).read_bytes()
-    remote.calls.clear()
-    assert updater.update(tmp_path, remote, migrate_flat_layout=True) == 0
-    assert (tmp_path / updater.STATE).read_bytes() == state
-    assert not any(call.startswith('git/blobs/') for call in remote.calls)
-    assert custom.read_bytes() == b'USER_CODE = True\n'
-    # Normal updates after migration do not reclaim a newly created same-name file.
-    (tmp_path / 'stash_merge.py').write_bytes(b'NEW_USER_CODE = True\n')
-    assert updater.update(tmp_path, remote, force_code=True) == 0
-    assert (tmp_path / 'stash_merge.py').read_bytes() == b'NEW_USER_CODE = True\n'
+def test_removed_layout_flag_is_rejected_before_updating(tmp_path, monkeypatch):
+    monkeypatch.setattr(updater, 'GitHub', lambda *args: pytest.fail('contacted GitHub'))
+    with pytest.raises(SystemExit) as rejected:
+        updater.main(['--install-dir', str(tmp_path), '--migrate-flat-layout'])
+    assert rejected.value.code == 2
 
 
-def test_known_flat_recovery_journal_can_restore_deleted_module(tmp_path):
-    flat_installation(tmp_path)
-    original = (tmp_path / 'stash_merge.py').read_bytes()
-    identity, directory = stage(tmp_path, Remote(), migrate_flat_layout=True)
+def test_flat_recovery_keeps_journal_and_backups_for_bridge(tmp_path):
+    installed(tmp_path, Remote())
+    identity = 'a' * 32
+    directory = tmp_path / updater.META / 'transactions' / identity
+    directory.mkdir(parents=True)
+    backup = b'original flat module'
+    (directory/'old-0').write_bytes(backup)
+    (directory/'plan.json').write_bytes(updater.json_bytes({'format': 1, 'entries': [
+        {'path': 'stash_merge.py', 'before': updater.blob_sha(backup), 'after': None, 'mode': 0o644},
+        {'path': updater.STATE, 'before': None, 'after': None, 'mode': 0o600},
+    ]}))
     updater.journal_write(tmp_path, identity, updater.Phase.APPLYING)
-    (tmp_path / 'stash_merge.py').unlink()
-    assert updater.recover(tmp_path) == 0
-    assert (tmp_path / 'stash_merge.py').read_bytes() == original
-
-
-
-def test_cli_flat_migration_preview_passes_the_explicit_option(tmp_path, monkeypatch):
-    flat_installation(tmp_path)
-    remote = Remote()
-    monkeypatch.setattr(updater, 'GitHub', lambda token: remote)
-    before = snapshot(tmp_path)
-    assert updater.main(['--install-dir', str(tmp_path), '--migrate-flat-layout', '--dry-run']) == 0
-    assert snapshot(tmp_path) == before
-    assert not any(call.startswith('git/blobs/') for call in remote.calls)
+    before = {p.relative_to(tmp_path).as_posix(): p.read_bytes()
+              for p in tmp_path.rglob('*') if p.is_file() and p.name != updater.LOCK}
+    with pytest.raises(updater.UpdateError, match=updater.LAYOUT_BRIDGE_COMMIT):
+        updater.recover(tmp_path)
+    assert {p.relative_to(tmp_path).as_posix(): p.read_bytes()
+            for p in tmp_path.rglob('*') if p.is_file() and p.name != updater.LOCK} == before

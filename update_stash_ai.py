@@ -23,18 +23,9 @@ import uuid
 
 REPOSITORY = "StormThatComes/stash_ai"
 UPDATER = "update_stash_ai.py"
-RETIRED_FILES = frozenset({
-    "joytag_stash_markers.py", "stash_refine.py", "stash_ai/runs/separate.py",
-    "stash_ai/publication/separate.py", "stash_ai/publication/planning/separate_markers.py",
-    "stash_ai/publication/planning/separate_tags.py", "stash_ai/evidence/marker_building.py",
-})
-LEGACY_MODULES = frozenset("stash_" + name + ".py" for name in (
-    "cleanup", "cleanup_sql", "client", "db", "developer_report", "diagnostics", "domain",
-    "exclusions", "fusion", "joytag", "marker_groups", "merge", "merge_sql", "model_report",
-    "occurrences", "performance", "preview", "progress", "prune", "recovery", "runtime",
-    "scene", "scene_cache", "state", "state_codec", "state_db", "taggers", "tags", "temporal",
-    "thresholds", "timeline", "transport",
-))
+LAYOUT_BRIDGE_COMMIT = "9fcaa52502cd487455457547860b5db7d8710ad8"
+LAYOUT_BRIDGE_HINT = ("Use update_stash_ai.py from commit " + LAYOUT_BRIDGE_COMMIT +
+                      " for flat-layout migration or recovery; see README.md.")
 REQUIRED_FILES = frozenset({"stash_ai.py", UPDATER, "stash_ai/__init__.py", "stash_ai/cli.py"})
 META = ".stash-ai-update"
 STATE = META + "/state.json"
@@ -92,11 +83,6 @@ def allowed(name):
     return bool(re.fullmatch(
         r"(?:stash_ai\.py|update_stash_ai\.py|[A-Za-z0-9][A-Za-z0-9_.-]*\.yml|"
         r"stash_ai/(?:[A-Za-z_][A-Za-z0-9_]*/)*[A-Za-z_][A-Za-z0-9_]*\.py)", name))
-
-
-def historical_file(name):
-    """Accept former flat modules in tracked history and recovery journals only."""
-    return allowed(name) or name in RETIRED_FILES or name in LEGACY_MODULES
 
 
 def blob_sha(data):
@@ -244,8 +230,7 @@ def launch_application(filename):
         with InstallationLock(root):
             require_complete(root)
             if any(not safe_path(root, name).is_file() for name in ("stash_ai/__init__.py", "stash_ai/cli.py")):
-                raise UpdateError("The stash_ai package is missing. If upgrading from the flat layout, "
-                                  "run python update_stash_ai.py --migrate-flat-layout to finish the migration.")
+                raise UpdateError("The stash_ai package is missing. " + LAYOUT_BRIDGE_HINT)
             runpy.run_path(str(root / "stash_ai.py"), run_name="__main__",
                            init_globals={"_STASH_INSTALL_LOCKED": True})
     except UpdateError as exc:
@@ -353,21 +338,19 @@ def load_state(root):
             if not isinstance(state[key], dict):
                 raise ValueError
             for name, sha in state[key].items():
-                if not historical_file(name) or not SHA.fullmatch(sha):
+                if not allowed(name) or not SHA.fullmatch(sha):
                     raise ValueError
         if not SHA.fullmatch(state["commit"]):
             raise ValueError
     except (KeyError, TypeError, ValueError):
-        raise UpdateError("Invalid installed-file history; refusing to overwrite local files.") from None
+        raise UpdateError("Invalid installed-file history; refusing to overwrite local files. " + LAYOUT_BRIDGE_HINT) from None
     return state
 
 
-def plan_update(root, state, snapshot, *, overwrite_configs=False, force_code=False, migrate_flat_layout=False):
+def plan_update(root, state, snapshot, *, overwrite_configs=False, force_code=False):
     """Inspect local files without downloading or changing the installation."""
-    if (state['commit'] and not migrate_flat_layout
-            and not {'stash_ai/__init__.py', 'stash_ai/cli.py'} <= state['baseline'].keys()):
-        raise UpdateError('Historical flat installation requires --migrate-flat-layout once. '
-                          'Use --dry-run to review the migration plan.')
+    if state['commit'] and not {'stash_ai/__init__.py', 'stash_ai/cli.py'} <= state['baseline'].keys():
+        raise UpdateError('Current updater requires the package layout. ' + LAYOUT_BRIDGE_HINT)
     remote = snapshot.files
     actions, conflicts, kept = [], [], []
     baseline = dict(state["baseline"])
@@ -394,9 +377,6 @@ def plan_update(root, state, snapshot, *, overwrite_configs=False, force_code=Fa
         actions.append(FileChange(name, current, sha))
         baseline[name] = sha
     obsolete = set(baseline) - set(remote)
-    if migrate_flat_layout:
-        # Only this explicit one-time migration probes untracked retired paths.
-        obsolete.update((RETIRED_FILES | LEGACY_MODULES) - set(remote))
     for name in sorted(obsolete):
         if name.endswith(".yml"):
             continue  # Retired configurations may still contain user settings.
@@ -475,7 +455,7 @@ def transaction_entries(root, plan):
         result = []
         for entry in entries:
             name = entry["path"]
-            if not (name == STATE or historical_file(name)
+            if not (name == STATE or allowed(name)
                     or (name.endswith(".yml.incoming") and allowed(name[:-9]))):
                 raise ValueError
             if name.casefold() in names:
@@ -489,7 +469,7 @@ def transaction_entries(root, plan):
                 raise ValueError
             result.append(TransactionEntry(name, entry["before"], entry["after"], entry["mode"]))
     except (KeyError, TypeError, ValueError):
-        raise UpdateError("Invalid transaction plan; backups were retained.") from None
+        raise UpdateError("Invalid transaction plan; backups were retained. " + LAYOUT_BRIDGE_HINT) from None
     return tuple(result)
 
 
@@ -642,14 +622,13 @@ def run_helper(root, prepared):
         return 130
 
 
-def update(root, client, *, check=False, dry_run=False, overwrite_configs=False, force_code=False, migrate_flat_layout=False):
+def update(root, client, *, check=False, dry_run=False, overwrite_configs=False, force_code=False):
     with InstallationLock(root, exclusive=not (check or dry_run)):
         require_complete(root)
         state = load_state(root)
         snapshot = client.snapshot()
         plan = plan_update(root, state, snapshot,
-                           overwrite_configs=overwrite_configs, force_code=force_code,
-                           migrate_flat_layout=migrate_flat_layout)
+                           overwrite_configs=overwrite_configs, force_code=force_code)
         describe_plan(state, snapshot, plan)
         if check or dry_run:
             print("Preview only: no application, configuration or updater-state writes.")
@@ -674,8 +653,6 @@ def build_parser():
     mode.add_argument("--recover", action="store_true", help="Recover an interrupted installation, offline.")
     mode.add_argument("--_apply", help=argparse.SUPPRESS)
     parser.add_argument("--overwrite-configs", action="store_true", help="Replace local YAML files, keeping backups.")
-    parser.add_argument("--migrate-flat-layout", action="store_true",
-                        help="One-time migration of known flat modules and retired paths to the package layout. Supports --dry-run/--check and backs up removals.")
     parser.add_argument("--force-code", action="store_true", help="Replace modified/untracked Python files, keeping backups.")
     return parser
 
@@ -691,8 +668,7 @@ def main(argv=None):
         return apply_transaction(root, args._apply)
     client = GitHub(os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN"))
     return update(root, client, check=args.check, dry_run=args.dry_run,
-                  overwrite_configs=args.overwrite_configs, force_code=args.force_code,
-                  migrate_flat_layout=args.migrate_flat_layout)
+                  overwrite_configs=args.overwrite_configs, force_code=args.force_code)
 
 
 if __name__ == "__main__":

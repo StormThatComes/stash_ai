@@ -82,10 +82,6 @@ python .\stash_ai.py --explain-tag ai:blue_hair --scene-id 123
 # Usuwanie nieużywanych definicji tagów.
 python .\stash_ai.py --prune-empty-tags-only --dry-run
 
-# Jednorazowe przejście starych wyników do ai: ze świeżą inferencją.
-python -m stash_ai.tools.namespace_migration --models all --dry-run
-python -m stash_ai.tools.namespace_migration --models all
-
 # Zdrowie, aktualizacja schematu, spójność i kompaktowanie lokalnej bazy stanu.
 python .\stash_ai.py --db-report
 python .\stash_ai.py --db-check
@@ -207,33 +203,48 @@ sprawdza zgodność istniejących metadanych z evidence bez ich naprawiania.
 
 Nowa inferencja zawsze zastępuje poprzednie wyniki danego modelu i rodzaju.
 Aktualizacja z v18 wycofuje niepełne wyniki starszego formatu analizy i zleca ponowną inferencję.
-Publikacje zachowują własność i geometrię, a ich potrzebne dowody pozostają przypięte w archiwum. Zwykłe przedziały opublikowane dawniej jako
-punkty wymagają jednorazowego `python -m stash_ai.tools.point_migration` (także z `--dry-run`).
-Komenda zapisuje długość ze snapshotów published, pending i recovery w natywnym `end_seconds`,
-zachowując ID, tytuły i ręczne tagi. Punkty `OccurrenceTag` pozostają punktami.
-Zwykły merge/cleanup wymaga natywnych zakresów i nie odtwarza długości w pamięci.
-Oba migratory są osobnymi modułami w `stash_ai.tools`; dawne flagi głównego CLI
-`--migrate-legacy-only` i `--migrate-point-markers-only` zostały usunięte.
+Publikacje zachowują własność i geometrię, a potrzebne dowody pozostają przypięte w archiwum.
+Zwykły merge i cleanup wymagają natywnych zakresów; punkty `OccurrenceTag` pozostają punktami.
+Dawne zwykłe punkty AI, hierarchie YAML v1 i zarządzane prefiksy `jt:`, `wd:`, `dtq:` oraz
+`op:` wymagają [migratorów w wersji pomostowej](#migratory-w-wersji-pomostowej).
+Bieżący kod publikuje wyłącznie namespace `ai:` i nie konwertuje obiektów starych modeli.
+Ręczne powiązania ze starymi definicjami tagów pozostają zachowane.
 
-### Jednorazowe przejście starych prefiksów do ai:
+### Migratory w wersji pomostowej
 
-`python -m stash_ai.tools.namespace_migration --models all` wykonuje świeżą inferencję dla scen ze starymi
-wynikami `jt:`, `wd:`, `dtq:` i `op:` oraz zastępuje zarządzane obiekty wynikami `ai:`.
-Użyj dotychczasowej bazy `--state-db`, po wcześniejszym `--db-update`.
-`--scene-id`, `--markers-only` i `--scene-tags-only` ograniczają zakres;
-`--dry-run` wykonuje inferencję i pokazuje plan bez zmiany Stash lub bazy źródłowej.
+Trzy zakończone migracje nie należą już do bieżącego pakietu. W razie potrzeby uruchom je
+z osobnego checkoutu niezmiennego commita
+[`9fcaa52502cd487455457547860b5db7d8710ad8`](https://github.com/StormThatComes/stash_ai/commit/9fcaa52502cd487455457547860b5db7d8710ad8).
+Ta wersja obsługuje bieżący schemat v23. Bazy sprzed v18 wymagają najpierw starszego
+mostka opisanego w sekcji aktualizacji bazy. Zrób kopię bazy i konfiguracji oraz zainstaluj
+zależności checkoutu w osobnym środowisku Python 3.14 zgodnie z instrukcją instalacji.
 
-Ręczne markery bez tagu ownership, ręczne tagi sceny i dodatki markerów są zachowywane.
-Pasujące zarządzane markery zachowują ID; pozostałe stare wyniki są usuwane dopiero
-po przygotowaniu nowej publikacji. Snapshot pending umożliwia ponowienie po błędzie API.
-Sceny, które zakończyły przejście, są pomijane przy ponownym uruchomieniu tej komendy.
-Jeśli CREATE_MISSING jest wyłączone, stary obiekt bez dostępnego tagu zastępczego pozostaje.
+```powershell
+git clone https://github.com/StormThatComes/stash_ai stash_ai_migration_bridge
+git -C stash_ai_migration_bridge checkout --detach 9fcaa52502cd487455457547860b5db7d8710ad8
+cd stash_ai_migration_bridge
 
-Zwykły merge obsługuje wyłącznie bieżący namespace `ai:`. Przed jego uruchomieniem
-przenieś stare zarządzane prefiksy osobnym narzędziem; zwykły przebieg ich nie konwertuje.
-Import historycznych ocen oraz jego trwały rejestr nie są już używane.
-Bazy sprzed v18 wymagają jednorazowego przejścia przez kompatybilny commit opisany poniżej.
-Globalne definicje starych tagów pozostają dostępne dla ręcznych powiązań.
+# Konwersja własnych hierarchii v1; podaj wszystkie używane pliki.
+python -m stash_ai.commands.hierarchy_migration C:/stash_ai/joytag_hierarchy.yml C:/stash_ai/wd_hierarchy.yml C:/stash_ai/dtq_hierarchy.yml C:/stash_ai/oppai_hierarchy.yml --dry-run
+
+# Zwykłe punkty AI: długość z published/pending/recovery do end_seconds.
+python -m stash_ai.tools.point_migration --state-db C:/stash_ai/tagger_sources.sqlite3 --dry-run
+
+# Stare prefiksy: świeża inferencja i publikacja w ai:.
+python -m stash_ai.tools.namespace_migration --models all --state-db C:/stash_ai/tagger_sources.sqlite3 --model-config C:/stash_ai/tagger_models.yml --temporal-policy C:/stash_ai/temporal_policy.yml --marker-core-exclusions C:/stash_ai/marker_core_exclusions.yml --scene-tag-exclusions C:/stash_ai/scene_tag_exclusions.yml --hierarchy C:/stash_ai/joytag_hierarchy.yml --wd-hierarchy C:/stash_ai/wd_hierarchy.yml --dtq-hierarchy C:/stash_ai/dtq_hierarchy.yml --oppai-hierarchy C:/stash_ai/oppai_hierarchy.yml --dry-run
+```
+
+Zastąp `C:/stash_ai` bezwzględną ścieżką dotychczasowej instalacji. Ustaw ten sam
+`STASH_URL` i `STASH_API_KEY`; zachowaj konfigurację modeli, polityk i zakres wyjść.
+Jeśli hierarchie są wyłączone, zastąp cztery opcje hierarchii przez `--no-hierarchy`.
+Po sprawdzeniu planu powtórz wybrane komendy bez `--dry-run`. Konwersja YAML zachowuje
+oryginały jako `*.v1.yml`, przypisania grup i metadane źródła. Migracja punktów nie ładuje
+modeli, zachowuje ID, tytuły i ręczne tagi; occurrences pozostają punktami.
+Migracja prefiksów zachowuje ręczne obiekty i dodatki markerów, a dopasowane markery
+zachowują ID. Można ograniczyć ją przez `--scene-id`, `--markers-only` lub `--scene-tags-only`.
+Przerwaną publikację prefiksów dokończ tym samym migratorem i konfiguracją przed powrotem
+do bieżącej wersji. Jej pending snapshoty nadal służą do ponowienia po błędzie API.
+Następnie wróć do bieżącej instalacji, wykonaj `--db-check` i potrzebną inferencję.
 
 ### Zdrowie, aktualizacja i kompaktowanie bazy stanu
 
@@ -527,22 +538,16 @@ recovery i migracji punktów. Cleanup wymaga przebudowy wycofanych publikacji
 przez świeżą inferencję i `--merge-only`.
 
 Nowy fingerprint cleanupu zawsze zawiera zakres wyjść i nie zawiera stałego
-pustego blocklist. Przerwany cleanup zachowuje generację i maski: adapter
-historycznego podpisu pozwala dokończyć go wyłącznie z tym samym zakresem wyjść
-i polityką wykluczeń. Nowe operacje zapisują tylko bieżący podpis.
+pustego blocklist. Przerwany cleanup zachowuje generację i maski. Historyczny
+podpis wymaga jawnego narzędzia `stash_ai.tools.cleanup_pending_migration`,
+które sprawdza ten sam zakres wyjść i politykę wykluczeń. Nowe operacje zapisują tylko bieżący podpis.
 
 ## Konfiguracja
 
 Hierarchie mają `version: 2` i pola `source` oraz `groups`. Ścieżki grup tworzą
 bezpośrednio kategorie `ai:category:` pod korzeniem `ai:category:AI`.
-Własne YAML-e v1 przekonwertuj lokalnie, bez ładowania modeli ani połączenia ze Stash:
-
-```powershell
-python -m stash_ai.commands.hierarchy_migration joytag_hierarchy.yml wd_hierarchy.yml dtq_hierarchy.yml oppai_hierarchy.yml
-```
-
-Dodaj `--dry-run`, aby sprawdzić migrację. Oryginały są zachowywane jako
-`*.v1.yml`; migrator zachowuje przypisania grup, surowe etykiety i metadane źródła.
+Własne YAML-e v1 przekonwertuj za pomocą [wersji pomostowej](#migratory-w-wersji-pomostowej).
+Bieżący walidator wymaga v2 i wskazuje commit migratora bez zmiany pliku.
 
 | Plik / opcja | Rola |
 |---|---|
@@ -567,18 +572,27 @@ Aktualne domyślne limity procesu:
 uruchamiania `pip`. Wymaga tokena GitHub z dostępem `Contents: read` do
 prywatnego repozytorium.
 
-Przy pierwszym przejściu ze starego układu (moduły `stash_*.py` obok launchera)
-uruchom starą wersję updatera raz, a potem nową wersję z jawną migracją:
+Bieżący updater obsługuje układ pakietowy (`stash_ai/`). Stare instalacje z
+modułami `stash_*.py` wymagają jednorazowego przejścia przez updater z commita
+[`9fcaa52502cd487455457547860b5db7d8710ad8`](https://github.com/StormThatComes/stash_ai/commit/9fcaa52502cd487455457547860b5db7d8710ad8).
+Zatrzymaj aplikację i pobierz tę wersję jako osobny plik w katalogu instalacji:
 
 ```powershell
-python .\update_stash_ai.py --migrate-flat-layout --dry-run
-python .\update_stash_ai.py --migrate-flat-layout
+$env:GH_TOKEN = "<fine-grained PAT>"
+$bridge = "9fcaa52502cd487455457547860b5db7d8710ad8"
+$headers = @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = "application/vnd.github.raw+json" }
+Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/StormThatComes/stash_ai/contents/update_stash_ai.py?ref=$bridge" -OutFile .\update_stash_ai_bridge.py
+python .\update_stash_ai_bridge.py --install-dir . --migrate-flat-layout --dry-run
+python .\update_stash_ai_bridge.py --install-dir . --migrate-flat-layout
 ```
 
-Migrator usuwa wyłącznie znane dawne moduły i wycofane ścieżki, zachowując backupy.
-Zmodyfikowany kod nadal wymaga `--force-code`. Kolejne zwykłe aktualizacje sprawdzają
-kod zarządzany w zapisanej historii; nie skanują już nieśledzonych plików starego układu.
-Przy `git pull` lub użyciu najnowszego updatera od początku nie ma etapu starego updatera.
+Jeśli dawna aktualizacja została przerwana, najpierw uruchom
+`python .\update_stash_ai_bridge.py --install-dir . --recover`.
+Updater pomostowy instaluje bieżący pakiet, zachowuje backupy, lokalne YAML,
+bazę i modele; zmodyfikowany kod wymaga `--force-code`. Następnie używaj
+zwykłego `update_stash_ai.py`. Bieżący updater nie skanuje ani nie usuwa
+nieśledzonych dawnych modułów. Przy `git pull` do układu pakietowego nie ma
+etapu pomostowego updatera.
 
 ```powershell
 $env:GH_TOKEN = "<fine-grained PAT>"
@@ -642,45 +656,10 @@ benchmarków. Nie opisują bieżącej liczby testów ani aktualnego kontraktu ap
 Nazwy konfiguracji i CLI są opisane w [instrukcji aktualizacji wykluczeń](docs/UPGRADE_exclusions.md#aktualizacja-starych-nazw). Używaj `excluded_scene_tags`, `--models`, `--scene-tag-exclusions` i `--cleanup-markers-only`; domyślny plik markerów to `marker_core_exclusions.yml`.
 
 
-W schemacie v14 `results` zawiera najwyżej jedną aktywną inferencję na model i wyjście.
-`--db-update` przenosi starsze segmenty do `inference_archive` tylko wtedy, gdy dokładna
-sygnatura dowodu występuje w published, pending lub recovery. Nowa inferencja stosuje tę samą
-zasadę; archiwum służy wyłącznie frozen replay i jest przycinane po zmianie publikacji.
-Zwykły merge, raporty, progi i indeks ukończenia nie korzystają z historii inferencji.
-
-
-W schemacie v19 aktywna inferencja wymaga analysis_format=5. --db-update wycofuje
-starsze wyniki, zaznacza konieczność ponownej inferencji i zachowuje tylko dokładne
-dowody przypięte przez published/pending/recovery. Snapshoty i owned_ids pozostają
-bez zmian. Uruchom następnie inferencję dla wszystkich wskazanych modeli i wyjść;
---merge-only nie odtwarza brakującego cache. Raporty i occurrences używają pełnych
-obserwacji scen oraz jawnych sygnatur. statistics=null nadal oznacza brak
-kwalifikującego wsparcia, a nie zgodę na historyczną kwalifikację agregatu.
-
-Schemat v17 wycofuje odtwarzanie historycznego algorytmu i wyjątków dla starego cache.
-Dawne publikacje zachowują geometrię, ownership i stan pending/recovery, ale wymagają
-ponownej inferencji i publikacji przed cleanup. Stare zwykłe punkty AI trzeba najpierw
-przekształcić przez `python -m stash_ai.tools.point_migration`; punkty wykryć pozostają punktami.
+Aktywny wynik to jeden rekord w formacie analizy 5, z opcjonalnym liczbowym progiem
+publikacji. Nowa inferencja zastępuje wynik i resetuje próg. Archiwum zachowuje tylko
+konkretne dowody przypięte przez published/pending/recovery; zwykły merge, rethreshold,
+raporty i indeks ukończenia nie odczytują historycznych segmentów.
+`--db-update` zachowuje geometrię, ownership i recovery, a niepełne starsze wyniki
+kieruje do ponownej inferencji. `--merge-only` wymaga nowych dowodów przed cleanup.
 Brak `end_seconds` w recovery oznacza dokładny punkt i nie pasuje do zakresu.
-
-Schemat v18 zapisuje aktywny wynik jako jeden obiekt zamiast listy segmentów.
-`result_metadata` w formacie 4 ma również jeden obiekt, a `result_thresholds.threshold`
-jest opcjonalnym progiem liczbowym. Nowa inferencja zastępuje wynik i resetuje próg.
-Migracja zachowuje tylko ostatnią aktywną inferencję i dokładne przypięte dowody archiwalne;
-merge, rethreshold, raporty i indeks ukończenia nie odczytują dawnych list ani tablic progów.
-
-Schemat v19 wycofuje aktywną inferencję w formatach 1–4. Uruchom `--db-update`,
-a następnie inferencję; `--merge-only` wymaga nowych dowodów. Przypięte dowody
-archiwalne oraz geometria, identyfikatory i stan published/pending/recovery
-pozostają zachowane. Nowe publikacje wymagają pełnych dowodów czasowych;
-historyczna geometria służy wyłącznie odzyskiwaniu stanu i migracji punktów.
-Format analizy 5 identyfikuje kompletny kontrakt sceny, bez dodatkowego
-`scene_frames_format`. Ręczne tagi dodatkowe pochodzą z obserwowanych markerów
-Stash i są zachowywane podczas dopasowania, podziału i łączenia zakresów.
-
-Schemat v20 usuwa stałą kolumnę `result_index.inference` i konwertuje historyczne
-konteksty `[signature]` na jeden `signature` per źródło. Nowe snapshoty mają
-format 5. Dawne konteksty wielu inferencji jednego źródła pozostają przypięte
-jako retired i wymagają przebudowy publikacji. Efektywny próg publikacji jest
-jednym polem `publication_threshold` w widoku rekordu; nie trafia do surowego
-BLOB-a inferencji. Cleanup odtwarza zamrożony próg w tym samym widoku rekordu.
