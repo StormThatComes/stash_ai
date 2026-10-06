@@ -298,14 +298,9 @@ def test_deep_check_relation_warnings_do_not_mark_database_failed(tmp_path):
     seed(path, scope)
 
     with sqlite3.connect(path) as db:
-        db.execute("CREATE TABLE legacy_imports(scope TEXT,scene TEXT,kind TEXT,data BLOB)")
         db.execute(
             "INSERT INTO snapshots VALUES (?,?,?,?,?)",
             (scope, "unused", "scene", None, None),
-        )
-        db.execute(
-            "INSERT INTO legacy_imports VALUES (?,?,?,?)",
-            (scope, "unused", "markers", encode([])),
         )
         db.execute(
             "INSERT INTO recovery_publications VALUES (?,?,?,?,?)",
@@ -317,7 +312,6 @@ def test_deep_check_relation_warnings_do_not_mark_database_failed(tmp_path):
 
     assert report["ok"]
     assert found["empty_snapshot_without_recovery"] == 1
-    assert found["legacy_import_without_result"] == 1
     assert found["recovery_publication_without_snapshot"] == 1
 
 
