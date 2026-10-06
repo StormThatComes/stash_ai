@@ -46,7 +46,7 @@ def valid_frames(rows, *, checkpoint=False):
     )
 
 
-def _statistics(value):
+def _archived_statistics(value):
     if value is None:  # Older aggregate-only results have no temporal statistics.
         return True
     if not isinstance(value, dict):
@@ -67,17 +67,17 @@ def _statistics(value):
     )
 
 
-def _item(item, *, legacy=False):
+def _item(item):
     return (
         isinstance(item, dict) and _label(item.get("tag")) and "score" in item
-        and (_score(item["score"]) or (legacy and item["score"] is None))
+        and _score(item["score"])
     )
 
 
-def _span(item, *, legacy=False):
+def _archived_span(item):
     return (
-        _item(item, legacy=legacy) and _number(item.get("start")) and "end" in item
-        # Imported markers can be points, including an unknown end time.
+        _item(item) and _number(item.get("start")) and "end" in item
+        # Archived inference can retain old point geometry.
         and (item["end"] is None or (_number(item["end"]) and item["end"] >= item["start"]))
         and (item.get("hits") is None or (type(item["hits"]) is int and item["hits"] >= 0))
         and ("extra_tags" not in item or (isinstance(item["extra_tags"], list)
@@ -87,32 +87,30 @@ def _span(item, *, legacy=False):
     )
 
 
-def valid_result_segments(segments, kind):
-    if not isinstance(segments, list):
+def valid_result(record, kind, *, archived=False):
+    """One inference record; historical span/statistic shapes belong to archives."""
+    if kind not in ('scene', 'markers'):
         return False
-    allowed_modes = {"scene"} if kind == "scene" else {"frames", "spans"}
-    for segment in segments:
-        if (not isinstance(segment, dict) or segment.get("mode") not in allowed_modes
-                or not isinstance(segment.get("meta"), dict)
-                or not isinstance(segment.get("items"), list)):
+    allowed_modes = ('scene',) if kind == 'scene' else (('frames', 'spans') if archived else ('frames',))
+    if (not isinstance(record, dict) or record.get('mode') not in allowed_modes
+            or not isinstance(record.get('meta'), dict)
+            or record['meta'].get('origin') != 'inference'
+            or not isinstance(record.get('items'), list)):
+        return False
+    mode, items = record['mode'], record['items']
+    if mode == 'frames':
+        return valid_frames(items)
+    if mode == 'spans':
+        return all(_archived_span(item) for item in items)
+    if not all(_item(item) for item in items):
+        return False
+    if archived and not all(_archived_statistics(item.get('statistics')) for item in items):
+        return False
+    if 'frames' in record:
+        if not valid_frames(record['frames']):
             return False
-        mode, items = segment["mode"], segment["items"]
-        legacy = segment["meta"].get("origin") == "legacy"
-        if mode == "frames":
-            if not valid_frames(items):
-                return False
-        elif mode == "spans":
-            if not all(_span(item, legacy=legacy) for item in items):
-                return False
-        else:
-            if not all(_item(item, legacy=legacy) and _statistics(item.get("statistics"))
-                       for item in items):
-                return False
-            if "frames" in segment:
-                if not valid_frames(segment["frames"]):
-                    return False
-                # Scene replay indexes every retained detection by its aggregate label.
-                labels = {item["tag"] for item in items}
-                if any(tag not in labels for row in segment["frames"] for tag, _ in row["tags"]):
-                    return False
+        # Scene replay indexes every retained detection by its aggregate label.
+        labels = {item['tag'] for item in items}
+        if any(tag not in labels for row in record['frames'] for tag, _ in row['tags']):
+            return False
     return True

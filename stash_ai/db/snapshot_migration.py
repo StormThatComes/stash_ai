@@ -2,7 +2,7 @@
 from dataclasses import asdict
 
 from stash_ai.storage.codec import decode
-from stash_ai.storage.snapshots import FORMAT, FORMAT_KEY, expand, encode
+from stash_ai.storage.snapshots import FORMAT, FORMAT_KEY, _expand_proofs
 from stash_ai.models import SOURCES
 
 
@@ -22,15 +22,16 @@ def complete_policy(values):
 
 
 def decode_legacy(blob):
+    """Schema v18+ stores declared v4/v5 snapshot envelopes."""
     value = decode(blob)
-    if isinstance(value, dict) and FORMAT_KEY in value:
-        version = value[FORMAT_KEY]
-        if type(version) is not int or version not in range(1, FORMAT + 1):
-            raise ValueError('Unsupported historical snapshot format.')
-        value = expand(value, version=version, validate=False)
-    if not isinstance(value, dict):
-        raise ValueError('Invalid historical snapshot format.')
-    return value
+    if (not isinstance(value, dict) or set(value) != {FORMAT_KEY, 'snapshot', 'proofs'}
+            or type(value[FORMAT_KEY]) is not int or value[FORMAT_KEY] not in (4, FORMAT)
+            or not isinstance(value['snapshot'], dict)
+            or not isinstance(value['snapshot'].get('contributions'), list)
+            or not isinstance(value['proofs'], list)
+            or any(not isinstance(proof, dict) for proof in value['proofs'])):
+        raise ValueError('Invalid historical snapshot format; schema v18 requires v4/v5 envelopes.')
+    return _expand_proofs(value['snapshot'], value['proofs'])
 
 
 def complete_options(options):
@@ -89,16 +90,3 @@ def normalize(snapshot):
     contributions = [normalize_item(item) for item in snapshot['contributions']]
     from .publication_rebase import normalize
     return normalize({**snapshot, 'contributions': contributions})
-
-
-def migrate(db):
-    for scope, scene, kind, published, pending in db.execute(
-            'SELECT scope,scene,kind,published,pending FROM snapshots'):
-        values = [encode(normalize(decode_legacy(blob))) if blob is not None else None
-                  for blob in (published, pending)]
-        db.execute('UPDATE snapshots SET published=?,pending=? WHERE scope=? AND scene=? AND kind=?',
-                   (*values, scope, scene, kind))
-    for scope, scene, kind, operation, blob in db.execute(
-            'SELECT scope,scene,kind,operation,data FROM recovery_publications'):
-        db.execute('UPDATE recovery_publications SET data=? WHERE scope=? AND scene=? AND kind=? AND operation=?',
-                   (encode(normalize(decode_legacy(blob))), scope, scene, kind, operation))

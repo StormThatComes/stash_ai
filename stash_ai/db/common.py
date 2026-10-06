@@ -5,10 +5,10 @@ from __future__ import annotations
 import sqlite3
 
 from stash_ai.storage.schema import (
-    LATEST_SCHEMA_VERSION, KNOWN_MODELS, KNOWN_KINDS, STATE_TABLES, BASE_TABLES, BLOB_COLUMNS,
+    MIN_SUPPORTED_SCHEMA_VERSION, LATEST_SCHEMA_VERSION, KNOWN_MODELS, KNOWN_KINDS, STATE_TABLES, BASE_TABLES, BLOB_COLUMNS,
 )
 
-KNOWN_VERSIONS = frozenset(range(1, LATEST_SCHEMA_VERSION + 1))
+KNOWN_VERSIONS = frozenset(range(MIN_SUPPORTED_SCHEMA_VERSION, LATEST_SCHEMA_VERSION + 1))
 
 
 def format_bytes(value):
@@ -46,4 +46,3 @@ def count_rows(db, tables, table, scope=None, extra=""):
     if where:
         sql += " WHERE " + " AND ".join(where)
     return db.execute(sql, params).fetchone()[0]
-

@@ -1,4 +1,5 @@
 """Abandonment across partial API success, old state formats and new policies."""
+from stash_ai.storage.schema import LATEST_SCHEMA_VERSION
 from tests.helpers.evidence import inference_record
 from copy import deepcopy
 import sqlite3
@@ -72,7 +73,7 @@ def test_standalone_abandons_without_stash_models_or_source_changes(tmp_path, mo
     assert app.main(command(tmp_path)) == 0
     with state(tmp_path) as store:
         assert not store.cleanup_pending and not store.has_pending_publications()
-        assert store.connection.execute('PRAGMA user_version').fetchone() == (20,)
+        assert store.connection.execute('PRAGMA user_version').fetchone() == (LATEST_SCHEMA_VERSION,)
         assert recovery.publications(store, '1', 'scene')[0]['owned_ids'] == ['999']
         assert store.snapshot('1', 'markers')[0]['recovery_required']
         assert any(i['tag'] == 'abc' for i in store.snapshot('1', 'markers')[0]['contributions'])
@@ -207,7 +208,7 @@ def test_unrecognized_survivor_keeps_recovery_evidence_and_requests_current_merg
         assert recovery.publications(store, '1', 'markers')
 
 
-@pytest.mark.parametrize('version', [5, 6])
+@pytest.mark.parametrize('version', [18, 19, 20])
 def test_old_pending_cleanup_state_can_be_abandoned_without_losing_earlier_masks(tmp_path, version):
     with state(tmp_path) as store:
         store.publish('1', {'scene': {'owned_ids': ['1', '2'], 'contributions': [hit('wd', 'old'), hit('wd', 'new')]}})
@@ -217,7 +218,7 @@ def test_old_pending_cleanup_state_can_be_abandoned_without_losing_earlier_masks
     # These are precisely the recovery data available in pre-abandon releases.
     with sqlite3.connect(state_path(tmp_path)) as db:
         db.execute('DROP TABLE recovery_publications'); db.execute('DROP TABLE recovery_cleanups')
-    from stash_ai.db import update_database
+    from stash_ai.db.update import update_database
     update_database(state_path(tmp_path))
     with state(tmp_path, allow_cleanup=True) as store:
         recovery.abandon(store, lambda _: None)
@@ -225,7 +226,7 @@ def test_old_pending_cleanup_state_can_be_abandoned_without_losing_earlier_masks
         assert [i['tag'] for i in snapshot['contributions']] == ['new']
         assert snapshot['owned_ids'] == ['2'] and snapshot['recovery_required']
         cleanup.begin(store, 'next', {'new'}, set(), ['2'], kinds=('scene',))
-        assert store.connection.execute('PRAGMA user_version').fetchone() == (20,)
+        assert store.connection.execute('PRAGMA user_version').fetchone() == (LATEST_SCHEMA_VERSION,)
         assert not store.snapshot('1', 'scene')[0]['contributions']
 
 

@@ -103,7 +103,7 @@ def _grouped_counts(db, tables):
             for (model, kind), count in sorted(counts.items())
         ]
 
-    for table in ("snapshots", "legacy_imports", "recovery_publications"):
+    for table in ("snapshots", "recovery_publications"):
         if table not in tables:
             continue
         counts = Counter()

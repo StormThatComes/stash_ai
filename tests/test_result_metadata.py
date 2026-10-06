@@ -1,4 +1,5 @@
 """SQL preflight preserves retention guards, history and legacy preview isolation."""
+from stash_ai.storage.schema import LATEST_SCHEMA_VERSION
 from tests.helpers.evidence import inject_records
 
 from stash_ai.rethreshold.plans import RecordAccess, PendingPolicy, ThresholdRequest
@@ -8,7 +9,8 @@ import sqlite3
 import pytest
 
 from stash_ai.rethreshold import execution as rethreshold_execution, scenes as scene_updates
-from stash_ai import db
+from stash_ai.db.checks import check_database
+from stash_ai.db.compaction import compact_database
 from tests.helpers.runtime import runtime as app
 from stash_ai.publication import fingerprints as performance
 import stash_ai.storage.merge_checks as performance_merge_checks
@@ -146,21 +148,23 @@ def test_combined_pending_guard_keeps_noop_semantics(tmp_path, monkeypatch, same
 
 
 @pytest.mark.parametrize('dry_run', [False, True])
-@pytest.mark.parametrize('version', [5, 7, 8])
-def test_old_database_backfills_once_and_keeps_inline_overrides(tmp_path, monkeypatch, dry_run, version):
+@pytest.mark.parametrize('version', [18, 19, 20])
+def test_supported_database_backfills_once_and_keeps_scalar_policy(tmp_path, monkeypatch, dry_run, version):
     path = tmp_path/'legacy.sqlite3'
     saved = outputs()
-    saved['scene']['scene_threshold_override'] = .9
-    saved['markers']['marker_threshold_override'] = .9
     with StateStore(path, 'scope') as store:
-        inject_records(store, '1', 'wd', saved)
+        store.put('1', 'wd', saved)
+        from stash_ai.storage.thresholds import overlay
+        with store.connection:
+            for kind in saved:
+                store.set_result_threshold('1', 'wd', kind, .9, overlay(saved[kind], kind, .9))
         raw = blobs(store)
     with sqlite3.connect(path) as connection:
         for event in ('insert', 'update', 'delete'):
             connection.execute('DROP TRIGGER results_metadata_' + event)
         connection.execute('DROP TABLE result_metadata')
         connection.execute(f'PRAGMA user_version={version}')
-    from stash_ai.db import update_database
+    from stash_ai.db.update import update_database
     update_database(path)
     with StateStore(path, 'scope') as store:
         raw = blobs(store)
@@ -172,7 +176,7 @@ def test_old_database_backfills_once_and_keeps_inline_overrides(tmp_path, monkey
         store.connection.set_trace_callback(statements.append)
         assert scene_updates.plan(app, store, '1', config(.4), request=ThresholdRequest(kinds=('scene', 'markers'), access=RecordAccess.METADATA))
         assert report.timing_calls['state_json_decode'] == 0
-        assert store.connection.execute('PRAGMA user_version').fetchone() == (20,)
+        assert store.connection.execute('PRAGMA user_version').fetchone() == (LATEST_SCHEMA_VERSION,)
         first = metadata_rows(store)
         assert len(first) == 2
         monkeypatch.setattr(store, 'unpack', lambda *a: pytest.fail('Repeated legacy decode'))
@@ -184,7 +188,7 @@ def test_old_database_backfills_once_and_keeps_inline_overrides(tmp_path, monkey
     else:
         with StateStore(path, 'scope') as store:
             assert blobs(store) == raw
-        assert db.check_database(path, 'scope')['ok']
+        assert check_database(path, 'scope')['ok']
 
 
 @pytest.mark.parametrize('dry_run', [False, True])
@@ -193,7 +197,7 @@ def test_preview_new_inference_metadata_hides_source_and_tracks_replacement(tmp_
     with StateStore(path, 'scope') as store:
         store.put('1', 'wd', outputs())
         rethreshold(store, .8)
-    from stash_ai.db import update_database
+    from stash_ai.db.update import update_database
     update_database(path)
     with StateStore(path, 'scope') as store:
         raw = blobs(store)
@@ -209,7 +213,7 @@ def test_preview_new_inference_metadata_hides_source_and_tracks_replacement(tmp_
     if dry_run:
         assert path.read_bytes() == source
     else:
-        assert db.check_database(path, 'scope')['ok']
+        assert check_database(path, 'scope')['ok']
 
 
 def test_legacy_backfill_only_selected_pairs_and_commits_once_per_check(tmp_path):
@@ -323,7 +327,7 @@ def test_db_check_reports_corrupt_mismatched_orphan_metadata_without_repair(tmp_
             store.connection.execute("UPDATE result_metadata SET data='{' WHERE kind='scene'")
             store.connection.execute("INSERT INTO result_metadata VALUES ('scope','orphan','wd','markers',1,'[]')")
     before = path.read_bytes()
-    report = db.check_database(path, 'scope')
+    report = check_database(path, 'scope')
     errors = {item['code']:item['count'] for item in report['errors']}
     assert errors['result_metadata_invalid'] == 1
     assert errors['result_metadata_mismatch'] == 1
@@ -336,7 +340,7 @@ def test_compaction_and_anonymous_report_preserve_only_metadata_counts(tmp_path)
     with StateStore(path, 'scope') as store:
         store.put('1', 'wd', outputs())
         original = metadata_rows(store)
-    before, after = db.compact_database(path, 'scope')
+    before, after = compact_database(path, 'scope')
     assert before['result_metadata'] == after['result_metadata'] == 2
     with StateStore(path, 'scope') as store:
         assert metadata_rows(store) == original

@@ -47,20 +47,28 @@ def compact(snapshot):
     return {FORMAT_KEY: FORMAT, 'snapshot': result, 'proofs': proofs}
 
 
-def expand(value, *, version=FORMAT, validate=True):
-    """Validate/expand a declared envelope. Runtime accepts only the current format."""
+def expand(value):
+    """Validate and expand the current snapshot envelope."""
     if (not isinstance(value, dict) or set(value) != {FORMAT_KEY, 'snapshot', 'proofs'}
-            or type(value[FORMAT_KEY]) is not int
-            or value[FORMAT_KEY] != version or not isinstance(value['snapshot'], dict)
-            or not isinstance(value['snapshot'].get('contributions', [] if version < FORMAT else None), list)
-            or not isinstance(value['proofs'], list) or any(not isinstance(proof, dict) for proof in value['proofs'])):
+            or type(value[FORMAT_KEY]) is not int or value[FORMAT_KEY] != FORMAT
+            or not isinstance(value['snapshot'], dict)
+            or not isinstance(value['snapshot'].get('contributions'), list)
+            or not isinstance(value['proofs'], list)
+            or any(not isinstance(proof, dict) for proof in value['proofs'])):
         raise ValueError('Invalid compact snapshot format.')
-    proofs, contributions = value['proofs'], []
-    for item in value['snapshot'].get('contributions', []):
+    for item in value['snapshot']['contributions']:
         if not isinstance(item, dict):
             raise ValueError('Invalid compact snapshot contribution.')
-        if version == FORMAT and validate:
-            validate_policy(item)
+        validate_policy(item)
+    return _expand_proofs(value['snapshot'], value['proofs'])
+
+
+def _expand_proofs(snapshot, proofs):
+    """Mechanical proof-reference expansion shared with offline upgrades."""
+    contributions = []
+    for item in snapshot['contributions']:
+        if not isinstance(item, dict):
+            raise ValueError('Invalid compact snapshot contribution.')
         if 'extra_support' not in item:
             contributions.append(item)
             continue
@@ -77,7 +85,7 @@ def expand(value, *, version=FORMAT, validate=True):
             else:
                 raise ValueError('Invalid compact snapshot proof reference.')
         contributions.append({**item, 'extra_support': support})
-    return {**value['snapshot'], 'contributions': contributions}
+    return {**snapshot, 'contributions': contributions}
 
 
 def validate_policy(item):

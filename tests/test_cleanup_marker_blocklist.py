@@ -51,11 +51,11 @@ def old_consensus(pipeline, monkeypatch, tmp_path, request):
         assert app.main(p.args) == 0
     assert len(p.stash.scene['scene_markers']) == 1
     assert p.stash.scene['scene_markers'][0]['primary_tag']['name'] == 'ai:common'
-    from stash_ai import db
+    from stash_ai.db.update import update_database
     import sqlite3
     with sqlite3.connect(p.path) as connection:
-        connection.execute('PRAGMA user_version=14')
-    db.update_database(p.path)
+        connection.execute('PRAGMA user_version=18')
+    update_database(p.path)
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), True) as state:
         published, _ = state.snapshot('1', 'markers')
         assert any({span['source'], *span.get('support_sources', [])} == {'wd', 'dtq'}

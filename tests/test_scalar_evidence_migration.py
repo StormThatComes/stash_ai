@@ -1,10 +1,12 @@
 """Schema 19 proof contexts become scalar without losing durable archive pins."""
+from stash_ai.storage.schema import LATEST_SCHEMA_VERSION
 from copy import deepcopy
 import sqlite3
 
 import pytest
 
-from stash_ai import db
+from stash_ai.db.checks import check_database
+from stash_ai.db.update import update_database
 from stash_ai.evidence.identity import marker_segment_signature
 from stash_ai.storage.archive import pinned, records as archived_records
 from stash_ai.storage.codec import encode
@@ -61,9 +63,9 @@ def test_v19_conversion_keeps_active_inference_thresholds_and_exact_pins(tmp_pat
         before = connection.execute('SELECT * FROM results').fetchall()
         completion = connection.execute('SELECT scope,scene,model,kind,populated,signature FROM result_index').fetchall()
     raw = path.read_bytes()
-    assert db.update_database(path, dry_run=True) == (19, 20)
+    assert update_database(path, dry_run=True) == (19, LATEST_SCHEMA_VERSION)
     assert path.read_bytes() == raw
-    assert db.update_database(path) == (19, 20)
+    assert update_database(path) == (19, LATEST_SCHEMA_VERSION)
     with sqlite3.connect(path) as connection:
         assert connection.execute('SELECT * FROM results').fetchall() == before
         assert connection.execute('SELECT * FROM result_index').fetchall() == completion
@@ -93,7 +95,7 @@ def test_v19_conversion_keeps_active_inference_thresholds_and_exact_pins(tmp_pat
             assert store.model_record('1', 'markers', 'wd')['publication_threshold'] == .7
             store.put('1', 'wd', outputs(signature='new'))
             assert marker_segment_signature(archived_records(store, '1', 'markers')['wd'][0]) == signature
-        assert db.check_database(path, scope)['ok']
+        assert check_database(path, scope)['ok']
 
 
 def test_invalid_context_rolls_back_snapshot_and_index_migration(tmp_path):
@@ -107,7 +109,7 @@ def test_invalid_context_rolls_back_snapshot_and_index_migration(tmp_path):
         old_index(connection)
         before = connection.execute('SELECT * FROM snapshots').fetchall()
     with pytest.raises(ValueError, match='historical proof signature'):
-        db.update_database(path)
+        update_database(path)
     with sqlite3.connect(path) as connection:
         assert connection.execute('PRAGMA user_version').fetchone() == (19,)
         assert connection.execute('SELECT * FROM snapshots').fetchall() == before

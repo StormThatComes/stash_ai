@@ -8,6 +8,8 @@ import stash_ai.evidence.labels as merge_labels
 from stash_ai.storage.store import StateStore, scope_for
 from stash_ai.storage.results import KINDS
 
+REPORT_FORMAT = 2
+
 
 def _effective_scene_thresholds(app, threshold):
     """Explain the actual scene cutoffs used by temporal qualification."""
@@ -62,15 +64,11 @@ def _explain_scene_contributor(app, hit, recorded_scene_sources):
     value = dict(hit)
     thresholds = _effective_scene_thresholds(
         app, hit.get("meta", {}).get("scene_threshold"))
-    source_records = recorded_scene_sources.get(hit.get("source"), {}).get("records", ())
+    record = recorded_scene_sources.get(hit.get("source"), {}).get("record")
     signature = hit.get("meta", {}).get("inference_signature")
-    matching = [
-        record["thresholds"] for record in source_records
-        if record.get("meta", {}).get("inference_signature") == signature
-    ]
-    if len(matching) == 1:
-        thresholds["stored_scene_threshold"] = matching[0].get("stored_scene_threshold")
-        thresholds["publication_threshold"] = matching[0].get("publication_threshold")
+    if record and record["meta"].get("inference_signature") == signature:
+        thresholds["stored_scene_threshold"] = record["thresholds"].get("stored_scene_threshold")
+        thresholds["publication_threshold"] = record["thresholds"].get("publication_threshold")
     value["thresholds"] = thresholds
     return value
 
@@ -90,21 +88,20 @@ def explain(app, args, core_policies, scene_policies):
             for kind in KINDS:
                 sources = {}
                 for source, segment in store.records(scene_id, kind).items():
-                    matches = []
                     items = ([dict(start=frame["start"], end=frame["end"], score=score)
                               for frame in segment["items"] for tag, score in frame["tags"] if tag == label]
                              if segment["mode"] == "frames" else [entry for entry in segment["items"] if entry["tag"] == label])
                     if items:
-                        matches.append({
-                            "meta": segment["meta"],
-                            "thresholds": _record_thresholds(app, kind, segment),
-                            "detections": items,
-                        })
-                    if matches:
-                        sources[source] = {"excluded": label in scene_policies[source] or (kind == 'markers' and label in core_policies[source]),
-                                           "records": matches}
+                        sources[source] = {
+                            "excluded": label in scene_policies[source] or (kind == 'markers' and label in core_policies[source]),
+                            "record": {
+                                "meta": segment["meta"],
+                                "thresholds": _record_thresholds(app, kind, segment),
+                                "detections": items,
+                            },
+                        }
                 recorded_sources[kind] = sources
-            reports.append({"scene_id": str(scene_id), "tag": merge_labels.AI.prefix + label, 'diagnostics': dict(diagnostics),
+            reports.append({"format": REPORT_FORMAT, "scene_id": str(scene_id), "tag": merge_labels.AI.prefix + label, 'diagnostics': dict(diagnostics),
                             "scene_contributors": [
                                 _explain_scene_contributor(app, hit, recorded_sources["scene"])
                                 for hit in hits if hit["tag"] == label

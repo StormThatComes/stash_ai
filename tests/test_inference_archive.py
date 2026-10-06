@@ -1,9 +1,11 @@
 """Only durable publication proofs survive replacement, without voting in active fusion."""
+from stash_ai.storage.schema import LATEST_SCHEMA_VERSION
 import sqlite3
 
 import pytest
 
-from stash_ai import db
+from stash_ai.db.checks import check_database
+from stash_ai.db.update import update_database
 from stash_ai.evidence.frozen_replay import PublishedRecords
 from stash_ai.evidence.identity import marker_segment_signature
 from stash_ai.storage.archive import records as archived_records
@@ -58,7 +60,7 @@ def test_replacement_preserves_exact_pins_and_replay_while_active_results_are_la
     if preview:
         assert path.read_bytes() == before
     else:
-        assert db.check_database(path, 'scope')['ok']
+        assert check_database(path, 'scope')['ok']
 
 
 def test_archive_and_replacement_roll_back_together(tmp_path):
@@ -74,7 +76,7 @@ def test_archive_and_replacement_roll_back_together(tmp_path):
         assert not archived_records(store, '1', 'markers')
 
 
-def test_v13_migration_keeps_latest_and_only_pinned_history_across_scopes(tmp_path):
+def test_v18_upgrade_preserves_latest_record_and_existing_pinned_archive(tmp_path):
     path = tmp_path/'state.sqlite3'
     history = [outputs(signature=signature)['markers'] for signature in ('unpinned', 'pinned', 'latest')]
     for scope in ('first', 'second'):
@@ -82,20 +84,22 @@ def test_v13_migration_keeps_latest_and_only_pinned_history_across_scopes(tmp_pa
             store.put('1', 'wd', {'markers': history[-1]})
             store.prepare('1', {'markers': proof(history[1])})
     with sqlite3.connect(path) as connection:
-        connection.execute('UPDATE results SET data=?', (encode(history),))
-        connection.execute('PRAGMA user_version=13')
-    assert db.update_database(path) == (13, 20)
+
+        for scope in ('first', 'second'):
+            connection.execute('INSERT INTO inference_archive VALUES (?,?,?,?,?,?)', (scope, '1', 'wd', 'markers', marker_segment_signature(history[1]), encode(history[1])))
+        connection.execute('PRAGMA user_version=18')
+    assert update_database(path) == (18, 21)
     for scope in ('first', 'second'):
         with StateStore(path, scope) as store:
             assert store.model_record('1', 'markers', 'wd') == history[-1]
             archived = archived_records(store, '1', 'markers')['wd']
             assert len(archived) == 1
             assert marker_segment_signature(archived[0]) == marker_segment_signature(history[1])
-        assert db.check_database(path, scope)['ok']
+        assert check_database(path, scope)['ok']
     with sqlite3.connect(path) as connection:
         before = [connection.execute('SELECT * FROM ' + table).fetchall()
                   for table in ('results', 'inference_archive', 'snapshots')]
-    assert db.update_database(path) == (20, 20)
+    assert update_database(path) == (LATEST_SCHEMA_VERSION, LATEST_SCHEMA_VERSION)
     with sqlite3.connect(path) as connection:
         assert [connection.execute('SELECT * FROM ' + table).fetchall()
                 for table in ('results', 'inference_archive', 'snapshots')] == before
@@ -125,5 +129,5 @@ def test_deep_check_rejects_archived_proof_signature_corruption(tmp_path):
         store.put('1', 'wd', outputs(signature='new'))
     with sqlite3.connect(path) as connection:
         connection.execute("UPDATE inference_archive SET signature='tampered'")
-    report = db.check_database(path, 'scope')
+    report = check_database(path, 'scope')
     assert [issue['code'] for issue in report['errors']] == ['state_payload_invalid']

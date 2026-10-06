@@ -120,19 +120,23 @@ Zmiana progów zapisuje małe wiersze w tabeli `result_thresholds`; skompresowan
 wyniki inferencji i evidence klatek pozostają bez zmian. Dotyczy to także
 automatycznego użycia cache po zmianie progów w YAML. Odczyt wyników, merge,
 cleanup i explain używają efektywnych progów z tej tabeli. Każda para model–wyjście ma jeden aktywny wynik i opcjonalny liczbowy próg w `result_thresholds.threshold`.
-`--db-update` przenosi dawne inline overrides i usuwa wycofane `refinement`;
-klatki, wyniki i podpisy dowodów zachowują swoje wartości.
+Bazy sprzed v18 wymagają najpierw mostka aktualizacji opisanego poniżej;
+obsługiwane schematy przechowują już pojedynczy rekord i liczbowy próg.
 `--dry-run` zapisuje progi wyłącznie w tymczasowej bazie.
 
 Snapshoty merge zapisują współdzielone dowody `extra_support` raz, a contributions
 odwołują się do nich przez referencje. Zmniejsza to koszt serializacji i kompresji.
-Aktualny schemat to v20; starsze wersje programu odmówią jego otwarcia. Każdy nowy snapshot ma otoczkę formatu v5. `--db-update` konwertuje dawne
-snapshoty, także pending i recovery, dopisuje wymagane `contributions: []` do pustych zapisów oraz uzupełnia kompletne opcje odtwarzania, również w zagnieżdżonych dowodach scen.
-Dawny `blocklist` zostaje połączony z zapisanymi `tag_exclusions` wszystkich źródeł.
-Brakujące dawne przełączniki współdzielenia i occurrences zachowują `False`.
+Aktualny schemat to v21, z obsługą aktualizacji od v18. Każdy nowy snapshot ma
+otoczkę formatu v5. `--db-update` konwertuje snapshoty v4/v5, także pending i recovery,
+w jednym przebiegu. Zachowuje geometrię, własność i przypięte dowody, normalizuje
+zamrożone opcje odtwarzania oraz usuwa nieużywaną konfigurację wycofanych algorytmów.
 Wersjonowanie analizy checkpointu dotyczy wyłącznie niedokończonej inferencji:
 stare checkpointy są pomijane przy wznowieniu i dany model zaczyna scenę od początku.
-Ukończone wyniki formatu 4 zachowują dowody i sygnatury; starsze aktywne wyniki wymagają ponownej inferencji. `--dry-run` zmienia wyłącznie tymczasową bazę.
+Ukończone wyniki formatu 5 zachowują dowody i sygnatury; starsze aktywne wyniki wymagają ponownej inferencji. `--dry-run` zmienia wyłącznie tymczasową bazę.
+
+`--explain-tag` wypisuje listę raportów scen z polem `format: 2`. Każde źródło
+w `recorded_sources` ma pojedynczy obiekt `record` zawierający `meta`, `thresholds`
+i `detections`, zamiast dawnej jednoelementowej listy `records`.
 
 Pełną listę opcji pokazuje:
 
@@ -183,24 +187,24 @@ zwykłego przebiegu uruchamia świeżą inferencję i unieważnia częściowy ch
 `--merge-only` nie uzupełnia wcześniej odrzuconych wyników. Niższa retencja zwiększa
 rozmiar bazy i koszt przetwarzania cache. Ustawienia dotyczą trwałego cache inferencji.
 
-Aktywny cache wymaga jawnych progów retencji i pełnego formatu analizy 4.
+Aktywny cache wymaga jawnych progów retencji i pełnego formatu analizy 5.
 `--db-update` wycofuje starszą inferencję; uruchom ją ponownie przed merge i cleanup.
 Nadpisanie progu publikacji nie uzupełnia wcześniej odrzuconych obserwacji.
 
 Fazy `Check` i `Apply` rethreshold korzystają z małych rekordów `result_metadata` w SQLite,
 zamiast dekodować klatki z `results.data`. Nowe wyniki zapisują je atomowo razem
 z evidence; starsze wyniki uzupełniają metadane przy pierwszym sprawdzeniu.
-Dotyczy to także historii wyników i starych nadpisań progów. Zmiana lub usunięcie
+Każdy model i rodzaj wyniku ma jeden aktywny rekord oraz opcjonalny liczbowy próg publikacji. Zmiana lub usunięcie
 surowego wyniku unieważnia jego metadane przez trigger, również przy zapisie
 starszą wersją programu. `Apply` zapisuje progi w `result_thresholds` i aktualizuje
 `result_index` z metadanych: obecności wyników oraz sygnatury ostatniej inferencji
-w historii. Przy gotowych metadanych żadna z obu faz nie dekoduje BLOB-ów klatek.
+bieżącego rekordu. Przy gotowych metadanych żadna z obu faz nie dekoduje BLOB-ów klatek.
 Dry-run uzupełnia wyłącznie tymczasową bazę; `--db-check`
 sprawdza zgodność istniejących metadanych z evidence bez ich naprawiania.
 
 Nowa inferencja zawsze zastępuje poprzednie wyniki danego modelu i rodzaju.
-Historyczne serie są normalizowane przez `--db-update`; stare importowane
-wyniki są wycofywane, a ich modele wymagają ponownej inferencji. Zwykłe przedziały opublikowane dawniej jako
+Aktualizacja z v18 wycofuje niepełne wyniki starszego formatu analizy i zleca ponowną inferencję.
+Publikacje zachowują własność i geometrię, a ich potrzebne dowody pozostają przypięte w archiwum. Zwykłe przedziały opublikowane dawniej jako
 punkty wymagają jednorazowego `python -m stash_ai.tools.point_migration` (także z `--dry-run`).
 Komenda zapisuje długość ze snapshotów published, pending i recovery w natywnym `end_seconds`,
 zachowując ID, tytuły i ręczne tagi. Punkty `OccurrenceTag` pozostają punktami.
@@ -224,31 +228,39 @@ Jeśli CREATE_MISSING jest wyłączone, stary obiekt bez dostępnego tagu zastę
 
 Zwykły merge obsługuje wyłącznie bieżący namespace `ai:`. Przed jego uruchomieniem
 przenieś stare zarządzane prefiksy osobnym narzędziem; zwykły przebieg ich nie konwertuje.
-Import historycznych ocen oraz jego trwały rejestr nie są już używane. Schemat v17
-usuwa `legacy_imports` i importowane aktywne wyniki, zlecając świeżą inferencję.
+Import historycznych ocen oraz jego trwały rejestr nie są już używane.
+Bazy sprzed v18 wymagają jednorazowego przejścia przez kompatybilny commit opisany poniżej.
 Globalne definicje starych tagów pozostają dostępne dla ręcznych powiązań.
 
 ### Zdrowie, aktualizacja i kompaktowanie bazy stanu
 
-`--db-update` aktualizuje całą istniejącą bazę wskazaną przez `--state-db`
-do najnowszego obsługiwanego schematu (obecnie v20), we wszystkich scope'ach.
-Zwykłe uruchomienie oraz `--dry-run` wymagają aktualnego schematu: starszą bazę
-trzeba najpierw zaktualizować tą komendą. Nowa baza od razu otrzymuje v20.
-Updater korzysta z tego samego locka writera; migracje są wyłącznie offline.
-Tworzy aktualne tabele, indeksy i triggery, uzupełnia `result_index` dla baz
-sprzed v2, uzupełnia historyczne `result_metadata` we wszystkich scope'ach
-oraz usuwa wycofaną tabelę `refinement_progress`.
-Nie łączy się ze Stash ani nie ładuje konfiguracji modeli. Zachowuje wyniki, checkpointy, pending publication/cleanup i recovery oraz
-efektywny próg bieżącej inferencji. Wynik aktywny jest pojedynczym obiektem,
-a polityka pojedynczą liczbą; dawne tablice odczytuje wyłącznie migracja offline.
-Nie odtwarza utraconych detekcji: starsze niepełne wyniki wymagają ponownej inferencji.
-Dowody przypięte przez publikacje pozostają w archiwum do czasu odświeżenia publikacji.
+`--db-update` aktualizuje bazę wskazaną przez `--state-db` ze schematu **v18 lub nowszego**
+do aktualnego **v21**, we wszystkich scope'ach. Zwykłe uruchomienie oraz `--dry-run`
+wymagają aktualnego schematu; nowa baza od razu otrzymuje v21.
+Updater korzysta z tego samego locka writera. Pracuje offline, bez Stash i konfiguracji modeli.
+Zachowuje liczbowe progi, własność publikacji, checkpointy, pending publication/cleanup i recovery.
+Snapshoty v4/v5 są konwertowane w jednym przebiegu, z zachowaniem współdzielonych dowodów.
+Wycofane konfiguracje algorytmów są usuwane; geometria i referencje do dowodów pozostają.
+Aktualizacja nie odtwarza utraconych detekcji. Niepełne wyniki z v18 wymagają ponownej inferencji.
+Metadane wyników są uzupełniane dopiero po zakończeniu konwersji.
 
-`--dry-run` wykonuje odczytowy preflight i pokazuje wersję źródłową oraz
-docelową; nie uruchamia migracji ani nie tworzy locka. Polecenie odrzuca brakującą,
-obcą lub nowszą niż obsługiwana bazę. Migracje są powtarzalne: mogą zatwierdzić
-etapy pośrednie, ale najnowsza wersja jest ustawiana dopiero po ukończeniu
-inicjalizacji. Przerwaną aktualizację można uruchomić ponownie.
+Dla bazy **sprzed v18** użyj najpierw kompatybilnego commita
+[`c5bcd887bafe76b7ee2a9de944666799c9a0fc30`](https://github.com/StormThatComes/stash_ai/commit/c5bcd887bafe76b7ee2a9de944666799c9a0fc30)
+w osobnym katalogu, z jego zależnościami. Zachowaj kopię bazy i wskaż tę samą bazę stanu:
+
+```bash
+git clone https://github.com/StormThatComes/stash_ai stash-ai-upgrade-bridge
+git -C stash-ai-upgrade-bridge checkout c5bcd887bafe76b7ee2a9de944666799c9a0fc30
+python stash-ai-upgrade-bridge/stash_ai.py --db-update --state-db /path/to/tagger_sources.sqlite3
+```
+
+Następnie uruchom `--db-update` z bieżącej instalacji. Kompatybilny commit konwertuje
+historyczne serie i importy do v20, który bieżąca wersja obsługuje bezpośrednio.
+
+`--db-update --dry-run` pokazuje wersję źródłową i docelową bez migracji, zmian pliku ani locka.
+Baza sprzed v18 otrzymuje komunikat ze ścieżką aktualizacji; obca lub nowsza baza jest odrzucana.
+Konwersja payloadów, wycofanie aktywnych wyników i ustawienie wersji są jedną transakcją.
+Tworzenie brakujących tabel jest powtarzalne; przerwaną aktualizację można ponowić.
 
 `--db-check` wykonuje głęboki, wyłącznie odczytowy test spójności całej bazy
 (we wszystkich scope'ach). Dla starszego schematu wykonuje tylko preflight wersji i integralności SQLite,
@@ -259,11 +271,12 @@ checkpoint/frames/analysis, wymiary checkpointów oraz generacje cleanup/recover
 Waliduje też zawartość wyników scen, klatek i zakresów markerów: wymagane pola,
 tagi, czasy, prawdopodobieństwa oraz zapisane statystyki czasowe. Sprawdza klatki
 checkpointów (również `scene_tags`) i wartości float32: odrzuca `NaN`,
-nieskończoności oraz wyniki poza `[0, 1]`. Zachowuje obsługę starszych wyników bez
-statystyk i metadanych retencji, a także importowanych markerów punktowych i
-brakujących historycznych ocen (`score: null`).
-Osierocone lub historyczne rekordy, które nie muszą oznaczać uszkodzenia, są
-raportowane jako warnings. Pending publication/cleanup i refresh requests są
+nieskończoności oraz wyniki poza `[0, 1]`. Aktywne wyniki muszą spełniać bieżący
+kontrakt inferencji; starsze zakresy i częściowe statystyki są sprawdzane wyłącznie
+w archiwum dowodów. Importy i oceny `score: null` są odrzucane. Wycofane tabele
+`legacy_imports` i `refinement_progress` są zgłaszane jako błąd bez odczytu ich payloadów.
+Niektóre brakujące powiązania snapshot/recovery są raportowane jako warnings.
+Pending publication/cleanup i refresh requests są
 pokazywane jako stan roboczy, a nie automatycznie jako błędy.
 
 Komenda nie łączy się ze Stash, nie ładuje modeli i niczego nie naprawia ani nie
@@ -288,6 +301,12 @@ szacunkowy odzysk z wolnych stron. Recovery evidence i checkpointy są zachowywa
 `--anonymous-diagnostics NEW.json` tworzy lokalny raport przeznaczony do
 ręcznego przejrzenia i ewentualnego przekazania developerowi. Aplikacja **nigdy
 nie wysyła go automatycznie** i odmawia nadpisania istniejącego pliku.
+
+Raport używa `format: 2`. Dla baz v18–v20 pokazuje informacje o bazie oraz
+`database.upgrade_required: true`, bez dekodowania dowodów i szczegółowych statystyk.
+Pełny raport wymaga wcześniejszego `--db-update`. Dawne tryby, pochodzenie i formaty
+analizy są oznaczane jako `other`; nie ma osobnych pól dla historycznych zakresów
+ani `scene_frames_format`.
 
 Raport obejmuje całą wskazaną bazę stanu, ale nie eksportuje scene IDs, wartości
 `scope`, URL-i, ścieżek plików, nazw tagów, score'ów, timestampów markerów,

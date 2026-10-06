@@ -5,7 +5,7 @@ import json
 import zlib
 
 from ..common import count_rows
-from ..payloads import valid_result_segments
+from ..payloads import valid_result
 from .common import decoded_payload, tick
 
 
@@ -24,7 +24,7 @@ def check_results_and_index(db, tables, errors, progress=None):
         tick(progress)
         try:
             record = decoded_payload(blob, dict)
-            if not valid_result_segments([record], kind):
+            if not valid_result(record, kind):
                 raise ValueError('Invalid result record.')
             from stash_ai.evidence.formats import validate_current
             validate_current(record)

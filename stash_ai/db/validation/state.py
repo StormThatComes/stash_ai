@@ -14,7 +14,6 @@ def check_state_payloads(db, tables, errors, progress=None):
         ("inference_archive", "data", dict),
         ("snapshots", "published", dict),
         ("snapshots", "pending", dict),
-        ("legacy_imports", "data", list),
         ("cleanup_state", "data", dict),
         ("checkpoint_frames", "data", list),
         ("checkpoint_analysis", "data", dict),
@@ -35,9 +34,9 @@ def check_state_payloads(db, tables, errors, progress=None):
                 else:
                     payload = decoded_payload(blob, expected)
                 if table == 'inference_archive':
-                    from stash_ai.db.payloads import valid_result_segments
+                    from stash_ai.db.payloads import valid_result
                     from stash_ai.evidence.formats import validate_archived
-                    if payload['meta'].get('origin') != 'inference' or not valid_result_segments([payload], kind):
+                    if not valid_result(payload, kind, archived=True):
                         raise ValueError('Invalid archived inference proof.')
                     validate_archived(payload)
                     from stash_ai.evidence.identity import marker_segment_signature
@@ -108,15 +107,6 @@ def check_state_relations(db, tables, warnings):
             warnings["empty_snapshot_without_recovery"] += db.execute(
                 "SELECT COUNT(*) FROM snapshots WHERE published IS NULL AND pending IS NULL"
             ).fetchone()[0]
-
-    if "legacy_imports" in tables and "results" in tables:
-        warnings["legacy_import_without_result"] += db.execute("""
-            SELECT COUNT(*) FROM legacy_imports AS l
-            WHERE NOT EXISTS (
-                SELECT 1 FROM results AS r
-                WHERE r.scope=l.scope AND r.scene=l.scene AND r.kind=l.kind
-            )
-        """).fetchone()[0]
 
     if "recovery_publications" in tables:
         if "snapshots" in tables:

@@ -12,7 +12,7 @@ import zlib
 import pytest
 
 from tests.helpers.runtime import runtime as app
-from stash_ai import db as stash_db
+from stash_ai.db.checks import check_database, format_check_report
 import stash_ai.storage.store as merge_store
 from tests.test_db import issues, seed
 from tests.test_result_thresholds import outputs
@@ -23,13 +23,13 @@ FRAME = {"start": 0.0, "end": 1.0, "tags": [["blue_hair", .9]]}
 
 def save_result(path, mode, items, **extra):
     kind = "scene" if mode == "scene" else "markers"
-    segment = {"mode": mode, "meta": {"origin": "inference"}, "items": items, **extra}
+    segment = {**outputs()[kind], "mode": mode, "items": items, **extra}
     with merge_store.StateStore(path, "scope") as state:
         # Build a consistent index, then inject a decodable payload. JSON NaN/Inf
         # cannot be produced by the normal encoder, but must be detected on disk.
         state.put("1", "wd", {kind: outputs()[kind]})
         state.connection.execute("UPDATE results SET data=?",
-                                 (zlib.compress(json.dumps([segment]).encode()),))
+                                 (zlib.compress(json.dumps(segment).encode()),))
         state.connection.commit()
 
 
@@ -51,12 +51,12 @@ def test_check_rejects_unusable_frame_rows(tmp_path, row):
     save_result(path, "frames", [row])
     before = hashlib.sha256(path.read_bytes()).digest()
 
-    report = stash_db.check_database(path, "scope")
+    report = check_database(path, "scope")
 
     assert not report["ok"]
     assert issues(report) == {"result_payload_invalid": 1}
     assert hashlib.sha256(path.read_bytes()).digest() == before
-    assert "blue_hair" not in stash_db.format_check_report(report)
+    assert "blue_hair" not in format_check_report(report)
 
 
 @pytest.mark.parametrize("mode,items,extra", [
@@ -73,7 +73,7 @@ def test_check_rejects_unusable_frame_rows(tmp_path, row):
 def test_check_rejects_unusable_scene_and_span_rows(tmp_path, mode, items, extra):
     path = tmp_path / "state.sqlite3"
     save_result(path, mode, items, **extra)
-    report = stash_db.check_database(path, "scope")
+    report = check_database(path, "scope")
     assert not report["ok"]
     assert issues(report) == {"result_payload_invalid": 1}
 
@@ -86,7 +86,7 @@ def test_check_rejects_invalid_float32_probabilities(tmp_path, score):
         db.execute("INSERT INTO checkpoints VALUES (?,?,?,?,?,?,?,?)",
                    ("scope", "cp", "wd", "sig", 1, 2, 1,
                     zlib.compress(struct.pack("<ff", .5, score))))
-    report = stash_db.check_database(path, "scope")
+    report = check_database(path, "scope")
     assert not report["ok"]
     assert issues(report) == {"checkpoint_scores": 1}
 
@@ -99,7 +99,7 @@ def test_check_reports_fractional_checkpoint_dimensions_without_crashing(tmp_pat
         # passes the old rows * 4 divisibility test, but is not a float32 array.
         db.execute("INSERT INTO checkpoints VALUES (?,?,?,?,?,?,?,?)",
                    ("scope", "cp", "wd", "sig", 2, 3, 1.25, zlib.compress(b"12345")))
-    report = stash_db.check_database(path, "scope")
+    report = check_database(path, "scope")
     assert not report["ok"]
     assert issues(report) == {"checkpoint_dimensions": 1, "checkpoint_scores": 1}
 
@@ -112,7 +112,7 @@ def test_check_accepts_empty_and_boundary_checkpoint_scores(tmp_path, scores):
         db.execute("INSERT INTO checkpoints VALUES (?,?,?,?,?,?,?,?)",
                    ("scope", "cp", "wd", "sig", 1, 2, int(bool(scores)),
                     zlib.compress(struct.pack(f"<{len(scores)}f", *scores))))
-    report = stash_db.check_database(path, "scope")
+    report = check_database(path, "scope")
     assert report["ok"], report["errors"]
 
 
@@ -126,14 +126,14 @@ def test_check_rejects_invalid_checkpoint_frames(tmp_path, row):
                     zlib.compress(struct.pack("<f", .9))))
         db.execute("INSERT INTO checkpoint_frames VALUES (?,?,?,?,?)",
                    ("scope", "cp", "wd", 1, zlib.compress(json.dumps([row]).encode())))
-    report = stash_db.check_database(path, "scope")
+    report = check_database(path, "scope")
     assert not report["ok"]
     assert issues(report) == {"state_payload_invalid": 1}
 
 
 def test_check_accepts_current_and_sparse_formats(tmp_path):
     path = tmp_path / "state.sqlite3"
-    seed(path, "scope")  # Old inference without retention metadata/statistics.
+    seed(path, "scope")
     with merge_store.StateStore(path, "scope") as state:
         state.put("raw", "wd", {
             "scene": inference_record(mode="scene", items=[dict(tag="blue_hair", score=.9)]),
@@ -146,7 +146,7 @@ def test_check_accepts_current_and_sparse_formats(tmp_path):
             "markers": inference_record(**{"mode": "frames", "meta": {"origin": "inference"},
                         "items": [{**FRAME, "tags": []}]}),
         })
-    report = stash_db.check_database(path, "scope")
+    report = check_database(path, "scope")
     assert report["ok"], report["errors"]
 
 
@@ -160,11 +160,11 @@ def test_check_accepts_real_checkpoint_and_completed_inference(pipeline, scene_o
     p.fail["wd"] = 4
     with pytest.raises(KeyboardInterrupt):
         app.main(args)
-    report = stash_db.check_database(p.path, scope)
+    report = check_database(p.path, scope)
     assert report["ok"], report["errors"]
     p.fail.clear()
     assert app.main(args) == 0
-    report = stash_db.check_database(p.path, scope)
+    report = check_database(p.path, scope)
     assert report["ok"], report["errors"]
 
 
@@ -174,3 +174,50 @@ def test_cli_rejects_unusable_payload_offline(tmp_path, monkeypatch):
     for name in ("create_stash_client", "load_model_settings", "load_tagger"):
         monkeypatch.setattr(app.services, name, lambda *a, **kw: pytest.fail("db-check must stay offline"))
     assert app.main(["--state-db", str(path), "--db-check"]) == 1
+
+
+@pytest.mark.parametrize('mode,items', [
+    ('scene', [{'tag': 'blue_hair', 'score': .9}]),
+    ('scene', [{'tag': 'blue_hair', 'score': .9, 'statistics': {
+        'hits': 1, 'high_hits': 1, 'longest_hits': 1, 'max_score': .9, 'sample_fraction': 1}}]),
+    ('frames', [FRAME]),
+    ('spans', [{'tag': 'blue_hair', 'score': .9, 'start': 0, 'end': 1}]),
+    ('spans', [{'tag': 'blue_hair', 'score': .9, 'start': 0, 'end': None}]),
+])
+def test_retired_inference_shapes_are_valid_only_in_archives(tmp_path, mode, items):
+    from stash_ai.evidence.identity import marker_segment_signature
+    from stash_ai.storage.codec import encode
+    path = tmp_path / 'state.sqlite3'
+    seed(path, 'scope')
+    kind = 'scene' if mode == 'scene' else 'markers'
+    record = {'mode': mode, 'meta': {'origin': 'inference', 'analysis_format': 1}, 'items': items}
+    with sqlite3.connect(path) as connection:
+        connection.execute('INSERT INTO inference_archive VALUES (?,?,?,?,?,?)',
+            ('scope', 'old', 'wd', kind, marker_segment_signature(record), encode(record)))
+    before = path.read_bytes()
+    report = check_database(path, 'scope')
+    assert report['ok'], report['errors']
+    assert path.read_bytes() == before
+    with sqlite3.connect(path) as connection:
+        connection.execute('UPDATE results SET data=? WHERE kind=?', (encode(record), kind))
+    assert issues(check_database(path, 'scope')) == {'result_payload_invalid': 1}
+
+
+@pytest.mark.parametrize('record', [
+    [{'mode': 'scene', 'meta': {'origin': 'inference'}, 'items': []}],
+    {'mode': 'scene', 'meta': {'origin': 'legacy'}, 'items': []},
+    {'mode': 'scene', 'meta': {'origin': 'inference'}, 'items': [{'tag': 'blue_hair', 'score': None}]},
+    {'mode': 'spans', 'meta': {'origin': 'inference'}, 'items': [{'tag': 'blue_hair', 'score': None, 'start': 0, 'end': 1}]},
+    {'mode': 'spans', 'meta': {'origin': 'inference'}, 'items': [{'tag': 'blue_hair', 'score': .9, 'start': 2, 'end': 1}]},
+])
+def test_archive_rejects_imports_histories_and_invalid_proofs(tmp_path, record):
+    from stash_ai.storage.codec import encode
+    path = tmp_path / 'state.sqlite3'
+    seed(path, 'scope')
+    kind = 'markers' if isinstance(record, dict) and record['mode'] == 'spans' else 'scene'
+    with sqlite3.connect(path) as connection:
+        connection.execute('INSERT INTO inference_archive VALUES (?,?,?,?,?,?)',
+            ('scope', 'old', 'wd', kind, 'invalid', encode(record)))
+    before = path.read_bytes()
+    assert issues(check_database(path, 'scope')) == {'state_payload_invalid': 1}
+    assert path.read_bytes() == before

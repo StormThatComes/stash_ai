@@ -19,6 +19,7 @@ CHECK_MESSAGES = {
     "sqlite_integrity_check": "SQLite integrity_check reported a storage/index-level problem.",
     "missing_base_tables": "Core state tables are missing.",
     "missing_state_tables": "Current state tables are missing; run --db-update.",
+    "retired_state_tables": "Retired state tables are present; inspect the schema/version before using this database.",
     "schema_upgrade_required": "Historical schema requires --db-update before a deep --db-check.",
     "invalid_table_columns": "Current state table columns do not match the schema; restore or migrate the database.",
     "missing_state_triggers": "State invalidation triggers are missing; run --db-update.",
@@ -33,7 +34,7 @@ CHECK_MESSAGES = {
     "result_metadata_invalid": "Derived result validation metadata is malformed or uses an unsupported format.",
     "result_metadata_mismatch": "Derived result validation metadata disagrees with its evidence payload.",
     "result_metadata_orphan": "Derived result validation metadata has no matching saved result.",
-    "result_payload_invalid": "Saved result payloads cannot be decoded or contain invalid segments, evidence rows, or values.",
+    "result_payload_invalid": "Saved result payloads cannot be decoded or contain an invalid inference record, evidence rows, or values.",
     "state_payload_invalid": "Non-result application state contains an unreadable or structurally invalid compressed payload.",
     "checkpoint_orphan_frames": "Checkpoint frame chunks have no parent checkpoint.",
     "checkpoint_orphan_analysis": "Checkpoint analysis rows have no parent checkpoint.",
@@ -43,7 +44,6 @@ CHECK_MESSAGES = {
     "cleanup_state_invalid": "Cleanup state has an invalid generation or mask structure.",
     "recovery_cleanup_invalid": "Recovery cleanup metadata is invalid or refers to an impossible generation.",
     "empty_snapshot_without_recovery": "Snapshot rows contain neither published nor pending state and have no archived recovery publication.",
-    "legacy_import_without_result": "Legacy import history has no matching saved evidence for that scene/output kind.",
     "recovery_publication_without_snapshot": "Archived publication recovery exists without a matching snapshot row.",
 }
 
@@ -78,6 +78,9 @@ def check_database(path, scope, *, show_progress=False):
         # Diagnose the version/shape before running queries against current SQL.
         preflight = (Counter(schema_upgrade_required=1) if version != LATEST_SCHEMA_VERSION
                      else shape_issues(db))
+        retired_tables = tables & {'legacy_imports', 'refinement_progress'}
+        if version == LATEST_SCHEMA_VERSION and retired_tables:
+            preflight['retired_state_tables'] = len(retired_tables)
         if preflight:
             integrity_ok = [row[0] for row in db.execute('PRAGMA integrity_check')] == ['ok']
             if not integrity_ok:
@@ -209,4 +212,3 @@ def format_check_report(report):
     if report["ok"] and not report["warnings"]:
         lines.append("No logical consistency problems found.")
     return "\n".join(lines)
-

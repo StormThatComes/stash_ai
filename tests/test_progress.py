@@ -1,4 +1,5 @@
 """Resume equivalence and bounded preparation; never connects to Stash/HF."""
+from stash_ai.storage.schema import LATEST_SCHEMA_VERSION
 from tests.helpers.evidence import inference_record
 
 
@@ -325,18 +326,16 @@ def test_prefetch_is_bounded_and_closes_producer(pipeline,monkeypatch):
     assert not any(t.name.startswith("prepare-frames") for t in threading.enumerate())
 
 
-def test_v1_database_is_migrated_once_without_losing_sources(tmp_path,monkeypatch):
+def test_v18_database_is_migrated_once_without_losing_sources(tmp_path,monkeypatch):
     path=tmp_path/"v1.sqlite3"
     segment=inference_record(**{"mode":"scene","meta":{"origin":"inference"},"items":[{"tag":"common","score":.9}]})
-    db=sqlite3.connect(path)
-    db.executescript(f"PRAGMA application_id={APPLICATION_ID}; PRAGMA user_version=1; "
-                    "CREATE TABLE results(scope TEXT,scene TEXT,model TEXT,kind TEXT,data BLOB,PRIMARY KEY(scope,scene,model,kind));")
-    db.execute("INSERT INTO results VALUES (?,?,?,?,?)",("fixture","1","wd","scene",state_codec.encode([segment])))
-    db.commit();db.close()
-    from stash_ai.db import update_database
+    with merge_store.StateStore(path, 'fixture') as state:
+        state.put('1', 'wd', {'scene': segment})
+        state.connection.execute('PRAGMA user_version=18')
+    from stash_ai.db.update import update_database
     update_database(path)
     with merge_store.StateStore(path,"fixture") as state:
-        assert state.connection.execute("PRAGMA user_version").fetchone()==(20,)
+        assert state.connection.execute("PRAGMA user_version").fetchone()== (LATEST_SCHEMA_VERSION,)
         assert state.records("1","scene")["wd"]==segment
         assert not progress.completed(state,"1","wd",["scene"],"new-signature")
     monkeypatch.setattr(state_codec,"decode",lambda *args:pytest.fail("migration repeated"))

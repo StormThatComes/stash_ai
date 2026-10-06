@@ -5,7 +5,7 @@ import sqlite3
 import pytest
 from tqdm import tqdm
 
-from stash_ai import db as stash_db
+from stash_ai.db.checks import check_database, format_check_report
 from stash_ai.db.validation import results
 from tests.test_db import seed
 
@@ -14,17 +14,17 @@ def test_historical_schema_reports_upgrade_without_decoding(tmp_path, monkeypatc
     path = tmp_path / 'state.sqlite3'
     seed(path, 'scope')
     with sqlite3.connect(path) as db:
-        db.execute('PRAGMA user_version=9')
+        db.execute('PRAGMA user_version=18')
         db.execute("UPDATE results SET data=x'01'")
     before = path.read_bytes()
     def forbidden(*args, **kwargs):
         raise AssertionError('Historical payloads require migration first.')
     monkeypatch.setattr(results, 'check_results_and_index', forbidden)
-    report = stash_db.check_database(path, 'scope')
+    report = check_database(path, 'scope')
     assert not report['ok'] and report['integrity_check_ok']
     assert report['results_checked'] == 0
     assert [issue['code'] for issue in report['errors']] == ['schema_upgrade_required']
-    assert '--db-update' in stash_db.format_check_report(report)
+    assert '--db-update' in format_check_report(report)
     assert path.read_bytes() == before
 
 
@@ -44,10 +44,10 @@ def test_checks_share_snapshot_when_another_writer_commits(tmp_path, monkeypatch
         return original(connection, tables, errors, progress)
 
     monkeypatch.setattr(results, 'check_results_and_index', concurrent_update)
-    report = stash_db.check_database(path, 'scope')
+    report = check_database(path, 'scope')
     assert report['ok'] and report['results_checked'] == 2
     monkeypatch.setattr(results, 'check_results_and_index', original)
-    later = stash_db.check_database(path, 'scope')
+    later = check_database(path, 'scope')
     assert {issue['code']: issue['count'] for issue in later['errors']} == {'result_index_mismatch': 2}
 
 
@@ -62,7 +62,7 @@ def test_db_progress_counts_all_work_and_closes(tmp_path, monkeypatch):
             bars.append(self)
 
     monkeypatch.setattr('tqdm.tqdm', Progress)
-    report = stash_db.check_database(path, 'scope', show_progress=True)
+    report = check_database(path, 'scope', show_progress=True)
     assert report['ok']
     assert len(bars) == 1
     assert bars[0].n == bars[0].total == 8
@@ -101,9 +101,35 @@ def test_current_schema_shape_preflight_is_read_only(tmp_path, damage, code):
     with sqlite3.connect(path) as db:
         db.execute(damage)
     before = path.read_bytes()
-    report = stash_db.check_database(path, 'scope')
+    report = check_database(path, 'scope')
     assert not report['ok'] and report['results_checked'] == 0
     assert [issue['code'] for issue in report['errors']] == [code]
     with pytest.raises(ValueError, match='Incomplete state DB'):
         StateStore(path, 'scope')
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize('table', ['legacy_imports', 'refinement_progress'])
+@pytest.mark.parametrize('with_payload', [False, True])
+def test_retired_tables_are_rejected_without_reading_their_shape_or_payload(tmp_path, monkeypatch, table, with_payload):
+    from stash_ai.db import checks
+    path = tmp_path / 'state.sqlite3'
+    seed(path, 'scope')
+    with sqlite3.connect(path) as connection:
+        connection.execute(f'CREATE TABLE {table}(private_payload BLOB)')
+        if with_payload:
+            connection.execute(f'INSERT INTO {table} VALUES (?)', (b'private-invalid-payload',))
+    before = path.read_bytes()
+    original = checks.connect_readonly
+    def protected(*args, **kwargs):
+        connection = original(*args, **kwargs)
+        def authorize(action, name, *rest):
+            return sqlite3.SQLITE_DENY if action == sqlite3.SQLITE_READ and name == table else sqlite3.SQLITE_OK
+        connection.set_authorizer(authorize)
+        return connection
+    monkeypatch.setattr(checks, 'connect_readonly', protected)
+    report = check_database(path, 'scope', show_progress=True)
+    assert not report['ok'] and report['integrity_check_ok']
+    assert [(issue['code'], issue['count']) for issue in report['errors']] == [('retired_state_tables', 1)]
+    assert report['results_checked'] == report['state_payloads_checked'] == 0
     assert path.read_bytes() == before

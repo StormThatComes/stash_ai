@@ -2,9 +2,19 @@
 from dataclasses import dataclass
 
 APPLICATION_ID = 0x53544D47
-LATEST_SCHEMA_VERSION = 20
+MIN_SUPPORTED_SCHEMA_VERSION = 18
+LATEST_SCHEMA_VERSION = 21
+UPGRADE_BRIDGE_COMMIT = 'c5bcd887bafe76b7ee2a9de944666799c9a0fc30'
 KNOWN_KINDS = frozenset(('scene', 'markers'))
 KNOWN_MODELS = frozenset(('joytag', 'wd', 'dtq', 'oppai'))
+
+
+def require_supported_version(version):
+    if version < MIN_SUPPORTED_SCHEMA_VERSION:
+        raise ValueError(f'State DB schema v{version} is below the supported minimum v{MIN_SUPPORTED_SCHEMA_VERSION}. '
+                         f'First run --db-update using commit {UPGRADE_BRIDGE_COMMIT}, then update this installation.')
+    if version > LATEST_SCHEMA_VERSION:
+        raise ValueError('Not a supported stash-taggers state DB; its schema is newer than this installation.')
 
 
 @dataclass(frozen=True)
