@@ -26,15 +26,20 @@ class ObservationIndex:
             return cached
         self.scans += 1
         first, last = bisect_left(self.starts, start), bisect_left(self.starts, end)
+        if self.disjoint:
+            if first and self.events[first - 1]['end'] > start:
+                first -= 1
+        else:
+            first = 0  # An earlier long observation can still overlap this range.
         if last <= first:
             return {}
-        if self.disjoint:
+        if self.disjoint and self.starts[first] >= start:
             from stash_ai.evidence.timeline import Timeline
             if allowed not in self.timelines:
                 self.timelines[allowed] = Timeline(self.events, self.context, allowed)
             support = self.timelines[allowed].support(first, last, end, policy, self.group)
         else:
-            support = self.scan_support(first, last, end, policy, allowed)
+            support = self.scan_support(first, last, end, policy, allowed, start=start)
         from stash_ai.evidence.timeline import support_size
         self.cache.put(key, support, retained_bytes=support_size(support))
         self.cache_keys.add(key)
@@ -59,22 +64,26 @@ class ObservationIndex:
         self.cache_keys.clear()
         self.timelines.clear()
 
-    def scan_support(self, first, last, end, policy, allowed):
+    def scan_support(self, first, last, end, policy, allowed, *, start=0.0):
         """Exact fallback for overlapping legacy/custom observation timelines."""
         support = {}
         for index in range(first, last):
             event = self.events[index]
             time, stop = event['start'], min(event['end'], end)
+            covered_start = max(time, start)
+            if stop <= covered_start:
+                continue
+            sampled = time >= start
             for tag, values in event['extras'].items():
                 sources = values if allowed is None else {s: score for s, score in values.items() if s in allowed}
                 if not sources:
                     continue
                 item = support.setdefault(tag, dict(intervals=[], sample_times=[], hits=0))
-                item['hits'] += 1
-                append_interval(item['intervals'], time, stop)
-                if len(item['sample_times']) < policy.extra_min_hits:
+                item['hits'] += int(sampled)
+                append_interval(item['intervals'], covered_start, stop)
+                if sampled and len(item['sample_times']) < policy.extra_min_hits:
                     item['sample_times'].append(time)
-                if policy.short_marker_extras:
+                if sampled and policy.short_marker_extras:
                     item['run_group'] = self.group
                     runs = item.setdefault('runs', [])
                     if runs and runs[-1][1] == index and time <= runs[-1][3] + .001:
@@ -87,8 +96,8 @@ class ObservationIndex:
                     own = item.setdefault('sources', {}).setdefault(source,
                         dict(intervals=[], sample_times=[], score=score, signature=self.context[source]))
                     own['score'] = max(own['score'], score)
-                    append_interval(own['intervals'], time, stop)
-                    if len(own['sample_times']) < policy.extra_min_hits:
+                    append_interval(own['intervals'], covered_start, stop)
+                    if sampled and len(own['sample_times']) < policy.extra_min_hits:
                         own['sample_times'].append(time)
         return support
 

@@ -558,6 +558,11 @@ Bieżący walidator wymaga v2 i wskazuje commit migratora bez zmiany pliku.
 | `*_hierarchy.yml` | hierarchie kategorii modeli |
 | `--state-db` | lokalizacja trwałej bazy stanu |
 
+`MAX_MARKERS_PER_SCENE` ogranicza wkłady osobno dla każdego modelu.
+Zakresy mają pierwszeństwo przed dodatkowymi punktami Occurrence. Punkt
+wspierany przez kilka modeli zajmuje slot jednego modelu, który ma jeszcze
+wolne miejsce; marker WD nie wyczerpuje limitu DTQ.
+
 Aktualne domyślne limity procesu:
 - `--ram-budget-gb 32`;
 - `--ram-cache-gb 24` — cache jest przydzielany na żądanie i ograniczony do

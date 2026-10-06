@@ -108,7 +108,14 @@ def enrich(app, policies, spans, index, metrics=None):
         candidates.sort(key=lambda span: (-span["shared_strong_hits"], -span["shared_hits"],
                                          span["start"], span["tag"], span["frame_group"]))
         if app.MAX_MARKERS_PER_SCENE:
-            candidates = candidates[:app.MAX_MARKERS_PER_SCENE]
+            from collections import Counter
+            used = Counter(span['source'] for span in spans)
+            retained = []
+            for span in candidates:
+                if used[span['source']] < app.MAX_MARKERS_PER_SCENE:
+                    used[span['source']] += 1
+                    retained.append(span)
+            candidates = retained
         if metrics is not None:
             metrics['shared_marker_runs'] += len(candidates)
             metrics['shared_marker_extensions'] += sum(any(a < span['end'] and b > span['start']
