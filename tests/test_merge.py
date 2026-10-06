@@ -268,13 +268,10 @@ def test_resume_uses_successful_records_even_with_no_predictions(merge_pipeline,
 
 def test_combined_hierarchy_has_one_namespace_and_all_labels(tmp_path):
     root=Path(__file__).resolve().parents[1]
-    args=runtime_args(no_hierarchy=False,hierarchy=root/"joytag_hierarchy.yml",**{
-        key+"_hierarchy":root/f"{key}_hierarchy.yml" for key in ("wd","dtq","oppai")})
+    args=runtime_args(no_hierarchy=False,hierarchy=root/"tag_hierarchy.yml")
     combined=hierarchy_commands.combined_hierarchy(app,args, tag_policies=empty_tag_policies())
-    expected=set()
-    for key in SOURCES:
-        data=yaml.safe_load((root/f"{key}_hierarchy.yml").read_text(encoding="utf-8"))
-        expected.update(tag for tags in data["groups"].values() for tag in tags)
+    data=yaml.safe_load((root/"tag_hierarchy.yml").read_text(encoding="utf-8"))
+    expected={tag for tags in data["groups"].values() for tag in tags}
     assert set(combined.leaf_parents)==expected
     assert combined.leaf_parents["blue_hair"]==("ai:category:Appearance / Hair / Color",)
     assert {name for name,parents in combined.category_parents.items() if not parents}=={"ai:category:AI"}

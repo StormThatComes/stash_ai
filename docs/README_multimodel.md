@@ -322,8 +322,26 @@ Szczegóły: [UPGRADE_abandon_pending.md](UPGRADE_abandon_pending.md).
 
 ## 12. Hierarchie
 
-Każdy model ma własny plik `*_hierarchy.yml`. W trybie merged kategorie są
-publikowane pod wspólnymi tagami `ai:category:...`.
+Każdy model korzysta z tego samego pliku `tag_hierarchy.yml`. Zawiera on unię
+czterech dotychczasowych hierarchii: 21 154 unikalne tagi w 92 grupach, bez zmiany
+ich przypisań. Kategorie są publikowane pod wspólnymi tagami `ai:category:...`.
+Jeden wpis surowego tagu określa jego rodziców dla każdego modelu.
+
+`--hierarchy YAML` wskazuje wspólny plik dla dowolnego wyboru modeli.
+Usunięto opcje `--wd-hierarchy`, `--dtq-hierarchy` i `--oppai-hierarchy`.
+Walidator sprawdza cały YAML oraz pokrycie słowników wybranych modeli.
+Wpisy innych modeli pozostają dozwolone; nie powodują utworzenia ich tagów
+podczas `--sync-hierarchy-only --create-all-tags` z wybranym podzbiorem modeli.
+
+Opcjonalne metadane `source.tag_count` i `source.vocabulary_sha256` dotyczą
+unikalnych tagów w całym pliku, nie słownika pojedynczego modelu.
+Przy dodaniu lub usunięciu tagów zaktualizuj te metadane albo usuń oba pola.
+Edycja samych grup nie zmienia fingerprintu słownika.
+
+Własne przypisania ze starych `joytag_hierarchy.yml`, `wd_hierarchy.yml`,
+`dtq_hierarchy.yml` i `oppai_hierarchy.yml` przenieś do wspólnego pliku.
+Aktualizator zachowuje stare lokalne YAML-e, ale aplikacja ich nie odczytuje.
+Zmiana hierarchii nie unieważnia cache inferencji ani nie wymaga migracji bazy.
 
 Synchronizacja zawsze zastępuje rodziców zarządzanych przez daną hierarchię
 przypisaniami z aktualnego YAML-a. Zachowuje rodziców spoza tej hierarchii,
@@ -336,9 +354,14 @@ lub zachowanego lokalnie YAML-a, usuń to pole przed uruchomieniem nowej wersji.
 ```powershell
 python .\stash_ai.py --sync-hierarchy-only --dry-run
 python .\stash_ai.py --validate-hierarchy
+python .\stash_ai.py --models wd --validate-hierarchy --hierarchy C:/stash_ai/my_tag_hierarchy.yml
 ```
 
 `--create-all-tags` działa tylko z `--sync-hierarchy-only`.
+
+Wykluczenia nadal są stosowane osobno do wyników modeli i do tworzenia tagów
+z ich słowników. Wspólna hierarchia pomija etykietę wykluczoną we wszystkich
+modelach; wykluczenie tylko w jednym modelu nie usuwa przypisania dla pozostałych.
 
 `--no-hierarchy` wyłącza synchronizację kategorii modeli, ale nie wyłącza grup
 markerów `m:`.

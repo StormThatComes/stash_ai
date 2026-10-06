@@ -10,7 +10,6 @@ import pytest
 import yaml
 from stash_ai.domain import Cue, FramePrediction, MarkerSpec
 from stash_ai.evidence.labels import AI
-from stash_ai.config import vocabulary_digest
 from stash_ai.inference import prediction, sprites
 from tests.helpers.runtime import runtime as app
 from tests.helpers.legacy_namespaces import NAMESPACES as LEGACY_NAMESPACES
@@ -87,13 +86,6 @@ def test_core_limit_and_gap_timing(monkeypatch):
     assert len(markers)==1 and markers[0].hits==4
 
 
-def test_hierarchy_loader_requires_explicit_source():
-    import inspect
-
-    parameter = inspect.signature(app.services.load_tag_hierarchy).parameters["source"]
-    assert parameter.default is inspect.Parameter.empty
-
-
 @pytest.mark.parametrize("mode", ["add", "replace_managed"])
 def test_hierarchy_rejects_removed_sync_option(tmp_path, mode):
     path = tmp_path / "hierarchy.yml"
@@ -102,15 +94,13 @@ def test_hierarchy_rejects_removed_sync_option(tmp_path, mode):
         "parent_sync": mode, "groups": {"General": ["common"]},
     }), encoding="utf-8")
     with pytest.raises(ValueError, match="Hierarchy YAML must be a mapping using only:"):
-        app.services.load_tag_hierarchy(path, ["common"], WD)
+        app.services.load_tag_hierarchy(path)
 
 
-def test_original_hierarchy_and_model_settings():
+def test_shared_hierarchy_and_model_settings():
     root=Path(__file__).resolve().parents[1]
-    data=yaml.safe_load((root/"joytag_hierarchy.yml").read_text())
-    labels=sorted({t for group in data["groups"].values() for t in group})
-    hierarchy=app.services.load_tag_hierarchy(root/"joytag_hierarchy.yml",labels,JOYTAG)
-    assert len(hierarchy.leaf_parents)==5813
+    hierarchy=app.services.load_tag_hierarchy(root/"tag_hierarchy.yml")
+    assert len(hierarchy.leaf_parents)==21154
     assert hierarchy.description_prefix==AI.hierarchy_description
     assert [s.source for s in app.services.load_model_settings(root/"tagger_models.yml",["all"],None)]==[JOYTAG,WD,DTQ,OPPAI]
     assert select_models(["dtq,wd","wd"])==["dtq","wd"]
@@ -125,7 +115,7 @@ def test_model_hierarchies_include_all_categories_and_keep_manual_parents(tmp_pa
     path = tmp_path / 'hierarchy.yml'
     path.write_text(yaml.safe_dump(dict(version=2, groups={'General': ['tag'],
         'Character': ['character'], 'Uncategorized': ['unknown']})))
-    hierarchy=app.services.load_tag_hierarchy(path,vocab.labels,WD)
+    hierarchy=app.services.load_tag_hierarchy(path)
     resolver=app.services.TagResolver(stash,hierarchy,source=AI)
     for name in vocab.labels: resolver.resolve("ai:"+name)
     assert {p["name"] for p in stash.tags["ai:tag"]["parents"]}=={"manual parent","jt:category:Other","ai:category:General"}
@@ -314,7 +304,7 @@ def test_oppai_modes_with_explicit_model_config(tmp_path,oppai_files,monkeypatch
     hierarchy_path=tmp_path/"fixture_hierarchy.yml"
     hierarchy_path.write_text(yaml.safe_dump({"version":2,"groups":{"Fixture":load_vocabulary(settings).labels}}))
     assert app.main(["--model-config",str(old),"--models","oppai","--validate-hierarchy",
-                     "--oppai-hierarchy",str(hierarchy_path),"--offline"])==0
+                     "--hierarchy",str(hierarchy_path),"--offline"])==0
     downloads=[]
     monkeypatch.setattr(app.services,"ensure_files",lambda config,names:downloads.append((config.source,names)))
     assert app.main(["--model-config",str(old),"--models","oppai","--download-models"])==0
@@ -341,33 +331,17 @@ def test_oppai_scoped_blacklist_and_cleanup_without_assets(tmp_path,monkeypatch)
     with pytest.raises(ValueError): app.services.load_exclusion_policy(policy,"excluded_core_tags")
 
 
-# Independently measured from the pinned upstream vocabularies, excluding only
-# Oppai's PAD/UNK slots. The default files must contain those exact label sets.
-BUNDLED_VOCABULARIES = {
-    "joytag": (5813,"ad82c7dd5746bffdb3de832c44dc348af74cbc240a0c17960d068b4eccb8b8f3"),
-    "wd": (10861,"b350f44fd5f5f96414af4596210fd669b3018f89a98deb87776fcfb19800ce7a"),
-    "dtq": (11424,"6993dd6fe83114e3c652fdfd76a6264810e4bf0b25c67d1e21e5674b9869fb6d"),
-    "oppai": (19292,"f8a73952c61f079e7972aec6612ce182c791e2fba99d2e9afaa9e0ebabf9c980"),
-}
-
-
 @pytest.fixture(scope="module")
 def bundled_catalogs():
     root=Path(__file__).resolve().parents[1]
-    result={}
-    for key,(count,digest) in BUNDLED_VOCABULARIES.items():
-        path=root/f"{key}_hierarchy.yml"
-        data=yaml.safe_load(path.read_text(encoding="utf-8"))
-        labels=sorted({label for group in data["groups"].values() for label in group})
-        assert len(labels)==count and vocabulary_digest(labels)==digest
-        hierarchy=app.services.load_tag_hierarchy(path,labels,SOURCES[key])
-        assert hierarchy.category_prefix=="ai:category:"
-        result[key]=(Vocabulary(labels,{}),hierarchy)
-    return result
+    hierarchy=app.services.load_tag_hierarchy(root/"tag_hierarchy.yml")
+    # Model-specific subsets exercise coverage without downloading any assets.
+    labels=["1girl", "blue_hair"]
+    return {key:(Vocabulary(labels,{}),hierarchy) for key in SOURCES}
 
 
-def test_default_hierarchies_cover_pinned_vocabularies_and_validate_without_weights(bundled_catalogs,monkeypatch,tmp_path):
-    # No explicit hierarchy flags: verify that all four CLI defaults load from
+def test_default_shared_hierarchy_validates_selected_vocabularies_without_weights(bundled_catalogs,monkeypatch,tmp_path):
+    # No explicit hierarchy flags: verify that the shared CLI default loads from
     # beside the script even when launched in another working directory.
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(app.services,"load_vocabulary",lambda settings:bundled_catalogs[settings.source.key][0])

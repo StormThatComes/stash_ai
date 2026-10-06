@@ -50,22 +50,21 @@ def policies(app, args, *, hierarchy_only, cleanup_only):
 
 
 def catalogs(app, settings, args, scene_policies):
-    """Validate all selected vocabularies/hierarchies before any Stash writes."""
+    """Validate selected vocabularies against one hierarchy before Stash writes."""
+    from stash_ai.config import validate_hierarchy_vocabulary
+    hierarchy = None if args.no_hierarchy else app.services.load_tag_hierarchy(args.hierarchy)
     catalogs = {}
     for config in settings:
         source = config.source
         vocabulary = app.services.load_vocabulary(config)
         catalogs[source.key] = vocabulary
-        hierarchy_path = args.hierarchy if source.key == "joytag" else getattr(args, source.key + "_hierarchy")
-        if args.no_hierarchy:
-            hierarchy = None
-        else:
-            hierarchy = app.services.load_tag_hierarchy(hierarchy_path, vocabulary.labels, source)
+        if hierarchy is not None:
+            validate_hierarchy_vocabulary(hierarchy, vocabulary.labels, source)
         print(f"{source.title}: {len(vocabulary.labels):,} labels; "
               f"hierarchy={'off' if hierarchy is None else str(len(hierarchy.category_parents)) + ' categories'}; "
               f"scene threshold={config.scene_threshold}, marker threshold={config.marker_threshold}.")
     from stash_ai.commands.hierarchy import combined_hierarchy
-    merged_hierarchy = combined_hierarchy(app, args, scene_policies)
+    merged_hierarchy = combined_hierarchy(app, args, scene_policies, hierarchy)
     if merged_hierarchy:
         print(f"AI: {len(merged_hierarchy.leaf_parents):,} unique labels; {len(merged_hierarchy.category_parents)} shared categories.")
     return catalogs, merged_hierarchy

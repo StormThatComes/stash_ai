@@ -89,8 +89,15 @@ Pakiet `stash_ai/commands/` grupuje granice trybów uruchomienia:
 DB/maintenance i pipeline, zachowując kolejność błędów oraz normalizację opcji.
 `dispatch.py` rozdziela komendy DB przed konfiguracją runtime, komendy samodzielne
 przed ładowaniem modeli oraz explain/merge-only przed dostępem do vocabularies i wag.
-`explain.py` zawiera odczytową diagnostykę tagów; `hierarchy.py` kompozycję hierarchii
+`explain.py` zawiera odczytową diagnostykę tagów; `hierarchy.py` wspólną hierarchię
 i jej samodzielną synchronizację. CLI używa bezpośrednich importów bez wrapperów pod dawnymi ścieżkami.
+Wszystkie modele czytają jeden `tag_hierarchy.yml` przez `--hierarchy`.
+Bootstrap parsuje go raz i sprawdza, czy pokrywa słowniki wybranych modeli,
+przed kontaktem ze Stash. Metadane słownika odnoszą się do unii wszystkich
+etykiet w pliku. `--merge-only` czyta ten sam YAML bez dostępu do model assets.
+Hierarchia usuwa tylko etykiety wykluczone we wszystkich politykach modeli;
+przed publikacją i tworzeniem tagów nadal obowiązują wykluczenia per model.
+Zmiana przypisań wpływa na fingerprint publikacji, ale nie tożsamość inferencji.
 Parsowanie konfiguracji,
 wykluczeń i hierarchii znajduje się w `stash_ai/config.py`, a parser cue WebVTT
 w `stash_ai/vtt.py`. Dzięki temu format argumentów, YAML i VTT oraz specjalne
