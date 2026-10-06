@@ -141,6 +141,6 @@ def test_fresh_inference_rebases_retired_publication_and_preserves_marker_id(old
     with merge_store.StateStore(p.path, merge_store.scope_for(app.STASH_URL), True) as state:
         saved = state.snapshot('1', 'markers')[0]
         assert all(not item.get('requires_rebase') for item in saved['contributions'])
-        assert all(item['build_options']['algorithm'] == 'temporal' for item in saved['contributions'])
+        assert all('algorithm' not in item['build_options'] for item in saved['contributions'])
     assert app.main(p.cleanup_args) == 0
     assert not p.stash.scene['scene_markers']

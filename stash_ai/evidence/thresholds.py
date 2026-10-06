@@ -6,7 +6,7 @@ from stash_ai.storage.thresholds import PUBLICATION_THRESHOLD, effective
 
 def indexed_signature(segment, inference=None):
     from stash_ai.signatures import digest
-    signature = segment['meta'].get('inference_signature') if inference is None else inference
+    signature = segment['meta']['inference_signature'] if inference is None else inference
     if PUBLICATION_THRESHOLD not in segment:
         return signature
     value = segment[PUBLICATION_THRESHOLD]

@@ -34,21 +34,26 @@ def test_yaml_cannot_select_a_retired_engine(tmp_path, enabled):
 
 def test_frozen_classic_snapshot_requires_rebase():
     options = build_options(app)
-    options.pop('algorithm')
     options['policy'] = {**asdict(TemporalPolicy()), 'enabled': False}
     options['core_exclusions'] = {source: [] for source in policies()}
-    from stash_ai.db.snapshot_migration import complete_options
-    with pytest.raises(ValueError, match='Retired frozen algorithm'):
-        snapshot_context(app, complete_options(options), 'markers')
+    from stash_ai.db.snapshot_migration import normalize
+    saved = normalize({'contributions': [{'build_options': options}]})
+    assert saved['contributions'][0]['requires_rebase']
+    assert 'build_options' not in saved['contributions'][0]
 
 
-def test_frozen_algorithm_is_validated_at_the_snapshot_boundary():
+@pytest.mark.parametrize('algorithm', ['historical', 'temporal'])
+def test_current_snapshots_reject_the_retired_algorithm_field(algorithm):
+    from stash_ai.storage.snapshots import compact
     options = build_options(app)
     assert type(frozen_policy(options)) is TemporalPolicy
-    options['algorithm'] = 'historical'
-    with pytest.raises(ValueError, match='Retired frozen algorithm'):
-        frozen_policy(options)
-    options['algorithm'] = 'temporal'
+    options['algorithm'] = algorithm
+    with pytest.raises(ValueError, match='Incomplete frozen build options'):
+        compact({'contributions': [{'build_options': options}]})
+
+
+def test_frozen_policy_requires_current_complete_fields():
+    options = build_options(app)
     options['policy']['enabled'] = True
     with pytest.raises(ValueError, match='Incomplete temporal snapshot policy'):
         frozen_policy(options)

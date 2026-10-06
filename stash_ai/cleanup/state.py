@@ -71,10 +71,8 @@ def mask_snapshot(store, snapshot, kind):
             continue
         item = dict(item)
         if kind == 'markers':
-            for field in ('extra_tags', 'extra_ids'):
-                if field in item:
-                    excluded = blocked if field == 'extra_tags' else ids
-                    item[field] = [value for value in item[field] if str(value) not in excluded]
+            if 'extra_tags' in item:
+                item['extra_tags'] = [value for value in item['extra_tags'] if value not in blocked]
             if 'extra_support' in item:
                 item['extra_support'] = {tag: proof for tag, proof in item['extra_support'].items() if tag not in blocked}
             if 'extra_evidence' in item:
@@ -97,4 +95,3 @@ def mask_snapshot(store, snapshot, kind):
 def stamp_snapshot(store, snapshot):
     snapshot = {key: value for key, value in snapshot.items() if key != 'recovery_required'}
     return {**snapshot, 'cleanup_generation': store.cleanup_generation} if store.cleanup_generation else snapshot
-

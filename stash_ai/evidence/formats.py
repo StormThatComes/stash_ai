@@ -1,7 +1,12 @@
-"""The active inference contract. Archived publication proofs are separate."""
+"""The inference contract shared by active records and archived replay proofs."""
 import math
+from itertools import pairwise
 
 ANALYSIS_FORMAT = 5
+
+
+class UnorderedFrames(ValueError):
+    """A saved timeline must be refreshed, never sorted under its old signature."""
 
 
 def current(meta):
@@ -25,6 +30,9 @@ def validate_current(segment):
         raise ValueError('Retired inline publication policy; run --db-update.')
     if 'marker_tag_blocklist' in meta:
         raise ValueError('Current inference evidence cannot contain the retired marker blocklist.')
+    if 'items' in segment and (not isinstance(segment['items'], list)
+                              or any(not isinstance(item, dict) for item in segment['items'])):
+        raise ValueError('Invalid current inference observations; run --db-check and inference again.')
     required_scores = ['marker_score_floor', 'scene_support_floor', 'scene_threshold', 'marker_threshold']
     if segment['mode'] == 'scene':
         required_scores.append('scene_score_floor')
@@ -40,6 +48,14 @@ def validate_current(segment):
     if any(type(meta.get(key)) not in (int, float) or not math.isfinite(meta[key])
            or not 0 <= meta[key] <= 1 for key in required_scores):
         raise ValueError('Current inference evidence requires publication thresholds and retention floors.')
+    if 'items' in segment:
+        from stash_ai.db.payloads import valid_result
+        kind = 'scene' if segment['mode'] == 'scene' else 'markers'
+        if not valid_result(segment, kind):
+            raise ValueError('Invalid current inference observations; run --db-check and inference again.')
+        rows = segment['frames'] if kind == 'scene' else segment['items']
+        if any(after['start'] < before['start'] for before, after in pairwise(rows)):
+            raise UnorderedFrames('Current inference frames must be chronological; run --db-update and inference again.')
 
 
 STATISTIC_FIELDS = frozenset(('hits', 'high_hits', 'max_score', 'sampled_frames',
@@ -60,12 +76,3 @@ def validate_statistics(stats):
             or stats['high_hits'] > stats['hits'] or stats['longest_hits'] > stats['hits']
             or stats['hits'] > stats['sampled_frames']):
         raise ValueError('Current scene statistics must be complete and internally consistent; run inference.')
-
-
-def validate_archived(segment):
-    """Validate pinned proof storage, including retired pre-v5 inference."""
-    version = segment['meta'].get('analysis_format')
-    if version is not None and (type(version) is not int or not 1 <= version <= ANALYSIS_FORMAT):
-        raise ValueError('Unsupported archived inference evidence format.')
-    if current(segment['meta']):
-        validate_current(segment)

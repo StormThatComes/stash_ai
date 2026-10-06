@@ -21,14 +21,13 @@ def references(snapshot):
         if isinstance(value, list):
             pending.extend(value)
         elif isinstance(value, dict):
+            if value.get('requires_rebase'):
+                continue
             source, signature = value.get('source'), value.get('evidence_signature')
             if isinstance(source, str) and isinstance(signature, str):
                 required.add((source, signature))
             for field in ('frame_context', 'scene_context', 'support_context'):
                 required.update(value.get(field, {}).items())
-            for field in ('retired_frame_context', 'retired_scene_context', 'retired_support_context'):
-                for source, signatures in value.get(field, {}).items():
-                    required.update((source, signature) for signature in signatures)
             pending.extend(value.values())
     return required
 
@@ -84,9 +83,15 @@ def prune(store, scene):
 def records(store, scene, kind):
     """Read only for frozen replay; active fusion and reports never consult this table."""
     from stash_ai.storage.segments import StoredSegment
+    from stash_ai.evidence.formats import validate_current
+    from stash_ai.db.payloads import valid_result
     result = {}
     for model, blob in store.read_rows('SELECT model,data FROM ' + store.table('inference_archive') +
                                       ' WHERE scope=? AND scene=? AND kind=?',
                                       (store.scope, str(scene), kind)):
-        result.setdefault(model, []).append(StoredSegment(store.unpack(blob)))
+        record = store.unpack(blob)
+        validate_current(record)
+        if not valid_result(record, kind):
+            raise ValueError('Invalid archived inference proof.')
+        result.setdefault(model, []).append(StoredSegment(record))
     return result

@@ -1,7 +1,7 @@
 """Versioned snapshot storage; callers continue to see expanded contributions."""
 
 FORMAT_KEY = '__stash_ai_snapshot__'
-FORMAT = 5
+FORMAT = 6
 
 
 def compact(snapshot):
@@ -89,6 +89,8 @@ def _expand_proofs(snapshot, proofs):
 
 
 def validate_policy(item):
+    if 'extra_ids' in item or any(key.startswith('retired_') for key in item):
+        raise ValueError('Retired publication fields; run --db-update.')
     for field in ('frame_context', 'scene_context', 'support_context'):
         if field in item and (not isinstance(item[field], dict) or any(
                 not isinstance(source, str) or not isinstance(signature, str) or not signature
@@ -100,11 +102,9 @@ def validate_policy(item):
         from stash_ai.models import SOURCES
         marker = {'policy', 'settings', 'marker_thresholds', 'core_exclusions', 'tag_exclusions'}
         scene = {'policy', 'max_tags', 'scene_thresholds', 'scene_exclusions'}
-        keys = set(options) - {"algorithm"} if isinstance(options, dict) else set()
+        keys = set(options) if isinstance(options, dict) else set()
         if not isinstance(options, dict) or keys not in (marker, scene):
             raise ValueError('Incomplete frozen build options; run --db-update.')
-        if 'algorithm' not in options:
-            raise ValueError('Missing frozen algorithm; run --db-update.')
         frozen_policy(options)
         fields = ('core_exclusions', 'tag_exclusions') if keys == marker else ('scene_exclusions',)
         for field in fields:

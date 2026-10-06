@@ -49,9 +49,9 @@ def test_offline_rebase_keeps_geometry_ownership_and_retry_proofs_across_scopes(
                                    (scope, '1', 'markers', 'lost-response', packed))
         connection.execute('PRAGMA user_version=18')
     before = path.read_bytes()
-    assert update_database(path, dry_run=True) == (18, 21)
+    assert update_database(path, dry_run=True) == (18, LATEST_SCHEMA_VERSION)
     assert path.read_bytes() == before
-    assert update_database(path) == (18, 21)
+    assert update_database(path) == (18, LATEST_SCHEMA_VERSION)
     for scope in ('scope-a', 'scope-b'):
         with StateStore(path, scope) as state:
             from stash_ai.storage.recovery import publications
@@ -108,9 +108,12 @@ def test_current_temporal_publication_remains_replayable(tmp_path):
     item['extra_support'] = {}
     path = tmp_path/'state.sqlite3'
     with StateStore(path, 'scope') as state:
-        state.publish('1', {'markers': value})
+        state.connection.execute('INSERT INTO snapshots VALUES (?,?,?,?,NULL)',
+            ('scope', '1', 'markers', encode({'__stash_ai_snapshot__': 5, 'snapshot': value, 'proofs': []})))
         state.connection.execute('PRAGMA user_version=18')
+        state.connection.commit()
     update_database(path)
+    value['contributions'][0]['build_options'].pop('algorithm')
     with StateStore(path, 'scope') as state:
         assert state.snapshot('1', 'markers')[0] == value
         require_rebased(value['contributions'])

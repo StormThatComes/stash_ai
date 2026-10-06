@@ -50,18 +50,12 @@ def _rank(witnesses):
 
 def _observations(source, segment, signature, qualified, policy):
     meta = segment['meta']
-    threshold = meta.get('scene_threshold')
-    if meta.get('origin') != 'inference' or not _number(threshold, high=1):
-        return
+    threshold = meta['scene_threshold']
     floor = threshold * policy.scene_support_ratio
-    # Cached VTT rows are normally ordered. Sorting references also handles
-    # older records without copying their tag arrays.
-    for row in sorted(segment['items'], key=lambda row: row['start']):
+    for row in segment['items']:
         values = [(tag, score, qualified[tag]) for tag, score in row['tags']
-                  if tag in qualified and _number(score, high=1) and score >= floor]
+                  if tag in qualified and score >= floor]
         if values:
-            if not _number(row['start']):
-                raise ValueError('Invalid occurrence timestamp in cached observations.')
             yield row['start'], source, meta, signature, 'frame', values
 
 
@@ -80,8 +74,8 @@ def _candidate_streams(hits, records, blocked, policy):
             continue
         by_run[source, _run(meta)][tag].append(hit)
         stats = hit.get('statistics') or {}
-        time, score, threshold = stats.get('peak_time'), stats.get('max_score'), meta.get('scene_threshold')
-        if (_number(time) and _number(score, high=1) and _number(threshold, high=1)
+        time, score, threshold = stats.get('peak_time'), stats.get('max_score'), meta['scene_threshold']
+        if (_number(time) and _number(score, high=1)
                 and score >= threshold * policy.scene_support_ratio):
             peaks.append((time, source, meta, None, 'scene_peak', [(tag, score, [hit])]))
 
@@ -134,6 +128,9 @@ def occurrence_contributions(app, scene_hits, records, spans, core_policies, tag
     policy = app.TEMPORAL_POLICY
     if not policy.occurrence_markers:
         return []
+    from stash_ai.evidence.formats import validate_current
+    for record in records.values():
+        validate_current(record)
     covered = {item['tag'] for item in spans}
     blocked = {s: set(core_policies[s]) | set(tag_policies[s]) for s in SOURCES}
     hits = [hit for hit in scene_hits if hit['tag'] not in covered and hit['meta'].get('origin') == 'inference'

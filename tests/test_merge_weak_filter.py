@@ -106,7 +106,7 @@ def test_low_score_invalid_labels_still_fail_merge_validation(label, shared, mon
     monkeypatch.setattr(app, 'TEMPORAL_POLICY', replace(app.TEMPORAL_POLICY,
         shared_marker_frames=shared, shared_marker_extras=shared))
     records = {'wd': segment('wd', [[('core', .9), (label, .01)]] * 2)}
-    with pytest.raises(ValueError, match='Invalid or reserved merged label'):
+    with pytest.raises(ValueError, match='Invalid current inference observations'):
         merge_source_markers.marker_contributions(app, records, policies())
 
 

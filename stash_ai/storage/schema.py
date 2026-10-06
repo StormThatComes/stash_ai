@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 APPLICATION_ID = 0x53544D47
 MIN_SUPPORTED_SCHEMA_VERSION = 18
-LATEST_SCHEMA_VERSION = 21
+LATEST_SCHEMA_VERSION = 23
 UPGRADE_BRIDGE_COMMIT = 'c5bcd887bafe76b7ee2a9de944666799c9a0fc30'
 KNOWN_KINDS = frozenset(('scene', 'markers'))
 KNOWN_MODELS = frozenset(('joytag', 'wd', 'dtq', 'oppai'))

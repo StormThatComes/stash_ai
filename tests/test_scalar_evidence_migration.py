@@ -72,7 +72,7 @@ def test_v19_conversion_keeps_active_inference_thresholds_and_exact_pins(tmp_pat
         assert 'inference' not in {row[1] for row in connection.execute('PRAGMA table_info(result_index)')}
     for scope in ('first', 'second'):
         with StateStore(path, scope) as store:
-            assert pinned(store, '1') == {('wd', value) for value in signatures}
+            assert pinned(store, '1') == (set() if multiple else {('wd', signature)})
             if location == 'recovery':
                 saved = store.unpack_snapshot(store.connection.execute(
                     'SELECT data FROM recovery_publications WHERE scope=?', (scope,)).fetchone()[0])
@@ -85,7 +85,7 @@ def test_v19_conversion_keeps_active_inference_thresholds_and_exact_pins(tmp_pat
             assert item['scene_evidence'][0]['scene_context'] == {'wd': signature}
             assert 'frame_context' not in item['scene_evidence'][0]
             if multiple:
-                assert item['retired_support_context'] == {'wd': signatures}
+                assert 'retired_support_context' not in item and 'retired_signatures' not in item['source_evidence']['wd']
                 with pytest.raises(RuntimeError, match='Retired publication proof'):
                     require_rebased(saved['contributions'])
             else:
@@ -94,7 +94,10 @@ def test_v19_conversion_keeps_active_inference_thresholds_and_exact_pins(tmp_pat
                 require_rebased(saved['contributions'])
             assert store.model_record('1', 'markers', 'wd')['publication_threshold'] == .7
             store.put('1', 'wd', outputs(signature='new'))
-            assert marker_segment_signature(archived_records(store, '1', 'markers')['wd'][0]) == signature
+            if multiple:
+                assert archived_records(store, '1', 'markers') == {}
+            else:
+                assert marker_segment_signature(archived_records(store, '1', 'markers')['wd'][0]) == signature
         assert check_database(path, scope)['ok']
 
 
@@ -114,3 +117,33 @@ def test_invalid_context_rolls_back_snapshot_and_index_migration(tmp_path):
         assert connection.execute('PRAGMA user_version').fetchone() == (19,)
         assert connection.execute('SELECT * FROM snapshots').fetchall() == before
         assert 'inference' in {row[1] for row in connection.execute('PRAGMA table_info(result_index)')}
+
+
+@pytest.mark.parametrize('location', ['published', 'pending', 'recovery'])
+def test_v21_discards_retired_context_lists_but_keeps_retry_geometry(tmp_path, location):
+    path = tmp_path/'state.sqlite3'
+    item = {'source': 'wd', 'tag': 'core', 'start': 1., 'end': 2.,
+            'requires_rebase': True, 'extra_ids': ['retired-id'],
+            'retired_support_context': {'wd': ['first', 'second']}}
+    blob = encode({FORMAT_KEY: 5, 'proofs': [], 'snapshot': {
+        'owned_ids': ['marker'], 'contributions': [item]}})
+    with StateStore(path, 'scope') as store:
+        if location == 'recovery':
+            store.connection.execute('INSERT INTO recovery_publications VALUES (?,?,?,?,?)',
+                                     ('scope', '1', 'markers', 'lost-response', blob))
+        else:
+            store.connection.execute('INSERT INTO snapshots VALUES (?,?,?,?,?)',
+                ('scope', '1', 'markers', blob if location == 'published' else None,
+                 blob if location == 'pending' else None))
+        store.connection.execute('PRAGMA user_version=21')
+        store.connection.commit()
+    update_database(path)
+    with StateStore(path, 'scope') as store:
+        if location == 'recovery':
+            from stash_ai.storage.recovery import publications
+            saved = publications(store, '1', 'markers')[0]
+        else:
+            saved = store.snapshot('1', 'markers')[location == 'pending']
+        assert saved == {'owned_ids': ['marker'], 'contributions': [{
+            'source': 'wd', 'tag': 'core', 'start': 1., 'end': 2., 'requires_rebase': True}]}
+        assert pinned(store, '1') == set()

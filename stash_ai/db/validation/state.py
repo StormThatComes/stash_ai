@@ -35,10 +35,10 @@ def check_state_payloads(db, tables, errors, progress=None):
                     payload = decoded_payload(blob, expected)
                 if table == 'inference_archive':
                     from stash_ai.db.payloads import valid_result
-                    from stash_ai.evidence.formats import validate_archived
-                    if not valid_result(payload, kind, archived=True):
+                    from stash_ai.evidence.formats import validate_current
+                    if not valid_result(payload, kind):
                         raise ValueError('Invalid archived inference proof.')
-                    validate_archived(payload)
+                    validate_current(payload)
                     from stash_ai.evidence.identity import marker_segment_signature
                     if marker_segment_signature(payload) != signature:
                         raise ValueError('Archived proof signature mismatch.')

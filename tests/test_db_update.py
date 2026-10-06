@@ -236,11 +236,11 @@ def test_db_update_cli_stays_offline_and_reports_dry_run_and_idempotence(tmp_pat
 
     assert app.main([*command, '--dry-run']) == 0
     assert path.read_bytes() == before
-    assert 'DRY RUN: state DB schema v18 -> v21' in capsys.readouterr().out
+    assert f'DRY RUN: state DB schema v18 -> v{LATEST_SCHEMA_VERSION}' in capsys.readouterr().out
     assert app.main(command) == 0
-    assert 'State DB updated: schema v18 -> v21' in capsys.readouterr().out
+    assert f'State DB updated: schema v18 -> v{LATEST_SCHEMA_VERSION}' in capsys.readouterr().out
     assert app.main(command) == 0
-    assert 'up to date: v21' in capsys.readouterr().out
+    assert f'up to date: v{LATEST_SCHEMA_VERSION}' in capsys.readouterr().out
     assert app.main(['--state-db', str(tmp_path / 'missing.sqlite3'), '--db-update']) == 1
     assert 'does not exist' in capsys.readouterr().out
 
@@ -312,7 +312,14 @@ def test_publication_upgrade_decodes_each_blob_once_and_drops_only_retired_optio
     for item in saved['contributions']:
         item['requires_rebase'] = True
         item['retired_build_options'] = {'algorithm': 'historical', 'unused': 'old policy'}
-    old = compact(saved)
+    compatible = deepcopy(saved)
+    for item in compatible['contributions']:
+        item.pop('retired_build_options')
+    # Intern proof references through the current encoder, then add the old
+    # fields directly to mimic a historical writer outside today's boundary.
+    old = compact(compatible)
+    for item in old['snapshot']['contributions']:
+        item['retired_build_options'] = {'algorithm': 'historical', 'unused': 'old policy'}
     old['__stash_ai_snapshot__'] = 4 if version < 20 else 5
     packed = encode(old)
     with sqlite3.connect(path) as connection:

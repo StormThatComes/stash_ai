@@ -126,10 +126,13 @@ obsługiwane schematy przechowują już pojedynczy rekord i liczbowy próg.
 
 Snapshoty merge zapisują współdzielone dowody `extra_support` raz, a contributions
 odwołują się do nich przez referencje. Zmniejsza to koszt serializacji i kompresji.
-Aktualny schemat to v21, z obsługą aktualizacji od v18. Każdy nowy snapshot ma
-otoczkę formatu v5. `--db-update` konwertuje snapshoty v4/v5, także pending i recovery,
-w jednym przebiegu. Zachowuje geometrię, własność i przypięte dowody, normalizuje
-zamrożone opcje odtwarzania oraz usuwa nieużywaną konfigurację wycofanych algorytmów.
+Aktualny schemat to v23, z obsługą aktualizacji od v18. Każdy nowy snapshot ma
+otoczkę formatu v6. `--db-update` konwertuje snapshoty v4/v5/v6, także pending i recovery,
+w jednym przebiegu. Zachowuje geometrię i własność publikacji, normalizuje zamrożone opcje
+odtwarzania oraz usuwa `extra_ids` i zbędne `algorithm: temporal`. Pełne payloady
+archiwalnych inferencji sprzed formatu 5 są usuwane; ich publikacje otrzymują
+`requires_rebase` i wymagają świeżej inferencji oraz `--merge-only`. Archiwum dowodów
+formatu 5 pozostaje dostępne do dokładnego odtwarzania opublikowanych wyników.
 Wersjonowanie analizy checkpointu dotyczy wyłącznie niedokończonej inferencji:
 stare checkpointy są pomijane przy wznowieniu i dany model zaczyna scenę od początku.
 Ukończone wyniki formatu 5 zachowują dowody i sygnatury; starsze aktywne wyniki wymagają ponownej inferencji. `--dry-run` zmienia wyłącznie tymczasową bazę.
@@ -235,14 +238,33 @@ Globalne definicje starych tagów pozostają dostępne dla ręcznych powiązań.
 ### Zdrowie, aktualizacja i kompaktowanie bazy stanu
 
 `--db-update` aktualizuje bazę wskazaną przez `--state-db` ze schematu **v18 lub nowszego**
-do aktualnego **v21**, we wszystkich scope'ach. Zwykłe uruchomienie oraz `--dry-run`
-wymagają aktualnego schematu; nowa baza od razu otrzymuje v21.
+do aktualnego **v23**, we wszystkich scope'ach. Zwykłe uruchomienie oraz `--dry-run`
+wymagają aktualnego schematu; nowa baza od razu otrzymuje v23.
 Updater korzysta z tego samego locka writera. Pracuje offline, bez Stash i konfiguracji modeli.
-Zachowuje liczbowe progi, własność publikacji, checkpointy, pending publication/cleanup i recovery.
-Snapshoty v4/v5 są konwertowane w jednym przebiegu, z zachowaniem współdzielonych dowodów.
+Zachowuje liczbowe progi bieżących wyników, własność publikacji, pending publication/cleanup
+i recovery. Starsze wyniki są kierowane do ponownej inferencji, a ich checkpointy usuwane.
+Snapshoty v4/v5/v6 są konwertowane w jednym przebiegu, z zachowaniem współdzielonych dowodów.
 Wycofane konfiguracje algorytmów są usuwane; geometria i referencje do dowodów pozostają.
-Aktualizacja nie odtwarza utraconych detekcji. Niepełne wyniki z v18 wymagają ponownej inferencji.
-Metadane wyników są uzupełniane dopiero po zakończeniu konwersji.
+Aktualizacja nie odtwarza utraconych detekcji. Wyniki inferencji sprzed formatu 5 wymagają ponownej inferencji.
+Metadane wyników są uzupełniane dopiero po zakończeniu konwersji. Klatki bieżących wyników
+muszą być zapisane chronologicznie. Aktualizacja do v23 kieruje nieuporządkowane
+rekordy do ponownej inferencji i oznacza zależne publikacje `requires_rebase`.
+Nie sortuje zapisanych payloadów ani nie zmienia ich sygnatur. Uporządkowane
+wyniki formatu 5 pozostają ważne. Odczyt i zapis odrzucają brakujące metadane
+pochodzenia, progów oraz retention floors, zamiast pomijać głosy modelu.
+
+Zwykły cleanup przyjmuje tylko aktualny fingerprint. Przerwany cleanup ze starym
+fingerprintem wymaga jawnej konwersji offline, z **tymi samymi** plikami YAML
+oraz zakresem wyjść (`--cleanup-only`, `--cleanup-markers-only` lub
+`--cleanup-scene-tags-only`). Narzędzie weryfikuje wszystkie polityki per model,
+zmienia wyłącznie klucz pending i zachowuje generację, maski oraz recovery:
+
+```bash
+python -m stash_ai.tools.cleanup_pending_migration --state-db /path/to/tagger_sources.sqlite3 --cleanup-only --marker-core-exclusions marker_core_exclusions.yml --scene-tag-exclusions scene_tag_exclusions.yml --dry-run
+```
+
+Po sprawdzeniu usuń `--dry-run`, a następnie ponów oryginalny cleanup.
+Narzędzie nie łączy się ze Stash i nie ładuje modeli.
 
 Dla bazy **sprzed v18** użyj najpierw kompatybilnego commita
 [`c5bcd887bafe76b7ee2a9de944666799c9a0fc30`](https://github.com/StormThatComes/stash_ai/commit/c5bcd887bafe76b7ee2a9de944666799c9a0fc30)

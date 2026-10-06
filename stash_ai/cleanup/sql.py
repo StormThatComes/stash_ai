@@ -74,7 +74,7 @@ def candidate_names(app, selected, cores, tags):
 def run_sql_cleanup(app, sql, store, settings, args, cores, tags, stats):
     """Fast common bans; only source-dependent policies need scene reconciliation."""
     from stash_ai.evidence.labels import AI
-    from stash_ai.signatures import digest
+    from stash_ai.cleanup.fingerprint import fingerprint as cleanup_fingerprint
     selected = {config.source.key for config in settings}
     wide = not args.scene_id and selected == set(SOURCES)
     global_labels = frozenset.intersection(*tags.values()) if wide else frozenset()
@@ -87,15 +87,11 @@ def run_sql_cleanup(app, sql, store, settings, args, cores, tags, stats):
     if wide and store.has_pending_publications():
         raise RuntimeError('An interrupted merge is pending; run --merge-only before cleanup.')
     kinds = [kind for kind, enabled in [('scene', app.APPLY_SCENE_TAGS), ('markers', app.CREATE_MARKERS)] if enabled] if wide else []
-    fingerprint_data = {'tags': {s: sorted(tags[s]) for s in SOURCES},
-                        'cores': {s: sorted(cores[s]) for s in SOURCES}, 'output_kinds': kinds}
-    fingerprint = digest(fingerprint_data)
+    fingerprint = cleanup_fingerprint(tags, cores, kinds)
     if store.cleanup_pending and store.cleanup_pending != fingerprint:
-        from stash_ai.db.cleanup_fingerprint import historical
-        if store.cleanup_pending != historical(fingerprint_data['tags'], fingerprint_data['cores'], kinds):
-            raise RuntimeError('Global cleanup is interrupted; rerun the same cleanup mode and exclusion policies.')
-        # Finish the already persisted intent with its original generation/key.
-        fingerprint = store.cleanup_pending
+        raise RuntimeError('Global cleanup is interrupted; rerun the same cleanup mode and exclusion policies. '
+                           'For a historical intent, first run python -m stash_ai.tools.cleanup_pending_migration '
+                           'with those policies and the same cleanup mode.')
     if wide and (global_labels or common_cores or store.cleanup_pending):
         begin(store, fingerprint, global_labels, common_cores,
               [i for i, n in catalog.items() if n in names], kinds=kinds)
@@ -123,4 +119,3 @@ def run_sql_cleanup(app, sql, store, settings, args, cores, tags, stats):
     stats['cleanup_candidate_scenes'] = len(candidates)
     view = SQLPreview(sql.stash, app, names, core_names, sql.preview.group_usage_delta) if app.DRY_RUN else sql.stash
     return sorted(candidates), view
-
