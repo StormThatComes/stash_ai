@@ -25,18 +25,23 @@ class MergedModelRun:
         self.identity = model_identity(app, config, vocabulary)
 
     def run(self, scenes, kinds, inputs):
+        remaining = set(scenes)
         try:
             bar = tqdm(scenes.items(), desc=self.key + " inference", unit="scene")
             for scene_id, current in bar:
                 self.report.progress(bar, self.stats)
                 paths = current["paths"]
                 if not self._eligible(scene_id, paths):
+                    remaining.discard(scene_id)
                     continue
                 try:
                     if not self._process_scene(scene_id, current, paths, kinds, inputs):
+                        progress.block_publication(self.store, remaining, self.key, kinds)
                         break
                 except Exception as exc:
+                    progress.block_publication(self.store, [scene_id], self.key, kinds)
                     self._record_error('inference', scene_id, exc)
+                remaining.discard(scene_id)
         finally:
             if self.tagger is not None:
                 self.tagger.close()

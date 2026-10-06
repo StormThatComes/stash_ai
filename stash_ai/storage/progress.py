@@ -37,7 +37,18 @@ def index_result(store, scene, model, kind, record, scope=None, *, metadata_only
 
 
 def output_kinds(app):
-    return [kind for kind, enabled in (("scene", app.APPLY_SCENE_TAGS), ("markers", app.CREATE_MARKERS)) if enabled]
+    need_scene = app.APPLY_SCENE_TAGS or (app.CREATE_MARKERS and app.TEMPORAL_POLICY.occurrence_markers)
+    return [kind for kind, enabled in (("scene", need_scene), ("markers", app.CREATE_MARKERS)) if enabled]
+
+
+def block_publication(store, scenes, model, kinds):
+    """Require successful inference after a failure, retaining resumable checkpoints."""
+    with store.connection:
+        for scene in scenes:
+            store.cache.discard(('status', str(scene), model))
+            for kind in kinds:
+                store.connection.execute('INSERT OR IGNORE INTO refresh_requests VALUES (?,?,?,?)',
+                                         (store.scope, str(scene), model, kind))
 
 
 def completed(store, scene, model, kinds, signature):
@@ -121,4 +132,3 @@ def preload_status(store):
         values[kind] = (populated, signature)
     if last is not None:
         store.cache.put(last, values)
-
