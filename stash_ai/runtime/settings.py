@@ -29,14 +29,12 @@ class RuntimeSettings:
     STASH_URL: str = field(default_factory=lambda: os.getenv("STASH_URL", "http://localhost:9999"))
     STASH_API_KEY: str = field(default_factory=lambda: os.getenv("STASH_API_KEY", ""), repr=False)
     APPLY_SCENE_TAGS: bool = True
-    MAX_TAGS: int = 0
     AGGREGATION: str = "topk_mean"
     TOP_K_FRAMES: int = 2
     CREATE_MARKERS: bool = True
     MARKER_MAX_TAGS_PER_FRAME: int = 0
     MARKER_MIN_HITS: int = 2
     MARKER_MERGE_GAP_SECONDS: float = 0.0
-    MAX_MARKERS_PER_SCENE: int = 0
     MARKER_MATCH_TOLERANCE_SECONDS: float = 0.25
     CREATE_MISSING: bool = True
     DRY_RUN: bool = False
@@ -63,9 +61,8 @@ def validate_config(app, scene_work: bool = True) -> None:
                         ("MARKER_MIN_HITS", app.MARKER_MIN_HITS), ("SCENE_PAGE_SIZE", app.SCENE_PAGE_SIZE)):
         if not isinstance(value, int) or value < 1:
             raise ValueError(f"{name} must be a positive integer.")
-    for name, value in (("MAX_TAGS", app.MAX_TAGS), ("MAX_FRAMES_PER_SCENE", app.MAX_FRAMES_PER_SCENE),
-                        ("MARKER_MAX_TAGS_PER_FRAME", app.MARKER_MAX_TAGS_PER_FRAME),
-                        ("MAX_MARKERS_PER_SCENE", app.MAX_MARKERS_PER_SCENE)):
+    for name, value in (("MAX_FRAMES_PER_SCENE", app.MAX_FRAMES_PER_SCENE),
+                        ("MARKER_MAX_TAGS_PER_FRAME", app.MARKER_MAX_TAGS_PER_FRAME)):
         if not isinstance(value, int) or value < 0:
             raise ValueError(f"{name} must be an integer >= 0 (0 = unlimited).")
     for value in (app.MARKER_MERGE_GAP_SECONDS, app.MARKER_MATCH_TOLERANCE_SECONDS):
@@ -76,8 +73,8 @@ def validate_config(app, scene_work: bool = True) -> None:
 
 
 EVIDENCE_SETTINGS = (
-    "APPLY_SCENE_TAGS", "CREATE_MARKERS", "MAX_TAGS", "MARKER_MIN_HITS",
-    "MARKER_MERGE_GAP_SECONDS", "MARKER_MAX_TAGS_PER_FRAME", "MAX_MARKERS_PER_SCENE",
+    "APPLY_SCENE_TAGS", "CREATE_MARKERS", "MARKER_MIN_HITS",
+    "MARKER_MERGE_GAP_SECONDS", "MARKER_MAX_TAGS_PER_FRAME",
     "TEMPORAL_POLICY",
 )
 

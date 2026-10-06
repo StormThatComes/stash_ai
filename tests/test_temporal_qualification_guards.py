@@ -1,4 +1,4 @@
-"""Temporal qualification uses capped votes, bounded coverage and per-model budgets."""
+"""Temporal qualification uses capped frame votes and bounded temporal coverage."""
 from dataclasses import replace
 import pytest
 from tests.helpers.runtime import runtime as app
@@ -43,8 +43,7 @@ def test_extra_interval_query_clips_leading_coverage_without_inventing_sample():
         index.close()
 
 
-def test_other_model_range_does_not_consume_occurrence_capacity(tmp_path, monkeypatch):
-    monkeypatch.setattr(app, 'MAX_MARKERS_PER_SCENE', 1)
+def test_other_model_range_does_not_suppress_an_occurrence_for_another_tag(tmp_path, monkeypatch):
     monkeypatch.setattr(app, 'TEMPORAL_POLICY', replace(TemporalPolicy(), shared_marker_frames=False,
                                                     shared_scene_tags=False))
     scenes, markers = paired_records({'dtq': [0, .95, 0]}, threshold=.35, marker_threshold=.65)
@@ -73,24 +72,22 @@ def test_all_exclusion_sections_reject_technical_labels(tmp_path, key, label, pe
         load_exclusion_policy(path, key)
 
 
-def test_occurrence_agreement_uses_a_model_with_remaining_capacity(tmp_path, monkeypatch):
-    monkeypatch.setattr(app, 'MAX_MARKERS_PER_SCENE', 1)
+def test_occurrence_agreement_keeps_its_anchor_when_that_model_has_ranges(tmp_path, monkeypatch):
     monkeypatch.setattr(app, 'TEMPORAL_POLICY', replace(TemporalPolicy(), shared_marker_frames=False,
                                                     shared_scene_tags=False))
     scenes, markers = paired_records({'wd': [0,.95,0], 'dtq': [0,.95,0]}, threshold=.35, marker_threshold=.65)
-    # A separate WD range consumes WD's one slot, but DTQ can still supply the point.
+    # An unrelated WD range does not change the point's evidence or anchor.
     from stash_ai.evidence.occurrences import occurrence_contributions
     hits = [{**scenes[s]['items'][0], 'source': s, 'meta': scenes[s]['meta']} for s in scenes]
     existing = [{'source':'wd', 'tag':'other', 'start':0, 'end':2}]
     points = occurrence_contributions(app, hits, markers, existing, empty_policies(), empty_policies())
-    assert len(points) == 1 and points[0]['source'] == 'dtq'
-    assert points[0]['support_sources'] == ['wd']
+    assert len(points) == 1 and points[0]['source'] == 'wd'
+    assert points[0]['support_sources'] == ['dtq']
 
 
-def test_ranges_remain_limited_per_model_not_globally(tmp_path, monkeypatch):
-    monkeypatch.setattr(app, 'MAX_MARKERS_PER_SCENE', 1)
+def test_all_qualified_ranges_are_retained_for_each_model(tmp_path):
     with StateStore(tmp_path/'s.db', 's') as state:
         for source, label in [('wd','a'), ('dtq','b')]:
-            state.put('1', source, {'markers': segment(source, [[(label,.95)]]*2)})
+            state.put('1', source, {'markers': segment(source, [[(label,.95), (label+'-extra',.9)]]*2)})
         _, spans = pipeline.evidence(app, state, '1', empty_policies(), empty_policies())
-    assert {(s['source'],s['tag']) for s in spans} == {('wd','a'), ('dtq','b')}
+    assert {(s['source'],s['tag']) for s in spans} == {('wd','a'), ('wd','a-extra'), ('dtq','b'), ('dtq','b-extra')}

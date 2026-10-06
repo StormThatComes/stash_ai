@@ -42,7 +42,7 @@ def main():
     from stash_ai.evidence.temporal.policy import TemporalPolicy
     from tests.helpers.stash import Stash
     app.TEMPORAL_POLICY = TemporalPolicy()
-    app.MAX_MARKERS_PER_SCENE = app.MARKER_MAX_TAGS_PER_FRAME = 0
+    app.MARKER_MAX_TAGS_PER_FRAME = 0
     app.MARKER_MIN_HITS = 2
     app.MARKER_MERGE_GAP_SECONDS = 0
     app.APPLY_SCENE_TAGS = app.CREATE_MARKERS = app.CREATE_MISSING = True

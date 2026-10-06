@@ -43,7 +43,6 @@ class MarkerBuildOptions(TypedDict):
 
 class SceneBuildOptions(TypedDict):
     policy: dict
-    max_tags: int
     scene_exclusions: dict[str, list[str]]
     scene_thresholds: dict[str, float]
 

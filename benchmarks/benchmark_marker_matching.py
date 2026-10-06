@@ -47,7 +47,7 @@ def main():
     app.APPLY_SCENE_TAGS = False
     app.CREATE_MARKERS = app.CREATE_MISSING = True
     app.MARKER_USE_END_TIME = not args.point_only
-    app.MAX_MARKERS_PER_SCENE = app.MARKER_MAX_TAGS_PER_FRAME = 0
+    app.MARKER_MAX_TAGS_PER_FRAME = 0
     app.MARKER_MERGE_GAP_SECONDS = 0
     spans = [dict(source='wd', tag=f'core_{i % args.labels}', start=float(i*3), end=float(i*3 + 1),
                   score=.9, hits=2, extra_tags=[], meta={'origin': 'test'}) for i in range(args.markers)]

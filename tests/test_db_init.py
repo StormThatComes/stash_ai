@@ -12,6 +12,7 @@ from stash_ai.db.update import update_database
 from stash_ai.evidence.labels import AI
 from stash_ai.evidence.marker_identity import OCCURRENCE_TAG
 from stash_ai.storage.store import StateStore, scope_for
+from stash_ai.storage.schema import LATEST_SCHEMA_VERSION
 from tests.helpers.runtime import runtime as app
 
 pytestmark = pytest.mark.usefixtures('reset_merge')
@@ -391,7 +392,7 @@ def test_v23_upgrade_adds_init_state_without_creating_authorization(pipeline):
         db.execute('DROP TABLE db_init_scenes')
         db.execute('DROP TABLE db_initializations')
         db.execute('PRAGMA user_version=23')
-    assert update_database(p.path) == (23, 24)
+    assert update_database(p.path) == (23, LATEST_SCHEMA_VERSION)
     assert (state_rows(p.path, 'results'), state_rows(p.path, 'snapshots')) == before
     assert state_rows(p.path, 'db_initializations') == []
     assert check_database(p.path, scope_for(app.STASH_URL))['ok']

@@ -67,7 +67,7 @@ def main():
     app.TEMPORAL_POLICY = temporal_policy.TemporalPolicy()
     app.MARKER_MIN_HITS = 2
     app.MARKER_MERGE_GAP_SECONDS = 0
-    app.MARKER_MAX_TAGS_PER_FRAME = app.MAX_MARKERS_PER_SCENE = 0
+    app.MARKER_MAX_TAGS_PER_FRAME = 0
     records = {source: [dict(mode='frames', meta=dict(origin='inference',
         marker_threshold=.8, marker_score_floor=.1, marker_tag_blocklist=[],
         frame_input_signature='retained-benchmark', inference_signature=source + '-benchmark'),

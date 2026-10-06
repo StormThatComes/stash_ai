@@ -92,11 +92,10 @@ def test_no_redundant_shared_range_when_original_union_already_covers_it():
     assert [(m['start'],m['end']) for m in markers]==[(0,4)]
 
 
-def test_shared_candidate_limit_is_bounded_and_deterministic(monkeypatch):
-    monkeypatch.setattr(app,'MAX_MARKERS_PER_SCENE',1)
+def test_all_shared_candidates_are_retained_in_deterministic_order():
     records={source:segment(source,[[(tag,.9) for tag in ('b','a')] if i==offset else [] for i in range(2)])
              for source,offset in [('wd',0),('dtq',1)]}
-    assert [m['tag'] for m in fused(records)[1]]==['a']
+    assert [m['tag'] for m in fused(records)[1]]==['a', 'b']
 
 
 @pytest.mark.parametrize('excluded_source',['wd','dtq'])

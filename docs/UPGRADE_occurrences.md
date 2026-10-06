@@ -60,12 +60,14 @@ konkretnej sceny/modelu:
 python .\stash_ai.py --models wd --scene-id 123 --restart
 ```
 
-## Wykluczenia i limity
+## Wykluczenia i kwalifikacja
 
 Occurrence respektuje:
 - `scene_tag_exclusions.yml`;
-- `marker_core_exclusions.yml`;
-- `MAX_MARKERS_PER_SCENE`.
+- `marker_core_exclusions.yml`.
+
+Liczba markerów na scenę nie jest ograniczana. Zakresy innych tagów nie
+blokują punktów Occurrence ani nie zmieniają źródła ich dowodów.
 
 Normalny marker zakresowy ma pierwszeństwo przed reprezentatywnym punktem tego
 samego tagu.

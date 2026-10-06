@@ -37,7 +37,7 @@ Przechowuje m.in.:
 Baza nie zawiera obrazów ani klucza API. Powinna być backupowana razem z
 konfiguracją.
 
-Starszą wspieraną bazę aktualizuje jawne `--db-update`; bieżący schemat to v24.
+Starszą wspieraną bazę aktualizuje jawne `--db-update`; bieżący schemat to v25.
 Po użyciu nowszej funkcji recovery/cleanup nie uruchamiaj starszej kopii programu
 na tej samej bazie.
 
@@ -268,7 +268,7 @@ Occurrence:
 - jest kontrolowane przez `occurrence_markers`;
 - używa wyłącznie zapisanych czasów/obserwacji;
 - nie zgaduje czasu, jeśli cache go nie zawiera;
-- respektuje wykluczenia i limit liczby markerów;
+- respektuje wykluczenia; liczba markerów na scenę nie jest ograniczana;
 - ma techniczny tag `ai:marker:occurrence`.
 
 Szczegóły: [UPGRADE_occurrences.md](UPGRADE_occurrences.md).

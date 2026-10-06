@@ -13,8 +13,9 @@ pytestmark = pytest.mark.usefixtures('reset_temporal')
 
 
 @pytest.mark.parametrize('settings', [
+    {},
     {'MARKER_MIN_HITS': 3},
-    {'MAX_TAGS': 1, 'MAX_MARKERS_PER_SCENE': 1, 'MARKER_MAX_TAGS_PER_FRAME': 1},
+    {'MARKER_MAX_TAGS_PER_FRAME': 1},
     {'MARKER_MERGE_GAP_SECONDS': 2.0},
     {'APPLY_SCENE_TAGS': False, 'CREATE_MARKERS': False},
 ])
@@ -35,5 +36,8 @@ def test_spawned_model_report_matches_serial_with_custom_settings(tmp_path, sett
                                      workers=2, cache_bytes=0, memory_budget_bytes=2**30)
     assert parallel == serial
     assert path.read_bytes() == before
+    if not settings:
+        assert serial['totals']['scene_tags'] == 4
+        assert serial['totals']['markers'] == 8
     if settings == {'MARKER_MIN_HITS': 3}:
         assert serial['totals']['markers'] == 0

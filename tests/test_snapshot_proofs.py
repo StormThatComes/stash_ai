@@ -104,7 +104,7 @@ def test_current_snapshots_reject_incomplete_build_options_on_write_and_read(kin
     from stash_ai.evidence.temporal.policy import build_options
     options = ({**build_options(app), 'core_exclusions': {s: [] for s in empty_policies()},
                 'tag_exclusions': {s: [] for s in empty_policies()}} if kind == 'markers' else
-               {'policy': asdict(app.TEMPORAL_POLICY), 'max_tags': 0, 'scene_thresholds': {},
+               {'policy': asdict(app.TEMPORAL_POLICY), 'scene_thresholds': {},
                 'scene_exclusions': {s: [] for s in empty_policies()}})
     threshold_field = 'marker_thresholds' if kind == 'markers' else 'scene_thresholds'
     exclusion_field = 'tag_exclusions' if kind == 'markers' else 'scene_exclusions'
@@ -118,7 +118,7 @@ def test_current_snapshots_reject_incomplete_build_options_on_write_and_read(kin
         if kind == 'markers':
             del options['settings']['MARKER_MIN_HITS']
         else:
-            del options['max_tags']
+            options['max_tags'] = 1
     else:
         options['blocklist'] = []
     item = {'build_options': options}
