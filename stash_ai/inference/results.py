@@ -26,7 +26,8 @@ def capture_outputs(app, config, vocabulary, cues, predictions, frames, analysis
                 scene_support_floor=config.scene_threshold * app.TEMPORAL_POLICY.scene_support_ratio)
     meta['marker_score_floor'] = marker_cache_floor(config, app.TEMPORAL_POLICY)
     outputs = {}
-    if app.APPLY_SCENE_TAGS:
+    from stash_ai.storage.progress import output_kinds
+    if 'scene' in output_kinds(app):
         outputs["scene"] = {"mode": "scene", "meta": {
                                 **meta,
                                 'scene_score_floor': analysis['scene_score_floor']},

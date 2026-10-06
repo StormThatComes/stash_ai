@@ -5,6 +5,41 @@ ITEM_FIELDS = frozenset(('hits', 'high_hits', 'max_score', 'peak_time', 'seconds
     'run_hits', 'run_start', 'last_end', 'last_frame', 'longest_hits', 'longest_seconds'))
 
 
+def validate_checkpoint(state, *, processed=None, labels=None):
+    """Validate sparse accumulator state before restoration or offline DB checks."""
+    from stash_ai.db.payloads import _number, _score
+    invalid = 'Unsupported or incomplete scene checkpoint analysis; use --restart.'
+    if (not isinstance(state, dict) or set(state) != {'format', 'items', 'frames', 'covered', 'last_end'}
+            or type(state['format']) is not int or state['format'] != CHECKPOINT_FORMAT
+            or type(state['frames']) is not int or state['frames'] < 0
+            or not _number(state['covered']) or not _number(state['last_end'])
+            or state['covered'] > state['last_end'] + .001
+            or not isinstance(state['items'], dict)
+            or (processed is not None and state['frames'] != processed)):
+        raise ValueError(invalid)
+    for key, item in state['items'].items():
+        try:
+            index = int(key)
+        except (TypeError, ValueError):
+            raise ValueError(invalid) from None
+        counts = ('hits', 'high_hits', 'run_hits', 'last_frame', 'longest_hits')
+        if (isinstance(key, bool) or str(index) != str(key) or index < 0
+                or (labels is not None and index >= labels)
+                or not isinstance(item, dict) or set(item) != ITEM_FIELDS
+                or any(type(item[k]) is not int or item[k] < 0 for k in counts)
+                or any(not _number(item[k]) for k in ITEM_FIELDS - set(counts))
+                or not _score(item['max_score'])
+                or not 0 < item['hits'] <= state['frames']
+                or item['high_hits'] > item['hits']
+                or not 0 < item['run_hits'] <= item['longest_hits'] <= item['hits']
+                or not 0 < item['last_frame'] <= state['frames']
+                or item['run_start'] > item['last_end'] or item['peak_time'] > item['last_end']
+                or item['last_end'] > state['last_end'] + .001
+                or item['seconds'] > state['covered'] + .001
+                or item['longest_seconds'] > item['last_end'] - item['run_start'] + item['seconds'] + .001):
+            raise ValueError(invalid)
+
+
 class SceneAccumulator:
     """One small record per observed label, never a frame-by-vocabulary matrix."""
     def __init__(self, threshold, policy, state=None):
@@ -12,11 +47,7 @@ class SceneAccumulator:
         if state is None:
             self.items, self.frames, self.covered, self.last_end = {}, 0, 0.0, 0.0
         else:
-            if (not isinstance(state, dict) or set(state) != {'format', 'items', 'frames', 'covered', 'last_end'}
-                    or type(state['format']) is not int or state['format'] != CHECKPOINT_FORMAT
-                    or not isinstance(state['items'], dict)
-                    or any(not isinstance(item, dict) or set(item) != ITEM_FIELDS for item in state['items'].values())):
-                raise ValueError('Unsupported or incomplete scene checkpoint analysis; use --restart.')
+            validate_checkpoint(state)
             self.items = {int(k): dict(v) for k, v in state['items'].items()}
             self.frames, self.covered, self.last_end = state['frames'], state['covered'], state['last_end']
 

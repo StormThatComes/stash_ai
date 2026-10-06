@@ -49,13 +49,17 @@ def validate_current(segment):
            or not 0 <= meta[key] <= 1 for key in required_scores):
         raise ValueError('Current inference evidence requires publication thresholds and retention floors.')
     if 'items' in segment:
+        rows = segment.get('frames', ()) if segment['mode'] == 'scene' else segment['items']
+        if any(isinstance(before, dict) and isinstance(after, dict)
+               and type(before.get('start')) in (int, float) and type(after.get('start')) in (int, float)
+               and (after['start'] <= before['start'] or (
+                   type(before.get('end')) in (int, float) and after['start'] < before['end'] - .001))
+               for before, after in pairwise(rows)):
+            raise UnorderedFrames('Current inference frames must be chronological and non-overlapping; run inference again.')
         from stash_ai.db.payloads import valid_result
         kind = 'scene' if segment['mode'] == 'scene' else 'markers'
         if not valid_result(segment, kind):
             raise ValueError('Invalid current inference observations; run --db-check and inference again.')
-        rows = segment['frames'] if kind == 'scene' else segment['items']
-        if any(after['start'] < before['start'] for before, after in pairwise(rows)):
-            raise UnorderedFrames('Current inference frames must be chronological; run --db-update and inference again.')
 
 
 STATISTIC_FIELDS = frozenset(('hits', 'high_hits', 'max_score', 'sampled_frames',

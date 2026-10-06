@@ -41,7 +41,7 @@ def evidence(app, store, scene_id, core_policies, scene_policies, metrics=None, 
         # Apply the scene cap once per current model record.
         eligible.sort(key=lambda item: (-(item["score"] if item["score"] is not None else -1), item["tag"]))
         scene_hits.extend(eligible[:app.MAX_TAGS] if app.MAX_TAGS else eligible)
-    records = store.records(scene_id, 'markers', borrow=True)
+    records = store.records(scene_id, 'markers', borrow=True) if app.CREATE_MARKERS else {}
     if selected_sources is not None:
         records = {source: record for source, record in records.items()
                    if source in selected_sources}

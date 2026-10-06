@@ -64,6 +64,8 @@ def test_scene_failure_continues_but_interruption_stops_and_closes_tagger(model_
         assert context.state.records('2', 'scene')['wd']['meta']['origin'] == 'inference'
         assert ('inference', 'wd', 'RuntimeError') in context.args.report.groups
     assert context.state.records('1', 'scene') == {}
+    from stash_ai.storage.progress import pending_refreshes
+    assert pending_refreshes(context.state, ['scene', 'markers'])['1'] == [('wd', 'markers'), ('wd', 'scene')]
     assert len(context.pipeline.loaded) == 1
     assert context.pipeline.loaded[0].closed
     # The borrowed database remains usable after the model's finally block.
@@ -137,3 +139,29 @@ def test_downloaded_weights_refresh_signatures_before_saving_and_enable_resume(m
     run_model(context)
     assert context.stats['reused'] == 2 and not context.stats['processed']
 
+
+def test_content_replacement_invalidates_resume_and_hashes_once_per_run(model_run, monkeypatch):
+    import hashlib
+    import os
+    context = model_run
+    context.config.model_dir.mkdir()
+    weight = context.config.model_dir/'model.onnx'
+    weight.write_bytes(b'AAAA')
+    calls, original = [], hashlib.file_digest
+    def counted(stream, algorithm):
+        calls.append(stream.name)
+        return original(stream, algorithm)
+    monkeypatch.setattr(hashlib, 'file_digest', counted)
+    run_model(context)
+    assert context.stats['processed'] == 2 and calls == [str(weight)]
+    context.args.resume = True
+    context.stats.clear()
+    run_model(context)
+    assert context.stats['reused'] == 2 and len(calls) == 2
+    stamp = weight.stat()
+    weight.write_bytes(b'BBBB')
+    os.utime(weight, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+    context.stats.clear()
+    run_model(context)
+    assert context.stats['processed'] == 2 and not context.stats['reused']
+    assert len(context.pipeline.loaded) == 2 and len(calls) == 3

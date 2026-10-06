@@ -43,7 +43,8 @@ def _restore_prediction_state(app, tagger, cues, *, checkpoint, report):
 
     settings, labels = tagger.settings, tagger.labels
     policy = app.TEMPORAL_POLICY
-    retain_scene = app.APPLY_SCENE_TAGS
+    from stash_ai.storage.progress import output_kinds
+    retain_scene = 'scene' in output_kinds(app)
     scene_floor = scene_cache_floor(settings, policy)
     retained_marker_floor = marker_cache_floor(settings, policy)
     processed, top_scores, saved = (
@@ -57,7 +58,7 @@ def _restore_prediction_state(app, tagger, cues, *, checkpoint, report):
             policy,
             checkpoint.analysis if checkpoint else None,
         )
-        if app.APPLY_SCENE_TAGS
+        if retain_scene
         else None
     )
     if accumulator is not None and accumulator.frames != processed:

@@ -31,7 +31,7 @@ def _detections(values):
         isinstance(pair, (list, tuple)) and len(pair) == 2
         and _label(pair[0]) and _score(pair[1])
         for pair in values
-    )
+    ) and len({pair[0] for pair in values}) == len(values)
 
 
 def valid_frames(rows, *, checkpoint=False):
@@ -43,7 +43,8 @@ def valid_frames(rows, *, checkpoint=False):
         and _detections(row.get("tags"))
         and (not checkpoint or "scene_tags" not in row or _detections(row["scene_tags"]))
         for row in rows
-    )
+    ) and all(b['start'] >= a['end'] - .001 and b['start'] > a['start']
+              for a, b in zip(rows, rows[1:]))
 
 
 def _item(item):

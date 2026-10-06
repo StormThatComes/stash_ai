@@ -26,7 +26,8 @@ def _marker_contributions(app, records, core_policies, index, metrics):
     effective_cores = core_policies_with_global(core_policies, tag_policies)
     report = index.report
     with stage(report, 'marker_seeds'):
-        seeds = consensus_seeds(records, effective_cores, app.TEMPORAL_POLICY)
+        seeds = consensus_seeds(records, effective_cores, app.TEMPORAL_POLICY,
+                                app.MARKER_MAX_TAGS_PER_FRAME)
     signatures = index.signatures
     spans = []
     with stage(report, 'marker_build'):

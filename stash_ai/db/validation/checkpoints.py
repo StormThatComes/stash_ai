@@ -64,3 +64,16 @@ def check_checkpoints(db, tables, errors, progress=None):
             """).fetchone()[0]
         else:
             errors["checkpoint_orphan_analysis"] += count_rows(db, tables, "checkpoint_analysis")
+
+        if 'checkpoints' in tables:
+            from stash_ai.storage.codec import decode
+            from stash_ai.evidence.temporal.statistics import validate_checkpoint
+            for blob, processed, top_rows, scores in db.execute(
+                    'SELECT a.data,c.processed,c.top_rows,c.top_scores FROM checkpoint_analysis AS a '
+                    'JOIN checkpoints AS c USING(scope,scene,model)'):
+                try:
+                    raw = zlib.decompress(scores)
+                    labels = len(raw) // (top_rows * 4) if top_rows > 0 else None
+                    validate_checkpoint(decode(blob), processed=processed, labels=labels)
+                except (KeyError, TypeError, ValueError, zlib.error):
+                    errors['checkpoint_analysis_progress'] += 1

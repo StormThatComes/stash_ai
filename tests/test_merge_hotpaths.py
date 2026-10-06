@@ -45,7 +45,7 @@ def test_index_matches_reference_scanner_across_ranges_sources_and_gaps(overlap,
         start, end = sorted(rng.uniform(-1, events[-1]['end']+1) for _ in range(2))
         policy = replace(TemporalPolicy(), short_marker_extras=short, extra_min_hits=rng.choice([1,2,4,50]))
         allowed = rng.choice([None, frozenset(), frozenset({'wd'}), frozenset({'wd','dtq'}), frozenset({None})])
-        expected = index.scan_support(bisect_left(index.starts,start),bisect_left(index.starts,end),end,policy,allowed)
+        expected = index.scan_support(0,bisect_left(index.starts,end),end,policy,allowed,start=start)
         actual = index.support(start,end,policy,allowed)
         assert actual == expected
         assert support_size(actual) >= retained_size(actual)
