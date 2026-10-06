@@ -13,7 +13,7 @@ def test_default_data_and_model_paths_stay_at_installation_root(tmp_path, monkey
     root = Path(__file__).resolve().parents[1]
     monkeypatch.chdir(tmp_path)
     for value in (app.MERGE_STATE_FILE, app.MODELS_CONFIG_FILE, app.TEMPORAL_POLICY_FILE,
-                  app.JOYTAG_HIERARCHY_FILE, app.MARKER_CORE_EXCLUSIONS_FILE, app.SCENE_TAG_EXCLUSIONS_FILE):
+                  app.HIERARCHY_FILE, app.MARKER_CORE_EXCLUSIONS_FILE, app.SCENE_TAG_EXCLUSIONS_FILE):
         assert value.parent == root
     settings = app.services.load_model_settings(app.MODELS_CONFIG_FILE, ['all'], None)
     assert all(config.model_dir.parent == root / 'models' for config in settings)

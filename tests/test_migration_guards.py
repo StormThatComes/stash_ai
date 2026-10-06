@@ -25,12 +25,12 @@ def test_hierarchy_v1_requires_bridge_without_changing_file(tmp_path):
     before = path.read_bytes()
     files = set(tmp_path.iterdir())
     with pytest.raises(ValueError, match=MIGRATION_BRIDGE_COMMIT):
-        load_tag_hierarchy(path, ['core'], WD)
+        load_tag_hierarchy(path)
     assert path.read_bytes() == before and set(tmp_path.iterdir()) == files
     data = {key: value for key, value in data.items() if key not in {'root', 'category_prefix'}}
     data['version'] = 2
     path.write_text(yaml.safe_dump(data))
-    assert load_tag_hierarchy(path, ['core'], WD).leaf_parents['core'] == ('ai:category:General',)
+    assert load_tag_hierarchy(path).leaf_parents['core'] == ('ai:category:General',)
 
 
 def test_occurrence_manual_points_and_native_ranges_are_valid():

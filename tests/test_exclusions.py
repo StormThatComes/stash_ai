@@ -188,10 +188,9 @@ def test_hierarchy_create_all_does_not_recreate_excluded_tags(pipeline, monkeypa
     assert prefix+'extra' in p.stash.tags and prefix+'common' not in p.stash.tags
 
 
-def test_combined_hierarchy_filters_each_source_before_union():
+def test_shared_hierarchy_excludes_only_globally_banned_labels():
     root = Path(__file__).resolve().parents[1]
-    args = SimpleNamespace(no_hierarchy=False, hierarchy=root/'joytag_hierarchy.yml',
-        **{source+'_hierarchy': root/f'{source}_hierarchy.yml' for source in ('wd', 'dtq', 'oppai')})
+    args = SimpleNamespace(no_hierarchy=False, hierarchy=root/'tag_hierarchy.yml')
     policies = {source: frozenset({'blue_hair'}) for source in SOURCES}
     hierarchy = hierarchy_commands.combined_hierarchy(app, args, policies)
     assert 'blue_hair' not in hierarchy.leaf_parents

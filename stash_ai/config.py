@@ -111,15 +111,15 @@ def load_model_settings(path: Path, chosen: list[str] | None, device: str | None
         settings.append(config)
     return sorted(settings, key=lambda item: selected.index(item.source.key))
 
-def load_tag_hierarchy(path: Path, labels: list[str], source: ModelSource) -> TagHierarchy:
+def load_tag_hierarchy(path: Path) -> TagHierarchy:
     if not path.is_file():
         raise FileNotFoundError(f"Hierarchy YAML missing: {path}. Place it beside the script or use --no-hierarchy.")
     data = load_unique_yaml(path, "Hierarchy")
-    return hierarchy_from_data(data, labels, source)
+    return hierarchy_from_data(data)
 
 
-def hierarchy_from_data(data, labels, source):
-    """Validate model vocabulary directly into the canonical AI taxonomy."""
+def hierarchy_from_data(data):
+    """Validate the complete shared AI taxonomy, independent of model selection."""
     from stash_ai.evidence.labels import AI, raw_label
     from stash_ai.tools import MIGRATION_BRIDGE_HINT
     allowed = {"version", "source", "groups"}
@@ -158,22 +158,25 @@ def hierarchy_from_data(data, labels, source):
         for label in group_labels:
             raw_label(label)
             leaves.setdefault(label, set()).add(parent)
-    label_set = set(labels)
-    missing, unknown = label_set - set(leaves), set(leaves) - label_set
-    if missing or unknown:
-        raise ValueError(
-            f"Hierarchy/{source.key} vocabulary mismatch: {len(missing)} unmapped labels "
-            f"({', '.join(sorted(missing)[:12])}); {len(unknown)} unknown labels "
-            f"({', '.join(sorted(unknown)[:12])}). Edit the YAML to match the selected model's vocabulary."
-        )
-    collisions = set(categories) & ({AI.prefix + label for label in labels} | {AI.owner_tag})
+    collisions = set(categories) & ({AI.prefix + label for label in leaves} | {AI.owner_tag})
     if collisions:
         raise ValueError(f"Hierarchy categories collide with model/marker tags: {sorted(collisions)!r}")
     source_metadata = data.get("source", {})
     if not isinstance(source_metadata, dict):
         raise ValueError("Hierarchy source metadata must be a mapping.")
+    labels = sorted(leaves)
     if source_metadata.get("tag_count", len(labels)) != len(labels):
-        raise ValueError("Hierarchy source.tag_count does not match the model vocabulary.")
+        raise ValueError("Hierarchy source.tag_count does not match the shared vocabulary.")
     if source_metadata.get("vocabulary_sha256", vocabulary_digest(labels)) != vocabulary_digest(labels):
-        raise ValueError("Hierarchy source.vocabulary_sha256 does not match the model vocabulary.")
+        raise ValueError("Hierarchy source.vocabulary_sha256 does not match the shared vocabulary.")
     return TagHierarchy({tag: tuple(sorted(parents)) for tag, parents in leaves.items()}, categories, prefix, AI.hierarchy_description)
+
+
+def validate_hierarchy_vocabulary(hierarchy: TagHierarchy, labels: list[str], source: ModelSource) -> None:
+    """Every selected model label needs a parent; other models' labels are allowed."""
+    missing = set(labels) - hierarchy.leaf_parents.keys()
+    if missing:
+        raise ValueError(
+            f"Hierarchy/{source.key} vocabulary mismatch: {len(missing)} unmapped labels "
+            f"({', '.join(sorted(missing)[:12])}). Add these labels to the shared hierarchy YAML."
+        )

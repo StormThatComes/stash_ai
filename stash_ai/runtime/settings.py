@@ -44,7 +44,7 @@ class RuntimeSettings:
     SCENE_PAGE_SIZE: int = 100
     REQUEST_TIMEOUT: tuple[int, int] = (5, 600)
     HTTP_RETRIES: int = 3
-    JOYTAG_HIERARCHY_FILE: Path = INSTALL_ROOT / "joytag_hierarchy.yml"
+    HIERARCHY_FILE: Path = INSTALL_ROOT / "tag_hierarchy.yml"
     MARKER_CORE_EXCLUSIONS_FILE: Path = INSTALL_ROOT / "marker_core_exclusions.yml"
     SCENE_TAG_EXCLUSIONS_FILE: Path = INSTALL_ROOT / "scene_tag_exclusions.yml"
     MODELS_CONFIG_FILE: Path = INSTALL_ROOT / "tagger_models.yml"

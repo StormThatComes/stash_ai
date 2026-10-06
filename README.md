@@ -554,8 +554,20 @@ które sprawdza ten sam zakres wyjść i politykę wykluczeń. Nowe operacje zap
 
 ## Konfiguracja
 
-Hierarchie mają `version: 2` i pola `source` oraz `groups`. Ścieżki grup tworzą
+Wszystkie modele korzystają z jednego pliku `tag_hierarchy.yml`, będącego unią
+dotychczasowych czterech hierarchii: 21 154 unikalne tagi w 92 grupach.
+Opcja `--hierarchy YAML` wskazuje wspólny plik również przy wyborze jednego modelu.
+Usunięto `--wd-hierarchy`, `--dtq-hierarchy` i `--oppai-hierarchy`.
+
+Hierarchia ma `version: 2` i pola `source` oraz `groups`. Ścieżki grup tworzą
 bezpośrednio kategorie `ai:category:` pod korzeniem `ai:category:AI`.
+Walidacja wymaga przypisania wszystkich tagów wybranych modeli; tagi pozostałych
+modeli są dozwolone. Opcjonalne `source.tag_count` i `source.vocabulary_sha256`
+opisują cały zbiór tagów wspólnego pliku, niezależnie od wybranych modeli.
+Zmiana grupowania nie wymaga ponownej inferencji ani nowej bazy SQLite;
+przypisania można zsynchronizować przez `--sync-hierarchy-only`.
+Przy własnych zmianach w starych plikach przenieś je do wspólnego YAML-a;
+aktualizator zachowuje stare konfiguracje lokalne, ale bieżący kod ich nie czyta.
 Własne YAML-e v1 przekonwertuj za pomocą [wersji pomostowej](#migratory-w-wersji-pomostowej).
 Bieżący walidator wymaga v2 i wskazuje commit migratora bez zmiany pliku.
 
@@ -565,7 +577,7 @@ Bieżący walidator wymaga v2 i wskazuje commit migratora bez zmiany pliku.
 | `temporal_policy.yml` | reguły temporalne, consensus, extras i Occurrence |
 | `scene_tag_exclusions.yml` | globalne wykluczenia tagów |
 | `marker_core_exclusions.yml` | wykluczenia głównych tagów markerów |
-| `*_hierarchy.yml` | hierarchie kategorii modeli |
+| `tag_hierarchy.yml` | wspólna hierarchia kategorii wszystkich modeli |
 | `--state-db` | lokalizacja trwałej bazy stanu |
 
 `MAX_MARKERS_PER_SCENE` ogranicza wkłady osobno dla każdego modelu.
