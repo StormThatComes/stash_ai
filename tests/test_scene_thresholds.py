@@ -413,3 +413,22 @@ def test_scene_rethreshold_never_decodes_publication_snapshots(tmp_path, monkeyp
         assert result == {'scene_thresholds_updated': 1}
         assert state.records('1', 'scene')['wd'][cache_identity.PUBLICATION_THRESHOLD] == .8
 
+
+
+@pytest.mark.parametrize('flags,scene,marker', [
+    (['--markers-only'], .4, .9),
+    (['--scene-tags-only'], .8, .7),
+    ([], .8, .9),
+])
+def test_unified_reuse_preserves_raw_outputs_for_each_kind(pipeline, monkeypatch, tmp_path, flags, scene, marker):
+    policy = tmp_path/'without_occurrences.yml'
+    policy.write_text('version: 1\noccurrence_markers: false\n')
+    args = [*pipeline.args, *flags, '--temporal-policy', str(policy)]
+    configure(monkeypatch)
+    assert app.main(args) == 0
+    before = raw_results(pipeline.path)
+    configure(monkeypatch, scene=scene, marker=marker)
+    monkeypatch.setattr(app.services, 'load_tagger', lambda *args: pytest.fail('reloaded retained inference'))
+    assert app.main(args) == 0
+    assert raw_results(pipeline.path) == before
+    assert app.main([*args, '--merge-only']) == 0

@@ -1,4 +1,5 @@
 """Abandonment across partial API success, old state formats and new policies."""
+from tests.helpers.evidence import empty_policies as empty_tag_policies
 from stash_ai.storage.schema import LATEST_SCHEMA_VERSION
 from tests.helpers.evidence import inference_record
 from copy import deepcopy
@@ -49,8 +50,8 @@ def seed(tmp_path, stash, spans=None):
             'markers': marker_record})
         from stash_ai.evidence.source_markers import marker_contributions
         cores = {source: frozenset(label for s in spans for label in s['extra_tags']) for source in empty_policies()}
-        spans = marker_contributions(app, {'wd': marker_record}, cores)
-        merge_sync.sync_merged(app, stash, app.services.TagResolver(stash, source=merge_labels.AI), store, stash.find_scene('1'), hits, spans)
+        spans = marker_contributions(app, {'wd': marker_record}, cores, tag_policies=empty_tag_policies())
+        merge_sync.sync_merged(app, stash, app.services.TagResolver(stash, source=merge_labels.AI), store, stash.find_scene('1'), hits, spans, tag_policies=empty_tag_policies())
 
 
 def raw_results(tmp_path):
@@ -149,7 +150,7 @@ def test_abandoned_merge_keeps_scene_association_ownership_after_lost_response(t
         monkeypatch.setattr(stash, 'update_scene_tags', lost)
         with pytest.raises(RuntimeError):
             merge_sync.sync_merged(app, stash, app.services.TagResolver(stash, source=merge_labels.AI), store,
-                              stash.find_scene('1'), [hit('wd', 'abc')], [])
+                              stash.find_scene('1'), [hit('wd', 'abc')], [], tag_policies=empty_tag_policies())
     monkeypatch.setattr(stash, 'update_scene_tags', actual)
     before = state_path(tmp_path).read_bytes()
     stash.dry_run = dry; stash.writes.clear()
@@ -157,7 +158,7 @@ def test_abandoned_merge_keeps_scene_association_ownership_after_lost_response(t
         assert recovery.abandon(store, lambda _: None)['publications_abandoned'] == 2
         assert not store.has_pending_publications()
         # New desired policy has no AI output. 'abc' must not become a manual tag.
-        merge_sync.sync_merged(app, stash, app.services.TagResolver(stash, source=merge_labels.AI), store, stash.find_scene('1'), [], [])
+        merge_sync.sync_merged(app, stash, app.services.TagResolver(stash, source=merge_labels.AI), store, stash.find_scene('1'), [], [], tag_policies=empty_tag_policies())
         assert not recovery.publications(store, '1', 'scene')
     if dry:
         assert state_path(tmp_path).read_bytes() == before and not stash.writes
@@ -173,7 +174,7 @@ def test_repeated_abandonment_retains_all_applied_scene_ownership(tmp_path):
             store.prepare('1', {'scene': {'owned_ids': [tag['id']], 'contributions': [hit('wd', name)]}})
             recovery.abandon(store, lambda _: None)
         assert len(recovery.publications(store, '1', 'scene')) == 2
-        merge_sync.sync_merged(app, stash, app.services.TagResolver(stash, source=merge_labels.AI), store, stash.find_scene('1'), [], [])
+        merge_sync.sync_merged(app, stash, app.services.TagResolver(stash, source=merge_labels.AI), store, stash.find_scene('1'), [], [], tag_policies=empty_tag_policies())
         assert stash.scene['tags'] == [human]
         assert not recovery.publications(store, '1', 'scene')
 

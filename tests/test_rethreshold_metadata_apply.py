@@ -8,7 +8,7 @@ import sqlite3
 
 import pytest
 
-from stash_ai.rethreshold import markers as marker_updates, execution as rethreshold_execution, scenes as scene_updates
+from stash_ai.rethreshold import execution as rethreshold_execution, scenes as scene_updates
 from stash_ai.db.checks import check_database
 from tests.helpers.runtime import runtime as app
 import stash_ai.evidence.identity as scene_cache_identity
@@ -57,7 +57,9 @@ def test_metadata_apply_matches_full_payload_index_and_preserves_history(tmp_pat
     # Reference the established full-evidence path, including preview overlays.
     with StateStore(paths[0], 'scope', dry_run=dry_run) as store:
         if mode == 'markers':
-            assert marker_updates.apply(app, store, '1', target(mode))
+            prepared = scene_updates.plan(app, store, '1', target(mode), request=ThresholdRequest(kinds=('markers',)))
+            assert prepared
+            scene_updates.apply(store, '1', target(mode).source.key, prepared)
         else:
             planned = scene_updates.plan(app, store, '1', target(mode), request=ThresholdRequest(kinds=('scene', 'markers') if mode == 'combined' else ('scene',)))
             scene_updates.apply(store, '1', 'wd', planned)

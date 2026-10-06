@@ -7,16 +7,16 @@ from .observations import ObservationIndex
 
 class FrameIndex:
     """Verify groups once; observations are prepared lazily and reused."""
-    def __init__(self, app, records, policies, signatures=None, cache=None, tag_policies=None, *, report=None):
+    def __init__(self, app, records, policies, *, tag_policies, cache=None, report=None):
         from stash_ai.evidence.identity import marker_segment_signature
-        from stash_ai.exclusions import policies_or_empty
-        self.app, self.policies, self.cache = app, policies, cache
-        self.tag_policies = policies_or_empty(tag_policies)
+        from stash_ai.exclusions import require_policies
+        self.app, self.policies, self.cache = app, require_policies(policies), cache
+        self.tag_policies = require_policies(tag_policies)
         self.report = report
         from stash_ai.evidence.formats import validate_current
         for record in records.values():
             validate_current(record)
-        self.signatures = signatures if signatures is not None else {
+        self.signatures = {
             id(segment): marker_segment_signature(segment) for segment in records.values()}
         self.groups = make_groups(records, self.signatures)
         self.by_signature = {sig: key for key, group in self.groups.items() for _, _, sig in group['members']}
@@ -41,7 +41,7 @@ def make_groups(records, signatures=None):
     groups = {}
     for source, segment in records.items():
         if segment["mode"] != "frames":
-            continue
+            raise ValueError("Frame grouping requires current frame evidence.")
         # A signature plus the actual timeline: shifted/missing cues never
         # become matching observations merely because metadata was copied.
         from stash_ai.storage.segments import frame_group
@@ -55,11 +55,11 @@ def make_groups(records, signatures=None):
     return dict(sorted(groups.items()))
 
 
-def observations(app, group, core_policies, tag_policies=None):
+def observations(app, group, core_policies, tag_policies):
     """One event per timestamp; duplicate runs of a model count only once."""
     from stash_ai.evidence.labels import raw_label
-    from stash_ai.exclusions import policies_or_empty
-    tag_policies = policies_or_empty(tag_policies)
+    from stash_ai.exclusions import require_policies
+    tag_policies = require_policies(tag_policies)
     times = {}
     for source, segment, signature in group["members"]:
         from stash_ai.evidence.thresholds import marker_threshold

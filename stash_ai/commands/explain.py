@@ -14,8 +14,6 @@ REPORT_FORMAT = 2
 def _effective_scene_thresholds(app, threshold):
     """Explain the actual scene cutoffs used by temporal qualification."""
     result = {"effective_scene_threshold": threshold}
-    if type(threshold) not in (int, float):
-        return result
     policy = app.TEMPORAL_POLICY
     ratio = policy.scene_support_ratio
     result.update(
@@ -31,12 +29,12 @@ def _effective_scene_thresholds(app, threshold):
 
 def _record_thresholds(app, kind, segment):
     """Expose stored policy separately from the effective replay policy."""
-    meta = segment.get("meta", {})
+    meta = segment["meta"]
     if kind == "scene":
         from stash_ai.storage.thresholds import PUBLICATION_THRESHOLD
         from stash_ai.evidence.cache_views import scene_threshold
         result = {
-            "stored_scene_threshold": meta.get("scene_threshold"),
+            "stored_scene_threshold": meta["scene_threshold"],
             "publication_threshold": segment.get(PUBLICATION_THRESHOLD),
             **_effective_scene_thresholds(app, scene_threshold(segment)),
         }
@@ -46,27 +44,26 @@ def _record_thresholds(app, kind, segment):
     from stash_ai.evidence.thresholds import marker_threshold
     effective = marker_threshold(segment)
     result = {
-        "stored_marker_threshold": meta.get("marker_threshold"),
+        "stored_marker_threshold": meta["marker_threshold"],
         "publication_threshold": segment.get(PUBLICATION_THRESHOLD),
         "effective_marker_threshold": effective,
     }
-    if type(effective) in (int, float):
-        policy = app.TEMPORAL_POLICY
-        result.update(
-            temporal_enabled=True,
-            marker_continue_ratio=policy.marker_continue_ratio,
-            effective_support_floor=marker_floor(policy, effective),
-        )
+    policy = app.TEMPORAL_POLICY
+    result.update(
+        temporal_enabled=True,
+        marker_continue_ratio=policy.marker_continue_ratio,
+        effective_support_floor=marker_floor(policy, effective),
+    )
     return result
 
 
 def _explain_scene_contributor(app, hit, recorded_scene_sources):
     value = dict(hit)
     thresholds = _effective_scene_thresholds(
-        app, hit.get("meta", {}).get("scene_threshold"))
+        app, hit["meta"]["scene_threshold"])
     record = recorded_scene_sources.get(hit.get("source"), {}).get("record")
-    signature = hit.get("meta", {}).get("inference_signature")
-    if record and record["meta"].get("inference_signature") == signature:
+    signature = hit["meta"]["inference_signature"]
+    if record and record["meta"]["inference_signature"] == signature:
         thresholds["stored_scene_threshold"] = record["thresholds"].get("stored_scene_threshold")
         thresholds["publication_threshold"] = record["thresholds"].get("publication_threshold")
     value["thresholds"] = thresholds

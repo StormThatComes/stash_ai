@@ -1,4 +1,5 @@
 """Offline API-contract, scale and recovery tests for SQL discovery and shared cleanup state."""
+from tests.helpers.evidence import empty_policies as empty_tag_policies
 from stash_ai.storage.results import KINDS
 from copy import deepcopy
 from pathlib import Path
@@ -178,7 +179,7 @@ def test_source_specific_cleanup_only_revisits_matching_scene_and_splits_bridge(
         stash.scenes[str(i)] = dict(id=str(i), tags=[stash.tag('ai:blocked')], scene_markers=[])
     with merge_store.StateStore(tmp_path/'state.sqlite3', merge_store.scope_for(app.STASH_URL)) as store:
         merge_sync.sync_merged(app, stash, app.services.TagResolver(stash, source=merge_labels.AI), store, stash.find_scene('1'),
-            [hit('wd'), hit('oppai')], [span('joytag', 10, 20), span('oppai', 20, 30), span('wd', 30, 40)])
+            [hit('wd'), hit('oppai')], [span('joytag', 10, 20), span('oppai', 20, 30), span('wd', 30, 40)], tag_policies=empty_tag_policies())
     install(monkeypatch, stash)
     stash.scene_reads.clear()
     assert app.main(options(tmp_path, ['blocked'], by_model={'oppai': ['common']})) == 0

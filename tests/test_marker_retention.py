@@ -1,4 +1,5 @@
 """Marker-policy replay must never treat unretained detections as absence."""
+from tests.helpers.evidence import empty_policies as empty_tag_policies
 from copy import deepcopy
 from dataclasses import replace
 import sqlite3
@@ -120,7 +121,7 @@ def test_unknown_historical_floor_requires_inference_even_at_high_threshold(over
     frames['meta']['marker_threshold'] = .7
     frames[thresholds_identity.PUBLICATION_THRESHOLD] = override
     with pytest.raises(ValueError, match='Obsolete active inference'):
-        merge_source_markers.marker_contributions(app, {'wd': frames}, policies())
+        merge_source_markers.marker_contributions(app, {'wd': frames}, policies(), tag_policies=empty_tag_policies())
 
 
 def test_historical_incomplete_segment_cannot_hide_behind_complete_history():
@@ -131,7 +132,7 @@ def test_historical_incomplete_segment_cannot_hide_behind_complete_history():
     old['meta'].pop('marker_score_floor', None)
     current = segment('wd', [[('core', .9)]] * 2)
     with pytest.raises(ValueError, match='Invalid active inference record'):
-        merge_source_markers.marker_contributions(app, {'wd': [old, current]}, policies())
+        merge_source_markers.marker_contributions(app, {'wd': [old, current]}, policies(), tag_policies=empty_tag_policies())
 
 
 @pytest.mark.parametrize('markers_only', [False, True])
@@ -222,7 +223,7 @@ def test_noninference_cannot_claim_current_retention_contract():
     imported['meta'].update(origin='legacy')
     imported['meta'].pop('marker_score_floor', None)
     with pytest.raises(ValueError, match='Active results require current inference'):
-        merge_source_markers.marker_contributions(app, {'wd': imported}, policies())
+        merge_source_markers.marker_contributions(app, {'wd': imported}, policies(), tag_policies=empty_tag_policies())
 
 
 @pytest.mark.parametrize('source', ['wd', 'dtq'])
@@ -235,4 +236,4 @@ def test_incomplete_history_cannot_contribute_consensus_votes(source):
     incomplete['meta']['marker_score_floor'] = .75
     records[source] = incomplete
     with pytest.raises(ValueError, match=source + ': marker cache floor.*run inference'):
-        merge_source_markers.marker_contributions(app, records, policies())
+        merge_source_markers.marker_contributions(app, records, policies(), tag_policies=empty_tag_policies())

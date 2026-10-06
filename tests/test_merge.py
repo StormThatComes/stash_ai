@@ -1,4 +1,5 @@
 """Behavior tests for exact-label AI fusion; no live Stash or model downloads."""
+from tests.helpers.evidence import empty_policies as empty_tag_policies
 from functools import partial
 from stash_ai.tools.point_migration import main as point_main
 from stash_ai.evidence.interval_geometry import union_intervals as geometry_union
@@ -127,7 +128,7 @@ def test_sync_common_tag_union_idempotence_and_manual_ownership(tmp_path):
     inputs=[span("joytag",10,30),span("wd",20,50),span("oppai",60,80)]
     with store(tmp_path) as state:
         merge_sync.sync_merged(app,stash,app.services.TagResolver(stash,source=merge_labels.AI),state,stash.find_scene("1"),
-                          [hit("joytag"),hit("wd"),hit("oppai","unique_op")],inputs)
+                          [hit("joytag"),hit("wd"),hit("oppai","unique_op")],inputs, tag_policies=empty_tag_policies())
         assert {t["name"] for t in stash.scene["tags"]}=={"manual","ai:common","ai:unique_op"}
         assert intervals(stash)==[(10,50),(60,80)]
         assert manual in stash.scene["scene_markers"]
@@ -136,7 +137,7 @@ def test_sync_common_tag_union_idempotence_and_manual_ownership(tmp_path):
         assert {t["name"] for t in shared["tags"]}=={merge_labels.AI.owner_tag, "m:common"}
         stash.writes.clear()
         merge_sync.sync_merged(app,stash,app.services.TagResolver(stash,source=merge_labels.AI),state,stash.find_scene("1"),
-                          [hit("joytag"),hit("wd"),hit("oppai","unique_op")],inputs)
+                          [hit("joytag"),hit("wd"),hit("oppai","unique_op")],inputs, tag_policies=empty_tag_policies())
         assert not stash.writes
 
 
@@ -144,7 +145,7 @@ def test_untracked_ai_scene_association_remains_manual(tmp_path):
     stash=Stash();tag=stash.tag("ai:common");stash.scene["tags"]=[tag]
     with store(tmp_path) as state:
         for hits in ([hit("wd")],[]):
-            merge_sync.sync_merged(app,stash,app.services.TagResolver(stash,source=merge_labels.AI),state,stash.find_scene("1"),hits,[])
+            merge_sync.sync_merged(app,stash,app.services.TagResolver(stash,source=merge_labels.AI),state,stash.find_scene("1"),hits,[], tag_policies=empty_tag_policies())
         assert stash.scene["tags"]==[tag]
 
 
@@ -152,7 +153,7 @@ def test_native_marker_id_survives_large_start_shift(tmp_path):
     stash=Stash()
     with store(tmp_path) as state:
         for inputs in ([span("wd",20,50)],[span("wd",20,50),span("joytag",10,30)]):
-            merge_sync.sync_merged(app,stash,app.services.TagResolver(stash,source=merge_labels.AI),state,stash.find_scene("1"),[],inputs)
+            merge_sync.sync_merged(app,stash,app.services.TagResolver(stash,source=merge_labels.AI),state,stash.find_scene("1"),[],inputs, tag_policies=empty_tag_policies())
             if len(inputs)==1: original=stash.scene["scene_markers"][0]["id"]
         assert len(stash.scene["scene_markers"])==1
         assert stash.scene["scene_markers"][0]["id"]==original and intervals(stash)==[(10,50)]
@@ -278,7 +279,7 @@ def test_combined_hierarchy_has_one_namespace_and_all_labels(tmp_path):
     root=Path(__file__).resolve().parents[1]
     args=runtime_args(no_hierarchy=False,hierarchy=root/"joytag_hierarchy.yml",**{
         key+"_hierarchy":root/f"{key}_hierarchy.yml" for key in ("wd","dtq","oppai")})
-    combined=hierarchy_commands.combined_hierarchy(app,args)
+    combined=hierarchy_commands.combined_hierarchy(app,args, tag_policies=empty_tag_policies())
     expected=set()
     for key in SOURCES:
         data=yaml.safe_load((root/f"{key}_hierarchy.yml").read_text(encoding="utf-8"))
@@ -325,13 +326,13 @@ def test_manual_extras_survive_absorbed_ai_markers_and_later_split(tmp_path):
     with store(tmp_path) as state:
         resolver=app.services.TagResolver(stash,source=merge_labels.AI)
         base=[span("joytag",10,20),span("wd",30,40)]
-        merge_sync.sync_merged(app,stash,resolver,state,stash.find_scene("1"),[],base)
+        merge_sync.sync_merged(app,stash,resolver,state,stash.find_scene("1"),[],base, tag_policies=empty_tag_policies())
         for marker,name in zip(stash.scene["scene_markers"],["manual A","manual B"]):
             marker["tags"].append(stash.tag(name))
-        merge_sync.sync_merged(app,stash,resolver,state,stash.find_scene("1"),[],base+[span("oppai",20,30)])
+        merge_sync.sync_merged(app,stash,resolver,state,stash.find_scene("1"),[],base+[span("oppai",20,30)], tag_policies=empty_tag_policies())
         assert intervals(stash)==[(10,40)]
         assert {"manual A","manual B"} <= {tag["name"] for tag in stash.scene["scene_markers"][0]["tags"]}
-        merge_sync.sync_merged(app,stash,resolver,state,stash.find_scene("1"),[],base)
+        merge_sync.sync_merged(app,stash,resolver,state,stash.find_scene("1"),[],base, tag_policies=empty_tag_policies())
         assert intervals(stash)==[(10,20),(30,40)]
         assert all({"manual A","manual B"} <= {t["name"] for t in m["tags"]} for m in stash.scene["scene_markers"])
 
@@ -362,7 +363,7 @@ def test_cleanup_selected_bridge_source_splits_union_and_keeps_manual_removals(m
     inputs=[span("joytag",10,20),span("oppai",20,30),span("wd",30,40),span("dtq",70,80,"extra")]
     with merge_store.StateStore(p.path,scope) as state:
         merge_sync.sync_merged(app,p.stash,app.services.TagResolver(p.stash,source=merge_labels.AI),state,p.stash.find_scene("1"),
-                          [hit("joytag"),hit("oppai"),hit("dtq","extra")],inputs)
+                          [hit("joytag"),hit("oppai"),hit("dtq","extra")],inputs, tag_policies=empty_tag_policies())
     assert intervals(p.stash)==[(10,40)]
     p.stash.scene["tags"]=[t for t in p.stash.scene["tags"] if t["name"]!="ai:extra"]
     p.stash.scene["scene_markers"]=[m for m in p.stash.scene["scene_markers"] if m["primary_tag"]["name"]!="ai:extra"]

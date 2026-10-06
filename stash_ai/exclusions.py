@@ -1,20 +1,23 @@
 """Global output exclusions, separate from primary-only marker exclusions.
 
 Raw inference records stay intact so changing YAML never requires a model run.
-The legacy scene_tag_exclusions.yml filename remains supported unchanged.
 """
 from dataclasses import replace
 
 from stash_ai.models import SOURCES
 
 
-def policies_or_empty(policies=None):
-    return {source: frozenset((policies or {}).get(source, ())) for source in SOURCES}
+def require_policies(policies):
+    """Internal callers provide every model, including explicitly empty bans."""
+    if (not isinstance(policies, dict) or set(policies) != set(SOURCES)
+            or any(not isinstance(values, (set, frozenset)) for values in policies.values())):
+        raise ValueError('Exclusion policies require an explicit set for every model.')
+    return policies
 
 
 def selected_policies(policies, selected):
     return {source: values if source in selected else frozenset()
-            for source, values in policies_or_empty(policies).items()}
+            for source, values in require_policies(policies).items()}
 
 
 def core_policies_with_global(core_policies, tag_policies):
@@ -26,7 +29,7 @@ def excluded_names(policies, *, unused=False):
 
     For unused definitions the union is safe: usage is checked before deletion.
     """
-    policies = policies_or_empty(policies)
+    policies = require_policies(policies)
     shared = (frozenset.union if unused else frozenset.intersection)(*policies.values())
     return {'ai:' + label for label in shared}
 

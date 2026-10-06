@@ -1,5 +1,6 @@
 """Wide retained caches must preserve publication and label validation."""
 
+from tests.helpers.evidence import empty_policies as empty_tag_policies
 import stash_ai.evidence.temporal.policy as temporal_policy
 import builtins
 from copy import deepcopy
@@ -34,7 +35,7 @@ def test_shared_observations_sort_only_eligible_scores(monkeypatch):
             sorted_sizes.append(len(values))
         return builtins.sorted(values, **kwargs)
     monkeypatch.setattr(fusion, 'sorted', observe_sort, raising=False)
-    result = fusion.observations(app, group(records), policies())
+    result = fusion.observations(app, group(records), policies(), tag_policies=empty_tag_policies())
     assert sorted_sizes == [2] * 4
     assert all(set(event['cores']) == {'core', 'support'} for event in result)
     assert all(set(event['extras']) == {'core'} for event in result)
@@ -86,7 +87,7 @@ def test_filter_uses_effective_per_source_threshold_and_preserves_exact_boundari
              ('under_high', math.nextafter(.8, -math.inf))]]
     wd, dtq = segment('wd', rows), segment('dtq', [[('dtq_core', .5), ('dtq_support', .425)]])
     dtq[thresholds_identity.PUBLICATION_THRESHOLD] = .5
-    event = fusion.observations(app, group({'wd': wd, 'dtq': dtq}), policies())[0]
+    event = fusion.observations(app, group({'wd': wd, 'dtq': dtq}), policies(), tag_policies=empty_tag_policies())[0]
     assert set(event['cores']) == {'edge', 'above', 'high', 'under_high', 'dtq_core', 'dtq_support'}
     assert set(event['extras']) == {'high', 'dtq_core'}
     assert not event['cores']['edge']['wd']['strong']
@@ -96,7 +97,7 @@ def test_filter_uses_effective_per_source_threshold_and_preserves_exact_boundari
 def test_zero_threshold_keeps_zero_score_observations():
     saved = segment('wd', [[('zero', 0.)]])
     saved['meta']['marker_threshold'] = 0.
-    event = fusion.observations(app, group({'wd': saved}), policies())[0]
+    event = fusion.observations(app, group({'wd': saved}), policies(), tag_policies=empty_tag_policies())[0]
     assert set(event['cores']) == set(event['extras']) == {'zero'}
 
 
@@ -107,13 +108,13 @@ def test_low_score_invalid_labels_still_fail_merge_validation(label, shared, mon
         shared_marker_frames=shared, shared_marker_extras=shared))
     records = {'wd': segment('wd', [[('core', .9), (label, .01)]] * 2)}
     with pytest.raises(ValueError, match='Invalid current inference observations'):
-        merge_source_markers.marker_contributions(app, records, policies())
+        merge_source_markers.marker_contributions(app, records, policies(), tag_policies=empty_tag_policies())
 
 
 def test_direct_observation_validation_checks_low_labels_but_keeps_exclusion_semantics():
     records = {'wd': segment('wd', [[('core', .9), (' bad', .01)]])}
     with pytest.raises(ValueError, match='Invalid or reserved merged label'):
-        fusion.observations(app, group(records), policies())
+        fusion.observations(app, group(records), policies(), tag_policies=empty_tag_policies())
     assert set(fusion.observations(app, group(records), policies(), policies({' bad'}))[0]['cores']) == {'core'}
 
 
@@ -146,7 +147,7 @@ def test_temporal_markers_keep_weak_continuations_gaps_extras_and_proofs(monkeyp
 def test_consensus_at_support_floor_survives_wider_retention():
     records = {source: segment(source, [[('core', .7)] +
                 [(f'weak_{i}', .2) for i in range(100)]] * 3) for source in ('wd', 'dtq')}
-    markers = merge_intervals.union_intervals(merge_source_markers.marker_contributions(app, records, policies()))
+    markers = merge_intervals.union_intervals(merge_source_markers.marker_contributions(app, records, policies(), tag_policies=empty_tag_policies()))
     assert len(markers) == 1
     assert markers[0]['tag'] == 'core'
     assert (markers[0]['start'], markers[0]['end']) == (0, 3)

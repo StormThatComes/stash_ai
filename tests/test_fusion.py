@@ -1,4 +1,5 @@
 """Shared VTT evidence, extra-only models, published-source cleanup and cache reuse."""
+from tests.helpers.evidence import empty_policies as empty_tag_policies
 from stash_ai.db.snapshot_migration import complete_policy
 
 from copy import deepcopy
@@ -33,7 +34,7 @@ def policies(excluded=()):
 
 
 def fused(records, exclusions=None):
-    spans=merge_source_markers.marker_contributions(app, records, exclusions or policies())
+    spans=merge_source_markers.marker_contributions(app, records, exclusions or policies(), tag_policies=empty_tag_policies())
     return spans, merge_intervals.union_intervals(spans)
 
 
@@ -177,11 +178,11 @@ def test_cleanup_rebuilds_a_shared_range_when_its_anchor_source_is_excluded(tmp_
         _,spans=merge.evidence(app,state,'1',excluded,policies())
         assert spans[0]['source']=='wd'
         excluded['wd']=frozenset({'core'})
-        cleaned=cleanup_evidence.cleanup_support(app,state,'1',spans,{'wd'},excluded)
+        cleaned=cleanup_evidence.cleanup_support(app,state,'1',spans,{'wd'},excluded, tag_policies=empty_tag_policies())
         marker=merge_intervals.union_intervals(cleaned)[0]
         assert (marker['start'],marker['end'],marker['sources'])==(1,3,['dtq','oppai'])
         excluded['dtq']=frozenset({'core'})
-        assert cleanup_evidence.cleanup_support(app,state,'1',cleaned,{'dtq'},excluded)==[]
+        assert cleanup_evidence.cleanup_support(app,state,'1',cleaned,{'dtq'},excluded, tag_policies=empty_tag_policies())==[]
 
 
 def test_cleanup_does_not_adopt_new_unpublished_votes(tmp_path):
@@ -191,7 +192,7 @@ def test_cleanup_does_not_adopt_new_unpublished_votes(tmp_path):
         _,spans=merge.evidence(app,state,'1',excluded,policies())
         state.put('1','oppai',{'markers':segment('oppai',[[],[],[('core',.9)]])})
         excluded['wd']=frozenset({'core'})
-        assert cleanup_evidence.cleanup_support(app,state,'1',spans,{'wd'},excluded)==[]
+        assert cleanup_evidence.cleanup_support(app,state,'1',spans,{'wd'},excluded, tag_policies=empty_tag_policies())==[]
 
 
 def test_cleanup_clips_source_scores_and_extra_proofs_to_published_bounds(tmp_path):
@@ -205,7 +206,7 @@ def test_cleanup_clips_source_scores_and_extra_proofs_to_published_bounds(tmp_pa
         # otherwise return a longer interval from the same frozen inputs.
         spans[0].update(start=2,end=4)
         excluded['wd']=frozenset({'core','detail'})
-        cleaned=cleanup_evidence.cleanup_support(app,state,'1',spans,{'wd'},excluded)
+        cleaned=cleanup_evidence.cleanup_support(app,state,'1',spans,{'wd'},excluded, tag_policies=empty_tag_policies())
         assert len(cleaned)==1
         proof=cleaned[0]['source_evidence']
         assert (proof['dtq']['score'],proof['oppai']['score'])==(.91,.92)
@@ -225,7 +226,7 @@ def test_cleanup_refuses_changed_required_frame_records(tmp_path):
         state.put('1','dtq',{'markers':changed})
         excluded['wd']=frozenset({'core'})
         with pytest.raises(RuntimeError,match='sources changed'):
-            cleanup_evidence.cleanup_support(app,state,'1',spans,{'wd'},excluded)
+            cleanup_evidence.cleanup_support(app,state,'1',spans,{'wd'},excluded, tag_policies=empty_tag_policies())
 
 
 def test_cleanup_command_rebuilds_shared_marker_and_then_removes_last_support(pipeline,monkeypatch,tmp_path):
@@ -253,7 +254,7 @@ def test_cleanup_requires_published_evidence_and_preserves_extras_when_only_core
     with merge_store.StateStore(tmp_path/'state.sqlite3','fixture') as state:
         for source,segments in extra_records().items():state.put('1',source,{'markers':segments})
         _,spans=merge.evidence(app,state,'1',excluded,policies())
-        cleaned=cleanup_evidence.cleanup_support(app,state,'1',spans,{'dtq'},excluded)
+        cleaned=cleanup_evidence.cleanup_support(app,state,'1',spans,{'dtq'},excluded, tag_policies=empty_tag_policies())
         assert merge_intervals.union_intervals(cleaned)[0]['extra_tags']==['detail']
         cleaned=cleanup_evidence.cleanup_support(app,state,'1',spans,{'wd','dtq'},excluded,policies({'detail'}))
         assert merge_intervals.union_intervals(cleaned)[0]['extra_tags']==[]
@@ -323,9 +324,9 @@ def test_clipped_replay_closes_its_observation_cache(monkeypatch, fail_collectio
             raise RuntimeError('collection interrupted')
         monkeypatch.setattr(shared_markers, 'collect_extras', fail)
         with pytest.raises(RuntimeError, match='collection interrupted'):
-            shared_markers.refresh_clipped_evidence(app, span, records, policies())
+            shared_markers.refresh_clipped_evidence(app, span, records, policies(), tag_policies=empty_tag_policies())
     else:
-        assert shared_markers.refresh_clipped_evidence(app, span, records, policies())
+        assert shared_markers.refresh_clipped_evidence(app, span, records, policies(), tag_policies=empty_tag_policies())
         assert span['extra_tags'] == ['detail']
         assert span['extra_support']['detail']['sources']['wd']['intervals'] == [[1, 3]]
     assert len(indexes) == 1

@@ -13,7 +13,7 @@ def validate_scene(app, segment, threshold, *, has_frames=None):
     from stash_ai.evidence.formats import validate_current
     validate_current({**segment, **({'has_frames': has_frames} if has_frames is not None else {})})
     needed = threshold * app.TEMPORAL_POLICY.scene_support_ratio
-    floor = meta.get('scene_score_floor')
+    floor = meta['scene_score_floor']
     has_frames = 'frames' in segment if has_frames is None else has_frames
     if segment['mode'] != 'scene' or not has_frames:
         raise ValueError('scene frame evidence is missing; run inference once to populate the cache.')
@@ -34,8 +34,8 @@ def project(app, segment):
     from stash_ai.evidence.formats import validate_current
     validate_current(segment)
     threshold = scene_threshold(segment)
-    support_changed = meta.get('scene_support_floor') != threshold * app.TEMPORAL_POLICY.scene_support_ratio
-    if threshold == meta.get('scene_threshold') and not support_changed:
+    support_changed = meta['scene_support_floor'] != threshold * app.TEMPORAL_POLICY.scene_support_ratio
+    if threshold == meta['scene_threshold'] and not support_changed:
         return segment
     validate_scene(app, segment, threshold)
     items = segment['items']

@@ -1,5 +1,6 @@
 """Regression coverage for the removal of direct video access; no video files/tools."""
 
+from tests.helpers.evidence import empty_policies as empty_tag_policies
 from copy import deepcopy
 from dataclasses import asdict
 import builtins
@@ -126,7 +127,7 @@ def test_frozen_old_policies_do_not_reenable_retired_options(tmp_path):
             span['build_options']['policy'] = complete_policy(old)
         assert merge_intervals.union_intervals(spans)[0]['sources']==['wd','dtq','oppai']
         policies['wd']=frozenset({'core'})
-        cleaned=cleanup_evidence.cleanup_support(app,state,'1',[s for s in spans if s['source']!='wd'],{'wd'},policies)
+        cleaned=cleanup_evidence.cleanup_support(app,state,'1',[s for s in spans if s['source']!='wd'],{'wd'},policies, tag_policies=empty_tag_policies())
         assert merge_intervals.union_intervals(cleaned)[0]['sources']==['dtq','oppai']
         assert all(not any(k.startswith('refine_') for k in span['build_options']['policy']) for span in cleaned)
 

@@ -1,4 +1,5 @@
 """Real SQLite SELECT contracts and API-write semantics for large cleanup."""
+from tests.helpers.evidence import empty_policies as empty_tag_policies
 from tests.helpers.evidence import inference_record
 from stash_ai.storage.results import KINDS
 from stash_ai.stash_api.client import StashClient
@@ -211,7 +212,7 @@ def test_source_specific_cleanup_reconciles_only_candidates(tmp_path, monkeypatc
         stash.scenes[str(i)] = dict(id=str(i), tags=[], scene_markers=[])
     with merge_store.StateStore(tmp_path/'state.sqlite3', merge_store.scope_for(app.STASH_URL)) as store:
         merge_sync.sync_merged(app, stash, app.services.TagResolver(stash, source=merge_labels.AI), store, stash.find_scene('1'),
-                         [hit('wd'), hit('oppai')], [span('joytag',10,20),span('oppai',20,30),span('wd',30,40)])
+                         [hit('wd'), hit('oppai')], [span('joytag',10,20),span('oppai',20,30),span('wd',30,40)], tag_policies=empty_tag_policies())
     stash.scene_reads.clear()
     install(monkeypatch, stash)
     assert app.main(args(tmp_path, by_model={'oppai':['common']})) == 0

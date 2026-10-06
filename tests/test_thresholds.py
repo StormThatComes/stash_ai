@@ -1,4 +1,7 @@
 """Retune marker publication without inference or loss of source evidence."""
+from stash_ai.rethreshold.plans import ThresholdRequest
+from stash_ai.rethreshold import scenes as scene_updates
+from tests.helpers.evidence import empty_policies as empty_tag_policies
 from tests.helpers.evidence import inference_record
 
 from tests.helpers.temporal import policy_args
@@ -10,7 +13,7 @@ import sqlite3
 
 import pytest
 
-from stash_ai.rethreshold import markers as marker_updates, execution as rethreshold_execution
+from stash_ai.rethreshold import execution as rethreshold_execution
 from stash_ai.signatures import digest
 from stash_ai.inference import sprites
 from stash_ai.cleanup import evidence as cleanup_evidence
@@ -265,17 +268,19 @@ def test_cleanup_replays_published_threshold_even_after_later_override(tmp_path)
     with merge_store.StateStore(tmp_path/'state.sqlite3', 'test') as state:
         for model in markers:
             state.put('1', model, {'scene': scenes[model], 'markers': markers[model]})
-        old_spans = merge_source_markers.marker_contributions(app, state.records('1', 'markers'), policies())
+        old_spans = merge_source_markers.marker_contributions(app, state.records('1', 'markers'), policies(), tag_policies=empty_tag_policies())
         for model in markers:
             config = type('Config', (), dict(source=SOURCES[model], marker_threshold=.9, scene_threshold=.4))
-            assert marker_updates.apply(app, state, '1', config)
-        spans = merge_source_markers.marker_contributions(app, state.records('1', 'markers'), policies())
+            prepared = scene_updates.plan(app, state, '1', config, request=ThresholdRequest(kinds=('markers',)))
+            assert prepared
+            scene_updates.apply(state, '1', config.source.key, prepared)
+        spans = merge_source_markers.marker_contributions(app, state.records('1', 'markers'), policies(), tag_policies=empty_tag_policies())
         # At .9 both weak models vote; removing one must remove the marker.
         assert spans
         excluded = policies(); excluded['wd'] = frozenset({'core'})
-        assert cleanup_evidence.cleanup_support(app, state, '1', spans, {'wd'}, excluded) == []
+        assert cleanup_evidence.cleanup_support(app, state, '1', spans, {'wd'}, excluded, tag_policies=empty_tag_policies()) == []
         # The same removal at the old .7 threshold leaves DTQ's strong evidence.
-        cleaned = cleanup_evidence.cleanup_support(app, state, '1', old_spans, {'wd'}, excluded)
+        cleaned = cleanup_evidence.cleanup_support(app, state, '1', old_spans, {'wd'}, excluded, tag_policies=empty_tag_policies())
         assert cleaned and all(s['source'] == 'dtq' for s in cleaned)
 
 

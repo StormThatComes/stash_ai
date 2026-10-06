@@ -6,12 +6,12 @@ from stash_ai.domain import TagHierarchy
 from stash_ai.models import SOURCES
 
 
-def combined_hierarchy(app, args, tag_policies=None):
+def combined_hierarchy(app, args, tag_policies):
     """Compose the four local YAMLs into one stable ai: category namespace."""
     if args.no_hierarchy:
         return None
-    from stash_ai.exclusions import policies_or_empty
-    tag_policies = policies_or_empty(tag_policies)
+    from stash_ai.exclusions import require_policies
+    tag_policies = require_policies(tag_policies)
     prefix, root = "ai:category:", "ai:category:AI"
     leaves = defaultdict(set)
     categories = {root: ()}
@@ -44,9 +44,9 @@ def combined_hierarchy(app, args, tag_policies=None):
                             categories, prefix, merge_labels.AI.hierarchy_description)
 
 
-def run_hierarchy(app, args, catalogs, hierarchy, tag_policies=None):
-    from stash_ai.exclusions import policies_or_empty
-    tag_policies = policies_or_empty(tag_policies)
+def run_hierarchy(app, args, catalogs, hierarchy, tag_policies):
+    from stash_ai.exclusions import require_policies
+    tag_policies = require_policies(tag_policies)
     stash = app.services.create_stash_client(app.DRY_RUN)
     try:
         resolver = app.services.TagResolver(stash, hierarchy, source=merge_labels.AI, report=args.report.detail, create_missing=app.CREATE_MISSING)

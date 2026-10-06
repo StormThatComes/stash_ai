@@ -1,4 +1,5 @@
 """Compact snapshots retain publication, cleanup, recovery and preview semantics."""
+from tests.helpers.evidence import empty_policies as empty_tag_policies
 from stash_ai.storage.schema import LATEST_SCHEMA_VERSION
 from copy import deepcopy
 import json
@@ -299,7 +300,7 @@ def test_merge_cleanup_and_partial_publication_recovery_match_old_snapshots(tmp_
             policies = empty_policies()
             seed_records(store, ['core', 'abc', 'def'])
             hits, spans = merge.evidence(app, store, '1', policies, policies)
-            initial = merge_sync.sync_merged(app, stash, resolver, store, stash.find_scene('1'), hits, spans)
+            initial = merge_sync.sync_merged(app, stash, resolver, store, stash.find_scene('1'), hits, spans, tag_policies=empty_tag_policies())
             snapshot = store.snapshot('1', 'markers')[0]
             stored = json.loads(zlib.decompress(store.connection.execute("SELECT published FROM snapshots WHERE kind='markers'").fetchone()[0]))
             assert stored[FORMAT_KEY] == FORMAT
@@ -307,7 +308,7 @@ def test_merge_cleanup_and_partial_publication_recovery_match_old_snapshots(tmp_
             markers = lambda items: [{k: v for k, v in item.items() if k != 'contributors'}
                                      for item in merge_intervals.union_intervals(items)]
             assert markers(snapshot['contributions']) == markers(spans)
-            repeated = merge_sync.sync_merged(app, stash, resolver, store, stash.find_scene('1'), hits, spans)
+            repeated = merge_sync.sync_merged(app, stash, resolver, store, stash.find_scene('1'), hits, spans, tag_policies=empty_tag_policies())
             assert repeated['markers_unchanged'] == 3
             raw_results = store.connection.execute('SELECT data FROM results ORDER BY model').fetchall()
             cores = {**policies, 'wd': frozenset({'core'})}
@@ -327,7 +328,7 @@ def test_merge_cleanup_and_partial_publication_recovery_match_old_snapshots(tmp_
                 return create(payload)
             stash.create_marker = fail_second
             with pytest.raises(RuntimeError, match='partial publication'):
-                merge_sync.sync_merged(app, stash, resolver, store, stash.find_scene('1'), hits, spans)
+                merge_sync.sync_merged(app, stash, resolver, store, stash.find_scene('1'), hits, spans, tag_policies=empty_tag_policies())
             pending = store.connection.execute("SELECT pending FROM snapshots WHERE kind='markers'").fetchone()[0]
             recovery.abandon(store, lambda _: None)
             assert store.connection.execute("SELECT data FROM recovery_publications WHERE kind='markers'").fetchone()[0] == pending
@@ -335,7 +336,7 @@ def test_merge_cleanup_and_partial_publication_recovery_match_old_snapshots(tmp_
                                                       store.snapshot('1', 'markers')[0])
             assert reconciled and 'new' not in {s['tag'] for s in observed['contributions']}
             stash.create_marker = create
-            finished = merge_sync.sync_merged(app, stash, resolver, store, stash.find_scene('1'), hits, spans)
+            finished = merge_sync.sync_merged(app, stash, resolver, store, stash.find_scene('1'), hits, spans, tag_policies=empty_tag_policies())
             assert not store.has_pending_publications() and not recovery.publications(store, '1', 'markers')
             variants.append((stash.scene, stash.writes, initial, repeated, cleaned_stats, observed, finished,
                              store.snapshot('1', 'markers')[0]))

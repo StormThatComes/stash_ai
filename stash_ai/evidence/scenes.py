@@ -174,5 +174,5 @@ def cleanup_scene_support(app, store, scene_id, hits, selected, policies):
 def shared_scene_contributions(app, scene_records, policies, existing=(), metrics=None, *, cache=None):
     from stash_ai.evidence.cache_views import frame_records
     from stash_ai.evidence.frames import FrameIndex
-    with FrameIndex(app, frame_records(scene_records), {s: frozenset() for s in SOURCES}, cache=cache) as index:
+    with FrameIndex(app, frame_records(scene_records), {s: frozenset() for s in SOURCES}, cache=cache, tag_policies=policies) as index:
         return _shared_scene_contributions(app, index, scene_records, policies, existing, metrics)
