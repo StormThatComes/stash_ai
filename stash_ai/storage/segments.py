@@ -26,7 +26,7 @@ def segment_digest(segment):
 def frame_group(segment):
     if isinstance(segment, StoredSegment) and hasattr(segment, '_frame_group'):
         return segment._frame_group
-    value = digest({'input': segment['meta'].get('frame_input_signature'),
+    value = digest({'input': segment['meta']['frame_input_signature'],
         'times': [[float(row['start']), float(row['end'])] for row in segment['items']]})
     if isinstance(segment, StoredSegment):
         segment._frame_group = value

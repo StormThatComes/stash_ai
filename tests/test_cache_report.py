@@ -97,8 +97,8 @@ def test_missing_marker_floor_never_inherits_old_threshold_for_rethreshold_plan(
     seed(path, outputs=saved, corrupt=True)
     target = replace(config(), marker_threshold=.95)
     data = report(path, settings=[target])
-    assert issue(data)['outputs']['markers']['status'] == 'insufficient'
-    assert '--restart' in actions(data)[0]['argv']
+    assert issue(data)['outputs']['markers']['status'] == 'inconsistent'
+    assert not data['plan']
     assert not any(row['action'] == 'rethreshold' for row in data['plan'])
     with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL), True) as store:
         from stash_ai.rethreshold import markers
@@ -138,8 +138,8 @@ def test_imported_history_is_not_completed_inference(tmp_path):
         segment['meta'].pop('analysis_format')
     seed(path, outputs=outputs, corrupt=True)
     data = report(path)
-    assert {row['status'] for row in issue(data)['outputs'].values()} == {'insufficient'}
-    assert actions(data)[0]['action'] == 'restart_inference'
+    assert {row['status'] for row in issue(data)['outputs'].values()} == {'inconsistent'}
+    assert not data['plan']
 
 
 def test_retired_history_does_not_block_current_retention(tmp_path):
@@ -248,7 +248,7 @@ def test_unselected_publication_dependencies_block_plan_without_expanding_target
                 state.connection.execute("UPDATE results SET data=? WHERE model='dtq' AND kind='markers'",
                                          (b'broken',))
     before = path.read_bytes()
-    if problem not in ('unreadable', 'blocklist'):
+    if problem not in ('unreadable', 'blocklist', 'old_floor'):
         monkeypatch.setattr(merge_store.StateStore, 'unpack', lambda *args: pytest.fail('prediction BLOB decoded'))
     data = report(path, settings=[replace(config(), marker_threshold=.9)])
     assert [row['model'] for row in data['models']] == ['wd']

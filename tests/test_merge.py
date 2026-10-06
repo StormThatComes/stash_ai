@@ -98,12 +98,12 @@ def test_state_is_durable_scoped_partial_and_dry_run_does_not_write(tmp_path):
     path=tmp_path/"sources.sqlite3"
     before=(path.read_bytes(),path.stat().st_mtime_ns)
     with store(tmp_path,dry=True) as state:
-        state.put("1","joytag",{"scene":{**first,"items":[]}})
+        state.put("1","joytag",{"scene":{**first,"items":[],"frames":[]}})
         assert state.records("1","scene")["joytag"]["items"]==[]
     assert (path.read_bytes(),path.stat().st_mtime_ns)==before
     with store(tmp_path) as state:
         assert state.records("1","scene")["joytag"]==first
-        state.put("1","joytag",{"scene":{**first,"items":[]}})
+        state.put("1","joytag",{"scene":{**first,"items":[],"frames":[]}})
         assert state.records("1","markers")["joytag"]==second
         assert state.records("1","scene")["wd"]==first
     with store(tmp_path,scope="different-stash") as state:

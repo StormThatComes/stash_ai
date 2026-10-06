@@ -36,7 +36,7 @@ def _marker_contributions(app, records, core_policies, index, metrics, tag_polic
                           for frame in segment["items"]]
                 from stash_ai.evidence.thresholds import marker_threshold
                 kwargs = dict(threshold=marker_threshold(segment), seeds=seeds,
-                              identity=segment["meta"].get("frame_input_signature"))
+                              identity=segment["meta"]["frame_input_signature"])
                 defer_extras = app.TEMPORAL_POLICY.shared_marker_extras and signatures[id(segment)] in index.by_signature
                 markers, _ = temporal_markers(app, frames, effective_cores[model], **kwargs,
                               collect_extras=not defer_extras,

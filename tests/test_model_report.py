@@ -131,6 +131,7 @@ def test_selected_sources_replays_consensus_instead_of_filtering_finished_marker
         for source in ("wd", "dtq"):
             outputs = inference_pair("consensus_only", score=weak, identity="identical-input")
             outputs["scene"]["items"] = []
+            outputs["scene"]["frames"] = []
             outputs["scene"]["meta"]["inference_signature"] = source + "-scene"
             outputs["markers"]["meta"]["inference_signature"] = source + "-markers"
             state.put("1", source, outputs)

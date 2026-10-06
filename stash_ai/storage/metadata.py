@@ -10,8 +10,8 @@ META_KEYS = frozenset((
 
 
 def summarize(record):
-    if 'marker_tag_blocklist' in record['meta']:
-        raise ValueError('Current inference evidence cannot contain the retired marker blocklist.')
+    from stash_ai.evidence.formats import validate_current
+    validate_current(record)
     return dict(mode=record['mode'], meta={key: value for key, value in record['meta'].items() if key in META_KEYS},
                 has_frames='frames' in record, populated=bool(record['items']))
 
@@ -28,6 +28,8 @@ def decode(data):
             or record['meta'].keys() - META_KEYS or type(record['has_frames']) is not bool
             or type(record['populated']) is not bool):
         raise ValueError('Invalid result metadata.')
+    from stash_ai.evidence.formats import validate_current
+    validate_current(record)
     return record
 
 

@@ -40,9 +40,7 @@ def make_groups(records, signatures=None):
     from stash_ai.evidence.identity import marker_segment_signature
     groups = {}
     for source, segment in records.items():
-        meta = segment["meta"]
-        identity = meta.get("frame_input_signature")
-        if segment["mode"] != "frames" or not identity or meta.get("marker_threshold") is None:
+        if segment["mode"] != "frames":
             continue
         # A signature plus the actual timeline: shifted/missing cues never
         # become matching observations merely because metadata was copied.

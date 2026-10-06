@@ -1,6 +1,6 @@
 """Retire obsolete inference offline; publication geometry survives in snapshots."""
 from stash_ai.storage.codec import decode
-from stash_ai.evidence.formats import ANALYSIS_FORMAT, current, validate_current
+from stash_ai.evidence.formats import ANALYSIS_FORMAT, UnorderedFrames, current, validate_current
 from stash_ai.evidence.identity import marker_segment_signature
 from .payloads import valid_result
 
@@ -14,7 +14,10 @@ def obsolete(record, kind):
         raise ValueError('Unsupported inference evidence format; update stash_ai.')
     if not current(record['meta']):
         return True
-    validate_current(record)
+    try:
+        validate_current(record)
+    except UnorderedFrames:
+        return True
     if not valid_result(record, kind):
         raise ValueError('Invalid current inference record; inspect the state DB.')
     return False
