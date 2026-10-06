@@ -5,7 +5,8 @@ import sqlite3
 
 import pytest
 
-from stash_ai import db
+from stash_ai.db.checks import check_database
+from stash_ai.db.update import update_database
 from stash_ai.evidence.labels import AI
 from stash_ai.evidence.temporal.policy import build_options
 from stash_ai.models import SOURCES
@@ -48,9 +49,9 @@ def test_offline_rebase_keeps_geometry_ownership_and_retry_proofs_across_scopes(
                                    (scope, '1', 'markers', 'lost-response', packed))
         connection.execute('PRAGMA user_version=18')
     before = path.read_bytes()
-    assert db.update_database(path, dry_run=True) == (18, 21)
+    assert update_database(path, dry_run=True) == (18, 21)
     assert path.read_bytes() == before
-    assert db.update_database(path) == (18, 21)
+    assert update_database(path) == (18, 21)
     for scope in ('scope-a', 'scope-b'):
         with StateStore(path, scope) as state:
             from stash_ai.storage.recovery import publications
@@ -73,11 +74,11 @@ def test_offline_rebase_keeps_geometry_ownership_and_retry_proofs_across_scopes(
     with sqlite3.connect(path) as connection:
         migrated = [connection.execute('SELECT * FROM ' + table).fetchall()
                     for table in ('snapshots', 'recovery_publications')]
-    assert db.update_database(path) == (LATEST_SCHEMA_VERSION, LATEST_SCHEMA_VERSION)
+    assert update_database(path) == (LATEST_SCHEMA_VERSION, LATEST_SCHEMA_VERSION)
     with sqlite3.connect(path) as connection:
         assert [connection.execute('SELECT * FROM ' + table).fetchall()
                 for table in ('snapshots', 'recovery_publications')] == migrated
-    assert db.check_database(path, 'scope-a')['ok']
+    assert check_database(path, 'scope-a')['ok']
 
 
 @pytest.mark.parametrize('observed_end,saved_end,match', [
@@ -109,7 +110,7 @@ def test_current_temporal_publication_remains_replayable(tmp_path):
     with StateStore(path, 'scope') as state:
         state.publish('1', {'markers': value})
         state.connection.execute('PRAGMA user_version=18')
-    db.update_database(path)
+    update_database(path)
     with StateStore(path, 'scope') as state:
         assert state.snapshot('1', 'markers')[0] == value
         require_rebased(value['contributions'])
@@ -130,7 +131,7 @@ def test_unknown_publication_contract_rolls_back_migration(tmp_path, damage):
         connection.execute('INSERT INTO snapshots VALUES (?,?,?,?,NULL)', ('scope', '1', 'markers', packed))
         connection.execute('PRAGMA user_version=18')
     with pytest.raises(ValueError, match='Unsupported'):
-        db.update_database(path)
+        update_database(path)
     with sqlite3.connect(path) as connection:
         assert connection.execute('PRAGMA user_version').fetchone() == (18,)
         assert connection.execute('SELECT published FROM snapshots').fetchone()[0] == packed

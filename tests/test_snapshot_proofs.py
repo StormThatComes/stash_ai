@@ -7,7 +7,8 @@ import zlib
 import pytest
 
 from stash_ai.rethreshold import execution as rethreshold_execution
-from stash_ai import db
+from stash_ai.db.checks import check_database
+from stash_ai.db.inspection import inspect_database
 from tests.helpers.runtime import runtime as app
 from stash_ai.storage import recovery as recovery
 import stash_ai.publication.recovery as recovery_recovery
@@ -192,7 +193,7 @@ def test_snapshot_storage_promotion_and_preview_are_transparent(tmp_path, monkey
             assert preview.connection.execute('SELECT COUNT(*) FROM main.snapshots').fetchone() == (0,)
             assert preview.snapshot('1', 'markers') == (saved, None)
         assert path.read_bytes() == before
-        assert db.check_database(path, 'scope')['ok']
+        assert check_database(path, 'scope')['ok']
 
 
 @pytest.mark.parametrize('operation', ['prepare', 'publish'])
@@ -225,8 +226,8 @@ def test_rethreshold_cleanup_and_abandonment_never_downgrade_v9(tmp_path):
         assert store.connection.execute('SELECT data FROM recovery_publications').fetchone()[0] == pending
         assert store.connection.execute('PRAGMA user_version').fetchone() == (LATEST_SCHEMA_VERSION,)
         assert recovery.publications(store, '1', 'markers')[0]['contributions'] == shared_snapshot()['contributions']
-    assert db.inspect_database(path, 'scope')['schema_version'] == LATEST_SCHEMA_VERSION
-    assert db.check_database(path, 'scope')['ok']
+    assert inspect_database(path, 'scope')['schema_version'] == LATEST_SCHEMA_VERSION
+    assert check_database(path, 'scope')['ok']
 
 
 def test_lazy_cleanup_masks_shared_proofs_and_recovery_without_rewriting_blobs(tmp_path):
@@ -254,7 +255,7 @@ def test_lazy_cleanup_masks_shared_proofs_and_recovery_without_rewriting_blobs(t
         assert store.connection.execute('SELECT data FROM recovery_publications').fetchone()[0] == archived
         store.publish('1', {'markers': masked})
         assert store.snapshot('1', 'markers')[0] == masked
-    assert db.check_database(path, 'scope')['ok']
+    assert check_database(path, 'scope')['ok']
 
 
 @pytest.mark.parametrize('location', ['published', 'pending', 'recovery'])
@@ -274,7 +275,7 @@ def test_db_check_detects_corrupt_proof_references_without_repair(tmp_path, loca
             else:
                 store.connection.execute('UPDATE snapshots SET '+location+'=?', (encode(damaged),))
     before = path.read_bytes()
-    report = db.check_database(path, 'scope')
+    report = check_database(path, 'scope')
     assert not report['ok']
     assert next(i['count'] for i in report['errors'] if i['code'] == 'state_payload_invalid') == 1
     assert path.read_bytes() == before
@@ -338,6 +339,6 @@ def test_merge_cleanup_and_partial_publication_recovery_match_old_snapshots(tmp_
             assert not store.has_pending_publications() and not recovery.publications(store, '1', 'markers')
             variants.append((stash.scene, stash.writes, initial, repeated, cleaned_stats, observed, finished,
                              store.snapshot('1', 'markers')[0]))
-        assert db.check_database(path, merge_store.scope_for(app.STASH_URL))['ok']
+        assert check_database(path, merge_store.scope_for(app.STASH_URL))['ok']
     assert variants[0] == variants[1]
 

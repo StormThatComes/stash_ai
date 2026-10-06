@@ -164,9 +164,11 @@ def test_database_module_moves_to_package_and_remains_importable(tmp_path):
 
     assert not (tmp_path / 'stash_ai/db.py').exists()
     assert not list(cache.glob('db.*.pyc'))
-    # Exercise the existing API through the installed package with stdlib only.
+    # Exercise the maintenance modules through the installed package with stdlib only.
     result = subprocess.run([sys.executable, '-c', '''
-from stash_ai.db import check_database, compact_database, inspect_database
+from stash_ai.db.checks import check_database
+from stash_ai.db.compaction import compact_database
+from stash_ai.db.inspection import inspect_database
 from stash_ai.reports.developer.report import build_report
 for operation, args in (
     (check_database, ('missing.sqlite3', 'scope')),

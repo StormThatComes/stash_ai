@@ -12,7 +12,7 @@ def run_database_command(app, args) -> int | None:
     if args.command is Command.DIAGNOSTICS:
         from stash_ai.reports.developer.report import run as run_anonymous_diagnostics
         return run_anonymous_diagnostics(args)
-    from stash_ai.db import run_mode as run_database_mode
+    from stash_ai.commands.database import run_mode as run_database_mode
     return run_database_mode(args, app.STASH_URL)
 
 

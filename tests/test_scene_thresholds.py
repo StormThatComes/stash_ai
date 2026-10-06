@@ -94,6 +94,8 @@ def test_explain_reports_effective_thresholds_after_rethreshold(pipeline, monkey
     output = capsys.readouterr().out
     report = json.loads(output[output.index('[\n'):])[0]
 
+    assert report['format'] == 2
+    assert 'records' not in report['recorded_sources']['scene']['wd']
     contributor = next(
         item for item in report['scene_contributors']
         if item['source'] == 'wd'
@@ -106,10 +108,10 @@ def test_explain_reports_effective_thresholds_after_rethreshold(pipeline, monkey
     assert thresholds['effective_support_floor'] == pytest.approx(.68)
     assert thresholds['strong_peak_threshold'] == pytest.approx(.9)
 
-    scene_record = report['recorded_sources']['scene']['wd']['records'][0]['thresholds']
+    scene_record = report['recorded_sources']['scene']['wd']['record']['thresholds']
     assert scene_record == thresholds
 
-    marker = report['recorded_sources']['markers']['wd']['records'][0]['thresholds']
+    marker = report['recorded_sources']['markers']['wd']['record']['thresholds']
     assert marker['stored_marker_threshold'] == pytest.approx(.7)
     assert marker['publication_threshold'] == pytest.approx(.9)
     assert marker['effective_marker_threshold'] == pytest.approx(.9)
@@ -364,7 +366,7 @@ def test_old_completed_cache_requires_database_update_then_reinference(pipeline,
         inject_records(state, '1', 'wd', {'scene': segment})
     assert app.main(p.args) == 1 and len(p.loaded) == 1
     import sqlite3
-    from stash_ai.db import update_database
+    from stash_ai.db.update import update_database
     with sqlite3.connect(p.path) as connection:
         connection.execute('PRAGMA user_version=18')
     update_database(p.path)

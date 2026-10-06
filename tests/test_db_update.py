@@ -7,7 +7,9 @@ import zlib
 import pytest
 
 from tests.helpers.runtime import runtime as app
-from stash_ai import db as stash_db
+from stash_ai.db.checks import check_database
+from stash_ai.db.update import update_database
+from stash_ai.storage.schema import STATE_TABLES
 from stash_ai.publication import fingerprints as performance
 import stash_ai.storage.merge_checks as performance_merge_checks
 from stash_ai.commands import arguments
@@ -41,7 +43,7 @@ def test_runtime_requires_explicit_upgrade_without_changing_old_database(tmp_pat
     with pytest.raises(ValueError, match='--db-update'):
         StateStore(path, 'scope-a', dry_run=dry_run)
     assert (path.read_bytes(), path.stat().st_mtime_ns) == before
-    stash_db.update_database(path)
+    update_database(path)
     with StateStore(path, 'scope-a', dry_run=dry_run) as state:
         assert state.records('1', 'scene')['wd']
 
@@ -53,7 +55,7 @@ def test_update_backfills_missing_and_corrupt_metadata_in_every_scope(tmp_path):
     with sqlite3.connect(path) as db:
         db.execute("DELETE FROM result_metadata WHERE scope='scope-a'")
         db.execute("UPDATE result_metadata SET data='corrupt' WHERE scope='scope-b'")
-    stash_db.update_database(path)
+    update_database(path)
     from stash_ai.storage.codec import decode
     assert [(row[:-1], decode(row[-1])) for row in rows(path, 'results')] == [
         (row[:-1], decode(row[-1])[-1] if isinstance(decode(row[-1]), list) else decode(row[-1])) for row in evidence]
@@ -88,7 +90,7 @@ def test_invalid_snapshot_upgrade_rolls_back_all_publication_changes(tmp_path, d
             state.connection.execute('PRAGMA user_version=18')
     before = rows(path, 'snapshots')
     with pytest.raises(ValueError, match='historical snapshot|frozen build options|historical frozen exclusions'):
-        stash_db.update_database(path)
+        update_database(path)
     assert rows(path, 'snapshots') == before
     with sqlite3.connect(path) as db:
         assert db.execute('PRAGMA user_version').fetchone() == (18,)
@@ -100,7 +102,7 @@ def test_update_migrates_every_supported_version_and_all_scopes(tmp_path, versio
     seed_version(path, version)
     evidence = rows(path, 'results')
 
-    assert stash_db.update_database(path) == (version, LATEST_SCHEMA_VERSION)
+    assert update_database(path) == (version, LATEST_SCHEMA_VERSION)
 
     from stash_ai.storage.codec import decode
     assert [(row[:-1], decode(row[-1])) for row in rows(path, 'results')] == [
@@ -108,12 +110,12 @@ def test_update_migrates_every_supported_version_and_all_scopes(tmp_path, versio
     with sqlite3.connect(path) as db:
         assert db.execute('PRAGMA user_version').fetchone() == (LATEST_SCHEMA_VERSION,)
         tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        assert stash_db.STATE_TABLES <= tables
+        assert STATE_TABLES <= tables
         assert 'refinement_progress' not in tables
         assert db.execute('SELECT scope,populated,signature FROM result_index ORDER BY scope').fetchall() == [
             ('scope-a', 1, 'saved'), ('scope-b', 1, 'saved')]
-    assert stash_db.check_database(path, 'scope-a')['ok']
-    assert stash_db.update_database(path) == (LATEST_SCHEMA_VERSION, LATEST_SCHEMA_VERSION)
+    assert check_database(path, 'scope-a')['ok']
+    assert update_database(path) == (LATEST_SCHEMA_VERSION, LATEST_SCHEMA_VERSION)
     from stash_ai.storage.codec import decode
     assert [(row[:-1], decode(row[-1])) for row in rows(path, 'results')] == [
         (row[:-1], decode(row[-1])[-1] if isinstance(decode(row[-1]), list) else decode(row[-1])) for row in evidence]
@@ -127,7 +129,7 @@ def test_dry_run_only_reports_target_without_modifying_database_or_lock(tmp_path
     lock.unlink(missing_ok=True)
     before = path.read_bytes(), path.stat().st_mtime_ns
 
-    assert stash_db.update_database(path, dry_run=True) == (version, LATEST_SCHEMA_VERSION)
+    assert update_database(path, dry_run=True) == (version, LATEST_SCHEMA_VERSION)
 
     assert (path.read_bytes(), path.stat().st_mtime_ns) == before
     assert not lock.exists()
@@ -160,7 +162,7 @@ def test_update_preserves_pending_and_recovery_work_checkpoints_and_thresholds(t
                  'result_thresholds', 'result_metadata')
     before = {table: rows(path, table) for table in preserved}
 
-    stash_db.update_database(path)
+    update_database(path)
 
     after = {table: rows(path, table) for table in preserved}
     from stash_ai.db.snapshot_migration import decode_legacy
@@ -177,9 +179,9 @@ def test_update_refuses_an_active_writer_and_releases_failed_lock(tmp_path):
     with StateStore(path, 'scope-a'):
         before = path.read_bytes()
         with pytest.raises(RuntimeError, match='Another merged-output process'):
-            stash_db.update_database(path)
+            update_database(path)
         assert path.read_bytes() == before
-    assert stash_db.update_database(path) == (LATEST_SCHEMA_VERSION, LATEST_SCHEMA_VERSION)
+    assert update_database(path) == (LATEST_SCHEMA_VERSION, LATEST_SCHEMA_VERSION)
 
 
 def test_failed_migration_can_be_retried_and_does_not_claim_latest_version(tmp_path, monkeypatch):
@@ -191,17 +193,17 @@ def test_failed_migration_can_be_retried_and_does_not_claim_latest_version(tmp_p
             raise RuntimeError('interrupted migration')
         patch.setattr(performance_merge_checks, 'initialize', fail)
         with pytest.raises(RuntimeError, match='interrupted migration'):
-            stash_db.update_database(path)
+            update_database(path)
     with sqlite3.connect(path) as db:
         assert db.execute('PRAGMA user_version').fetchone()[0] < LATEST_SCHEMA_VERSION
     assert rows(path, 'results') == evidence
 
-    stash_db.update_database(path)
+    update_database(path)
 
     from stash_ai.storage.codec import decode
     assert [(row[:-1], decode(row[-1])) for row in rows(path, 'results')] == [
         (row[:-1], decode(row[-1])[-1] if isinstance(decode(row[-1]), list) else decode(row[-1])) for row in evidence]
-    assert stash_db.check_database(path, 'scope-a')['ok']
+    assert check_database(path, 'scope-a')['ok']
 
 
 @pytest.mark.parametrize('dry_run', [False, True])
@@ -217,7 +219,7 @@ def test_update_rejects_unsupported_databases_without_changing_them(tmp_path, dr
     before = (path.read_bytes(), path.stat().st_mtime_ns) if path.exists() else None
 
     with pytest.raises((FileNotFoundError, ValueError)):
-        stash_db.update_database(path, dry_run=dry_run)
+        update_database(path, dry_run=dry_run)
 
     assert ((path.read_bytes(), path.stat().st_mtime_ns) if path.exists() else None) == before
     assert not path.with_name(path.name + '.lock').exists()
@@ -278,7 +280,7 @@ def test_pre_v18_upgrade_requires_bridge_without_lock_or_mutation(tmp_path, vers
     lock.unlink()
     before = path.read_bytes(), path.stat().st_mtime_ns
     with pytest.raises(ValueError, match='supported minimum v18') as error:
-        stash_db.update_database(path, dry_run=dry_run)
+        update_database(path, dry_run=dry_run)
     assert UPGRADE_BRIDGE_COMMIT in str(error.value) and '--db-update' in str(error.value)
     assert (path.read_bytes(), path.stat().st_mtime_ns) == before
     assert not lock.exists()
@@ -324,7 +326,7 @@ def test_publication_upgrade_decodes_each_blob_once_and_drops_only_retired_optio
         calls.append(blob)
         return decode(blob)
     monkeypatch.setattr(snapshot_migration, 'decode', counted)
-    assert stash_db.update_database(path) == (version, LATEST_SCHEMA_VERSION)
+    assert update_database(path) == (version, LATEST_SCHEMA_VERSION)
     assert len(calls) == 6
     expected = deepcopy(saved)
     for item in expected['contributions']:

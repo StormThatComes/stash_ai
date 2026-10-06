@@ -9,7 +9,9 @@ import zlib
 import pytest
 
 from tests.helpers.runtime import runtime as app
-from stash_ai import db as stash_db
+from stash_ai.db.checks import check_database, format_check_report
+from stash_ai.db.compaction import compact_database
+from stash_ai.db.inspection import format_report, inspect_database
 import stash_ai.storage.store as merge_store
 from stash_ai.storage.codec import encode
 
@@ -36,7 +38,7 @@ def test_report_is_read_only_and_privacy_safe(tmp_path):
     seed(path, scope)
     before = hashlib.sha256(path.read_bytes()).digest()
 
-    report = stash_db.inspect_database(path, scope)
+    report = inspect_database(path, scope)
 
     assert hashlib.sha256(path.read_bytes()).digest() == before
     assert report["quick_check"] == "ok"
@@ -46,7 +48,7 @@ def test_report_is_read_only_and_privacy_safe(tmp_path):
         ("wd", "scene", 1),
     }
     assert report["pending_publications"] == 0
-    text = stash_db.format_report(report)
+    text = format_report(report)
     assert "blue_hair" not in text
     assert "scene-sig" not in text
     assert "marker-sig" not in text
@@ -61,12 +63,12 @@ def test_compact_reclaims_free_pages_and_preserves_state(tmp_path):
         db.execute("INSERT INTO scratch VALUES (randomblob(4000000))")
         db.execute("DELETE FROM scratch")
 
-    before = stash_db.inspect_database(path, scope)
+    before = inspect_database(path, scope)
     assert before["free_page_bytes"] > 0
     with merge_store.StateStore(path, scope, True) as state:
         expected = state.records("1", "scene"), state.records("1", "markers")
 
-    old, after = stash_db.compact_database(path, scope)
+    old, after = compact_database(path, scope)
 
     assert old["file_bytes"] == before["file_bytes"]
     assert after["quick_check"] == "ok"
@@ -84,7 +86,7 @@ def test_compact_refuses_pending_publication_or_cleanup(tmp_path):
         state.prepare("1", {"scene": {"owned_ids": [], "contributions": []}})
 
     with pytest.raises(RuntimeError, match="Pending publication"):
-        stash_db.compact_database(path, scope)
+        compact_database(path, scope)
 
     with merge_store.StateStore(path, scope, allow_cleanup=True) as state:
         with state.connection:
@@ -97,7 +99,7 @@ def test_compact_refuses_pending_publication_or_cleanup(tmp_path):
             )
 
     with pytest.raises(RuntimeError, match="cleanup plan"):
-        stash_db.compact_database(path, scope)
+        compact_database(path, scope)
 
 
 def test_compact_refuses_pending_plan_in_another_scope(tmp_path):
@@ -106,11 +108,11 @@ def test_compact_refuses_pending_plan_in_another_scope(tmp_path):
     with merge_store.StateStore(path, "scope-b") as state:
         state.prepare("9", {"scene": {"owned_ids": [], "contributions": []}})
 
-    report = stash_db.inspect_database(path, "scope-a")
+    report = inspect_database(path, "scope-a")
     assert report["scope_pending_publications"] == 0
     assert report["pending_publications"] == 1
     with pytest.raises(RuntimeError, match="Pending publication"):
-        stash_db.compact_database(path, "scope-a")
+        compact_database(path, "scope-a")
 
 
 def test_compact_dry_run_does_not_change_database(tmp_path):
@@ -123,7 +125,7 @@ def test_compact_dry_run_does_not_change_database(tmp_path):
         db.execute("DELETE FROM scratch")
     before = path.read_bytes()
 
-    first, second = stash_db.compact_database(path, scope, dry_run=True)
+    first, second = compact_database(path, scope, dry_run=True)
 
     assert path.read_bytes() == before
     assert first == second
@@ -159,14 +161,14 @@ def test_deep_check_is_read_only_and_accepts_consistent_state(tmp_path):
     seed(path, scope)
     before = hashlib.sha256(path.read_bytes()).digest()
 
-    report = stash_db.check_database(path, scope)
+    report = check_database(path, scope)
 
     assert hashlib.sha256(path.read_bytes()).digest() == before
     assert report["ok"]
     assert report["errors"] == []
     assert report["results_checked"] == 2
     assert report["integrity_check_ok"]
-    assert "No logical consistency problems found." in stash_db.format_check_report(report)
+    assert "No logical consistency problems found." in format_check_report(report)
 
 
 def test_deep_check_detects_result_index_relationship_and_content_errors(tmp_path):
@@ -190,7 +192,7 @@ def test_deep_check_detects_result_index_relationship_and_content_errors(tmp_pat
             (scope, "orphan", "dtq", "scene", 0, None),
         )
 
-    report = stash_db.check_database(path, scope)
+    report = check_database(path, scope)
     found = issues(report)
 
     assert not report["ok"]
@@ -223,7 +225,7 @@ def test_deep_check_detects_corrupt_state_blobs_and_unknown_domains(tmp_path):
             (scope, "2", "wd", "unknown-kind"),
         )
 
-    report = stash_db.check_database(path, scope)
+    report = check_database(path, scope)
     found = issues(report)
 
     assert not report["ok"]
@@ -256,7 +258,7 @@ def test_deep_check_detects_checkpoint_parent_progress_and_score_corruption(tmp_
             (scope, "orphan", "dtq", encode({})),
         )
 
-    report = stash_db.check_database(path, scope)
+    report = check_database(path, scope)
     found = issues(report)
 
     assert not report["ok"]
@@ -282,7 +284,7 @@ def test_deep_check_validates_cleanup_and_recovery_generations(tmp_path):
             (scope, 2, '["scene","invalid-kind"]'),
         )
 
-    report = stash_db.check_database(path, scope)
+    report = check_database(path, scope)
     found = issues(report)
 
     assert not report["ok"]
@@ -296,26 +298,20 @@ def test_deep_check_relation_warnings_do_not_mark_database_failed(tmp_path):
     seed(path, scope)
 
     with sqlite3.connect(path) as db:
-        db.execute("CREATE TABLE legacy_imports(scope TEXT,scene TEXT,kind TEXT,data BLOB)")
         db.execute(
             "INSERT INTO snapshots VALUES (?,?,?,?,?)",
             (scope, "unused", "scene", None, None),
-        )
-        db.execute(
-            "INSERT INTO legacy_imports VALUES (?,?,?,?)",
-            (scope, "unused", "markers", encode([])),
         )
         db.execute(
             "INSERT INTO recovery_publications VALUES (?,?,?,?,?)",
             (scope, "recovery-only", "scene", "op", encode_snapshot({"contributions": []})),
         )
 
-    report = stash_db.check_database(path, scope)
+    report = check_database(path, scope)
     found = issues(report, "warnings")
 
     assert report["ok"]
     assert found["empty_snapshot_without_recovery"] == 1
-    assert found["legacy_import_without_result"] == 1
     assert found["recovery_publication_without_snapshot"] == 1
 
 

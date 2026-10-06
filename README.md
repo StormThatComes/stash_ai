@@ -120,19 +120,23 @@ Zmiana progów zapisuje małe wiersze w tabeli `result_thresholds`; skompresowan
 wyniki inferencji i evidence klatek pozostają bez zmian. Dotyczy to także
 automatycznego użycia cache po zmianie progów w YAML. Odczyt wyników, merge,
 cleanup i explain używają efektywnych progów z tej tabeli. Każda para model–wyjście ma jeden aktywny wynik i opcjonalny liczbowy próg w `result_thresholds.threshold`.
-`--db-update` przenosi dawne inline overrides i usuwa wycofane `refinement`;
-klatki, wyniki i podpisy dowodów zachowują swoje wartości.
+Bazy sprzed v18 wymagają najpierw mostka aktualizacji opisanego poniżej;
+obsługiwane schematy przechowują już pojedynczy rekord i liczbowy próg.
 `--dry-run` zapisuje progi wyłącznie w tymczasowej bazie.
 
 Snapshoty merge zapisują współdzielone dowody `extra_support` raz, a contributions
 odwołują się do nich przez referencje. Zmniejsza to koszt serializacji i kompresji.
-Aktualny schemat to v20; starsze wersje programu odmówią jego otwarcia. Każdy nowy snapshot ma otoczkę formatu v5. `--db-update` konwertuje dawne
-snapshoty, także pending i recovery, dopisuje wymagane `contributions: []` do pustych zapisów oraz uzupełnia kompletne opcje odtwarzania, również w zagnieżdżonych dowodach scen.
-Dawny `blocklist` zostaje połączony z zapisanymi `tag_exclusions` wszystkich źródeł.
-Brakujące dawne przełączniki współdzielenia i occurrences zachowują `False`.
+Aktualny schemat to v21, z obsługą aktualizacji od v18. Każdy nowy snapshot ma
+otoczkę formatu v5. `--db-update` konwertuje snapshoty v4/v5, także pending i recovery,
+w jednym przebiegu. Zachowuje geometrię, własność i przypięte dowody, normalizuje
+zamrożone opcje odtwarzania oraz usuwa nieużywaną konfigurację wycofanych algorytmów.
 Wersjonowanie analizy checkpointu dotyczy wyłącznie niedokończonej inferencji:
 stare checkpointy są pomijane przy wznowieniu i dany model zaczyna scenę od początku.
 Ukończone wyniki formatu 5 zachowują dowody i sygnatury; starsze aktywne wyniki wymagają ponownej inferencji. `--dry-run` zmienia wyłącznie tymczasową bazę.
+
+`--explain-tag` wypisuje listę raportów scen z polem `format: 2`. Każde źródło
+w `recorded_sources` ma pojedynczy obiekt `record` zawierający `meta`, `thresholds`
+i `detections`, zamiast dawnej jednoelementowej listy `records`.
 
 Pełną listę opcji pokazuje:
 
@@ -267,11 +271,12 @@ checkpoint/frames/analysis, wymiary checkpointów oraz generacje cleanup/recover
 Waliduje też zawartość wyników scen, klatek i zakresów markerów: wymagane pola,
 tagi, czasy, prawdopodobieństwa oraz zapisane statystyki czasowe. Sprawdza klatki
 checkpointów (również `scene_tags`) i wartości float32: odrzuca `NaN`,
-nieskończoności oraz wyniki poza `[0, 1]`. Zachowuje obsługę starszych wyników bez
-statystyk i metadanych retencji, a także importowanych markerów punktowych i
-brakujących historycznych ocen (`score: null`).
-Osierocone lub historyczne rekordy, które nie muszą oznaczać uszkodzenia, są
-raportowane jako warnings. Pending publication/cleanup i refresh requests są
+nieskończoności oraz wyniki poza `[0, 1]`. Aktywne wyniki muszą spełniać bieżący
+kontrakt inferencji; starsze zakresy i częściowe statystyki są sprawdzane wyłącznie
+w archiwum dowodów. Importy i oceny `score: null` są odrzucane. Wycofane tabele
+`legacy_imports` i `refinement_progress` są zgłaszane jako błąd bez odczytu ich payloadów.
+Niektóre brakujące powiązania snapshot/recovery są raportowane jako warnings.
+Pending publication/cleanup i refresh requests są
 pokazywane jako stan roboczy, a nie automatycznie jako błędy.
 
 Komenda nie łączy się ze Stash, nie ładuje modeli i niczego nie naprawia ani nie
@@ -296,6 +301,12 @@ szacunkowy odzysk z wolnych stron. Recovery evidence i checkpointy są zachowywa
 `--anonymous-diagnostics NEW.json` tworzy lokalny raport przeznaczony do
 ręcznego przejrzenia i ewentualnego przekazania developerowi. Aplikacja **nigdy
 nie wysyła go automatycznie** i odmawia nadpisania istniejącego pliku.
+
+Raport używa `format: 2`. Dla baz v18–v20 pokazuje informacje o bazie oraz
+`database.upgrade_required: true`, bez dekodowania dowodów i szczegółowych statystyk.
+Pełny raport wymaga wcześniejszego `--db-update`. Dawne tryby, pochodzenie i formaty
+analizy są oznaczane jako `other`; nie ma osobnych pól dla historycznych zakresów
+ani `scene_frames_format`.
 
 Raport obejmuje całą wskazaną bazę stanu, ale nie eksportuje scene IDs, wartości
 `scope`, URL-i, ścieżek plików, nazw tagów, score'ów, timestampów markerów,

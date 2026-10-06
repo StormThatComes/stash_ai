@@ -8,7 +8,7 @@ def check_work_units(db, tables):
     payload_specs = (
         ("inference_archive", "data"),
         ("snapshots", "published"), ("snapshots", "pending"),
-        ("legacy_imports", "data"), ("cleanup_state", "data"),
+        ("cleanup_state", "data"),
         ("checkpoint_frames", "data"), ("checkpoint_analysis", "data"),
         ("recovery_publications", "data"),
     )

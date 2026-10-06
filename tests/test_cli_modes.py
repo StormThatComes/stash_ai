@@ -12,7 +12,7 @@ def test_database_dispatch_ignores_normal_pipeline():
 
 
 def test_database_dispatch_delegates_before_runtime(monkeypatch):
-    from stash_ai import db
+    from stash_ai.commands import database as db
 
     called = {}
     monkeypatch.setattr(db, "run_mode",
@@ -80,7 +80,7 @@ def test_explain_dispatch_uses_diagnostics_without_entering_merge(monkeypatch):
 
 
 def test_main_database_command_bypasses_bootstrap(monkeypatch):
-    from stash_ai import db
+    from stash_ai.commands import database as db
     from stash_ai.commands import bootstrap
     monkeypatch.setattr(db, 'run_mode', lambda args, url: 7)
     for name in ('runtime_options', 'selected_settings', 'policies', 'catalogs'):

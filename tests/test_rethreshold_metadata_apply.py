@@ -9,7 +9,7 @@ import sqlite3
 import pytest
 
 from stash_ai.rethreshold import markers as marker_updates, execution as rethreshold_execution, scenes as scene_updates
-from stash_ai import db
+from stash_ai.db.checks import check_database
 from tests.helpers.runtime import runtime as app
 import stash_ai.evidence.identity as scene_cache_identity
 import stash_ai.evidence.identity as thresholds_identity
@@ -95,7 +95,7 @@ def test_metadata_apply_matches_full_payload_index_and_preserves_history(tmp_pat
             assert progress.completed(store, '1', 'wd', [row[3]], row[5])
     if dry_run:
         assert paths[1].read_bytes() == source
-    assert db.check_database(paths[1], 'scope')['ok']
+    assert check_database(paths[1], 'scope')['ok']
 
 
 @pytest.mark.parametrize('history', ['no_inference', 'legacy_tail', 'empty_inference_tail', 'scene_override'])
