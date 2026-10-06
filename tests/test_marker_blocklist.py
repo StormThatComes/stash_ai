@@ -36,7 +36,7 @@ def test_current_inference_identity_drops_retired_hash_fields(monkeypatch, tmp_p
     monkeypatch.setattr(app, 'TEMPORAL_POLICY', TemporalPolicy())
     config = ModelSettings(WD, tmp_path / 'missing', batch_size=2, scene_threshold=.4, marker_threshold=.7)
     identity = model_identity(app, config, Vocabulary(['common', 'extra'], {}))
-    assert identity['format'] == 3
+    assert identity['format'] == 4
     assert 'frame_blocklist' not in identity and 'temporal' not in identity['retention']
     old = {**identity, 'format': 2, 'frame_blocklist': []}
     assert digest(identity) != digest(old)

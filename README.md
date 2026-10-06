@@ -145,6 +145,12 @@ python .\stash_ai.py --help
 
 ## Jak działa stan i cache
 
+Tożsamość inferencji obejmuje SHA-256 zawartości plików modelu oraz normalizację
+JoyTag (`JOYTAG_CLIP_MEAN` i `JOYTAG_CLIP_STD`). Zmiana wag jest wykrywana także
+przy zachowanym rozmiarze i czasie modyfikacji pliku. Pliki są hashowane raz na
+model w przebiegu; po pobraniu brakujących plików hashowane są tylko nowe zasoby.
+Pierwszy przebieg po tej zmianie odświeży wcześniejsze inferencje i checkpointy.
+
 Domyślna baza `tagger_sources.sqlite3` przechowuje surowe dowody modeli,
 checkpointy, opublikowane snapshoty i informacje potrzebne do bezpiecznego
 wznowienia. **Zachowuj ją w backupie.** Nie zawiera obrazów ani klucza API.
