@@ -50,14 +50,31 @@ jobs:
           cache-dependency-glob: |
             requirements-dev.txt
             requirements-ci-ml.txt
+            constraints/*.txt
 
       - name: Install test dependencies
         run: |
-          uv pip install --system -r requirements-dev.txt
-          uv pip install --system -r requirements-ci-ml.txt --index-url https://download.pytorch.org/whl/cpu
+          uv pip install --system -r requirements-dev.txt -r requirements-ci-ml.txt -c constraints/cpu-py314.txt --index-strategy unsafe-best-match
+
+      - name: Offline benchmark smoke
+        run: python -m pytest -q tests/test_benchmarks.py --tb=short
 
       - name: Run tests
         env:
           STASH_API_KEY: ""
           STASH_AI_HF_SMOKE: "1"
         run: python -m pytest -q --tb=short
+
+  dependency-resolution:
+    name: dependencies (${{ matrix.variant }}, ${{ matrix.platform }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        variant: [cpu, gpu]
+        platform: [x86_64-manylinux_2_28, x86_64-pc-windows-msvc]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.2.0
+      - name: Resolve pinned wheels without installing GPU packages
+        run: uv pip compile requirements-${{ matrix.variant }}.txt requirements-dev.txt -c constraints/${{ matrix.variant }}-py314.txt --python-version 3.14.7 --python-platform ${{ matrix.platform }} --index-strategy unsafe-best-match --only-binary :all: -o /tmp/resolved.txt

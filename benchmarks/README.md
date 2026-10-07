@@ -1,6 +1,8 @@
 # Benchmarki offline
 
 Uruchamiaj z katalogu głównego repozytorium, po instalacji `requirements-dev.txt`.
+W CI wszystkie siedem wejść przechodzi smoke test na małych danych.
+Fixture używają bieżącego formatu analysis i pełnych metadanych.
 Skrypty używają syntetycznych danych, lokalnej tymczasowej bazy lub makiety Stash;
 nie łączą się ze Stash i nie uruchamiają modeli GPU.
 

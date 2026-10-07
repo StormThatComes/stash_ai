@@ -24,6 +24,7 @@ def main():
     app = RuntimeContext()
     from stash_ai.evidence.occurrences import occurrence_contributions
     from stash_ai.storage.segments import StoredSegment, segment_digest
+    from benchmarks.fixtures import record
     from stash_ai.models import SOURCES
     from stash_ai.evidence.temporal.policy import TemporalPolicy
     app.TEMPORAL_POLICY = TemporalPolicy()
@@ -33,7 +34,7 @@ def main():
     for case in ('old_sparse_frames', 'new_scene_peaks', 'already_localized'):
         records, hits = {}, []
         for source in SOURCES:
-            meta = dict(origin='inference', scene_threshold=.35, marker_threshold=.65,
+            meta = dict(origin='inference', analysis_format=5, scene_threshold=.35, scene_support_floor=.35*.85, marker_threshold=.65, marker_score_floor=.1,
                         inference_signature=source+'-benchmark', frame_input_signature='same-input')
             segment = StoredSegment(mode='frames', meta=meta, items=[dict(start=i, end=i+1,
                 tags=[(tag, .9) for tag in labels] if i % 3 == 0 and case != 'new_scene_peaks' else [])
@@ -41,7 +42,7 @@ def main():
             # The merge's existing FrameIndex has already hashed each borrowed
             # record before the occurrence stage begins in the application.
             segment_digest(segment)
-            records[source] = [segment]
+            records[source] = segment
             hits.extend(dict(tag=tag, source=source, score=.9, meta=meta,
                 statistics={'max_score': .9, 'peak_time': 0} if case == 'new_scene_peaks' else {}) for tag in labels)
         spans = [dict(tag=tag) for tag in labels] if case == 'already_localized' else []

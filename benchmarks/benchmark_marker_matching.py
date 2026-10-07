@@ -42,21 +42,23 @@ def main():
     from stash_ai.runtime.report import RunReport
     from stash_ai.evidence.temporal.policy import TemporalPolicy
     from tests.helpers.stash import Stash
+    from tests.helpers.evidence import span, empty_policies
 
-    app.TEMPORAL_POLICY = TemporalPolicy(enabled=False)
+    app.TEMPORAL_POLICY = TemporalPolicy(shared_marker_frames=False, shared_marker_extras=False)
     app.APPLY_SCENE_TAGS = False
     app.CREATE_MARKERS = app.CREATE_MISSING = True
     app.MARKER_USE_END_TIME = not args.point_only
     app.MARKER_MAX_TAGS_PER_FRAME = 0
     app.MARKER_MERGE_GAP_SECONDS = 0
-    spans = [dict(source='wd', tag=f'core_{i % args.labels}', start=float(i*3), end=float(i*3 + 1),
-                  score=.9, hits=2, extra_tags=[], meta={'origin': 'test'}) for i in range(args.markers)]
+    spans = [span('wd', float(i*3), float(i*3+1), tag=f'core_{i % args.labels}')
+             for i in range(args.markers)]
+    policies = empty_policies()
     trials = []
     with tempfile.TemporaryDirectory() as directory, merge_store.StateStore(
             Path(directory)/'state.sqlite3', 'marker-matching-benchmark', cache_bytes=128*2**20) as store:
         stash = Stash()
-        resolver = app.TagResolver(stash, source=merge_labels.AI)
-        merge_sync.sync_merged(app, stash, resolver, store, stash.find_scene('1'), [], spans, migrate=False)
+        resolver = app.services.TagResolver(stash, source=merge_labels.AI)
+        merge_sync.sync_merged(app, stash, resolver, store, stash.find_scene('1'), [], spans, tag_policies=policies)
         for _ in range(args.repeats):
             gc.collect()
             report = RunReport(write=lambda _: None)
@@ -64,7 +66,7 @@ def main():
             current = stash.find_scene('1')  # Same input; API latency is excluded.
             start, cpu = time.perf_counter(), time.process_time()
             counts = merge_sync.sync_merged(app, stash, resolver, store, current, [], spans,
-                                       migrate=False, cleanup=args.cleanup, report=report)
+                                       tag_policies=policies, cleanup=args.cleanup, report=report)
             elapsed, cpu_elapsed = time.perf_counter()-start, time.process_time()-cpu
             stages = dict(report.timings)
             snapshot = store.snapshot('1', 'markers')[0]

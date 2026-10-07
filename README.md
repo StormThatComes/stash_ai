@@ -28,6 +28,7 @@ Dla CPU zamień `onnxruntime-gpu` na zgodny `onnxruntime>=1.21,<2`.
 
 ```powershell
 pip install -r requirements.txt
+# Pinned Python 3.14.7 environments: see constraints/README.md
 
 $env:STASH_URL = "http://localhost:9999"
 $env:STASH_API_KEY = "<własny klucz ze Stash>"
