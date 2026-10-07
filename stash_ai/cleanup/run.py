@@ -105,6 +105,19 @@ class CleanupRun:
                 self.stats["errors"] += 1
                 self.report.issue('cleanup', '', scene_id, exc, app.services.safe_error(exc, api_key=app.STASH_API_KEY))
             self.report.progress(bar, self.stats)
+        self._finish_scene_reads()
+
+    def _finish_scene_reads(self):
+        from stash_ai.stash_api.scene_reads import MissingSceneError
+        for scene_id, exc in self.report.unread_scenes.items():
+            if isinstance(exc, MissingSceneError):
+                self.stats['skipped'] += 1
+                self.stats['missing_scenes'] += 1
+                self.report.detail(f'Cleanup: scene {scene_id} no longer exists; skipped.')
+                continue
+            self.stats['errors'] += 1
+            self.report.issue('cleanup read', '', scene_id, exc,
+                              self.app.services.safe_error(exc, api_key=self.app.STASH_API_KEY))
 
     def _prune(self):
         if self.stats['errors']:
