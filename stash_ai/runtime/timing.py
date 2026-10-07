@@ -58,6 +58,20 @@ class RunTimings:
     def request(self, operation, read):
         start, failed = time.perf_counter(), True
         details = {'response_bytes': 0}
+        token, stopped = object(), threading.Event()
+        with self._timing_lock:
+            self.report.active_requests[token] = dict(operation=operation, read=read, started=start)
+
+        def heartbeat():
+            while not stopped.wait(self.report.heartbeat_seconds):
+                with self._timing_lock:
+                    active = len(self.report.active_requests)
+                self.report.write(f'Waiting for Stash: {operation}, '
+                    f'{time.perf_counter() - start:.1f}s, active={active}, '
+                    f'{"read" if read else "write"}.')
+
+        ticker = threading.Thread(target=heartbeat, name='stash-request-heartbeat', daemon=True)
+        ticker.start()
         previous = getattr(self._timers, 'request', None)
         self._timers.request = details
         try:
@@ -65,6 +79,10 @@ class RunTimings:
                 yield
             failed = False
         finally:
+            stopped.set()
+            ticker.join()
+            with self._timing_lock:
+                self.report.active_requests.pop(token, None)
             self._timers.request = previous
             if self.report.diagnostics is not None:
                 self.report.diagnostics.record_api(operation, time.perf_counter()-start, failed, details['response_bytes'])

@@ -1,0 +1,267 @@
+{
+  "measured_on": "2026-10-07",
+  "python": "3.14.7",
+  "reference": "stashapp/stash v0.31.1",
+  "cases": [
+    {
+      "scope": "Disposable indexed SQLite, WAL/NORMAL/immediate writes; no API, network, hooks or object loading.",
+      "sqlite_version": "3.53.1",
+      "markers": 100000,
+      "scenes": 1000,
+      "batch_size": 200,
+      "identical_state": true,
+      "trials": [
+        {
+          "cascade": {
+            "seconds": 0.12555150499974843,
+            "max_transaction_seconds": 0.12554645700038236,
+            "transactions": 1,
+            "native_mutations": 1,
+            "state_sha256": "ef04f06227e4705c8643d5bac58a55cdc9113fadac62a87bed8b33840599f873",
+            "remaining_rows": {
+              "tags": 2,
+              "tags_image": 1,
+              "scenes": 1000,
+              "scene_markers": 100000,
+              "images": 20,
+              "scene_markers_tags": 100000,
+              "scenes_tags": 1000,
+              "images_tags": 20
+            }
+          },
+          "detach": {
+            "seconds": 0.18713594700057,
+            "max_transaction_seconds": 0.0015825840000616154,
+            "transactions": 506,
+            "native_mutations": 506,
+            "state_sha256": "ef04f06227e4705c8643d5bac58a55cdc9113fadac62a87bed8b33840599f873",
+            "remaining_rows": {
+              "tags": 2,
+              "tags_image": 1,
+              "scenes": 1000,
+              "scene_markers": 100000,
+              "images": 20,
+              "scene_markers_tags": 100000,
+              "scenes_tags": 1000,
+              "images_tags": 20
+            }
+          }
+        },
+        {
+          "detach": {
+            "seconds": 0.17031601800044882,
+            "max_transaction_seconds": 0.0026133709998248378,
+            "transactions": 506,
+            "native_mutations": 506,
+            "state_sha256": "ef04f06227e4705c8643d5bac58a55cdc9113fadac62a87bed8b33840599f873",
+            "remaining_rows": {
+              "tags": 2,
+              "tags_image": 1,
+              "scenes": 1000,
+              "scene_markers": 100000,
+              "images": 20,
+              "scene_markers_tags": 100000,
+              "scenes_tags": 1000,
+              "images_tags": 20
+            }
+          },
+          "cascade": {
+            "seconds": 0.11537228999986837,
+            "max_transaction_seconds": 0.11536907499976223,
+            "transactions": 1,
+            "native_mutations": 1,
+            "state_sha256": "ef04f06227e4705c8643d5bac58a55cdc9113fadac62a87bed8b33840599f873",
+            "remaining_rows": {
+              "tags": 2,
+              "tags_image": 1,
+              "scenes": 1000,
+              "scene_markers": 100000,
+              "images": 20,
+              "scene_markers_tags": 100000,
+              "scenes_tags": 1000,
+              "images_tags": 20
+            }
+          }
+        },
+        {
+          "cascade": {
+            "seconds": 0.14210086099956243,
+            "max_transaction_seconds": 0.1420974449993082,
+            "transactions": 1,
+            "native_mutations": 1,
+            "state_sha256": "ef04f06227e4705c8643d5bac58a55cdc9113fadac62a87bed8b33840599f873",
+            "remaining_rows": {
+              "tags": 2,
+              "tags_image": 1,
+              "scenes": 1000,
+              "scene_markers": 100000,
+              "images": 20,
+              "scene_markers_tags": 100000,
+              "scenes_tags": 1000,
+              "images_tags": 20
+            }
+          },
+          "detach": {
+            "seconds": 0.2081027139993239,
+            "max_transaction_seconds": 0.001102332000300521,
+            "transactions": 506,
+            "native_mutations": 506,
+            "state_sha256": "ef04f06227e4705c8643d5bac58a55cdc9113fadac62a87bed8b33840599f873",
+            "remaining_rows": {
+              "tags": 2,
+              "tags_image": 1,
+              "scenes": 1000,
+              "scene_markers": 100000,
+              "images": 20,
+              "scene_markers_tags": 100000,
+              "scenes_tags": 1000,
+              "images_tags": 20
+            }
+          }
+        }
+      ],
+      "summary": {
+        "cascade": {
+          "median_ms": 125.55150499974843,
+          "median_max_transaction_ms": 125.54645700038236,
+          "native_mutations": 1
+        },
+        "detach": {
+          "median_ms": 187.13594700057,
+          "median_max_transaction_ms": 1.5825840000616154,
+          "native_mutations": 506
+        }
+      }
+    },
+    {
+      "scope": "Disposable indexed SQLite, WAL/NORMAL/immediate writes; no API, network, hooks or object loading.",
+      "sqlite_version": "3.53.1",
+      "markers": 1000000,
+      "scenes": 10000,
+      "batch_size": 200,
+      "identical_state": true,
+      "trials": [
+        {
+          "cascade": {
+            "seconds": 1.3918381580006098,
+            "max_transaction_seconds": 1.3916860120007186,
+            "transactions": 1,
+            "native_mutations": 1,
+            "state_sha256": "321b8b47d71e15451b9611084b60c945878177405cf1e45d2c4fbcf9158db3cf",
+            "remaining_rows": {
+              "tags": 2,
+              "tags_image": 1,
+              "scenes": 10000,
+              "scene_markers": 1000000,
+              "images": 20,
+              "scene_markers_tags": 1000000,
+              "scenes_tags": 10000,
+              "images_tags": 20
+            }
+          },
+          "detach": {
+            "seconds": 1.7708154289994127,
+            "max_transaction_seconds": 0.0027356310001778184,
+            "transactions": 5051,
+            "native_mutations": 5051,
+            "state_sha256": "321b8b47d71e15451b9611084b60c945878177405cf1e45d2c4fbcf9158db3cf",
+            "remaining_rows": {
+              "tags": 2,
+              "tags_image": 1,
+              "scenes": 10000,
+              "scene_markers": 1000000,
+              "images": 20,
+              "scene_markers_tags": 1000000,
+              "scenes_tags": 10000,
+              "images_tags": 20
+            }
+          }
+        },
+        {
+          "detach": {
+            "seconds": 1.7167820390004636,
+            "max_transaction_seconds": 0.0023441609992005397,
+            "transactions": 5051,
+            "native_mutations": 5051,
+            "state_sha256": "321b8b47d71e15451b9611084b60c945878177405cf1e45d2c4fbcf9158db3cf",
+            "remaining_rows": {
+              "tags": 2,
+              "tags_image": 1,
+              "scenes": 10000,
+              "scene_markers": 1000000,
+              "images": 20,
+              "scene_markers_tags": 1000000,
+              "scenes_tags": 10000,
+              "images_tags": 20
+            }
+          },
+          "cascade": {
+            "seconds": 1.2601240429994505,
+            "max_transaction_seconds": 1.2601207679999789,
+            "transactions": 1,
+            "native_mutations": 1,
+            "state_sha256": "321b8b47d71e15451b9611084b60c945878177405cf1e45d2c4fbcf9158db3cf",
+            "remaining_rows": {
+              "tags": 2,
+              "tags_image": 1,
+              "scenes": 10000,
+              "scene_markers": 1000000,
+              "images": 20,
+              "scene_markers_tags": 1000000,
+              "scenes_tags": 10000,
+              "images_tags": 20
+            }
+          }
+        },
+        {
+          "cascade": {
+            "seconds": 1.2109907270005351,
+            "max_transaction_seconds": 1.2109870410004078,
+            "transactions": 1,
+            "native_mutations": 1,
+            "state_sha256": "321b8b47d71e15451b9611084b60c945878177405cf1e45d2c4fbcf9158db3cf",
+            "remaining_rows": {
+              "tags": 2,
+              "tags_image": 1,
+              "scenes": 10000,
+              "scene_markers": 1000000,
+              "images": 20,
+              "scene_markers_tags": 1000000,
+              "scenes_tags": 10000,
+              "images_tags": 20
+            }
+          },
+          "detach": {
+            "seconds": 1.7230124269990483,
+            "max_transaction_seconds": 0.0017078400014725048,
+            "transactions": 5051,
+            "native_mutations": 5051,
+            "state_sha256": "321b8b47d71e15451b9611084b60c945878177405cf1e45d2c4fbcf9158db3cf",
+            "remaining_rows": {
+              "tags": 2,
+              "tags_image": 1,
+              "scenes": 10000,
+              "scene_markers": 1000000,
+              "images": 20,
+              "scene_markers_tags": 1000000,
+              "scenes_tags": 10000,
+              "images_tags": 20
+            }
+          }
+        }
+      ],
+      "summary": {
+        "cascade": {
+          "median_ms": 1260.1240429994505,
+          "median_max_transaction_ms": 1260.1207679999789,
+          "native_mutations": 1
+        },
+        "detach": {
+          "median_ms": 1723.0124269990483,
+          "median_max_transaction_ms": 2.3441609992005397,
+          "native_mutations": 5051
+        }
+      }
+    }
+  ]
+}
