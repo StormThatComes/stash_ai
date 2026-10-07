@@ -13,10 +13,19 @@ allowlisted SQL reads and same-origin media GETs.
 
 Socket inactivity timeouts alone allow a trickling response to run indefinitely.
 Only proven reads therefore perform blocking calls behind a caller deadline.
-Streaming bodies are interrupted through the connection socket on expiry; late
-responses are discarded/closed. A daemon network call can finish after the caller
-has returned, but it cannot apply results, retry or issue mutations. The source
-state remains intact and normal per-scene error handling controls publication.
+Header and body reads track their own connection sockets and interrupt them on
+expiry or cancellation. A pooled connection already owned by a newer read is
+protected from an older read's cancellation. Late responses are discarded.
+At most four read workers can remain active per process, including a resolver
+that cannot be interrupted; capacity waiting shares the caller deadline. A
+single bounded close queue handles buffered readers. Late calls cannot apply
+results, retry or issue mutations. Source state remains intact.
+
+Closing prefetch propagates cancellation through preparation and media reads,
+then joins the producer to release its images. The last complete prediction
+batch is saved first; interrupted work cannot publish incomplete evidence.
+Programmatic HTTP_RETRIES accepts integer 0..10, and REQUEST_TIMEOUT requires
+positive finite scalar or (connect, read) values, excluding booleans.
 
 Writes stay on the owning caller thread with the configured socket timeout.
 They receive heartbeats but **are never automatically retried**. Durable pending

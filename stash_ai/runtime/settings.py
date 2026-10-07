@@ -58,18 +58,30 @@ def validate_config(app, scene_work: bool = True) -> None:
     if scene_work and not app.APPLY_SCENE_TAGS and not app.CREATE_MARKERS:
         raise ValueError("Enable scene tags, markers, or both.")
     for name, value in (("TOP_K_FRAMES", app.TOP_K_FRAMES),
+                        ("CHECKPOINT_BATCHES", app.CHECKPOINT_BATCHES),
                         ("MARKER_MIN_HITS", app.MARKER_MIN_HITS), ("SCENE_PAGE_SIZE", app.SCENE_PAGE_SIZE)):
-        if not isinstance(value, int) or value < 1:
+        if type(value) is not int or value < 1:
             raise ValueError(f"{name} must be a positive integer.")
     for name, value in (("MAX_FRAMES_PER_SCENE", app.MAX_FRAMES_PER_SCENE),
                         ("MARKER_MAX_TAGS_PER_FRAME", app.MARKER_MAX_TAGS_PER_FRAME)):
-        if not isinstance(value, int) or value < 0:
+        if type(value) is not int or value < 0:
             raise ValueError(f"{name} must be an integer >= 0 (0 = unlimited).")
     for value in (app.MARKER_MERGE_GAP_SECONDS, app.MARKER_MATCH_TOLERANCE_SECONDS):
         if not math.isfinite(value) or value < 0:
             raise ValueError("Marker time gaps/tolerances must be finite and nonnegative.")
     if app.AGGREGATION not in {"max", "topk_mean"}:
         raise ValueError("AGGREGATION must be max or topk_mean.")
+    if type(app.HTTP_RETRIES) is not int or not 0 <= app.HTTP_RETRIES <= 10:
+        raise ValueError('HTTP_RETRIES must be an integer in 0..10.')
+    timeouts = app.REQUEST_TIMEOUT if isinstance(app.REQUEST_TIMEOUT, tuple) else (app.REQUEST_TIMEOUT,)
+    if ((isinstance(app.REQUEST_TIMEOUT, tuple) and len(timeouts) != 2) or
+            any(type(value) not in (int, float) or
+            not math.isfinite(value) or value <= 0 for value in timeouts)):
+        raise ValueError('REQUEST_TIMEOUT must be a positive finite number or (connect, read) pair.')
+    for name, maximum, minimum in (('PREFETCH_BATCHES', 16, 0), ('PREPARE_WORKERS', 16, 1)):
+        value = getattr(app, name)
+        if type(value) is not int or not minimum <= value <= maximum:
+            raise ValueError(f'{name} must be an integer in {minimum}..{maximum}.')
 
 
 from stash_ai.runtime.dependencies import settings_for

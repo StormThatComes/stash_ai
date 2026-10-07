@@ -28,7 +28,7 @@ class StashTransport:
     def __init__(self, dry_run: bool, *, url: str, api_key: str,
                  request_timeout: float | tuple[float, float], http_retries: int):
         import requests
-        from requests.adapters import HTTPAdapter
+        from stash_ai.stash_api.read_connections import ReadAdapter
 
         self.url = url
         self.api_key = api_key
@@ -42,9 +42,10 @@ class StashTransport:
             self.api.headers["ApiKey"] = self.api_key
             self.media.headers["ApiKey"] = self.api_key
         # All read retries share one caller deadline, including media redirects.
-        adapter = HTTPAdapter(max_retries=0)
-        self.media.mount("http://", adapter)
-        self.media.mount("https://", adapter)
+        for session in (self.api, self.media):
+            adapter = ReadAdapter(max_retries=0)
+            session.mount("http://", adapter)
+            session.mount("https://", adapter)
 
     def close(self) -> None:
         self.api.close()
@@ -120,7 +121,13 @@ class StashTransport:
                 self.report.counts['stash_media_retries' if media else 'stash_read_retries'] += 1
             delay = .5 * 2 ** attempt
             budget = remaining(deadline)
-            time.sleep(min(delay, budget))
+            from stash_ai.runtime.cancellation import current
+            token = current()
+            if token is not None:
+                token.event.wait(min(delay, budget))
+                token.check()
+            else:
+                time.sleep(min(delay, budget))
             remaining(deadline)
 
         for attempt in range(attempts):

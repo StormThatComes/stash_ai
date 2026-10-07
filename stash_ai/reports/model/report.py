@@ -23,15 +23,8 @@ REPORT_FORMAT = 1
 
 
 def _scene_ids(store, requested=None):
-    table = store.table("results")
-    if requested:
-        wanted = list(dict.fromkeys(str(value) for value in requested))
-        return [scene for scene in wanted if store.connection.execute(
-            "SELECT 1 FROM " + table + " WHERE scope=? AND scene=? LIMIT 1",
-            (store.scope, scene)).fetchone()]
-    return [row[0] for row in store.connection.execute(
-        "SELECT DISTINCT scene FROM " + table + " WHERE scope=? ORDER BY scene",
-        (store.scope,))]
+    from stash_ai.storage.selection import evidence_scenes
+    return evidence_scenes(store, requested)
 
 
 _MODEL_ROW_KEYS = (

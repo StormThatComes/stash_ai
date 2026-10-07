@@ -24,6 +24,24 @@ class RunReport:
         self.issue_counts = Counter()
         self.count_sources = []
         self.history = None
+        self.workload = dict(verified_input_pairs=0, verified_cues=0, input_fingerprint=None)
+        self._input_digest = 0
+
+    def record_input_workload(self, scene, model, cues, hashes):
+        if self.profile is None:
+            return
+        from stash_ai.inference.input_identity import cue_manifest, frame_signature
+        from stash_ai.signatures import digest
+        fingerprint = frame_signature(cue_manifest(cues), hashes)
+        self._input_digest = (self._input_digest + int(digest([str(scene), model, fingerprint]), 16)) % (1 << 256)
+        self.workload['verified_input_pairs'] += 1
+        self.workload['verified_cues'] += len(cues)
+        self.workload['input_fingerprint'] = digest(hex(self._input_digest))
+
+    def record_progress(self):
+        progress = getattr(self.history, 'progress', None)
+        if progress is not None:
+            progress()
 
     def reuse_decision(self, scope, scene, model, action, status, reasons, details):
         if status != 'started':
@@ -72,7 +90,9 @@ class RunReport:
                    scene_cache_floor=config.scene_cache_floor, marker_cache_floor=config.marker_cache_floor)
         if identity is not None:
             row.update(vocabulary=identity['vocabulary'], asset_hashes=[value for _, value in identity['files']])
+        row.setdefault('execution_observed', False)
         if tagger is not None:
+            row['execution_observed'] = True
             row['effective_batch_size'] = tagger.batch_size
             if hasattr(tagger, 'device'):
                 row['effective_device'] = str(tagger.device)

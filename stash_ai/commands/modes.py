@@ -25,6 +25,7 @@ class Command(Enum):
     CACHE_REPORT = 'cache_report'
     RUN_REPORT = 'run_report'
     REUSE_REPORT = 'reuse_report'
+    PRUNE_HISTORY = 'prune_run_history'
     ABANDON = 'abandon_pending'
 
 

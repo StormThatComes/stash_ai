@@ -12,10 +12,12 @@ def build_report(rows):
     rows, groups = list(rows), {}
     for run in rows:
         # Failed/interrupted/running work must not lower successful-run averages.
-        key = digest([run['command'], run['status'], run['configuration']['fingerprint'], run['models']])
+        partial = run.get('partial', run.get('finished_at') is None and run['status'] == 'running')
+        workload = run.get('workload', {})
+        key = digest([run['command'], run['status'], partial, run['configuration']['fingerprint'], run['models'], workload])
         group = groups.setdefault(key, dict(command=run['command'], status=run['status'],
             configuration_fingerprint=run['configuration']['fingerprint'], models=run['models'],
-            runs=0, wall_seconds=0.0, cpu_seconds=0.0, counts=Counter(), outcomes={}, samples={}))
+            partial=partial, workload=workload, runs=0, wall_seconds=0.0, cpu_seconds=0.0, counts=Counter(), outcomes={}, samples={}))
         group['runs'] += 1
         group['wall_seconds'] += run['wall_seconds'] or 0.0
         group['cpu_seconds'] += run['cpu_seconds'] or 0.0
@@ -35,7 +37,9 @@ def build_report(rows):
                'p50/p95 are upper-bucket estimates from bounded logarithmic histograms.',
                'Worker/thread time can overlap; sums of stages are not run wall time.',
                'CPU seconds cover the parent process; worker CPU is reported separately when measured.',
-               'A running record has no recorded finish; it may be active or have been killed.',
+               'A partial running record has no recorded finish; last_progress_at marks its last saved aggregates. It may be active or killed.',
+               'Selection digests, code/package provenance, observed execution metadata and verified-input workloads separate comparison groups when available.',
+               'Legacy records missing provenance/workload remain readable; their comparability is limited.',
                'Groups describe only the selected, most recent matching runs.'])
 
 
