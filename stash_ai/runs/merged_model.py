@@ -22,22 +22,26 @@ class MergedModelRun:
         self.stats, self.report = stats, report
         self.key = config.source.key
         self.tagger = None
-        self.identity = model_identity(app, config, vocabulary)
+        with report.measure('model_identity', model=self.key):
+            self.identity = model_identity(app, config, vocabulary)
+        report.record_model(config, identity=self.identity)
 
     def run(self, scenes, kinds, inputs):
         remaining = set(scenes)
         try:
             bar = tqdm(scenes.items(), desc=self.key + " inference", unit="scene")
             for scene_id, current in bar:
+                self.report.work('')
                 self.report.progress(bar, self.stats)
                 paths = current["paths"]
                 if not self._eligible(scene_id, paths):
                     remaining.discard(scene_id)
                     continue
                 try:
-                    if not self._process_scene(scene_id, current, paths, kinds, inputs):
-                        progress.block_publication(self.store, remaining, self.key, kinds)
-                        break
+                    with self.report.measure('model_scene', model=self.key, units=1, unit='scenes'):
+                        if not self._process_scene(scene_id, current, paths, kinds, inputs):
+                            progress.block_publication(self.store, remaining, self.key, kinds)
+                            break
                 except Exception as exc:
                     from stash_ai.storage.input_checks import pending
                     if self.key not in pending(self.store, scene_id):
@@ -58,6 +62,7 @@ class MergedModelRun:
             from stash_ai.storage.input_checks import defer
             defer(self.store, scene_id, self.key)
             self.stats["skipped"] += 1
+            self.report.model_outcome(self.key, 'missing_media')
             return False
         return True
 
@@ -65,18 +70,22 @@ class MergedModelRun:
         args, store, key = self.args, self.store, self.key
         if args.resume and progress.completed(store, scene_id, key, kinds, signature):
             self.stats["reused"] += 1
+            self.report.model_outcome(key, 'reused')
             return True
         if args.resume and not args.restart:
             from stash_ai.inference.reuse import reuse
             if reuse(self.app, store, scene_id, self.config, self.identity, cues, media.hashes, kinds):
                 self.stats['threshold_cache_reused'] += 1
+                self.report.model_outcome(key, 'rethreshold')
                 return True
         return False
 
     def _load_tagger(self):
         try:
-            self.tagger = self.app.services.load_tagger(
-                self.config, self.vocabulary, partial(preparation.prepare_image, self.app))
+            with self.report.measure('model_load', model=self.key):
+                self.tagger = self.app.services.load_tagger(
+                    self.config, self.vocabulary, partial(preparation.prepare_image, self.app))
+            self.report.record_model(self.config, tagger=self.tagger)
         except Exception as exc:
             self._record_error('load model', None, exc)
             return False
@@ -88,13 +97,15 @@ class MergedModelRun:
         store.cache.pressure(force=True)
         from stash_ai.storage.input_checks import defer, verified
         try:
-            cues, media, signature = inputs.inspect(app, paths, self.identity)
+            with self.report.measure('input_verify', model=self.key):
+                cues, media, signature = inputs.inspect(app, paths, self.identity)
         except BaseException:
             defer(store, scene_id, self.key, 'read_error')
             raise
         verified(store, scene_id, self.key)
-        if self._reuse(scene_id, signature, cues, media, kinds):
-            return True
+        with self.report.measure('inference_reuse_check', model=self.key):
+            if self._reuse(scene_id, signature, cues, media, kinds):
+                return True
         if not args.restart:
             stale = progress.request_stale_refresh(store, scene_id, self.key, kinds, signature)
             self.stats['auto_refresh_requested'] += len(stale)
@@ -104,6 +115,7 @@ class MergedModelRun:
             # Auto-download may just have supplied missing weight files.
             self.identity = model_identity(app, self.config, self.vocabulary,
                                            known_files=self.identity['files'])
+            self.report.record_model(self.config, identity=self.identity)
             signature = inference_signature(self.identity, cue_manifest(cues), media.hashes)
         self._predict_scene(scene_id, paths, cues, media, signature, kinds)
         return True
@@ -120,18 +132,22 @@ class MergedModelRun:
                     "scene_analysis": CHECKPOINT_FORMAT}),
             len(cues), len(self.vocabulary.labels), args.checkpoint_batches)
         analysis = {}
-        predictions, frames = prediction.predict_scene(
-            app, self.tagger, media, paths, cues, checkpoint=checkpoint,
-            prefetch=args.prefetch_batches, analysis=analysis, report=self.report,
-            prepare_workers=args.prepare_workers)
+        with self.report.measure('inference_scene', model=self.key, units=1, unit='scenes'):
+            predictions, frames = prediction.predict_scene(
+                app, self.tagger, media, paths, cues, checkpoint=checkpoint,
+                prefetch=args.prefetch_batches, analysis=analysis, report=self.report,
+                prepare_workers=args.prepare_workers)
         outputs = merge_results.capture_outputs(
             app, self.config, self.vocabulary, cues, predictions, frames, analysis,
             inference_signature=signature,
             frame_input_signature=frame_signature(cue_manifest(cues), media.hashes))
-        checkpoints.finish(store, scene_id, self.key, outputs)
+        with self.report.measure('inference_commit', model=self.key):
+            checkpoints.finish(store, scene_id, self.key, outputs)
+        self.report.model_outcome(self.key, 'checkpoint_resumed' if getattr(checkpoint, 'resumed_frames', 0) else 'fresh')
         self.stats["processed"] += 1
 
     def _record_error(self, stage, scene_id, exc):
         self.stats["errors"] += 1
+        self.report.model_outcome(self.key, 'error')
         self.report.issue(stage, self.key, scene_id, exc,
                           self.app.services.safe_error(exc, api_key=self.app.STASH_API_KEY))

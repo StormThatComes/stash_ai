@@ -11,12 +11,26 @@ from stash_ai.stash_api.transport import safe_error
 
 def main(argv: list[str] | None = None, *, runtime: RuntimeContext | None = None) -> int:
     from stash_ai.commands.arguments import parse_args
-    from stash_ai.commands import bootstrap
-    from stash_ai.commands.dispatch import (
-        run_database_command, run_standalone_command, run_saved_merge_command, run_merged)
 
     app = runtime if runtime is not None else RuntimeContext()
     args = parse_args(app, argv)
+    if args.command is Command.RUN_REPORT:
+        from stash_ai.reports.runs import run as run_history_report
+        return run_history_report(app, args)
+    from stash_ai.history.lifecycle import RunHistory
+    from contextlib import nullcontext
+    with RunHistory(app, args) as history:
+        timer = args.report.measure('command') if history.enabled else nullcontext()
+        with timer:
+            result = _execute(app, args)
+        history.result = result
+        return result
+
+
+def _execute(app, args):
+    from stash_ai.commands import bootstrap
+    from stash_ai.commands.dispatch import (
+        run_database_command, run_standalone_command, run_saved_merge_command, run_merged)
     result = run_database_command(app, args)
     if result is not None:
         return result

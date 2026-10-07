@@ -33,7 +33,7 @@ class RunTimings:
         self._timing_lock = threading.RLock()
 
     @contextmanager
-    def measure(self, stage):
+    def measure(self, stage, *, model=None, work=None, units=0, unit=''):
         stack = getattr(self._timers, 'stack', None)
         if stack is None:
             stack = self._timers.stack = []
@@ -53,6 +53,22 @@ class RunTimings:
                 self.timing_calls[stage] += 1
             if self.report.diagnostics is not None:
                 self.report.diagnostics.record_stage(stage, elapsed, max(0.0, elapsed-entry[1]), failed)
+            if self.report.profile is not None:
+                self.report.profile.record('stage', stage, elapsed, max(0.0, elapsed-entry[1]), failed,
+                    model=model if model is not None else getattr(self._timers, 'model', ''),
+                    work=work if work is not None else getattr(self._timers, 'work', ''), units=units, unit=unit)
+
+    @contextmanager
+    def model(self, name):
+        previous = getattr(self._timers, 'model', '')
+        previous_work = getattr(self._timers, 'work', '')
+        self._timers.model = name
+        self._timers.work = ''
+        try:
+            yield
+        finally:
+            self._timers.model = previous
+            self._timers.work = previous_work
 
     @contextmanager
     def request(self, operation, read):
@@ -86,6 +102,11 @@ class RunTimings:
             self._timers.request = previous
             if self.report.diagnostics is not None:
                 self.report.diagnostics.record_api(operation, time.perf_counter()-start, failed, details['response_bytes'])
+            if self.report.profile is not None:
+                elapsed = time.perf_counter()-start
+                self.report.profile.record('api', operation, elapsed, elapsed,
+                    failed, model=getattr(self._timers, 'model', ''), work=getattr(self._timers, 'work', ''),
+                    units=details['response_bytes'], unit='bytes')
 
     def response_size(self, size):
         current = getattr(self._timers, 'request', None)

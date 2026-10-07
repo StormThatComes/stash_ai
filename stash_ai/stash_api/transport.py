@@ -116,6 +116,8 @@ class StashTransport:
         session = self.media if media else self.api
 
         def backoff(attempt):
+            if self.report is not None:
+                self.report.counts['stash_media_retries' if media else 'stash_read_retries'] += 1
             delay = .5 * 2 ** attempt
             budget = remaining(deadline)
             time.sleep(min(delay, budget))

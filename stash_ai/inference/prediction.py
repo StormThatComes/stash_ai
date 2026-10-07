@@ -104,6 +104,8 @@ def _restore_prediction_state(app, tagger, cues, *, checkpoint, report):
         report.detail(
             f"  Resume {settings.source.key}: {processed}/{len(cues)} frames already processed."
         )
+    if report is not None:
+        report.work('checkpoint_resumed' if processed else 'fresh')
 
     return _PredictionState(
         processed,
@@ -119,7 +121,7 @@ def _restore_prediction_state(app, tagger, cues, *, checkpoint, report):
 
 
 def _run_prediction_batches(app, tagger, stash, paths, cues, state, *,
-                            checkpoint, prefetch, prepare_workers):
+                            checkpoint, prefetch, prepare_workers, report):
     import numpy as np
     from stash_ai.inference.preparation import prepared_batches
     from stash_ai.models import validate_scores
@@ -134,15 +136,20 @@ def _run_prediction_batches(app, tagger, stash, paths, cues, state, *,
         cues[state.processed:],
         prefetch,
         prepare_workers,
+        report=report,
     )
     try:
         for prepared, batch_cues in batches:
-            result = validate_scores(
-                tagger.predict_batch(prepared),
-                len(prepared),
-                labels,
-                settings.source.title,
-            )
+            from contextlib import nullcontext
+            timer = (report.measure('inference_batch', model=settings.source.key, units=len(prepared), unit='frames')
+                     if report is not None else nullcontext())
+            with timer:
+                result = validate_scores(
+                    tagger.predict_batch(prepared),
+                    len(prepared),
+                    labels,
+                    settings.source.title,
+                )
             combined = np.concatenate((state.top_scores, result), axis=0)
             count = min(keep, len(combined))
             state.top_scores = np.partition(
@@ -252,6 +259,7 @@ def predict_scene(app, tagger: Any, stash, paths: dict, cues: list[Cue],
         checkpoint=checkpoint,
         prefetch=prefetch,
         prepare_workers=prepare_workers,
+        report=report,
     )
     return _finalize_predictions(
         app,

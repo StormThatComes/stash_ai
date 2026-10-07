@@ -1,0 +1,59 @@
+"""Offline run history and weighted profiling aggregates for comparable runs."""
+from collections import Counter
+
+from stash_ai.history.store import HistoryStore, history_path
+from stash_ai.reports.io import write_json_report
+from stash_ai.runtime.profile import combine, describe, empty_sample
+from stash_ai.signatures import digest
+from stash_ai.storage.store import scope_for
+
+
+def build_report(rows):
+    rows, groups = list(rows), {}
+    for run in rows:
+        # Failed/interrupted/running work must not lower successful-run averages.
+        key = digest([run['command'], run['status'], run['configuration']['fingerprint'], run['models']])
+        group = groups.setdefault(key, dict(command=run['command'], status=run['status'],
+            configuration_fingerprint=run['configuration']['fingerprint'], models=run['models'],
+            runs=0, wall_seconds=0.0, cpu_seconds=0.0, counts=Counter(), outcomes={}, samples={}))
+        group['runs'] += 1
+        group['wall_seconds'] += run['wall_seconds'] or 0.0
+        group['cpu_seconds'] += run['cpu_seconds'] or 0.0
+        group['counts'].update(run['counts'])
+        for model, counts in run['outcomes'].items():
+            group['outcomes'].setdefault(model, Counter()).update(counts)
+        for metric in run['metrics']:
+            metric_key = tuple(metric[name] for name in ('kind', 'name', 'model', 'work', 'outcome', 'unit'))
+            combine(group['samples'].setdefault(metric_key, empty_sample()), metric)
+    for group in groups.values():
+        group['mean_wall_seconds'] = group['wall_seconds'] / group['runs']
+        group['mean_cpu_seconds'] = group['cpu_seconds'] / group['runs']
+        group['metrics'] = [dict(zip(('kind', 'name', 'model', 'work', 'outcome', 'unit'), key), **describe(value))
+                            for key, value in sorted(group.pop('samples').items())]
+    return dict(format=1, runs=rows, groups=list(groups.values()),
+        notes=['Means use total elapsed seconds / total calls, not a mean of run means.',
+               'p50/p95 are upper-bucket estimates from bounded logarithmic histograms.',
+               'Worker/thread time can overlap; sums of stages are not run wall time.',
+               'CPU seconds cover the parent process; worker CPU is reported separately when measured.',
+               'A running record has no recorded finish; it may be active or have been killed.',
+               'Groups describe only the selected, most recent matching runs.'])
+
+
+def run(app, args):
+    with HistoryStore(history_path(args), readonly=True) as store:
+        report = build_report(store.rows(scope_for(app.STASH_URL), limit=args.run_limit,
+            command=args.run_command, status=args.run_status, model=args.run_model))
+    destination = write_json_report(report, args.run_report)
+    print('Run history: ' + str(len(report['runs'])) + ' runs')
+    for item in report['runs']:
+        print(f"  {item['started_at']} {item['command']} {item['status']}: "
+              + (f"{item['wall_seconds']:.3f}s" if item['wall_seconds'] is not None else 'unfinished'))
+    for group in report['groups']:
+        print(f"  Profile {group['command']}/{group['status']} ({group['runs']} runs): "
+              f"mean wall={group['mean_wall_seconds']:.3f}s")
+        for metric in sorted(group['metrics'], key=lambda row: -row['inclusive_seconds'])[:12]:
+            print(f"    {metric['kind']}/{metric['model'] or 'all'}/{metric['name']}/{metric['work'] or 'all'}/{metric['outcome']}: "
+                  f"calls={metric['calls']}, total={metric['inclusive_seconds']:.3f}s, "
+                  f"mean={metric['mean_seconds']:.6f}s, p95~={metric['p95_seconds']:.6f}s")
+    print('Report: ' + str(destination))
+    return 0

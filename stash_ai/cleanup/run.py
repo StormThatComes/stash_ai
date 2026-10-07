@@ -22,6 +22,7 @@ class CleanupRun:
         self.scoped_tags = selected_policies(scene_policies, self.selected)
         self.stats = Counter()
         self.report = args.report
+        self.report.watch_counts(self.stats)
         self.wide = not args.scene_id and self.selected == set(SOURCES)
         self.store = self.stash = self.cleanup_stash = self.resolver = self.sql = None
         self.scene_ids = None
@@ -36,6 +37,8 @@ class CleanupRun:
                 from stash_ai.storage.recovery import abandon
                 self.stats.update(abandon(self.store, self.report.write))
             self.stash = self.cleanup_stash = app.services.create_stash_client(app.DRY_RUN)
+            self.stash.report = self.report
+            self.store.report = self.report
             try:
                 self._prepare_strategy()
                 self._cleanup_scenes()

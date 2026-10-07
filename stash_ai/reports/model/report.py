@@ -163,6 +163,7 @@ def run(app, args):
                 cache_bytes=cache_bytes,
                 memory_budget_bytes=memory_budget_bytes,
                 preload_sources=not bool(args.scene_id),
+                **({'profile': args.report.profile} if args.report.profile is not None else {}),
             )
         destination = write_report(report, args.model_report)
         print(format_summary(report))

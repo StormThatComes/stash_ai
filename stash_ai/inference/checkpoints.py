@@ -30,6 +30,7 @@ class Checkpoint:
         self.signature, self.total, self.labels, self.every = signature, total, labels, every
         self.pending, self.batches, self.processed, self.top_scores = [], 0, 0, None
         self.saved_processed = 0
+        self.resumed_frames = 0
         self.analysis = None
 
     def restore(self):
@@ -53,6 +54,7 @@ class Checkpoint:
                 (self.store.scope, self.scene, self.model)):
             frames.extend(decode(data))
         self.processed = self.saved_processed = processed
+        self.resumed_frames = processed
         self.top_scores = top
         state = self.store.connection.execute(
             "SELECT data FROM " + self.store.table('checkpoint_analysis') + " WHERE scope=? AND scene=? AND model=?",
@@ -83,6 +85,11 @@ class Checkpoint:
             self.flush()
 
     def flush(self):
+        from stash_ai.runtime.timing import stage
+        with stage(getattr(self.store, 'report', None), 'checkpoint_write'):
+            self._flush()
+
+    def _flush(self):
         if self.top_scores is None or self.processed == self.saved_processed:
             return
         db = self.store.connection

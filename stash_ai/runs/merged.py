@@ -35,6 +35,7 @@ class MergedRun:
         self.scene_policies = scene_policies
         self.stats = Counter()
         self.report = args.report
+        self.report.watch_counts(self.stats)
         self.store = None
         self.stash = None
         self.resolver = None
@@ -181,10 +182,11 @@ class MergedRun:
                 store, self.scenes, [config.source.key for config in self.settings], kinds)
         progress.preload_status(store, self.scenes)
         for config in self.settings:
-            MergedModelRun(
-                app, args, store, config, self.catalogs[config.source.key],
-                stats=self.stats, report=self.report,
-            ).run(self.scenes, kinds, inputs)
+            with self.report.model(config.source.key):
+                MergedModelRun(
+                    app, args, store, config, self.catalogs[config.source.key],
+                    stats=self.stats, report=self.report,
+                ).run(self.scenes, kinds, inputs)
 
     def _merge_scenes(self):
         MergePublisher(

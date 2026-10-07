@@ -23,18 +23,23 @@ def prepare_image(app, image: PILImage, target_size: int) -> Any:
     return TVF.normalize(tensor, mean=app.JOYTAG_CLIP_MEAN, std=app.JOYTAG_CLIP_STD)
 
 
-def prepared_batches(app, tagger, stash, paths, cues, prefetch=False, workers=1):
+def prepared_batches(app, tagger, stash, paths, cues, prefetch=False, workers=1, *, report=None):
     """Current batch plus N queued batches; one producer owns media/PIL."""
     if not isinstance(prefetch, int) or not 0 <= prefetch <= 16:
         raise ValueError('prefetch must be an integer in 0..16.')
     if type(workers) is not int or not 1 <= workers <= 16:
         raise ValueError('prepare workers must be an integer in 1..16.')
     iterator = sprites.iter_sprite_frames(stash, paths, cues)
+    work = report.work() if report is not None else ''
     executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="prepare-frames") if prefetch else None
     transforms = ThreadPoolExecutor(max_workers=workers, thread_name_prefix='transform-frames') if workers > 1 else None
     def transform(image: PILImage):
         try:
-            return tagger.prepare(image)
+            from contextlib import nullcontext
+            timer = (report.measure('image_prepare', model=tagger.settings.source.key, work=work, units=1, unit='frames')
+                     if report is not None else nullcontext())
+            with timer:
+                return tagger.prepare(image)
         finally:
             image.close()
     def prepare_next():
@@ -50,7 +55,11 @@ def prepared_batches(app, tagger, stash, paths, cues, prefetch=False, workers=1)
                 owned = image.copy()
                 prepared.append(transforms.submit(transform, owned))
             else:
-                prepared.append(tagger.prepare(image))
+                from contextlib import nullcontext
+                timer = (report.measure('image_prepare', model=tagger.settings.source.key, work=work, units=1, unit='frames')
+                         if report is not None else nullcontext())
+                with timer:
+                    prepared.append(tagger.prepare(image))
             batch_cues.append(cue)
         if transforms:
             prepared = [future.result() for future in prepared]

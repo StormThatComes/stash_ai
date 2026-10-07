@@ -392,6 +392,59 @@ Raport jest pozbawiony bezpośrednich identyfikatorów i treści, ale dokładne
 agregaty rozmiaru/liczebności nadal opisują konkretną instalację. Przed
 udostępnieniem warto przejrzeć wygenerowany JSON.
 
+### Historia uruchomień i raport profilowania
+
+Inferencja, merge, cleanup i operacje zapisujące stan automatycznie zapisują
+historię w osobnym pliku `<state-db>.runs.sqlite3`. `--run-history-db PATH`
+wybiera inny plik, a `--no-run-history` wyłącza zapis. Baza historii jest
+niezależna od cache: nie zmienia jego schematu, sygnatur ani zasad wznowienia.
+Warto zachować ją razem z bazą stanu, jeżeli zależy Ci na porównaniach historycznych.
+
+Inspekcje i raporty domyślnie nie zapisują historii; dodaj `--record-run`, aby
+zmierzyć np. `--model-report`, `--cache-report` lub `--db-check`. `--dry-run`
+oraz programowy `DRY_RUN` nigdy nie zapisują historii, także z `--record-run`.
+Historia nie wymusza sekwencyjnego merge ani raportu modeli: procesy CPU
+zwracają swoje agregaty, a rodzic zapisuje je obok własnych pomiarów.
+
+```powershell
+python .\stash_ai.py --models all
+python .\stash_ai.py --merge-only
+python .\stash_ai.py --model-report .\models.json --record-run
+python .\stash_ai.py --run-report .\runs.json
+python .\stash_ai.py --run-report .\wd-runs.json --run-model wd --run-command inference --run-status finished --run-limit 100
+```
+
+`--run-report NEW.json` czyta wyłącznie historię, drukuje podsumowanie i zapisuje
+nowy JSON. Nie potrzebuje bazy cache, modeli ani połączenia ze Stash.
+Filtry obejmują komendę, status i model; limit 1..10000 wybiera najnowsze
+pasujące przebiegi (domyślnie 50). Istniejący raport nie jest nadpisywany.
+
+Każdy przebieg zawiera status, czas rzeczywisty i CPU rodzica, skróty plików
+konfiguracji, parametry workerów, modele i rewizje, dostępne hashe wag/słowników,
+liczniki zmian i błędów oraz pomiary etapów/API. Nie zapisuje klucza API,
+adresów mediów, payloadów ani treści błędów. Nie jest to raport anonimowy:
+identyfikatory przebiegów, daty, konfiguracja i agregaty opisują Twoją instalację.
+Zapis startu następuje przed wykonaniem akcji; Ctrl+C i błędy kończą rekord.
+Status `running` oznacza brak zapisanego końca — proces może jeszcze pracować
+albo zostać zabity bez możliwości zamknięcia historii. Błąd zapisu historii
+nie przerywa właściwej komendy i nie przesłania jej błędu.
+
+Raport pokazuje czasy scen, batchy inferencji, przygotowania klatek,
+checkpointów, cache, rethreshold, merge, publikacji i operacji API, jeśli dany
+etap został wykonany. Świeża inferencja, wznowienia i użycie cache są rozdzielone.
+Metryki zawierają liczbę wywołań, sumę, średnią, min/max, przybliżone p50/p95
+z ograniczonego histogramu oraz przepustowość, gdy znana jest liczba jednostek.
+Średnia to suma czasów / liczba wywołań, również przy łączeniu przebiegów.
+Porównania grupują zgodną konfigurację, środowisko i tożsamość modeli,
+oddzielając statusy zakończenia oraz udane i nieudane operacje.
+
+Czasy etapów zawierają zarówno czas własny, jak i czas z wywołaniami podrzędnymi.
+Praca w wątkach/procesach może się nakładać; sumy etapów nie są czasem całego
+przebiegu. `cpu_seconds` obejmuje rodzica, a `worker_cpu` mierzone zadania workerów.
+Histogramy mają stały rozmiar; historia rośnie o jeden rekord na przebieg,
+bez zapisywania wszystkich pojedynczych pomiarów. Raport opisuje wybrane
+przebiegi, nie całą historię, gdy zastosowano limit lub filtry.
+
 ### Model Utility / Ablation Report
 
 `--model-report NEW.json` działa wyłącznie na zapisanym evidence i nie łączy się
