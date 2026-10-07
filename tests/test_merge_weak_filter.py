@@ -12,6 +12,7 @@ import pytest
 from tests.helpers.runtime import runtime as app
 import stash_ai.evidence.identity as thresholds_identity
 from stash_ai.evidence import frames as fusion
+from stash_ai.evidence import eligibility
 import stash_ai.evidence.intervals as merge_intervals
 import stash_ai.evidence.source_markers as merge_source_markers
 from stash_ai.evidence.temporal import markers as temporal
@@ -34,7 +35,7 @@ def test_shared_observations_sort_only_eligible_scores(monkeypatch):
         if kwargs.get('key') is not None:
             sorted_sizes.append(len(values))
         return builtins.sorted(values, **kwargs)
-    monkeypatch.setattr(fusion, 'sorted', observe_sort, raising=False)
+    monkeypatch.setattr(eligibility, 'sorted', observe_sort, raising=False)
     result = fusion.observations(app, group(records), policies(), tag_policies=empty_tag_policies())
     assert sorted_sizes == [2] * 4
     assert all(set(event['cores']) == {'core', 'support'} for event in result)
@@ -49,7 +50,7 @@ def test_temporal_markers_sort_only_eligible_scores(monkeypatch):
         if values and isinstance(values[0], tuple):
             sorted_sizes.append(len(values))
         return builtins.sorted(values, **kwargs)
-    monkeypatch.setattr(temporal, 'sorted', observe_sort, raising=False)
+    monkeypatch.setattr(eligibility, 'sorted', observe_sort, raising=False)
     markers, _ = temporal.build_markers(app, frames(rows), frozenset(), threshold=.8,
                                        collect_extras=False)
     assert sorted_sizes == [2] * 4

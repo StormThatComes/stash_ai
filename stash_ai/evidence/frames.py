@@ -57,7 +57,6 @@ def make_groups(records, signatures=None):
 
 def observations(app, group, core_policies, tag_policies):
     """One event per timestamp; duplicate runs of a model count only once."""
-    from stash_ai.evidence.labels import raw_label
     from stash_ai.exclusions import require_policies
     tag_policies = require_policies(tag_policies)
     times = {}
@@ -65,26 +64,16 @@ def observations(app, group, core_policies, tag_policies):
         from stash_ai.evidence.thresholds import marker_threshold
         high = marker_threshold(segment)
         floor = marker_floor(app.TEMPORAL_POLICY, high)
-        sort_floor = min(floor, high)
         for row in segment["items"]:
             start, end = row["start"], row["end"]
             if start < 0 or end <= start:
                 raise ValueError("Invalid cached VTT interval for shared observations.")
             event = times.setdefault(start, {"start": start, "end": end, "cores": {}, "extras": {}})
             event["end"] = max(event["end"], end)
-            eligible = []
-            for tag, score in row["tags"]:
-                if tag not in tag_policies[source]:
-                    # Validate even observations below the current publication floor.
-                    label = raw_label(tag)
-                    if score >= sort_floor:
-                        eligible.append((label, score))
-            ordered = sorted(eligible, key=lambda item: (-item[1], item[0]))
-            cores = [(tag, score) for tag, score in ordered if score >= floor and tag not in core_policies[source]]
-            extras = [(tag, score) for tag, score in ordered if score >= high]
-            if app.MARKER_MAX_TAGS_PER_FRAME:
-                cores = cores[:app.MARKER_MAX_TAGS_PER_FRAME]
-                extras = extras[:app.MARKER_MAX_TAGS_PER_FRAME]
+            from .eligibility import selections
+            cores, extras = selections(row['tags'], high, floor, core_policies[source],
+                                       tag_policies[source], app.MARKER_MAX_TAGS_PER_FRAME,
+                                       validate=True)
             for tag, score in cores:
                 evidence = event["cores"].setdefault(tag, {}).setdefault(source,
                     {"score": score, "strong": False, "signature": signature})

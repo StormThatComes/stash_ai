@@ -8,14 +8,18 @@ from stash_ai.runtime.timing import stage
 from .types import PreparedEvidence
 
 
-def prepare_sync_evidence(app, stash, store, scene, scene_hits, spans, *, cleanup, report):
+def prepare_sync_evidence(app, stash, store, scene, scene_hits, spans, *, cleanup, report,
+                          prepared_markers=None):
     """Build merged markers/scene labels and apply cleanup-only retention rules."""
     scene_id = str(scene["id"])
     if app.CREATE_MARKERS:
         from stash_ai.publication.preconditions import require_native_ranges
         require_native_ranges(scene)
-    with stage(report, 'marker_union'):
-        markers = merge_intervals.union_intervals(spans, borrow=True) if app.CREATE_MARKERS else []
+    if prepared_markers is None:
+        with stage(report, 'marker_union'):
+            markers = merge_intervals.union_intervals(spans, borrow=True) if app.CREATE_MARKERS else []
+    else:
+        markers = prepared_markers
     if report is not None:
         report.record_counts(marker_contributions=len(spans), union_markers=len(markers),
                              scene_contributions=len(scene_hits))
@@ -32,4 +36,3 @@ def prepare_sync_evidence(app, stash, store, scene, scene_hits, spans, *, cleanu
             merge_labels.AI.prefix + marker["tag"], {"seconds": marker["start"], "end_seconds": marker["end"]})]
         spans = [item for marker in markers for item in marker["contributors"]]
     return PreparedEvidence(scene_hits, spans, markers, scene_labels)
-

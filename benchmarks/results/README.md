@@ -29,3 +29,9 @@ z 1,242 do 0,012 s; cleanup 1000 markerów w 20 primary tagach z 0,179 do 0,065 
 Plik zawiera też mały wariant kontrolny. Hashe wejścia, logicznych snapshotów,
 wyników Stash i liczniki są zgodne między wersjami. Pomiar obejmuje SQLite i makietę
 Stash, bez inferencji oraz opóźnień API.
+
+[Kaskada popularnego tagu](tag_cascade_2026-10-07.json) to pomiar z 2026-10-07:
+100 tys. i milion markerów, indeksowane relacje oraz WAL/NORMAL zgodne ze Stash
+v0.31.1. Wcześniejsze odpinanie relacji partiami skróciło największą transakcję,
+ale zwiększyło całkowity czas o 37–49% nawet bez API, hooków i ładowania obiektów.
+Hashe zachowanego stanu są identyczne. [Opis i decyzja](../../docs/cleanup_performance.md).

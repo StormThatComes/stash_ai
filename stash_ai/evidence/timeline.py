@@ -6,11 +6,14 @@ reference scanner, since removing a long leading interval can split a union.
 """
 from bisect import bisect_left, bisect_right
 
+BLOCK = 64
+
 
 class Series:
     def __init__(self):
         self.positions, self.starts, self.ends, self.scores = [], [], [], []
         self.coverage, self.runs = [], []
+        self.maxima, self.max_tree = [], None
 
     def append(self, position, start, end, score=None):
         offset = len(self.positions)
@@ -22,6 +25,37 @@ class Series:
         self.starts.append(start)
         self.ends.append(end)
         self.scores.append(score)
+        if score is not None:
+            if offset % BLOCK == 0:
+                self.maxima.append(score)
+            else:
+                self.maxima[-1] = max(self.maxima[-1], score)
+            self.max_tree = None
+
+    def max_score(self, lo, hi):
+        left, right = (lo + BLOCK - 1) // BLOCK, hi // BLOCK
+        if left >= right:
+            return max(self.scores[lo:hi])
+        edges = self.scores[lo:left * BLOCK] + self.scores[right * BLOCK:hi]
+        result = max(edges, default=float('-inf'))
+        if self.max_tree is None:
+            width = 1 << (len(self.maxima) - 1).bit_length()
+            tree = [float('-inf')] * (2 * width)
+            tree[width:width + len(self.maxima)] = self.maxima
+            for index in range(width - 1, 0, -1):
+                tree[index] = max(tree[index * 2], tree[index * 2 + 1])
+            self.max_tree = tree, width
+        tree, width = self.max_tree
+        left, right = left + width, right + width
+        while left < right:
+            if left % 2:
+                result = max(result, tree[left])
+                left += 1
+            if right % 2:
+                right -= 1
+                result = max(result, tree[right])
+            left, right = left // 2, right // 2
+        return result
 
     def bounds(self, first, last):
         lo = bisect_left(self.positions, first)
@@ -54,12 +88,15 @@ class Series:
 class Timeline:
     def __init__(self, events, context, allowed):
         self.tags, self.context = {}, context
+        self.blocks = [set() for _ in range((len(events) + BLOCK - 1) // BLOCK)]
+        self.length = len(events)
         for position, event in enumerate(events):
             start, end = event['start'], event['end']
             for tag, values in event['extras'].items():
                 sources = values if allowed is None else {s: score for s, score in values.items() if s in allowed}
                 if not sources:
                     continue
+                self.blocks[position // BLOCK].add(tag)
                 if tag not in self.tags:
                     self.tags[tag] = Series(), {}
                 total, own = self.tags[tag]
@@ -72,7 +109,10 @@ class Timeline:
 
     def support(self, first, last, end, policy, group):
         support = {}
-        for tag, (total, sources) in self.tags.items():
+        candidates = self.tags if last - first > self.length // 8 else sorted(set().union(
+            *self.blocks[first // BLOCK:(last + BLOCK - 1) // BLOCK]))
+        for tag in candidates:
+            total, sources = self.tags[tag]
             lo, hi = total.bounds(first, last)
             if lo == hi:
                 continue
@@ -83,7 +123,7 @@ class Timeline:
                 if a < b:
                     own[source] = dict(intervals=series.intervals(a, b, end),
                         sample_times=series.starts[a:min(b, a+policy.extra_min_hits)],
-                        score=max(series.scores[a:b]), signature=self.context[source])
+                        score=series.max_score(a, b), signature=self.context[source])
             if own:
                 item['sources'] = own
             support[tag] = item

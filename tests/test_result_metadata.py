@@ -231,7 +231,7 @@ def test_legacy_backfill_only_selected_pairs_and_commits_once_per_check(tmp_path
                                         markers=True) == {'scene_thresholds_updated': 2}
         assert {(row[1], row[2], row[3]) for row in metadata_rows(store)} == {
             (scene, 'wd', kind) for scene in ('1', '2') for kind in ('scene', 'markers')}
-        assert statements.count('COMMIT') == 3  # One Check backfill plus two Apply pairs.
+        assert statements.count('COMMIT') == 2  # One Check backfill and one bounded Apply batch.
         assert report.timing_calls['state_json_decode'] == 4  # Check backfills each scene/kind once.
 
 

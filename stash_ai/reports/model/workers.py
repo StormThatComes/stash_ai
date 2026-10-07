@@ -89,10 +89,9 @@ def build_report_parallel(app, state_db, scope, scene_ids, core_policies,
         ),
     ) as executor:
         partials = executor.map(
-            _report_worker_scene, scene_ids, chunksize=chunksize)
+            _report_worker_scene, scene_ids, chunksize=chunksize, buffersize=max(workers, 2))
         for partial in tqdm(
                 partials, total=len(scene_ids), desc="Model report", unit="scene"):
             merge_scene_report(totals, utility, partial)
 
     return model.report_payload(totals, utility)
-
