@@ -425,7 +425,10 @@ liczniki zmian i błędów oraz pomiary etapów/API. Nie zapisuje klucza API,
 adresów mediów, payloadów ani treści błędów. Nie jest to raport anonimowy:
 identyfikatory przebiegów, daty, konfiguracja i agregaty opisują Twoją instalację.
 Zapis startu następuje przed wykonaniem akcji; Ctrl+C i błędy kończą rekord.
-Status `running` oznacza brak zapisanego końca — proces może jeszcze pracować
+Agregaty są zapisywane częściowo na granicach etapów co 30 sekund lub po 32 ukończonych
+jednostkach pracy model/scena/merge. `last_progress_at` i `progress_seq` pokazują
+ostatni zapis; `partial=true` oznacza brak końca i nie jest traktowane jako udany
+pełny przebieg. Status `running` oznacza brak zapisanego końca — proces może jeszcze pracować
 albo zostać zabity bez możliwości zamknięcia historii. Błąd zapisu historii
 nie przerywa właściwej komendy i nie przesłania jej błędu.
 
@@ -435,8 +438,14 @@ etap został wykonany. Świeża inferencja, wznowienia i użycie cache są rozdz
 Metryki zawierają liczbę wywołań, sumę, średnią, min/max, przybliżone p50/p95
 z ograniczonego histogramu oraz przepustowość, gdy znana jest liczba jednostek.
 Średnia to suma czasów / liczba wywołań, również przy łączeniu przebiegów.
-Porównania grupują zgodną konfigurację, środowisko i tożsamość modeli,
-oddzielając statusy zakończenia oraz udane i nieudane operacje.
+Porównania grupują zgodną konfigurację, środowisko i tożsamość modeli.
+Konfiguracja zawiera skrót uporządkowanego zestawu wybranych ID (kolejność i duplikaty
+nie zmieniają skrótu), hash kodu, dostępną rewizję git i wersje zainstalowanych bibliotek.
+`execution_observed=false` oznacza, że urządzenie modelu nie zostało zaobserwowane,
+np. przy użyciu cache. Zweryfikowane wejścia mają oddzielny workload: liczbę par,
+liczbę cue i fingerprint danych, również uwzględniany przy grupowaniu. Te metadane
+nie autoryzują reuse i nie zmieniają tożsamości zapisanych predykcji. Raport rozdziela
+statusy zakończenia oraz udane i nieudane operacje.
 
 Czasy etapów zawierają zarówno czas własny, jak i czas z wywołaniami podrzędnymi.
 Praca w wątkach/procesach może się nakładać; sumy etapów nie są czasem całego
@@ -887,3 +896,40 @@ scenes finish. Network/read errors do not authorize retirement.
 
 Dokładny plan publikacji z cache: `--merge-only --dry-run --dry-run-plan review.jsonl`.
 Opis zdarzeń i symbolicznych ID: [docs/dry_run_plan.md](docs/dry_run_plan.md).
+
+### Retencja historii uruchomień
+
+`--prune-run-history` działa wyłącznie na osobnej bazie historii, w scope bieżącego
+STASH_URL. Podaj `--history-keep-last N` i/lub `--history-max-age-days DAYS`.
+Połączone limity usuwają zakończony przebieg przekraczający dowolny z nich;
+`N=0` usuwa wszystkie zakończone przebiegi w tym scope. Przed zastosowaniem możesz
+sprawdzić liczbę przebiegów/decyzji i przykładowe ID przez `--dry-run`.
+
+```powershell
+python .\stash_ai.py --prune-run-history --history-keep-last 100 --history-max-age-days 90 --dry-run
+python .\stash_ai.py --prune-run-history --history-keep-last 100 --history-max-age-days 90
+```
+
+Usuwanie przebiegów i ich decyzji jest jedną transakcją. Rekordy `running`,
+rekordy bez końca, inne scope i `reuse_proofs` pozostają. Nie są otwierane wyniki,
+checkpointy ani snapshoty bazy źródłowej. Historia v1/v2 jest nadal czytelna
+bez modyfikacji; pierwszy zapis aktualizuje tylko historię do v3. Retencja nie
+uruchamia się automatycznie i nie wykonuje VACUUM.
+
+
+### Zależności ponownej publikacji
+
+Fingerprint merge obejmuje moduły odtwarzające zachowane dowody i publikujące
+tagi/markery oraz efektywną politykę, ustawienia publikacji, exclusions, hierarchy
+i zaobserwowany katalog/scenę. Zmiana backendu, checkpointów, przygotowania wejść,
+prefetchu, workerów lub historii nie unieważnia gotowej publikacji samą zmianą
+pliku. Zapis nowych wyników i rzeczywiste zmiany sceny/polityki nadal ją unieważniają.
+
+Manifest jest konserwatywny na poziomie modułów: zmiana mieszanego modułu storage
+lub domain może nadal wymagać sprawdzenia merge. Jednorazowa zmiana manifestu
+powoduje ponowne sprawdzenie istniejących merge checks, z użyciem zapisanych wyników;
+nie zmienia tożsamości inferencji ani formatów wyników/checkpointów/snapshotów.
+
+Przypięte dowody published/pending/recovery są odczytywane leniwie raz podczas
+jednego zapisu wyników scene+markers. Odczyt nie przechodzi na kolejny zapis,
+rollback ani zmianę publikacji; pełne archiwum konkretnych dowodów pozostaje.

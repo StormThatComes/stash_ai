@@ -208,6 +208,7 @@ class ReuseObserver:
         if self.current is None:
             self.action, self.reasons = 'blocked', ['input_verification_failed' if stage == 'inference' else 'model_load_failed']
         if stage == 'load model':
+            self.action = 'blocked'
             self.reasons.append('model_load_failed')
         checkpoint = self.store.connection.execute('SELECT signature FROM ' + self.store.table('checkpoints') +
             ' WHERE scope=? AND scene=? AND model=?', (self.store.scope, self.scene, self.model)).fetchone()

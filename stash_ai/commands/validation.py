@@ -30,6 +30,19 @@ def _validate_report(parser, args, rule):
 
 def validate_reports(parser, args):
     """Reject report modifiers before applying runtime defaults."""
+    if args.command is Command.PRUNE_HISTORY:
+        if supplied(args, (*MODEL_OPTIONS, *PUBLICATION_OPTIONS, 'record_run')) or args.scene_id:
+            parser.error('--prune-run-history does not use inference/tagging/scene modifiers.')
+        if any(getattr(args, name) is not None for name in ('run_limit', 'run_command', 'run_status', 'run_model')):
+            parser.error('--run-* filters do not apply to history retention.')
+        if args.history_keep_last is None and args.history_max_age_days is None:
+            parser.error('--prune-run-history requires --history-keep-last and/or --history-max-age-days.')
+    elif args.history_keep_last is not None or args.history_max_age_days is not None:
+        parser.error('--history-* retention settings require --prune-run-history.')
+    if args.history_keep_last is not None and args.history_keep_last < 0:
+        parser.error('--history-keep-last must be >= 0.')
+    if args.history_max_age_days is not None and (not math.isfinite(args.history_max_age_days) or args.history_max_age_days <= 0):
+        parser.error('--history-max-age-days must be finite and positive.')
     if args.command is Command.RUN_REPORT:
         if supplied(args, (*MODEL_OPTIONS, *PUBLICATION_OPTIONS, 'dry_run', 'record_run')) or args.scene_id:
             parser.error('--run-report is an offline history inspection; model/tagging/scene modifiers do not apply.')
