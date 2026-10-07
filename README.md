@@ -441,6 +441,9 @@ oddzielając statusy zakończenia oraz udane i nieudane operacje.
 Czasy etapów zawierają zarówno czas własny, jak i czas z wywołaniami podrzędnymi.
 Praca w wątkach/procesach może się nakładać; sumy etapów nie są czasem całego
 przebiegu. `cpu_seconds` obejmuje rodzica, a `worker_cpu` mierzone zadania workerów.
+Błąd zadania workera ma `outcome=error`, zwiększa `errors` i nie zwiększa liczby
+ukończonych scen (`units=0`), również gdy został przekazany rodzicowi jako wynik.
+Merge kontynuuje kolejne sceny po takim błędzie; raport modeli zgłasza niepowodzenie.
 Histogramy mają stały rozmiar; historia rośnie o jeden rekord na przebieg,
 bez zapisywania wszystkich pojedynczych pomiarów. Raport opisuje wybrane
 przebiegi, nie całą historię, gdy zastosowano limit lub filtry.

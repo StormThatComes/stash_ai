@@ -6,6 +6,7 @@ all Stash access, tag resolution, publication intent and SQLite writes serial.
 from __future__ import annotations
 
 from collections import Counter
+from dataclasses import dataclass
 from concurrent.futures import ProcessPoolExecutor
 from multiprocessing import get_context
 from pathlib import Path
@@ -16,6 +17,14 @@ from stash_ai.runtime.settings import evidence_settings as runtime_settings
 
 _WORKER_CONTEXT = None
 _PROFILE = False
+
+
+@dataclass(frozen=True)
+class MergeEvidence:
+    scene_hits: list
+    spans: list
+    markers: list
+    diagnostics: Counter
 
 def _init_worker(state_db, scope, settings, core_policies, scene_policies,
                  cache_bytes, memory_budget_bytes, profile=False):
@@ -32,34 +41,25 @@ def _init_worker(state_db, scope, settings, core_policies, scene_policies,
 
 
 def _worker_evidence(scene_id):
-    if _PROFILE and _WORKER_CONTEXT is not None:
-        from stash_ai.runtime.profile import worker_profile
-        result, metrics = worker_profile(_WORKER_CONTEXT.store, lambda: _compute_evidence(scene_id), 'merge_worker_compute')
-        return (*result, metrics)
-    return _compute_evidence(scene_id)
+    from stash_ai.runtime.profile import execute_worker
+    store = _WORKER_CONTEXT.store if _WORKER_CONTEXT is not None else None
+    return execute_worker(scene_id, store, lambda: _compute_evidence(scene_id),
+                          'merge_worker_compute', profile=_PROFILE)
 
 
 def _compute_evidence(scene_id):
-    """Return one scene's merge evidence or a serializable failure."""
+    """Compute evidence; the outer envelope captures failures after profiling."""
     if _WORKER_CONTEXT is None:
-        return str(scene_id), None, None, None, None, "Merge worker was not initialized."
+        raise RuntimeError('Merge worker was not initialized.')
     from stash_ai.evidence import pipeline as merge
 
     diagnostics = Counter()
-    try:
-        scene_hits, spans = merge.evidence(
-            _WORKER_CONTEXT.settings,
-            _WORKER_CONTEXT.store,
-            str(scene_id),
-            _WORKER_CONTEXT.core_policies,
-            _WORKER_CONTEXT.scene_policies,
-            diagnostics,
-        )
-        from stash_ai.evidence.intervals import union_intervals
-        markers = union_intervals(spans, borrow=True) if _WORKER_CONTEXT.settings.CREATE_MARKERS else []
-        return str(scene_id), scene_hits, spans, markers, diagnostics, None
-    except Exception as exc:
-        return str(scene_id), None, None, None, None, f"{type(exc).__name__}: {exc}"
+    scene_hits, spans = merge.evidence(
+        _WORKER_CONTEXT.settings, _WORKER_CONTEXT.store, str(scene_id),
+        _WORKER_CONTEXT.core_policies, _WORKER_CONTEXT.scene_policies, diagnostics)
+    from stash_ai.evidence.intervals import union_intervals
+    markers = union_intervals(spans, borrow=True) if _WORKER_CONTEXT.settings.CREATE_MARKERS else []
+    return MergeEvidence(scene_hits, spans, markers, diagnostics)
 
 
 def iter_parallel_evidence(app, state_db, scope, scene_ids, core_policies,
