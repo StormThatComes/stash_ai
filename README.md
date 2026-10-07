@@ -392,6 +392,104 @@ Raport jest pozbawiony bezpośrednich identyfikatorów i treści, ale dokładne
 agregaty rozmiaru/liczebności nadal opisują konkretną instalację. Przed
 udostępnieniem warto przejrzeć wygenerowany JSON.
 
+### Historia uruchomień i raport profilowania
+
+Inferencja, merge, cleanup i operacje zapisujące stan automatycznie zapisują
+historię w osobnym pliku `<state-db>.runs.sqlite3`. `--run-history-db PATH`
+wybiera inny plik, a `--no-run-history` wyłącza zapis. Baza historii jest
+niezależna od cache: nie zmienia jego schematu, sygnatur ani zasad wznowienia.
+Warto zachować ją razem z bazą stanu, jeżeli zależy Ci na porównaniach historycznych.
+
+Inspekcje i raporty domyślnie nie zapisują historii; dodaj `--record-run`, aby
+zmierzyć np. `--model-report`, `--cache-report` lub `--db-check`. `--dry-run`
+oraz programowy `DRY_RUN` nigdy nie zapisują historii, także z `--record-run`.
+Historia nie wymusza sekwencyjnego merge ani raportu modeli: procesy CPU
+zwracają swoje agregaty, a rodzic zapisuje je obok własnych pomiarów.
+
+```powershell
+python .\stash_ai.py --models all
+python .\stash_ai.py --merge-only
+python .\stash_ai.py --model-report .\models.json --record-run
+python .\stash_ai.py --run-report .\runs.json
+python .\stash_ai.py --run-report .\wd-runs.json --run-model wd --run-command inference --run-status finished --run-limit 100
+```
+
+`--run-report NEW.json` czyta wyłącznie historię, drukuje podsumowanie i zapisuje
+nowy JSON. Nie potrzebuje bazy cache, modeli ani połączenia ze Stash.
+Filtry obejmują komendę, status i model; limit 1..10000 wybiera najnowsze
+pasujące przebiegi (domyślnie 50). Istniejący raport nie jest nadpisywany.
+
+Każdy przebieg zawiera status, czas rzeczywisty i CPU rodzica, skróty plików
+konfiguracji, parametry workerów, modele i rewizje, dostępne hashe wag/słowników,
+liczniki zmian i błędów oraz pomiary etapów/API. Nie zapisuje klucza API,
+adresów mediów, payloadów ani treści błędów. Nie jest to raport anonimowy:
+identyfikatory przebiegów, daty, konfiguracja i agregaty opisują Twoją instalację.
+Zapis startu następuje przed wykonaniem akcji; Ctrl+C i błędy kończą rekord.
+Status `running` oznacza brak zapisanego końca — proces może jeszcze pracować
+albo zostać zabity bez możliwości zamknięcia historii. Błąd zapisu historii
+nie przerywa właściwej komendy i nie przesłania jej błędu.
+
+Raport pokazuje czasy scen, batchy inferencji, przygotowania klatek,
+checkpointów, cache, rethreshold, merge, publikacji i operacji API, jeśli dany
+etap został wykonany. Świeża inferencja, wznowienia i użycie cache są rozdzielone.
+Metryki zawierają liczbę wywołań, sumę, średnią, min/max, przybliżone p50/p95
+z ograniczonego histogramu oraz przepustowość, gdy znana jest liczba jednostek.
+Średnia to suma czasów / liczba wywołań, również przy łączeniu przebiegów.
+Porównania grupują zgodną konfigurację, środowisko i tożsamość modeli,
+oddzielając statusy zakończenia oraz udane i nieudane operacje.
+
+Czasy etapów zawierają zarówno czas własny, jak i czas z wywołaniami podrzędnymi.
+Praca w wątkach/procesach może się nakładać; sumy etapów nie są czasem całego
+przebiegu. `cpu_seconds` obejmuje rodzica, a `worker_cpu` mierzone zadania workerów.
+Histogramy mają stały rozmiar; historia rośnie o jeden rekord na przebieg,
+bez zapisywania wszystkich pojedynczych pomiarów. Raport opisuje wybrane
+przebiegi, nie całą historię, gdy zastosowano limit lub filtry.
+
+### Dlaczego scena została przeliczona?
+
+Zwykła inferencja zapisuje w historii decyzję dla każdej pary scena/model:
+`infer`, `cache_reused`, `rethreshold`, `checkpoint_resumed` albo `blocked`.
+Dodaj `--verbose`, aby widzieć decyzje i powody podczas pracy. Osobny raport
+czyta te same dane offline, drukuje podsumowanie per model i zapisuje nowy JSON:
+
+```powershell
+python .\stash_ai.py --reuse-report .\reuse.json
+python .\stash_ai.py --reuse-report .\wd-scene.json --models wd --scene-id 123
+python .\stash_ai.py --reuse-report .\recent-reuse.json --run-limit 20 --run-status finished
+```
+
+Domyślnie raport wybiera ostatni pasujący przebieg z zapisanymi decyzjami.
+`--run-limit` wybiera 1..10000 takich przebiegów; filtry modeli (`--models`
+lub `--run-model`), scen (`--scene-id` można powtarzać), komendy i statusu
+stosowane są przed limitem. Późniejszy merge lub maintenance bez decyzji
+inferencji nie ukryje ostatniego raportu. Raport opisuje wykonane przebiegi;
+nie sprawdza bieżących plików ani dostępności mediów w Stash.
+
+Powody obejmują brak evidence, jawny restart, wyłączone resume, oczekujący
+refresh, niekompletny indeks oraz zmianę modelu, rewizji, wag, słownika,
+batch size, agregacji, retencji, progów, VTT lub sprite. Jeśli dostępna jest
+poprzednia tożsamość, JSON zawiera wartości przed/po, liczebność cue i medianę
+odstępów między ich początkami. Dla zbyt płytkiego cache pokazuje zapisany
+floor i wymaganą retencję; dla checkpointu liczbę wznowionych klatek i powód
+przyjęcia lub odrzucenia. Kilka powodów może dotyczyć jednej decyzji, więc
+ich liczebności nie muszą sumować się do liczby scen.
+
+Starszy cache bez historii nadal działa normalnie. Po zgodnym reuse można
+uzupełnić jego tożsamość diagnostyczną bez inferencji. Gdy wcześniejszych
+danych brakuje, `historical_identity_unavailable` oraz ogólne `input_changed`
+lub `model_or_configuration_changed` wskazują granice dostępnej informacji.
+Diagnostyka nie zmienia sygnatur, schematu cache ani warunków jego użycia.
+Historia w formacie 1 jest odczytywana bez modyfikacji i aktualizowana do
+formatu 2 dopiero podczas zapisu kolejnego przebiegu.
+
+Historia przechowuje identyfikatory scen i modeli, powody, parametry oraz
+hashe wejść, bez adresów mediów i kluczy API. Decyzje rosną wraz z liczbą
+par scena/model/przebieg; poprzednia tożsamość zajmuje jeden rekord na
+scenę/model/rodzaj wyniku. Zapis jest buforowany w krótkich transakcjach po
+maksymalnie 64 operacje, a normalne zakończenie i Ctrl+C opróżniają bufor.
+Nagłe zabicie procesu może utracić ostatnie niezapisane operacje historii.
+`--no-run-history` wyłącza ich zapis; raport wymaga wcześniej zebranych danych.
+
 ### Model Utility / Ablation Report
 
 `--model-report NEW.json` działa wyłącznie na zapisanym evidence i nie łączy się

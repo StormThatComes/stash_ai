@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 
 from stash_ai.commands.validation import validate_args
+from stash_ai.commands.modes import Command
 
 
 def build_parser(app) -> argparse.ArgumentParser:
@@ -22,6 +23,18 @@ def build_parser(app) -> argparse.ArgumentParser:
     parser.add_argument("--scene-id", action="append", metavar="ID", help="Limit to this scene; repeat for multiple scenes.")
     parser.add_argument("--state-db", type=Path, default=app.MERGE_STATE_FILE, metavar="SQLITE",
                         help="Durable per-model evidence for merged outputs; retain this file between runs.")
+    parser.add_argument("--run-history-db", type=Path, metavar="SQLITE",
+                        help="Independent run history DB; default: <state-db>.runs.sqlite3.")
+    history = parser.add_mutually_exclusive_group()
+    history.add_argument("--record-run", action="store_true",
+                         help="Also record a read-only command in run history; dry runs never record history.")
+    history.add_argument("--no-run-history", action="store_true",
+                         help="Disable automatic history of inference, merge and write/maintenance commands.")
+    parser.add_argument("--run-limit", type=int, metavar="N", help="Most recent matching runs: 50 for --run-report, 1 for --reuse-report; maximum: 10000.")
+    parser.add_argument("--run-command", choices=[item.value for item in Command],
+                        help="Filter run/reuse reports by command.")
+    parser.add_argument("--run-status", choices=("running", "finished", "error", "interrupted"), help="Filter run/reuse reports by run status.")
+    parser.add_argument("--run-model", choices=("joytag", "wd", "dtq", "oppai"), help="Filter run/reuse reports by model.")
     parser.add_argument("--db-init", action="store_true",
                         help="Rebuild a new/empty state DB from fresh inference, adopting existing AI outputs. "
                              "Requires both outputs; interrupted initialization resumes normally.")
@@ -116,6 +129,10 @@ def build_parser(app) -> argparse.ArgumentParser:
                        help="Write an offline tag review queue with reasons, examples and per-model counts; no inference or Stash requests.")
     modes.add_argument("--cache-report", type=Path, metavar="NEW.json",
                        help="Report scene/marker cache coverage against selected YAML models and plan targeted backfill; offline and read-only.")
+    modes.add_argument("--run-report", type=Path, metavar="NEW.json",
+                       help="Write offline run history and comparable-run profiling averages; no Stash, model or state DB writes.")
+    modes.add_argument("--reuse-report", type=Path, metavar="NEW.json",
+                       help="Explain recorded cache/checkpoint decisions and reinference reasons from run history; offline and read-only.")
 
     return parser
 

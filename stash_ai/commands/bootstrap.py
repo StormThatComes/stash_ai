@@ -7,7 +7,8 @@ def runtime_options(app, args):
     from stash_ai.commands.validation import mode_flags
     from stash_ai.runtime.report import RunReport
     from tqdm import tqdm
-    args.report = RunReport(args.verbose, tqdm.write)
+    if not hasattr(args, 'report'):
+        args.report = RunReport(args.verbose, tqdm.write)
     app.DRY_RUN = app.DRY_RUN or args.dry_run
     if args.markers_only or args.cleanup_markers_only or args.sync_marker_groups_only:
         app.APPLY_SCENE_TAGS, app.CREATE_MARKERS = False, True
@@ -21,6 +22,8 @@ def runtime_options(app, args):
 
 def selected_settings(app, args):
     settings = app.services.load_model_settings(args.model_config, args.models, args.device, args.offline)
+    for config in settings:
+        args.report.record_model(config)
     print("Selected models: " + ", ".join(f"{item.source.title} ({item.source.code})" for item in settings))
     return settings
 

@@ -20,9 +20,62 @@ class RunReport:
         self.unread_scenes = {}
         self.dry_run_plan = None
         self.active_requests = {}
+        self.profile = None
+        self.issue_counts = Counter()
+        self.count_sources = []
+        self.history = None
 
-    def measure(self, stage):
-        return self._timing.measure(stage)
+    def reuse_decision(self, scope, scene, model, action, status, reasons, details):
+        if status != 'started':
+            self.counts['reuse_decision_' + action] += 1
+            for reason in reasons:
+                self.counts['reuse_reason_' + reason] += 1
+        self.detail(f'Reuse {model}/scene {scene}: {action}/{status}; ' + ', '.join(reasons))
+        if self.history is not None:
+            self.history.call('record_decision', self.history.identifier, scope, scene, model,
+                              action, status, reasons, details)
+
+    def measure(self, stage, *, model=None, work=None, units=0, unit=''):
+        return self._timing.measure(stage, model=model, work=work, units=units, unit=unit)
+
+    def work(self, name=None):
+        if name is not None:
+            self._timing._timers.work = name
+        return getattr(self._timing._timers, 'work', '')
+
+    def model(self, name):
+        return self._timing.model(name)
+
+    def watch_counts(self, source):
+        if not any(item is source for item in self.count_sources):
+            self.count_sources.append(source)
+
+    def model_outcome(self, model, name):
+        self.work(name)
+        if self.profile is not None:
+            self.profile.outcome(model, name)
+
+    def record_model(self, config, *, identity=None, tagger=None):
+        if self.profile is None:
+            return
+        source = config.source
+        row = self.profile.models.setdefault(source.key, {})
+        row.update(repo=source.repo, revision=source.revision, scene_threshold=config.scene_threshold,
+                   marker_threshold=config.marker_threshold, batch_size=config.batch_size, device=config.device,
+                   scene_cache_floor=config.scene_cache_floor, marker_cache_floor=config.marker_cache_floor)
+        if identity is not None:
+            row.update(vocabulary=identity['vocabulary'], asset_hashes=[value for _, value in identity['files']])
+        if tagger is not None:
+            row['effective_batch_size'] = tagger.batch_size
+            if hasattr(tagger, 'device'):
+                row['effective_device'] = str(tagger.device)
+                import sys
+                torch = sys.modules.get('torch')
+                if torch is not None and str(tagger.device).startswith('cuda'):
+                    row['gpu'] = torch.cuda.get_device_name(tagger.device)
+            session = getattr(tagger, 'session', None)
+            if session is not None and hasattr(session, 'get_providers'):
+                row['providers'] = session.get_providers()
 
     def request(self, operation, read):
         return self._timing.request(operation, read)
@@ -39,6 +92,7 @@ class RunReport:
             self.write(message)
 
     def issue(self, stage, source, scene, exc, message):
+        self.issue_counts['/'.join((stage, source, type(exc).__name__))] += 1
         key = (stage, source, type(exc).__name__)
         if key not in self.groups:
             if len(self.groups) >= self.max_groups:
@@ -72,4 +126,7 @@ class RunReport:
         )
 
     def finish(self, title, counts, cache=None):
+        self.watch_counts(counts)
+        if self.profile is not None and cache is not None:
+            self.counts.update({f'ram_cache_{name}': value for name, value in cache.stats.items()})
         write_summary(self, title, counts, cache)

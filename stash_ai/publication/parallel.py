@@ -15,10 +15,12 @@ from stash_ai.runtime.settings import evidence_settings as runtime_settings
 
 
 _WORKER_CONTEXT = None
+_PROFILE = False
 
 def _init_worker(state_db, scope, settings, core_policies, scene_policies,
-                 cache_bytes, memory_budget_bytes):
-    global _WORKER_CONTEXT
+                 cache_bytes, memory_budget_bytes, profile=False):
+    global _WORKER_CONTEXT, _PROFILE
+    _PROFILE = profile
     if _WORKER_CONTEXT is not None:
         _WORKER_CONTEXT.close()
     _WORKER_CONTEXT = open_read_worker(
@@ -30,6 +32,14 @@ def _init_worker(state_db, scope, settings, core_policies, scene_policies,
 
 
 def _worker_evidence(scene_id):
+    if _PROFILE and _WORKER_CONTEXT is not None:
+        from stash_ai.runtime.profile import worker_profile
+        result, metrics = worker_profile(_WORKER_CONTEXT.store, lambda: _compute_evidence(scene_id), 'merge_worker_compute')
+        return (*result, metrics)
+    return _compute_evidence(scene_id)
+
+
+def _compute_evidence(scene_id):
     """Return one scene's merge evidence or a serializable failure."""
     if _WORKER_CONTEXT is None:
         return str(scene_id), None, None, None, None, "Merge worker was not initialized."
@@ -54,7 +64,7 @@ def _worker_evidence(scene_id):
 
 def iter_parallel_evidence(app, state_db, scope, scene_ids, core_policies,
                            scene_policies, *, workers, cache_bytes,
-                           memory_budget_bytes):
+                           memory_budget_bytes, profile=False):
     """Yield read-only evidence in input order while a single parent publishes it."""
     scene_ids = [str(scene_id) for scene_id in scene_ids]
     if not scene_ids:
@@ -81,6 +91,7 @@ def iter_parallel_evidence(app, state_db, scope, scene_ids, core_policies,
             scene_policies,
             worker_cache,
             worker_budget,
+            profile,
         ),
     ) as executor:
         yield from executor.map(

@@ -14,13 +14,15 @@ from stash_ai.runtime.workers import open_read_worker
 from stash_ai.runtime.settings import evidence_settings
 
 _WORKER_CONTEXT = None
+_PROFILE = False
 
 
 def _init_report_worker(state_db, scope, settings, core_policies,
                         scene_policies, cache_bytes, memory_budget_bytes,
-                        preload_sources):
+                        preload_sources, profile=False):
     """Initialize one isolated read-only worker and keep its DB/cache hot."""
-    global _WORKER_CONTEXT
+    global _WORKER_CONTEXT, _PROFILE
+    _PROFILE = profile
     if _WORKER_CONTEXT is not None:
         _WORKER_CONTEXT.close()
     _WORKER_CONTEXT = open_read_worker(
@@ -34,6 +36,13 @@ def _init_report_worker(state_db, scope, settings, core_policies,
 def _report_worker_scene(scene):
     if _WORKER_CONTEXT is None:
         raise RuntimeError("Model report worker was not initialized.")
+    if _PROFILE:
+        from stash_ai.runtime.profile import worker_profile
+        return worker_profile(_WORKER_CONTEXT.store, lambda: _compute_scene(scene), 'model_report_worker_compute')
+    return _compute_scene(scene)
+
+
+def _compute_scene(scene):
     return scene_report(
         _WORKER_CONTEXT.settings,
         _WORKER_CONTEXT.store,
@@ -45,7 +54,7 @@ def _report_worker_scene(scene):
 
 def build_report_parallel(app, state_db, scope, scene_ids, core_policies,
                           scene_policies, *, workers, cache_bytes,
-                          memory_budget_bytes, preload_sources=True):
+                          memory_budget_bytes, preload_sources=True, profile=None):
     """Replay independent scenes in isolated CPU worker processes."""
     scene_ids = list(scene_ids)
     if not scene_ids:
@@ -86,12 +95,16 @@ def build_report_parallel(app, state_db, scope, scene_ids, core_policies,
             worker_cache,
             worker_budget,
             preload_sources,
+            profile is not None,
         ),
     ) as executor:
         partials = executor.map(
             _report_worker_scene, scene_ids, chunksize=chunksize, buffersize=max(workers, 2))
         for partial in tqdm(
                 partials, total=len(scene_ids), desc="Model report", unit="scene"):
+            if profile is not None:
+                partial, metrics = partial
+                profile.ingest(metrics)
             merge_scene_report(totals, utility, partial)
 
     return model.report_payload(totals, utility)

@@ -212,10 +212,15 @@ class MergePublisher:
                     workers=workers,
                     cache_bytes=int(self.args.ram_cache_gb * 2**30),
                     memory_budget_bytes=int(self.args.ram_budget_gb * 2**30),
+                    **({'profile': True} if self.report.profile is not None else {}),
                 )
                 completed = 0
                 try:
                     for (scene_id, current), prepared in zip(pending, evidence):
+                        if len(prepared) == 7:
+                            if self.report.profile is not None:
+                                self.report.profile.ingest(prepared[-1])
+                            prepared = prepared[:6]
                         self._merge_one(scene_id, current, prepared)
                         completed += 1
                         bar.update(1)
