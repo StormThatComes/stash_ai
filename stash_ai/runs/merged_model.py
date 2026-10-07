@@ -39,10 +39,14 @@ class MergedModelRun:
                         progress.block_publication(self.store, remaining, self.key, kinds)
                         break
                 except Exception as exc:
-                    progress.block_publication(self.store, [scene_id], self.key, kinds)
+                    from stash_ai.storage.input_checks import pending
+                    if self.key not in pending(self.store, scene_id):
+                        progress.block_publication(self.store, [scene_id], self.key, kinds)
                     self._record_error('inference', scene_id, exc)
                 except BaseException:
-                    progress.block_publication(self.store, [scene_id], self.key, kinds)
+                    from stash_ai.storage.input_checks import pending
+                    if self.key not in pending(self.store, scene_id):
+                        progress.block_publication(self.store, [scene_id], self.key, kinds)
                     raise
                 remaining.discard(scene_id)
         finally:
@@ -51,6 +55,8 @@ class MergedModelRun:
 
     def _eligible(self, scene_id, paths):
         if not paths.get("sprite") or not paths.get("vtt"):
+            from stash_ai.storage.input_checks import defer
+            defer(self.store, scene_id, self.key)
             self.stats["skipped"] += 1
             return False
         return True
@@ -80,7 +86,13 @@ class MergedModelRun:
         """Return False only when model loading fails and its remaining scenes must stop."""
         app, args, store = self.app, self.args, self.store
         store.cache.pressure(force=True)
-        cues, media, signature = inputs.inspect(app, paths, self.identity)
+        from stash_ai.storage.input_checks import defer, verified
+        try:
+            cues, media, signature = inputs.inspect(app, paths, self.identity)
+        except BaseException:
+            defer(store, scene_id, self.key, 'read_error')
+            raise
+        verified(store, scene_id, self.key)
         if self._reuse(scene_id, signature, cues, media, kinds):
             return True
         if not args.restart:

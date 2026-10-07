@@ -11,6 +11,7 @@ from stash_ai.signatures import digest
 
 
 PUBLICATION_CODE_FILES = (
+    'runtime/dependencies.py', 'storage/input_checks.py',
     'storage/metadata_store.py', 'storage/schema.py', 'rethreshold/plans.py',
     'evidence/contracts.py', 'evidence/formats.py', 'evidence/qualification.py', 'evidence/marker_identity.py', 'evidence/interval_geometry.py', 'inference/input_identity.py',
     'runtime/settings.py', 'runtime/context.py', 'runtime/workers.py',
@@ -31,11 +32,9 @@ def publication_code():
 
 def publication_key(app, args, hierarchy, cores, tags):
     code = publication_code()
-    names = ('APPLY_SCENE_TAGS', 'CREATE_MARKERS', 'CREATE_MISSING',
-             'MARKER_MIN_HITS', 'MARKER_MERGE_GAP_SECONDS', 'MARKER_MAX_TAGS_PER_FRAME',
-             'MARKER_MATCH_TOLERANCE_SECONDS')
+    from stash_ai.runtime.dependencies import capture
     return digest(dict(code=code, policy=asdict(app.TEMPORAL_POLICY),
-        settings={name: getattr(app, name) for name in names},
+        settings=capture(app, 'publication'),
         cores={s: sorted(v) for s, v in cores.items()}, tags={s: sorted(v) for s, v in tags.items()},
         hierarchy=asdict(hierarchy) if hierarchy else None))
 

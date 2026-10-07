@@ -6,6 +6,7 @@ from .summary import write_summary
 
 class RunReport:
     """Fixed-size counters and bounded error examples, even for many scenes."""
+    heartbeat_seconds = 5.0
     def __init__(self, verbose=False, write=print, max_groups=6, examples=2):
         self.verbose, self.write = verbose, write
         self.max_groups, self.examples = max_groups, examples
@@ -16,6 +17,9 @@ class RunReport:
         self.timings, self.timing_calls = self._timing.timings, self._timing.timing_calls
         self.threshold_preflight = None
         self.diagnostics = None
+        self.unread_scenes = {}
+        self.dry_run_plan = None
+        self.active_requests = {}
 
     def measure(self, stage):
         return self._timing.measure(stage)

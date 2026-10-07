@@ -55,7 +55,7 @@ def main():
         report = RunReport(write=lambda _: None)
         with tempfile.TemporaryDirectory() as directory, merge_store.StateStore(Path(directory)/'state.sqlite3',
                 'offline-benchmark', cache_bytes=128*2**20) as state:
-            for model, segments in source.items(): state.put('1', model, {'markers': segments[0]})
+            for model, record in source.items(): state.put('1', model, {'markers': record})
             state.report = report
             stash = Stash()
             with MergeDiagnostics(report):
@@ -63,13 +63,13 @@ def main():
                 with report.measure('merge_compute'):
                     hits, spans = merge.evidence(app, state, '1', policies, policies)
                 with report.measure('merge_plan'):
-                    counts = merge_sync.sync_merged(app, stash, app.TagResolver(stash, source=merge_labels.AI), state,
-                                              stash.find_scene('1'), hits, spans, report=report)
+                    counts = merge_sync.sync_merged(app, stash, app.services.TagResolver(stash, source=merge_labels.AI), state,
+                                              stash.find_scene('1'), hits, spans, report=report, tag_policies=policies)
                 elapsed, cpu_elapsed = time.perf_counter()-start, time.process_time()-cpu
             stages = dict(report.timings)  # Verification below is outside the measured region.
             blobs = state.connection.execute('SELECT kind,published FROM snapshots ORDER BY kind').fetchall()
             sizes = {kind: dict(json_bytes=len(zlib.decompress(blob)), compressed_bytes=len(blob)) for kind, blob in blobs}
-            logical = {kind: state.unpack(blob) for kind, blob in blobs}
+            logical = {kind: state.unpack_snapshot(blob) for kind, blob in blobs}
             canonical = lambda value: json.dumps(value, sort_keys=True, separators=(',', ':'), allow_nan=False).encode()
             rows.append(dict(wall_seconds=elapsed, cpu_seconds=cpu_elapsed, stages=stages,
                              counts=dict(counts), snapshots=sizes,

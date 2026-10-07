@@ -75,10 +75,10 @@ def marker_floor(policy, threshold):
 def build_options(app, records=()):
     from stash_ai.evidence.identity import marker_segment_signature
     from stash_ai.storage.thresholds import effective
+    from stash_ai.runtime.dependencies import capture
     return {"policy": asdict(app.TEMPORAL_POLICY),
         "marker_thresholds": {marker_segment_signature(record): effective(record) for record in dict(records).values()},
-        "settings": {name: getattr(app, name) for name in (
-        "MARKER_MIN_HITS", "MARKER_MERGE_GAP_SECONDS", "MARKER_MAX_TAGS_PER_FRAME")}}
+        "settings": capture(app, 'marker_snapshot')}
 
 
 def frozen_policy(options):

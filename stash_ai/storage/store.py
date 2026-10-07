@@ -29,7 +29,7 @@ class StateStore(AbstractContextManager):
     A dry run uses a read-only source plus a sparse temporary overlay, no source lock.
     A writer holds a process lock for its whole run, including Stash requests.
     """
-    def __init__(self, path, scope, dry_run=False, cache_bytes=0, *, allow_cleanup=False, cleanup_preview=False,
+    def __init__(self, path, scope, dry_run=False, cache_bytes=0, *, allow_cleanup=False,
                  memory_budget_bytes=0, allow_parent_publication_updates=False):
         from stash_ai.runtime.cache import RamCache
         if allow_parent_publication_updates and not dry_run:
@@ -130,17 +130,17 @@ class StateStore(AbstractContextManager):
     def result_metadata(self, scene, kind, model):
         return self.metadata.get(scene, kind, model)
 
-    def result_presence(self, models):
-        return self.results.result_presence(models)
+    def result_presence(self, models, scenes=None):
+        return self.results.result_presence(models, scenes)
 
-    def result_index_presence(self, models):
-        return self.results.result_index_presence(models)
+    def result_index_presence(self, models, scenes=None):
+        return self.results.result_index_presence(models, scenes)
 
     def sources(self, scene, kind):
         return self.results.sources(scene, kind)
 
-    def preload_sources(self):
-        return self.results.preload_sources()
+    def preload_sources(self, scenes=None):
+        return self.results.preload_sources(scenes)
 
     def put(self, scene, model, outputs):
         return self.results.put(scene, model, outputs)

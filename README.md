@@ -28,6 +28,7 @@ Dla CPU zamień `onnxruntime-gpu` na zgodny `onnxruntime>=1.21,<2`.
 
 ```powershell
 pip install -r requirements.txt
+# Pinned Python 3.14.7 environments: see constraints/README.md
 
 $env:STASH_URL = "http://localhost:9999"
 $env:STASH_API_KEY = "<własny klucz ze Stash>"
@@ -122,7 +123,7 @@ obsługiwane schematy przechowują już pojedynczy rekord i liczbowy próg.
 
 Snapshoty merge zapisują współdzielone dowody `extra_support` raz, a contributions
 odwołują się do nich przez referencje. Zmniejsza to koszt serializacji i kompresji.
-Aktualny schemat to v25, z obsługą aktualizacji od v18. Każdy nowy snapshot ma
+Aktualny schemat to v26, z obsługą aktualizacji od v18. Każdy nowy snapshot ma
 otoczkę formatu v7. `--db-update` konwertuje snapshoty v4/v5/v6/v7, także pending i recovery,
 w jednym przebiegu. Zachowuje geometrię i własność publikacji, normalizuje zamrożone opcje
 odtwarzania oraz usuwa `extra_ids` i zbędne `algorithm: temporal`. Pełne payloady
@@ -246,7 +247,7 @@ Ręczne powiązania ze starymi definicjami tagów pozostają zachowane.
 Trzy zakończone migracje nie należą już do bieżącego pakietu. W razie potrzeby uruchom je
 z osobnego checkoutu niezmiennego commita
 [`9fcaa52502cd487455457547860b5db7d8710ad8`](https://github.com/StormThatComes/stash_ai/commit/9fcaa52502cd487455457547860b5db7d8710ad8).
-Bieżący pakiet korzysta ze schematu v25. Bazy sprzed v18 wymagają najpierw starszego
+Bieżący pakiet korzysta ze schematu v26. Bazy sprzed v18 wymagają najpierw starszego
 mostka opisanego w sekcji aktualizacji bazy. Zrób kopię bazy i konfiguracji oraz zainstaluj
 zależności checkoutu w osobnym środowisku Python 3.14 zgodnie z instrukcją instalacji.
 
@@ -280,8 +281,8 @@ Następnie wróć do bieżącej instalacji, wykonaj `--db-check` i potrzebną in
 ### Zdrowie, aktualizacja i kompaktowanie bazy stanu
 
 `--db-update` aktualizuje bazę wskazaną przez `--state-db` ze schematu **v18 lub nowszego**
-do aktualnego **v25**, we wszystkich scope'ach. Zwykłe uruchomienie oraz `--dry-run`
-wymagają aktualnego schematu; nowa baza od razu otrzymuje v25.
+do aktualnego **v26**, we wszystkich scope'ach. Zwykłe uruchomienie oraz `--dry-run`
+wymagają aktualnego schematu; nowa baza od razu otrzymuje v26.
 Migracja dodaje stan odbudowy, ale nie przejmuje istniejących wyników Stash.
 To uprawnienie powstaje wyłącznie po jawnym `--db-init` na nowej/pustej bazie.
 Updater korzysta z tego samego locka writera. Pracuje offline, bez Stash i konfiguracji modeli.
@@ -610,7 +611,7 @@ dotyczy to każdego modelu, wspólnych wyników i punktów Occurrence.
 `MAX_TAGS` i `MAX_MARKERS_PER_SCENE` zostały usunięte. Limit tagów na klatkę
 `MARKER_MAX_TAGS_PER_FRAME` pozostaje osobnym ustawieniem (domyślnie 0).
 
-Bazy v18–v24 wymagają `--db-update`. Migracja do v25 zapisuje snapshoty v7
+Bazy v18–v25 wymagają `--db-update`. Migracja do v26 zapisuje snapshoty v7
 bez dawnych limitów liczby wyników, zachowując geometrię, własność i plany
 pending/recovery. Nie zmienia cache inferencji i nie zapisuje do Stash.
 Aby uzupełnić wcześniej obcięte wyniki z zachowanego cache, wykonaj:
@@ -738,3 +739,19 @@ raporty i indeks ukończenia nie odczytują historycznych segmentów.
 `--db-update` zachowuje geometrię, ownership i recovery, a niepełne starsze wyniki
 kieruje do ponownej inferencji. `--merge-only` wymaga nowych dowodów przed cleanup.
 Brak `end_seconds` w recovery oznacza dokładny punkt i nie pasuje do zakresu.
+
+### Deferred input verification (schema v26)
+
+Run `python stash_ai.py --db-update` once for existing databases. This adds a small
+input-verification table without changing raw inference records or publication
+snapshots. Missing VTT/sprite paths defer publication and retain previous predictions.
+After restoring the same inputs, `--resume` verifies and reuses matching results;
+it does not force inference. Model utility reports exclude scenes awaiting input
+verification or fresh inference and report the skipped counts.
+
+Explicit missing scene IDs are reported independently. During resumed `--db-init`,
+a successful Stash read confirming deletion retires that scene and lets remaining
+scenes finish. Network/read errors do not authorize retirement.
+
+Dokładny plan publikacji z cache: `--merge-only --dry-run --dry-run-plan review.jsonl`.
+Opis zdarzeń i symbolicznych ID: [docs/dry_run_plan.md](docs/dry_run_plan.md).

@@ -83,6 +83,10 @@ def inspect_database(path, scope):
         result_metadata = count_rows(db, tables, "result_metadata", scope)
         init_completed = count_rows(db, tables, 'db_init_scenes', scope, 'completed=1')
         init_pending = count_rows(db, tables, 'db_init_scenes', scope, 'completed=0')
+        if 'input_checks' in tables:
+            removed = db.execute("SELECT COUNT(DISTINCT i.scene) FROM db_init_scenes AS i "
+                "JOIN input_checks AS c USING(scope,scene) WHERE i.scope=? AND c.reason='deleted'", (scope,)).fetchone()[0]
+            init_completed -= removed
 
     wal_path = Path(str(path) + "-wal")
     shm_path = Path(str(path) + "-shm")

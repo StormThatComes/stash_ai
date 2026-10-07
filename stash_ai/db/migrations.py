@@ -20,6 +20,8 @@ def migrate(database):
         if database.version < 25:
             from .scalar_evidence_migration import migrate as migrate_publications
             migrate_publications(db, retired)
+        from .duplicate_aggregates import migrate as deduplicate_aggregates
+        deduplicate_aggregates(db)
         from stash_ai.storage.metadata import FORMAT, decode as decode_metadata, encode, summarize
         for scope, scene, model, kind, payload, version, data in db.execute(
                 'SELECT r.scope,r.scene,r.model,r.kind,r.data,m.format,m.data '

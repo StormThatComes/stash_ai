@@ -35,6 +35,9 @@ def validate_current(segment):
         raise ValueError('Invalid current inference observations; run --db-check and inference again.')
     required_scores = ['marker_score_floor', 'scene_support_floor', 'scene_threshold', 'marker_threshold']
     if segment['mode'] == 'scene':
+        items = segment.get('items', ())
+        if all(isinstance(item.get('tag'), str) for item in items) and len({item['tag'] for item in items}) != len(items):
+            raise ValueError('Duplicate scene aggregates; run --db-update to deduplicate identical entries.')
         required_scores.append('scene_score_floor')
         has_frames = 'frames' in segment if 'items' in segment else segment.get('has_frames', False)
         if not has_frames:

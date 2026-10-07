@@ -6,6 +6,10 @@ from stash_ai.stash_api.sql import SceneReader
 from stash_ai.stash_api.transport import safe_error
 
 
+class MissingSceneError(RuntimeError):
+    """A successful Stash read confirmed that the requested scene is absent."""
+
+
 class SceneReads:
     """Own one client's read strategy; failures disable SQL until reconfigured."""
     def __init__(self, client):
@@ -49,7 +53,7 @@ class SceneReads:
             return self.find(scene_id)
         scene = scenes.get(str(int(scene_id)))
         if scene is None:
-            raise RuntimeError(f'Scene {scene_id} no longer exists.')
+            raise MissingSceneError(f'Scene {scene_id} no longer exists.')
         return scene
 
     def iter_scenes(self, ids: list[str] | None = None) -> Iterator[dict]:
@@ -58,13 +62,19 @@ class SceneReads:
                 snapshots = (self.snapshots(group)
                              if self.merge_only else None)
                 for scene_id in group:
-                    if snapshots is None:
-                        yield self.find(scene_id)
-                    else:
-                        scene = snapshots.get(str(int(scene_id)))
-                        if scene is None:
-                            raise RuntimeError(f'Scene {scene_id} no longer exists.')
-                        yield scene
+                    try:
+                        if snapshots is None:
+                            scene = self.find(scene_id)
+                        else:
+                            scene = snapshots.get(str(int(scene_id)))
+                            if scene is None:
+                                raise MissingSceneError(f'Scene {scene_id} no longer exists.')
+                    except Exception as exc:
+                        if self.report is None:
+                            raise
+                        self.report.unread_scenes[str(scene_id)] = exc
+                        continue
+                    yield scene
             return
         after = 0
         if self.merge_only and self.reader:
@@ -109,13 +119,12 @@ class SceneReads:
             }
         }""", {"id": scene_id})["findScene"]
         if not data:
-            raise RuntimeError(f"Scene {scene_id} no longer exists.")
+            raise MissingSceneError(f"Scene {scene_id} no longer exists.")
         if reader:
             scenes = self.snapshots([data['id']])
             if scenes is None:
                 return self.find(scene_id)
             if data['id'] not in scenes:
-                raise RuntimeError(f'Scene {scene_id} no longer exists.')
+                raise MissingSceneError(f'Scene {scene_id} no longer exists.')
             data.update(scenes[data['id']])
         return data
-

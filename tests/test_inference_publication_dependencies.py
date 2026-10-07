@@ -45,10 +45,16 @@ def test_input_error_blocks_fresh_stale_mix(pipeline, monkeypatch):
     assert app.main(args) == 1
     assert not p.stash.writes
     with StateStore(p.path, scope_for(app.STASH_URL), True) as state:
-        assert pending_refreshes(state, ['scene', 'markers']) == {'1': [('wd', 'markers'), ('wd', 'scene')]}
+        from stash_ai.storage.input_checks import pending
+        assert pending_refreshes(state, ['scene', 'markers']) == {}
+        assert pending(state, '1') == {'wd': 'read_error'}
         assert state.records('1', 'scene')['dtq']['meta']['frame_input_signature'] != old
         published = state.snapshot('1', 'scene')[0]
         assert any(h['source'] == 'wd' and h['meta']['frame_input_signature'] == old for h in published['contributions'])
+    monkeypatch.setattr(RunInputs, 'inspect', original)
+    loaded = len(p.loaded)
+    assert app.main(args) == 0
+    assert [model.settings.source.key for model in p.loaded[loaded:]] == ['wd']
 
 
 def test_model_load_failure_blocks_all_remaining_scenes(tmp_path, monkeypatch):

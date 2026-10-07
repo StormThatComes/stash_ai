@@ -133,6 +133,17 @@ def scene_report(app, store, scene, core_policies, scene_policies):
     totals = Counter()
     utility = {model: Counter() for model in models}
 
+    from stash_ai.storage.input_checks import pending as unverified_inputs
+    deferred = unverified_inputs(store, scene)
+    refreshing = {row[0] for row in store.connection.execute(
+        'SELECT DISTINCT model FROM ' + store.table('refresh_requests') +
+        ' WHERE scope=? AND scene=?', (store.scope, str(scene)))}
+    if deferred or refreshing:
+        totals['scenes_skipped_unverified' if deferred else 'scenes_skipped_refresh_required'] += 1
+        for model in set(deferred) | refreshing:
+            utility[model]['scenes_unverified' if model in deferred else 'scenes_refresh_required'] += 1
+        return totals, utility
+
     baseline = _scene_baseline(
         app, store, scene, core_policies, scene_policies)
     _record_scene_totals(totals, baseline)
@@ -160,4 +171,3 @@ def merge_scene_report(totals, utility, partial):
     totals.update(scene_totals)
     for model in utility:
         utility[model].update(scene_utility[model])
-

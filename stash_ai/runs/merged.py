@@ -84,6 +84,7 @@ class MergedRun:
         self.resolver = app.services.TagResolver(
             stash, self.hierarchy, source=merge_labels.AI, report=self.report.detail,
             create_missing=app.CREATE_MISSING)
+        self.resolver.plan_writer = self.report.dry_run_plan
         self.use_catalog = bool(self.hierarchy or app.CREATE_MARKERS)
         if self.use_catalog or not args.scene_id or len(args.scene_id) > 1:
             self.resolver.preload()
@@ -92,7 +93,7 @@ class MergedRun:
         self.merge_key = (
             digest([self.base_key, fingerprints.catalog_fingerprint(self.resolver)])
             if self.use_catalog else self.base_key)
-        self.store.preload_sources()
+        self.store.preload_sources(args.scene_id)
 
     def _scan_scenes(self):
         app, args = self.app, self.args
@@ -126,7 +127,32 @@ class MergedRun:
                     self.report.issue(
                         'read sources', '', scene_id, exc,
                         app.services.safe_error(exc, api_key=app.STASH_API_KEY))
-            self.store.initialization.finish_scan(self.scenes, errors=self.stats['errors'])
+            self._finish_scan()
+
+    def _finish_scan(self):
+        from stash_ai.stash_api.scene_reads import MissingSceneError
+        initialization = self.store.initialization
+        failures = dict(self.report.unread_scenes)
+        if initialization.active:
+            missing = {scene for scene, done in initialization.scenes.items() if not done} - self.scenes.keys()
+            if initialization.run.selection is not None:
+                missing.update(set(initialization.run.selection) - self.scenes.keys() - initialization.removed)
+            for scene in sorted(missing):
+                if scene not in failures:
+                    try:
+                        self.stash.find_scene(scene)
+                    except Exception as exc:
+                        failures[scene] = exc
+                if isinstance(failures.get(scene), MissingSceneError):
+                    initialization.retire(scene)
+                    self.report.detail(f'DB initialization: scene {scene} was removed from Stash.')
+        for scene, exc in failures.items():
+            if scene in initialization.removed:
+                continue
+            self.stats['errors'] += 1
+            self.report.issue('read sources', '', scene, exc,
+                              self.app.services.safe_error(exc, api_key=self.app.STASH_API_KEY))
+        initialization.finish_scan(self.scenes, errors=self.stats['errors'])
 
     def _apply_thresholds(self):
         args, app = self.args, self.app
@@ -153,7 +179,7 @@ class MergedRun:
         if args.restart:
             progress.request_refresh(
                 store, self.scenes, [config.source.key for config in self.settings], kinds)
-        progress.preload_status(store)
+        progress.preload_status(store, self.scenes)
         for config in self.settings:
             MergedModelRun(
                 app, args, store, config, self.catalogs[config.source.key],

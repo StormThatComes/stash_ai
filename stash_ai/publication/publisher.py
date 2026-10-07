@@ -29,7 +29,7 @@ class MergePublisher:
         if (self.app.CREATE_MARKERS
                 and self.app.TEMPORAL_POLICY.occurrence_markers):
             refresh_kinds = [*refresh_kinds, "scene"]
-        self.pending_refreshes = progress.pending_refreshes(self.store, refresh_kinds)
+        self.pending_refreshes = progress.pending_refreshes(self.store, refresh_kinds, scenes)
         workers = self.args.merge_workers
         if self.app.DRY_RUN or self.args.profile_merge is not None:
             # Workers cannot see the temporary dry-run overlay. Profiling needs
@@ -52,16 +52,14 @@ class MergePublisher:
             if candidates:
                 with stage(self.report, 'reuse_refresh'):
                     try:
-                        bulk = getattr(self.stash, 'merge_snapshots', None)
-                        snapshots = bulk(candidates) if bulk is not None else None
+                        snapshots = self.stash.merge_snapshots(candidates)
                     except Exception as exc:
                         errors.update((scene_id, exc) for scene_id in candidates)
                     else:
                         for scene_id in candidates:
                             try:
                                 if snapshots is None:
-                                    find = getattr(self.stash, 'find_scene_for_merge', None) or self.stash.find_scene
-                                    observed = find(scene_id)
+                                    observed = self.stash.find_scene_for_merge(scene_id)
                                 else:
                                     observed = snapshots.get(str(scene_id))
                                 if observed is None or str(observed['id']) != str(scene_id):
@@ -75,6 +73,13 @@ class MergePublisher:
 
     def _reason(self, scene_id, current, refresh_error=None):
         self.store.initialization.require_ready(scene_id)
+        from stash_ai.storage.input_checks import pending as unverified_inputs
+        deferred = unverified_inputs(self.store, scene_id)
+        if deferred:
+            self.stats['merge_input_unverified'] += 1
+            raise RuntimeError('Input verification pending for ' +
+                               ', '.join(f'{model}/{reason}' for model, reason in sorted(deferred.items())) +
+                               '; existing results retained. Restore media and resume to verify reuse.')
         pending = self.pending_refreshes.get(str(scene_id), ())
         if pending:
             self.stats["merge_refresh_blocked"] += 1
@@ -95,6 +100,9 @@ class MergePublisher:
 
     def _issue(self, scene_id, exc):
         self.stats["errors"] += 1
+        if self.report.dry_run_plan is not None:
+            self.report.dry_run_plan.write(dict(type='status', scene_id=str(scene_id), status='error',
+                reason=self.app.services.safe_error(exc, api_key=self.app.STASH_API_KEY)))
         self.report.issue(
             'merge', '', scene_id, exc,
             self.app.services.safe_error(exc, api_key=self.app.STASH_API_KEY))
@@ -103,7 +111,7 @@ class MergePublisher:
         """Publish local or worker evidence with the same accounting and errors."""
         try:
             if prepared is not None:
-                worker_scene, scene_hits, spans, diagnostics, error = prepared
+                worker_scene, scene_hits, spans, markers, diagnostics, error = prepared
                 if worker_scene != scene_id:
                     raise RuntimeError(
                         f"Merge worker returned scene {worker_scene!r} while {scene_id!r} was expected.")
@@ -117,7 +125,8 @@ class MergePublisher:
                         self.app, self.store, scene_id, self.core_policies,
                         self.scene_policies, diagnostics)
             with self.report.measure('merge_plan'):
-                result = self._sync(current, scene_hits, spans)
+                result = self._sync(current, scene_hits, spans,
+                                    prepared_markers=markers if prepared is not None else None)
             self.stats.update(result)
             self.report.record_counts(**{
                 'cache_' + key: value - cache_before[key]
@@ -132,11 +141,11 @@ class MergePublisher:
             self._issue(scene_id, exc)
             return None
 
-    def _sync(self, current, scene_hits, spans):
+    def _sync(self, current, scene_hits, spans, *, prepared_markers=None):
         return merge_sync.sync_merged(
             self.app, self.stash, self.resolver, self.store, current, scene_hits, spans,
             report=self.report, tag_policies=self.scene_policies,
-            publication_key=self.publication_key)
+            publication_key=self.publication_key, prepared_markers=prepared_markers)
 
     def _serial(self, scenes):
         bar = tqdm(self._observed_scenes(scenes), total=len(scenes), desc="Merge to ai:", unit="scene")
@@ -147,6 +156,9 @@ class MergePublisher:
                     sample['reason'] = reason
                     if reason == 'reused':
                         sample['status'] = 'reused'
+                        if self.report.dry_run_plan is not None:
+                            self.report.dry_run_plan.write(dict(type='status', scene_id=str(scene_id),
+                                                               status='reused', reason='current_publication'))
                     else:
                         statistics = self._merge_one(scene_id, current)
                         if statistics is None:

@@ -42,6 +42,8 @@ def publish_sync_plan(app, stash, resolver, store, scene_id, scene, markers, sce
                       plan, stats, *, report, publication_key):
     """Apply or preview a completed sync plan and durably commit its snapshot."""
     if stash.dry_run:
+        if report is not None and report.dry_run_plan is not None:
+            report.dry_run_plan.scene(scene_id, plan, resolver, app, stats)
         from stash_ai.publication.groups import for_resolver
         for_resolver(app, resolver).record_preview(scene, plan.creates, plan.updates, plan.deletes)
         write = report.detail if report is not None else print
@@ -66,8 +68,7 @@ def publish_sync_plan(app, stash, resolver, store, scene_id, scene, markers, sce
             stash.update_marker(payload)
         if app.APPLY_SCENE_TAGS and plan.scene_changed:
             stash.update_scene_tags(scene_id, sorted(plan.final_scene_tag_ids))
-        for marker_id in sorted(plan.deletes):
-            stash.delete_marker(marker_id)
+        stash.delete_markers(sorted(plan.deletes))
 
     publication = None
     with stage(report, 'publication_fingerprint'):
@@ -85,13 +86,14 @@ def publish_sync_plan(app, stash, resolver, store, scene_id, scene, markers, sce
 
 
 def sync_merged(app, stash, resolver, store, scene, scene_hits, spans, *, cleanup=False,
-                report=None, tag_policies, publication_key=None):
+                report=None, tag_policies, publication_key=None, prepared_markers=None):
     """Reconcile only script-owned markers and recorded scene associations."""
     scene_id = str(scene["id"])
     store.initialization.require_ready(scene_id)
     report = report or store.report
     evidence = prepare_sync_evidence(
-        app, stash, store, scene, scene_hits, spans, cleanup=cleanup, report=report)
+        app, stash, store, scene, scene_hits, spans, cleanup=cleanup, report=report,
+        prepared_markers=prepared_markers)
     resolved = resolve_sync_tags(app, stash, resolver, scene_id, evidence, tag_policies, report)
     with stage(report, 'tag_resolution'):
         catalog = resolve_marker_catalog(resolver, resolved)
