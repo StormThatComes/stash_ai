@@ -445,6 +445,51 @@ Histogramy mają stały rozmiar; historia rośnie o jeden rekord na przebieg,
 bez zapisywania wszystkich pojedynczych pomiarów. Raport opisuje wybrane
 przebiegi, nie całą historię, gdy zastosowano limit lub filtry.
 
+### Dlaczego scena została przeliczona?
+
+Zwykła inferencja zapisuje w historii decyzję dla każdej pary scena/model:
+`infer`, `cache_reused`, `rethreshold`, `checkpoint_resumed` albo `blocked`.
+Dodaj `--verbose`, aby widzieć decyzje i powody podczas pracy. Osobny raport
+czyta te same dane offline, drukuje podsumowanie per model i zapisuje nowy JSON:
+
+```powershell
+python .\stash_ai.py --reuse-report .\reuse.json
+python .\stash_ai.py --reuse-report .\wd-scene.json --models wd --scene-id 123
+python .\stash_ai.py --reuse-report .\recent-reuse.json --run-limit 20 --run-status finished
+```
+
+Domyślnie raport wybiera ostatni pasujący przebieg z zapisanymi decyzjami.
+`--run-limit` wybiera 1..10000 takich przebiegów; filtry modeli (`--models`
+lub `--run-model`), scen (`--scene-id` można powtarzać), komendy i statusu
+stosowane są przed limitem. Późniejszy merge lub maintenance bez decyzji
+inferencji nie ukryje ostatniego raportu. Raport opisuje wykonane przebiegi;
+nie sprawdza bieżących plików ani dostępności mediów w Stash.
+
+Powody obejmują brak evidence, jawny restart, wyłączone resume, oczekujący
+refresh, niekompletny indeks oraz zmianę modelu, rewizji, wag, słownika,
+batch size, agregacji, retencji, progów, VTT lub sprite. Jeśli dostępna jest
+poprzednia tożsamość, JSON zawiera wartości przed/po, liczebność cue i medianę
+odstępów między ich początkami. Dla zbyt płytkiego cache pokazuje zapisany
+floor i wymaganą retencję; dla checkpointu liczbę wznowionych klatek i powód
+przyjęcia lub odrzucenia. Kilka powodów może dotyczyć jednej decyzji, więc
+ich liczebności nie muszą sumować się do liczby scen.
+
+Starszy cache bez historii nadal działa normalnie. Po zgodnym reuse można
+uzupełnić jego tożsamość diagnostyczną bez inferencji. Gdy wcześniejszych
+danych brakuje, `historical_identity_unavailable` oraz ogólne `input_changed`
+lub `model_or_configuration_changed` wskazują granice dostępnej informacji.
+Diagnostyka nie zmienia sygnatur, schematu cache ani warunków jego użycia.
+Historia w formacie 1 jest odczytywana bez modyfikacji i aktualizowana do
+formatu 2 dopiero podczas zapisu kolejnego przebiegu.
+
+Historia przechowuje identyfikatory scen i modeli, powody, parametry oraz
+hashe wejść, bez adresów mediów i kluczy API. Decyzje rosną wraz z liczbą
+par scena/model/przebieg; poprzednia tożsamość zajmuje jeden rekord na
+scenę/model/rodzaj wyniku. Zapis jest buforowany w krótkich transakcjach po
+maksymalnie 64 operacje, a normalne zakończenie i Ctrl+C opróżniają bufor.
+Nagłe zabicie procesu może utracić ostatnie niezapisane operacje historii.
+`--no-run-history` wyłącza ich zapis; raport wymaga wcześniej zebranych danych.
+
 ### Model Utility / Ablation Report
 
 `--model-report NEW.json` działa wyłącznie na zapisanym evidence i nie łączy się

@@ -24,6 +24,7 @@ class Command(Enum):
     REVIEW_REPORT = 'tag_review_report'
     CACHE_REPORT = 'cache_report'
     RUN_REPORT = 'run_report'
+    REUSE_REPORT = 'reuse_report'
     ABANDON = 'abandon_pending'
 
 
