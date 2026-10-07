@@ -114,7 +114,9 @@ def validate_policy(item):
                            for tags in values.values())):
                 raise ValueError('Incomplete frozen exclusions; run --db-update.')
         thresholds = options['marker_thresholds' if keys == marker else 'scene_thresholds']
-        if not isinstance(thresholds, dict):
+        if (not isinstance(thresholds, dict) or any(
+                not isinstance(signature, str) or not signature or type(value) not in (int, float)
+                or not 0 <= value <= 1 for signature, value in thresholds.items())):
             raise ValueError('Invalid frozen thresholds.')
         if keys == marker:
             settings = options['settings']
@@ -122,6 +124,12 @@ def validate_policy(item):
                     'MARKER_MIN_HITS', 'MARKER_MERGE_GAP_SECONDS',
                     'MARKER_MAX_TAGS_PER_FRAME'}:
                 raise ValueError('Incomplete frozen marker settings; run --db-update.')
+            for name in ('MARKER_MIN_HITS', 'MARKER_MAX_TAGS_PER_FRAME'):
+                if type(settings[name]) is not int or settings[name] < (1 if name == 'MARKER_MIN_HITS' else 0):
+                    raise ValueError(f'Invalid frozen marker setting {name}.')
+            gap = settings['MARKER_MERGE_GAP_SECONDS']
+            if type(gap) not in (int, float) or not 0 <= gap < float('inf'):
+                raise ValueError('Invalid frozen marker setting MARKER_MERGE_GAP_SECONDS.')
     if 'scene_evidence' in item:
         if not isinstance(item['scene_evidence'], list) or any(
                 not isinstance(hit, dict) for hit in item['scene_evidence']):

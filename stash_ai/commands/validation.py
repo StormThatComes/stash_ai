@@ -74,6 +74,12 @@ def validate_pipeline(app, parser, args):
     args.ram_cache_gb = min(args.ram_cache_gb, args.ram_budget_gb * .75)
 
     hierarchy_only, cleanup_only = mode_flags(args)
+    if args.dry_run_plan is not None:
+        if not args.dry_run or not args.merge_only or args.prune_empty_tags:
+            parser.error('--dry-run-plan requires --dry-run --merge-only without pruning.')
+        args.dry_run_plan = args.dry_run_plan.expanduser().resolve()
+        if args.dry_run_plan.suffix.lower() != '.jsonl' or args.dry_run_plan.exists():
+            parser.error('--dry-run-plan requires a new .jsonl file; existing files are never overwritten.')
     if args.abandon_pending:
         if (hierarchy_only or args.download_models or args.explain_tag
                 or args.prune_empty_tags_only or args.sync_marker_groups_only or args.restart):

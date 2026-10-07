@@ -69,6 +69,8 @@ def valid_result(record, kind):
         return valid_frames(items)
     if not all(_item(item) for item in items):
         return False
+    if len({item['tag'] for item in items}) != len(items):
+        return False
     if 'frames' in record:
         if not valid_frames(record['frames']):
             return False

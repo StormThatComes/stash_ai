@@ -84,6 +84,7 @@ class MergedRun:
         self.resolver = app.services.TagResolver(
             stash, self.hierarchy, source=merge_labels.AI, report=self.report.detail,
             create_missing=app.CREATE_MISSING)
+        self.resolver.plan_writer = self.report.dry_run_plan
         self.use_catalog = bool(self.hierarchy or app.CREATE_MARKERS)
         if self.use_catalog or not args.scene_id or len(args.scene_id) > 1:
             self.resolver.preload()
@@ -92,7 +93,7 @@ class MergedRun:
         self.merge_key = (
             digest([self.base_key, fingerprints.catalog_fingerprint(self.resolver)])
             if self.use_catalog else self.base_key)
-        self.store.preload_sources()
+        self.store.preload_sources(args.scene_id)
 
     def _scan_scenes(self):
         app, args = self.app, self.args
@@ -178,7 +179,7 @@ class MergedRun:
         if args.restart:
             progress.request_refresh(
                 store, self.scenes, [config.source.key for config in self.settings], kinds)
-        progress.preload_status(store)
+        progress.preload_status(store, self.scenes)
         for config in self.settings:
             MergedModelRun(
                 app, args, store, config, self.catalogs[config.source.key],

@@ -9,6 +9,8 @@ def validate_snapshot(snapshot, kind):
     if kind not in ('scene', 'markers'):
         raise ValueError('Unknown publication kind.')
     for item in snapshot['contributions']:
+        from stash_ai.storage.snapshots import validate_policy
+        validate_policy(item)
         if (not _label(item.get('tag')) or item.get('source') not in KNOWN_MODELS
                 or not isinstance(item.get('meta'), dict)
                 or 'score' not in item or (item['score'] is not None and not _score(item['score']))):

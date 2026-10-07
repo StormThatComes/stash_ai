@@ -56,7 +56,7 @@ def publication(tmp_path, monkeypatch):
     def workers(app, state_db, scope, scene_ids, core_policies, scene_policies, **kwargs):
         worker_jobs.append((scene_ids, kwargs))
         for scene_id in scene_ids:
-            yield scene_id, [scene_id], [], Counter(replayed=3), None
+            yield scene_id, [scene_id], [], [], Counter(replayed=3), None
 
     monkeypatch.setattr(merge, 'evidence', evidence)
     monkeypatch.setattr(merge_sync, 'sync_merged', sync)
@@ -64,7 +64,7 @@ def publication(tmp_path, monkeypatch):
     with StateStore(args.state_db, 'scope') as store, MergeDiagnostics(report) as diagnostics:
         publisher = MergePublisher(
             app, args, store, SimpleNamespace(find_scene_for_merge=lambda identifier:
-                dict(id=identifier, tags=[], scene_markers=[])), object(), {}, {},
+                dict(id=identifier, tags=[], scene_markers=[]), merge_snapshots=lambda ids: None), object(), {}, {},
             publication_key='policy', stats=Counter(), report=report)
         yield SimpleNamespace(
             publisher=publisher, app=app, args=args, store=store,
@@ -154,9 +154,9 @@ def test_failed_worker_scene_is_not_published_and_later_scenes_continue(publicat
     p.args.merge_workers = 4
 
     def workers(*args, **kwargs):
-        yield ('wrong' if failure == 'scene' else '1'), ['1'], [], Counter(), (
+        yield ('wrong' if failure == 'scene' else '1'), ['1'], [], [], Counter(), (
             'worker failed' if failure == 'evidence' else None)
-        yield '2', ['2'], [], Counter(replayed=3), None
+        yield '2', ['2'], [], [], Counter(replayed=3), None
 
     monkeypatch.setattr(merge_parallel, 'iter_parallel_evidence', workers)
     if failure == 'publication':
@@ -205,7 +205,7 @@ def test_pool_failure_never_retries_completed_scenes(publication, monkeypatch, c
 
     def workers(*args, **kwargs):
         if completed:
-            yield '1', ['1'], [], Counter(replayed=3), None
+            yield '1', ['1'], [], [], Counter(replayed=3), None
         raise RuntimeError('pool failed')
 
     monkeypatch.setattr(merge_parallel, 'iter_parallel_evidence', workers)
@@ -234,8 +234,8 @@ def test_parent_budget_is_shared_until_workers_close_and_restored(publication, m
             assert p.store.cache.get('oversized-parent-snapshot') is None
             if failure:
                 raise failure('pool failed')
-            yield '1', ['1'], [], Counter(), None
-            yield '2', ['2'], [], Counter(), None
+            yield '1', ['1'], [], [], Counter(), None
+            yield '2', ['2'], [], [], Counter(), None
         finally:
             # Pool shutdown completes before the parent can reclaim its budget.
             assert p.store.cache.limit == 2**20
