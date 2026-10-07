@@ -7,6 +7,7 @@ from stash_ai.models import SOURCES
 from stash_ai.evidence.interval_geometry import append_interval
 from .frames import make_groups, observations
 from .observations import ObservationIndex
+from .ranges import Coverage
 
 
 def shared_runs(app, events, group, key, options):
@@ -96,21 +97,21 @@ def enrich(app, policies, spans, index, metrics=None):
         merged = []
         for start, end in sorted(intervals):
             append_interval(merged, start, end)
-        covered[tag] = merged
+        covered[tag] = Coverage(merged)
     candidates = []
+    empty_coverage = Coverage(())
     if policy.shared_marker_frames:
         for key, group in groups.items():
             if len(group["context"]) < 2:
                 continue
             for span in shared_runs(app, index.get(key).events, group, key, options):
-                if not any(a <= span["start"] and b >= span["end"] for a,b in covered[span["tag"]]):
+                if not covered.get(span["tag"], empty_coverage).contains(span["start"], span["end"]):
                     candidates.append(span)
-        candidates.sort(key=lambda span: (-span["shared_strong_hits"], -span["shared_hits"],
-                                         span["start"], span["tag"], span["frame_group"]))
+        candidates.sort(key=lambda span: (span["start"], span["tag"], span["frame_group"]))
         if metrics is not None:
             metrics['shared_marker_runs'] += len(candidates)
-            metrics['shared_marker_extensions'] += sum(any(a < span['end'] and b > span['start']
-                for a,b in covered[span['tag']]) for span in candidates)
+            metrics['shared_marker_extensions'] += sum(covered.get(span['tag'], empty_coverage).overlaps(span['start'], span['end'])
+                for span in candidates)
         spans.extend(candidates)
     for span in spans:
         key = span.get("frame_group")
