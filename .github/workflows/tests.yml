@@ -77,4 +77,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v10.2.0
       - name: Resolve pinned wheels without installing GPU packages
-        run: uv pip compile requirements-${{ matrix.variant }}.txt requirements-dev.txt -c constraints/${{ matrix.variant }}-py314.txt --python-version 3.14.7 --python-platform ${{ matrix.platform }} --index-strategy unsafe-best-match --only-binary :all: -o /tmp/resolved.txt
+        run: >-
+          uv pip compile requirements-${{ matrix.variant }}.txt requirements-dev.txt
+          -c constraints/${{ matrix.variant }}-py314.txt --python-version 3.14.7
+          --python-platform ${{ matrix.platform }} --index-strategy unsafe-best-match
+          --only-binary :all: -o /tmp/resolved.txt
