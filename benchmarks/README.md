@@ -1,7 +1,7 @@
 # Benchmarki offline
 
 Uruchamiaj z katalogu głównego repozytorium, po instalacji `requirements-dev.txt`.
-W CI wszystkie dziewięć wejść przechodzi smoke test na małych danych.
+W CI wszystkie dziesięć wejść przechodzi smoke test na małych danych.
 Fixture używają bieżącego formatu analysis i pełnych metadanych.
 Skrypty używają syntetycznych danych, lokalnej tymczasowej bazy lub makiety Stash;
 nie łączą się ze Stash i nie uruchamiają modeli GPU.
@@ -110,3 +110,15 @@ Do porównania wersji uruchom ten sam skrypt z tymi samymi parametrami i innym
 `--project`; identyczne hashe wejścia i wszystkich trzech etapów potwierdzają
 zgodność danych, markerów i dowodów. Cały pomiar `merge_cpu` obejmuje budowanie
 markerów i scalanie przed zapisem do SQLite lub wywołaniem API Stash.
+
+## Koszt historii uruchomień
+
+`python -m benchmarks.benchmark_run_history --frames 128 --labels 12 --repeats 3`
+porównuje historię on/off dla świeżej inferencji, cache i wznowienia checkpointu.
+Każda próbka działa w osobnym procesie. Raportuje wall/CPU, zmienione wiersze SQL
+bazy stanu i historii, peak RSS procesu, rozmiary baz oraz oddzielny koszt retencji.
+Hashe ukończonych surowych wyników muszą być identyczne; wariant cache nie może
+uruchomić predykcji. Retencja usuwa 40 zakończonych rekordów fixture, chroniąc proofs.
+Fixture wykorzystuje prawdziwą orkiestrację, VTT/PNG i checkpointy oraz syntetyczny
+tagger CPU. Wynik nie jest pomiarem rzeczywistego backendu ML ani sieci;
+peak RSS obejmuje również przygotowanie fixture.

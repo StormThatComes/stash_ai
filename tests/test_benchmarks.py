@@ -16,6 +16,7 @@ import pytest
     ('cleanup_sql', ['--markers', '20', '--legacy-time-budget', '.01']),
     ('tag_cascade', ['--markers', '20', '--batch-size', '7', '--repeats', '2']),
     ('rethreshold', ['--scenes', '2', '--frames', '4', '--labels', '2', '--repeats', '2']),
+    ('run_history', ['--frames', '8', '--labels', '2', '--repeats', '1']),
     ('scoped_reports', ['--scenes', '20', '--selected', '2', '--repeats', '2']),
 ])
 def test_offline_entry_point(name, arguments):
@@ -28,6 +29,11 @@ def test_offline_entry_point(name, arguments):
     if name == 'rethreshold':
         assert all(trial['evidence_unchanged'] and trial['evidence_writes'] == 0
                    for trial in payload['trials'])
+    if name == 'run_history':
+        assert payload['identical_evidence']
+        assert all(row['history_bytes'] == 0 for row in payload['trials'] if not row['history'])
+        assert all(row['retention']['removed_runs'] == 40 and row['retention']['proofs_unchanged']
+                   for row in payload['trials'] if row['history'])
     if name == 'scoped_reports':
         assert all(trial['evidence_unchanged'] and trial['decoded_payloads'] == 0
                    for rows in payload['trials'].values() for trial in rows)

@@ -59,6 +59,11 @@ jobs:
       - name: Offline benchmark smoke
         run: python -m pytest -q tests/test_benchmarks.py --tb=short
 
+      - name: Diagnostic overhead benchmark
+        run: |
+          python -m benchmarks.benchmark_run_history --frames 128 --labels 12 --repeats 3 > /tmp/run_history.json
+          python -c "import json; r=json.load(open('/tmp/run_history.json')); print('HISTORY_BENCHMARK_SUMMARY ' + json.dumps({'scope':r['scope'],'frames':r['frames'],'labels':r['labels'],'identical_evidence':r['identical_evidence'],'groups':r['groups'],'trials':r['trials']}))"
+
       - name: Run tests
         env:
           STASH_API_KEY: ""

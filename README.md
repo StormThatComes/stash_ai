@@ -445,7 +445,7 @@ nie zmieniają skrótu), hash kodu, dostępną rewizję git i wersje zainstalowa
 np. przy użyciu cache. Zweryfikowane wejścia mają oddzielny workload: liczbę par,
 liczbę cue i fingerprint danych, również uwzględniany przy grupowaniu. Te metadane
 nie autoryzują reuse i nie zmieniają tożsamości zapisanych predykcji. Raport rozdziela
-oddzielając statusy zakończenia oraz udane i nieudane operacje.
+statusy zakończenia oraz udane i nieudane operacje.
 
 Czasy etapów zawierają zarówno czas własny, jak i czas z wywołaniami podrzędnymi.
 Praca w wątkach/procesach może się nakładać; sumy etapów nie są czasem całego
