@@ -83,6 +83,8 @@ def test_existing_sprite_reader_uses_only_stash_http_bytes(monkeypatch):
     client=StashClient.__new__(StashClient)
     client.url=app.STASH_URL
     client.request_timeout=app.REQUEST_TIMEOUT
+    client.http_retries=0
+    client.report=None
     with Image.new('RGB',(2,1),'white') as sprite:
         buffer=io.BytesIO();sprite.save(buffer,format='PNG');png=buffer.getvalue()
     urls={'http://stash.test:9999/thumb.vtt':b'WEBVTT\n\n00:00:00.000 --> 00:00:01.000\nsprite.png#xywh=0,0,1,1\n\n00:00:01.000 --> 00:00:02.000\nsprite.png#xywh=1,0,1,1\n',

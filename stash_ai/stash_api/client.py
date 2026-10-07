@@ -13,7 +13,7 @@ class StashClient(StashTransport):
     """Build domain queries for Stash 0.31.1+ and manage SQL read fallback."""
 
     def __init__(self, dry_run: bool, *, url: str, api_key: str,
-                 request_timeout: float, http_retries: int, scene_page_size: int,
+                 request_timeout: float | tuple[float, float], http_retries: int, scene_page_size: int,
                  create_markers: bool):
         super().__init__(dry_run, url=url, api_key=api_key,
                          request_timeout=request_timeout, http_retries=http_retries)
