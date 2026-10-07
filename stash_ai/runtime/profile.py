@@ -76,19 +76,31 @@ class ProfileMetrics:
                     for key, row in sorted(self.rows.items())]
 
 
-def worker_profile(store, callback, name):
-    """Return bounded metrics with a worker result; the parent alone writes history."""
+def execute_worker(scene, store, callback, name, *, profile=False):
+    """Capture exceptions after measurement; the parent alone writes history."""
     import time
+    from contextlib import nullcontext
     from stash_ai.runtime.report import RunReport
-    report, previous = RunReport(write=lambda _: None), store.report
-    report.profile = ProfileMetrics()
-    store.report = report
-    cpu = time.process_time()
+    from stash_ai.runtime.worker_result import WorkerResult
+    report = RunReport(write=lambda _: None) if profile else None
+    previous = store.report if store is not None else None
+    if profile:
+        report.profile = ProfileMetrics()
+        if store is not None:
+            store.report = report
+    cpu = time.process_time() if profile else None
+    payload, error, failed = None, None, True
     try:
-        with report.measure(name, units=1, unit='scenes'):
-            result = callback()
-        cpu_elapsed = time.process_time() - cpu
-        report.profile.record('worker_cpu', name, cpu_elapsed, cpu_elapsed, units=1, unit='scenes')
-        return result, report.profile.export()
+        with report.measure(name, units=1, unit='scenes') if profile else nullcontext():
+            payload = callback()
+        failed = False
+    except Exception as exc:
+        error = f'{type(exc).__name__}: {exc}'
     finally:
-        store.report = previous
+        if profile:
+            cpu_elapsed = time.process_time() - cpu
+            report.profile.record('worker_cpu', name, cpu_elapsed, cpu_elapsed, failed,
+                                  units=1, unit='scenes')
+            if store is not None:
+                store.report = previous
+    return WorkerResult(str(scene), payload, error, report.profile.export() if profile else None)

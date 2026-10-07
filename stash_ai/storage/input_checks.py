@@ -33,6 +33,16 @@ def pending(store, scene):
         ' WHERE scope=? AND scene=?', (store.scope, str(scene))))
 
 
+def selected(store, scenes):
+    from stash_ai.storage.selection import selected_rows
+    checks = {}
+    for scene, model, reason in selected_rows(store,
+            'SELECT scene,model,reason FROM ' + store.table('input_checks') + ' WHERE scope=?',
+            (store.scope,), scenes):
+        checks.setdefault(scene, {})[model] = reason
+    return checks
+
+
 def removed_scenes(store):
     return {row[0] for row in store.connection.execute('SELECT DISTINCT scene FROM ' +
         store.table('input_checks') + " WHERE scope=? AND reason='deleted'", (store.scope,))}
