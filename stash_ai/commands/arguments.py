@@ -30,6 +30,10 @@ def build_parser(app) -> argparse.ArgumentParser:
                          help="Also record a read-only command in run history; dry runs never record history.")
     history.add_argument("--no-run-history", action="store_true",
                          help="Disable automatic history of inference, merge and write/maintenance commands.")
+    parser.add_argument('--history-keep-last', type=int, metavar='N',
+                        help='Keep at most N finished runs in this Stash scope; --prune-run-history only.')
+    parser.add_argument('--history-max-age-days', type=float, metavar='DAYS',
+                        help='Remove finished runs older than this age; --prune-run-history only.')
     parser.add_argument("--run-limit", type=int, metavar="N", help="Most recent matching runs: 50 for --run-report, 1 for --reuse-report; maximum: 10000.")
     parser.add_argument("--run-command", choices=[item.value for item in Command],
                         help="Filter run/reuse reports by command.")
@@ -131,6 +135,8 @@ def build_parser(app) -> argparse.ArgumentParser:
                        help="Report scene/marker cache coverage against selected YAML models and plan targeted backfill; offline and read-only.")
     modes.add_argument("--run-report", type=Path, metavar="NEW.json",
                        help="Write offline run history and comparable-run profiling averages; no Stash, model or state DB writes.")
+    modes.add_argument('--prune-run-history', action='store_true',
+                       help='Prune finished run history by count/age; honors --dry-run, protects active runs and reuse proofs.')
     modes.add_argument("--reuse-report", type=Path, metavar="NEW.json",
                        help="Explain recorded cache/checkpoint decisions and reinference reasons from run history; offline and read-only.")
 

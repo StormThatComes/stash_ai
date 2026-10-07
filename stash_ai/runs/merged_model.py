@@ -43,6 +43,11 @@ class MergedModelRun:
                     with self.report.measure('model_scene', model=self.key, units=1, unit='scenes'):
                         if not self._process_scene(scene_id, current, paths, kinds, inputs):
                             progress.block_publication(self.store, remaining, self.key, kinds)
+                            for blocked_scene in scenes:
+                                if blocked_scene in remaining and blocked_scene != scene_id:
+                                    self.observer.begin(blocked_scene)
+                                    self.observer.blocked('model_load_failed')
+                                    self.report.model_outcome(self.key, 'blocked')
                             break
                 except Exception as exc:
                     from stash_ai.storage.input_checks import pending
@@ -112,6 +117,7 @@ class MergedModelRun:
         except BaseException:
             defer(store, scene_id, self.key, 'read_error')
             raise
+        self.report.record_input_workload(scene_id, self.key, cues, media.hashes)
         verified(store, scene_id, self.key)
         self.observer.inputs(self.identity, cues, media.hashes, paths)
         with self.report.measure('inference_reuse_check', model=self.key):
