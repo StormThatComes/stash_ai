@@ -1,6 +1,6 @@
 """Hard caller deadlines for proven reads, including a trickling response body."""
-from queue import Empty, Queue
-from threading import Event, Thread, Lock
+from queue import Empty, Full, Queue
+from threading import Event, Thread, Lock, BoundedSemaphore
 from time import monotonic
 
 from requests import Response, Timeout
@@ -8,6 +8,36 @@ from requests import Response, Timeout
 
 class ReadDeadlineExceeded(Timeout):
     pass
+
+
+MAX_ACTIVE_READS = 4
+_slots = BoundedSemaphore(MAX_ACTIVE_READS)
+_closing = Queue(maxsize=8)
+_close_lock, _closer = Lock(), None
+
+
+def close_later(response):
+    """One bounded daemon closes readers without blocking the command thread."""
+    global _closer
+    def close_worker():
+        while True:
+            value = _closing.get()
+            try:
+                value.close()
+            except Exception:
+                pass
+            finally:
+                _closing.task_done()
+    with _close_lock:
+        if _closer is None:
+            _closer = Thread(target=close_worker, name='stash-close-read', daemon=True)
+            _closer.start()
+    try:
+        _closing.put_nowait(response)
+    except Full:
+        control = getattr(response, '_stash_read_control', None)
+        if control is not None:
+            control.cancel()
 
 
 def remaining(deadline):
@@ -24,18 +54,36 @@ def call_with_deadline(operation, deadline, *, cancel=None):
     cannot enforce a wall-clock budget. A daemon performs this one blocking read;
     the caller remains bounded. It never schedules retries or any writes.
     """
+    from stash_ai.runtime.cancellation import current, use
+    from stash_ai.stash_api.read_connections import ReadControl
     budget, completed, cancelled = remaining(deadline), Queue(maxsize=1), Event()
+    started, token, control = monotonic(), current(), ReadControl()
     gate = Lock()
+
+    def abort():
+        control.cancel()
+        if cancel is not None:
+            cancel()
+
+    if token is not None:
+        token.subscribe(abort)
 
     def discard(value):
         if isinstance(value, Response):
-            Thread(target=value.close, name='stash-close-read', daemon=True).start()
+            close_later(value)
 
     def run():
         try:
-            value, failed = operation(), False
+            from contextlib import nullcontext
+            with use(token) if token is not None else nullcontext():
+                with control.use():
+                    value, failed = operation(), False
+            if isinstance(value, Response):
+                value._stash_read_control = control
         except BaseException as exc:
             value, failed = exc, True
+        finally:
+            _slots.release()
         with gate:
             abandoned = cancelled.is_set()
             if not abandoned:
@@ -43,24 +91,47 @@ def call_with_deadline(operation, deadline, *, cancel=None):
         if abandoned:
             discard(value)
 
-    Thread(target=run, name='stash-deadline-read', daemon=True).start()
     value, succeeded = None, False
     try:
-        failed, value = completed.get(timeout=budget)
+        # Even an uninterruptible resolver or foreign read cannot spawn an
+        # unbounded number of workers. Waiting for capacity shares the deadline.
+        while True:
+            if token is not None:
+                token.check()
+            left = budget - (monotonic() - started)
+            if left <= 0:
+                raise Empty
+            if _slots.acquire(timeout=min(left, .05)):
+                break
+        Thread(target=run, name='stash-deadline-read', daemon=True).start()
+        while True:
+            if token is not None:
+                token.check()
+            left = budget - (monotonic() - started)
+            if left <= 0:
+                raise Empty
+            try:
+                failed, value = completed.get(timeout=min(left, .05) if token is not None else left)
+                break
+            except Empty:
+                if token is None:
+                    raise
+        if token is not None:
+            token.check()
         if failed:
             raise value
         remaining(deadline)
         succeeded = True
         return value
     except Empty:
-        if cancel is not None:
-            cancel()
+        abort()
         raise ReadDeadlineExceeded('Stash read exceeded its total deadline.') from None
     except (ReadDeadlineExceeded, KeyboardInterrupt):
-        if cancel is not None:
-            cancel()
+        abort()
         raise
     finally:
+        if token is not None:
+            token.unsubscribe(abort)
         with gate:
             cancelled.set()
             late = completed.get_nowait()[1] if not completed.empty() else None
@@ -71,12 +142,12 @@ def call_with_deadline(operation, deadline, *, cancel=None):
 
 def abort_response(response):
     """Interrupt a streaming body before closing its buffered reader."""
-    import socket
-    connection = response.raw.connection
-    if connection is not None and connection.sock is not None:
-        try:
-            connection.sock.shutdown(socket.SHUT_RDWR)
-        except OSError:
-            pass
+    from stash_ai.stash_api.read_connections import shutdown
+    control = getattr(response, '_stash_read_control', None)
+    if control is not None:
+        control.cancel()
+    connection = getattr(response.raw, 'connection', None)
+    if connection is not None:
+        shutdown(connection.sock)
     # Closing a buffered reader can wait for a read lock; never block the caller.
-    Thread(target=response.close, name='stash-close-read', daemon=True).start()
+    close_later(response)

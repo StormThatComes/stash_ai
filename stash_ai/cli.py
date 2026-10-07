@@ -14,6 +14,9 @@ def main(argv: list[str] | None = None, *, runtime: RuntimeContext | None = None
 
     app = runtime if runtime is not None else RuntimeContext()
     args = parse_args(app, argv)
+    if args.command is Command.PRUNE_HISTORY:
+        from stash_ai.history.retention import run as prune_history
+        return prune_history(app, args)
     if args.command is Command.RUN_REPORT:
         from stash_ai.reports.runs import run as run_history_report
         return run_history_report(app, args)

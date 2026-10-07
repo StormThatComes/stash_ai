@@ -128,10 +128,16 @@ class ResultStore:
         """Replace inference outputs inside the caller's transaction."""
         if model not in SOURCES or set(outputs) - set(KINDS):
             raise ValueError("Unknown result source or output kind.")
+        # The two output replacements cannot mutate publication pins. Share only
+        # this call's lazy read; no pin set survives a commit, rollback or publish.
+        from stash_ai.storage.archive import lazy_pins
+        if outputs and not self.store.connection.in_transaction:
+            self.store.connection.execute('BEGIN')
+        pins = lazy_pins(self.store, scene)
         for kind, segment in outputs.items():
-            self.replace_record(scene, model, kind, segment)
+            self.replace_record(scene, model, kind, segment, _pins=pins)
 
-    def replace_record(self, scene, model, kind, record):
+    def replace_record(self, scene, model, kind, record, *, _pins=None):
         """Replace the active record while retaining exactly pinned prior proofs."""
         if (model not in SOURCES or kind not in KINDS or not isinstance(record, dict)
                 or record.get('mode') != ('scene' if kind == 'scene' else 'frames')
@@ -144,7 +150,7 @@ class ResultStore:
         store = self.store
         from stash_ai.storage.archive import retain
         previous = self.model_record(scene, kind, model, borrow=True)
-        retain(store, scene, model, kind, previous, record)
+        retain(store, scene, model, kind, previous, record, pins=_pins)
         from stash_ai.storage.preview import delete
         from stash_ai.storage.progress import index_result
         store.cache.discard(('records', str(scene), kind))

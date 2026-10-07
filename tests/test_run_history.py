@@ -256,8 +256,8 @@ def test_parallel_merge_profiles_real_workers_without_state_writes(tmp_path):
         workers=2, cache_bytes=0, memory_budget_bytes=128 * 2**20, profile=True))
     profile = ProfileMetrics()
     for result in results:
-        assert result[5] is None
-        profile.ingest(result[6])
+        assert result.error is None
+        profile.ingest(result.metrics)
     metrics = profile.export()
     assert any(row['name'] == 'merge_worker_compute' and row['calls'] == 2 for row in metrics)
     assert any(row['kind'] == 'worker_cpu' for row in metrics)

@@ -1,0 +1,202 @@
+{
+  "measured_at": "2026-10-07",
+  "ci_run": 37697251554,
+  "runner": "ubuntu-latest / Python 3.14",
+  "baseline": "current persistence with only the per-call lazy pin reader disabled",
+  "frames": 256,
+  "groups": {
+    "preview_baseline": {
+      "median_decoded_snapshots": 48,
+      "median_seconds": 0.404732929000005,
+      "median_state_sql_writes": 48
+    },
+    "preview_candidate": {
+      "median_decoded_snapshots": 24,
+      "median_seconds": 0.27924800499999947,
+      "median_state_sql_writes": 48
+    },
+    "writer_baseline": {
+      "median_decoded_snapshots": 48,
+      "median_seconds": 0.4121156759999849,
+      "median_state_sql_writes": 40
+    },
+    "writer_candidate": {
+      "median_decoded_snapshots": 24,
+      "median_seconds": 0.2832401880000077,
+      "median_state_sql_writes": 40
+    }
+  },
+  "identical_state": true,
+  "labels": 12,
+  "scope": "synthetic CPU result writes; no inference or Stash network",
+  "trials": [
+    {
+      "archived_records": 8,
+      "cpu_seconds": 0.4231514150000001,
+      "decoded_snapshots": 48,
+      "peak_process_rss_bytes": 33341440,
+      "preview": false,
+      "proofs_unchanged": true,
+      "repeat": 0,
+      "source_unchanged": null,
+      "state_sha256": "8476237d4a60078b9d3e21b4885816e3e40e77206add6bf497998ffb26f8075f",
+      "state_sql_writes": 40,
+      "variant": "baseline",
+      "wall_seconds": 0.4266178489999959
+    },
+    {
+      "archived_records": 8,
+      "cpu_seconds": 0.27819627,
+      "decoded_snapshots": 24,
+      "peak_process_rss_bytes": 33222656,
+      "preview": false,
+      "proofs_unchanged": true,
+      "repeat": 0,
+      "source_unchanged": null,
+      "state_sha256": "8476237d4a60078b9d3e21b4885816e3e40e77206add6bf497998ffb26f8075f",
+      "state_sql_writes": 40,
+      "variant": "candidate",
+      "wall_seconds": 0.2832401880000077
+    },
+    {
+      "archived_records": 8,
+      "cpu_seconds": 0.40853890400000004,
+      "decoded_snapshots": 48,
+      "peak_process_rss_bytes": 33329152,
+      "preview": false,
+      "proofs_unchanged": true,
+      "repeat": 1,
+      "source_unchanged": null,
+      "state_sha256": "8476237d4a60078b9d3e21b4885816e3e40e77206add6bf497998ffb26f8075f",
+      "state_sql_writes": 40,
+      "variant": "baseline",
+      "wall_seconds": 0.4116069899999957
+    },
+    {
+      "archived_records": 8,
+      "cpu_seconds": 0.27995549499999994,
+      "decoded_snapshots": 24,
+      "peak_process_rss_bytes": 33361920,
+      "preview": false,
+      "proofs_unchanged": true,
+      "repeat": 1,
+      "source_unchanged": null,
+      "state_sha256": "8476237d4a60078b9d3e21b4885816e3e40e77206add6bf497998ffb26f8075f",
+      "state_sql_writes": 40,
+      "variant": "candidate",
+      "wall_seconds": 0.28244192899998666
+    },
+    {
+      "archived_records": 8,
+      "cpu_seconds": 0.4093297160000001,
+      "decoded_snapshots": 48,
+      "peak_process_rss_bytes": 33288192,
+      "preview": false,
+      "proofs_unchanged": true,
+      "repeat": 2,
+      "source_unchanged": null,
+      "state_sha256": "8476237d4a60078b9d3e21b4885816e3e40e77206add6bf497998ffb26f8075f",
+      "state_sql_writes": 40,
+      "variant": "baseline",
+      "wall_seconds": 0.4121156759999849
+    },
+    {
+      "archived_records": 8,
+      "cpu_seconds": 0.28349047299999997,
+      "decoded_snapshots": 24,
+      "peak_process_rss_bytes": 33091584,
+      "preview": false,
+      "proofs_unchanged": true,
+      "repeat": 2,
+      "source_unchanged": null,
+      "state_sha256": "8476237d4a60078b9d3e21b4885816e3e40e77206add6bf497998ffb26f8075f",
+      "state_sql_writes": 40,
+      "variant": "candidate",
+      "wall_seconds": 0.28636232299999165
+    },
+    {
+      "archived_records": 8,
+      "cpu_seconds": 0.40458760400000005,
+      "decoded_snapshots": 48,
+      "peak_process_rss_bytes": 33808384,
+      "preview": true,
+      "proofs_unchanged": true,
+      "repeat": 0,
+      "source_unchanged": true,
+      "state_sha256": "8476237d4a60078b9d3e21b4885816e3e40e77206add6bf497998ffb26f8075f",
+      "state_sql_writes": 48,
+      "variant": "baseline",
+      "wall_seconds": 0.404732929000005
+    },
+    {
+      "archived_records": 8,
+      "cpu_seconds": 0.278961013,
+      "decoded_snapshots": 24,
+      "peak_process_rss_bytes": 33722368,
+      "preview": true,
+      "proofs_unchanged": true,
+      "repeat": 0,
+      "source_unchanged": true,
+      "state_sha256": "8476237d4a60078b9d3e21b4885816e3e40e77206add6bf497998ffb26f8075f",
+      "state_sql_writes": 48,
+      "variant": "candidate",
+      "wall_seconds": 0.2790324220000002
+    },
+    {
+      "archived_records": 8,
+      "cpu_seconds": 0.40431990799999995,
+      "decoded_snapshots": 48,
+      "peak_process_rss_bytes": 33763328,
+      "preview": true,
+      "proofs_unchanged": true,
+      "repeat": 1,
+      "source_unchanged": true,
+      "state_sha256": "8476237d4a60078b9d3e21b4885816e3e40e77206add6bf497998ffb26f8075f",
+      "state_sql_writes": 48,
+      "variant": "baseline",
+      "wall_seconds": 0.40440456900000754
+    },
+    {
+      "archived_records": 8,
+      "cpu_seconds": 0.2790002749999999,
+      "decoded_snapshots": 24,
+      "peak_process_rss_bytes": 33759232,
+      "preview": true,
+      "proofs_unchanged": true,
+      "repeat": 1,
+      "source_unchanged": true,
+      "state_sha256": "8476237d4a60078b9d3e21b4885816e3e40e77206add6bf497998ffb26f8075f",
+      "state_sql_writes": 48,
+      "variant": "candidate",
+      "wall_seconds": 0.27924800499999947
+    },
+    {
+      "archived_records": 8,
+      "cpu_seconds": 0.4073737989999999,
+      "decoded_snapshots": 48,
+      "peak_process_rss_bytes": 33800192,
+      "preview": true,
+      "proofs_unchanged": true,
+      "repeat": 2,
+      "source_unchanged": true,
+      "state_sha256": "8476237d4a60078b9d3e21b4885816e3e40e77206add6bf497998ffb26f8075f",
+      "state_sql_writes": 48,
+      "variant": "baseline",
+      "wall_seconds": 0.40740004699998167
+    },
+    {
+      "archived_records": 8,
+      "cpu_seconds": 0.279246203,
+      "decoded_snapshots": 24,
+      "peak_process_rss_bytes": 33705984,
+      "preview": true,
+      "proofs_unchanged": true,
+      "repeat": 2,
+      "source_unchanged": true,
+      "state_sha256": "8476237d4a60078b9d3e21b4885816e3e40e77206add6bf497998ffb26f8075f",
+      "state_sql_writes": 48,
+      "variant": "candidate",
+      "wall_seconds": 0.2795231300000012
+    }
+  ]
+}

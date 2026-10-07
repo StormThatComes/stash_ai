@@ -10,24 +10,47 @@ from pathlib import Path
 from stash_ai.signatures import digest
 
 
+# Module-level semantic dependencies of saved-evidence replay and publication.
+# Effective policy, settings, exclusions and hierarchy are hashed as values below.
+# Inference/checkpoint/backend changes invalidate their own evidence identities;
+# result writes invalidate scene checks through SQLite triggers. Scheduling,
+# diagnostics, transport and maintenance code must not invalidate ready merges.
+# Keep mixed storage/domain modules conservatively until their contracts split.
 PUBLICATION_CODE_FILES = (
-    'runtime/dependencies.py', 'storage/input_checks.py',
-    'storage/metadata_store.py', 'storage/schema.py', 'rethreshold/plans.py',
-    'evidence/contracts.py', 'evidence/formats.py', 'evidence/qualification.py', 'evidence/marker_identity.py', 'evidence/interval_geometry.py', 'inference/input_identity.py',
-    'runtime/settings.py', 'runtime/context.py', 'runtime/workers.py',
-    'cli.py', 'commands/bootstrap.py', 'evidence/pipeline.py', 'evidence/source_markers.py', 'evidence/identity.py', 'evidence/labels.py', 'inference/results.py', 'commands/hierarchy.py', 'publication/preconditions.py', 'publication/namespace.py', 'runs/merged.py', 'runs/merged_model.py', 'publication/publisher.py', 'publication/parallel.py', 'publication/merged.py', 'publication/planning/types.py', 'publication/planning/merged_evidence.py', 'publication/planning/merged_tags.py', 'publication/planning/merged_markers.py', 'publication/index.py', 'publication/markers.py',
-    'evidence/temporal/policy.py', 'evidence/temporal/statistics.py', 'evidence/temporal/markers.py', 'evidence/temporal/extras.py', 'evidence/intervals.py', 'evidence/observations.py', 'evidence/frames.py', 'evidence/shared_markers.py', 'evidence/scenes.py', 'evidence/occurrences.py', 'exclusions.py', 'cleanup/state.py', 'cleanup/client.py',
-    'models.py', 'backends/loader.py', 'backends/onnx.py', 'backends/onnx_preprocessing.py', 'backends/onnx_session.py', 'backends/vocabulary.py', 'inference/prediction.py', 'inference/scene_predictions.py', 'inference/sprites.py', 'inference/preparation.py', 'stash_api/tags.py', 'domain.py', 'publication/fingerprints.py', 'storage/segments.py', 'storage/merge_checks.py',
-    'evidence/timeline.py', 'stash_api/sql.py', 'publication/groups.py',
-    'evidence/thresholds.py', 'inference/reuse.py', 'evidence/retention.py', 'evidence/cache_views.py', 'rethreshold/markers.py', 'rethreshold/scenes.py', 'storage/progress.py', 'inference/inputs.py', 'inference/identity.py', 'inference/checkpoints.py', 'signatures.py', 'storage/store.py', 'storage/database.py',
-    'storage/archive.py', 'storage/snapshots.py', 'storage/results.py', 'storage/thresholds.py', 'storage/metadata.py', 'storage/publications.py', 'config.py',
-    'storage/initialization.py',
+    'runtime/dependencies.py',
+    'evidence/contracts.py', 'evidence/formats.py',
+    'evidence/qualification.py', 'evidence/marker_identity.py',
+    'evidence/interval_geometry.py', 'evidence/pipeline.py',
+    'evidence/source_markers.py', 'evidence/identity.py', 'evidence/labels.py',
+    'evidence/temporal/policy.py', 'evidence/temporal/statistics.py',
+    'evidence/temporal/markers.py', 'evidence/temporal/extras.py',
+    'evidence/intervals.py', 'evidence/observations.py', 'evidence/frames.py',
+    'evidence/shared_markers.py', 'evidence/scenes.py', 'evidence/occurrences.py',
+    'evidence/timeline.py', 'evidence/thresholds.py', 'evidence/cache_views.py',
+    'publication/preconditions.py', 'publication/namespace.py',
+    'publication/merged.py', 'publication/planning/types.py',
+    'publication/planning/merged_evidence.py',
+    'publication/planning/merged_tags.py', 'publication/planning/merged_markers.py',
+    'publication/index.py', 'publication/markers.py', 'publication/groups.py',
+    'publication/fingerprints.py',
+    'storage/input_checks.py', 'storage/metadata_store.py', 'storage/metadata.py',
+    'storage/results.py', 'storage/thresholds.py', 'storage/segments.py',
+    'storage/merge_checks.py', 'storage/store.py', 'storage/publications.py',
+    'storage/snapshots.py', 'storage/preview.py',
+    'cleanup/state.py', 'exclusions.py', 'models.py', 'domain.py',
+    'stash_api/tags.py', 'stash_api/sql.py', 'signatures.py',
 )
 
 
 def publication_code():
     root = Path(__file__).resolve().parents[1]
-    return hashlib.sha256(b''.join((root / name).read_bytes() for name in PUBLICATION_CODE_FILES)).hexdigest()
+    code = hashlib.sha256()
+    for name in PUBLICATION_CODE_FILES:
+        data = (root / name).read_bytes()
+        code.update(name.encode('utf-8') + b'\0')
+        code.update(len(data).to_bytes(8, 'big'))
+        code.update(data)
+    return code.hexdigest()
 
 
 def publication_key(app, args, hierarchy, cores, tags):

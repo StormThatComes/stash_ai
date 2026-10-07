@@ -40,8 +40,8 @@ def model_identity(app, config: ModelSettings, vocabulary, *, known_files=()):
             "aggregation": app.AGGREGATION, "top_k": app.TOP_K_FRAMES,
             "retention": {"marker_ratio": app.TEMPORAL_POLICY.marker_continue_ratio,
                           "scene_ratio": app.TEMPORAL_POLICY.scene_support_ratio}}
-    # Enabling or changing retention requests fresh inference to populate it;
-    # publication-only threshold edits can still reuse the retained evidence.
+    # Preserve historical signatures. Verified state provenance separates
+    # execution settings and checks actual retained coverage before reuse.
     for name in ('scene_cache_floor', 'marker_cache_floor'):
         value = getattr(config, name)
         if value is not None:

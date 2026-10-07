@@ -11,6 +11,7 @@ from .common import decoded_payload, tick
 
 def check_state_payloads(db, tables, errors, progress=None):
     specs = (
+        ("inference_identities", "data", dict),
         ("inference_archive", "data", dict),
         ("snapshots", "published", dict),
         ("snapshots", "pending", dict),
@@ -40,6 +41,13 @@ def check_state_payloads(db, tables, errors, progress=None):
                         errors['snapshot_proof_missing'] += 1
                 else:
                     payload = decoded_payload(blob, expected)
+                if table == 'inference_identities':
+                    from stash_ai.inference.provenance import predictive
+                    required = {'format', 'source', 'repo', 'revision', 'files', 'vocabulary',
+                                'batch_size', 'scene_threshold', 'marker_threshold', 'aggregation', 'top_k', 'retention'}
+                    if not required <= payload.keys() or not isinstance(payload['retention'], dict):
+                        raise ValueError('Incomplete inference identity.')
+                    predictive(payload)
                 if table == 'inference_archive':
                     from stash_ai.db.payloads import valid_result
                     from stash_ai.evidence.formats import validate_current
