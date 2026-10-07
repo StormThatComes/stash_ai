@@ -23,6 +23,7 @@ def trial(root, case, enabled, frames, labels):
     from stash_ai.history import lifecycle
     from stash_ai.history.store import HistoryStore, history_path
     from stash_ai.history.retention import prune
+    from stash_ai.inference import results as captured_results
     from stash_ai.inference.inputs import RunInputs
     from stash_ai.models import ModelSettings, SOURCES, Vocabulary
     from stash_ai.runs.merged_model import MergedModelRun
@@ -32,6 +33,7 @@ def trial(root, case, enabled, frames, labels):
     from stash_ai.storage.store import StateStore, scope_for
     from stash_ai.vtt import format_time
 
+    captured_results.now = lambda: '2026-01-01T00:00:00+00:00'  # Fixed fixture provenance for byte comparison.
     root = Path(root)
     assets = root / 'assets'
     assets.mkdir(exist_ok=True)
@@ -172,7 +174,7 @@ def main():
                     for path in root.glob(case+'-*sqlite3*'):
                         path.unlink()
     if len({row['evidence_sha256'] for row in samples}) != 1:
-        raise RuntimeError('Telemetry changed completed raw evidence')
+        raise RuntimeError('Telemetry changed completed raw evidence: '+repr([(r['case'],r['history'],r['evidence_sha256']) for r in samples]))
     for row in samples:
         if row['case'] == 'cached' and row['counts'].get('predicted_frames', 0) != 0:
             raise RuntimeError('Cached benchmark forced inference')

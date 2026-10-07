@@ -122,3 +122,6 @@ uruchomić predykcji. Retencja usuwa 40 zakończonych rekordów fixture, chroni�
 Fixture wykorzystuje prawdziwą orkiestrację, VTT/PNG i checkpointy oraz syntetyczny
 tagger CPU. Wynik nie jest pomiarem rzeczywistego backendu ML ani sieci;
 peak RSS obejmuje również przygotowanie fixture.
+
+Czas `captured_at` jest stały wyłącznie w fixture, aby porównanie BLOB-ów nie różniło
+się z powodu momentu uruchomienia próbki.

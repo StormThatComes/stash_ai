@@ -1,11 +1,41 @@
-"""Code and package provenance without importing inference backends."""
+"""Code and package provenance without backends or external processes."""
 import hashlib
 from importlib import metadata
 from pathlib import Path
-import subprocess
+import re
 
 PACKAGES = ('numpy', 'Pillow', 'requests', 'torch', 'torchvision', 'timm',
             'transformers', 'onnxruntime', 'onnxruntime-gpu')
+
+
+def git_revision(root):
+    git = Path(root) / '.git'
+    if git.is_file():
+        pointer = git.read_text().strip()
+        if not pointer.startswith('gitdir: '):
+            return None
+        git = (Path(root) / pointer[8:]).resolve()
+    if not git.is_dir():
+        return None
+    head = (git / 'HEAD').read_text().strip()
+    if head.startswith('ref: '):
+        ref = head[5:]
+        common = git
+        if (git / 'commondir').is_file():
+            common = (git / (git / 'commondir').read_text().strip()).resolve()
+        for directory in dict.fromkeys((git, common)):
+            path = directory / ref
+            if path.is_file():
+                head = path.read_text().strip()
+                break
+            packed = directory / 'packed-refs'
+            if packed.is_file():
+                match = next((line.split()[0] for line in packed.read_text().splitlines()
+                              if len(line.split()) == 2 and line.split()[1] == ref), None)
+                if match:
+                    head = match
+                    break
+    return head if re.fullmatch(r'[0-9a-fA-F]{40}|[0-9a-fA-F]{64}', head) else None
 
 
 def capture(root):
@@ -16,15 +46,10 @@ def capture(root):
         code.update(path.relative_to(root).as_posix().encode())
         with path.open('rb') as stream:
             code.update(hashlib.file_digest(stream, 'sha256').digest())
-    revision = None
-    if (root / '.git').exists():
-        try:
-            result = subprocess.run(['git', '-C', str(root), 'rev-parse', 'HEAD'],
-                                    capture_output=True, text=True, timeout=1)
-            if result.returncode == 0:
-                revision = result.stdout.strip()
-        except (OSError, subprocess.TimeoutExpired):
-            pass
+    try:
+        revision = git_revision(root)
+    except (OSError, ValueError):
+        revision = None
     packages = {}
     for name in PACKAGES:
         try:

@@ -131,3 +131,23 @@ def test_partial_and_different_observed_workloads_have_separate_groups():
                     models={}, counts={}, outcomes={}, metrics=[], wall_seconds=1, cpu_seconds=1,
                     workload={'verified_cues': cues})
     assert len(build_report([row(True, 10), row(True, 20), row(False, 10)])['groups']) == 3
+
+
+@pytest.mark.parametrize('layout', ['detached', 'loose', 'packed', 'worktree'])
+def test_revision_reads_git_metadata_without_processes(tmp_path, layout):
+    git = tmp_path / '.git'
+    sha = 'a' * 40
+    if layout == 'worktree':
+        git.write_text('gitdir: worktree\n')
+        git = tmp_path / 'worktree'
+    git.mkdir()
+    if layout == 'detached':
+        (git / 'HEAD').write_text(sha+'\n')
+    else:
+        (git / 'HEAD').write_text('ref: refs/heads/main\n')
+        if layout == 'packed':
+            (git / 'packed-refs').write_text(sha+' refs/heads/main\n')
+        else:
+            (git / 'refs' / 'heads').mkdir(parents=True)
+            (git / 'refs' / 'heads' / 'main').write_text(sha+'\n')
+    assert provenance.git_revision(tmp_path) == sha
