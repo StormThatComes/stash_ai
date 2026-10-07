@@ -1,11 +1,12 @@
 """Run complete preflight before applying saved-evidence threshold changes."""
 from collections import Counter
+from itertools import batched
 
 from tqdm import tqdm
 
 from . import scenes as scene_updates
 from .targets import threshold_failure_reason, threshold_targets
-from .plans import RecordAccess, PendingPolicy, ThresholdRequest, apply_plan
+from .plans import RecordAccess, PendingPolicy, ThresholdRequest, write_plan
 
 
 
@@ -48,25 +49,39 @@ def run(app, store, scene_ids, settings, report, *, scenes=True, markers=False):
     prepared_targets = []
     pending_scenes = store.pending_publication_scenes()
     from stash_ai.storage.metadata import backfill_batch
-    with backfill_batch(store):
-        for scene, config, available in tqdm(targets, desc=f'Check {mode}', unit='pair'):
-            try:
-                prepared = _plan_target(app, store, scene, config, available, pending_scenes,
-                                        scenes=scenes, markers=markers)
-                prepared_targets.append((scene, config.source.key, prepared))
-            except (ValueError, RuntimeError) as exc:
-                report.issue(issue_phase, config.source.key, scene, exc, str(exc))
-                reasons[threshold_failure_reason(exc)] += 1
-                errors += 1
+    bar = tqdm(total=len(targets), desc=f'Check {mode}', unit='pair')
+    try:
+        for group in batched(targets, 128):
+            with backfill_batch(store), store.metadata.batch(
+                    (scene, config.source.key) for scene, config, _ in group):
+                for scene, config, available in group:
+                    try:
+                        prepared = _plan_target(app, store, scene, config, available, pending_scenes,
+                                                scenes=scenes, markers=markers)
+                        prepared_targets.append((scene, config.source.key, prepared))
+                    except (ValueError, RuntimeError) as exc:
+                        report.issue(issue_phase, config.source.key, scene, exc, str(exc))
+                        reasons[threshold_failure_reason(exc)] += 1
+                        errors += 1
+                    bar.update(1)
+    finally:
+        bar.close()
     if errors:
         report.record_threshold_preflight(
             len(targets), errors, reasons, applied=0,
             selected=selected, skipped_no_evidence=skipped)
         return dict(errors=errors)
     changed = 0
-    for scene, model, prepared in tqdm(prepared_targets, desc=f'Apply {mode}', unit='pair'):
-        apply_plan(store, scene, model, prepared)
-        changed += bool(prepared)
+    bar = tqdm(total=len(prepared_targets), desc=f'Apply {mode}', unit='pair')
+    try:
+        for group in batched(prepared_targets, 128):
+            with store.connection:
+                for scene, model, prepared in group:
+                    write_plan(store, scene, model, prepared)
+                    changed += bool(prepared)
+                    bar.update(1)
+    finally:
+        bar.close()
     report.record_threshold_preflight(
         len(targets), 0, applied=changed,
         selected=selected, skipped_no_evidence=skipped)

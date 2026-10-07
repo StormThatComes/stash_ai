@@ -29,6 +29,12 @@ class TagResolver:
         self.catalog_loaded = False
         self.hierarchy_stats = Counter()
         self.marker_groups = None
+        self.plan_writer = None
+
+    def preview_mutation(self, operation, payload, reason, identifier=None):
+        if self.plan_writer is not None:
+            self.plan_writer.write(dict(type='tag', operation=operation, id=identifier,
+                                        payload=payload, reason=reason))
 
     def preload(self) -> None:
         """Read all tags for a hierarchy-only backfill, avoiding 5,813 lookups."""
@@ -73,6 +79,8 @@ class TagResolver:
             tag = {"id": f"dry-run:{name}", "name": name, "parents": parents or [],
                    "description": payload.get("description")}
             self.missing.add(name)
+            self.preview_mutation('create', dict(name=name, **payload),
+                                  'missing_generated_tag', tag['id'])
         else:
             tag = self.stash.create_tag(name, **payload)
         if self.hierarchy:
@@ -105,6 +113,8 @@ class TagResolver:
         if self.report and self.stash.dry_run:
             self.report(f"[DRY] Set parents of {tag['name']!r}: " + (", ".join(p["name"] for p in wanted.values()) or "(none)"))
         if self.stash.dry_run:
+            self.preview_mutation('update', dict(id=str(tag['id']), parent_ids=sorted(wanted)),
+                                  'managed_hierarchy_changed', str(tag['id']))
             updated = {**tag, "parents": list(wanted.values())}
         else:
             updated = self.stash.update_tag_parents(str(tag["id"]), sorted(wanted))

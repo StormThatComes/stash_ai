@@ -45,20 +45,14 @@ def main():
     from stash_ai.evidence.temporal.policy import TemporalPolicy
     app = SimpleNamespace(TEMPORAL_POLICY=TemporalPolicy())
     settings = [ModelSettings(source, Path('.'), scene_threshold=.4 if args.mode == 'markers' else .55,
-                              marker_threshold=.55)
+                              marker_threshold=.55, batch_size=1)
                 for source in SOURCES.values()]
     frames = [dict(start=float(i), end=float(i + 1), tags=[
         ['label_' + str(j), .3 + ((i * 7 + j * 19) % 600) / 1000]
         for j in range(args.labels)]) for i in range(args.frames)]
-    meta = dict(origin='inference', inference_signature='synthetic',
-                scene_threshold=.4, marker_threshold=.4, scene_frames_format=1,
-                scene_score_floor=.1, scene_support_floor=.34, marker_score_floor=.1,
-                marker_tag_blocklist=[])
-    outputs = {
-        'scene': dict(mode='scene', meta=meta, frames=frames,
-                      items=[dict(tag='label_' + str(j), score=.9) for j in range(args.labels)]),
-        'markers': dict(mode='frames', meta=meta, items=frames),
-    }
+    from benchmarks.fixtures import record
+    outputs = {'scene': record('synthetic', frames, scene=True, threshold=.4),
+               'markers': record('synthetic', frames, threshold=.4)}
     scenes = [str(i) for i in range(args.scenes)]
     trials = []
     for _ in range(args.repeats):
@@ -74,12 +68,12 @@ def main():
                 report = RunReport(write=lambda _: None)
                 store.report = report
                 writes, packed_bytes = 0, 0
-                replace_records, pack = store.replace_records, store.pack
+                replace_record, pack = store.replace_record, store.pack
 
                 def count_write(*values):
                     nonlocal writes
                     writes += 1
-                    return replace_records(*values)
+                    return replace_record(*values)
 
                 def count_pack(value):
                     nonlocal packed_bytes
@@ -87,9 +81,9 @@ def main():
                     packed_bytes += len(blob)
                     return blob
 
-                store.replace_records, store.pack = count_write, count_pack
-                planner = marker_updates if args.mode == 'markers' else scene_updates
-                plan_name = 'validate' if args.mode == 'markers' else 'plan'
+                store.replace_record, store.pack = count_write, count_pack
+                planner = scene_updates
+                plan_name = 'plan'
                 original_plan = getattr(planner, plan_name)
                 phases = {phase: dict(seconds=0., decode_calls=0) for phase in ('check', 'apply')}
                 plan_calls = 0

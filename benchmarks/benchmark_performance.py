@@ -16,14 +16,7 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 
-def synthetic_records(sources, frames, labels):
-    return {source: [dict(mode='frames', meta=dict(origin='inference',
-        marker_threshold=.8, marker_score_floor=.1, marker_tag_blocklist=[],
-        frame_input_signature='benchmark',
-        inference_signature=source + '-benchmark'), items=[
-            dict(start=i, end=i+1, tags=[(f'tag_{t}', .9) for t in range(labels)
-                if (i // (4+t % 7)+t) % 4 != 0]) for i in range(frames)])]
-        for source in sources}
+from benchmarks.fixtures import synthetic_records
 
 
 def fingerprint(value):
@@ -59,7 +52,7 @@ def main():
     for _ in range(args.repeats):
         gc.collect()
         start = time.perf_counter()
-        spans = merge_source_markers.marker_contributions(app, records, policies)
+        spans = merge_source_markers.marker_contributions(app, records, policies, tag_policies=policies)
         merged = merge_intervals.union_intervals(spans, borrow=True)
         times.append(time.perf_counter()-start)
         hashes.add(fingerprint(merged))

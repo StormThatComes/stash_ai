@@ -1,0 +1,26 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+# JoyTag + WD EVA02-Large v3 + DanbooruTagQuery L/16 + OppaiOracle V1.1 -> Stash
+
+# JoyTag
+torch==2.14.0+cpu
+torchvision==0.29.0+cpu
+transformers>=4.36.2
+einops>=0.7.0
+safetensors>=0.4.1
+Pillow>=9.4.0
+
+# Stash / HTTP / progress
+stashapi
+requests>=2.31.0
+urllib3>=2.0.0
+tqdm>=4.66.0
+
+# Editable tag hierarchy (safe YAML loader).
+PyYAML>=6.0
+
+# ONNX classifiers. Use only one ORT package. This GPU range uses CUDA 12/cuDNN 9.
+# ORT 1.21+ supplies preload_dlls for CUDA library setup.
+# CPU-only: replace onnxruntime-gpu with onnxruntime>=1.21,<2.
+numpy>=1.24,<3
+onnxruntime==1.26.0
+huggingface_hub>=0.26,<2

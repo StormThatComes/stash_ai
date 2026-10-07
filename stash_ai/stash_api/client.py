@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+from itertools import batched
 from typing import Iterator
 
 from stash_ai.stash_api.transport import StashTransport
@@ -12,7 +13,7 @@ class StashClient(StashTransport):
     """Build domain queries for Stash 0.31.1+ and manage SQL read fallback."""
 
     def __init__(self, dry_run: bool, *, url: str, api_key: str,
-                 request_timeout: float, http_retries: int, scene_page_size: int,
+                 request_timeout: float | tuple[float, float], http_retries: int, scene_page_size: int,
                  create_markers: bool):
         super().__init__(dry_run, url=url, api_key=api_key,
                          request_timeout=request_timeout, http_retries=http_retries)
@@ -157,3 +158,11 @@ class StashClient(StashTransport):
         if not result:
             raise RuntimeError(f"Stash did not delete marker {marker_id}.")
 
+    def delete_markers(self, marker_ids):
+        """Bounded native mutations; ambiguous responses leave durable recovery."""
+        for group in batched(dict.fromkeys(map(str, marker_ids)), 200):
+            result = self.gql('''mutation StashAIDeleteMarkers($ids: [ID!]!) {
+                sceneMarkersDestroy(ids: $ids)
+            }''', {'ids': list(group)})['sceneMarkersDestroy']
+            if result is not True:
+                raise RuntimeError('Marker batch deletion was not confirmed; resume the pending merge.')

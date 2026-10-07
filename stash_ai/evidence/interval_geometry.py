@@ -14,6 +14,24 @@ def append_interval(intervals, start, end):
         intervals.append([start, end])
 
 
+def _content_hash(value, memo):
+    """Equality-compatible bucket key; collisions still use exact comparison."""
+    if not isinstance(value, (dict, list, tuple, set, frozenset)):
+        return hash(value)
+    identity = id(value)
+    if identity in memo:
+        return memo[identity]
+    if isinstance(value, dict):
+        result = hash(frozenset((_content_hash(k, memo), _content_hash(v, memo))
+                                for k, v in value.items()))
+    elif isinstance(value, (set, frozenset)):
+        result = hash(frozenset(_content_hash(v, memo) for v in value))
+    else:
+        result = hash((type(value), tuple(_content_hash(v, memo) for v in value)))
+    memo[identity] = result
+    return result
+
+
 def union_intervals(contributions: list[MarkerContribution], *, borrow=False) -> list[MergedMarker]:
     """One component per exact label. Positive gaps are never bridged here.
 
@@ -34,16 +52,30 @@ def union_intervals(contributions: list[MarkerContribution], *, borrow=False) ->
             raise ValueError(f"Invalid marker interval for {tag!r}.")
         grouped[tag].append(item)
     merged = []
+    hashes = {}
     for tag, items in sorted(grouped.items()):
         items.sort(key=lambda item: (item["start"], item["end"] if item["end"] is not None else item["start"], item["source"]))
         components = []
+        buckets = {}
         for item in items:
             end = item["end"] if item["end"] is not None else item["start"]
             if not components or item["start"] > components[-1]["bound"]:
                 components.append(dict(tag=tag, start=item["start"], bound=end, contributors=[]))
+                buckets = {}
             component = components[-1]
             component["bound"] = max(component["bound"], end)
-            if item not in component["contributors"]:
+            key = tuple(item.get(field) for field in
+                        ('source', 'start', 'end', 'score', 'hits', 'derived', 'evidence_signature'))
+            bucket = buckets.setdefault(key, [])
+            if isinstance(bucket, list) and len(bucket) >= 8:
+                indexed = defaultdict(list)
+                for previous in bucket:
+                    indexed[_content_hash(previous, hashes)].append(previous)
+                buckets[key] = bucket = indexed
+            if isinstance(bucket, dict):
+                bucket = bucket.setdefault(_content_hash(item, hashes), [])
+            if item not in bucket:
+                bucket.append(item)
                 component["contributors"].append(item)
         for component in components:
             contributors = component["contributors"]
@@ -64,4 +96,3 @@ def overlaps(marker, wanted, tolerance):
     target_end = wanted["seconds"] if target_end is None else target_end
     return (max(start, wanted["seconds"]) <= min(end, target_end)
             or abs(start - wanted["seconds"]) <= tolerance)
-

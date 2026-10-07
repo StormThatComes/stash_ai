@@ -68,24 +68,23 @@ def main():
     app.MARKER_MIN_HITS = 2
     app.MARKER_MERGE_GAP_SECONDS = 0
     app.MARKER_MAX_TAGS_PER_FRAME = 0
-    records = {source: [dict(mode='frames', meta=dict(origin='inference',
-        marker_threshold=.8, marker_score_floor=.1, marker_tag_blocklist=[],
-        frame_input_signature='retained-benchmark', inference_signature=source + '-benchmark'),
-        items=[dict(start=i, end=i+1, tags=[
-            (f'tag_{j}', .9 if (i+j) % 4 == 0 else .7) for j in range(args.labels)] + [
-            (f'weak_{j}', .2 + ((i+j) % 20) / 100) for j in range(args.weak_labels)])
-            for i in range(args.frames)])] for source in SOURCES}
+    from benchmarks.fixtures import record
+    rows = [dict(start=float(i), end=float(i+1), tags=[
+        (f'tag_{j}', .9 if (i+j) % 4 == 0 else .7) for j in range(args.labels)] + [
+        (f'weak_{j}', .2 + ((i+j) % 20) / 100) for j in range(args.weak_labels)])
+        for i in range(args.frames)]
+    records = {source: record(source, rows, identity='retained-benchmark') for source in SOURCES}
     policies = {source: frozenset() for source in SOURCES}
     groups = list(fusion.make_groups(records).values())
-    first = next(iter(records.values()))[0]
+    first = next(iter(records.values()))
     frames = [FramePrediction(Cue(row['start'], row['end'], '', (0, 0, 1, 1)),
                                   tuple(row['tags'])) for row in first['items']]
     result = dict(frames=args.frames, labels=args.labels, weak_labels=args.weak_labels,
         sources=len(SOURCES), repeats=args.repeats, input_sha256=fingerprint(records),
-        observations=measure(lambda: [fusion.observations(app, group, policies) for group in groups], args.repeats),
+        observations=measure(lambda: [fusion.observations(app, group, policies, policies) for group in groups], args.repeats),
         temporal_markers=measure(lambda: temporal.build_markers(app, frames, frozenset(), threshold=.8,
             identity='retained-benchmark'), args.repeats),
-        merge_cpu=measure(lambda: merge_intervals.union_intervals(merge_source_markers.marker_contributions(app, records, policies),
+        merge_cpu=measure(lambda: merge_intervals.union_intervals(merge_source_markers.marker_contributions(app, records, policies, tag_policies=policies),
             borrow=True), args.repeats))
     print(json.dumps(result, indent=2))
 
