@@ -32,6 +32,11 @@ class Checkpoint:
         self.saved_processed = 0
         self.resumed_frames = 0
         self.analysis = None
+        self.restore_reason, self.previous_signature, self.on_restore = 'missing', None, None
+
+    def _notify_restore(self):
+        if self.on_restore is not None:
+            self.on_restore(self)
 
     def restore(self):
         import numpy as np
@@ -39,10 +44,14 @@ class Checkpoint:
             "SELECT signature,processed,total,top_rows,top_scores FROM " + self.store.table('checkpoints') + " WHERE scope=? AND scene=? AND model=?",
             (self.store.scope, self.scene, self.model)).fetchone()
         if not row or row[0] != self.signature or row[2] != self.total:
+            self.previous_signature = row[0] if row else None
+            self.restore_reason = ('missing' if not row else 'signature_changed' if row[0] != self.signature else 'total_changed')
             with self.store.connection:
                 clear_checkpoint(self.store, self.scene, self.model)
+            self._notify_restore()
             return 0, np.empty((0, self.labels), np.float32), []
         _, processed, _, rows, blob = row
+        self.previous_signature, self.restore_reason = row[0], 'compatible'
         if not 0 <= processed <= self.total or not 0 <= rows <= processed:
             raise ValueError("Invalid checkpoint dimensions.")
         top = np.frombuffer(zlib.decompress(blob), dtype="<f4").reshape(rows, self.labels).copy()
@@ -66,6 +75,7 @@ class Checkpoint:
         from stash_ai.db.payloads import valid_frames
         if not valid_frames(frames, checkpoint=True):
             raise ValueError('Invalid checkpoint frame evidence; use --restart.')
+        self._notify_restore()
         return processed, top, frames
 
     def record(self, processed, top_scores, frames, analysis=None, *, scene_frames=None):

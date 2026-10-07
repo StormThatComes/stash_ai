@@ -23,6 +23,17 @@ class RunReport:
         self.profile = None
         self.issue_counts = Counter()
         self.count_sources = []
+        self.history = None
+
+    def reuse_decision(self, scope, scene, model, action, status, reasons, details):
+        if status != 'started':
+            self.counts['reuse_decision_' + action] += 1
+            for reason in reasons:
+                self.counts['reuse_reason_' + reason] += 1
+        self.detail(f'Reuse {model}/scene {scene}: {action}/{status}; ' + ', '.join(reasons))
+        if self.history is not None:
+            self.history.call('record_decision', self.history.identifier, scope, scene, model,
+                              action, status, reasons, details)
 
     def measure(self, stage, *, model=None, work=None, units=0, unit=''):
         return self._timing.measure(stage, model=model, work=work, units=units, unit=unit)

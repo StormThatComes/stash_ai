@@ -55,7 +55,7 @@ class RunHistory:
         self.app, self.args, self.store = app, args, None
         self.identifier, self.result = uuid.uuid4().hex, None
         self.enabled = (not (app.DRY_RUN or args.dry_run or args.no_run_history)
-                        and args.command is not Command.RUN_REPORT
+                        and args.command not in (Command.RUN_REPORT, Command.REUSE_REPORT)
                         and (args.record_run or args.command in AUTOMATIC_COMMANDS))
 
     def warn(self, exc):
@@ -68,6 +68,7 @@ class RunHistory:
         from tqdm import tqdm
         self.args.report = RunReport(self.args.verbose, tqdm.write)
         self.args.report.profile = ProfileMetrics()
+        self.args.report.history = self
         self.start, self.cpu_start = time.perf_counter(), time.process_time()
         try:
             self.store = HistoryStore(history_path(self.args))
@@ -103,3 +104,15 @@ class RunHistory:
             self.warn(failure)
         finally:
             self.store.close()
+
+    def call(self, operation, *args):
+        """Optional diagnostic writes/reads must never affect state or inference."""
+        if self.store is None:
+            return None
+        try:
+            return getattr(self.store, operation)(*args)
+        except Exception as exc:
+            self.warn(exc)
+            self.store.close()
+            self.store = None
+            return None

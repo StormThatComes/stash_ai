@@ -17,6 +17,9 @@ def main(argv: list[str] | None = None, *, runtime: RuntimeContext | None = None
     if args.command is Command.RUN_REPORT:
         from stash_ai.reports.runs import run as run_history_report
         return run_history_report(app, args)
+    if args.command is Command.REUSE_REPORT:
+        from stash_ai.reports.reuse import run as run_reuse_report
+        return run_reuse_report(app, args)
     from stash_ai.history.lifecycle import RunHistory
     from contextlib import nullcontext
     with RunHistory(app, args) as history:

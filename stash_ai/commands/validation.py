@@ -35,11 +35,24 @@ def validate_reports(parser, args):
             parser.error('--run-report is an offline history inspection; model/tagging/scene modifiers do not apply.')
         if args.run_report.suffix.lower() != '.json' or args.run_report.expanduser().exists():
             parser.error('--run-report requires a new .json file; existing files are never overwritten.')
+    elif args.command is Command.REUSE_REPORT:
+        from .modes import EXECUTION_OPTIONS
+        if supplied(args, (*EXECUTION_OPTIONS, *PUBLICATION_OPTIONS, 'dry_run', 'record_run')):
+            parser.error('--reuse-report reads recorded decisions; inference/tagging modifiers do not apply.')
+        if args.reuse_report.suffix.lower() != '.json' or args.reuse_report.expanduser().exists():
+            parser.error('--reuse-report requires a new .json file; existing files are never overwritten.')
+        if args.models:
+            from stash_ai.models import select_models
+            try:
+                args.models = select_models(args.models)
+            except ValueError as exc:
+                parser.error(str(exc))
     elif any(getattr(args, name) is not None for name in ('run_limit', 'run_command', 'run_status', 'run_model')):
-        parser.error('--run-* filters require --run-report.')
+        parser.error('--run-* filters require --run-report or --reuse-report.')
     if args.run_limit is not None and not 1 <= args.run_limit <= 10000:
         parser.error('--run-limit must be in 1..10000.')
-    args.run_limit = 50 if args.run_limit is None else args.run_limit
+    if args.run_limit is None:
+        args.run_limit = 1 if args.command is Command.REUSE_REPORT else 50
     if args.run_history_db is not None:
         import os
         history, state = args.run_history_db.expanduser().resolve(), args.state_db.expanduser().resolve()
