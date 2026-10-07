@@ -47,11 +47,32 @@ def pinned(store, scene):
     return required
 
 
-def retain(store, scene, model, kind, previous, active):
+def lazy_pins(store, scene):
+    """A lazy reader scoped to one uninterrupted result replacement call.
+
+    Its caller owns the transaction and performs only result/index/metadata writes
+    between reads. Never reuse this reader around prepare/publish/abandon/prune.
+    The returned set is private and is only read by retain.
+    """
+    required = None
+
+    def read():
+        nonlocal required
+        if required is None:
+            required = pinned(store, scene)
+        return required
+
+    return read
+
+
+def retain(store, scene, model, kind, previous, active, *, pins=None):
     if previous is None:
         return
     signature = marker_segment_signature(previous)
-    if signature == marker_segment_signature(active) or (model, signature) not in pinned(store, scene):
+    if signature == marker_segment_signature(active):
+        return
+    required = pins() if pins is not None else pinned(store, scene)
+    if (model, signature) not in required:
         return
     raw = {key: value for key, value in previous.items()
            if key != 'publication_threshold'}

@@ -132,3 +132,16 @@ oraz 53/84 ms dla wznowienia. Narzut obejmuje start i zamknięcie historii,
 fingerprint kodu i odczyt metadanych pakietów; liczba zapisów historii wynosi
 odpowiednio 7, 5 i 7. Jest to mały syntetyczny przebieg, więc porównuj też
 bezwzględny czas, a nie tylko procent narzutu.
+
+
+## Koszt zapisu wyników przy przypiętych dowodach
+
+`python -m benchmarks.benchmark_pinned_proofs --frames 256 --labels 12 --repeats 3`
+mierzy cały zapis scene+markers dla czterech źródeł przy jednoczesnych dowodach
+published, pending i recovery, również w sparse dry-run. Każda próbka działa
+w nowym procesie i nowej bazie. Baseline wyłącza tylko współdzielenie leniwego
+odczytu pins w ramach wywołania; reszta kodu jest identyczna. Przygotowanie
+dowodów i weryfikacja hashy są poza pomiarem czasu. Raportuje wall/CPU, peak RSS
+procesu (obejmujący fixture), liczbę dekodowanych snapshotów i zapisów SQL.
+Wszystkie trwałe wyniki, archiwa, snapshoty, recovery i indeksy muszą dać
+identyczny hash; dry-run dodatkowo zachowuje bajty bazy źródłowej.

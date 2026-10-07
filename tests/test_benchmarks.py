@@ -17,6 +17,7 @@ import pytest
     ('tag_cascade', ['--markers', '20', '--batch-size', '7', '--repeats', '2']),
     ('rethreshold', ['--scenes', '2', '--frames', '4', '--labels', '2', '--repeats', '2']),
     ('run_history', ['--frames', '8', '--labels', '2', '--repeats', '1']),
+    ('pinned_proofs', ['--frames', '4', '--labels', '2', '--repeats', '1']),
     ('scoped_reports', ['--scenes', '20', '--selected', '2', '--repeats', '2']),
 ])
 def test_offline_entry_point(name, arguments):
@@ -26,6 +27,12 @@ def test_offline_entry_point(name, arguments):
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
     assert payload
+    if name == 'pinned_proofs':
+        assert payload['identical_state']
+        assert all(row['proofs_unchanged'] and row['archived_records'] == 8 for row in payload['trials'])
+        assert all(row['source_unchanged'] for row in payload['trials'] if row['preview'])
+        assert {row['decoded_snapshots'] for row in payload['trials'] if row['variant'] == 'baseline'} == {48}
+        assert {row['decoded_snapshots'] for row in payload['trials'] if row['variant'] == 'candidate'} == {24}
     if name == 'rethreshold':
         assert all(trial['evidence_unchanged'] and trial['evidence_writes'] == 0
                    for trial in payload['trials'])

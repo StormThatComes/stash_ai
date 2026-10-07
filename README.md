@@ -915,3 +915,21 @@ rekordy bez końca, inne scope i `reuse_proofs` pozostają. Nie są otwierane wy
 checkpointy ani snapshoty bazy źródłowej. Historia v1/v2 jest nadal czytelna
 bez modyfikacji; pierwszy zapis aktualizuje tylko historię do v3. Retencja nie
 uruchamia się automatycznie i nie wykonuje VACUUM.
+
+
+### Zależności ponownej publikacji
+
+Fingerprint merge obejmuje moduły odtwarzające zachowane dowody i publikujące
+tagi/markery oraz efektywną politykę, ustawienia publikacji, exclusions, hierarchy
+i zaobserwowany katalog/scenę. Zmiana backendu, checkpointów, przygotowania wejść,
+prefetchu, workerów lub historii nie unieważnia gotowej publikacji samą zmianą
+pliku. Zapis nowych wyników i rzeczywiste zmiany sceny/polityki nadal ją unieważniają.
+
+Manifest jest konserwatywny na poziomie modułów: zmiana mieszanego modułu storage
+lub domain może nadal wymagać sprawdzenia merge. Jednorazowa zmiana manifestu
+powoduje ponowne sprawdzenie istniejących merge checks, z użyciem zapisanych wyników;
+nie zmienia tożsamości inferencji ani formatów wyników/checkpointów/snapshotów.
+
+Przypięte dowody published/pending/recovery są odczytywane leniwie raz podczas
+jednego zapisu wyników scene+markers. Odczyt nie przechodzi na kolejny zapis,
+rollback ani zmianę publikacji; pełne archiwum konkretnych dowodów pozostaje.
