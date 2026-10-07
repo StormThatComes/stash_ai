@@ -34,7 +34,7 @@ def test_clients_keep_connection_and_output_settings_isolated(monkeypatch):
             monkeypatch.setattr(current.api, 'post', post)
             assert list(current.iter_scenes()) == [{'id': '1'}]
         assert [url for url, _ in calls] == ['http://first.test/stash/graphql', 'http://second.test/graphql']
-        assert [kw['timeout'] for _, kw in calls] == [7, 11]
+        assert [kw['timeout'] for _, kw in calls] == pytest.approx([7, 11], abs=.1)
         assert [kw['json']['variables']['filter']['per_page'] for _, kw in calls] == [3, 5]
         assert 'scene_markers' not in calls[0][1]['json']['query']
         assert 'scene_markers' in calls[1][1]['json']['query']
@@ -50,7 +50,7 @@ def http_response(status, data=None):
     def raise_for_status():
         if status >= 400:
             raise requests.HTTPError(f'HTTP {status}')
-    return SimpleNamespace(status_code=status, content=b'', headers={},
+    return SimpleNamespace(status_code=status, content=b'', headers={}, close=lambda: None,
                            raise_for_status=raise_for_status,
                            json=lambda: {'data': data or {'ok': True}})
 

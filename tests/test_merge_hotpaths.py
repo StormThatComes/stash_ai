@@ -87,7 +87,7 @@ INSERT INTO scenes_tags VALUES (1,1),(1,3);
 
 @pytest.fixture
 def database():
-    db = sqlite3.connect(':memory:')
+    db = sqlite3.connect(':memory:', check_same_thread=False)
     db.executescript(SCHEMA)
     with db:
         for i in range(1,301):

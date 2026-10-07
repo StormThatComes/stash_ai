@@ -50,6 +50,9 @@ class MarkerGroups:
         if self.stash.dry_run:
             tag = dict(id='dry-run:' + name, name=name, description=description,
                        parents=parents, ignore_auto_tag=True)
+            self.resolver.preview_mutation('create', dict(name=name, description=description,
+                parent_ids=[str(p['id']) for p in parents], ignore_auto_tag=True),
+                'missing_marker_group', tag['id'])
             if self.resolver.report:
                 self.resolver.report(f'[DRY] Create marker group tag {name!r}.')
         else:
@@ -82,6 +85,9 @@ class MarkerGroups:
             wanted = {str(p['id']) for p in tag.get('parents', [])} | {str(root['id'])}
             if wanted != {str(p['id']) for p in tag.get('parents', [])} or not tag.get('ignore_auto_tag'):
                 if self.stash.dry_run:
+                    self.resolver.preview_mutation('update', dict(id=str(tag['id']),
+                        parent_ids=sorted(wanted), ignore_auto_tag=True),
+                        'marker_group_organization_changed', str(tag['id']))
                     if self.resolver.report:
                         self.resolver.report(f'[DRY] Repair marker group hierarchy/settings for {name!r}.')
                     parents = {str(p['id']): p for p in tag.get('parents', [])}

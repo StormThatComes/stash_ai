@@ -2,6 +2,7 @@
 from collections import defaultdict
 from stash_ai.domain import MarkerSpec
 from .policy import marker_floor
+from stash_ai.evidence.eligibility import eligible, selections
 from stash_ai.evidence.observations import qualify_marker_extras
 
 
@@ -17,10 +18,7 @@ def consensus_seeds(records, policies, policy, max_tags=0):
         high = marker_threshold(segment)
         floor = marker_floor(policy, high)
         for frame in segment["items"]:
-            eligible = sorted(((tag, score) for tag, score in frame['tags']
-                               if score >= floor and tag not in policies[model]),
-                              key=lambda item: (-item[1], item[0]))
-            for tag, score in eligible[:max_tags] if max_tags else eligible:
+            for tag, score in eligible(frame['tags'], floor, policies[model], max_tags):
                 votes[(identity, frame["start"], tag)].add(model)
     return {key: tuple(sorted(models)) for key, models in votes.items() if len(models) >= policy.consensus_min_models}
 
@@ -31,7 +29,6 @@ def build_markers(app, frames, core_exclusions, *, threshold, seeds=None, identi
     policy = app.TEMPORAL_POLICY
     high = threshold
     floor = marker_floor(policy, high)
-    sort_floor = min(floor, high)
     seeds = seeds or {}
     active, finished = {}, []
     frames = sorted(frames, key=lambda frame: frame.cue.start)
@@ -46,13 +43,8 @@ def build_markers(app, frames, core_exclusions, *, threshold, seeds=None, identi
 
     for frame in frames:
         cue = frame.cue
-        ordered = sorted(((tag, score) for tag, score in frame.tags
-                          if score >= sort_floor),
-                         key=lambda item: (-item[1], item[0]))
-        extras = [(tag, score) for tag, score in ordered if score >= high]
-        cores = [(tag, score) for tag, score in ordered if tag not in core_exclusions and score >= floor]
-        if app.MARKER_MAX_TAGS_PER_FRAME:
-            extras, cores = extras[:app.MARKER_MAX_TAGS_PER_FRAME], cores[:app.MARKER_MAX_TAGS_PER_FRAME]
+        cores, extras = selections(frame.tags, high, floor, core_exclusions,
+                                   limit=app.MARKER_MAX_TAGS_PER_FRAME)
         if collect_extras:
             extra_frames.append((cue.start, cue.end, extras))
         for tag, score in cores:

@@ -128,8 +128,7 @@ def _shared_scene_contributions(app, index, scene_records, policies, existing, m
             group_key, members, scene_context, stats, events,
             policy, options, incomplete))
 
-    candidates.sort(key=lambda item: (-item['joint_statistics']['high_hits'], -item['joint_statistics']['hits'],
-                                     item['tag'], item['frame_group']))
+    candidates.sort(key=lambda item: (item['tag'], item['frame_group']))
     if metrics is not None:
         metrics['shared_scene_tags'] += len({item['tag'] for item in candidates})
         metrics['scene_cache_partial'] += int(partial)
