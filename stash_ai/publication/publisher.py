@@ -29,7 +29,7 @@ class MergePublisher:
         if (self.app.CREATE_MARKERS
                 and self.app.TEMPORAL_POLICY.occurrence_markers):
             refresh_kinds = [*refresh_kinds, "scene"]
-        self.pending_refreshes = progress.pending_refreshes(self.store, refresh_kinds)
+        self.pending_refreshes = progress.pending_refreshes(self.store, refresh_kinds, scenes)
         workers = self.args.merge_workers
         if self.app.DRY_RUN or self.args.profile_merge is not None:
             # Workers cannot see the temporary dry-run overlay. Profiling needs

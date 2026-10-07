@@ -130,17 +130,17 @@ class StateStore(AbstractContextManager):
     def result_metadata(self, scene, kind, model):
         return self.metadata.get(scene, kind, model)
 
-    def result_presence(self, models):
-        return self.results.result_presence(models)
+    def result_presence(self, models, scenes=None):
+        return self.results.result_presence(models, scenes)
 
-    def result_index_presence(self, models):
-        return self.results.result_index_presence(models)
+    def result_index_presence(self, models, scenes=None):
+        return self.results.result_index_presence(models, scenes)
 
     def sources(self, scene, kind):
         return self.results.sources(scene, kind)
 
-    def preload_sources(self):
-        return self.results.preload_sources()
+    def preload_sources(self, scenes=None):
+        return self.results.preload_sources(scenes)
 
     def put(self, scene, model, outputs):
         return self.results.put(scene, model, outputs)

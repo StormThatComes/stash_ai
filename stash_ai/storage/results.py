@@ -6,6 +6,7 @@ from copy import deepcopy
 from stash_ai.runtime.timing import measured
 from stash_ai.storage.thresholds import overlay
 from stash_ai.models import SOURCES
+from .selection import selected_rows
 
 
 KINDS = ("scene", "markers")
@@ -60,7 +61,7 @@ class ResultStore:
             record = self._normalize_record(store.unpack(rows[0][0]), kind, rows[0][1]) if rows else None
         return record if borrow else deepcopy(record)
 
-    def result_presence(self, models):
+    def result_presence(self, models, scenes=None):
         """Return lightweight saved-result keys without decoding payload BLOBs."""
         store = self.store
         from stash_ai.storage.preview import check_source
@@ -69,13 +70,13 @@ class ResultStore:
         if not selected:
             return set()
         placeholders = ','.join('?' for _ in selected)
-        rows = store.read_rows(
+        rows = selected_rows(store,
             "SELECT scene,model,kind FROM " + store.table('results') +
             f" WHERE scope=? AND model IN ({placeholders})",
-            (store.scope, *selected))
+            (store.scope, *selected), scenes)
         return {(str(scene), model, kind) for scene, model, kind in rows}
 
-    def result_index_presence(self, models):
+    def result_index_presence(self, models, scenes=None):
         """Return indexed result keys without decoding result payloads."""
         store = self.store
         from stash_ai.storage.preview import check_source
@@ -84,10 +85,10 @@ class ResultStore:
         if not selected:
             return set()
         placeholders = ','.join('?' for _ in selected)
-        rows = store.read_rows(
+        rows = selected_rows(store,
             "SELECT scene,model,kind FROM " + store.table('result_index') +
             f" WHERE scope=? AND model IN ({placeholders})",
-            (store.scope, *selected))
+            (store.scope, *selected), scenes)
         return {(str(scene), model, kind) for scene, model, kind in rows}
 
     def sources(self, scene, kind):
@@ -101,14 +102,14 @@ class ResultStore:
             store.retain(key, value)
         return set(value)
 
-    def preload_sources(self):
+    def preload_sources(self, scenes=None):
         store = self.store
         if not store.cache.limit:
             return
         last, values = None, set()
-        for scene, kind, model in store.connection.execute(
-                'SELECT scene,kind,model FROM ' + store.table('results') + ' WHERE scope=? ORDER BY scene,kind',
-                (store.scope,)):
+        for scene, kind, model in selected_rows(store,
+                'SELECT scene,kind,model FROM ' + store.table('results') + ' WHERE scope=?',
+                (store.scope,), scenes, suffix=' ORDER BY scene,kind'):
             key = ('sources', scene, kind)
             if key != last:
                 if last is not None:

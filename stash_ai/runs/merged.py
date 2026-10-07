@@ -92,7 +92,7 @@ class MergedRun:
         self.merge_key = (
             digest([self.base_key, fingerprints.catalog_fingerprint(self.resolver)])
             if self.use_catalog else self.base_key)
-        self.store.preload_sources()
+        self.store.preload_sources(args.scene_id)
 
     def _scan_scenes(self):
         app, args = self.app, self.args
@@ -178,7 +178,7 @@ class MergedRun:
         if args.restart:
             progress.request_refresh(
                 store, self.scenes, [config.source.key for config in self.settings], kinds)
-        progress.preload_status(store)
+        progress.preload_status(store, self.scenes)
         for config in self.settings:
             MergedModelRun(
                 app, args, store, config, self.catalogs[config.source.key],

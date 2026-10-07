@@ -5,7 +5,7 @@ def threshold_targets(store, scenes, settings, kinds):
     scene_ids = [str(scene) for scene in scenes]
     models = [config.source.key for config in settings]
     requested = frozenset(kinds)
-    known = store.result_presence(models) | store.result_index_presence(models)
+    known = store.result_presence(models, scene_ids) | store.result_index_presence(models, scene_ids)
     targets = []
     for scene in scene_ids:
         for config in settings:
