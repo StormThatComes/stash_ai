@@ -149,3 +149,10 @@ dowodów i weryfikacja hashy są poza pomiarem czasu. Raportuje wall/CPU, peak R
 procesu (obejmujący fixture), liczbę dekodowanych snapshotów i zapisów SQL.
 Wszystkie trwałe wyniki, archiwa, snapshoty, recovery i indeksy muszą dać
 identyczny hash; dry-run dodatkowo zachowuje bajty bazy źródłowej.
+
+Pomiar [pinned_proofs_2026-10-07.json](results/pinned_proofs_2026-10-07.json)
+z CI: writer 412 → 283 ms, preview 405 → 279 ms (mediany, 3 powtórzenia).
+Dekodowania snapshotów spadły z 48 do 24, a liczba zapisów SQL pozostała
+40 dla writera i 48 dla preview. Hashe całego sprawdzanego stanu są identyczne;
+wszystkie 8 przypiętych rekordów pozostaje w archiwum. Zysk około 31% dotyczy
+tego syntetycznego zapisu z dużymi proofs, bez kosztu inferencji i API.
