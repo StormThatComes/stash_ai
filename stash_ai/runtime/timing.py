@@ -58,6 +58,8 @@ class RunTimings:
                     model=model if model is not None else getattr(self._timers, 'model', ''),
                     work=work if work is not None else getattr(self._timers, 'work', ''), units=units, unit=unit)
 
+            self.report.record_progress()
+
     @contextmanager
     def model(self, name):
         previous = getattr(self._timers, 'model', '')

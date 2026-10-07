@@ -34,15 +34,15 @@ def _init_report_worker(state_db, scope, settings, core_policies,
 
 
 def _report_worker_scene(scene):
-    if _WORKER_CONTEXT is None:
-        raise RuntimeError("Model report worker was not initialized.")
-    if _PROFILE:
-        from stash_ai.runtime.profile import worker_profile
-        return worker_profile(_WORKER_CONTEXT.store, lambda: _compute_scene(scene), 'model_report_worker_compute')
-    return _compute_scene(scene)
+    from stash_ai.runtime.profile import execute_worker
+    store = _WORKER_CONTEXT.store if _WORKER_CONTEXT is not None else None
+    return execute_worker(scene, store, lambda: _compute_scene(scene),
+                          'model_report_worker_compute', profile=_PROFILE)
 
 
 def _compute_scene(scene):
+    if _WORKER_CONTEXT is None:
+        raise RuntimeError('Model report worker was not initialized.')
     return scene_report(
         _WORKER_CONTEXT.settings,
         _WORKER_CONTEXT.store,
@@ -100,11 +100,16 @@ def build_report_parallel(app, state_db, scope, scene_ids, core_policies,
     ) as executor:
         partials = executor.map(
             _report_worker_scene, scene_ids, chunksize=chunksize, buffersize=max(workers, 2))
-        for partial in tqdm(
-                partials, total=len(scene_ids), desc="Model report", unit="scene"):
-            if profile is not None:
-                partial, metrics = partial
-                profile.ingest(metrics)
-            merge_scene_report(totals, utility, partial)
+        for scene, partial in zip(scene_ids, tqdm(
+                partials, total=len(scene_ids), desc="Model report", unit="scene")):
+            if profile is not None and partial.metrics is not None:
+                profile.ingest(partial.metrics)
+            if partial.scene_id != str(scene):
+                raise RuntimeError('Model report worker returned an inconsistent scene ID.')
+            if partial.error is not None:
+                raise RuntimeError(partial.error)
+            if partial.payload is None:
+                raise RuntimeError('Model report worker returned no counters.')
+            merge_scene_report(totals, utility, partial.payload)
 
     return model.report_payload(totals, utility)

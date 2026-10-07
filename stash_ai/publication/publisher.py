@@ -111,12 +111,15 @@ class MergePublisher:
         """Publish local or worker evidence with the same accounting and errors."""
         try:
             if prepared is not None:
-                worker_scene, scene_hits, spans, markers, diagnostics, error = prepared
-                if worker_scene != scene_id:
+                if prepared.scene_id != str(scene_id):
                     raise RuntimeError(
-                        f"Merge worker returned scene {worker_scene!r} while {scene_id!r} was expected.")
-                if error is not None:
-                    raise RuntimeError(error)
+                        f"Merge worker returned scene {prepared.scene_id!r} while {scene_id!r} was expected.")
+                if prepared.error is not None:
+                    raise RuntimeError(prepared.error)
+                if prepared.payload is None:
+                    raise RuntimeError('Merge worker returned no evidence.')
+                scene_hits, spans = prepared.payload.scene_hits, prepared.payload.spans
+                markers, diagnostics = prepared.payload.markers, prepared.payload.diagnostics
             cache_before = self.store.cache.stats.copy()
             if prepared is None:
                 diagnostics = Counter()
@@ -217,10 +220,8 @@ class MergePublisher:
                 completed = 0
                 try:
                     for (scene_id, current), prepared in zip(pending, evidence):
-                        if len(prepared) == 7:
-                            if self.report.profile is not None:
-                                self.report.profile.ingest(prepared[-1])
-                            prepared = prepared[:6]
+                        if self.report.profile is not None and prepared.metrics is not None:
+                            self.report.profile.ingest(prepared.metrics)
                         self._merge_one(scene_id, current, prepared)
                         completed += 1
                         bar.update(1)
