@@ -39,6 +39,8 @@ class CoverageAccumulator:
                 continue
             row = dict(scene_id=pair.scene_id, model=model,
                        outputs=pair.outputs, blockers=pair.blockers)
+            if pair.input_checks:
+                row['input_checks'] = pair.input_checks
             if pair.publication_dependencies:
                 row['publication_dependencies'] = pair.publication_dependencies
             if 'blocked_selected_model' in pair.blockers:

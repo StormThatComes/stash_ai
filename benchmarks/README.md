@@ -1,7 +1,7 @@
 # Benchmarki offline
 
 Uruchamiaj z katalogu głównego repozytorium, po instalacji `requirements-dev.txt`.
-W CI wszystkie osiem wejść przechodzi smoke test na małych danych.
+W CI wszystkie dziewięć wejść przechodzi smoke test na małych danych.
 Fixture używają bieżącego formatu analysis i pełnych metadanych.
 Skrypty używają syntetycznych danych, lokalnej tymczasowej bazy lub makiety Stash;
 nie łączą się ze Stash i nie uruchamiają modeli GPU.
@@ -15,6 +15,7 @@ python -m benchmarks.benchmark_occurrences --frames 500 --labels 100 --repeats 5
 python -m benchmarks.benchmark_cleanup_sql --markers 2500000 --legacy-time-budget 5
 python -m benchmarks.benchmark_rethreshold --scenes 6 --frames 600 --labels 12 --repeats 5
 python -m benchmarks.benchmark_tag_cascade --markers 100000 --batch-size 200 --repeats 3
+python -m benchmarks.benchmark_scoped_reports --scenes 9000 --selected 32 --repeats 3
 ```
 
 | Skrypt | Co mierzy |
@@ -27,6 +28,15 @@ python -m benchmarks.benchmark_tag_cascade --markers 100000 --batch-size 200 --r
 | `benchmark_cleanup_sql` | odkrywanie kandydatów przez SQL; bez kosztu API i usuwania |
 | `benchmark_rethreshold` | zmiana progów, czas/dekodowania Check i Apply, zapisy evidence oraz hashe wyników i result_index; bez merge/API |
 | `benchmark_tag_cascade` | kaskada popularnego tagu kontra wcześniejsze odpinanie relacji w partiach; całkowity czas, najdłuższa transakcja, liczba mutacji i hash zachowanego stanu |
+| `benchmark_scoped_reports` | raport cache i całe Check/Apply dla małej selekcji w większej bazie, osobno writer/preview; czas, instrukcje SQL, zapisy, dekodowania i hashe wyników |
+
+Wynik `results/scoped_reports_2026-10-07.json` porównuje PR 4 z PR 5 dla
+32 wybranych scen i czterech modeli, przy 900 i 9000 scenach w bazie. Dla 9000
+scen mediana raportu preview spadła z 437 do 7 ms, Check/Apply writer z 201 do
+12 ms, a Check/Apply preview z 420 do 15 ms. Hashe wyników pozostały identyczne,
+surowe evidence nie zmieniło się i żaden wariant nie dekodował BLOB-ów predykcji.
+Liczba instrukcji SQL po poprawce pozostaje stała dla obu wielkości bazy.
+To pomiar lokalnego syntetycznego workflow; nie obejmuje modeli ani API.
 
 Każdy skrypt obsługuje też bezpośrednie uruchomienie przez ścieżkę, np.
 `python benchmarks/benchmark_performance.py`. Benchmarki porównujące aplikację bez `--project` wskazują

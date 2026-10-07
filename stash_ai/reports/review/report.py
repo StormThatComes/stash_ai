@@ -20,12 +20,11 @@ from stash_ai.reports.runtime import report_context, report_policies, report_sto
 
 
 def _scene_ids(store, requested):
-    table = store.table("results")
-    present = {row[0] for row in store.connection.execute(
-        f"SELECT DISTINCT scene FROM {table} WHERE scope=? ORDER BY scene", (store.scope,))}
+    from stash_ai.storage.selection import evidence_scenes
+    present = evidence_scenes(store, requested)
     if requested:
         wanted = list(dict.fromkeys(map(str, requested)))
-        missing = sorted(set(wanted) - present)
+        missing = sorted(set(wanted) - set(present))
         if missing:
             raise ValueError("No saved evidence for scene(s): " + ", ".join(missing))
         return wanted
@@ -35,15 +34,20 @@ def _scene_ids(store, requested):
 def build_report(app, store, scenes, core_policies, scene_policies, options=ReviewOptions()):
     from stash_ai.evidence import pipeline as merge
 
-    pending = store.pending_publication_scenes()
-    refresh = {row[0] for row in store.connection.execute(
-        f"SELECT DISTINCT scene FROM {store.table('refresh_requests')} WHERE scope=?", (store.scope,))}
+    from stash_ai.storage.selection import selected_rows
+    from stash_ai.storage.input_checks import selected as input_checks
+    pending = store.pending_publication_scenes(scenes)
+    refresh = {row[0] for row in selected_rows(store,
+        f"SELECT DISTINCT scene FROM {store.table('refresh_requests')} WHERE scope=?", (store.scope,), scenes)}
+    deferred = input_checks(store, scenes)
     accumulator = ReviewAccumulator(len(scenes), options.examples, REASONS)
 
     for scene in tqdm(scenes, desc="Tag review", unit="scene"):
-        reason = ("pending_refresh" if scene in refresh else
+        reason = ("unverified_inputs" if scene in deferred else
+                  "pending_refresh" if scene in refresh else
                   "pending_publication" if scene in pending else None)
-        message = None
+        message = (', '.join(f'{model}: {why}' for model, why in sorted(deferred[scene].items()))
+                   if scene in deferred else None)
         if reason is None:
             try:
                 hits, spans = merge.evidence(app, store, scene, core_policies, scene_policies)
@@ -62,6 +66,7 @@ def build_report(app, store, scenes, core_policies, scene_policies, options=Revi
         "mode": "tag-review",
         "semantics": {
             "scope": "Replayed scene labels and marker cores under saved effective thresholds and selected exclusion/temporal policies; no live Stash inspection.",
+            "known_input_failures": "Scenes with deferred missing_media, read_error or deleted inputs are excluded; saved evidence is preserved.",
             "signals_are_not_errors": True,
             "model_scores_are_not_averaged": True,
             "pair_count": "One scene/tag per model, deduplicated across history, scene tags and marker ranges.",

@@ -537,6 +537,10 @@ markerów, odtwarzając merge z efektywnymi progami zapisanymi w bazie. Używa
 wybranej polityki temporalnej i wykluczeń. Nie ładuje modeli, nie pobiera mediów,
 nie łączy się ze Stash i nie zmienia bazy źródłowej ani publikacji.
 
+Sceny z `input_checks` (`missing_media`, `read_error`, `deleted`) są pomijane
+z powodem `unverified_inputs`. Dotyczy to również problemu innego modelu w tej
+samej scenie; raport zachowuje zapisane wyniki i podaje przyczynę w przykładach.
+
 Raport wskazuje priorytety ręcznego przeglądu:
 
 - `weak_or_borderline`: najlepszy wynik nie przekracza właściwego progu o więcej
@@ -583,7 +587,7 @@ modeli, słowników, mediów i połączenia ze Stash. Nie zmienia źródłowej b
 ani publikacji i nie nadpisuje istniejącego raportu.
 
 Domyślny zakres obejmuje sceny znane **bieżącemu scope lokalnej bazy**, również
-te obecne tylko w checkpointach, refresh requests, snapshotach lub recovery.
+te obecne tylko w checkpointach, refresh requests, snapshotach, recovery lub input_checks.
 Sceny ze Stash, które nigdy nie trafiły do tej bazy, nie wchodzą do mianownika.
 Powtarzalne `--scene-id` ustala dokładny zakres; ID bez żadnego lokalnego stanu
 jest wtedy raportowane jako brakujące. Raport nie sprawdza aktualności wag,
@@ -605,6 +609,11 @@ liczniki osobno na scene/markers i rozłączne statusy:
 | `inconsistent` | Wynik i indeks są niespójne albo evidence jest nieczytelne; sprawdź `--db-check` |
 
 Ukończony wynik bez żadnych detekcji jest poprawnym cache, a nie brakiem.
+`evidence_ready_pairs` opisuje pokrycie zapisanych wyników. Znane odroczone
+kontrole wejścia blokują `fully_ready_scenes` i cały plan dla danej sceny,
+również gdy dotyczą niewybranego modelu. `issues.input_checks` podaje model
+i przyczynę. Przywróć dostępność mediów lub wyjaśnij usuniętą scenę, następnie
+zweryfikuj wejście zwykłym uruchomieniem; sama blokada nie wymaga `--restart`.
 Retencja jest sprawdzana względem minimum floor z YAML i progu wsparcia
 potrzebnego do publikacji. Sprawdzany jest jeden aktywny wynik każdego modelu i wyjścia.
 Przy gotowych `result_metadata` raport nie dekoduje BLOB-ów predykcji; starsze
