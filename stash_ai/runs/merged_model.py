@@ -9,7 +9,6 @@ import stash_ai.inference.results as merge_results
 from stash_ai.storage import progress
 from stash_ai.inference import checkpoints, prediction, preparation
 from stash_ai.inference.identity import model_identity
-from stash_ai.signatures import digest
 from stash_ai.inference.input_identity import cue_manifest, frame_signature, inference_signature
 
 
@@ -74,6 +73,8 @@ class MergedModelRun:
     def _reuse(self, scene_id, signature, cues, media, kinds):
         args, store, key = self.args, self.store, self.key
         if args.resume and progress.completed(store, scene_id, key, kinds, signature):
+            from stash_ai.inference.provenance import register
+            register(store, scene_id, key, signature, self.identity)
             self.stats["reused"] += 1
             self.report.model_outcome(key, 'reused')
             self.observer.reused(kinds)
@@ -139,8 +140,7 @@ class MergedModelRun:
                 checkpoints.clear_checkpoint(store, scene_id, self.key)
         checkpoint = checkpoints.Checkpoint(
             store, scene_id, self.key,
-            digest({"input": signature, "kinds": kinds, "scene_frames": 1,
-                    "scene_analysis": CHECKPOINT_FORMAT}),
+            self._checkpoint_signature(scene_id, signature, cues, media, kinds, CHECKPOINT_FORMAT),
             len(cues), len(self.vocabulary.labels), args.checkpoint_batches)
         checkpoint.on_restore = self.observer.checkpoint
         analysis = {}
@@ -155,9 +155,20 @@ class MergedModelRun:
             frame_input_signature=frame_signature(cue_manifest(cues), media.hashes))
         with self.report.measure('inference_commit', model=self.key):
             checkpoints.finish(store, scene_id, self.key, outputs)
+            from stash_ai.inference.provenance import prune
+            prune(store, scene_id, self.key)
         self.report.model_outcome(self.key, 'checkpoint_resumed' if getattr(checkpoint, 'resumed_frames', 0) else 'fresh')
         self.stats["processed"] += 1
         self.observer.finished(kinds)
+
+    def _checkpoint_signature(self, scene_id, signature, cues, media, kinds, analysis_format):
+        from stash_ai.inference.provenance import register, resume_signature, prune
+        result = resume_signature(self.store, scene_id, self.key, self.identity,
+                                  cue_manifest(cues), media.hashes, kinds, analysis_format)
+        register(self.store, scene_id, self.key, signature, self.identity)
+        prune(self.store, scene_id, self.key, keep=(signature,), checkpoint=result,
+              kinds=kinds, analysis_format=analysis_format)
+        return result
 
     def _record_error(self, stage, scene_id, exc):
         self.stats["errors"] += 1

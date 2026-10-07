@@ -59,13 +59,15 @@ def _restore_prediction_state(app, tagger, cues, *, checkpoint, report):
         with checkpoint.store.connection:
             clear_checkpoint(checkpoint.store, checkpoint.scene, checkpoint.model)
         checkpoint.analysis = None
-        checkpoint.processed = checkpoint.saved_processed = checkpoint.batches = 0
+        checkpoint.processed = checkpoint.saved_processed = checkpoint.batches = checkpoint.resumed_frames = 0
         checkpoint.pending.clear()
         checkpoint.top_scores = None
         if report is not None:
             report.counts['checkpoint_timeline_resets'] += 1
             report.detail('Checkpoint timeline is inconsistent; rebuilding only this scene/model.')
-        return _restore_prediction_state(app, tagger, cues, checkpoint=checkpoint, report=report)
+        processed, top_scores, saved = 0, np.empty((0, len(labels)), np.float32), []
+        checkpoint.restore_reason = 'timeline_inconsistent'
+        checkpoint._notify_restore()
     accumulator = (
         SceneAccumulator(
             settings.scene_threshold,

@@ -6,6 +6,7 @@ from ..common import column_names, count_rows
 
 def check_work_units(db, tables):
     payload_specs = (
+        ("inference_identities", "data"),
         ("inference_archive", "data"),
         ("snapshots", "published"), ("snapshots", "pending"),
         ("cleanup_state", "data"),

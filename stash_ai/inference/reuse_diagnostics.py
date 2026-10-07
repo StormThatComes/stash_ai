@@ -192,6 +192,9 @@ class ReuseObserver:
                 self.reasons.extend(differences(saved, self.current))
         if checkpoint.resumed_frames:
             self.action = 'checkpoint_resumed'
+        else:
+            self.action = 'infer'
+            self.reasons = [reason for reason in self.reasons if reason != 'checkpoint_compatible']
         self.emit('started')
 
     @observational

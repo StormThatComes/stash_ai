@@ -123,7 +123,7 @@ obsługiwane schematy przechowują już pojedynczy rekord i liczbowy próg.
 
 Snapshoty merge zapisują współdzielone dowody `extra_support` raz, a contributions
 odwołują się do nich przez referencje. Zmniejsza to koszt serializacji i kompresji.
-Aktualny schemat to v26, z obsługą aktualizacji od v18. Każdy nowy snapshot ma
+Aktualny schemat to v27, z obsługą aktualizacji od v18. Każdy nowy snapshot ma
 otoczkę formatu v7. `--db-update` konwertuje snapshoty v4/v5/v6/v7, także pending i recovery,
 w jednym przebiegu. Zachowuje geometrię i własność publikacji, normalizuje zamrożone opcje
 odtwarzania oraz usuwa `extra_ids` i zbędne `algorithm: temporal`. Pełne payloady
@@ -247,7 +247,7 @@ Ręczne powiązania ze starymi definicjami tagów pozostają zachowane.
 Trzy zakończone migracje nie należą już do bieżącego pakietu. W razie potrzeby uruchom je
 z osobnego checkoutu niezmiennego commita
 [`9fcaa52502cd487455457547860b5db7d8710ad8`](https://github.com/StormThatComes/stash_ai/commit/9fcaa52502cd487455457547860b5db7d8710ad8).
-Bieżący pakiet korzysta ze schematu v26. Bazy sprzed v18 wymagają najpierw starszego
+Bieżący pakiet korzysta ze schematu v27. Bazy sprzed v18 wymagają najpierw starszego
 mostka opisanego w sekcji aktualizacji bazy. Zrób kopię bazy i konfiguracji oraz zainstaluj
 zależności checkoutu w osobnym środowisku Python 3.14 zgodnie z instrukcją instalacji.
 
@@ -281,8 +281,8 @@ Następnie wróć do bieżącej instalacji, wykonaj `--db-check` i potrzebną in
 ### Zdrowie, aktualizacja i kompaktowanie bazy stanu
 
 `--db-update` aktualizuje bazę wskazaną przez `--state-db` ze schematu **v18 lub nowszego**
-do aktualnego **v26**, we wszystkich scope'ach. Zwykłe uruchomienie oraz `--dry-run`
-wymagają aktualnego schematu; nowa baza od razu otrzymuje v26.
+do aktualnego **v27**, we wszystkich scope'ach. Zwykłe uruchomienie oraz `--dry-run`
+wymagają aktualnego schematu; nowa baza od razu otrzymuje v27.
 Migracja dodaje stan odbudowy, ale nie przejmuje istniejących wyników Stash.
 To uprawnienie powstaje wyłącznie po jawnym `--db-init` na nowej/pustej bazie.
 Updater korzysta z tego samego locka writera. Pracuje offline, bez Stash i konfiguracji modeli.
@@ -446,6 +446,22 @@ bez zapisywania wszystkich pojedynczych pomiarów. Raport opisuje wybrane
 przebiegi, nie całą historię, gdy zastosowano limit lub filtry.
 
 ### Dlaczego scena została przeliczona?
+
+Schemat v27 dodaje zweryfikowaną tożsamość inferencji w bazie stanu. Uruchom
+`python .\stash_ai.py --db-update` przed użyciem starej bazy. Migracja zachowuje
+oryginalne BLOB-y wyników, checkpointy i frozen proofs; nie uruchamia modeli.
+Przy pierwszym zgodnym odczycie CLI zapisuje brakującą tożsamość bez inferencji.
+Następne zmiany `batch_size`, lokalizacji identycznych wag lub mniej wymagającej
+retencji korzystają z tych samych scores, jeżeli weryfikacja wejść i pokrycia
+cache przejdzie. Zmiana batcha może dawać drobne różnice numeryczne przy świeżym
+obliczeniu; reuse zachowuje dotychczasowe wyniki, nie obiecuje bitowej zgodności.
+
+Dla starego cache bez zarejestrowanej tożsamości wykonaj zgodny przebieg z
+dotychczasową konfiguracją przed przenoszeniem wag lub zmianą batcha/retencji.
+Jeżeli starej tożsamości nie można udowodnić, CLI nie zgaduje jej na podstawie
+historii diagnostycznej. Zmiana wag/wejść i brak wymaganych scores nadal mogą
+uzasadnić przeliczenie konkretnej pary scena/model. Zgodne checkpointy można
+wznawiać po zmianie batcha; ich polityka przechowywania musi pozostać zgodna.
 
 Zwykła inferencja zapisuje w historii decyzję dla każdej pary scena/model:
 `infer`, `cache_reused`, `rethreshold`, `checkpoint_resumed` albo `blocked`.
@@ -712,7 +728,7 @@ dotyczy to każdego modelu, wspólnych wyników i punktów Occurrence.
 `MAX_TAGS` i `MAX_MARKERS_PER_SCENE` zostały usunięte. Limit tagów na klatkę
 `MARKER_MAX_TAGS_PER_FRAME` pozostaje osobnym ustawieniem (domyślnie 0).
 
-Bazy v18–v25 wymagają `--db-update`. Migracja do v26 zapisuje snapshoty v7
+Bazy v18–v26 wymagają `--db-update`. Migracja do v27 zapisuje snapshoty v7
 bez dawnych limitów liczby wyników, zachowując geometrię, własność i plany
 pending/recovery. Nie zmienia cache inferencji i nie zapisuje do Stash.
 Aby uzupełnić wcześniej obcięte wyniki z zachowanego cache, wykonaj:
