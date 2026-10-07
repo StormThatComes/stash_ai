@@ -123,7 +123,7 @@ obsługiwane schematy przechowują już pojedynczy rekord i liczbowy próg.
 
 Snapshoty merge zapisują współdzielone dowody `extra_support` raz, a contributions
 odwołują się do nich przez referencje. Zmniejsza to koszt serializacji i kompresji.
-Aktualny schemat to v26, z obsługą aktualizacji od v18. Każdy nowy snapshot ma
+Aktualny schemat to v27, z obsługą aktualizacji od v18. Każdy nowy snapshot ma
 otoczkę formatu v7. `--db-update` konwertuje snapshoty v4/v5/v6/v7, także pending i recovery,
 w jednym przebiegu. Zachowuje geometrię i własność publikacji, normalizuje zamrożone opcje
 odtwarzania oraz usuwa `extra_ids` i zbędne `algorithm: temporal`. Pełne payloady
@@ -247,7 +247,7 @@ Ręczne powiązania ze starymi definicjami tagów pozostają zachowane.
 Trzy zakończone migracje nie należą już do bieżącego pakietu. W razie potrzeby uruchom je
 z osobnego checkoutu niezmiennego commita
 [`9fcaa52502cd487455457547860b5db7d8710ad8`](https://github.com/StormThatComes/stash_ai/commit/9fcaa52502cd487455457547860b5db7d8710ad8).
-Bieżący pakiet korzysta ze schematu v26. Bazy sprzed v18 wymagają najpierw starszego
+Bieżący pakiet korzysta ze schematu v27. Bazy sprzed v18 wymagają najpierw starszego
 mostka opisanego w sekcji aktualizacji bazy. Zrób kopię bazy i konfiguracji oraz zainstaluj
 zależności checkoutu w osobnym środowisku Python 3.14 zgodnie z instrukcją instalacji.
 
@@ -281,8 +281,8 @@ Następnie wróć do bieżącej instalacji, wykonaj `--db-check` i potrzebną in
 ### Zdrowie, aktualizacja i kompaktowanie bazy stanu
 
 `--db-update` aktualizuje bazę wskazaną przez `--state-db` ze schematu **v18 lub nowszego**
-do aktualnego **v26**, we wszystkich scope'ach. Zwykłe uruchomienie oraz `--dry-run`
-wymagają aktualnego schematu; nowa baza od razu otrzymuje v26.
+do aktualnego **v27**, we wszystkich scope'ach. Zwykłe uruchomienie oraz `--dry-run`
+wymagają aktualnego schematu; nowa baza od razu otrzymuje v27.
 Migracja dodaje stan odbudowy, ale nie przejmuje istniejących wyników Stash.
 To uprawnienie powstaje wyłącznie po jawnym `--db-init` na nowej/pustej bazie.
 Updater korzysta z tego samego locka writera. Pracuje offline, bez Stash i konfiguracji modeli.
@@ -425,7 +425,10 @@ liczniki zmian i błędów oraz pomiary etapów/API. Nie zapisuje klucza API,
 adresów mediów, payloadów ani treści błędów. Nie jest to raport anonimowy:
 identyfikatory przebiegów, daty, konfiguracja i agregaty opisują Twoją instalację.
 Zapis startu następuje przed wykonaniem akcji; Ctrl+C i błędy kończą rekord.
-Status `running` oznacza brak zapisanego końca — proces może jeszcze pracować
+Agregaty są zapisywane częściowo na granicach etapów co 30 sekund lub po 32 ukończonych
+jednostkach pracy model/scena/merge. `last_progress_at` i `progress_seq` pokazują
+ostatni zapis; `partial=true` oznacza brak końca i nie jest traktowane jako udany
+pełny przebieg. Status `running` oznacza brak zapisanego końca — proces może jeszcze pracować
 albo zostać zabity bez możliwości zamknięcia historii. Błąd zapisu historii
 nie przerywa właściwej komendy i nie przesłania jej błędu.
 
@@ -435,17 +438,42 @@ etap został wykonany. Świeża inferencja, wznowienia i użycie cache są rozdz
 Metryki zawierają liczbę wywołań, sumę, średnią, min/max, przybliżone p50/p95
 z ograniczonego histogramu oraz przepustowość, gdy znana jest liczba jednostek.
 Średnia to suma czasów / liczba wywołań, również przy łączeniu przebiegów.
-Porównania grupują zgodną konfigurację, środowisko i tożsamość modeli,
-oddzielając statusy zakończenia oraz udane i nieudane operacje.
+Porównania grupują zgodną konfigurację, środowisko i tożsamość modeli.
+Konfiguracja zawiera skrót uporządkowanego zestawu wybranych ID (kolejność i duplikaty
+nie zmieniają skrótu), hash kodu, dostępną rewizję git i wersje zainstalowanych bibliotek.
+`execution_observed=false` oznacza, że urządzenie modelu nie zostało zaobserwowane,
+np. przy użyciu cache. Zweryfikowane wejścia mają oddzielny workload: liczbę par,
+liczbę cue i fingerprint danych, również uwzględniany przy grupowaniu. Te metadane
+nie autoryzują reuse i nie zmieniają tożsamości zapisanych predykcji. Raport rozdziela
+statusy zakończenia oraz udane i nieudane operacje.
 
 Czasy etapów zawierają zarówno czas własny, jak i czas z wywołaniami podrzędnymi.
 Praca w wątkach/procesach może się nakładać; sumy etapów nie są czasem całego
 przebiegu. `cpu_seconds` obejmuje rodzica, a `worker_cpu` mierzone zadania workerów.
+Błąd zadania workera ma `outcome=error`, zwiększa `errors` i nie zwiększa liczby
+ukończonych scen (`units=0`), również gdy został przekazany rodzicowi jako wynik.
+Merge kontynuuje kolejne sceny po takim błędzie; raport modeli zgłasza niepowodzenie.
 Histogramy mają stały rozmiar; historia rośnie o jeden rekord na przebieg,
 bez zapisywania wszystkich pojedynczych pomiarów. Raport opisuje wybrane
 przebiegi, nie całą historię, gdy zastosowano limit lub filtry.
 
 ### Dlaczego scena została przeliczona?
+
+Schemat v27 dodaje zweryfikowaną tożsamość inferencji w bazie stanu. Uruchom
+`python .\stash_ai.py --db-update` przed użyciem starej bazy. Migracja zachowuje
+oryginalne BLOB-y wyników, checkpointy i frozen proofs; nie uruchamia modeli.
+Przy pierwszym zgodnym odczycie CLI zapisuje brakującą tożsamość bez inferencji.
+Następne zmiany `batch_size`, lokalizacji identycznych wag lub mniej wymagającej
+retencji korzystają z tych samych scores, jeżeli weryfikacja wejść i pokrycia
+cache przejdzie. Zmiana batcha może dawać drobne różnice numeryczne przy świeżym
+obliczeniu; reuse zachowuje dotychczasowe wyniki, nie obiecuje bitowej zgodności.
+
+Dla starego cache bez zarejestrowanej tożsamości wykonaj zgodny przebieg z
+dotychczasową konfiguracją przed przenoszeniem wag lub zmianą batcha/retencji.
+Jeżeli starej tożsamości nie można udowodnić, CLI nie zgaduje jej na podstawie
+historii diagnostycznej. Zmiana wag/wejść i brak wymaganych scores nadal mogą
+uzasadnić przeliczenie konkretnej pary scena/model. Zgodne checkpointy można
+wznawiać po zmianie batcha; ich polityka przechowywania musi pozostać zgodna.
 
 Zwykła inferencja zapisuje w historii decyzję dla każdej pary scena/model:
 `infer`, `cache_reused`, `rethreshold`, `checkpoint_resumed` albo `blocked`.
@@ -489,6 +517,9 @@ scenę/model/rodzaj wyniku. Zapis jest buforowany w krótkich transakcjach po
 maksymalnie 64 operacje, a normalne zakończenie i Ctrl+C opróżniają bufor.
 Nagłe zabicie procesu może utracić ostatnie niezapisane operacje historii.
 `--no-run-history` wyłącza ich zapis; raport wymaga wcześniej zebranych danych.
+Bez `--verbose` pomija również budowanie diagnostycznych proofs. Weryfikacja
+wejść i tożsamości cache nadal działa. Błędy metadanych GPU i opcjonalnej
+historii nie zmieniają wyniku polecenia ani decyzji o ponownej inferencji.
 
 ### Model Utility / Ablation Report
 
@@ -517,6 +548,10 @@ do wybranych scen.
 markerów, odtwarzając merge z efektywnymi progami zapisanymi w bazie. Używa
 wybranej polityki temporalnej i wykluczeń. Nie ładuje modeli, nie pobiera mediów,
 nie łączy się ze Stash i nie zmienia bazy źródłowej ani publikacji.
+
+Sceny z `input_checks` (`missing_media`, `read_error`, `deleted`) są pomijane
+z powodem `unverified_inputs`. Dotyczy to również problemu innego modelu w tej
+samej scenie; raport zachowuje zapisane wyniki i podaje przyczynę w przykładach.
 
 Raport wskazuje priorytety ręcznego przeglądu:
 
@@ -564,7 +599,7 @@ modeli, słowników, mediów i połączenia ze Stash. Nie zmienia źródłowej b
 ani publikacji i nie nadpisuje istniejącego raportu.
 
 Domyślny zakres obejmuje sceny znane **bieżącemu scope lokalnej bazy**, również
-te obecne tylko w checkpointach, refresh requests, snapshotach lub recovery.
+te obecne tylko w checkpointach, refresh requests, snapshotach, recovery lub input_checks.
 Sceny ze Stash, które nigdy nie trafiły do tej bazy, nie wchodzą do mianownika.
 Powtarzalne `--scene-id` ustala dokładny zakres; ID bez żadnego lokalnego stanu
 jest wtedy raportowane jako brakujące. Raport nie sprawdza aktualności wag,
@@ -586,6 +621,11 @@ liczniki osobno na scene/markers i rozłączne statusy:
 | `inconsistent` | Wynik i indeks są niespójne albo evidence jest nieczytelne; sprawdź `--db-check` |
 
 Ukończony wynik bez żadnych detekcji jest poprawnym cache, a nie brakiem.
+`evidence_ready_pairs` opisuje pokrycie zapisanych wyników. Znane odroczone
+kontrole wejścia blokują `fully_ready_scenes` i cały plan dla danej sceny,
+również gdy dotyczą niewybranego modelu. `issues.input_checks` podaje model
+i przyczynę. Przywróć dostępność mediów lub wyjaśnij usuniętą scenę, następnie
+zweryfikuj wejście zwykłym uruchomieniem; sama blokada nie wymaga `--restart`.
 Retencja jest sprawdzana względem minimum floor z YAML i progu wsparcia
 potrzebnego do publikacji. Sprawdzany jest jeden aktywny wynik każdego modelu i wyjścia.
 Przy gotowych `result_metadata` raport nie dekoduje BLOB-ów predykcji; starsze
@@ -709,7 +749,7 @@ dotyczy to każdego modelu, wspólnych wyników i punktów Occurrence.
 `MAX_TAGS` i `MAX_MARKERS_PER_SCENE` zostały usunięte. Limit tagów na klatkę
 `MARKER_MAX_TAGS_PER_FRAME` pozostaje osobnym ustawieniem (domyślnie 0).
 
-Bazy v18–v25 wymagają `--db-update`. Migracja do v26 zapisuje snapshoty v7
+Bazy v18–v26 wymagają `--db-update`. Migracja do v27 zapisuje snapshoty v7
 bez dawnych limitów liczby wyników, zachowując geometrię, własność i plany
 pending/recovery. Nie zmienia cache inferencji i nie zapisuje do Stash.
 Aby uzupełnić wcześniej obcięte wyniki z zachowanego cache, wykonaj:
@@ -728,7 +768,10 @@ Aktualne domyślne ustawienia pamięci i równoległości:
   maksymalnie 75% budżetu;
 - `--prepare-workers 4`;
 - `--merge-workers 4` — równoległy CPU replay evidence; zapisy Stash/SQLite pozostają sekwencyjne;
-- `--prefetch-batches 4`.
+- Globalne `prefetch_batches: 4` w `tagger_models.yml` (0–16; 0 wyłącza).
+  Jawne `--prefetch-batches N` nadpisuje YAML; brak pola zachowuje default 4.
+  Parametr steruje przygotowaniem kolejnych batchy, niezależnie od rozmiaru
+  inferencji `batch_size`, i nie unieważnia zapisanych wyników.
 
 `--db-compact` utrzymuje blokadę zapisu aż do końcowej kontroli bazy i
 porównania liczników po VACUUM.
@@ -853,3 +896,40 @@ scenes finish. Network/read errors do not authorize retirement.
 
 Dokładny plan publikacji z cache: `--merge-only --dry-run --dry-run-plan review.jsonl`.
 Opis zdarzeń i symbolicznych ID: [docs/dry_run_plan.md](docs/dry_run_plan.md).
+
+### Retencja historii uruchomień
+
+`--prune-run-history` działa wyłącznie na osobnej bazie historii, w scope bieżącego
+STASH_URL. Podaj `--history-keep-last N` i/lub `--history-max-age-days DAYS`.
+Połączone limity usuwają zakończony przebieg przekraczający dowolny z nich;
+`N=0` usuwa wszystkie zakończone przebiegi w tym scope. Przed zastosowaniem możesz
+sprawdzić liczbę przebiegów/decyzji i przykładowe ID przez `--dry-run`.
+
+```powershell
+python .\stash_ai.py --prune-run-history --history-keep-last 100 --history-max-age-days 90 --dry-run
+python .\stash_ai.py --prune-run-history --history-keep-last 100 --history-max-age-days 90
+```
+
+Usuwanie przebiegów i ich decyzji jest jedną transakcją. Rekordy `running`,
+rekordy bez końca, inne scope i `reuse_proofs` pozostają. Nie są otwierane wyniki,
+checkpointy ani snapshoty bazy źródłowej. Historia v1/v2 jest nadal czytelna
+bez modyfikacji; pierwszy zapis aktualizuje tylko historię do v3. Retencja nie
+uruchamia się automatycznie i nie wykonuje VACUUM.
+
+
+### Zależności ponownej publikacji
+
+Fingerprint merge obejmuje moduły odtwarzające zachowane dowody i publikujące
+tagi/markery oraz efektywną politykę, ustawienia publikacji, exclusions, hierarchy
+i zaobserwowany katalog/scenę. Zmiana backendu, checkpointów, przygotowania wejść,
+prefetchu, workerów lub historii nie unieważnia gotowej publikacji samą zmianą
+pliku. Zapis nowych wyników i rzeczywiste zmiany sceny/polityki nadal ją unieważniają.
+
+Manifest jest konserwatywny na poziomie modułów: zmiana mieszanego modułu storage
+lub domain może nadal wymagać sprawdzenia merge. Jednorazowa zmiana manifestu
+powoduje ponowne sprawdzenie istniejących merge checks, z użyciem zapisanych wyników;
+nie zmienia tożsamości inferencji ani formatów wyników/checkpointów/snapshotów.
+
+Przypięte dowody published/pending/recovery są odczytywane leniwie raz podczas
+jednego zapisu wyników scene+markers. Odczyt nie przechodzi na kolejny zapis,
+rollback ani zmianę publikacji; pełne archiwum konkretnych dowodów pozostaje.

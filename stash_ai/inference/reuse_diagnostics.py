@@ -12,6 +12,8 @@ from .input_identity import cue_manifest, frame_signature, inference_signature
 def observational(method):
     @wraps(method)
     def wrapped(self, *args, **kwargs):
+        if not self.enabled:
+            return
         try:
             return method(self, *args, **kwargs)
         except Exception as exc:
@@ -61,6 +63,11 @@ class ReuseObserver:
         self.model = config.source.key
         self.scene, self.current, self.cues, self.hashes = None, None, None, None
         self.action, self.reasons, self.details = 'infer', [], {}
+
+    @property
+    def enabled(self):
+        history = self.report.history
+        return self.report.verbose or (history is not None and history.store is not None)
 
     def begin(self, scene):
         self.scene, self.current = str(scene), None
@@ -185,6 +192,9 @@ class ReuseObserver:
                 self.reasons.extend(differences(saved, self.current))
         if checkpoint.resumed_frames:
             self.action = 'checkpoint_resumed'
+        else:
+            self.action = 'infer'
+            self.reasons = [reason for reason in self.reasons if reason != 'checkpoint_compatible']
         self.emit('started')
 
     @observational
@@ -198,6 +208,7 @@ class ReuseObserver:
         if self.current is None:
             self.action, self.reasons = 'blocked', ['input_verification_failed' if stage == 'inference' else 'model_load_failed']
         if stage == 'load model':
+            self.action = 'blocked'
             self.reasons.append('model_load_failed')
         checkpoint = self.store.connection.execute('SELECT signature FROM ' + self.store.table('checkpoints') +
             ' WHERE scope=? AND scene=? AND model=?', (self.store.scope, self.scene, self.model)).fetchone()

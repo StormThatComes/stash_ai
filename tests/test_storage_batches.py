@@ -26,7 +26,7 @@ def test_batched_rethreshold_keeps_full_preflight_and_raw_blobs(tmp_path, invali
         store.connection.set_trace_callback(None)
         assert result == ({'errors': 1} if invalid_last else {'scene_thresholds_updated': 260})
         assert blobs(store) == before
-        reads = [sql for sql in statements if sql.startswith('SELECT r.scene,r.model,r.kind,m.format')]
+        reads = [sql for sql in statements if sql.startswith('WITH wanted(scene,model) AS')]
         assert len(reads) == 3
         assert not any('SELECT data FROM results' in sql for sql in statements)
         writes = [sql for sql in statements if sql.startswith('INSERT INTO result_thresholds')]

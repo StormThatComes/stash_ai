@@ -22,9 +22,10 @@ from stash_ai.reports.io import write_json_report
 from stash_ai.reports.runtime import report_context, report_store, require_database
 
 
-def _keys(store, table, columns):
-    return list(store.connection.execute(
-        f'SELECT {columns} FROM {store.table(table)} WHERE scope=?', (store.scope,)))
+def _keys(store, table, columns, scenes=None):
+    from stash_ai.storage.selection import selected_rows
+    return list(selected_rows(store,
+        f'SELECT {columns} FROM {store.table(table)} WHERE scope=?', (store.scope,), scenes))
 
 
 def scene_ids(store, requested):
@@ -33,7 +34,7 @@ def scene_ids(store, requested):
         return sorted(set(map(str, requested)))
     known = set()
     for table in ('results', 'result_index', 'refresh_requests', 'checkpoints',
-                  'snapshots', 'recovery_publications'):
+                  'snapshots', 'recovery_publications', 'input_checks'):
         known.update(row[0] for row in _keys(store, table, 'DISTINCT scene'))
     return sorted(known)
 
@@ -47,12 +48,16 @@ def _metadata_rows(store, scenes):
         store.connection.execute('DELETE FROM cache_report_scenes')
         store.connection.executemany('INSERT INTO cache_report_scenes VALUES (?)', ((scene,) for scene in scenes))
     rows = store.connection.execute(
-        'SELECT r.scene,r.model,r.kind,m.format,m.data,t.threshold FROM ' +
-        store.table('results') + ' AS r LEFT JOIN ' + store.table('result_metadata') +
-        ' AS m USING(scope,scene,model,kind) LEFT JOIN ' + store.table('result_thresholds') +
-        ' AS t USING(scope,scene,model,kind) WHERE r.scope=? '
-        'AND r.scene IN (SELECT scene FROM cache_report_scenes) '
-        'ORDER BY r.scene,r.model,r.kind', (store.scope,))
+        'WITH metadata AS (SELECT m.* FROM cache_report_scenes AS c CROSS JOIN ' +
+        store.table('result_metadata') + ' AS m WHERE m.scope=? AND m.scene=c.scene), '
+        'thresholds AS (SELECT t.* FROM cache_report_scenes AS c CROSS JOIN ' +
+        store.table('result_thresholds') + ' AS t WHERE t.scope=? AND t.scene=c.scene) '
+        'SELECT r.scene,r.model,r.kind,m.format,m.data,t.threshold FROM cache_report_scenes AS c CROSS JOIN ' +
+        store.table('results') + ' AS r LEFT JOIN metadata AS m '
+        'ON m.scope=r.scope AND m.scene=r.scene AND m.model=r.model AND m.kind=r.kind '
+        'LEFT JOIN thresholds AS t '
+        'ON t.scope=r.scope AND t.scene=r.scene AND t.model=r.model AND t.kind=r.kind '
+        'WHERE r.scope=? AND r.scene=c.scene ORDER BY r.scene,r.model,r.kind', (store.scope,) * 3)
     for scene, model, kind, version, data, threshold in rows:
         if kind not in KINDS:
             continue
@@ -91,17 +96,19 @@ def build_report(app, store, scenes, settings, command_context=()):
     """Inspect one scene at a time; count outputs separately from scene/model pairs."""
     from stash_ai.storage.preview import check_source
     from stash_ai.storage.metadata import backfill_batch
+    from stash_ai.storage.input_checks import selected as input_checks
 
     models = [config.source.key for config in settings]
     indexes = {(scene, model, kind): (populated, signature)
                for scene, model, kind, populated, signature in
-               _keys(store, 'result_index', 'scene,model,kind,populated,signature')}
-    refreshes = set(_keys(store, 'refresh_requests', 'scene,model,kind'))
+               _keys(store, 'result_index', 'scene,model,kind,populated,signature', scenes)}
+    refreshes = set(_keys(store, 'refresh_requests', 'scene,model,kind', scenes))
     checkpoints = {(scene, model): dict(processed=processed, total=total, compatibility='unverified')
                    for scene, model, processed, total in
-                   _keys(store, 'checkpoints', 'scene,model,processed,total')}
-    pending = store.pending_publication_scenes()
-    recovery = {scene for scene, in _keys(store, 'recovery_publications', 'DISTINCT scene')}
+                   _keys(store, 'checkpoints', 'scene,model,processed,total', scenes)}
+    pending = store.pending_publication_scenes(scenes)
+    recovery = {scene for scene, in _keys(store, 'recovery_publications', 'DISTINCT scene', scenes)}
+    deferred = input_checks(store, scenes)
     outside_refresh = {scene for scene, model, kind in refreshes if model not in models and kind in KINDS}
     coverage = CoverageAccumulator(models)
     with backfill_batch(store):
@@ -109,7 +116,7 @@ def build_report(app, store, scenes, settings, command_context=()):
             coverage.record(assess_scene(
                 app, scene, settings, evidence, indexes, refreshes, checkpoints,
                 cleanup_pending=store.cleanup_pending, publication_pending=scene in pending,
-                outside_refresh=scene in outside_refresh))
+                outside_refresh=scene in outside_refresh, input_checks=deferred.get(scene, {})))
     check_source(store)
     recovery_scenes = set(scenes) & recovery
     plan = build_plan(models, coverage.operations, coverage.blocked_scenes,
@@ -118,10 +125,12 @@ def build_report(app, store, scenes, settings, command_context=()):
         semantics=dict(scene_universe='Explicit --scene-id values, or scenes known to the current local DB scope; unseen Stash scenes are not counted.',
                        freshness='Inference identity beyond thresholds/retention, model assets, vocabulary, VTT and sprites are unverified offline.',
                        coverage='Both scene and marker inference evidence, completion index, YAML thresholds and requested retention; completed empty detections count as ready.',
+                       evidence_ready_pairs='Stored evidence coverage only. Known deferred input checks block fully_ready_scenes and every plan command, including checks for unselected models.',
                        integrity='Compact metadata is trusted when valid; --db-check performs a deep payload check.',
                        checkpoint='Presence/progress only; inference verifies compatibility before resuming.',
                        plan='Advisory argv arrays in execution order; never executed by this report. Running them can publish to Stash.',
                        blockers='Blockers exclude the entire scene from all plan commands. Finish interrupted publication/cleanup, '
+                                'verify missing/unreadable/deleted media without requesting fresh predictions, '
                                 'include reported unselected dependency models with --models, or resolve DB errors, then regenerate.'),
         **coverage.payload(len(scenes)), plan=plan,
         publication_recovery_scene_ids=sorted(recovery_scenes),

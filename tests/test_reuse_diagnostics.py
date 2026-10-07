@@ -133,19 +133,14 @@ def test_changed_assets_are_detected_by_content_not_timestamps(pipeline, monkeyp
     assert row['details']['changes']['scene']['assets']
 
 
-@pytest.mark.parametrize('change,reason', [({'batch_size': 8}, 'batch_size_changed'),
-                                         ({'scene_cache_floor': .01}, 'retention_changed')])
-def test_model_parameter_changes_explain_existing_inference_decision(pipeline, monkeypatch, tmp_path, change, reason):
+def test_more_demanding_retention_explains_required_inference(pipeline, monkeypatch, tmp_path):
     selected = settings(monkeypatch, tmp_path)
     assert app.main(pipeline.args) == 0
-    selected[0] = replace(selected[0], **change)
+    selected[0] = replace(selected[0], scene_cache_floor=.01)
     assert app.main(pipeline.args) == 0
     row = decisions(pipeline.path)[0]
-    assert reason in row['reasons']
-    if reason == 'batch_size_changed':
-        assert row['details']['changes']['scene']['batch_size'] == {'before': 4, 'after': 8}
-    else:
-        assert 'insufficient_retention' in row['reasons']
+    assert 'retention_changed' in row['reasons']
+    assert 'insufficient_retention' in row['reasons']
 
 
 def test_threshold_only_change_uses_rethreshold_without_loading_model(pipeline, monkeypatch, tmp_path):
@@ -228,6 +223,31 @@ def test_diagnostic_database_failure_does_not_change_reuse(pipeline, monkeypatch
     monkeypatch.setattr(HistoryStore, 'queue', lambda *a: (_ for _ in ()).throw(sqlite3.OperationalError('disk full')))
     assert app.main(pipeline.args) == 0
     assert len(pipeline.loaded) == loaded
+
+
+def test_opt_out_skips_diagnostic_proofs_without_skipping_input_validation(pipeline, monkeypatch):
+    from stash_ai.inference import reuse_diagnostics
+    from stash_ai.domain import Cue
+    monkeypatch.setattr(reuse_diagnostics, 'proof', lambda *a: pytest.fail('disabled diagnostics built a proof'))
+    arguments = [*pipeline.args, '--no-run-history']
+    assert app.main(arguments) == 0
+    loaded = len(pipeline.loaded)
+    assert app.main(arguments) == 0
+    assert len(pipeline.loaded) == loaded
+    pipeline.cues = [Cue(cue.start, cue.end - .25, cue.image, cue.rect) for cue in pipeline.cues]
+    assert app.main(arguments) == 0
+    assert len(pipeline.loaded) == loaded + 1
+
+
+def test_verbose_opt_out_keeps_diagnostic_explanations(pipeline, monkeypatch):
+    from stash_ai.inference import reuse_diagnostics
+    original, calls = reuse_diagnostics.proof, []
+    def observe(*args):
+        calls.append(True)
+        return original(*args)
+    monkeypatch.setattr(reuse_diagnostics, 'proof', observe)
+    assert app.main([*pipeline.args, '--no-run-history', '--verbose']) == 0
+    assert calls
 
 
 @pytest.mark.parametrize('empty', [False, True])

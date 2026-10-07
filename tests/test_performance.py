@@ -38,15 +38,58 @@ def fail(*args, **kwargs):
 
 
 @pytest.mark.parametrize('filename', [
-    'stash_api/tags.py', 'domain.py', 'storage/store.py', 'storage/database.py', 'storage/results.py', 'storage/thresholds.py', 'storage/publications.py',
-    'models.py', 'backends/vocabulary.py', 'backends/onnx.py', 'backends/onnx_preprocessing.py', 'backends/onnx_session.py', 'inference/prediction.py', 'inference/sprites.py', 'inference/preparation.py', 'storage/progress.py', 'inference/inputs.py', 'inference/identity.py', 'inference/checkpoints.py', 'signatures.py',
-    'runs/merged.py', 'runs/merged_model.py', 'publication/publisher.py', 'publication/parallel.py', 'publication/merged.py', 'publication/markers.py',
-    'evidence/temporal/policy.py', 'evidence/temporal/statistics.py', 'evidence/temporal/markers.py', 'evidence/temporal/extras.py', 'evidence/intervals.py', 'evidence/timeline.py', 'evidence/retention.py',
-    'evidence/pipeline.py', 'evidence/source_markers.py', 'evidence/identity.py', 'evidence/labels.py', 'inference/results.py', 'evidence/observations.py', 'evidence/frames.py', 'evidence/shared_markers.py', 'evidence/thresholds.py', 'inference/reuse.py', 'evidence/cache_views.py', 'evidence/scenes.py', 'evidence/occurrences.py',
-    'publication/groups.py', 'publication/index.py', 'publication/planning/types.py', 'publication/planning/merged_evidence.py', 'publication/planning/merged_tags.py', 'publication/planning/merged_markers.py',
-    'publication/fingerprints.py', 'storage/segments.py', 'storage/merge_checks.py',
-    'inference/scene_predictions.py', 'commands/bootstrap.py', 'storage/initialization.py',
-    'config.py', 'commands/hierarchy.py', 'publication/preconditions.py', 'publication/namespace.py', 'rethreshold/markers.py', 'rethreshold/scenes.py', 'cleanup/state.py', 'cleanup/client.py',
+    "runtime/dependencies.py",
+    "evidence/contracts.py",
+    "evidence/formats.py",
+    "evidence/qualification.py",
+    "evidence/marker_identity.py",
+    "evidence/interval_geometry.py",
+    "evidence/pipeline.py",
+    "evidence/source_markers.py",
+    "evidence/identity.py",
+    "evidence/labels.py",
+    "evidence/temporal/policy.py",
+    "evidence/temporal/statistics.py",
+    "evidence/temporal/markers.py",
+    "evidence/temporal/extras.py",
+    "evidence/intervals.py",
+    "evidence/observations.py",
+    "evidence/frames.py",
+    "evidence/shared_markers.py",
+    "evidence/scenes.py",
+    "evidence/occurrences.py",
+    "evidence/timeline.py",
+    "evidence/thresholds.py",
+    "evidence/cache_views.py",
+    "publication/preconditions.py",
+    "publication/namespace.py",
+    "publication/merged.py",
+    "publication/planning/types.py",
+    "publication/planning/merged_evidence.py",
+    "publication/planning/merged_tags.py",
+    "publication/planning/merged_markers.py",
+    "publication/index.py",
+    "publication/markers.py",
+    "publication/groups.py",
+    "publication/fingerprints.py",
+    "storage/input_checks.py",
+    "storage/metadata_store.py",
+    "storage/metadata.py",
+    "storage/results.py",
+    "storage/thresholds.py",
+    "storage/segments.py",
+    "storage/merge_checks.py",
+    "storage/store.py",
+    "storage/publications.py",
+    "storage/snapshots.py",
+    "storage/preview.py",
+    "cleanup/state.py",
+    "exclusions.py",
+    "models.py",
+    "domain.py",
+    "stash_api/tags.py",
+    "stash_api/sql.py",
+    "signatures.py"
 ])
 def test_publication_code_tracks_extracted_modules(monkeypatch, filename):
     before = performance.publication_code()
@@ -61,12 +104,88 @@ def test_publication_code_tracks_extracted_modules(monkeypatch, filename):
 
 
 @pytest.mark.parametrize('filename', [
-    'tools/cleanup_pending_migration.py', 'tools/_entrypoint.py', 'runtime/cache.py', 'runtime/memory.py', 'runtime/timing.py', 'runtime/report.py', 'runtime/summary.py', 'runtime/diagnostics.py',
-    'stash_api/client.py', 'stash_api/transport.py', 'vtt.py', 'commands/arguments.py', 'commands/validation.py', 'commands/dispatch.py', 'commands/explain.py',
-    'commands/marker_groups.py', 'cleanup/groups.py', 'cleanup/run.py', 'storage/recovery.py', 'publication/recovery.py', 'commands/recovery.py', 'cleanup/sql.py', 'cleanup/sql_session.py',
-    'rethreshold/execution.py', 'rethreshold/targets.py', 'db/checks.py',
-    'db/validation/common.py', 'db/validation/schema.py', 'db/validation/results.py',
-    'db/validation/checkpoints.py', 'db/validation/state.py', 'cleanup/evidence.py', 'cleanup/scenes.py', 'evidence/frozen_replay.py', 'stash_api/scene_reads.py', 'commands/modes.py', 'reports/io.py', 'reports/runtime.py', 'cleanup/sql_discovery.py', 'cleanup/sql_mutations.py', 'cleanup/sql_preview.py',
+    "tools/cleanup_pending_migration.py",
+    "tools/_entrypoint.py",
+    "runtime/cache.py",
+    "runtime/memory.py",
+    "runtime/timing.py",
+    "runtime/report.py",
+    "runtime/summary.py",
+    "runtime/diagnostics.py",
+    "stash_api/client.py",
+    "stash_api/transport.py",
+    "vtt.py",
+    "commands/arguments.py",
+    "commands/validation.py",
+    "commands/dispatch.py",
+    "commands/explain.py",
+    "commands/marker_groups.py",
+    "cleanup/groups.py",
+    "cleanup/run.py",
+    "storage/recovery.py",
+    "publication/recovery.py",
+    "commands/recovery.py",
+    "cleanup/sql.py",
+    "cleanup/sql_session.py",
+    "rethreshold/execution.py",
+    "rethreshold/targets.py",
+    "db/checks.py",
+    "db/validation/common.py",
+    "db/validation/schema.py",
+    "db/validation/results.py",
+    "db/validation/checkpoints.py",
+    "db/validation/state.py",
+    "cleanup/evidence.py",
+    "cleanup/scenes.py",
+    "evidence/frozen_replay.py",
+    "stash_api/scene_reads.py",
+    "commands/modes.py",
+    "reports/io.py",
+    "reports/runtime.py",
+    "cleanup/sql_discovery.py",
+    "cleanup/sql_mutations.py",
+    "cleanup/sql_preview.py",
+    "storage/schema.py",
+    "rethreshold/plans.py",
+    "inference/input_identity.py",
+    "runtime/settings.py",
+    "runtime/context.py",
+    "runtime/workers.py",
+    "cli.py",
+    "commands/bootstrap.py",
+    "inference/results.py",
+    "commands/hierarchy.py",
+    "runs/merged.py",
+    "runs/merged_model.py",
+    "publication/publisher.py",
+    "publication/parallel.py",
+    "cleanup/client.py",
+    "backends/loader.py",
+    "backends/onnx.py",
+    "backends/onnx_preprocessing.py",
+    "backends/onnx_session.py",
+    "backends/vocabulary.py",
+    "inference/prediction.py",
+    "inference/scene_predictions.py",
+    "inference/sprites.py",
+    "inference/preparation.py",
+    "inference/reuse.py",
+    "evidence/retention.py",
+    "rethreshold/markers.py",
+    "rethreshold/scenes.py",
+    "storage/progress.py",
+    "inference/inputs.py",
+    "inference/identity.py",
+    "inference/checkpoints.py",
+    "storage/database.py",
+    "storage/archive.py",
+    "config.py",
+    "storage/initialization.py",
+    "history/store.py",
+    "history/lifecycle.py",
+    "history/provenance.py",
+    "runtime/worker_result.py",
+    "runtime/profile.py"
 ])
 def test_publication_code_ignores_runtime_and_maintenance_modules(monkeypatch, filename):
     before = performance.publication_code()
@@ -336,3 +455,56 @@ def test_detached_records_cannot_reuse_a_stale_segment_digest(tmp_path):
         assert performance_segments.segment_digest(detached) != original
         assert performance_segments.segment_digest(borrowed) == original and borrowed['items'] == []
 
+
+@pytest.mark.parametrize('filename', [
+    'runs/merged_model.py', 'inference/prediction.py', 'inference/checkpoints.py',
+    'backends/onnx_session.py', 'runtime/settings.py', 'runtime/profile.py',
+    'publication/parallel.py', 'history/lifecycle.py', 'storage/archive.py',
+])
+def test_execution_code_change_reuses_publication_without_inference(pipeline, monkeypatch, filename):
+    p = pipeline
+    assert app.main(p.args) == 0
+    with sqlite3.connect(p.path) as db:
+        raw = db.execute('SELECT * FROM results ORDER BY scope,scene,model,kind').fetchall()
+        snapshots = db.execute('SELECT * FROM snapshots ORDER BY scope,scene,kind').fetchall()
+    read_bytes = performance.Path.read_bytes
+
+    def changed(path):
+        data = read_bytes(path)
+        return data + b'\n# execution change' if path.as_posix().endswith('/stash_ai/' + filename) else data
+
+    monkeypatch.setattr(performance.Path, 'read_bytes', changed)
+    monkeypatch.setattr(app.services, 'load_tagger', fail)
+    monkeypatch.setattr(merge, 'evidence', fail)
+    monkeypatch.setattr(merge_store.StateStore, 'prepare', fail)
+    p.stash.writes.clear()
+    assert app.main(p.args) == 0
+    assert p.stash.writes == []
+    # The second read may touch input verification; the actual evidence bytes
+    # and published snapshots must stay unchanged.
+    with sqlite3.connect(p.path) as db:
+        assert db.execute('SELECT * FROM results ORDER BY scope,scene,model,kind').fetchall() == raw
+        assert db.execute('SELECT * FROM snapshots ORDER BY scope,scene,kind').fetchall() == snapshots
+        assert db.execute('SELECT COUNT(*) FROM refresh_requests').fetchone() == (0,)
+
+
+def test_semantic_code_change_rechecks_merge_without_reinference(pipeline, monkeypatch):
+    p = pipeline
+    assert app.main(p.args) == 0
+    with sqlite3.connect(p.path) as db:
+        raw = db.execute('SELECT * FROM results ORDER BY scope,scene,model,kind').fetchall()
+    read_bytes = performance.Path.read_bytes
+
+    def changed(path):
+        data = read_bytes(path)
+        return data + b'\n# semantic change' if path.as_posix().endswith('/stash_ai/evidence/qualification.py') else data
+
+    monkeypatch.setattr(performance.Path, 'read_bytes', changed)
+    monkeypatch.setattr(app.services, 'load_tagger', fail)
+    original, calls = merge.evidence, []
+    monkeypatch.setattr(merge, 'evidence', lambda *a, **kw: (calls.append(1), original(*a, **kw))[1])
+    assert app.main(p.args) == 0 and calls == [1]
+    with sqlite3.connect(p.path) as db:
+        assert db.execute('SELECT * FROM results ORDER BY scope,scene,model,kind').fetchall() == raw
+    monkeypatch.setattr(merge, 'evidence', fail)
+    assert app.main(p.args) == 0

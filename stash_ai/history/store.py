@@ -4,7 +4,7 @@ from pathlib import Path
 import sqlite3
 
 APPLICATION_ID = 0x53544148
-FORMAT = 2
+FORMAT = 3
 
 
 def history_path(args):
@@ -30,7 +30,7 @@ class HistoryStore:
             version = db.execute('PRAGMA user_version').fetchone()[0]
             populated = bool(db.execute("SELECT 1 FROM sqlite_master WHERE type='table' LIMIT 1").fetchone())
             if (app not in (0, APPLICATION_ID) or (populated and app != APPLICATION_ID)
-                    or version not in (0, 1, FORMAT) or (readonly and (app != APPLICATION_ID or version not in (1, FORMAT)))):
+                    or version not in (0, 1, 2, FORMAT) or (readonly and (app != APPLICATION_ID or version not in (1, 2, FORMAT)))):
                 raise ValueError('Not a supported run history DB; choose another --run-history-db.')
             if not readonly:
                 with db:
@@ -43,6 +43,11 @@ class HistoryStore:
                         models TEXT NOT NULL DEFAULT '{}', counts TEXT NOT NULL DEFAULT '{}',
                         outcomes TEXT NOT NULL DEFAULT '{}', metrics TEXT NOT NULL DEFAULT '[]',
                         issues TEXT NOT NULL DEFAULT '{}')''')
+                    columns = {row[1] for row in db.execute('PRAGMA table_info(runs)')}
+                    for name, declaration in (('last_progress_at', 'TEXT'), ('progress_seq', 'INTEGER NOT NULL DEFAULT 0'),
+                                              ('workload', "TEXT NOT NULL DEFAULT '{}'")):
+                        if name not in columns:
+                            db.execute(f'ALTER TABLE runs ADD COLUMN {name} {declaration}')
                     db.execute('CREATE INDEX IF NOT EXISTS runs_scope_started ON runs(scope,started_at DESC,id)')
                     db.execute('''CREATE TABLE IF NOT EXISTS reuse_decisions (
                         run_id TEXT NOT NULL, scope TEXT NOT NULL, scene TEXT NOT NULL, model TEXT NOT NULL,
@@ -61,13 +66,23 @@ class HistoryStore:
             self.connection.execute('INSERT INTO runs(id,scope,command,started_at,status,configuration) VALUES (?,?,?,?,?,?)',
                                     (identifier, scope, command, started, 'running', encode(configuration)))
 
-    def finish(self, identifier, finished, status, wall, cpu, *, models, counts, outcomes, metrics, issues):
+    def finish(self, identifier, finished, status, wall, cpu, *, models, counts, outcomes, metrics, issues, workload=None):
         self.flush()
         with self.connection:
             self.connection.execute('''UPDATE runs SET finished_at=?,status=?,wall_seconds=?,cpu_seconds=?,
-                models=?,counts=?,outcomes=?,metrics=?,issues=? WHERE id=?''',
+                models=?,counts=?,outcomes=?,metrics=?,issues=?,last_progress_at=?,progress_seq=progress_seq+1,
+                workload=COALESCE(?,workload) WHERE id=?''',
                 (finished, status, wall, cpu, encode(models), encode(counts), encode(outcomes),
-                 encode(metrics), encode(issues), identifier))
+                 encode(metrics), encode(issues), finished, encode(workload) if workload is not None else None, identifier))
+
+    def progress(self, identifier, updated, wall, cpu, *, models, counts, outcomes, metrics, issues, workload):
+        self.flush()
+        with self.connection:
+            self.connection.execute('''UPDATE runs SET last_progress_at=?,progress_seq=progress_seq+1,
+                wall_seconds=?,cpu_seconds=?,models=?,counts=?,outcomes=?,metrics=?,issues=?,workload=?
+                WHERE id=? AND status='running' AND finished_at IS NULL''',
+                (updated, wall, cpu, encode(models), encode(counts), encode(outcomes), encode(metrics),
+                 encode(issues), encode(workload), identifier))
 
     def rows(self, scope, *, limit=50, command=None, status=None, model=None):
         filters, params = ['scope=?'], [scope]
@@ -86,6 +101,10 @@ class HistoryStore:
             row = dict(zip(names, values))
             for name in ('configuration', 'models', 'counts', 'outcomes', 'metrics', 'issues'):
                 row[name] = json.loads(row[name])
+            row.setdefault('last_progress_at', None)
+            row.setdefault('progress_seq', 0)
+            row['workload'] = json.loads(row['workload']) if 'workload' in row else {}
+            row['partial'] = row['finished_at'] is None
             yield row
 
     def close(self):

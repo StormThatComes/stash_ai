@@ -24,6 +24,24 @@ class RunReport:
         self.issue_counts = Counter()
         self.count_sources = []
         self.history = None
+        self.workload = dict(verified_input_pairs=0, verified_cues=0, input_fingerprint=None)
+        self._input_digest = 0
+
+    def record_input_workload(self, scene, model, cues, hashes):
+        if self.profile is None:
+            return
+        from stash_ai.inference.input_identity import cue_manifest, frame_signature
+        from stash_ai.signatures import digest
+        fingerprint = frame_signature(cue_manifest(cues), hashes)
+        self._input_digest = (self._input_digest + int(digest([str(scene), model, fingerprint]), 16)) % (1 << 256)
+        self.workload['verified_input_pairs'] += 1
+        self.workload['verified_cues'] += len(cues)
+        self.workload['input_fingerprint'] = digest(hex(self._input_digest))
+
+    def record_progress(self):
+        progress = getattr(self.history, 'progress', None)
+        if progress is not None:
+            progress()
 
     def reuse_decision(self, scope, scene, model, action, status, reasons, details):
         if status != 'started':
@@ -56,6 +74,13 @@ class RunReport:
             self.profile.outcome(model, name)
 
     def record_model(self, config, *, identity=None, tagger=None):
+        try:
+            self._record_model(config, identity=identity, tagger=tagger)
+        except Exception:
+            # Optional backend metadata cannot turn a loaded tagger into a failure.
+            pass
+
+    def _record_model(self, config, *, identity=None, tagger=None):
         if self.profile is None:
             return
         source = config.source
@@ -65,14 +90,19 @@ class RunReport:
                    scene_cache_floor=config.scene_cache_floor, marker_cache_floor=config.marker_cache_floor)
         if identity is not None:
             row.update(vocabulary=identity['vocabulary'], asset_hashes=[value for _, value in identity['files']])
+        row.setdefault('execution_observed', False)
         if tagger is not None:
+            row['execution_observed'] = True
             row['effective_batch_size'] = tagger.batch_size
             if hasattr(tagger, 'device'):
                 row['effective_device'] = str(tagger.device)
                 import sys
                 torch = sys.modules.get('torch')
                 if torch is not None and str(tagger.device).startswith('cuda'):
-                    row['gpu'] = torch.cuda.get_device_name(tagger.device)
+                    try:
+                        row['gpu'] = torch.cuda.get_device_name(tagger.device)
+                    except Exception as exc:
+                        row['gpu_metadata_error'] = type(exc).__name__
             session = getattr(tagger, 'session', None)
             if session is not None and hasattr(session, 'get_providers'):
                 row['providers'] = session.get_providers()

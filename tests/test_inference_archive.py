@@ -188,3 +188,60 @@ def test_unknown_archive_format_rolls_back_retirement(tmp_path):
         assert db.execute('SELECT * FROM results').fetchall() == before
         assert not db.execute('SELECT * FROM refresh_requests').fetchall()
         assert db.execute('PRAGMA user_version').fetchone() == (21,)
+
+
+@pytest.mark.parametrize('preview', [False, True])
+def test_pin_read_is_shared_only_within_one_result_write(tmp_path, monkeypatch, preview):
+    path = tmp_path/'state.sqlite3'
+    old, first, second = (outputs(signature=value) for value in ('old', 'first', 'second'))
+    with StateStore(path, 'scope') as state:
+        state.put('1', 'wd', old)
+        state.publish('1', {'scene': proof(old['scene']), 'markers': proof(old['markers'])})
+    source = path.read_bytes()
+    with StateStore(path, 'scope', dry_run=preview) as state:
+        calls, original = [], state.unpack_snapshot
+        monkeypatch.setattr(state, 'unpack_snapshot', lambda blob: (calls.append(1), original(blob))[1])
+        state.put('1', 'wd', first)
+        assert len(calls) == 2  # one published snapshot per kind, shared by both replacements
+        assert set(archived_records(state, '1', 'scene')) == {'wd'}
+        assert set(archived_records(state, '1', 'markers')) == {'wd'}
+        # A later publication pins DIFFERENT evidence. Its next write must read
+        # the new pin set even on the same store/scene and within another transaction.
+        state.publish('1', {'scene': proof(first['scene']), 'markers': proof(first['markers'])})
+        calls.clear()
+        state.put('1', 'wd', second)
+        assert len(calls) == 2
+        for kind in ('scene', 'markers'):
+            saved = archived_records(state, '1', kind)['wd']
+            assert [marker_segment_signature(value) for value in saved] == [
+                marker_segment_signature(first[kind])]
+    if preview:
+        assert path.read_bytes() == source
+
+
+def test_lazy_pins_are_not_decoded_for_fresh_or_identical_evidence(tmp_path, monkeypatch):
+    with StateStore(tmp_path/'state.sqlite3', 'scope') as state:
+        monkeypatch.setattr(state, 'unpack_snapshot',
+                            lambda _: pytest.fail('No prior changed proof needs a pin read'))
+        state.put('1', 'wd', outputs())
+        state.put('1', 'wd', outputs())
+
+
+def test_failed_second_output_rolls_back_first_output_and_archives(tmp_path):
+    from copy import deepcopy
+    with StateStore(tmp_path/'state.sqlite3', 'scope') as state:
+        old, new = outputs(signature='old'), outputs(signature='new')
+        state.put('1', 'wd', old)
+        state.publish('1', {'scene': proof(old['scene']), 'markers': proof(old['markers'])})
+        invalid = deepcopy(new)
+        invalid['markers']['mode'] = 'scene'
+        with pytest.raises(ValueError, match='Incomplete result'):
+            state.put('1', 'wd', invalid)
+        assert not state.connection.in_transaction
+        for kind in ('scene', 'markers'):
+            assert state.model_record('1', kind, 'wd') == old[kind]
+            assert not archived_records(state, '1', kind)
+        state.put('1', 'wd', new)
+        for kind in ('scene', 'markers'):
+            assert marker_segment_signature(archived_records(state, '1', kind)['wd'][0]) == (
+                marker_segment_signature(old[kind]))
