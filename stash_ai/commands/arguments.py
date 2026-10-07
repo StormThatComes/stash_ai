@@ -44,8 +44,8 @@ def build_parser(app) -> argparse.ArgumentParser:
     resume.add_argument("--restart", action="store_true", help="Request fresh inference for selected scenes/models; resume later without this flag.")
     parser.add_argument("--checkpoint-batches", type=int, default=app.CHECKPOINT_BATCHES,
                         help="Persist partial inference every N batches; also saves on Ctrl+C/errors. Default: 8.")
-    parser.add_argument("--prefetch-batches", type=int, choices=range(17), default=app.PREFETCH_BATCHES,
-                        help="Prepare N next batches in RAM (default: 4); 0 disables. No disk image cache.")
+    parser.add_argument("--prefetch-batches", type=int, choices=range(17), default=None,
+                        help="Prepare N next batches in RAM; overrides YAML prefetch_batches (default: 4); 0 disables.")
     parser.add_argument("--ram-cache-gb", type=float, default=app.RAM_CACHE_GB, metavar="GIB",
                         help="Shared result/index/media cache in GiB (default: 24); 0 disables. Capped to 75%% of --ram-budget-gb.")
     parser.add_argument("--ram-budget-gb", type=float, default=app.RAM_BUDGET_GB, metavar="GIB",
@@ -139,4 +139,11 @@ def build_parser(app) -> argparse.ArgumentParser:
 
 def parse_args(app, argv: list[str] | None = None) -> argparse.Namespace:
     parser = build_parser(app)
-    return validate_args(app, parser, parser.parse_args(argv))
+    args = validate_args(app, parser, parser.parse_args(argv))
+    if args.prefetch_batches is None:
+        if args.command is Command.INFERENCE:
+            from stash_ai.config import load_model_configuration
+            args.prefetch_batches = load_model_configuration(args.model_config).get('prefetch_batches', app.PREFETCH_BATCHES)
+        else:
+            args.prefetch_batches = app.PREFETCH_BATCHES
+    return args

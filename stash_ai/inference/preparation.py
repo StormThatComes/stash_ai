@@ -30,6 +30,8 @@ def prepared_batches(app, tagger, stash, paths, cues, prefetch=False, workers=1,
     if type(workers) is not int or not 1 <= workers <= 16:
         raise ValueError('prepare workers must be an integer in 1..16.')
     iterator = sprites.iter_sprite_frames(stash, paths, cues)
+    from stash_ai.runtime.cancellation import Cancellation, use
+    cancellation = Cancellation()
     work = report.work() if report is not None else ''
     executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="prepare-frames") if prefetch else None
     transforms = ThreadPoolExecutor(max_workers=workers, thread_name_prefix='transform-frames') if workers > 1 else None
@@ -38,13 +40,18 @@ def prepared_batches(app, tagger, stash, paths, cues, prefetch=False, workers=1,
             from contextlib import nullcontext
             timer = (report.measure('image_prepare', model=tagger.settings.source.key, work=work, units=1, unit='frames')
                      if report is not None else nullcontext())
-            with timer:
+            with use(cancellation), timer:
                 return tagger.prepare(image)
         finally:
             image.close()
     def prepare_next():
+        with use(cancellation):
+            return _prepare_next()
+
+    def _prepare_next():
         prepared, batch_cues = [], []
         for _ in range(tagger.batch_size):
+            cancellation.check()
             try:
                 cue, image = next(iterator)
             except StopIteration:
@@ -63,6 +70,7 @@ def prepared_batches(app, tagger, stash, paths, cues, prefetch=False, workers=1,
             batch_cues.append(cue)
         if transforms:
             prepared = [future.result() for future in prepared]
+        cancellation.check()
         return prepared, batch_cues
     try:
         pending = deque(executor.submit(prepare_next) for _ in range(prefetch)) if executor else deque()
@@ -74,6 +82,7 @@ def prepared_batches(app, tagger, stash, paths, cues, prefetch=False, workers=1,
                 pending.append(executor.submit(prepare_next))
             yield prepared, batch_cues
     finally:
+        cancellation.cancel()
         if executor:
             executor.shutdown(wait=True, cancel_futures=True)
         if transforms:

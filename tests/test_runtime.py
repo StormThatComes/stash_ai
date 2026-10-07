@@ -3,6 +3,7 @@ from stash_ai import cli
 from stash_ai.commands import dispatch
 from stash_ai.runtime.context import RuntimeContext
 from stash_ai.runtime.settings import RuntimeSettings
+import pytest
 
 
 def test_default_cli_invocations_own_independent_runtime(monkeypatch):
@@ -39,3 +40,27 @@ def test_api_key_has_no_historical_default_and_is_read_for_each_runtime(monkeypa
     assert RuntimeSettings().STASH_API_KEY == 'configured-test-key'
     monkeypatch.setenv('STASH_API_KEY', '')
     assert RuntimeSettings().STASH_API_KEY == ''
+
+
+@pytest.mark.parametrize('name,value', [
+    ('TOP_K_FRAMES', True), ('MARKER_MIN_HITS', False), ('SCENE_PAGE_SIZE', True),
+    ('MAX_FRAMES_PER_SCENE', True), ('MARKER_MAX_TAGS_PER_FRAME', False),
+    ('CHECKPOINT_BATCHES', True), ('PREFETCH_BATCHES', True), ('PREPARE_WORKERS', False),
+    ('HTTP_RETRIES', True), ('HTTP_RETRIES', -1), ('HTTP_RETRIES', 11),
+    ('REQUEST_TIMEOUT', True), ('REQUEST_TIMEOUT', 0), ('REQUEST_TIMEOUT', float('inf')),
+    ('REQUEST_TIMEOUT', (1,)), ('REQUEST_TIMEOUT', (1, 2, 3)),
+    ('REQUEST_TIMEOUT', (1, float('nan'))), ('REQUEST_TIMEOUT', (True, 1)),
+])
+def test_runtime_rejects_ambiguous_counts_and_invalid_http_budgets(name, value):
+    from stash_ai.runtime.settings import validate_config
+    runtime = RuntimeSettings()
+    setattr(runtime, name, value)
+    with pytest.raises(ValueError, match=name):
+        validate_config(runtime)
+
+
+@pytest.mark.parametrize('timeout', [.1, (1, .1)])
+@pytest.mark.parametrize('retries', [0, 10])
+def test_runtime_accepts_finite_positive_timeout_and_retry_boundaries(timeout, retries):
+    from stash_ai.runtime.settings import validate_config
+    validate_config(RuntimeSettings(REQUEST_TIMEOUT=timeout, HTTP_RETRIES=retries))

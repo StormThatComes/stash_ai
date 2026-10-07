@@ -747,7 +747,10 @@ Aktualne domyślne ustawienia pamięci i równoległości:
   maksymalnie 75% budżetu;
 - `--prepare-workers 4`;
 - `--merge-workers 4` — równoległy CPU replay evidence; zapisy Stash/SQLite pozostają sekwencyjne;
-- `--prefetch-batches 4`.
+- Globalne `prefetch_batches: 4` w `tagger_models.yml` (0–16; 0 wyłącza).
+  Jawne `--prefetch-batches N` nadpisuje YAML; brak pola zachowuje default 4.
+  Parametr steruje przygotowaniem kolejnych batchy, niezależnie od rozmiaru
+  inferencji `batch_size`, i nie unieważnia zapisanych wyników.
 
 `--db-compact` utrzymuje blokadę zapisu aż do końcowej kontroli bazy i
 porównania liczników po VACUUM.
