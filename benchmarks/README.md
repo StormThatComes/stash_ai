@@ -1,7 +1,7 @@
 # Benchmarki offline
 
 Uruchamiaj z katalogu głównego repozytorium, po instalacji `requirements-dev.txt`.
-W CI wszystkie dziesięć wejść przechodzi smoke test na małych danych.
+W CI wszystkie jedenaście skryptów przechodzi smoke test na małych danych.
 Fixture używają bieżącego formatu analysis i pełnych metadanych.
 Skrypty używają syntetycznych danych, lokalnej tymczasowej bazy lub makiety Stash;
 nie łączą się ze Stash i nie uruchamiają modeli GPU.
@@ -16,6 +16,8 @@ python -m benchmarks.benchmark_cleanup_sql --markers 2500000 --legacy-time-budge
 python -m benchmarks.benchmark_rethreshold --scenes 6 --frames 600 --labels 12 --repeats 5
 python -m benchmarks.benchmark_tag_cascade --markers 100000 --batch-size 200 --repeats 3
 python -m benchmarks.benchmark_scoped_reports --scenes 9000 --selected 32 --repeats 3
+python -m benchmarks.benchmark_run_history --frames 128 --labels 12 --repeats 3
+python -m benchmarks.benchmark_pinned_proofs --frames 256 --labels 12 --repeats 3
 ```
 
 | Skrypt | Co mierzy |
@@ -29,6 +31,8 @@ python -m benchmarks.benchmark_scoped_reports --scenes 9000 --selected 32 --repe
 | `benchmark_rethreshold` | zmiana progów, czas/dekodowania Check i Apply, zapisy evidence oraz hashe wyników i result_index; bez merge/API |
 | `benchmark_tag_cascade` | kaskada popularnego tagu kontra wcześniejsze odpinanie relacji w partiach; całkowity czas, najdłuższa transakcja, liczba mutacji i hash zachowanego stanu |
 | `benchmark_scoped_reports` | raport cache i całe Check/Apply dla małej selekcji w większej bazie, osobno writer/preview; czas, instrukcje SQL, zapisy, dekodowania i hashe wyników |
+| `benchmark_run_history` | historia on/off dla świeżej inferencji, cache i checkpointu; czas, RSS, SQL, retencja i zgodność surowych wyników |
+| `benchmark_pinned_proofs` | cały zapis wyników przy published/pending/recovery, osobno writer/preview; czas, RSS, dekodowania i zgodność stanu |
 
 Wynik `results/scoped_reports_2026-10-07.json` porównuje PR 4 z PR 5 dla
 32 wybranych scen i czterech modeli, przy 900 i 9000 scenach w bazie. Dla 9000
@@ -132,3 +136,23 @@ oraz 53/84 ms dla wznowienia. Narzut obejmuje start i zamknięcie historii,
 fingerprint kodu i odczyt metadanych pakietów; liczba zapisów historii wynosi
 odpowiednio 7, 5 i 7. Jest to mały syntetyczny przebieg, więc porównuj też
 bezwzględny czas, a nie tylko procent narzutu.
+
+
+## Koszt zapisu wyników przy przypiętych dowodach
+
+`python -m benchmarks.benchmark_pinned_proofs --frames 256 --labels 12 --repeats 3`
+mierzy cały zapis scene+markers dla czterech źródeł przy jednoczesnych dowodach
+published, pending i recovery, również w sparse dry-run. Każda próbka działa
+w nowym procesie i nowej bazie. Baseline wyłącza tylko współdzielenie leniwego
+odczytu pins w ramach wywołania; reszta kodu jest identyczna. Przygotowanie
+dowodów i weryfikacja hashy są poza pomiarem czasu. Raportuje wall/CPU, peak RSS
+procesu (obejmujący fixture), liczbę dekodowanych snapshotów i zapisów SQL.
+Wszystkie trwałe wyniki, archiwa, snapshoty, recovery i indeksy muszą dać
+identyczny hash; dry-run dodatkowo zachowuje bajty bazy źródłowej.
+
+Pomiar [pinned_proofs_2026-10-07.json](results/pinned_proofs_2026-10-07.json)
+z CI: writer 412 → 283 ms, preview 405 → 279 ms (mediany, 3 powtórzenia).
+Dekodowania snapshotów spadły z 48 do 24, a liczba zapisów SQL pozostała
+40 dla writera i 48 dla preview. Hashe całego sprawdzanego stanu są identyczne;
+wszystkie 8 przypiętych rekordów pozostaje w archiwum. Zysk około 31% dotyczy
+tego syntetycznego zapisu z dużymi proofs, bez kosztu inferencji i API.
