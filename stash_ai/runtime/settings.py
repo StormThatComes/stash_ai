@@ -72,11 +72,9 @@ def validate_config(app, scene_work: bool = True) -> None:
         raise ValueError("AGGREGATION must be max or topk_mean.")
 
 
-EVIDENCE_SETTINGS = (
-    "APPLY_SCENE_TAGS", "CREATE_MARKERS", "MARKER_MIN_HITS",
-    "MARKER_MERGE_GAP_SECONDS", "MARKER_MAX_TAGS_PER_FRAME",
-    "TEMPORAL_POLICY",
-)
+from stash_ai.runtime.dependencies import settings_for
+
+EVIDENCE_SETTINGS = settings_for('evidence')
 
 
 def evidence_settings(app):

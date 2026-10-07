@@ -27,5 +27,7 @@ def check_schema(db, tables, version, errors, warnings, progress=None):
         count = _invalid_enum_count(db, tables, table, column, allowed)
         errors["invalid_model" if column == "model" else "invalid_kind"] += count
     tick(progress)
-
+    if 'input_checks' in tables:
+        from stash_ai.storage.input_checks import REASONS
+        errors['input_verification_invalid'] += _invalid_enum_count(db, tables, 'input_checks', 'reason', REASONS)
 

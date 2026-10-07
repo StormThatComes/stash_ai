@@ -16,6 +16,7 @@ class RunReport:
         self.timings, self.timing_calls = self._timing.timings, self._timing.timing_calls
         self.threshold_preflight = None
         self.diagnostics = None
+        self.unread_scenes = {}
 
     def measure(self, stage):
         return self._timing.measure(stage)

@@ -74,6 +74,8 @@ class InitializationStore:
             'SELECT models,selection,scanned FROM db_initializations WHERE scope=?', (store.scope,)).fetchone()
         self.run = InitializationRun.decode(*row) if row else None
         self.scenes, self.owned = {}, {}
+        from stash_ai.storage.input_checks import removed_scenes
+        self.removed = removed_scenes(store)
         for scene, owned, completed in store.connection.execute(
                 'SELECT scene,owned_ids,completed FROM ' + store.table('db_init_scenes') + ' WHERE scope=?',
                 (store.scope,)):
@@ -137,15 +139,32 @@ class InitializationStore:
     def finish_scan(self, observed, *, errors):
         if not self.active:
             return
-        missing = {scene for scene, done in self.scenes.items() if not done} - set(observed)
+        missing = {scene for scene, done in self.scenes.items() if not done} - set(observed) - self.removed
         if self.run.selection is not None:
-            missing.update(set(self.run.selection) - set(observed))
+            missing.update(set(self.run.selection) - set(observed) - self.removed)
         if missing:
             raise RuntimeError('DB initialization scenes could not be read: ' + ', '.join(sorted(missing)[:12]))
         if not errors and not self.run.scanned:
             with self.store.connection:
                 self.store.connection.execute('UPDATE db_initializations SET scanned=1 WHERE scope=?', (self.store.scope,))
             self.run = replace(self.run, scanned=True)
+
+    def retire(self, scene):
+        """Retire only a scene whose absence was confirmed by a successful API read."""
+        if not self.active:
+            return
+        scene = str(scene)
+        with self.store.connection:
+            self.store.connection.execute('INSERT INTO db_init_scenes VALUES (?,?,?,1) '
+                'ON CONFLICT(scope,scene) DO UPDATE SET completed=1',
+                (self.store.scope, scene, '[]'))
+            for model in self.run.models:
+                self.store.connection.execute('INSERT INTO input_checks VALUES (?,?,?,?) '
+                    'ON CONFLICT(scope,scene,model) DO UPDATE SET reason=excluded.reason',
+                    (self.store.scope, scene, model, 'deleted'))
+        self.scenes[scene] = True
+        self.owned.pop(scene, None)
+        self.removed.add(scene)
 
     def require_ready(self, scene):
         if not self.pending(scene):
@@ -196,8 +215,10 @@ class InitializationStore:
     def report(self, report, stats):
         if self.run is None:
             return
-        completed = sum(self.scenes.values())
-        pending = len(self.scenes) - completed
+        completed = sum(done for scene, done in self.scenes.items() if scene not in self.removed)
+        pending = sum(not done for done in self.scenes.values())
         stats['db_init_completed_scenes'], stats['db_init_pending_scenes'] = completed, pending
+        stats['db_init_removed_scenes'] = len(self.removed & self.scenes.keys())
         report.write(f'DB initialization: {completed:,} scene(s) rebuilt; {pending:,} pending; '
+                     f'{stats["db_init_removed_scenes"]:,} removed; '
                      f'scan={"complete" if self.run.scanned else "incomplete"}.')

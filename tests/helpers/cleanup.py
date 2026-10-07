@@ -27,6 +27,9 @@ class FastStash(Stash):
         return self.tags[name]
 
     def find_scene(self, identifier):
+        if str(identifier) not in self.scenes:
+            from stash_ai.stash_api.scene_reads import MissingSceneError
+            raise MissingSceneError(f'Scene {identifier} no longer exists.')
         self.scene_reads.append(str(identifier))
         return deepcopy(self.scenes[str(identifier)])
 

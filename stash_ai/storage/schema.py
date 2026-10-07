@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 APPLICATION_ID = 0x53544D47
 MIN_SUPPORTED_SCHEMA_VERSION = 18
-LATEST_SCHEMA_VERSION = 25
+LATEST_SCHEMA_VERSION = 26
 UPGRADE_BRIDGE_COMMIT = 'c5bcd887bafe76b7ee2a9de944666799c9a0fc30'
 KNOWN_KINDS = frozenset(('scene', 'markers'))
 KNOWN_MODELS = frozenset(('joytag', 'wd', 'dtq', 'oppai'))
@@ -36,6 +36,7 @@ TABLES = (
     TableSpec('snapshots', ('published', 'pending'), kind=True, base=True, invalidates_merge=True),
     TableSpec('result_index', model=True, kind=True),
     TableSpec('refresh_requests', model=True, kind=True),
+    TableSpec('input_checks', model=True, invalidates_merge=True),
     TableSpec('checkpoints', ('top_scores',), model=True),
     TableSpec('checkpoint_frames', ('data',), model=True),
     TableSpec('checkpoint_analysis', ('data',), model=True),
@@ -62,8 +63,10 @@ def initialize_features(store):
     from stash_ai.storage.preview import initialize as initialize_preview
     from stash_ai.storage.archive import initialize as initialize_archive
     from stash_ai.storage.initialization import initialize as initialize_db_init
+    from stash_ai.storage.input_checks import initialize as initialize_input_checks
     initialize_archive(store)
     initialize_progress(store)
+    initialize_input_checks(store)
     initialize_cleanup(store)
     if store.preview_source:
         store.connection.execute(
@@ -94,6 +97,7 @@ COLUMNS = {
     'snapshots': 'scope scene kind published pending',
     'result_index': 'scope scene model kind populated signature',
     'refresh_requests': 'scope scene model kind',
+    'input_checks': 'scope scene model reason',
     'checkpoints': 'scope scene model signature processed total top_rows top_scores',
     'checkpoint_frames': 'scope scene model processed data',
     'checkpoint_analysis': 'scope scene model data',

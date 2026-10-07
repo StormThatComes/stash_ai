@@ -35,6 +35,7 @@ def _scene_ids(store, requested=None):
 
 
 _MODEL_ROW_KEYS = (
+    'scenes_unverified', 'scenes_refresh_required',
     "scenes_total", "scenes_with_evidence", "scenes_changed", "scenes_unchanged",
     "scene_tags_supported", "scene_tags_sole_source", "scene_tags_multi_model",
     "scene_tags_lost", "scene_tags_added",
@@ -72,6 +73,8 @@ def report_payload(totals, utility):
             "counterfactual_replays_consensus_temporal_extras_and_occurrence": True,
         },
         "totals": dict(totals),
+        'warnings': [dict(code=key, scenes=totals[key]) for key in
+                     ('scenes_skipped_unverified', 'scenes_skipped_refresh_required') if totals[key]],
         "models": [_model_row(model, utility[model]) for model in SOURCES],
     }
 
@@ -101,6 +104,8 @@ def format_summary(report):
         "",
         "model     evidence  changed   scene lost  marker lost  marker changed  extras lost  occurrence lost",
     ]
+    for warning in report.get('warnings', []):
+        lines.insert(1, f"Excluded {warning['scenes']:,} scene(s): {warning['code']}.")
     for row in report["models"]:
         lines.append(
             f"{row['model']:<9} "
@@ -166,4 +171,3 @@ def run(app, args):
     except (OSError, ValueError, RuntimeError) as exc:
         print("Model utility report failed: " + str(exc))
         return 1
-

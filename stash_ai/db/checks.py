@@ -16,6 +16,7 @@ from .validation import (
 
 
 CHECK_MESSAGES = {
+    'input_verification_invalid': 'Deferred input verification contains an unknown reason.',
     "sqlite_integrity_check": "SQLite integrity_check reported a storage/index-level problem.",
     "missing_base_tables": "Core state tables are missing.",
     "missing_state_tables": "Current state tables are missing; run --db-update.",

@@ -284,9 +284,10 @@ def test_explicit_batch_failure_falls_back_without_replay(database):
 
 def test_batched_missing_scene_remains_an_error(database):
     client = client_for(database)
-    client.configure_merge_reads(RunReport(write=lambda line: None), merge_only=True)
-    with pytest.raises(RuntimeError, match='Scene 999 no longer exists'):
-        list(client.iter_scenes(['1', '999']))
+    report = RunReport(write=lambda line: None)
+    client.configure_merge_reads(report, merge_only=True)
+    assert [scene['id'] for scene in client.iter_scenes(['1', '999', '2'])] == ['1', '2']
+    assert 'Scene 999 no longer exists' in str(report.unread_scenes['999'])
 
 
 def test_snapshot_only_refresh_reads_current_sql_state(database):

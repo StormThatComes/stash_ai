@@ -75,6 +75,13 @@ class MergePublisher:
 
     def _reason(self, scene_id, current, refresh_error=None):
         self.store.initialization.require_ready(scene_id)
+        from stash_ai.storage.input_checks import pending as unverified_inputs
+        deferred = unverified_inputs(self.store, scene_id)
+        if deferred:
+            self.stats['merge_input_unverified'] += 1
+            raise RuntimeError('Input verification pending for ' +
+                               ', '.join(f'{model}/{reason}' for model, reason in sorted(deferred.items())) +
+                               '; existing results retained. Restore media and resume to verify reuse.')
         pending = self.pending_refreshes.get(str(scene_id), ())
         if pending:
             self.stats["merge_refresh_blocked"] += 1
