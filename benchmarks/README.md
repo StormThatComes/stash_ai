@@ -125,3 +125,10 @@ peak RSS obejmuje również przygotowanie fixture.
 
 Czas `captured_at` jest stały wyłącznie w fixture, aby porównanie BLOB-ów nie różniło
 się z powodu momentu uruchomienia próbki.
+
+Pomiar [run_history_2026-10-07.json](results/run_history_2026-10-07.json) z CI:
+mediany off/on wynoszą 139/167 ms dla świeżej inferencji, 5/33 ms dla cache
+oraz 53/84 ms dla wznowienia. Narzut obejmuje start i zamknięcie historii,
+fingerprint kodu i odczyt metadanych pakietów; liczba zapisów historii wynosi
+odpowiednio 7, 5 i 7. Jest to mały syntetyczny przebieg, więc porównuj też
+bezwzględny czas, a nie tylko procent narzutu.
