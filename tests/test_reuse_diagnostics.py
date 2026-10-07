@@ -133,19 +133,14 @@ def test_changed_assets_are_detected_by_content_not_timestamps(pipeline, monkeyp
     assert row['details']['changes']['scene']['assets']
 
 
-@pytest.mark.parametrize('change,reason', [({'batch_size': 8}, 'batch_size_changed'),
-                                         ({'scene_cache_floor': .01}, 'retention_changed')])
-def test_model_parameter_changes_explain_existing_inference_decision(pipeline, monkeypatch, tmp_path, change, reason):
+def test_more_demanding_retention_explains_required_inference(pipeline, monkeypatch, tmp_path):
     selected = settings(monkeypatch, tmp_path)
     assert app.main(pipeline.args) == 0
-    selected[0] = replace(selected[0], **change)
+    selected[0] = replace(selected[0], scene_cache_floor=.01)
     assert app.main(pipeline.args) == 0
     row = decisions(pipeline.path)[0]
-    assert reason in row['reasons']
-    if reason == 'batch_size_changed':
-        assert row['details']['changes']['scene']['batch_size'] == {'before': 4, 'after': 8}
-    else:
-        assert 'insufficient_retention' in row['reasons']
+    assert 'retention_changed' in row['reasons']
+    assert 'insufficient_retention' in row['reasons']
 
 
 def test_threshold_only_change_uses_rethreshold_without_loading_model(pipeline, monkeypatch, tmp_path):

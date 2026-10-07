@@ -62,14 +62,22 @@ def load_exclusion_policy(path: Path, key: str) -> dict[str, frozenset[str]]:
         raise ValueError("by_model must contain only joytag, wd, dtq, and/or oppai keys.")
     return {name: common | checked(additions.get(name, []), f"by_model.{name}") for name in SOURCES}
 
-def load_model_settings(path: Path, chosen: list[str] | None, device: str | None,
-                        offline: bool = False) -> list[ModelSettings]:
+def load_model_configuration(path: Path):
     data = load_unique_yaml(path, "Model configuration")
-    allowed = {"version", "enabled_models", "device", "download_missing", *SOURCES}
+    allowed = {"version", "enabled_models", "device", "download_missing", "prefetch_batches", *SOURCES}
     if not isinstance(data, dict) or set(data) - allowed:
         raise ValueError("Unknown model configuration keys.")
     if type(data.get("version")) is not int or data["version"] != 1:
         raise ValueError("Model configuration version must be 1.")
+    if 'prefetch_batches' in data and (type(data['prefetch_batches']) is not int or
+                                      not 0 <= data['prefetch_batches'] <= 16):
+        raise ValueError('prefetch_batches must be an integer in 0..16.')
+    return data
+
+
+def load_model_settings(path: Path, chosen: list[str] | None, device: str | None,
+                        offline: bool = False) -> list[ModelSettings]:
+    data = load_model_configuration(path)
     if chosen is None and "enabled_models" not in data:
         raise ValueError("enabled_models is required when --models is omitted.")
     selected = select_models(chosen if chosen is not None else data["enabled_models"])

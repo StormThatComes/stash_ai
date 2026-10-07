@@ -47,8 +47,8 @@ def main(argv=None, *, runtime=None):
     app.services.validate_config(scene_work=False)
     if not args.state_db.is_file():
         raise FileNotFoundError(args.state_db)
-    cores = app.services.load_exclusion_policy(args.marker_core_exclusions, 'marker_core_exclusions')
-    tags = app.services.load_exclusion_policy(args.scene_tag_exclusions, 'scene_tag_exclusions')
+    cores = app.services.load_exclusion_policy(args.marker_core_exclusions, 'excluded_core_tags')
+    tags = app.services.load_exclusion_policy(args.scene_tag_exclusions, 'excluded_scene_tags')
     kinds = (['scene', 'markers'] if args.cleanup_only else
              ['markers'] if args.cleanup_markers_only else ['scene'])
     dry_run = app.DRY_RUN or args.dry_run

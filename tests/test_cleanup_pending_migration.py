@@ -88,8 +88,8 @@ def test_cli_reads_yaml_and_stays_offline_without_models(tmp_path, monkeypatch):
             store.connection.execute('INSERT INTO cleanup_state VALUES (?,?,?,?)',
                 (scope, 1, encode({}), historical(tags, cores, ['markers'])))
     tag_file, core_file = tmp_path/'tags.yml', tmp_path/'cores.yml'
-    tag_file.write_text('version: 1\nscene_tag_exclusions: [blocked]\n')
-    core_file.write_text('version: 1\nmarker_core_exclusions: []\n')
+    tag_file.write_text('version: 1\nexcluded_scene_tags: [blocked]\n')
+    core_file.write_text('version: 1\nexcluded_core_tags: []\n')
     def forbidden(*args, **kwargs):
         pytest.fail('Maintenance must not connect to Stash or load models')
     for service in ('create_stash_client', 'load_tagger', 'load_model_settings'):

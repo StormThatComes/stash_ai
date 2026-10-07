@@ -566,3 +566,32 @@ def test_generated_rethreshold_applies_yaml_without_loading_a_model(pipeline, mo
     monkeypatch.setattr(app.services, 'load_tagger', lambda *args: pytest.fail('model loaded for rethreshold'))
     assert app.main([*result['plan'][0]['argv'][2:], '--no-hierarchy']) == 0
     assert report(p.path, settings=settings)['totals']['fully_ready_scenes'] == 1
+
+
+@pytest.mark.parametrize('reason', ['missing_media', 'read_error', 'deleted'])
+@pytest.mark.parametrize('model', ['wd', 'dtq'])
+def test_known_input_failure_blocks_plan_but_preserves_ready_evidence(tmp_path, reason, model):
+    from stash_ai.storage import input_checks
+    path = tmp_path / 'state.sqlite3'
+    seed(path)
+    with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL)) as store:
+        input_checks.defer(store, '1', model, reason)
+    before = path.read_bytes()
+    data = report(path, ['1'])
+    assert data['totals']['evidence_ready_pairs'] == 1
+    assert data['totals']['fully_ready_scenes'] == 0
+    assert data['totals']['blocked_pairs'] == 1 and not data['plan']
+    assert issue(data)['input_checks'] == {model: reason}
+    assert issue(data)['blockers'] == ['unverified_inputs']
+    assert path.read_bytes() == before
+
+
+def test_input_check_only_scene_is_in_the_local_universe(tmp_path):
+    from stash_ai.storage import input_checks
+    path = tmp_path / 'state.sqlite3'
+    with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL)) as store:
+        input_checks.defer(store, '404', 'wd', 'deleted')
+    data = report(path)
+    assert data['totals']['scenes'] == 1
+    assert issue(data, '404')['input_checks'] == {'wd': 'deleted'}
+    assert not data['plan']

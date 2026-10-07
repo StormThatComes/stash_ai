@@ -1,6 +1,6 @@
 """Assess retained evidence and scene-wide publication blockers."""
 from stash_ai.evidence.formats import validate_current
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 
 from stash_ai.storage.results import KINDS
 
@@ -105,10 +105,11 @@ class PairAssessment:
     checkpoint: dict | None
     publication_dependencies: list[dict]
     blocking_models: list[str]
+    input_checks: dict = field(default_factory=dict)
 
 
 def assess_scene(app, scene, settings, evidence, indexes, refreshes, checkpoints,
-                 *, cleanup_pending, publication_pending, outside_refresh):
+                 *, cleanup_pending, publication_pending, outside_refresh, input_checks=None):
     """Assess all selected models before propagating scene-wide blockers."""
     models = [config.source.key for config in settings]
     dependencies = publication_dependencies(app, evidence, models)
@@ -123,6 +124,8 @@ def assess_scene(app, scene, settings, evidence, indexes, refreshes, checkpoints
                 indexes.get((scene, model, kind)), (scene, model, kind) in refreshes,
                 checkpoint, error)
         blockers = []
+        if input_checks:
+            blockers.append('unverified_inputs')
         if cleanup_pending:
             blockers.append('pending_global_cleanup')
         if publication_pending:
@@ -133,7 +136,8 @@ def assess_scene(app, scene, settings, evidence, indexes, refreshes, checkpoints
             blockers.append('unusable_evidence_for_unselected_model')
         if any(value.get('unreadable') for value in outputs.values()):
             blockers.append('unreadable_evidence_run_db_check')
-        inspected.append(PairAssessment(scene, model, outputs, blockers, checkpoint, dependencies, []))
+        inspected.append(PairAssessment(scene, model, outputs, blockers, checkpoint, dependencies, [],
+                                        input_checks or {}))
     # Every planned command attempts publication, so selected peers must all
     # inherit a blocked model's scene restriction, independent of model order.
     blocking_models = sorted(pair.model for pair in inspected if pair.blockers)

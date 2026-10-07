@@ -46,12 +46,13 @@ class PublicationStore:
             ' WHERE scope=? AND scene=? AND pending IS NOT NULL LIMIT 1',
             (store.scope, str(scene))).fetchone() is not None
 
-    def pending_scenes(self):
+    def pending_scenes(self, scenes=None):
         """Return scenes with durable publication intent without decoding snapshots."""
         store = self.store
-        return {str(scene) for scene, in store.connection.execute(
+        from stash_ai.storage.selection import selected_rows
+        return {str(scene) for scene, in selected_rows(store,
             'SELECT DISTINCT scene FROM ' + store.table('snapshots') +
-            ' WHERE scope=? AND pending IS NOT NULL', (store.scope,))}
+            ' WHERE scope=? AND pending IS NOT NULL', (store.scope,), scenes)}
 
     @measured('state_write')
     def prepare(self, scene, snapshots):

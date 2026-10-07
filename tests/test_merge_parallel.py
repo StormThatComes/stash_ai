@@ -75,7 +75,7 @@ def test_parallel_worker_tolerates_parent_publication_commits(tmp_path, rethresh
             assert worker.preview_source
             assert worker.model_record('1', 'markers', 'wd')[thresholds_identity.PUBLICATION_THRESHOLD] == .95
         first = merge_parallel._worker_evidence("1")
-        assert first[-1] is None
+        assert first.error is None
 
         # The parent publishes one prepared scene while the same worker remains
         # alive for later scenes. This changes DB data_version but not results.
@@ -83,8 +83,8 @@ def test_parallel_worker_tolerates_parent_publication_commits(tmp_path, rethresh
             parent.publish("1", {"scene": {"contributions": []}})
 
         second = merge_parallel._worker_evidence("2")
-        assert second[-1] is None
-        assert second[0] == "2"
+        assert second.error is None
+        assert second.scene_id == "2"
     finally:
         merge_parallel._WORKER_CONTEXT.close()
         merge_parallel._WORKER_CONTEXT = None
@@ -120,15 +120,16 @@ def test_parallel_evidence_matches_serial_read_only(tmp_path):
         memory_budget_bytes=512 * 2**20,
     ))
 
-    assert [row[0] for row in results] == ["1", "2"]
-    for scene_id, hits, spans, markers, diagnostics, error in results:
-        assert error is None
-        wanted_hits, wanted_spans, wanted_diagnostics = expected[scene_id]
-        assert _normalized(hits) == _normalized(wanted_hits)
-        assert _normalized(spans) == _normalized(wanted_spans)
-        assert dict(diagnostics) == dict(wanted_diagnostics)
+    assert [row.scene_id for row in results] == ["1", "2"]
+    for result in results:
+        assert result.error is None
+        payload = result.payload
+        wanted_hits, wanted_spans, wanted_diagnostics = expected[result.scene_id]
+        assert _normalized(payload.scene_hits) == _normalized(wanted_hits)
+        assert _normalized(payload.spans) == _normalized(wanted_spans)
+        assert dict(payload.diagnostics) == dict(wanted_diagnostics)
         from stash_ai.evidence.intervals import union_intervals
-        assert _normalized(markers) == _normalized(union_intervals(wanted_spans, borrow=True))
+        assert _normalized(payload.markers) == _normalized(union_intervals(wanted_spans, borrow=True))
 
     # Worker StateStores are dry-run/read-only overlays.
     before = path.read_bytes()

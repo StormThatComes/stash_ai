@@ -123,6 +123,55 @@ def test_snapshot_failure_falls_back_and_scene_strategy_stays_graphql(tmp_path, 
     assert stash.snapshot_reads == ([] if strategy == 'scenes' else [[]])
 
 
+@pytest.mark.parametrize('route', ['sql_missing', 'fallback_missing', 'fallback_error', 'scenes_error'])
+@pytest.mark.parametrize('dry', [False, True])
+def test_cleanup_accounts_for_unread_candidates_and_blocks_pruning_on_read_error(tmp_path, monkeypatch, route, dry):
+    from stash_ai.cleanup.run import CleanupRun
+    stash = SceneSQLStash(dry)
+    blocked = stash.tag('ai:blocked')
+    stash.scene['tags'] = [blocked, stash.tag('human')]
+    path = tmp_path / 'state.sqlite3'
+    with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL)) as store:
+        store.publish('1', {'scene': {'contributions': [hit('wd', 'blocked')], 'owned_ids': [blocked['id']]}})
+    original_gql = stash.gql
+    def gql(query, variables=None):
+        if query == OPERATION and json.loads(variables['args'][0]) and route == 'sql_missing':
+            return {'querySQL': {'rows': []}}
+        if 'StashAIScene(' in query:
+            if route.endswith('missing'):
+                return {'findScene': None}
+            raise OSError('candidate read failed')
+        return original_gql(query, variables)
+    monkeypatch.setattr(stash, 'gql', gql)
+    stash.deny_snapshots = route.startswith('fallback')
+    install(monkeypatch, stash)
+    finished, prune_errors = [], []
+    monkeypatch.setattr(RunReport, 'finish', lambda self, title, counts, cache=None: finished.append(dict(counts)))
+    original_prune = CleanupRun._prune
+    def prune(run):
+        prune_errors.append(run.stats['errors'])
+        if route.endswith('error'):
+            # Observe that the real pruning guard prevents all definition writes.
+            run.sql = type('ForbiddenPrune', (), {'prune': lambda *a, **k: pytest.fail('pruned after unread candidate')})()
+        return original_prune(run)
+    monkeypatch.setattr(CleanupRun, '_prune', prune)
+    before = path.read_bytes(), deepcopy(stash.scenes)
+    command = options(tmp_path, by_model={'wd': ['blocked']})
+    if route == 'scenes_error':
+        command += ['--cleanup-strategy', 'scenes']
+    if dry:
+        command += ['--dry-run']
+    failed = route.endswith('error')
+    assert app.main(command) == int(failed)
+    assert finished[0].get('errors', 0) == int(failed)
+    assert finished[0].get('missing_scenes', 0) == int(not failed)
+    if route != 'scenes_error':
+        assert prune_errors == [int(failed)]
+    assert stash.scenes == before[1]
+    if dry:
+        assert path.read_bytes() == before[0]
+
+
 def test_prefetched_scene_is_refreshed_before_cleanup_writes(tmp_path, monkeypatch):
     stash = SceneSQLStash()
     with merge_store.StateStore(tmp_path/'state.sqlite3', merge_store.scope_for(app.STASH_URL)) as store:

@@ -30,6 +30,10 @@ def build_parser(app) -> argparse.ArgumentParser:
                          help="Also record a read-only command in run history; dry runs never record history.")
     history.add_argument("--no-run-history", action="store_true",
                          help="Disable automatic history of inference, merge and write/maintenance commands.")
+    parser.add_argument('--history-keep-last', type=int, metavar='N',
+                        help='Keep at most N finished runs in this Stash scope; --prune-run-history only.')
+    parser.add_argument('--history-max-age-days', type=float, metavar='DAYS',
+                        help='Remove finished runs older than this age; --prune-run-history only.')
     parser.add_argument("--run-limit", type=int, metavar="N", help="Most recent matching runs: 50 for --run-report, 1 for --reuse-report; maximum: 10000.")
     parser.add_argument("--run-command", choices=[item.value for item in Command],
                         help="Filter run/reuse reports by command.")
@@ -44,8 +48,8 @@ def build_parser(app) -> argparse.ArgumentParser:
     resume.add_argument("--restart", action="store_true", help="Request fresh inference for selected scenes/models; resume later without this flag.")
     parser.add_argument("--checkpoint-batches", type=int, default=app.CHECKPOINT_BATCHES,
                         help="Persist partial inference every N batches; also saves on Ctrl+C/errors. Default: 8.")
-    parser.add_argument("--prefetch-batches", type=int, choices=range(17), default=app.PREFETCH_BATCHES,
-                        help="Prepare N next batches in RAM (default: 4); 0 disables. No disk image cache.")
+    parser.add_argument("--prefetch-batches", type=int, choices=range(17), default=None,
+                        help="Prepare N next batches in RAM; overrides YAML prefetch_batches (default: 4); 0 disables.")
     parser.add_argument("--ram-cache-gb", type=float, default=app.RAM_CACHE_GB, metavar="GIB",
                         help="Shared result/index/media cache in GiB (default: 24); 0 disables. Capped to 75%% of --ram-budget-gb.")
     parser.add_argument("--ram-budget-gb", type=float, default=app.RAM_BUDGET_GB, metavar="GIB",
@@ -131,6 +135,8 @@ def build_parser(app) -> argparse.ArgumentParser:
                        help="Report scene/marker cache coverage against selected YAML models and plan targeted backfill; offline and read-only.")
     modes.add_argument("--run-report", type=Path, metavar="NEW.json",
                        help="Write offline run history and comparable-run profiling averages; no Stash, model or state DB writes.")
+    modes.add_argument('--prune-run-history', action='store_true',
+                       help='Prune finished run history by count/age; honors --dry-run, protects active runs and reuse proofs.')
     modes.add_argument("--reuse-report", type=Path, metavar="NEW.json",
                        help="Explain recorded cache/checkpoint decisions and reinference reasons from run history; offline and read-only.")
 
@@ -139,4 +145,11 @@ def build_parser(app) -> argparse.ArgumentParser:
 
 def parse_args(app, argv: list[str] | None = None) -> argparse.Namespace:
     parser = build_parser(app)
-    return validate_args(app, parser, parser.parse_args(argv))
+    args = validate_args(app, parser, parser.parse_args(argv))
+    if args.prefetch_batches is None:
+        if args.command is Command.INFERENCE:
+            from stash_ai.config import load_model_configuration
+            args.prefetch_batches = load_model_configuration(args.model_config).get('prefetch_batches', app.PREFETCH_BATCHES)
+        else:
+            args.prefetch_batches = app.PREFETCH_BATCHES
+    return args

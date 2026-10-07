@@ -330,3 +330,20 @@ def test_cli_rejects_unsafe_or_invalid_review_options(tmp_path, flags):
 def test_review_modifiers_require_the_review_mode():
     with pytest.raises(SystemExit):
         app.main(["--tag-review-margin", ".1"])
+
+
+@pytest.mark.parametrize('reason', ['missing_media', 'read_error', 'deleted'])
+def test_known_input_failure_is_excluded_without_decoding_or_changing_cache(tmp_path, monkeypatch, reason):
+    from stash_ai.storage import input_checks
+    from stash_ai.evidence import pipeline
+    path = tmp_path / 'state.sqlite3'
+    seed(path, '1', 'wd', pair())
+    with merge_store.StateStore(path, merge_store.scope_for(app.STASH_URL)) as store:
+        input_checks.defer(store, '1', 'dtq', reason)
+    before = path.read_bytes()
+    monkeypatch.setattr(pipeline, 'evidence', lambda *a, **k: pytest.fail('Blocked media were replayed'))
+    data = report(path)
+    assert data['totals']['analyzed_scenes'] == 0
+    assert data['skipped_by_reason'] == {'unverified_inputs': 1}
+    assert reason in data['skipped_scene_examples'][0]['message']
+    assert path.read_bytes() == before

@@ -1,0 +1,417 @@
+{
+  "baseline_commit": "960616369f17041eeb61a60c9a0cd6bd8225cc90",
+  "python": "3.14.7",
+  "scope": "Synthetic selected cache report and Check/Apply workflows. Timings are local medians, not model/network or production throughput.",
+  "datasets": [
+    {
+      "scenes": 900,
+      "selected_scenes": 32,
+      "identical_results": true,
+      "baseline": {
+        "scenes": 900,
+        "selected_scenes": 32,
+        "models": 4,
+        "scope": "Synthetic end-to-end selected report and Check/Apply; no network or inference.",
+        "summaries": {
+          "cache_preview": {
+            "median_seconds": 0.0423728329997175,
+            "median_sql_vm_steps": 1012300
+          },
+          "rethreshold_writer": {
+            "median_seconds": 0.03132009000000835,
+            "median_sql_vm_steps": 1874300
+          },
+          "rethreshold_preview": {
+            "median_seconds": 0.05225573700045061,
+            "median_sql_vm_steps": 2474100
+          }
+        },
+        "trials": {
+          "cache_preview": [
+            {
+              "seconds": 0.0530807149998509,
+              "sql_vm_steps": 1012300,
+              "changed_rows": 32,
+              "result_sha256": "d7adcb7d9304ea2b65921fd4c92923b1c69c9bc140d9cfb5abe13b8eb78f9678",
+              "evidence_unchanged": true,
+              "decoded_payloads": 0
+            },
+            {
+              "seconds": 0.0423728329997175,
+              "sql_vm_steps": 1012300,
+              "changed_rows": 32,
+              "result_sha256": "d7adcb7d9304ea2b65921fd4c92923b1c69c9bc140d9cfb5abe13b8eb78f9678",
+              "evidence_unchanged": true,
+              "decoded_payloads": 0
+            },
+            {
+              "seconds": 0.04057474299952446,
+              "sql_vm_steps": 1012300,
+              "changed_rows": 32,
+              "result_sha256": "d7adcb7d9304ea2b65921fd4c92923b1c69c9bc140d9cfb5abe13b8eb78f9678",
+              "evidence_unchanged": true,
+              "decoded_payloads": 0
+            }
+          ],
+          "rethreshold_writer": [
+            {
+              "seconds": 0.03132009000000835,
+              "sql_vm_steps": 1867900,
+              "changed_rows": 512,
+              "result_sha256": "69286490e7335b220329e277508e9c96aae1394a827399fa6f82e89af345eb68",
+              "evidence_unchanged": true,
+              "decoded_payloads": 0
+            },
+            {
+              "seconds": 0.03366705099961109,
+              "sql_vm_steps": 1874300,
+              "changed_rows": 512,
+              "result_sha256": "69286490e7335b220329e277508e9c96aae1394a827399fa6f82e89af345eb68",
+              "evidence_unchanged": true,
+              "decoded_payloads": 0
+            },
+            {
+              "seconds": 0.02998962599940569,
+              "sql_vm_steps": 1874300,
+              "changed_rows": 512,
+              "result_sha256": "69286490e7335b220329e277508e9c96aae1394a827399fa6f82e89af345eb68",
+              "evidence_unchanged": true,
+              "decoded_payloads": 0
+            }
+          ],
+          "rethreshold_preview": [
+            {
+              "seconds": 0.054237766999904125,
+              "sql_vm_steps": 2474100,
+              "changed_rows": 512,
+              "result_sha256": "69286490e7335b220329e277508e9c96aae1394a827399fa6f82e89af345eb68",
+              "evidence_unchanged": true,
+              "decoded_payloads": 0
+            },
+            {
+              "seconds": 0.05225573700045061,
+              "sql_vm_steps": 2474100,
+              "changed_rows": 512,
+              "result_sha256": "69286490e7335b220329e277508e9c96aae1394a827399fa6f82e89af345eb68",
+              "evidence_unchanged": true,
+              "decoded_payloads": 0
+            },
+            {
+              "seconds": 0.05211198899996816,
+              "sql_vm_steps": 2474100,
+              "changed_rows": 512,
+              "result_sha256": "69286490e7335b220329e277508e9c96aae1394a827399fa6f82e89af345eb68",
+              "evidence_unchanged": true,
+              "decoded_payloads": 0
+            }
+          ]
+        }
+      },
+      "candidate": {
+        "scenes": 900,
+        "selected_scenes": 32,
+        "models": 4,
+        "scope": "Synthetic end-to-end selected report and Check/Apply; no network or inference.",
+        "summaries": {
+          "cache_preview": {
+            "median_seconds": 0.006716472999869438,
+            "median_sql_vm_steps": 63700
+          },
+          "rethreshold_writer": {
+            "median_seconds": 0.010540598999796202,
+            "median_sql_vm_steps": 46500
+          },
+          "rethreshold_preview": {
+            "median_seconds": 0.012445590999959677,
+            "median_sql_vm_steps": 120600
+          }
+        },
+        "trials": {
+          "cache_preview": [
+            {
+              "seconds": 0.011042087000532774,
+              "sql_vm_steps": 63700,
+              "changed_rows": 32,
+              "result_sha256": "d7adcb7d9304ea2b65921fd4c92923b1c69c9bc140d9cfb5abe13b8eb78f9678",
+              "evidence_unchanged": true,
+              "decoded_payloads": 0
+            },
+            {
+              "seconds": 0.006716472999869438,
+              "sql_vm_steps": 63700,
+              "changed_rows": 32,
+              "result_sha256": "d7adcb7d9304ea2b65921fd4c92923b1c69c9bc140d9cfb5abe13b8eb78f9678",
+              "evidence_unchanged": true,
+              "decoded_payloads": 0
+            },
+            {
+              "seconds": 0.006108521999522054,
+              "sql_vm_steps": 63700,
+              "changed_rows": 32,
+              "result_sha256": "d7adcb7d9304ea2b65921fd4c92923b1c69c9bc140d9cfb5abe13b8eb78f9678",
+              "evidence_unchanged": true,
+              "decoded_payloads": 0
+            }
+          ],
+          "rethreshold_writer": [
+            {
+              "seconds": 0.010540598999796202,
+              "sql_vm_steps": 40100,
+              "changed_rows": 512,
+              "result_sha256": "69286490e7335b220329e277508e9c96aae1394a827399fa6f82e89af345eb68",
+              "evidence_unchanged": true,
+              "decoded_payloads": 0
+            },
+            {
+              "seconds": 0.011635384999863163,
+              "sql_vm_steps": 46500,
+              "changed_rows": 512,
+              "result_sha256": "69286490e7335b220329e277508e9c96aae1394a827399fa6f82e89af345eb68",
+              "evidence_unchanged": true,
+              "decoded_payloads": 0
+            },
+            {
+              "seconds": 0.010401217000435281,
+              "sql_vm_steps": 46500,
+              "changed_rows": 512,
+              "result_sha256": "69286490e7335b220329e277508e9c96aae1394a827399fa6f82e89af345eb68",
+              "evidence_unchanged": true,
+              "decoded_payloads": 0
+            }
+          ],
+          "rethreshold_preview": [
+            {
+              "seconds": 0.012505993000559101,
+              "sql_vm_steps": 120600,
+              "changed_rows": 512,
+              "result_sha256": "69286490e7335b220329e277508e9c96aae1394a827399fa6f82e89af345eb68",
+              "evidence_unchanged": true,
+              "decoded_payloads": 0
+            },
+            {
+              "seconds": 0.012045796000165865,
+              "sql_vm_steps": 120600,
+              "changed_rows": 512,
+              "result_sha256": "69286490e7335b220329e277508e9c96aae1394a827399fa6f82e89af345eb68",
+              "evidence_unchanged": true,
+              "decoded_payloads": 0
+            },
+            {
+              "seconds": 0.012445590999959677,
+              "sql_vm_steps": 120600,
+              "changed_rows": 512,
+              "result_sha256": "69286490e7335b220329e277508e9c96aae1394a827399fa6f82e89af345eb68",
+              "evidence_unchanged": true,
+              "decoded_payloads": 0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "scenes": 9000,
+      "selected_scenes": 32,
+      "identical_results": true,
+      "baseline": {
+        "scenes": 9000,
+        "selected_scenes": 32,
+        "models": 4,
+        "scope": "Synthetic end-to-end selected report and Check/Apply; no network or inference.",
+        "summaries": {
+          "cache_preview": {
+            "median_seconds": 0.4368933249998008,
+            "median_sql_vm_steps": 9889900
+          },
+          "rethreshold_writer": {
+            "median_seconds": 0.2013070470002276,
+            "median_sql_vm_steps": 18592700
+          },
+          "rethreshold_preview": {
+            "median_seconds": 0.4204117440003756,
+            "median_sql_vm_steps": 24117300
+          }
+        },
+        "trials": {
+          "cache_preview": [
+            {
+              "seconds": 0.45966817699991225,
+              "sql_vm_steps": 9889900,
+              "changed_rows": 32,
+              "result_sha256": "d7adcb7d9304ea2b65921fd4c92923b1c69c9bc140d9cfb5abe13b8eb78f9678",
+              "evidence_unchanged": true,
+              "decoded_payloads": 0
+            },
+            {
+              "seconds": 0.4368933249998008,
+              "sql_vm_steps": 9889900,
+              "changed_rows": 32,
+              "result_sha256": "d7adcb7d9304ea2b65921fd4c92923b1c69c9bc140d9cfb5abe13b8eb78f9678",
+              "evidence_unchanged": true,
+              "decoded_payloads": 0
+            },
+            {
+              "seconds": 0.4213065120002284,
+              "sql_vm_steps": 9889900,
+              "changed_rows": 32,
+              "result_sha256": "d7adcb7d9304ea2b65921fd4c92923b1c69c9bc140d9cfb5abe13b8eb78f9678",
+              "evidence_unchanged": true,
+              "decoded_payloads": 0
+            }
+          ],
+          "rethreshold_writer": [
+            {
+              "seconds": 0.2230379600005108,
+              "sql_vm_steps": 18586300,
+              "changed_rows": 512,
+              "result_sha256": "69286490e7335b220329e277508e9c96aae1394a827399fa6f82e89af345eb68",
+              "evidence_unchanged": true,
+              "decoded_payloads": 0
+            },
+            {
+              "seconds": 0.2013070470002276,
+              "sql_vm_steps": 18592700,
+              "changed_rows": 512,
+              "result_sha256": "69286490e7335b220329e277508e9c96aae1394a827399fa6f82e89af345eb68",
+              "evidence_unchanged": true,
+              "decoded_payloads": 0
+            },
+            {
+              "seconds": 0.20049077099974966,
+              "sql_vm_steps": 18592700,
+              "changed_rows": 512,
+              "result_sha256": "69286490e7335b220329e277508e9c96aae1394a827399fa6f82e89af345eb68",
+              "evidence_unchanged": true,
+              "decoded_payloads": 0
+            }
+          ],
+          "rethreshold_preview": [
+            {
+              "seconds": 0.4268710159994953,
+              "sql_vm_steps": 24117300,
+              "changed_rows": 512,
+              "result_sha256": "69286490e7335b220329e277508e9c96aae1394a827399fa6f82e89af345eb68",
+              "evidence_unchanged": true,
+              "decoded_payloads": 0
+            },
+            {
+              "seconds": 0.4204117440003756,
+              "sql_vm_steps": 24117300,
+              "changed_rows": 512,
+              "result_sha256": "69286490e7335b220329e277508e9c96aae1394a827399fa6f82e89af345eb68",
+              "evidence_unchanged": true,
+              "decoded_payloads": 0
+            },
+            {
+              "seconds": 0.41247147299964126,
+              "sql_vm_steps": 24117300,
+              "changed_rows": 512,
+              "result_sha256": "69286490e7335b220329e277508e9c96aae1394a827399fa6f82e89af345eb68",
+              "evidence_unchanged": true,
+              "decoded_payloads": 0
+            }
+          ]
+        }
+      },
+      "candidate": {
+        "scenes": 9000,
+        "selected_scenes": 32,
+        "models": 4,
+        "scope": "Synthetic end-to-end selected report and Check/Apply; no network or inference.",
+        "summaries": {
+          "cache_preview": {
+            "median_seconds": 0.0070697979999749805,
+            "median_sql_vm_steps": 63700
+          },
+          "rethreshold_writer": {
+            "median_seconds": 0.012192991000119946,
+            "median_sql_vm_steps": 46500
+          },
+          "rethreshold_preview": {
+            "median_seconds": 0.01540133600065019,
+            "median_sql_vm_steps": 120600
+          }
+        },
+        "trials": {
+          "cache_preview": [
+            {
+              "seconds": 0.01253422599984333,
+              "sql_vm_steps": 63700,
+              "changed_rows": 32,
+              "result_sha256": "d7adcb7d9304ea2b65921fd4c92923b1c69c9bc140d9cfb5abe13b8eb78f9678",
+              "evidence_unchanged": true,
+              "decoded_payloads": 0
+            },
+            {
+              "seconds": 0.0070697979999749805,
+              "sql_vm_steps": 63700,
+              "changed_rows": 32,
+              "result_sha256": "d7adcb7d9304ea2b65921fd4c92923b1c69c9bc140d9cfb5abe13b8eb78f9678",
+              "evidence_unchanged": true,
+              "decoded_payloads": 0
+            },
+            {
+              "seconds": 0.006347855999592866,
+              "sql_vm_steps": 63700,
+              "changed_rows": 32,
+              "result_sha256": "d7adcb7d9304ea2b65921fd4c92923b1c69c9bc140d9cfb5abe13b8eb78f9678",
+              "evidence_unchanged": true,
+              "decoded_payloads": 0
+            }
+          ],
+          "rethreshold_writer": [
+            {
+              "seconds": 0.01238668400037568,
+              "sql_vm_steps": 40100,
+              "changed_rows": 512,
+              "result_sha256": "69286490e7335b220329e277508e9c96aae1394a827399fa6f82e89af345eb68",
+              "evidence_unchanged": true,
+              "decoded_payloads": 0
+            },
+            {
+              "seconds": 0.012192991000119946,
+              "sql_vm_steps": 46500,
+              "changed_rows": 512,
+              "result_sha256": "69286490e7335b220329e277508e9c96aae1394a827399fa6f82e89af345eb68",
+              "evidence_unchanged": true,
+              "decoded_payloads": 0
+            },
+            {
+              "seconds": 0.011423556000409008,
+              "sql_vm_steps": 46500,
+              "changed_rows": 512,
+              "result_sha256": "69286490e7335b220329e277508e9c96aae1394a827399fa6f82e89af345eb68",
+              "evidence_unchanged": true,
+              "decoded_payloads": 0
+            }
+          ],
+          "rethreshold_preview": [
+            {
+              "seconds": 0.01540133600065019,
+              "sql_vm_steps": 120600,
+              "changed_rows": 512,
+              "result_sha256": "69286490e7335b220329e277508e9c96aae1394a827399fa6f82e89af345eb68",
+              "evidence_unchanged": true,
+              "decoded_payloads": 0
+            },
+            {
+              "seconds": 0.013161877000129607,
+              "sql_vm_steps": 120600,
+              "changed_rows": 512,
+              "result_sha256": "69286490e7335b220329e277508e9c96aae1394a827399fa6f82e89af345eb68",
+              "evidence_unchanged": true,
+              "decoded_payloads": 0
+            },
+            {
+              "seconds": 0.0204592190002586,
+              "sql_vm_steps": 120600,
+              "changed_rows": 512,
+              "result_sha256": "69286490e7335b220329e277508e9c96aae1394a827399fa6f82e89af345eb68",
+              "evidence_unchanged": true,
+              "decoded_payloads": 0
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
