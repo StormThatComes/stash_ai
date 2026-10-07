@@ -47,7 +47,7 @@ def publication_code():
     code = hashlib.sha256()
     for name in PUBLICATION_CODE_FILES:
         data = (root / name).read_bytes()
-        code.update(name.encode('utf-8') + b'\\0')
+        code.update(name.encode('utf-8') + b'\0')
         code.update(len(data).to_bytes(8, 'big'))
         code.update(data)
     return code.hexdigest()

@@ -65,7 +65,7 @@ def trial(args):
     def state_hash(store, selected):
         value = hashlib.sha256()
         for table in selected:
-            records = store.read_rows('SELECT * FROM ' + store.table(table))
+            records = store.read_rows('SELECT * FROM ' + (table if table == 'merge_checks' else store.table(table)), ())
             normalized = sorted([[(cell.hex() if isinstance(cell, bytes) else cell)
                                   for cell in row] for row in records], key=repr)
             value.update(json.dumps([table, normalized], sort_keys=True,
@@ -104,7 +104,7 @@ def trial(args):
             cpu = process_time()-cpu
             write_count = store.connection.total_changes-writes
             store.unpack_snapshot = original
-            archived = store.read_rows('SELECT model,kind,signature FROM ' + store.table('inference_archive'))
+            archived = store.read_rows('SELECT model,kind,signature FROM ' + store.table('inference_archive'), ())
             if len(archived) != len(SOURCES)*2:
                 raise RuntimeError('Pinned evidence was lost during replacement')
             proofs_unchanged = proof_before == state_hash(store, ('snapshots', 'recovery_publications'))

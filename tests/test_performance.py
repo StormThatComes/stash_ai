@@ -471,7 +471,7 @@ def test_execution_code_change_reuses_publication_without_inference(pipeline, mo
 
     def changed(path):
         data = read_bytes(path)
-        return data + b'\\n# execution change' if path.as_posix().endswith('/stash_ai/' + filename) else data
+        return data + b'\n# execution change' if path.as_posix().endswith('/stash_ai/' + filename) else data
 
     monkeypatch.setattr(performance.Path, 'read_bytes', changed)
     monkeypatch.setattr(app.services, 'load_tagger', fail)
@@ -497,7 +497,7 @@ def test_semantic_code_change_rechecks_merge_without_reinference(pipeline, monke
 
     def changed(path):
         data = read_bytes(path)
-        return data + b'\\n# semantic change' if path.as_posix().endswith('/stash_ai/evidence/qualification.py') else data
+        return data + b'\n# semantic change' if path.as_posix().endswith('/stash_ai/evidence/qualification.py') else data
 
     monkeypatch.setattr(performance.Path, 'read_bytes', changed)
     monkeypatch.setattr(app.services, 'load_tagger', fail)
