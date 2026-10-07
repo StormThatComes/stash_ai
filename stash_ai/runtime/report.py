@@ -17,6 +17,7 @@ class RunReport:
         self.threshold_preflight = None
         self.diagnostics = None
         self.unread_scenes = {}
+        self.dry_run_plan = None
 
     def measure(self, stage):
         return self._timing.measure(stage)

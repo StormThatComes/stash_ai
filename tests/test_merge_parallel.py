@@ -121,12 +121,14 @@ def test_parallel_evidence_matches_serial_read_only(tmp_path):
     ))
 
     assert [row[0] for row in results] == ["1", "2"]
-    for scene_id, hits, spans, diagnostics, error in results:
+    for scene_id, hits, spans, markers, diagnostics, error in results:
         assert error is None
         wanted_hits, wanted_spans, wanted_diagnostics = expected[scene_id]
         assert _normalized(hits) == _normalized(wanted_hits)
         assert _normalized(spans) == _normalized(wanted_spans)
         assert dict(diagnostics) == dict(wanted_diagnostics)
+        from stash_ai.evidence.intervals import union_intervals
+        assert _normalized(markers) == _normalized(union_intervals(wanted_spans, borrow=True))
 
     # Worker StateStores are dry-run/read-only overlays.
     before = path.read_bytes()

@@ -45,9 +45,13 @@ def run_standalone_command(app, args) -> int | None:
 def run_merged(app, settings, args, catalogs, hierarchy, core_policies, scene_policies):
     from stash_ai.runtime.diagnostics import MergeDiagnostics
     from stash_ai.runs.merged import MergedRun
+    from stash_ai.publication.dry_run import DryRunPlan
     with MergeDiagnostics(args.report, args.profile_merge, dry_run=app.DRY_RUN,
-                          merge_only=args.merge_only, force=args.force_merge):
-        return MergedRun(app, settings, args, catalogs, hierarchy, core_policies, scene_policies).run()
+                          merge_only=args.merge_only, force=args.force_merge), DryRunPlan(args.dry_run_plan) as plan:
+        args.report.dry_run_plan = plan if args.dry_run_plan is not None else None
+        result = MergedRun(app, settings, args, catalogs, hierarchy, core_policies, scene_policies).run()
+        plan.write(dict(type='summary', exit_code=result))
+        return result
 
 
 def run_saved_merge_command(app, settings, args, core_policies, scene_policies) -> int | None:
