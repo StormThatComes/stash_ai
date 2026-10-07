@@ -60,6 +60,8 @@ class Stash:
         self.merge_read_configurations.append(merge_only)
     def find_scene_for_merge(self, identifier):
         return self.find_scene(identifier)
+    def merge_snapshots(self, identifiers):
+        return {str(identifier): self.find_scene_for_merge(identifier) for identifier in identifiers}
     def get_media(self,url): return url.encode("utf-8")
     def iter_scenes(self,identifiers=None): yield self.find_scene("1")
     def iter_tags(self): yield from deepcopy(list(self.tags.values()))
@@ -85,6 +87,9 @@ class Stash:
         assert not self.dry_run
         self.writes.append(("delete",identifier))
         self.scene["scene_markers"]=[m for m in self.scene["scene_markers"] if m["id"]!=identifier]
+    def delete_markers(self, identifiers):
+        for identifier in identifiers:
+            self.delete_marker(identifier)
     def close(self): pass
     def gql(self,query,variables=None):
         from stash_ai.cleanup.prune import REQUIRED_COUNTS

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from stash_ai.inference import checkpoints
+from .selection import selected_rows
 
 
 def initialize_progress(store):
@@ -98,31 +99,32 @@ def request_stale_refresh(store, scene, model, kinds, signature):
     return stale
 
 
-def pending_refreshes(store, kinds):
+def pending_refreshes(store, kinds, scenes=None):
     """Group outstanding refresh requests that can affect the selected outputs."""
     kinds = tuple(dict.fromkeys(kinds))
     if not kinds:
         return {}
     placeholders = ",".join("?" for _ in kinds)
-    rows = store.connection.execute(
+    rows = selected_rows(store,
         "SELECT scene,model,kind FROM " + store.table('refresh_requests') +
-        f" WHERE scope=? AND kind IN ({placeholders}) ORDER BY scene,model,kind",
-        (store.scope, *kinds))
+        f" WHERE scope=? AND kind IN ({placeholders})",
+        (store.scope, *kinds), scenes, suffix=" ORDER BY scene,model,kind")
     result = {}
     for scene, model, kind in rows:
         result.setdefault(str(scene), []).append((model, kind))
     return result
 
 
-def preload_status(store):
+def preload_status(store, scenes=None):
     """One small ordered query instead of per-pair status reads across all passes."""
     if not store.cache.limit:
         return
     last, values = None, {}
-    rows = store.connection.execute(
+    rows = selected_rows(store,
         "SELECT i.scene,i.model,i.kind,i.populated,i.signature FROM " + store.table('result_index') + " AS i "
         "LEFT JOIN " + store.table('refresh_requests') + " AS r ON r.scope=i.scope AND r.scene=i.scene AND r.model=i.model AND r.kind=i.kind "
-        "WHERE i.scope=? AND r.kind IS NULL ORDER BY i.scene,i.model", (store.scope,))
+        "WHERE i.scope=? AND r.kind IS NULL", (store.scope,), scenes,
+        column="i.scene", suffix=" ORDER BY i.scene,i.model")
     for scene, model, kind, populated, signature in rows:
         key = ('status', scene, model)
         if key != last:

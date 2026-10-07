@@ -1,7 +1,7 @@
 # Benchmarki offline
 
 Uruchamiaj z katalogu głównego repozytorium, po instalacji `requirements-dev.txt`.
-W CI wszystkie siedem wejść przechodzi smoke test na małych danych.
+W CI wszystkie osiem wejść przechodzi smoke test na małych danych.
 Fixture używają bieżącego formatu analysis i pełnych metadanych.
 Skrypty używają syntetycznych danych, lokalnej tymczasowej bazy lub makiety Stash;
 nie łączą się ze Stash i nie uruchamiają modeli GPU.
@@ -14,6 +14,7 @@ python -m benchmarks.benchmark_retained_merge --frames 400 --labels 12 --weak-la
 python -m benchmarks.benchmark_occurrences --frames 500 --labels 100 --repeats 5
 python -m benchmarks.benchmark_cleanup_sql --markers 2500000 --legacy-time-budget 5
 python -m benchmarks.benchmark_rethreshold --scenes 6 --frames 600 --labels 12 --repeats 5
+python -m benchmarks.benchmark_tag_cascade --markers 100000 --batch-size 200 --repeats 3
 ```
 
 | Skrypt | Co mierzy |
@@ -25,9 +26,10 @@ python -m benchmarks.benchmark_rethreshold --scenes 6 --frames 600 --labels 12 -
 | `benchmark_occurrences` | wybór reprezentatywnych punktów Occurance |
 | `benchmark_cleanup_sql` | odkrywanie kandydatów przez SQL; bez kosztu API i usuwania |
 | `benchmark_rethreshold` | zmiana progów, czas/dekodowania Check i Apply, zapisy evidence oraz hashe wyników i result_index; bez merge/API |
+| `benchmark_tag_cascade` | kaskada popularnego tagu kontra wcześniejsze odpinanie relacji w partiach; całkowity czas, najdłuższa transakcja, liczba mutacji i hash zachowanego stanu |
 
 Każdy skrypt obsługuje też bezpośrednie uruchomienie przez ścieżkę, np.
-`python benchmarks/benchmark_performance.py`. Bez `--project` benchmark wskazuje
+`python benchmarks/benchmark_performance.py`. Benchmarki porównujące aplikację bez `--project` wskazują
 katalog aplikacji, niezależnie od bieżącego katalogu terminala.
 
 Do porównań z poprzednią kopią kodu:
@@ -47,6 +49,14 @@ dopasowują wywołań do starszych API.
 Narzędzia pomiarowe oraz makieta Stash pochodzą z bieżącego repozytorium,
 więc porównanie nie wymaga testów we wskazanej instalacji. Porównuj identyczne dane
 i parametry; przy zmianie zachowania aplikacji mogą się różnić również hashe.
+
+`benchmark_tag_cascade` używa wyłącznie własnej tymczasowej bazy SQLite i nie
+przyjmuje `--project`. Odtwarza indeksowane relacje markerów, scen i obrazów do
+tagów. Pomija sieć, hooki oraz ładowanie obiektów Stash; wariant wcześniejszego
+odpinania ma dzięki temu optymistyczny koszt. Kopiowanie fixture i weryfikacja
+hasha są poza pomiarem. Baza używa WAL/NORMAL i natychmiastowych transakcji zapisu,
+tak jak Stash v0.31.1. Wynik oraz decyzję o strategii cleanupu opisuje
+[cleanup_performance](../docs/cleanup_performance.md).
 
 `benchmark_merge_pipeline` pokazuje rozmiar JSON i skompresowanego BLOB-a każdego
 snapshotu. Przy zmianie formatu zapisu porównuj `input_sha256`,

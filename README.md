@@ -752,3 +752,6 @@ verification or fresh inference and report the skipped counts.
 Explicit missing scene IDs are reported independently. During resumed `--db-init`,
 a successful Stash read confirming deletion retires that scene and lets remaining
 scenes finish. Network/read errors do not authorize retirement.
+
+Dokładny plan publikacji z cache: `--merge-only --dry-run --dry-run-plan review.jsonl`.
+Opis zdarzeń i symbolicznych ID: [docs/dry_run_plan.md](docs/dry_run_plan.md).

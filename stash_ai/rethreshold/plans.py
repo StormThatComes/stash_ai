@@ -45,7 +45,12 @@ class ThresholdPlan:
 def apply_plan(store, scene, model, plan: ThresholdPlan):
     """Apply a validated plan without reopening payloads or changing their bytes."""
     with store.connection:
-        for kind, record in plan.outputs.items():
-            threshold = scene_threshold(record) if kind == 'scene' else marker_threshold(record)
-            store.set_result_threshold(scene, model, kind, threshold, record,
-                                       metadata_only=plan.access is RecordAccess.METADATA)
+        write_plan(store, scene, model, plan)
+
+
+def write_plan(store, scene, model, plan):
+    """The caller owns the transaction, including bounded multi-pair application."""
+    for kind, record in plan.outputs.items():
+        threshold = scene_threshold(record) if kind == 'scene' else marker_threshold(record)
+        store.set_result_threshold(scene, model, kind, threshold, record,
+                                   metadata_only=plan.access is RecordAccess.METADATA)
