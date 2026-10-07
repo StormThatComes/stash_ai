@@ -230,6 +230,31 @@ def test_diagnostic_database_failure_does_not_change_reuse(pipeline, monkeypatch
     assert len(pipeline.loaded) == loaded
 
 
+def test_opt_out_skips_diagnostic_proofs_without_skipping_input_validation(pipeline, monkeypatch):
+    from stash_ai.inference import reuse_diagnostics
+    from stash_ai.domain import Cue
+    monkeypatch.setattr(reuse_diagnostics, 'proof', lambda *a: pytest.fail('disabled diagnostics built a proof'))
+    arguments = [*pipeline.args, '--no-run-history']
+    assert app.main(arguments) == 0
+    loaded = len(pipeline.loaded)
+    assert app.main(arguments) == 0
+    assert len(pipeline.loaded) == loaded
+    pipeline.cues = [Cue(cue.start, cue.end - .25, cue.image, cue.rect) for cue in pipeline.cues]
+    assert app.main(arguments) == 0
+    assert len(pipeline.loaded) == loaded + 1
+
+
+def test_verbose_opt_out_keeps_diagnostic_explanations(pipeline, monkeypatch):
+    from stash_ai.inference import reuse_diagnostics
+    original, calls = reuse_diagnostics.proof, []
+    def observe(*args):
+        calls.append(True)
+        return original(*args)
+    monkeypatch.setattr(reuse_diagnostics, 'proof', observe)
+    assert app.main([*pipeline.args, '--no-run-history', '--verbose']) == 0
+    assert calls
+
+
 @pytest.mark.parametrize('empty', [False, True])
 def test_publication_exclusions_and_empty_results_do_not_require_reinference(pipeline, monkeypatch, tmp_path, empty):
     if empty:

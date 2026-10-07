@@ -56,6 +56,13 @@ class RunReport:
             self.profile.outcome(model, name)
 
     def record_model(self, config, *, identity=None, tagger=None):
+        try:
+            self._record_model(config, identity=identity, tagger=tagger)
+        except Exception:
+            # Optional backend metadata cannot turn a loaded tagger into a failure.
+            pass
+
+    def _record_model(self, config, *, identity=None, tagger=None):
         if self.profile is None:
             return
         source = config.source
@@ -72,7 +79,10 @@ class RunReport:
                 import sys
                 torch = sys.modules.get('torch')
                 if torch is not None and str(tagger.device).startswith('cuda'):
-                    row['gpu'] = torch.cuda.get_device_name(tagger.device)
+                    try:
+                        row['gpu'] = torch.cuda.get_device_name(tagger.device)
+                    except Exception as exc:
+                        row['gpu_metadata_error'] = type(exc).__name__
             session = getattr(tagger, 'session', None)
             if session is not None and hasattr(session, 'get_providers'):
                 row['providers'] = session.get_providers()

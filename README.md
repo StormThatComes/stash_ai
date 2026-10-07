@@ -489,6 +489,9 @@ scenę/model/rodzaj wyniku. Zapis jest buforowany w krótkich transakcjach po
 maksymalnie 64 operacje, a normalne zakończenie i Ctrl+C opróżniają bufor.
 Nagłe zabicie procesu może utracić ostatnie niezapisane operacje historii.
 `--no-run-history` wyłącza ich zapis; raport wymaga wcześniej zebranych danych.
+Bez `--verbose` pomija również budowanie diagnostycznych proofs. Weryfikacja
+wejść i tożsamości cache nadal działa. Błędy metadanych GPU i opcjonalnej
+historii nie zmieniają wyniku polecenia ani decyzji o ponownej inferencji.
 
 ### Model Utility / Ablation Report
 

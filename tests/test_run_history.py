@@ -103,12 +103,66 @@ def test_unavailable_history_does_not_break_successful_inference(pipeline, monke
     assert pipeline.loaded and pipeline.stash.scene['scene_markers']
 
 
+def test_onnx_cuda_metadata_failure_does_not_fail_model_loading(pipeline, monkeypatch):
+    import sys
+    from types import SimpleNamespace
+    original = app.services.load_tagger
+    def load(*args):
+        tagger = original(*args)
+        tagger.device = 'cuda:0'
+        tagger.session = SimpleNamespace(get_providers=lambda: ['CUDAExecutionProvider'])
+        return tagger
+    monkeypatch.setattr(app.services, 'load_tagger', load)
+    monkeypatch.setitem(sys.modules, 'torch', SimpleNamespace(cuda=SimpleNamespace(
+        get_device_name=lambda *a: (_ for _ in ()).throw(RuntimeError('CUDA unavailable in Torch')))))
+    assert app.main(pipeline.args) == 0
+    model = history_rows(pipeline.path)[0]['models']['wd']
+    assert model['effective_device'] == 'cuda:0'
+    assert model['providers'] == ['CUDAExecutionProvider']
+    assert model['gpu_metadata_error'] == 'RuntimeError'
+    assert pipeline.stash.scene['scene_markers']
+
+
 def test_finish_write_failure_does_not_mask_command_error(pipeline, monkeypatch):
     monkeypatch.setattr(HistoryStore, 'finish', lambda *a, **k: (_ for _ in ()).throw(OSError('full')))
     pipeline.fail['wd'] = 4
     with pytest.raises(KeyboardInterrupt):
         app.main(pipeline.args)
     assert history_rows(pipeline.path)[0]['status'] == 'running'
+
+
+@pytest.mark.parametrize('operation', ['start', 'finish', 'record_decision', 'close'])
+@pytest.mark.parametrize('interrupted', [False, True])
+def test_history_lifecycle_failures_preserve_inference_and_interrupt(pipeline, monkeypatch, operation, interrupted):
+    original_close = HistoryStore.close
+    def failing_close(store):
+        original_close(store)
+        raise OSError('private close payload')
+    def fail(*args, **kwargs):
+        raise OSError('private write payload')
+    monkeypatch.setattr(HistoryStore, operation, failing_close if operation == 'close' else fail)
+    if operation in ('start', 'record_decision'):
+        monkeypatch.setattr(HistoryStore, 'close', failing_close)
+    if interrupted:
+        pipeline.fail['wd'] = 4
+        with pytest.raises(KeyboardInterrupt):
+            app.main(pipeline.args)
+    else:
+        assert app.main(pipeline.args) == 0
+        loaded = len(pipeline.loaded)
+        assert app.main(pipeline.args) == 0
+        assert len(pipeline.loaded) == loaded
+
+
+def test_history_close_and_warning_failures_preserve_original_exception(tmp_path, monkeypatch):
+    from stash_ai.commands.arguments import parse_args
+    from stash_ai.history.lifecycle import RunHistory
+    args = parse_args(app, ['--state-db', str(tmp_path / 'state.sqlite3')])
+    with pytest.raises(ValueError, match='original command failure'):
+        with RunHistory(app, args) as history:
+            monkeypatch.setattr(history.store, 'close', lambda: (_ for _ in ()).throw(OSError()))
+            monkeypatch.setattr(args.report, 'write', lambda *a: (_ for _ in ()).throw(OSError()))
+            raise ValueError('original command failure')
 
 
 def test_read_only_commands_record_only_when_explicitly_requested(tmp_path, monkeypatch):

@@ -60,42 +60,51 @@ class RunHistory:
 
     def warn(self, exc):
         # Never include URLs, exception payloads or secrets in persisted history.
-        self.args.report.write('Run history unavailable: ' + type(exc).__name__ + '; command continues.')
+        try:
+            self.args.report.write('Run history unavailable: ' + type(exc).__name__ + '; command continues.')
+        except Exception:
+            pass
+
+    def close(self):
+        store, self.store = self.store, None
+        if store is not None:
+            try:
+                store.close()
+            except Exception as exc:
+                self.warn(exc)
 
     def __enter__(self):
         if not self.enabled:
             return self
-        from tqdm import tqdm
-        self.args.report = RunReport(self.args.verbose, tqdm.write)
-        self.args.report.profile = ProfileMetrics()
-        self.args.report.history = self
-        self.start, self.cpu_start = time.perf_counter(), time.process_time()
         try:
+            from tqdm import tqdm
+            self.args.report = RunReport(self.args.verbose, tqdm.write)
+            self.args.report.profile = ProfileMetrics()
+            self.args.report.history = self
+            self.start, self.cpu_start = time.perf_counter(), time.process_time()
             self.store = HistoryStore(history_path(self.args))
             self.store.start(self.identifier, scope_for(self.app.STASH_URL), self.args.command.value,
                              now(), configuration(self.app, self.args))
         except Exception as exc:
-            if self.store is not None:
-                self.store.close()
-                self.store = None
+            self.close()
             self.warn(exc)
         return self
 
     def __exit__(self, kind, exc, traceback):
         if not self.enabled:
             return
-        report = self.args.report
         if self.store is None:
             return
-        status = ('interrupted' if kind is not None and not issubclass(kind, Exception)
-                  else 'error' if kind is not None or self.result else 'finished')
-        issues = dict(report.issue_counts)
-        if kind is not None:
-            issues['command/' + kind.__name__] = issues.get('command/' + kind.__name__, 0) + 1
-        counts = Counter(report.counts)
-        for source in report.count_sources:
-            counts.update(source)
         try:
+            report = self.args.report
+            status = ('interrupted' if kind is not None and not issubclass(kind, Exception)
+                      else 'error' if kind is not None or self.result else 'finished')
+            issues = dict(report.issue_counts)
+            if kind is not None:
+                issues['command/' + kind.__name__] = issues.get('command/' + kind.__name__, 0) + 1
+            counts = Counter(report.counts)
+            for source in report.count_sources:
+                counts.update(source)
             self.store.finish(self.identifier, now(), status,
                 max(0.0, time.perf_counter() - self.start), max(0.0, time.process_time() - self.cpu_start),
                 models=report.profile.models, counts=dict(counts), outcomes=report.profile.outcomes,
@@ -103,7 +112,7 @@ class RunHistory:
         except Exception as failure:
             self.warn(failure)
         finally:
-            self.store.close()
+            self.close()
 
     def call(self, operation, *args):
         """Optional diagnostic writes/reads must never affect state or inference."""
@@ -113,6 +122,5 @@ class RunHistory:
             return getattr(self.store, operation)(*args)
         except Exception as exc:
             self.warn(exc)
-            self.store.close()
-            self.store = None
+            self.close()
             return None
