@@ -289,7 +289,7 @@ def test_cleanup_preview_reads_only_requested_state_and_shadows_in_memory(tmp_pa
         state.put('1','wd',{'markers':segment})
         state.publish('1',{'scene':snapshot})
     before = path.read_bytes(), path.stat().st_mtime_ns
-    with merge_store.StateStore(path,'fixture',dry_run=True,cleanup_preview=True) as state:
+    with merge_store.StateStore(path,'fixture',dry_run=True) as state:
         assert state.preview_source
         assert state.connection.execute('SELECT count(*) FROM main.results').fetchone() == (0,)
         assert state.connection.execute('SELECT count(*) FROM main.snapshots').fetchone() == (0,)
@@ -306,7 +306,7 @@ def test_cleanup_preview_detects_pending_publications_in_readonly_source(tmp_pat
     path = tmp_path/'state.sqlite3'
     with merge_store.StateStore(path,'fixture') as state:
         state.prepare('1',{'markers':{'contributions':[]}})
-    with merge_store.StateStore(path,'fixture',dry_run=True,cleanup_preview=True) as state:
+    with merge_store.StateStore(path,'fixture',dry_run=True) as state:
         assert state.has_pending_publications()
         assert state.snapshot('1','markers')[1] is not None
 
