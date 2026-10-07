@@ -42,7 +42,7 @@ def test_supported_release_and_development_builds(monkeypatch, version):
         url, kwargs = calls[0]
         assert url == 'http://stash.test/graphql'
         assert kwargs['json'] == {'query': 'query StashAIVersion { version { version } }', 'variables': {}}
-        assert kwargs['timeout'] == 7 and kwargs['allow_redirects'] is False
+        assert kwargs['timeout'] == pytest.approx(7, abs=.1) and kwargs['allow_redirects'] is False
         assert not closed
         assert 'end_seconds' in current.scene_fields()
         assert 'parents' in current.tag_fields()

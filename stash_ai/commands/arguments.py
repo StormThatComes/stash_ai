@@ -17,6 +17,8 @@ def build_parser(app) -> argparse.ArgumentParser:
     parser.add_argument("--temporal-policy", type=Path, default=app.TEMPORAL_POLICY_FILE, metavar="YAML",
                         help="Automatic scene qualification, marker hysteresis and extras using Stash VTT/sprites only.")
     parser.add_argument("--dry-run", action="store_true", help="Preview without writing to Stash.")
+    parser.add_argument('--dry-run-plan', type=Path, metavar='NEW.jsonl',
+                        help='Write exact scene mutations/reasons to JSONL; requires --dry-run --merge-only. No inference.')
     parser.add_argument("--scene-id", action="append", metavar="ID", help="Limit to this scene; repeat for multiple scenes.")
     parser.add_argument("--state-db", type=Path, default=app.MERGE_STATE_FILE, metavar="SQLITE",
                         help="Durable per-model evidence for merged outputs; retain this file between runs.")

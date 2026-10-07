@@ -84,6 +84,7 @@ class MergedRun:
         self.resolver = app.services.TagResolver(
             stash, self.hierarchy, source=merge_labels.AI, report=self.report.detail,
             create_missing=app.CREATE_MISSING)
+        self.resolver.plan_writer = self.report.dry_run_plan
         self.use_catalog = bool(self.hierarchy or app.CREATE_MARKERS)
         if self.use_catalog or not args.scene_id or len(args.scene_id) > 1:
             self.resolver.preload()

@@ -32,7 +32,7 @@ def _init_worker(state_db, scope, settings, core_policies, scene_policies,
 def _worker_evidence(scene_id):
     """Return one scene's merge evidence or a serializable failure."""
     if _WORKER_CONTEXT is None:
-        return str(scene_id), None, None, None, "Merge worker was not initialized."
+        return str(scene_id), None, None, None, None, "Merge worker was not initialized."
     from stash_ai.evidence import pipeline as merge
 
     diagnostics = Counter()
@@ -45,9 +45,11 @@ def _worker_evidence(scene_id):
             _WORKER_CONTEXT.scene_policies,
             diagnostics,
         )
-        return str(scene_id), scene_hits, spans, diagnostics, None
+        from stash_ai.evidence.intervals import union_intervals
+        markers = union_intervals(spans, borrow=True) if _WORKER_CONTEXT.settings.CREATE_MARKERS else []
+        return str(scene_id), scene_hits, spans, markers, diagnostics, None
     except Exception as exc:
-        return str(scene_id), None, None, None, f"{type(exc).__name__}: {exc}"
+        return str(scene_id), None, None, None, None, f"{type(exc).__name__}: {exc}"
 
 
 def iter_parallel_evidence(app, state_db, scope, scene_ids, core_policies,

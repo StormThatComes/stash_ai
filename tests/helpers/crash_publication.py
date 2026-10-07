@@ -35,7 +35,7 @@ def main():
             return value
         return call
     for name, operation in [('create', 'create_marker'), ('update', 'update_marker'),
-                            ('scene', 'update_scene_tags'), ('delete', 'delete_marker')]:
+                            ('scene', 'update_scene_tags'), ('delete', 'delete_markers')]:
         setattr(stash, operation, persist(name, getattr(stash, operation)))
     with StateStore(state_path, scope) as store:
         store.prepare = persist('prepare', store.prepare)
