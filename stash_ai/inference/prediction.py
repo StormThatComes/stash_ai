@@ -52,6 +52,20 @@ def _restore_prediction_state(app, tagger, cues, *, checkpoint, report):
         if checkpoint
         else (0, np.empty((0, len(labels)), np.float32), [])
     )
+    if checkpoint and len(saved) == processed and any(
+            frame['start'] != cue.start or frame['end'] != cue.end
+            for frame, cue in zip(saved, cues[:processed])):
+        from stash_ai.inference.checkpoints import clear_checkpoint
+        with checkpoint.store.connection:
+            clear_checkpoint(checkpoint.store, checkpoint.scene, checkpoint.model)
+        checkpoint.analysis = None
+        checkpoint.processed = checkpoint.saved_processed = checkpoint.batches = 0
+        checkpoint.pending.clear()
+        checkpoint.top_scores = None
+        if report is not None:
+            report.counts['checkpoint_timeline_resets'] += 1
+            report.detail('Checkpoint timeline is inconsistent; rebuilding only this scene/model.')
+        return _restore_prediction_state(app, tagger, cues, checkpoint=checkpoint, report=report)
     accumulator = (
         SceneAccumulator(
             settings.scene_threshold,

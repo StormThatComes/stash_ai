@@ -62,18 +62,33 @@ class FrameRow(TypedDict):
     tags: list[tuple[str, float]]
 
 
-class SceneContribution(SceneEntry):
+class BaseSceneContribution(TypedDict):
+    tag: str
+    score: float | None
     source: str
     meta: EvidenceMetadata
     qualification: NotRequired[str]
-    derived: NotRequired[Literal['shared_scene_frames']]
-    support_sources: NotRequired[list[str]]
-    frame_context: NotRequired[dict[str, str]]
-    scene_context: NotRequired[dict[str, str]]
-    build_options: NotRequired[BuildOptions]
 
 
-class MarkerContribution(TypedDict):
+class SourceSceneContribution(BaseSceneContribution):
+    derived: NotRequired[None]
+    statistics: dict | None
+    build_options: NotRequired[SceneBuildOptions]
+
+
+class SharedSceneContribution(BaseSceneContribution):
+    derived: Literal['shared_scene_frames']
+    support_sources: list[str]
+    scene_context: dict[str, str]
+    source_evidence: dict[str, dict]
+    joint_statistics: dict
+    build_options: SceneBuildOptions
+
+
+SceneContribution = SourceSceneContribution | SharedSceneContribution
+
+
+class BaseMarkerContribution(TypedDict):
     tag: str
     source: str
     start: float
@@ -84,9 +99,35 @@ class MarkerContribution(TypedDict):
     extra_tags: NotRequired[list[str]]
     support_sources: NotRequired[list[str]]
     build_options: NotRequired[BuildOptions]
-    derived: NotRequired[Literal['shared_frames', 'occurrence']]
-    occurrence_evidence: NotRequired[list[dict]]
-    scene_evidence: NotRequired[list[SceneContribution]]
+    extra_support: NotRequired[dict]
+    evidence_signature: NotRequired[str]
+    frame_context: NotRequired[dict[str, str]]
+    support_context: NotRequired[dict[str, str]]
+
+
+class SourceMarkerContribution(BaseMarkerContribution):
+    derived: NotRequired[None]
+
+
+class SharedMarkerContribution(BaseMarkerContribution):
+    derived: Literal['shared_frames']
+    source_evidence: dict[str, dict]
+    shared_hits: int
+    shared_strong_hits: int
+    support_sources: list[str]
+    support_context: dict[str, str]
+    frame_context: dict[str, str]
+    evidence_signature: str
+    build_options: MarkerBuildOptions
+
+
+class OccurrenceContribution(BaseMarkerContribution):
+    derived: Literal['occurrence']
+    occurrence_evidence: list[dict]
+    scene_evidence: list[SceneContribution]
+
+
+MarkerContribution = SourceMarkerContribution | SharedMarkerContribution | OccurrenceContribution
 
 
 class SceneRecord(TypedDict):
