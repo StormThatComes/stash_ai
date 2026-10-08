@@ -43,7 +43,7 @@ def select_command(args):
     return Command.ABANDON if args.abandon_pending else Command.INFERENCE
 
 
-EXECUTION_OPTIONS = ('device', 'offline', 'resume', 'restart')
+EXECUTION_OPTIONS = ('device', 'offline', 'resume', 'restart', 'force_fetch_vtt')
 MODEL_OPTIONS = ('models', *EXECUTION_OPTIONS)
 PUBLICATION_OPTIONS = ('db_init', 'markers_only', 'scene_tags_only', 'profile_merge', 'force_merge', 'dry_run_plan',
                        'rethreshold_scenes', 'rethreshold_markers', 'abandon_pending',

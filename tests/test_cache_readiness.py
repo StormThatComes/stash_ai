@@ -65,7 +65,7 @@ def test_media_read_error_does_not_request_fresh_predictions(pipeline, monkeypat
     def fail(*args, **kwargs):
         raise TimeoutError('temporary media read failure')
     monkeypatch.setattr(RunInputs, 'inspect', fail)
-    assert app.main([*p.args, '--resume']) == 1
+    assert app.main([*p.args, '--resume', '--force-fetch-vtt']) == 1
     with StateStore(p.path, scope_for(app.STASH_URL)) as store:
         assert input_checks.pending(store, '1') == {'wd': 'read_error'}
         assert not progress.pending_refreshes(store, ['scene', 'markers'])

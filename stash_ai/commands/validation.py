@@ -103,6 +103,8 @@ def validate_maintenance(parser, args):
 
 def validate_pipeline(app, parser, args):
     """Normalize execution defaults and validate tagging/recovery combinations."""
+    if args.force_fetch_vtt and args.command is not Command.INFERENCE:
+        parser.error('--force-fetch-vtt applies to normal model inference/resume runs.')
     args.resume = app.DEFAULT_RESUME if args.resume is None else args.resume
     if args.checkpoint_batches < 1:
         parser.error("--checkpoint-batches must be >= 1.")

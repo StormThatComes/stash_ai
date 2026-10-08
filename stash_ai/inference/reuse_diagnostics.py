@@ -158,9 +158,12 @@ class ReuseObserver:
         self.emit('started')
 
     @observational
-    def reused(self, kinds, *, rethreshold=False):
+    def reused(self, kinds, *, rethreshold=False, input_verified=True):
         self.action = 'rethreshold' if rethreshold else 'cache_reused'
         self.reasons = ['retained_evidence_covers_thresholds' if rethreshold else 'matching_completed_identity']
+        self.details['input_verification'] = 'fetched' if input_verified else 'skipped'
+        if not input_verified:
+            self.reasons.append('input_fetch_skipped')
         if rethreshold:
             self.details['outputs'] = {kind: dict(stored_scene_threshold=meta['scene_threshold'],
                 stored_marker_threshold=meta['marker_threshold'], target_scene_threshold=self.config.scene_threshold,
