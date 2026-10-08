@@ -71,8 +71,8 @@ def load_model_configuration(path: Path):
     if type(data.get("version")) is not int or data["version"] != 1:
         raise ValueError("Model configuration version must be 1.")
     if 'prefetch_batches' in data and (type(data['prefetch_batches']) is not int or
-                                      not 0 <= data['prefetch_batches'] <= 16):
-        raise ValueError('prefetch_batches must be an integer in 0..16.')
+                                      not 0 <= data['prefetch_batches'] <= 128):
+        raise ValueError('prefetch_batches must be an integer in 0..128.')
     for name in ('prepare_workers', 'merge_workers', 'model_report_workers'):
         if name in data and (type(data[name]) is not int or not 1 <= data[name] <= 16):
             raise ValueError(f'{name} must be an integer in 1..16.')

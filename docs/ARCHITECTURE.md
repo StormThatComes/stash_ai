@@ -86,8 +86,10 @@ pożyczonego wykonawcy. `inference/prediction.py` odtwarza stan predykcji,
 obrabia wyniki i checkpointy w wątku właściciela SQLite oraz finalizuje scenę.
 `inference/input_prefetch.py` weryfikuje wejście jednej następnej sceny w tle,
 przez izolowany transport HTTP. `inference/batch_stream.py` dekoduje jej
-obrazy i przygotowuje ograniczoną kolejkę `min(prefetch_batches, 2)` batchy
-CPU. Bieżąca i następna scena współdzielą pulę transformacji należącą do
+obrazy i przygotowuje ograniczoną kolejkę `prefetch_batches` batchy CPU
+(0 wyłącza prefetch, maksimum 128, domyślnie 4). Limit dotyczy każdej aktywnej
+kolejki osobno; przygotowane wejścia są poza budżetem cache RAM. Bieżąca
+i następna scena współdzielą pulę transformacji należącą do
 model pass; zamknięcie sceny czeka na jej własne obrazy, a nie zamyka puli.
 Weryfikator wejść i dwaj producenci CPU mają oddzielnych wykonawców/sesje HTTP;
 pełna kolejka bieżącej sceny nie zajmuje wykonawcy potrzebnego następnej.

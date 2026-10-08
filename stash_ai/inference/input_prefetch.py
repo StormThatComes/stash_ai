@@ -7,7 +7,7 @@ from stash_ai.runtime.cancellation import Cancellation, Cancelled, use
 
 
 class SceneInputPrefetch:
-    """Verify one next input; optionally retain two prepared CPU batches."""
+    """Verify one next input; retain the configured number of CPU batches."""
 
     def __init__(self, app, inputs, report, model):
         self.app, self.inputs, self.report, self.model = app, inputs, report, model
@@ -43,7 +43,7 @@ class SceneInputPrefetch:
                     token.check()
                 if tagger is not None:
                     from .batch_stream import PreparedBatchStream
-                    stream = PreparedBatchStream(min(prefetch, 2), self.report, self.model)
+                    stream = PreparedBatchStream(prefetch, self.report, self.model)
                     with self.lock:
                         if self.closed:
                             raise Cancelled('Input prefetch was closed.')

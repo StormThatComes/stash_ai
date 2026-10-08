@@ -48,7 +48,7 @@ def test_small_batches_use_workers_across_batch_boundaries(pipeline):
     assert_workers_closed()
 
 
-@pytest.mark.parametrize('prefetch', [0, 1, 16])
+@pytest.mark.parametrize('prefetch', [0, 1, 16, 128])
 def test_collation_precedes_inference_and_preserves_partial_batch(pipeline, prefetch):
     model = IndexedTagger(ModelSettings(WD, Path('missing'), .4, .65, 4),
                           pipeline.scores['wd'], pipeline.vocab.labels)

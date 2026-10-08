@@ -39,27 +39,40 @@ def test_close_during_batch_registration_does_not_start_a_late_producer(monkeypa
     assert not any(thread.name.startswith('scene-inputs') for thread in threads())
 
 
-def test_prepared_input_queue_is_bounded_and_releases_inputs_on_close(monkeypatch):
+@pytest.mark.parametrize('limit', [1, 16, 128])
+def test_prepared_input_queue_is_bounded_and_releases_inputs_on_close(monkeypatch, limit):
     from stash_ai.inference import batch_stream
-    third = Event()
+    full, refilled = Event(), Event()
     produced = []
 
-    def inputs(*args, **kwargs):
-        for index in range(100):
+    def batches(*args, **kwargs):
+        for index in range(limit + 10):
             produced.append(index)
-            if index == 2:
-                third.set()
+            if index == limit:
+                full.set()
+            if index == limit + 1:
+                refilled.set()
             yield [index], [index]
 
-    monkeypatch.setattr(batch_stream, 'prepared_batches', inputs)
-    stream = batch_stream.PreparedBatchStream(2, None, 'wd')
-    with ThreadPoolExecutor(max_workers=1, thread_name_prefix='scene-inputs') as executor:
-        stream.task = executor.submit(stream.produce, None, None, None, {}, [], 1, None)
-        assert third.wait(5)
-        assert produced == [0, 1, 2]
+    inputs = SimpleNamespace(open_background_reader=lambda: SimpleNamespace(close=lambda: None),
+                             read_with=lambda _: nullcontext(), inspect=lambda *args: ([], None, 'sig'))
+    monkeypatch.setattr(batch_stream, 'prepared_batches', batches)
+    prefetch = SceneInputPrefetch(None, inputs, None, 'wd')
+    try:
+        prefetch.submit('next', {}, {}, tagger=object(), prefetch=limit)
+        prefetch.take('next')
+        stream = prefetch.take_batches('next', 0)
+        assert full.wait(5), 'Configured CPU lookahead was capped before filling the queue'
+        assert produced == list(range(limit + 1))  # Queued inputs plus one awaiting space.
+        assert next(stream) == ([0], [0])
+        assert refilled.wait(5), 'Reading a batch did not refill the input queue'
+        assert produced == list(range(limit + 2))
+        assert next(stream) == ([1], [1])
         stream.close()
         assert stream.queue.empty()
-    assert not any(thread.name.startswith('scene-inputs') for thread in threads())
+    finally:
+        prefetch.close()
+    assert not any(thread.name.startswith(('scene-inputs', 'scene-batches')) for thread in threads())
 
 
 def test_ctrl_c_waiting_for_input_keeps_read_token_until_cleanup(monkeypatch):

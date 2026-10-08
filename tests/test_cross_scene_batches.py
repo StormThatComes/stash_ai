@@ -139,7 +139,7 @@ def test_next_gpu_results_are_bounded_while_previous_scene_is_finalized(model_ru
     assert_inference_workers_closed()
 
 
-@pytest.mark.parametrize('prefetch', [1, 16])
+@pytest.mark.parametrize('prefetch', [1, 16, 128])
 def test_handoff_continues_across_three_scenes(model_run, monkeypatch, prefetch):
     context = model_run
     context.args.prefetch_batches, context.args.prepare_workers = prefetch, 8
@@ -183,7 +183,7 @@ def test_handoff_continues_across_three_scenes(model_run, monkeypatch, prefetch)
     assert_inference_workers_closed()
 
 
-@pytest.mark.parametrize('prefetch', [1, 16])
+@pytest.mark.parametrize('prefetch', [1, 16, 128])
 def test_next_input_and_cpu_batches_start_while_long_current_queue_is_full(model_run, monkeypatch, prefetch):
     from stash_ai.domain import Cue
     from stash_ai.inference.input_identity import cue_manifest, inference_signature
@@ -196,7 +196,8 @@ def test_next_input_and_cpu_batches_start_while_long_current_queue_is_full(model
     def inspect_scene(*args):
         cues, media, signature = inspect(*args)
         if args[1]['vtt'] == '/vtt/2':
-            cues = [Cue(index, index + 1, 'sprite', (0, 0, 1, 1)) for index in range(100)]
+            cues = [Cue(index, index + 1, 'sprite', (0, 0, 1, 1))
+                    for index in range(2 * (prefetch + 8))]
             signature = inference_signature(args[2], cue_manifest(cues), media.hashes)
         if args[1]['vtt'] == '/vtt/3':
             third_verified.set()
@@ -228,7 +229,7 @@ def test_next_input_and_cpu_batches_start_while_long_current_queue_is_full(model
     monkeypatch.setattr(app.services, 'load_tagger', load_model)
     run_model(context)
     assert context.stats['processed'] == 3 and not context.stats['errors']
-    assert len([scene for scene, _ in calls if scene == '2']) == 50
+    assert len([scene for scene, _ in calls if scene == '2']) == prefetch + 8
     assert len(cpu_threads) <= 8 and len(gpu_threads) == 1
     assert_inference_workers_closed()
 
