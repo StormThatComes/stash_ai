@@ -259,9 +259,8 @@ def predict_scene(app, tagger: Any, stash, paths: dict, cues: list[Cue],
         report=report,
         inference_executor=inference_executor,
     )
-    return _finalize_predictions(
-        app,
-        tagger,
-        state,
-        analysis=analysis,
-    )
+    from contextlib import nullcontext
+    timer = (report.measure('inference_scene_finalize', model=tagger.settings.source.key,
+                            units=1, unit='scenes') if report is not None else nullcontext())
+    with timer:
+        return _finalize_predictions(app, tagger, state, analysis=analysis)

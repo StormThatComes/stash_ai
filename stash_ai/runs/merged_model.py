@@ -23,6 +23,7 @@ class MergedModelRun:
         self.key = config.source.key
         self.tagger = None
         self.inference_executor = None
+        self.input_prefetch = None
         with report.measure('model_identity', model=self.key):
             self.identity = model_identity(app, config, vocabulary)
         report.record_model(config, identity=self.identity)
@@ -31,9 +32,13 @@ class MergedModelRun:
 
     def run(self, scenes, kinds, inputs, *, input_plan=None):
         remaining = set(scenes)
+        self._scene_sequence = tuple(scenes.items())
+        if self.args.prefetch_batches:
+            from stash_ai.inference.input_prefetch import SceneInputPrefetch
+            self.input_prefetch = SceneInputPrefetch(self.app, inputs, self.report, self.key)
         try:
-            bar = tqdm(scenes.items(), desc=self.key + " inference", unit="scene")
-            for scene_id, current in bar:
+            bar = tqdm(self._scene_sequence, desc=self.key + " inference", unit="scene")
+            for self._scene_position, (scene_id, current) in enumerate(bar):
                 self.observer.begin(scene_id)
                 self.report.work('')
                 self.report.progress(bar, self.stats)
@@ -68,16 +73,35 @@ class MergedModelRun:
                 remaining.discard(scene_id)
         finally:
             try:
-                if self.inference_executor is None:
-                    self._close_tagger()
-                else:
-                    # Queue cleanup after any interrupted model initialization.
-                    # Load, inference and close all use the same backend thread.
-                    self.inference_executor.submit(self._close_tagger).result()
+                try:
+                    if self.input_prefetch is not None:
+                        self.input_prefetch.close()
+                finally:
+                    if self.inference_executor is None:
+                        self._close_tagger()
+                    else:
+                        # Queue cleanup after any interrupted model initialization.
+                        # Load, inference and close all use the same backend thread.
+                        self.inference_executor.submit(self._close_tagger).result()
             finally:
                 if self.inference_executor is not None:
                     self.inference_executor.shutdown(wait=True)
                     self.inference_executor = None
+                self.input_prefetch = None
+                self._scene_sequence = ()
+
+    def _prefetch_next_input(self, input_plan):
+        if self.input_prefetch is None or self.input_prefetch.pending is not None:
+            return
+        for index in range(self._scene_position + 1, len(self._scene_sequence)):
+            scene, current = self._scene_sequence[index]
+            paths = current['paths']
+            if not paths.get('vtt') or not paths.get('sprite'):
+                continue
+            if input_plan is not None and scene in input_plan.cached[self.key]:
+                continue
+            self.input_prefetch.submit(scene, paths, self.identity)
+            break
 
     def _close_tagger(self):
         if self.tagger is not None:
@@ -168,7 +192,13 @@ class MergedModelRun:
         from stash_ai.storage.input_checks import defer, verified
         try:
             with self.report.measure('input_verify', model=self.key):
-                cues, media, signature = inputs.inspect(app, paths, self.identity)
+                prepared = self.input_prefetch.take(scene_id) if self.input_prefetch is not None else None
+                cues, media, signature = (prepared if prepared is not None
+                                          else inputs.inspect(app, paths, self.identity))
+                if prepared is not None:
+                    # Model auto-download can update identity after lookahead
+                    # was submitted; signatures always use the current assets.
+                    signature = inference_signature(self.identity, cue_manifest(cues), media.hashes)
         except BaseException:
             defer(store, scene_id, self.key, 'read_error')
             raise
@@ -192,6 +222,7 @@ class MergedModelRun:
             self.report.record_model(self.config, identity=self.identity)
             signature = inference_signature(self.identity, cue_manifest(cues), media.hashes)
             self.observer.inputs(self.identity, cues, media.hashes, paths)
+        self._prefetch_next_input(input_plan)
         self._predict_scene(scene_id, paths, cues, media, signature, kinds)
         return True
 
@@ -213,10 +244,11 @@ class MergedModelRun:
                 prefetch=args.prefetch_batches, analysis=analysis, report=self.report,
                 prepare_workers=args.prepare_workers,
                 inference_executor=self.inference_executor)
-        outputs = merge_results.capture_outputs(
-            app, self.config, self.vocabulary, cues, predictions, frames, analysis,
-            inference_signature=signature,
-            frame_input_signature=frame_signature(cue_manifest(cues), media.hashes))
+        with self.report.measure('inference_output_capture', model=self.key, units=1, unit='scenes'):
+            outputs = merge_results.capture_outputs(
+                app, self.config, self.vocabulary, cues, predictions, frames, analysis,
+                inference_signature=signature,
+                frame_input_signature=frame_signature(cue_manifest(cues), media.hashes))
         with self.report.measure('inference_commit', model=self.key):
             checkpoints.finish(store, scene_id, self.key, outputs)
             from stash_ai.inference.provenance import prune

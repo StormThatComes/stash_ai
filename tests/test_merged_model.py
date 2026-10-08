@@ -33,17 +33,216 @@ def model_run(pipeline, tmp_path):
                               state=state, stats=stats, inputs=inputs)
 
 
-def run_model(context):
+def run_model(context, *, input_plan=None):
     MergedModelRun(
         app, context.args, context.state, context.config, context.pipeline.vocab,
         stats=context.stats, report=context.args.report,
-    ).run(context.scenes, ['scene', 'markers'], context.inputs)
+    ).run(context.scenes, ['scene', 'markers'], context.inputs, input_plan=input_plan)
 
 
 def assert_inference_workers_closed():
     assert not any(thread.name.startswith(('inference-model', 'inference-batches',
-                                           'prepare-frames', 'transform-frames'))
+                                           'prepare-frames', 'transform-frames', 'scene-inputs'))
                    for thread in threads())
+
+
+def test_next_input_read_overlaps_inference_and_keeps_sqlite_on_owner(model_run, monkeypatch):
+    from stash_ai.inference.checkpoints import Checkpoint
+    from stash_ai.runtime.profile import ProfileMetrics
+    context = model_run
+    context.args.prefetch_batches = 16
+    context.args.report.profile = ProfileMetrics()
+    for scene, current in context.scenes.items():
+        current['paths']['vtt'] = '/vtt/' + scene
+    started, release, finished = Event(), Event(), Event()
+    owner = current_thread()
+    inspect, load, record = context.inputs.inspect, app.services.load_tagger, Checkpoint.record
+
+    def inspect_next(*args):
+        if args[1]['vtt'] == '/vtt/2':
+            assert current_thread() is not owner
+            started.set()
+            assert release.wait(5), 'Next scene was read synchronously before inference'
+            result = inspect(*args)
+            finished.set()
+            return result
+        return inspect(*args)
+
+    def load_model(*args):
+        model = load(*args)
+        predict = model.predict_batch
+
+        def predict_batch(images):
+            assert started.wait(5), 'Next input read waited for the current scene to finish'
+            release.set()
+            assert finished.wait(5)
+            return predict(images)
+
+        model.predict_batch = predict_batch
+        return model
+
+    def record_checkpoint(*args, **kwargs):
+        assert current_thread() is owner
+        return record(*args, **kwargs)
+
+    monkeypatch.setattr(context.inputs, 'inspect', inspect_next)
+    monkeypatch.setattr(app.services, 'load_tagger', load_model)
+    monkeypatch.setattr(Checkpoint, 'record', record_checkpoint)
+    run_model(context)
+    assert context.stats['processed'] == 2 and not context.stats['errors']
+    metrics = {row['name']: row for row in context.args.report.profile.export()}
+    assert metrics['scene_input_prefetch']['calls'] == metrics['scene_input_wait']['calls'] == 1
+    assert metrics['inference_scene_finalize']['calls'] == metrics['inference_output_capture']['calls'] == 2
+    assert_inference_workers_closed()
+
+
+@pytest.mark.parametrize('error', [OSError, KeyboardInterrupt])
+def test_next_input_failure_waits_for_its_scene_and_keeps_previous_result(model_run, monkeypatch, error):
+    from stash_ai.inference import checkpoints
+    from stash_ai.storage.input_checks import pending
+    context = model_run
+    context.args.prefetch_batches = 2
+    context.scenes['2']['paths']['vtt'] = '/vtt/2'
+    failed = Event()
+    inspect, load, finish = context.inputs.inspect, app.services.load_tagger, checkpoints.finish
+    owner = current_thread()
+
+    def inspect_next(*args):
+        if args[1]['vtt'] == '/vtt/2':
+            failed.set()
+            raise error('next input failed')
+        return inspect(*args)
+
+    def load_model(*args):
+        model = load(*args)
+        predict = model.predict_batch
+
+        def predict_batch(images):
+            assert failed.wait(5)
+            return predict(images)
+
+        model.predict_batch = predict_batch
+        return model
+
+    def finish_current(*args):
+        assert current_thread() is owner
+        assert failed.is_set() and not pending(context.state, '2')
+        return finish(*args)
+
+    monkeypatch.setattr(context.inputs, 'inspect', inspect_next)
+    monkeypatch.setattr(app.services, 'load_tagger', load_model)
+    monkeypatch.setattr(checkpoints, 'finish', finish_current)
+    if error is KeyboardInterrupt:
+        with pytest.raises(KeyboardInterrupt, match='next input failed'):
+            run_model(context)
+    else:
+        run_model(context)
+        assert context.stats['errors'] == 1
+    assert context.stats['processed'] == 1
+    assert context.state.records('1', 'scene')['wd']['meta']['origin'] == 'inference'
+    assert not context.state.records('2', 'scene')
+    assert pending(context.state, '2') == {'wd': 'read_error'}
+    assert_inference_workers_closed()
+
+
+def test_interrupt_cancels_one_future_scene_before_model_close(model_run, monkeypatch):
+    from stash_ai.runtime.cancellation import current
+    context = model_run
+    context.args.prefetch_batches = 16
+    for index in range(1, 5):
+        context.scenes[str(index)] = dict(paths=dict(vtt='/vtt/' + str(index), sprite='/sprite'))
+    started, cancelled, stopped = Event(), Event(), Event()
+    read_scenes = []
+    inspect, load = context.inputs.inspect, app.services.load_tagger
+
+    def inspect_next(*args):
+        scene = args[1]['vtt']
+        read_scenes.append(scene)
+        if scene == '/vtt/2':
+            token = current()
+            token.subscribe(cancelled.set)
+            try:
+                started.set()
+                assert cancelled.wait(5), 'Interrupted run did not cancel next input read'
+                token.check()
+            finally:
+                token.unsubscribe(cancelled.set)
+                stopped.set()
+        return inspect(*args)
+
+    def load_model(*args):
+        model = load(*args)
+        close = model.close
+
+        def interrupt(images):
+            assert started.wait(5)
+            raise KeyboardInterrupt('current inference stopped')
+
+        def close_model():
+            assert stopped.is_set()
+            close()
+
+        model.predict_batch, model.close = interrupt, close_model
+        return model
+
+    monkeypatch.setattr(context.inputs, 'inspect', inspect_next)
+    monkeypatch.setattr(app.services, 'load_tagger', load_model)
+    with pytest.raises(KeyboardInterrupt, match='current inference stopped'):
+        run_model(context)
+    assert read_scenes == ['/vtt/1', '/vtt/2']
+    assert cancelled.is_set() and context.pipeline.loaded[0].closed
+    assert not context.state.records('2', 'scene')
+    assert_inference_workers_closed()
+
+
+def test_scene_lookahead_skips_completed_inputs(model_run, monkeypatch):
+    from stash_ai.runs.cached_inputs import CachedInputPlan
+    from stash_ai.storage.progress import request_refresh
+    context = model_run
+    context.args.prefetch_batches = 2
+    for index in range(1, 4):
+        context.scenes[str(index)] = dict(paths=dict(vtt='/vtt/' + str(index), sprite='/sprite'))
+    run_model(context)
+    context.args.resume = True
+    context.stats.clear()
+    request_refresh(context.state, ['1', '3'], ['wd'], ['scene', 'markers'])
+    run = MergedModelRun(app, context.args, context.state, context.config, context.pipeline.vocab,
+                         stats=context.stats, report=context.args.report)
+    plan = CachedInputPlan(context.state, context.scenes, ['scene', 'markers'], [run], context.stats)
+    inspected = []
+    inspect = context.inputs.inspect
+
+    def checked_inspect(*args):
+        inspected.append(args[1]['vtt'])
+        return inspect(*args)
+
+    monkeypatch.setattr(context.inputs, 'inspect', checked_inspect)
+    run.run(context.scenes, ['scene', 'markers'], context.inputs, input_plan=plan)
+    assert inspected == ['/vtt/1', '/vtt/3']
+    assert context.stats['processed'] == 2 and context.stats['reused'] == 1
+    assert_inference_workers_closed()
+
+
+def test_input_reader_close_failure_still_closes_backend(model_run, monkeypatch):
+    context = model_run
+    context.args.prefetch_batches = 2
+    reader_threads = []
+
+    def create_reader():
+        reader_threads.append(current_thread())
+
+        def close():
+            assert current_thread() is reader_threads[0]
+            raise RuntimeError('input reader close failed')
+
+        return SimpleNamespace(get_media=context.pipeline.stash.get_media, close=close)
+
+    monkeypatch.setattr(context.pipeline.stash, 'new_media_reader', create_reader, raising=False)
+    with pytest.raises(RuntimeError, match='input reader close failed'):
+        run_model(context)
+    assert context.stats['processed'] == 2
+    assert context.pipeline.loaded[0].closed
+    assert_inference_workers_closed()
 
 
 @pytest.mark.parametrize('prefetch', [0, 2])
