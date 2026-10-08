@@ -793,6 +793,9 @@ RAM. Kolejka wejść następnej sceny mieści `min(prefetch_batches, 2)` gotowe
 batche; dodatkowo jeden batch może czekać na wstawienie, a okno transformacji
 obejmuje najwyżej `max(batch_size, prepare_workers)` klatek. Obie sceny
 współdzielą jedną pulę `prepare_workers`, więc jej liczba wątków nie podwaja się.
+Weryfikacja wejść ma własnego wykonawcę, a najwyżej dwaj producenci batchy
+CPU mają izolowane sesje HTTP. Pełna kolejka bieżącej sceny nie blokuje
+pobierania ani przygotowania następnej.
 Gotowe sceny z planu reuse nie są pobierane z wyprzedzeniem.
 Błąd odczytu jest obsługiwany dopiero po dojściu do jego sceny, dzięki czemu
 nie przerywa zapisu poprzedniego wyniku. Tak samo obsługiwane są błędy
@@ -808,7 +811,7 @@ pobiera lub jego weryfikacja zawiodła, finalizacja poprzedniej sceny przebiega
 bez czekania na nie. Handoff jest ponawiany także przed budowaniem wyniku
 i przed commitem, jeśli wejście stało się gotowe podczas finalizacji.
 Przy resume spekulacyjne batche CPU od początku sceny
-są odrzucane, a GPU otrzymuje tylko suffix po zweryfikowanym checkpoincie.
+są odrzucane, a GPU otrzymuje tylko pozostałe klatki po zweryfikowanym checkpoincie.
 Ctrl+C anuluje także odczyt i zadanie następnej sceny; nieprzetworzone wyniki
 GPU nie poszerzają zapisanego checkpointu.
 `--prefetch-batches 0` wyłącza również przygotowanie wejścia następnej sceny.

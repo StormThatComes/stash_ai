@@ -89,6 +89,8 @@ przez izolowany transport HTTP. `inference/batch_stream.py` dekoduje jej
 obrazy i przygotowuje ograniczoną kolejkę `min(prefetch_batches, 2)` batchy
 CPU. Bieżąca i następna scena współdzielą pulę transformacji należącą do
 model pass; zamknięcie sceny czeka na jej własne obrazy, a nie zamyka puli.
+Weryfikator wejść i dwaj producenci CPU mają oddzielnych wykonawców/sesje HTTP;
+pełna kolejka bieżącej sceny nie zajmuje wykonawcy potrzebnego następnej.
 Synchronizowane mapy `RunMedia`/`RunInputs`
 zachowują jeden snapshot treści URL-i i manifestów przy równoległych odczytach.
 Plan reuse wybiera kandydatów bez dodatkowych odczytów SQLite przed inferencją;
@@ -101,7 +103,7 @@ historii/proofs do właściwych scen. Wolne lub błędne wejście nie zatrzymuje
 finalizacji; błędy przyszłej sceny są raportowane po dojściu do niej.
 Zapisy SQLite pozostają uporządkowane w głównym wątku, a kolejka GPU wyników
 mieści najwyżej dwa batche i jedno wywołanie w toku. Resume odrzuca CPU
-lookahead od początku i uruchamia wyłącznie suffix po zapisanym checkpoincie.
+lookahead od początku i uruchamia wyłącznie klatki po zapisanym checkpoincie.
 Anulowanie zatrzymuje też przyszłe zadanie i odrzuca nieprzetworzone wyniki.
 `inference/identity.py` buduje tożsamość modeli; `inference/checkpoints.py` zawiera
 `Checkpoint`, zapis i odtworzenie kompaktowego stanu oraz atomowe zakończenie inferencji.

@@ -13,8 +13,10 @@ class SceneInputPrefetch:
         self.app, self.inputs, self.report, self.model = app, inputs, report, model
         self.executor = self.pending = self.reader = self.token = None
         self.scene = None
-        self.prepared = None
+        self.prepared = {}
         self.streams = []
+        self.batch_executor = None
+        self.batch_close_errors = []
         self.lock, self.closed = Lock(), False
 
     def submit(self, scene, paths, identity, *, tagger=None, prefetch=0, workers=1, transforms=None):
@@ -45,27 +47,48 @@ class SceneInputPrefetch:
                     with self.lock:
                         if self.closed:
                             raise Cancelled('Input prefetch was closed.')
-                        self.prepared = (scene, stream)
+                        self.prepared[scene] = stream
                         self.streams.append(stream)
-                        stream.task = self.executor.submit(self._prepare_batches, stream, tagger,
-                                                            paths, result, workers, transforms)
+                        if self.batch_executor is None:
+                            self.batch_executor = ThreadPoolExecutor(
+                                max_workers=2, thread_name_prefix='scene-batches')
+                        stream.task = self.batch_executor.submit(self._prepare_batches, stream, tagger,
+                                                                  paths, result, workers, transforms)
                 return result
 
     def _prepare_batches(self, stream, tagger, paths, result, workers, transforms):
         cues, media, _ = result
-        with self.inputs.read_with(self.reader), self.report.model(self.model) if self.report else nullcontext():
-            if self.report is not None:
-                self.report.work('lookahead')
-            timer = (self.report.measure('scene_batch_prefetch', model=self.model, units=1, unit='scenes')
-                     if self.report else nullcontext())
-            with timer:
-                stream.produce(self.app, tagger, media, paths, cues, workers, transforms)
+        reader = None
+        try:
+            # Verification of C must not wait for a full CPU queue of current
+            # scene B. Every CPU producer also owns an isolated HTTP session.
+            reader = self.inputs.open_background_reader()
+            with self.inputs.read_with(reader), self.report.model(self.model) if self.report else nullcontext():
+                if self.report is not None:
+                    self.report.work('lookahead')
+                timer = (self.report.measure('scene_batch_prefetch', model=self.model, units=1, unit='scenes')
+                         if self.report else nullcontext())
+                with timer:
+                    stream.produce(self.app, tagger, media, paths, cues, workers, transforms)
+        except BaseException as error:
+            stream._send(error)
+            stream._send(stream.end)
+        finally:
+            if reader is not None:
+                try:
+                    reader.close()
+                except BaseException as error:
+                    # HTTP cleanup is reported after durable scene processing,
+                    # like cleanup of the input verifier's own reader.
+                    with self.lock:
+                        if not self.batch_close_errors:
+                            self.batch_close_errors.append(error)
 
     def take_batches(self, scene, processed):
-        if self.prepared is None or self.prepared[0] != scene:
+        with self.lock:
+            stream = self.prepared.pop(scene, None)
+        if stream is None:
             return None
-        _, stream = self.prepared
-        self.prepared = None
         if processed:
             # Resume is authorized on the SQLite owner after verifying inputs.
             # Discard speculative CPU work; prepare only the restored suffix.
@@ -107,9 +130,18 @@ class SceneInputPrefetch:
             try:
                 self.executor.submit(self._close_reader).result()
             finally:
-                self.executor.shutdown(wait=True)
-                self.executor = self.pending = self.token = self.scene = self.prepared = None
-                self.streams.clear()
+                try:
+                    if self.batch_executor is not None:
+                        self.batch_executor.shutdown(wait=True, cancel_futures=True)
+                finally:
+                    self.executor.shutdown(wait=True)
+                    self.executor = self.pending = self.token = self.scene = self.batch_executor = None
+                    self.prepared.clear()
+                    self.streams.clear()
+                    errors = tuple(self.batch_close_errors)
+                    self.batch_close_errors.clear()
+        if errors:
+            raise errors[0]
 
     def _close_reader(self):
         if self.reader is not None:

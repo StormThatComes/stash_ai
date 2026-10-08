@@ -14,7 +14,7 @@ from tests.test_merged_model import model_run, run_model, assert_inference_worke
 pytestmark = pytest.mark.usefixtures('reset_progress')
 
 
-def instrument(context, monkeypatch, *, predict=None, await_ready=True):
+def instrument(context, monkeypatch, *, predict=None, await_ready=True, score_index=lambda index: index):
     """Identify each scene in CPU inputs without depending on timing or network."""
     for scene, current in context.scenes.items():
         current['paths']['vtt'] = '/vtt/' + scene
@@ -50,7 +50,7 @@ def instrument(context, monkeypatch, *, predict=None, await_ready=True):
                 gpu_next.set()
             if predict is not None:
                 predict(scene, images)
-            return original([index for _, index in images])
+            return original([score_index(index) for _, index in images])
 
         model.prepare, model.collate_batch, model.predict_collated_batch = prepare, collate, forward
         return model
@@ -180,6 +180,56 @@ def test_handoff_continues_across_three_scenes(model_run, monkeypatch, prefetch)
     assert [scene for scene, _ in calls] == ['1'] * 5 + ['2'] * 5 + ['3'] * 5
     assert len(cpu_threads) <= 8 and len(gpu_threads) == 1
     assert all(context.state.records(scene, 'scene') for scene in context.scenes)
+    assert_inference_workers_closed()
+
+
+@pytest.mark.parametrize('prefetch', [1, 16])
+def test_next_input_and_cpu_batches_start_while_long_current_queue_is_full(model_run, monkeypatch, prefetch):
+    from stash_ai.domain import Cue
+    from stash_ai.inference.input_identity import cue_manifest, inference_signature
+    context = model_run
+    context.args.prefetch_batches, context.args.prepare_workers = prefetch, 8
+    context.scenes['3'] = dict(paths=dict(vtt='/vtt/3', sprite='/sprite'))
+    third_verified, third_prepared = Event(), Event()
+    inspect = context.inputs.inspect
+
+    def inspect_scene(*args):
+        cues, media, signature = inspect(*args)
+        if args[1]['vtt'] == '/vtt/2':
+            cues = [Cue(index, index + 1, 'sprite', (0, 0, 1, 1)) for index in range(100)]
+            signature = inference_signature(args[2], cue_manifest(cues), media.hashes)
+        if args[1]['vtt'] == '/vtt/3':
+            third_verified.set()
+        return cues, media, signature
+
+    def predict(scene, images):
+        if scene == '2' and images[0][1] == 8:
+            assert third_verified.wait(5), 'Full current CPU queue blocked next input verification'
+            assert third_prepared.wait(5), 'Full current CPU queue blocked next scene preparation'
+
+    _, _, calls, cpu_threads, gpu_threads = instrument(context, monkeypatch, predict=predict,
+                                                       score_index=lambda index: index % 10)
+    load = app.services.load_tagger
+
+    def load_model(*args):
+        model = load(*args)
+        collate = model.collate_batch
+
+        def collate_batch(images):
+            value = collate(images)
+            if images[0][0] == '3':
+                third_prepared.set()
+            return value
+
+        model.collate_batch = collate_batch
+        return model
+
+    monkeypatch.setattr(context.inputs, 'inspect', inspect_scene)
+    monkeypatch.setattr(app.services, 'load_tagger', load_model)
+    run_model(context)
+    assert context.stats['processed'] == 3 and not context.stats['errors']
+    assert len([scene for scene, _ in calls if scene == '2']) == 50
+    assert len(cpu_threads) <= 8 and len(gpu_threads) == 1
     assert_inference_workers_closed()
 
 
