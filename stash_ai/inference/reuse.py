@@ -20,8 +20,8 @@ def input_options(app, paths):
 def cached_reuse(app, store, scene, config, identity, paths, kinds):
     """Trust previously verified inputs, checking model and durable completion.
 
-    The coordinator enables this only when every selected model in the scene is
-    ready on the same saved inputs. Otherwise all selected passes verify inputs.
+    The coordinator enables this per completed model with consistent saved inputs.
+    Unfinished passes verify inputs and invalidate cached peers if inputs changed.
     No current media-content claim is made by this non-fetching path.
     """
     from stash_ai.storage.progress import completed
