@@ -44,8 +44,10 @@ class OnnxTagger:
         )
 
     def predict_batch(self, images: list[Any]) -> Any:
+        return self.predict_collated_batch(self.collate_batch(images), len(images))
+
+    def collate_batch(self, images: list[Any]) -> dict[str, Any]:
         import numpy as np
-        from stash_ai.models import validate_scores
 
         count = len(images)
         if not count or count > self.batch_size:
@@ -72,6 +74,11 @@ class OnnxTagger:
                 )
                 for name, values in feed.items()
             }
+        return feed
+
+    def predict_collated_batch(self, feed: dict[str, Any], count: int) -> Any:
+        import numpy as np
+        from stash_ai.models import validate_scores
 
         raw = np.asarray(
             self.session.run([self.output_name], feed)[0],

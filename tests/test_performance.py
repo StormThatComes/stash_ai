@@ -177,6 +177,7 @@ def test_publication_code_tracks_extracted_modules(monkeypatch, filename):
     "inference/inputs.py",
     "inference/identity.py",
     "inference/checkpoints.py",
+    "inference/batches.py",
     "storage/database.py",
     "storage/archive.py",
     "config.py",
@@ -457,7 +458,7 @@ def test_detached_records_cannot_reuse_a_stale_segment_digest(tmp_path):
 
 
 @pytest.mark.parametrize('filename', [
-    'runs/merged_model.py', 'inference/prediction.py', 'inference/checkpoints.py',
+    'runs/merged_model.py', 'inference/prediction.py', 'inference/checkpoints.py', 'inference/batches.py',
     'backends/onnx_session.py', 'runtime/settings.py', 'runtime/profile.py',
     'publication/parallel.py', 'history/lifecycle.py', 'storage/archive.py',
 ])

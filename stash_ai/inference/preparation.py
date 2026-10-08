@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 from collections import deque
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import dataclass
+from contextlib import nullcontext
 from typing import Any, TYPE_CHECKING
 
 from stash_ai.inference import sprites
@@ -23,59 +25,108 @@ def prepare_image(app, image: PILImage, target_size: int) -> Any:
     return TVF.normalize(tensor, mean=app.JOYTAG_CLIP_MEAN, std=app.JOYTAG_CLIP_STD)
 
 
-def prepared_batches(app, tagger, stash, paths, cues, prefetch=False, workers=1, *, report=None):
-    """Current batch plus N queued batches; one producer owns media/PIL."""
+@dataclass(frozen=True)
+class PreparedBatch:
+    """A complete backend input assembled on CPU, before inference starts."""
+    inputs: Any
+    count: int
+
+    def __len__(self):
+        return self.count
+
+
+def prepared_batches(app, tagger, stash, paths, cues, prefetch=False, workers=1, *,
+                     report=None, collate=False, cancellation=None):
+    """Bounded ordered batches; one producer owns media and worker image copies."""
     if not isinstance(prefetch, int) or not 0 <= prefetch <= 16:
         raise ValueError('prefetch must be an integer in 0..16.')
     if type(workers) is not int or not 1 <= workers <= 16:
         raise ValueError('prepare workers must be an integer in 1..16.')
     iterator = sprites.iter_sprite_frames(stash, paths, cues)
     from stash_ai.runtime.cancellation import Cancellation, use
-    cancellation = Cancellation()
+    cancellation = cancellation if cancellation is not None else Cancellation()
     work = report.work() if report is not None else ''
     executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="prepare-frames") if prefetch else None
     transforms = ThreadPoolExecutor(max_workers=workers, thread_name_prefix='transform-frames') if workers > 1 else None
+    frames = deque()
+    exhausted = False
+    # With prefetch, CPU parallelism is independent of the GPU batch size.
+    # This is a bounded frame window in addition to the queued ready batches.
+    window = max(tagger.batch_size, workers) if prefetch else tagger.batch_size
+
+    def measure(name, count=1):
+        return (report.measure(name, model=tagger.settings.source.key, work=work,
+                               units=count, unit='frames') if report is not None else nullcontext())
+
     def transform(image: PILImage):
         try:
-            from contextlib import nullcontext
-            timer = (report.measure('image_prepare', model=tagger.settings.source.key, work=work, units=1, unit='frames')
-                     if report is not None else nullcontext())
-            with use(cancellation), timer:
+            with use(cancellation), measure('image_prepare'):
                 return tagger.prepare(image)
         finally:
             image.close()
+
+    def fill_frames():
+        nonlocal exhausted
+        while not exhausted and len(frames) < window:
+            cancellation.check()
+            try:
+                with measure('sprite_frame_read', 0):
+                    frame = next(iterator, None)
+                if frame is None:
+                    exhausted = True
+                    break
+                cue, image = frame
+                owned = image.copy()
+                try:
+                    future = transforms.submit(transform, owned)
+                except BaseException:
+                    owned.close()
+                    raise
+                frames.append((cue, future))
+            except BaseException as error:
+                # A lookahead failure belongs after the already read frames.
+                # Preserve their complete batches for inference/checkpointing.
+                failed = Future()
+                failed.set_exception(error)
+                frames.append((None, failed))
+                exhausted = True
+
     def prepare_next():
         with use(cancellation):
             return _prepare_next()
 
     def _prepare_next():
         prepared, batch_cues = [], []
+        if transforms:
+            fill_frames()
         for _ in range(tagger.batch_size):
             cancellation.check()
-            try:
-                cue, image = next(iterator)
-            except StopIteration:
-                break
             if transforms:
-                # The source iterator closes its frame on the next step. Each
-                # worker owns a copy, and closes it even if preparation fails.
-                owned = image.copy()
-                prepared.append(transforms.submit(transform, owned))
+                if not frames:
+                    break
+                cue, future = frames.popleft()
+                prepared.append(future.result())
+                if prefetch:
+                    fill_frames()
             else:
-                from contextlib import nullcontext
-                timer = (report.measure('image_prepare', model=tagger.settings.source.key, work=work, units=1, unit='frames')
-                         if report is not None else nullcontext())
-                with timer:
+                with measure('sprite_frame_read', 0):
+                    frame = next(iterator, None)
+                if frame is None:
+                    break
+                cue, image = frame
+                with measure('image_prepare'):
                     prepared.append(tagger.prepare(image))
             batch_cues.append(cue)
-        if transforms:
-            prepared = [future.result() for future in prepared]
         cancellation.check()
+        if prepared and collate and hasattr(tagger, 'collate_batch'):
+            with measure('batch_collate', len(prepared)):
+                prepared = PreparedBatch(tagger.collate_batch(prepared), len(prepared))
         return prepared, batch_cues
     try:
         pending = deque(executor.submit(prepare_next) for _ in range(prefetch)) if executor else deque()
         while True:
-            prepared, batch_cues = pending.popleft().result() if executor else prepare_next()
+            with measure('inference_input_wait', 0):
+                prepared, batch_cues = pending.popleft().result() if executor else prepare_next()
             if not prepared:
                 break
             if executor:

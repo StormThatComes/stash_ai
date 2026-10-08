@@ -773,6 +773,31 @@ Aktualne domyślne ustawienia pamięci i równoległości:
   Parametr steruje przygotowaniem kolejnych batchy, niezależnie od rozmiaru
   inferencji `batch_size`, i nie unieważnia zapisanych wyników.
 
+Przy `prefetch_batches > 0` jeden wątek wykonuje inferencję, a główny wątek
+równolegle obrabia poprzednie wyniki i zapisuje checkpointy/SQLite. Kolejka
+wyników mieści dwa batche; dodatkowo może trwać jedno wywołanie inferencji.
+Wyniki są odbierane w kolejności, a checkpoint obejmuje tylko w pełni
+przetworzony prefiks. Błąd późniejszego batcha zachowuje wcześniejszy postęp;
+przerwanie zamyka wszystkie wątki przed zamknięciem modelu.
+
+Przygotowanie CPU składa kompletne wejścia (`stack`, maski i dopełnianie
+stałego batcha ONNX) przed przekazaniem do inferencji. Workery transformacji
+mogą pracować na klatkach kolejnych batchy: batch 4 nie ogranicza już puli
+8 workerów do czterech aktywnych zadań. Odczyt mediów/PIL nadal ma jednego
+właściciela. Oprócz kolejki batchy okno transformacji jest ograniczone do
+`max(batch_size, prepare_workers)` klatek. `--prefetch-batches 0` zachowuje
+inferencję i obróbkę wyników w głównym wątku oraz dotychczasową pulę transformacji.
+
+Historia uruchomień rozdziela `sprite_frame_read`, `image_prepare`,
+`batch_collate`, `inference_input_wait`, `inference_batch`,
+`inference_result_wait`, `inference_result_queue_wait` i
+`inference_postprocess`. Pełna kolejka wyników wskazuje, że odbiorca nie nadąża;
+długi `inference_input_wait` wskazuje oczekiwanie na przygotowanie wejścia.
+`inference_batch` nadal obejmuje transfery i walidację, więc nie jest pomiarem
+samych kerneli CUDA. Czasy równoległych etapów mogą się nakładać i nie należy
+sumować ich jako czasu rzeczywistego przebiegu. Zmiana pipeline'u nie wymaga
+migracji bazy ani odrzucenia zgodnych wyników/checkpointów.
+
 `--db-compact` utrzymuje blokadę zapisu aż do końcowej kontroli bazy i
 porównania liczników po VACUUM.
 

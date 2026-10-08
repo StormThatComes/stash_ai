@@ -7,7 +7,8 @@
 # --restart requests fresh inference; omit it when resuming that new run.
 # --prefetch-batches 4 prepares four next batches; 0 disables preparation in the background.
 # --ram-budget-gb 32 / --ram-cache-gb 24 bound the shared cache; allocated on demand.
-# --prepare-workers 4 parallelizes CPU transforms only; inference remains sequential.
+# --prepare-workers 4 parallelizes CPU transforms across batches with prefetch enabled.
+# One inference thread overlaps GPU work with ordered result/checkpoint processing.
 # --verbose enables per-scene diagnostics; default output summarizes the collection.
 # No sprite or extracted-frame cache is written to disk.
 # --merge-only migrates existing results without model inference.
@@ -19,7 +20,7 @@ version: 1
 enabled_models: [joytag, oppai, wd, dtq]
 device: cuda  # auto prefers CUDA; cuda requires CUDA; cpu forces CPU.
 download_missing: true  # All four models, including JoyTag; --offline disables downloads.
-prefetch_batches: 4  # Global 0..16; --prefetch-batches overrides it. Separate from model batch_size.
+prefetch_batches: 4  # Global 0..16; 0 also disables inference lookahead. Separate from model batch_size.
 prepare_workers: 4  # CPU image transforms; --prepare-workers overrides. Integer 1..16.
 merge_workers: 4  # Read-only evidence replay; --merge-workers overrides. Integer 1..16.
 model_report_workers: 4  # Offline report processes; --model-report-workers overrides. Integer 1..16.
