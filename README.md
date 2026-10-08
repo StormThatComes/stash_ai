@@ -784,6 +784,16 @@ przerwanie anuluje przygotowanie sceny i czeka na inferencję. Następnie model
 jest zamykany w swoim wątku, a wykonawca kończy pracę. Wejścia prefetch i wyniki
 w kolejce znajdują się w RAM, a nie w VRAM.
 
+Prefetch obejmuje też wejście jednej następnej sceny: pobranie VTT/sprite'ów
+i sprawdzenie ich hashy mogą trwać podczas inferencji bieżącej sceny. Odczyt
+używa osobnej sesji HTTP i wspólnego cache RAM; nie uruchamia modelu ani nie
+dekoduje obrazów kolejnej sceny. Lokalny bufor zachowuje najwyżej dwa
+skompresowane sprite'y w limicie 16 MiB, a wspólny cache nadal podlega budżetowi
+RAM. Gotowe sceny z planu reuse nie są pobierane z wyprzedzeniem.
+Błąd odczytu jest obsługiwany dopiero po dojściu do jego sceny, dzięki czemu
+nie przerywa zapisu poprzedniego wyniku. Ctrl+C anuluje także oczekujący odczyt.
+`--prefetch-batches 0` wyłącza również przygotowanie wejścia następnej sceny.
+
 Przygotowanie CPU składa kompletne wejścia (`stack`, maski i dopełnianie
 stałego batcha ONNX) przed przekazaniem do inferencji. Workery transformacji
 mogą pracować na klatkach kolejnych batchy: batch 4 nie ogranicza już puli
@@ -797,6 +807,13 @@ Historia uruchomień rozdziela `sprite_frame_read`, `image_prepare`,
 `inference_result_wait`, `inference_result_queue_wait` i
 `inference_postprocess`. Pełna kolejka wyników wskazuje, że odbiorca nie nadąża;
 długi `inference_input_wait` wskazuje oczekiwanie na przygotowanie wejścia.
+`scene_input_prefetch` mierzy weryfikację następnej sceny w tle,
+`scene_input_wait` — oczekiwanie na jej gotowe wejście, a
+`inference_scene_finalize`, `inference_output_capture` i `inference_commit`
+rozdzielają finalizację CPU, budowanie wyniku i jego zapis. Pozwala to wskazać
+przyczynę pauz na granicach scen. `input_verify` na ścieżce synchronicznej
+nadal obejmuje odczyt i hashowanie; przy prefetch obejmuje odbiór wejścia,
+z oczekiwaniem wykazanym osobno w `scene_input_wait`.
 `inference_batch` nadal obejmuje transfery i walidację, więc nie jest pomiarem
 samych kerneli CUDA. Czasy równoległych etapów mogą się nakładać i nie należy
 sumować ich jako czasu rzeczywistego przebiegu. Zmiana pipeline'u nie wymaga

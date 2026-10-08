@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from collections import OrderedDict
+from contextlib import contextmanager
+from threading import Lock, local
 import hashlib
 
 from stash_ai.inference import sprites
@@ -53,23 +55,36 @@ class RunMedia:
     def __init__(self, stash, cache, report=None):
         self.stash, self.cache, self.report = stash, cache, report
         self.token, self.hashes = object(), {}
+        self._lock, self._readers = Lock(), local()
+
+    @contextmanager
+    def read_with(self, reader):
+        previous = getattr(self._readers, 'reader', None)
+        self._readers.reader = reader
+        try:
+            yield
+        finally:
+            self._readers.reader = previous
 
     def get_media(self, url):
         key = ('media', self.token, url)
         saved = self.cache.get(key)
         if saved is not None:
             if self.report is not None:
-                self.report.counts['media_cache_hits'] += 1
+                with self._lock:
+                    self.report.counts['media_cache_hits'] += 1
             return saved
-        data = self.stash.get_media(url)
+        reader = getattr(self._readers, 'reader', None) or self.stash
+        data = reader.get_media(url)
         checksum = hashlib.sha256(data).hexdigest()
-        if url in self.hashes and checksum != self.hashes[url]:
-            raise RuntimeError('Stash media changed during model passes; rerun to use one consistent input.')
-        self.hashes[url] = checksum
-        self.cache.put(key, data)
-        if self.report is not None:
-            self.report.counts['media_downloads'] += 1
-            self.report.counts['media_download_bytes'] += len(data)
+        with self._lock:
+            if url in self.hashes and checksum != self.hashes[url]:
+                raise RuntimeError('Stash media changed during model passes; rerun to use one consistent input.')
+            self.hashes[url] = checksum
+            self.cache.put(key, data)
+            if self.report is not None:
+                self.report.counts['media_downloads'] += 1
+                self.report.counts['media_download_bytes'] += len(data)
         return data
 
 
@@ -79,6 +94,14 @@ class RunInputs:
         self.cache, self.report = cache, report
         self.media = RunMedia(stash, cache, report)
         self.token, self.identities = object(), {}
+        self._lock = Lock()
+
+    def open_background_reader(self):
+        factory = getattr(self.media.stash, 'new_media_reader', None)
+        return factory() if factory is not None else None
+
+    def read_with(self, reader):
+        return self.media.read_with(reader)
 
     def inspect(self, app, paths, model_identity):
         key = digest({'paths': paths, 'sample_limit': app.MAX_FRAMES_PER_SCENE})
@@ -87,10 +110,11 @@ class RunInputs:
             cues, media, signature = inspect_input(app, self.media, paths, model_identity)
             cue_identity = cue_manifest(cues)
             frozen = frame_signature(cue_identity, media.hashes)
-            if key in self.identities and frozen != self.identities[key]:
-                raise RuntimeError('Stash VTT changed during model passes; rerun the analysis.')
-            self.identities[key] = frozen
-            self.cache.put(('input', self.token, key), (cues, dict(media.hashes), cue_identity))
+            with self._lock:
+                if key in self.identities and frozen != self.identities[key]:
+                    raise RuntimeError('Stash VTT changed during model passes; rerun the analysis.')
+                self.identities[key] = frozen
+                self.cache.put(('input', self.token, key), (cues, dict(media.hashes), cue_identity))
             return cues, media, signature
         cues, hashes, cue_identity = cached
         media = VerifiedMedia(self.media, limit=0, expected=hashes)

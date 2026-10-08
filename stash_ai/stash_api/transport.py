@@ -51,6 +51,14 @@ class StashTransport:
         self.api.close()
         self.media.close()
 
+    def new_media_reader(self):
+        """Give background input reads their own sessions and deadline cleanup."""
+        reader = StashTransport(True, url=self.url, api_key=self.api_key,
+                                request_timeout=self.request_timeout,
+                                http_retries=self.http_retries)
+        reader.report = self.report
+        return reader
+
     @staticmethod
     def _read_only(query: str, variables: dict | None = None) -> bool:
         if not query.lstrip().startswith('mutation'):

@@ -84,6 +84,14 @@ cały lifecycle modelu: ładowanie, inferencję wszystkich scen i zamknięcie na
 tym samym wątku. Iterator sceny czeka na swoje zadanie, ale nie zamyka
 pożyczonego wykonawcy. `inference/prediction.py` odtwarza stan predykcji,
 obrabia wyniki i checkpointy w wątku właściciela SQLite oraz finalizuje scenę.
+`inference/input_prefetch.py` weryfikuje wejście jednej następnej sceny w tle,
+przez izolowany transport HTTP. Synchronizowane mapy `RunMedia`/`RunInputs`
+zachowują jeden snapshot treści URL-i i manifestów przy równoległych odczytach.
+Plan reuse wybiera kandydatów bez dodatkowych odczytów SQLite przed inferencją;
+faktyczne reuse, invalidacja peerów i obsługa błędu następują dopiero w wątku
+głównym po dojściu do sceny. Prefetch nie dekoduje kolejnej sceny ani nie
+alokuje jej tensorów GPU; limit lokalny mediów i budżet wspólnego cache są
+zachowane. Anulowanie obejmuje także przerwane oczekiwanie na Future.
 `inference/identity.py` buduje tożsamość modeli; `inference/checkpoints.py` zawiera
 `Checkpoint`, zapis i odtworzenie kompaktowego stanu oraz atomowe zakończenie inferencji.
 `stash_ai/storage/progress.py` obsługuje indeks ukończenia, ponowne użycie wyników i resume/refresh.
