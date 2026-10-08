@@ -15,13 +15,15 @@ class _Failure:
 
 
 def predicted_batches(app, tagger, stash, paths, cues, *, prefetch=0,
-                      prepare_workers=1, report=None):
+                      prepare_workers=1, report=None, inference_executor=None):
     """Overlap the next prediction with ordered CPU result/checkpoint handling.
 
     Two queued CPU results plus one running prediction bound inference lookahead.
     The consumer owns all scene state and SQLite writes. With prefetch=0,
     prediction and result handling run in the caller; the CPU transform pool
     remains available, preserving the previous troubleshooting path.
+    A borrowed single-worker executor keeps backend thread affinity across
+    scenes; its owner shuts it down after closing the model.
     """
     cancellation = Cancellation()
     work = report.work() if report is not None else ''
@@ -77,8 +79,11 @@ def predicted_batches(app, tagger, stash, paths, cues, *, prefetch=0,
         finally:
             send(finished)
 
-    worker = Thread(target=produce, name='inference-batches')
-    worker.start()
+    if inference_executor is None:
+        worker = Thread(target=produce, name='inference-batches')
+        worker.start()
+    else:
+        worker = inference_executor.submit(produce)
     try:
         while True:
             with measure('inference_result_wait'):
@@ -91,4 +96,7 @@ def predicted_batches(app, tagger, stash, paths, cues, *, prefetch=0,
     finally:
         stopped.set()
         cancellation.cancel()
-        worker.join()
+        if inference_executor is None:
+            worker.join()
+        else:
+            worker.result()

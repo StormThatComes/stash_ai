@@ -123,7 +123,8 @@ def _restore_prediction_state(app, tagger, cues, *, checkpoint, report):
 
 
 def _run_prediction_batches(app, tagger, stash, paths, cues, state, *,
-                            checkpoint, prefetch, prepare_workers, report):
+                            checkpoint, prefetch, prepare_workers, report,
+                            inference_executor):
     import numpy as np
     from stash_ai.inference.batches import predicted_batches
 
@@ -138,6 +139,7 @@ def _run_prediction_batches(app, tagger, stash, paths, cues, state, *,
         prefetch=prefetch,
         prepare_workers=prepare_workers,
         report=report,
+        inference_executor=inference_executor,
     )
     try:
         for result, batch_cues in batches:
@@ -232,7 +234,7 @@ def _finalize_predictions(app, tagger, state, *, analysis):
 
 def predict_scene(app, tagger: Any, stash, paths: dict, cues: list[Cue],
                   *, checkpoint=None, prefetch: int = 0, analysis: dict | None = None,
-                  report=None, prepare_workers: int = 1
+                  report=None, prepare_workers: int = 1, inference_executor=None
                   ) -> tuple[list[tuple[str, float]], list[FramePrediction]]:
     """Return raw retained evidence; publication applies exclusions and limits."""
     if not cues:
@@ -255,6 +257,7 @@ def predict_scene(app, tagger: Any, stash, paths: dict, cues: list[Cue],
         prefetch=prefetch,
         prepare_workers=prepare_workers,
         report=report,
+        inference_executor=inference_executor,
     )
     return _finalize_predictions(
         app,
