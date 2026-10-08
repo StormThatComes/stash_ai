@@ -933,3 +933,28 @@ nie zmienia tożsamości inferencji ani formatów wyników/checkpointów/snapsho
 Przypięte dowody published/pending/recovery są odczytywane leniwie raz podczas
 jednego zapisu wyników scene+markers. Odczyt nie przechodzi na kolejny zapis,
 rollback ani zmianę publikacji; pełne archiwum konkretnych dowodów pozostaje.
+
+### Liczba workerów w tagger_models.yml
+
+Globalne ustawienia wybierają liczbę workerów osobno dla każdego etapu:
+
+```yaml
+prefetch_batches: 4
+prepare_workers: 4
+merge_workers: 4
+model_report_workers: 4
+```
+
+`prepare_workers` steruje transformacjami obrazów CPU, `merge_workers` odczytem
+i scalaniem dowodów, a `model_report_workers` procesami raportu modeli.
+Każdy worker count musi być liczbą całkowitą 1..16; `1` oznacza pracę szeregową.
+Odpowiedni argument CLI (`--prepare-workers`, `--merge-workers`,
+`--model-report-workers`) ma pierwszeństwo przed YAML. Gdy klucza brakuje,
+pozostają dotychczasowe domyślne wartości: 4/4/do 4 dostępnych CPU.
+
+Merge i raport modeli odczytują ustawienia workerów z istniejącego YAML, bez
+ładowania modeli. Brak pliku nie blokuje pracy na zapisanych dowodach; wtedy
+obowiązują wartości domyślne lub CLI. Pozostałe polecenia offline nie odczytują
+tego pliku dla ustawień workerów. Zmiana liczby workerów nie zmienia tożsamości
+inferencji ani zapisanych wyników. Inferencja modeli i zapisy do Stash pozostają
+szeregowe.

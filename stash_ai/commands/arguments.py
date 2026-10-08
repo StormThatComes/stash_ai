@@ -54,13 +54,13 @@ def build_parser(app) -> argparse.ArgumentParser:
                         help="Shared result/index/media cache in GiB (default: 24); 0 disables. Capped to 75%% of --ram-budget-gb.")
     parser.add_argument("--ram-budget-gb", type=float, default=app.RAM_BUDGET_GB, metavar="GIB",
                         help="Process RAM target in GiB (default: 32); reserves 25%% for models and active work. RSS pressure evicts caches.")
-    parser.add_argument("--prepare-workers", type=int, choices=range(1, 17), default=app.PREPARE_WORKERS,
-                        help="CPU image preparation workers (default: 4); one model at a time runs inference.")
-    parser.add_argument("--merge-workers", type=int, choices=range(1, 17), default=4,
-                        help="Read-only CPU workers for merged evidence replay (default: 4). Stash/state writes stay serial.")
+    parser.add_argument("--prepare-workers", type=int, choices=range(1, 17), default=None,
+                        help="CPU image preparation workers; overrides YAML prepare_workers (default: 4).")
+    parser.add_argument("--merge-workers", type=int, choices=range(1, 17), default=None,
+                        help="Read-only CPU workers; overrides YAML merge_workers (default: 4). Stash/state writes stay serial.")
     parser.add_argument("--model-report-workers", type=int, choices=range(1, 17),
-                        default=min(4, os.cpu_count() or 1),
-                        help="CPU worker processes for --model-report (default: up to 4); use 1 for serial execution.")
+                        default=None,
+                        help="CPU report workers; overrides YAML model_report_workers (default: up to 4); 1 runs serially.")
     parser.add_argument("--tag-review-margin", type=float, default=None, metavar="SCORE",
                         help="Weak/borderline score margin above each model's own threshold (default: 0.05); --tag-review-report only.")
     parser.add_argument("--tag-review-long-marker-seconds", type=float, default=None, metavar="SECONDS",
@@ -146,10 +146,20 @@ def build_parser(app) -> argparse.ArgumentParser:
 def parse_args(app, argv: list[str] | None = None) -> argparse.Namespace:
     parser = build_parser(app)
     args = validate_args(app, parser, parser.parse_args(argv))
-    if args.prefetch_batches is None:
-        if args.command is Command.INFERENCE:
-            from stash_ai.config import load_model_configuration
-            args.prefetch_batches = load_model_configuration(args.model_config).get('prefetch_batches', app.PREFETCH_BATCHES)
-        else:
-            args.prefetch_batches = app.PREFETCH_BATCHES
+    defaults = dict(prefetch_batches=app.PREFETCH_BATCHES,
+                    prepare_workers=app.PREPARE_WORKERS, merge_workers=4,
+                    model_report_workers=min(4, os.cpu_count() or 1))
+    used = {
+        Command.INFERENCE: ('prefetch_batches', 'prepare_workers', 'merge_workers'),
+        Command.MERGE: ('merge_workers',),
+        Command.MODEL_REPORT: ('model_report_workers',),
+    }.get(args.command, ())
+    missing = [name for name in used if getattr(args, name) is None]
+    configuration = {}
+    if missing and (args.command is Command.INFERENCE or args.model_config.expanduser().is_file()):
+        from stash_ai.config import load_model_configuration
+        configuration = load_model_configuration(args.model_config.expanduser())
+    for name, default in defaults.items():
+        if getattr(args, name) is None:
+            setattr(args, name, configuration.get(name, default) if name in used else default)
     return args

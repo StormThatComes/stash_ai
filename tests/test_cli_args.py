@@ -5,11 +5,14 @@ from tests.helpers.runtime import runtime as app
 from stash_ai.commands import arguments, validation
 
 
-def test_parse_args_uses_live_cli_defaults_and_caps_cache(monkeypatch):
+def test_parse_args_uses_live_cli_defaults_and_caps_cache(monkeypatch, tmp_path):
     monkeypatch.setattr(app, "RAM_CACHE_GB", 12.0)
     monkeypatch.setattr(app, "RAM_BUDGET_GB", 8.0)
     monkeypatch.setattr(app, "DEFAULT_RESUME", False)
     monkeypatch.setattr(app, "PREPARE_WORKERS", 3)
+    configuration = tmp_path / 'models.yml'
+    configuration.write_text('version: 1\n')
+    monkeypatch.setattr(app, 'MODELS_CONFIG_FILE', configuration)
 
     args = arguments.parse_args(app, [])
 

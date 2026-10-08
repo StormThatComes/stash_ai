@@ -20,6 +20,9 @@ enabled_models: [joytag, oppai, wd, dtq]
 device: cuda  # auto prefers CUDA; cuda requires CUDA; cpu forces CPU.
 download_missing: true  # All four models, including JoyTag; --offline disables downloads.
 prefetch_batches: 4  # Global 0..16; --prefetch-batches overrides it. Separate from model batch_size.
+prepare_workers: 4  # CPU image transforms; --prepare-workers overrides. Integer 1..16.
+merge_workers: 4  # Read-only evidence replay; --merge-workers overrides. Integer 1..16.
+model_report_workers: 4  # Offline report processes; --model-report-workers overrides. Integer 1..16.
 
 # All models download missing assets from pinned Hugging Face revisions.
 # model_dir / *_MODEL_PATH select download locations; relative paths use this YAML.
