@@ -51,7 +51,8 @@ def build_parser(app) -> argparse.ArgumentParser:
     parser.add_argument("--checkpoint-batches", type=int, default=app.CHECKPOINT_BATCHES,
                         help="Persist partial inference every N batches; also saves on Ctrl+C/errors. Default: 8.")
     parser.add_argument("--prefetch-batches", type=int, choices=range(17), default=None,
-                        help="Prepare N next batches in RAM; overrides YAML prefetch_batches (default: 4); 0 disables.")
+                        help="Prepare N next inputs in RAM and overlap inference with result processing; "
+                             "overrides YAML prefetch_batches (default: 4); 0 disables lookahead.")
     parser.add_argument("--ram-cache-gb", type=float, default=app.RAM_CACHE_GB, metavar="GIB",
                         help="Shared result/index/media cache in GiB (default: 24); 0 disables. Capped to 75%% of --ram-budget-gb.")
     parser.add_argument("--ram-budget-gb", type=float, default=app.RAM_BUDGET_GB, metavar="GIB",

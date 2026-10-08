@@ -75,8 +75,12 @@ współdzieli ograniczony cache mediów oraz manifestów między modelami wyłą
 w RAM. Kod i testy importują je bezpośrednio z tego modułu.
 `inference/sprites.py` odpowiada za cue i dekodowanie sprite, a
 `inference/preparation.py` za preprocessing obrazów oraz ograniczone, uporządkowane
-batchowanie z własnością i zamykaniem obrazów w workerach. `inference/prediction.py`
-odtwarza stan predykcji, wykonuje batche i finalizuje wyniki sceny.
+batchowanie z własnością i zamykaniem obrazów w workerach. Z prefetch okno
+transformacji obejmuje klatki kilku batchy, a składanie wejścia backendu odbywa
+się przed inferencją. `inference/batches.py` wykonuje uporządkowaną inferencję
+w jednym wątku z ograniczoną kolejką dwóch wyników i wspólnym anulowaniem
+przygotowania mediów. `inference/prediction.py` odtwarza stan predykcji,
+obrabia wyniki i checkpointy w wątku właściciela SQLite oraz finalizuje scenę.
 `inference/identity.py` buduje tożsamość modeli; `inference/checkpoints.py` zawiera
 `Checkpoint`, zapis i odtworzenie kompaktowego stanu oraz atomowe zakończenie inferencji.
 `stash_ai/storage/progress.py` obsługuje indeks ukończenia, ponowne użycie wyników i resume/refresh.

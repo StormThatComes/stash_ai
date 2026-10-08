@@ -32,13 +32,20 @@ class JoyTagger:
         return self.prepare_image(image, self.model.image_size)
 
     def predict_batch(self, images: list[Any]) -> Any:
+        return self.predict_collated_batch(self.collate_batch(images), len(images))
+
+    def collate_batch(self, images: list[Any]) -> Any:
+        import torch
+        return torch.stack(images)
+
+    def predict_collated_batch(self, prepared: Any, count: int) -> Any:
         import torch
         from contextlib import nullcontext
-        batch = torch.stack(images).to(self.device, non_blocking=self.device.type == "cuda")
+        batch = prepared.to(self.device, non_blocking=self.device.type == "cuda")
         amp = torch.autocast("cuda", dtype=torch.float16) if self.device.type == "cuda" else nullcontext()
         with torch.inference_mode(), amp:
             scores = self.model({"image": batch})["tags"].sigmoid().float().cpu().numpy()
-        return models.validate_scores(scores, len(images), self.labels, "JoyTag")
+        return models.validate_scores(scores, count, self.labels, "JoyTag")
 
     def close(self) -> None:
         import torch

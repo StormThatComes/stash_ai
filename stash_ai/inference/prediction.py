@@ -125,76 +125,69 @@ def _restore_prediction_state(app, tagger, cues, *, checkpoint, report):
 def _run_prediction_batches(app, tagger, stash, paths, cues, state, *,
                             checkpoint, prefetch, prepare_workers, report):
     import numpy as np
-    from stash_ai.inference.preparation import prepared_batches
-    from stash_ai.models import validate_scores
+    from stash_ai.inference.batches import predicted_batches
 
     settings, labels = tagger.settings, tagger.labels
     keep = 1 if app.AGGREGATION == "max" else min(app.TOP_K_FRAMES, len(cues))
-    batches = prepared_batches(
+    batches = predicted_batches(
         app,
         tagger,
         stash,
         paths,
         cues[state.processed:],
-        prefetch,
-        prepare_workers,
+        prefetch=prefetch,
+        prepare_workers=prepare_workers,
         report=report,
     )
     try:
-        for prepared, batch_cues in batches:
+        for result, batch_cues in batches:
             from contextlib import nullcontext
-            timer = (report.measure('inference_batch', model=settings.source.key, units=len(prepared), unit='frames')
+            timer = (report.measure('inference_postprocess', model=settings.source.key, units=len(batch_cues), unit='frames')
                      if report is not None else nullcontext())
             with timer:
-                result = validate_scores(
-                    tagger.predict_batch(prepared),
-                    len(prepared),
-                    labels,
-                    settings.source.title,
+                combined = np.concatenate((state.top_scores, result), axis=0)
+                count = min(keep, len(combined))
+                state.top_scores = np.partition(
+                    combined, len(combined) - count, axis=0
+                )[-count:]
+
+                batch_frames = []
+                if app.CREATE_MARKERS:
+                    for cue, row in zip(batch_cues, result):
+                        matches = select_scores(
+                            row,
+                            labels,
+                            state.marker_floor,
+                            0,
+                        )
+                        batch_frames.append(FramePrediction(cue, tuple(matches)))
+
+                batch_scene = (
+                    [
+                        dict(
+                            start=cue.start,
+                            end=cue.end,
+                            tags=select_scores(row, labels, state.scene_floor, 0),
+                        )
+                        for cue, row in zip(batch_cues, result)
+                    ]
+                    if state.retain_scene
+                    else []
                 )
-            combined = np.concatenate((state.top_scores, result), axis=0)
-            count = min(keep, len(combined))
-            state.top_scores = np.partition(
-                combined, len(combined) - count, axis=0
-            )[-count:]
+                state.scene_frames.extend(batch_scene)
+                if state.accumulator is not None:
+                    state.accumulator.add(result, batch_cues)
+                state.frame_predictions.extend(batch_frames)
+                state.processed += len(batch_cues)
 
-            batch_frames = []
-            if app.CREATE_MARKERS:
-                for cue, row in zip(batch_cues, result):
-                    matches = select_scores(
-                        row,
-                        labels,
-                        state.marker_floor,
-                        0,
+                if checkpoint:
+                    checkpoint.record(
+                        state.processed,
+                        state.top_scores,
+                        batch_frames,
+                        analysis=state.accumulator.state() if state.accumulator is not None else None,
+                        scene_frames=batch_scene if state.retain_scene else None,
                     )
-                    batch_frames.append(FramePrediction(cue, tuple(matches)))
-
-            batch_scene = (
-                [
-                    dict(
-                        start=cue.start,
-                        end=cue.end,
-                        tags=select_scores(row, labels, state.scene_floor, 0),
-                    )
-                    for cue, row in zip(batch_cues, result)
-                ]
-                if state.retain_scene
-                else []
-            )
-            state.scene_frames.extend(batch_scene)
-            if state.accumulator is not None:
-                state.accumulator.add(result, batch_cues)
-            state.frame_predictions.extend(batch_frames)
-            state.processed += len(batch_cues)
-
-            if checkpoint:
-                checkpoint.record(
-                    state.processed,
-                    state.top_scores,
-                    batch_frames,
-                    analysis=state.accumulator.state() if state.accumulator is not None else None,
-                    scene_frames=batch_scene if state.retain_scene else None,
-                )
     finally:
         # Save the last fully completed batch on Ctrl+C/inference/preparation errors.
         try:
