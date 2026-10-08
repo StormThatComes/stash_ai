@@ -768,7 +768,7 @@ Aktualne domyślne ustawienia pamięci i równoległości:
   maksymalnie 75% budżetu;
 - `--prepare-workers 4`;
 - `--merge-workers 4` — równoległy CPU replay evidence; zapisy Stash/SQLite pozostają sekwencyjne;
-- Globalne `prefetch_batches: 4` w `tagger_models.yml` (0–16; 0 wyłącza).
+- Globalne `prefetch_batches: 4` w `tagger_models.yml` (0–128; 0 wyłącza).
   Jawne `--prefetch-batches N` nadpisuje YAML; brak pola zachowuje default 4.
   Parametr steruje przygotowaniem kolejnych batchy, niezależnie od rozmiaru
   inferencji `batch_size`, i nie unieważnia zapisanych wyników.
@@ -789,13 +789,18 @@ i sprawdzenie ich hashy, dekodowanie obrazów i składanie batchy CPU mogą trwa
 podczas inferencji bieżącej sceny. Odczyt używa osobnej sesji HTTP i wspólnego
 cache RAM. Lokalny bufor mediów zachowuje najwyżej dwa
 skompresowane sprite'y w limicie 16 MiB, a wspólny cache nadal podlega budżetowi
-RAM. Kolejka wejść następnej sceny mieści `min(prefetch_batches, 2)` gotowe
-batche; dodatkowo jeden batch może czekać na wstawienie, a okno transformacji
+RAM. Kolejka wejść następnej sceny mieści `prefetch_batches` gotowych
+batchy; dodatkowo jeden batch może czekać na wstawienie, a okno transformacji
 obejmuje najwyżej `max(batch_size, prepare_workers)` klatek. Obie sceny
 współdzielą jedną pulę `prepare_workers`, więc jej liczba wątków nie podwaja się.
 Weryfikacja wejść ma własnego wykonawcę, a najwyżej dwaj producenci batchy
 CPU mają izolowane sesje HTTP. Pełna kolejka bieżącej sceny nie blokuje
 pobierania ani przygotowania następnej.
+Limit obowiązuje osobno dla każdej aktywnej kolejki wejść: bieżąca i następna
+scena mogą jednocześnie zachowywać przygotowane batche. Są one aktywnymi
+wejściami CPU, poza limitem cache `--ram-cache-gb`. Większa głębokość zwiększa
+zużycie RAM proporcjonalnie do `prefetch_batches` i rozmiaru `batch_size`;
+nie zwiększa liczby scen pobieranych z wyprzedzeniem ani kolejki wyników GPU.
 Gotowe sceny z planu reuse nie są pobierane z wyprzedzeniem.
 Błąd odczytu jest obsługiwany dopiero po dojściu do jego sceny, dzięki czemu
 nie przerywa zapisu poprzedniego wyniku. Tak samo obsługiwane są błędy
