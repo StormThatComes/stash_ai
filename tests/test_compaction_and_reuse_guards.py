@@ -68,7 +68,7 @@ def test_merge_rechecks_automation_changes_after_initial_scan(pipeline, monkeypa
         return result
     monkeypatch.setattr(RunInputs, 'inspect', inspect)
     p.stash.writes.clear()
-    assert app.main(p.args) == 0
+    assert app.main([*p.args, '--force-fetch-vtt']) == 0
     repaired = next(m for m in p.stash.scene['scene_markers'] if m['id'] == changed[0])
     assert repaired['title'] == expected['title']
     assert repaired['end_seconds'] == expected['end_seconds']

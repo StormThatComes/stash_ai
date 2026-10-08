@@ -77,7 +77,8 @@ def test_changed_or_unproven_identity_requires_only_local_inference(pipeline, mo
                 value['batch_size'] = 8
                 db.execute('UPDATE inference_identities SET data=?', (encode(value),))
         selected[0] = replace(selected[0], batch_size=8)
-    assert app.main(pipeline.args) == 0
+    extra = ['--force-fetch-vtt'] if damage == 'input' else []
+    assert app.main([*pipeline.args, *extra]) == 0
     assert len(pipeline.loaded) == loaded + 1
     assert decisions(pipeline.path)[0]['action'] == 'infer'
     with sqlite3.connect(pipeline.path) as db:

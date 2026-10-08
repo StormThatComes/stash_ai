@@ -46,6 +46,8 @@ def build_parser(app) -> argparse.ArgumentParser:
     resume.add_argument("--resume", action="store_true", default=None,
                         help="Reuse matching completed results and resume checkpoints (default; merged output).")
     resume.add_argument("--restart", action="store_true", help="Request fresh inference for selected scenes/models; resume later without this flag.")
+    parser.add_argument('--force-fetch-vtt', action='store_true',
+                        help='Fetch and verify VTT/sprites also for completed cached scenes; normal reruns trust saved inputs. Does not force inference.')
     parser.add_argument("--checkpoint-batches", type=int, default=app.CHECKPOINT_BATCHES,
                         help="Persist partial inference every N batches; also saves on Ctrl+C/errors. Default: 8.")
     parser.add_argument("--prefetch-batches", type=int, choices=range(17), default=None,

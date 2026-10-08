@@ -29,7 +29,7 @@ def test_input_error_blocks_fresh_stale_mix(pipeline, monkeypatch):
     from stash_ai.storage.progress import pending_refreshes
     from stash_ai.domain import Cue
     p = pipeline
-    args = ['--models', 'wd', 'dtq', *p.args[2:]]
+    args = ['--models', 'wd', 'dtq', *p.args[2:], '--force-fetch-vtt']
     assert app.main(args) == 0
     with StateStore(p.path, scope_for(app.STASH_URL), True) as state:
         old = state.records('1', 'scene')['wd']['meta']['frame_input_signature']

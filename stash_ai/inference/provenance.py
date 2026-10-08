@@ -5,6 +5,38 @@ from stash_ai.signatures import digest
 from stash_ai.storage.codec import encode, decode
 from .input_identity import inference_signature
 
+_STATE_FIELDS = frozenset(('_input_options', '_signature_proof'))
+
+
+def decode_identity(data, signature):
+    """Read old plain identities and optional state-only consistency metadata.
+
+    These fields never enter a model, input or checkpoint signature. The checksum
+    catches damaged registry associations without fetching otherwise ready inputs.
+    """
+    value = decode(data)
+    required = {'format', 'source', 'repo', 'revision', 'files', 'vocabulary',
+                'batch_size', 'scene_threshold', 'marker_threshold', 'aggregation', 'top_k', 'retention'}
+    if not isinstance(value, dict) or not required <= value.keys() or not isinstance(value['retention'], dict):
+        raise ValueError('Incomplete inference identity.')
+    proof = value.pop('_signature_proof', None)
+    if proof is not None and proof != digest({'signature': signature, 'identity': value}):
+        raise ValueError('Inference identity consistency check failed.')
+    options = value.pop('_input_options', None)
+    if options is not None and (not isinstance(options, dict) or set(options) != {'paths', 'sample_limit'}
+            or not isinstance(options['paths'], str) or type(options['sample_limit']) is not int
+            or options['sample_limit'] < 0):
+        raise ValueError('Invalid cached input options.')
+    return value, options
+
+
+def registered_identity(store, scene, model, signature):
+    """Read authoritative state provenance; run history never authorizes reuse."""
+    row = store.connection.execute('SELECT data FROM ' + store.table('inference_identities') +
+        ' WHERE scope=? AND scene=? AND model=? AND signature=?',
+        (store.scope, str(scene), model, signature)).fetchone()
+    return decode_identity(row[0], signature) if row else (None, None)
+
 
 def initialize(store):
     store.connection.execute('''CREATE TABLE IF NOT EXISTS inference_identities (
@@ -19,7 +51,7 @@ def predictive(identity, *, checkpoint=False):
     Retention/threshold changes require a completed-evidence coverage check;
     partial checkpoints retain their original capture policy.
     """
-    excluded = {'batch_size'}
+    excluded = {'batch_size', *_STATE_FIELDS}
     if not checkpoint:
         excluded.update(('retention', 'scene_threshold', 'marker_threshold'))
     result = {key: value for key, value in identity.items() if key not in excluded}
@@ -27,10 +59,14 @@ def predictive(identity, *, checkpoint=False):
     return result
 
 
-def register(store, scene, model, signature, identity):
+def register(store, scene, model, signature, identity, *, input_options=None):
     """Caller has verified these inputs or is about to create their checkpoint."""
     key = (store.scope, str(scene), model, signature)
-    data = encode(identity)
+    value = dict(identity)
+    if input_options is not None:
+        value['_input_options'] = input_options
+    value['_signature_proof'] = digest({'signature': signature, 'identity': value})
+    data = encode(value)
     saved = store.connection.execute('SELECT data FROM ' + store.table('inference_identities') +
             ' WHERE scope=? AND scene=? AND model=? AND signature=?', key).fetchone()
     if saved and saved[0] == data:
@@ -66,7 +102,7 @@ def saved_identity(store, scene, model, signature, identity, manifest, hashes, m
         ' WHERE scope=? AND scene=? AND model=? AND signature=?', (store.scope, str(scene), model, signature)).fetchone()
     if row:
         try:
-            candidate = decode(row[0])
+            candidate, _ = decode_identity(row[0], signature)
             if inference_signature(candidate, manifest, hashes) == signature:
                 return candidate
         except (ValueError, TypeError, KeyError):
@@ -91,7 +127,7 @@ def resume_signature(store, scene, model, identity, manifest, hashes, kinds, ana
     for signature, data in store.connection.execute('SELECT signature,data FROM ' + store.table('inference_identities') +
             ' WHERE scope=? AND scene=? AND model=?', (store.scope, str(scene), model)):
         try:
-            candidate = decode(data)
+            candidate, _ = decode_identity(data, signature)
             if (predictive(candidate, checkpoint=True) == predictive(identity, checkpoint=True)
                     and inference_signature(candidate, manifest, hashes) == signature
                     and checkpoint_signature(signature) == row[0]):
