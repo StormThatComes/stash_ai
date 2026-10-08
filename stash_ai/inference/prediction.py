@@ -124,13 +124,14 @@ def _restore_prediction_state(app, tagger, cues, *, checkpoint, report):
 
 def _run_prediction_batches(app, tagger, stash, paths, cues, state, *,
                             checkpoint, prefetch, prepare_workers, report,
-                            inference_executor):
+                            inference_executor, batch_results=None, prepared_inputs=None,
+                            transform_executor=None):
     import numpy as np
     from stash_ai.inference.batches import predicted_batches
 
     settings, labels = tagger.settings, tagger.labels
     keep = 1 if app.AGGREGATION == "max" else min(app.TOP_K_FRAMES, len(cues))
-    batches = predicted_batches(
+    batches = batch_results if batch_results is not None else predicted_batches(
         app,
         tagger,
         stash,
@@ -140,6 +141,8 @@ def _run_prediction_batches(app, tagger, stash, paths, cues, state, *,
         prepare_workers=prepare_workers,
         report=report,
         inference_executor=inference_executor,
+        prepared_inputs=prepared_inputs,
+        transform_executor=transform_executor,
     )
     try:
         for result, batch_cues in batches:
@@ -234,12 +237,14 @@ def _finalize_predictions(app, tagger, state, *, analysis):
 
 def predict_scene(app, tagger: Any, stash, paths: dict, cues: list[Cue],
                   *, checkpoint=None, prefetch: int = 0, analysis: dict | None = None,
-                  report=None, prepare_workers: int = 1, inference_executor=None
+                  report=None, prepare_workers: int = 1, inference_executor=None,
+                  state=None, batch_results=None, prepared_inputs=None,
+                  transform_executor=None, before_finalize=None
                   ) -> tuple[list[tuple[str, float]], list[FramePrediction]]:
     """Return raw retained evidence; publication applies exclusions and limits."""
     if not cues:
         raise ValueError("Cannot predict a scene without VTT cues.")
-    state = _restore_prediction_state(
+    state = state if state is not None else _restore_prediction_state(
         app,
         tagger,
         cues,
@@ -258,7 +263,12 @@ def predict_scene(app, tagger: Any, stash, paths: dict, cues: list[Cue],
         prepare_workers=prepare_workers,
         report=report,
         inference_executor=inference_executor,
+        batch_results=batch_results,
+        prepared_inputs=prepared_inputs,
+        transform_executor=transform_executor,
     )
+    if before_finalize is not None:
+        before_finalize()
     from contextlib import nullcontext
     timer = (report.measure('inference_scene_finalize', model=tagger.settings.source.key,
                             units=1, unit='scenes') if report is not None else nullcontext())

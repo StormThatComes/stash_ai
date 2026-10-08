@@ -785,13 +785,32 @@ jest zamykany w swoim wątku, a wykonawca kończy pracę. Wejścia prefetch i wy
 w kolejce znajdują się w RAM, a nie w VRAM.
 
 Prefetch obejmuje też wejście jednej następnej sceny: pobranie VTT/sprite'ów
-i sprawdzenie ich hashy mogą trwać podczas inferencji bieżącej sceny. Odczyt
-używa osobnej sesji HTTP i wspólnego cache RAM; nie uruchamia modelu ani nie
-dekoduje obrazów kolejnej sceny. Lokalny bufor zachowuje najwyżej dwa
+i sprawdzenie ich hashy, dekodowanie obrazów i składanie batchy CPU mogą trwać
+podczas inferencji bieżącej sceny. Odczyt używa osobnej sesji HTTP i wspólnego
+cache RAM. Lokalny bufor mediów zachowuje najwyżej dwa
 skompresowane sprite'y w limicie 16 MiB, a wspólny cache nadal podlega budżetowi
-RAM. Gotowe sceny z planu reuse nie są pobierane z wyprzedzeniem.
+RAM. Kolejka wejść następnej sceny mieści `min(prefetch_batches, 2)` gotowe
+batche; dodatkowo jeden batch może czekać na wstawienie, a okno transformacji
+obejmuje najwyżej `max(batch_size, prepare_workers)` klatek. Obie sceny
+współdzielą jedną pulę `prepare_workers`, więc jej liczba wątków nie podwaja się.
+Gotowe sceny z planu reuse nie są pobierane z wyprzedzeniem.
 Błąd odczytu jest obsługiwany dopiero po dojściu do jego sceny, dzięki czemu
-nie przerywa zapisu poprzedniego wyniku. Ctrl+C anuluje także oczekujący odczyt.
+nie przerywa zapisu poprzedniego wyniku. Tak samo obsługiwane są błędy
+dekodowania i inferencji następnej sceny.
+
+Po przetworzeniu ostatniego batcha bieżącej sceny główny wątek może odebrać
+gotowe wejście następnej, sprawdzić reuse i odtworzyć jej checkpoint. Dopiero
+po tych sprawdzeniach uruchamia jej zadanie na tym samym właścicielu GPU,
+przed finalizacją, budowaniem wyniku i commitem poprzedniej sceny. Wyniki
+następnej sceny czekają w ograniczonej kolejce RAM; checkpointy i pełne wyniki
+są zapisywane w kolejności scen, w głównym wątku. Jeśli wejście nadal się
+pobiera lub jego weryfikacja zawiodła, finalizacja poprzedniej sceny przebiega
+bez czekania na nie. Handoff jest ponawiany także przed budowaniem wyniku
+i przed commitem, jeśli wejście stało się gotowe podczas finalizacji.
+Przy resume spekulacyjne batche CPU od początku sceny
+są odrzucane, a GPU otrzymuje tylko suffix po zweryfikowanym checkpoincie.
+Ctrl+C anuluje także odczyt i zadanie następnej sceny; nieprzetworzone wyniki
+GPU nie poszerzają zapisanego checkpointu.
 `--prefetch-batches 0` wyłącza również przygotowanie wejścia następnej sceny.
 
 Przygotowanie CPU składa kompletne wejścia (`stack`, maski i dopełnianie
@@ -809,6 +828,9 @@ Historia uruchomień rozdziela `sprite_frame_read`, `image_prepare`,
 długi `inference_input_wait` wskazuje oczekiwanie na przygotowanie wejścia.
 `scene_input_prefetch` mierzy weryfikację następnej sceny w tle,
 `scene_input_wait` — oczekiwanie na jej gotowe wejście, a
+`scene_batch_prefetch` i `scene_batch_queue_wait` — przygotowanie CPU i
+oczekiwanie na miejsce w kolejce następnej sceny. `scene_handoff` mierzy
+autoryzację i rozpoczęcie jej zadania przed finalizacją poprzedniej.
 `inference_scene_finalize`, `inference_output_capture` i `inference_commit`
 rozdzielają finalizację CPU, budowanie wyniku i jego zapis. Pozwala to wskazać
 przyczynę pauz na granicach scen. `input_verify` na ścieżce synchronicznej

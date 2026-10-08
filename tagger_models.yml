@@ -5,10 +5,12 @@
 # Keep tagger_sources.sqlite3; --state-db selects a durable location.
 # stash_ai.py resumes matching results/checkpoints by default in merged mode.
 # --restart requests fresh inference; omit it when resuming that new run.
-# --prefetch-batches 4 prepares four next batches; 0 disables preparation in the background.
+# --prefetch-batches 4 prepares four next batches; 0 disables batch/scene lookahead.
 # --ram-budget-gb 32 / --ram-cache-gb 24 bound the shared cache; allocated on demand.
 # --prepare-workers 4 parallelizes CPU transforms across batches with prefetch enabled.
-# One inference thread overlaps GPU work with ordered result/checkpoint processing.
+# One GPU owner overlaps work with results/checkpoints and previous-scene finalization.
+# One next scene also prepares up to min(prefetch_batches, 2) CPU batches in RAM.
+# Current/next scenes share prepare_workers; SQLite/checkpoints stay on the main thread.
 # --verbose enables per-scene diagnostics; default output summarizes the collection.
 # No sprite or extracted-frame cache is written to disk.
 # --merge-only migrates existing results without model inference.
