@@ -78,7 +78,7 @@ w RAM. Kod i testy importują je bezpośrednio z tego modułu.
 batchowanie z własnością i zamykaniem obrazów w workerach. Z prefetch okno
 transformacji obejmuje klatki kilku batchy, a składanie wejścia backendu odbywa
 się przed inferencją. `inference/batches.py` wykonuje uporządkowaną inferencję
-w jednym wątku z ograniczoną kolejką dwóch wyników i wspólnym anulowaniem
+w jednym wątku z ograniczoną kolejką wyników CPU i wspólnym anulowaniem
 przygotowania mediów. `runs/merged_model.py` udostępnia jednego wykonawcę przez
 cały lifecycle modelu: ładowanie, inferencję wszystkich scen i zamknięcie na
 tym samym wątku. Iterator sceny czeka na swoje zadanie, ale nie zamyka
@@ -104,7 +104,9 @@ samym właścicielu backendu. Oddzielne obserwatory zachowują przypisanie
 historii/proofs do właściwych scen. Wolne lub błędne wejście nie zatrzymuje
 finalizacji; błędy przyszłej sceny są raportowane po dojściu do niej.
 Zapisy SQLite pozostają uporządkowane w głównym wątku, a kolejka GPU wyników
-mieści najwyżej dwa batche i jedno wywołanie w toku. Resume odrzuca CPU
+mieści `result_prefetch_batches` batchy (1–128, domyślnie 32) oraz jeden wynik
+oczekujący na wstawienie lub jedno wywołanie w toku. Limit jest niezależny od
+kolejki wejść i nie zmienia właściciela backendu. Resume odrzuca CPU
 lookahead od początku i uruchamia wyłącznie klatki po zapisanym checkpoincie.
 Anulowanie zatrzymuje też przyszłe zadanie i odrzuca nieprzetworzone wyniki.
 `inference/identity.py` buduje tożsamość modeli; `inference/checkpoints.py` zawiera

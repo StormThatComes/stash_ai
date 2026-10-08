@@ -19,6 +19,7 @@ import pytest
     ('run_history', ['--frames', '8', '--labels', '2', '--repeats', '1']),
     ('pinned_proofs', ['--frames', '4', '--labels', '2', '--repeats', '1']),
     ('scoped_reports', ['--scenes', '20', '--selected', '2', '--repeats', '2']),
+    ('state_compression', ['--frames', '4', '--labels', '2', '--repeats', '2']),
 ])
 def test_offline_entry_point(name, arguments):
     result = subprocess.run([sys.executable, '-m', 'benchmarks.benchmark_' + name, *arguments],
@@ -33,6 +34,12 @@ def test_offline_entry_point(name, arguments):
         assert all(row['source_unchanged'] for row in payload['trials'] if row['preview'])
         assert {row['decoded_snapshots'] for row in payload['trials'] if row['variant'] == 'baseline'} == {48}
         assert {row['decoded_snapshots'] for row in payload['trials'] if row['variant'] == 'candidate'} == {24}
+    if name == 'state_compression':
+        assert payload['identical_evidence']
+        assert {(row['kind'], row['level']) for row in payload['groups']} == {
+            (kind, level) for kind in ('scene', 'markers') for level in (1, 6)}
+        for kind in ('scene', 'markers'):
+            assert len({row['logical_sha256'] for row in payload['trials'] if row['kind'] == kind}) == 1
     if name == 'rethreshold':
         assert all(trial['evidence_unchanged'] and trial['evidence_writes'] == 0
                    for trial in payload['trials'])

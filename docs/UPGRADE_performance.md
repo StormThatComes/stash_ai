@@ -11,6 +11,7 @@ lokalny cache merge.
 | `--ram-cache-gb` | 24 | wspólny cache wyników, indeksów i mediów |
 | `--prepare-workers` | 4 | równoległe transformacje klatek na CPU |
 | `--prefetch-batches` | 4 | liczba przygotowanych batchy przed inferencją |
+| `--result-prefetch-batches` | 32 | liczba wyników CPU buforowanych podczas obróbki i zapisu, 1–128 |
 
 Cache jest przydzielany na żądanie i dodatkowo ograniczony do 75% budżetu RAM.
 Budżet nie jest twardym limitem procesu — poza cache pozostają modele, tensory,

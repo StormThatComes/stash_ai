@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Barrier, Event, Lock, enumerate as threads, get_ident, current_thread
 from types import SimpleNamespace
+import weakref
 
 import numpy as np
 import pytest
@@ -227,29 +228,40 @@ def test_lookahead_failure_keeps_complete_prefix_and_resumes(pipeline, monkeypat
     assert_workers_closed()
 
 
-def test_full_result_queue_is_bounded_and_close_joins_worker(monkeypatch):
-    fourth_completed = Event()
-    calls = []
+@pytest.mark.parametrize('result_prefetch', [1, 2, 16, 32, 128])
+def test_full_result_queue_is_bounded_and_close_joins_worker(monkeypatch, result_prefetch):
+    full = Event()
+    calls, scores = [], []
     model = SimpleNamespace(settings=SimpleNamespace(source=WD), labels=['tag'])
 
     def inputs(*args, **kwargs):
-        for index in range(100):
+        for index in range(result_prefetch + 4):
             yield [index], [index]
 
     def predict(images):
         calls.append(images[0])
-        if len(calls) == 4:
-            fourth_completed.set()
-        return np.array([[.5]], np.float32)
+        if len(calls) == result_prefetch + 2:
+            full.set()
+        result = np.array([[.5]], np.float32)
+        scores.append(weakref.ref(result))
+        return result
 
     model.predict_batch = predict
     monkeypatch.setattr(batches, 'prepared_batches', inputs)
-    with closing(batches.predicted_batches(None, model, None, {}, [], prefetch=1)) as iterator:
+    with closing(batches.predicted_batches(None, model, None, {}, [], prefetch=1,
+                                           result_prefetch=result_prefetch)) as iterator:
         assert next(iterator)[1] == [0]
-        assert fourth_completed.wait(5)
-        # One yielded result, two queued results and one waiting to be enqueued.
-        assert calls == [0, 1, 2, 3]
+        assert full.wait(5)
+        # One yielded result, N queued CPU results and one awaiting enqueue.
+        assert calls == list(range(result_prefetch + 2))
     assert_workers_closed()
+    assert all(reference() is None for reference in scores)
+
+
+@pytest.mark.parametrize('value', [0, -1, 129, True, 1.5])
+def test_result_queue_rejects_invalid_or_unbounded_capacity(value):
+    with pytest.raises(ValueError, match='result_prefetch'):
+        batches.BatchPredictions(None, None, None, {}, [], prefetch=1, result_prefetch=value)
 
 
 def test_scene_close_cancels_read_but_keeps_borrowed_model_executor(monkeypatch):
@@ -286,7 +298,8 @@ def test_scene_close_cancels_read_but_keeps_borrowed_model_executor(monkeypatch)
 
 
 @pytest.mark.parametrize('error_type', [RuntimeError, KeyboardInterrupt])
-def test_consumer_failure_checkpoints_only_processed_results(pipeline, monkeypatch, tmp_path, error_type):
+@pytest.mark.parametrize('result_prefetch', [2, 32, 128])
+def test_consumer_failure_checkpoints_only_processed_results(pipeline, monkeypatch, tmp_path, error_type, result_prefetch):
     from stash_ai.evidence.temporal.statistics import SceneAccumulator
     config = ModelSettings(WD, Path('missing'), .4, .65, 4)
     model = IndexedTagger(config, pipeline.scores['wd'], pipeline.vocab.labels)
@@ -303,7 +316,8 @@ def test_consumer_failure_checkpoints_only_processed_results(pipeline, monkeypat
             patch.setattr(SceneAccumulator, 'add', fail_second)
             with pytest.raises(error_type, match='postprocessing failed'):
                 prediction.predict_scene(app, model, pipeline.stash, {}, pipeline.cues,
-                                         checkpoint=checkpoint, prefetch=2, prepare_workers=8)
+                                         checkpoint=checkpoint, prefetch=2, prepare_workers=8,
+                                         result_prefetch=result_prefetch)
         assert checkpoint.restore()[0] == 4
         assert_workers_closed()
         resumed = IndexedTagger(config, pipeline.scores['wd'], pipeline.vocab.labels)

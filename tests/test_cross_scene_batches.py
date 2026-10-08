@@ -108,17 +108,19 @@ def test_next_gpu_overlaps_scene_finalization_and_matches_sequential_results(mod
     assert sum(row['calls'] for row in metrics if row['name'] == 'scene_handoff') == 1
 
 
-def test_next_gpu_results_are_bounded_while_previous_scene_is_finalized(model_run, monkeypatch):
+@pytest.mark.parametrize('result_prefetch', [1, 2, 4])
+def test_next_gpu_results_are_bounded_while_previous_scene_is_finalized(model_run, monkeypatch, result_prefetch):
     context = model_run
     context.args.prefetch_batches = 16
-    third = Event()
+    context.args.result_prefetch_batches = result_prefetch
+    full = Event()
     next_calls = []
 
     def predict(scene, images):
         if scene == '2':
             next_calls.append(images)
-            if len(next_calls) == 3:
-                third.set()
+            if len(next_calls) == result_prefetch + 1:
+                full.set()
 
     instrument(context, monkeypatch, predict=predict)
     original = prediction._finalize_predictions
@@ -127,10 +129,10 @@ def test_next_gpu_results_are_bounded_while_previous_scene_is_finalized(model_ru
     def finalize(*args, **kwargs):
         if not finalized:
             finalized.append(True)
-            assert third.wait(5)
-            # Two queued results and one waiting to be enqueued. No result of
+            assert full.wait(5)
+            # N queued results and one waiting to be enqueued. No result of
             # the next scene is consumed during this scene's finalization.
-            assert len(next_calls) == 3
+            assert len(next_calls) == result_prefetch + 1
         return original(*args, **kwargs)
 
     monkeypatch.setattr(prediction, '_finalize_predictions', finalize)
@@ -139,10 +141,44 @@ def test_next_gpu_results_are_bounded_while_previous_scene_is_finalized(model_ru
     assert_inference_workers_closed()
 
 
+def test_next_scene_can_finish_inference_during_previous_commit(model_run, monkeypatch):
+    context = model_run
+    context.args.prefetch_batches = 16
+    assert context.args.result_prefetch_batches == 32
+    next_finished = Event()
+
+    def predict(scene, images):
+        if scene == '2' and images[0][1] == 8:
+            next_finished.set()
+
+    _, _, calls, _, gpu_threads = instrument(context, monkeypatch, predict=predict)
+    original = checkpoints.finish
+    owner = current_thread()
+    sql_threads = []
+    context.state.connection.set_trace_callback(lambda _: sql_threads.append(current_thread()))
+
+    def commit(store, scene, *args):
+        assert current_thread() is owner
+        if scene == '1':
+            assert next_finished.wait(5), 'CPU result queue blocked scene 2 during scene 1 commit'
+            assert len([value for value in calls if value[0] == '2']) == 5
+            assert not store.records('2', 'scene')
+        return original(store, scene, *args)
+
+    monkeypatch.setattr(checkpoints, 'finish', commit)
+    run_model(context)
+    assert context.stats['processed'] == 2 and not context.stats['errors']
+    assert len(gpu_threads) == 1 and set(sql_threads) == {owner}
+    assert context.state.records('2', 'scene')
+    assert_inference_workers_closed()
+
+
 @pytest.mark.parametrize('prefetch', [1, 16, 128])
 def test_handoff_continues_across_three_scenes(model_run, monkeypatch, prefetch):
     context = model_run
     context.args.prefetch_batches, context.args.prepare_workers = prefetch, 8
+    # Keep scene 2 running until its owner starts prefetching scene 3.
+    context.args.result_prefetch_batches = 2
     context.scenes['3'] = dict(paths=dict(vtt='/vtt/3', sprite='/sprite'))
     cpu_third, gpu_third = Event(), Event()
 
@@ -189,6 +225,7 @@ def test_next_input_and_cpu_batches_start_while_long_current_queue_is_full(model
     from stash_ai.inference.input_identity import cue_manifest, inference_signature
     context = model_run
     context.args.prefetch_batches, context.args.prepare_workers = prefetch, 8
+    context.args.result_prefetch_batches = 2
     context.scenes['3'] = dict(paths=dict(vtt='/vtt/3', sprite='/sprite'))
     third_verified, third_prepared = Event(), Event()
     inspect = context.inputs.inspect

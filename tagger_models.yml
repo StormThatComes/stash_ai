@@ -10,6 +10,7 @@
 # --prepare-workers 4 parallelizes CPU transforms across batches with prefetch enabled.
 # One GPU owner overlaps work with results/checkpoints and previous-scene finalization.
 # Each current/next input queue holds up to prefetch_batches CPU batches in RAM.
+# --result-prefetch-batches 32 buffers inferred CPU scores during result persistence.
 # Prepared batches are active work outside the shared cache limit.
 # Current/next scenes share prepare_workers; SQLite/checkpoints stay on the main thread.
 # --verbose enables per-scene diagnostics; default output summarizes the collection.
@@ -24,6 +25,7 @@ enabled_models: [joytag, oppai, wd, dtq]
 device: cuda  # auto prefers CUDA; cuda requires CUDA; cpu forces CPU.
 download_missing: true  # All four models, including JoyTag; --offline disables downloads.
 prefetch_batches: 4  # Global 0..128; 0 also disables inference lookahead. Separate from model batch_size.
+result_prefetch_batches: 32  # CPU result batches, 1..128; used only when prefetch_batches > 0.
 prepare_workers: 4  # CPU image transforms; --prepare-workers overrides. Integer 1..16.
 merge_workers: 4  # Read-only evidence replay; --merge-workers overrides. Integer 1..16.
 model_report_workers: 4  # Offline report processes; --model-report-workers overrides. Integer 1..16.

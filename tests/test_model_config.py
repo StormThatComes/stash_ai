@@ -84,6 +84,47 @@ def test_cli_rejects_out_of_range_prefetch_values(value):
         parse_args(RuntimeContext(), ['--prefetch-batches', str(value)])
 
 
+@pytest.mark.parametrize('yaml_value', [1, 16, 32, 128, 'absent'])
+@pytest.mark.parametrize('cli_value', [None, 2, 32, 128])
+def test_result_prefetch_precedence_preserves_inference_identity(tmp_path, yaml_value, cli_value):
+    from stash_ai.commands.arguments import parse_args
+    from stash_ai.runtime.context import RuntimeContext
+    from stash_ai.inference.identity import model_identity
+    from stash_ai.models import Vocabulary
+    app = RuntimeContext()
+    path = tmp_path / 'models.yml'
+    data = dict(version=1, enabled_models=['wd'], wd=dict(scene_threshold=.4, marker_threshold=.7, batch_size=4))
+    path.write_text(yaml.safe_dump(data))
+    identity = model_identity(app, load_model_settings(path, None, None)[0], Vocabulary(['one'], {}))
+    if yaml_value != 'absent':
+        data['result_prefetch_batches'] = yaml_value
+    path.write_text(yaml.safe_dump(data))
+    command = ['--model-config', str(path)]
+    if cli_value is not None:
+        command += ['--result-prefetch-batches', str(cli_value)]
+    args = parse_args(app, command)
+    assert args.result_prefetch_batches == (cli_value if cli_value is not None else
+                                            32 if yaml_value == 'absent' else yaml_value)
+    assert model_identity(app, load_model_settings(path, None, None)[0], Vocabulary(['one'], {})) == identity
+
+
+@pytest.mark.parametrize('value', [True, False, 0, -1, 129, None, 1.2, '32', [], {}])
+def test_yaml_rejects_invalid_result_prefetch_values(tmp_path, value):
+    from stash_ai.config import load_model_configuration
+    path = tmp_path / 'models.yml'
+    path.write_text(yaml.safe_dump(dict(version=1, result_prefetch_batches=value)))
+    with pytest.raises(ValueError, match='result_prefetch_batches'):
+        load_model_configuration(path)
+
+
+@pytest.mark.parametrize('value', [0, -1, 129])
+def test_cli_rejects_out_of_range_result_prefetch_values(value):
+    from stash_ai.commands.arguments import parse_args
+    from stash_ai.runtime.context import RuntimeContext
+    with pytest.raises(SystemExit):
+        parse_args(RuntimeContext(), ['--result-prefetch-batches', str(value)])
+
+
 @pytest.mark.parametrize('name,mode', [
     ('prepare_workers', []), ('merge_workers', ['--merge-only']),
     ('model_report_workers', ['--model-report']),
