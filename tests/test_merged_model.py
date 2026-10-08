@@ -42,7 +42,7 @@ def run_model(context, *, input_plan=None):
 
 def assert_inference_workers_closed():
     assert not any(thread.name.startswith(('inference-model', 'inference-batches',
-                                           'prepare-frames', 'transform-frames', 'scene-inputs'))
+                                           'prepare-frames', 'transform-frames', 'scene-inputs', 'scene-batches'))
                    for thread in threads())
 
 
@@ -229,10 +229,11 @@ def test_input_reader_close_failure_still_closes_backend(model_run, monkeypatch)
     reader_threads = []
 
     def create_reader():
-        reader_threads.append(current_thread())
+        owner = current_thread()
+        reader_threads.append(owner)
 
         def close():
-            assert current_thread() is reader_threads[0]
+            assert current_thread() is owner
             raise RuntimeError('input reader close failed')
 
         return SimpleNamespace(get_media=context.pipeline.stash.get_media, close=close)

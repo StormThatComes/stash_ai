@@ -85,13 +85,26 @@ tym samym wątku. Iterator sceny czeka na swoje zadanie, ale nie zamyka
 pożyczonego wykonawcy. `inference/prediction.py` odtwarza stan predykcji,
 obrabia wyniki i checkpointy w wątku właściciela SQLite oraz finalizuje scenę.
 `inference/input_prefetch.py` weryfikuje wejście jednej następnej sceny w tle,
-przez izolowany transport HTTP. Synchronizowane mapy `RunMedia`/`RunInputs`
+przez izolowany transport HTTP. `inference/batch_stream.py` dekoduje jej
+obrazy i przygotowuje ograniczoną kolejkę `min(prefetch_batches, 2)` batchy
+CPU. Bieżąca i następna scena współdzielą pulę transformacji należącą do
+model pass; zamknięcie sceny czeka na jej własne obrazy, a nie zamyka puli.
+Weryfikator wejść i dwaj producenci CPU mają oddzielnych wykonawców/sesje HTTP;
+pełna kolejka bieżącej sceny nie zajmuje wykonawcy potrzebnego następnej.
+Synchronizowane mapy `RunMedia`/`RunInputs`
 zachowują jeden snapshot treści URL-i i manifestów przy równoległych odczytach.
 Plan reuse wybiera kandydatów bez dodatkowych odczytów SQLite przed inferencją;
-faktyczne reuse, invalidacja peerów i obsługa błędu następują dopiero w wątku
-głównym po dojściu do sceny. Prefetch nie dekoduje kolejnej sceny ani nie
-alokuje jej tensorów GPU; limit lokalny mediów i budżet wspólnego cache są
-zachowane. Anulowanie obejmuje także przerwane oczekiwanie na Future.
+faktyczne reuse, invalidacja peerów i odtworzenie checkpointu odbywają się
+w głównym wątku przed startem GPU. `runs/model_scene.py` przechowuje stan
+jednej autoryzowanej sceny. Po odebraniu batchy bieżącej sceny jej finalizacja
+może nakładać się na eager `BatchPredictions` następnej sceny, nadal na tym
+samym właścicielu backendu. Oddzielne obserwatory zachowują przypisanie
+historii/proofs do właściwych scen. Wolne lub błędne wejście nie zatrzymuje
+finalizacji; błędy przyszłej sceny są raportowane po dojściu do niej.
+Zapisy SQLite pozostają uporządkowane w głównym wątku, a kolejka GPU wyników
+mieści najwyżej dwa batche i jedno wywołanie w toku. Resume odrzuca CPU
+lookahead od początku i uruchamia wyłącznie klatki po zapisanym checkpoincie.
+Anulowanie zatrzymuje też przyszłe zadanie i odrzuca nieprzetworzone wyniki.
 `inference/identity.py` buduje tożsamość modeli; `inference/checkpoints.py` zawiera
 `Checkpoint`, zapis i odtworzenie kompaktowego stanu oraz atomowe zakończenie inferencji.
 `stash_ai/storage/progress.py` obsługuje indeks ukończenia, ponowne użycie wyników i resume/refresh.

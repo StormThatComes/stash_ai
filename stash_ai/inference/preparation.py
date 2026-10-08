@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from collections import deque
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from contextlib import nullcontext
 from typing import Any, TYPE_CHECKING
@@ -36,7 +36,8 @@ class PreparedBatch:
 
 
 def prepared_batches(app, tagger, stash, paths, cues, prefetch=False, workers=1, *,
-                     report=None, collate=False, cancellation=None):
+                     report=None, collate=False, cancellation=None,
+                     transform_executor=None, frame_lookahead=False):
     """Bounded ordered batches; one producer owns media and worker image copies."""
     if not isinstance(prefetch, int) or not 0 <= prefetch <= 16:
         raise ValueError('prefetch must be an integer in 0..16.')
@@ -47,12 +48,15 @@ def prepared_batches(app, tagger, stash, paths, cues, prefetch=False, workers=1,
     cancellation = cancellation if cancellation is not None else Cancellation()
     work = report.work() if report is not None else ''
     executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="prepare-frames") if prefetch else None
-    transforms = ThreadPoolExecutor(max_workers=workers, thread_name_prefix='transform-frames') if workers > 1 else None
+    transforms = transform_executor
+    if transforms is None and workers > 1:
+        transforms = ThreadPoolExecutor(max_workers=workers, thread_name_prefix='transform-frames')
     frames = deque()
+    current_future = None
     exhausted = False
     # With prefetch, CPU parallelism is independent of the GPU batch size.
     # This is a bounded frame window in addition to the queued ready batches.
-    window = max(tagger.batch_size, workers) if prefetch else tagger.batch_size
+    window = max(tagger.batch_size, workers) if prefetch or frame_lookahead else tagger.batch_size
 
     def measure(name, count=1):
         return (report.measure(name, model=tagger.settings.source.key, work=work,
@@ -96,6 +100,7 @@ def prepared_batches(app, tagger, stash, paths, cues, prefetch=False, workers=1,
             return _prepare_next()
 
     def _prepare_next():
+        nonlocal current_future
         prepared, batch_cues = [], []
         if transforms:
             fill_frames()
@@ -105,8 +110,10 @@ def prepared_batches(app, tagger, stash, paths, cues, prefetch=False, workers=1,
                 if not frames:
                     break
                 cue, future = frames.popleft()
+                current_future = future
                 prepared.append(future.result())
-                if prefetch:
+                current_future = None
+                if prefetch or frame_lookahead:
                     fill_frames()
             else:
                 with measure('sprite_frame_read', 0):
@@ -136,6 +143,10 @@ def prepared_batches(app, tagger, stash, paths, cues, prefetch=False, workers=1,
         cancellation.cancel()
         if executor:
             executor.shutdown(wait=True, cancel_futures=True)
-        if transforms:
+        if transforms is not None and transform_executor is None:
             transforms.shutdown(wait=True)
+        elif transforms is not None:
+            # Borrowed workers outlive the scene. Let every owned image reach
+            # transform()'s finally before closing media/the backend.
+            wait([future for _, future in frames] + ([current_future] if current_future else []))
         iterator.close()

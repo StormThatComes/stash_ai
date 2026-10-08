@@ -24,6 +24,8 @@ class MergedModelRun:
         self.tagger = None
         self.inference_executor = None
         self.input_prefetch = None
+        self.prepare_executor = None
+        self._staged = None
         with report.measure('model_identity', model=self.key):
             self.identity = model_identity(app, config, vocabulary)
         report.record_model(config, identity=self.identity)
@@ -74,9 +76,15 @@ class MergedModelRun:
         finally:
             try:
                 try:
-                    if self.input_prefetch is not None:
-                        self.input_prefetch.close()
+                    try:
+                        self._close_staged(kinds)
+                    finally:
+                        if self.input_prefetch is not None:
+                            self.input_prefetch.close()
                 finally:
+                    if self.prepare_executor is not None:
+                        self.prepare_executor.shutdown(wait=True)
+                        self.prepare_executor = None
                     if self.inference_executor is None:
                         self._close_tagger()
                     else:
@@ -88,6 +96,7 @@ class MergedModelRun:
                     self.inference_executor.shutdown(wait=True)
                     self.inference_executor = None
                 self.input_prefetch = None
+                self._staged = None
                 self._scene_sequence = ()
 
     def _prefetch_next_input(self, input_plan):
@@ -100,7 +109,11 @@ class MergedModelRun:
                 continue
             if input_plan is not None and scene in input_plan.cached[self.key]:
                 continue
-            self.input_prefetch.submit(scene, paths, self.identity)
+            self._prefetch_position = index
+            self.input_prefetch.submit(scene, paths, self.identity, tagger=self.tagger,
+                                       prefetch=self.args.prefetch_batches,
+                                       workers=self.args.prepare_workers,
+                                       transforms=self.prepare_executor)
             break
 
     def _close_tagger(self):
@@ -109,6 +122,18 @@ class MergedModelRun:
                 self.tagger.close()
             finally:
                 self.tagger = None
+
+    def _close_staged(self, kinds):
+        if self._staged is None:
+            return
+        scene, job, observer, _ = self._staged
+        if job is not None and job is not False:
+            try:
+                job.close()
+            finally:
+                from stash_ai.runtime.cancellation import Cancelled
+                progress.block_publication(self.store, [scene], self.key, kinds)
+                observer.failed('inference', Cancelled('Run stopped before processing this scene.'))
 
     def _eligible(self, scene_id, paths):
         if not paths.get("sprite") or not paths.get("vtt"):
@@ -151,6 +176,8 @@ class MergedModelRun:
         try:
             with self.report.measure('model_load', model=self.key):
                 if self.args.prefetch_batches:
+                    self.prepare_executor = ThreadPoolExecutor(
+                        max_workers=self.args.prepare_workers, thread_name_prefix='transform-frames')
                     self.inference_executor = ThreadPoolExecutor(
                         max_workers=1, thread_name_prefix='inference-model')
                     self.inference_executor.submit(load).result()
@@ -181,12 +208,36 @@ class MergedModelRun:
     def _process_scene(self, scene_id, current, paths, kinds, inputs, *, trust_cached=False,
                        input_plan=None):
         """Return False only when model loading fails and its remaining scenes must stop."""
+        if self._staged is not None and self._staged[0] == scene_id:
+            _, job, self.observer, error = self._staged
+            self._staged = None
+            if error is not None:
+                raise error
+        else:
+            job = self._prepare_scene(scene_id, current, paths, kinds, inputs,
+                                      trust_cached=trust_cached, input_plan=input_plan)
+        if job is False:
+            return False
+        if job is None:
+            if self.input_prefetch is not None:
+                self.input_prefetch.take_batches(scene_id, 1)
+            return True
+        self.input_options = job.input_options
+        try:
+            self._prefetch_next_input(input_plan)
+            self._predict_scene(job, kinds, inputs, input_plan)
+        finally:
+            job.close()
+        return True
+
+    def _prepare_scene(self, scene_id, current, paths, kinds, inputs, *, trust_cached=False,
+                       input_plan=None):
         app, args, store = self.app, self.args, self.store
         store.cache.pressure(force=True)
         if trust_cached:
             with self.report.measure('inference_reuse_check', model=self.key):
                 if self._reuse_cached(scene_id, paths, kinds):
-                    return True
+                    return None
         from stash_ai.inference.reuse import input_options
         self.input_options = input_options(app, paths)
         from stash_ai.storage.input_checks import defer, verified
@@ -209,7 +260,7 @@ class MergedModelRun:
         self.observer.inputs(self.identity, cues, media.hashes, paths)
         with self.report.measure('inference_reuse_check', model=self.key):
             if self._reuse(scene_id, signature, cues, media, kinds):
-                return True
+                return None
         if not args.restart:
             stale = progress.request_stale_refresh(store, scene_id, self.key, kinds, signature)
             self.stats['auto_refresh_requested'] += len(stale)
@@ -222,38 +273,96 @@ class MergedModelRun:
             self.report.record_model(self.config, identity=self.identity)
             signature = inference_signature(self.identity, cue_manifest(cues), media.hashes)
             self.observer.inputs(self.identity, cues, media.hashes, paths)
-        self._prefetch_next_input(input_plan)
-        self._predict_scene(scene_id, paths, cues, media, signature, kinds)
-        return True
+        from .model_scene import ModelScene
+        return ModelScene(scene_id, paths, cues, media, signature, input_options=self.input_options)
 
-    def _predict_scene(self, scene_id, paths, cues, media, signature, kinds):
+    def _initialize_scene(self, job, kinds):
         from stash_ai.evidence.temporal.statistics import CHECKPOINT_FORMAT
         app, args, store = self.app, self.args, self.store
         if not args.resume:
             with store.connection:
-                checkpoints.clear_checkpoint(store, scene_id, self.key)
-        checkpoint = checkpoints.Checkpoint(
-            store, scene_id, self.key,
-            self._checkpoint_signature(scene_id, signature, cues, media, kinds, CHECKPOINT_FORMAT),
-            len(cues), len(self.vocabulary.labels), args.checkpoint_batches)
-        checkpoint.on_restore = self.observer.checkpoint
+                checkpoints.clear_checkpoint(store, job.scene, self.key)
+        job.checkpoint = checkpoints.Checkpoint(
+            store, job.scene, self.key,
+            self._checkpoint_signature(job.scene, job.signature, job.cues, job.media, kinds, CHECKPOINT_FORMAT),
+            len(job.cues), len(self.vocabulary.labels), args.checkpoint_batches)
+        job.checkpoint.on_restore = self.observer.checkpoint
+        job.state = prediction._restore_prediction_state(app, self.tagger, job.cues,
+                                                         checkpoint=job.checkpoint, report=self.report)
+        if self.input_prefetch is not None:
+            job.prepared = self.input_prefetch.take_batches(job.scene, job.state.processed)
+
+    def _stage_next_scene(self, kinds, inputs, input_plan):
+        lookahead = self.input_prefetch
+        if self._staged is not None or lookahead is None or lookahead.pending is None:
+            return
+        future = lookahead.pending
+        # Slow/failed input must never hold up finalization of the previous
+        # scene. Its read error is still observed only when that scene is visited.
+        if not future.done() or future.cancelled() or future.exception() is not None:
+            return
+        scene_id, current = self._scene_sequence[self._prefetch_position]
+        from stash_ai.inference.reuse_diagnostics import ReuseObserver
+        previous = self.observer, self.input_options, self.report.work()
+        self.observer = ReuseObserver(self.app, self.args, self.store, self.config, self.report)
+        self.observer.begin(scene_id)
+        job, error = None, None
+        try:
+            with self.report.measure('scene_handoff', model=self.key, units=1, unit='scenes'):
+                job = self._prepare_scene(scene_id, current, current['paths'], kinds, inputs,
+                                          trust_cached=(input_plan is not None and
+                                                        scene_id in input_plan.cached[self.key]),
+                                          input_plan=input_plan)
+                if job is not None and job is not False:
+                    self._initialize_scene(job, kinds)
+                    from stash_ai.inference.batches import BatchPredictions
+                    job.batches = BatchPredictions(
+                        self.app, self.tagger, job.media, job.paths, job.cues[job.state.processed:],
+                        prefetch=self.args.prefetch_batches, prepare_workers=self.args.prepare_workers,
+                        report=self.report, inference_executor=self.inference_executor,
+                        prepared_inputs=job.prepared, transform_executor=self.prepare_executor)
+                else:
+                    lookahead.take_batches(scene_id, 1)
+        except Exception as exc:
+            error = exc
+            if job is not None and job is not False:
+                job.close()
+            lookahead.take_batches(scene_id, 1)
+            job = None
+        finally:
+            self._staged = (scene_id, job, self.observer, error)
+            self.observer, self.input_options, work = previous
+            self.report.work(work)
+
+    def _predict_scene(self, job, kinds, inputs, input_plan):
+        app, args, store = self.app, self.args, self.store
+        if job.state is None:
+            self._initialize_scene(job, kinds)
+        self.report.work('checkpoint_resumed' if job.checkpoint.resumed_frames else 'fresh')
         analysis = {}
         with self.report.measure('inference_scene', model=self.key, units=1, unit='scenes'):
             predictions, frames = prediction.predict_scene(
-                app, self.tagger, media, paths, cues, checkpoint=checkpoint,
+                app, self.tagger, job.media, job.paths, job.cues, checkpoint=job.checkpoint,
                 prefetch=args.prefetch_batches, analysis=analysis, report=self.report,
                 prepare_workers=args.prepare_workers,
-                inference_executor=self.inference_executor)
+                inference_executor=self.inference_executor, state=job.state,
+                batch_results=job.batches, prepared_inputs=job.prepared,
+                transform_executor=self.prepare_executor,
+                before_finalize=lambda: self._stage_next_scene(kinds, inputs, input_plan))
+        # Input may finish while finalization/capture runs. Retry handoff at
+        # these boundaries without ever waiting for an unfinished input.
+        self._stage_next_scene(kinds, inputs, input_plan)
         with self.report.measure('inference_output_capture', model=self.key, units=1, unit='scenes'):
             outputs = merge_results.capture_outputs(
-                app, self.config, self.vocabulary, cues, predictions, frames, analysis,
-                inference_signature=signature,
-                frame_input_signature=frame_signature(cue_manifest(cues), media.hashes))
+                app, self.config, self.vocabulary, job.cues, predictions, frames, analysis,
+                inference_signature=job.signature,
+                frame_input_signature=frame_signature(cue_manifest(job.cues), job.media.hashes))
+        self._stage_next_scene(kinds, inputs, input_plan)
         with self.report.measure('inference_commit', model=self.key):
-            checkpoints.finish(store, scene_id, self.key, outputs)
+            checkpoints.finish(store, job.scene, self.key, outputs)
             from stash_ai.inference.provenance import prune
-            prune(store, scene_id, self.key)
-        self.report.model_outcome(self.key, 'checkpoint_resumed' if getattr(checkpoint, 'resumed_frames', 0) else 'fresh')
+            prune(store, job.scene, self.key)
+        self.report.model_outcome(self.key, 'checkpoint_resumed' if job.checkpoint.resumed_frames else 'fresh')
         self.stats["processed"] += 1
         self.observer.finished(kinds)
 

@@ -13,6 +13,55 @@ from stash_ai.runtime.cancellation import current
 from stash_ai.stash_api.transport import StashTransport
 
 
+def test_close_during_batch_registration_does_not_start_a_late_producer(monkeypatch):
+    from stash_ai.inference import batch_stream
+    started, cancelled = Event(), Event()
+    create = batch_stream.PreparedBatchStream
+
+    def delayed_create(*args):
+        token = current()
+        token.subscribe(cancelled.set)
+        try:
+            started.set()
+            assert cancelled.wait(5), 'Input cleanup did not cancel batch registration'
+            return create(*args)
+        finally:
+            token.unsubscribe(cancelled.set)
+
+    inputs = SimpleNamespace(open_background_reader=lambda: None,
+                             read_with=lambda _: nullcontext(), inspect=lambda *args: ([], None, 'sig'))
+    prefetch = SceneInputPrefetch(None, inputs, None, 'wd')
+    monkeypatch.setattr(batch_stream, 'PreparedBatchStream', delayed_create)
+    prefetch.submit('next', {}, {}, tagger=object(), prefetch=1)
+    assert started.wait(5)
+    prefetch.close()
+    assert prefetch.executor is None and not prefetch.streams
+    assert not any(thread.name.startswith('scene-inputs') for thread in threads())
+
+
+def test_prepared_input_queue_is_bounded_and_releases_inputs_on_close(monkeypatch):
+    from stash_ai.inference import batch_stream
+    third = Event()
+    produced = []
+
+    def inputs(*args, **kwargs):
+        for index in range(100):
+            produced.append(index)
+            if index == 2:
+                third.set()
+            yield [index], [index]
+
+    monkeypatch.setattr(batch_stream, 'prepared_batches', inputs)
+    stream = batch_stream.PreparedBatchStream(2, None, 'wd')
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix='scene-inputs') as executor:
+        stream.task = executor.submit(stream.produce, None, None, None, {}, [], 1, None)
+        assert third.wait(5)
+        assert produced == [0, 1, 2]
+        stream.close()
+        assert stream.queue.empty()
+    assert not any(thread.name.startswith('scene-inputs') for thread in threads())
+
+
 def test_ctrl_c_waiting_for_input_keeps_read_token_until_cleanup(monkeypatch):
     started, cancelled, finished = Event(), Event(), Event()
     owner, interrupted = current_thread(), False
