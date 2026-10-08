@@ -27,6 +27,7 @@ def check_state_payloads(db, tables, errors, progress=None):
         if table not in tables or column not in column_names(db, table):
             continue
         details = (',signature,kind,scope,scene' if table == 'inference_archive'
+                   else ',signature,NULL,NULL,NULL' if table == 'inference_identities'
                    else ',NULL,kind,scope,scene' if table in ('snapshots', 'recovery_publications')
                    else ',NULL,NULL,NULL,NULL')
         for blob, signature, kind, scope, scene in db.execute(f"SELECT {column}{details} FROM {table} WHERE {column} IS NOT NULL"):
@@ -42,12 +43,13 @@ def check_state_payloads(db, tables, errors, progress=None):
                 else:
                     payload = decoded_payload(blob, expected)
                 if table == 'inference_identities':
-                    from stash_ai.inference.provenance import predictive
+                    from stash_ai.inference.provenance import decode_identity, predictive
                     required = {'format', 'source', 'repo', 'revision', 'files', 'vocabulary',
                                 'batch_size', 'scene_threshold', 'marker_threshold', 'aggregation', 'top_k', 'retention'}
                     if not required <= payload.keys() or not isinstance(payload['retention'], dict):
                         raise ValueError('Incomplete inference identity.')
-                    predictive(payload)
+                    identity, _ = decode_identity(blob, signature)
+                    predictive(identity)
                 if table == 'inference_archive':
                     from stash_ai.db.payloads import valid_result
                     from stash_ai.evidence.formats import validate_current

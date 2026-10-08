@@ -27,7 +27,7 @@ class MergedModelRun:
         from stash_ai.inference.reuse_diagnostics import ReuseObserver
         self.observer = ReuseObserver(app, args, store, config, report)
 
-    def run(self, scenes, kinds, inputs):
+    def run(self, scenes, kinds, inputs, *, cached_scenes=()):
         remaining = set(scenes)
         try:
             bar = tqdm(scenes.items(), desc=self.key + " inference", unit="scene")
@@ -41,7 +41,8 @@ class MergedModelRun:
                     continue
                 try:
                     with self.report.measure('model_scene', model=self.key, units=1, unit='scenes'):
-                        if not self._process_scene(scene_id, current, paths, kinds, inputs):
+                        if not self._process_scene(scene_id, current, paths, kinds, inputs,
+                                                   trust_cached=scene_id in cached_scenes):
                             progress.block_publication(self.store, remaining, self.key, kinds)
                             for blocked_scene in scenes:
                                 if blocked_scene in remaining and blocked_scene != scene_id:
@@ -79,7 +80,7 @@ class MergedModelRun:
         args, store, key = self.args, self.store, self.key
         if args.resume and progress.completed(store, scene_id, key, kinds, signature):
             from stash_ai.inference.provenance import register
-            register(store, scene_id, key, signature, self.identity)
+            register(store, scene_id, key, signature, self.identity, input_options=self.input_options)
             self.stats["reused"] += 1
             self.report.model_outcome(key, 'reused')
             self.observer.reused(kinds)
@@ -87,7 +88,8 @@ class MergedModelRun:
         diagnostics = {}
         if args.resume and not args.restart:
             from stash_ai.inference.reuse import reuse
-            if reuse(self.app, store, scene_id, self.config, self.identity, cues, media.hashes, kinds, diagnostics=diagnostics):
+            if reuse(self.app, store, scene_id, self.config, self.identity, cues, media.hashes, kinds,
+                     diagnostics=diagnostics, input_options=self.input_options):
                 self.stats['threshold_cache_reused'] += 1
                 self.report.model_outcome(key, 'rethreshold')
                 self.observer.reused(kinds, rethreshold=True)
@@ -106,10 +108,32 @@ class MergedModelRun:
             return False
         return True
 
-    def _process_scene(self, scene_id, current, paths, kinds, inputs):
+    def cached_plan(self, scene_id, paths, kinds):
+        from stash_ai.inference.reuse import cached_reuse
+        return cached_reuse(self.app, self.store, scene_id, self.config, self.identity, paths, kinds)
+
+    def _reuse_cached(self, scene_id, paths, kinds):
+        saved = self.cached_plan(scene_id, paths, kinds)
+        if saved is None:
+            return False
+        from stash_ai.rethreshold.scenes import apply
+        apply(self.store, scene_id, self.key, saved.thresholds)
+        self.stats['threshold_cache_reused' if saved.rethreshold else 'reused'] += 1
+        self.stats['input_fetch_skipped'] += 1
+        self.report.model_outcome(self.key, 'rethreshold' if saved.rethreshold else 'reused')
+        self.observer.reused(kinds, rethreshold=saved.rethreshold, input_verified=False)
+        return True
+
+    def _process_scene(self, scene_id, current, paths, kinds, inputs, *, trust_cached=False):
         """Return False only when model loading fails and its remaining scenes must stop."""
         app, args, store = self.app, self.args, self.store
         store.cache.pressure(force=True)
+        if trust_cached:
+            with self.report.measure('inference_reuse_check', model=self.key):
+                if self._reuse_cached(scene_id, paths, kinds):
+                    return True
+        from stash_ai.inference.reuse import input_options
+        self.input_options = input_options(app, paths)
         from stash_ai.storage.input_checks import defer, verified
         try:
             with self.report.measure('input_verify', model=self.key):
@@ -171,7 +195,7 @@ class MergedModelRun:
         from stash_ai.inference.provenance import register, resume_signature, prune
         result = resume_signature(self.store, scene_id, self.key, self.identity,
                                   cue_manifest(cues), media.hashes, kinds, analysis_format)
-        register(self.store, scene_id, self.key, signature, self.identity)
+        register(self.store, scene_id, self.key, signature, self.identity, input_options=self.input_options)
         prune(self.store, scene_id, self.key, keep=(signature,), checkpoint=result,
               kinds=kinds, analysis_format=analysis_format)
         return result

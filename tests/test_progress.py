@@ -121,6 +121,7 @@ def test_automatic_input_invalidation_never_publishes_fresh_and_stale_model_mix(
 
     # Same media URLs, but changed cue timing invalidates both models' inference signatures.
     p.cues=[Cue(c.start,c.end-.1,c.image,c.rect) for c in p.cues]
+    args = [*args, '--force-fetch-vtt']
     p.scores["wd"][:]=0;p.scores["dtq"][:]=0
     fail={"dtq":True}
     def load(settings,*_):
@@ -189,7 +190,7 @@ def test_vtt_timing_change_invalidates_but_scene_threshold_reuses_frames(pipelin
     p=pipeline
     assert app.main(p.args)==0
     p.cues=[Cue(c.start,c.end-.1,c.image,c.rect) for c in p.cues]
-    assert app.main(p.args)==0 and len(p.loaded)==2
+    assert app.main([*p.args, '--force-fetch-vtt'])==0 and len(p.loaded)==2
     original=app.services.load_model_settings
     from dataclasses import replace
     monkeypatch.setattr(app.services,"load_model_settings",lambda *args:[replace(c,scene_threshold=.77) for c in original(*args)])

@@ -181,12 +181,28 @@ class MergedRun:
             progress.request_refresh(
                 store, self.scenes, [config.source.key for config in self.settings], kinds)
         progress.preload_status(store, self.scenes)
+        runs = []
         for config in self.settings:
             with self.report.model(config.source.key):
-                MergedModelRun(
+                runs.append(MergedModelRun(
                     app, args, store, config, self.catalogs[config.source.key],
                     stats=self.stats, report=self.report,
-                ).run(self.scenes, kinds, inputs)
+                ))
+        cached_scenes = set()
+        if args.resume and not args.restart and not args.force_fetch_vtt:
+            from stash_ai.storage.input_checks import selected
+            deferred = selected(store, self.scenes)
+            with self.report.measure('cached_input_plan'):
+                for scene_id, current in self.scenes.items():
+                    paths = current['paths']
+                    if scene_id in deferred or not paths.get('vtt') or not paths.get('sprite'):
+                        continue
+                    plans = [run.cached_plan(scene_id, paths, kinds) for run in runs]
+                    if plans and all(plan is not None for plan in plans) and len({plan.frame_input for plan in plans}) == 1:
+                        cached_scenes.add(scene_id)
+        for run in runs:
+            with self.report.model(run.key):
+                run.run(self.scenes, kinds, inputs, cached_scenes=cached_scenes)
 
     def _merge_scenes(self):
         MergePublisher(

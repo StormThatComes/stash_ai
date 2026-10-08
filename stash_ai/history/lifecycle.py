@@ -26,7 +26,7 @@ def now():
 
 def configuration(app, args):
     options = {name: getattr(args, name) for name in (
-        'models', 'device', 'offline', 'resume', 'restart', 'db_init', 'markers_only', 'scene_tags_only',
+        'models', 'device', 'offline', 'resume', 'restart', 'force_fetch_vtt', 'db_init', 'markers_only', 'scene_tags_only',
         'checkpoint_batches', 'prefetch_batches', 'prepare_workers', 'merge_workers', 'model_report_workers',
         'ram_cache_gb', 'ram_budget_gb', 'rethreshold_scenes', 'rethreshold_markers', 'force_merge',
         'cleanup_strategy', 'cleanup_page_size', 'cleanup_write_batch_size', 'no_hierarchy',

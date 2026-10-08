@@ -41,7 +41,8 @@ def test_new_then_cached_result_and_offline_report(pipeline, monkeypatch, tmp_pa
     assert app.main(pipeline.args) == 0
     latest = decisions(pipeline.path)[0]
     assert latest['action'] == 'cache_reused'
-    assert latest['reasons'] == ['matching_completed_identity']
+    assert latest['reasons'] == ['input_fetch_skipped', 'matching_completed_identity']
+    assert latest['details']['input_verification'] == 'skipped'
     assert len(pipeline.loaded) == loaded
     before = Path(str(pipeline.path) + '.runs.sqlite3').read_bytes()
     for service in ('create_stash_client', 'load_tagger', 'load_vocabulary', 'load_model_settings'):
@@ -73,6 +74,10 @@ def test_detailed_proofs_are_optional_and_v1_history_migrates_without_inference(
     assert len(pipeline.loaded) == loaded
     assert decisions(pipeline.path)[0]['action'] == 'cache_reused'
     with HistoryStore(path, readonly=True) as store:
+        assert store.connection.execute('SELECT count(*) FROM reuse_proofs').fetchone()[0] == 0
+    assert app.main([*pipeline.args, '--force-fetch-vtt']) == 0
+    assert len(pipeline.loaded) == loaded
+    with HistoryStore(path, readonly=True) as store:
         assert store.connection.execute('SELECT count(*) FROM reuse_proofs').fetchone()[0] == 2
 
 
@@ -80,7 +85,7 @@ def test_changed_vtt_cues_identify_the_exact_difference(pipeline):
     from stash_ai.domain import Cue
     assert app.main(pipeline.args) == 0
     pipeline.cues = [Cue(cue.start, cue.end - .25, cue.image, cue.rect) for cue in pipeline.cues]
-    assert app.main(pipeline.args) == 0
+    assert app.main([*pipeline.args, '--force-fetch-vtt']) == 0
     row = decisions(pipeline.path)[0]
     assert row['action'] == 'infer' and 'vtt_cues_changed' in row['reasons']
     assert 'historical_identity_unavailable' not in row['reasons']
@@ -94,7 +99,7 @@ def test_changed_sprite_bytes_and_no_plaintext_media_urls(pipeline, monkeypatch)
     pipeline.stash.scene['paths']['vtt'] += '?apikey=' + secret
     assert app.main(pipeline.args) == 0
     monkeypatch.setattr(pipeline.stash, 'get_media', lambda url: original(url) + b'changed sprite')
-    assert app.main(pipeline.args) == 0
+    assert app.main([*pipeline.args, '--force-fetch-vtt']) == 0
     row = decisions(pipeline.path)[0]
     assert 'sprite_media_changed' in row['reasons']
     with HistoryStore(Path(str(pipeline.path) + '.runs.sqlite3'), readonly=True) as store:
@@ -114,7 +119,7 @@ def test_changed_vtt_bytes_even_with_identical_cues_are_reported(pipeline, monke
     monkeypatch.setattr(sprites, 'fetch_cues', fetch)
     assert app.main(pipeline.args) == 0
     monkeypatch.setattr(pipeline.stash, 'get_media', lambda url: original_media(url) + (b'new vtt' if '/vtt' in url else b''))
-    assert app.main(pipeline.args) == 0
+    assert app.main([*pipeline.args, '--force-fetch-vtt']) == 0
     row = decisions(pipeline.path)[0]
     assert 'vtt_media_changed' in row['reasons']
     assert 'vtt_cues_changed' not in row['reasons'] and 'sprite_media_changed' not in row['reasons']
@@ -151,7 +156,7 @@ def test_threshold_only_change_uses_rethreshold_without_loading_model(pipeline, 
     assert app.main(pipeline.args) == 0
     row = decisions(pipeline.path)[0]
     assert row['action'] == 'rethreshold'
-    assert row['reasons'] == ['retained_evidence_covers_thresholds']
+    assert row['reasons'] == ['input_fetch_skipped', 'retained_evidence_covers_thresholds']
     assert len(pipeline.loaded) == loaded
 
 
@@ -171,7 +176,7 @@ def test_legacy_input_change_is_not_given_a_fabricated_specific_cause(pipeline):
     from stash_ai.domain import Cue
     assert app.main([*pipeline.args, '--no-run-history']) == 0
     pipeline.cues = [Cue(cue.start, cue.end - .25, cue.image, cue.rect) for cue in pipeline.cues]
-    assert app.main(pipeline.args) == 0
+    assert app.main([*pipeline.args, '--force-fetch-vtt']) == 0
     row = decisions(pipeline.path)[0]
     assert 'historical_identity_unavailable' in row['reasons'] and 'input_changed' in row['reasons']
     assert 'sprite_media_changed' not in row['reasons'] and 'vtt_cues_changed' not in row['reasons']
@@ -229,7 +234,7 @@ def test_opt_out_skips_diagnostic_proofs_without_skipping_input_validation(pipel
     from stash_ai.inference import reuse_diagnostics
     from stash_ai.domain import Cue
     monkeypatch.setattr(reuse_diagnostics, 'proof', lambda *a: pytest.fail('disabled diagnostics built a proof'))
-    arguments = [*pipeline.args, '--no-run-history']
+    arguments = [*pipeline.args, '--no-run-history', '--force-fetch-vtt']
     assert app.main(arguments) == 0
     loaded = len(pipeline.loaded)
     assert app.main(arguments) == 0
@@ -261,7 +266,7 @@ def test_publication_exclusions_and_empty_results_do_not_require_reinference(pip
     assert app.main([*pipeline.args, '--scene-tag-exclusions', str(policy)]) == 0
     row = decisions(pipeline.path)[0]
     assert row['action'] == 'cache_reused'
-    assert row['reasons'] == ['matching_completed_identity']
+    assert row['reasons'] == ['input_fetch_skipped', 'matching_completed_identity']
 
 
 def test_changed_vocabulary_is_distinguished_from_changed_weights(pipeline):

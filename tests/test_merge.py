@@ -365,7 +365,7 @@ def test_result_writer_replaces_one_record_before_verified_reuse(merge_pipeline,
         previous = {kind: state.records('1', kind)['oppai'] for kind in ('scene', 'markers')}
     p.scores['oppai'][:] = 0
     monkeypatch.setattr(p.stash, 'get_media', lambda url: b'changed-media')
-    assert app.main(args) == 0
+    assert app.main([*args, '--force-fetch-vtt']) == 0
     with merge_store.StateStore(p.path, scope) as state:
         with state.connection:
             for kind in ('scene', 'markers'):

@@ -258,7 +258,8 @@ def test_automatic_reuse_still_requires_matching_inputs_and_retention(pipeline, 
               scene=.45 if change == 'scene' else .40)
     if change == 'media':
         monkeypatch.setattr(p.stash, 'get_media', lambda url: b'new media')
-    assert app.main([*p.args, *(['--restart'] if change == 'restart' else [])]) == 0
+    extra = ['--restart'] if change == 'restart' else ['--force-fetch-vtt'] if change == 'media' else []
+    assert app.main([*p.args, *extra]) == 0
     assert len(p.loaded) == 2
 
 
