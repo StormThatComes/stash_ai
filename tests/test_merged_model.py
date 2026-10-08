@@ -1,5 +1,7 @@
 """Merged model lifecycle against real input signatures and SQLite checkpoints."""
 from collections import Counter
+from concurrent.futures import Future
+from threading import Event, current_thread, enumerate as threads
 from types import SimpleNamespace
 
 import pytest
@@ -38,6 +40,162 @@ def run_model(context):
     ).run(context.scenes, ['scene', 'markers'], context.inputs)
 
 
+def assert_inference_workers_closed():
+    assert not any(thread.name.startswith(('inference-model', 'inference-batches',
+                                           'prepare-frames', 'transform-frames'))
+                   for thread in threads())
+
+
+@pytest.mark.parametrize('prefetch', [0, 2])
+def test_model_load_all_scenes_and_close_keep_one_backend_thread(model_run, monkeypatch, prefetch):
+    from stash_ai.inference.checkpoints import Checkpoint
+    context = model_run
+    context.args.prefetch_batches = prefetch
+    context.args.prepare_workers = 8
+    context.scenes = {str(index): dict(paths=dict(context.pipeline.stash.scene['paths']))
+                      for index in range(1, 21)}
+    owner = current_thread()
+    loaded, predicted, closed = [], [], []
+    load = app.services.load_tagger
+
+    def tracked_load(*args):
+        loaded.append(current_thread())
+        model = load(*args)
+        predict, close = model.predict_batch, model.close
+
+        def tracked_predict(images):
+            predicted.append(current_thread())
+            assert current_thread() is loaded[0]
+            return predict(images)
+
+        def tracked_close():
+            closed.append(current_thread())
+            assert current_thread() is loaded[0]
+            close()
+
+        model.predict_batch, model.close = tracked_predict, tracked_close
+        return model
+
+    record = Checkpoint.record
+
+    def checked_record(*args, **kwargs):
+        assert current_thread() is owner
+        return record(*args, **kwargs)
+
+    monkeypatch.setattr(app.services, 'load_tagger', tracked_load)
+    monkeypatch.setattr(Checkpoint, 'record', checked_record)
+    run_model(context)
+    assert context.stats['processed'] == 20 and not context.stats['errors']
+    assert len(loaded) == len(closed) == 1 and len(predicted) == 100
+    assert all(thread is loaded[0] for thread in predicted + closed)
+    assert (loaded[0] is owner) == (prefetch == 0)
+    assert context.pipeline.loaded[0].closed
+    assert_inference_workers_closed()
+
+
+@pytest.mark.parametrize('error', [RuntimeError, KeyboardInterrupt])
+def test_backend_failure_cleans_scene_and_preserves_model_worker(model_run, monkeypatch, error):
+    context = model_run
+    context.args.prefetch_batches = 2
+    owner_threads, calls = [], []
+    load = app.services.load_tagger
+
+    def failing_load(*args):
+        owner_threads.append(current_thread())
+        model = load(*args)
+        predict, close = model.predict_batch, model.close
+
+        def failing_predict(images):
+            assert current_thread() is owner_threads[0]
+            calls.append(tuple(images))
+            if len(calls) == 2:
+                raise error('backend failed')
+            return predict(images)
+
+        def checked_close():
+            assert current_thread() is owner_threads[0]
+            close()
+
+        model.predict_batch, model.close = failing_predict, checked_close
+        return model
+
+    monkeypatch.setattr(app.services, 'load_tagger', failing_load)
+    if error is KeyboardInterrupt:
+        with pytest.raises(KeyboardInterrupt, match='backend failed'):
+            run_model(context)
+        assert calls == [(0, 1), (2, 3)]
+        assert not context.state.records('2', 'scene')
+    else:
+        run_model(context)
+        assert context.stats['processed'] == context.stats['errors'] == 1
+        assert context.state.records('2', 'scene')['wd']['meta']['origin'] == 'inference'
+    assert context.pipeline.loaded[0].closed
+    assert_inference_workers_closed()
+
+
+def test_interrupt_waiting_for_load_still_closes_initialized_model(model_run, monkeypatch):
+    context = model_run
+    context.args.prefetch_batches = 2
+    started, released = Event(), Event()
+    owner, interrupted = current_thread(), False
+    load, result = app.services.load_tagger, Future.result
+    load_threads, close_threads = [], []
+
+    def slow_load(*args):
+        load_threads.append(current_thread())
+        started.set()
+        assert released.wait(5)
+        model = load(*args)
+        close = model.close
+
+        def tracked_close():
+            close_threads.append(current_thread())
+            close()
+
+        model.close = tracked_close
+        return model
+
+    def interrupted_result(future, *args, **kwargs):
+        nonlocal interrupted
+        if current_thread() is owner and not interrupted:
+            interrupted = True
+            assert started.wait(5)
+            released.set()
+            raise KeyboardInterrupt('interrupted load wait')
+        return result(future, *args, **kwargs)
+
+    monkeypatch.setattr(app.services, 'load_tagger', slow_load)
+    monkeypatch.setattr(Future, 'result', interrupted_result)
+    with pytest.raises(KeyboardInterrupt, match='interrupted load wait'):
+        run_model(context)
+    assert context.pipeline.loaded[0].closed
+    assert load_threads == close_threads and load_threads[0] is not owner
+    assert not context.pipeline.loaded[0].seen
+    assert_inference_workers_closed()
+
+
+def test_close_failure_still_shuts_down_model_worker(model_run, monkeypatch):
+    context = model_run
+    context.args.prefetch_batches = 2
+    load = app.services.load_tagger
+
+    def failing_load(*args):
+        model = load(*args)
+
+        def close():
+            raise RuntimeError('close failed')
+
+        model.close = close
+        return model
+
+    monkeypatch.setattr(app.services, 'load_tagger', failing_load)
+    with pytest.raises(RuntimeError, match='close failed'):
+        run_model(context)
+    assert context.stats['processed'] == 2
+    assert context.state.connection.execute('SELECT 1').fetchone() == (1,)
+    assert_inference_workers_closed()
+
+
 @pytest.mark.parametrize('error', [RuntimeError, KeyboardInterrupt])
 def test_scene_failure_continues_but_interruption_stops_and_closes_tagger(model_run, monkeypatch, error):
     context = model_run
@@ -72,8 +230,10 @@ def test_scene_failure_continues_but_interruption_stops_and_closes_tagger(model_
     assert context.state.connection.execute('SELECT 1').fetchone() == (1,)
 
 
-def test_loading_failure_stops_remaining_scenes_without_retrying(model_run, monkeypatch):
+@pytest.mark.parametrize('prefetch', [0, 2])
+def test_loading_failure_stops_remaining_scenes_without_retrying(model_run, monkeypatch, prefetch):
     context = model_run
+    context.args.prefetch_batches = prefetch
     inspected, loaded = [], []
     original = context.inputs.inspect
 
@@ -93,11 +253,14 @@ def test_loading_failure_stops_remaining_scenes_without_retrying(model_run, monk
     assert context.stats['errors'] == 1 and not context.stats['processed']
     assert set(context.args.report.groups) == {('load model', 'wd', 'OSError')}
     assert not context.state.records('1', 'scene') and not context.state.records('2', 'scene')
+    assert_inference_workers_closed()
 
 
 @pytest.mark.parametrize('reason', ['missing-input', 'completed'])
-def test_skipped_and_completed_scenes_do_not_load_a_model(model_run, monkeypatch, reason):
+@pytest.mark.parametrize('prefetch', [0, 2])
+def test_skipped_and_completed_scenes_do_not_load_a_model(model_run, monkeypatch, reason, prefetch):
     context = model_run
+    context.args.prefetch_batches = prefetch
     if reason == 'missing-input':
         for current in context.scenes.values():
             current['paths'] = {}
@@ -112,6 +275,7 @@ def test_skipped_and_completed_scenes_do_not_load_a_model(model_run, monkeypatch
 
     assert context.stats['reused' if reason == 'completed' else 'skipped'] == 2
     assert not context.stats['processed'] and not context.stats['errors']
+    assert_inference_workers_closed()
 
 
 def test_downloaded_weights_refresh_signatures_before_saving_and_enable_resume(model_run, monkeypatch):

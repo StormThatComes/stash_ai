@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from functools import partial
+from concurrent.futures import ThreadPoolExecutor
 
 from tqdm import tqdm
 
@@ -21,6 +22,7 @@ class MergedModelRun:
         self.stats, self.report = stats, report
         self.key = config.source.key
         self.tagger = None
+        self.inference_executor = None
         with report.measure('model_identity', model=self.key):
             self.identity = model_identity(app, config, vocabulary)
         report.record_model(config, identity=self.identity)
@@ -65,8 +67,23 @@ class MergedModelRun:
                     raise
                 remaining.discard(scene_id)
         finally:
-            if self.tagger is not None:
+            try:
+                if self.inference_executor is None:
+                    self._close_tagger()
+                else:
+                    # Queue cleanup after any interrupted model initialization.
+                    # Load, inference and close all use the same backend thread.
+                    self.inference_executor.submit(self._close_tagger).result()
+            finally:
+                if self.inference_executor is not None:
+                    self.inference_executor.shutdown(wait=True)
+                    self.inference_executor = None
+
+    def _close_tagger(self):
+        if self.tagger is not None:
+            try:
                 self.tagger.close()
+            finally:
                 self.tagger = None
 
     def _eligible(self, scene_id, paths):
@@ -101,10 +118,20 @@ class MergedModelRun:
         return False
 
     def _load_tagger(self):
+        def load():
+            # Assign on the owner thread so finally can close a model even if
+            # the caller is interrupted while waiting for initialization.
+            self.tagger = self.app.services.load_tagger(
+                self.config, self.vocabulary, partial(preparation.prepare_image, self.app))
+
         try:
             with self.report.measure('model_load', model=self.key):
-                self.tagger = self.app.services.load_tagger(
-                    self.config, self.vocabulary, partial(preparation.prepare_image, self.app))
+                if self.args.prefetch_batches:
+                    self.inference_executor = ThreadPoolExecutor(
+                        max_workers=1, thread_name_prefix='inference-model')
+                    self.inference_executor.submit(load).result()
+                else:
+                    load()
             self.report.record_model(self.config, tagger=self.tagger)
         except Exception as exc:
             self._record_error('load model', None, exc)
@@ -184,7 +211,8 @@ class MergedModelRun:
             predictions, frames = prediction.predict_scene(
                 app, self.tagger, media, paths, cues, checkpoint=checkpoint,
                 prefetch=args.prefetch_batches, analysis=analysis, report=self.report,
-                prepare_workers=args.prepare_workers)
+                prepare_workers=args.prepare_workers,
+                inference_executor=self.inference_executor)
         outputs = merge_results.capture_outputs(
             app, self.config, self.vocabulary, cues, predictions, frames, analysis,
             inference_signature=signature,

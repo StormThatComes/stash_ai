@@ -1,5 +1,6 @@
 """Offline concurrency, bounded lookahead and durable-prefix pipeline contracts."""
 from contextlib import closing
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Barrier, Event, Lock, enumerate as threads, get_ident, current_thread
 from types import SimpleNamespace
@@ -248,6 +249,39 @@ def test_full_result_queue_is_bounded_and_close_joins_worker(monkeypatch):
         assert fourth_completed.wait(5)
         # One yielded result, two queued results and one waiting to be enqueued.
         assert calls == [0, 1, 2, 3]
+    assert_workers_closed()
+
+
+def test_scene_close_cancels_read_but_keeps_borrowed_model_executor(monkeypatch):
+    from stash_ai.runtime.cancellation import current
+    read_started, cancelled = Event(), Event()
+    model = SimpleNamespace(batch_size=1, settings=SimpleNamespace(source=WD), labels=['tag'],
+                            prepare=lambda image: 0,
+                            predict_batch=lambda images: np.array([[.5]], np.float32))
+
+    def frames(*args):
+        yield from sprite_frames([SimpleNamespace(start=0)])
+        token = current()
+        token.subscribe(cancelled.set)
+        try:
+            read_started.set()
+            assert cancelled.wait(5), 'Closing scene did not cancel its preparation read'
+            token.check()
+        finally:
+            token.unsubscribe(cancelled.set)
+
+    monkeypatch.setattr(sprites, 'iter_sprite_frames', frames)
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix='inference-model') as executor:
+        owner = executor.submit(current_thread).result()
+        with closing(batches.predicted_batches(None, model, None, {}, [], prefetch=1,
+                                               inference_executor=executor)) as iterator:
+            next(iterator)
+            assert read_started.wait(5)
+        assert cancelled.is_set()
+        # Closing a scene must finish its task without shutting down the
+        # executor needed by the next scene and backend cleanup.
+        assert executor.submit(current_thread).result(timeout=5) is owner
+    assert not any(thread.name.startswith('inference-model') for thread in threads())
     assert_workers_closed()
 
 

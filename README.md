@@ -773,12 +773,16 @@ Aktualne domyślne ustawienia pamięci i równoległości:
   Parametr steruje przygotowaniem kolejnych batchy, niezależnie od rozmiaru
   inferencji `batch_size`, i nie unieważnia zapisanych wyników.
 
-Przy `prefetch_batches > 0` jeden wątek wykonuje inferencję, a główny wątek
-równolegle obrabia poprzednie wyniki i zapisuje checkpointy/SQLite. Kolejka
+Przy `prefetch_batches > 0` jeden stały wątek ładuje model, wykonuje inferencję
+dla wszystkich jego scen i zamyka model. Nie powstaje nowy wątek backendu dla
+każdej sceny; zasoby CUDA i pule strumieni mogą zachować jednego właściciela.
+Główny wątek równolegle obrabia poprzednie wyniki i zapisuje checkpointy/SQLite. Kolejka
 wyników mieści dwa batche; dodatkowo może trwać jedno wywołanie inferencji.
 Wyniki są odbierane w kolejności, a checkpoint obejmuje tylko w pełni
 przetworzony prefiks. Błąd późniejszego batcha zachowuje wcześniejszy postęp;
-przerwanie zamyka wszystkie wątki przed zamknięciem modelu.
+przerwanie anuluje przygotowanie sceny i czeka na inferencję. Następnie model
+jest zamykany w swoim wątku, a wykonawca kończy pracę. Wejścia prefetch i wyniki
+w kolejce znajdują się w RAM, a nie w VRAM.
 
 Przygotowanie CPU składa kompletne wejścia (`stack`, maski i dopełnianie
 stałego batcha ONNX) przed przekazaniem do inferencji. Workery transformacji

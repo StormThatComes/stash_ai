@@ -79,7 +79,10 @@ batchowanie z własnością i zamykaniem obrazów w workerach. Z prefetch okno
 transformacji obejmuje klatki kilku batchy, a składanie wejścia backendu odbywa
 się przed inferencją. `inference/batches.py` wykonuje uporządkowaną inferencję
 w jednym wątku z ograniczoną kolejką dwóch wyników i wspólnym anulowaniem
-przygotowania mediów. `inference/prediction.py` odtwarza stan predykcji,
+przygotowania mediów. `runs/merged_model.py` udostępnia jednego wykonawcę przez
+cały lifecycle modelu: ładowanie, inferencję wszystkich scen i zamknięcie na
+tym samym wątku. Iterator sceny czeka na swoje zadanie, ale nie zamyka
+pożyczonego wykonawcy. `inference/prediction.py` odtwarza stan predykcji,
 obrabia wyniki i checkpointy w wątku właściciela SQLite oraz finalizuje scenę.
 `inference/identity.py` buduje tożsamość modeli; `inference/checkpoints.py` zawiera
 `Checkpoint`, zapis i odtworzenie kompaktowego stanu oraz atomowe zakończenie inferencji.
