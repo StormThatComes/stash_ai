@@ -46,6 +46,102 @@ def model_args(pipeline, *models):
     return ['--models', *models, *pipeline.args[2:]]
 
 
+@pytest.mark.parametrize('initialize', [False, True])
+def test_interrupted_oppai_resume_skips_completed_joytag_media_pass(pipeline, monkeypatch, initialize):
+    requests = media_requests(pipeline, monkeypatch)
+    args = model_args(pipeline, 'joytag', 'oppai')
+    pipeline.fail['oppai'] = 4
+    with pytest.raises(KeyboardInterrupt):
+        app.main([*args, '--db-init'] if initialize else args)
+    with sqlite3.connect(pipeline.path) as db:
+        assert db.execute("SELECT processed FROM checkpoints WHERE model='oppai'").fetchone()[0] == 4
+        assert db.execute("SELECT count(*) FROM results WHERE model='joytag'").fetchone()[0] == 2
+    before = durable_rows(pipeline.path)
+    loaded = len(pipeline.loaded)
+    pipeline.fail.clear()
+    requests.clear()
+    inspected = []
+    original = RunInputs.inspect
+
+    def inspect(self, runtime, paths, identity):
+        inspected.append(identity['source'])
+        return original(self, runtime, paths, identity)
+
+    monkeypatch.setattr(RunInputs, 'inspect', inspect)
+    assert app.main(args) == 0
+    assert inspected == ['oppai']
+    assert len(requests) == 2
+    assert [m.settings.source.key for m in pipeline.loaded[loaded:]] == ['oppai']
+    assert pipeline.loaded[-1].seen == list(range(4, 10))
+    after = durable_rows(pipeline.path)
+    assert [r for r in after['results'] if r[2] == 'joytag'] == [r for r in before['results'] if r[2] == 'joytag']
+    assert not after['checkpoints'] and not after['refresh_requests']
+
+
+@pytest.mark.parametrize('models', [('wd', 'dtq'), ('dtq', 'wd'), ('all',)])
+@pytest.mark.parametrize('missing', ['result', 'refresh'])
+def test_unchanged_incomplete_model_does_not_fetch_for_completed_peers(pipeline, monkeypatch, models, missing):
+    requests = media_requests(pipeline, monkeypatch)
+    args = model_args(pipeline, *models)
+    assert app.main(args) == 0
+    if missing == 'result':
+        with sqlite3.connect(pipeline.path) as db:
+            for table in ('results', 'result_index'):
+                db.execute('DELETE FROM ' + table + " WHERE model='dtq'")
+    else:
+        from stash_ai.storage.progress import request_refresh
+        with StateStore(pipeline.path, scope_for(app.STASH_URL)) as store:
+            request_refresh(store, ['1'], ['dtq'], ['scene', 'markers'])
+    before = durable_rows(pipeline.path)['results']
+    requests.clear()
+    inspected = []
+    original = RunInputs.inspect
+
+    def inspect(self, runtime, paths, identity):
+        inspected.append(identity['source'])
+        return original(self, runtime, paths, identity)
+
+    monkeypatch.setattr(RunInputs, 'inspect', inspect)
+    assert app.main(args) == 0
+    assert inspected == ['dtq'] and len(requests) == 2
+    after = durable_rows(pipeline.path)['results']
+    assert [r for r in before if r[2] != 'dtq'] == [r for r in after if r[2] != 'dtq']
+
+
+@pytest.mark.parametrize('change', ['vtt', 'sprite'])
+def test_changed_inputs_block_skipped_peer_before_interrupted_inference(pipeline, monkeypatch, change):
+    from stash_ai.storage.progress import pending_refreshes
+    requests = media_requests(pipeline, monkeypatch)
+    args = model_args(pipeline, 'joytag', 'oppai')
+    assert app.main(args) == 0
+    with sqlite3.connect(pipeline.path) as db:
+        for table in ('results', 'result_index'):
+            db.execute('DELETE FROM ' + table + " WHERE model='oppai'")
+    if change == 'vtt':
+        pipeline.cues = [replace(c, end=c.end-.1) for c in pipeline.cues]
+    else:
+        original = pipeline.stash.get_media
+        monkeypatch.setattr(pipeline.stash, 'get_media',
+                            lambda url: original(url) + (b'changed' if '/sprite' in url else b''))
+    pipeline.stash.writes.clear()
+    pipeline.fail['oppai'] = 4
+    with pytest.raises(KeyboardInterrupt):
+        app.main(args)
+    assert not pipeline.stash.writes
+    with StateStore(pipeline.path, scope_for(app.STASH_URL), True) as store:
+        assert ('joytag', 'scene') in pending_refreshes(store, ['scene', 'markers'])['1']
+        assert ('joytag', 'markers') in pending_refreshes(store, ['scene', 'markers'])['1']
+    pipeline.fail.clear()
+    assert app.main(args) == 0
+    with StateStore(pipeline.path, scope_for(app.STASH_URL), True) as store:
+        assert not pending_refreshes(store, ['scene', 'markers'])
+        assert len({store.result_metadata('1', 'scene', model)['meta']['frame_input_signature']
+                    for model in ('joytag', 'oppai')}) == 1
+    requests.clear()
+    assert app.main(args) == 0
+    assert not requests
+
+
 @pytest.mark.parametrize('models', [('wd',), ('all',)])
 def test_ready_rerun_skips_all_media_and_model_work_but_force_verifies(pipeline, monkeypatch, models):
     requests = media_requests(pipeline, monkeypatch)
@@ -101,7 +197,7 @@ def test_same_url_content_changes_are_opt_in_for_ready_scenes(pipeline, monkeypa
 
 
 @pytest.mark.parametrize('missing', ['result', 'refresh'])
-def test_one_incomplete_model_verifies_the_whole_selected_scene(pipeline, monkeypatch, missing):
+def test_changed_inputs_in_incomplete_model_refresh_completed_peers(pipeline, monkeypatch, missing):
     requests = media_requests(pipeline, monkeypatch)
     args = model_args(pipeline, 'wd', 'dtq')
     assert app.main(args) == 0
@@ -212,6 +308,38 @@ def test_incomplete_scene_does_not_disable_reuse_for_other_scenes(pipeline, monk
     assert app.main(args) == 0
     assert len(requests) == 2 and all(url.endswith('/2') for url in requests)
     assert [m.settings.source.key for m in pipeline.loaded[loaded:]] == ['dtq']
+
+
+def test_changed_later_input_reopens_earlier_tagger_only_for_stale_scene(pipeline, monkeypatch):
+    from copy import deepcopy
+    from tests.helpers.cleanup import FastStash
+    stash = FastStash()
+    stash.scenes['2'] = dict(deepcopy(stash.scene), id='2')
+    for scene in stash.scenes.values():
+        scene['paths'] = dict(vtt='/vtt/' + scene['id'], sprite='/sprite/' + scene['id'])
+    pipeline.stash = stash
+    monkeypatch.setattr(app.services, 'create_stash_client', lambda _: stash)
+    requests = media_requests(pipeline, monkeypatch)
+    args = ['--models', 'wd', 'dtq', '--no-hierarchy', '--state-db', str(pipeline.path)]
+    assert app.main(args) == 0
+    with sqlite3.connect(pipeline.path) as db:
+        for table in ('results', 'result_index'):
+            db.execute('DELETE FROM ' + table + " WHERE (model='wd' AND scene='2') OR (model='dtq' AND scene='1')")
+    original = stash.get_media
+    monkeypatch.setattr(stash, 'get_media', lambda url: original(url) +
+                        (b'changed' if '/sprite/1' in url else b''))
+    loaded = len(pipeline.loaded)
+    requests.clear()
+    assert app.main(args) == 0
+    # WD first works on scene 2 and closes; DTQ discovers changed scene 1.
+    # The second WD instance refreshes only scene 1, without reusing a closed model.
+    assert [m.settings.source.key for m in pipeline.loaded[loaded:]] == ['wd', 'dtq', 'wd']
+    assert all(model.closed for model in pipeline.loaded)
+    assert len(requests) == 4
+    with StateStore(pipeline.path, scope_for(app.STASH_URL), True) as store:
+        for scene in ('1', '2'):
+            assert len({store.result_metadata(scene, 'scene', model)['meta']['frame_input_signature']
+                        for model in ('wd', 'dtq')}) == 1
 
 
 def test_pending_threshold_change_falls_back_to_per_scene_error_handling(pipeline, monkeypatch, tmp_path):

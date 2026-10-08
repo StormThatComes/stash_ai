@@ -188,21 +188,26 @@ class MergedRun:
                     app, args, store, config, self.catalogs[config.source.key],
                     stats=self.stats, report=self.report,
                 ))
-        cached_scenes = set()
+        input_plan = None
         if args.resume and not args.restart and not args.force_fetch_vtt:
-            from stash_ai.storage.input_checks import selected
-            deferred = selected(store, self.scenes)
+            from .cached_inputs import CachedInputPlan
             with self.report.measure('cached_input_plan'):
-                for scene_id, current in self.scenes.items():
-                    paths = current['paths']
-                    if scene_id in deferred or not paths.get('vtt') or not paths.get('sprite'):
-                        continue
-                    plans = [run.cached_plan(scene_id, paths, kinds) for run in runs]
-                    if plans and all(plan is not None for plan in plans) and len({plan.frame_input for plan in plans}) == 1:
-                        cached_scenes.add(scene_id)
+                input_plan = CachedInputPlan(store, self.scenes, kinds, runs, self.stats)
         for run in runs:
             with self.report.model(run.key):
-                run.run(self.scenes, kinds, inputs, cached_scenes=cached_scenes)
+                run.run(self.scenes, kinds, inputs, input_plan=input_plan)
+            if input_plan is not None:
+                input_plan.finished(run.key)
+        if input_plan is not None:
+            # A later unfinished model can discover regenerated inputs after an
+            # earlier completed model skipped its media reads. Refresh only those
+            # earlier scene/model pairs before publishing the combined evidence.
+            for run in runs:
+                stale = input_plan.invalidated.pop(run.key, set())
+                if stale:
+                    with self.report.model(run.key):
+                        run.run({scene: self.scenes[scene] for scene in sorted(stale)},
+                                kinds, inputs, input_plan=input_plan)
 
     def _merge_scenes(self):
         MergePublisher(

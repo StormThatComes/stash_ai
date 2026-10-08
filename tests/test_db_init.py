@@ -202,8 +202,13 @@ def test_changed_vtt_invalidates_finished_model_and_partial_checkpoint(pipeline)
     p.fail.clear()
     p.cues = p.cues[:-1]
     assert app.main(resume_args(args)) == 0
-    assert [model.settings.source.key for model in p.loaded] == ['wd', 'dtq', 'wd', 'dtq']
+    # WD skips its completed pass; DTQ detects the new input and resets its
+    # checkpoint, then the deferred WD refresh aligns both before publication.
+    assert [model.settings.source.key for model in p.loaded] == ['wd', 'dtq', 'dtq', 'wd']
     assert all(model.seen == list(range(9)) for model in p.loaded[-2:])
+    with StateStore(p.path, scope_for(app.STASH_URL)) as store:
+        assert len({store.result_metadata('1', 'scene', model)['meta']['frame_input_signature']
+                    for model in ('wd', 'dtq')}) == 1
 
 
 def test_failed_partial_publication_resumes_offline_and_keeps_ownership(pipeline, monkeypatch):

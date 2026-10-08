@@ -961,9 +961,9 @@ szeregowe.
 
 ### Rerun bez pobierania gotowych wejść
 
-Domyślne uruchomienie/wznowienie ufa wcześniej zweryfikowanym wejściom sceny,
-gdy wszystkie wybrane modele mają komplet zgodnych wyników na tych samych
-wejściach. Wtedy nie pobiera VTT ani sprite'ów ze Stash i nie ładuje modeli.
+Domyślne uruchomienie/wznowienie ufa wcześniej zweryfikowanym wejściom każdego
+ukończonego modelu sceny. Jego przejście nie pobiera VTT ani sprite'ów ze Stash
+i nie ładuje modelu, także gdy inne wybrane modele dopiero przetwarzają tę scenę.
 Nadal sprawdza tożsamość modeli, zawartość ich plików, vocabulary, ukończenie
 wyników i pokrycie progów przez zachowane dowody. Zgodna zmiana batch size,
 workerów lub progów publikacji nie wymaga ponownej inferencji.
@@ -980,10 +980,14 @@ Przy zmianie wejść, modelu lub zbyt małym pokryciu cache przeliczane są tylk
 wymagające tego wyniki. Opcja dotyczy zwykłej inferencji/wznowienia, nie raportów,
 `--merge-only` ani osobnych poleceń rethreshold.
 
-Sceny nowe, niekompletne, z checkpointem lub oczekującą weryfikacją wejść nadal
-są weryfikowane automatycznie. Gdy jeden wybrany model wymaga pracy, wszystkie
-wybrane modele tej sceny sprawdzają wejścia, aby nie łączyć starych i nowych
-danych. Zmiana śledzonych ścieżek lub limitu próbkowania również wymaga sprawdzenia.
+Nowe/niekompletne wyniki i checkpointy nadal wymagają pobrania wejść w przejściu
+danego modelu. Na przykład po przerwaniu ukończonego JoyTaga i częściowego Oppai
+JoyTag pomija pobieranie, a Oppai pobiera wejścia i wznawia swój checkpoint.
+Jeśli ten późniejszy model wykryje zmianę VTT/sprite'ów, wcześniejsze wyniki na
+starych wejściach zostają od razu zablokowane i odświeżone przed wspólnym merge.
+Blokada pozostaje w bazie po przerwaniu lub błędzie. Wyniki już zapisane na
+różnych wejściach, oczekująca weryfikacja, zmiana śledzonych ścieżek lub limitu
+próbkowania również wymagają sprawdzenia.
 
 Nie jest potrzebna migracja bazy ani zmiana formatów inferencji/checkpointów.
 Istniejące wpisy tożsamości v27 działają od razu przy domyślnym pełnym próbkowaniu.

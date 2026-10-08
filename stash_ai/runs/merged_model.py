@@ -27,7 +27,7 @@ class MergedModelRun:
         from stash_ai.inference.reuse_diagnostics import ReuseObserver
         self.observer = ReuseObserver(app, args, store, config, report)
 
-    def run(self, scenes, kinds, inputs, *, cached_scenes=()):
+    def run(self, scenes, kinds, inputs, *, input_plan=None):
         remaining = set(scenes)
         try:
             bar = tqdm(scenes.items(), desc=self.key + " inference", unit="scene")
@@ -42,7 +42,9 @@ class MergedModelRun:
                 try:
                     with self.report.measure('model_scene', model=self.key, units=1, unit='scenes'):
                         if not self._process_scene(scene_id, current, paths, kinds, inputs,
-                                                   trust_cached=scene_id in cached_scenes):
+                                                   trust_cached=(input_plan is not None and
+                                                       scene_id in input_plan.cached[self.key]),
+                                                   input_plan=input_plan):
                             progress.block_publication(self.store, remaining, self.key, kinds)
                             for blocked_scene in scenes:
                                 if blocked_scene in remaining and blocked_scene != scene_id:
@@ -65,6 +67,7 @@ class MergedModelRun:
         finally:
             if self.tagger is not None:
                 self.tagger.close()
+                self.tagger = None
 
     def _eligible(self, scene_id, paths):
         if not paths.get("sprite") or not paths.get("vtt"):
@@ -124,7 +127,8 @@ class MergedModelRun:
         self.observer.reused(kinds, rethreshold=saved.rethreshold, input_verified=False)
         return True
 
-    def _process_scene(self, scene_id, current, paths, kinds, inputs, *, trust_cached=False):
+    def _process_scene(self, scene_id, current, paths, kinds, inputs, *, trust_cached=False,
+                       input_plan=None):
         """Return False only when model loading fails and its remaining scenes must stop."""
         app, args, store = self.app, self.args, self.store
         store.cache.pressure(force=True)
@@ -141,6 +145,8 @@ class MergedModelRun:
         except BaseException:
             defer(store, scene_id, self.key, 'read_error')
             raise
+        if input_plan is not None:
+            input_plan.verified(scene_id, cues, media.hashes)
         self.report.record_input_workload(scene_id, self.key, cues, media.hashes)
         verified(store, scene_id, self.key)
         self.observer.inputs(self.identity, cues, media.hashes, paths)
