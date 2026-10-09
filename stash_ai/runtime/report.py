@@ -114,6 +114,8 @@ class RunReport:
         self._timing.response_size(size)
 
     def record_counts(self, **values):
+        with self._timing._timing_lock:
+            self.counts.update(values)
         if self.diagnostics is not None:
             self.diagnostics.record_counts(values)
 

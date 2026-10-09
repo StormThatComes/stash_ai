@@ -50,9 +50,9 @@ class MergedModelRun:
             for self._scene_position, (scene_id, current) in enumerate(bar):
                 self.observer.begin(scene_id)
                 self.report.work('')
-                self.report.progress(bar, self.stats)
                 paths = current["paths"]
                 if not self._eligible(scene_id, paths):
+                    self.report.progress(bar, self.stats)
                     continue
                 try:
                     if self._load_failure is not None:
@@ -83,6 +83,8 @@ class MergedModelRun:
                     if self.key not in pending(self.store, scene_id):
                         progress.block_publication(self.store, [scene_id], self.key, kinds)
                     raise
+                finally:
+                    self.report.progress(bar, self.stats)
         finally:
             from stash_ai.runtime.cleanup import cleanup
             def close_backend():
@@ -165,6 +167,7 @@ class MergedModelRun:
             return True
         diagnostics = {}
         if args.resume and not args.restart:
+            context.observer.before_reuse(kinds)
             from stash_ai.inference.reuse import reuse
             if reuse(self.app, store, scene_id, self.config, self.identity, cues, media.hashes, kinds,
                      diagnostics=diagnostics, input_options=context.input_options, snapshot=snapshot):
@@ -208,12 +211,14 @@ class MergedModelRun:
         saved = input_plan.plan(scene_id, self.key) if input_plan is not None else self.cached_plan(scene_id, paths, kinds)
         if saved is None:
             return False
+        observer = observer or self.observer
+        observer.before_reuse(kinds)
         from stash_ai.rethreshold.scenes import apply
         apply(self.store, scene_id, self.key, saved.thresholds)
         self.stats['threshold_cache_reused' if saved.rethreshold else 'reused'] += 1
         self.stats['input_fetch_skipped'] += 1
         self.report.model_outcome(self.key, 'rethreshold' if saved.rethreshold else 'reused')
-        (observer or self.observer).reused(kinds, rethreshold=saved.rethreshold, input_verified=False)
+        observer.reused(kinds, rethreshold=saved.rethreshold, input_verified=False)
         return True
 
     def _process_scene(self, scene_id, current, paths, kinds, inputs, *, trust_cached=False,
