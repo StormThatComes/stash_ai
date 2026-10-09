@@ -1,15 +1,17 @@
 """Prove saved inference identity before applying threshold-only edits."""
-from dataclasses import dataclass
 import zlib
 from .input_identity import cue_manifest
 from stash_ai.rethreshold.plans import RecordAccess, ThresholdRequest, ThresholdPlan
 
 
-@dataclass(frozen=True)
-class CachedReuse:
-    thresholds: ThresholdPlan
-    frame_input: str
-    rethreshold: bool
+from .decisions import ReuseDecision
+
+
+def CachedReuse(thresholds, frame_input, rethreshold):
+    """Adapter for the historical three-field constructor."""
+    from .decisions import ReuseAction
+    return ReuseDecision(ReuseAction.RETHRESHOLD if rethreshold else ReuseAction.REUSE,
+                         thresholds, frame_input)
 
 
 def input_options(app, paths):
@@ -67,22 +69,22 @@ def cached_reuse(app, store, scene, config, identity, paths, kinds):
         except RuntimeError:
             # Pending publication is reported by the ordinary per-scene path.
             return None
-        return CachedReuse(thresholds, inputs.pop(), bool(thresholds))
+        return ReuseDecision.authorized(thresholds, inputs.pop(), input_verified=False)
     except (ValueError, KeyError, TypeError, zlib.error):
         return None  # Verify current inputs through the established normal path.
 
 
-def reuse(app, store, scene, config, identity, cues, hashes, kinds, *, diagnostics=None, input_options=None):
+def verified_reuse_decision(app, store, scene, config, identity, cues, hashes, kinds, *, diagnostics=None, input_options=None):
     """Prove and rethreshold the selected current outputs through one planner."""
     from stash_ai.storage.progress import completed
-    from stash_ai.rethreshold.scenes import plan, apply
+    from stash_ai.rethreshold.scenes import plan
     from stash_ai.evidence.thresholds import indexed_signature
     records = {kind: store.model_record(scene, kind, config.source.key, borrow=True) for kind in kinds}
     if diagnostics is not None:
         diagnostics['metas'] = {kind: record['meta'] for kind, record in records.items() if record}
     if any(not record for record in records.values()):
-        return False
-    from .provenance import saved_identity, predictive, register
+        return ReuseDecision.infer('missing_or_incompatible_evidence')
+    from .provenance import saved_identity, predictive
     manifest = cue_manifest(cues)
     from stash_ai.evidence.retention import scene_cache_floor, marker_cache_floor
     verified = {}
@@ -90,27 +92,43 @@ def reuse(app, store, scene, config, identity, cues, hashes, kinds, *, diagnosti
         meta = record['meta']
         signature = meta['inference_signature']
         if not completed(store, scene, config.source.key, [kind], indexed_signature(record, signature)):
-            return False
+            return ReuseDecision.infer('saved_identity_mismatch')
         candidate = saved_identity(store, scene, config.source.key, signature, identity, manifest, hashes, meta)
         if candidate is None or predictive(candidate) != predictive(identity):
-            return False
+            return ReuseDecision.infer('saved_identity_mismatch')
         verified[signature] = candidate
         required = (scene_cache_floor(config, app.TEMPORAL_POLICY) if kind == 'scene'
                     else marker_cache_floor(config, app.TEMPORAL_POLICY))
         if meta['scene_score_floor' if kind == 'scene' else 'marker_score_floor'] > required:
             if diagnostics is not None:
                 diagnostics['rethreshold_rejected'] = True
-            return False
+            return ReuseDecision.infer('saved_identity_mismatch')
     try:
         outputs = plan(app, store, scene, config, request=ThresholdRequest(kinds=tuple(records)))
     except ValueError:
         if diagnostics is not None:
             diagnostics['rethreshold_rejected'] = True
-        return False
-    apply(store, scene, config.source.key, outputs)
+        return ReuseDecision.infer('missing_or_incompatible_evidence')
+    from .identity_types import ProvenanceIdentity
+    return ReuseDecision.authorized(outputs, records[next(iter(records))]['meta']['frame_input_signature'],
+        input_verified=True, identities=tuple((signature, ProvenanceIdentity.from_legacy(candidate))
+                                             for signature, candidate in verified.items()))
+
+
+def reuse(app, store, scene, config, identity, cues, hashes, kinds, *, diagnostics=None, input_options=None):
+    """Legacy bool adapter; only the consumer applies the authorized plan."""
+    from stash_ai.rethreshold.scenes import apply
+    from .provenance import register
+    decision = verified_reuse_decision(app, store, scene, config, identity, cues, hashes, kinds,
+                                       diagnostics=diagnostics)
     if diagnostics is not None:
-        diagnostics['rethreshold'] = bool(outputs)
+        diagnostics['decision'] = decision
+        diagnostics['rethreshold'] = decision.rethreshold
+    if not decision.reusable:
+        return False
+    apply(store, scene, config.source.key, decision.thresholds)
     if input_options is not None:
-        for signature, candidate in verified.items():
-            register(store, scene, config.source.key, signature, candidate, input_options=input_options)
+        # Preserve the proven identity associated with each historical signature.
+        for signature, candidate in decision.identities:
+            register(store, scene, config.source.key, signature, candidate.legacy(), input_options=input_options)
     return True

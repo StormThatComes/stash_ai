@@ -51,12 +51,8 @@ def predictive(identity, *, checkpoint=False):
     Retention/threshold changes require a completed-evidence coverage check;
     partial checkpoints retain their original capture policy.
     """
-    excluded = {'batch_size', *_STATE_FIELDS}
-    if not checkpoint:
-        excluded.update(('retention', 'scene_threshold', 'marker_threshold'))
-    result = {key: value for key, value in identity.items() if key not in excluded}
-    result['files'] = [[Path(path).name, checksum] for path, checksum in identity['files']]
-    return result
+    from .identity_types import ProvenanceIdentity
+    return ProvenanceIdentity.from_legacy(identity).predictive(checkpoint=checkpoint).legacy()
 
 
 def register(store, scene, model, signature, identity, *, input_options=None):

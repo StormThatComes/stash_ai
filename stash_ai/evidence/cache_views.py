@@ -1,4 +1,5 @@
 """Replay scene qualification from sparse frame evidence and exact aggregates."""
+from stash_ai.runtime.reasons import EvidenceError, Reason, PendingPublication
 
 from stash_ai.storage.thresholds import effective
 
@@ -16,9 +17,9 @@ def validate_scene(app, segment, threshold, *, has_frames=None):
     floor = meta['scene_score_floor']
     has_frames = 'frames' in segment if has_frames is None else has_frames
     if segment['mode'] != 'scene' or not has_frames:
-        raise ValueError('scene frame evidence is missing; run inference once to populate the cache.')
+        raise EvidenceError(Reason.MISSING_SCENE_FRAMES, 'scene frame evidence is missing; run inference once to populate the cache.')
     if not _score(floor) or floor > needed:
-        raise ValueError(f'scene cache floor {floor!r} exceeds required {needed:g}; run inference.')
+        raise EvidenceError(Reason.SCENE_FLOOR, f'scene cache floor {floor!r} exceeds required {needed:g}; run inference.')
 
 
 def project(app, segment):

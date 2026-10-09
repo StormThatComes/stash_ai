@@ -156,6 +156,8 @@ def build_parser(app) -> argparse.ArgumentParser:
 def parse_args(app, argv: list[str] | None = None) -> argparse.Namespace:
     parser = build_parser(app)
     args = validate_args(app, parser, parser.parse_args(argv))
+    from stash_ai.runtime.configuration import EffectiveConfiguration
+    args.configuration_snapshot = EffectiveConfiguration.capture(args)
     defaults = dict(checkpoint_batches=app.CHECKPOINT_BATCHES,
                     prefetch_batches=app.PREFETCH_BATCHES,
                     result_prefetch_batches=app.RESULT_PREFETCH_BATCHES,
@@ -170,7 +172,8 @@ def parse_args(app, argv: list[str] | None = None) -> argparse.Namespace:
     configuration = {}
     if missing and (args.command is Command.INFERENCE or args.model_config.expanduser().is_file()):
         from stash_ai.config import load_model_configuration
-        configuration = load_model_configuration(args.model_config.expanduser())
+        with args.configuration_snapshot.use():
+            configuration = load_model_configuration(args.model_config.expanduser())
     for name, default in defaults.items():
         if getattr(args, name) is None:
             setattr(args, name, configuration.get(name, default) if name in used else default)

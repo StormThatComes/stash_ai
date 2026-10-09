@@ -1,6 +1,9 @@
-"""At most one authorized scene waiting for owner-thread result processing."""
+"""Typed preparation outcomes and exclusive ownership of staged scene resources."""
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any
+
+from stash_ai.runtime.cleanup import cleanup
 
 
 @dataclass
@@ -17,7 +20,33 @@ class ModelScene:
     prepared: Any = None
 
     def close(self):
-        if self.batches is not None:
-            self.batches.close()
-        elif self.prepared is not None:
-            self.prepared.close()
+        resources = {id(value): value for value in (self.batches, self.prepared) if value is not None}
+        self.batches = self.prepared = None
+        cleanup([value.close for value in resources.values()])
+
+
+class PreparationStatus(Enum):
+    REUSED = 'reused'
+    BLOCKED = 'blocked'
+    READY = 'ready'
+    FAILED = 'failed'
+
+
+@dataclass(frozen=True)
+class ScenePreparation:
+    status: PreparationStatus
+    job: ModelScene | None = None
+    error: BaseException | None = None
+
+    def __post_init__(self):
+        if (self.status is PreparationStatus.READY) != (self.job is not None):
+            raise ValueError('Only a ready preparation owns a scene job.')
+        if (self.status is PreparationStatus.FAILED) != (self.error is not None):
+            raise ValueError('Only a failed preparation owns an exception.')
+
+
+@dataclass(frozen=True)
+class StagedScene:
+    scene: str
+    preparation: ScenePreparation
+    observer: Any
