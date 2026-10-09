@@ -14,6 +14,11 @@ def current(meta):
 
 
 def validate_current(segment):
+    from stash_ai.storage.codec import validate_cached
+    validate_cached(segment, 'current-inference', _validate_current)
+
+
+def _validate_current(segment):
     """Reject obsolete inference rather than guessing its missing provenance."""
     if not isinstance(segment, dict) or not isinstance(segment.get('meta'), dict):
         raise ValueError('Invalid active inference record; run --db-update.')
@@ -37,7 +42,7 @@ def validate_current(segment):
     if segment['mode'] == 'scene':
         items = segment.get('items', ())
         if all(isinstance(item.get('tag'), str) for item in items) and len({item['tag'] for item in items}) != len(items):
-            raise ValueError('Duplicate scene aggregates; run --db-update to deduplicate identical entries.')
+            raise ValueError('Duplicate scene aggregates; run --db-repair to deduplicate identical entries.')
         required_scores.append('scene_score_floor')
         has_frames = 'frames' in segment if 'items' in segment else segment.get('has_frames', False)
         if not has_frames:
