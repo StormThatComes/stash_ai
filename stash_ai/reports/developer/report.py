@@ -12,6 +12,7 @@ from .database import database_report, _checkpoint_report, _grouped_counts
 from .evidence import _result_evidence_report
 
 import platform
+from contextlib import closing
 from pathlib import Path
 import sqlite3
 import struct
@@ -31,7 +32,7 @@ def build_report(path):
 
     from stash_ai.storage.schema import APPLICATION_ID, LATEST_SCHEMA_VERSION, require_supported_version
 
-    with connect_readonly(path) as db:
+    with closing(connect_readonly(path)) as db:
         db.execute("BEGIN")
         application_id = db.execute("PRAGMA application_id").fetchone()[0]
         schema_version = db.execute("PRAGMA user_version").fetchone()[0]
