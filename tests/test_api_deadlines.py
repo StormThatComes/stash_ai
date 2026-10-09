@@ -216,9 +216,17 @@ def test_https_read_deadline_disconnects_headers_and_body(tmp_path, body):
                     '-keyout', str(key), '-out', str(cert), '-days', '1',
                     '-subj', '/CN=localhost', '-addext', 'subjectAltName=IP:127.0.0.1'],
                    check=True, capture_output=True)
-    disconnected = Event()
+    disconnected, entered = Event(), Event()
     class Handler(BaseHTTPRequestHandler):
+        protocol_version = 'HTTP/1.1'
+
         def do_GET(self):
+            if self.path == '/warmup':
+                self.send_response(200)
+                self.send_header('Content-Length', '0')
+                self.end_headers()
+                return
+            entered.set()
             try:
                 prefix = (b'HTTP/1.1 200 OK\r\nContent-Length: 1000\r\n\r\n'
                           if body else b'HTTP/1.1 200 OK\r\nX-Slow: ')
@@ -238,14 +246,21 @@ def test_https_read_deadline_disconnects_headers_and_body(tmp_path, body):
     server.socket = context.wrap_socket(server.socket, server_side=True)
     thread = Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    client = transport((.1, .15), retries=0)
+    # Establish the keep-alive TLS connection outside the fault's short budget.
+    # The deadline assertion below still measures actual trickling TLS reads.
+    client = transport((2., 2.), retries=0)
     client.url = f'https://127.0.0.1:{server.server_port}'
     client.media.trust_env = False
     client.media.verify = str(cert)
     try:
+        client.get_media(client.url + '/warmup')
+        client.request_timeout = (.5, .5)
+        started = time.monotonic()
         with pytest.raises(ReadDeadlineExceeded):
             client.get_media(client.url + '/sprite')
-        assert disconnected.wait(1)
+        assert entered.is_set()
+        assert time.monotonic() - started < 1.5
+        assert disconnected.wait(2)
     finally:
         client.close()
         server.shutdown()

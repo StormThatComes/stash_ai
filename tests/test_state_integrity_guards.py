@@ -94,8 +94,8 @@ def test_missing_proof_and_wrong_scope_are_diagnosed_but_archived_proof_is_usabl
     assert 'snapshot_proof_missing' in codes(path)
 
 
-def test_db_update_repairs_valid_shaped_mismatched_metadata(tmp_path):
-    from stash_ai.db.update import update_database
+def test_db_repair_repairs_valid_shaped_mismatched_metadata(tmp_path):
+    from stash_ai.db.repair import repair_database
     from stash_ai.storage.metadata import encode, summarize
     path = tmp_path/'state.db'
     record = inference_record(mode='scene', items=[{'tag': 'a', 'score': .9}], meta={'scene_score_floor': .1})
@@ -106,5 +106,5 @@ def test_db_update_repairs_valid_shaped_mismatched_metadata(tmp_path):
         with state.connection:
             state.connection.execute('UPDATE result_metadata SET data=?', (encode(metadata),))
     assert 'result_metadata_mismatch' in codes(path)
-    update_database(path)
+    repair_database(path)
     assert not codes(path)

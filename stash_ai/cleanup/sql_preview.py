@@ -2,6 +2,7 @@
 import json
 from collections import Counter
 from stash_ai.publication import markers as marker_ops
+from stash_ai.stash_api.protocols import ReadTagView, SceneReads
 
 
 class PreviewEffects:
@@ -25,14 +26,11 @@ class PreviewEffects:
         return [i for i in ids if i not in removed]
 
 
-class SQLPreview:
+class SQLPreview(ReadTagView):
     """Overlay global dry-run effects without retaining millions of marker IDs."""
-    def __init__(self, stash, app, names, cores, group_usage_delta=None):
+    def __init__(self, stash: SceneReads, app, names, cores, group_usage_delta=None):
         self.stash, self.app, self.names, self.cores = stash, app, names, cores
         self.marker_group_usage_delta = group_usage_delta or Counter()
-
-    def __getattr__(self, name):
-        return getattr(self.stash, name)
 
     def find_scene(self, identifier):
         return self._project(self.stash.find_scene(identifier))
