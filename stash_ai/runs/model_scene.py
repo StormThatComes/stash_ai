@@ -14,6 +14,7 @@ class ModelScene:
     media: Any
     signature: str
     input_options: Any = None
+    verified_input: Any = None
     checkpoint: Any = None
     state: Any = None
     batches: Any = None

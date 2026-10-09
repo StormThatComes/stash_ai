@@ -6,6 +6,7 @@ merge reconciliation directly; merge algorithms stay function-oriented.
 from __future__ import annotations
 
 from collections import Counter
+from itertools import batched
 
 from tqdm import tqdm
 
@@ -94,40 +95,43 @@ class MergedRun:
         self.merge_key = (
             digest([self.base_key, fingerprints.catalog_fingerprint(self.resolver)])
             if self.use_catalog else self.base_key)
-        self.store.preload_sources(args.scene_id)
 
     def _scan_scenes(self):
         app, args = self.app, self.args
         with stage(self.report, 'initial_scan'):
-            for current in tqdm(self.stash.iter_scenes(args.scene_id), desc="Read sources", unit="scene"):
-                scene_id = str(current["id"])
-                try:
-                    if self.store.initialization.active:
-                        from stash_ai.publication.preconditions import require_native_ranges
-                        require_native_ranges(current)
-                        self.store.initialization.enroll(current)
-                    with stage(self.report, 'scan_fingerprint'):
-                        fingerprint = fingerprints.scene_fingerprint(current)
-                    publication_reason = merge_checks.check_reason(
-                        self.store, scene_id, self.merge_key, fingerprint)
-                    if publication_reason == 'reused':
-                        self.stats['source_check_reused'] += 1
-                    else:
-                        with self.report.measure('source_check'):
-                            require_source_state(app, self.store, current)
-                    # Keep only input paths/ID between passes; marker bodies need
-                    # no collection-sized in-memory cache and are refreshed at sync.
-                    self.scenes[scene_id] = {
-                        "id": scene_id,
-                        "paths": current.get("paths") or {},
-                        'fingerprint': fingerprint,
-                        'publication_reason': publication_reason,
-                    }
-                except Exception as exc:
-                    self.stats["errors"] += 1
-                    self.report.issue(
-                        'read sources', '', scene_id, exc,
-                        app.services.safe_error(exc, api_key=app.STASH_API_KEY))
+            for group in batched(tqdm(self.stash.iter_scenes(args.scene_id),
+                                      desc="Read sources", unit="scene"), 128):
+                if app.CREATE_MARKERS:
+                    self.store.preload_sources((current['id'] for current in group), kinds=('markers',))
+                for current in group:
+                    scene_id = str(current["id"])
+                    try:
+                        if self.store.initialization.active:
+                            from stash_ai.publication.preconditions import require_native_ranges
+                            require_native_ranges(current)
+                            self.store.initialization.enroll(current)
+                        with stage(self.report, 'scan_fingerprint'):
+                            fingerprint = fingerprints.scene_fingerprint(current)
+                        publication_reason = merge_checks.check_reason(
+                            self.store, scene_id, self.merge_key, fingerprint)
+                        if publication_reason == 'reused':
+                            self.stats['source_check_reused'] += 1
+                        else:
+                            with self.report.measure('source_check'):
+                                require_source_state(app, self.store, current)
+                        # Keep only input paths/ID between passes; marker bodies need
+                        # no collection-sized in-memory cache and are refreshed at sync.
+                        self.scenes[scene_id] = {
+                            "id": scene_id,
+                            "paths": current.get("paths") or {},
+                            'fingerprint': fingerprint,
+                            'publication_reason': publication_reason,
+                        }
+                    except Exception as exc:
+                        self.stats["errors"] += 1
+                        self.report.issue(
+                            'read sources', '', scene_id, exc,
+                            app.services.safe_error(exc, api_key=app.STASH_API_KEY))
             self._finish_scan()
 
     def _finish_scan(self):
@@ -174,40 +178,40 @@ class MergedRun:
     def _run_inference(self):
         app, args, store = self.app, self.args, self.store
         kinds = progress.output_kinds(app)
-        inputs = RunInputs(self.stash, store.cache, self.report)
         if args.merge_only:
             return
-        if args.restart:
-            progress.request_refresh(
-                store, self.scenes, [config.source.key for config in self.settings], kinds)
-        progress.preload_status(store, self.scenes)
-        runs = []
-        for config in self.settings:
-            with self.report.model(config.source.key):
-                runs.append(MergedModelRun(
-                    app, args, store, config, self.catalogs[config.source.key],
-                    stats=self.stats, report=self.report,
-                ))
-        input_plan = None
-        if args.resume and not args.restart and not args.force_fetch_vtt:
-            from .cached_inputs import CachedInputPlan
-            with self.report.measure('cached_input_plan'):
-                input_plan = CachedInputPlan(store, self.scenes, kinds, runs, self.stats)
-        for run in runs:
-            with self.report.model(run.key):
-                run.run(self.scenes, kinds, inputs, input_plan=input_plan)
-            if input_plan is not None:
-                input_plan.finished(run.key)
-        if input_plan is not None:
-            # A later unfinished model can discover regenerated inputs after an
-            # earlier completed model skipped its media reads. Refresh only those
-            # earlier scene/model pairs before publishing the combined evidence.
+        with RunInputs(self.stash, store.cache, self.report) as inputs:
+            if args.restart:
+                progress.request_refresh(
+                    store, self.scenes, [config.source.key for config in self.settings], kinds)
+            progress.preload_status(store, self.scenes)
+            runs = []
+            for config in self.settings:
+                with self.report.model(config.source.key):
+                    runs.append(MergedModelRun(
+                        app, args, store, config, self.catalogs[config.source.key],
+                        stats=self.stats, report=self.report,
+                    ))
+            input_plan = None
+            if args.resume and not args.restart and not args.force_fetch_vtt:
+                from .cached_inputs import CachedInputPlan
+                with self.report.measure('cached_input_plan'):
+                    input_plan = CachedInputPlan(store, self.scenes, kinds, runs, self.stats)
             for run in runs:
-                stale = input_plan.invalidated.pop(run.key, set())
-                if stale:
-                    with self.report.model(run.key):
-                        run.run({scene: self.scenes[scene] for scene in sorted(stale)},
-                                kinds, inputs, input_plan=input_plan)
+                with self.report.model(run.key):
+                    run.run(self.scenes, kinds, inputs, input_plan=input_plan)
+                if input_plan is not None:
+                    input_plan.finished(run.key)
+            if input_plan is not None:
+                # A later unfinished model can discover regenerated inputs after an
+                # earlier completed model skipped its media reads. Refresh only those
+                # earlier scene/model pairs before publishing the combined evidence.
+                for run in runs:
+                    stale = input_plan.invalidated.pop(run.key, set())
+                    if stale:
+                        with self.report.model(run.key):
+                            run.run({scene: self.scenes[scene] for scene in sorted(stale)},
+                                    kinds, inputs, input_plan=input_plan)
 
     def _merge_scenes(self):
         MergePublisher(
