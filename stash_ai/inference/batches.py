@@ -17,16 +17,18 @@ class _Failure:
 class BatchPredictions:
     """Start GPU production now; consume/checkpoint CPU results later.
 
-    Only two CPU results and one running prediction can precede the consumer.
+    A bounded number of CPU results and one prediction can precede the consumer.
     Model calls always use the borrowed backend owner, including across scenes.
     """
     def __init__(self, app, tagger, stash, paths, cues, *, prefetch,
                  prepare_workers=1, report=None, inference_executor=None,
-                 prepared_inputs=None, transform_executor=None):
+                 prepared_inputs=None, transform_executor=None, result_prefetch=32):
+        if type(result_prefetch) is not int or not 1 <= result_prefetch <= 128:
+            raise ValueError('result_prefetch must be an integer in 1..128.')
         self.report, self.model = report, tagger.settings.source.key
         self.work = report.work() if report is not None else ''
         self.tagger, self.cancellation = tagger, Cancellation()
-        self.results, self.stopped = Queue(maxsize=2), Event()
+        self.results, self.stopped = Queue(maxsize=result_prefetch), Event()
         self.finished, self.external_inputs = object(), prepared_inputs
         self.inputs = (prepared_inputs if prepared_inputs is not None else
                        prepared_batches(app, tagger, stash, paths, cues, prefetch,
@@ -106,14 +108,15 @@ class BatchPredictions:
 
 def predicted_batches(app, tagger, stash, paths, cues, *, prefetch=0,
                       prepare_workers=1, report=None, inference_executor=None,
-                      prepared_inputs=None, transform_executor=None):
+                      prepared_inputs=None, transform_executor=None, result_prefetch=32):
     """Lazy compatibility iterator; prefetch=0 keeps caller-owned inference."""
     if prefetch:
         with closing(BatchPredictions(app, tagger, stash, paths, cues, prefetch=prefetch,
                                      prepare_workers=prepare_workers, report=report,
                                      inference_executor=inference_executor,
                                      prepared_inputs=prepared_inputs,
-                                     transform_executor=transform_executor)) as batches:
+                                     transform_executor=transform_executor,
+                                     result_prefetch=result_prefetch)) as batches:
             yield from batches
         return
     with closing(prepared_batches(app, tagger, stash, paths, cues, workers=prepare_workers,

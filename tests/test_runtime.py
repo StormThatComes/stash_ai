@@ -46,6 +46,7 @@ def test_api_key_has_no_historical_default_and_is_read_for_each_runtime(monkeypa
     ('TOP_K_FRAMES', True), ('MARKER_MIN_HITS', False), ('SCENE_PAGE_SIZE', True),
     ('MAX_FRAMES_PER_SCENE', True), ('MARKER_MAX_TAGS_PER_FRAME', False),
     ('CHECKPOINT_BATCHES', True), ('PREFETCH_BATCHES', True), ('PREPARE_WORKERS', False),
+    ('RESULT_PREFETCH_BATCHES', True), ('RESULT_PREFETCH_BATCHES', 0), ('RESULT_PREFETCH_BATCHES', 129),
     ('HTTP_RETRIES', True), ('HTTP_RETRIES', -1), ('HTTP_RETRIES', 11),
     ('REQUEST_TIMEOUT', True), ('REQUEST_TIMEOUT', 0), ('REQUEST_TIMEOUT', float('inf')),
     ('REQUEST_TIMEOUT', (1,)), ('REQUEST_TIMEOUT', (1, 2, 3)),
@@ -64,3 +65,11 @@ def test_runtime_rejects_ambiguous_counts_and_invalid_http_budgets(name, value):
 def test_runtime_accepts_finite_positive_timeout_and_retry_boundaries(timeout, retries):
     from stash_ai.runtime.settings import validate_config
     validate_config(RuntimeSettings(REQUEST_TIMEOUT=timeout, HTTP_RETRIES=retries))
+
+
+@pytest.mark.parametrize('input_prefetch', [0, 128])
+@pytest.mark.parametrize('result_prefetch', [1, 128])
+def test_runtime_accepts_independent_prefetch_boundaries(input_prefetch, result_prefetch):
+    from stash_ai.runtime.settings import validate_config
+    validate_config(RuntimeSettings(PREFETCH_BATCHES=input_prefetch,
+                                    RESULT_PREFETCH_BATCHES=result_prefetch))

@@ -20,6 +20,7 @@ class RuntimeSettings:
     DEFAULT_RESUME: bool = True
     CHECKPOINT_BATCHES: int = 8
     PREFETCH_BATCHES: int = 4
+    RESULT_PREFETCH_BATCHES: int = 32
     RAM_CACHE_GB: float = 24.0
     RAM_BUDGET_GB: float = 32.0
     PREPARE_WORKERS: int = 4
@@ -78,7 +79,8 @@ def validate_config(app, scene_work: bool = True) -> None:
             any(type(value) not in (int, float) or
             not math.isfinite(value) or value <= 0 for value in timeouts)):
         raise ValueError('REQUEST_TIMEOUT must be a positive finite number or (connect, read) pair.')
-    for name, maximum, minimum in (('PREFETCH_BATCHES', 16, 0), ('PREPARE_WORKERS', 16, 1)):
+    for name, maximum, minimum in (('PREFETCH_BATCHES', 128, 0),
+                                    ('RESULT_PREFETCH_BATCHES', 128, 1), ('PREPARE_WORKERS', 16, 1)):
         value = getattr(app, name)
         if type(value) is not int or not minimum <= value <= maximum:
             raise ValueError(f'{name} must be an integer in {minimum}..{maximum}.')

@@ -64,7 +64,7 @@ def load_exclusion_policy(path: Path, key: str) -> dict[str, frozenset[str]]:
 
 def load_model_configuration(path: Path):
     data = load_unique_yaml(path, "Model configuration")
-    allowed = {"version", "enabled_models", "device", "download_missing", "prefetch_batches",
+    allowed = {"version", "enabled_models", "device", "download_missing", "prefetch_batches", "result_prefetch_batches",
                "prepare_workers", "merge_workers", "model_report_workers", *SOURCES}
     if not isinstance(data, dict) or set(data) - allowed:
         raise ValueError("Unknown model configuration keys.")
@@ -73,6 +73,9 @@ def load_model_configuration(path: Path):
     if 'prefetch_batches' in data and (type(data['prefetch_batches']) is not int or
                                       not 0 <= data['prefetch_batches'] <= 128):
         raise ValueError('prefetch_batches must be an integer in 0..128.')
+    if 'result_prefetch_batches' in data and (type(data['result_prefetch_batches']) is not int or
+                                             not 1 <= data['result_prefetch_batches'] <= 128):
+        raise ValueError('result_prefetch_batches must be an integer in 1..128.')
     for name in ('prepare_workers', 'merge_workers', 'model_report_workers'):
         if name in data and (type(data[name]) is not int or not 1 <= data[name] <= 16):
             raise ValueError(f'{name} must be an integer in 1..16.')

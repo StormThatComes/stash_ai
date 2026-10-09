@@ -1,7 +1,7 @@
 """Compact checkpoints and atomic completion of retained inference results."""
 import zlib
 
-from stash_ai.storage.codec import encode, decode
+from stash_ai.storage.codec import compress, encode, decode
 
 
 def clear_checkpoint(store, scene, model):
@@ -102,18 +102,29 @@ class Checkpoint:
     def _flush(self):
         if self.top_scores is None or self.processed == self.saved_processed:
             return
+        from stash_ai.runtime.timing import stage
+        report = getattr(self.store, 'report', None)
+        # Prepare immutable blobs before opening the write transaction. A
+        # failed encode cannot modify SQLite or advance the durable prefix.
+        with stage(report, 'checkpoint_prepare'):
+            scores = compress(self.top_scores.astype("<f4", copy=False).tobytes(), report,
+                              stage_name='checkpoint_compress')
+            frames = encode(self.pending, report, stage_prefix='checkpoint') if self.pending else None
+            analysis = (encode(self.analysis, report, stage_prefix='checkpoint')
+                        if self.analysis is not None else None)
         db = self.store.connection
-        with db:
-            db.execute("INSERT INTO checkpoints VALUES (?,?,?,?,?,?,?,?) "
-                "ON CONFLICT(scope,scene,model) DO UPDATE SET signature=excluded.signature,processed=excluded.processed,"
-                "total=excluded.total,top_rows=excluded.top_rows,top_scores=excluded.top_scores",
-                (self.store.scope, self.scene, self.model, self.signature, self.processed, self.total,
-                 len(self.top_scores), zlib.compress(self.top_scores.astype("<f4", copy=False).tobytes())))
-            if self.pending:
-                db.execute("INSERT INTO checkpoint_frames VALUES (?,?,?,?,?)",
-                           (self.store.scope, self.scene, self.model, self.processed, encode(self.pending)))
-            if self.analysis is not None:
-                db.execute("INSERT INTO checkpoint_analysis VALUES (?,?,?,?) ON CONFLICT(scope,scene,model) "
-                           "DO UPDATE SET data=excluded.data", (self.store.scope, self.scene, self.model, encode(self.analysis)))
+        with stage(report, 'checkpoint_sqlite_write'):
+            with db:
+                db.execute("INSERT INTO checkpoints VALUES (?,?,?,?,?,?,?,?) "
+                    "ON CONFLICT(scope,scene,model) DO UPDATE SET signature=excluded.signature,processed=excluded.processed,"
+                    "total=excluded.total,top_rows=excluded.top_rows,top_scores=excluded.top_scores",
+                    (self.store.scope, self.scene, self.model, self.signature, self.processed, self.total,
+                     len(self.top_scores), scores))
+                if frames is not None:
+                    db.execute("INSERT INTO checkpoint_frames VALUES (?,?,?,?,?)",
+                               (self.store.scope, self.scene, self.model, self.processed, frames))
+                if analysis is not None:
+                    db.execute("INSERT INTO checkpoint_analysis VALUES (?,?,?,?) ON CONFLICT(scope,scene,model) "
+                               "DO UPDATE SET data=excluded.data", (self.store.scope, self.scene, self.model, analysis))
         self.saved_processed = self.processed
         self.pending, self.batches = [], 0

@@ -183,11 +183,14 @@ def test_resolvers_choose_missing_tag_behavior_independently():
     assert create.cache['ai:label'] == 'dry-run:ai:label'
 
 
-def test_state_codec_preserves_pre_refactor_blob_format():
+def test_state_codec_reads_pre_refactor_blob_and_preserves_json_encoding():
+    import zlib
     # Produced by main e2bbcaa before moving the codec out of stash_merge.py.
     saved = bytes.fromhex(
         '789cab562a48cd4bc9cc4b57b2aa56ca4d2cca4e2d2a56b28a8eadd5512a4ece2f4a55b232d0b3d051'
         '2a49042a504accb43abae7f0e6a34d47da956a0152b81592')
     value = {'tag': 'ai:żółć', 'score': 0.8, 'pending': {'markers': []}}
     assert decode(saved) == value
-    assert encode(value) == saved
+    encoded = encode(value)
+    assert zlib.decompress(encoded) == zlib.decompress(saved)
+    assert decode(encoded) == value

@@ -445,6 +445,7 @@ Domyślne wartości:
 | `--ram-cache-gb` | 24 |
 | `--prepare-workers` | 4 |
 | `--prefetch-batches` | 4 |
+| `--result-prefetch-batches` | 32 |
 
 Cache jest przydzielany na żądanie i ograniczony do maksymalnie 75% budżetu RAM.
 Budżet nie jest twardym limitem procesu — model, aktywne tensory, Python i SQLite

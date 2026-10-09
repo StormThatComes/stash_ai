@@ -53,6 +53,10 @@ def build_parser(app) -> argparse.ArgumentParser:
     parser.add_argument("--prefetch-batches", type=int, choices=range(129), default=None, metavar="N",
                         help="Prepare N next inputs in RAM and overlap inference with result processing; "
                              "0..128, overrides YAML prefetch_batches (default: 4); 0 disables lookahead.")
+    parser.add_argument("--result-prefetch-batches", type=int, choices=range(1, 129), default=None, metavar="N",
+                        help="Buffer N inferred CPU result batches while processing/checkpointing results; "
+                             "1..128, overrides YAML result_prefetch_batches (default: 32). "
+                             "Used only with --prefetch-batches > 0.")
     parser.add_argument("--ram-cache-gb", type=float, default=app.RAM_CACHE_GB, metavar="GIB",
                         help="Shared result/index/media cache in GiB (default: 24); 0 disables. Capped to 75%% of --ram-budget-gb.")
     parser.add_argument("--ram-budget-gb", type=float, default=app.RAM_BUDGET_GB, metavar="GIB",
@@ -150,10 +154,11 @@ def parse_args(app, argv: list[str] | None = None) -> argparse.Namespace:
     parser = build_parser(app)
     args = validate_args(app, parser, parser.parse_args(argv))
     defaults = dict(prefetch_batches=app.PREFETCH_BATCHES,
+                    result_prefetch_batches=app.RESULT_PREFETCH_BATCHES,
                     prepare_workers=app.PREPARE_WORKERS, merge_workers=4,
                     model_report_workers=min(4, os.cpu_count() or 1))
     used = {
-        Command.INFERENCE: ('prefetch_batches', 'prepare_workers', 'merge_workers'),
+        Command.INFERENCE: ('prefetch_batches', 'result_prefetch_batches', 'prepare_workers', 'merge_workers'),
         Command.MERGE: ('merge_workers',),
         Command.MODEL_REPORT: ('model_report_workers',),
     }.get(args.command, ())

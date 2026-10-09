@@ -772,17 +772,28 @@ Aktualne domyślne ustawienia pamięci i równoległości:
   Jawne `--prefetch-batches N` nadpisuje YAML; brak pola zachowuje default 4.
   Parametr steruje przygotowaniem kolejnych batchy, niezależnie od rozmiaru
   inferencji `batch_size`, i nie unieważnia zapisanych wyników.
+- Globalne `result_prefetch_batches: 32` (1–128) lub `--result-prefetch-batches N`
+  wybiera osobno pojemność kolejki wyników CPU. Działa przy `prefetch_batches > 0`;
+  CLI nadpisuje YAML, a brak pola zachowuje default 32. Zmiana nie unieważnia
+  wyników ani checkpointów.
 
 Przy `prefetch_batches > 0` jeden stały wątek ładuje model, wykonuje inferencję
 dla wszystkich jego scen i zamyka model. Nie powstaje nowy wątek backendu dla
 każdej sceny; zasoby CUDA i pule strumieni mogą zachować jednego właściciela.
 Główny wątek równolegle obrabia poprzednie wyniki i zapisuje checkpointy/SQLite. Kolejka
-wyników mieści dwa batche; dodatkowo może trwać jedno wywołanie inferencji.
+wyników mieści `result_prefetch_batches` batchy; dodatkowo jeden wynik może
+czekać na wstawienie lub może trwać jedno wywołanie inferencji.
 Wyniki są odbierane w kolejności, a checkpoint obejmuje tylko w pełni
 przetworzony prefiks. Błąd późniejszego batcha zachowuje wcześniejszy postęp;
 przerwanie anuluje przygotowanie sceny i czeka na inferencję. Następnie model
 jest zamykany w swoim wątku, a wykonawca kończy pracę. Wejścia prefetch i wyniki
 w kolejce znajdują się w RAM, a nie w VRAM.
+Większa kolejka wyników pozwala kontynuować inferencję podczas wolniejszej
+obróbki, kompresji i zapisu poprzedniej sceny. Zajmuje RAM poza limitem cache;
+same macierze wyników float32 zajmują około
+`result_prefetch_batches × batch_size × liczba_etykiet × 4` bajtów,
+do czego dochodzi wynik w toku i metadane klatek. To bufor chwilowych opóźnień:
+jeśli odbiorca stale pracuje wolniej od inferencji, kolejka nadal się zapełni.
 
 Prefetch obejmuje też wejście jednej następnej sceny: pobranie VTT/sprite'ów
 i sprawdzenie ich hashy, dekodowanie obrazów i składanie batchy CPU mogą trwać
@@ -848,6 +859,14 @@ z oczekiwaniem wykazanym osobno w `scene_input_wait`.
 samych kerneli CUDA. Czasy równoległych etapów mogą się nakładać i nie należy
 sumować ich jako czasu rzeczywistego przebiegu. Zmiana pipeline'u nie wymaga
 migracji bazy ani odrzucenia zgodnych wyników/checkpointów.
+
+Wyniki i checkpointy korzystają z szybkiej kompresji zlib na poziomie 1;
+odczyt dotychczasowych BLOB-ów pozostaje zgodny. Kosztem szybszego zapisu
+może być większa baza. `state_json_encode` i `state_compress` mierzą zapis
+wyników, a `checkpoint_json_encode` i `checkpoint_compress` — przygotowanie
+checkpointów, w tym kompresję macierzy top scores. `checkpoint_prepare`
+obejmuje przygotowanie BLOB-ów przed transakcją, `checkpoint_sqlite_write`
+obejmuje SQL i commit, a `checkpoint_write` obejmuje oba etapy.
 
 `--db-compact` utrzymuje blokadę zapisu aż do końcowej kontroli bazy i
 porównania liczników po VACUUM.
@@ -1016,6 +1035,7 @@ Globalne ustawienia wybierają liczbę workerów osobno dla każdego etapu:
 
 ```yaml
 prefetch_batches: 4
+result_prefetch_batches: 32
 prepare_workers: 4
 merge_workers: 4
 model_report_workers: 4

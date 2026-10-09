@@ -319,6 +319,7 @@ class MergedModelRun:
                     job.batches = BatchPredictions(
                         self.app, self.tagger, job.media, job.paths, job.cues[job.state.processed:],
                         prefetch=self.args.prefetch_batches, prepare_workers=self.args.prepare_workers,
+                        result_prefetch=self.args.result_prefetch_batches,
                         report=self.report, inference_executor=self.inference_executor,
                         prepared_inputs=job.prepared, transform_executor=self.prepare_executor)
                 else:
@@ -345,6 +346,7 @@ class MergedModelRun:
                 app, self.tagger, job.media, job.paths, job.cues, checkpoint=job.checkpoint,
                 prefetch=args.prefetch_batches, analysis=analysis, report=self.report,
                 prepare_workers=args.prepare_workers,
+                result_prefetch=args.result_prefetch_batches,
                 inference_executor=self.inference_executor, state=job.state,
                 batch_results=job.batches, prepared_inputs=job.prepared,
                 transform_executor=self.prepare_executor,

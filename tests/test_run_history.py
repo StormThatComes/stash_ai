@@ -29,6 +29,7 @@ def test_fresh_and_cached_runs_are_durable_and_report_is_entirely_offline(pipeli
     assert fresh['outcomes']['wd']['fresh'] == 1
     assert cached['outcomes']['wd']['reused'] == 1
     assert fresh['counts']['processed'] == cached['counts']['reused'] == 1
+    assert fresh['configuration']['result_prefetch_batches'] == app.RESULT_PREFETCH_BATCHES
     assert fresh['models']['wd']['revision']
     batches = [row for row in fresh['metrics'] if row['name'] == 'inference_batch']
     assert sum(row['units'] for row in batches) == len(pipeline.cues)
