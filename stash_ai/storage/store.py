@@ -139,8 +139,8 @@ class StateStore(AbstractContextManager):
     def sources(self, scene, kind):
         return self.results.sources(scene, kind)
 
-    def preload_sources(self, scenes=None):
-        return self.results.preload_sources(scenes)
+    def preload_sources(self, scenes=None, *, kinds=('scene', 'markers')):
+        return self.results.preload_sources(scenes, kinds=kinds)
 
     def put(self, scene, model, outputs):
         return self.results.put(scene, model, outputs)

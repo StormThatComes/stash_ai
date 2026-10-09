@@ -6,7 +6,7 @@ from stash_ai.evidence.eligibility import eligible, selections
 from stash_ai.evidence.observations import qualify_marker_extras
 
 
-def consensus_seeds(records, policies, policy, max_tags=0):
+def consensus_seeds(records, policies, policy, max_tags=0, *, memo=None):
     """Only identical sampled inputs/times can vote, at most once per model."""
     votes = defaultdict(set)
     for model, segment in records.items():
@@ -18,13 +18,14 @@ def consensus_seeds(records, policies, policy, max_tags=0):
         high = marker_threshold(segment)
         floor = marker_floor(policy, high)
         for frame in segment["items"]:
-            for tag, score in eligible(frame['tags'], floor, policies[model], max_tags):
+            for tag, score in eligible(frame['tags'], floor, policies[model], max_tags, validate=True, memo=memo, source=model):
                 votes[(identity, frame["start"], tag)].add(model)
     return {key: tuple(sorted(models)) for key, models in votes.items() if len(models) >= policy.consensus_min_models}
 
 
 def build_markers(app, frames, core_exclusions, *, threshold, seeds=None, identity=None,
-                  collect_extras=True, extra_group=None, extra_cache=None):
+                  collect_extras=True, extra_group=None, extra_cache=None, tag_exclusions=(),
+                  validate=False, memo=None, source=None):
     """High/consensus seeds start runs; weaker observations have a time limit."""
     policy = app.TEMPORAL_POLICY
     high = threshold
@@ -44,7 +45,8 @@ def build_markers(app, frames, core_exclusions, *, threshold, seeds=None, identi
     for frame in frames:
         cue = frame.cue
         cores, extras = selections(frame.tags, high, floor, core_exclusions,
-                                   limit=app.MARKER_MAX_TAGS_PER_FRAME)
+                                   tags_excluded=tag_exclusions, limit=app.MARKER_MAX_TAGS_PER_FRAME,
+                                   validate=validate, memo=memo, source=source)
         if collect_extras:
             extra_frames.append((cue.start, cue.end, extras))
         for tag, score in cores:

@@ -74,7 +74,7 @@ def cached_reuse(app, store, scene, config, identity, paths, kinds):
         return None  # Verify current inputs through the established normal path.
 
 
-def verified_reuse_decision(app, store, scene, config, identity, cues, hashes, kinds, *, diagnostics=None, input_options=None):
+def verified_reuse_decision(app, store, scene, config, identity, cues, hashes, kinds, *, diagnostics=None, input_options=None, snapshot=None):
     """Prove and rethreshold the selected current outputs through one planner."""
     from stash_ai.storage.progress import completed
     from stash_ai.rethreshold.scenes import plan
@@ -85,7 +85,7 @@ def verified_reuse_decision(app, store, scene, config, identity, cues, hashes, k
     if any(not record for record in records.values()):
         return ReuseDecision.infer('missing_or_incompatible_evidence')
     from .provenance import saved_identity, predictive
-    manifest = cue_manifest(cues)
+    manifest = snapshot.manifest if snapshot is not None else cue_manifest(cues)
     from stash_ai.evidence.retention import scene_cache_floor, marker_cache_floor
     verified = {}
     for kind, record in records.items():
@@ -115,12 +115,12 @@ def verified_reuse_decision(app, store, scene, config, identity, cues, hashes, k
                                              for signature, candidate in verified.items()))
 
 
-def reuse(app, store, scene, config, identity, cues, hashes, kinds, *, diagnostics=None, input_options=None):
+def reuse(app, store, scene, config, identity, cues, hashes, kinds, *, diagnostics=None, input_options=None, snapshot=None):
     """Legacy bool adapter; only the consumer applies the authorized plan."""
     from stash_ai.rethreshold.scenes import apply
     from .provenance import register
     decision = verified_reuse_decision(app, store, scene, config, identity, cues, hashes, kinds,
-                                       diagnostics=diagnostics)
+                                       diagnostics=diagnostics, snapshot=snapshot)
     if diagnostics is not None:
         diagnostics['decision'] = decision
         diagnostics['rethreshold'] = decision.rethreshold

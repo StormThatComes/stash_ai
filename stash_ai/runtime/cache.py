@@ -81,6 +81,13 @@ class RamCache:
             if entry is not None:
                 self.size -= entry[1]
 
+    def discard_matching(self, predicate):
+        """Release a token scope without retaining an unbounded list of keys."""
+        with self._lock:
+            for key in tuple(self.entries):
+                if predicate(key):
+                    self.discard(key)
+
     def clear(self):
         with self._lock:
             self.entries.clear()
