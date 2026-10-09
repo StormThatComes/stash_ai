@@ -58,7 +58,7 @@ class MergedModelRun:
                         # Continue cheap authoritative reuse without another load/GET.
                         if (self.args.resume and not self.args.restart and
                                 not self.args.force_fetch_vtt and
-                                self._reuse_cached(scene_id, paths, kinds)):
+                                self._reuse_cached(scene_id, paths, kinds, input_plan=input_plan)):
                             continue
                         progress.block_publication(self.store, [scene_id], self.key, kinds)
                         self.observer.blocked('model_load_failed')
@@ -151,7 +151,7 @@ class MergedModelRun:
             return False
         return True
 
-    def _reuse(self, scene_id, signature, cues, media, kinds):
+    def _reuse(self, scene_id, signature, cues, media, kinds, *, snapshot=None):
         args, store, key = self.args, self.store, self.key
         if args.resume and progress.completed(store, scene_id, key, kinds, signature):
             from stash_ai.inference.provenance import register
@@ -164,7 +164,7 @@ class MergedModelRun:
         if args.resume and not args.restart:
             from stash_ai.inference.reuse import reuse
             if reuse(self.app, store, scene_id, self.config, self.identity, cues, media.hashes, kinds,
-                     diagnostics=diagnostics, input_options=self.input_options):
+                     diagnostics=diagnostics, input_options=self.input_options, snapshot=snapshot):
                 changed = diagnostics.get('rethreshold', False)
                 self.stats['threshold_cache_reused' if changed else 'reused'] += 1
                 self.report.model_outcome(key, 'rethreshold' if changed else 'reused')
@@ -201,8 +201,8 @@ class MergedModelRun:
         from stash_ai.inference.reuse import cached_reuse
         return cached_reuse(self.app, self.store, scene_id, self.config, self.identity, paths, kinds)
 
-    def _reuse_cached(self, scene_id, paths, kinds):
-        saved = self.cached_plan(scene_id, paths, kinds)
+    def _reuse_cached(self, scene_id, paths, kinds, *, input_plan=None):
+        saved = input_plan.plan(scene_id, self.key) if input_plan is not None else self.cached_plan(scene_id, paths, kinds)
         if saved is None:
             return False
         from stash_ai.rethreshold.scenes import apply
@@ -247,7 +247,7 @@ class MergedModelRun:
         store.cache.pressure(force=True)
         if trust_cached:
             with self.report.measure('inference_reuse_check', model=self.key):
-                if self._reuse_cached(scene_id, paths, kinds):
+                if self._reuse_cached(scene_id, paths, kinds, input_plan=input_plan):
                     return ScenePreparation(PreparationStatus.REUSED)
         from stash_ai.inference.reuse import input_options
         self.input_options = input_options(app, paths)
@@ -255,22 +255,24 @@ class MergedModelRun:
         try:
             with self.report.measure('input_verify', model=self.key):
                 prepared = self.input_prefetch.take(scene_id) if self.input_prefetch is not None else None
-                cues, media, signature = (prepared if prepared is not None
-                                          else inputs.inspect(app, paths, self.identity))
+                inspected = (prepared if prepared is not None else inputs.inspect(app, paths, self.identity))
+                cues, media, signature = inspected
+                snapshot = getattr(inspected, 'snapshot', None)
                 if prepared is not None:
                     # Model auto-download can update identity after lookahead
                     # was submitted; signatures always use the current assets.
-                    signature = inference_signature(self.identity, cue_manifest(cues), media.hashes)
+                    signature = (snapshot.inference_signature(self.identity) if snapshot is not None else
+                                 inference_signature(self.identity, cue_manifest(cues), media.hashes))
         except BaseException:
             defer(store, scene_id, self.key, 'read_error')
             raise
         if input_plan is not None:
-            input_plan.verified(scene_id, cues, media.hashes)
+            input_plan.verified(scene_id, cues, media.hashes, snapshot=snapshot)
         self.report.record_input_workload(scene_id, self.key, cues, media.hashes)
         verified(store, scene_id, self.key)
-        self.observer.inputs(self.identity, cues, media.hashes, paths)
+        self.observer.inputs(self.identity, cues, media.hashes, paths, snapshot=snapshot)
         with self.report.measure('inference_reuse_check', model=self.key):
-            if self._reuse(scene_id, signature, cues, media, kinds):
+            if self._reuse(scene_id, signature, cues, media, kinds, snapshot=snapshot):
                 return ScenePreparation(PreparationStatus.REUSED)
         if not args.restart:
             stale = progress.request_stale_refresh(store, scene_id, self.key, kinds, signature)
@@ -284,10 +286,11 @@ class MergedModelRun:
             self.provenance = ProvenanceIdentity.from_legacy(self.identity)
             self.execution = ExecutionIdentity.from_legacy(self.identity, args)
             self.report.record_model(self.config, identity=self.identity)
-            signature = inference_signature(self.identity, cue_manifest(cues), media.hashes)
-            self.observer.inputs(self.identity, cues, media.hashes, paths)
+            signature = (snapshot.inference_signature(self.identity) if snapshot is not None else
+                                 inference_signature(self.identity, cue_manifest(cues), media.hashes))
+            self.observer.inputs(self.identity, cues, media.hashes, paths, snapshot=snapshot)
         return ScenePreparation(PreparationStatus.READY,
-            ModelScene(scene_id, paths, cues, media, signature, input_options=self.input_options))
+            ModelScene(scene_id, paths, cues, media, signature, input_options=self.input_options, verified_input=snapshot))
 
     def _initialize_scene(self, job, kinds):
         from stash_ai.evidence.temporal.statistics import CHECKPOINT_FORMAT
@@ -297,7 +300,7 @@ class MergedModelRun:
                 checkpoints.clear_checkpoint(store, job.scene, self.key)
         job.checkpoint = checkpoints.Checkpoint(
             store, job.scene, self.key,
-            self._checkpoint_signature(job.scene, job.signature, job.cues, job.media, kinds, CHECKPOINT_FORMAT),
+            self._checkpoint_signature(job.scene, job.signature, job.cues, job.media, kinds, CHECKPOINT_FORMAT, snapshot=job.verified_input),
             len(job.cues), len(self.vocabulary.labels), args.checkpoint_batches)
         job.checkpoint.on_restore = self.observer.checkpoint
         job.state = prediction._restore_prediction_state(app, self.tagger, job.cues,
@@ -373,7 +376,8 @@ class MergedModelRun:
             outputs = merge_results.capture_outputs(
                 app, self.config, self.vocabulary, job.cues, predictions, frames, analysis,
                 inference_signature=job.signature,
-                frame_input_signature=frame_signature(cue_manifest(job.cues), job.media.hashes))
+                frame_input_signature=(job.verified_input.frame_signature if job.verified_input is not None else
+                                       frame_signature(cue_manifest(job.cues), job.media.hashes)))
         self._stage_next_scene(kinds, inputs, input_plan)
         with self.report.measure('inference_commit', model=self.key):
             checkpoints.finish(store, job.scene, self.key, outputs)
@@ -383,10 +387,11 @@ class MergedModelRun:
         self.stats["processed"] += 1
         self.observer.finished(kinds)
 
-    def _checkpoint_signature(self, scene_id, signature, cues, media, kinds, analysis_format):
+    def _checkpoint_signature(self, scene_id, signature, cues, media, kinds, analysis_format, *, snapshot=None):
         from stash_ai.inference.provenance import register, resume_signature, prune
         result = resume_signature(self.store, scene_id, self.key, self.identity,
-                                  cue_manifest(cues), media.hashes, kinds, analysis_format)
+                                  snapshot.manifest if snapshot is not None else cue_manifest(cues),
+                                  snapshot.hashes if snapshot is not None else media.hashes, kinds, analysis_format)
         register(self.store, scene_id, self.key, signature, self.identity, input_options=self.input_options)
         prune(self.store, scene_id, self.key, keep=(signature,), checkpoint=result,
               kinds=kinds, analysis_format=analysis_format)
