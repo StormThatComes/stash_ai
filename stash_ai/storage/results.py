@@ -103,22 +103,39 @@ class ResultStore:
             store.retain(key, value)
         return set(value)
 
-    def preload_sources(self, scenes=None):
+    def preload_sources(self, scenes=None, *, kinds=KINDS):
+        """Load only selected lightweight keys; no inference payload is decoded."""
         store = self.store
-        if not store.cache.limit:
+        kinds = tuple(dict.fromkeys(kinds))
+        if set(kinds) - set(KINDS):
+            raise ValueError('Unknown source output kind.')
+        if not store.cache.limit or not kinds:
             return
-        last, values = None, set()
-        for scene, kind, model in selected_rows(store,
-                'SELECT scene,kind,model FROM ' + store.table('results') + ' WHERE scope=?',
-                (store.scope,), scenes, suffix=' ORDER BY scene,kind'):
-            key = ('sources', scene, kind)
-            if key != last:
-                if last is not None:
-                    store.cache.put(last, values)
-                last, values = key, set()
-            values.add(model)
-        if last is not None:
-            store.cache.put(last, values)
+        selected = tuple(dict.fromkeys(map(str, scenes))) if scenes is not None else None
+        placeholders = ','.join('?' for _ in kinds)
+        sql = ('SELECT scene,kind,model FROM ' + store.table('results') +
+               f' WHERE scope=? AND kind IN ({placeholders})')
+        if selected is None:
+            last, values = None, set()
+            for scene, kind, model in selected_rows(store, sql, (store.scope, *kinds),
+                                                    suffix=' ORDER BY scene,kind'):
+                key = ('sources', scene, kind)
+                if key != last:
+                    if last is not None:
+                        store.cache.put(last, values)
+                    last, values = key, set()
+                values.add(model)
+            if last is not None:
+                store.cache.put(last, values)
+            return
+        from itertools import batched
+        for group in batched(selected, 800):
+            # Bound temporary keys independently from library/selection size.
+            values = {('sources', scene, kind): set() for scene in group for kind in kinds}
+            for scene, kind, model in selected_rows(store, sql, (store.scope, *kinds), group):
+                values['sources', scene, kind].add(model)
+            for key, sources in values.items():
+                store.cache.put(key, sources)
 
     @measured('state_write')
     def put(self, scene, model, outputs):

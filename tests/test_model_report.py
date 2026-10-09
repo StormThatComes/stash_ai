@@ -256,9 +256,9 @@ def test_cli_model_report_uses_saved_evidence_without_models_or_stash(tmp_path, 
     preloaded = []
     original_preload = merge_store.StateStore.preload_sources
 
-    def preload_sources(store):
+    def preload_sources(store, scenes=None, **kwargs):
         preloaded.append(True)
-        return original_preload(store)
+        return original_preload(store, scenes, **kwargs)
 
     monkeypatch.setattr(merge_store.StateStore, "preload_sources", preload_sources)
     monkeypatch.setattr(app, "APPLY_SCENE_TAGS", False)

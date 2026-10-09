@@ -83,7 +83,7 @@ def _build_report_parallel(app, state_db, scope, scene_ids, core_policies,
             allow_cleanup=True,
         ) as store:
             if preload_sources:
-                store.preload_sources()
+                store.preload_sources(scene_ids)
             return model.build_report(
                 app, store, scene_ids, core_policies, scene_policies)
 
@@ -105,7 +105,7 @@ def _build_report_parallel(app, state_db, scope, scene_ids, core_policies,
             scene_policies,
             worker_cache,
             worker_budget,
-            preload_sources,
+            tuple(scene_ids) if preload_sources else False,
             profile is not None,
         ),
     ) as executor:
