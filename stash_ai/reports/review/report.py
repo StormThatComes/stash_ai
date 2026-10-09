@@ -115,7 +115,7 @@ def run(app, args):
         with report_store(app, args, **report_memory(args)) as store:
             scenes = _scene_ids(store, args.scene_id)
             if not args.scene_id:
-                store.preload_sources()
+                store.preload_sources(scenes)
             report = build_report(local, store, scenes, core, tags, options)
         destination = write_json_report(report, args.tag_review_report)
         print(format_summary(report))

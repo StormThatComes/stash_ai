@@ -1,4 +1,5 @@
 """Run complete preflight before applying saved-evidence threshold changes."""
+from stash_ai.runtime.reasons import EvidenceError, Reason, PendingPublication
 from collections import Counter
 from itertools import batched
 
@@ -29,7 +30,7 @@ def _plan_target(app, store, scene, config, available, pending_scenes, *, scenes
     if blocked and str(scene) in pending_scenes:
         message = ('Finish the pending merge or use --abandon-pending before changing thresholds.'
                    if scenes else 'Finish the pending merge or use --abandon-pending first.')
-        raise RuntimeError(message)
+        raise PendingPublication(message)
     return prepared
 
 

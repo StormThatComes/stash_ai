@@ -1,4 +1,5 @@
 """Plan scene and optional marker threshold changes from retained evidence."""
+from stash_ai.runtime.reasons import EvidenceError, Reason, PendingPublication
 from stash_ai.storage.thresholds import PUBLICATION_THRESHOLD, effective
 from stash_ai.evidence.cache_views import validate_scene
 from .plans import RecordAccess, PendingPolicy, ThresholdRequest, ThresholdPlan, apply_plan
@@ -11,7 +12,7 @@ def plan(app, store, scene, config, *, request=ThresholdRequest()) -> ThresholdP
     if scenes:
         record = request.access.read(store, scene, 'scene', config.source.key)
         if not record:
-            raise ValueError('no scene results; run inference for this scene/model.')
+            raise EvidenceError(Reason.MISSING_SCENE, 'no scene results; run inference for this scene/model.')
         validate_scene(app, record, config.scene_threshold,
                        has_frames=record['has_frames'] if request.access is RecordAccess.METADATA else None)
         result['scene'] = record
@@ -29,7 +30,7 @@ def plan(app, store, scene, config, *, request=ThresholdRequest()) -> ThresholdP
                 value[PUBLICATION_THRESHOLD] = threshold
             updated[kind] = value
     if updated and request.pending is PendingPolicy.VERIFY and store.has_pending_publication(scene):
-        raise RuntimeError('Finish the pending merge or use --abandon-pending before changing thresholds.')
+        raise PendingPublication('Finish the pending merge or use --abandon-pending before changing thresholds.')
     return ThresholdPlan(updated, request.access)
 
 

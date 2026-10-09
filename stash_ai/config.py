@@ -31,11 +31,14 @@ def load_unique_yaml(path: Path, context: str) -> Any:
                 result[key] = self.construct_object(value_node, deep=deep)
             return result
 
-    return yaml.load(path.read_text(encoding="utf-8-sig"), Loader=UniqueSafeLoader)
+    from stash_ai.runtime.configuration import read_bytes, cached_yaml
+    return cached_yaml(path, context,
+                       lambda: yaml.load(read_bytes(path).decode('utf-8-sig'), Loader=UniqueSafeLoader))
 
 def load_exclusion_policy(path: Path, key: str) -> dict[str, frozenset[str]]:
     """Common raw labels plus optional per-model additions, never a whitelist."""
-    if not path.is_file():
+    from stash_ai.runtime.configuration import is_file
+    if not is_file(path):
         raise FileNotFoundError(f"Exclusions YAML missing: {path}. Use {key}: [] for an empty blacklist.")
     data = load_unique_yaml(path, "Tag exclusions")
     if (not isinstance(data, dict) or not {"version", key} <= set(data)
@@ -130,7 +133,8 @@ def load_model_settings(path: Path, chosen: list[str] | None, device: str | None
     return sorted(settings, key=lambda item: selected.index(item.source.key))
 
 def load_tag_hierarchy(path: Path) -> TagHierarchy:
-    if not path.is_file():
+    from stash_ai.runtime.configuration import is_file
+    if not is_file(path):
         raise FileNotFoundError(f"Hierarchy YAML missing: {path}. Place it beside the script or use --no-hierarchy.")
     data = load_unique_yaml(path, "Hierarchy")
     return hierarchy_from_data(data)
