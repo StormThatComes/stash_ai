@@ -19,10 +19,12 @@ class ModelScene:
     state: Any = None
     batches: Any = None
     prepared: Any = None
+    batch_usage: Any = None  # Read-only status accessor; never owns stream cleanup.
 
     def close(self):
         resources = {id(value): value for value in (self.batches, self.prepared) if value is not None}
         self.batches = self.prepared = None
+        self.batch_usage = None
         cleanup([value.close for value in resources.values()])
 
 

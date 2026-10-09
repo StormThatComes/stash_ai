@@ -4,6 +4,7 @@ from queue import Empty, Full, Queue
 
 from stash_ai.runtime.cancellation import Cancellation, use
 from .preparation import prepared_batches
+from .buffer_usage import queued_batches
 
 
 class PreparedBatchStream:
@@ -14,6 +15,9 @@ class PreparedBatchStream:
         self.stopped = False
         self.task = None
         self.end = object()
+
+    def buffer_usage(self):
+        return queued_batches(self.queue)
 
     def _send(self, value):
         timer = (self.report.measure('scene_batch_queue_wait', model=self.model)

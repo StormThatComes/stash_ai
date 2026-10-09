@@ -7,6 +7,7 @@ from threading import Event, Thread
 from stash_ai.inference.preparation import PreparedBatch, prepared_batches
 from stash_ai.models import validate_scores
 from stash_ai.runtime.cancellation import Cancellation
+from .buffer_usage import PreparedBatchUsage, queued_batches
 
 
 @dataclass(frozen=True)
@@ -30,11 +31,13 @@ class BatchPredictions:
         self.tagger, self.cancellation = tagger, Cancellation()
         self.results, self.stopped = Queue(maxsize=result_prefetch), Event()
         self.finished, self.external_inputs = object(), prepared_inputs
+        self.input_usage = PreparedBatchUsage(prefetch)
         self.inputs = (prepared_inputs if prepared_inputs is not None else
                        prepared_batches(app, tagger, stash, paths, cues, prefetch,
                                         prepare_workers, report=report, collate=True,
                                         cancellation=self.cancellation,
-                                        transform_executor=transform_executor))
+                                        transform_executor=transform_executor,
+                                        buffer_usage=self.input_usage))
         self.borrowed = inference_executor is not None
         if self.borrowed:
             self.worker = inference_executor.submit(self._produce)
@@ -45,6 +48,11 @@ class BatchPredictions:
     def measure(self, name, count=0):
         return (self.report.measure(name, model=self.model, work=self.work, units=count,
                                     unit='frames') if self.report is not None else nullcontext())
+
+    def buffer_usage(self):
+        inputs = (self.external_inputs.buffer_usage() if self.external_inputs is not None
+                  and hasattr(self.external_inputs, 'buffer_usage') else self.input_usage.snapshot())
+        return dict(input=inputs, result=queued_batches(self.results))
 
     def _send(self, value):
         with self.measure('inference_result_queue_wait'):
@@ -108,7 +116,8 @@ class BatchPredictions:
 
 def predicted_batches(app, tagger, stash, paths, cues, *, prefetch=0,
                       prepare_workers=1, report=None, inference_executor=None,
-                      prepared_inputs=None, transform_executor=None, result_prefetch=32):
+                      prepared_inputs=None, transform_executor=None, result_prefetch=32,
+                      on_start=None):
     """Lazy compatibility iterator; prefetch=0 keeps caller-owned inference."""
     if prefetch:
         with closing(BatchPredictions(app, tagger, stash, paths, cues, prefetch=prefetch,
@@ -117,6 +126,8 @@ def predicted_batches(app, tagger, stash, paths, cues, *, prefetch=0,
                                      prepared_inputs=prepared_inputs,
                                      transform_executor=transform_executor,
                                      result_prefetch=result_prefetch)) as batches:
+            if on_start is not None:
+                on_start(batches)
             yield from batches
         return
     with closing(prepared_batches(app, tagger, stash, paths, cues, workers=prepare_workers,

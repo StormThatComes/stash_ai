@@ -127,7 +127,8 @@ def _restore_prediction_state(app, tagger, cues, *, checkpoint, report):
 def _run_prediction_batches(app, tagger, stash, paths, cues, state, *,
                             checkpoint, prefetch, prepare_workers, report,
                             inference_executor, batch_results=None, prepared_inputs=None,
-                            transform_executor=None, result_prefetch=32, on_progress=None):
+                            transform_executor=None, result_prefetch=32, on_progress=None,
+                            on_batches=None):
     import numpy as np
     from stash_ai.inference.batches import predicted_batches
 
@@ -146,6 +147,7 @@ def _run_prediction_batches(app, tagger, stash, paths, cues, state, *,
         prepared_inputs=prepared_inputs,
         transform_executor=transform_executor,
         result_prefetch=result_prefetch,
+        on_start=on_batches,
     )
     try:
         for result, batch_cues in batches:
@@ -232,7 +234,7 @@ def predict_scene(app, tagger: Any, stash, paths: dict, cues: list[Cue],
                   report=None, prepare_workers: int = 1, inference_executor=None,
                   state=None, batch_results=None, prepared_inputs=None,
                   transform_executor=None, before_finalize=None, result_prefetch: int = 32,
-                  on_progress=None
+                  on_progress=None, on_batches=None
                   ) -> tuple[list[tuple[str, float]], list[FramePrediction]]:
     """Return raw retained evidence; report progress only for consumed batches."""
     if not cues:
@@ -261,6 +263,7 @@ def predict_scene(app, tagger: Any, stash, paths: dict, cues: list[Cue],
         transform_executor=transform_executor,
         result_prefetch=result_prefetch,
         on_progress=on_progress,
+        on_batches=on_batches,
     )
     if before_finalize is not None:
         before_finalize()
