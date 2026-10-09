@@ -216,9 +216,10 @@ def test_https_read_deadline_disconnects_headers_and_body(tmp_path, body):
                     '-keyout', str(key), '-out', str(cert), '-days', '1',
                     '-subj', '/CN=localhost', '-addext', 'subjectAltName=IP:127.0.0.1'],
                    check=True, capture_output=True)
-    disconnected = Event()
+    disconnected, entered = Event(), Event()
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
+            entered.set()
             try:
                 prefix = (b'HTTP/1.1 200 OK\r\nContent-Length: 1000\r\n\r\n'
                           if body else b'HTTP/1.1 200 OK\r\nX-Slow: ')
@@ -238,14 +239,19 @@ def test_https_read_deadline_disconnects_headers_and_body(tmp_path, body):
     server.socket = context.wrap_socket(server.socket, server_side=True)
     thread = Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    client = transport((.1, .15), retries=0)
+    # TLS setup is not the fault under test. Allow scheduling/handshake headroom
+    # so CI reaches the deliberately trickling headers/body before the deadline.
+    client = transport((1., .15), retries=0)
     client.url = f'https://127.0.0.1:{server.server_port}'
     client.media.trust_env = False
     client.media.verify = str(cert)
     try:
+        started = time.monotonic()
         with pytest.raises(ReadDeadlineExceeded):
             client.get_media(client.url + '/sprite')
-        assert disconnected.wait(1)
+        assert entered.is_set()
+        assert time.monotonic() - started < 2.5
+        assert disconnected.wait(2)
     finally:
         client.close()
         server.shutdown()

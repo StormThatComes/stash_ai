@@ -38,7 +38,7 @@ def test_execution_and_easier_retention_preserve_raw_records_and_snapshots(pipel
     assert app.main(pipeline.args) == 0
     assert app.main(pipeline.args) == 0
     assert raw_rows(pipeline.path) == before
-    assert decisions(pipeline.path)[0]['action'] == 'rethreshold'
+    assert decisions(pipeline.path)[0]['action'] == 'cache_reused'
 
 
 def test_v26_upgrade_and_matching_read_register_legacy_identity_without_rewriting_scores(pipeline, monkeypatch, tmp_path):
