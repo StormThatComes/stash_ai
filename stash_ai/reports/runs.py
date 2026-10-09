@@ -8,16 +8,28 @@ from stash_ai.signatures import digest
 from stash_ai.storage.store import scope_for
 
 
+def work_profile(run):
+    """Legacy profiles remain readable, with explicit unknown frame accounting."""
+    counts = run.get('counts', {})
+    return dict(
+        outcomes={model: dict(sorted(values.items()))
+                  for model, values in sorted(run.get('outcomes', {}).items())},
+        processed_frames=counts.get('inference_processed_frames'),
+        restored_frames=counts.get('checkpoint_restored_frames'),
+    )
+
+
 def build_report(rows):
     rows, groups = list(rows), {}
     for run in rows:
         # Failed/interrupted/running work must not lower successful-run averages.
         partial = run.get('partial', run.get('finished_at') is None and run['status'] == 'running')
         workload = run.get('workload', {})
-        key = digest([run['command'], run['status'], partial, run['configuration']['fingerprint'], run['models'], workload])
+        work = work_profile(run)
+        key = digest([run['command'], run['status'], partial, run['configuration']['fingerprint'], run['models'], workload, work])
         group = groups.setdefault(key, dict(command=run['command'], status=run['status'],
             configuration_fingerprint=run['configuration']['fingerprint'], models=run['models'],
-            partial=partial, workload=workload, runs=0, wall_seconds=0.0, cpu_seconds=0.0, counts=Counter(), outcomes={}, samples={}))
+            partial=partial, workload=workload, work_profile=work, runs=0, wall_seconds=0.0, cpu_seconds=0.0, counts=Counter(), outcomes={}, samples={}))
         group['runs'] += 1
         group['wall_seconds'] += run['wall_seconds'] or 0.0
         group['cpu_seconds'] += run['cpu_seconds'] or 0.0
@@ -39,7 +51,8 @@ def build_report(rows):
                'CPU seconds cover the parent process; worker CPU is reported separately when measured.',
                'A partial running record has no recorded finish; last_progress_at marks its last saved aggregates. It may be active or killed.',
                'Selection digests, code/package provenance, observed execution metadata and verified-input workloads separate comparison groups when available.',
-               'Legacy records missing provenance/workload remain readable; their comparability is limited.',
+               'Fresh, checkpoint resume and reuse outcomes and performed/restored frame counts separate averages.',
+               'Legacy records missing provenance/workload/frame accounting remain readable; their comparability is limited.',
                'Groups describe only the selected, most recent matching runs.'])
 
 

@@ -21,15 +21,15 @@ def observational(method):
     return wrapped
 
 
-def proof(identity, cues, hashes, paths, app):
+def proof(identity, cues, hashes, paths, app, *, snapshot=None):
     model = {name: value for name, value in identity.items() if name != 'files'}
     assets = [dict(name=Path(path).name, location=digest(path), sha256=checksum) for path, checksum in identity['files']]
-    manifest = cue_manifest(cues)
+    manifest = snapshot.manifest if snapshot is not None else cue_manifest(cues)
     vtt = absolute_stash_url(paths['vtt'], app.STASH_URL)
     spacing = [b.start - a.start for a, b in zip(cues, cues[1:])]
-    return dict(model=model, assets=assets, cues=digest(manifest), cue_count=len(cues),
+    return dict(model=model, assets=assets, cues=snapshot.cue_digest if snapshot is not None else digest(manifest), cue_count=len(cues),
                 median_cue_spacing_seconds=median(spacing) if spacing else None,
-                frame_input=frame_signature(manifest, hashes),
+                frame_input=snapshot.frame_signature if snapshot is not None else frame_signature(manifest, hashes),
                 vtt=dict(location=digest(vtt), sha256=hashes.get(vtt)),
                 sprites=[dict(location=digest(url), sha256=hashes.get(url)) for url in sorted({cue.image for cue in cues})])
 
@@ -83,10 +83,10 @@ class ReuseObserver:
                                   sorted(set(self.reasons)), self.details)
 
     @observational
-    def inputs(self, identity, cues, hashes, paths):
+    def inputs(self, identity, cues, hashes, paths, *, snapshot=None):
         self.identity = identity
-        self.cues, self.hashes = cue_manifest(cues), dict(hashes)
-        self.current = proof(identity, cues, hashes, paths, self.app)
+        self.cues, self.hashes = (snapshot.manifest, snapshot.hashes) if snapshot is not None else (cue_manifest(cues), dict(hashes))
+        self.current = proof(identity, cues, hashes, paths, self.app, snapshot=snapshot)
 
     @observational
     def blocked(self, reason):

@@ -13,6 +13,8 @@ class FrameIndex:
         self.app, self.policies, self.cache = app, require_policies(policies), cache
         self.tag_policies = require_policies(tag_policies)
         self.report = report
+        from .eligibility import FrameMemo
+        self.memo = FrameMemo(cache)
         from stash_ai.evidence.formats import validate_current
         for record in records.values():
             validate_current(record)
@@ -26,13 +28,16 @@ class FrameIndex:
         return self
 
     def __exit__(self, *args):
-        for index in self.indexes.values():
-            index.close()
+        try:
+            for index in self.indexes.values():
+                index.close()
+        finally:
+            self.memo.close()
 
     def get(self, key):
         if key not in self.indexes:
             group = self.groups[key]
-            self.indexes[key] = ObservationIndex(observations(self.app, group, self.policies, self.tag_policies), group['context'], key, self.cache)
+            self.indexes[key] = ObservationIndex(observations(self.app, group, self.policies, self.tag_policies, memo=self.memo), group['context'], key, self.cache)
         return self.indexes[key]
 
 
@@ -55,7 +60,7 @@ def make_groups(records, signatures=None):
     return dict(sorted(groups.items()))
 
 
-def observations(app, group, core_policies, tag_policies):
+def observations(app, group, core_policies, tag_policies, *, memo=None):
     """One event per timestamp; duplicate runs of a model count only once."""
     from stash_ai.exclusions import require_policies
     tag_policies = require_policies(tag_policies)
@@ -73,7 +78,7 @@ def observations(app, group, core_policies, tag_policies):
             from .eligibility import selections
             cores, extras = selections(row['tags'], high, floor, core_policies[source],
                                        tag_policies[source], app.MARKER_MAX_TAGS_PER_FRAME,
-                                       validate=True)
+                                       validate=True, memo=memo, source=source)
             for tag, score in cores:
                 evidence = event["cores"].setdefault(tag, {}).setdefault(source,
                     {"score": score, "strong": False, "signature": signature})

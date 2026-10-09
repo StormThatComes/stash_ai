@@ -30,7 +30,7 @@ def open_read_worker(state_db, scope, settings, core_policies, scene_policies,
     )
     try:
         if preload_sources:
-            store.preload_sources()
+            store.preload_sources(None if preload_sources is True else preload_sources)
     except BaseException:
         store.close()
         raise

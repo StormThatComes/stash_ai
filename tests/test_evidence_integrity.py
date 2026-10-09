@@ -13,7 +13,7 @@ from stash_ai.storage.store import StateStore
 from stash_ai.storage.snapshots import validate_policy
 from stash_ai.evidence.identity import marker_segment_signature
 from stash_ai.evidence.formats import validate_current
-from stash_ai.db.update import update_database
+from stash_ai.db.repair import repair_database
 from stash_ai.db.checks import check_database
 
 pytestmark = pytest.mark.usefixtures('reset_merge')
@@ -81,7 +81,7 @@ def test_offline_duplicate_repair_preserves_all_pinned_publication_states(tmp_pa
         store.connection.execute('INSERT INTO recovery_publications VALUES (?,?,?,?,?)',
                                  ('scope', '1', 'scene', 1, store.pack_snapshot(snapshot)))
         store.connection.commit()
-    update_database(path)
+    repair_database(path)
     with StateStore(path, 'scope') as store:
         clean = store.model_record('1', 'scene', 'wd')
         assert len(clean['items']) == 1
@@ -110,7 +110,7 @@ def test_conflicting_duplicate_repair_does_not_guess_scores(tmp_path):
     with sqlite3.connect(path) as db:
         before = db.execute('SELECT data FROM results').fetchall()
     with pytest.raises(ValueError, match='Conflicting scene aggregates'):
-        update_database(path)
+        repair_database(path)
     with sqlite3.connect(path) as db:
         assert db.execute('SELECT data FROM results').fetchall() == before
 

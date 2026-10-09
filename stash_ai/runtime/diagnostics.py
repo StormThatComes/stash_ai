@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import threading
 import time
+from .status import completion_status
 
 
 def add_sample(target, name, elapsed, exclusive, failed=False, response_bytes=0):
@@ -91,8 +92,8 @@ class MergeDiagnostics:
         start, cpu = time.perf_counter(), time.process_time()
         try:
             yield record
-        except BaseException:
-            record['status'] = 'interrupted'
+        except BaseException as exc:
+            record['status'] = completion_status(type(exc))
             raise
         finally:
             wall, used = time.perf_counter()-start, time.process_time()-cpu
@@ -116,7 +117,7 @@ class MergeDiagnostics:
 
     def __exit__(self, exc_type, exc, tb):
         self.report.diagnostics = None
-        summary = dict(type='summary', status='interrupted' if exc_type else 'error' if self.statuses['error'] else 'finished',
+        summary = dict(type='summary', status=completion_status(exc_type, errors=self.statuses['error']),
                        **self.metadata, scenes=self.scenes, scene_statuses=dict(self.statuses),
                        wall_seconds=time.perf_counter()-self.start, cpu_seconds=time.process_time()-self.cpu_start,
                        scene_wall_seconds=self.scene_wall, scene_cpu_seconds=self.scene_cpu,
