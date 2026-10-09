@@ -177,6 +177,10 @@ def test_update_refuses_an_active_writer_and_releases_failed_lock(tmp_path):
     path = tmp_path / 'state.sqlite3'
     seed_version(path, LATEST_SCHEMA_VERSION)
     with StateStore(path, 'scope-a'):
+        # A complete no-op now needs only a read. Force actual maintenance so
+        # this test continues to cover refusal of a concurrent writer.
+        with sqlite3.connect(path) as db:
+            db.execute('DELETE FROM data_revisions')
         before = path.read_bytes()
         with pytest.raises(RuntimeError, match='Another merged-output process'):
             update_database(path)

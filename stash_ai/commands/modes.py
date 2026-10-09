@@ -18,6 +18,7 @@ class Command(Enum):
     DB_REPORT = 'db_report'
     DB_CHECK = 'db_check'
     DB_UPDATE = 'db_update'
+    DB_REPAIR = 'db_repair'
     DB_COMPACT = 'db_compact'
     DIAGNOSTICS = 'anonymous_diagnostics'
     MODEL_REPORT = 'model_report'
@@ -32,7 +33,7 @@ class Command(Enum):
 HIERARCHY_COMMANDS = frozenset((Command.SYNC_HIERARCHY, Command.VALIDATE_HIERARCHY))
 CLEANUP_COMMANDS = frozenset((Command.CLEANUP, Command.CLEANUP_MARKERS, Command.CLEANUP_SCENES))
 DATABASE_COMMANDS = frozenset((Command.DB_REPORT, Command.DB_CHECK, Command.DB_UPDATE,
-                               Command.DB_COMPACT, Command.DIAGNOSTICS))
+                               Command.DB_REPAIR, Command.DB_COMPACT, Command.DIAGNOSTICS))
 
 
 def select_command(args):

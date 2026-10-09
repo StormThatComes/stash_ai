@@ -1,4 +1,5 @@
 """The inference contract shared by active records and archived replay proofs."""
+from stash_ai.runtime.reasons import EvidenceError, Reason, PendingPublication
 import math
 from itertools import pairwise
 
@@ -14,6 +15,16 @@ def current(meta):
 
 
 def validate_current(segment):
+    from stash_ai.storage.segments import StoredSegment
+    if isinstance(segment, StoredSegment) and getattr(segment, '_validated_current', False):
+        return
+    from stash_ai.storage.codec import validate_cached
+    validate_cached(segment, 'current-inference', _validate_current)
+    if isinstance(segment, StoredSegment):
+        segment._validated_current = True
+
+
+def _validate_current(segment):
     """Reject obsolete inference rather than guessing its missing provenance."""
     if not isinstance(segment, dict) or not isinstance(segment.get('meta'), dict):
         raise ValueError('Invalid active inference record; run --db-update.')
@@ -21,7 +32,7 @@ def validate_current(segment):
     if meta.get('origin') != 'inference':
         raise ValueError('Active results require current inference evidence; run --db-update and inference again.')
     if not current(meta):
-        raise ValueError('Obsolete active inference evidence; run --db-update and inference again.')
+        raise EvidenceError(Reason.OBSOLETE, 'Obsolete active inference evidence; run --db-update and inference again.')
     if (segment.get('mode') not in ('scene', 'frames')
             or any(not isinstance(meta.get(key), str) or not meta[key]
                    for key in ('inference_signature', 'frame_input_signature'))):
@@ -37,7 +48,7 @@ def validate_current(segment):
     if segment['mode'] == 'scene':
         items = segment.get('items', ())
         if all(isinstance(item.get('tag'), str) for item in items) and len({item['tag'] for item in items}) != len(items):
-            raise ValueError('Duplicate scene aggregates; run --db-update to deduplicate identical entries.')
+            raise ValueError('Duplicate scene aggregates; run --db-repair to deduplicate identical entries.')
         required_scores.append('scene_score_floor')
         has_frames = 'frames' in segment if 'items' in segment else segment.get('has_frames', False)
         if not has_frames:

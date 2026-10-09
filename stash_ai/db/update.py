@@ -5,7 +5,7 @@ from pathlib import Path
 import zlib
 
 from stash_ai.storage.database import StateDatabase
-from stash_ai.storage.schema import APPLICATION_ID, LATEST_SCHEMA_VERSION, require_supported_version
+from stash_ai.storage.schema import APPLICATION_ID, LATEST_SCHEMA_VERSION, require_supported_version, shape_issues
 
 from .common import connect_readonly, table_names
 
@@ -22,12 +22,17 @@ def update_database(path, *, dry_run=False):
     if not path.is_file():
         raise FileNotFoundError(f"State database does not exist: {path}")
     with closing(connect_readonly(path)) as db:
+        db.execute('BEGIN')
         application = db.execute('PRAGMA application_id').fetchone()[0]
         version = db.execute('PRAGMA user_version').fetchone()[0]
         if application != APPLICATION_ID or 'results' not in table_names(db):
             raise ValueError('Not a supported stash-taggers state DB.')
         require_supported_version(version)
-        if db.execute('PRAGMA quick_check(1)').fetchone()[0] != 'ok':
+        from .revisions import completed, metadata_complete
+        if (version == LATEST_SCHEMA_VERSION and not shape_issues(db)
+                and completed(db) and metadata_complete(db)):
+            return version, LATEST_SCHEMA_VERSION
+        if not dry_run and db.execute('PRAGMA quick_check(1)').fetchone()[0] != 'ok':
             raise RuntimeError('SQLite quick_check failed; database update was not started.')
     if dry_run:
         return version, LATEST_SCHEMA_VERSION

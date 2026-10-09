@@ -1099,3 +1099,19 @@ weryfikacji wejść, po której zgodne wyniki można zachować. Nowe/zweryfikowa
 zapisują mały checksum i kontekst wejść, bez przepisywania surowych wyników.
 Historia uruchomień opisuje pominięcie pobierania przez `input_fetch_skipped`;
 nie udaje ponownej weryfikacji i nie stanowi podstawy reuse.
+
+### Offline schema updates and repairs
+
+`--db-update` checks schema shape and completed data revisions first. An already current,
+complete database returns without decoding inference BLOBs or running SQLite quick_check.
+The small metadata/key scan can grow with the number of results. Required historical
+conversions (minimum schema v18) run automatically before their completion is recorded.
+A previously unrecorded data revision may need a one-time full pass. A DDL-only upgrade
+with completed data revisions does not require a global repair.
+
+Use `--db-repair` for an explicit full scan on the current schema: it repairs derived
+metadata and identical scene aggregate duplicates, preserving archived/publication proofs.
+Conflicting duplicates stop and roll back repair. Semantic corruption should be diagnosed
+with `--db-check`; a fast preflight cannot prove arbitrary BLOB contents. Both update and
+repair are offline and support `--dry-run`; repair preview uses a temporary SQLite copy.
+Neither command runs models, contacts Stash, or globally requests reinference.

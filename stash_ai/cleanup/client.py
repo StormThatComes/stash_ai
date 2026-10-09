@@ -1,11 +1,12 @@
 """Paginated Stash tag catalog used by cleanup discovery."""
 from tqdm import tqdm
+from stash_ai.stash_api.protocols import QueryReads
 
 PAGE_SIZE = 1000
 
 
 class CleanupClient:
-    def __init__(self, stash):
+    def __init__(self, stash: QueryReads):
         self.stash = stash
 
     def catalog(self):

@@ -1,6 +1,7 @@
 """Stream concrete plans with symbolic references for tags not created yet."""
 import json
 from pathlib import Path
+from stash_ai.runtime.status import completion_status
 
 
 class DryRunPlan:
@@ -19,7 +20,7 @@ class DryRunPlan:
     def __exit__(self, *args):
         if self.stream is not None:
             if args[0] is not None:
-                self.write(dict(type='interrupted', error_type=args[0].__name__))
+                self.write(dict(type=completion_status(args[0]), error_type=args[0].__name__))
             self.stream.close()
 
     def write(self, value):

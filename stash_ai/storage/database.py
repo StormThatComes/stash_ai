@@ -131,6 +131,9 @@ class StateDatabase(AbstractContextManager):
                 f'AND model={row}.model AND kind={row}.kind;' for row in rows)
             db.execute(f'''CREATE TRIGGER IF NOT EXISTS results_metadata_{event.lower()}
                 AFTER {event} ON results BEGIN {deletes} END''')
+        if self.fresh:
+            from stash_ai.db.revisions import mark_completed
+            mark_completed(db)  # Empty new state needs no historical data conversion.
 
     def close(self):
         connection, self.connection = self.connection, None
