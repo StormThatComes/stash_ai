@@ -10,6 +10,7 @@ import uuid
 from stash_ai.commands.modes import Command
 from stash_ai.runtime.profile import ProfileMetrics
 from stash_ai.runtime.report import RunReport
+from stash_ai.runtime.status import completion_status
 from stash_ai.signatures import digest
 from stash_ai.storage.store import scope_for
 from .store import HistoryStore, history_path
@@ -90,6 +91,7 @@ class RunHistory:
         try:
             from tqdm import tqdm
             self.args.report = RunReport(self.args.verbose, tqdm.write)
+            self.args.report.counts.update(inference_processed_frames=0, checkpoint_restored_frames=0)
             self.args.report.profile = ProfileMetrics()
             self.args.report.history = self
             import threading
@@ -111,8 +113,7 @@ class RunHistory:
             return
         try:
             report = self.args.report
-            status = ('interrupted' if kind is not None and not issubclass(kind, Exception)
-                      else 'error' if kind is not None or self.result else 'finished')
+            status = completion_status(kind, errors=bool(self.result))
             issues = dict(report.issue_counts)
             if kind is not None:
                 issues['command/' + kind.__name__] = issues.get('command/' + kind.__name__, 0) + 1

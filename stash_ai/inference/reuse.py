@@ -34,7 +34,7 @@ def cached_reuse(app, store, scene, config, identity, paths, kinds):
             (store.scope, str(scene), config.source.key)).fetchone():
         return None
     try:
-        inputs, changed, identities = set(), False, {}
+        inputs, identities = set(), {}
         for kind in kinds:
             record = store.result_metadata(scene, kind, config.source.key)
             if record is None:
@@ -59,7 +59,6 @@ def cached_reuse(app, store, scene, config, identity, paths, kinds):
             if meta['scene_score_floor' if kind == 'scene' else 'marker_score_floor'] > required:
                 return None
             inputs.add(meta['frame_input_signature'])
-            changed |= candidate != identity
         if len(inputs) != 1:
             return None
         try:
@@ -68,7 +67,7 @@ def cached_reuse(app, store, scene, config, identity, paths, kinds):
         except RuntimeError:
             # Pending publication is reported by the ordinary per-scene path.
             return None
-        return CachedReuse(thresholds, inputs.pop(), changed or bool(thresholds))
+        return CachedReuse(thresholds, inputs.pop(), bool(thresholds))
     except (ValueError, KeyError, TypeError, zlib.error):
         return None  # Verify current inputs through the established normal path.
 
@@ -109,6 +108,8 @@ def reuse(app, store, scene, config, identity, cues, hashes, kinds, *, diagnosti
             diagnostics['rethreshold_rejected'] = True
         return False
     apply(store, scene, config.source.key, outputs)
+    if diagnostics is not None:
+        diagnostics['rethreshold'] = bool(outputs)
     if input_options is not None:
         for signature, candidate in verified.items():
             register(store, scene, config.source.key, signature, candidate, input_options=input_options)

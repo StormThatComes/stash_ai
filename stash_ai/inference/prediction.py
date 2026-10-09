@@ -187,6 +187,8 @@ def _run_prediction_batches(app, tagger, stash, paths, cues, state, *,
                     state.accumulator.add(result, batch_cues)
                 state.frame_predictions.extend(batch_frames)
                 state.processed += len(batch_cues)
+                if report is not None:
+                    report.counts['inference_processed_frames'] += len(batch_cues)
 
                 if checkpoint:
                     checkpoint.record(

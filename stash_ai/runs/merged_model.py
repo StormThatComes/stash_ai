@@ -161,9 +161,10 @@ class MergedModelRun:
             from stash_ai.inference.reuse import reuse
             if reuse(self.app, store, scene_id, self.config, self.identity, cues, media.hashes, kinds,
                      diagnostics=diagnostics, input_options=self.input_options):
-                self.stats['threshold_cache_reused'] += 1
-                self.report.model_outcome(key, 'rethreshold')
-                self.observer.reused(kinds, rethreshold=True)
+                changed = diagnostics.get('rethreshold', False)
+                self.stats['threshold_cache_reused' if changed else 'reused'] += 1
+                self.report.model_outcome(key, 'rethreshold' if changed else 'reused')
+                self.observer.reused(kinds, rethreshold=changed)
                 return True
         self.observer.required(kinds, diagnostics)
         return False
@@ -343,6 +344,7 @@ class MergedModelRun:
         app, args, store = self.app, self.args, self.store
         if job.state is None:
             self._initialize_scene(job, kinds)
+        self.report.counts['checkpoint_restored_frames'] += job.state.processed
         self.report.work('checkpoint_resumed' if job.checkpoint.resumed_frames else 'fresh')
         analysis = {}
         with self.report.measure('inference_scene', model=self.key, units=1, unit='scenes'):
