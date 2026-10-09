@@ -39,13 +39,16 @@ class JoyTagger:
         return torch.stack(images)
 
     def predict_collated_batch(self, prepared: Any, count: int) -> Any:
+        return models.validate_scores(self._predict_collated_scores(prepared, count), count, self.labels, 'JoyTag')
+
+    def _predict_collated_scores(self, prepared: Any, count: int) -> Any:
         import torch
         from contextlib import nullcontext
         batch = prepared.to(self.device, non_blocking=self.device.type == "cuda")
         amp = torch.autocast("cuda", dtype=torch.float16) if self.device.type == "cuda" else nullcontext()
         with torch.inference_mode(), amp:
             scores = self.model({"image": batch})["tags"].sigmoid().float().cpu().numpy()
-        return models.validate_scores(scores, count, self.labels, "JoyTag")
+        return scores
 
     def close(self) -> None:
         import torch

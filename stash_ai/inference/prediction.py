@@ -13,14 +13,17 @@ if TYPE_CHECKING:
 
 
 def select_scores(scores: np.ndarray, labels: list[str], threshold: float, limit: int) -> list[tuple[str, float]]:
-    import numpy as np
-
-    # Match Python float comparisons exactly at the threshold, including
-    # float32 values just below a float64 policy boundary.
-    indexes = np.flatnonzero(scores.astype(np.float64, copy=False) >= threshold)
-    matches = [(labels[int(i)], float(scores[i])) for i in indexes]
+    values = selected_scores(scores, threshold)
+    matches = [(labels[index], value) for index, value in values]
     matches.sort(key=lambda item: (-item[1], item[0]))
     return matches[:limit] if limit else matches
+
+
+def selected_scores(scores, threshold):
+    import numpy as np
+    # Keep Python-float boundary comparisons and ascending vocabulary indices.
+    indexes = np.flatnonzero(scores.astype(np.float64, copy=False) >= threshold)
+    return [(int(index), float(scores[index])) for index in indexes]
 
 
 @dataclass
@@ -157,24 +160,29 @@ def _run_prediction_batches(app, tagger, stash, paths, cues, state, *,
             with timer:
                 combined = np.concatenate((state.top_scores, result), axis=0)
                 count = min(keep, len(combined))
-                state.top_scores = np.partition(
+                top_scores = np.partition(
                     combined, len(combined) - count, axis=0
                 )[-count:]
 
                 # One ordering per model row, then apply each retention floor.
                 batch_frames, batch_scene = [], []
                 floors = ([state.marker_floor] if app.CREATE_MARKERS else []) + ([state.scene_floor] if state.retain_scene else [])
-                for cue, row in zip(batch_cues, result):
-                    matches = select_scores(row, labels, min(floors), 0) if floors else []
-                    if app.CREATE_MARKERS:
-                        batch_frames.append(FramePrediction(cue, tuple(
-                            item for item in matches if item[1] >= state.marker_floor)))
-                    if state.retain_scene:
-                        batch_scene.append(dict(start=cue.start, end=cue.end,
-                            tags=[item for item in matches if item[1] >= state.scene_floor]))
+                transaction = state.accumulator.batch() if state.accumulator is not None else nullcontext()
+                with transaction:
+                    for cue, row in zip(batch_cues, result):
+                        values = selected_scores(row, min(floors)) if floors else []
+                        matches = [(labels[index], score) for index, score in values]
+                        matches.sort(key=lambda item: (-item[1], item[0]))
+                        if app.CREATE_MARKERS:
+                            batch_frames.append(FramePrediction(cue, tuple(
+                                item for item in matches if item[1] >= state.marker_floor)))
+                        if state.retain_scene:
+                            batch_scene.append(dict(start=cue.start, end=cue.end,
+                                tags=[item for item in matches if item[1] >= state.scene_floor]))
+                        if state.accumulator is not None:
+                            state.accumulator.add_sparse(values, cue)
+                state.top_scores = top_scores
                 state.scene_frames.extend(batch_scene)
-                if state.accumulator is not None:
-                    state.accumulator.add(result, batch_cues)
                 state.frame_predictions.extend(batch_frames)
                 state.processed += len(batch_cues)
                 if report is not None:
@@ -185,7 +193,7 @@ def _run_prediction_batches(app, tagger, stash, paths, cues, state, *,
                         state.processed,
                         state.top_scores,
                         batch_frames,
-                        analysis=state.accumulator.state() if state.accumulator is not None else None,
+                        analysis_provider=state.accumulator.state if state.accumulator is not None else None,
                         scene_frames=batch_scene if state.retain_scene else None,
                     )
             if on_progress is not None:
