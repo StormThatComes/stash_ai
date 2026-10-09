@@ -46,4 +46,9 @@ def retained_size(value):
             pending.extend(item)
         if hasattr(item, '__dict__'):
             pending.append(vars(item))
+        for cls in type(item).__mro__:
+            slots = getattr(cls, '__slots__', ())
+            for name in (slots,) if isinstance(slots, str) else slots:
+                if name not in ('__dict__', '__weakref__') and hasattr(item, name):
+                    pending.append(getattr(item, name))
     return total

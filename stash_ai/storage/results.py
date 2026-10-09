@@ -26,10 +26,11 @@ class ResultStore:
     def _normalize_record(record, kind, threshold):
         from stash_ai.storage.segments import StoredSegment
         from stash_ai.evidence.formats import validate_current
+        record = StoredSegment(overlay(record, kind, threshold))
         validate_current(record)
         if record.get('mode') != ('scene' if kind == 'scene' else 'frames') or not isinstance(record.get('items'), list):
             raise ValueError('Invalid active result record; run --db-check.')
-        return StoredSegment(overlay(record, kind, threshold))
+        return record
 
     @measured('state_read')
     def records(self, scene, kind, model=None, *, borrow=False):

@@ -15,8 +15,13 @@ def current(meta):
 
 
 def validate_current(segment):
+    from stash_ai.storage.segments import StoredSegment
+    if isinstance(segment, StoredSegment) and getattr(segment, '_validated_current', False):
+        return
     from stash_ai.storage.codec import validate_cached
     validate_cached(segment, 'current-inference', _validate_current)
+    if isinstance(segment, StoredSegment):
+        segment._validated_current = True
 
 
 def _validate_current(segment):
