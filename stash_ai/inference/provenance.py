@@ -1,6 +1,4 @@
 """Verified inference identities in state DB; diagnostic history is never evidence."""
-from pathlib import Path
-
 from stash_ai.signatures import digest
 from stash_ai.storage.codec import encode, decode
 from .input_identity import inference_signature
@@ -32,6 +30,10 @@ def decode_identity(data, signature):
 
 def registered_identity(store, scene, model, signature):
     """Read authoritative state provenance; run history never authorizes reuse."""
+    from .identity_batch import lookup
+    batched = lookup(store, scene, model, signature, decode_identity)
+    if batched is not None:
+        return batched[0]
     row = store.connection.execute('SELECT data FROM ' + store.table('inference_identities') +
         ' WHERE scope=? AND scene=? AND model=? AND signature=?',
         (store.scope, str(scene), model, signature)).fetchone()

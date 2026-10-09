@@ -4,11 +4,47 @@ from __future__ import annotations
 from collections import OrderedDict
 from contextlib import contextmanager
 from threading import Lock, local
+from dataclasses import dataclass
+from stash_ai.storage.segments import FrozenDict, FrozenList
 import hashlib
 
 from stash_ai.inference import sprites
 from stash_ai.signatures import digest
 from .input_identity import cue_manifest, frame_signature, inference_signature
+
+
+@dataclass(frozen=True, slots=True)
+class VerifiedInput:
+    cues: FrozenList
+    manifest: FrozenList
+    hashes: FrozenDict
+    frame_signature: str
+    cue_digest: str
+
+    @classmethod
+    def capture(cls, cues, hashes):
+        manifest = FrozenList(cue_manifest(cues))
+        hashes = FrozenDict(hashes)
+        return cls(FrozenList(cues), manifest, hashes, frame_signature(manifest, hashes), digest(manifest))
+
+    def inference_signature(self, identity):
+        return inference_signature(identity, self.manifest, self.hashes)
+
+
+@dataclass(frozen=True, slots=True)
+class InspectedInput:
+    snapshot: VerifiedInput
+    media: object
+    signature: str
+
+    def __iter__(self):
+        return iter((self.snapshot.cues, self.media, self.signature))
+
+    def __getitem__(self, index):
+        return (self.snapshot.cues, self.media, self.signature)[index]
+
+    def __len__(self):
+        return 3
 
 
 class VerifiedMedia:
@@ -25,8 +61,11 @@ class VerifiedMedia:
         if url in self.cache:
             self.cache.move_to_end(url)
             return self.cache[url]
-        data = self.stash.get_media(url)
-        checksum = hashlib.sha256(data).hexdigest()
+        if isinstance(self.stash, RunMedia):
+            data, checksum = self.stash.get_verified_media(url)
+        else:
+            data = self.stash.get_media(url)
+            checksum = hashlib.sha256(data).hexdigest()
         if url in self.hashes and checksum != self.hashes[url]:
             raise RuntimeError("Input media changed during this scene; rerun to use the new input.")
         self.hashes[url] = checksum
@@ -45,9 +84,8 @@ def inspect_input(app, stash, paths, identity):
         raise ValueError("No VTT cues to analyze.")
     for url in dict.fromkeys(cue.image for cue in cues):
         media.get_media(url)
-    cue_identity = cue_manifest(cues)
-    signature = inference_signature(identity, cue_identity, media.hashes)
-    return cues, media, signature
+    snapshot = VerifiedInput.capture(cues, media.hashes)
+    return InspectedInput(snapshot, media, snapshot.inference_signature(identity))
 
 
 class RunMedia:
@@ -87,6 +125,11 @@ class RunMedia:
                 self.report.counts['media_download_bytes'] += len(data)
         return data
 
+    def get_verified_media(self, url):
+        data = self.get_media(url)
+        with self._lock:
+            return data, self.hashes[url]
+
 
 class RunInputs:
     """Share verified cue manifests without changing any inference signatures."""
@@ -107,19 +150,31 @@ class RunInputs:
         key = digest({'paths': paths, 'sample_limit': app.MAX_FRAMES_PER_SCENE})
         cached = self.cache.get(('input', self.token, key))
         if cached is None:
-            cues, media, signature = inspect_input(app, self.media, paths, model_identity)
-            cue_identity = cue_manifest(cues)
-            frozen = frame_signature(cue_identity, media.hashes)
+            result = inspect_input(app, self.media, paths, model_identity)
+            snapshot = result.snapshot
             with self._lock:
-                if key in self.identities and frozen != self.identities[key]:
+                if key in self.identities and snapshot.frame_signature != self.identities[key]:
                     raise RuntimeError('Stash VTT changed during model passes; rerun the analysis.')
-                self.identities[key] = frozen
-                self.cache.put(('input', self.token, key), (cues, dict(media.hashes), cue_identity))
-            return cues, media, signature
-        cues, hashes, cue_identity = cached
-        media = VerifiedMedia(self.media, limit=0, expected=hashes)
-        signature = inference_signature(model_identity, cue_identity, hashes)
+                self.identities[key] = snapshot.frame_signature
+                self.cache.put(('input', self.token, key), snapshot)
+            return result
+        media = VerifiedMedia(self.media, limit=0, expected=cached.hashes)
+        signature = cached.inference_signature(model_identity)
         if self.report is not None:
             self.report.counts['input_manifest_hits'] += 1
-        return cues, media, signature
+        return InspectedInput(cached, media, signature)
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.close()
+
+    def close(self):
+        # Called only after all ordinary/stale-peer passes and producer joins.
+        self.cache.discard_matching(lambda key: isinstance(key, tuple) and len(key) >= 2 and
+            ((key[0] == 'input' and key[1] is self.token) or
+             (key[0] == 'media' and key[1] is self.media.token)))
+        self.identities.clear()
+        with self.media._lock:
+            self.media.hashes.clear()

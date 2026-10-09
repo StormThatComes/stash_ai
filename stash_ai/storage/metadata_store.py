@@ -2,12 +2,13 @@
 from stash_ai.runtime.timing import measured
 from stash_ai.storage.thresholds import overlay
 from contextlib import contextmanager
+from copy import deepcopy
 
 
 class MetadataStore:
     def __init__(self, store):
         self.store = store
-        self._batch = None
+        self._batch = self._decoded_batch = None
 
     @contextmanager
     def batch(self, pairs):
@@ -18,7 +19,7 @@ class MetadataStore:
         pairs = tuple(dict.fromkeys((str(scene), model) for scene, model in pairs))
         if len(pairs) > 128:
             raise ValueError('Metadata batches are limited to 128 scene/model pairs.')
-        previous = self._batch
+        previous = self._batch, self._decoded_batch
         values = {}
         if pairs:
             wanted = ','.join('(?,?)' for _ in pairs)
@@ -43,11 +44,11 @@ class MetadataStore:
                 (*(value for pair in pairs for value in pair), *scopes, store.scope))
             values = {(scene, model, kind): (version, data, threshold)
                       for scene, model, kind, version, data, threshold in rows}
-        self._batch = values
+        self._batch, self._decoded_batch = values, {}
         try:
             yield
         finally:
-            self._batch = previous
+            self._batch, self._decoded_batch = previous
 
     @property
     def report(self):
@@ -73,6 +74,9 @@ class MetadataStore:
         if not rows:
             return None
         version, data, threshold = rows[0]
+        key = str(scene), model, kind
+        if self._decoded_batch is not None and key in self._decoded_batch:
+            return overlay(deepcopy(self._decoded_batch[key]), kind, threshold)
         record = None
         if version == FORMAT:
             try:
@@ -85,11 +89,18 @@ class MetadataStore:
             record = summarize(store.unpack(payload))
             with backfill_batch(store):
                 self.save(scene, model, kind, record)
+        if self._decoded_batch is not None:
+            self._decoded_batch[key] = deepcopy(record)
         return overlay(record, kind, threshold)
 
     def save(self, scene, model, kind, record):
         from stash_ai.storage.metadata import FORMAT, encode
         store = self.store
+        data = encode(record)
         store.connection.execute('INSERT INTO result_metadata VALUES (?,?,?,?,?,?) '
             'ON CONFLICT(scope,scene,model,kind) DO UPDATE SET format=excluded.format,data=excluded.data',
-            (store.scope, str(scene), model, kind, FORMAT, encode(record)))
+            (store.scope, str(scene), model, kind, FORMAT, data))
+        key = str(scene), model, kind
+        if self._batch is not None and key in self._batch:
+            self._batch[key] = FORMAT, data, self._batch[key][2]
+            self._decoded_batch[key] = deepcopy(record)
