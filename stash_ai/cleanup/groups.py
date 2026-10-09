@@ -2,18 +2,16 @@
 from collections import Counter
 from copy import deepcopy
 from stash_ai.publication.groups import PREFIX
+from stash_ai.stash_api.protocols import ReadTagView, TagReads
 
 
-class PreviewUsage:
+class PreviewUsage(ReadTagView):
     """Apply planned membership deltas to native, global tag usage counters."""
-    def __init__(self, stash, delta):
+    def __init__(self, stash: TagReads, delta):
         self.stash, self.delta = stash, delta
 
-    def __getattr__(self, name):
-        return getattr(self.stash, name)
-
     def gql(self, query, variables=None):
-        data = self.stash.gql(query, variables)
+        data = super().gql(query, variables)
         if not any(name in query for name in ('StashAIPruneCandidates', 'StashAIPruneCatalog', 'StashAIPruneTag(')):
             return data
         data = deepcopy(data)

@@ -233,7 +233,7 @@ def test_diagnostic_database_failure_does_not_change_reuse(pipeline, monkeypatch
 def test_opt_out_skips_diagnostic_proofs_without_skipping_input_validation(pipeline, monkeypatch):
     from stash_ai.inference import reuse_diagnostics
     from stash_ai.domain import Cue
-    monkeypatch.setattr(reuse_diagnostics, 'proof', lambda *a: pytest.fail('disabled diagnostics built a proof'))
+    monkeypatch.setattr(reuse_diagnostics, 'proof', lambda *a, **kw: pytest.fail('disabled diagnostics built a proof'))
     arguments = [*pipeline.args, '--no-run-history', '--force-fetch-vtt']
     assert app.main(arguments) == 0
     loaded = len(pipeline.loaded)
@@ -247,9 +247,9 @@ def test_opt_out_skips_diagnostic_proofs_without_skipping_input_validation(pipel
 def test_verbose_opt_out_keeps_diagnostic_explanations(pipeline, monkeypatch):
     from stash_ai.inference import reuse_diagnostics
     original, calls = reuse_diagnostics.proof, []
-    def observe(*args):
+    def observe(*args, **kwargs):
         calls.append(True)
-        return original(*args)
+        return original(*args, **kwargs)
     monkeypatch.setattr(reuse_diagnostics, 'proof', observe)
     assert app.main([*pipeline.args, '--no-run-history', '--verbose']) == 0
     assert calls

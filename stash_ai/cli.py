@@ -25,7 +25,7 @@ def main(argv: list[str] | None = None, *, runtime: RuntimeContext | None = None
         return run_reuse_report(app, args)
     from stash_ai.history.lifecycle import RunHistory
     from contextlib import nullcontext
-    with RunHistory(app, args) as history:
+    with args.configuration_snapshot.use(), RunHistory(app, args) as history:
         timer = args.report.measure('command') if history.enabled else nullcontext()
         with timer:
             result = _execute(app, args)
