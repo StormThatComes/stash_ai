@@ -62,6 +62,16 @@ def build_report_parallel(app, state_db, scope, scene_ids, core_policies,
         return model.report_payload(
             Counter(), {source: Counter() for source in SOURCES})
 
+    from stash_ai.db.read_source import consistent_source
+    with consistent_source(state_db):
+        return _build_report_parallel(app, state_db, scope, scene_ids, core_policies,
+            scene_policies, workers=workers, cache_bytes=cache_bytes,
+            memory_budget_bytes=memory_budget_bytes, preload_sources=preload_sources, profile=profile)
+
+
+def _build_report_parallel(app, state_db, scope, scene_ids, core_policies,
+                           scene_policies, *, workers, cache_bytes,
+                           memory_budget_bytes, preload_sources, profile):
     workers = max(1, min(int(workers), len(scene_ids)))
     if workers == 1:
         with StateStore(
