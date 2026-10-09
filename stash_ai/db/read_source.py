@@ -1,5 +1,5 @@
 """One guardian connection validates the entire report's source interval."""
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from pathlib import Path
 
 from .common import connect_readonly
@@ -9,7 +9,7 @@ from .common import connect_readonly
 def consistent_source(path):
     path = Path(path).expanduser().resolve()
     identity = path.stat()
-    with connect_readonly(path) as guardian:
+    with closing(connect_readonly(path)) as guardian:
         version = guardian.execute('PRAGMA data_version').fetchone()[0]
         yield
         current = path.stat()

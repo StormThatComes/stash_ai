@@ -1,5 +1,4 @@
 """Comparable work, precise status and batch-only cache reuse telemetry."""
-from copy import deepcopy
 from dataclasses import replace
 import json
 

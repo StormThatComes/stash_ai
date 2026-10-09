@@ -23,28 +23,25 @@ def prune(store, scope, *, keep_last=None, max_age_days=None, dry_run=True, now=
     # A writer cannot finish or add a candidate between selection and deletion.
     db.execute('BEGIN' if dry_run else 'BEGIN IMMEDIATE')
     try:
-        rows = db.execute("SELECT id,finished_at FROM runs WHERE scope=? AND status<>'running' "
-                          "AND finished_at IS NOT NULL ORDER BY julianday(finished_at) DESC,id DESC",
-                          (scope,)).fetchall()
-        old = set()
-        if cutoff is not None:
-            old = {row[0] for row in db.execute("SELECT id FROM runs WHERE scope=? "
-                "AND status<>'running' AND finished_at IS NOT NULL AND julianday(finished_at)<julianday(?)",
-                (scope, cutoff))}
-        candidates = [identifier for position, (identifier, _) in enumerate(rows)
-                      if identifier in old or (keep_last is not None and position >= keep_last)]
-        decisions = sum(db.execute('SELECT COUNT(*) FROM reuse_decisions WHERE run_id=?',
-                                   (identifier,)).fetchone()[0] for identifier in candidates)
+        selection = """WITH finished AS (
+            SELECT id,finished_at,ROW_NUMBER() OVER (ORDER BY julianday(finished_at) DESC,id DESC) AS position
+            FROM runs WHERE scope=? AND status<>'running' AND finished_at IS NOT NULL
+        ) SELECT id FROM finished WHERE (? IS NOT NULL AND position>?)
+            OR (? IS NOT NULL AND julianday(finished_at)<julianday(?))"""
+        parameters = (scope, keep_last, keep_last, cutoff, cutoff)
+        candidates = [row[0] for row in db.execute(selection + ' ORDER BY position', parameters)]
+        finished_count = db.execute("SELECT COUNT(*) FROM runs WHERE scope=? AND status<>'running' "
+                                    "AND finished_at IS NOT NULL", (scope,)).fetchone()[0]
+        decisions = db.execute('SELECT COUNT(*) FROM reuse_decisions WHERE run_id IN (' + selection + ')',
+                               parameters).fetchone()[0]
         if not dry_run:
-            for identifier in candidates:
-                db.execute('DELETE FROM reuse_decisions WHERE run_id=?', (identifier,))
-                db.execute("DELETE FROM runs WHERE id=? AND scope=? AND status<>'running' "
-                           "AND finished_at IS NOT NULL", (identifier, scope))
+            db.execute('DELETE FROM reuse_decisions WHERE run_id IN (' + selection + ')', parameters)
+            db.execute('DELETE FROM runs WHERE id IN (' + selection + ')', parameters)
             db.commit()
         else:
             db.rollback()
         return dict(dry_run=dry_run, candidate_runs=len(candidates), candidate_decisions=decisions,
-                    retained_finished_runs=len(rows)-len(candidates), run_ids=candidates,
+                    retained_finished_runs=finished_count-len(candidates), run_ids=candidates,
                     protected_active_runs=True, reuse_proofs_unchanged=True)
     except BaseException:
         db.rollback()
