@@ -59,6 +59,14 @@ def call_with_deadline(operation, deadline, *, cancel=None):
     budget, completed, cancelled = remaining(deadline), Queue(maxsize=1), Event()
     started, token, control = monotonic(), current(), ReadControl()
     gate = Lock()
+    slot_lock, slot_returned = Lock(), False
+
+    def return_slot():
+        nonlocal slot_returned
+        with slot_lock:
+            if not slot_returned:
+                slot_returned = True
+                _slots.release()
 
     def abort():
         control.cancel()
@@ -83,7 +91,7 @@ def call_with_deadline(operation, deadline, *, cancel=None):
         except BaseException as exc:
             value, failed = exc, True
         finally:
-            _slots.release()
+            return_slot()
         with gate:
             abandoned = cancelled.is_set()
             if not abandoned:
@@ -103,7 +111,16 @@ def call_with_deadline(operation, deadline, *, cancel=None):
                 raise Empty
             if _slots.acquire(timeout=min(left, .05)):
                 break
-        Thread(target=run, name='stash-deadline-read', daemon=True).start()
+        worker = None
+        try:
+            worker = Thread(target=run, name='stash-deadline-read', daemon=True)
+            worker.start()
+        except BaseException:
+            # start() can be interrupted after the worker has actually started.
+            # In that case only its finally block may return the capacity.
+            if worker is None or not getattr(worker, 'is_alive', lambda: False)():
+                return_slot()
+            raise
         while True:
             if token is not None:
                 token.check()

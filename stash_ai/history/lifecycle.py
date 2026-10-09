@@ -1,7 +1,6 @@
 """Non-fatal run telemetry; dry runs and inspections preserve read-only behavior."""
 from collections import Counter
 from datetime import datetime, timezone
-import hashlib
 from pathlib import Path
 import platform
 import time
@@ -10,6 +9,7 @@ import uuid
 from stash_ai.commands.modes import Command
 from stash_ai.runtime.profile import ProfileMetrics
 from stash_ai.runtime.report import RunReport
+from stash_ai.runtime.status import completion_status
 from stash_ai.signatures import digest
 from stash_ai.storage.store import scope_for
 from .store import HistoryStore, history_path
@@ -17,7 +17,7 @@ from .store import HistoryStore, history_path
 AUTOMATIC_COMMANDS = frozenset((Command.INFERENCE, Command.MERGE, Command.CLEANUP,
     Command.CLEANUP_MARKERS, Command.CLEANUP_SCENES, Command.SYNC_HIERARCHY,
     Command.DOWNLOAD, Command.MARKER_GROUPS, Command.PRUNE_TAGS, Command.ABANDON,
-    Command.DB_UPDATE, Command.DB_COMPACT))
+    Command.DB_UPDATE, Command.DB_REPAIR, Command.DB_COMPACT))
 
 
 def now():
@@ -39,13 +39,7 @@ def configuration(app, args):
     options['runtime'] = {name: getattr(app, name) for name in (
         'AGGREGATION', 'TOP_K_FRAMES', 'MAX_FRAMES_PER_SCENE', 'MARKER_MAX_TAGS_PER_FRAME',
         'MARKER_MIN_HITS', 'MARKER_MERGE_GAP_SECONDS', 'MARKER_MATCH_TOLERANCE_SECONDS')}
-    files = {}
-    for name in ('model_config', 'temporal_policy', 'hierarchy', 'marker_core_exclusions', 'scene_tag_exclusions'):
-        try:
-            with Path(getattr(args, name)).expanduser().open('rb') as stream:
-                files[name] = hashlib.file_digest(stream, 'sha256').hexdigest()
-        except OSError:
-            files[name] = None
+    files = dict(args.configuration_snapshot.hashes)
     options['files'] = files
     options['environment'] = dict(python=platform.python_version(), system=platform.system(),
                                    machine=platform.machine(), processor=platform.processor())
@@ -90,6 +84,7 @@ class RunHistory:
         try:
             from tqdm import tqdm
             self.args.report = RunReport(self.args.verbose, tqdm.write)
+            self.args.report.counts.update(inference_processed_frames=0, checkpoint_restored_frames=0)
             self.args.report.profile = ProfileMetrics()
             self.args.report.history = self
             import threading
@@ -111,8 +106,7 @@ class RunHistory:
             return
         try:
             report = self.args.report
-            status = ('interrupted' if kind is not None and not issubclass(kind, Exception)
-                      else 'error' if kind is not None or self.result else 'finished')
+            status = completion_status(kind, errors=bool(self.result))
             issues = dict(report.issue_counts)
             if kind is not None:
                 issues['command/' + kind.__name__] = issues.get('command/' + kind.__name__, 0) + 1

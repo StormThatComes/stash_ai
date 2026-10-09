@@ -37,6 +37,8 @@ def inspect_database(path, scope):
     from stash_ai.storage.schema import APPLICATION_ID
 
     with connect_readonly(path) as db:
+        # Schema, evidence and aggregate state belong to one SQLite snapshot.
+        db.execute('BEGIN')
         application_id = db.execute("PRAGMA application_id").fetchone()[0]
         version = db.execute("PRAGMA user_version").fetchone()[0]
         if application_id != APPLICATION_ID or version not in KNOWN_VERSIONS:

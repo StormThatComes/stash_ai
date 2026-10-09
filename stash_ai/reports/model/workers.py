@@ -11,6 +11,7 @@ from stash_ai.reports.model import report as model
 from .analysis import scene_report, merge_scene_report
 from stash_ai.storage.store import StateStore
 from stash_ai.runtime.workers import open_read_worker
+from stash_ai.runtime.process_pool import read_process_pool
 from stash_ai.runtime.settings import evidence_settings
 
 _WORKER_CONTEXT = None
@@ -61,6 +62,16 @@ def build_report_parallel(app, state_db, scope, scene_ids, core_policies,
         return model.report_payload(
             Counter(), {source: Counter() for source in SOURCES})
 
+    from stash_ai.db.read_source import consistent_source
+    with consistent_source(state_db):
+        return _build_report_parallel(app, state_db, scope, scene_ids, core_policies,
+            scene_policies, workers=workers, cache_bytes=cache_bytes,
+            memory_budget_bytes=memory_budget_bytes, preload_sources=preload_sources, profile=profile)
+
+
+def _build_report_parallel(app, state_db, scope, scene_ids, core_policies,
+                           scene_policies, *, workers, cache_bytes,
+                           memory_budget_bytes, preload_sources, profile):
     workers = max(1, min(int(workers), len(scene_ids)))
     if workers == 1:
         with StateStore(
@@ -72,7 +83,7 @@ def build_report_parallel(app, state_db, scope, scene_ids, core_policies,
             allow_cleanup=True,
         ) as store:
             if preload_sources:
-                store.preload_sources()
+                store.preload_sources(scene_ids)
             return model.build_report(
                 app, store, scene_ids, core_policies, scene_policies)
 
@@ -82,7 +93,7 @@ def build_report_parallel(app, state_db, scope, scene_ids, core_policies,
     worker_budget = max(1, memory_budget_bytes // workers)
     chunksize = max(1, min(64, len(scene_ids) // (workers * 8) or 1))
 
-    with ProcessPoolExecutor(
+    with read_process_pool(ProcessPoolExecutor,
         max_workers=workers,
         mp_context=get_context("spawn"),
         initializer=_init_report_worker,
@@ -94,7 +105,7 @@ def build_report_parallel(app, state_db, scope, scene_ids, core_policies,
             scene_policies,
             worker_cache,
             worker_budget,
-            preload_sources,
+            tuple(scene_ids) if preload_sources else False,
             profile is not None,
         ),
     ) as executor:

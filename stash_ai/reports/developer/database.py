@@ -2,7 +2,11 @@
 from collections import Counter, defaultdict
 from pathlib import Path
 
-from stash_ai.db.common import BLOB_COLUMNS, STATE_TABLES as KNOWN_TABLES, column_names
+from stash_ai.db.common import BLOB_COLUMNS, STATE_TABLES, column_names
+# The optional data-conversion ledger is known without becoming a required
+# schema-v27 table for read-only access to older databases.
+KNOWN_TABLES = STATE_TABLES | {'data_revisions'}
+
 from .distribution import Distribution
 from .common import _row_count, _safe_model, _safe_kind
 

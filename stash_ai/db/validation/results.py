@@ -42,7 +42,7 @@ def check_results_and_index(db, tables, errors, progress=None):
             if threshold is not None:
                 from stash_ai.storage.thresholds import overlay
                 try:
-                    overlay(record, kind, threshold)
+                    record = overlay(dict(record), kind, threshold)
                 except (TypeError, ValueError):
                     pass
             expected_populated = int(bool(record['items']))

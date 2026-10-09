@@ -8,6 +8,7 @@ from threading import Event, Thread
 from time import monotonic
 
 from tqdm import tqdm
+from stash_ai.stash_api.protocols import QueryReads
 
 DEFAULT_PREFIXES = ("ai:", "m:")
 REQUIRED_COUNTS = {"scene_count", "scene_marker_count", "image_count", "gallery_count",
@@ -48,7 +49,7 @@ def _waiting_for_stash(progress, batch, total_batches):
 
 
 class PruneClient:
-    def __init__(self, stash):
+    def __init__(self, stash: QueryReads):
         self.stash = stash
         data = stash.gql('''query StashAIPruneCapabilities {
             tag: __type(name: "Tag") { fields(includeDeprecated: true) { name } }

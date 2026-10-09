@@ -47,6 +47,8 @@ def _restore_prediction_state(app, tagger, cues, *, checkpoint, report):
     retain_scene = 'scene' in output_kinds(app)
     scene_floor = scene_cache_floor(settings, policy)
     retained_marker_floor = marker_cache_floor(settings, policy)
+    if checkpoint:
+        checkpoint.keep = 1 if app.AGGREGATION == 'max' else app.TOP_K_FRAMES
     processed, top_scores, saved = (
         checkpoint.restore()
         if checkpoint
@@ -157,34 +159,24 @@ def _run_prediction_batches(app, tagger, stash, paths, cues, state, *,
                     combined, len(combined) - count, axis=0
                 )[-count:]
 
-                batch_frames = []
-                if app.CREATE_MARKERS:
-                    for cue, row in zip(batch_cues, result):
-                        matches = select_scores(
-                            row,
-                            labels,
-                            state.marker_floor,
-                            0,
-                        )
-                        batch_frames.append(FramePrediction(cue, tuple(matches)))
-
-                batch_scene = (
-                    [
-                        dict(
-                            start=cue.start,
-                            end=cue.end,
-                            tags=select_scores(row, labels, state.scene_floor, 0),
-                        )
-                        for cue, row in zip(batch_cues, result)
-                    ]
-                    if state.retain_scene
-                    else []
-                )
+                # One ordering per model row, then apply each retention floor.
+                batch_frames, batch_scene = [], []
+                floors = ([state.marker_floor] if app.CREATE_MARKERS else []) + ([state.scene_floor] if state.retain_scene else [])
+                for cue, row in zip(batch_cues, result):
+                    matches = select_scores(row, labels, min(floors), 0) if floors else []
+                    if app.CREATE_MARKERS:
+                        batch_frames.append(FramePrediction(cue, tuple(
+                            item for item in matches if item[1] >= state.marker_floor)))
+                    if state.retain_scene:
+                        batch_scene.append(dict(start=cue.start, end=cue.end,
+                            tags=[item for item in matches if item[1] >= state.scene_floor]))
                 state.scene_frames.extend(batch_scene)
                 if state.accumulator is not None:
                     state.accumulator.add(result, batch_cues)
                 state.frame_predictions.extend(batch_frames)
                 state.processed += len(batch_cues)
+                if report is not None:
+                    report.counts['inference_processed_frames'] += len(batch_cues)
 
                 if checkpoint:
                     checkpoint.record(
@@ -196,11 +188,8 @@ def _run_prediction_batches(app, tagger, stash, paths, cues, state, *,
                     )
     finally:
         # Save the last fully completed batch on Ctrl+C/inference/preparation errors.
-        try:
-            if checkpoint:
-                checkpoint.flush()
-        finally:
-            batches.close()
+        from stash_ai.runtime.cleanup import cleanup
+        cleanup(([checkpoint.flush] if checkpoint else []) + [batches.close], report=report)
 
     if state.processed != len(cues) or not len(state.top_scores):
         raise RuntimeError("Incomplete inference; scene sync was not started.")
