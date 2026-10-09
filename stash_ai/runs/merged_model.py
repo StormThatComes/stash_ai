@@ -361,9 +361,10 @@ class MergedModelRun:
             self._initialize_scene(job, kinds)
         self.report.counts['checkpoint_restored_frames'] += job.state.processed
         self.report.work('checkpoint_resumed' if job.checkpoint.resumed_frames else 'fresh')
-        with tqdm(total=len(job.cues), initial=job.state.processed,
-                  desc=f'{self.key} scene {job.scene}', unit='frame', position=1,
-                  leave=False, dynamic_ncols=True, mininterval=.25, disable=None) as frame_bar:
+        from .inference_progress import InferenceProgress
+        with InferenceProgress(tqdm, total=len(job.cues), initial=job.state.processed,
+                               desc=f'{self.key} scene {job.scene}',
+                               sample=lambda: self._buffer_snapshot(job)) as display:
             analysis = {}
             with self.report.measure('inference_scene', model=self.key, units=1, unit='scenes'):
                 predictions, frames = prediction.predict_scene(
@@ -374,11 +375,13 @@ class MergedModelRun:
                     inference_executor=self.inference_executor, state=job.state,
                     batch_results=job.batches, prepared_inputs=job.prepared,
                     transform_executor=self.prepare_executor,
-                    on_progress=frame_bar.update,
+                    on_progress=display.update,
+                    on_batches=lambda batches: setattr(job, 'batch_usage', batches.buffer_usage),
                     before_finalize=lambda: self._stage_next_scene(kinds, inputs, input_plan))
             # Input may finish while finalization/capture runs. Retry handoff at
             # these boundaries without ever waiting for an unfinished input.
             self._stage_next_scene(kinds, inputs, input_plan)
+            display.refresh()
             with self.report.measure('inference_output_capture', model=self.key, units=1, unit='scenes'):
                 outputs = merge_results.capture_outputs(
                     app, self.config, self.vocabulary, job.cues, predictions, frames, analysis,
@@ -386,6 +389,7 @@ class MergedModelRun:
                     frame_input_signature=(job.verified_input.frame_signature if job.verified_input is not None else
                                            frame_signature(cue_manifest(job.cues), job.media.hashes)))
             self._stage_next_scene(kinds, inputs, input_plan)
+            display.refresh()
             with self.report.measure('inference_commit', model=self.key):
                 checkpoints.finish(store, job.scene, self.key, outputs)
                 from stash_ai.inference.provenance import prune
@@ -393,6 +397,25 @@ class MergedModelRun:
             self.report.model_outcome(self.key, 'checkpoint_resumed' if job.checkpoint.resumed_frames else 'fresh')
             self.stats["processed"] += 1
             self.observer.finished(kinds)
+            display.refresh()
+
+    def _buffer_snapshot(self, job):
+        args = self.args
+        read = job.batches.buffer_usage if job.batches is not None else job.batch_usage
+        current = (read() if read is not None else
+                   dict(input=(0, args.prefetch_batches) if args.prefetch_batches else None,
+                        result=(0, args.result_prefetch_batches) if args.prefetch_batches else None))
+        following = None
+        if self._staged is not None and self._staged.preparation.job is not None:
+            staged = self._staged.preparation.job
+            following = dict(scene=staged.scene, **staged.batches.buffer_usage())
+        elif self.input_prefetch is not None and self.input_prefetch.scene is not None:
+            scene = self.input_prefetch.scene
+            following = dict(scene=scene,
+                input=self.input_prefetch.buffer_usage(scene) or (0, args.prefetch_batches),
+                result=(0, args.result_prefetch_batches))
+        return dict(current=current, next=following, cache=self.store.cache.usage(),
+                    checkpoint=(job.checkpoint.batches, job.checkpoint.every))
 
     def _checkpoint_signature(self, scene_id, signature, cues, media, kinds, analysis_format, *, snapshot=None):
         from stash_ai.inference.provenance import register, resume_signature, prune

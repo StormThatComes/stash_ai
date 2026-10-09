@@ -53,11 +53,14 @@ def frame_bars(bars):
 def test_frame_bar_counts_partial_batches_even_without_retained_tags(pipeline, bars, prefetch):
     pipeline.scores['wd'][:] = 0
     assert app.main([*pipeline.args, '--prefetch-batches', str(prefetch)]) == 0
-    scene_bar, frame_bar = bars
+    scene_bar, frame_bar = bars[:2]
     assert scene_bar.pos == 0 and scene_bar.n == scene_bar.total == 1
     assert frame_bar.pos == -1 and frame_bar.desc == 'wd scene 1'
     assert frame_bar.initial == 0 and frame_bar.n == frame_bar.total == 10
     assert frame_bar.updates == [4, 4, 2]
+    assert [bar.pos for bar in bars[2:]] == [-2, -3]
+    assert bars[2].desc.startswith('Buffers: in=')
+    assert bars[3].desc.startswith('Cache:') and 'checkpoint interval=0/8' in bars[3].desc
     assert not frame_bar.leave and all(bar.closed for bar in bars)
 
 
@@ -139,6 +142,8 @@ def test_frame_bar_is_hidden_when_output_is_redirected(pipeline, monkeypatch):
         return bar
 
     monkeypatch.setattr(merged_model, 'tqdm', redirected_bar)
+    monkeypatch.setattr(merged_model.MergedModelRun, '_buffer_snapshot',
+                        lambda *args: pytest.fail('Redirected output sampled buffer state'))
     assert app.main(pipeline.args) == 0
     assert len(captured) == 2 and captured[1].disable
     assert 'wd inference' in output.getvalue()

@@ -96,6 +96,11 @@ class SceneInputPrefetch:
             return None
         return stream
 
+    def buffer_usage(self, scene):
+        with self.lock:
+            stream = self.prepared.get(scene)
+        return stream.buffer_usage() if stream is not None else None
+
     def take(self, scene):
         if self.pending is None or self.scene != scene:
             return None

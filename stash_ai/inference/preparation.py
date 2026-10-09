@@ -37,7 +37,7 @@ class PreparedBatch:
 
 def prepared_batches(app, tagger, stash, paths, cues, prefetch=False, workers=1, *,
                      report=None, collate=False, cancellation=None,
-                     transform_executor=None, frame_lookahead=False):
+                     transform_executor=None, frame_lookahead=False, buffer_usage=None):
     """Bounded ordered batches; one producer owns media and worker image copies."""
     if not isinstance(prefetch, int) or not 0 <= prefetch <= 128:
         raise ValueError('prefetch must be an integer in 0..128.')
@@ -129,20 +129,37 @@ def prepared_batches(app, tagger, stash, paths, cues, prefetch=False, workers=1,
             with measure('batch_collate', len(prepared)):
                 prepared = PreparedBatch(tagger.collate_batch(prepared), len(prepared))
         return prepared, batch_cues
+
+    def submit_next():
+        future = executor.submit(prepare_next)
+        if buffer_usage is not None:
+            buffer_usage.submitted(future)
+        return future
+
     try:
-        pending = deque(executor.submit(prepare_next) for _ in range(prefetch)) if executor else deque()
+        pending = deque(submit_next() for _ in range(prefetch)) if executor else deque()
         while True:
             with measure('inference_input_wait', 0):
-                prepared, batch_cues = pending.popleft().result() if executor else prepare_next()
+                if executor:
+                    future = pending.popleft()
+                    if buffer_usage is not None:
+                        buffer_usage.taken(future)
+                    prepared, batch_cues = future.result()
+                else:
+                    prepared, batch_cues = prepare_next()
             if not prepared:
                 break
             if executor:
-                pending.append(executor.submit(prepare_next))
+                pending.append(submit_next())
             yield prepared, batch_cues
     finally:
         cancellation.cancel()
-        if executor:
-            executor.shutdown(wait=True, cancel_futures=True)
+        try:
+            if executor:
+                executor.shutdown(wait=True, cancel_futures=True)
+        finally:
+            if buffer_usage is not None:
+                buffer_usage.clear()
         if transforms is not None and transform_executor is None:
             transforms.shutdown(wait=True)
         elif transforms is not None:

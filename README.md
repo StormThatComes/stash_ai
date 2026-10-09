@@ -534,6 +534,34 @@ przesuwa się dopiero po zakończeniu obsługi sceny. Sceny użyte z cache
 nie uruchamiają paska klatek. Pasek klatek jest ukryty poza interaktywnym
 terminalem, żeby przekierowane logi nie zawierały dwóch linii z ruchem kursora.
 
+Pod paskami pojawiają się dwa wiersze z zajętością buforów, np.:
+
+```text
+Buffers: in=12/16 out=5/32 | next[6307]: in=16/16 out=0/32
+Cache: 1.2GiB/24.0GiB | checkpoint interval=7/32 batch
+```
+
+`in` to gotowe batche wejściowe względem `prefetch_batches`, a `out` to
+wyniki GPU w RAM czekające na obróbkę CPU względem `result_prefetch_batches`.
+`next[ID]` pokazuje osobne kolejki następnej sceny, także przed przekazaniem jej
+na GPU. Licznik nie obejmuje batcha już pobranego przez konsumenta ani zadań
+preprocessingu, które jeszcze nie skończyły się przygotowaniem batcha. Sygnały
+końca i błędy nie są liczone jako batche. Przy `prefetch_batches: 0` kolejki
+pokazują `off`; brak następnej sceny również pokazuje `next=off`.
+
+`Cache` to szacowane bajty zatrzymane we wspólnym cache RAM i jego rzeczywisty
+skonfigurowany limit, po ograniczeniu przez `ram_budget_gb`. To wspólny cache
+mediów, wejść, wyników i indeksów, a nie całe zużycie RAM procesu lub VRAM.
+`checkpoint interval` pokazuje liczbę przetworzonych batchy od ostatniego
+udanego zapisu względem `checkpoint_batches`; nie jest pojemnością kolejki.
+Po zapisie checkpointu licznik wraca do zera.
+
+Status jest odczytywany przy odświeżeniu paska klatek (domyślnie nie częściej
+niż co 0,25 s) oraz na granicach finalizacji i zapisu sceny. Są to chwilowe
+odczyty pracujących równolegle buforów, bez czekania na producerów, pobierania
+elementów, dostępu do SQLite lub zmian LRU. Dodatkowe wiersze są ukryte poza
+interaktywnym terminalem i zamykane także po błędzie lub Ctrl+C.
+
 ### Model Utility / Ablation Report
 
 `--model-report NEW.json` działa wyłącznie na zapisanym evidence i nie łączy się

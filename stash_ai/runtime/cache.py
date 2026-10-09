@@ -23,6 +23,11 @@ class RamCache:
         self._effective_limit = self.limit
         self._lock = threading.RLock()
 
+    def usage(self):
+        """Current retained bytes and configured cap; never changes cache state."""
+        with self._lock:
+            return self.size, self.limit
+
     def get(self, key):
         with self._lock:
             if key not in self.entries:
