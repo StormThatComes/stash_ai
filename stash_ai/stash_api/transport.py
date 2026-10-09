@@ -61,11 +61,27 @@ class StashTransport:
 
     @staticmethod
     def _read_only(query: str, variables: dict | None = None) -> bool:
-        if not query.lstrip().startswith('mutation'):
-            return True
         from stash_ai.cleanup.sql_session import is_read_only_cleanup
         from stash_ai.stash_api.sql import is_read_only_merge
-        return is_read_only_cleanup(query, variables) or is_read_only_merge(query, variables)
+        if is_read_only_cleanup(query, variables) or is_read_only_merge(query, variables):
+            return True
+        # Ignore comments and string contents, but inspect the whole document:
+        # a query followed by a mutation is not a proven read either.
+        tokens = re.findall(r'"""(?:\\.|(?!""")[\s\S])*"""|"(?:\\.|[^"\\])*"|#[^\r\n]*|[A-Za-z_][A-Za-z_0-9]*|[{}()]', query)
+        depth = 0
+        operations = []
+        for token in tokens:
+            if token.startswith(('"', '#')):
+                continue
+            if depth == 0 and token in ('query', 'mutation', 'subscription'):
+                operations.append(token)
+            if token in ('{', '('):
+                depth += 1
+            elif token in ('}', ')'):
+                depth -= 1
+        first = re.sub(r'#[^\r\n]*', '', query).lstrip('\ufeff \t\r\n,')
+        return depth == 0 and (bool(operations) and all(op == 'query' for op in operations)
+                               or not operations and first.startswith('{'))
 
     def gql(self, query: str, variables: dict | None = None) -> dict:
         report = self.report
@@ -86,7 +102,7 @@ class StashTransport:
 
     def _gql(self, query: str, variables: dict | None = None) -> dict:
         read = self._read_only(query, variables)
-        if self.dry_run and query.lstrip().startswith("mutation") and not read:
+        if self.dry_run and not read:
             raise RuntimeError("Internal error: mutation attempted during dry-run.")
         from time import monotonic
         from stash_ai.stash_api.deadlines import call_with_deadline
