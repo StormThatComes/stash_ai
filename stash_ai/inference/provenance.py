@@ -12,7 +12,10 @@ def decode_identity(data, signature):
     These fields never enter a model, input or checkpoint signature. The checksum
     catches damaged registry associations without fetching otherwise ready inputs.
     """
-    value = dict(decode(data))
+    value = decode(data)
+    if not isinstance(value, dict):
+        raise ValueError('Incomplete inference identity.')
+    value = dict(value)
     required = {'format', 'source', 'repo', 'revision', 'files', 'vocabulary',
                 'batch_size', 'scene_threshold', 'marker_threshold', 'aggregation', 'top_k', 'retention'}
     if not isinstance(value, dict) or not required <= value.keys() or not isinstance(value['retention'], dict):

@@ -78,15 +78,15 @@ def test_only_immutable_successful_validation_is_memoized(monkeypatch):
 
 def test_shared_order_preserves_thresholds_caps_sources_and_exclusions():
     values = FrozenList([['z', .8], ['a', .8], ['low', .699999988079071], ['high', .9]])
-    cache = RamCache(10000)
+    cache = RamCache(100000)
     memo = FrameMemo(cache)
-    for source in ('wd', 'dtq'):
+    for source in ('wd', 'dtq') * 2:
         for high, floor, cores, exclusions, limit in (
             (.8, .7, {'high'}, (), 1), (.7, .6, (), {'a'}, 2), (.9, .8, (), (), 0)):
             assert selections(values, high, floor, cores, exclusions, limit, validate=True,
                               memo=memo, source=source) == selections(deepcopy(values), high, floor,
                                                                     cores, exclusions, limit, validate=True)
-    assert memo.sorts == 2
+    assert memo.sorts == 6
     memo.close()
     assert cache.size == 0
 
@@ -100,3 +100,32 @@ def test_frame_memo_is_bounded_and_cleans_evicted_keys():
     assert not hasattr(memo, 'keys')
     memo.close()
     assert cache.size == 0
+
+
+def test_immutable_memo_sorts_only_qualified_detections(monkeypatch):
+    import stash_ai.evidence.eligibility as eligibility
+    real_sorted = sorted
+    sizes = []
+    def counted(values, *args, **kwargs):
+        values = list(values)
+        sizes.append(len(values))
+        return real_sorted(values, *args, **kwargs)
+    monkeypatch.setattr(eligibility, 'sorted', counted, raising=False)
+    tags = FrozenList([['high', .9], ['medium', .8]] + [[f'low{i}', .1] for i in range(100)])
+    memo = FrameMemo()
+    for _ in range(3):
+        assert eligible(tags, .7, memo=memo, source='wd') == [('high', .9), ('medium', .8)]
+    assert sizes == [2]
+    assert eligible(tags, .7, {'high'}, memo=memo, source='wd') == [('medium', .8)]
+    assert sizes == [2, 1]
+    memo.close()
+
+
+def test_registry_json_array_cannot_masquerade_as_identity():
+    from stash_ai.inference.provenance import decode_identity
+    from stash_ai.storage.codec import encode
+    pairs = [[key, {} if key == 'retention' else 'value'] for key in (
+        'format', 'source', 'repo', 'revision', 'files', 'vocabulary', 'batch_size',
+        'scene_threshold', 'marker_threshold', 'aggregation', 'top_k', 'retention')]
+    with pytest.raises(ValueError, match='Incomplete inference identity'):
+        decode_identity(encode(pairs), 'signature')

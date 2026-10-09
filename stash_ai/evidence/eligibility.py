@@ -9,16 +9,16 @@ class FrameMemo:
         self.token = object()
         self.sorts = 0
 
-    def ordered(self, tags, source, validate):
+    def ordered(self, tags, source, floor, exclusions, validate):
         # Only immutable payloads may retain successful validation/order.
         if not isinstance(tags, FrozenList):
-            return _ordered(tags, validate)
-        key = ('frame-order', self.token, source, id(tags), validate)
+            return _ordered(tags, validate, floor=floor, exclusions=exclusions)
+        key = ('frame-order', self.token, source, id(tags), floor, frozenset(exclusions), validate)
         entry = self.cache.get(key)
         if entry is not None and entry[0] is tags:
             return entry[1]
         self.sorts += 1
-        values = tuple(_ordered(tags, validate))
+        values = tuple(_ordered(tags, validate, floor=floor, exclusions=exclusions))
         self.cache.put(key, (tags, values))  # retain tags to prevent id recycling
         return values
 
@@ -27,19 +27,24 @@ class FrameMemo:
                                     key[:2] == ('frame-order', self.token))
 
 
-def _ordered(tags, validate):
+def _ordered(tags, validate, *, floor=0, exclusions=()):
     from .labels import raw_label
-    values = [(raw_label(tag) if validate else tag, score) for tag, score in tags]
+    values = []
+    for tag, score in tags:
+        if tag in exclusions:
+            continue
+        label = raw_label(tag) if validate else tag
+        if score >= floor:
+            values.append((label, score))
     return sorted(values, key=lambda item: (-item[1], item[0]))
 
 
 def eligible(tags, floor, exclusions=(), limit=0, *, validate=False, memo=None, source=None):
-    if memo is None or not isinstance(tags, FrozenList):
-        ordered = _ordered(((tag, score) for tag, score in tags if tag not in exclusions), validate)
-    else:
-        ordered = memo.ordered(tags, source, validate)
-    values = [(tag, score) for tag, score in ordered if tag not in exclusions and score >= floor]
-    return values[:limit] if limit else values
+    # Filter before sorting, including untrusted/non-memoized external frames.
+    # The memo key describes the entire qualification represented by its order.
+    values = (memo.ordered(tags, source, floor, exclusions, validate) if memo is not None
+              else _ordered(tags, validate, floor=floor, exclusions=exclusions))
+    return list(values[:limit] if limit else values)
 
 
 def selections(tags, high, floor, cores=(), tags_excluded=(), limit=0, *, validate=False, memo=None, source=None):
