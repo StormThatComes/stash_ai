@@ -10,12 +10,12 @@ from .scenes import _scene_signals
 from .markers import _marker_signals
 
 from dataclasses import asdict
-import sqlite3
 
 from tqdm import tqdm
 
 from stash_ai.reports.review.accumulator import ReviewAccumulator
 from stash_ai.reports.io import write_json_report
+from stash_ai.reports.runtime import offline_report
 from stash_ai.reports.runtime import report_context, report_policies, report_store, report_memory
 
 
@@ -102,25 +102,22 @@ def format_summary(report):
     return "\n".join(lines)
 
 
+@offline_report('Tag review report')
 def run(app, args):
 
-    try:
-        options = ReviewOptions(
-            margin=.05 if args.tag_review_margin is None else args.tag_review_margin,
-            long_marker_seconds=300.0 if args.tag_review_long_marker_seconds is None
-            else args.tag_review_long_marker_seconds,
-            examples=3 if args.tag_review_examples is None else args.tag_review_examples)
-        local = report_context(app, args, both_outputs=True)
-        core, tags = report_policies(app, args)
-        with report_store(app, args, **report_memory(args)) as store:
-            scenes = _scene_ids(store, args.scene_id)
-            if not args.scene_id:
-                store.preload_sources(scenes)
-            report = build_report(local, store, scenes, core, tags, options)
-        destination = write_json_report(report, args.tag_review_report)
-        print(format_summary(report))
-        print(f"Tag review report written to {destination}. No Stash requests or inference were performed.")
-        return 0
-    except (OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
-        print("Tag review report failed: " + str(exc))
-        return 1
+    options = ReviewOptions(
+        margin=.05 if args.tag_review_margin is None else args.tag_review_margin,
+        long_marker_seconds=300.0 if args.tag_review_long_marker_seconds is None
+        else args.tag_review_long_marker_seconds,
+        examples=3 if args.tag_review_examples is None else args.tag_review_examples)
+    local = report_context(app, args, both_outputs=True)
+    core, tags = report_policies(app, args)
+    with report_store(app, args, **report_memory(args)) as store:
+        scenes = _scene_ids(store, args.scene_id)
+        if not args.scene_id:
+            store.preload_sources(scenes)
+        report = build_report(local, store, scenes, core, tags, options)
+    destination = write_json_report(report, args.tag_review_report)
+    print(format_summary(report))
+    print(f"Tag review report written to {destination}. No Stash requests or inference were performed.")
+    return 0

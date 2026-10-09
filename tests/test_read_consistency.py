@@ -34,7 +34,7 @@ def test_shared_source_guard_detects_commit_between_readers(tmp_path):
     path = tmp_path/'state.sqlite3'
     with StateStore(path, 's'):
         pass
-    with pytest.raises(RuntimeError, match='changed during model report'):
+    with pytest.raises(RuntimeError, match='changed during offline report'):
         with consistent_source(path):
             with sqlite3.connect(path) as writer:
                 writer.execute("INSERT INTO refresh_requests VALUES ('s','1','wd','scene')")

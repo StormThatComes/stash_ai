@@ -181,8 +181,7 @@ def test_read_only_commands_record_only_when_explicitly_requested(tmp_path, monk
 def test_missing_history_report_does_not_create_db_or_output(tmp_path):
     destination = tmp_path / 'report.json'
     before = set(tmp_path.iterdir())
-    with pytest.raises(sqlite3.OperationalError):
-        app.main(['--run-report', str(destination), '--state-db', str(tmp_path / 'missing.sqlite3')])
+    assert app.main(['--run-report', str(destination), '--state-db', str(tmp_path / 'missing.sqlite3')]) == 1
     assert set(tmp_path.iterdir()) == before
 
 

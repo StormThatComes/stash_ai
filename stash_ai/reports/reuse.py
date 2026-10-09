@@ -1,18 +1,19 @@
 """Offline explanations of actual recorded scene/model reuse decisions."""
 from collections import Counter
 
-from stash_ai.history.store import HistoryStore, history_path
 from stash_ai.reports.io import write_json_report
+from stash_ai.reports.runtime import offline_report, report_history
 from stash_ai.storage.store import scope_for
 
 
+@offline_report('Reuse report')
 def run(app, args):
     models = args.models or ([args.run_model] if args.run_model else None)
     if args.models and args.run_model:
         models = [model for model in models if model == args.run_model]
         if not models:
             raise ValueError('--models and --run-model select no common model.')
-    with HistoryStore(history_path(args), readonly=True) as store:
+    with report_history(args) as store:
         decisions = store.decisions(scope_for(app.STASH_URL), limit=args.run_limit,
             scenes=args.scene_id, models=models, command=args.run_command, status=args.run_status)
     summaries = {}
