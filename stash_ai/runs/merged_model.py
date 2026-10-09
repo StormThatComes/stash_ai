@@ -43,8 +43,10 @@ class MergedModelRun:
         if self.args.prefetch_batches:
             from stash_ai.inference.input_prefetch import SceneInputPrefetch
             self.input_prefetch = SceneInputPrefetch(self.app, inputs, self.report, self.key)
+        bar = None
         try:
-            bar = tqdm(self._scene_sequence, desc=self.key + " inference", unit="scene")
+            bar = tqdm(self._scene_sequence, desc=self.key + " inference", unit="scene",
+                       position=0, dynamic_ncols=True)
             for self._scene_position, (scene_id, current) in enumerate(bar):
                 self.observer.begin(scene_id)
                 self.report.work('')
@@ -92,6 +94,7 @@ class MergedModelRun:
                 self.prepare_executor = self.inference_executor = self.input_prefetch = None
                 self._staged, self._scene_sequence = None, ()
             cleanup([
+                lambda: bar.close() if bar is not None else None,
                 lambda: self._close_staged(kinds),
                 lambda: self.input_prefetch.close() if self.input_prefetch is not None else None,
                 lambda: self.prepare_executor.shutdown(wait=True) if self.prepare_executor is not None else None,
@@ -358,34 +361,38 @@ class MergedModelRun:
             self._initialize_scene(job, kinds)
         self.report.counts['checkpoint_restored_frames'] += job.state.processed
         self.report.work('checkpoint_resumed' if job.checkpoint.resumed_frames else 'fresh')
-        analysis = {}
-        with self.report.measure('inference_scene', model=self.key, units=1, unit='scenes'):
-            predictions, frames = prediction.predict_scene(
-                app, self.tagger, job.media, job.paths, job.cues, checkpoint=job.checkpoint,
-                prefetch=args.prefetch_batches, analysis=analysis, report=self.report,
-                prepare_workers=args.prepare_workers,
-                result_prefetch=args.result_prefetch_batches,
-                inference_executor=self.inference_executor, state=job.state,
-                batch_results=job.batches, prepared_inputs=job.prepared,
-                transform_executor=self.prepare_executor,
-                before_finalize=lambda: self._stage_next_scene(kinds, inputs, input_plan))
-        # Input may finish while finalization/capture runs. Retry handoff at
-        # these boundaries without ever waiting for an unfinished input.
-        self._stage_next_scene(kinds, inputs, input_plan)
-        with self.report.measure('inference_output_capture', model=self.key, units=1, unit='scenes'):
-            outputs = merge_results.capture_outputs(
-                app, self.config, self.vocabulary, job.cues, predictions, frames, analysis,
-                inference_signature=job.signature,
-                frame_input_signature=(job.verified_input.frame_signature if job.verified_input is not None else
-                                       frame_signature(cue_manifest(job.cues), job.media.hashes)))
-        self._stage_next_scene(kinds, inputs, input_plan)
-        with self.report.measure('inference_commit', model=self.key):
-            checkpoints.finish(store, job.scene, self.key, outputs)
-            from stash_ai.inference.provenance import prune
-            prune(store, job.scene, self.key)
-        self.report.model_outcome(self.key, 'checkpoint_resumed' if job.checkpoint.resumed_frames else 'fresh')
-        self.stats["processed"] += 1
-        self.observer.finished(kinds)
+        with tqdm(total=len(job.cues), initial=job.state.processed,
+                  desc=f'{self.key} scene {job.scene}', unit='frame', position=1,
+                  leave=False, dynamic_ncols=True, mininterval=.25, disable=None) as frame_bar:
+            analysis = {}
+            with self.report.measure('inference_scene', model=self.key, units=1, unit='scenes'):
+                predictions, frames = prediction.predict_scene(
+                    app, self.tagger, job.media, job.paths, job.cues, checkpoint=job.checkpoint,
+                    prefetch=args.prefetch_batches, analysis=analysis, report=self.report,
+                    prepare_workers=args.prepare_workers,
+                    result_prefetch=args.result_prefetch_batches,
+                    inference_executor=self.inference_executor, state=job.state,
+                    batch_results=job.batches, prepared_inputs=job.prepared,
+                    transform_executor=self.prepare_executor,
+                    on_progress=frame_bar.update,
+                    before_finalize=lambda: self._stage_next_scene(kinds, inputs, input_plan))
+            # Input may finish while finalization/capture runs. Retry handoff at
+            # these boundaries without ever waiting for an unfinished input.
+            self._stage_next_scene(kinds, inputs, input_plan)
+            with self.report.measure('inference_output_capture', model=self.key, units=1, unit='scenes'):
+                outputs = merge_results.capture_outputs(
+                    app, self.config, self.vocabulary, job.cues, predictions, frames, analysis,
+                    inference_signature=job.signature,
+                    frame_input_signature=(job.verified_input.frame_signature if job.verified_input is not None else
+                                           frame_signature(cue_manifest(job.cues), job.media.hashes)))
+            self._stage_next_scene(kinds, inputs, input_plan)
+            with self.report.measure('inference_commit', model=self.key):
+                checkpoints.finish(store, job.scene, self.key, outputs)
+                from stash_ai.inference.provenance import prune
+                prune(store, job.scene, self.key)
+            self.report.model_outcome(self.key, 'checkpoint_resumed' if job.checkpoint.resumed_frames else 'fresh')
+            self.stats["processed"] += 1
+            self.observer.finished(kinds)
 
     def _checkpoint_signature(self, scene_id, signature, cues, media, kinds, analysis_format, *, snapshot=None):
         from stash_ai.inference.provenance import register, resume_signature, prune

@@ -521,6 +521,19 @@ Bez `--verbose` pomija również budowanie diagnostycznych proofs. Weryfikacja
 wejść i tożsamości cache nadal działa. Błędy metadanych GPU i opcjonalnej
 historii nie zmieniają wyniku polecenia ani decyzji o ponownej inferencji.
 
+### Postęp inferencji
+
+W terminalu inferencja pokazuje dwa paski: sceny bieżącego modelu oraz klatki
+aktualnej sceny, np. `wd scene 6306: 128/729 frame`. Pasek klatek liczy cue
+z VTT wybrane do inferencji, a nie wszystkie klatki wideo. Przy wznowieniu
+zaczyna od poprawnie odtworzonego checkpointu i przesuwa się po obróbce
+każdego batcha przez CPU, także gdy model nie zachował żadnych tagów.
+Prefetch i inferencja następnej sceny nie przesuwają paska bieżącej sceny.
+Po osiągnięciu 100% trwa jeszcze finalizacja i zapis wyniku; pasek scen
+przesuwa się dopiero po zakończeniu obsługi sceny. Sceny użyte z cache
+nie uruchamiają paska klatek. Pasek klatek jest ukryty poza interaktywnym
+terminalem, żeby przekierowane logi nie zawierały dwóch linii z ruchem kursora.
+
 ### Model Utility / Ablation Report
 
 `--model-report NEW.json` działa wyłącznie na zapisanym evidence i nie łączy się

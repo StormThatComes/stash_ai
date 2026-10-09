@@ -127,7 +127,7 @@ def _restore_prediction_state(app, tagger, cues, *, checkpoint, report):
 def _run_prediction_batches(app, tagger, stash, paths, cues, state, *,
                             checkpoint, prefetch, prepare_workers, report,
                             inference_executor, batch_results=None, prepared_inputs=None,
-                            transform_executor=None, result_prefetch=32):
+                            transform_executor=None, result_prefetch=32, on_progress=None):
     import numpy as np
     from stash_ai.inference.batches import predicted_batches
 
@@ -186,6 +186,8 @@ def _run_prediction_batches(app, tagger, stash, paths, cues, state, *,
                         analysis=state.accumulator.state() if state.accumulator is not None else None,
                         scene_frames=batch_scene if state.retain_scene else None,
                     )
+            if on_progress is not None:
+                on_progress(len(batch_cues))
     finally:
         # Save the last fully completed batch on Ctrl+C/inference/preparation errors.
         from stash_ai.runtime.cleanup import cleanup
@@ -229,9 +231,10 @@ def predict_scene(app, tagger: Any, stash, paths: dict, cues: list[Cue],
                   *, checkpoint=None, prefetch: int = 0, analysis: dict | None = None,
                   report=None, prepare_workers: int = 1, inference_executor=None,
                   state=None, batch_results=None, prepared_inputs=None,
-                  transform_executor=None, before_finalize=None, result_prefetch: int = 32
+                  transform_executor=None, before_finalize=None, result_prefetch: int = 32,
+                  on_progress=None
                   ) -> tuple[list[tuple[str, float]], list[FramePrediction]]:
-    """Return raw retained evidence; publication applies exclusions and limits."""
+    """Return raw retained evidence; report progress only for consumed batches."""
     if not cues:
         raise ValueError("Cannot predict a scene without VTT cues.")
     state = state if state is not None else _restore_prediction_state(
@@ -257,6 +260,7 @@ def predict_scene(app, tagger: Any, stash, paths: dict, cues: list[Cue],
         prepared_inputs=prepared_inputs,
         transform_executor=transform_executor,
         result_prefetch=result_prefetch,
+        on_progress=on_progress,
     )
     if before_finalize is not None:
         before_finalize()
