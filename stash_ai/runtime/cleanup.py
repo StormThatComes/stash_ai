@@ -16,7 +16,10 @@ def cleanup(callbacks, *, report=None, primary=None):
         for error in failures:
             primary.add_note(f'Cleanup also failed: {type(error).__name__}: {error}')
             if report is not None:
-                report.detail(f'Cleanup also failed: {type(error).__name__}: {error}')
+                try:
+                    report.detail(f'Cleanup also failed: {type(error).__name__}: {error}')
+                except BaseException as diagnostic_error:
+                    primary.add_note(f'Cleanup diagnostic also failed: {type(diagnostic_error).__name__}: {diagnostic_error}')
         return
     for error in failures[1:]:
         failures[0].add_note(f'Additional cleanup failure: {type(error).__name__}: {error}')

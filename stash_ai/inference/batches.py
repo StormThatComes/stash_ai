@@ -1,18 +1,12 @@
 """Ordered inference lookahead with a bounded result queue and one model owner."""
 from contextlib import closing, nullcontext
-from dataclasses import dataclass
-from queue import Full, Queue
-from threading import Event, Thread
+from threading import Thread
 
 from stash_ai.inference.preparation import PreparedBatch, prepared_batches
 from stash_ai.models import validate_scores
-from stash_ai.runtime.cancellation import Cancellation
 from .buffer_usage import PreparedBatchUsage, queued_batches
-
-
-@dataclass(frozen=True)
-class _Failure:
-    error: BaseException
+from .managed_stream import ManagedStream, StreamFailure as _Failure
+from stash_ai.runtime.cleanup import cleanup
 
 
 class BatchPredictions:
@@ -28,9 +22,10 @@ class BatchPredictions:
             raise ValueError('result_prefetch must be an integer in 1..128.')
         self.report, self.model = report, tagger.settings.source.key
         self.work = report.work() if report is not None else ''
-        self.tagger, self.cancellation = tagger, Cancellation()
-        self.results, self.stopped = Queue(maxsize=result_prefetch), Event()
-        self.finished, self.external_inputs = object(), prepared_inputs
+        self.channel = ManagedStream(result_prefetch)
+        self.tagger, self.cancellation = tagger, self.channel.cancellation
+        self.results, self.stopped = self.channel.queue, self.channel.stopped
+        self.finished, self.external_inputs = self.channel.end, prepared_inputs
         self.input_usage = PreparedBatchUsage(prefetch)
         self.inputs = (prepared_inputs if prepared_inputs is not None else
                        prepared_batches(app, tagger, stash, paths, cues, prefetch,
@@ -44,6 +39,7 @@ class BatchPredictions:
         else:
             self.worker = Thread(target=self._produce, name='inference-batches')
             self.worker.start()
+        self.channel.worker = self.worker
 
     def measure(self, name, count=0):
         return (self.report.measure(name, model=self.model, work=self.work, units=count,
@@ -56,12 +52,7 @@ class BatchPredictions:
 
     def _send(self, value):
         with self.measure('inference_result_queue_wait'):
-            while not self.stopped.is_set():
-                try:
-                    self.results.put(value, timeout=.05)
-                    return
-                except Full:
-                    pass
+            self.channel.send(value)
 
     def _produce(self):
         try:
@@ -89,7 +80,7 @@ class BatchPredictions:
 
     def __next__(self):
         with self.measure('inference_result_wait'):
-            item = self.results.get()
+            item = self.channel.receive()
         if item is self.finished:
             raise StopIteration
         if isinstance(item, _Failure):
@@ -97,21 +88,13 @@ class BatchPredictions:
         return item
 
     def close(self):
-        self.stopped.set()
-        self.cancellation.cancel()
-        try:
-            if self.external_inputs is not None:
-                self.external_inputs.close()
-        finally:
-            if self.borrowed:
-                self.worker.cancel()
-                if not self.worker.cancelled():
-                    self.worker.result()
-            else:
-                self.worker.join()
-        # Release prefetched scores immediately after cancellation/completion.
-        while not self.results.empty():
-            self.results.get_nowait()
+        callbacks = [self.channel.stop]
+        if self.external_inputs is not None:
+            stop = getattr(self.external_inputs, 'stop', None)
+            if stop is not None:
+                callbacks.append(stop)
+            callbacks.append(self.external_inputs.close)
+        cleanup(callbacks + [self.channel.join, self.channel.drain], report=self.report)
 
 
 def predicted_batches(app, tagger, stash, paths, cues, *, prefetch=0,

@@ -47,7 +47,8 @@ class CleanupRun:
                 self.stats['errors'] += 1
                 self.report.issue('cleanup', '', None, exc, app.services.safe_error(exc, api_key=app.STASH_API_KEY))
             finally:
-                self.stash.close()
+                from stash_ai.runtime.cleanup import cleanup
+                cleanup([self.stash.close], report=self.report)
             self.report.finish('Cleanup' + (' (planned)' if app.DRY_RUN else ''), self.stats, self.store.cache)
         return int(bool(self.stats["errors"]))
 

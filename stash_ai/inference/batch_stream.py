@@ -1,20 +1,30 @@
 """Bounded CPU inputs prepared ahead of the next scene's GPU task."""
 from contextlib import nullcontext
-from queue import Empty, Full, Queue
 
-from stash_ai.runtime.cancellation import Cancellation, use
+from stash_ai.runtime.cancellation import use
 from .preparation import prepared_batches
 from .buffer_usage import queued_batches
+from .managed_stream import ManagedStream
 
 
 class PreparedBatchStream:
     def __init__(self, limit, report, model):
-        self.queue = Queue(maxsize=limit)
+        self.channel = ManagedStream(limit)
+        self.queue = self.channel.queue
         self.report, self.model = report, model
-        self.cancellation = Cancellation()
-        self.stopped = False
-        self.task = None
-        self.end = object()
+        self.cancellation, self.end = self.channel.cancellation, self.channel.end
+
+    @property
+    def stopped(self):
+        return self.channel.stopped.is_set()
+
+    @property
+    def task(self):
+        return self.channel.worker
+
+    @task.setter
+    def task(self, worker):
+        self.channel.worker = worker
 
     def buffer_usage(self):
         return queued_batches(self.queue)
@@ -23,12 +33,7 @@ class PreparedBatchStream:
         timer = (self.report.measure('scene_batch_queue_wait', model=self.model)
                  if self.report else nullcontext())
         with timer:
-            while not self.stopped:
-                try:
-                    self.queue.put(value, timeout=.05)
-                    return
-                except Full:
-                    pass
+            self.channel.send(value)
 
     def produce(self, app, tagger, media, paths, cues, workers, transforms):
         batches = None
@@ -44,9 +49,9 @@ class PreparedBatchStream:
         except BaseException as error:
             self._send(error)
         finally:
-            if batches is not None:
-                batches.close()
-            self._send(self.end)
+            from stash_ai.runtime.cleanup import cleanup
+            cleanup([lambda: batches.close() if batches is not None else None,
+                     lambda: self._send(self.end)], report=self.report)
 
     def __iter__(self):
         return self
@@ -63,29 +68,10 @@ class PreparedBatchStream:
         return value
 
     def _receive(self):
-        while not self.stopped:
-            try:
-                value = self.queue.get(timeout=.05)
-            except Empty:
-                # A task cancelled before it started has no queue sentinel.
-                if self.task is not None and self.task.done():
-                    self.task.result()
-                    return self.end
-                continue
-            return value
-        return self.end
+        return self.channel.receive()
+
+    def stop(self):
+        self.channel.stop()
 
     def close(self):
-        self.stopped = True
-        self.cancellation.cancel()
-        try:
-            if self.task is not None:
-                self.task.cancel()
-                if not self.task.cancelled():
-                    self.task.result()
-        finally:
-            while True:
-                try:
-                    self.queue.get_nowait()
-                except Empty:
-                    break
+        self.channel.close()
