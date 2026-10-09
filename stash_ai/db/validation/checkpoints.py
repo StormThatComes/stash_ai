@@ -8,7 +8,7 @@ from ..common import count_rows
 from .common import tick
 
 
-def check_checkpoints(db, tables, errors, progress=None):
+def check_checkpoints(db, tables, errors, progress=None, warnings=None):
     if "checkpoints" in tables:
         errors["checkpoint_dimensions"] += db.execute("""
             SELECT COUNT(*) FROM checkpoints
@@ -34,6 +34,41 @@ def check_checkpoints(db, tables, errors, progress=None):
                     errors["checkpoint_scores"] += 1
             except (TypeError, zlib.error):
                 errors["checkpoint_scores"] += 1
+
+        from stash_ai.storage.checkpoint_contract import registered_contract, retained_rows, validate_chunks
+        from stash_ai.storage.codec import decode
+        for scope, scene, model, signature, processed, top_rows in db.execute(
+                'SELECT scope,scene,model,signature,processed,top_rows FROM checkpoints'):
+            contract = (registered_contract(db, scope, scene, model, signature)
+                        if 'inference_identities' in tables else None)
+            if contract is not None:
+                try:
+                    if top_rows != retained_rows(contract, processed):
+                        errors['checkpoint_aggregate_incomplete'] += 1
+                except (KeyError, TypeError, ValueError):
+                    errors['checkpoint_aggregate_incomplete'] += 1
+            elif warnings is not None:
+                warnings['checkpoint_aggregation_unverified'] += 1
+            chunks = (list(db.execute('SELECT processed,data FROM checkpoint_frames '
+                      'WHERE scope=? AND scene=? AND model=? ORDER BY processed',
+                      (scope, scene, model))) if 'checkpoint_frames' in tables else [])
+            # Old checkpoints without provenance cannot prove capture policy.
+            # A known policy, analysis or any chunks must form a complete prefix.
+            analysis = ('checkpoint_analysis' in tables and db.execute(
+                'SELECT 1 FROM checkpoint_analysis WHERE scope=? AND scene=? AND model=?',
+                (scope, scene, model)).fetchone())
+            if contract is not None or chunks or analysis:
+                try:
+                    decoded = [(end, decode(blob)) for end, blob in chunks]
+                except (KeyError, TypeError, ValueError, zlib.error):
+                    continue  # Already counted by state_payload_invalid.
+                from stash_ai.db.payloads import valid_frames
+                if not all(valid_frames(chunk, checkpoint=True) for _, chunk in decoded):
+                    continue  # Preserve the existing structural payload error.
+                try:
+                    validate_chunks(decoded, processed)
+                except (KeyError, TypeError, ValueError):
+                    errors['checkpoint_frame_incomplete'] += 1
 
     if "checkpoint_frames" in tables:
         if "checkpoints" in tables:

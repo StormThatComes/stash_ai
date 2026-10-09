@@ -47,6 +47,8 @@ def _restore_prediction_state(app, tagger, cues, *, checkpoint, report):
     retain_scene = 'scene' in output_kinds(app)
     scene_floor = scene_cache_floor(settings, policy)
     retained_marker_floor = marker_cache_floor(settings, policy)
+    if checkpoint:
+        checkpoint.keep = 1 if app.AGGREGATION == 'max' else app.TOP_K_FRAMES
     processed, top_scores, saved = (
         checkpoint.restore()
         if checkpoint
@@ -196,11 +198,8 @@ def _run_prediction_batches(app, tagger, stash, paths, cues, state, *,
                     )
     finally:
         # Save the last fully completed batch on Ctrl+C/inference/preparation errors.
-        try:
-            if checkpoint:
-                checkpoint.flush()
-        finally:
-            batches.close()
+        from stash_ai.runtime.cleanup import cleanup
+        cleanup(([checkpoint.flush] if checkpoint else []) + [batches.close], report=report)
 
     if state.processed != len(cues) or not len(state.top_scores):
         raise RuntimeError("Incomplete inference; scene sync was not started.")

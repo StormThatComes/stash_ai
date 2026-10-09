@@ -26,6 +26,8 @@ class MergedModelRun:
         self.input_prefetch = None
         self.prepare_executor = None
         self._staged = None
+        self._load_failure = None
+        self._cleanup_primary = None
         with report.measure('model_identity', model=self.key):
             self.identity = model_identity(app, config, vocabulary)
         report.record_model(config, identity=self.identity)
@@ -49,18 +51,25 @@ class MergedModelRun:
                     remaining.discard(scene_id)
                     continue
                 try:
+                    if self._load_failure is not None:
+                        # A failed backend does not invalidate completed evidence.
+                        # Continue cheap authoritative reuse without another load/GET.
+                        if (self.args.resume and not self.args.restart and
+                                not self.args.force_fetch_vtt and
+                                self._reuse_cached(scene_id, paths, kinds)):
+                            remaining.discard(scene_id)
+                            continue
+                        progress.block_publication(self.store, [scene_id], self.key, kinds)
+                        self.observer.blocked('model_load_failed')
+                        self.report.model_outcome(self.key, 'blocked')
+                        remaining.discard(scene_id)
+                        continue
                     with self.report.measure('model_scene', model=self.key, units=1, unit='scenes'):
                         if not self._process_scene(scene_id, current, paths, kinds, inputs,
                                                    trust_cached=(input_plan is not None and
                                                        scene_id in input_plan.cached[self.key]),
                                                    input_plan=input_plan):
-                            progress.block_publication(self.store, remaining, self.key, kinds)
-                            for blocked_scene in scenes:
-                                if blocked_scene in remaining and blocked_scene != scene_id:
-                                    self.observer.begin(blocked_scene)
-                                    self.observer.blocked('model_load_failed')
-                                    self.report.model_outcome(self.key, 'blocked')
-                            break
+                            progress.block_publication(self.store, [scene_id], self.key, kinds)
                 except Exception as exc:
                     from stash_ai.storage.input_checks import pending
                     if self.key not in pending(self.store, scene_id):
@@ -74,30 +83,23 @@ class MergedModelRun:
                     raise
                 remaining.discard(scene_id)
         finally:
-            try:
-                try:
-                    try:
-                        self._close_staged(kinds)
-                    finally:
-                        if self.input_prefetch is not None:
-                            self.input_prefetch.close()
-                finally:
-                    if self.prepare_executor is not None:
-                        self.prepare_executor.shutdown(wait=True)
-                        self.prepare_executor = None
-                    if self.inference_executor is None:
-                        self._close_tagger()
-                    else:
-                        # Queue cleanup after any interrupted model initialization.
-                        # Load, inference and close all use the same backend thread.
-                        self.inference_executor.submit(self._close_tagger).result()
-            finally:
-                if self.inference_executor is not None:
-                    self.inference_executor.shutdown(wait=True)
-                    self.inference_executor = None
-                self.input_prefetch = None
-                self._staged = None
-                self._scene_sequence = ()
+            from stash_ai.runtime.cleanup import cleanup
+            def close_backend():
+                if self.inference_executor is None:
+                    self._close_tagger()
+                else:
+                    self.inference_executor.submit(self._close_tagger).result()
+            def reset():
+                self.prepare_executor = self.inference_executor = self.input_prefetch = None
+                self._staged, self._scene_sequence = None, ()
+            cleanup([
+                lambda: self._close_staged(kinds),
+                lambda: self.input_prefetch.close() if self.input_prefetch is not None else None,
+                lambda: self.prepare_executor.shutdown(wait=True) if self.prepare_executor is not None else None,
+                close_backend,
+                lambda: self.inference_executor.shutdown(wait=True) if self.inference_executor is not None else None,
+                reset,
+            ], report=self.report, primary=self._cleanup_primary)
 
     def _prefetch_next_input(self, input_plan):
         if self.input_prefetch is None or self.input_prefetch.pending is not None:
@@ -185,6 +187,7 @@ class MergedModelRun:
                     load()
             self.report.record_model(self.config, tagger=self.tagger)
         except Exception as exc:
+            self._load_failure = exc
             self._record_error('load model', None, exc)
             return False
         return True
@@ -227,7 +230,8 @@ class MergedModelRun:
             self._prefetch_next_input(input_plan)
             self._predict_scene(job, kinds, inputs, input_plan)
         finally:
-            job.close()
+            from stash_ai.runtime.cleanup import cleanup
+            cleanup([job.close], report=self.report)
         return True
 
     def _prepare_scene(self, scene_id, current, paths, kinds, inputs, *, trust_cached=False,
@@ -378,6 +382,8 @@ class MergedModelRun:
         return result
 
     def _record_error(self, stage, scene_id, exc):
+        if self._cleanup_primary is None:
+            self._cleanup_primary = exc
         self.stats["errors"] += 1
         self.report.model_outcome(self.key, 'error')
         self.observer.failed(stage, exc)

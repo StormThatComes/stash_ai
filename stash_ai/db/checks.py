@@ -16,6 +16,9 @@ from .validation import (
 
 
 CHECK_MESSAGES = {
+    'checkpoint_aggregate_incomplete': 'Checkpoint aggregate rows do not match its recorded aggregation policy.',
+    'checkpoint_frame_incomplete': 'Checkpoint chunks do not form its complete processed frame prefix.',
+    'checkpoint_aggregation_unverified': 'Historical checkpoint has no matching aggregation provenance; runtime must verify its policy before resume.',
     'input_verification_invalid': 'Deferred input verification contains an unknown reason.',
     "sqlite_integrity_check": "SQLite integrity_check reported a storage/index-level problem.",
     "missing_base_tables": "Core state tables are missing.",
@@ -130,7 +133,7 @@ def check_database(path, scope, *, show_progress=False):
 
             if progress is not None:
                 progress.set_postfix_str("checkpoints", refresh=True)
-            checkpoint_checks.check_checkpoints(db, tables, errors, progress)
+            checkpoint_checks.check_checkpoints(db, tables, errors, progress, warnings)
             validation_common.tick(progress)
 
             if progress is not None:

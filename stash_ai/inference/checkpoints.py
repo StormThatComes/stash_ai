@@ -25,13 +25,15 @@ def finish(store, scene, model, outputs):
 
 
 class Checkpoint:
-    def __init__(self, store, scene, model, signature, total, labels, every=8):
+    def __init__(self, store, scene, model, signature, total, labels, every=8, *, keep=None):
         self.store, self.scene, self.model = store, str(scene), model
         self.signature, self.total, self.labels, self.every = signature, total, labels, every
         self.pending, self.batches, self.processed, self.top_scores = [], 0, 0, None
         self.saved_processed = 0
         self.resumed_frames = 0
         self.analysis = None
+        self.keep = keep
+        self.aggregation_verified = False
         self.restore_reason, self.previous_signature, self.on_restore = 'missing', None, None
 
     def _notify_restore(self):
@@ -54,14 +56,22 @@ class Checkpoint:
         self.previous_signature, self.restore_reason = row[0], 'compatible'
         if not 0 <= processed <= self.total or not 0 <= rows <= processed:
             raise ValueError("Invalid checkpoint dimensions.")
+        from stash_ai.storage.checkpoint_contract import registered_contract, retained_rows, validate_chunks
+        contract = registered_contract(self.store.connection, self.store.scope, self.scene,
+                                       self.model, self.signature,
+                                       table=self.store.table('inference_identities'))
+        required = (min(self.keep, processed) if self.keep is not None
+                    else retained_rows(contract, processed) if contract is not None else None)
+        if required is not None and rows != required:
+            raise ValueError('Incomplete checkpoint aggregate scores; use --restart.')
+        self.aggregation_verified = required is not None
         top = np.frombuffer(zlib.decompress(blob), dtype="<f4").reshape(rows, self.labels).copy()
         if not np.isfinite(top).all() or ((top < 0) | (top > 1)).any():
             raise ValueError("Invalid checkpoint scores.")
-        frames = []
-        for data, in self.store.connection.execute(
-                "SELECT data FROM " + self.store.table('checkpoint_frames') + " WHERE scope=? AND scene=? AND model=? ORDER BY processed",
-                (self.store.scope, self.scene, self.model)):
-            frames.extend(decode(data))
+        chunks = [(end, decode(data)) for end, data in self.store.connection.execute(
+                "SELECT processed,data FROM " + self.store.table('checkpoint_frames') + " WHERE scope=? AND scene=? AND model=? ORDER BY processed",
+                (self.store.scope, self.scene, self.model))]
+        frames = validate_chunks(chunks, processed)
         self.processed = self.saved_processed = processed
         self.resumed_frames = processed
         self.top_scores = top
