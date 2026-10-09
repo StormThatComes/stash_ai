@@ -140,7 +140,7 @@ def run(app, args):
                 workers = min(workers, len(scenes)) if scenes else 1
                 if workers == 1:
                     if not args.scene_id:
-                        store.preload_sources()
+                        store.preload_sources(scenes)
                     report = build_report(
                         app, store, scenes, core_policies, scene_policies)
 

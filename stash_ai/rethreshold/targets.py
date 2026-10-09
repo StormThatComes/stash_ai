@@ -19,6 +19,11 @@ def threshold_targets(store, scenes, settings, kinds):
 
 def threshold_failure_reason(exc):
     """Collapse scene-specific preflight errors into stable operator-facing reasons."""
+    from stash_ai.runtime.reasons import LABELS
+    code = getattr(exc, 'reason_code', None)
+    if code in LABELS:
+        return LABELS[code]
+    # Adapter for historical exceptions from external callers.
     message = str(exc).strip()
     if ': ' in message:
         prefix, remainder = message.split(': ', 1)

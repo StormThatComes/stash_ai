@@ -27,15 +27,14 @@ def _marker_contributions(app, records, core_policies, index, metrics):
     report = index.report
     with stage(report, 'marker_seeds'):
         seeds = consensus_seeds(records, effective_cores, app.TEMPORAL_POLICY,
-                                app.MARKER_MAX_TAGS_PER_FRAME)
+                                app.MARKER_MAX_TAGS_PER_FRAME, memo=index.memo)
     signatures = index.signatures
     spans = []
     with stage(report, 'marker_build'):
         for model, segment in records.items():
             if segment["mode"] == "frames":
                 frames = [FramePrediction(Cue(frame["start"], frame["end"], "", (0, 0, 1, 1)),
-                           tuple((raw_label(tag), score) for tag, score in frame["tags"]
-                                 if tag not in tag_policies[model]))
+                           frame["tags"])
                           for frame in segment["items"]]
                 from stash_ai.evidence.thresholds import marker_threshold
                 kwargs = dict(threshold=marker_threshold(segment), seeds=seeds,
@@ -44,7 +43,8 @@ def _marker_contributions(app, records, core_policies, index, metrics):
                 markers, _ = temporal_markers(app, frames, effective_cores[model], **kwargs,
                               collect_extras=not defer_extras,
                               extra_group=index.by_signature[signatures[id(segment)]],
-                              extra_cache=index.cache)
+                              extra_cache=index.cache, tag_exclusions=tag_policies[model],
+                              validate=True, memo=index.memo, source=model)
                 options = {**build_options(app, records), "core_exclusions": {k: sorted(v) for k, v in core_policies.items()},
                            "tag_exclusions": {k: sorted(v) for k, v in tag_policies.items()}}
                 values = [dict(tag=marker.tag, start=marker.start, end=marker.end, score=marker.score,

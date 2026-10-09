@@ -57,7 +57,7 @@ def test_pending_publication_preserves_mode_specific_noop_rules(tmp_path, scenes
             phase = 'scene thresholds' if scenes else 'marker thresholds'
             message = ('Finish the pending merge or use --abandon-pending before changing thresholds.'
                        if scenes else 'Finish the pending merge or use --abandon-pending first.')
-            assert report.groups[phase, 'wd', 'RuntimeError']['examples'] == ['scene 1: ' + message]
+            assert report.groups[phase, 'wd', 'PendingPublication']['examples'] == ['scene 1: ' + message]
         assert not threshold_rows(store)
         assert blobs(store) == before
 

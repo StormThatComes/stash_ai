@@ -1,7 +1,6 @@
 """Non-fatal run telemetry; dry runs and inspections preserve read-only behavior."""
 from collections import Counter
 from datetime import datetime, timezone
-import hashlib
 from pathlib import Path
 import platform
 import time
@@ -40,13 +39,7 @@ def configuration(app, args):
     options['runtime'] = {name: getattr(app, name) for name in (
         'AGGREGATION', 'TOP_K_FRAMES', 'MAX_FRAMES_PER_SCENE', 'MARKER_MAX_TAGS_PER_FRAME',
         'MARKER_MIN_HITS', 'MARKER_MERGE_GAP_SECONDS', 'MARKER_MATCH_TOLERANCE_SECONDS')}
-    files = {}
-    for name in ('model_config', 'temporal_policy', 'hierarchy', 'marker_core_exclusions', 'scene_tag_exclusions'):
-        try:
-            with Path(getattr(args, name)).expanduser().open('rb') as stream:
-                files[name] = hashlib.file_digest(stream, 'sha256').hexdigest()
-        except OSError:
-            files[name] = None
+    files = dict(args.configuration_snapshot.hashes)
     options['files'] = files
     options['environment'] = dict(python=platform.python_version(), system=platform.system(),
                                    machine=platform.machine(), processor=platform.processor())
