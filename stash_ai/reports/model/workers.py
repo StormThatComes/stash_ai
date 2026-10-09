@@ -11,6 +11,7 @@ from stash_ai.reports.model import report as model
 from .analysis import scene_report, merge_scene_report
 from stash_ai.storage.store import StateStore
 from stash_ai.runtime.workers import open_read_worker
+from stash_ai.runtime.process_pool import read_process_pool
 from stash_ai.runtime.settings import evidence_settings
 
 _WORKER_CONTEXT = None
@@ -82,7 +83,7 @@ def build_report_parallel(app, state_db, scope, scene_ids, core_policies,
     worker_budget = max(1, memory_budget_bytes // workers)
     chunksize = max(1, min(64, len(scene_ids) // (workers * 8) or 1))
 
-    with ProcessPoolExecutor(
+    with read_process_pool(ProcessPoolExecutor,
         max_workers=workers,
         mp_context=get_context("spawn"),
         initializer=_init_report_worker,

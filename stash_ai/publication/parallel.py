@@ -12,6 +12,7 @@ from multiprocessing import get_context
 from pathlib import Path
 
 from stash_ai.runtime.workers import open_read_worker
+from stash_ai.runtime.process_pool import read_process_pool
 from stash_ai.runtime.settings import evidence_settings as runtime_settings
 
 
@@ -79,7 +80,7 @@ def iter_parallel_evidence(app, state_db, scope, scene_ids, core_policies,
     worker_cache = max(0, int(cache_bytes) // divisor)
     worker_budget = max(1, int(memory_budget_bytes) // divisor)
 
-    with ProcessPoolExecutor(
+    with read_process_pool(ProcessPoolExecutor,
         max_workers=workers,
         mp_context=get_context("spawn"),
         initializer=_init_worker,
