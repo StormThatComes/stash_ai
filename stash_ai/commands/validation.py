@@ -106,7 +106,7 @@ def validate_pipeline(app, parser, args):
     if args.force_fetch_vtt and args.command is not Command.INFERENCE:
         parser.error('--force-fetch-vtt applies to normal model inference/resume runs.')
     args.resume = app.DEFAULT_RESUME if args.resume is None else args.resume
-    if args.checkpoint_batches < 1:
+    if args.checkpoint_batches is not None and args.checkpoint_batches < 1:
         parser.error("--checkpoint-batches must be >= 1.")
     if not 1 <= args.cleanup_page_size <= 10000 or not 1 <= args.cleanup_write_batch_size <= 1000:
         parser.error("--cleanup-page-size must be 1..10000 and --cleanup-write-batch-size must be 1..1000.")

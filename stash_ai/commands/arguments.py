@@ -48,8 +48,9 @@ def build_parser(app) -> argparse.ArgumentParser:
     resume.add_argument("--restart", action="store_true", help="Request fresh inference for selected scenes/models; resume later without this flag.")
     parser.add_argument('--force-fetch-vtt', action='store_true',
                         help='Fetch and verify VTT/sprites also for completed cached scenes; normal reruns trust saved inputs. Does not force inference.')
-    parser.add_argument("--checkpoint-batches", type=int, default=app.CHECKPOINT_BATCHES,
-                        help="Persist partial inference every N batches; also saves on Ctrl+C/errors. Default: 8.")
+    parser.add_argument("--checkpoint-batches", type=int, default=None, metavar="N",
+                        help="Persist partial inference every N batches; also saves on Ctrl+C/errors. "
+                             "Integer >= 1, overrides YAML checkpoint_batches (default: 8).")
     parser.add_argument("--prefetch-batches", type=int, choices=range(129), default=None, metavar="N",
                         help="Prepare N next inputs in RAM and overlap inference with result processing; "
                              "0..128, overrides YAML prefetch_batches (default: 4); 0 disables lookahead.")
@@ -153,12 +154,13 @@ def build_parser(app) -> argparse.ArgumentParser:
 def parse_args(app, argv: list[str] | None = None) -> argparse.Namespace:
     parser = build_parser(app)
     args = validate_args(app, parser, parser.parse_args(argv))
-    defaults = dict(prefetch_batches=app.PREFETCH_BATCHES,
+    defaults = dict(checkpoint_batches=app.CHECKPOINT_BATCHES,
+                    prefetch_batches=app.PREFETCH_BATCHES,
                     result_prefetch_batches=app.RESULT_PREFETCH_BATCHES,
                     prepare_workers=app.PREPARE_WORKERS, merge_workers=4,
                     model_report_workers=min(4, os.cpu_count() or 1))
     used = {
-        Command.INFERENCE: ('prefetch_batches', 'result_prefetch_batches', 'prepare_workers', 'merge_workers'),
+        Command.INFERENCE: ('checkpoint_batches', 'prefetch_batches', 'result_prefetch_batches', 'prepare_workers', 'merge_workers'),
         Command.MERGE: ('merge_workers',),
         Command.MODEL_REPORT: ('model_report_workers',),
     }.get(args.command, ())

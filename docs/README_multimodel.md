@@ -68,7 +68,14 @@ Nie używaj `--restart` do:
 Do tych zadań istnieją tryby bez inferencji.
 
 Checkpointy są zapisywane domyślnie co 8 batchy oraz przy kontrolowanym
-przerwaniu/błędzie. `--checkpoint-batches` zmienia częstotliwość.
+przerwaniu/błędzie i na końcu sceny. Globalne `checkpoint_batches` w
+`tagger_models.yml` zmienia częstotliwość; `--checkpoint-batches N` ma
+pierwszeństwo przed YAML. Wartość musi być liczbą całkowitą >= 1; brak klucza
+zachowuje default 8. Zmiana interwału nie unieważnia wyników ani checkpointów.
+
+```yaml
+checkpoint_batches: 32
+```
 
 ### Odbudowa nowej bazy: `--db-init`
 
@@ -444,6 +451,7 @@ Domyślne wartości:
 | `--ram-budget-gb` | 32 |
 | `--ram-cache-gb` | 24 |
 | `--prepare-workers` | 4 |
+| `--checkpoint-batches` | 8 |
 | `--prefetch-batches` | 4 |
 | `--result-prefetch-batches` | 32 |
 
