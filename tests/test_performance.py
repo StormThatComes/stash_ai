@@ -336,7 +336,8 @@ def test_preview_resumes_checkpoint_and_does_not_resurrect_deleted_source(pipeli
         checkpoint = checkpoints.Checkpoint(preview, '1', 'wd', 'new', 10, 2)
         assert checkpoint.restore()[0] == 0
         assert not preview.connection.execute('SELECT 1 FROM ' + preview.table('checkpoint_frames')).fetchall()
-        checkpoint.record(2, np.zeros((2, 2), np.float32), [])
+        checkpoint.record(2, np.zeros((2, 2), np.float32), [], scene_frames=[
+            dict(start=index, end=index + 1, tags=[]) for index in range(2)])
         checkpoint.flush()
         assert checkpoints.Checkpoint(preview, '1', 'wd', 'new', 10, 2).restore()[0] == 2
         checkpoints.finish(preview, '1', 'wd', {k: inference_record(**dict(mode='scene' if k == 'scene' else 'frames',
