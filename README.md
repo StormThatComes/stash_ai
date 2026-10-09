@@ -768,6 +768,11 @@ Aktualne domyślne ustawienia pamięci i równoległości:
   maksymalnie 75% budżetu;
 - `--prepare-workers 4`;
 - `--merge-workers 4` — równoległy CPU replay evidence; zapisy Stash/SQLite pozostają sekwencyjne;
+- Globalne `checkpoint_batches: 8` w `tagger_models.yml` lub
+  `--checkpoint-batches N` wybiera zapis postępu co N przetworzonych batchy.
+  Wartość musi być liczbą całkowitą >= 1; CLI ma pierwszeństwo, a brak pola
+  zachowuje default 8. Końcowy checkpoint oraz zapis przy obsługiwanym
+  przerwaniu/błędzie pozostają niezależne od tego interwału.
 - Globalne `prefetch_batches: 4` w `tagger_models.yml` (0–128; 0 wyłącza).
   Jawne `--prefetch-batches N` nadpisuje YAML; brak pola zachowuje default 4.
   Parametr steruje przygotowaniem kolejnych batchy, niezależnie od rozmiaru
@@ -1034,6 +1039,7 @@ rollback ani zmianę publikacji; pełne archiwum konkretnych dowodów pozostaje.
 Globalne ustawienia wybierają liczbę workerów osobno dla każdego etapu:
 
 ```yaml
+checkpoint_batches: 8
 prefetch_batches: 4
 result_prefetch_batches: 32
 prepare_workers: 4

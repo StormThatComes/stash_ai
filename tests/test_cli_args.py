@@ -10,6 +10,7 @@ def test_parse_args_uses_live_cli_defaults_and_caps_cache(monkeypatch, tmp_path)
     monkeypatch.setattr(app, "RAM_BUDGET_GB", 8.0)
     monkeypatch.setattr(app, "DEFAULT_RESUME", False)
     monkeypatch.setattr(app, "PREPARE_WORKERS", 3)
+    monkeypatch.setattr(app, "CHECKPOINT_BATCHES", 13)
     configuration = tmp_path / 'models.yml'
     configuration.write_text('version: 1\n')
     monkeypatch.setattr(app, 'MODELS_CONFIG_FILE', configuration)
@@ -22,6 +23,7 @@ def test_parse_args_uses_live_cli_defaults_and_caps_cache(monkeypatch, tmp_path)
     assert args.model_config == app.MODELS_CONFIG_FILE
     assert args.merge_workers == 4
     assert args.prepare_workers == 3
+    assert args.checkpoint_batches == 13
     assert args.profile_merge is None
     assert args.force_merge is args.rethreshold_markers is args.rethreshold_scenes is False
     assert args.abandon_pending is args.prune_empty_tags is False

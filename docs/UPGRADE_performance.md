@@ -10,12 +10,21 @@ lokalny cache merge.
 | `--ram-budget-gb` | 32 | cel pamięci całego procesu |
 | `--ram-cache-gb` | 24 | wspólny cache wyników, indeksów i mediów |
 | `--prepare-workers` | 4 | równoległe transformacje klatek na CPU |
+| `--checkpoint-batches` | 8 | zapis postępu co N przetworzonych batchy, liczba całkowita >= 1 |
 | `--prefetch-batches` | 4 | liczba przygotowanych batchy przed inferencją |
 | `--result-prefetch-batches` | 32 | liczba wyników CPU buforowanych podczas obróbki i zapisu, 1–128 |
 
 Cache jest przydzielany na żądanie i dodatkowo ograniczony do 75% budżetu RAM.
 Budżet nie jest twardym limitem procesu — poza cache pozostają modele, tensory,
 aktywna scena, Python i SQLite.
+
+Globalne `checkpoint_batches` w `tagger_models.yml` ustawia interwał zapisu
+postępu inferencji; `--checkpoint-batches N` ma pierwszeństwo przed YAML.
+Brak pola zachowuje default 8. Większy interwał ogranicza częstotliwość zapisów,
+ale po twardym zakończeniu procesu może wymagać powtórzenia większej liczby
+batchy. Końcowy checkpoint i zapis przy obsługiwanym przerwaniu/błędzie
+pozostają niezależne od tego interwału. Zmiana nie unieważnia istniejących
+wyników ani checkpointów.
 
 ## Jeden model na GPU
 
