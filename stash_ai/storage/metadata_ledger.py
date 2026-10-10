@@ -19,6 +19,24 @@ def _mark(row):
             f'AND NOT EXISTS (SELECT 1 FROM {TABLE} WHERE {_key(row)});')
 
 
+
+def _valid_metadata_sql(row):
+    """SQLite-side shape test: a JSON object alone is not valid metadata."""
+    data = f'{row}.data'
+    from stash_ai.storage.metadata import META_KEYS
+    allowed = ','.join("'" + key + "'" for key in sorted(META_KEYS))
+    return (f"(CASE WHEN json_valid({data}) THEN "
+            f"json_type({data})='object' "
+            f"AND json_type({data},'$.mode')='text' "
+            f"AND json_extract({data},'$.mode') IN ('scene','frames') "
+            f"AND json_type({data},'$.meta')='object' "
+            f"AND json_type({data},'$.has_frames') IN ('true','false') "
+            f"AND json_type({data},'$.populated') IN ('true','false') "
+            f"AND (SELECT COUNT(*) FROM json_each({data}))=4 "
+            f"AND NOT EXISTS (SELECT 1 FROM json_each({data},'$.meta') "
+            f"WHERE key NOT IN ({allowed})) ELSE 0 END)")
+
+
 def definitions():
     result = {}
     for event in ('INSERT', 'UPDATE', 'DELETE'):
@@ -35,7 +53,7 @@ def definitions():
         if event != 'DELETE':
             body += _mark('NEW')
             body += (f'DELETE FROM {TABLE} WHERE {_key("NEW")} '
-                     f'AND NEW.format={FORMAT} AND json_valid(NEW.data);')
+                     f'AND NEW.format={FORMAT} AND {_valid_metadata_sql("NEW")};')
         name = f'metadata_ledger_metadata_{event.lower()}'
         result[name] = f'CREATE TRIGGER {name} AFTER {event} ON result_metadata BEGIN {body} END'
     return result
@@ -66,7 +84,7 @@ def initialize(db):
     db.execute(DDL)
     db.execute('''INSERT INTO metadata_dirty SELECT r.scope,r.scene,r.model,r.kind
         FROM results AS r LEFT JOIN result_metadata AS m USING(scope,scene,model,kind)
-        WHERE m.format IS NULL OR m.format!=? OR NOT json_valid(m.data)''', (FORMAT,))
+        WHERE m.format IS NULL OR m.format!=? OR NOT {_valid_metadata_sql('m')}''', (FORMAT,))
     for sql in definitions().values():
         db.execute(sql)
     db.execute('CREATE TABLE IF NOT EXISTS data_revisions (name TEXT PRIMARY KEY, revision INTEGER NOT NULL)')
