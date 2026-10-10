@@ -4,7 +4,7 @@ from __future__ import annotations
 import argparse
 import math
 from .modes import (Command, select_command, DATABASE_COMMANDS, HIERARCHY_COMMANDS, CLEANUP_COMMANDS,
-                    MODEL_OPTIONS, PUBLICATION_OPTIONS, supplied, CACHE_RULE, REVIEW_RULE, MODEL_RULE)
+                    MODEL_OPTIONS, PUBLICATION_OPTIONS, supplied, CACHE_RULE, REVIEW_RULE, MODEL_RULE, MODEL_ASSETS_RULE)
 
 
 def database_mode(args) -> bool:
@@ -88,6 +88,7 @@ def validate_reports(parser, args):
     if args.tag_review_examples is not None and not 1 <= args.tag_review_examples <= 20:
         parser.error("--tag-review-examples must be in 1..20.")
     _validate_report(parser, args, MODEL_RULE)
+    _validate_report(parser, args, MODEL_ASSETS_RULE)
 
 
 def validate_maintenance(parser, args):
@@ -178,7 +179,8 @@ def validate_pipeline(app, parser, args):
 def validate_command_capabilities(parser, args):
     """Reject user-supplied execution settings that a selected command ignores."""
     model_users = {Command.INFERENCE, Command.MERGE, Command.DOWNLOAD,
-                   Command.CACHE_REPORT, Command.REUSE_REPORT}
+                   Command.CACHE_REPORT, Command.REUSE_REPORT,
+                   Command.MODEL_ASSETS_REPORT}
     if args.models and args.command not in model_users:
         parser.error('--models is not used by this command.')
     workers = {
