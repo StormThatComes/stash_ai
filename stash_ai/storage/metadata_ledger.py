@@ -13,7 +13,10 @@ def _key(row):
 
 def _mark(row):
     values = ','.join(f'{row}.{key}' for key in KEYS)
-    return f'INSERT OR IGNORE INTO {TABLE} SELECT {values} WHERE EXISTS (SELECT 1 FROM results WHERE {_key(row)});'
+    # An outer UPSERT can override a trigger's OR IGNORE policy. Avoid the
+    # conflicting insert explicitly; SQLite's writer transaction serializes it.
+    return (f'INSERT INTO {TABLE} SELECT {values} WHERE EXISTS (SELECT 1 FROM results WHERE {_key(row)}) '
+            f'AND NOT EXISTS (SELECT 1 FROM {TABLE} WHERE {_key(row)});')
 
 
 def definitions():
