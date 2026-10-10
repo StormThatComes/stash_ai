@@ -19,8 +19,32 @@ class OnnxTagger:
         self.settings, self.vocabulary = settings, vocabulary
         self.labels = vocabulary.labels
         ensure_files(settings, ("model.onnx",))
-        self.session, self.device = _open_session(ort, settings)
+        from stash_ai.backends.profiling import active
+        from tempfile import TemporaryDirectory
+        self.report = active()
+        self.profile_directory = TemporaryDirectory(prefix='stash-ort-profile-') if self.report is not None else None
+        try:
+            if self.profile_directory is None:
+                self.session, self.device = _open_session(ort, settings)
+            else:
+                from pathlib import Path
+                try:
+                    self.session, self.device = _open_session(ort, settings,
+                        profile_prefix=str(Path(self.profile_directory.name)/'trace'))
+                except Exception as error:
+                    def failed():
+                        raise error
+                    self.report.optional('backend_onnx_profile_setup', failed)
+                    self.profile_directory.cleanup()
+                    self.profile_directory = None
+                    self.session, self.device = _open_session(ort, settings)
+        except BaseException:
+            if self.profile_directory is not None:
+                from stash_ai.runtime.cleanup import cleanup
+                cleanup([self.profile_directory.cleanup], report=self.report)
+            raise
         model_io = _inspect_model(self.session, settings, vocabulary)
+        self.node_profile_enabled = self.profile_directory is not None
         self.input_name = model_io.input_name
         self.output_name = model_io.output_name
         self.mask_name = model_io.mask_name
@@ -84,10 +108,12 @@ class OnnxTagger:
     def _predict_collated_scores(self, feed: dict[str, Any], count: int) -> Any:
         import numpy as np
 
-        raw = np.asarray(
-            self.session.run([self.output_name], feed)[0],
-            dtype=np.float32,
-        )
+        from stash_ai.runtime.timing import stage
+        report = getattr(self, 'report', None)
+        with stage(report, 'ort_session_run'):
+            output = self.session.run([self.output_name], feed)[0]
+        with stage(report, 'ort_output_copy'):
+            raw = np.asarray(output, dtype=np.float32)
         if (
             raw.shape != (len(feed[self.input_name]), self.output_count)
             or not np.isfinite(raw).all()
@@ -103,5 +129,12 @@ class OnnxTagger:
         return raw[:count]
 
     def close(self) -> None:
-        self.session = None
-        gc.collect()
+        from stash_ai.backends.profiling import record_onnx
+        from stash_ai.runtime.cleanup import cleanup
+        report, session = getattr(self, 'report', None), self.session
+        directory = getattr(self, 'profile_directory', None)
+        def release():
+            self.session = None
+            gc.collect()
+        cleanup([lambda: record_onnx(report, session, self.settings.source.key) if session is not None and directory is not None else None, release,
+                 *([directory.cleanup] if directory is not None else [])], report=report)
