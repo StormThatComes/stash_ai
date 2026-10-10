@@ -1,89 +1,94 @@
 # Stash AI
 
-Automatyczne tagowanie scen i tworzenie markerów czasowych dla [Stash](https://github.com/stashapp/stash).
+Automatic scene tagging and time-based marker generation for [Stash](https://github.com/stashapp/stash).
 
-Stash AI używa czterech modeli: JoyTag (`jt`), WD EVA02-Large v3 (`wd`),
-DanbooruTagQuery L/16 (`dtq`) i OppaiOracle V1.1 (`op`). Modele są
-uruchamiane kolejno — w GPU znajduje się jeden model naraz.
+Stash AI supports four models: JoyTag (`jt`), WD EVA02-Large v3 (`wd`),
+DanbooruTagQuery L/16 (`dtq`), and OppaiOracle V1.1 (`op`). Models run
+sequentially, with only one model loaded on the GPU at a time.
 
-Domyślny tryb `merged` publikuje wspólne tagi `ai:`, łączy zgodne wyniki modeli
-i zachowuje osobne źródła oraz pewności w lokalnej bazie SQLite. Wejście wizualne
-pochodzi wyłącznie z VTT i sprite'ów Stash; aplikacja nie otwiera plików wideo.
+The default `merged` mode publishes shared `ai:` tags, combines compatible
+model predictions, and retains per-model provenance and confidence in a local
+SQLite database. Visual input comes exclusively from Stash VTT files and
+sprites; the application never opens video files.
 
-## Wymagania
+## Requirements
 
-- Python **3.14.7** — to jedyna wspierana i testowana wersja;
-- Stash **0.31.1 lub nowszy** z wygenerowanymi sprite'ami/VTT;
-- zależności z `requirements.txt`;
-- CUDA jest zalecana; CPU działa, ale jest znacznie wolniejsze.
+- **Python 3.14.7** — the only supported and tested version;
+- **Stash 0.31.1 or newer**, with generated sprites/VTT;
+- Dependencies from `requirements.txt`;
+- CUDA is recommended. CPU inference works but is substantially slower.
 
-Wersja Stash jest sprawdzana przed odczytem scen i zmianami na serwerze, także
-w `--dry-run`. Komendy lokalne, np. `--db-update`, `--db-check` i `--db-report`,
-nie wymagają połączenia ze Stash. Znane przedziały zawsze publikują koniec;
-occurrence i importowane markery z nieznanym końcem mają `end_seconds: null`.
+The Stash version is checked before reading scenes or changing server data,
+including during `--dry-run`. Local commands such as `--db-update`,
+`--db-check`, and `--db-report` do not require a Stash connection.
+Known intervals always publish an end time; occurrences and imported markers
+whose end is unknown have `end_seconds: null`.
 
-Dla CPU zamień `onnxruntime-gpu` na zgodny `onnxruntime>=1.21,<2`.
+For CPU-only environments, replace `onnxruntime-gpu` with a compatible
+`onnxruntime>=1.21,<2` version.
 
-## Szybki start
+## Quick start
 
 ```powershell
 pip install -r requirements.txt
 # Pinned Python 3.14.7 environments: see constraints/README.md
 
 $env:STASH_URL = "http://localhost:9999"
-$env:STASH_API_KEY = "<własny klucz ze Stash>"
+$env:STASH_API_KEY = "<your Stash API key>"
 
 python .\stash_ai.py --download-models --models all
 python .\stash_ai.py --models all --scene-id 123 --dry-run --verbose
 python .\stash_ai.py --models all --scene-id 123
 ```
 
-Ustaw `STASH_API_KEY` jawnie w środowisku, jeśli Stash wymaga klucza.
-Bez tej zmiennej klient nie wysyła nagłówka `ApiKey`. Historyczny klucz
-został usunięty z bieżącego kodu; informacje o rotacji są w [SECURITY.md](SECURITY.md).
+Set `STASH_API_KEY` explicitly in your environment if your Stash instance
+requires authentication. Without this variable, the client does not send an
+`ApiKey` header. A historical embedded key has been removed; see
+[SECURITY.md](SECURITY.md) for key-rotation guidance.
 
-W `tagger_models.yml` każdy wybrany model musi mieć jawne `scene_threshold`,
-`marker_threshold` i `batch_size`. Wybór modeli pochodzi z `--models` lub
-wymaganego wtedy `enabled_models`; brakujące wartości nie korzystają ze starych
-domyślnych ustawień JoyTag. Pola `scene_cache_floor` i `marker_cache_floor`
-pozostają opcjonalne. Dopasowany cache jest używany przez resume; sama obecność
-tagów lub markerów nie pomija nowej inferencji.
+In `tagger_models.yml`, every selected model must explicitly define
+`scene_threshold`, `marker_threshold`, and `batch_size`. Models are selected
+using `--models` or the then-required `enabled_models` setting; missing
+values do not fall back to legacy JoyTag defaults. Optional
+`scene_cache_floor` and `marker_cache_floor` control evidence retention.
+Resume reuses matching cached results, but the mere presence of published
+tags or markers does not bypass inference.
 
-## Najczęstsze tryby
+## Common operations
 
 ```powershell
-# Zwykła inferencja; poprawny cache i checkpointy są używane automatycznie.
+# Normal inference; matching cache entries and checkpoints are reused automatically.
 python .\stash_ai.py --models all
 
-# Świeża inferencja tylko dla wybranego zakresu.
+# Force fresh inference for a selected scope.
 python .\stash_ai.py --models wd --scene-id 123 --restart
 
-# Ponowne scalenie zapisanych wyników bez uruchamiania modeli.
+# Re-merge stored results without running any models.
 python .\stash_ai.py --merge-only
 python .\stash_ai.py --merge-only --scene-id 123 --dry-run
 
-# Równoległe read-only przygotowanie evidence; publikacja do Stash pozostaje sekwencyjna.
+# Parallel read-only evidence preparation; Stash publication remains sequential.
 python .\stash_ai.py --merge-only --merge-workers 4
-# --dry-run i --profile-merge celowo używają ścieżki sekwencyjnej.
+# --dry-run and --profile-merge intentionally use the sequential path.
 
-# Zmiana progów z zachowanego cache, bez modeli.
+# Apply new thresholds to retained cache without running models.
 python .\stash_ai.py --models all --merge-only --rethreshold-markers
 python .\stash_ai.py --models all --merge-only --rethreshold-scenes --rethreshold-markers
 
-# Cleanup wykluczeń.
+# Clean up excluded results.
 python .\stash_ai.py --models all --cleanup-only --dry-run
 python .\stash_ai.py --models all --cleanup-only
 
-# Naprawa grup istniejących markerów.
+# Repair groups of existing markers.
 python .\stash_ai.py --sync-marker-groups-only --scene-id 123 --dry-run
 
-# Lokalny podgląd źródeł tagu.
+# Inspect the locally recorded evidence for a tag.
 python .\stash_ai.py --explain-tag ai:blue_hair --scene-id 123
 
-# Usuwanie nieużywanych definicji tagów.
+# Remove unused tag definitions.
 python .\stash_ai.py --prune-empty-tags-only --dry-run
 
-# Zdrowie, aktualizacja schematu, spójność i kompaktowanie lokalnej bazy stanu.
+# Inspect, migrate, validate, and compact the local state database.
 python .\stash_ai.py --db-report
 python .\stash_ai.py --db-check
 python .\stash_ai.py --db-update --dry-run
@@ -91,105 +96,115 @@ python .\stash_ai.py --db-update
 python .\stash_ai.py --db-compact --dry-run
 python .\stash_ai.py --db-compact
 
-# Lokalny, anonimowy raport diagnostyczny do ręcznego przekazania developerowi.
+# Create a local anonymous diagnostic report for optional manual sharing.
 python .\stash_ai.py --anonymous-diagnostics .\stash-ai-diagnostics.json
 
-# Użyteczność modeli i leave-one-model-out ablation bez inferencji.
-# Domyślnie używa do 4 procesów CPU; --model-report-workers 1 wymusza tryb sekwencyjny.
+# Model utility and leave-one-model-out ablation without inference.
+# Up to four CPU processes by default; --model-report-workers 1 forces sequential execution.
 python .\stash_ai.py --model-report .\model-utility.json
 python .\stash_ai.py --model-report .\model-utility.json --model-report-workers 8
 python .\stash_ai.py --model-report .\model-utility-scene-123.json --scene-id 123
 
-# Tagi wymagające ręcznego przeglądu: powody, przykłady i liczniki per model.
+# Tags worth reviewing: reasons, examples, and per-model counts.
 python .\stash_ai.py --tag-review-report .\tag-review.json
 python .\stash_ai.py --tag-review-report .\tag-review-scene-123.json --scene-id 123
 
-# Kompletność cache względem YAML oraz plan uzupełnienia brakujących par scena–model.
+# Cache completeness against YAML and a plan to backfill missing scene/model pairs.
 python .\stash_ai.py --cache-report .\cache-coverage.json
 python .\stash_ai.py --cache-report .\cache-coverage-all.json --models all
 python .\stash_ai.py --cache-report .\cache-coverage-scene-123.json --models wd --scene-id 123
 
-# Porzucenie niedokończonego planu merge/cleanup.
+# Abandon an unfinished merge/cleanup plan.
 python .\stash_ai.py --abandon-pending
 ```
 
-Zmiana progów zapisuje małe wiersze w tabeli `result_thresholds`; skompresowane
-wyniki inferencji i evidence klatek pozostają bez zmian. Dotyczy to także
-automatycznego użycia cache po zmianie progów w YAML. Odczyt wyników, merge,
-cleanup i explain używają efektywnych progów z tej tabeli. Każda para model–wyjście ma jeden aktywny wynik i opcjonalny liczbowy próg w `result_thresholds.threshold`.
-Bazy sprzed v18 wymagają najpierw mostka aktualizacji opisanego poniżej;
-obsługiwane schematy przechowują już pojedynczy rekord i liczbowy próg.
-`--dry-run` zapisuje progi wyłącznie w tymczasowej bazie.
+Threshold changes write small rows to the `result_thresholds` table;
+compressed inference results and frame-level evidence remain unchanged.
+This also applies when changed YAML thresholds trigger automatic cache reuse.
+Reading results, merging, cleanup, and tag explanation use the effective
+thresholds from that table. Each model/output pair has one active result and
+an optional numeric `result_thresholds.threshold`. Databases predating v18
+must first use the upgrade bridge described below. Supported schemas use
+the single-record/numeric-threshold representation.
+`--dry-run` stores thresholds only in a temporary database.
 
-Snapshoty merge zapisują współdzielone dowody `extra_support` raz, a contributions
-odwołują się do nich przez referencje. Zmniejsza to koszt serializacji i kompresji.
-Aktualny schemat to v27, z obsługą aktualizacji od v18. Każdy nowy snapshot ma
-otoczkę formatu v7. `--db-update` konwertuje snapshoty v4/v5/v6/v7, także pending i recovery,
-w jednym przebiegu. Zachowuje geometrię i własność publikacji, normalizuje zamrożone opcje
-odtwarzania oraz usuwa `extra_ids` i zbędne `algorithm: temporal`. Pełne payloady
-archiwalnych inferencji sprzed formatu 5 są usuwane; ich publikacje otrzymują
-`requires_rebase` i wymagają świeżej inferencji oraz `--merge-only`. Archiwum dowodów
-formatu 5 pozostaje dostępne do dokładnego odtwarzania opublikowanych wyników.
-Wersjonowanie analizy checkpointu dotyczy wyłącznie niedokończonej inferencji:
-stare checkpointy są pomijane przy wznowieniu i dany model zaczyna scenę od początku.
-Ukończone wyniki formatu 5 zachowują dowody i sygnatury; starsze aktywne wyniki wymagają ponownej inferencji. `--dry-run` zmienia wyłącznie tymczasową bazę.
+Merge snapshots store shared `extra_support` evidence once and reference it
+from contributions, reducing serialization and compression costs.
+The current database schema is **v27**, with upgrades supported from **v18**.
+New snapshots use format envelope **v7**. `--db-update` converts snapshot
+formats v4/v5/v6/v7, including pending and recovery data, in one pass,
+preserving interval geometry and publication ownership, normalizing frozen
+replay settings, and removing `extra_ids` and redundant
+`algorithm: temporal` fields. Full pre-format-5 inference payloads are
+retired; dependent publications receive `requires_rebase` and need fresh
+inference followed by `--merge-only`. The format-5 evidence archive remains
+available for exact reconstruction of published results. Checkpoint-analysis
+versioning affects incomplete inference only: obsolete checkpoints are
+ignored, and inference restarts that model/scene from the beginning.
+Completed format-5 results retain evidence and signatures; older active
+results must be recomputed. Dry runs change only a temporary database.
 
-`--explain-tag` wypisuje listę raportów scen z polem `format: 2`. Każde źródło
-w `recorded_sources` ma pojedynczy obiekt `record` zawierający `meta`, `thresholds`
-i `detections`, zamiast dawnej jednoelementowej listy `records`.
+`--explain-tag` outputs scene reports with `format: 2`. Each item in
+`recorded_sources` has one `record` object containing `meta`,
+`thresholds` and `detections`, rather than the former one-item
+`records` array.
 
-Pełną listę opcji pokazuje:
+To see every option:
 
 ```powershell
 python .\stash_ai.py --help
 ```
 
-## Jak działa stan i cache
+## State and cache behavior
 
-Przed pominięciem merge na podstawie cache aplikacja odświeża stan sceny
-w Stash. Odczyty SQL są grupowane w paczki; zmiana markera przez inną
-automatyzację po początkowym skanie uruchamia ponowne scalenie.
+Before skipping a merge based on cached state, Stash AI refreshes the scene's
+current state in Stash. SQL reads are batched; if another automation changed a
+marker after the initial scan, a fresh merge is triggered.
 
-Tożsamość inferencji obejmuje SHA-256 zawartości plików modelu oraz normalizację
-JoyTag (`JOYTAG_CLIP_MEAN` i `JOYTAG_CLIP_STD`). Zmiana wag jest wykrywana także
-przy zachowanym rozmiarze i czasie modyfikacji pliku. Pliki są hashowane raz na
-model w przebiegu; po pobraniu brakujących plików hashowane są tylko nowe zasoby.
-Pierwszy przebieg po tej zmianie odświeży wcześniejsze inferencje i checkpointy.
+Inference identity includes SHA-256 hashes of the model files and JoyTag
+normalization (`JOYTAG_CLIP_MEAN` and `JOYTAG_CLIP_STD`).
+Weight changes are detected even when file size and modification time are
+unchanged. Each model's files are hashed once per run; after downloading
+missing assets only the new files are hashed. The first run following this
+identity change will refresh older inference results and checkpoints.
 
-Domyślna baza `tagger_sources.sqlite3` przechowuje surowe dowody modeli,
-checkpointy, opublikowane snapshoty i informacje potrzebne do bezpiecznego
-wznowienia. **Zachowuj ją w backupie.** Nie zawiera obrazów ani klucza API.
+The default `tagger_sources.sqlite3` database stores raw model evidence,
+checkpoints, published snapshots, and metadata for safe resume.
+**Back up this file.** It contains neither images nor the API key.
 
-W trybie `merged` domyślne `resume`:
-- pomija ukończoną inferencję, gdy model i wejście są zgodne;
-- wznawia częściowy checkpoint;
-- może przeliczyć merge bez GPU po zmianie reguł publikacji;
-- przy zmianie progów wykorzystuje zachowane obserwacje, jeśli ich retencja jest
-  wystarczająca.
+In `merged` mode, the default resume behavior:
 
-`--restart` wymusza świeżą inferencję dla wybranych modeli/scen. Nie używaj go
-do zwykłego przeliczenia merge, cleanupu ani zmiany progów.
+- skips completed inference when the model and input identities match;
+- resumes a compatible partial checkpoint;
+- can re-run merging without a GPU after publication-policy changes;
+- uses retained observations after threshold changes when their coverage
+  is sufficient.
 
-### Nowa baza przy istniejących wynikach AI
+`--restart` forces fresh inference for the selected models/scenes. Do not
+use it merely to re-run merge, cleanup, or threshold evaluation.
 
-`--db-init` pozwala odbudować stan po utracie bazy albo rozpocząć od nowa,
-zachowując stare wyniki w Stash do czasu ukończenia inferencji danej sceny:
+### Starting a new database with existing AI results
+
+`--db-init` can rebuild state after the database is lost, or start a fresh
+database while retaining existing Stash results until each scene finishes
+inference:
 
 ```powershell
 python .\stash_ai.py --db-init --models all --state-db .\tagger_sources_fresh.sqlite3
 ```
 
-Wymaga nowej lub pustej bazy i obu wyjść: tagów scen oraz markerów. Przejmuje
-istniejące przypisania tagów `ai:<label>` i markery należące do aplikacji.
-Po udanej inferencji wszystkich wybranych modeli usuwa nieaktualne wyniki AI;
-brak VTT/sprite'a lub błąd modelu pozostawia dotychczasowe wyniki sceny.
-Ręcznie przypisane tagi z prefiksem `ai:` również podlegają temu przejęciu,
-z wyjątkiem kategorii i zarezerwowanych tagów markerów.
+A new or empty database and both output types (scene tags and markers) are
+required. The command adopts existing `ai:<label>` tag assignments and
+application-owned markers. After inference succeeds for all selected models
+it removes outdated AI results. Missing VTT/sprites or model errors leave
+the scene's previous results intact. Manually assigned `ai:` tags are
+also adopted, except category and reserved marker tags.
 
-Przerwany przebieg wznów tą samą komendą bez `--db-init`, zachowując modele,
-ścieżkę bazy i ewentualny zakres `--scene-id`. Ponowienie flagi też zachowuje
-postęp. `--dry-run` korzysta wyłącznie z tymczasowej nakładki i nie zapisuje do
-Stash ani źródłowej bazy. Szczegóły: [Odbudowa bazy](docs/UPGRADE_db_init.md).
+Resume an interrupted run with the same command **without** `--db-init`,
+keeping the model selection, database path, and any `--scene-id` scope.
+Repeating the flag also preserves progress. Dry run uses only a temporary
+overlay and writes neither to Stash nor to the source database.
+See [database initialization](docs/UPGRADE_db_init.md).
 
 ### Retencja niezależna od progów publikacji
 
