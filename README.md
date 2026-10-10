@@ -1140,70 +1140,81 @@ Use `excluded_scene_tags`, `--models`,
 `--scene-tag-exclusions` and `--cleanup-markers-only`;
 the default marker-exclusions file is `marker_core_exclusions.yml`.
 
-Aktywny wynik to jeden rekord w formacie analizy 5, z opcjonalnym liczbowym progiem
-publikacji. Nowa inferencja zastępuje wynik i resetuje próg. Archiwum zachowuje tylko
-konkretne dowody przypięte przez published/pending/recovery; zwykły merge, rethreshold,
-raporty i indeks ukończenia nie odczytują historycznych segmentów.
-`--db-update` zachowuje geometrię, ownership i recovery, a niepełne starsze wyniki
-kieruje do ponownej inferencji. `--merge-only` wymaga nowych dowodów przed cleanup.
-Brak `end_seconds` w recovery oznacza dokładny punkt i nie pasuje do zakresu.
+An active result is one analysis-format-5 record with an optional
+numeric publication threshold. New inference replaces the record and
+resets that threshold. The archive retains only specific proofs pinned
+by published/pending/recovery state; ordinary merge, rethreshold, reports
+and completion indexing do not read historical segments.
+`--db-update` preserves geometry, ownership and recovery, and schedules
+incomplete legacy results for reinference. `--merge-only` requires
+fresh evidence before cleanup. A missing `end_seconds` in recovery is
+an exact point, not an interval.
 
 ### Deferred input verification (schema v26)
 
-Run `python stash_ai.py --db-update` once for existing databases. This adds a small
-input-verification table without changing raw inference records or publication
-snapshots. Missing VTT/sprite paths defer publication and retain previous predictions.
-After restoring the same inputs, `--resume` verifies and reuses matching results;
-it does not force inference. Model utility reports exclude scenes awaiting input
-verification or fresh inference and report the skipped counts.
+Run `python stash_ai.py --db-update` once for existing databases.
+This adds a small input-verification table without changing raw inference
+records or publication snapshots. Missing VTT/sprite paths defer
+publication and retain previous predictions. After restoring identical
+inputs, `--resume` verifies and reuses compatible results instead of
+forcing inference. Model-utility reports exclude scenes awaiting input
+verification or fresh inference and include skipped counts.
 
-Explicit missing scene IDs are reported independently. During resumed `--db-init`,
-a successful Stash read confirming deletion retires that scene and lets remaining
-scenes finish. Network/read errors do not authorize retirement.
+Explicit missing scene IDs are reported separately. During resumed
+`--db-init`, a successful Stash read confirming scene deletion retires
+that scene so remaining scenes can complete. Network/read errors
+cannot authorize retirement.
 
-Dokładny plan publikacji z cache: `--merge-only --dry-run --dry-run-plan review.jsonl`.
-Opis zdarzeń i symbolicznych ID: [docs/dry_run_plan.md](docs/dry_run_plan.md).
+For a detailed cache-based publication preview, use
+`--merge-only --dry-run --dry-run-plan review.jsonl`.
+Event details and symbolic IDs are described in
+[the dry-run plan](docs/dry_run_plan.md).
 
-### Retencja historii uruchomień
+### Run history retention
 
-`--prune-run-history` działa wyłącznie na osobnej bazie historii, w scope bieżącego
-STASH_URL. Podaj `--history-keep-last N` i/lub `--history-max-age-days DAYS`.
-Połączone limity usuwają zakończony przebieg przekraczający dowolny z nich;
-`N=0` usuwa wszystkie zakończone przebiegi w tym scope. Przed zastosowaniem możesz
-sprawdzić liczbę przebiegów/decyzji i przykładowe ID przez `--dry-run`.
+`--prune-run-history` affects only the separate run-history database,
+within the current `STASH_URL` scope. Provide
+`--history-keep-last N` and/or `--history-max-age-days DAYS`.
+Combined limits delete a finished run exceeding either limit;
+`N=0` removes all finished runs in the scope. Preview affected
+run/decision counts and example IDs using `--dry-run`:
 
 ```powershell
 python .\stash_ai.py --prune-run-history --history-keep-last 100 --history-max-age-days 90 --dry-run
 python .\stash_ai.py --prune-run-history --history-keep-last 100 --history-max-age-days 90
 ```
 
-Usuwanie przebiegów i ich decyzji jest jedną transakcją. Rekordy `running`,
-rekordy bez końca, inne scope i `reuse_proofs` pozostają. Nie są otwierane wyniki,
-checkpointy ani snapshoty bazy źródłowej. Historia v1/v2 jest nadal czytelna
-bez modyfikacji; pierwszy zapis aktualizuje tylko historię do v3. Retencja nie
-uruchamia się automatycznie i nie wykonuje VACUUM.
+Run and decision deletion is one transaction. `running` records,
+records without completion, other scopes and `reuse_proofs` remain.
+The source database's results, checkpoints and snapshots are never
+opened. History formats v1/v2 can still be read without mutation;
+the next write upgrades only run history to v3. Pruning is
+opt-in and does not run `VACUUM`.
 
+### Republishing dependencies
 
-### Zależności ponownej publikacji
+The merge fingerprint covers modules responsible for replaying
+retained evidence and publishing tags/markers, along with the
+effective policy, publication options, exclusions, hierarchy
+and observed catalog/scene. Changes limited to backend, checkpoints,
+input preparation, prefetch, worker settings or history do not by
+themselves invalidate a completed publication because a source
+file changed. New results and actual scene/policy changes still do.
 
-Fingerprint merge obejmuje moduły odtwarzające zachowane dowody i publikujące
-tagi/markery oraz efektywną politykę, ustawienia publikacji, exclusions, hierarchy
-i zaobserwowany katalog/scenę. Zmiana backendu, checkpointów, przygotowania wejść,
-prefetchu, workerów lub historii nie unieważnia gotowej publikacji samą zmianą
-pliku. Zapis nowych wyników i rzeczywiste zmiany sceny/polityki nadal ją unieważniają.
+The dependency manifest is conservative at the module level:
+changing a combined storage or domain module may still require
+rechecking merge. A one-time manifest change rechecks existing
+merge checks against stored results, without altering inference
+identity or result/checkpoint/snapshot formats.
 
-Manifest jest konserwatywny na poziomie modułów: zmiana mieszanego modułu storage
-lub domain może nadal wymagać sprawdzenia merge. Jednorazowa zmiana manifestu
-powoduje ponowne sprawdzenie istniejących merge checks, z użyciem zapisanych wyników;
-nie zmienia tożsamości inferencji ani formatów wyników/checkpointów/snapshotów.
+Pinned published/pending/recovery evidence is lazily read once
+during a scene+marker result write. The read is not reused
+across subsequent writes, rollbacks or publication changes.
+The complete archive of the specific pinned proofs is retained.
 
-Przypięte dowody published/pending/recovery są odczytywane leniwie raz podczas
-jednego zapisu wyników scene+markers. Odczyt nie przechodzi na kolejny zapis,
-rollback ani zmianę publikacji; pełne archiwum konkretnych dowodów pozostaje.
+### Worker counts in tagger_models.yml
 
-### Liczba workerów w tagger_models.yml
-
-Globalne ustawienia wybierają liczbę workerów osobno dla każdego etapu:
+Global settings independently control worker counts for each stage:
 
 ```yaml
 checkpoint_batches: 8
@@ -1214,82 +1225,98 @@ merge_workers: 4
 model_report_workers: 4
 ```
 
-`prepare_workers` steruje transformacjami obrazów CPU, `merge_workers` odczytem
-i scalaniem dowodów, a `model_report_workers` procesami raportu modeli.
-Każdy worker count musi być liczbą całkowitą 1..16; `1` oznacza pracę szeregową.
-Odpowiedni argument CLI (`--prepare-workers`, `--merge-workers`,
-`--model-report-workers`) ma pierwszeństwo przed YAML. Gdy klucza brakuje,
-pozostają dotychczasowe domyślne wartości: 4/4/do 4 dostępnych CPU.
+`prepare_workers` controls CPU image transformation,
+`merge_workers` controls evidence reading/replay, and
+`model_report_workers` controls model-report processes.
+Worker counts are integers from 1 to 16; `1` means sequential
+execution. Corresponding CLI options (`--prepare-workers`,
+`--merge-workers`, `--model-report-workers`) override YAML.
+Without these keys, defaults remain 4/4/up to 4 available CPUs.
 
-Merge i raport modeli odczytują ustawienia workerów z istniejącego YAML, bez
-ładowania modeli. Brak pliku nie blokuje pracy na zapisanych dowodach; wtedy
-obowiązują wartości domyślne lub CLI. Pozostałe polecenia offline nie odczytują
-tego pliku dla ustawień workerów. Zmiana liczby workerów nie zmienia tożsamości
-inferencji ani zapisanych wyników. Inferencja modeli i zapisy do Stash pozostają
-szeregowe.
+Merge and model reports read worker settings from an existing
+YAML file without loading models. Missing YAML does not prevent
+replaying saved evidence: defaults or CLI settings apply.
+Other offline commands do not read this file for worker counts.
+Changes to worker counts do not invalidate inference identity
+or persisted results. Model inference and Stash writes remain
+sequential.
 
-### Rerun bez pobierania gotowych wejść
+### Rerunning without refetching verified inputs
 
-Domyślne uruchomienie/wznowienie ufa wcześniej zweryfikowanym wejściom każdego
-ukończonego modelu sceny. Jego przejście nie pobiera VTT ani sprite'ów ze Stash
-i nie ładuje modelu, także gdy inne wybrane modele dopiero przetwarzają tę scenę.
-Nadal sprawdza tożsamość modeli, zawartość ich plików, vocabulary, ukończenie
-wyników i pokrycie progów przez zachowane dowody. Zgodna zmiana batch size,
-workerów lub progów publikacji nie wymaga ponownej inferencji.
+By default, normal execution/resume trusts already verified input
+for each completed model/scene. It skips fetching VTT and sprites
+from Stash and skips model loading, even if another selected model
+still needs to process that scene. It continues to check model
+identity, model-file contents, vocabulary, result completion and
+retained evidence's threshold coverage. Compatible changes to
+batch size, workers or publication thresholds do not force inference.
 
-Po regeneracji VTT/sprite'ów pod tymi samymi URL wymuś weryfikację:
+After regenerating VTT/sprites **at the same URLs**, force a fresh
+input verification:
 
 ```powershell
 python .\stash_ai.py --force-fetch-vtt
 ```
 
-Switch pobiera i weryfikuje VTT oraz używane sprite'y również dla gotowych scen.
-Nie wymusza inferencji: niezmienione, zgodne wyniki zostają użyte ponownie.
-Przy zmianie wejść, modelu lub zbyt małym pokryciu cache przeliczane są tylko
-wymagające tego wyniki. Opcja dotyczy zwykłej inferencji/wznowienia, nie raportów,
-`--merge-only` ani osobnych poleceń rethreshold.
+This option fetches and verifies VTT and relevant sprites even
+for completed scenes. It does **not** force inference:
+unchanged inputs with compatible results are reused. Only
+results with modified inputs/models or insufficient evidence
+coverage are recomputed. This applies to normal inference/resume,
+not reports, `--merge-only` or standalone rethreshold commands.
 
-Nowe/niekompletne wyniki i checkpointy nadal wymagają pobrania wejść w przejściu
-danego modelu. Na przykład po przerwaniu ukończonego JoyTaga i częściowego Oppai
-JoyTag pomija pobieranie, a Oppai pobiera wejścia i wznawia swój checkpoint.
-Jeśli ten późniejszy model wykryje zmianę VTT/sprite'ów, wcześniejsze wyniki na
-starych wejściach zostają od razu zablokowane i odświeżone przed wspólnym merge.
-Blokada pozostaje w bazie po przerwaniu lub błędzie. Wyniki już zapisane na
-różnych wejściach, oczekująca weryfikacja, zmiana śledzonych ścieżek lub limitu
-próbkowania również wymagają sprawdzenia.
+New/incomplete results and checkpoints still fetch their inputs
+during the corresponding model pass. For example, if JoyTag
+finished but Oppai was interrupted, JoyTag skips fetching
+while Oppai fetches input and resumes. If that later model
+detects a changed VTT/sprite, previously saved results based
+on the old inputs are immediately blocked and queued for
+refresh before the shared merge. The block persists through
+interruption or failure. Results saved with different inputs,
+pending verification, changed tracked paths, or sampling limits
+also require verification.
 
-Nie jest potrzebna migracja bazy ani zmiana formatów inferencji/checkpointów.
-Istniejące wpisy tożsamości v27 działają od razu przy domyślnym pełnym próbkowaniu.
-Starsze wpisy nie śledzą ścieżek; po ich zmianie użyj `--force-fetch-vtt`.
-Brak wpisu tożsamości lub starszy wpis przy ograniczonym próbkowaniu wymaga
-weryfikacji wejść, po której zgodne wyniki można zachować. Nowe/zweryfikowane wpisy
-zapisują mały checksum i kontekst wejść, bez przepisywania surowych wyników.
-Historia uruchomień opisuje pominięcie pobierania przez `input_fetch_skipped`;
-nie udaje ponownej weryfikacji i nie stanowi podstawy reuse.
+No database migration or inference/checkpoint format change is
+needed. Existing v27 identity records work immediately with
+the default full sampling. Older entries did not record paths;
+run `--force-fetch-vtt` after changing those paths.
+Missing identity or legacy identity with reduced sampling
+requires input verification, after which compatible results
+may still be preserved. New/verified records store a small
+checksum and input context without rewriting raw results.
+Run history marks skipped fetches using `input_fetch_skipped`;
+it neither pretends that verification occurred nor authorizes reuse.
 
 ### Offline schema updates and repairs
 
-`--db-update` checks schema shape and completed data revisions first. An already current,
-complete database returns without decoding inference BLOBs or running SQLite quick_check.
-The small metadata/key scan can grow with the number of results. Required historical
-conversions (minimum schema v18) run automatically before their completion is recorded.
-A previously unrecorded data revision may need a one-time full pass. A DDL-only upgrade
-with completed data revisions does not require a global repair.
+`--db-update` checks schema shape and completed data revisions first.
+An already current, complete database returns without decoding
+inference BLOBs or running SQLite `quick_check`. The small metadata/key
+scan can grow with result count. Required historical conversions
+(minimum schema v18) run automatically before recording completion.
+A previously unrecorded data revision may require a one-time full pass.
+A DDL-only upgrade with completed data revisions does not require
+a global repair.
 
-Use `--db-repair` for an explicit full scan on the current schema: it repairs derived
-metadata and identical scene aggregate duplicates, preserving archived/publication proofs.
-Conflicting duplicates stop and roll back repair. Semantic corruption should be diagnosed
-with `--db-check`; a fast preflight cannot prove arbitrary BLOB contents. Both update and
-repair are offline and support `--dry-run`; repair preview uses a temporary SQLite copy.
-Neither command runs models, contacts Stash, or globally requests reinference.
+Use `--db-repair` for an explicit full scan on the current schema:
+it repairs derived metadata and identical scene aggregate duplicates
+while preserving archived/publication proofs. Conflicting duplicates
+stop the operation and roll it back. Investigate semantic corruption
+with `--db-check`; a fast preflight cannot prove arbitrary BLOB contents.
+Update and repair both work offline and support `--dry-run`; the repair
+preview uses a temporary SQLite copy. Neither command runs models,
+contacts Stash, or globally requests reinference.
 
-Repair spools canonical BLOB rewrites and signature replacements into a disk-backed
-temporary SQLite database with a bounded page cache. It scans each original archive
-record once and applies evidence, metadata and publication-reference changes in one
-transaction; interruption before commit rolls back the entire repair. Memory still needs to fit one
-decoded evidence/publication record. Temporary disk space must fit the rewritten BLOBs.
+Repair spools canonical BLOB rewrites and signature replacements into
+a disk-backed temporary SQLite database with a bounded page cache.
+It scans each original archive record once and applies evidence,
+metadata and publication-reference changes in one transaction.
+Interruption before commit rolls back the entire repair.
+Available memory must still fit one decoded evidence/publication record,
+and temporary disk space must fit rewritten BLOBs.
 
-CLI maintenance shows the active phase and scanned/written row counts. A current-schema
-update that restores missing metadata or completes a required data revision reports
-maintenance performed, rather than claiming that nothing needed doing. A complete
-no-op does not create a progress bar or start a full scan.
+CLI maintenance shows the active phase and scanned/written row counts.
+A current-schema update that restores metadata or completes a data
+revision reports that work rather than claiming no changes were
+needed. A complete no-op creates no progress bar and performs
+no full scan.
