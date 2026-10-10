@@ -8,7 +8,9 @@ class VerificationLedger:
     """Temporary verification state; no media bytes or plaintext URLs are stored."""
     def __init__(self):
         self._lock = Lock()
-        self._db = sqlite3.connect('', check_same_thread=False, isolation_level=None)
+        self._db = sqlite3.connect('', check_same_thread=False)
+        self._pending = 0
+        self._batch_size = 256
         self._db.execute('PRAGMA cache_size=-64')
         self._db.execute('PRAGMA mmap_size=0')
         self._db.execute('CREATE TABLE verification (key BLOB PRIMARY KEY, checksum TEXT NOT NULL) WITHOUT ROWID')
@@ -42,6 +44,10 @@ class VerificationLedger:
             if self._db is None:
                 raise RuntimeError('Verification ledger is closed.')
             self._db.execute('INSERT OR REPLACE INTO verification VALUES (?,?)', (self._key(key), checksum))
+            self._pending += 1
+            if self._pending >= self._batch_size:
+                self._db.commit()
+                self._pending = 0
 
     def __len__(self):
         with self._lock:
@@ -51,4 +57,7 @@ class VerificationLedger:
         with self._lock:
             db, self._db = self._db, None
             if db is not None:
-                db.close()
+                try:
+                    db.commit()
+                finally:
+                    db.close()
