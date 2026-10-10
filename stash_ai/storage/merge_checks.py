@@ -13,10 +13,9 @@ def initialize(store):
             ON snapshots(scope, scene, kind) WHERE pending IS NOT NULL;
     ''')
     if getattr(store, 'maintenance_migration', False):
-        from stash_ai.storage.schema import repair_trigger_definitions
+        from stash_ai.storage.schema import _trigger_sql, repair_trigger_definitions
         repair_trigger_definitions(db, (
-            name for name in __import__('stash_ai.storage.schema', fromlist=['_trigger_sql'])._trigger_sql()
-            if name.startswith('perf_')))
+            name for name in _trigger_sql() if name.startswith('perf_')))
     for table in MERGE_INVALIDATING_TABLES:
         for event, row in (('INSERT', 'NEW'), ('UPDATE', 'NEW'), ('DELETE', 'OLD')):
             db.execute(f'''CREATE TRIGGER IF NOT EXISTS perf_{table}_{event.lower()}
