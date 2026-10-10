@@ -104,16 +104,24 @@ class StashTransport:
         from time import monotonic
         from stash_ai.stash_api.deadlines import call_with_deadline, ReadDeadlineExceeded
         read = self._read_only(query, variables)
-        deadline = monotonic() + self._read_budget() if read else None
+        # Mutations get a response budget too, but are NEVER retried if the
+        # outcome may be uncertain. Only response reads use deadline workers.
+        deadline = monotonic() + self._read_budget()
         operation = lambda: self._gql_payload(query, variables, read=read, deadline=deadline)
         if not read:
-            return operation()
+            try:
+                return operation()
+            except ReadDeadlineExceeded as exc:
+                raise RuntimeError(
+                    'Stash mutation response timed out; write outcome is unknown. '
+                    'Inspect/recover pending publication before retrying.') from exc
         if self.report is not None:
             operation = self.report.bind_read(operation)
         try:
             return call_with_deadline(operation, deadline)
         except (ReadDeadlineExceeded, KeyboardInterrupt):
-            self.api.close()
+            from stash_ai.runtime.cleanup import cleanup
+            cleanup([self.api.close], report=self.report)
             raise
 
     def _gql_payload(self, query, variables, *, read, deadline):
@@ -125,7 +133,7 @@ class StashTransport:
         response = self._request_response(lambda timeout: self.api.post(
             absolute_stash_url('graphql', self.url),
             json={'query': query, 'variables': variables or {}},
-            timeout=timeout, allow_redirects=False, stream=read), read=read, deadline=deadline)
+            timeout=timeout, allow_redirects=False, stream=True), read=read, deadline=deadline)
         try:
             if report is not None:
                 report.response_size(len(response.content))
@@ -134,10 +142,15 @@ class StashTransport:
                 raise RuntimeError("Stash redirected GraphQL; configure STASH_URL to its final URL.")
             with stage(report, 'stash_json_decode'):
                 payload = call_with_deadline(response.json, deadline) if read else response.json()
-            if payload.get("errors"):
-                raise RuntimeError("GraphQL: " + "; ".join(
-                    error.get("message", "Unknown error") for error in payload["errors"]
-                ))
+            if not isinstance(payload, dict):
+                raise RuntimeError('Invalid GraphQL response envelope: expected object.')
+            errors = payload.get('errors')
+            if errors is not None and (not isinstance(errors, list) or
+                    any(not isinstance(item, dict) or not isinstance(item.get('message'), str)
+                        for item in errors)):
+                raise RuntimeError('Invalid GraphQL errors envelope.')
+            if errors:
+                raise RuntimeError("GraphQL: " + "; ".join(error["message"] for error in errors))
             if not isinstance(payload.get("data"), dict):
                 raise RuntimeError("Stash returned no GraphQL data.")
             return payload["data"]
@@ -179,21 +192,32 @@ class StashTransport:
                 timeout = ((min(self.request_timeout[0], budget), budget)
                            if isinstance(self.request_timeout, tuple) else budget)
             else:
-                timeout = self.request_timeout
+                budget = remaining(deadline)
+                timeout = ((min(self.request_timeout[0], budget), budget)
+                           if isinstance(self.request_timeout, tuple) else budget)
+            response = None
             try:
                 with stage(self.report, 'stash_media_http' if media else 'stash_http'):
                     response = call_with_deadline(lambda: call(timeout), deadline) if read else call(timeout)
-                    if read and isinstance(response, Response):
+                    if isinstance(response, Response):
+                        # The mutation POST itself runs exactly once, synchronously.
+                        # Reading its already acquired response is safe to bound.
                         call_with_deadline(lambda: response.content, deadline,
                                            cancel=lambda: abort_response(response))
-            except ReadDeadlineExceeded:
-                session.close()
+            except (ReadDeadlineExceeded, KeyboardInterrupt):
+                from stash_ai.runtime.cleanup import cleanup
+                cleanup([response.close] if response is not None else [], report=self.report)
+                cleanup([session.close], report=self.report)
                 raise
             except (RequestsConnectionError, RequestsTimeout):
+                if response is not None:
+                    from stash_ai.runtime.cleanup import cleanup
+                    cleanup([response.close], report=self.report)
                 if attempt + 1 == attempts:
                     raise
                 backoff(attempt)
                 continue
+            remaining(deadline)
             if not read or response.status_code not in retry_statuses or attempt + 1 == attempts:
                 return response
             response.close()
@@ -216,7 +240,8 @@ class StashTransport:
         try:
             return call_with_deadline(operation, deadline)
         except (ReadDeadlineExceeded, KeyboardInterrupt):
-            self.media.close()
+            from stash_ai.runtime.cleanup import cleanup
+            cleanup([self.media.close], report=self.report)
             raise
 
     def _media_payload(self, url, deadline):
