@@ -52,17 +52,22 @@ def prepare_wd(image: Any, size: int) -> Any:
     import numpy as np
     from PIL import Image
 
-    rgba = image.convert("RGBA")
-    background = Image.new("RGBA", rgba.size, (255, 255, 255, 255))
-    background.alpha_composite(rgba)
-    rgb = background.convert("RGB")
+    opened = []
+    if image.mode == 'RGB' and 'transparency' not in image.info:
+        rgb = image
+    else:
+        rgba = image.convert("RGBA")
+        background = Image.new("RGBA", rgba.size, (255, 255, 255, 255))
+        background.alpha_composite(rgba)
+        rgb = background.convert("RGB")
+        opened.extend((rgba, background, rgb))
     side = max(rgb.size)
     padded = Image.new("RGB", (side, side), (255, 255, 255))
     padded.paste(rgb, ((side - rgb.width) // 2, (side - rgb.height) // 2))
     resized = padded.resize((size, size), Image.Resampling.BICUBIC) if side != size else padded
     result = np.ascontiguousarray(np.asarray(resized, dtype=np.float32)[:, :, ::-1])
-    for opened in (rgba, background, rgb, padded, resized):
-        opened.close()
+    for value in (*opened, padded, resized):
+        value.close()
     return result
 
 
