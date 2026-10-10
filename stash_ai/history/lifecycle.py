@@ -49,6 +49,9 @@ def configuration(app, args):
     except Exception as exc:
         options['provenance'] = dict(unavailable=type(exc).__name__)
     options['fingerprint'] = digest(options)
+    # Owner identity is not included in the comparability fingerprint.
+    from stash_ai.history.reconcile import local_owner
+    options['process_owner'] = local_owner()
     return options
 
 
