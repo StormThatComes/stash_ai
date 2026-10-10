@@ -100,7 +100,7 @@ class OnnxTagger:
                 values = np.empty((self.fixed_batch, *first.shape), dtype=first.dtype)
                 for index, row in enumerate(rows):
                     values[index] = row
-                values[count:] = first
+                values[count:] = values[count - 1]
                 return values
             return np.stack(rows)
 
