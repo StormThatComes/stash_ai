@@ -23,7 +23,8 @@ def _validate_report(parser, args, rule):
     if supplied(args, (*PUBLICATION_OPTIONS, 'dry_run')):
         parser.error(rule.modifiers_message)
     destination = getattr(args, rule.command.value)
-    checked = destination.expanduser() if rule.expand_destination else destination
+    checked = destination.expanduser().resolve()
+    setattr(args, rule.command.value, checked)
     if destination.suffix.lower() != '.json' or checked.exists():
         parser.error(rule.flag + ' requires a new .json file; existing files are never overwritten.')
 
@@ -46,14 +47,16 @@ def validate_reports(parser, args):
     if args.command is Command.RUN_REPORT:
         if supplied(args, (*MODEL_OPTIONS, *PUBLICATION_OPTIONS, 'dry_run', 'record_run')) or args.scene_id:
             parser.error('--run-report is an offline history inspection; model/tagging/scene modifiers do not apply.')
-        if args.run_report.suffix.lower() != '.json' or args.run_report.expanduser().exists():
+        if args.run_report.suffix.lower() != '.json' or args.run_report.expanduser().resolve().exists():
             parser.error('--run-report requires a new .json file; existing files are never overwritten.')
+        args.run_report = args.run_report.expanduser().resolve()
     elif args.command is Command.REUSE_REPORT:
         from .modes import EXECUTION_OPTIONS
         if supplied(args, (*EXECUTION_OPTIONS, *PUBLICATION_OPTIONS, 'dry_run', 'record_run')):
             parser.error('--reuse-report reads recorded decisions; inference/tagging modifiers do not apply.')
-        if args.reuse_report.suffix.lower() != '.json' or args.reuse_report.expanduser().exists():
+        if args.reuse_report.suffix.lower() != '.json' or args.reuse_report.expanduser().resolve().exists():
             parser.error('--reuse-report requires a new .json file; existing files are never overwritten.')
+        args.reuse_report = args.reuse_report.expanduser().resolve()
         if args.models:
             from stash_ai.models import select_models
             try:
@@ -140,6 +143,7 @@ def validate_pipeline(app, parser, args):
         if (hierarchy_only or cleanup_only or args.download_models
                 or args.explain_tag or args.prune_empty_tags_only or args.sync_marker_groups_only):
             parser.error("--profile-merge applies to merged tagging or --merge-only.")
+        args.profile_merge = args.profile_merge.expanduser().resolve()
         if args.profile_merge.suffix.lower() != ".jsonl" or args.profile_merge.exists():
             parser.error("--profile-merge requires a new .jsonl file; existing files are never overwritten.")
     if (args.markers_only or args.scene_tags_only) and (
@@ -170,8 +174,29 @@ def validate_pipeline(app, parser, args):
         parser.error("Standalone abandonment covers pending plans for this Stash/state DB; --scene-id does not apply.")
 
 
+
+def validate_command_capabilities(parser, args):
+    """Reject user-supplied execution settings that a selected command ignores."""
+    model_users = {Command.INFERENCE, Command.MERGE, Command.DOWNLOAD,
+                   Command.CACHE_REPORT, Command.REUSE_REPORT}
+    if args.models and args.command not in model_users:
+        parser.error('--models is not used by this command.')
+    workers = {
+        'prepare_workers': {Command.INFERENCE},
+        'prefetch_batches': {Command.INFERENCE},
+        'result_prefetch_batches': {Command.INFERENCE},
+        'checkpoint_batches': {Command.INFERENCE},
+        'merge_workers': {Command.INFERENCE, Command.MERGE},
+        'model_report_workers': {Command.MODEL_REPORT},
+    }
+    for name, commands in workers.items():
+        if getattr(args, name) is not None and args.command not in commands:
+            parser.error('--' + name.replace('_', '-') + ' is not used by this command.')
+
+
 def validate_args(app, parser: argparse.ArgumentParser, args: argparse.Namespace) -> argparse.Namespace:
     args.command = select_command(args)
+    validate_command_capabilities(parser, args)
     if args.db_init and (args.command is not Command.INFERENCE or args.markers_only
                         or args.scene_tags_only or args.restart or args.abandon_pending):
         parser.error('--db-init requires normal inference with both outputs; restart/recovery modifiers do not apply.')
