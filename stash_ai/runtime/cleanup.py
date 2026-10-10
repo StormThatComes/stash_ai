@@ -1,5 +1,15 @@
 """Finish every cleanup step without replacing the original failure."""
 import sys
+from contextlib import contextmanager
+
+
+@contextmanager
+def closing(resource, *, report=None):
+    """Close a resource without replacing an exception from its body."""
+    try:
+        yield resource
+    finally:
+        cleanup([resource.close], report=report)
 
 
 def cleanup(callbacks, *, report=None, primary=None):

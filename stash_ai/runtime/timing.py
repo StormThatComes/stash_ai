@@ -95,9 +95,11 @@ class RunTimings:
                 self.timings[stage] += max(0.0, elapsed-entry[1])
                 self.timing_calls[stage] += 1
             if self.report.diagnostics is not None:
-                self.report.diagnostics.record_stage(stage, elapsed, max(0.0, elapsed-entry[1]), failed)
+                self.report.optional('diagnostics_stage', self.report.diagnostics.record_stage,
+                    stage, elapsed, max(0.0, elapsed-entry[1]), failed)
             if self.report.profile is not None:
-                self.report.profile.record('stage', stage, elapsed, max(0.0, elapsed-entry[1]), failed,
+                self.report.optional('profile_stage', self.report.profile.record,
+                    'stage', stage, elapsed, max(0.0, elapsed-entry[1]), failed,
                     model=model if model is not None else getattr(self._timers, 'model', ''),
                     work=work if work is not None else getattr(self._timers, 'work', ''), units=units, unit=unit)
 
@@ -141,10 +143,12 @@ class RunTimings:
                 self._heartbeat_condition.notify_all()
             self._timers.request = previous
             if self.report.diagnostics is not None:
-                self.report.diagnostics.record_api(operation, time.perf_counter()-start, failed, details['response_bytes'])
+                self.report.optional('diagnostics_api', self.report.diagnostics.record_api,
+                    operation, time.perf_counter()-start, failed, details['response_bytes'])
             if self.report.profile is not None:
                 elapsed = time.perf_counter()-start
-                self.report.profile.record('api', operation, elapsed, elapsed,
+                self.report.optional('profile_api', self.report.profile.record,
+                    'api', operation, elapsed, elapsed,
                     failed, model=getattr(self._timers, 'model', ''), work=getattr(self._timers, 'work', ''),
                     units=details['response_bytes'], unit='bytes')
 

@@ -1,12 +1,12 @@
 """Ordered inference lookahead with a bounded result queue and one model owner."""
-from contextlib import closing, nullcontext
+from contextlib import nullcontext
 from threading import Thread
 
 from stash_ai.inference.preparation import PreparedBatch, prepared_batches
 from stash_ai.models import validate_scores
 from .buffer_usage import PreparedBatchUsage, queued_batches
 from .managed_stream import ManagedStream, StreamFailure as _Failure
-from stash_ai.runtime.cleanup import cleanup
+from stash_ai.runtime.cleanup import cleanup, closing
 
 
 def prediction_scores(tagger, prepared):
@@ -78,7 +78,7 @@ class BatchPredictions:
             with self.report.model(self.model) if self.report is not None else nullcontext():
                 if self.report is not None:
                     self.report.work(self.work)
-                with closing(self.inputs) as batches:
+                with closing(self.inputs, report=self.report) as batches:
                     for prepared, batch_cues in batches:
                         self.cancellation.check()
                         with self.measure('inference_batch', len(prepared)):
@@ -125,13 +125,13 @@ def predicted_batches(app, tagger, stash, paths, cues, *, prefetch=0,
                                      inference_executor=inference_executor,
                                      prepared_inputs=prepared_inputs,
                                      transform_executor=transform_executor,
-                                     result_prefetch=result_prefetch)) as batches:
+                                     result_prefetch=result_prefetch), report=report) as batches:
             if on_start is not None:
                 on_start(batches)
             yield from batches
         return
     with closing(prepared_batches(app, tagger, stash, paths, cues, workers=prepare_workers,
-                                  report=report, collate=True)) as batches:
+                                  report=report, collate=True), report=report) as batches:
         for prepared, batch_cues in batches:
             timer = (report.measure('inference_batch', model=tagger.settings.source.key,
                                     units=len(prepared), unit='frames')

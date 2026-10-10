@@ -1,5 +1,6 @@
 """Run counters, bounded issues and user-facing progress coordination."""
 from collections import Counter
+import sys
 from .timing import RunTimings
 from .summary import write_summary
 
@@ -41,7 +42,26 @@ class RunReport:
     def record_progress(self):
         progress = getattr(self.history, 'progress', None)
         if progress is not None:
-            progress()
+            self.optional('history_progress', progress)
+
+    def optional(self, name, callback, *args, **kwargs):
+        """Count optional reporting failures without changing the operation."""
+        primary = sys.exception()
+        try:
+            return callback(*args, **kwargs)
+        except Exception as error:
+            key = name + '_failures'
+            with self._timing._timing_lock:
+                self.counts[key] += 1
+                first = self.counts[key] == 1
+            message = f'Optional {name} failed ({type(error).__name__}).'
+            if primary is not None:
+                primary.add_note(message)
+            if first:
+                try:
+                    self.write(message)
+                except Exception:
+                    pass
 
     def reuse_decision(self, scope, scene, model, action, status, reasons, details):
         if status != 'started':
@@ -71,7 +91,7 @@ class RunReport:
     def model_outcome(self, model, name):
         self.work(name)
         if self.profile is not None:
-            self.profile.outcome(model, name)
+            self.optional('profile_outcome', self.profile.outcome, model, name)
 
     def record_model(self, config, *, identity=None, tagger=None):
         try:
@@ -117,7 +137,7 @@ class RunReport:
         with self._timing._timing_lock:
             self.counts.update(values)
         if self.diagnostics is not None:
-            self.diagnostics.record_counts(values)
+            self.optional('diagnostics_counts', self.diagnostics.record_counts, values)
 
     def detail(self, message):
         if self.verbose:
