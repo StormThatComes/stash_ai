@@ -18,6 +18,9 @@ def repair_missing_metadata(db, *, progress=None):
             SELECT r.scope,r.scene,r.model,r.kind,r.data FROM results AS r
             LEFT JOIN result_metadata AS m USING(scope,scene,model,kind)
             WHERE m.format IS NULL OR m.format!=? OR NOT json_valid(m.data)'''
+    from stash_ai.storage.metadata_ledger import trusted
+    if trusted(db):
+        query = query.replace('FROM results AS r', 'FROM metadata_dirty AS d JOIN results AS r USING(scope,scene,model,kind)')
     total = db.execute('SELECT COUNT(*) FROM (' + query + ')', (FORMAT,)).fetchone()[0]
     if progress is not None:
         progress('missing metadata', 0, total)
@@ -39,6 +42,8 @@ def _repair(db, progress):
     from .duplicate_aggregates import migrate
     with db:
         db.execute('BEGIN IMMEDIATE')
+        from stash_ai.storage.metadata_ledger import initialize
+        initialize(db)
         try:
             result = migrate(db, metadata=True, progress=progress)
         except (KeyError, TypeError, zlib.error, StateDecodeError) as exc:
@@ -48,9 +53,9 @@ def _repair(db, progress):
     return result
 
 
-def repair_database(path, *, dry_run=False, show_progress=False, progress=None):
+def repair_database(path, *, dry_run=False, show_progress=False, progress=None, report=None):
     from .progress import maintenance_progress
-    with maintenance_progress('DB repair', show=show_progress, callback=progress) as notify:
+    with maintenance_progress('DB repair', show=show_progress, callback=progress, report=report) as notify:
         return _repair_database(path, dry_run=dry_run, progress=notify)
 
 
