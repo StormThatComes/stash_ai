@@ -18,6 +18,9 @@ def mark_completed(db):
 
 
 def metadata_complete(db):
+    from stash_ai.storage.metadata_ledger import trusted
+    if trusted(db):
+        return not db.execute('SELECT 1 FROM metadata_dirty LIMIT 1').fetchone()
     from stash_ai.storage.metadata import FORMAT
     # Small metadata/key scan; never read/decompress the evidence BLOB column.
     return not db.execute('''SELECT 1 FROM results AS r LEFT JOIN result_metadata AS m
