@@ -1,9 +1,12 @@
 """Versioned snapshot storage; callers continue to see expanded contributions."""
 
+from stash_ai.evidence.temporal.policy import validated_operation
+
 FORMAT_KEY = '__stash_ai_snapshot__'
 FORMAT = 7
 
 
+@validated_operation
 def compact(snapshot):
     """Intern repeated immutable proof objects without hashing their large JSON.
 
@@ -47,6 +50,7 @@ def compact(snapshot):
     return {FORMAT_KEY: FORMAT, 'snapshot': result, 'proofs': proofs}
 
 
+@validated_operation
 def expand(value):
     """Validate and expand the current snapshot envelope."""
     if (not isinstance(value, dict) or set(value) != {FORMAT_KEY, 'snapshot', 'proofs'}
@@ -119,17 +123,8 @@ def validate_policy(item):
                 or not 0 <= value <= 1 for signature, value in thresholds.items())):
             raise ValueError('Invalid frozen thresholds.')
         if keys == marker:
-            settings = options['settings']
-            if not isinstance(settings, dict) or set(settings) != {
-                    'MARKER_MIN_HITS', 'MARKER_MERGE_GAP_SECONDS',
-                    'MARKER_MAX_TAGS_PER_FRAME'}:
-                raise ValueError('Incomplete frozen marker settings; run --db-update.')
-            for name in ('MARKER_MIN_HITS', 'MARKER_MAX_TAGS_PER_FRAME'):
-                if type(settings[name]) is not int or settings[name] < (1 if name == 'MARKER_MIN_HITS' else 0):
-                    raise ValueError(f'Invalid frozen marker setting {name}.')
-            gap = settings['MARKER_MERGE_GAP_SECONDS']
-            if type(gap) not in (int, float) or not 0 <= gap < float('inf'):
-                raise ValueError('Invalid frozen marker setting MARKER_MERGE_GAP_SECONDS.')
+            from stash_ai.evidence.temporal.policy import validate_marker_settings
+            validate_marker_settings(options['settings'])
     if 'scene_evidence' in item:
         if not isinstance(item['scene_evidence'], list) or any(
                 not isinstance(hit, dict) for hit in item['scene_evidence']):
