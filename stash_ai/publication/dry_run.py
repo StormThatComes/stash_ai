@@ -2,6 +2,7 @@
 import json
 from pathlib import Path
 from stash_ai.runtime.status import completion_status
+from stash_ai.runtime.cleanup import cleanup
 
 
 class DryRunPlan:
@@ -13,15 +14,26 @@ class DryRunPlan:
             destination = Path(self.destination)
             destination.parent.mkdir(parents=True, exist_ok=True)
             self.stream = destination.open('x', encoding='utf-8', newline='\n')
-            self.write(dict(type='header', format=1, dry_run=True,
-                            symbolic_id_prefix='dry-run:'))
+            try:
+                self.write(dict(type='header', format=1, dry_run=True,
+                                symbolic_id_prefix='dry-run:'))
+            except BaseException:
+                cleanup([self.close])
+                raise
         return self
 
-    def __exit__(self, *args):
+    def __exit__(self, exc_type, exc_value, traceback):
         if self.stream is not None:
-            if args[0] is not None:
-                self.write(dict(type=completion_status(args[0]), error_type=args[0].__name__))
-            self.stream.close()
+            callbacks = []
+            if exc_type is not None:
+                callbacks.append(lambda: self.write(dict(type=completion_status(exc_type),
+                                                         error_type=exc_type.__name__)))
+            cleanup(callbacks + [self.close], primary=exc_value)
+
+    def close(self):
+        stream, self.stream = self.stream, None
+        if stream is not None:
+            stream.close()
 
     def write(self, value):
         if self.stream is not None:

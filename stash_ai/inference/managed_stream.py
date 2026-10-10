@@ -37,6 +37,9 @@ class ManagedStream:
                     if not worker.cancelled():
                         worker.result()
                     return self.end
+                if (worker is not None and hasattr(worker, 'is_alive')
+                        and worker.ident is not None and not worker.is_alive()):
+                    raise RuntimeError('Producer thread exited without completing its stream.')
         return self.end
 
     def stop(self):

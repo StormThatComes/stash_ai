@@ -153,17 +153,17 @@ def prepared_batches(app, tagger, stash, paths, cues, prefetch=0, workers=1, *,
                 pending.append(submit_next())
             yield prepared, batch_cues
     finally:
-        cancellation.cancel()
-        try:
-            if executor:
-                executor.shutdown(wait=True, cancel_futures=True)
-        finally:
-            if buffer_usage is not None:
-                buffer_usage.clear()
+        from stash_ai.runtime.cleanup import cleanup
+        callbacks = [cancellation.cancel]
+        if executor:
+            callbacks.append(lambda: executor.shutdown(wait=True, cancel_futures=True))
+        if buffer_usage is not None:
+            callbacks.append(buffer_usage.clear)
         if transforms is not None and transform_executor is None:
-            transforms.shutdown(wait=True)
+            callbacks.append(lambda: transforms.shutdown(wait=True))
         elif transforms is not None:
             # Borrowed workers outlive the scene. Let every owned image reach
             # transform()'s finally before closing media/the backend.
-            wait([future for _, future in frames] + ([current_future] if current_future else []))
-        iterator.close()
+            callbacks.append(lambda: wait([future for _, future in frames] +
+                                          ([current_future] if current_future else [])))
+        cleanup(callbacks + [iterator.close], report=report)
