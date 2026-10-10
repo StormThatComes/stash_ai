@@ -122,8 +122,6 @@ def build_parser(app) -> argparse.ArgumentParser:
     modes.add_argument("--merge-only", action="store_true", help="Merge current saved evidence without models/inference.")
     modes.add_argument("--sync-marker-groups-only", action="store_true",
                        help="Repair m:<core> / m:<core>:occurrence groups on existing owned ai: markers; no inference or time changes.")
-    modes.add_argument('--rename-occurrence-groups', action='store_true',
-                       help='Rename managed m:<core>:occurance tags to :occurrence, preserving IDs and assignments. Global; honors --dry-run.')
     modes.add_argument("--explain-tag", metavar="TAG", help="Show saved sources, scores and intervals for a raw/ai: tag; requires --scene-id; no Stash access.")
     modes.add_argument("--prune-empty-tags-only", action="store_true",
                        help="Remove unused leaf tag definitions without models/inference. Honors --dry-run.")

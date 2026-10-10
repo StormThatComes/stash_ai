@@ -95,6 +95,39 @@ def test_union_and_split_drop_obsolete_managed_groups_but_keep_manual_extras(tmp
 
 
 @pytest.mark.parametrize('dry', [False, True])
+def test_canonical_occurrence_group_reuses_id_and_assignments_without_writes(dry):
+    stash = Stash()
+    marker = stash.marker(merge_labels.AI, 'abc', '1')
+    identifier = attach(stash, marker, 'abc', True)
+    before = deepcopy((stash.tags, stash.scene))
+    stash.dry_run = dry; stash.writes.clear()
+    resolver = app.services.TagResolver(stash, source=merge_labels.AI); resolver.preload()
+    group_manager = groups.for_resolver(app, resolver)
+    assert group_manager.resolve('abc', True) == identifier
+    assert group_manager.owns_id(identifier)
+    assert (stash.tags, stash.scene) == before and not stash.writes
+
+
+@pytest.mark.parametrize('dry', [False, True])
+def test_noncanonical_occurrence_name_is_left_untouched_when_resolving_group(dry):
+    stash = Stash()
+    root = stash.tag(groups.ROOT)
+    old = stash.tag('m:abc:occurance')
+    old.update(description=groups.group_description('abc', True),
+               parents=[root], ignore_auto_tag=True)
+    before = deepcopy(old)
+    stash.dry_run = dry
+    resolver = app.services.TagResolver(stash, source=merge_labels.AI); resolver.preload()
+    group_manager = groups.for_resolver(app, resolver)
+    identifier = group_manager.resolve('abc', True)
+    assert identifier != old['id']
+    assert resolver.records['m:abc:occurrence']['id'] == identifier
+    assert not group_manager.owns_id(old['id'])
+    assert stash.tags['m:abc:occurance'] == before
+    assert stash.writes == ([] if dry else [('tag', 'm:abc:occurrence')])
+
+
+@pytest.mark.parametrize('dry', [False, True])
 def test_repair_adds_direct_root_preserving_other_parents_and_disables_autotag(dry):
     stash = Stash(); identifier = manager(stash).resolve('abc', True)
     manual = stash.tag('human category')
@@ -239,6 +272,14 @@ def test_group_pruning_refresh_rechecks_ownership():
     stash.before_refresh = change
     assert prune_tags(stash, report=lambda _: None)['tags_retained_after_refresh'] == 1
     assert identifier in stash.tags
+
+
+def test_group_pruning_retains_noncanonical_name_but_manages_literal_core():
+    stash = PruneStash()
+    old = stash.add('m:abc:occurance', description=groups.group_description('abc', True))
+    literal = stash.add('m:def:occurance', description=groups.group_description('def:occurance'))
+    assert prune_tags(stash, report=lambda _: None)['tags_pruned'] == 1
+    assert stash.deleted == [literal] and old in stash.tags
 
 
 @pytest.mark.parametrize('strategy', ['sql', 'scenes'])

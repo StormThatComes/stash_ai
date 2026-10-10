@@ -7,7 +7,6 @@ import json
 ROOT = 'ai_markers'
 PREFIX = 'm:'
 OCCURRENCE_SUFFIX = ':occurrence'
-LEGACY_OCCURRENCE_SUFFIX = ':occurance'
 DESCRIPTION = '[Stash AI marker group v1] '
 ROOT_DESCRIPTION = '[Stash AI marker groups v1] Organizational root.'
 
@@ -34,8 +33,7 @@ def _group_data(tag):
                 and type(data['occurrence']) is bool):
             return None
         name = group_name(data['core'], data['occurrence'])
-        legacy = PREFIX + data['core'] + LEGACY_OCCURRENCE_SUFFIX
-        if tag.get('name') == name or (data['occurrence'] and tag.get('name') == legacy):
+        if tag.get('name') == name:
             return data
     except (ValueError, TypeError, KeyError):
         pass
@@ -44,32 +42,6 @@ def _group_data(tag):
 
 def managed_group(tag):
     return _group_data(tag) is not None
-
-
-def legacy_group_target(tag):
-    """Return a canonical name only for a proven, misspelled occurrence group."""
-    data = _group_data(tag)
-    if data is not None and data['occurrence']:
-        name = group_name(data['core'], True)
-        if tag['name'] != name:
-            return name
-    return None
-
-
-def rename_legacy_group(stash, tag):
-    """Refresh ownership and collisions, then change only the existing tag name."""
-    name = legacy_group_target(tag)
-    if name is None:
-        raise ValueError('Not a legacy managed occurrence group.')
-    current = stash.find_tag_by_id(str(tag['id']))
-    if (current['name'] != tag['name'] or legacy_group_target(current) != name
-            or current.get('description') != tag.get('description')):
-        raise ValueError(f"Marker group ownership/name changed for {tag['name']!r}.")
-    if stash.find_tag(name) is not None:
-        raise ValueError(f'Marker group name collision: {name!r}; resolve it before renaming.')
-    if stash.dry_run:
-        return {**current, 'name': name}
-    return stash.rename_tag(str(current['id']), name)
 
 
 class MarkerGroups:
@@ -109,19 +81,6 @@ class MarkerGroups:
         root = self._root()
         name, description = group_name(label, occurrence), group_description(label, occurrence)
         tag = self.resolver._find(name)
-        if tag is None and occurrence:
-            legacy_name = PREFIX + label + LEGACY_OCCURRENCE_SUFFIX
-            legacy = self.resolver._find(legacy_name)
-            if legacy and legacy_group_target(legacy) == name and legacy.get('description') == description:
-                tag = rename_legacy_group(self.stash, legacy)
-                self.resolver.records[legacy_name] = None
-                self.resolver.cache[legacy_name] = None
-                self.resolver._remember(tag)
-                if self.stash.dry_run:
-                    self.resolver.preview_mutation('update', dict(id=str(tag['id']), name=name),
-                        'occurrence_group_spelling', str(tag['id']))
-                if self.resolver.report:
-                    self.resolver.report(f"{'[DRY] ' if self.stash.dry_run else ''}Rename group {legacy_name!r} -> {name!r}.")
         if tag is None:
             tag = self._create(name, description, [root])
         else:

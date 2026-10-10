@@ -5,50 +5,6 @@ from stash_ai.publication.groups import for_resolver
 from stash_ai.cleanup.groups import prune_groups
 
 
-def run_rename(app, args):
-    """Rename global managed tag definitions in place; never replay evidence."""
-    from stash_ai.publication.groups import legacy_group_target, rename_legacy_group
-    from stash_ai.storage.store import StateStore, scope_for
-    stats = Counter(occurrence_groups_found=0, occurrence_groups_renamed=0, errors=0)
-    report = args.report
-    with StateStore(args.state_db, scope_for(app.STASH_URL), app.DRY_RUN) as store:
-        if store.has_pending_publications():
-            raise RuntimeError('An interrupted merge is pending; run --merge-only before renaming marker groups.')
-        stash = app.services.create_stash_client(app.DRY_RUN)
-        try:
-            catalog = list(stash.iter_tags())
-            names = {tag['name'] for tag in catalog}
-            candidates = []
-            for tag in catalog:
-                name = legacy_group_target(tag)
-                if name is not None:
-                    candidates.append((tag, name))
-            stats['occurrence_groups_found'] = len(candidates)
-            # Check every destination before writing any names. Never merge or
-            # delete a colliding definition, including another managed group.
-            for tag, name in candidates:
-                if name in names:
-                    stats['errors'] += 1
-                    report.write(f"Name collision: {tag['name']!r} -> {name!r}; no tags renamed. Resolve the destination before retrying.")
-            if not stats['errors']:
-                for tag, name in candidates:
-                    try:
-                        rename_legacy_group(stash, tag)
-                    except Exception as exc:
-                        stats['errors'] += 1
-                        report.issue('rename occurrence groups', '', '', exc,
-                            app.services.safe_error(exc, api_key=app.STASH_API_KEY))
-                        break
-                    stats['occurrence_groups_renamed'] += 1
-                    report.write(f"{'[DRY] ' if stash.dry_run else ''}Rename tag {tag['id']}: {tag['name']!r} -> {name!r}.")
-                    report.watch_counts(stats)
-                    report.record_progress()
-        finally:
-            stash.close()
-    report.finish('Rename occurrence groups' + (' (planned)' if app.DRY_RUN else ''), stats)
-    return int(bool(stats['errors']))
-
-
 def run_backfill(app, args):
     """Repair group membership on existing owned markers, without source replay."""
     from tqdm import tqdm
