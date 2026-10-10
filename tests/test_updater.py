@@ -54,6 +54,114 @@ class Remote(updater.GitHub):
         pytest.fail(f"Unexpected API request: {endpoint}")
 
 
+@pytest.mark.parametrize('name', ['LICENSE', 'THIRD_PARTY_NOTICES.md'])
+def test_license_files_install_update_and_protect_local_edits(tmp_path, name):
+    remote = Remote()
+    remote.files[name] = b'license version one\n'
+    assert updater.update(tmp_path, remote) == 0
+    assert (tmp_path/name).read_bytes() == remote.files[name]
+    remote.files[name] = b'license version two\n'
+    remote.commit = 'c' * 40
+    assert updater.update(tmp_path, remote) == 0
+    assert (tmp_path/name).read_bytes() == remote.files[name]
+    (tmp_path/name).write_bytes(b'local edit\n')
+    remote.files[name] = b'license version three\n'
+    plan = updater.plan_update(tmp_path, updater.load_state(tmp_path), remote.snapshot())
+    assert name in plan.conflicts
+    assert (tmp_path/name).read_bytes() == b'local edit\n'
+
+
+@pytest.mark.parametrize('name', sorted(updater.REQUIREMENT_PROFILES))
+def test_dependency_profile_changes_are_named_without_downloading(tmp_path, capsys, name):
+    remote = Remote()
+    remote.files.update({profile: b'package==1\n' for profile in updater.REQUIREMENT_PROFILES})
+    installed(tmp_path, remote)
+    state = updater.load_state(tmp_path)
+    remote.files[name] = b'package==2\n'
+    version = remote.snapshot()
+    plan = updater.plan_update(tmp_path, state, version)
+    updater.describe_plan(state, version, plan)
+    output = capsys.readouterr().out
+    assert name + ' changed' in output
+    assert not any(action.path in updater.REQUIREMENT_PROFILES for action in plan.actions)
+    assert not any(call.startswith('git/blobs/') for call in remote.calls)
+    capsys.readouterr()
+    updater.describe_plan(plan.next_state, version, updater.plan_update(tmp_path, plan.next_state, version))
+    assert 'Review dependencies manually' not in capsys.readouterr().out
+
+
+def test_legacy_requirements_history_preserves_managed_file_baselines(tmp_path):
+    remote = Remote()
+    installed(tmp_path, remote)
+    state = updater.load_state(tmp_path)
+    state.pop('requirement_profiles', None)
+    updater.atomic_write(tmp_path/updater.STATE, updater.json_bytes(state))
+    migrated = updater.load_state(tmp_path)
+    assert migrated['baseline'] == state['baseline']
+    assert migrated['requirement_profiles'] == {'requirements.txt': state['requirements']}
+
+
+@pytest.mark.parametrize('failure', ['download', 'compile', 'plan', 'worker', 'journal'])
+def test_failed_prejournal_preparation_leaves_no_owned_staging(tmp_path, monkeypatch, failure):
+    remote = Remote()
+    if failure == 'compile':
+        remote.files['stash_ai.py'] = b'not valid python !!!'
+    version = remote.snapshot()
+    plan = updater.plan_update(tmp_path, updater.load_state(tmp_path), version)
+    original_blob, original_write = remote.blob, updater.atomic_write
+    calls = []
+    def blob(sha):
+        calls.append(sha)
+        if failure == 'download' and len(calls) == 2:
+            raise updater.UpdateError('download failed')
+        return original_blob(sha)
+    def write(path, data, *args, **kwargs):
+        if ((failure == 'plan' and path.name == 'plan.json') or
+                (failure == 'worker' and path.name == 'worker.py') or
+                (failure == 'journal' and path == tmp_path/updater.JOURNAL)):
+            raise OSError('stage failed')
+        return original_write(path, data, *args, **kwargs)
+    monkeypatch.setattr(remote, 'blob', blob)
+    monkeypatch.setattr(updater, 'atomic_write', write)
+    with pytest.raises((OSError, updater.UpdateError)):
+        updater.prepare(tmp_path, plan, remote)
+    assert not (tmp_path/updater.JOURNAL).exists()
+    assert not list((tmp_path/updater.META/'transactions').iterdir())
+    assert not (tmp_path/'stash_ai.py').exists()
+
+
+def test_recovery_discards_only_marked_abandoned_preparations(tmp_path):
+    parent = tmp_path/updater.META/'transactions'
+    abandoned, backup = parent/('a' * 32), parent/('b' * 32)
+    abandoned.mkdir(parents=True)
+    backup.mkdir()
+    updater.atomic_write(abandoned/updater.PREPARING,
+                         updater.json_bytes({'format': 1, 'id': abandoned.name}))
+    (abandoned/'new-0').write_bytes(b'partial')
+    (backup/'old-0').write_bytes(b'committed backup')
+    assert updater.recover(tmp_path) == 0
+    assert not abandoned.exists()
+    assert (backup/'old-0').read_bytes() == b'committed backup'
+
+
+def test_preparation_failure_after_journal_publish_retains_recovery(tmp_path, monkeypatch):
+    remote = Remote()
+    plan = updater.plan_update(tmp_path, updater.load_state(tmp_path), remote.snapshot())
+    original = updater.journal_write
+    def journal(*args):
+        original(*args)
+        raise OSError('failure after journal publish')
+    monkeypatch.setattr(updater, 'journal_write', journal)
+    with pytest.raises(OSError, match='after journal'):
+        updater.prepare(tmp_path, plan, remote)
+    assert (tmp_path/updater.JOURNAL).exists()
+    transaction = updater.UpdateTransaction.load(tmp_path)
+    assert transaction.directory.exists()
+    assert updater.recover(tmp_path) == 0
+    assert not (tmp_path/updater.JOURNAL).exists()
+    assert not (tmp_path/'stash_ai.py').exists()
+
+
 def installed(root, remote):
     version = remote.snapshot()
     for name in version.files:
@@ -61,7 +169,8 @@ def installed(root, remote):
         (root / name).write_bytes(remote.files[name])
     updater.atomic_write(root / updater.STATE, updater.json_bytes({
         "format": 1, "commit": version.commit, "baseline": version.files,
-        "upstream": version.files, "requirements": version.requirements}))
+        "upstream": version.files, "requirements": version.requirements,
+        "requirement_profiles": version.requirement_profiles}))
     remote.calls.clear()
 
 

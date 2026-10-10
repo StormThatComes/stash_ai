@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import atexit
 import base64
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from enum import StrEnum
 import hashlib
 import json
@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import re
 import runpy
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -33,6 +34,8 @@ JOURNAL = META + "/journal.json"
 LOCK = ".stash-ai.install.lock"
 MAX_FILE_BYTES = 16 * 1024 * 1024
 SHA = re.compile(r"[0-9a-f]{40}\Z")
+REQUIREMENT_PROFILES = frozenset({'requirements.txt', 'requirements-cpu.txt', 'requirements-gpu.txt'})
+PREPARING = 'preparing.json'
 
 
 class UpdateError(RuntimeError):
@@ -44,6 +47,7 @@ class RemoteSnapshot:
     commit: str
     files: dict[str, str]
     requirements: str | None
+    requirement_profiles: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -79,9 +83,9 @@ class Phase(StrEnum):
 
 
 def allowed(name):
-    """Install entry points, package Python files and root YAML configuration."""
+    """Install application code/configuration and the distribution's licenses."""
     return bool(re.fullmatch(
-        r"(?:stash_ai\.py|update_stash_ai\.py|[A-Za-z0-9][A-Za-z0-9_.-]*\.yml|"
+        r"(?:LICENSE|THIRD_PARTY_NOTICES\.md|stash_ai\.py|update_stash_ai\.py|[A-Za-z0-9][A-Za-z0-9_.-]*\.yml|"
         r"stash_ai/(?:[A-Za-z_][A-Za-z0-9_]*/)*[A-Za-z_][A-Za-z0-9_]*\.py)", name))
 
 
@@ -296,23 +300,24 @@ class GitHub:
             tree = self.get("git/trees/" + tree_sha + "?recursive=1")
             if tree.get("truncated") or not isinstance(tree.get("tree"), list):
                 raise ValueError
-            files, requirements = {}, None
+            files, profiles = {}, {}
             for entry in tree["tree"]:
                 name = entry["path"]
-                if name == "requirements.txt":
-                    requirements = entry["sha"]  # Metadata only; never download this file.
-                if not allowed(name):
+                if not allowed(name) and name not in REQUIREMENT_PROFILES:
                     continue
                 if (entry["type"] != "blob" or entry["mode"] not in ("100644", "100755")
                         or not SHA.fullmatch(entry["sha"])
                         or not 0 <= entry["size"] <= MAX_FILE_BYTES):
                     raise ValueError
+                if name in REQUIREMENT_PROFILES:
+                    profiles[name] = entry['sha']  # Metadata only; never download/install packages.
+                    continue
                 if name.casefold() in {n.casefold() for n in files}:
                     raise ValueError
                 files[name] = entry["sha"]
             if not REQUIRED_FILES.issubset(files):
                 raise UpdateError("main does not contain the complete application package and updater.")
-            return RemoteSnapshot(sha, files, requirements)
+            return RemoteSnapshot(sha, files, profiles.get('requirements.txt'), profiles)
         except (KeyError, TypeError, ValueError):
             raise UpdateError("Invalid or incomplete GitHub file tree; refusing partial installation.") from None
 
@@ -332,7 +337,8 @@ class GitHub:
 def load_state(root):
     state = read_json(safe_path(root, STATE))
     if state is None:
-        return {"format": 1, "commit": None, "baseline": {}, "upstream": {}, "requirements": None}
+        return {"format": 1, "commit": None, "baseline": {}, "upstream": {},
+                "requirements": None, "requirement_profiles": {}}
     try:
         for key in ("baseline", "upstream"):
             if not isinstance(state[key], dict):
@@ -341,6 +347,12 @@ def load_state(root):
                 if not allowed(name) or not SHA.fullmatch(sha):
                     raise ValueError
         if not SHA.fullmatch(state["commit"]):
+            raise ValueError
+        state.setdefault('requirement_profiles',
+            {'requirements.txt': state['requirements']} if state.get('requirements') else {})
+        if (not isinstance(state['requirement_profiles'], dict) or
+                any(name not in REQUIREMENT_PROFILES or not isinstance(sha, str) or not SHA.fullmatch(sha)
+                    for name, sha in state['requirement_profiles'].items())):
             raise ValueError
     except (KeyError, TypeError, ValueError):
         raise UpdateError("Invalid installed-file history; refusing to overwrite local files. " + LAYOUT_BRIDGE_HINT) from None
@@ -371,7 +383,7 @@ def plan_update(root, state, snapshot, *, overwrite_configs=False, force_code=Fa
                 else:
                     actions.append(FileChange(incoming, before, sha))
             continue
-        if modified and name.endswith(".py") and not force_code:
+        if modified and not name.endswith('.yml') and not force_code:
             conflicts.append(name)
             continue
         actions.append(FileChange(name, current, sha))
@@ -387,8 +399,12 @@ def plan_update(root, state, snapshot, *, overwrite_configs=False, force_code=Fa
                 continue
             actions.append(FileChange(name, current, None))
         baseline.pop(name, None)
+    profiles = dict(snapshot.requirement_profiles)
+    if snapshot.requirements is not None:
+        profiles.setdefault('requirements.txt', snapshot.requirements)
     next_state = {"format": 1, "commit": snapshot.commit, "baseline": baseline,
-                  "upstream": remote, "requirements": snapshot.requirements}
+                  "upstream": remote, "requirements": snapshot.requirements,
+                  "requirement_profiles": profiles}
     return UpdatePlan(tuple(actions), tuple(conflicts), tuple(kept), next_state)
 
 
@@ -408,10 +424,55 @@ def clear_bytecode(root, entries):
 
 
 def prepare(root, plan, client):
-    """Stage all downloads and backups before publishing the recovery journal."""
+    """Stage safely while the caller owns the exclusive installation lock."""
+    discard_abandoned_preparations(root)
     identity = uuid.uuid4().hex
     directory = safe_path(root, META + "/transactions/" + identity)
     directory.mkdir(parents=True)
+    try:
+        atomic_write(directory / PREPARING, json_bytes({'format': 1, 'id': identity}))
+        stage_files(root, plan, client, directory)
+        journal_write(root, identity, Phase.PREPARED)
+        (directory / PREPARING).unlink()
+        sync_dir(directory)
+        return PreparedUpdate(identity, directory)
+    except BaseException as primary:
+        try:
+            journal = read_json(safe_path(root, JOURNAL))
+            if journal is None or journal.get('id') != identity:
+                shutil.rmtree(directory)
+                sync_dir(directory.parent)
+        except BaseException as secondary:
+            primary.add_note(f'Preparation cleanup also failed: {type(secondary).__name__}: {secondary}')
+        raise
+
+
+def discard_abandoned_preparations(root):
+    """Remove marked pre-journal staging; retain active transactions/backups."""
+    journal = read_json(safe_path(root, JOURNAL))
+    active = journal.get('id') if journal is not None else None
+    parent = safe_path(root, META + '/transactions')
+    removed = 0
+    if not parent.exists():
+        return removed
+    for directory in parent.iterdir():
+        if not re.fullmatch(r'[0-9a-f]{32}', directory.name) or directory.name == active:
+            continue
+        directory = safe_path(root, directory.relative_to(root).as_posix())
+        marker = read_json(safe_path(root, (directory / PREPARING).relative_to(root).as_posix()))
+        if marker is None:
+            continue
+        if marker.get('id') != directory.name:
+            raise UpdateError('Invalid preparation ownership marker; staging was retained.')
+        shutil.rmtree(directory)
+        removed += 1
+    if removed:
+        sync_dir(parent)
+    return removed
+
+
+def stage_files(root, plan, client, directory):
+    """Write verified downloads and backups without publishing a journal."""
     entries = []
     # Updater last among code files; installed-version metadata last overall.
     ordered = sorted(plan.actions, key=lambda entry: entry.path == UPDATER)
@@ -441,8 +502,6 @@ def prepare(root, plan, client):
     # The helper is the currently trusted updater, with no application imports.
     atomic_write(directory / "worker.py", Path(__file__).read_bytes())
     sync_dir(directory.parent)
-    journal_write(root, identity, Phase.PREPARED)
-    return PreparedUpdate(identity, directory)
 
 
 def transaction_entries(root, plan):
@@ -560,6 +619,7 @@ def finish_journal(root):
 def apply_transaction(root, identity):
     with InstallationLock(root, exclusive=True):
         transaction = UpdateTransaction.load(root, identity)
+        (transaction.directory / PREPARING).unlink(missing_ok=True)
         transaction.apply()
         print(f"Update installed. Backups: {transaction.directory}", flush=True)
     return 0
@@ -567,10 +627,14 @@ def apply_transaction(root, identity):
 
 def recover(root):
     with InstallationLock(root, exclusive=True):
+        removed = discard_abandoned_preparations(root)
+        if removed:
+            print(f'Discarded {removed} abandoned preparations. Application files were not changed.')
         if not safe_path(root, JOURNAL).exists():
             print("No incomplete update.")
             return 0
         transaction = UpdateTransaction.load(root)
+        (transaction.directory / PREPARING).unlink(missing_ok=True)
         if transaction.phase == Phase.COMMITTED:
             finish_journal(root)
             print("Completed update finalized.")
@@ -592,8 +656,11 @@ def describe_plan(state, snapshot, plan):
         print(f"KEEP local configuration: {name}; upstream proposal: {name}.incoming")
     for name in plan.conflicts:
         print(f"CONFLICT {name}")
-    if snapshot.requirements != state.get("requirements"):
-        print("requirements.txt changed or has no recorded baseline. Review dependencies manually; "
+    previous = state.get('requirement_profiles', {})
+    current = plan.next_state['requirement_profiles']
+    changed = sorted(name for name in previous.keys() | current.keys() if previous.get(name) != current.get(name))
+    if changed:
+        print(', '.join(changed) + " changed or has no recorded baseline. Review dependencies manually; "
               "the updater does not download requirements or run pip.")
     if not state["commit"]:
         print("First adoption: stop any application started before updater support was installed.")
@@ -625,6 +692,8 @@ def run_helper(root, prepared):
 def update(root, client, *, check=False, dry_run=False, overwrite_configs=False, force_code=False):
     with InstallationLock(root, exclusive=not (check or dry_run)):
         require_complete(root)
+        if not (check or dry_run):
+            discard_abandoned_preparations(root)
         state = load_state(root)
         snapshot = client.snapshot()
         plan = plan_update(root, state, snapshot,
@@ -634,7 +703,7 @@ def update(root, client, *, check=False, dry_run=False, overwrite_configs=False,
             print("Preview only: no application, configuration or updater-state writes.")
             return 2 if plan.conflicts else 0
         if plan.conflicts:
-            raise UpdateError("Local or untracked Python files require --force-code; "
+            raise UpdateError("Local or untracked application files require --force-code; "
                               "edited .incoming proposals must be moved aside first. No files installed.")
         if not plan.actions and state == plan.next_state:
             print("Already up to date.")
@@ -653,7 +722,7 @@ def build_parser():
     mode.add_argument("--recover", action="store_true", help="Recover an interrupted installation, offline.")
     mode.add_argument("--_apply", help=argparse.SUPPRESS)
     parser.add_argument("--overwrite-configs", action="store_true", help="Replace local YAML files, keeping backups.")
-    parser.add_argument("--force-code", action="store_true", help="Replace modified/untracked Python files, keeping backups.")
+    parser.add_argument("--force-code", action="store_true", help="Replace modified/untracked application files, keeping backups.")
     return parser
 
 
