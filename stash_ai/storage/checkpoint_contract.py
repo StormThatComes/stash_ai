@@ -30,6 +30,26 @@ def registered_contract(db, scope, scene, model, checkpoint, *, table='inference
     return None
 
 
+class MalformedCheckpointChunk(ValueError):
+    """Malformed frame payload already reported by the state payload validator."""
+
+
+def validate_chunk_prefix(chunks, processed):
+    """Check a complete sparse prefix in O(one chunk) memory."""
+    from stash_ai.db.payloads import valid_frames
+    previous, last_frame = 0, None
+    for end, chunk in chunks:
+        if not valid_frames(chunk, checkpoint=True, previous=last_frame):
+            raise MalformedCheckpointChunk('Invalid saved checkpoint frame data.')
+        if type(end) is not int or end != previous + len(chunk) or end > processed:
+            raise ValueError('Invalid checkpoint frame chunk progress.')
+        if chunk:
+            last_frame = chunk[-1]
+        previous = end
+    if previous != processed:
+        raise ValueError('Incomplete checkpoint frame prefix; use --restart.')
+
+
 def validate_chunks(chunks, processed):
     from stash_ai.db.payloads import valid_frames
     frames, previous, last_frame = [], 0, None
