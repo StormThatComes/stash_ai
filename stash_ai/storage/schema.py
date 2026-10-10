@@ -123,6 +123,52 @@ TRIGGERS = frozenset(
        for event in ('insert', 'update', 'delete')])
 
 
+
+def _trigger_sql():
+    """Expected state triggers shared by validation and offline maintenance."""
+    definitions = {
+        'results_delete_threshold': (
+            'CREATE TRIGGER results_delete_threshold AFTER DELETE ON results BEGIN '
+            'DELETE FROM result_thresholds WHERE scope=OLD.scope AND scene=OLD.scene '
+            'AND model=OLD.model AND kind=OLD.kind; END')
+    }
+    for event, rows in (('INSERT', ('NEW',)), ('UPDATE', ('OLD', 'NEW')),
+                        ('DELETE', ('OLD',))):
+        body = ''.join(
+            f'DELETE FROM result_metadata WHERE scope={row}.scope AND scene={row}.scene '
+            f'AND model={row}.model AND kind={row}.kind;' for row in rows)
+        name = f'results_metadata_{event.lower()}'
+        definitions[name] = f'CREATE TRIGGER {name} AFTER {event} ON results BEGIN {body} END'
+    for table in MERGE_INVALIDATING_TABLES:
+        for event, row in (('INSERT', 'NEW'), ('UPDATE', 'NEW'), ('DELETE', 'OLD')):
+            name = f'perf_{table}_{event.lower()}'
+            definitions[name] = (
+                f'CREATE TRIGGER {name} AFTER {event} ON {table} BEGIN '
+                f'DELETE FROM merge_checks WHERE scope={row}.scope AND scene={row}.scene; END')
+    for event, row in (('INSERT', 'NEW'), ('UPDATE', 'NEW'), ('DELETE', 'OLD')):
+        name = f'perf_cleanup_{event.lower()}'
+        definitions[name] = (
+            f'CREATE TRIGGER {name} AFTER {event} ON cleanup_state BEGIN '
+            f'DELETE FROM merge_checks WHERE scope={row}.scope; END')
+    return definitions
+
+
+def _normal_trigger(sql):
+    return ''.join((sql or '').lower().split()).replace('ifnotexists', '').rstrip(';')
+
+
+def repair_trigger_definitions(db, names=None):
+    """Rebuild only changed triggers under the caller's explicit migration lock."""
+    expected = _trigger_sql()
+    names = set(expected) if names is None else set(names) & set(expected)
+    existing = dict(db.execute("SELECT name,sql FROM sqlite_master WHERE type='trigger'"))
+    for name in sorted(names):
+        if _normal_trigger(existing.get(name)) == _normal_trigger(expected[name]):
+            continue
+        db.execute(f'DROP TRIGGER IF EXISTS main.{name}')
+        db.execute(expected[name])
+
+
 def shape_issues(db):
     """Current SQL requires these column orders, indexes and invalidators."""
     from collections import Counter
@@ -132,6 +178,11 @@ def shape_issues(db):
     for name in STATE_TABLES & tables:
         columns = [row[1] for row in db.execute(f'PRAGMA table_info({name})')]
         issues['invalid_table_columns'] += int(columns != COLUMNS[name].split())
-    issues['missing_state_triggers'] = len(TRIGGERS - {name for kind, name in objects if kind == 'trigger'})
+    existing = dict(db.execute("SELECT name,sql FROM sqlite_master WHERE type='trigger'"))
+    expected = _trigger_sql()
+    issues['missing_state_triggers'] = len(set(expected) - set(existing))
+    issues['invalid_state_triggers'] = sum(
+        _normal_trigger(existing[name]) != _normal_trigger(sql)
+        for name, sql in expected.items() if name in existing)
     issues['missing_state_indexes'] = int(('index', 'snapshots_pending_scope') not in objects)
     return +issues
