@@ -1,6 +1,9 @@
 """Temporal configuration, frozen snapshots and publication floors."""
 from dataclasses import asdict, dataclass, fields
 import math
+from contextvars import ContextVar
+from contextlib import contextmanager
+from functools import wraps
 
 
 @dataclass(frozen=True)
@@ -83,4 +86,68 @@ def build_options(app, records=()):
 
 def frozen_policy(options):
     """Replay only the current temporal engine with its saved settings."""
-    return TemporalPolicy.from_snapshot(options['policy'])
+    return _cached('policy', options['policy'], _POLICY_FIELDS, TemporalPolicy.from_snapshot)
+
+
+# Reuse validated immutable policy/settings values only within one operation.
+# Include types in keys: bool/int/float equality must never bypass type checks.
+
+_VALIDATED = ContextVar('validated_temporal_options', default=None)
+_POLICY_FIELDS = tuple(field.name for field in fields(TemporalPolicy))
+_MARKER_FIELDS = ('MARKER_MIN_HITS', 'MARKER_MAX_TAGS_PER_FRAME', 'MARKER_MERGE_GAP_SECONDS')
+
+
+def _key(values, names):
+    if not isinstance(values, dict) or set(values) != set(names):
+        return None
+    key = tuple((type(values[name]), values[name]) for name in names)
+    try:
+        hash(key)
+    except TypeError:
+        return None
+    return key
+
+
+def _cached(kind, values, names, validate):
+    cache, key = _VALIDATED.get(), _key(values, names)
+    key = (kind, key) if key is not None else None
+    if cache is not None and key is not None and key in cache:
+        return cache[key]
+    result = validate(values)
+    if cache is not None and key is not None and len(cache) < 128:
+        cache[key] = result
+    return result
+
+
+@contextmanager
+def validation_scope():
+    if _VALIDATED.get() is not None:
+        yield
+        return
+    token = _VALIDATED.set({})
+    try:
+        yield
+    finally:
+        _VALIDATED.reset(token)
+
+
+def validated_operation(operation):
+    @wraps(operation)
+    def wrapped(*args, **kwargs):
+        with validation_scope():
+            return operation(*args, **kwargs)
+    return wrapped
+
+
+def validate_marker_settings(settings):
+    def validate(values):
+        if not isinstance(values, dict) or set(values) != set(_MARKER_FIELDS):
+            raise ValueError('Incomplete frozen marker settings; run --db-update.')
+        for name in _MARKER_FIELDS[:2]:
+            if type(values[name]) is not int or values[name] < (1 if name == 'MARKER_MIN_HITS' else 0):
+                raise ValueError(f'Invalid frozen marker setting {name}.')
+        gap = values['MARKER_MERGE_GAP_SECONDS']
+        if type(gap) not in (int, float) or not 0 <= gap < float('inf'):
+            raise ValueError('Invalid frozen marker setting MARKER_MERGE_GAP_SECONDS.')
+        return tuple((name, values[name]) for name in _MARKER_FIELDS)
+    return _cached('marker_settings', settings, _MARKER_FIELDS, validate)
