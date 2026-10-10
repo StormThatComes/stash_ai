@@ -66,7 +66,10 @@ def check_checkpoints(db, tables, errors, progress=None, warnings=None):
                             'SELECT processed,data FROM checkpoint_frames '
                             'WHERE scope=? AND scene=? AND model=? ORDER BY processed',
                             (scope, scene, model)):
-                        yield end, decode(blob)
+                        try:
+                            yield end, decode(blob)
+                        except (KeyError, TypeError, ValueError, zlib.error) as exc:
+                            raise MalformedCheckpointChunk('Unreadable checkpoint chunk.') from exc
                 try:
                     validate_chunk_prefix(decoded_chunks(), processed)
                 except MalformedCheckpointChunk:
