@@ -9,6 +9,8 @@ from stash_ai.storage.codec import decode
 from tests.helpers.runtime import runtime as app
 from tests.helpers.evidence import empty_policies, inference_record
 
+pytestmark = pytest.mark.usefixtures('reset_merge')
+
 
 def test_explain_rejects_commit_after_final_snapshot_read(tmp_path, monkeypatch, capsys):
     from stash_ai.commands import explain
