@@ -27,12 +27,12 @@ class RunReport:
         self.workload = dict(verified_input_pairs=0, verified_cues=0, input_fingerprint=None)
         self._input_digest = 0
 
-    def record_input_workload(self, scene, model, cues, hashes):
+    def record_input_workload(self, scene, model, cues, hashes, *, snapshot=None):
         if self.profile is None:
             return
         from stash_ai.inference.input_identity import cue_manifest, frame_signature
         from stash_ai.signatures import digest
-        fingerprint = frame_signature(cue_manifest(cues), hashes)
+        fingerprint = snapshot.frame_signature if snapshot is not None else frame_signature(cue_manifest(cues), hashes)
         self._input_digest = (self._input_digest + int(digest([str(scene), model, fingerprint]), 16)) % (1 << 256)
         self.workload['verified_input_pairs'] += 1
         self.workload['verified_cues'] += len(cues)

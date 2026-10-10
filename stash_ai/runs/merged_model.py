@@ -276,7 +276,7 @@ class MergedModelRun:
             raise
         if input_plan is not None:
             input_plan.verified(scene_id, cues, media.hashes, snapshot=snapshot)
-        self.report.record_input_workload(scene_id, self.key, cues, media.hashes)
+        self.report.record_input_workload(scene_id, self.key, cues, media.hashes, snapshot=snapshot)
         verified(store, scene_id, self.key)
         context.observer.inputs(self.identity, cues, media.hashes, paths, snapshot=snapshot)
         with self.report.measure('inference_reuse_check', model=self.key):
@@ -388,7 +388,7 @@ class MergedModelRun:
             with self.report.measure('inference_output_capture', model=self.key, units=1, unit='scenes'):
                 outputs = merge_results.capture_outputs(
                     app, self.config, self.vocabulary, job.cues, predictions, frames, analysis,
-                    inference_signature=job.signature,
+                    inference_signature=job.signature, verified_input=job.verified_input,
                     frame_input_signature=(job.verified_input.frame_signature if job.verified_input is not None else
                                            frame_signature(cue_manifest(job.cues), job.media.hashes)))
             self._stage_next_scene(kinds, inputs, input_plan)

@@ -9,6 +9,25 @@ from .managed_stream import ManagedStream, StreamFailure as _Failure
 from stash_ai.runtime.cleanup import cleanup
 
 
+def prediction_scores(tagger, prepared):
+    """Validate once at the pipeline boundary, including external adapters.
+
+    Only the exact native types expose their internal raw calculation here;
+    subclasses and injected backends retain the checked public-adapter path.
+    Direct native backend calls also remain validated.
+    """
+    from stash_ai.backends.loader import JoyTagger
+    from stash_ai.backends.onnx import OnnxTagger
+    collated = isinstance(prepared, PreparedBatch)
+    if type(tagger) in (JoyTagger, OnnxTagger):
+        inputs = prepared.inputs if collated else tagger.collate_batch(prepared)
+        scores = tagger._predict_collated_scores(inputs, len(prepared))
+    else:
+        scores = (tagger.predict_collated_batch(prepared.inputs, prepared.count) if collated
+                  else tagger.predict_batch(prepared))
+    return validate_scores(scores, len(prepared), tagger.labels, tagger.settings.source.title)
+
+
 class BatchPredictions:
     """Start GPU production now; consume/checkpoint CPU results later.
 
@@ -63,11 +82,7 @@ class BatchPredictions:
                     for prepared, batch_cues in batches:
                         self.cancellation.check()
                         with self.measure('inference_batch', len(prepared)):
-                            scores = (self.tagger.predict_collated_batch(prepared.inputs, prepared.count)
-                                      if isinstance(prepared, PreparedBatch)
-                                      else self.tagger.predict_batch(prepared))
-                            result = validate_scores(scores, len(prepared), self.tagger.labels,
-                                                     self.tagger.settings.source.title)
+                            result = prediction_scores(self.tagger, prepared)
                         self.cancellation.check()
                         self._send((result, batch_cues))
         except BaseException as error:
@@ -102,6 +117,8 @@ def predicted_batches(app, tagger, stash, paths, cues, *, prefetch=0,
                       prepared_inputs=None, transform_executor=None, result_prefetch=32,
                       on_start=None):
     """Lazy compatibility iterator; prefetch=0 keeps caller-owned inference."""
+    if type(prefetch) is not int or not 0 <= prefetch <= 128:
+        raise ValueError('prefetch must be an integer in 0..128.')
     if prefetch:
         with closing(BatchPredictions(app, tagger, stash, paths, cues, prefetch=prefetch,
                                      prepare_workers=prepare_workers, report=report,
@@ -120,7 +137,5 @@ def predicted_batches(app, tagger, stash, paths, cues, *, prefetch=0,
                                     units=len(prepared), unit='frames')
                      if report is not None else nullcontext())
             with timer:
-                scores = (tagger.predict_collated_batch(prepared.inputs, prepared.count)
-                          if isinstance(prepared, PreparedBatch) else tagger.predict_batch(prepared))
-                result = validate_scores(scores, len(prepared), tagger.labels, tagger.settings.source.title)
+                result = prediction_scores(tagger, prepared)
             yield result, batch_cues

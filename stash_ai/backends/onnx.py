@@ -77,8 +77,12 @@ class OnnxTagger:
         return feed
 
     def predict_collated_batch(self, feed: dict[str, Any], count: int) -> Any:
-        import numpy as np
         from stash_ai.models import validate_scores
+        return validate_scores(self._predict_collated_scores(feed, count), count,
+                               self.labels, self.settings.source.title)
+
+    def _predict_collated_scores(self, feed: dict[str, Any], count: int) -> Any:
+        import numpy as np
 
         raw = np.asarray(
             self.session.run([self.output_name], feed)[0],
@@ -96,12 +100,7 @@ class OnnxTagger:
             raw = np.where(raw >= 0, 1.0 / (1.0 + exp), exp / (1.0 + exp))
         if self.output_indices is not None:
             raw = raw[:, self.output_indices]
-        return validate_scores(
-            raw[:count],
-            count,
-            self.labels,
-            self.settings.source.title,
-        )
+        return raw[:count]
 
     def close(self) -> None:
         self.session = None

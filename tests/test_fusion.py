@@ -291,11 +291,26 @@ def test_shared_merge_dry_run_and_extra_explanation(pipeline,monkeypatch,tmp_pat
     assert app.main([*args,'--merge-only','--dry-run'])==0
     assert (p.path.read_bytes(),p.stash.scene)==expected
     capsys.readouterr()
+    from stash_ai.commands import explain as explain_command
+    original_union = explain_command.merge_intervals.union_intervals
+    unions = []
+    def union(*args, **kwargs):
+        unions.append(True)
+        return original_union(*args, **kwargs)
+    monkeypatch.setattr(explain_command.merge_intervals, 'union_intervals', union)
+    original_records = merge_store.StateStore.records
+    borrowed = []
+    def records(store, *args, **kwargs):
+        borrowed.append(kwargs.get('borrow', False))
+        return original_records(store, *args, **kwargs)
+    monkeypatch.setattr(merge_store.StateStore, 'records', records)
     assert app.main([*args,'--explain-tag','ai:extra'])==0
     output=capsys.readouterr().out
     report=json.loads(output[output.index('[\n'):])[0]
     assert report['as_marker_extra'][0]['tag']=='ai:common'
     assert set(report['as_marker_extra'][0]['evidence']['source_evidence'])=={'dtq'}
+    assert unions == [True]
+    assert borrowed and all(borrowed)
 
 
 
@@ -329,5 +344,7 @@ def test_clipped_replay_closes_its_observation_cache(monkeypatch, fail_collectio
         assert span['extra_tags'] == ['detail']
         assert span['extra_support']['detail']['sources']['wd']['intervals'] == [[1, 3]]
     assert len(indexes) == 1
-    assert indexes[0].cache_keys == set() and indexes[0].timelines == {}
+    assert indexes[0].timelines == {}
+    assert not any(isinstance(key, tuple) and len(key) > 1 and key[1] is indexes[0].token
+                   for key in indexes[0].cache.entries)
     assert records == original
