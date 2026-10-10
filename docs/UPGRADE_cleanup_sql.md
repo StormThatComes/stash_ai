@@ -1,121 +1,130 @@
-# Cleanup SQL dużej kolekcji
+# SQL cleanup for large libraries
 
-Ten dokument opisuje bieżącą ścieżkę cleanupu dla dużych bibliotek.
+This guide describes the current cleanup path for large Stash libraries.
 
-## Strategie
+## Strategies
 
-`--cleanup-strategy auto` jest domyślne:
-- próbuje read-only `querySQL` na Stash 0.31.1+ i sprawdza wymagany SELECT/schema;
-- w przeciwnym razie przechodzi na odczyt scen przez GraphQL.
+`--cleanup-strategy auto` is the default:
+- tries read-only `querySQL` on Stash 0.31.1+ after validating the
+  required SELECT/schema;
+- otherwise falls back to GraphQL scene reads.
 
-`--cleanup-strategy sql` wymaga SQL do wyszukiwania kandydatów i kończy się
-błędem, jeśli nie może go użyć. `--cleanup-strategy scenes` wymusza GraphQL.
+`--cleanup-strategy sql` requires SQL candidate discovery and
+fails if it is unavailable. `--cleanup-strategy scenes` forces
+GraphQL discovery.
 
 ```powershell
 python .\stash_ai.py --models all --cleanup-only --cleanup-strategy sql --dry-run
 python .\stash_ai.py --models all --cleanup-only --cleanup-strategy sql
 ```
 
-SQL służy wyłącznie do odczytu. Aplikacja nie wykonuje bezpośrednich
-`DELETE`/`UPDATE` na bazie Stash; wszystkie zmiany przechodzą przez API Stash.
+SQL is **read-only**. The application never runs direct
+`DELETE`/`UPDATE` statements on Stash's database; every
+modification uses the Stash API.
 
-## Zakres cleanupu
+## Cleanup scope
 
-Dostępne tryby:
-- `--cleanup-only` — sceny i markery;
+Supported modes:
+- `--cleanup-only` — scene tags and markers;
 - `--cleanup-markers-only`;
 - `--cleanup-scene-tags-only`.
 
-Globalne wpisy z `scene_tag_exclusions.yml` mogą usuwać definicje zakazanych
-tagów wraz z ich relacjami. `marker_core_exclusions.yml` dotyczy wyłącznie
-zarządzanych core markerów i nie usuwa samej definicji tagu.
+Global entries in `scene_tag_exclusions.yml` may remove
+excluded tag definitions and their relationships.
+`marker_core_exclusions.yml` applies only to managed marker
+core labels and does not remove the tag definition.
 
-Tryby częściowe zachowują definicje tagów i modyfikują tylko odpowiedni rodzaj
-powiązania.
+Partial cleanup modes preserve tag definitions and only
+modify the selected relationship type.
 
-## Dlaczego SQL jest szybszy
+## Why SQL is faster
 
-Ścieżka SQL:
-- używa stałych, parametryzowanych SELECT-ów;
-- stronicuje po kluczu/ID zamiast COUNT+OFFSET;
-- pobiera ID kandydatów zamiast pełnych obiektów markerów;
-- nie tworzy list całej biblioteki w pamięci;
-- ponownie weryfikuje stan przed zapisem przez API.
+The SQL path:
+- uses fixed parameterized SELECT statements;
+- paginates by key/ID instead of COUNT+OFFSET;
+- fetches candidate IDs instead of full marker objects;
+- avoids retaining library-wide lists in memory;
+- re-verifies state before API writes.
 
-Dla reguł zależnych od modelu pobierane są tylko sceny wymagające dokładnego
-przeliczenia. Ich tagi i markery są odczytywane przez `SceneReader` paczkami
-po `SCENE_PAGE_SIZE` scen (domyślnie 100, maksymalnie 1000), bez osobnych zapytań
-GraphQL o każdą scenę ani odczytu ścieżek sprite/VTT. Kolejna paczka jest pobierana
-dopiero po przetworzeniu poprzedniej. Przed zapisem stan sceny jest odświeżany;
-sceny niewymagające zmian nie potrzebują dodatkowego odczytu.
+For model-dependent rules, only scenes requiring an exact
+recalculation are fetched. `SceneReader` loads their tags
+and markers in batches of `SCENE_PAGE_SIZE` scenes
+(default 100, maximum 1000), with no individual GraphQL
+request per scene and no sprite/VTT path reads.
+The next page is fetched only after processing the previous
+one. Scene state is refreshed before writes; unchanged
+scenes need no extra read.
 
-Jeśli SELECT snapshotów jest niedostępny lub zawiedzie w trakcie pracy,
-pozostałe odczyty przechodzą na GraphQL bez powtarzania przetworzonych scen.
-Dotyczy to również `--cleanup-strategy sql`: wymaga on SQL do wyszukiwania
-kandydatów, ale odczyt ich szczegółów ma niezależny fallback. Tryb `scenes`
-pozostaje ścieżką GraphQL. Dry-run stosuje te same paczki i zachowuje podgląd
-globalnych usunięć także podczas ponownego odczytu sceny.
+If snapshot SELECT is unavailable or fails mid-run, remaining
+detail reads fall back to GraphQL without reprocessing completed
+scenes. This also applies under `--cleanup-strategy sql`:
+SQL is mandatory for candidate discovery, but detail reads
+have their own fallback. `scenes` remains GraphQL-only.
+Dry-run uses the same batching and preserves previews of
+global removals even during scene re-reads.
 
-## Rozmiary partii
+## Batch sizes
 
-| Opcja | Domyślnie | Zakres |
+| Option | Default | Range |
 |---|---:|---:|
 | `--cleanup-page-size` | 2000 | 1–10000 |
 | `--cleanup-write-batch-size` | 200 | 1–1000 |
 
-Jeśli serwer długo wykonuje mutacje, można zmniejszyć write batch:
+If server mutations are slow, reduce the write batch:
 
 ```powershell
 python .\stash_ai.py --models all --cleanup-only --cleanup-strategy sql --cleanup-write-batch-size 50
 ```
 
-## Retry i wznowienie
+## Retries and resume
 
-Read-only GraphQL/SQL może zostać ponowiony po błędach przejściowych. Mutacje
-GraphQL nie są retry'owane automatycznie, ponieważ po timeoutcie serwer mógł już
-wykonać zapis.
+Read-only GraphQL/SQL can be retried after transient errors.
+GraphQL mutations are **not automatically retried** because
+Stash might have completed the write before a timeout.
 
-Po przerwaniu uruchom tę samą operację z tym samym stanem i polityką. Aplikacja
-ponownie odczyta aktualne obiekty i będzie kontynuować z tym, co pozostało.
+After interruption, rerun the same operation with the same
+state and policy. The application rereads current objects
+and continues with those still requiring changes.
 
-Jeśli zamiast wznowienia chcesz użyć zmienionych reguł:
+To abandon and apply new rules instead:
 
 ```powershell
 python .\stash_ai.py --models all --cleanup-only --abandon-pending
 ```
 
-Szczegóły: [UPGRADE_abandon_pending.md](UPGRADE_abandon_pending.md).
+See [abandoning interrupted operations](UPGRADE_abandon_pending.md).
 
 ## Dry-run
 
-`--dry-run` nie zapisuje do Stash ani źródłowej bazy. Dla wspieranej nowoczesnej
-bazy aplikacja używa read-only źródła i tymczasowego overlay SQLite, więc podgląd
-nie wymaga kopiowania całego pliku stanu do RAM.
+`--dry-run` writes neither to Stash nor to the source database.
+With a supported current database, the source is opened
+read-only and a temporary SQLite overlay stores the preview:
+the entire state file is not copied into RAM.
 
-## Pruning pustych definicji
+## Pruning unused tag definitions
 
-Po udanym cleanupie można usunąć nieużywane liście:
+After successful cleanup, prune unused leaf tags:
 
 ```powershell
 python .\stash_ai.py --models all --cleanup-only --prune-empty-tags
 ```
 
-Samodzielnie:
+Or run pruning alone:
 
 ```powershell
 python .\stash_ai.py --prune-empty-tags-only --dry-run
 ```
 
-Najpierw odrzucane są oczywiście używane tagi, a pełna weryfikacja liczników Stash
-jest wykonywana tylko dla pozostałych kandydatów.
+Obviously used tags are rejected first. Full Stash count
+verification is performed only for remaining candidates.
 
-## Diagnostyka
+## Diagnostics
 
-Podsumowanie cleanupu raportuje m.in. liczbę odczytów SQL, odczytanych wierszy,
-zapisów API i operacji obiekt–tag. Do porównań syntetycznych służy:
+Cleanup summaries include SQL-read counts, fetched rows,
+API writes and object/tag mutations. For synthetic comparisons:
 
 ```powershell
 python -m benchmarks.benchmark_cleanup_sql --markers 100000
 ```
 
-Benchmark nie łączy się z produkcyjnym Stash.
+The benchmark never connects to a production Stash instance.
