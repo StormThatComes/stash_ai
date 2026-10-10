@@ -82,7 +82,7 @@ def initialize(db):
         db.execute(f'DROP TRIGGER IF EXISTS main.{name}')
     db.execute(f'DROP TABLE IF EXISTS main.{TABLE}')
     db.execute(DDL)
-    db.execute('''INSERT INTO metadata_dirty SELECT r.scope,r.scene,r.model,r.kind
+    db.execute(f'''INSERT INTO metadata_dirty SELECT r.scope,r.scene,r.model,r.kind
         FROM results AS r LEFT JOIN result_metadata AS m USING(scope,scene,model,kind)
         WHERE m.format IS NULL OR m.format!=? OR NOT {_valid_metadata_sql('m')}''', (FORMAT,))
     for sql in definitions().values():
