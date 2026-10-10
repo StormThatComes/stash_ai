@@ -137,6 +137,8 @@ def build_parser(app) -> argparse.ArgumentParser:
                        help="Safely VACUUM the state DB while idle; refuses pending publication/cleanup plans. Honors --dry-run.")
     modes.add_argument("--anonymous-diagnostics", type=Path, metavar="NEW.json",
                        help="Write a local content-free developer diagnostics JSON from the state DB; never uploads it.")
+    modes.add_argument("--model-assets-report", type=Path, metavar="NEW.json",
+                       help="Write an offline model file health/sha256 report without loading weights or inference backends.")
     modes.add_argument("--model-report", type=Path, metavar="NEW.json",
                        help="Write an offline per-model utility and leave-one-model-out ablation report from saved evidence.")
     modes.add_argument("--tag-review-report", type=Path, metavar="NEW.json",
