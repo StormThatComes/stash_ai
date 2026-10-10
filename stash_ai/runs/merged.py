@@ -72,7 +72,8 @@ class MergedRun:
                 catalog_pruned = self._prune_outputs()
                 self._finalize_catalog_key(refresh=catalog_pruned)
             finally:
-                self.stash.close()
+                from stash_ai.runtime.cleanup import cleanup
+                cleanup([self.stash.close], report=self.report)
             store.initialization.report(self.report, self.stats)
             self.report.finish('Merged' + (' (planned)' if app.DRY_RUN else ''), self.stats, store.cache)
         return int(bool(self.stats["errors"]))

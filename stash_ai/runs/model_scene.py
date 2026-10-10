@@ -7,6 +7,13 @@ from stash_ai.runtime.cleanup import cleanup
 
 
 @dataclass
+class SceneContext:
+    scene: str
+    observer: Any
+    input_options: Any = None
+
+
+@dataclass
 class ModelScene:
     scene: str
     paths: dict
@@ -20,6 +27,7 @@ class ModelScene:
     batches: Any = None
     prepared: Any = None
     batch_usage: Any = None  # Read-only status accessor; never owns stream cleanup.
+    context: SceneContext | None = None
 
     def close(self):
         resources = {id(value): value for value in (self.batches, self.prepared) if value is not None}

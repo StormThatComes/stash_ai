@@ -32,8 +32,8 @@ class Cancellation:
         with self.lock:
             self.event.set()
             callbacks = tuple(self.callbacks)
-        for callback in callbacks:
-            callback()
+        from .cleanup import cleanup
+        cleanup(callbacks)
 
 
 def current():

@@ -73,6 +73,7 @@ class ReuseObserver:
         self.scene, self.current = str(scene), None
         self.checkpoint_signature = None
         self.action, self.reasons, self.details = 'infer', [], {}
+        self.previous_effective = {}
 
     def journal(self, operation, *args):
         if self.report.history is not None:
@@ -158,6 +159,13 @@ class ReuseObserver:
         self.emit('started')
 
     @observational
+    def before_reuse(self, kinds):
+        """Observe the pre-application overlay; raw capture metadata is stable."""
+        from stash_ai.storage.thresholds import effective
+        self.previous_effective = {kind: effective(row) for kind in kinds
+            if (row := self.store.result_metadata(self.scene, kind, self.model)) is not None}
+
+    @observational
     def reused(self, kinds, *, rethreshold=False, input_verified=True):
         self.action = 'rethreshold' if rethreshold else 'cache_reused'
         self.reasons = ['retained_evidence_covers_thresholds' if rethreshold else 'matching_completed_identity']
@@ -167,7 +175,11 @@ class ReuseObserver:
         if rethreshold:
             self.details['outputs'] = {kind: dict(stored_scene_threshold=meta['scene_threshold'],
                 stored_marker_threshold=meta['marker_threshold'], target_scene_threshold=self.config.scene_threshold,
-                target_marker_threshold=self.config.marker_threshold) for kind, meta in self.metas(kinds).items()}
+                target_marker_threshold=self.config.marker_threshold,
+                capture_threshold=meta['scene_threshold' if kind == 'scene' else 'marker_threshold'],
+                previous_effective_threshold=self.previous_effective.get(kind),
+                target_threshold=self.config.scene_threshold if kind == 'scene' else self.config.marker_threshold)
+                for kind, meta in self.metas(kinds).items()}
         self.emit('finished')
         self.remember(kinds)
 

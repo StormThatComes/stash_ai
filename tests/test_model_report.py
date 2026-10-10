@@ -351,6 +351,27 @@ def test_empty_parallel_report_does_not_open_database(tmp_path):
     assert not path.exists()
 
 
+def test_worker_preloads_only_assigned_chunk(monkeypatch):
+    from types import SimpleNamespace
+    preloaded, computed, opened = [], [], []
+    context = SimpleNamespace(store=SimpleNamespace(preload_sources=preloaded.append), close=lambda: None)
+    monkeypatch.setattr(model_workers, '_WORKER_CONTEXT', None)
+    monkeypatch.setattr(model_workers, '_PRELOAD', False)
+    def open_worker(*args, **kwargs):
+        opened.append(kwargs)
+        return context
+    monkeypatch.setattr(model_workers, 'open_read_worker', open_worker)
+    monkeypatch.setattr(model_workers, '_report_worker_scene', lambda scene: computed.append(scene) or scene)
+    model_workers._init_report_worker('db', 'scope', {}, {}, {}, 0, 1, True)
+    assert opened == [{'preload_sources': False}]
+    assert preloaded == []
+    assert model_workers._report_worker_scenes(('2', '5')) == ['2', '5']
+    assert preloaded == [('2', '5')] and computed == ['2', '5']
+    monkeypatch.setattr(model_workers, '_PRELOAD', False)
+    assert model_workers._report_worker_scenes(('8',)) == ['8']
+    assert preloaded == [('2', '5')]
+
+
 @pytest.mark.parametrize("preload", [False, True])
 def test_parallel_report_single_scene_fallback_is_read_only(tmp_path, preload):
     path = tmp_path / "state.sqlite3"

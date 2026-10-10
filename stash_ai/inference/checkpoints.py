@@ -32,6 +32,7 @@ class Checkpoint:
         self.saved_processed = 0
         self.resumed_frames = 0
         self.analysis = None
+        self._analysis_provider = None
         self.keep = keep
         self.aggregation_verified = False
         self.restore_reason, self.previous_signature, self.on_restore = 'missing', None, None
@@ -42,6 +43,7 @@ class Checkpoint:
 
     def restore(self):
         import numpy as np
+        self._analysis_provider = None
         row = self.store.connection.execute(
             "SELECT signature,processed,total,top_rows,top_scores FROM " + self.store.table('checkpoints') + " WHERE scope=? AND scene=? AND model=?",
             (self.store.scope, self.scene, self.model)).fetchone()
@@ -88,7 +90,7 @@ class Checkpoint:
         self._notify_restore()
         return processed, top, frames
 
-    def record(self, processed, top_scores, frames, analysis=None, *, scene_frames=None):
+    def record(self, processed, top_scores, frames, analysis=None, *, scene_frames=None, analysis_provider=None):
         self.processed, self.top_scores = processed, top_scores
         rows = [dict(start=f.cue.start, end=f.cue.end, tags=list(f.tags)) for f in frames]
         if scene_frames is not None:
@@ -99,7 +101,9 @@ class Checkpoint:
             for row, scene in zip(rows, scene_frames):
                 row['scene_tags'] = scene['tags']
         self.pending.extend(rows)
-        self.analysis = analysis
+        if analysis_provider is None:
+            self.analysis = analysis
+        self._analysis_provider = analysis_provider
         self.batches += 1
         if self.batches >= self.every:
             self.flush()
@@ -120,8 +124,8 @@ class Checkpoint:
             scores = compress(self.top_scores.astype("<f4", copy=False).tobytes(), report,
                               stage_name='checkpoint_compress')
             frames = encode(self.pending, report, stage_prefix='checkpoint') if self.pending else None
-            analysis = (encode(self.analysis, report, stage_prefix='checkpoint')
-                        if self.analysis is not None else None)
+            state = self._analysis_provider() if self._analysis_provider is not None else self.analysis
+            analysis = (encode(state, report, stage_prefix='checkpoint') if state is not None else None)
         db = self.store.connection
         with stage(report, 'checkpoint_sqlite_write'):
             with db:
@@ -137,4 +141,5 @@ class Checkpoint:
                     db.execute("INSERT INTO checkpoint_analysis VALUES (?,?,?,?) ON CONFLICT(scope,scene,model) "
                                "DO UPDATE SET data=excluded.data", (self.store.scope, self.scene, self.model, analysis))
         self.saved_processed = self.processed
+        self.analysis = state
         self.pending, self.batches = [], 0

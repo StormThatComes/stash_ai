@@ -123,30 +123,28 @@ class SceneInputPrefetch:
         with self.lock:
             self.closed = True
             streams = tuple(self.streams)
-        if self.token is not None:
-            self.token.cancel()
-        if self.pending is not None:
-            self.pending.cancel()
-        try:
-            for stream in streams:
-                stream.close()
-            # Cleanup is queued after the cancelled read, on its owner thread.
-        finally:
-            try:
-                self.executor.submit(self._close_reader).result()
-            finally:
-                try:
-                    if self.batch_executor is not None:
-                        self.batch_executor.shutdown(wait=True, cancel_futures=True)
-                finally:
-                    self.executor.shutdown(wait=True)
-                    self.executor = self.pending = self.token = self.scene = self.batch_executor = None
-                    self.prepared.clear()
-                    self.streams.clear()
-                    errors = tuple(self.batch_close_errors)
-                    self.batch_close_errors.clear()
-        if errors:
-            raise errors[0]
+        from stash_ai.runtime.cleanup import cleanup
+        def reset():
+            self.executor = self.pending = self.token = self.scene = self.batch_executor = None
+            self.prepared.clear()
+            self.streams.clear()
+            errors = tuple(self.batch_close_errors)
+            self.batch_close_errors.clear()
+            def fail(error):
+                raise error
+            cleanup([lambda error=error: fail(error) for error in errors])
+        # Cancellation is a distinct phase: every producer must be unblocked
+        # before any result()/executor shutdown waits for it.
+        cleanup([
+            lambda: self.token.cancel() if self.token is not None else None,
+            lambda: self.pending.cancel() if self.pending is not None else None,
+            *[stream.stop for stream in streams],
+            *[stream.close for stream in streams],
+            lambda: self.executor.submit(self._close_reader).result(),
+            lambda: self.batch_executor.shutdown(wait=True, cancel_futures=True) if self.batch_executor is not None else None,
+            lambda: self.executor.shutdown(wait=True),
+            reset,
+        ], report=self.report)
 
     def _close_reader(self):
         if self.reader is not None:
