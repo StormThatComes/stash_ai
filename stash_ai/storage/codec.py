@@ -9,6 +9,10 @@ from stash_ai.runtime.timing import stage
 _decoded = ContextVar('decoded_state_check_cache', default=None)
 
 
+class StateDecodeError(ValueError):
+    """Unreadable compressed state, distinguishable from evidence validation."""
+
+
 @contextmanager
 def decoded_cache(limit=32 * 2**20):
     """Bounded validated-read sharing, scoped only to a deep consistency check.
@@ -64,7 +68,7 @@ def decode(value, report=None):
         try:
             raw = zlib.decompress(value)
         except zlib.error as error:
-            raise ValueError('Invalid compressed state payload; run --db-check to identify affected evidence.') from error
+            raise StateDecodeError('Invalid compressed state payload; run --db-check to identify affected evidence.') from error
     with stage(report, 'state_json_decode'):
         result = json.loads(raw)
     if report is not None:

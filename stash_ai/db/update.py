@@ -5,6 +5,7 @@ from pathlib import Path
 import zlib
 
 from stash_ai.storage.database import StateDatabase
+from stash_ai.storage.codec import StateDecodeError
 from stash_ai.storage.schema import APPLICATION_ID, LATEST_SCHEMA_VERSION, require_supported_version, shape_issues
 
 from .common import connect_readonly, table_names
@@ -56,6 +57,6 @@ def _update_database(path, *, dry_run, progress, details):
         with StateDatabase(path, migration=True) as database:
             version = database.version
             details.update(migrate(database, progress=progress))
-    except (KeyError, TypeError, zlib.error) as exc:
+    except (KeyError, TypeError, zlib.error, StateDecodeError) as exc:
         raise ValueError('Saved state could not be migrated; inspect the database with --db-check.') from exc
     return version, LATEST_SCHEMA_VERSION
