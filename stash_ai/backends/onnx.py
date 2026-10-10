@@ -43,7 +43,21 @@ class OnnxTagger:
                 from stash_ai.runtime.cleanup import cleanup
                 cleanup([self.profile_directory.cleanup], report=self.report)
             raise
-        model_io = _inspect_model(self.session, settings, vocabulary)
+        try:
+            model_io = _inspect_model(self.session, settings, vocabulary)
+        except BaseException:
+            # Once opened, the session and tracing directory belong to us even
+            # when model IO inspection fails before construction completes.
+            from stash_ai.runtime.cleanup import cleanup
+            session, self.session = self.session, None
+            directory, self.profile_directory = self.profile_directory, None
+            callbacks = []
+            if callable(getattr(session, 'close', None)):
+                callbacks.append(session.close)
+            if directory is not None:
+                callbacks.append(directory.cleanup)
+            cleanup(callbacks, report=self.report)
+            raise
         self.node_profile_enabled = self.profile_directory is not None
         self.input_name = model_io.input_name
         self.output_name = model_io.output_name
