@@ -198,3 +198,11 @@ in-memory dictionary. These are controlled overhead measurements, not network
 or end-to-end inference speedups. Media bytes stay in RAM; only hashed URL keys
 and checksums spill. RunInputs also spills its manifest identity ledger, and
 closes both ledgers after producers have joined.
+
+`python -m benchmarks.benchmark_model_pipeline --iterations 20` checks identical
+WD RGB preprocessing, sparse/dense probability selection, and max aggregation
+against the earlier algorithms. It includes a tiny CPU JoyTag-shaped network to
+measure optional profiling overhead; these model-independent timings are not
+GPU or end-to-end inference claims. Probability floors are rounded upward to the
+first representable float32, cached across rows, with widened comparisons kept
+for other dtypes/ranges. Max aggregation keeps one running row; top-k is unchanged.

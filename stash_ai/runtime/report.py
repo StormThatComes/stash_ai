@@ -113,6 +113,9 @@ class RunReport:
         row.setdefault('execution_observed', False)
         if tagger is not None:
             row['execution_observed'] = True
+            profiled = getattr(tagger, 'report', None) is not None
+            row['backend_profiling'] = profiled
+            row['gpu_event_timing'] = ('enabled' if profiled else 'disabled') if str(getattr(tagger, 'device', '')).startswith('cuda') else 'not_applicable'
             row['effective_batch_size'] = tagger.batch_size
             if hasattr(tagger, 'device'):
                 row['effective_device'] = str(tagger.device)
@@ -126,6 +129,8 @@ class RunReport:
             session = getattr(tagger, 'session', None)
             if session is not None and hasattr(session, 'get_providers'):
                 row['providers'] = session.get_providers()
+                row['node_provider_observations'] = ('pending' if getattr(tagger, 'node_profile_enabled', False)
+                                                     else 'unavailable' if profiled else 'disabled')
 
     def request(self, operation, read):
         return self._timing.request(operation, read)

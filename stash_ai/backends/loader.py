@@ -12,6 +12,8 @@ from stash_ai.backends import vocabulary as assets
 class JoyTagger:
     def __init__(self, settings: models.ModelSettings, vocabulary: models.Vocabulary, prepare_image):
         import torch
+        from stash_ai.backends.profiling import active
+        self.report = active()
         self.settings, self.vocabulary = settings, vocabulary
         self.labels, self.batch_size = vocabulary.labels, settings.batch_size
         self.prepare_image = prepare_image
@@ -44,10 +46,26 @@ class JoyTagger:
     def _predict_collated_scores(self, prepared: Any, count: int) -> Any:
         import torch
         from contextlib import nullcontext
-        batch = prepared.to(self.device, non_blocking=self.device.type == "cuda")
+        from stash_ai.backends.profiling import gpu_events, record_gpu
+        from stash_ai.runtime.timing import stage
+        report = getattr(self, 'report', None)
+        events = gpu_events(report, torch) if self.device.type == 'cuda' else None
+        if events is not None:
+            report.optional('backend_event_record', events[0].record)
+        with stage(report, 'backend_input_transfer_enqueue'):
+            batch = prepared.to(self.device, non_blocking=self.device.type == "cuda")
+        if events is not None:
+            report.optional('backend_event_record', events[1].record)
         amp = torch.autocast("cuda", dtype=torch.float16) if self.device.type == "cuda" else nullcontext()
         with torch.inference_mode(), amp:
-            scores = self.model({"image": batch})["tags"].sigmoid().float().cpu().numpy()
+            with stage(report, 'backend_model_compute_enqueue'):
+                device_scores = self.model({"image": batch})["tags"].sigmoid().float()
+            if events is not None:
+                report.optional('backend_event_record', events[2].record)
+            with stage(report, 'backend_output_copy_and_wait'):
+                scores = device_scores.cpu().numpy()
+        if events is not None:
+            record_gpu(report, events, self.settings.source.key, report.work(), count)
         return scores
 
     def close(self) -> None:
