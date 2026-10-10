@@ -14,17 +14,24 @@ def run_mode(args, stash_url):
     try:
         if args.db_repair:
             from stash_ai.db.repair import repair_database
-            result = repair_database(args.state_db, dry_run=args.dry_run)
+            result = repair_database(args.state_db, dry_run=args.dry_run, show_progress=True)
             verb = 'Would repair' if args.dry_run else 'Repaired'
             print(f"{verb}: metadata={result['metadata_repaired']}, duplicates={result['duplicates_repaired']}; "
                   f"checked {result['results_checked']} result(s), {result['archives_checked']} archive(s).")
             return 0
         if args.db_update:
-            before, after = update_database(args.state_db, dry_run=args.dry_run)
+            details = {}
+            before, after = update_database(args.state_db, dry_run=args.dry_run,
+                                           show_progress=True, details=details)
             if args.dry_run:
                 print(f"DRY RUN: state DB schema v{before} -> v{after}; no migrations were run.")
-            elif before == after:
+                if before == after and not details['noop']:
+                    print('Required schema/data maintenance remains; run --db-update without --dry-run.')
+            elif details['noop']:
                 print(f"State DB schema is up to date: v{after}.")
+            elif before == after:
+                print(f"State DB maintenance completed: schema v{after}; "
+                      f"required repair={details['required_repair']}, metadata={details['metadata_repaired']}.")
             else:
                 print(f"State DB updated: schema v{before} -> v{after}.")
             return 0

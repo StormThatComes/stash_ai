@@ -55,6 +55,7 @@ def test_frame_bar_counts_partial_batches_even_without_retained_tags(pipeline, b
     assert app.main([*pipeline.args, '--prefetch-batches', str(prefetch)]) == 0
     scene_bar, frame_bar = bars[:2]
     assert scene_bar.pos == 0 and scene_bar.n == scene_bar.total == 1
+    assert 'processed=1' in scene_bar.postfix
     assert frame_bar.pos == -1 and frame_bar.desc == 'wd scene 1'
     assert frame_bar.initial == 0 and frame_bar.n == frame_bar.total == 10
     assert frame_bar.updates == [4, 4, 2]

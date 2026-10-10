@@ -1156,3 +1156,14 @@ Conflicting duplicates stop and roll back repair. Semantic corruption should be 
 with `--db-check`; a fast preflight cannot prove arbitrary BLOB contents. Both update and
 repair are offline and support `--dry-run`; repair preview uses a temporary SQLite copy.
 Neither command runs models, contacts Stash, or globally requests reinference.
+
+Repair spools canonical BLOB rewrites and signature replacements into a disk-backed
+temporary SQLite database with a bounded page cache. It scans each original archive
+record once and applies evidence, metadata and publication-reference changes in one
+transaction; interruption before commit rolls back the entire repair. Memory still needs to fit one
+decoded evidence/publication record. Temporary disk space must fit the rewritten BLOBs.
+
+CLI maintenance shows the active phase and scanned/written row counts. A current-schema
+update that restores missing metadata or completes a required data revision reports
+maintenance performed, rather than claiming that nothing needed doing. A complete
+no-op does not create a progress bar or start a full scan.

@@ -7,6 +7,7 @@ from threading import Lock, local
 from dataclasses import dataclass
 from stash_ai.storage.segments import FrozenDict, FrozenList
 import hashlib
+import json
 
 from stash_ai.inference import sprites
 from stash_ai.signatures import digest
@@ -20,12 +21,14 @@ class VerifiedInput:
     hashes: FrozenDict
     frame_signature: str
     cue_digest: str
+    legacy_cue_sha256: str
 
     @classmethod
     def capture(cls, cues, hashes):
         manifest = FrozenList(cue_manifest(cues))
         hashes = FrozenDict(hashes)
-        return cls(FrozenList(cues), manifest, hashes, frame_signature(manifest, hashes), digest(manifest))
+        legacy = hashlib.sha256(json.dumps(manifest, ensure_ascii=False).encode()).hexdigest()
+        return cls(FrozenList(cues), manifest, hashes, frame_signature(manifest, hashes), digest(manifest), legacy)
 
     def inference_signature(self, identity):
         return inference_signature(identity, self.manifest, self.hashes)
