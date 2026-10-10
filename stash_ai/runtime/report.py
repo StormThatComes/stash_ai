@@ -130,6 +130,9 @@ class RunReport:
     def request(self, operation, read):
         return self._timing.request(operation, read)
 
+    def bind_read(self, operation):
+        return self._timing.bind(operation)
+
     def response_size(self, size):
         self._timing.response_size(size)
 

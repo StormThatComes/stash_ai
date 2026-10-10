@@ -101,32 +101,51 @@ class StashTransport:
             return self._gql(query, variables)
 
     def _gql(self, query: str, variables: dict | None = None) -> dict:
+        from time import monotonic
+        from stash_ai.stash_api.deadlines import call_with_deadline, ReadDeadlineExceeded
         read = self._read_only(query, variables)
+        deadline = monotonic() + self._read_budget() if read else None
+        operation = lambda: self._gql_payload(query, variables, read=read, deadline=deadline)
+        if not read:
+            return operation()
+        if self.report is not None:
+            operation = self.report.bind_read(operation)
+        try:
+            return call_with_deadline(operation, deadline)
+        except (ReadDeadlineExceeded, KeyboardInterrupt):
+            self.api.close()
+            raise
+
+    def _gql_payload(self, query, variables, *, read, deadline):
         if self.dry_run and not read:
             raise RuntimeError("Internal error: mutation attempted during dry-run.")
-        from time import monotonic
         from stash_ai.stash_api.deadlines import call_with_deadline
         from stash_ai.runtime.timing import stage
         report = self.report
-        deadline = monotonic() + self._read_budget() if read else None
         response = self._request_response(lambda timeout: self.api.post(
             absolute_stash_url('graphql', self.url),
             json={'query': query, 'variables': variables or {}},
             timeout=timeout, allow_redirects=False, stream=read), read=read, deadline=deadline)
-        if report is not None:
-            report.response_size(len(response.content))
-        response.raise_for_status()
-        if 300 <= response.status_code < 400:
-            raise RuntimeError("Stash redirected GraphQL; configure STASH_URL to its final URL.")
-        with stage(report, 'stash_json_decode'):
-            payload = call_with_deadline(response.json, deadline) if read else response.json()
-        if payload.get("errors"):
-            raise RuntimeError("GraphQL: " + "; ".join(
-                error.get("message", "Unknown error") for error in payload["errors"]
-            ))
-        if not isinstance(payload.get("data"), dict):
-            raise RuntimeError("Stash returned no GraphQL data.")
-        return payload["data"]
+        try:
+            if report is not None:
+                report.response_size(len(response.content))
+            response.raise_for_status()
+            if 300 <= response.status_code < 400:
+                raise RuntimeError("Stash redirected GraphQL; configure STASH_URL to its final URL.")
+            with stage(report, 'stash_json_decode'):
+                payload = call_with_deadline(response.json, deadline) if read else response.json()
+            if payload.get("errors"):
+                raise RuntimeError("GraphQL: " + "; ".join(
+                    error.get("message", "Unknown error") for error in payload["errors"]
+                ))
+            if not isinstance(payload.get("data"), dict):
+                raise RuntimeError("Stash returned no GraphQL data.")
+            return payload["data"]
+        finally:
+            close = getattr(response, "close", None)
+            if close is not None:
+                from stash_ai.runtime.cleanup import cleanup
+                cleanup([close], report=report)
 
     def _read_budget(self):
         return self.request_timeout[1] if isinstance(self.request_timeout, tuple) else self.request_timeout
@@ -189,21 +208,38 @@ class StashTransport:
 
     def _get_media(self, url):
         from time import monotonic
+        from stash_ai.stash_api.deadlines import call_with_deadline, ReadDeadlineExceeded
         deadline = monotonic() + self._read_budget()
+        operation = lambda: self._media_payload(url, deadline)
+        if self.report is not None:
+            operation = self.report.bind_read(operation)
+        try:
+            return call_with_deadline(operation, deadline)
+        except (ReadDeadlineExceeded, KeyboardInterrupt):
+            self.media.close()
+            raise
+
+    def _media_payload(self, url, deadline):
         # ApiKey is a custom header; never forward it to another origin.
         for _ in range(6):
             if origin(url) != origin(self.url):
                 raise ValueError('Media URL uses a different Stash origin; check STASH_URL.')
             response = self._request_response(lambda timeout: self.media.get(
                 url, timeout=timeout, allow_redirects=False, stream=True), read=True, deadline=deadline, media=True)
-            if self.report is not None:
-                self.report.response_size(len(response.content))
-            if response.status_code in (301, 302, 303, 307, 308):
-                location = response.headers.get('Location')
-                if not location:
-                    raise RuntimeError('Media redirect has no Location header.')
-                url = urljoin(url, location)
-                continue
-            response.raise_for_status()
-            return response.content
+            try:
+                if self.report is not None:
+                    self.report.response_size(len(response.content))
+                if response.status_code in (301, 302, 303, 307, 308):
+                    location = response.headers.get('Location')
+                    if not location:
+                        raise RuntimeError('Media redirect has no Location header.')
+                    url = urljoin(url, location)
+                    continue
+                response.raise_for_status()
+                return response.content
+            finally:
+                close = getattr(response, "close", None)
+                if close is not None:
+                    from stash_ai.runtime.cleanup import cleanup
+                    cleanup([close], report=self.report)
         raise RuntimeError('Too many media redirects.')
