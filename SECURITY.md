@@ -2,27 +2,29 @@
 
 ## Stash API key
 
-`STASH_API_KEY` powinien pochodzić z environment lub lokalnego mechanizmu
-sekretów i nigdy nie powinien być commitowany do repozytorium.
+`STASH_API_KEY` should be provided through the environment or a
+local secret manager and **must never be committed to the repository**.
 
-Historyczne wersje zawierały fallback klucza API. Bieżący runtime pobiera klucz
-wyłącznie ze środowiska, z pustą wartością domyślną. Traktuj dawny klucz jako
-**skompromitowany**; wygeneruj nowy klucz i ustaw go jawnie:
+Historical versions contained a fallback API key. The current runtime
+reads it exclusively from the environment and defaults to an empty value.
+Treat the historical key as **compromised**: generate a new key
+and configure it explicitly:
 
 ```powershell
 $env:STASH_URL = "http://localhost:9999"
-$env:STASH_API_KEY = "<nowy-klucz>"
+$env:STASH_API_KEY = "<new-key>"
 ```
 
-Samo usunięcie fallbacku z bieżącej wersji kodu nie unieważnia sekretu obecnego
-w historii Git. Klucz należy zrotować po stronie Stash.
+Removing the fallback from current code does not revoke a secret
+that remains in Git history. Rotate the key in Stash itself.
 
-Klient pomija nagłówek `ApiKey`, gdy przekazana wartość jest pusta. Komunikaty
-błędów maskują jawnie przekazany klucz oraz typowe parametry tokenów w URL.
+The client omits the `ApiKey` header when the configured value is
+empty. Error messages redact explicitly supplied keys and common
+URL token query parameters.
 
 ## GitHub updater token
 
-`GH_TOKEN` / `GITHUB_TOKEN` powinien być fine-grained PAT ograniczonym do
-tego repozytorium i uprawnienia `Contents: read`. Updater nie zapisuje tokena
-do plików projektu i odrzuca przekierowania HTTP, aby nie przekazać credentiali
-innemu originowi.
+`GH_TOKEN` / `GITHUB_TOKEN` should be a fine-grained personal access
+token restricted to this repository and `Contents: read` permission.
+The updater does not write the token to project files and rejects
+HTTP redirects to avoid forwarding credentials to another origin.
