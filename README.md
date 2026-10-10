@@ -11,6 +11,21 @@ model predictions, and retains per-model provenance and confidence in a local
 SQLite database. Visual input comes exclusively from Stash VTT files and
 sprites; the application never opens video files.
 
+## License
+
+Stash AI's original source code is released under the
+[GNU General Public License v3.0 only](LICENSE) (`GPL-3.0-only`).
+
+You may use, modify, and redistribute it under the conditions of GPLv3.
+Distributing modified versions or covered derivative works requires
+providing the corresponding source code under GPLv3; private use does
+not require publishing changes.
+
+Third-party models and other upstream components retain their own
+licenses. In particular, DanbooruTagQuery uses the separate DINOv3
+License. See [Third-party notices](THIRD_PARTY_NOTICES.md) before
+redistributing model assets.
+
 ## Requirements
 
 - **Python 3.14.7** — the only supported and tested version;
