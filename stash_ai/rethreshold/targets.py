@@ -31,7 +31,7 @@ def iter_threshold_groups(store, scenes, settings, kinds, *, chunk=128):
                                       if (scene, setting.source.key, kind) in known)
                 if available:
                     targets.append((scene, setting, available))
-        yield targets
+        yield targets, len(group)
 
 
 def threshold_failure_reason(exc):
