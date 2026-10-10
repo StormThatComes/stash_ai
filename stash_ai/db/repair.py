@@ -5,6 +5,7 @@ import sqlite3
 import zlib
 
 from stash_ai.storage.database import StateDatabase
+from stash_ai.storage.codec import StateDecodeError
 from stash_ai.storage.schema import APPLICATION_ID, LATEST_SCHEMA_VERSION, shape_issues
 from .common import connect_readonly
 from .revisions import mark_completed
@@ -40,7 +41,7 @@ def _repair(db, progress):
         db.execute('BEGIN IMMEDIATE')
         try:
             result = migrate(db, metadata=True, progress=progress)
-        except (KeyError, TypeError, zlib.error) as exc:
+        except (KeyError, TypeError, zlib.error, StateDecodeError) as exc:
             raise ValueError('Saved evidence could not be repaired; inspect with --db-check.') from exc
         mark_completed(db)
     progress('committed', 1, 1)
