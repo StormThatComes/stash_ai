@@ -13,23 +13,22 @@ class PublishedRecords:
         self.indexes = {}
 
     def matching(self, kind, required, *, error):
-        key = kind
-        if key not in self.indexes:
-            from stash_ai.storage.archive import records as archived_records
-            def with_archive(output):
-                active = self.store.records(self.scene_id, output, borrow=True)
-                archive = archived_records(self.store, self.scene_id, output)
-                return {source: [*archive.get(source, []), *([active[source]] if source in active else [])]
-                        for source in archive.keys() | active.keys()}
-            records = with_archive(kind)
-            self.indexes[key] = {source: {marker_segment_signature(segment): segment for segment in segments}
-                                 for source, segments in records.items()}
+        from stash_ai.storage.archive import matching_record
         matching = {}
         for source, signature in required.items():
-            available = self.indexes[key].get(source, {})
-            if not isinstance(signature, str) or signature not in available:
+            if source not in SOURCES or not isinstance(signature, str) or not signature:
                 raise RuntimeError(error)
-            matching[source] = available[signature]
+            key = kind, source, signature
+            if key not in self.indexes:
+                active = self.store.model_record(self.scene_id, kind, source, borrow=True)
+                if active is not None and marker_segment_signature(active) == signature:
+                    record = active
+                else:
+                    record = matching_record(self.store, self.scene_id, kind, source, signature)
+                if record is None:
+                    raise RuntimeError(error)
+                self.indexes[key] = record
+            matching[source] = self.indexes[key]
         return matching
 
 

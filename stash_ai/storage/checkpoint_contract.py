@@ -32,13 +32,15 @@ def registered_contract(db, scope, scene, model, checkpoint, *, table='inference
 
 def validate_chunks(chunks, processed):
     from stash_ai.db.payloads import valid_frames
-    frames, previous = [], 0
+    frames, previous, last_frame = [], 0, None
     for end, chunk in chunks:
-        if (type(end) is not int or not valid_frames(chunk, checkpoint=True)
+        if (type(end) is not int or not valid_frames(chunk, checkpoint=True, previous=last_frame)
                 or end != previous + len(chunk) or end > processed):
             raise ValueError('Invalid checkpoint frame chunk progress.')
         frames.extend(chunk)
+        if chunk:
+            last_frame = chunk[-1]
         previous = end
-    if previous != processed or not valid_frames(frames, checkpoint=True):
+    if previous != processed:
         raise ValueError('Incomplete checkpoint frame prefix; use --restart.')
     return frames
