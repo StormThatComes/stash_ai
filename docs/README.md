@@ -1,35 +1,36 @@
-# Dokumentacja Stash AI
+# Stash AI documentation
 
-Dokumentacja jest podzielona na bieżące instrukcje użytkownika oraz historyczne
-artefakty pomiarowe.
+Documentation is organized into current user guides and historical
+measurement artifacts.
 
-## Bieżąca dokumentacja
+## Current documentation
 
-- [Szybki start i konfiguracja](../README.md)
-- [Aktualny podręcznik](README_multimodel.md)
-- [Granice modułów i odpowiedzialności klas](ARCHITECTURE.md)
-- [Cleanup SQL](UPGRADE_cleanup_sql.md)
-- [Wydajność i pamięć](UPGRADE_performance.md)
-- [Merge i szybka ścieżka](UPGRADE_merge.md)
-- [Wykluczenia i cleanup](UPGRADE_exclusions.md)
-- [Punkty Occurrence](UPGRADE_occurrences.md)
-- [Grupy markerów](UPGRADE_marker_groups.md)
-- [Porzucanie przerwanych operacji](UPGRADE_abandon_pending.md)
-- [Odbudowa nowej bazy](UPGRADE_db_init.md)
-- [Profilowanie merge](UPGRADE_diagnostics.md)
-- [Benchmarki](../benchmarks/README.md)
+- [Quick start and configuration](../README.md)
+- [Current user guide](README_multimodel.md)
+- [Module boundaries and class responsibilities](ARCHITECTURE.md)
+- [SQL cleanup](UPGRADE_cleanup_sql.md)
+- [Performance and memory](UPGRADE_performance.md)
+- [Merge and fast path](UPGRADE_merge.md)
+- [Exclusions and cleanup](UPGRADE_exclusions.md)
+- [Occurrence points](UPGRADE_occurrences.md)
+- [Marker groups](UPGRADE_marker_groups.md)
+- [Abandoning interrupted operations](UPGRADE_abandon_pending.md)
+- [Initializing a fresh database](UPGRADE_db_init.md)
+- [Merge diagnostics](UPGRADE_diagnostics.md)
+- [Benchmarks](../benchmarks/README.md)
 
-Nazwy plików `UPGRADE_*.md` są historyczne. Treść tych dokumentów opisuje
-aktualne zachowanie odpowiadających im funkcji, a nie instrukcję instalacji
-konkretnego starego wydania.
+The `UPGRADE_*.md` filenames are historical. Their contents document
+the current behavior of the corresponding features; they are not
+installation instructions for a particular old release.
 
-## Historyczne artefakty
+## Historical artifacts
 
-Pliki w [validation/](validation/README.md) oraz zachowane wyniki w
-`benchmarks/results/` dokumentują konkretne wcześniejsze pomiary. Mogą być
-przydatne do regresji, ale wartości czasu i liczby testów nie są bieżącą
-specyfikacją projektu.
+Files under [validation/](validation/README.md) and saved results in
+`benchmarks/results/` document specific earlier measurements. They can
+help with regression analysis, but historical timings and test counts
+are not the current project specification.
 
-Kod aplikacji jest w pakiecie `stash_ai/`. W katalogu głównym pozostają
-launchery `stash_ai.py`, `update_stash_ai.py`, YAML-e i domyślna baza
-`tagger_sources.sqlite3`. Updater nie pobiera dokumentacji, testów ani benchmarków.
+Application code lives in the `stash_ai/` package. Root-level files
+include the `stash_ai.py` and `update_stash_ai.py` launchers,
+YAML configuration, and default `tagger_sources.sqlite3` state database.
+The updater does not download documentation, tests, or benchmarks.
