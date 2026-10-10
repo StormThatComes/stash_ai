@@ -58,6 +58,16 @@ class _IntervalBucket:
         return [row[1] for row in sorted(rows, key=lambda row: row[0])]
 
 
+class _SmallIntervalBucket:
+    """Avoid tree and start-array allocations for tiny primary-tag groups."""
+    def __init__(self, rows):
+        self.rows = rows
+
+    def overlapping(self, interval, tolerance):
+        return [marker for _, marker in self.rows
+                if merge_intervals.overlaps(marker, interval, tolerance)]
+
+
 class MarkerIntervalIndex:
     """Query owned markers by primary ID (planning) or name (cleanup).
 
@@ -69,7 +79,8 @@ class MarkerIntervalIndex:
         for order, marker in enumerate(markers):
             primary = marker['primary_tag']['name'] if by_name else str(marker['primary_tag']['id'])
             grouped[primary].append((order, marker))
-        self.buckets = {primary: _IntervalBucket(rows) for primary, rows in grouped.items()}
+        self.buckets = {primary: (_SmallIntervalBucket(rows) if len(rows) <= 3 else _IntervalBucket(rows))
+                        for primary, rows in grouped.items()}
 
     def overlapping(self, primary, interval, tolerance=0):
         bucket = self.buckets.get(primary)
