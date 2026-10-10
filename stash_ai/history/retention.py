@@ -29,19 +29,28 @@ def prune(store, scope, *, keep_last=None, max_age_days=None, dry_run=True, now=
         ) SELECT id FROM finished WHERE (? IS NOT NULL AND position>?)
             OR (? IS NOT NULL AND julianday(finished_at)<julianday(?))"""
         parameters = (scope, keep_last, keep_last, cutoff, cutoff)
-        candidates = [row[0] for row in db.execute(selection + ' ORDER BY position', parameters)]
+        db.execute('CREATE TEMP TABLE IF NOT EXISTS retention_candidates (id TEXT PRIMARY KEY, position INTEGER)')
+        db.execute('DELETE FROM retention_candidates')
+        db.execute('INSERT INTO retention_candidates (id,position) ' +
+                   selection.replace('SELECT id FROM finished WHERE', 'SELECT id,position FROM finished WHERE'),
+                   parameters)
+        candidate_count = db.execute('SELECT COUNT(*) FROM retention_candidates').fetchone()[0]
+        examples = [row[0] for row in db.execute(
+            'SELECT id FROM retention_candidates ORDER BY position LIMIT 20')]
         finished_count = db.execute("SELECT COUNT(*) FROM runs WHERE scope=? AND status<>'running' "
                                     "AND finished_at IS NOT NULL", (scope,)).fetchone()[0]
-        decisions = db.execute('SELECT COUNT(*) FROM reuse_decisions WHERE run_id IN (' + selection + ')',
-                               parameters).fetchone()[0]
+        decisions = db.execute('SELECT COUNT(*) FROM reuse_decisions WHERE run_id IN '
+                               '(SELECT id FROM retention_candidates)').fetchone()[0]
         if not dry_run:
-            db.execute('DELETE FROM reuse_decisions WHERE run_id IN (' + selection + ')', parameters)
-            db.execute('DELETE FROM runs WHERE id IN (' + selection + ')', parameters)
+            db.execute('DELETE FROM reuse_decisions WHERE run_id IN (SELECT id FROM retention_candidates)')
+            db.execute('DELETE FROM runs WHERE id IN (SELECT id FROM retention_candidates)')
+            db.execute('DROP TABLE retention_candidates')
             db.commit()
         else:
             db.rollback()
-        return dict(dry_run=dry_run, candidate_runs=len(candidates), candidate_decisions=decisions,
-                    retained_finished_runs=finished_count-len(candidates), run_ids=candidates,
+        return dict(dry_run=dry_run, candidate_runs=candidate_count, candidate_decisions=decisions,
+                    retained_finished_runs=finished_count-candidate_count, run_ids=examples,
+                    run_ids_truncated=candidate_count > len(examples),
                     protected_active_runs=True, reuse_proofs_unchanged=True)
     except BaseException:
         db.rollback()
