@@ -1,95 +1,100 @@
-# Wydajność i pamięć
+# Performance and memory
 
-Bieżący pipeline jest zoptymalizowany pod sekwencyjną inferencję modeli i duży
-lokalny cache merge.
+The current pipeline is optimized for sequential
+model inference and a large local merge cache.
 
-## Domyślne limity
+## Default limits
 
-| Opcja | Domyślnie | Znaczenie |
+| Option | Default | Meaning |
 |---|---:|---|
-| `--ram-budget-gb` | 32 | cel pamięci całego procesu |
-| `--ram-cache-gb` | 24 | wspólny cache wyników, indeksów i mediów |
-| `--prepare-workers` | 4 | równoległe transformacje klatek na CPU |
-| `--checkpoint-batches` | 8 | zapis postępu co N przetworzonych batchy, liczba całkowita >= 1 |
-| `--prefetch-batches` | 4 | liczba przygotowanych batchy przed inferencją |
-| `--result-prefetch-batches` | 32 | liczba wyników CPU buforowanych podczas obróbki i zapisu, 1–128 |
+| `--ram-budget-gb` | 32 | Whole-process memory target |
+| `--ram-cache-gb` | 24 | Shared cache for results, indexes and media |
+| `--prepare-workers` | 4 | Parallel CPU frame transformations |
+| `--checkpoint-batches` | 8 | Save progress every N processed batches (integer >= 1) |
+| `--prefetch-batches` | 4 | Prepared batches ahead of inference |
+| `--result-prefetch-batches` | 32 | CPU result batches buffered during post-processing and writes (1–128) |
 
-Cache jest przydzielany na żądanie i dodatkowo ograniczony do 75% budżetu RAM.
-Budżet nie jest twardym limitem procesu — poza cache pozostają modele, tensory,
-aktywna scena, Python i SQLite.
+Cache allocation is lazy and also limited to 75% of
+the RAM budget. The budget is **not a hard process cap**:
+models, tensors, active scenes, Python and SQLite
+also consume memory.
 
-Globalne `checkpoint_batches` w `tagger_models.yml` ustawia interwał zapisu
-postępu inferencji; `--checkpoint-batches N` ma pierwszeństwo przed YAML.
-Brak pola zachowuje default 8. Większy interwał ogranicza częstotliwość zapisów,
-ale po twardym zakończeniu procesu może wymagać powtórzenia większej liczby
-batchy. Końcowy checkpoint i zapis przy obsługiwanym przerwaniu/błędzie
-pozostają niezależne od tego interwału. Zmiana nie unieważnia istniejących
-wyników ani checkpointów.
+Global `checkpoint_batches` in `tagger_models.yml`
+controls inference checkpoint frequency. CLI
+`--checkpoint-batches N` overrides YAML. Missing
+settings retain default 8. Larger intervals save
+less frequently but can require replaying more batches
+after a hard process kill. Final checkpoints and writes
+on handled interruption/errors are independent of
+this interval. Changes do not invalidate results/checkpoints.
 
-## Jeden model na GPU
+## One model on the GPU
 
-Modele są uruchamiane kolejno. Przygotowanie obrazów może korzystać z kilku
-workerów CPU, ale wywołania inferencji nie działają równolegle między modelami.
+Models run sequentially. Image preparation can use
+multiple CPU workers, but inference from separate
+models does not overlap. This limits peak VRAM
+and simplifies recovery.
 
-To ogranicza szczyt VRAM i upraszcza odzyskiwanie po błędach.
+## Shared input between models
 
-## Wspólne wejście modeli
+Within a merged run, later models may reuse downloaded
+VTT/sprites. The application retains input hashes and
+rejects changes to data between model passes.
 
-Podczas jednego przebiegu merged pobrane VTT/sprite'y mogą być współdzielone
-przez kolejne modele. Aplikacja przechowuje hash wejścia i odrzuca sytuację, w
-której dane zmienią się między modelami.
+There is no persistent image cache on disk.
 
-Nie ma trwałego cache obrazów na dysku.
+## Merge cache
 
-## Cache merge
+After publication, `merge_checks` records fingerprints
+of policy and scene state. An identical subsequent
+run can skip legacy import, evidence decoding, index
+building, marker union and publication planning.
 
-Po poprawnej publikacji `merge_checks` zapisuje fingerprint polityki i stanu
-sceny. Identyczny kolejny przebieg może pominąć:
-- import starych wyników;
-- dekodowanie evidence;
-- budowanie indeksów;
-- union markerów;
-- przygotowanie publikacji.
+Result, snapshot and cleanup writes invalidate the
+corresponding checks transactionally.
 
-Zapisy wyników, snapshotów i cleanupu unieważniają odpowiednie sprawdzenia
-transakcyjnie.
-
-Zmiana kodu wpływającego na publikację lub konfiguracji może spowodować
-jednorazowy re-merge. To nie jest równoznaczne z ponowną inferencją.
+Changes to publication code or configuration may
+require one re-merge but do not necessarily
+require re-inference.
 
 ## SQLite
 
-Wyniki są przechowywane jako skompresowane rekordy. Publikacja zapisuje plan
-`pending`, a po udanym Stash commit promuje zapisany stan do `published`.
+Results are compressed. Publication saves a `pending`
+plan and promotes it to `published` after successful
+Stash synchronization.
 
-Dane pochodne i małe indeksy służą wydajności; źródłowe evidence pozostaje
-podstawą do ponownego merge/cleanupu.
+Derived records and compact indexes improve performance,
+while source evidence remains authoritative for
+merge/cleanup replay.
 
 ## Dry-run
 
-Dla nowoczesnego formatu bazy dry-run dołącza źródło read-only i zapisuje tylko
-różnice do tymczasowego overlay. Dzięki temu podgląd dużej bazy nie wymaga pełnej
-kopii do pamięci.
+For current database formats, dry-run attaches the
+source read-only and writes differences into a
+temporary overlay, avoiding an in-memory copy of
+the entire state database.
 
-## Sterowanie pamięcią
+## Controlling memory
 
-Zmniejsz wartości, jeśli system zaczyna swapować:
+Lower limits if the system starts swapping:
 
 ```powershell
 python .\stash_ai.py --models all --ram-budget-gb 20 --ram-cache-gb 14
 ```
 
-Przy bardzo dużej scenie pojedyncza aktywna struktura może chwilowo przekroczyć
-typowy udział cache. Raport końcowy pokazuje peak cache, próbkowane RSS, trafienia,
-misses, evictions i pressure trims.
+For unusually large scenes, one active structure
+may temporarily exceed the typical cache share.
+The final report includes peak cache, sampled RSS,
+hits, misses, evictions and pressure trims.
 
-## Pomiar
+## Measurement
 
 ```powershell
 python -m benchmarks.benchmark_performance --frames 400 --labels 28 --repeats 3
 python -m benchmarks.benchmark_merge_pipeline --frames 400 --labels 28 --repeats 3
 ```
 
-Benchmarki są syntetyczne i nie obejmują GPU ani rzeczywistego serwera Stash.
-Do diagnozy konkretnej biblioteki użyj `--profile-merge`; patrz
-[UPGRADE_diagnostics.md](UPGRADE_diagnostics.md).
+Benchmarks are synthetic and include neither GPU
+inference nor a real Stash server. Use `--profile-merge`
+to diagnose a particular library; see
+[merge profiling](UPGRADE_diagnostics.md).
