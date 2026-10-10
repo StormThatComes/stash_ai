@@ -1,45 +1,51 @@
-# Wykluczenia i cleanup
+# Exclusions and cleanup
 
-Wykluczenia są stosowane podczas normalnego merge oraz w osobnych trybach
-cleanupu bez inferencji.
+Exclusions are applied during ordinary merge and dedicated
+GPU-free cleanup modes.
 
-## Pliki
+## Files
 
-`scene_tag_exclusions.yml` zawiera globalne i per-model reguły tagów scen.
-Globalny zakaz dotyczy również marker cores/extras i tworzenia hierarchii.
+`scene_tag_exclusions.yml` defines global and per-model scene-tag
+rules. A global exclusion also applies to marker cores/extras
+and hierarchy creation.
 
-`marker_core_exclusions.yml` wyklucza główne tagi markerów bez globalnego
-zakazu użycia etykiety w innych rolach.
+`marker_core_exclusions.yml` excludes primary marker tags
+without globally prohibiting the label in other roles.
 
-Opcja kodowa `MARKER_TAG_BLOCKLIST` została wycofana. Używaj powyższych plików
-YAML. Core-only pozostawia etykietę dostępną jako dodatek i tag sceny, a reguły
-`scene_tag_exclusions.yml` obejmują sceny oraz główne i dodatkowe tagi markerów.
-Osobny zakaz obejmujący wszystkie role markerów z zachowaniem tagu sceny
-nie jest już dostępny.
+The code-level `MARKER_TAG_BLOCKLIST` option has been retired.
+Use these YAML files. Core-only rules allow the label as
+a marker extra or scene tag, while
+`scene_tag_exclusions.yml` covers scenes and primary/extra
+marker tags. There is no longer a separate all-marker-role
+exclusion that also preserves scene-tag usage.
 
-Cache zapisany z pustą blocklistą jest nadal użyteczny. Niepusta lub nieznana
-historyczna blocklista wymaga `--restart` dla wskazanych scen/modeli przed
-zwykłym merge lub rethreshold markerów. Cleanup może nadal cofać opublikowane
-dowody bez inferencji, z zachowaniem ich historycznych reguł i granic.
+Cache saved with an empty blocklist remains usable.
+Non-empty or unknown historical blocklists require
+`--restart` for affected scene/model pairs before normal
+marker merge or rethreshold. Cleanup can still retract
+previously published evidence without inference, respecting
+historical rules and boundaries.
 
-## Aktualizacja starych nazw
+## Renamed configuration and CLI options
 
-Konfiguracja i CLI używają jednej nazwy dla każdej opcji:
+Each setting now has one supported name:
 
-| Dawna nazwa | Aktualna nazwa |
-| --- | --- |
+| Legacy name | Current name |
+|---|---|
 | YAML `excluded_tags` | `excluded_scene_tags` |
-| `joytag_marker_core_exclusions.yml` wybierany automatycznie | `marker_core_exclusions.yml` |
+| Automatically selected `joytag_marker_core_exclusions.yml` | `marker_core_exclusions.yml` |
 | `--model` | `--models` |
 | `--tag-exclusions` | `--scene-tag-exclusions` |
 | `--sync-marker-core-only` | `--cleanup-markers-only` |
 
-Zmień klucz listy w YAML, pozostawiając jej zawartość i `by_model` bez zmian.
-Przenieś własny plik wykluczeń markerów pod aktualną nazwę albo wskaż go
-jawnie przez `--marker-core-exclusions PATH`. Jeśli masz oba pliki, wybierz
-własną politykę zamiast nadpisywać ją pustym plikiem dostarczonym z aplikacją.
-Zaktualizuj argumenty w skryptach i harmonogramach. CLI wymaga pełnych nazw
-opcji, bez skrótów. Wycofane aliasy i klucz YAML zgłaszają błąd.
+Rename the YAML list key without changing its values or
+`by_model` section. Move your custom marker-exclusions
+file to the new name, or pass it explicitly with
+`--marker-core-exclusions PATH`. If both files exist,
+keep your custom policy rather than overwriting it
+with the application's empty default. Update scripts
+and schedules. The CLI requires full option names;
+retired aliases/YAML keys now fail validation.
 
 ## Cleanup
 
@@ -48,57 +54,59 @@ python .\stash_ai.py --models all --cleanup-only --dry-run
 python .\stash_ai.py --models all --cleanup-only
 ```
 
-Tryby częściowe:
+Partial scopes:
 
 ```powershell
 python .\stash_ai.py --models all --cleanup-markers-only
 python .\stash_ai.py --models all --cleanup-scene-tags-only
 ```
 
-Cleanup nie uruchamia modeli i nie pobiera sprite'ów.
+Cleanup runs neither models nor sprite downloads.
 
-## Globalne wykluczenie
+## Global exclusions
 
-Globalny wpis może usunąć zakazany tag `ai:/jt:/wd:/dtq:/op:` ze scen i
-markerów, a w pełnym cleanupie również samą definicję tagu. Usunięcie definicji
-przez Stash usuwa jej relacje do innych obiektów.
+A global rule can remove forbidden `ai:/jt:/wd:/dtq:/op:`
+tags from scenes and markers, and during full cleanup
+may delete the tag definition itself. Stash deletes its
+other relationships when that definition is removed.
 
-To zachowanie jest celowo silniejsze niż core-only. Przed dodaniem globalnej
-blacklisty upewnij się, że dana definicja nie jest potrzebna ręcznie.
+This is deliberately stronger than core-only exclusion.
+Before adding a global blacklist entry, make sure
+the tag definition is not needed for manual use.
 
-## Core-only
+## Core-only exclusions
 
-`marker_core_exclusions.yml` usuwa tylko zarządzane markery mające zakazany
-core. Definicja tagu pozostaje i może nadal działać jako dodatkowa etykieta.
+`marker_core_exclusions.yml` removes only managed markers
+whose core label is forbidden. The tag definition remains,
+and the label may still be used as an extra.
 
-Ręczne markery nie są przejmowane tylko dlatego, że mają podobną nazwę tagu.
+Manual markers are not adopted merely because their
+tag names are similar.
 
-## Stan i odtwarzanie
+## Persistence and replay
 
-Surowe evidence modeli pozostaje w `tagger_sources.sqlite3`. Cleanup zapisuje
-kompaktową informację potrzebną do prawidłowego odczytu wcześniejszych
-publikacji, bez masowego przepisywania wszystkich wyników.
+Raw model evidence remains in `tagger_sources.sqlite3`.
+Cleanup stores compact metadata needed to read earlier
+publications correctly without rewriting all raw results.
 
-Po zdjęciu wykluczenia zwykły `--merge-only` może ponownie opublikować wynik z
-zachowanego evidence, jeśli nie został on ręcznie utracony w sposób, którego
-aplikacja nie potrafi odtworzyć.
+After removing an exclusion, ordinary `--merge-only` can
+republish a result from retained evidence unless it was
+manually lost in a way that cannot be reconstructed.
 
-## Przerwanie
+## Interrupted cleanup
 
-Niedokończony cleanup należy:
-- wznowić z tymi samymi regułami; albo
-- porzucić przez `--abandon-pending` przed użyciem nowych reguł.
+Either resume interrupted cleanup with **identical rules**,
+or run `--abandon-pending` before using a new policy.
+Do not silently change policies while cleanup is pending.
 
-Nie zmieniaj polityk pending cleanupu bez jednej z tych operacji.
+## Empty tag definitions
 
-## Puste definicje
-
-Opcjonalnie:
+Optionally:
 
 ```powershell
 python .\stash_ai.py --models all --cleanup-only --prune-empty-tags
 python .\stash_ai.py --prune-empty-tags-only --dry-run
 ```
 
-Pruning usuwa tylko zweryfikowane nieużywane liście i respektuje zarządzane
-grupy markerów.
+Pruning removes only verified unused leaves and respects
+managed marker groups.
