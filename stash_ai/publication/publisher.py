@@ -176,6 +176,7 @@ class MergePublisher:
     def _parallel(self, scenes, workers):
         """Prepare evidence in read-only processes; publish serially here."""
         from stash_ai.publication.parallel import iter_parallel_evidence
+        from itertools import zip_longest
 
         pending = []
         bar = tqdm(total=len(scenes), desc="Merge to ai:", unit="scene")
@@ -219,7 +220,13 @@ class MergePublisher:
                 )
                 completed = 0
                 try:
-                    for (scene_id, current), prepared in zip(pending, evidence):
+                    missing = object()
+                    for item, prepared in zip_longest(pending, evidence, fillvalue=missing):
+                        if item is missing or prepared is missing:
+                            raise RuntimeError('Merge worker returned incomplete or extra scene results.')
+                        scene_id, current = item
+                        if prepared.scene_id != str(scene_id):
+                            raise RuntimeError('Merge worker returned an inconsistent scene ID.')
                         if self.report.profile is not None and prepared.metrics is not None:
                             self.report.profile.ingest(prepared.metrics)
                         self._merge_one(scene_id, current, prepared)

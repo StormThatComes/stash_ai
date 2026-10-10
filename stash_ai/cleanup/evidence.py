@@ -82,6 +82,10 @@ def _clip_candidate(span, item, replay: MarkerReplay):
     return clipped
 
 
+from stash_ai.evidence.temporal.policy import validated_operation
+
+
+@validated_operation
 def cleanup_support(app, store, scene_id, spans, selected, core_policies, tag_policies):
     """Re-evaluate revoked votes, bounded by the already-published source ranges."""
     from stash_ai.evidence.shared_markers import prune_blocked_extras

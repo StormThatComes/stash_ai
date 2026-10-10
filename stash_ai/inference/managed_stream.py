@@ -1,10 +1,11 @@
 """Bounded producer/consumer lifecycle shared by input and result streams."""
 from dataclasses import dataclass
-from queue import Empty, Full, Queue
+from queue import Empty, Full
 from threading import Event
 
 from stash_ai.runtime.cancellation import Cancellation
 from stash_ai.runtime.cleanup import cleanup
+from .buffer_usage import BatchQueue
 
 
 @dataclass(frozen=True)
@@ -16,7 +17,7 @@ class ManagedStream:
     def __init__(self, limit):
         if type(limit) is not int or not 1 <= limit <= 128:
             raise ValueError('Stream limit must be an integer in 1..128.')
-        self.queue, self.stopped = Queue(maxsize=limit), Event()
+        self.queue, self.stopped = BatchQueue(maxsize=limit), Event()
         self.cancellation, self.end, self.worker = Cancellation(), object(), None
 
     def send(self, value):
@@ -62,6 +63,7 @@ class ManagedStream:
             try:
                 self.queue.get_nowait()
             except Empty:
+                self.queue.consuming(False)
                 return
 
     def close(self):
