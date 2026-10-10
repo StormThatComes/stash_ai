@@ -1,15 +1,16 @@
-# Historyczne raporty walidacji
+# Historical validation reports
 
-Te pliki dokumentują wykonane wcześniej testy. Zachowano ich oryginalną zawartość,
-w tym ówczesne liczby testów, nazwy plików i ścieżki środowiska. Nie są instrukcją
-uruchamiania obecnej wersji ani bieżącym raportem CI.
+These files document tests completed in earlier versions.
+They retain their original contents, including test counts,
+filenames, and environment paths. They are **not** instructions
+for testing the current version or a current CI report.
 
-- [Cleanup SQL](cleanup_validation.txt)
+- [SQL cleanup](cleanup_validation.txt)
 - [Merge](validation_merge.txt)
-- [Wydajność](validation_performance.txt)
+- [Performance](validation_performance.txt)
 - [Occurrence](validation_occurrences.txt)
-- [Diagnostyka](validation_diagnostics.txt)
+- [Diagnostics](validation_diagnostics.txt)
 
-Aktualne polecenia: [testy](../../README.md#testy-i-ci) i
-[benchmarki](../../benchmarks/README.md). Historyczne dane pomiarowe są w
-[benchmarks/results](../../benchmarks/results/README.md).
+For current instructions, see [tests](../../README.md#tests-and-ci)
+and [benchmarks](../../benchmarks/README.md). Historical measurements
+are available in [benchmark results](../../benchmarks/results/README.md).
