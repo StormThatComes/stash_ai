@@ -62,7 +62,7 @@ def test_offline_rebase_keeps_geometry_ownership_and_retry_proofs_across_scopes(
             assert 'retired_build_options' not in item and 'build_options' not in item
             assert item['evidence_signature'] == 'old-proof' and item['requires_rebase']
             assert (item['start'], item['end'], item['extra_tags']) == (10, 20, ['extra'])
-            with pytest.raises(RuntimeError, match='fresh inference'):
+            with pytest.raises(RuntimeError, match='compatible retained evidence'):
                 require_rebased(saved['contributions'])
             stash = Stash()
             marker = stash.marker(AI, 'common', 'old')

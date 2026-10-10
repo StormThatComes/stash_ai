@@ -61,7 +61,10 @@ def decode(value, report=None):
         if saved is not None:
             return saved
     with stage(report, 'state_decompress'):
-        raw = zlib.decompress(value)
+        try:
+            raw = zlib.decompress(value)
+        except zlib.error as error:
+            raise ValueError('Invalid compressed state payload; run --db-check to identify affected evidence.') from error
     with stage(report, 'state_json_decode'):
         result = json.loads(raw)
     if report is not None:

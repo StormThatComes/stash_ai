@@ -156,4 +156,5 @@ def encode(value, report=None):
 
 def require_rebased(contributions):
     if any(item.get('requires_rebase') for item in contributions):
-        raise RuntimeError('Retired publication proof; run fresh inference for its models and --merge-only before cleanup.')
+        raise RuntimeError('Retired publication proof; rebuild with --merge-only using compatible retained evidence '
+                           'before cleanup. If observations are missing or unusable, refresh only the affected scenes/models.')

@@ -9,7 +9,7 @@ from tqdm import tqdm
 import stash_ai.inference.results as merge_results
 from stash_ai.storage import progress
 from stash_ai.inference import checkpoints, prediction, preparation
-from stash_ai.inference.identity import model_identity
+from stash_ai.inference.identity import model_identity, asset_stamps, require_assets_unchanged
 from stash_ai.inference.identity_types import ProvenanceIdentity, ExecutionIdentity
 from .model_scene import ModelScene, ScenePreparation, PreparationStatus, StagedScene, SceneContext
 from stash_ai.inference.input_identity import cue_manifest, frame_signature, inference_signature
@@ -31,7 +31,9 @@ class MergedModelRun:
         self._load_failure = None
         self._cleanup_primary = None
         with report.measure('model_identity', model=self.key):
-            self.identity = model_identity(app, config, vocabulary)
+            self.asset_stamps = asset_stamps(config)
+            self.identity = model_identity(app, config, vocabulary,
+                known_stamps=self.asset_stamps, require_unchanged=True)
         self.provenance = ProvenanceIdentity.from_legacy(self.identity)
         self.execution = ExecutionIdentity.from_legacy(self.identity, args)
         report.record_model(config, identity=self.identity)
@@ -183,8 +185,13 @@ class MergedModelRun:
         def load():
             # Assign on the owner thread so finally can close a model even if
             # the caller is interrupted while waiting for initialization.
+            before = asset_stamps(self.config)
+            require_assets_unchanged(self.asset_stamps, before, allow_download=True)
             self.tagger = self.app.services.load_tagger(
                 self.config, self.vocabulary, partial(preparation.prepare_image, self.app))
+            after = asset_stamps(self.config)
+            require_assets_unchanged(before, after, allow_download=True)
+            self.asset_stamps = after
 
         try:
             with self.report.measure('model_load', model=self.key):
@@ -290,7 +297,8 @@ class MergedModelRun:
                 return ScenePreparation(PreparationStatus.BLOCKED)
             # Auto-download may just have supplied missing weight files.
             self.identity = model_identity(app, self.config, self.vocabulary,
-                                           known_files=self.identity['files'])
+                                           known_files=self.identity['files'],
+                                           known_stamps=self.asset_stamps, require_unchanged=True)
             self.provenance = ProvenanceIdentity.from_legacy(self.identity)
             self.execution = ExecutionIdentity.from_legacy(self.identity, args)
             self.report.record_model(self.config, identity=self.identity)
