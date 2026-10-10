@@ -22,7 +22,8 @@ def metadata_complete(db):
     if trusted(db):
         return not db.execute('SELECT 1 FROM metadata_dirty LIMIT 1').fetchone()
     from stash_ai.storage.metadata import FORMAT
+    from stash_ai.storage.metadata_ledger import _valid_metadata_sql
     # Small metadata/key scan; never read/decompress the evidence BLOB column.
-    return not db.execute('''SELECT 1 FROM results AS r LEFT JOIN result_metadata AS m
+    return not db.execute(f'''SELECT 1 FROM results AS r LEFT JOIN result_metadata AS m
         USING(scope,scene,model,kind) WHERE m.format IS NULL OR m.format!=?
-        OR NOT json_valid(m.data) LIMIT 1''', (FORMAT,)).fetchone()
+        OR NOT {_valid_metadata_sql('m')} LIMIT 1''', (FORMAT,)).fetchone()
