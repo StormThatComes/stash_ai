@@ -444,7 +444,7 @@ but not `m:` marker groups.
 Every managed `ai:` marker may receive an extra group tag:
 
 - `m:<core>` for ordinary markers;
-- `m:<core>:occurance` for Occurrence.
+- `m:<core>:occurrence` for Occurrence.
 
 The root is `ai_markers`. These groups are organizational
 **tags**, not Stash Group objects.

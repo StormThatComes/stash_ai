@@ -16,7 +16,7 @@ from .store import HistoryStore, history_path
 
 AUTOMATIC_COMMANDS = frozenset((Command.INFERENCE, Command.MERGE, Command.CLEANUP,
     Command.CLEANUP_MARKERS, Command.CLEANUP_SCENES, Command.SYNC_HIERARCHY,
-    Command.DOWNLOAD, Command.MARKER_GROUPS, Command.PRUNE_TAGS, Command.ABANDON,
+    Command.DOWNLOAD, Command.MARKER_GROUPS, Command.RENAME_OCCURRENCE_GROUPS, Command.PRUNE_TAGS, Command.ABANDON,
     Command.DB_UPDATE, Command.DB_REPAIR, Command.DB_COMPACT))
 
 

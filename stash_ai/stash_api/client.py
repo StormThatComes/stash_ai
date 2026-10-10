@@ -113,6 +113,14 @@ class StashClient(StashTransport):
             raise RuntimeError(f"Stash did not create tag {name!r}.")
         return result
 
+    def rename_tag(self, tag_id: str, name: str) -> dict:
+        result = self.gql('''mutation StashAIRenameTag($input: TagUpdateInput!) {
+            tagUpdate(input: $input) { ''' + self.tag_fields() + ''' }
+        }''', {'input': {'id': tag_id, 'name': name}})['tagUpdate']
+        if not result or str(result['id']) != str(tag_id) or result['name'] != name:
+            raise RuntimeError(f'Stash did not confirm renaming tag {tag_id}. Rerun to verify its current name.')
+        return result
+
     def update_tag_organization(self, tag_id: str, parent_ids: list[str], ignore_auto_tag: bool) -> dict:
         result = self.gql('''mutation StashAIMarkerGroupTag($input: TagUpdateInput!) {
             tagUpdate(input: $input) { ''' + self.tag_fields() + ''' }

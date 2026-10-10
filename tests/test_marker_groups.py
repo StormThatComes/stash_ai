@@ -60,7 +60,7 @@ def test_one_group_per_primary_independent_of_extra_labels_or_time_policy(tmp_pa
         merge_sync.sync_merged(app, stash, resolver, state, stash.find_scene('1'), [], contributions, tag_policies=empty_tag_policies())
         assert len(stash.scene['scene_markers']) == 2
         assert all(group_names(m) == {'m:abc'} for m in stash.scene['scene_markers'])
-        assert 'm:def' not in stash.tags and 'm:abc:occurance' not in stash.tags
+        assert 'm:def' not in stash.tags and 'm:abc:occurrence' not in stash.tags
         assert all(not t['name'].startswith('m:') for t in stash.scene['tags'])
         root, group = stash.tags['ai_markers'], stash.tags['m:abc']
         assert [t['id'] for t in group['parents']] == [root['id']]
@@ -98,12 +98,12 @@ def test_union_and_split_drop_obsolete_managed_groups_but_keep_manual_extras(tmp
 def test_repair_adds_direct_root_preserving_other_parents_and_disables_autotag(dry):
     stash = Stash(); identifier = manager(stash).resolve('abc', True)
     manual = stash.tag('human category')
-    tag = stash.tags['m:abc:occurance']
+    tag = stash.tags['m:abc:occurrence']
     tag.update(parents=[manual], ignore_auto_tag=False)
     stash.dry_run = dry; stash.writes.clear()
     resolver = app.services.TagResolver(stash, source=merge_labels.AI)
     assert groups.for_resolver(app, resolver).resolve('abc', True) == identifier
-    repaired = resolver.records['m:abc:occurance']
+    repaired = resolver.records['m:abc:occurrence']
     assert {p['name'] for p in repaired['parents']} == {'ai_markers', 'human category'}
     assert repaired['ignore_auto_tag']
     assert bool(stash.writes) != dry
@@ -114,13 +114,13 @@ def test_repair_adds_direct_root_preserving_other_parents_and_disables_autotag(d
 def test_name_collision_never_adopts_an_unrelated_group(existing):
     stash = Stash()
     if existing == 'manual':
-        stash.tag('m:abc:occurance')
+        stash.tag('m:abc:occurrence')
     else:
-        manager(stash).resolve('abc:occurance')
-    before = deepcopy(stash.tags['m:abc:occurance'])
+        manager(stash).resolve('abc:occurrence')
+    before = deepcopy(stash.tags['m:abc:occurrence'])
     with pytest.raises(ValueError, match='name collision'):
         manager(stash).resolve('abc', True)
-    assert stash.tags['m:abc:occurance'] == before
+    assert stash.tags['m:abc:occurrence'] == before
 
 
 def test_changed_ownership_on_refresh_prevents_hierarchy_repair(monkeypatch):
@@ -157,7 +157,7 @@ def test_backfill_uses_semantic_type_preserves_identity_and_ignores_manual_marke
     assert app.main(backfill_args(tmp_path, '--no-hierarchy')) == 0
     after = stash.scene['scene_markers']
     assert group_names(after[0]) == {'m:abc'}
-    assert group_names(after[1]) == {'m:abc:occurance'}
+    assert group_names(after[1]) == {'m:abc:occurrence'}
     assert after[2:] == [manual, legacy] and stash.scene['tags'] == before['tags']
     for old, new in zip(before['scene_markers'], after):
         for field in ('id', 'title', 'seconds', 'end_seconds', 'primary_tag'):
@@ -187,7 +187,7 @@ def test_backfill_replaces_core_and_type_groups_and_prunes_only_unused(tmp_path,
         assert not (tmp_path/'state.sqlite3').exists()
     else:
         assert group_names(stash.scene['scene_markers'][0]) == {'m:def', 'm:human'}
-        assert 'm:abc:occurance' not in stash.tags and groups.ROOT in stash.tags
+        assert 'm:abc:occurrence' not in stash.tags and groups.ROOT in stash.tags
 
 
 def test_backfill_failure_keeps_orphans_for_retry_and_does_not_mutate_raw_evidence(tmp_path, monkeypatch):
@@ -225,7 +225,7 @@ def test_group_pruning_keeps_global_usage_manual_names_and_root(counter):
     stash = PruneStash()
     root = stash.add('ai_markers')
     used = stash.add('m:abc', [root], description=groups.group_description('abc'), **{counter: 1})
-    empty = stash.add('m:def:occurance', [root], description=groups.group_description('def', True))
+    empty = stash.add('m:def:occurrence', [root], description=groups.group_description('def', True))
     manual = stash.add('m:manual', [root])
     stats = prune_tags(stash, report=lambda _: None)
     assert stats['tags_pruned'] == 1 and stash.deleted == [empty]
@@ -262,7 +262,7 @@ def test_cleanup_removes_both_groups_with_matching_dry_run_counts(tmp_path, monk
         if strategy == 'sql': assert any(key == 'group_usage' for key, _ in stash.sql_calls)
     else:
         assert not stash.scene['scene_markers']
-        assert 'm:blocked' not in stash.tags and 'm:blocked:occurance' not in stash.tags
+        assert 'm:blocked' not in stash.tags and 'm:blocked:occurrence' not in stash.tags
         assert 'ai_markers' in stash.tags
 
 

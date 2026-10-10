@@ -66,7 +66,7 @@ def test_17000_groups_fetch_counters_only_for_two_old_orphans(tmp_path, monkeypa
     group_scans = [batch for batch in scans if set(map(str, batch)) & group_ids]
     assert len(group_scans) == 9 and max(map(len, group_scans)) == 2000
     assert {str(i) for batch in group_scans for i in batch} == group_ids
-    assert 'm:old' not in stash.tags and 'm:old:occurance' not in stash.tags
+    assert 'm:old' not in stash.tags and 'm:old:occurrence' not in stash.tags
     assert len(stash.scene['scene_markers']) == 16998
     output = capsys.readouterr().out
     assert 'marker_group_tags_checked_sql=17000' in output

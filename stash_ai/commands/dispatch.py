@@ -22,6 +22,10 @@ def run_standalone_command(app, args) -> int | None:
         from stash_ai.commands.recovery import run_only
         app.services.validate_config(scene_work=False)
         return run_only(app, args)
+    if args.command is Command.RENAME_OCCURRENCE_GROUPS:
+        from stash_ai.commands.marker_groups import run_rename
+        app.services.validate_config(scene_work=False)
+        return run_rename(app, args)
     if args.command is Command.MARKER_GROUPS:
         from stash_ai.commands.marker_groups import run_backfill
         app.services.validate_config(scene_work=False)

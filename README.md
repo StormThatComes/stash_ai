@@ -833,12 +833,23 @@ In `merged` mode:
 | Ownership tag | `ai:marker:stash-taggers` |
 | Occurrence point | Also has `ai:marker:occurrence` |
 | Regular marker group | `m:blue_hair` |
-| Occurrence group | `m:blue_hair:occurance` |
+| Occurrence group | `m:blue_hair:occurrence` |
 | Marker group root | `ai_markers` |
 | Hierarchy categories | `ai:category:...` |
 
-The `:occurance` spelling in group names is intentional and must remain
-compatible with the existing format.
+Occurrence groups now use `:occurrence`. To rename existing managed
+`:occurance` groups in place while preserving tag IDs and all assignments:
+
+```powershell
+python .\stash_ai.py --rename-occurrence-groups --dry-run
+python .\stash_ai.py --rename-occurrence-groups
+```
+
+Use the same `--state-db` as your tagging runs. This global command needs
+no models or inference and prints each change without `--verbose`.
+It refuses existing destination names; resolve any collision before retrying.
+Normal publication also renames a matching legacy group when first needed.
+See [marker groups](docs/UPGRADE_marker_groups.md) for details.
 
 New results always use shared `ai:` publication and temporal rules.
 `--output-mode`, `--no-temporal`, and the YAML `enabled` key have been

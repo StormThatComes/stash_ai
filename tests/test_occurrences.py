@@ -167,7 +167,7 @@ def test_point_publication_is_idempotent_and_promotes_to_a_range(tmp_path, monke
         merge_sync.sync_merged(app, stash, resolver, state, stash.find_scene('1'), hits, spans, tag_policies=empty_tag_policies())
         assert not stash.writes and len(stash.scene['scene_markers']) == 1
         assert point['seconds'] == 1 and point['end_seconds'] is None
-        assert {t['name'] for t in point['tags']} == {merge_labels.AI.owner_tag, OCCURRENCE_TAG, 'm:core:occurance'}
+        assert {t['name'] for t in point['tags']} == {merge_labels.AI.owner_tag, OCCURRENCE_TAG, 'm:core:occurrence'}
         assert point['title'].endswith(' · wykrycie')
         scenes, markers = paired_records({'wd': [.95, .95, .95]}, threshold=.35, marker_threshold=.65)
         for kind, value in (('scene', scenes), ('markers', markers)): state.put('1', 'wd', {kind: value['wd']})

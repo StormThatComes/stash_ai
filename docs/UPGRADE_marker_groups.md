@@ -8,10 +8,10 @@ Browse them using Stash's additional-marker-tag filter.
 | Primary tag | Marker type | Additional group tag | Direct parent |
 |---|---|---|---|
 | `ai:abc` | Ordinary (including intervals with no end) | `m:abc` | `ai_markers` |
-| `ai:abc` | Occurrence point | `m:abc:occurance` | `ai_markers` |
+| `ai:abc` | Occurrence point | `m:abc:occurrence` | `ai_markers` |
 | `ai:def` | Ordinary | `m:def` | `ai_markers` |
 
-The spelling `:occurance` is intentional. The technical
+The corrected spelling is `:occurrence`. The technical
 type tag remains `ai:marker:occurrence`. Marker type is
 determined from its data and, for existing markers, the
 technical tag; a missing `end_seconds` does **not**
@@ -25,6 +25,34 @@ are not assigned to scenes or model evidence, and do not
 change the `ai:marker:stash-taggers` ownership tag.
 
 ## New and existing markers
+
+To rename all existing managed `m:<core>:occurance` tag definitions:
+
+```powershell
+python .\stash_ai.py --rename-occurrence-groups --dry-run
+python .\stash_ai.py --rename-occurrence-groups
+```
+
+Pass the same `--state-db` used for tagging if it differs from the default.
+The command changes only tag names, preserving each ID, description,
+parents, automatic-tagging setting and assignments to every Stash object.
+Marker IDs, titles, times, core labels and saved model predictions stay intact.
+It needs no model files, media, policies or inference. `--scene-id` is
+rejected because tag names have global scope. Changes are printed even
+without `--verbose`; dry-run writes neither Stash nor state/run-history DBs.
+
+Only tags with valid Stash AI group metadata matching their old name
+and occurrence type are renamed. Manual tags, regular groups with a
+literal `:occurance` core, and malformed or mismatched metadata are left alone.
+Any existing destination name blocks the entire preflight; resolve that
+collision manually and rerun. The command never merges or deletes tags.
+Ownership and destination names are checked again immediately before
+each update. Stash has no compare-and-swap rename, so avoid concurrent
+tag editing. A failure can leave earlier renames committed; rerun safely
+to finish the remaining names. Interrupted publications must first be resumed
+with `--merge-only`. Normal publication also renames matching legacy groups
+in place as needed, with equivalent dry-run previews. Both spellings remain
+recognized as managed groups for membership repair and cleanup.
 
 Normal runs and `--merge-only` assign groups at publication.
 Repeating a run does not duplicate tags or markers.
@@ -138,6 +166,6 @@ from a description opts that tag out of automatic
 management.
 
 One convention limitation remains: ordinary core
-`abc:occurance` collides with the Occurrence-group
+`abc:occurrence` collides with the Occurrence-group
 name for core `abc`. The script raises an error
 rather than merging unrelated groups.

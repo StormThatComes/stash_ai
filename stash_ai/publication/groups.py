@@ -6,8 +6,8 @@ import json
 
 ROOT = 'ai_markers'
 PREFIX = 'm:'
-# User-facing spelling is intentional and is part of the persisted naming contract.
-OCCURRENCE_SUFFIX = ':occurance'
+OCCURRENCE_SUFFIX = ':occurrence'
+LEGACY_OCCURRENCE_SUFFIX = ':occurance'
 DESCRIPTION = '[Stash AI marker group v1] '
 ROOT_DESCRIPTION = '[Stash AI marker groups v1] Organizational root.'
 
@@ -23,18 +23,53 @@ def group_description(label, occurrence=False):
                                    ensure_ascii=False, sort_keys=True, separators=(',', ':'))
 
 
-def managed_group(tag):
+def _group_data(tag):
     """A prefix alone never authorizes changing or deleting somebody else's tag."""
     description = tag.get('description') or ''
     if not description.startswith(DESCRIPTION):
-        return False
+        return None
     try:
         data = json.loads(description[len(DESCRIPTION):])
-        return (isinstance(data, dict) and set(data) == {'core', 'occurrence'}
-                and type(data['occurrence']) is bool
-                and tag.get('name') == group_name(data['core'], data['occurrence']))
+        if not (isinstance(data, dict) and set(data) == {'core', 'occurrence'}
+                and type(data['occurrence']) is bool):
+            return None
+        name = group_name(data['core'], data['occurrence'])
+        legacy = PREFIX + data['core'] + LEGACY_OCCURRENCE_SUFFIX
+        if tag.get('name') == name or (data['occurrence'] and tag.get('name') == legacy):
+            return data
     except (ValueError, TypeError, KeyError):
-        return False
+        pass
+    return None
+
+
+def managed_group(tag):
+    return _group_data(tag) is not None
+
+
+def legacy_group_target(tag):
+    """Return a canonical name only for a proven, misspelled occurrence group."""
+    data = _group_data(tag)
+    if data is not None and data['occurrence']:
+        name = group_name(data['core'], True)
+        if tag['name'] != name:
+            return name
+    return None
+
+
+def rename_legacy_group(stash, tag):
+    """Refresh ownership and collisions, then change only the existing tag name."""
+    name = legacy_group_target(tag)
+    if name is None:
+        raise ValueError('Not a legacy managed occurrence group.')
+    current = stash.find_tag_by_id(str(tag['id']))
+    if (current['name'] != tag['name'] or legacy_group_target(current) != name
+            or current.get('description') != tag.get('description')):
+        raise ValueError(f"Marker group ownership/name changed for {tag['name']!r}.")
+    if stash.find_tag(name) is not None:
+        raise ValueError(f'Marker group name collision: {name!r}; resolve it before renaming.')
+    if stash.dry_run:
+        return {**current, 'name': name}
+    return stash.rename_tag(str(current['id']), name)
 
 
 class MarkerGroups:
@@ -74,11 +109,24 @@ class MarkerGroups:
         root = self._root()
         name, description = group_name(label, occurrence), group_description(label, occurrence)
         tag = self.resolver._find(name)
+        if tag is None and occurrence:
+            legacy_name = PREFIX + label + LEGACY_OCCURRENCE_SUFFIX
+            legacy = self.resolver._find(legacy_name)
+            if legacy and legacy_group_target(legacy) == name and legacy.get('description') == description:
+                tag = rename_legacy_group(self.stash, legacy)
+                self.resolver.records[legacy_name] = None
+                self.resolver.cache[legacy_name] = None
+                self.resolver._remember(tag)
+                if self.stash.dry_run:
+                    self.resolver.preview_mutation('update', dict(id=str(tag['id']), name=name),
+                        'occurrence_group_spelling', str(tag['id']))
+                if self.resolver.report:
+                    self.resolver.report(f"{'[DRY] ' if self.stash.dry_run else ''}Rename group {legacy_name!r} -> {name!r}.")
         if tag is None:
             tag = self._create(name, description, [root])
         else:
             # The suffix can collide with a literal raw label ending in
-            # ':occurance'. Fail explicitly instead of mixing the two groups.
+            # ':occurrence'. Fail explicitly instead of mixing the two groups.
             if not managed_group(tag) or tag.get('description') != description:
                 raise ValueError(f'Marker group name collision: {name!r}. '
                                  'The existing tag belongs to another label/type or is not managed by Stash AI.')
