@@ -206,3 +206,13 @@ measure optional profiling overhead; these model-independent timings are not
 GPU or end-to-end inference claims. Probability floors are rounded upward to the
 first representable float32, cached across rows, with widened comparisons kept
 for other dtypes/ranges. Max aggregation keeps one running row; top-k is unchanged.
+
+`python -m benchmarks.benchmark_evidence_processing` measures controlled costs
+for 5,000 checkpoint frames in 100 chunks, one proof selected from 200 archives,
+and 500 contributions sharing frozen options. The October 10 result records
+checkpoint restore 93 -> 60 ms (Python peak 2.57 -> 2.44 MB), archive replay
+44 -> 0.77 ms with 201 -> 2 decodes, and policy validation 500 -> 1 calls.
+Every chunk and its boundary still validate; selective archive reads verify the
+stored key against the decoded proof signature. Policy/settings keys include
+value types and live only within one bounded operation scope, while exclusions,
+thresholds and each contribution continue to validate independently.

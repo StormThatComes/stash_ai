@@ -70,9 +70,9 @@ class Checkpoint:
         top = np.frombuffer(zlib.decompress(blob), dtype="<f4").reshape(rows, self.labels).copy()
         if not np.isfinite(top).all() or ((top < 0) | (top > 1)).any():
             raise ValueError("Invalid checkpoint scores.")
-        chunks = [(end, decode(data)) for end, data in self.store.connection.execute(
+        chunks = ((end, decode(data)) for end, data in self.store.connection.execute(
                 "SELECT processed,data FROM " + self.store.table('checkpoint_frames') + " WHERE scope=? AND scene=? AND model=? ORDER BY processed",
-                (self.store.scope, self.scene, self.model))]
+                (self.store.scope, self.scene, self.model)))
         frames = validate_chunks(chunks, processed)
         self.processed = self.saved_processed = processed
         self.resumed_frames = processed
@@ -84,9 +84,6 @@ class Checkpoint:
         if self.analysis is not None:
             from stash_ai.evidence.temporal.statistics import validate_checkpoint
             validate_checkpoint(self.analysis, processed=processed, labels=self.labels)
-        from stash_ai.db.payloads import valid_frames
-        if not valid_frames(frames, checkpoint=True):
-            raise ValueError('Invalid checkpoint frame evidence; use --restart.')
         self._notify_restore()
         return processed, top, frames
 
