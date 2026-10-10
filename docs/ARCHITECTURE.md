@@ -1,173 +1,242 @@
-# Granice modułów
+# Module boundaries
 
-W katalogu głównym pozostają dwa pliki Pythona uruchamiane z linii poleceń:
-`stash_ai.py` i `update_stash_ai.py`. Launcher `stash_ai.py` przejmuje blokadę
-instalacji, a `stash_ai/cli.py` koordynuje CLI i uruchomienie pipeline.
-Algorytmy evidence/fusion i union przedziałów pozostają w `stash_ai/evidence/pipeline.py`.
-Pakiet `stash_ai/publication/` grupuje planowanie i publikację wspólnych wyników `ai:`.
-`markers.py` zawiera wspólne reguły własności markerów, payloadów, porównywania
-zmian i usuwania wykluczonych extras. Moduły i testy importują je bezpośrednio,
-bez ponownego eksportowania przez CLI.
-`commands/dispatch.py` wywołuje tryby CLI oraz obejmuje `MergedRun.run()`
-kontekstem diagnostyki przez `run_merged()`. Wywołania
-reconciliation korzystają bezpośrednio z `publication/merged.py` i `cleanup/scenes.py`; CLI
-uruchamia cleanup przez `CleanupRun.run()`. Kod i testy importują codec
-bezpośrednio z `stash_ai/storage/codec.py`.
-Stanowy lifecycle jednego przebiegu merged-output (scan, rethreshold, inference,
-publikacja i pruning) obsługuje `stash_ai/runs/merged.py` / `MergedRun`, który otwiera
-oraz zamyka Stash i StateStore. `runs/merged_model.py` / `MergedModelRun` odpowiada
-za przebieg jednego modelu: kwalifikację scen, reuse/refresh oraz inferencję
-pojedynczej sceny. Współdzieli store, cache, liczniki i raport z `MergedRun`,
-a tagger ładuje dopiero po wyczerpaniu możliwości reuse i zamyka w `finally`.
-Błąd inferencji dotyczy jednej sceny; błąd ładowania modelu kończy jego pętlę.
-Faza publikacji znajduje się w
-`stash_ai/publication/publisher.py` / `MergePublisher`: sprawdza pending refresh i cache
-publikacji, wybiera tryb szeregowy lub równoległy oraz wspólnie obsługuje
-publikację, liczniki i błędy. Korzysta z zasobów przebiegu bez przejmowania ich
-lifecycle. Opcjonalny `stash_ai/publication/parallel.py` uruchamia wyłącznie read-only
-replay evidence w izolowanych procesach; `MergePublisher` zachowuje pojedynczy
-writer dla TagResolver, Stash i StateStore. Dry-run i profilowanie pozostają
-szeregowe, a awaria workerów nie uruchamia drugiego przebiegu publikacji.
-Planowanie jednej sceny znajduje się w `stash_ai/publication/planning/`: osobne
-moduły przygotowują evidence, tagi i markery.
-`types.py` definiuje `MergeSyncPlan`. Koordynator `publication/merged.py`
-zachowuje kolejność mutacji i zatwierdzania snapshotów. Cleanup ma
-osobny lifecycle w `stash_ai/cleanup/run.py` / `CleanupRun`. Rekonsyliację jednej
-sceny zawiera `cleanup/scenes.py`, a re-ewaluację opublikowanego evidence
-`cleanup/evidence.py`: kwalifikacja zmienionych dowodów, leniwy `EvidenceReplay`
-z indeksem sygnatur i cache replay oraz clipping do opublikowanych przedziałów.
-Stan i maski cleanupu znajdują się w `cleanup/state.py`, a odczyt katalogu tagów
-w `cleanup/client.py`. `cleanup/prune.py` obsługuje pruning zwykłych tagów. Pozostała logika domenowa znajduje się m.in. w `stash_ai/evidence/scenes.py`,
-`stash_ai/evidence/observations.py`, `stash_ai/evidence/temporal/` i `stash_ai/evidence/occurrences.py`.
+Two command-line Python entry points remain at repository root:
+`stash_ai.py` and `update_stash_ai.py`. The `stash_ai.py` launcher
+acquires the installation lock; `stash_ai/cli.py` coordinates CLI
+dispatch and pipeline execution. Evidence/fusion and interval-union
+algorithms live in `stash_ai/evidence/pipeline.py`.
+The `stash_ai/publication/` package handles planning and publishing
+shared `ai:` results. Its `markers.py` holds common marker-ownership,
+payload, change-comparison and excluded-extra removal rules.
+Modules and tests import these rules directly rather than
+through CLI re-exports.
 
-`stash_ai/publication/index.py` buduje dla jednej sceny niemutowalny indeks istniejących
-markerów według primary tagu. Posortowane początki i drzewo maksymalnych końców
-ograniczają kandydatów także dla zagnieżdżonych przedziałów; końcowy filtr używa
-dotychczasowego `merge.overlaps()`, z osobną tolerancją początku. Cleanup wyszukuje
-według nazwy primary, a planowanie po odświeżeniu sceny według jego ID. Dla outputu
-punktowego `PreviousMarkerRanges` indeksuje zaokrąglone początki z published,
-pending i recovery oraz zachowuje największy pasujący koniec. Normalizacja odbywa
-się raz na marker w indeksie. Wybrane markery pozostają w indeksie, aby ich ręczne
-extras mogły trafić do kolejnych fragmentów; dostępność do ponownego dopasowania
-nadal kontroluje plan publikacji. Indeksy żyją wyłącznie w pamięci, bez zmiany
-formatu snapshotów lub schematu bazy.
+`commands/dispatch.py` invokes CLI modes and wraps `MergedRun.run()`
+with a diagnostic context via `run_merged()`. Reconciliation calls
+use `publication/merged.py` and `cleanup/scenes.py` directly, while
+CLI starts cleanup through `CleanupRun.run()`. Code and tests
+import the codec from `stash_ai/storage/codec.py`.
 
-`runtime/settings.py` zawiera ustawienia jednego uruchomienia, a
-`runtime/context.py` łączy je z jawnymi, wstrzykiwanymi usługami. CLI tworzy nowy
-kontekst przy każdym wywołaniu; moduły domenowe nie importują CLI. Wspólny
-`runtime/workers.py` otwiera izolowany, read-only store i dane ustawień dla
-procesów merge oraz model report, bez ładowania usług CLI.
+`stash_ai/runs/merged.py` / `MergedRun` owns the lifecycle of
+a merged-output run: scanning, rethresholding, inference, publication,
+and pruning. It opens and closes the Stash client and `StateStore`.
+`runs/merged_model.py` / `MergedModelRun` manages one model's scene
+eligibility, reuse/refresh, and per-scene inference. It shares
+the store, cache, counters and report with `MergedRun`, loading
+the tagger only after exhausting reuse options and closing it
+in `finally`. An inference error affects one scene; a model-load
+failure ends that model's loop.
 
-`stash_ai/cli.py` koordynuje jeden pipeline publikacji. Pobieranie cue/sprite,
-przygotowanie obrazów, filtrowanie score i resumowalna inferencja znajdują się
-w `stash_ai/inference/`. Nowa inferencja używa silnika temporalnego.
-Frozen replay uses only the temporal engine. Offline upgrades retain old contribution geometry,
-manual tag IDs, ownership and pending/recovery intent while removing obsolete build options.
-Cleanup refuses contributions marked `requires_rebase`; fresh inference and merge replace them
-with current proofs. Offline snapshot upgrades are supported from schema v18 onward.
-Usunięto aktywne moduły `runs/separate.py`, `publication/separate.py` i ich
-plannery. Source-prefixed wyniki przechodzą jednorazowo do ai: przez świeżą inferencję.
-Funkcje zależne od ustawień przebiegu otrzymują `app` jako jawny argument,
-a callback przygotowania obrazu JoyTag wiąże go przez `functools.partial`.
-`stash_ai/inference/inputs.py` zawiera `VerifiedMedia`, `RunMedia`, `RunInputs`
-i `inspect_input()`: weryfikuje wejścia VTT/sprite, tworzy ich sygnatury i
-współdzieli ograniczony cache mediów oraz manifestów między modelami wyłącznie
-w RAM. Kod i testy importują je bezpośrednio z tego modułu.
-`inference/sprites.py` odpowiada za cue i dekodowanie sprite, a
-`inference/preparation.py` za preprocessing obrazów oraz ograniczone, uporządkowane
-batchowanie z własnością i zamykaniem obrazów w workerach. Z prefetch okno
-transformacji obejmuje klatki kilku batchy, a składanie wejścia backendu odbywa
-się przed inferencją. `inference/batches.py` wykonuje uporządkowaną inferencję
-w jednym wątku z ograniczoną kolejką wyników CPU i wspólnym anulowaniem
-przygotowania mediów. `runs/merged_model.py` udostępnia jednego wykonawcę przez
-cały lifecycle modelu: ładowanie, inferencję wszystkich scen i zamknięcie na
-tym samym wątku. Iterator sceny czeka na swoje zadanie, ale nie zamyka
-pożyczonego wykonawcy. `inference/prediction.py` odtwarza stan predykcji,
-obrabia wyniki i checkpointy w wątku właściciela SQLite oraz finalizuje scenę.
-`inference/input_prefetch.py` weryfikuje wejście jednej następnej sceny w tle,
-przez izolowany transport HTTP. `inference/batch_stream.py` dekoduje jej
-obrazy i przygotowuje ograniczoną kolejkę `prefetch_batches` batchy CPU
-(0 wyłącza prefetch, maksimum 128, domyślnie 4). Limit dotyczy każdej aktywnej
-kolejki osobno; przygotowane wejścia są poza budżetem cache RAM. Bieżąca
-i następna scena współdzielą pulę transformacji należącą do
-model pass; zamknięcie sceny czeka na jej własne obrazy, a nie zamyka puli.
-Weryfikator wejść i dwaj producenci CPU mają oddzielnych wykonawców/sesje HTTP;
-pełna kolejka bieżącej sceny nie zajmuje wykonawcy potrzebnego następnej.
-Synchronizowane mapy `RunMedia`/`RunInputs`
-zachowują jeden snapshot treści URL-i i manifestów przy równoległych odczytach.
-Plan reuse wybiera kandydatów bez dodatkowych odczytów SQLite przed inferencją;
-faktyczne reuse, invalidacja peerów i odtworzenie checkpointu odbywają się
-w głównym wątku przed startem GPU. `runs/model_scene.py` przechowuje stan
-jednej autoryzowanej sceny. Po odebraniu batchy bieżącej sceny jej finalizacja
-może nakładać się na eager `BatchPredictions` następnej sceny, nadal na tym
-samym właścicielu backendu. Oddzielne obserwatory zachowują przypisanie
-historii/proofs do właściwych scen. Wolne lub błędne wejście nie zatrzymuje
-finalizacji; błędy przyszłej sceny są raportowane po dojściu do niej.
-Zapisy SQLite pozostają uporządkowane w głównym wątku, a kolejka GPU wyników
-mieści `result_prefetch_batches` batchy (1–128, domyślnie 32) oraz jeden wynik
-oczekujący na wstawienie lub jedno wywołanie w toku. Limit jest niezależny od
-kolejki wejść i nie zmienia właściciela backendu. Resume odrzuca CPU
-lookahead od początku i uruchamia wyłącznie klatki po zapisanym checkpoincie.
-Anulowanie zatrzymuje też przyszłe zadanie i odrzuca nieprzetworzone wyniki.
-`inference/identity.py` buduje tożsamość modeli; `inference/checkpoints.py` zawiera
-`Checkpoint`, zapis i odtworzenie kompaktowego stanu oraz atomowe zakończenie inferencji.
-`stash_ai/storage/progress.py` obsługuje indeks ukończenia, ponowne użycie wyników i resume/refresh.
-`stash_ai/signatures.py` definiuje wspólny `digest()` dla sygnatur wejść, checkpointów
-i publikacji. Kanoniczny JSON, hashe, format BLOB-ów oraz schemat bazy pozostają takie same;
-zapis wyników, usunięcie checkpointu i zakończenie refresh nadal są atomowe.
-Pakiet `inference` nie re-eksportuje helperów; wywołania używają modułów, które je definiują.
-Pakiet `stash_ai/commands/` grupuje granice trybów uruchomienia:
-`arguments.py` definiuje parser, a `validation.py` oddziela walidację raportów,
-DB/maintenance i pipeline, zachowując kolejność błędów oraz normalizację opcji.
-`dispatch.py` rozdziela komendy DB przed konfiguracją runtime, komendy samodzielne
-przed ładowaniem modeli oraz explain/merge-only przed dostępem do vocabularies i wag.
-`explain.py` zawiera odczytową diagnostykę tagów; `hierarchy.py` wspólną hierarchię
-i jej samodzielną synchronizację. CLI używa bezpośrednich importów bez wrapperów pod dawnymi ścieżkami.
-Wszystkie modele czytają jeden `tag_hierarchy.yml` przez `--hierarchy`.
-Bootstrap parsuje go raz i sprawdza, czy pokrywa słowniki wybranych modeli,
-przed kontaktem ze Stash. Metadane słownika odnoszą się do unii wszystkich
-etykiet w pliku. `--merge-only` czyta ten sam YAML bez dostępu do model assets.
-Hierarchia usuwa tylko etykiety wykluczone we wszystkich politykach modeli;
-przed publikacją i tworzeniem tagów nadal obowiązują wykluczenia per model.
-Zmiana przypisań wpływa na fingerprint publikacji, ale nie tożsamość inferencji.
-Parsowanie konfiguracji,
-wykluczeń i hierarchii znajduje się w `stash_ai/config.py`, a parser cue WebVTT
-w `stash_ai/vtt.py`. Dzięki temu format argumentów, YAML i VTT oraz specjalne
-ścieżki uruchomienia można testować niezależnie od normalnego pipeline inferencji.
+The publication phase is implemented in
+`stash_ai/publication/publisher.py` / `MergePublisher`. It checks
+pending refresh and publication cache, selects sequential or parallel
+execution, and centralizes publishing, counts and errors without
+taking ownership of run resources. Optional
+`stash_ai/publication/parallel.py` runs **read-only** evidence
+replay in isolated processes; `MergePublisher` remains the single
+writer for `TagResolver`, Stash, and `StateStore`. Dry-run and
+profiling stay sequential, and worker failure never triggers
+a second publication pass.
 
-`stash_ai/reports/review/report.py` koordynuje odtwarzanie lokalne evidence do raportu priorytetów przeglądu
-tagów. `reports/review/scenes.py` i `markers.py` obliczają sygnały dla obu rodzajów evidence.
-`reports/review/options.py` definiuje opcje i opis znaczenia sygnałów.
-`reports/review/accumulator.py` zawiera `ReviewAccumulator`, który zarządza
-deduplikacją liczników globalnych i per model, powodami oraz limitami przykładów. Raport nie
-korzysta z modeli ani połączenia ze Stash i pomija evidence z pending refresh.
+`stash_ai/publication/planning/` separates preparation of evidence,
+tags and markers for each scene. `types.py` defines `MergeSyncPlan`;
+`publication/merged.py` coordinates mutation order and snapshot
+commit. Cleanup has its own lifecycle in
+`stash_ai/cleanup/run.py` / `CleanupRun`. `cleanup/scenes.py`
+reconciles a single scene, and `cleanup/evidence.py` re-evaluates
+published evidence, including eligibility for changed evidence,
+lazy `EvidenceReplay` with a signature index/replay cache, and
+clipping to published intervals. `cleanup/state.py` contains cleanup
+state and masks, `cleanup/client.py` reads tag catalogs, and
+`cleanup/prune.py` handles ordinary tag pruning. Remaining
+domain code includes `evidence/scenes.py`, `observations.py`,
+`temporal/` and `occurrences.py`.
 
-`stash_ai/reports/model/report.py` buduje offline raport leave-one-model-out z zachowanego
-evidence. `analysis.py` oblicza baseline sceny, attribution supportu i counterfactual
-bez jednego modelu, a `comparison.py` porównuje semantykę oraz nakładanie markerów.
-`report.py` koordynuje iterację scen i formatowanie finalnych wierszy.
-`reports/model/workers.py` odpowiada za izolowane procesy odczytu, ich inicjalizację,
-podział budżetu pamięci oraz redukcję wyników do tego samego formatu co ścieżka serialna.
+`stash_ai/publication/index.py` builds a per-scene immutable
+index of existing markers by primary tag. Sorted starts and
+a maximum-end tree reduce candidates even for nested intervals;
+the final filter uses `merge.overlaps()` with a separate start
+tolerance. Cleanup resolves markers by primary-tag name,
+while planning uses IDs after refreshing the scene. For point
+outputs, `PreviousMarkerRanges` indexes rounded starts from
+published, pending and recovery state while retaining the largest
+matching end. Normalization happens once per indexed marker.
+Matched markers remain in the index so their manual extras
+can contribute to subsequent fragments; the publication plan
+still controls whether they can be matched again. These indexes
+are memory-only and change neither snapshot format nor DB schema.
 
-`stash_ai/models.py` definiuje wspólne typy `ModelSource`, `ModelSettings` i
-`Vocabulary`, katalog źródeł oraz walidację wyboru modeli i wyników predykcji.
-Moduł nie zależy od loaderów ani adapterów inferencji. `stash_ai/backends/loader.py`
-zawiera adapter JoyTag i wybór adaptera przez `load_tagger()`. Obsługa plików
-modelu oraz parsowanie słowników tagów znajduje się w `stash_ai/backends/vocabulary.py`.
-`backends/joytag.py` weryfikuje i ładuje przypiętą architekturę autora.
-ONNX jest rozdzielone na transformacje obrazów w `backends/onnx_preprocessing.py`,
-wybór providerów, fallback CPU i inspekcję wejść/wyjść w `backends/onnx_session.py`
-oraz adapter inferencji w `backends/onnx.py`. Kod, testy i benchmarki importują typy oraz helpery
-bezpośrednio z modułów, które je definiują; `backends/loader.py` nie re-eksportuje
-starego API. Wspólne typy i walidacja usuwają cykle między loaderami i adapterami.
-Genericzne komponenty (`TagResolver`, loader hierarchii i cleanup źródłowy) wymagają jawnego `ModelSource`; JoyTag nie jest ich ukrytym
-domyślnym namespace'em.
+`runtime/settings.py` holds per-run settings, while
+`runtime/context.py` binds them to explicitly injected services.
+CLI creates a new context per invocation; domain modules never
+import CLI. Shared `runtime/workers.py` opens isolated read-only
+state and settings for merge and model-report worker processes
+without loading CLI services.
 
-Kontrakty wewnętrzne są jawne: `select_scores()` przyjmuje tablicę NumPy,
-retencja i podpisy inferencji korzystają z pełnego `ModelSettings`, a
-`MarkerIntervalIndex` wymaga gotowego `PreviousMarkerRanges`. Iterator klatek
-i przygotowanie batchy operują na obrazach PIL; worker tworzy własną kopię
-i zamyka ją po transformacji. Fixture testowe zachowują te same kontrakty.
+`stash_ai/cli.py` coordinates one publication pipeline.
+The `stash_ai/inference/` package owns cue/sprite retrieval,
+image preparation, score filtering and resumable inference.
+Fresh inference uses the temporal engine; frozen replay
+also uses only that engine. Offline upgrades preserve old
+contribution geometry, manual tag IDs, ownership and
+pending/recovery intent while removing obsolete build options.
+Cleanup rejects contributions marked `requires_rebase`;
+fresh inference and merge replace them with current proofs.
+Offline snapshot upgrades are supported from schema v18 onward.
+
+Active `runs/separate.py` and `publication/separate.py`
+modules and their planners were removed. Migrating
+source-prefixed output to `ai:` requires one-time fresh
+inference using the historical migration bridge.
+Run-dependent functions take an explicit `app` argument,
+and the JoyTag image-preparation callback binds it with
+`functools.partial`.
+
+`stash_ai/inference/inputs.py` defines `VerifiedMedia`,
+`RunMedia`, `RunInputs` and `inspect_input()`. It checks
+VTT/sprite inputs, constructs identities, and shares a
+bounded RAM-only cache of media and manifests between models.
+Code and tests import these symbols directly.
+`inference/sprites.py` manages cues and sprite decoding;
+`inference/preparation.py` performs image preprocessing
+and bounded, ordered batching, including worker ownership
+and image cleanup. With prefetch, the transformation window
+covers frames across several batches, and backend inputs
+are assembled before inference.
+
+`inference/batches.py` runs ordered inference on one thread,
+with a bounded CPU result queue and shared cancellation
+of media preparation. `runs/merged_model.py` provides one
+executor for model loading, inference across all scenes,
+and closing on that same thread. A scene iterator awaits
+its task but does not close the borrowed executor.
+`inference/prediction.py` restores prediction state,
+processes outputs/checkpoints in the SQLite-owner thread,
+and finalizes the scene.
+
+`inference/input_prefetch.py` verifies the next scene's
+input in the background over isolated HTTP transport.
+`inference/batch_stream.py` decodes its images and fills
+the bounded `prefetch_batches` CPU-batch queue
+(0 disables; maximum 128; default 4). Each active queue
+has its own limit, and prepared inputs are outside
+the RAM cache budget. Current and next scene share
+one model-pass transformation pool; ending one scene
+waits for its images without closing the pool.
+Input verification and up to two CPU producers have
+separate executors/HTTP sessions; a full current-scene
+queue cannot occupy the executor needed by the next scene.
+Synchronized `RunMedia`/`RunInputs` maps preserve one
+snapshot of URL contents and manifests under parallel reads.
+
+The reuse plan chooses candidates before inference without
+extra SQLite reads. Actual reuse, peer invalidation and
+checkpoint restoration happen on the main thread before
+GPU execution. `runs/model_scene.py` stores state for one
+authorized scene. When current-scene batches are consumed,
+finalization can overlap with eager `BatchPredictions`
+for the next scene on the same backend owner. Distinct
+observers attribute history/proofs to the correct scenes.
+Slow or failing next-scene input does not delay finalization;
+future-scene errors are reported when that scene is reached.
+
+SQLite writes remain ordered on the main thread.
+The GPU result queue holds `result_prefetch_batches` batches
+(1–128, default 32), plus one pending insertion or one
+in-flight inference call. The limit is independent of
+the input queue and backend ownership. Resume discards
+early CPU look-ahead and runs only frames after the saved
+checkpoint. Cancellation stops future work and discards
+unprocessed results.
+
+`inference/identity.py` constructs model identity.
+`inference/checkpoints.py` defines `Checkpoint`, compact
+state persistence/restoration and atomic inference completion.
+`stash_ai/storage/progress.py` manages completion indexing,
+result reuse and resume/refresh. `stash_ai/signatures.py`
+defines shared `digest()` for input, checkpoint and
+publication signatures. Canonical JSON, hashes, BLOB format
+and schema remain stable, as does the atomic sequence of
+writing results, removing checkpoints and completing refresh.
+`inference` does not re-export helpers from unrelated modules.
+
+`stash_ai/commands/` holds run-mode boundaries.
+`arguments.py` defines the parser. `validation.py` splits
+report, DB/maintenance and pipeline validation while
+preserving error order and option normalization.
+`dispatch.py` handles DB commands before runtime setup,
+standalone commands before model loading, and explanation/
+merge-only before vocabulary/weight access.
+`explain.py` contains read-only tag diagnostics;
+`hierarchy.py` handles shared hierarchy and standalone
+synchronization. CLI imports modules directly without
+legacy-path wrappers.
+
+All models use one `tag_hierarchy.yml` through `--hierarchy`.
+Bootstrap parses it once and checks coverage of the
+selected vocabularies **before contacting Stash**.
+Vocabulary metadata describes the union of all labels
+in the file. `--merge-only` reads the same YAML without
+access to model assets. A label is removed from the
+shared hierarchy only if excluded across all model
+policies; per-model exclusions still apply when
+publishing or creating tags. Hierarchy changes
+affect publication fingerprint, not inference identity.
+`stash_ai/config.py` parses model configuration, exclusions
+and hierarchy; `stash_ai/vtt.py` parses WebVTT cues.
+CLI arguments, YAML, VTT and special run paths can
+therefore be tested independently of normal inference.
+
+`stash_ai/reports/review/report.py` coordinates offline
+evidence replay for prioritized tag review.
+`reports/review/scenes.py` and `markers.py` compute signals
+for the two evidence kinds; `options.py` defines signal
+meaning and settings. `accumulator.py` implements
+`ReviewAccumulator`, deduplicating global/per-model counts,
+reasons and example limits. The report loads no models,
+does not contact Stash and skips evidence awaiting refresh.
+
+`stash_ai/reports/model/report.py` builds offline
+leave-one-model-out analysis from retained evidence.
+`analysis.py` calculates scene baselines, support
+attribution and counterfactuals; `comparison.py`
+compares semantics and marker overlap. `report.py`
+coordinates scene traversal and output rows.
+`reports/model/workers.py` initializes isolated read-only
+workers, divides memory budgets and reduces worker
+results into the sequential report's format.
+
+`stash_ai/models.py` defines `ModelSource`,
+`ModelSettings` and `Vocabulary`, the source registry,
+and model/prediction validation without depending
+on loaders or inference adapters.
+`stash_ai/backends/loader.py` contains the JoyTag
+adapter and `load_tagger()` dispatch; model files
+and tag vocabularies are handled in
+`stash_ai/backends/vocabulary.py`.
+`backends/joytag.py` validates/loads the pinned
+upstream architecture. ONNX responsibilities are
+split between image transformations in
+`backends/onnx_preprocessing.py`, provider selection,
+CPU fallback and I/O inspection in
+`backends/onnx_session.py`, and inference adaptation
+in `backends/onnx.py`. Code, tests and benchmarks
+import types/helpers from their defining modules;
+`backends/loader.py` does not re-export the old API.
+Shared types and validation prevent loader/adapter
+dependency cycles.
+
+Generic components (`TagResolver`, hierarchy loader
+and source cleanup) require explicit `ModelSource`;
+JoyTag is not an implicit default namespace.
+Internal contracts are explicit: `select_scores()`
+accepts NumPy arrays; retention and inference
+signatures use complete `ModelSettings`; and
+`MarkerIntervalIndex` requires a built
+`PreviousMarkerRanges`. Frame iterators and
+batch preparation operate on PIL images: workers
+copy their images and close them after transformation.
+Test fixtures observe the same contracts.
 
 ## Komunikacja ze Stash
 
