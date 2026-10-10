@@ -42,6 +42,18 @@ def test_clean_preflight_never_reads_results_or_metadata(tmp_path, monkeypatch):
     assert update_database(path) == (LATEST_SCHEMA_VERSION, LATEST_SCHEMA_VERSION)
 
 
+def test_current_writer_upsert_handles_existing_dirty_key(tmp_path):
+    path = tmp_path/'state.db'
+    seed(path, 1)
+    record = inference_record(mode='scene', items=[])
+    with StateStore(path, 'scope') as store:
+        store.put('0', 'wd', {'scene': record})
+        store.connection.execute("DELETE FROM result_metadata WHERE scene='0'")
+        store.connection.commit()
+        store.put('0', 'wd', {'scene': record})
+        assert store.connection.execute('SELECT * FROM metadata_dirty').fetchall() == []
+
+
 @pytest.mark.parametrize('sql', [
     "DELETE FROM result_metadata WHERE scene='0'",
     "UPDATE result_metadata SET data='invalid' WHERE scene='0'",
