@@ -28,7 +28,11 @@ def load_model(model_dir, label_count, download_missing=True):
     # any local module named Models. The upstream module has no relative imports.
     spec = importlib.util.spec_from_file_location("_stash_ai_joytag", path)
     module = importlib.util.module_from_spec(spec)
-    exec(compile(path.read_bytes(), str(path), "exec"), module.__dict__)
+    # The executed source, not just an earlier file read, must match the pin.
+    source = path.read_bytes()
+    if hashlib.sha256(source).hexdigest() != LOADER_SHA256:
+        raise ValueError("JoyTag loader changed after verification; refusing execution.")
+    exec(compile(source, str(path), "exec"), module.__dict__)
     config = json.loads((Path(model_dir) / "config.json").read_text(encoding="utf-8-sig"))
     if config.get("class") != "ViT" or config.get("n_tags") != label_count:
         raise ValueError("JoyTag config must describe the Hugging Face ViT and match top_tags.txt.")
