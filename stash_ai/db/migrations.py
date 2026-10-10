@@ -10,7 +10,7 @@ def migrate(database, *, progress=None):
             progress(name, completed, 1)
     result = dict(required_repair=False, historical_conversions=False, metadata_repaired=0)
     db = database.connection
-    state = SimpleNamespace(connection=db, scope='', preview_source=False)
+    state = SimpleNamespace(connection=db, scope='', preview_source=False, maintenance_migration=True)
     phase('schema features', 0)
     initialize_features(state)
     phase('schema features', 1)
@@ -30,6 +30,8 @@ def migrate(database, *, progress=None):
             from .scalar_evidence_migration import migrate as migrate_publications
             migrate_publications(db, retired)
             phase('historical publications', 1)
+        from stash_ai.storage.metadata_ledger import initialize
+        initialize(db)
         from .revisions import completed, metadata_complete, mark_completed
         if database.version < 25 or not completed(db):
             from .duplicate_aggregates import migrate as repair_evidence
