@@ -118,6 +118,10 @@ class StateDatabase(AbstractContextManager):
                 f'AND model={row}.model AND kind={row}.kind;' for row in rows)
             db.execute(f'''CREATE TRIGGER IF NOT EXISTS results_metadata_{event.lower()}
                 AFTER {event} ON results BEGIN {deletes} END''')
+        if self.migration:
+            from stash_ai.storage.schema import repair_trigger_definitions
+            repair_trigger_definitions(db, ('results_delete_threshold',
+                'results_metadata_insert', 'results_metadata_update', 'results_metadata_delete'))
         if self.fresh:
             from stash_ai.db.revisions import mark_completed
             mark_completed(db)  # Empty new state needs no historical data conversion.
