@@ -57,9 +57,44 @@ CHECK_MESSAGES = {
 }
 
 
-def _issue_list(counter):
+
+def _bounded_examples(db, errors, *, limit=5):
+    """Only diagnose affected rows when a check already reported errors."""
+    sources = {
+        'result_metadata_missing': """
+            SELECT r.scope,r.scene,r.model,r.kind FROM results r
+            LEFT JOIN result_metadata m USING(scope,scene,model,kind)
+            WHERE m.format IS NULL""",
+        'result_missing_index': """
+            SELECT r.scope,r.scene,r.model,r.kind FROM results r
+            LEFT JOIN result_index i USING(scope,scene,model,kind)
+            WHERE i.populated IS NULL""",
+        'result_metadata_orphan': """
+            SELECT m.scope,m.scene,m.model,m.kind FROM result_metadata m
+            WHERE NOT EXISTS(SELECT 1 FROM results r WHERE r.scope=m.scope
+              AND r.scene=m.scene AND r.model=m.model AND r.kind=m.kind)""",
+        'result_index_orphan': """
+            SELECT i.scope,i.scene,i.model,i.kind FROM result_index i
+            WHERE NOT EXISTS(SELECT 1 FROM results r WHERE r.scope=i.scope
+              AND r.scene=i.scene AND r.model=i.model AND r.kind=i.kind)""",
+        'checkpoint_orphan_frames': """
+            SELECT f.scope,f.scene,f.model,'frames' FROM checkpoint_frames f
+            WHERE NOT EXISTS(SELECT 1 FROM checkpoints c WHERE c.scope=f.scope
+              AND c.scene=f.scene AND c.model=f.model)""",
+    }
+    examples = {}
+    for code, query in sources.items():
+        if errors.get(code):
+            rows = db.execute(query + ' LIMIT ?', (limit,)).fetchall()
+            if rows:
+                examples[code] = [dict(zip(('scope','scene','model','kind'), row)) for row in rows]
+    return examples
+
+
+def _issue_list(counter, examples=None):
     return [
-        {"code": code, "count": count, "message": CHECK_MESSAGES[code]}
+        dict(code=code, count=count, message=CHECK_MESSAGES[code],
+             **({'examples': examples[code]} if examples and code in examples else {}))
         for code, count in sorted(counter.items()) if count
     ]
 
@@ -168,7 +203,10 @@ def check_database(path, scope, *, show_progress=False):
             if progress is not None:
                 progress.close()
 
-    error_rows = _issue_list(errors)
+    # Bound diagnostic examples separately from large aggregate counts.
+    with closing(connect_readonly(path)) as examples_db:
+        error_examples = _bounded_examples(examples_db, errors)
+    error_rows = _issue_list(errors, error_examples)
     warning_rows = _issue_list(warnings)
     return {
         "path": str(path),
@@ -212,10 +250,10 @@ def format_check_report(report):
     ]
     if report["errors"]:
         lines.append("Errors:")
-        lines.extend(
-            f"  - {item['code']}: {item['count']:,} — {item['message']}"
-            for item in report["errors"]
-        )
+        for item in report["errors"]:
+            lines.append(f"  - {item['code']}: {item['count']:,} — {item['message']}")
+            for example in item.get('examples', []):
+                lines.append('      affected: ' + ', '.join(f'{k}={v}' for k, v in example.items()))
     if report["warnings"]:
         lines.append("Warnings:")
         lines.extend(
