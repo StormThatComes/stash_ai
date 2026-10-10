@@ -2,6 +2,7 @@
 from queue import Empty, Full, Queue
 from threading import Event, Thread, Lock, BoundedSemaphore
 from time import monotonic
+from contextvars import ContextVar
 
 from requests import Response, Timeout
 
@@ -14,6 +15,7 @@ MAX_ACTIVE_READS = 4
 _slots = BoundedSemaphore(MAX_ACTIVE_READS)
 _closing = Queue(maxsize=8)
 _close_lock, _closer = Lock(), None
+_owned_read = ContextVar('owned_stash_read_deadline', default=None)
 
 
 def close_later(response):
@@ -63,10 +65,33 @@ def call_with_deadline(operation, deadline, *, cancel=None):
     """
     from stash_ai.runtime.cancellation import current, use
     from stash_ai.stash_api.read_connections import ReadControl
+    owned = _owned_read.get()
+    if owned is not None and owned[0] == deadline:
+        _, control, callbacks, callback_lock = owned
+        remaining(deadline)
+        if cancel is not None:
+            with callback_lock:
+                callbacks.add(cancel)
+            if control.cancelled.is_set():
+                cancel()
+        try:
+            token = current()
+            if token is not None:
+                token.check()
+            value = operation()
+            if isinstance(value, Response):
+                value._stash_read_control = control
+            remaining(deadline)
+            return value
+        finally:
+            if cancel is not None:
+                with callback_lock:
+                    callbacks.discard(cancel)
     budget, completed, cancelled = remaining(deadline), Queue(maxsize=1), Event()
     started, token, control = monotonic(), current(), ReadControl()
     gate = Lock()
     slot_lock, slot_returned = Lock(), False
+    callbacks, callback_lock = set(), Lock()
 
     def return_slot():
         nonlocal slot_returned
@@ -77,6 +102,10 @@ def call_with_deadline(operation, deadline, *, cancel=None):
 
     def abort():
         control.cancel()
+        with callback_lock:
+            active = tuple(callbacks)
+        for callback in active:
+            callback()
         if cancel is not None:
             cancel()
 
@@ -92,7 +121,11 @@ def call_with_deadline(operation, deadline, *, cancel=None):
             from contextlib import nullcontext
             with use(token) if token is not None else nullcontext():
                 with control.use():
-                    value, failed = operation(), False
+                    owned_token = _owned_read.set((deadline, control, callbacks, callback_lock))
+                    try:
+                        value, failed = operation(), False
+                    finally:
+                        _owned_read.reset(owned_token)
             if isinstance(value, Response):
                 value._stash_read_control = control
         except BaseException as exc:

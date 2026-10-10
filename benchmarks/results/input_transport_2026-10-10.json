@@ -1,0 +1,30 @@
+{
+  "reads": {
+    "separate_stages": {
+      "reads": 200,
+      "workers": 600,
+      "seconds": 0.20281852399966738,
+      "reads_per_second": 986.1032220130347
+    },
+    "owned_operation": {
+      "reads": 200,
+      "workers": 200,
+      "seconds": 0.07433821100039495,
+      "reads_per_second": 2690.406418294589
+    }
+  },
+  "verification": {
+    "dictionary": {
+      "entries": 10000,
+      "seconds": 0.03839180699924327,
+      "python_peak_bytes": 1966474
+    },
+    "sqlite_ledger": {
+      "entries": 10000,
+      "seconds": 0.2493565300001137,
+      "python_peak_bytes": 22743,
+      "page_cache_kib": 64,
+      "temporary_db_bytes": 1187840
+    }
+  }
+}

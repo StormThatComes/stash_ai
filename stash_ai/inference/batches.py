@@ -3,29 +3,16 @@ from contextlib import nullcontext
 from threading import Thread
 
 from stash_ai.inference.preparation import PreparedBatch, prepared_batches
-from stash_ai.models import validate_scores
 from .buffer_usage import PreparedBatchUsage, queued_batches
 from .managed_stream import ManagedStream, StreamFailure as _Failure
 from stash_ai.runtime.cleanup import cleanup, closing
 
 
 def prediction_scores(tagger, prepared):
-    """Validate once at the pipeline boundary, including external adapters.
-
-    Only the exact native types expose their internal raw calculation here;
-    subclasses and injected backends retain the checked public-adapter path.
-    Direct native backend calls also remain validated.
-    """
-    from stash_ai.backends.loader import JoyTagger
-    from stash_ai.backends.onnx import OnnxTagger
+    from stash_ai.backends.predictions import checked_prediction
     collated = isinstance(prepared, PreparedBatch)
-    if type(tagger) in (JoyTagger, OnnxTagger):
-        inputs = prepared.inputs if collated else tagger.collate_batch(prepared)
-        scores = tagger._predict_collated_scores(inputs, len(prepared))
-    else:
-        scores = (tagger.predict_collated_batch(prepared.inputs, prepared.count) if collated
-                  else tagger.predict_batch(prepared))
-    return validate_scores(scores, len(prepared), tagger.labels, tagger.settings.source.title)
+    return checked_prediction(tagger, prepared.inputs if collated else prepared,
+                              len(prepared), collated=collated)
 
 
 class BatchPredictions:
@@ -80,6 +67,7 @@ class BatchPredictions:
                     self.report.work(self.work)
                 with closing(self.inputs, report=self.report) as batches:
                     for prepared, batch_cues in batches:
+                        self.results.producing(True)
                         self.cancellation.check()
                         with self.measure('inference_batch', len(prepared)):
                             result = prediction_scores(self.tagger, prepared)
@@ -88,12 +76,14 @@ class BatchPredictions:
         except BaseException as error:
             self._send(_Failure(error))
         finally:
+            self.results.producing(False)
             self._send(self.finished)
 
     def __iter__(self):
         return self
 
     def __next__(self):
+        self.results.consuming(False)
         with self.measure('inference_result_wait'):
             item = self.channel.receive()
         if item is self.finished:
