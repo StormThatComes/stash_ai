@@ -37,9 +37,14 @@ def _execution_providers(ort, settings):
     return providers, use_cuda
 
 
-def _create_session(ort, settings, providers):
+def _create_session(ort, settings, providers, profile_prefix=None):
     path = str(settings.model_dir / "model.onnx")
     if settings.source.key != "oppai":
+        if profile_prefix is not None:
+            options = ort.SessionOptions()
+            options.enable_profiling = True
+            options.profile_file_prefix = profile_prefix
+            return ort.InferenceSession(path, sess_options=options, providers=providers)
         return ort.InferenceSession(path, providers=providers)
 
     # Author's workaround: full optimization can insert unsupported
@@ -50,6 +55,9 @@ def _create_session(ort, settings, providers):
         ort.GraphOptimizationLevel.ORT_DISABLE_ALL,
     ):
         options = ort.SessionOptions()
+        if profile_prefix is not None:
+            options.enable_profiling = True
+            options.profile_file_prefix = profile_prefix
         options.graph_optimization_level = level
         options.intra_op_num_threads = min(os.cpu_count() or 2, 8)
         try:
@@ -61,15 +69,15 @@ def _create_session(ort, settings, providers):
     ) from last_error
 
 
-def _open_session(ort, settings):
+def _open_session(ort, settings, *, profile_prefix=None):
     providers, use_cuda = _execution_providers(ort, settings)
     try:
-        session = _create_session(ort, settings, providers)
+        session = _create_session(ort, settings, providers, profile_prefix)
     except Exception:
         if settings.device != "auto" or not use_cuda:
             raise
         print(f"{settings.source.title}: CUDA initialization failed; using CPU.")
-        session = _create_session(ort, settings, ["CPUExecutionProvider"])
+        session = _create_session(ort, settings, ["CPUExecutionProvider"], profile_prefix)
 
     active = session.get_providers()
     if settings.device == "cuda" and "CUDAExecutionProvider" not in active:

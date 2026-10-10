@@ -1,0 +1,62 @@
+{
+  "wd_rgb": {
+    "reference": {
+      "iterations": 20,
+      "seconds": 0.30003644499993243,
+      "python_peak_bytes": 4819606
+    },
+    "optimized": {
+      "iterations": 20,
+      "seconds": 0.2147820549998869,
+      "python_peak_bytes": 4818744
+    }
+  },
+  "scores_sparse": {
+    "reference": {
+      "iterations": 200,
+      "seconds": 0.004185802000392869,
+      "python_peak_bytes": 63320
+    },
+    "optimized": {
+      "iterations": 200,
+      "seconds": 0.002477226999872073,
+      "python_peak_bytes": 10409
+    }
+  },
+  "scores_dense": {
+    "reference": {
+      "iterations": 200,
+      "seconds": 0.5297196179999446,
+      "python_peak_bytes": 102409
+    },
+    "optimized": {
+      "iterations": 200,
+      "seconds": 0.3624003699997047,
+      "python_peak_bytes": 125032
+    }
+  },
+  "max": {
+    "reference": {
+      "iterations": 20,
+      "seconds": 0.24137217000043165,
+      "python_peak_bytes": 2775500
+    },
+    "optimized": {
+      "iterations": 20,
+      "seconds": 0.01618766899991897,
+      "python_peak_bytes": 92840
+    }
+  },
+  "optional_cpu_profiling": {
+    "disabled": {
+      "iterations": 200,
+      "seconds": 0.006705472000248847,
+      "python_peak_bytes": 3728
+    },
+    "enabled": {
+      "iterations": 200,
+      "seconds": 0.023287564999918686,
+      "python_peak_bytes": 9144
+    }
+  }
+}

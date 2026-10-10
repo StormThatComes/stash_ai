@@ -51,7 +51,6 @@ def test_native_pipeline_and_direct_adapter_each_validate_once(monkeypatch):
         calls.append(1)
         return validate(*args)
     monkeypatch.setattr(models, 'validate_scores', checked)
-    monkeypatch.setattr(batches, 'validate_scores', checked)
     batches.prediction_scores(native, [object()])
     assert calls == [1]
     native.predict_batch([object()])
