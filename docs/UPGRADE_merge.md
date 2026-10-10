@@ -1,87 +1,93 @@
-# Merge: szybka ścieżka i odczyt Stash
+# Merge: fast path and Stash reads
 
-Merge przelicza opublikowany stan z zachowanych evidence. Może działać całkowicie
-bez modeli przez `--merge-only`.
+Merge reconstructs published state from retained evidence.
+`--merge-only` can run without loading models.
 
-## Szybka ścieżka
+## Fast path
 
-Po udanej publikacji scena otrzymuje `merge_check`. Jeśli:
-- polityka publikacji jest zgodna;
-- katalog zarządzanych tagów jest zgodny;
-- fingerprint tagów/markerów sceny jest zgodny;
-- nie ma pending publication;
+After successful publication, a scene receives a
+`merge_check`. The next run can mark it `merge_reused`
+and skip expensive computations if:
+- publication policy matches;
+- the managed tag catalog matches;
+- the scene's tag/marker fingerprint matches;
+- no publication is pending.
 
-kolejny przebieg może oznaczyć scenę jako `merge_reused` i pominąć kosztowne
-obliczenia.
+New results, changes to YAML, publication code, hierarchy,
+or Stash state trigger reconciliation.
 
-Zmiana wyników, YAML, kodu publikacji, hierarchii lub stanu Stash powoduje
-ponowne uzgodnienie.
+## Batched SQL reads
 
-## Odczyt zbiorczy SQL
+When Stash provides compatible `querySQL`, fixed read-only
+SELECT statements fetch tags/markers without the overhead
+of many GraphQL resolvers.
 
-Jeśli Stash udostępnia zgodne `querySQL`, aplikacja używa stałych read-only
-SELECT-ów do pobierania tagów i markerów bez kosztu wielu resolverów GraphQL.
+With `--merge-only`, scenes may be paginated by increasing
+ID without COUNT/OFFSET. During ordinary inference,
+GraphQL still supplies VTT/sprite paths while tag/marker
+state can be attached in batches.
 
-Dla `--merge-only` sceny mogą być stronicowane po rosnącym ID bez COUNT/OFFSET.
-Podczas zwykłej inferencji GraphQL nadal dostarcza ścieżki VTT/sprite, a stan
-tagów/markerów może zostać dołączony zbiorczo.
+Stash 0.31.1+ must provide required hierarchy fields and
+`end_seconds`; point markers use `end_seconds: null`.
+If read-only SQL fails, merge can fall back to GraphQL.
+All writes use the Stash API.
 
-Na Stash 0.31.1+ pola hierarchii i `end_seconds` są wymagane. Markery
-punktowe nadal mają `end_seconds: null`. Jeśli wykonanie read-only SQL zawiedzie, merge może wrócić
-do GraphQL. Zapisy zawsze używają API Stash.
+## Final pruning of unused tags
 
-## Końcowe usuwanie pustych tagów
+After successful merge, read-only SQL excludes tags
+associated with scenes or markers before full usage
+counts are fetched over GraphQL. This applies to
+empty marker groups, excluded tag definitions and
+`--prune-empty-tags`. One fresh ID/name catalog supports
+both pruning phases.
 
-Po udanym merge’u read-only SQL odrzuca tagi używane przez sceny lub markery,
-zanim aplikacja pobierze pełne liczniki użycia przez GraphQL. Dotyczy to pustych
-grup markerów, wykluczonych definicji oraz `--prune-empty-tags`. Jeden świeży
-katalog ID/nazw obsługuje obie fazy prune’a.
+SQL only narrows the candidate set. Full usage counts,
+children, group ownership and pre-deletion checks remain
+in Stash API calls. In dry-run, candidates also include
+groups that would lose markers through the planned merge;
+other-scene usage still protects them.
 
-SQL wyłącznie zawęża kandydatów. Kontrole wszystkich liczników użycia, dzieci,
-własności grup i ponowne sprawdzenie przed usunięciem pozostają w API Stash.
-W `--dry-run` kandydaci grup obejmują również grupy tracące markery w planowanym
-merge’u; użycie w pozostałych scenach nadal chroni grupę przed usunięciem.
+If SQL capability detection, validation or catalog reads
+fail, pruning uses the GraphQL path. Invalid results from
+later candidate filtering abort pruning. The summary
+reports `merge_prune_sql_enabled` or
+`merge_prune_graphql_fallback`.
 
-Jeśli wykrywanie możliwości SQL, jego weryfikacja lub odczyt katalogu nie
-powiedzie się, prune korzysta z dotychczasowej ścieżki GraphQL. Nieprawidłowe
-wyniki późniejszego filtrowania kandydatów przerywają prune.
-Podsumowanie pokazuje `merge_prune_sql_enabled` lub `merge_prune_graphql_fallback`.
+## Temporal indexes
 
-## Indeksy temporalne
+Repeated lookups of occurrences within the same interval
+use timeline indexes and caches of shared results.
+Unusual overlapping legacy timelines retain the safe
+reference implementation.
 
-Powtarzane zapytania o wystąpienia w tym samym przedziale korzystają z indeksów
-osi czasu i cache wspólnych wyników. Dla nietypowych, nakładających się starych
-osi aplikacja zachowuje bezpieczną ścieżkę referencyjną.
+## Publication
 
-## Publikacja
+The plan is saved locally before mutations. After
+successful synchronization, the pending snapshot
+commits together with the updated merge check.
 
-Plan jest zapisany lokalnie przed mutacjami. Po udanej synchronizacji pending
-snapshot jest zatwierdzany razem z aktualnym merge checkiem.
+Read-only GraphQL can retry transient failures.
+Mutations are not automatically retried.
 
-Read-only GraphQL może być retry'owany po błędach przejściowych. Mutacje nie są
-retry'owane automatycznie.
-
-## Przydatne komendy
+## Useful commands
 
 ```powershell
-# Normalny merge bez modeli
+# Normal merge without models
 python .\stash_ai.py --merge-only
 
-# Jedna scena
+# One scene
 python .\stash_ai.py --merge-only --scene-id 123 --verbose
 
-# Wymuś przeliczenie mimo zgodnego cache
+# Force recomputation despite a matching publication cache
 python .\stash_ai.py --merge-only --scene-id 123 --force-merge
 
-# Profil JSONL
+# JSONL profile
 python .\stash_ai.py --merge-only --scene-id 123 --force-merge --profile-merge merge-profile.jsonl
 ```
 
-W podsumowaniu zwracaj uwagę na:
-- `merge_reused`;
-- `merge_graphql_fallback`;
-- powody typu policy/stash/cache change;
-- czasy odczytu Stash i etapów merge.
+In the summary, inspect `merge_reused`,
+`merge_graphql_fallback`, policy/Stash/cache change
+reasons and timing of Stash reads and merge stages.
 
-Szczegółowy format profilu opisuje
-[UPGRADE_diagnostics.md](UPGRADE_diagnostics.md).
+For profile details see
+[merge diagnostics](UPGRADE_diagnostics.md).

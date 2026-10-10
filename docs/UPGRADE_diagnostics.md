@@ -1,16 +1,16 @@
-# Profilowanie merge
+# Merge profiling
 
-Do diagnozy wolnego lub nieoczekiwanie przeliczanego merge użyj
-`--profile-merge`. Profil nie wymaga nowej inferencji, jeśli jest połączony z
-`--merge-only`.
+Use `--profile-merge` to investigate slow merges or merges
+that unexpectedly recompute scenes. Combine it with
+`--merge-only` to avoid new inference.
 
-## Zbieranie profilu
+## Collecting a profile
 
 ```powershell
 python .\stash_ai.py --merge-only --scene-id 123 --force-merge --profile-merge merge-profile.jsonl
 ```
 
-Dla kilku scen:
+For multiple scenes:
 
 ```powershell
 python .\stash_ai.py --merge-only `
@@ -18,70 +18,69 @@ python .\stash_ai.py --merge-only `
   --force-merge --profile-merge merge-profile.jsonl
 ```
 
-Plik `.jsonl` musi być nowy; aplikacja nie nadpisuje istniejącego profilu.
+The `.jsonl` file must be new; the application refuses
+to overwrite an existing profile. `--force-merge` bypasses
+only publication cache; it neither deletes evidence nor
+runs models. `--verbose` adds terminal detail but is not
+required for profiling.
 
-`--force-merge` omija wyłącznie cache publikacji. Nie usuwa evidence i nie
-uruchamia modeli.
+## JSONL contents
 
-`--verbose` dodaje szczegóły do konsoli, ale nie jest wymagane do profilu.
+The profile contains a start record, per-scene records
+and a summary. Available scene fields include:
 
-## Co zawiera JSONL
-
-Profil zapisuje rekord startowy, rekordy scen i podsumowanie. Dla scen dostępne
-są m.in.:
-
-| Pole | Znaczenie |
+| Field | Meaning |
 |---|---|
-| `wall_seconds` / `cpu_seconds` | czas rzeczywisty i CPU |
-| `status` / `reason` | wynik i powód przeliczenia/pominięcia |
-| `stages` | czas i liczba wywołań etapów |
-| `api` | operacje GraphQL/SQL, czasy, błędy, rozmiary |
-| `counts` | liczby wejść, wyników, cache hits i bajtów |
-| `statistics` | planowane zmiany publikacji |
-| `unmeasured_seconds` | czas poza zarejestrowanymi etapami |
+| `wall_seconds` / `cpu_seconds` | Elapsed time and CPU time |
+| `status` / `reason` | Outcome and reason for recomputing/skipping |
+| `stages` | Stage durations and call counts |
+| `api` | GraphQL/SQL operations, durations, errors and sizes |
+| `counts` | Input/output counts, cache hits and bytes |
+| `statistics` | Planned publication changes |
+| `unmeasured_seconds` | Time outside recorded stages |
 
-Etapy mają czas exclusive oraz inclusive. Do szukania udziału danego etapu używaj
-wartości exclusive; nie sumuj rodzica z jego dziećmi.
+Stages have exclusive and inclusive timing. Use exclusive
+time when estimating a stage's contribution, not the sum
+of a parent and its children.
 
-## Najważniejsze obszary
+## Primary areas
 
-Typowe grupy etapów:
-- obliczenia markerów/scen/Occurrence;
-- lokalny stan: SQL, decode/encode, compression i cache;
-- odczyt Stash oraz decode odpowiedzi;
-- rozwiązywanie tagów i katalogu;
-- przygotowanie, mutacje i commit publikacji.
+Typical stage groups include marker/scene/Occurrence
+computations; local state SQL, decode/encode, compression
+and cache; Stash reads and response decoding; tag
+resolution/catalog work; and preparing, mutating and
+committing publication.
 
-Początkowy skan kolekcji jest raportowany globalnie i nie jest częścią czasu
-końcowego merge pojedynczej sceny.
+The initial collection scan is reported globally; it
+is not part of an individual scene's final merge time.
 
-## Jak interpretować problem
+## Diagnosing a bottleneck
 
-Jeżeli kolejny identyczny przebieg nadal przelicza scenę, zacznij od `reason` i
-liczników `merge_*`. Najczęstsze przyczyny to:
-- zmiana polityki/kodu publikacji;
-- zmiana tagów lub markerów w Stash;
-- zapis nowych wyników;
-- pending publication;
-- zmiana zarządzanego katalogu tagów.
+If an identical later run still recomputes a scene,
+start with `reason` and the `merge_*` counters.
+Common reasons include changed publication code/policy,
+changed Stash tags or markers, new saved inference results,
+pending publication, or changes to the managed tag catalog.
 
-Jeżeli dominuje czas API, sprawdź liczbę operacji oraz czy działa zbiorczy
-read-only SQL. Jeżeli dominuje lokalny stan, porównaj decode/encode/compression i
-rozmiary snapshotów. Jeżeli dominuje compute, dopiero wtedy warto profilować
-algorytmy fusion/union.
+If API time dominates, inspect operation counts and whether
+batched read-only SQL is active. If local state dominates,
+compare decoding, encoding, compression and snapshot sizes.
+If compute dominates, profile fusion/interval-union
+algorithms next.
 
-## Bezpieczeństwo profilu
+## Profile confidentiality
 
-Profil nie zapisuje klucza API, obrazów ani pełnych zapytań/parametrów GraphQL.
-Zawiera identyfikatory scen, nazwy etapów i dane ilościowe potrzebne do analizy.
+Profiles do not store API keys, images or full GraphQL
+queries and parameters. They do contain scene IDs, stage
+names and quantitative data needed for analysis.
 
-## Benchmark offline
+## Offline benchmark
 
-Do reprodukowalnego pomiaru syntetycznego:
+For a reproducible synthetic comparison:
 
 ```powershell
 python -m benchmarks.benchmark_merge_pipeline --frames 400 --labels 28 --repeats 3
 ```
 
-Benchmark nie łączy się z produkcyjnym Stash i nie zastępuje profilu rzeczywistej
-biblioteki.
+The benchmark does not contact production Stash and
+is not a substitute for profiling the actual library.

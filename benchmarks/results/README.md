@@ -1,37 +1,46 @@
-# Referencyjne wyniki pomiarów
+# Reference benchmark results
 
-Pliki JSON przeniesiono bez zmiany zawartości. Dotyczą wcześniejszych wersji i
-warunków pomiaru opisanych w dokumentacji; nie są wynikiem bieżącego uruchomienia.
+The JSON files were moved without modifying their contents. They
+describe earlier versions and test conditions documented elsewhere;
+they are **not** results from the current execution.
 
-- [Cleanup SQL](cleanup_benchmark.json)
-- [Wydajność](performance_results.json)
+- [SQL cleanup](cleanup_benchmark.json)
+- [Performance](performance_results.json)
 - [Merge](merge_performance_results.json)
-- [Occurance](occurrence_performance_results.json)
-- [Diagnostyka merge](diagnostic_benchmark_results.json)
+- [Occurrence](occurrence_performance_results.json)
+- [Merge diagnostics](diagnostic_benchmark_results.json)
 
-[Współdzielone dowody snapshotów](shared_snapshot_proofs.json) to pomiar z
-2026-10-02 względem `main` po #90: 4 modele, 400 klatek, 28 etykiet i 453 markery,
-mediana 5 prób. Pełny merge offline skrócił się z 1,996 do 1,511 s, a kompaktowanie,
-serializacja i kompresja snapshotów z 0,790 do 0,319 s. JSON markerów zmalał
-z 44,29 do 14,90 MB, skompresowany BLOB z 1,69 do 0,73 MB. Hashe logicznych
-snapshotów, wyników Stash i liczniki publikacji są identyczne. Plik zawiera również
-wariant z jedną etykietą, bez współdzielonych dowodów. Są to syntetyczne pomiary
-bez inferencji i opóźnień sieciowych, nie prognoza czasu całej biblioteki.
+[Shared snapshot evidence](shared_snapshot_proofs.json) measures
+2026-10-02 against `main` after #90: four models, 400 frames,
+28 labels and 453 markers (median of five repetitions).
+Total offline merge dropped from 1.996 to 1.511 seconds, and
+snapshot compaction, serialization and compression from 0.790
+to 0.319 seconds. Marker JSON shrank from 44.29 to 14.90 MB,
+and compressed BLOBs from 1.69 to 0.73 MB. Logical snapshot
+and Stash-result hashes and publication counts remained identical.
+The file also includes a one-label case with no shared evidence.
+These are synthetic measurements without inference or network latency,
+not a prediction for a full library.
 
-[Instrukcja nowych pomiarów](../README.md) ·
-[Historyczne raporty walidacji](../../docs/validation/README.md)
+[How to run new benchmarks](../README.md) ·
+[Historical validation reports](../../docs/validation/README.md)
 
-[Indeks przedziałów markerów](marker_interval_index.json) to pomiar z 2026-10-02
-względem `main` po #93, mediana 5 prób tym samym skryptem. Dla 1000 istniejących
-markerów jednego primary tagu ponowny sync skrócił się z 0,913 do 0,061 s, a samo
-dopasowanie z 0,855 do 0,031 s. Dla 125 markerów punktowych sync skrócił się
-z 1,242 do 0,012 s; cleanup 1000 markerów w 20 primary tagach z 0,179 do 0,065 s.
-Plik zawiera też mały wariant kontrolny. Hashe wejścia, logicznych snapshotów,
-wyników Stash i liczniki są zgodne między wersjami. Pomiar obejmuje SQLite i makietę
-Stash, bez inferencji oraz opóźnień API.
+[Marker interval index](marker_interval_index.json) measures
+2026-10-02 against `main` after #93, with five repetitions
+of the same script. For 1,000 existing markers sharing one
+primary tag, resynchronization fell from 0.913 to 0.061 seconds,
+and matching alone from 0.855 to 0.031 seconds. For 125
+point markers, sync fell from 1.242 to 0.012 seconds; cleanup
+of 1,000 markers across 20 primary tags dropped from 0.179 to
+0.065 seconds. A small control case is also included. Input,
+logical snapshot and Stash-result hashes and counts match between
+revisions. Timings cover SQLite and mocked Stash, excluding inference
+and API latency.
 
-[Kaskada popularnego tagu](tag_cascade_2026-10-07.json) to pomiar z 2026-10-07:
-100 tys. i milion markerów, indeksowane relacje oraz WAL/NORMAL zgodne ze Stash
-v0.31.1. Wcześniejsze odpinanie relacji partiami skróciło największą transakcję,
-ale zwiększyło całkowity czas o 37–49% nawet bez API, hooków i ładowania obiektów.
-Hashe zachowanego stanu są identyczne. [Opis i decyzja](../../docs/cleanup_performance.md).
+[Popular-tag cascade](tag_cascade_2026-10-07.json) measures
+2026-10-07 with 100,000 and 1,000,000 markers, indexed
+relationships, and Stash v0.31.1-compatible WAL/NORMAL behavior.
+Pre-detaching relationships in batches reduced the longest
+transaction but increased total time by 37–49%, even without
+API calls, hooks or object loading. Retained-state hashes
+were identical. See the [analysis and decision](../../docs/cleanup_performance.md).

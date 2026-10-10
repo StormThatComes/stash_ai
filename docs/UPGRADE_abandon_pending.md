@@ -1,67 +1,62 @@
-# Porzucanie przerwanych operacji
+# Abandoning interrupted operations
 
-`--abandon-pending` pozwala porzucić niewykonaną część pending merge/cleanupu i
-kontynuować z aktualnymi regułami. Nie cofa mutacji, które Stash już wykonał.
+`--abandon-pending` discards the unfinished part of a pending merge
+or cleanup so work can continue under current policies. It does **not**
+undo mutations already performed by Stash.
 
-Najpierw zatrzymaj poprzedni proces. Opcja nie zatrzymuje innego działającego
-procesu i nadal obowiązuje blokada jednego writera dla bazy stanu.
+Stop the previous process first. The option does not terminate another
+running process, and the state database still enforces its single-writer lock.
 
-## Użycie
+## Usage
 
 ```powershell
-# Samo porzucenie; bez kontaktu ze Stash.
+# Abandon only; does not contact Stash.
 python .\stash_ai.py --abandon-pending
 
-# Podgląd samego porzucenia.
+# Preview abandonment.
 python .\stash_ai.py --abandon-pending --dry-run
 
-# Porzuć stary merge i przelicz zapisane evidence według obecnych reguł.
+# Abandon old merge, then replay stored evidence with current rules.
 python .\stash_ai.py --merge-only --abandon-pending
 
-# Porzuć stary cleanup i wykonaj nowy według obecnych YAML-i.
+# Abandon old cleanup and start again using current YAML.
 python .\stash_ai.py --models all --cleanup-only --abandon-pending
 ```
 
-Użyj tej samej `--state-db` i tego samego `STASH_URL` co w przerwanej
-operacji.
+Use the same `--state-db` and `STASH_URL` as the interrupted operation.
 
-## Co zostaje zachowane
+## What is preserved
 
-Porzucenie zachowuje:
-- surowe wyniki modeli;
-- checkpointy inferencji;
-- importowane legacy evidence;
-- informacje odzyskiwania potrzebne do rozpoznania własności;
-- wszystkie zmiany już wykonane w Stash.
+Abandonment retains:
+- raw model results;
+- inference checkpoints;
+- imported legacy evidence;
+- recovery records needed to identify ownership;
+- every change already applied in Stash.
 
-Nie przywraca:
-- skasowanych obiektów;
-- starych ID;
-- ręcznych relacji/metadanych;
-- mutacji wykonanych przez Stash przed utratą odpowiedzi.
+It does not restore deleted objects, old IDs, manual relationships/
+metadata, or mutations committed in Stash before its response was lost.
 
-`--dry-run` nie zmienia trwałej bazy ani Stash.
+`--dry-run` changes neither persistent state nor Stash.
 
-## Kiedy używać
+## When to use it
 
-Bez `--abandon-pending` przerwany globalny cleanup należy wznowić z tym samym
-zakresem i polityką.
+Without `--abandon-pending`, an interrupted global cleanup must
+resume with the **same scope and policy**.
 
-Użyj porzucenia, gdy:
-- zmieniłeś blacklistę przed dokończeniem cleanupu;
-- zmieniły się reguły publikacji;
-- nie chcesz kończyć starego planu;
-- chcesz ponownie uzgodnić stan na podstawie bieżących YAML-i.
+Abandon when exclusions changed before cleanup finished, publication
+rules changed, the old plan should not be completed, or you want to
+reconcile published state using current YAML.
 
 ## Recovery
 
-Porzucenie archiwizuje potrzebne informacje lokalnie i unieważnia cache
-publikacji. Kolejny cleanup/merge odczytuje aktualny stan Stash i próbuje go
-dopasować do zachowanych publikacji.
+Abandonment archives required information locally and invalidates
+publication cache. The next cleanup/merge reads live Stash state
+and attempts to reconcile it with saved publications.
 
-Jeżeli zarządzany marker został zmieniony poza znanym stanem i aplikacja nie
-potrafi bezpiecznie ustalić jego pochodzenia, operacja nie zgaduje. Może wymagać
-`--merge-only` z bieżącymi regułami.
+If a managed marker has been modified outside known state and
+the application cannot establish its provenance safely, it will
+not guess. A `--merge-only` run under current rules may be required.
 
-Nie uruchamiaj starszej wersji programu na bazie, która została zaktualizowana
-przez nowszy mechanizm recovery.
+Do not use an older application release on a database already
+updated by the newer recovery mechanism.

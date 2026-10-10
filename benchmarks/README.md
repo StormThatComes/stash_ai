@@ -1,10 +1,11 @@
-# Benchmarki offline
+# Offline benchmarks
 
-Uruchamiaj z katalogu głównego repozytorium, po instalacji `requirements-dev.txt`.
-W CI wszystkie dwanaście skryptów przechodzi smoke test na małych danych.
-Fixture używają bieżącego formatu analysis i pełnych metadanych.
-Skrypty używają syntetycznych danych, lokalnej tymczasowej bazy lub makiety Stash;
-nie łączą się ze Stash i nie uruchamiają modeli GPU.
+Run these scripts from the repository root after installing
+`requirements-dev.txt`. In CI, all twelve scripts pass smoke tests
+against small datasets. Fixtures use the current analysis format
+and complete metadata. Benchmarks operate on synthetic data,
+temporary local databases, or a Stash mock: they do **not**
+connect to Stash or run GPU models.
 
 ```powershell
 python -m benchmarks.benchmark_performance --frames 400 --labels 28 --repeats 3
@@ -21,140 +22,167 @@ python -m benchmarks.benchmark_pinned_proofs --frames 256 --labels 12 --repeats 
 python -m benchmarks.benchmark_state_compression --frames 729 --labels 128 --repeats 5
 ```
 
-| Skrypt | Co mierzy |
+| Script | What it measures |
 |---|---|
-| `benchmark_performance` | budowanie markerów i scalanie, z hashem wyniku |
-| `benchmark_merge_pipeline` | merge ze stanem SQLite, etapami i makietą API |
-| `benchmark_marker_matching` | ponowny merge na istniejących markerach; czas całego sync i dopasowania, hashe logicznych snapshotów oraz Stash |
-| `benchmark_retained_merge` | obserwacje współdzielone, markery temporalne jednego modelu i merge CPU przy szerokiej retencji wyników, z hashami każdego etapu |
-| `benchmark_occurrences` | wybór reprezentatywnych punktów Occurance |
-| `benchmark_cleanup_sql` | odkrywanie kandydatów przez SQL; bez kosztu API i usuwania |
-| `benchmark_rethreshold` | zmiana progów, czas/dekodowania Check i Apply, zapisy evidence oraz hashe wyników i result_index; bez merge/API |
-| `benchmark_tag_cascade` | kaskada popularnego tagu kontra wcześniejsze odpinanie relacji w partiach; całkowity czas, najdłuższa transakcja, liczba mutacji i hash zachowanego stanu |
-| `benchmark_scoped_reports` | raport cache i całe Check/Apply dla małej selekcji w większej bazie, osobno writer/preview; czas, instrukcje SQL, zapisy, dekodowania i hashe wyników |
-| `benchmark_run_history` | historia on/off dla świeżej inferencji, cache i checkpointu; czas, RSS, SQL, retencja i zgodność surowych wyników |
-| `benchmark_pinned_proofs` | cały zapis wyników przy published/pending/recovery, osobno writer/preview; czas, RSS, dekodowania i zgodność stanu |
-| `benchmark_state_compression` | zlib 6 kontra 1 na tych samych scene/marker evidence; czas kompresji, rozmiar BLOB i zgodność odczytu; bez JSON encoding, SQLite i GPU |
+| `benchmark_performance` | Marker construction and merging, including output hashes |
+| `benchmark_merge_pipeline` | SQLite-backed merge, its stages and a mocked API |
+| `benchmark_marker_matching` | Re-merge against existing markers; full synchronization and matching time, logical snapshot and Stash hashes |
+| `benchmark_retained_merge` | Shared observations, single-model temporal markers and CPU merge with broad prediction retention, hashing every stage |
+| `benchmark_occurrences` | Selection of representative Occurrence points |
+| `benchmark_cleanup_sql` | SQL-based candidate discovery, excluding API and deletion cost |
+| `benchmark_rethreshold` | Threshold updates, Check/Apply time and decoding, evidence writes, result and `result_index` hashes, excluding merge/API |
+| `benchmark_tag_cascade` | Popular-tag cascading versus prior batched relationship detachment; total time, longest transaction, mutation counts and retained-state hashes |
+| `benchmark_scoped_reports` | Cache report and complete Check/Apply for a small selection in a larger database, writer versus preview: duration, SQL statements, writes, decoding, output hashes |
+| `benchmark_run_history` | History enabled/disabled during fresh inference, cache reuse and checkpoint resume: duration, RSS, SQL, retention and raw-result equivalence |
+| `benchmark_pinned_proofs` | Full result writes with published/pending/recovery evidence, writer and preview: duration, RSS, decoding and final-state equivalence |
+| `benchmark_state_compression` | zlib level 6 vs 1 using identical scene/marker evidence: compression time, BLOB size and decoding equivalence, excluding JSON encoding, SQLite and GPU |
 
-Wynik `results/scoped_reports_2026-10-07.json` porównuje PR 4 z PR 5 dla
-32 wybranych scen i czterech modeli, przy 900 i 9000 scenach w bazie. Dla 9000
-scen mediana raportu preview spadła z 437 do 7 ms, Check/Apply writer z 201 do
-12 ms, a Check/Apply preview z 420 do 15 ms. Hashe wyników pozostały identyczne,
-surowe evidence nie zmieniło się i żaden wariant nie dekodował BLOB-ów predykcji.
-Liczba instrukcji SQL po poprawce pozostaje stała dla obu wielkości bazy.
-To pomiar lokalnego syntetycznego workflow; nie obejmuje modeli ani API.
+`results/scoped_reports_2026-10-07.json` compares PR 4 to PR 5 for
+32 selected scenes and four models with either 900 or 9,000 scenes
+in the database. With 9,000 scenes, median preview report time
+fell from 437 to 7 ms, Check/Apply writer time from 201 to 12 ms,
+and Check/Apply preview time from 420 to 15 ms. Output hashes
+remained identical, raw evidence was unchanged, and no variant
+decoded prediction BLOBs. Post-fix SQL statement count stayed
+constant at both database sizes. These are local synthetic
+workflow measurements without models or API.
 
-Każdy skrypt obsługuje też bezpośrednie uruchomienie przez ścieżkę, np.
-`python benchmarks/benchmark_performance.py`. Benchmarki porównujące aplikację bez `--project` wskazują
-katalog aplikacji, niezależnie od bieżącego katalogu terminala.
+Every script also supports direct execution by path, e.g.
+`python benchmarks/benchmark_performance.py`. Benchmarks comparing
+application versions without `--project` target the application
+directory independently of the terminal's current directory.
 
-Do porównań z poprzednią kopią kodu:
+For comparison against an earlier source-tree copy:
 
 ```powershell
-python -m benchmarks.benchmark_performance --project C:\poprzednia_paczka\stash_ai
-python -m benchmarks.benchmark_merge_pipeline --project C:\poprzednia_paczka\stash_ai
-python -m benchmarks.benchmark_rethreshold --project C:\poprzednia_paczka\stash_ai
+python -m benchmarks.benchmark_performance --project C:\previous_build\stash_ai
+python -m benchmarks.benchmark_merge_pipeline --project C:\previous_build\stash_ai
+python -m benchmarks.benchmark_rethreshold --project C:\previous_build\stash_ai
 ```
 
-Wskazany katalog musi zawierać kompletną aplikację: launcher `stash_ai.py`,
-`update_stash_ai.py` i pakiet `stash_ai/`.
-Porównywane rewizje muszą udostępniać aktualne API używane przez skrypty:
-`union_intervals(..., borrow=True)`, filtrowanie tablic NumPy przez `select_scores`,
-`MergeDiagnostics` i tabelę `result_metadata` w `StateStore`. Benchmarki nie
-dopasowują wywołań do starszych API.
-Narzędzia pomiarowe oraz makieta Stash pochodzą z bieżącego repozytorium,
-więc porównanie nie wymaga testów we wskazanej instalacji. Porównuj identyczne dane
-i parametry; przy zmianie zachowania aplikacji mogą się różnić również hashe.
+The selected directory must contain a complete installation:
+`stash_ai.py`, `update_stash_ai.py`, and the `stash_ai/` package.
+Compared revisions must expose the current APIs required by the
+scripts: `union_intervals(..., borrow=True)`, NumPy-array filtering
+through `select_scores`, `MergeDiagnostics`, and
+`StateStore.result_metadata`. Benchmarks do not adapt their calls
+to older interfaces.
 
-`benchmark_tag_cascade` używa wyłącznie własnej tymczasowej bazy SQLite i nie
-przyjmuje `--project`. Odtwarza indeksowane relacje markerów, scen i obrazów do
-tagów. Pomija sieć, hooki oraz ładowanie obiektów Stash; wariant wcześniejszego
-odpinania ma dzięki temu optymistyczny koszt. Kopiowanie fixture i weryfikacja
-hasha są poza pomiarem. Baza używa WAL/NORMAL i natychmiastowych transakcji zapisu,
-tak jak Stash v0.31.1. Wynik oraz decyzję o strategii cleanupu opisuje
-[cleanup_performance](../docs/cleanup_performance.md).
+Benchmark tools and the Stash mock come from the current
+repository, so the target installation's tests do not need
+to be run. Use identical data and parameters; output hashes
+may also differ when application behavior changes.
 
-`benchmark_merge_pipeline` pokazuje rozmiar JSON i skompresowanego BLOB-a każdego
-snapshotu. Przy zmianie formatu zapisu porównuj `input_sha256`,
-`logical_snapshot_sha256`, `stash_sha256` i liczniki operacji; `snapshot_sha256`
-obejmuje surowe BLOB-y, więc może się zmienić przy identycznym wyniku logicznym.
-Dekodowanie i hashowanie do tej weryfikacji odbywa się poza pomiarem czasu.
+`benchmark_tag_cascade` creates only its own temporary SQLite
+database and does not accept `--project`. It models indexed
+relationships between tags, markers, scenes and images while
+omitting network operations, hooks and Stash object loading,
+giving pre-detachment an optimistic cost. Fixture cloning and
+hash verification are excluded from the timed portion.
+The database uses WAL/NORMAL and immediate write transactions,
+matching Stash v0.31.1. See
+[cleanup performance](../docs/cleanup_performance.md) for the
+results and the selected cleanup strategy.
 
-`benchmark_marker_matching` najpierw publikuje rozłączne przedziały, a następnie
-mierzy ponowny sync na tych samych markerach. `--labels` rozkłada je na wiele
-primary tagów, `--point-only` mierzy publikację markerów punktowych, a `--cleanup`
-obejmuje również sprawdzanie obecności markerów przed cleanupem. Także ten skrypt
-obsługuje `--project` i `--output`. Przy porównaniu wersji użyj tego samego skryptu
-i parametrów; hashe oraz liczniki muszą być identyczne. Weryfikacja jest poza
-pomiarem; wynik obejmuje lokalny zapis snapshotu, bez inferencji i opóźnień API.
+`benchmark_merge_pipeline` reports the JSON and compressed
+BLOB sizes of each snapshot. When comparing storage formats,
+use `input_sha256`, `logical_snapshot_sha256`, `stash_sha256`
+and operation counts. `snapshot_sha256` covers raw BLOB bytes,
+which can change even if logical results remain identical.
+Decoding and hashing for verification occur outside the
+measured interval.
 
-`benchmark_rethreshold` domyślnie mierzy wyniki zapisane przez wskazaną wersję
-aplikacji, z gotowymi metadanymi walidacji. Dodaj
-`--mode scene` lub `--mode markers`, aby zmierzyć zmianę tylko progów scen
-lub markerów; domyślny `--mode combined` zmienia oba progi. Dodaj
-`--legacy-metadata`, aby zmierzyć pierwsze uzupełnianie metadanych starego cache.
-Opcja czyści tylko pochodne metadane w tymczasowej bazie benchmarku.
-Raport osobno pokazuje dekodowania evidence i czas planowania w `Check`/`Apply`;
-całkowity czas obejmuje też transakcje i zapisy progów.
-Hashe obejmują wejściowe BLOB-y, efektywne wyniki i indeks ukończenia.
+`benchmark_marker_matching` first publishes disjoint intervals,
+then measures re-synchronization of those same markers.
+`--labels` distributes them across multiple primary tags,
+`--point-only` tests point-marker publication, and `--cleanup`
+also includes checking marker existence before cleanup.
+The script supports `--project` and `--output`. When comparing
+revisions, use the same script and settings; hashes and counts
+must match. Verification is excluded from timing; results include
+local snapshot writes without inference or API latency.
 
-Skrypty drukują JSON na stdout. `benchmark_merge_pipeline` i `benchmark_occurrences`
-przyjmują też `--output PATH`. Do nowego pomiaru użyj nowej nazwy pliku:
+`benchmark_rethreshold` measures results written by the selected
+application version with populated validation metadata by default.
+Use `--mode scene` or `--mode markers` to change only scene
+or marker thresholds; `--mode combined` (default) changes both.
+Use `--legacy-metadata` to measure initial metadata population
+for older cached results. This option deletes only derived
+metadata inside the temporary benchmark database. The report
+separately reports evidence decoding and planning time for
+`Check` and `Apply`, while total time includes transactions and
+threshold writes. Hashes cover input BLOBs, effective results
+and completion indexes.
+
+Scripts print JSON to stdout. `benchmark_merge_pipeline` and
+`benchmark_occurrences` also support `--output PATH`. Use a new
+filename for each measurement:
 
 ```powershell
 python -m benchmarks.benchmark_occurrences --output benchmarks/results/local_occurrences.json
 ```
 
-Lokalne wyniki `local_*` są ignorowane przez Git. Zachowane wcześniejsze pomiary
-w [results](results/README.md) są punktami odniesienia; nie nadpisuj ich zwykłym
-uruchomieniem. Czasy syntetycznych testów nie są prognozą czasu pracy całej biblioteki.
+Local `local_*` result files are gitignored. Historical measurements
+in [results](results/README.md) are reference data: do not overwrite
+them during routine runs. Synthetic benchmark timings are not
+forecasts for processing an entire library.
 
-`benchmark_retained_merge` zachowuje po 12 obserwacji mocnych lub podtrzymujących
-oraz 108 słabszych na klatkę przy progu publikacji 0,8 i retencji od 0,1.
-Dodaj `--weak-labels 0`, aby sprawdzić wariant bez zbędnych obserwacji.
-Do porównania wersji uruchom ten sam skrypt z tymi samymi parametrami i innym
-`--project`; identyczne hashe wejścia i wszystkich trzech etapów potwierdzają
-zgodność danych, markerów i dowodów. Cały pomiar `merge_cpu` obejmuje budowanie
-markerów i scalanie przed zapisem do SQLite lub wywołaniem API Stash.
+`benchmark_retained_merge` retains 12 strong/supporting and 108 weak
+observations per frame at a publication threshold of 0.8 and
+retention floor of 0.1. Use `--weak-labels 0` to test a case
+without extra weak observations. For version comparisons, run
+the same script and settings with a different `--project` path.
+Identical hashes for the input and three stages verify evidence,
+marker and data consistency. The complete `merge_cpu` measurement
+includes building and merging markers before SQLite writes or
+Stash API calls.
 
-## Koszt historii uruchomień
+## Run history overhead
 
 `python -m benchmarks.benchmark_run_history --frames 128 --labels 12 --repeats 3`
-porównuje historię on/off dla świeżej inferencji, cache i wznowienia checkpointu.
-Każda próbka działa w osobnym procesie. Raportuje wall/CPU, zmienione wiersze SQL
-bazy stanu i historii, peak RSS procesu, rozmiary baz oraz oddzielny koszt retencji.
-Hashe ukończonych surowych wyników muszą być identyczne; wariant cache nie może
-uruchomić predykcji. Retencja usuwa 40 zakończonych rekordów fixture, chroniąc proofs.
-Fixture wykorzystuje prawdziwą orkiestrację, VTT/PNG i checkpointy oraz syntetyczny
-tagger CPU. Wynik nie jest pomiarem rzeczywistego backendu ML ani sieci;
-peak RSS obejmuje również przygotowanie fixture.
+compares run history on/off for fresh inference, cache reuse
+and checkpoint resume. Every sample runs in a separate process.
+The report records wall/CPU time, changed SQL rows in state and
+history databases, process peak RSS, database sizes, and
+separate retention cost. Completed raw-result hashes must
+be identical; the cache variant must not perform prediction.
+Retention removes 40 completed fixture runs while protecting
+proofs. The fixture exercises actual orchestration, VTT/PNG
+and checkpoints using a synthetic CPU tagger. It does not
+measure a production ML backend or network access, and peak
+RSS also includes fixture preparation.
 
-Czas `captured_at` jest stały wyłącznie w fixture, aby porównanie BLOB-ów nie różniło
-się z powodu momentu uruchomienia próbki.
+`captured_at` is fixed only in the fixture so comparisons
+of BLOBs are not affected by sample execution time.
 
-Pomiar [run_history_2026-10-07.json](results/run_history_2026-10-07.json) z CI:
-mediany off/on wynoszą 139/167 ms dla świeżej inferencji, 5/33 ms dla cache
-oraz 53/84 ms dla wznowienia. Narzut obejmuje start i zamknięcie historii,
-fingerprint kodu i odczyt metadanych pakietów; liczba zapisów historii wynosi
-odpowiednio 7, 5 i 7. Jest to mały syntetyczny przebieg, więc porównuj też
-bezwzględny czas, a nie tylko procent narzutu.
+The CI measurement [run_history_2026-10-07.json](results/run_history_2026-10-07.json)
+shows median off/on times of 139/167 ms for fresh inference,
+5/33 ms for cache reuse, and 53/84 ms for resume.
+Overhead includes opening/closing history, fingerprinting
+code, and reading package metadata. History-write counts
+are 7, 5 and 7, respectively. This is a small synthetic run,
+so compare absolute time as well as the overhead percentage.
 
-
-## Koszt zapisu wyników przy przypiętych dowodach
+## Result-writing overhead with pinned evidence
 
 `python -m benchmarks.benchmark_pinned_proofs --frames 256 --labels 12 --repeats 3`
-mierzy cały zapis scene+markers dla czterech źródeł przy jednoczesnych dowodach
-published, pending i recovery, również w sparse dry-run. Każda próbka działa
-w nowym procesie i nowej bazie. Baseline wyłącza tylko współdzielenie leniwego
-odczytu pins w ramach wywołania; reszta kodu jest identyczna. Przygotowanie
-dowodów i weryfikacja hashy są poza pomiarem czasu. Raportuje wall/CPU, peak RSS
-procesu (obejmujący fixture), liczbę dekodowanych snapshotów i zapisów SQL.
-Wszystkie trwałe wyniki, archiwa, snapshoty, recovery i indeksy muszą dać
-identyczny hash; dry-run dodatkowo zachowuje bajty bazy źródłowej.
+measures the full scene+marker result write for four sources
+while published, pending, and recovery proofs coexist, including
+sparse dry-run. Every sample uses a new process and database.
+The baseline disables only reuse of lazily loaded pinned
+proofs within the call; the remaining code is identical.
+Evidence preparation and hash verification are not timed.
+The report includes wall/CPU time, process peak RSS
+(including fixtures), snapshot decoding count and SQL writes.
+All persistent results, archives, snapshots, recovery and
+indexes must have identical hashes; dry-run additionally
+preserves the source database byte for byte.
 
-Pomiar [pinned_proofs_2026-10-07.json](results/pinned_proofs_2026-10-07.json)
-z CI: writer 412 → 283 ms, preview 405 → 279 ms (mediany, 3 powtórzenia).
-Dekodowania snapshotów spadły z 48 do 24, a liczba zapisów SQL pozostała
-40 dla writera i 48 dla preview. Hashe całego sprawdzanego stanu są identyczne;
-wszystkie 8 przypiętych rekordów pozostaje w archiwum. Zysk około 31% dotyczy
-tego syntetycznego zapisu z dużymi proofs, bez kosztu inferencji i API.
+The CI measurement [pinned_proofs_2026-10-07.json](results/pinned_proofs_2026-10-07.json)
+shows writer 412 → 283 ms and preview 405 → 279 ms
+(medians of three repetitions). Snapshot decoding dropped
+from 48 to 24, while SQL-write counts remained 40 for the
+writer and 48 for preview. Entire-state verification hashes
+match, and all eight pinned records remain archived.
+The approximately 31% improvement applies to this synthetic
+write with large proofs, excluding inference and API overhead.
