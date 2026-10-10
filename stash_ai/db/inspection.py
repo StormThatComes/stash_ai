@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import closing
 from pathlib import Path
 import sqlite3
 
@@ -36,7 +37,7 @@ def inspect_database(path, scope):
 
     from stash_ai.storage.schema import APPLICATION_ID
 
-    with connect_readonly(path) as db:
+    with closing(connect_readonly(path)) as db:
         # Schema, evidence and aggregate state belong to one SQLite snapshot.
         db.execute('BEGIN')
         application_id = db.execute("PRAGMA application_id").fetchone()[0]
@@ -45,6 +46,9 @@ def inspect_database(path, scope):
             raise ValueError("Not a supported stash-taggers state DB.")
 
         tables = table_names(db)
+        from stash_ai.storage.schema import LATEST_SCHEMA_VERSION, STATE_TABLES, shape_issues
+        schema_issues = shape_issues(db) if version == LATEST_SCHEMA_VERSION else []
+        missing_tables = sorted(STATE_TABLES - tables) if version == LATEST_SCHEMA_VERSION else []
         quick_check = db.execute("PRAGMA quick_check(1)").fetchone()[0]
         page_size = db.execute("PRAGMA page_size").fetchone()[0]
         page_count = db.execute("PRAGMA page_count").fetchone()[0]
@@ -85,7 +89,7 @@ def inspect_database(path, scope):
         result_metadata = count_rows(db, tables, "result_metadata", scope)
         init_completed = count_rows(db, tables, 'db_init_scenes', scope, 'completed=1')
         init_pending = count_rows(db, tables, 'db_init_scenes', scope, 'completed=0')
-        if 'input_checks' in tables:
+        if {'input_checks', 'db_init_scenes'} <= tables:
             removed = db.execute("SELECT COUNT(DISTINCT i.scene) FROM db_init_scenes AS i "
                 "JOIN input_checks AS c USING(scope,scene) WHERE i.scope=? AND c.reason='deleted'", (scope,)).fetchone()[0]
             init_completed -= removed
@@ -93,7 +97,9 @@ def inspect_database(path, scope):
     wal_path = Path(str(path) + "-wal")
     shm_path = Path(str(path) + "-shm")
     file_bytes = path.stat().st_size
-    warnings = []
+    warnings = [f'Incomplete schema: {issue}={count}' for issue, count in dict(schema_issues).items()]
+    if missing_tables:
+        warnings.append('Missing state tables: ' + ', '.join(missing_tables))
     if quick_check != "ok":
         warnings.append("SQLite quick_check failed.")
     if pending_publications:
@@ -108,6 +114,8 @@ def inspect_database(path, scope):
         sqlite_version=sqlite3.sqlite_version,
         schema_version=version,
         quick_check=quick_check,
+        schema_issues=dict(schema_issues),
+        missing_tables=missing_tables,
         file_bytes=file_bytes,
         wal_bytes=wal_path.stat().st_size if wal_path.exists() else 0,
         shm_bytes=shm_path.stat().st_size if shm_path.exists() else 0,

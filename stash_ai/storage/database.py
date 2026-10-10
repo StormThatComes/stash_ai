@@ -2,11 +2,11 @@
 from __future__ import annotations
 
 from contextlib import AbstractContextManager
-import os
 from pathlib import Path
 import sqlite3
 
 
+from stash_ai.storage.writer_lock import acquire_writer_lock
 from stash_ai.storage.schema import APPLICATION_ID, LATEST_SCHEMA_VERSION, require_supported_version, shape_issues
 
 
@@ -56,20 +56,7 @@ class StateDatabase(AbstractContextManager):
 
     def _open_writer(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.lock_file = open(str(self.path) + ".lock", "a+b")
-        if self.lock_file.seek(0, os.SEEK_END) == 0:
-            self.lock_file.write(b"0")
-            self.lock_file.flush()
-        self.lock_file.seek(0)
-        try:
-            if os.name == "nt":
-                import msvcrt
-                msvcrt.locking(self.lock_file.fileno(), msvcrt.LK_NBLCK, 1)
-            else:
-                import fcntl
-                fcntl.flock(self.lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError as exc:
-            raise RuntimeError("Another merged-output process is using this state DB.") from exc
+        self.lock_file = acquire_writer_lock(self.path)
         self.connection = sqlite3.connect(self.path, timeout=30)
 
     def _validate(self, db):

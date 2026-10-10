@@ -80,11 +80,11 @@ def explain(app, args, core_policies, scene_policies):
         for scene_id in dict.fromkeys(args.scene_id):
             diagnostics = Counter()
             hits, spans = merge.evidence(app, store, scene_id, core_policies, scene_policies, diagnostics)
-            matching = [span for span in spans if span["tag"] == label]
+            markers = merge_intervals.union_intervals(spans)
             recorded_sources = {}
             for kind in KINDS:
                 sources = {}
-                for source, segment in store.records(scene_id, kind).items():
+                for source, segment in store.records(scene_id, kind, borrow=True).items():
                     items = ([dict(start=frame["start"], end=frame["end"], score=score)
                               for frame in segment["items"] for tag, score in frame["tags"] if tag == label]
                              if segment["mode"] == "frames" else [entry for entry in segment["items"] if entry["tag"] == label])
@@ -103,10 +103,10 @@ def explain(app, args, core_policies, scene_policies):
                                 _explain_scene_contributor(app, hit, recorded_sources["scene"])
                                 for hit in hits if hit["tag"] == label
                             ],
-                            "markers": merge_intervals.union_intervals(matching), "recorded_sources": recorded_sources,
+                            "markers": [marker for marker in markers if marker["tag"] == label], "recorded_sources": recorded_sources,
                             "as_marker_extra": [dict(tag=merge_labels.AI.prefix + marker["tag"], start=marker["start"], end=marker["end"],
                                                      evidence=marker["extra_evidence"][label])
-                                                for marker in merge_intervals.union_intervals(spans) if label in marker.get("extra_evidence", {})],
+                                                for marker in markers if label in marker.get("extra_evidence", {})],
                             "pending_sync": any(store.snapshot(scene_id, kind, borrow=True)[1] is not None for kind in KINDS)})
     print(json.dumps(reports, ensure_ascii=False, indent=2, allow_nan=False))
     return 0

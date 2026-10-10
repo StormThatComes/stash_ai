@@ -1,4 +1,5 @@
 """Sparse scene accumulation and qualification without a dense score matrix."""
+from contextlib import contextmanager
 
 CHECKPOINT_FORMAT = 1
 ITEM_FIELDS = frozenset(('hits', 'high_hits', 'max_score', 'peak_time', 'seconds',
@@ -44,12 +45,33 @@ class SceneAccumulator:
     """One small record per observed label, never a frame-by-vocabulary matrix."""
     def __init__(self, threshold, policy, state=None):
         self.threshold, self.policy = threshold, policy
+        self._undo = None
         if state is None:
             self.items, self.frames, self.covered, self.last_end = {}, 0, 0.0, 0.0
         else:
             validate_checkpoint(state)
             self.items = {int(k): dict(v) for k, v in state['items'].items()}
             self.frames, self.covered, self.last_end = state['frames'], state['covered'], state['last_end']
+
+    @contextmanager
+    def batch(self):
+        """Roll back only touched labels if processing this batch fails."""
+        if self._undo is not None:
+            raise RuntimeError('Nested scene accumulator batch.')
+        previous = self.frames, self.covered, self.last_end
+        self._undo = {}
+        try:
+            yield
+        except BaseException:
+            for index, value in self._undo.items():
+                if value is None:
+                    self.items.pop(index, None)
+                else:
+                    self.items[index] = value
+            self.frames, self.covered, self.last_end = previous
+            raise
+        finally:
+            self._undo = None
 
     def add(self, scores, cues):
         import numpy as np
@@ -67,6 +89,8 @@ class SceneAccumulator:
         for index, score in values:
             if score < floor:
                 continue
+            if self._undo is not None and index not in self._undo:
+                self._undo[index] = dict(self.items[index]) if index in self.items else None
             item = self.items.setdefault(index, dict(hits=0, high_hits=0, max_score=0.0,
                 seconds=0.0, run_hits=0, run_start=cue.start, last_end=cue.start,
                 longest_hits=0, longest_seconds=0.0, last_frame=0, peak_time=cue.start))

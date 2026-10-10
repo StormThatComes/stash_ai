@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from contextlib import contextmanager
-import os
+from contextlib import closing
 from pathlib import Path
 import shutil
 import sqlite3
 
 from .common import format_bytes
 from .inspection import inspect_database
+from stash_ai.storage.writer_lock import writer_lock as _writer_lock
 
 
 MIN_FREE_HEADROOM = 16 * 2**20
@@ -26,35 +26,14 @@ def _same_logical_counts(before, after):
 
 
 def _safe_to_compact(report):
+    if report.get('schema_issues'):
+        raise RuntimeError('Incomplete state DB schema; run --db-update before --db-compact.')
     if report["quick_check"] != "ok":
         raise RuntimeError("SQLite quick_check is not clean; compacting a suspect database is refused.")
     if report["pending_publications"]:
         raise RuntimeError("Pending publication plans exist; finish or abandon them before --db-compact.")
     if report["pending_cleanups"]:
         raise RuntimeError("A cleanup plan is pending; finish or abandon it before --db-compact.")
-
-
-@contextmanager
-def _writer_lock(path):
-    """Use the same advisory lock file as StateStore writers."""
-    lock = open(str(path) + ".lock", "a+b")
-    try:
-        if lock.seek(0, os.SEEK_END) == 0:
-            lock.write(b"0")
-            lock.flush()
-        lock.seek(0)
-        try:
-            if os.name == "nt":
-                import msvcrt
-                msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
-            else:
-                import fcntl
-                fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError as exc:
-            raise RuntimeError("Another merged-output process is using this state DB.") from exc
-        yield
-    finally:
-        lock.close()
 
 
 def compact_database(path, scope, *, dry_run=False):
@@ -80,7 +59,7 @@ def compact_database(path, scope, *, dry_run=False):
                 f"Insufficient free disk space for safe VACUUM: need about {format_bytes(required)}, "
                 f"have {format_bytes(available)}."
             )
-        with sqlite3.connect(path, timeout=30) as db:
+        with closing(sqlite3.connect(path, timeout=30)) as db:
             db.execute("PRAGMA busy_timeout=30000")
             db.execute("VACUUM")
             check = db.execute("PRAGMA quick_check(1)").fetchone()[0]

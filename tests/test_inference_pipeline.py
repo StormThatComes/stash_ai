@@ -303,17 +303,18 @@ def test_consumer_failure_checkpoints_only_processed_results(pipeline, monkeypat
     from stash_ai.evidence.temporal.statistics import SceneAccumulator
     config = ModelSettings(WD, Path('missing'), .4, .65, 4)
     model = IndexedTagger(config, pipeline.scores['wd'], pipeline.vocab.labels)
-    add = SceneAccumulator.add
+    add = SceneAccumulator.add_sparse
 
-    def fail_second(accumulator, scores, cues):
-        if cues[0].start == 4:
+    def fail_second(accumulator, values, cue):
+        result = add(accumulator, values, cue)
+        if cue.start == 5:
             raise error_type('postprocessing failed')
-        return add(accumulator, scores, cues)
+        return result
 
     with StateStore(tmp_path / 'state.sqlite3', 'fixture') as store:
         checkpoint = checkpoints.Checkpoint(store, '1', 'wd', 'signature', 10, 2)
         with monkeypatch.context() as patch:
-            patch.setattr(SceneAccumulator, 'add', fail_second)
+            patch.setattr(SceneAccumulator, 'add_sparse', fail_second)
             with pytest.raises(error_type, match='postprocessing failed'):
                 prediction.predict_scene(app, model, pipeline.stash, {}, pipeline.cues,
                                          checkpoint=checkpoint, prefetch=2, prepare_workers=8,

@@ -70,6 +70,22 @@ def test_exact_boundaries_skip_empty_queries_and_reuse_qualification():
     assert proof['a']['intervals'] == [[0,10]]
 
 
+@pytest.mark.parametrize('limit', [0, 2048])
+def test_index_does_not_keep_keys_for_discarded_queries(limit):
+    cache = RamCache(limit)
+    events = [dict(start=0, end=1, extras={'a': {'wd': .9}})]
+    index = ObservationIndex(events, {'wd': ['sig']}, 'timeline', cache)
+    other = ObservationIndex(events, {'wd': ['other']}, 'other', cache)
+    policy = TemporalPolicy()
+    for number in range(500):
+        index.qualified(0, 1 + number / 1000, policy)
+    assert not hasattr(index, 'cache_keys')
+    retained = other.qualified(0, 1, policy)
+    index.close()
+    assert all(key[1] is other.token for key in cache.entries)
+    assert other.qualified(0, 1, policy) == retained
+
+
 SCHEMA = '''
 CREATE TABLE scenes(id INTEGER PRIMARY KEY,title TEXT);
 CREATE TABLE tags(id INTEGER PRIMARY KEY,name TEXT);

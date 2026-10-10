@@ -29,6 +29,9 @@ def test_fresh_and_cached_runs_are_durable_and_report_is_entirely_offline(pipeli
     assert fresh['outcomes']['wd']['fresh'] == 1
     assert cached['outcomes']['wd']['reused'] == 1
     assert fresh['counts']['processed'] == cached['counts']['reused'] == 1
+    assert fresh['counts']['state_json_bytes_written'] > 0
+    assert fresh['counts']['state_blob_bytes_written'] > 0
+    assert fresh['counts']['state_json_bytes_written'] >= fresh['counts']['state_blob_bytes_written']
     assert fresh['configuration']['result_prefetch_batches'] == app.RESULT_PREFETCH_BATCHES
     assert fresh['models']['wd']['revision']
     batches = [row for row in fresh['metrics'] if row['name'] == 'inference_batch']
@@ -181,8 +184,7 @@ def test_read_only_commands_record_only_when_explicitly_requested(tmp_path, monk
 def test_missing_history_report_does_not_create_db_or_output(tmp_path):
     destination = tmp_path / 'report.json'
     before = set(tmp_path.iterdir())
-    with pytest.raises(sqlite3.OperationalError):
-        app.main(['--run-report', str(destination), '--state-db', str(tmp_path / 'missing.sqlite3')])
+    assert app.main(['--run-report', str(destination), '--state-db', str(tmp_path / 'missing.sqlite3')]) == 1
     assert set(tmp_path.iterdir()) == before
 
 
