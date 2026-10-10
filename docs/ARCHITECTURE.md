@@ -445,120 +445,278 @@ ordered command plans in batches of 50 scenes.
 preview-source verification and the existing
 JSON output format.
 
-### Reguły czasowe i obserwacje
+### Temporal rules and observations
 
-`stash_ai/evidence/temporal/` oddziela politykę i jej historyczne snapshoty (`policy.py`),
-rzadkie statystyki oraz kwalifikację scen (`statistics.py`), budowę markerów
-i consensus seeds (`markers.py`) oraz kwalifikację dodatkowych tagów (`extras.py`).
-`evidence/intervals.py` scala uporządkowane przedziały, `evidence/timeline.py`
-udostępnia indeksowane zapytania o obserwacje, a `evidence/retention.py` wyznacza
-progi retencji. Przeniesienie nie zmienia zapisanych dowodów ani reguł publikacji.
+`stash_ai/evidence/temporal/` separates policy and its
+historical snapshots (`policy.py`), sparse statistics
+and scene qualification (`statistics.py`), marker
+construction and consensus seeds (`markers.py`), and
+extra-tag qualification (`extras.py`).
+`evidence/intervals.py` merges ordered intervals,
+`evidence/timeline.py` provides indexed observation
+queries, and `evidence/retention.py` determines
+retention floors. Moving these modules does not
+alter saved proofs or publication rules.
 
-### Potok zachowanych dowodów
+### Retained-evidence pipeline
 
-`stash_ai/evidence/pipeline.py` koordynuje kwalifikację scen, markerów i punktów
-wystąpień. `source_markers.py` buduje wkład pojedynczych źródeł, `frames.py`
-weryfikuje grupy klatek i przygotowuje obserwacje, a `observations.py` obsługuje
-wielokrotne zapytania o przedziały. `shared_markers.py` łączy kompatybilne źródła
-i odtwarza przycięte dowody; `scenes.py` kwalifikuje oraz odwołuje dowody scen.
-`occurrences.py` oddziela kwalifikację kandydatów, budowę strumieni i wybór punktu.
+`stash_ai/evidence/pipeline.py` coordinates scene,
+marker and occurrence qualification.
+`source_markers.py` assembles contributions from
+individual sources; `frames.py` validates frame
+groups and prepares observations; `observations.py`
+supports repeated interval queries. `shared_markers.py`
+merges compatible sources and reconstructs clipped
+evidence. `scenes.py` qualifies and withdraws
+scene evidence. `occurrences.py` separates
+candidate qualification, stream construction
+and point selection.
 
-`identity.py` definiuje tożsamość segmentów bez przejściowych override progów;
-`labels.py` waliduje surowe etykiety i opisuje namespace AI. `cache_views.py`
-i `thresholds.py` tworzą widoki kwalifikacji, a zapis zmian progów pozostaje
-w `rethreshold/`. `inference/results.py` zapisuje kształt raw prediction outputs,
-a `inference/reuse.py` dowodzi zgodności wcześniejszej inferencji przed zmianą progów.
+`identity.py` defines segment identity without
+temporary threshold overrides; `labels.py` validates
+raw labels and describes the AI namespace.
+`cache_views.py` and `thresholds.py` build
+qualification views, with threshold writes staying
+in `rethreshold/`. `inference/results.py` defines
+the raw prediction output format; `inference/reuse.py`
+proves prior inference compatibility before
+changing thresholds.
 
-### Runtime i raportowanie wykonania
+### Runtime and run reporting
 
-`stash_ai/runtime/cache.py` zawiera cache LRU, a `memory.py` estymację utrzymanych
-obiektów i odczyt RSS. `report.py` zachowuje licznikowy interfejs `RunReport`,
-lecz `timing.py` zarządza oddzielnym `RunTimings` dla każdego raportu, jego
-thread-local stosami i rozmiarem odpowiedzi API. `summary.py` renderuje dotychczasowe
-podsumowanie, a `diagnostics.py` strumieniuje profil JSONL. Moduły runtime
-pozostają poza fingerprintem kodu publikacji i nie wymagają zależności ML.
+`stash_ai/runtime/cache.py` contains the LRU cache;
+`memory.py` estimates retained objects and reads RSS.
+`report.py` retains the `RunReport` counter interface,
+while `timing.py` maintains a distinct `RunTimings`
+instance for each report, including thread-local
+stacks and API response sizes. `summary.py`
+renders the existing summary and `diagnostics.py`
+streams JSONL profiles. Runtime modules remain outside
+the publication-code fingerprint and do not
+depend on machine-learning packages.
 
-Grupy markerów rozwiązuje `publication/groups.py`; ich backfill uruchamia
-`commands/marker_groups.py`, a pruning wraz z dry-run korektą liczników
-obsługuje `cleanup/groups.py`. `cleanup/markers.py` usuwa wykluczone rdzenie
-i extras historycznych wyników modeli, bez wyliczania nowych markerów.
+Marker groups are resolved by `publication/groups.py`;
+backfill is dispatched by `commands/marker_groups.py`,
+and pruning with dry-run count adjustments uses
+`cleanup/groups.py`. `cleanup/markers.py` removes
+excluded core labels and extras from legacy-model
+output without calculating new markers.
 
-Recovery jest rozdzielone między `storage/recovery.py` (lokalna archiwizacja
-i odczyt intentów), `publication/recovery.py` (uzgodnienie dowodów z faktycznie
-obecnymi wynikami Stash) oraz `commands/recovery.py` (tryb abandon-pending).
-`storage/merge_checks.py` odpowiada za transakcyjnie unieważniany indeks publikacji,
-`storage/segments.py` za pożyczone segmenty i ich memoizowaną tożsamość, a
-`publication/fingerprints.py` za podpis kodu, polityki, katalogu i stanu sceny.
-Ścieżki kodu do hashowania są liczone względem pakietu, niezależnie od cwd.
+Recovery responsibilities are split between
+`storage/recovery.py` (local archival and intent reads),
+`publication/recovery.py` (reconciling proofs with
+actual Stash output), and `commands/recovery.py`
+(the abandon-pending mode).
+`storage/merge_checks.py` owns the transactionally
+invalidated publication index; `storage/segments.py`
+manages borrowed segments and memoized identity;
+`publication/fingerprints.py` signs code, policy,
+catalog and scene state. Code paths are hashed
+relative to the package, regardless of CWD.
 
-`commands/bootstrap.py` przygotowuje runtime, wybrane modele, polityki oraz
-katalogi i hierarchie w dotychczasowej kolejności CLI. Szybkie tryby bazy
-kończą się przed bootstrapem, a wszystkie katalogi są walidowane przed
-ładowaniem wag i zapisami Stash. `runs/merged.py` zarządza wspólnym
-lifecycle Stash dla wybranych modeli. `inference/scene_predictions.py` oddziela
-wybór zachowanych etykiet od kwalifikacji temporal; finalizacja w `prediction.py`
-zachowuje raw evidence, limity i wykluczenia przed publikacją.
+`commands/bootstrap.py` prepares runtime, selected
+models, policies, catalogs and hierarchies in
+the established CLI order. Fast database modes
+finish before bootstrap. All catalogs are validated
+before loading weights or writing Stash.
+`runs/merged.py` owns the shared Stash lifecycle
+for selected models. `inference/scene_predictions.py`
+separates retained-label selection from temporal
+qualification; `prediction.py` finalization
+preserves raw evidence, limits and exclusions
+before publication.
 
+Evidence contracts are explicit dictionaries
+in `evidence/contracts.py`, including scene,
+frame and span records and derived results.
+`interval_geometry.py` merges geometry without
+temporal algorithms; `intervals.py` applies
+extra qualification. Reserved names and
+Occurrence classification live in
+`marker_identity.py`. `inference/input_identity.py`
+shares the cue manifest and historical signature
+format between preflight, cache, reuse and inference.
 
-Evidence ma jawne kontrakty słownikowe w `evidence/contracts.py`, w tym warianty
-rekordów scene/frames/spans i wyników pochodnych. `interval_geometry.py` scala
-geometrię bez algorytmów temporal; `intervals.py` dokłada kwalifikację extras.
-Nazwy zarezerwowane i klasyfikacja occurrence żyją w `marker_identity.py`.
-`inference/input_identity.py` współdzieli manifest cue i historyczny format
-podpisów między preflightem, cache, reuse i inferencją.
+Storage separates `ResultStore`, `MetadataStore`
+and `LegacyStore`. `StateStore` still owns the
+connection, cache and transaction boundaries.
+`storage/schema.py` feeds diagnostics and preview
+views, sets invalidation triggers, and specifies
+function/migration initialization order.
 
-Storage rozdziela `ResultStore`, `MetadataStore` i `LegacyStore`; `StateStore`
-pozostaje właścicielem połączenia, cache i granic transakcji. Katalog
-`storage/schema.py` zasila diagnostykę, widoki preview i triggery invalidacji,
-oraz jawnie ustala kolejność inicjalizacji funkcji i migracji.
-Re-threshold korzysta z `ThresholdRequest`, `RecordAccess` i `ThresholdPlan`.
-Executor sprawdza wszystkie cele przed zapisami, a apply używa tych samych
-planów metadanych bez ponownego odczytu lub dekodowania frame BLOB.
+Rethreshold uses `ThresholdRequest`,
+`RecordAccess` and `ThresholdPlan`. Its executor
+validates all targets before writing; `Apply`
+uses the same metadata plans without another
+frame-BLOB read or decode.
 
-Planowanie publikacji przekazuje nazwane `PreparedEvidence`, `ResolvedEvidence`,
-`MarkerCatalog` i `SeparateMarkerPlan`. Resolver kończy I/O katalogu przed
-dopasowaniem markerów; payloady i plan create/update/delete powstają z gotowych
-danych. Wspólny `evidence/frozen_replay.py` wybiera dokładne podpisy opublikowanej
-evidence i odtwarza zamrożoną politykę. Recovery osobno rekonstruuje obserwowane
-snapshoty scen i markerów, po czym koordynator zapisuje baseline.
+Publication planning passes named
+`PreparedEvidence`, `ResolvedEvidence`,
+`MarkerCatalog` and `SeparateMarkerPlan`.
+Catalog I/O finishes before marker matching;
+payloads and create/update/delete plans are built
+from prepared data. Shared
+`evidence/frozen_replay.py` selects exact signatures
+of published evidence and replays frozen policies.
+Recovery reconstructs observed scene/marker
+snapshots separately before the coordinator
+persists the baseline.
 
-`stash_api/scene_reads.py` koordynuje SQL snapshoty, pola mediów GraphQL
-i jednokierunkowy fallback po błędzie, wspólny dla find, batch i page.
-`cleanup/sql.py` ustala lifecycle i politykę cleanupu; `sql_discovery.py`
-wykonuje ograniczone SELECT-y, `sql_mutations.py` rewaliduje partie i potwierdza
-zapisy natywnym API, a `sql_preview.py` modeluje skutki dry-run bez zapisu źródła.
+`stash_api/scene_reads.py` coordinates SQL
+snapshots, GraphQL media fields and one-way
+failure fallback for find, batch and page operations.
+`cleanup/sql.py` defines cleanup lifecycle and
+policy; `sql_discovery.py` executes allowlisted
+SELECTs; `sql_mutations.py` revalidates batches
+and confirms native-API writes; `sql_preview.py`
+models dry-run effects without touching source state.
 
-`commands/modes.py` ustala jeden `Command` przed normalizacją domyślnych
-opcji. Dispatch, grupy trybów i deklaratywne reguły raportów korzystają z tego
-wyboru, zachowując kolejność walidacji. `reports/runtime.py` współdzieli
-izolowane ustawienia, polityki i read-only store, a `reports/io.py` zapisuje
-nowy JSON z wyłącznym otwarciem pliku. Wybór scen i specyfika raportów pozostają
-w ich modułach.
+`commands/modes.py` selects a single `Command`
+before default-option normalization. Dispatch,
+mode groups and declarative report rules share
+that selection while preserving validation order.
+`reports/runtime.py` shares isolated settings,
+policies and read-only stores; `reports/io.py`
+creates JSON through exclusive file opening.
+Scene selection and report-specific rules remain
+in their own modules.
 
+Runtime read contracts use declared optional state:
+`StateStore.report` and `FrameIndex.report` default
+to `None`; preview/recovery fields are initialized
+by `StateStore`; `TagResolver` owns its lazy
+marker-group cache. Threshold plans select
+full batched evidence or derived metadata.
+The unused model-only plan mode was removed.
+Native marker geometry comes from
+`interval_geometry`.
 
-Runtime read contracts use declared optional state: StateStore.report and
-FrameIndex.report default to None, preview/recovery fields are initialized by
-StateStore, and TagResolver owns its lazy marker-group cache. Threshold plans
-select either full batch evidence or derived metadata; the unused model-only
-plan mode is removed. Native marker geometry is imported from interval_geometry.
+Shared marker extras use `ObservationIndex`.
+`FrameIndex` owns scene-wide query indexes,
+while clipped cleanup replay closes its
+temporary index even if qualification fails.
+Closing drops query-cache references without
+altering retained proof objects in result spans.
 
-Shared marker extras consume ObservationIndex. FrameIndex owns indexes used
-throughout a scene, while clipped cleanup replay closes its temporary index
-even when qualification fails. Closing drops query cache references without
-changing the proof objects retained by result spans.
+Schema upgrades run **only** through `--db-update`.
+Runtime writers and dry-run readers require the
+current schema, and fresh stores are initialized
+at that version. Preview attaches a current
+database read-only and writes into a sparse
+temporary overlay. The offline updater traverses
+all scopes, populates derived result metadata
+and preserves raw evidence and unfinished plans.
+Metadata invalidated or corrupted later can
+be reconstructed from authoritative evidence.
 
-Schema upgrades run only through `--db-update`. Runtime writers and dry-run readers require the current schema; fresh stores are created at the current version. Preview always attaches a current database read-only and writes into a sparse temporary overlay. The offline updater visits every scope, backfills derived result metadata, and preserves raw evidence and unfinished plans. Metadata invalidated or corrupted later is still rebuilt from authoritative evidence.
+**Schema v27** accepts offline upgrades from v18
+onward. Earlier databases must first run the
+updater at commit
+`c5bcd887bafe76b7ee2a9de944666799c9a0fc30`.
+Supported input schemas already contain one
+inference object and optional numeric threshold
+per (scope, scene, model, output). List histories,
+JSON threshold arrays and their migration paths
+have been removed. Current metadata format 5
+is rebuilt after authoritative evidence conversion.
+New base schemas are marked current so failed
+feature initialization can be repaired with
+`--db-update`.
 
-Schema v25 accepts offline upgrades from v18 onward. Earlier databases must first run the updater at commit `c5bcd887bafe76b7ee2a9de944666799c9a0fc30`. Supported input schemas already store one inference object and one numeric threshold per (scope, scene, model, output). List histories, JSON threshold arrays and their migrations have been removed. Current metadata format 5 is rebuilt only after authoritative evidence conversion. Fresh base schemas are marked current so feature-initialization failures can be repaired with `--db-update`.
+Fresh-state rebuilding persists a
+`db_initializations` manifest per Stash scope
+and `db_init_scenes` ownership/completion rows.
+`--db-init` rejects any database populated in
+any state table across all scopes before recording
+selected models and the scene selector. Enrollment
+atomically captures existing AI leaf-tag associations
+and seeds refresh requests for both outputs
+of each selected model. A successful scan
+freezes enrollment. Pending scenes authorize a
+missing-source guard exception; completed and
+out-of-manifest scenes do not.
 
-Fresh-state rebuilding uses a persisted `db_initializations` manifest per Stash scope and `db_init_scenes` ownership/completion rows. `--db-init` first refuses any populated state table across all scopes, then records the selected models and scene selector. Enrollment atomically captures existing AI leaf tag associations and seeds refresh requests for both outputs of every selected model. A successful scan freezes enrollment. Pending scenes authorize the missing-source guard exception; completed scenes and scenes outside the manifest do not. Publication requires signed result/index pairs and no refresh requests for every selected model/output, including valid zero-detection results. Planning persists any additional AI associations from the fresh scene read before API mutations. Snapshot promotion and init completion share one SQLite transaction; failed API writes keep durable intent and ownership for retry. Dry-run uses the existing read-only source plus temporary overlay. Upgrading an existing DB creates empty manifest tables without granting adoption permission.
+Publication requires signed result/index pairs
+and no refresh requests for every selected
+model/output, including valid zero-detection
+results. Planning persists additional AI associations
+found in a fresh scene read **before** API mutations.
+Snapshot promotion and initialization completion
+share one SQLite transaction; failed writes retain
+durable intent and ownership for retry. Dry-run
+uses a read-only source and temporary overlay.
+Updating a pre-existing DB creates empty
+manifest tables without authorizing adoption.
 
-Runtime snapshot decoding accepts only envelope v7. The offline v18+ reader handles v4/v5/v6/v7 and shares mechanical proof-reference expansion with runtime. One publication pass normalizes frozen policies, retires obsolete algorithms, converts source contexts to scalar signatures, and removes unused `retired_build_options`. Geometry, ownership, source pins, cleanup generations and recovery operation IDs remain unchanged. Current pinned inference archives remain available for frozen replay. Migration preserves shared proof identity and rejects unknown contracts atomically. Schema v25 removes `max_tags` and `MAX_MARKERS_PER_SCENE` from frozen build options, including nested scene evidence and pending/recovery snapshots; current replay has no per-scene output budgets. Existing geometry and contribution lists stay intact during the offline upgrade, and the next merge can publish additional qualified results from unchanged inference evidence. The remaining frame tag limit is independent of scene output counts.
+Runtime snapshot decoding accepts only
+envelope **v7**. The offline reader for schemas
+v18+ handles v4/v5/v6/v7 and shares mechanical
+proof-reference expansion with runtime.
+One publication migration pass normalizes frozen
+policies, retires obsolete algorithms, converts
+source contexts to scalar signatures and removes
+unused `retired_build_options`. Geometry, ownership,
+source pins, cleanup generations and recovery
+operation IDs are preserved.
 
-Scene accumulator checkpoints carry a complete analysis format. Its version participates in the checkpoint signature, so old unfinished batches restart for the affected scene/model. Active inference requires complete format-5 evidence. Upgrading v18 retires obsolete active records and requests reinference, retaining exact proofs referenced by published, pending or recovery state.
+Current pinned inference archives remain available
+for frozen replay. Migration preserves shared
+proof identity and atomically rejects unknown
+contracts. Schema v27 removes `max_tags` and
+`MAX_MARKERS_PER_SCENE` from frozen build options,
+including nested scene evidence and pending/recovery
+snapshots. Current replay has no per-scene
+output budgets. Existing geometry and contribution
+lists remain intact during offline upgrade, and
+a subsequent merge can publish additional eligible
+results from unchanged inference evidence.
+The remaining per-frame tag limit is independent
+of scene output counts.
 
-The current package publishes only the AI namespace and validates hierarchy YAML v2 and native marker ranges. The namespace, hierarchy-v1 and ordinary-point migrators and their historical namespace definitions have been retired. These tools remain available in the immutable bridge commit `9fcaa52502cd487455457547860b5db7d8710ad8`; README documents an isolated checkout with the original database and configuration. Complete interrupted namespace conversion using that bridge before returning to current publication. Ordinary occurrences remain native points, and current ownership and recovery guards remain active. Pre-v18 databases use the separate schema-upgrade bridge described above. Historical namespaces survive only as foreign-output fixtures in tests.
+Scene-accumulator checkpoints store the complete
+analysis format. Its version participates in
+checkpoint signatures, so old unfinished batches
+restart only the affected scene/model.
+Active inference requires complete format-5
+evidence. Upgrading v18 retires obsolete
+active records and schedules reinference while
+preserving exact proofs referenced by published,
+pending or recovery state.
 
-New result writes require an explicit output mode, metadata dictionary and item list before changing SQL state. Scene inference capture requires retained frame analysis. Missing marker retention floors are insufficient in both cache reports and publication validation. Frame indexes use current evidence signatures and require complete explicit core and scene-tag policy maps; supported result threshold overrides are scalar numeric values. Spawned merge workers carry explicit publication policy, and HTTP timing uses the native Response body contract.
+The current package publishes only the AI namespace
+and validates hierarchy YAML v2 and native marker
+intervals. Legacy namespace, hierarchy-v1 and
+ordinary-point migrators and their historical
+namespace definitions have been retired.
+Those tools remain in immutable bridge commit
+`9fcaa52502cd487455457547860b5db7d8710ad8`;
+the README explains an isolated checkout using
+the original database and configuration.
+Complete interrupted namespace migration with
+that bridge before returning to current publishing.
+Ordinary occurrences remain native points, while
+current ownership and recovery guards stay active.
+Pre-v18 databases use the separate schema-upgrade
+bridge described above. Historical namespaces
+survive only as foreign-output test fixtures.
 
-Stash credentials have no bundled fallback: an unset STASH_API_KEY sends no ApiKey header. Pruning requires the native studio/group usage counters guaranteed by Stash 0.31.1+, checks all other exposed usage counters, and omits the deprecated movie_count alias of group_count. It never probes the retired Movie API.
+New result writes require explicit output mode,
+metadata dictionary and item list before changing
+SQL state. Scene inference capture requires
+retained frame analysis. Missing marker retention
+floors make results insufficient in both cache
+reports and publication validation. Frame indexes
+use current evidence signatures and require full
+explicit core and scene-tag policy maps.
+Supported threshold overrides are scalar numeric
+values. Spawned merge workers carry explicit
+publication policies, and HTTP timing uses
+the native `Response` body contract.
+
+Stash credentials have no bundled fallback:
+an unset `STASH_API_KEY` sends no `ApiKey` header.
+Pruning requires native studio/group usage counters
+available in Stash 0.31.1+, checks all other
+exposed usage counters, and omits the deprecated
+`movie_count` alias of `group_count`. It never
+probes the retired Movie API.
