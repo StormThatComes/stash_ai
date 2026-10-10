@@ -59,6 +59,8 @@ class OnnxTagger:
             cleanup(callbacks, report=self.report)
             raise
         self.node_profile_enabled = self.profile_directory is not None
+        self._node_profile_batches = 0
+        self._node_profile_limit = 64
         self.input_name = model_io.input_name
         self.output_name = model_io.output_name
         self.mask_name = model_io.mask_name
@@ -91,27 +93,21 @@ class OnnxTagger:
         if not count or count > self.batch_size:
             raise ValueError("Invalid inference batch length.")
 
-        feed = {
-            self.input_name: np.stack(
-                [pair[0] for pair in images] if self.mask_name else images
-            )
-        }
+        def collate(rows):
+            if self.fixed_batch and count < self.fixed_batch:
+                # One final-size allocation rather than stack/repeat/concatenate.
+                first = np.asarray(rows[0])
+                values = np.empty((self.fixed_batch, *first.shape), dtype=first.dtype)
+                for index, row in enumerate(rows):
+                    values[index] = row
+                values[count:] = first
+                return values
+            return np.stack(rows)
+
+        feed = {self.input_name: collate(
+            [pair[0] for pair in images] if self.mask_name else images)}
         if self.mask_name:
-            feed[self.mask_name] = np.stack([pair[1] for pair in images])
-        if self.fixed_batch and count < self.fixed_batch:
-            feed = {
-                name: np.concatenate(
-                    [
-                        values,
-                        np.repeat(
-                            values[-1:],
-                            self.fixed_batch - count,
-                            axis=0,
-                        ),
-                    ]
-                )
-                for name, values in feed.items()
-            }
+            feed[self.mask_name] = collate([pair[1] for pair in images])
         return feed
 
     def predict_collated_batch(self, feed: dict[str, Any], count: int) -> Any:
@@ -126,6 +122,25 @@ class OnnxTagger:
         report = getattr(self, 'report', None)
         with stage(report, 'ort_session_run'):
             output = self.session.run([self.output_name], feed)[0]
+        # Node tracing is opt-in and bounded to the first 64 backend batches.
+        if getattr(self, 'node_profile_enabled', False):
+            self._node_profile_batches += 1
+            if self._node_profile_batches >= self._node_profile_limit:
+                from stash_ai.backends.profiling import record_onnx
+                directory, self.profile_directory = self.profile_directory, None
+                self.node_profile_enabled = False
+                def sample():
+                    record_onnx(report, self.session, self.settings.source.key)
+                    if report is not None and report.profile is not None:
+                        row = report.profile.models.setdefault(self.settings.source.key, {})
+                        row['node_profile_sample_batches'] = self._node_profile_batches
+                try:
+                    if report is not None:
+                        report.optional('backend_node_sampling', sample)
+                finally:
+                    if directory is not None:
+                        from stash_ai.runtime.cleanup import cleanup
+                        cleanup([directory.cleanup], report=report)
         with stage(report, 'ort_output_copy'):
             raw = np.asarray(output, dtype=np.float32)
         if (
