@@ -176,11 +176,13 @@ def test_failed_worker_scene_is_not_published_and_later_scenes_continue(publicat
 
         monkeypatch.setattr(merge_sync, 'sync_merged', fail_first)
     p.publisher.run(scenes('1', '2'))
-    assert p.writes == ['2']
+    # Identity corruption is a protocol failure; ordinary scene errors continue.
+    completed = 0 if failure == 'scene' else 1
+    assert p.writes == ([] if failure == 'scene' else ['2'])
     assert not p.computed
-    assert p.publisher.stats['errors'] == 1
-    assert p.publisher.stats['scenes_synced'] == 1
-    assert p.publisher.stats['merge_parallel_scenes'] == 1
+    assert p.publisher.stats['errors'] == 2 - completed
+    assert p.publisher.stats['scenes_synced'] == completed
+    assert p.publisher.stats['merge_parallel_scenes'] == completed
 
 
 @pytest.mark.parametrize('workers', [1, 4])
@@ -297,3 +299,20 @@ def test_reuse_refresh_uses_bounded_bulk_queries_and_no_per_scene_reads(publicat
     assert batches == [['0', '1'], ['2', '3'], ['4']]
     assert p.publisher.stats['merge_reused'] == 5
     assert not p.writes and not p.computed
+
+
+@pytest.mark.parametrize('returned,completed', [(('1',), 1), (('1', '2', '3'), 2), (('1', '1'), 1)])
+def test_worker_result_coverage_errors_are_reported_without_republishing(publication, monkeypatch, returned, completed):
+    p = publication
+    p.args.merge_workers = 2
+    closed = []
+    def workers(*a, **kw):
+        try:
+            yield from (worker_result(scene) for scene in returned)
+        finally:
+            closed.append(True)
+    monkeypatch.setattr(merge_parallel, 'iter_parallel_evidence', workers)
+    p.publisher.run(scenes('1', '2'))
+    assert p.writes == list(('1', '2')[:completed])
+    assert p.publisher.stats['errors'] == max(1, 2-completed)
+    assert closed == [True] and not p.computed
