@@ -172,9 +172,6 @@ def validate_pipeline(app, parser, args):
 
 def validate_args(app, parser: argparse.ArgumentParser, args: argparse.Namespace) -> argparse.Namespace:
     args.command = select_command(args)
-    if args.command is Command.RENAME_OCCURRENCE_GROUPS:
-        if args.scene_id or supplied(args, (*MODEL_OPTIONS, *PUBLICATION_OPTIONS)):
-            parser.error('--rename-occurrence-groups renames global tag definitions; model, scene and publication modifiers do not apply.')
     if args.db_init and (args.command is not Command.INFERENCE or args.markers_only
                         or args.scene_tags_only or args.restart or args.abandon_pending):
         parser.error('--db-init requires normal inference with both outputs; restart/recovery modifiers do not apply.')

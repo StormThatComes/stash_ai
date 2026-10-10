@@ -837,18 +837,8 @@ In `merged` mode:
 | Marker group root | `ai_markers` |
 | Hierarchy categories | `ai:category:...` |
 
-Occurrence groups now use `:occurrence`. To rename existing managed
-`:occurance` groups in place while preserving tag IDs and all assignments:
-
-```powershell
-python .\stash_ai.py --rename-occurrence-groups --dry-run
-python .\stash_ai.py --rename-occurrence-groups
-```
-
-Use the same `--state-db` as your tagging runs. This global command needs
-no models or inference and prints each change without `--verbose`.
-It refuses existing destination names; resolve any collision before retrying.
-Normal publication also renames a matching legacy group when first needed.
+Occurrence groups use `:occurrence`. The one-time spelling migration is
+complete; current versions manage only the canonical names.
 See [marker groups](docs/UPGRADE_marker_groups.md) for details.
 
 New results always use shared `ai:` publication and temporal rules.
