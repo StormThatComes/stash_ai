@@ -64,7 +64,7 @@ def run(app, store, scene_ids, settings, report, *, scenes=True, markers=False):
         spool.execute('CREATE TABLE prepared (id INTEGER PRIMARY KEY, scene TEXT, model TEXT, outputs TEXT)')
         bar = tqdm(total=selected, desc=f'Check {mode}', unit='pair')
         try:
-            for group in iter_threshold_groups(store, scene_list, settings, requested):
+            for group, scene_count in iter_threshold_groups(store, scene_list, settings, requested):
                 with backfill_batch(store), store.metadata.batch(
                         (scene, config.source.key) for scene, config, _ in group):
                     for scene, config, available in group:
@@ -82,7 +82,7 @@ def run(app, store, scene_ids, settings, report, *, scenes=True, markers=False):
                             errors += 1
                 spool.commit()
                 # Includes pairs skipped for lack of evidence.
-                bar.update(min(selected - bar.n, len(group) + 128 * len(settings)))
+                bar.update(scene_count * len(settings))
         finally:
             bar.close()
         skipped = selected - checked
