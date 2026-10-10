@@ -320,7 +320,7 @@ def test_prefetch_is_bounded_and_closes_producer(pipeline,monkeypatch):
         if out==3: prepared.set()
         return out
     model.prepare=prepare
-    iterator=preparation.prepared_batches(app,model,p.stash,{},p.cues,True)
+    iterator=preparation.prepared_batches(app,model,p.stash,{},p.cues,1)
     batch,_=next(iterator)
     assert batch==[0,1]
     assert prepared.wait(2)

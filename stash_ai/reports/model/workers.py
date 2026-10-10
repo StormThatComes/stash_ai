@@ -3,6 +3,7 @@ from collections import Counter
 from concurrent.futures import ProcessPoolExecutor
 from multiprocessing import get_context
 from pathlib import Path
+from itertools import batched, chain
 
 from tqdm import tqdm
 
@@ -16,21 +17,23 @@ from stash_ai.runtime.settings import evidence_settings
 
 _WORKER_CONTEXT = None
 _PROFILE = False
+_PRELOAD = False
 
 
 def _init_report_worker(state_db, scope, settings, core_policies,
                         scene_policies, cache_bytes, memory_budget_bytes,
                         preload_sources, profile=False):
     """Initialize one isolated read-only worker and keep its DB/cache hot."""
-    global _WORKER_CONTEXT, _PROFILE
+    global _WORKER_CONTEXT, _PROFILE, _PRELOAD
     _PROFILE = profile
+    _PRELOAD = bool(preload_sources)
     if _WORKER_CONTEXT is not None:
         _WORKER_CONTEXT.close()
     _WORKER_CONTEXT = open_read_worker(
         state_db, scope,
         settings,
         core_policies, scene_policies, cache_bytes, memory_budget_bytes,
-        preload_sources=preload_sources,
+        preload_sources=False,
     )
 
 
@@ -39,6 +42,15 @@ def _report_worker_scene(scene):
     store = _WORKER_CONTEXT.store if _WORKER_CONTEXT is not None else None
     return execute_worker(scene, store, lambda: _compute_scene(scene),
                           'model_report_worker_compute', profile=_PROFILE)
+
+
+def _report_worker_scenes(scenes):
+    """Preload only this bounded task, never the whole scene selection."""
+    if _WORKER_CONTEXT is None:
+        raise RuntimeError('Model report worker was not initialized.')
+    if _PRELOAD:
+        _WORKER_CONTEXT.store.preload_sources(scenes)
+    return [_report_worker_scene(scene) for scene in scenes]
 
 
 def _compute_scene(scene):
@@ -105,12 +117,13 @@ def _build_report_parallel(app, state_db, scope, scene_ids, core_policies,
             scene_policies,
             worker_cache,
             worker_budget,
-            tuple(scene_ids) if preload_sources else False,
+            preload_sources,
             profile is not None,
         ),
     ) as executor:
-        partials = executor.map(
-            _report_worker_scene, scene_ids, chunksize=chunksize, buffersize=max(workers, 2))
+        partials = chain.from_iterable(executor.map(
+            _report_worker_scenes, batched(scene_ids, chunksize),
+            chunksize=1, buffersize=max(workers, 2)))
         for scene, partial in zip(scene_ids, tqdm(
                 partials, total=len(scene_ids), desc="Model report", unit="scene")):
             if profile is not None and partial.metrics is not None:

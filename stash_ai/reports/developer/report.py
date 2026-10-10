@@ -12,14 +12,14 @@ from .database import database_report, _checkpoint_report, _grouped_counts
 from .evidence import _result_evidence_report
 
 import platform
-from contextlib import closing
 from pathlib import Path
 import sqlite3
 import struct
 import sys
 
-from stash_ai.db.common import connect_readonly, table_names
+from stash_ai.db.common import table_names
 from stash_ai.reports.io import write_json_report
+from stash_ai.reports.runtime import offline_report, report_connection
 
 REPORT_FORMAT = 2
 
@@ -32,8 +32,7 @@ def build_report(path):
 
     from stash_ai.storage.schema import APPLICATION_ID, LATEST_SCHEMA_VERSION, require_supported_version
 
-    with closing(connect_readonly(path)) as db:
-        db.execute("BEGIN")
+    with report_connection(path) as db:
         application_id = db.execute("PRAGMA application_id").fetchone()[0]
         schema_version = db.execute("PRAGMA user_version").fetchone()[0]
         if application_id != APPLICATION_ID:
@@ -90,20 +89,17 @@ def write_report(state_db, destination):
     return destination, report
 
 
+@offline_report('Anonymous diagnostics')
 def run(args):
-    try:
-        destination, report = write_report(args.state_db, args.anonymous_diagnostics)
-        print(
-            f"Anonymous developer diagnostics written to {destination}. "
-            f"Report format={report['format']}; no upload was performed."
-        )
-        if report['database']['upgrade_required']:
-            print('Run --db-update before collecting detailed evidence statistics.')
-        print(
-            "Review the JSON before sharing it. It contains no direct content/identifiers, "
-            "but aggregate counts and size distributions describe this installation."
-        )
-        return 0
-    except (OSError, sqlite3.DatabaseError, ValueError, RuntimeError) as exc:
-        print("Anonymous diagnostics failed: " + str(exc))
-        return 1
+    destination, report = write_report(args.state_db, args.anonymous_diagnostics)
+    print(
+        f"Anonymous developer diagnostics written to {destination}. "
+        f"Report format={report['format']}; no upload was performed."
+    )
+    if report['database']['upgrade_required']:
+        print('Run --db-update before collecting detailed evidence statistics.')
+    print(
+        "Review the JSON before sharing it. It contains no direct content/identifiers, "
+        "but aggregate counts and size distributions describe this installation."
+    )
+    return 0

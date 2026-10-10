@@ -13,13 +13,14 @@ def now():
 
 
 def capture_outputs(app, config, vocabulary, cues, predictions, frames, analysis, *,
-                    inference_signature, frame_input_signature) -> dict[str, InferenceRecord]:
+                    inference_signature, frame_input_signature, verified_input=None) -> dict[str, InferenceRecord]:
     from stash_ai.evidence.retention import marker_cache_floor
-    cue_data = cue_manifest(cues)
+    cue_checksum = (verified_input.legacy_cue_sha256 if verified_input is not None else
+                    hashlib.sha256(json.dumps(cue_manifest(cues), ensure_ascii=False).encode()).hexdigest())
     meta = {"origin": "inference", "captured_at": now(),
             "inference_signature": inference_signature, "frame_input_signature": frame_input_signature, "repo": config.source.repo,
             "revision": config.source.revision, "vocabulary_sha256": vocabulary_digest(vocabulary.labels),
-            "input_cues_sha256": hashlib.sha256(json.dumps(cue_data, ensure_ascii=False).encode()).hexdigest(),
+            "input_cues_sha256": cue_checksum,
             "scene_threshold": config.scene_threshold, "marker_threshold": config.marker_threshold,
             "aggregation": app.AGGREGATION, "top_k_frames": app.TOP_K_FRAMES}
     meta.update(analysis_format=ANALYSIS_FORMAT,

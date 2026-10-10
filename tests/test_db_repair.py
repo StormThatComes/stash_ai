@@ -27,7 +27,10 @@ def test_complete_update_has_no_blob_decode_integrity_scan_lock_or_mutation(tmp_
     monkeypatch.setattr(update, 'connect_readonly', readonly)
     monkeypatch.setattr(codec, 'decode', lambda *_: pytest.fail('no-op decoded a BLOB'))
     monkeypatch.setattr(update, 'StateDatabase', lambda *_a, **_k: pytest.fail('no-op opened a writer'))
-    assert update.update_database(path) == (LATEST_SCHEMA_VERSION, LATEST_SCHEMA_VERSION)
+    details, phases = {}, []
+    assert update.update_database(path, details=details,
+                                  progress=lambda *event: phases.append(event)) == (LATEST_SCHEMA_VERSION, LATEST_SCHEMA_VERSION)
+    assert details == {'noop': True} and phases == []
     assert not any('quick_check' in query.lower() or 'integrity_check' in query.lower() for query in statements)
     assert path.read_bytes() == before
 
@@ -115,3 +118,78 @@ def test_repair_cli_stays_offline_and_requires_current_schema(tmp_path, monkeypa
     update.update_database(path)
     assert app.main(['--db-repair', '--state-db', str(path), '--dry-run']) == 0
     assert app.main(['--db-repair', '--state-db', str(path)]) == 0
+
+
+def test_repair_spools_encoded_changes_instead_of_retaining_all_blobs(tmp_path, monkeypatch):
+    path = tmp_path / 'state.sqlite3'
+    raw = record_with_duplicate()
+    with StateStore(path, 'scope') as store:
+        for scene in range(40):
+            store.put(str(scene), 'wd', {'scene': {**raw, 'items': raw['items'][:1]}})
+        store.connection.execute('UPDATE results SET data=?', (codec.encode(raw),))
+        store.connection.commit()
+    encode = duplicate_aggregates.encode
+    live = peak = calls = 0
+    class TrackedBlob(bytes):
+        def __new__(cls, value):
+            nonlocal live, peak, calls
+            live += 1
+            calls += 1
+            peak = max(peak, live)
+            return super().__new__(cls, value)
+        def __del__(self):
+            nonlocal live
+            live -= 1
+    monkeypatch.setattr(duplicate_aggregates, 'encode', lambda value: TrackedBlob(encode(value)))
+    phases = []
+    result = repair_database(path, progress=lambda *event: phases.append(event))
+    assert result['duplicates_repaired'] == calls == 40
+    assert peak <= 3 and live == 0
+    assert ('results', 40, 40) in phases
+    assert ('canonical writes', 40, 40) in phases
+    assert phases[-1] == ('committed', 1, 1)
+    assert check_database(path, 'scope')['ok']
+
+
+@pytest.mark.parametrize('error', [RuntimeError, KeyboardInterrupt])
+def test_failure_after_first_canonical_write_rolls_back_entire_repair(tmp_path, error):
+    path = tmp_path / 'state.sqlite3'
+    raw = record_with_duplicate()
+    with StateStore(path, 'scope') as store:
+        for scene in ('1', '2'):
+            store.put(scene, 'wd', {'scene': {**raw, 'items': raw['items'][:1]}})
+        store.connection.execute('UPDATE results SET data=?', (codec.encode(raw),))
+        store.connection.execute('DELETE FROM data_revisions')
+        store.connection.commit()
+    tables = ('results', 'result_metadata', 'inference_archive', 'snapshots', 'data_revisions')
+    before = {table: rows(path, table) for table in tables}
+    def interrupt(phase, completed, total):
+        if phase == 'canonical writes' and completed == 1:
+            raise error('after write')
+    with pytest.raises(error, match='after write'):
+        repair_database(path, progress=interrupt)
+    assert {table: rows(path, table) for table in tables} == before
+    assert repair_database(path)['duplicates_repaired'] == 2
+
+
+def test_current_schema_metadata_maintenance_is_reported_as_work(tmp_path, capsys):
+    path = tmp_path / 'state.sqlite3'
+    seed_version(path, LATEST_SCHEMA_VERSION)
+    with sqlite3.connect(path) as db:
+        db.execute("DELETE FROM result_metadata WHERE scope='scope-a'")
+    details, phases = {}, []
+    assert update.update_database(path, dry_run=True, details=details) == (LATEST_SCHEMA_VERSION, LATEST_SCHEMA_VERSION)
+    assert details == {'noop': False}
+    assert update.update_database(path, details=details,
+                                  progress=lambda *event: phases.append(event)) == (LATEST_SCHEMA_VERSION, LATEST_SCHEMA_VERSION)
+    assert not details['noop'] and not details['required_repair']
+    assert details['metadata_repaired'] == 1
+    assert ('missing metadata', 1, 1) in phases
+    assert not any(phase == 'results' for phase, _, _ in phases)
+    with sqlite3.connect(path) as db:
+        db.execute("DELETE FROM result_metadata WHERE scope='scope-a'")
+    assert app.main(['--db-update', '--state-db', str(path)]) == 0
+    output = capsys.readouterr()
+    assert 'maintenance completed' in output.out and 'metadata=1' in output.out
+    assert 'up to date' not in output.out
+    assert 'missing metadata' in output.err

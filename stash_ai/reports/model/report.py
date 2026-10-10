@@ -16,6 +16,7 @@ from tqdm import tqdm
 from stash_ai.models import SOURCES
 from stash_ai.storage.store import scope_for
 from stash_ai.reports.io import write_json_report
+from stash_ai.reports.runtime import offline_report
 from stash_ai.reports.runtime import report_context, report_policies, report_store, report_memory
 
 
@@ -120,50 +121,47 @@ def write_report(report, destination):
     return write_json_report(report, destination)
 
 
+@offline_report('Model utility report')
 def run(app, args):
     app = report_context(app, args, both_outputs=True)
     core_policies, scene_policies = report_policies(app, args)
 
-    try:
-        budget = report_memory(args)
-        cache_bytes, memory_budget_bytes = budget['cache_bytes'], budget['memory_budget_bytes']
-        scope = scope_for(app.STASH_URL)
-        workers = max(1, int(args.model_report_workers))
-        from stash_ai.db.read_source import consistent_source
-        with consistent_source(args.state_db):
-            report = None
-            with report_store(app, args, **budget) as store:
-                scenes = _scene_ids(store, args.scene_id)
-                if args.scene_id and len(scenes) != len(dict.fromkeys(str(value) for value in args.scene_id)):
-                    missing = sorted(set(map(str, args.scene_id)) - set(scenes))
-                    raise ValueError("No saved evidence for scene(s): " + ", ".join(missing))
-                workers = min(workers, len(scenes)) if scenes else 1
-                if workers == 1:
-                    if not args.scene_id:
-                        store.preload_sources(scenes)
-                    report = build_report(
-                        app, store, scenes, core_policies, scene_policies)
+    budget = report_memory(args)
+    cache_bytes, memory_budget_bytes = budget['cache_bytes'], budget['memory_budget_bytes']
+    scope = scope_for(app.STASH_URL)
+    workers = max(1, int(args.model_report_workers))
+    from stash_ai.db.read_source import consistent_source
+    with consistent_source(args.state_db):
+        report = None
+        with report_store(app, args, **budget) as store:
+            scenes = _scene_ids(store, args.scene_id)
+            if args.scene_id and len(scenes) != len(dict.fromkeys(str(value) for value in args.scene_id)):
+                missing = sorted(set(map(str, args.scene_id)) - set(scenes))
+                raise ValueError("No saved evidence for scene(s): " + ", ".join(missing))
+            workers = min(workers, len(scenes)) if scenes else 1
+            if workers == 1:
+                if not args.scene_id:
+                    store.preload_sources(scenes)
+                report = build_report(
+                    app, store, scenes, core_policies, scene_policies)
 
-            if report is None:
-                from stash_ai.reports.model.workers import build_report_parallel
+        if report is None:
+            from stash_ai.reports.model.workers import build_report_parallel
 
-                report = build_report_parallel(
-                    app,
-                    args.state_db,
-                    scope,
-                    scenes,
-                    core_policies,
-                    scene_policies,
-                    workers=workers,
-                    cache_bytes=cache_bytes,
-                    memory_budget_bytes=memory_budget_bytes,
-                    preload_sources=not bool(args.scene_id),
-                    **({'profile': args.report.profile} if args.report.profile is not None else {}),
-                )
-        destination = write_report(report, args.model_report)
-        print(format_summary(report))
-        print(f"\nDetailed model utility report written to {destination}. No Stash requests or inference were performed.")
-        return 0
-    except (OSError, ValueError, RuntimeError) as exc:
-        print("Model utility report failed: " + str(exc))
-        return 1
+            report = build_report_parallel(
+                app,
+                args.state_db,
+                scope,
+                scenes,
+                core_policies,
+                scene_policies,
+                workers=workers,
+                cache_bytes=cache_bytes,
+                memory_budget_bytes=memory_budget_bytes,
+                preload_sources=not bool(args.scene_id),
+                **({'profile': args.report.profile} if args.report.profile is not None else {}),
+            )
+    destination = write_report(report, args.model_report)
+    print(format_summary(report))
+    print(f"\nDetailed model utility report written to {destination}. No Stash requests or inference were performed.")
+    return 0

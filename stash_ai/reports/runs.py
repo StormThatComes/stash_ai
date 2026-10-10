@@ -1,8 +1,8 @@
 """Offline run history and weighted profiling aggregates for comparable runs."""
 from collections import Counter
 
-from stash_ai.history.store import HistoryStore, history_path
 from stash_ai.reports.io import write_json_report
+from stash_ai.reports.runtime import offline_report, report_history
 from stash_ai.runtime.profile import combine, describe, empty_sample
 from stash_ai.signatures import digest
 from stash_ai.storage.store import scope_for
@@ -56,8 +56,9 @@ def build_report(rows):
                'Groups describe only the selected, most recent matching runs.'])
 
 
+@offline_report('Run history report')
 def run(app, args):
-    with HistoryStore(history_path(args), readonly=True) as store:
+    with report_history(args) as store:
         report = build_report(store.rows(scope_for(app.STASH_URL), limit=args.run_limit,
             command=args.run_command, status=args.run_status, model=args.run_model))
     destination = write_json_report(report, args.run_report)

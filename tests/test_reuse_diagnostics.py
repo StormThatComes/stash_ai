@@ -160,6 +160,32 @@ def test_threshold_only_change_uses_rethreshold_without_loading_model(pipeline, 
     assert len(pipeline.loaded) == loaded
 
 
+@pytest.mark.parametrize('fetch', [False, True])
+def test_repeated_rethreshold_records_capture_previous_and_target(pipeline, monkeypatch, tmp_path, fetch):
+    selected = settings(monkeypatch, tmp_path, scene_cache_floor=.01, marker_cache_floor=.01)
+    capture = dict(scene=selected[0].scene_threshold, markers=selected[0].marker_threshold)
+    assert app.main(pipeline.args) == 0
+    with sqlite3.connect(pipeline.path) as db:
+        blobs = db.execute('SELECT data FROM results ORDER BY kind').fetchall()
+    loaded = len(pipeline.loaded)
+    selected[0] = replace(selected[0], scene_threshold=.45, marker_threshold=.75)
+    arguments = [*pipeline.args, *(['--force-fetch-vtt'] if fetch else [])]
+    assert app.main(arguments) == 0
+    first = decisions(pipeline.path)[0]['details']['outputs']
+    assert first['scene']['capture_threshold'] == capture['scene']
+    assert first['scene']['previous_effective_threshold'] == capture['scene']
+    selected[0] = replace(selected[0], scene_threshold=.50, marker_threshold=.80)
+    assert app.main(arguments) == 0
+    latest = decisions(pipeline.path)[0]['details']['outputs']
+    for kind, previous, target in [('scene', .45, .50), ('markers', .75, .80)]:
+        assert latest[kind]['capture_threshold'] == capture[kind]
+        assert latest[kind]['previous_effective_threshold'] == previous
+        assert latest[kind]['target_threshold'] == target
+    assert len(pipeline.loaded) == loaded
+    with sqlite3.connect(pipeline.path) as db:
+        assert db.execute('SELECT data FROM results ORDER BY kind').fetchall() == blobs
+
+
 def test_insufficient_retention_explains_why_threshold_replay_failed(pipeline, monkeypatch, tmp_path):
     selected = settings(monkeypatch, tmp_path)
     assert app.main(pipeline.args) == 0
