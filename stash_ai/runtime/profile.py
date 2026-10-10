@@ -48,7 +48,9 @@ class ProfileMetrics:
         bucket = 0 if elapsed == 0 else min(63, max(1, math.ceil(math.log2(max(1.0, elapsed * 1e6))) + 1))
         key = (kind, name, model or '', work, 'error' if failed else 'ok', unit)
         with self.lock:
-            row = self.rows.setdefault(key, empty_sample())
+            row = self.rows.get(key)
+            if row is None:
+                row = self.rows[key] = empty_sample()
             row['calls'] += 1
             row['errors'] += int(failed)
             row['seconds'] += exclusive
@@ -67,7 +69,10 @@ class ProfileMetrics:
         with self.lock:
             for row in rows:
                 key = tuple(row[name] for name in ('kind', 'name', 'model', 'work', 'outcome', 'unit'))
-                combine(self.rows.setdefault(key, empty_sample()), row)
+                target = self.rows.get(key)
+                if target is None:
+                    target = self.rows[key] = empty_sample()
+                combine(target, row)
 
     def export(self):
         with self.lock:
