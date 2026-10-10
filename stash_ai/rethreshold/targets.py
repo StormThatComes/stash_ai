@@ -17,6 +17,23 @@ def threshold_targets(store, scenes, settings, kinds):
     return targets, selected - len(targets), selected
 
 
+def iter_threshold_groups(store, scenes, settings, kinds, *, chunk=128):
+    """Yield bounded scene/model groups without retaining full selection key sets."""
+    from itertools import batched
+    models = [setting.source.key for setting in settings]
+    requested = frozenset(kinds)
+    for group in batched(map(str, scenes), chunk):
+        known = store.result_presence(models, group) | store.result_index_presence(models, group)
+        targets = []
+        for scene in group:
+            for setting in settings:
+                available = frozenset(kind for kind in requested
+                                      if (scene, setting.source.key, kind) in known)
+                if available:
+                    targets.append((scene, setting, available))
+        yield targets
+
+
 def threshold_failure_reason(exc):
     """Collapse scene-specific preflight errors into stable operator-facing reasons."""
     from stash_ai.runtime.reasons import LABELS
