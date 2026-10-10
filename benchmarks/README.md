@@ -186,3 +186,15 @@ writer and 48 for preview. Entire-state verification hashes
 match, and all eight pinned records remain archived.
 The approximately 31% improvement applies to this synthetic
 write with large proofs, excluding inference and API overhead.
+
+`python -m benchmarks.benchmark_input_transport --reads 200 --urls 10000`
+compares three separate deadline stages with one owned read worker using the same
+mock HTTP/JSON payload. It also compares a URL/hash dictionary with zero-cache
+media verification backed by temporary SQLite. The checked-in October 10 result
+shows 600 -> 200 worker starts (986 -> 2,690 mocked reads/s), and Python peak
+memory 1.97 MB -> 23 KB for 10,000 unique URLs. SQLite used 1.19 MB of temporary
+database pages with a 64 KiB page cache and took 0.25 s versus 0.04 s for the
+in-memory dictionary. These are controlled overhead measurements, not network
+or end-to-end inference speedups. Media bytes stay in RAM; only hashed URL keys
+and checksums spill. RunInputs also spills its manifest identity ledger, and
+closes both ledgers after producers have joined.
