@@ -1,4 +1,4 @@
-"""Verified VTT/sprite inputs and shared media caches for model passes, RAM only."""
+"""Verified VTT/sprite inputs, RAM media caches and temporary verification state."""
 from __future__ import annotations
 
 from collections import OrderedDict
@@ -12,6 +12,7 @@ import json
 from stash_ai.inference import sprites
 from stash_ai.signatures import digest
 from .input_identity import cue_manifest, frame_signature, inference_signature
+from .verification_ledger import VerificationLedger
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,15 +40,6 @@ class InspectedInput:
     snapshot: VerifiedInput
     media: object
     signature: str
-
-    def __iter__(self):
-        return iter((self.snapshot.cues, self.media, self.signature))
-
-    def __getitem__(self, index):
-        return (self.snapshot.cues, self.media, self.signature)[index]
-
-    def __len__(self):
-        return 3
 
 
 class VerifiedMedia:
@@ -92,10 +84,10 @@ def inspect_input(app, stash, paths, identity):
 
 
 class RunMedia:
-    """One verified media snapshot for sequential model passes, RAM only."""
+    """One verified media snapshot; hashes spill to a temporary SQLite ledger."""
     def __init__(self, stash, cache, report=None):
         self.stash, self.cache, self.report = stash, cache, report
-        self.token, self.hashes = object(), {}
+        self.token, self.hashes = object(), VerificationLedger()
         self._lock, self._readers = Lock(), local()
 
     @contextmanager
@@ -119,9 +111,11 @@ class RunMedia:
         data = reader.get_media(url)
         checksum = hashlib.sha256(data).hexdigest()
         with self._lock:
-            if url in self.hashes and checksum != self.hashes[url]:
+            previous = self.hashes.get(url)
+            if previous is not None and checksum != previous:
                 raise RuntimeError('Stash media changed during model passes; rerun to use one consistent input.')
-            self.hashes[url] = checksum
+            if previous is None:
+                self.hashes[url] = checksum
             self.cache.put(key, data)
             if self.report is not None:
                 self.report.counts['media_downloads'] += 1
@@ -133,13 +127,17 @@ class RunMedia:
         with self._lock:
             return data, self.hashes[url]
 
+    def close(self):
+        with self._lock:
+            self.hashes.close()
+
 
 class RunInputs:
     """Share verified cue manifests without changing any inference signatures."""
     def __init__(self, stash, cache, report=None):
         self.cache, self.report = cache, report
         self.media = RunMedia(stash, cache, report)
-        self.token, self.identities = object(), {}
+        self.token, self.identities = object(), VerificationLedger()
         self._lock = Lock()
 
     def open_background_reader(self):
@@ -156,9 +154,11 @@ class RunInputs:
             result = inspect_input(app, self.media, paths, model_identity)
             snapshot = result.snapshot
             with self._lock:
-                if key in self.identities and snapshot.frame_signature != self.identities[key]:
+                previous = self.identities.get(key)
+                if previous is not None and snapshot.frame_signature != previous:
                     raise RuntimeError('Stash VTT changed during model passes; rerun the analysis.')
-                self.identities[key] = snapshot.frame_signature
+                if previous is None:
+                    self.identities[key] = snapshot.frame_signature
                 self.cache.put(('input', self.token, key), snapshot)
             return result
         media = VerifiedMedia(self.media, limit=0, expected=cached.hashes)
@@ -178,6 +178,5 @@ class RunInputs:
         self.cache.discard_matching(lambda key: isinstance(key, tuple) and len(key) >= 2 and
             ((key[0] == 'input' and key[1] is self.token) or
              (key[0] == 'media' and key[1] is self.media.token)))
-        self.identities.clear()
-        with self.media._lock:
-            self.media.hashes.clear()
+        from stash_ai.runtime.cleanup import cleanup
+        cleanup([self.identities.close, self.media.close], report=self.report)

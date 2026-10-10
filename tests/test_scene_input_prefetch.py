@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from stash_ai.inference.input_prefetch import SceneInputPrefetch
-from stash_ai.inference.inputs import RunInputs, RunMedia
+from stash_ai.inference.inputs import RunInputs, RunMedia, InspectedInput, VerifiedInput
 from stash_ai.runtime.cache import RamCache
 from stash_ai.runtime.cancellation import current
 from stash_ai.stash_api.transport import StashTransport
@@ -29,7 +29,7 @@ def test_close_during_batch_registration_does_not_start_a_late_producer(monkeypa
             token.unsubscribe(cancelled.set)
 
     inputs = SimpleNamespace(open_background_reader=lambda: None,
-                             read_with=lambda _: nullcontext(), inspect=lambda *args: ([], None, 'sig'))
+                             read_with=lambda _: nullcontext(), inspect=lambda *args: InspectedInput(VerifiedInput.capture([], {}), None, 'sig'))
     prefetch = SceneInputPrefetch(None, inputs, None, 'wd')
     monkeypatch.setattr(batch_stream, 'PreparedBatchStream', delayed_create)
     prefetch.submit('next', {}, {}, tagger=object(), prefetch=1)
@@ -55,7 +55,7 @@ def test_prepared_input_queue_is_bounded_and_releases_inputs_on_close(monkeypatc
             yield [index], [index]
 
     inputs = SimpleNamespace(open_background_reader=lambda: SimpleNamespace(close=lambda: None),
-                             read_with=lambda _: nullcontext(), inspect=lambda *args: ([], None, 'sig'))
+                             read_with=lambda _: nullcontext(), inspect=lambda *args: InspectedInput(VerifiedInput.capture([], {}), None, 'sig'))
     monkeypatch.setattr(batch_stream, 'prepared_batches', batches)
     prefetch = SceneInputPrefetch(None, inputs, None, 'wd')
     try:
@@ -177,7 +177,8 @@ def test_verified_media_leaves_background_reader_before_inference():
     cache = RamCache(0)
     inputs = RunInputs(SimpleNamespace(get_media=normal), cache)
     with inputs.read_with(SimpleNamespace(get_media=background)):
-        cues, media, _ = inputs.inspect(settings, {'vtt': '/vtt', 'sprite': '/sprite'}, {})
+        result = inputs.inspect(settings, {'vtt': '/vtt', 'sprite': '/sprite'}, {})
+        cues, media = result.snapshot.cues, result.media
     media.cache.clear()
     media.size = 0
     assert media.get_media(cues[0].image) == b'sprite'

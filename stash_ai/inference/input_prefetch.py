@@ -57,7 +57,7 @@ class SceneInputPrefetch:
                 return result
 
     def _prepare_batches(self, stream, tagger, paths, result, workers, transforms):
-        cues, media, _ = result
+        cues, media = result.snapshot.cues, result.media
         reader = None
         try:
             # Verification of C must not wait for a full CPU queue of current

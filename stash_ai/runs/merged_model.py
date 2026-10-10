@@ -271,13 +271,12 @@ class MergedModelRun:
             with self.report.measure('input_verify', model=self.key):
                 prepared = self.input_prefetch.take(scene_id) if self.input_prefetch is not None else None
                 inspected = (prepared if prepared is not None else inputs.inspect(app, paths, self.identity))
-                cues, media, signature = inspected
-                snapshot = getattr(inspected, 'snapshot', None)
+                snapshot, media, signature = inspected.snapshot, inspected.media, inspected.signature
+                cues = snapshot.cues
                 if prepared is not None:
                     # Model auto-download can update identity after lookahead
                     # was submitted; signatures always use the current assets.
-                    signature = (snapshot.inference_signature(self.identity) if snapshot is not None else
-                                 inference_signature(self.identity, cue_manifest(cues), media.hashes))
+                    signature = snapshot.inference_signature(self.identity)
         except BaseException:
             defer(store, scene_id, self.key, 'read_error')
             raise
@@ -302,8 +301,7 @@ class MergedModelRun:
             self.provenance = ProvenanceIdentity.from_legacy(self.identity)
             self.execution = ExecutionIdentity.from_legacy(self.identity, args)
             self.report.record_model(self.config, identity=self.identity)
-            signature = (snapshot.inference_signature(self.identity) if snapshot is not None else
-                                 inference_signature(self.identity, cue_manifest(cues), media.hashes))
+            signature = snapshot.inference_signature(self.identity)
             context.observer.inputs(self.identity, cues, media.hashes, paths, snapshot=snapshot)
         return ScenePreparation(PreparationStatus.READY,
             ModelScene(scene_id, paths, cues, media, signature, input_options=context.input_options, verified_input=snapshot, context=context))
