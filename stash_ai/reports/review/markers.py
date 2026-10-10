@@ -41,7 +41,7 @@ def _supporting_scores(app, contribution, tag, segments, postings):
         hi = (bisect_right(series.starts, contribution["start"]) if end is None
               else bisect_left(series.starts, end))
         if lo < hi:
-            yield model, max(series.scores[lo:hi]), threshold
+            yield model, series.max_score(lo, hi), threshold
 
 def _marker_signals(app, store, scene, spans, rows, options):
     from stash_ai.evidence.identity import marker_segment_signature
