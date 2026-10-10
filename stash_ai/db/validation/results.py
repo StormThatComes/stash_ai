@@ -30,7 +30,9 @@ def check_results_and_index(db, tables, errors, progress=None):
             validate_current(record)
             if {'publication_threshold', 'scene_threshold_override', 'marker_threshold_override', 'refinement'} & record.keys():
                 raise ValueError('Noncanonical result record.')
-            if metadata_format is not None:
+            if metadata_format is None and 'result_metadata' in tables:
+                errors['result_metadata_missing'] += 1
+            elif metadata_format is not None:
                 from stash_ai.storage.metadata import FORMAT, decode, encode, summarize
                 try:
                     if metadata_format != FORMAT:
