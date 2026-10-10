@@ -4,18 +4,22 @@
 --extra-index-url https://download.pytorch.org/whl/cpu
 
 annotated-doc==0.0.5
-    # via typer
+    # via
+    #   typer
 anyio==4.15.1
-    # via httpx
+    # via
+    #   httpx
 certifi==2026.7.22
     # via
     #   httpcore
     #   httpx
     #   requests
 charset-normalizer==3.5.2
-    # via requests
+    # via
+    #   requests
 click==8.5.0
-    # via huggingface-hub
+    # via
+    #   huggingface-hub
 colorama==0.4.6 ; sys_platform == 'win32'
     # via
     #   pytest
@@ -30,19 +34,24 @@ filelock==4.0.12
     #   huggingface-hub
     #   torch
 flatbuffers==25.12.19
-    # via onnxruntime
+    # via
+    #   onnxruntime
 fsspec==2026.9.0
     # via
     #   huggingface-hub
     #   torch
 h11==0.16.0
-    # via httpcore
+    # via
+    #   httpcore
 hf-xet==1.7.0 ; platform_machine == 'AMD64' or platform_machine == 'aarch64' or platform_machine == 'amd64' or platform_machine == 'arm64' or platform_machine == 'x86_64'
-    # via huggingface-hub
+    # via
+    #   huggingface-hub
 httpcore==1.0.9
-    # via httpx
+    # via
+    #   httpx
 httpx==0.28.1
-    # via huggingface-hub
+    # via
+    #   huggingface-hub
 huggingface-hub==1.33.0
     # via
     #   -r requirements-cpu.txt
@@ -55,19 +64,26 @@ idna==3.20
     #   httpx
     #   requests
 iniconfig==2.3.1
-    # via pytest
+    # via
+    #   pytest
 jinja2==3.1.6
-    # via torch
+    # via
+    #   torch
 markdown-it-py==4.2.0
-    # via rich
+    # via
+    #   rich
 markupsafe==3.0.4
-    # via jinja2
+    # via
+    #   jinja2
 mdurl==0.1.2
-    # via markdown-it-py
+    # via
+    #   markdown-it-py
 mpmath==1.3.0
-    # via sympy
+    # via
+    #   sympy
 networkx==3.7
-    # via torch
+    # via
+    #   torch
 numpy==2.5.3
     # via
     #   -r requirements-cpu.txt
@@ -76,7 +92,8 @@ numpy==2.5.3
     #   torchvision
     #   transformers
 onnxruntime==1.26.0
-    # via -r requirements-cpu.txt
+    # via
+    #   -r requirements-cpu.txt
 packaging==26.3
     # via
     #   huggingface-hub
@@ -89,15 +106,18 @@ pillow==12.3.0
     #   -r requirements-dev.txt
     #   torchvision
 pluggy==1.6.0
-    # via pytest
+    # via
+    #   pytest
 protobuf==7.36.2
-    # via onnxruntime
+    # via
+    #   onnxruntime
 pygments==2.21.0
     # via
     #   pytest
     #   rich
 pytest==9.1.1
-    # via -r requirements-dev.txt
+    # via
+    #   -r requirements-dev.txt
 pyyaml==6.0.3
     # via
     #   -r requirements-cpu.txt
@@ -105,35 +125,39 @@ pyyaml==6.0.3
     #   huggingface-hub
     #   transformers
 regex==2026.9.29
-    # via transformers
+    # via
+    #   transformers
 requests==2.34.2
     # via
     #   -r requirements-cpu.txt
     #   -r requirements-dev.txt
-    #   stashapi
 rich==15.0.0
-    # via typer
+    # via
+    #   typer
 safetensors==0.8.0
     # via
     #   -r requirements-cpu.txt
     #   -r requirements-dev.txt
     #   transformers
 setuptools==84.0.0
-    # via torch
+    # via
+    #   torch
 shellingham==1.5.4
-    # via typer
-stashapi==0.1.5
-    # via -r requirements-cpu.txt
+    # via
+    #   typer
 sympy==1.14.0
-    # via torch
+    # via
+    #   torch
 tokenizers==0.23.2
-    # via transformers
+    # via
+    #   transformers
 torch==2.14.0+cpu
     # via
     #   -r requirements-cpu.txt
     #   torchvision
 torchvision==0.29.0+cpu
-    # via -r requirements-cpu.txt
+    # via
+    #   -r requirements-cpu.txt
 tqdm==4.70.1
     # via
     #   -r requirements-cpu.txt
@@ -145,12 +169,12 @@ transformers==5.19.0
     #   -r requirements-cpu.txt
     #   -r requirements-dev.txt
 typer==0.27.3
-    # via transformers
+    # via
+    #   transformers
 typing-extensions==4.16.0
     # via
     #   anyio
     #   huggingface-hub
-    #   stashapi
     #   torch
 urllib3==2.8.0
     # via

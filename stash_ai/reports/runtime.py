@@ -1,10 +1,45 @@
 """Shared isolated settings and read-only store lifecycle for evidence reports."""
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from dataclasses import replace
+from functools import wraps
 from pathlib import Path
+import sqlite3
 
 from stash_ai.evidence.temporal.policy import load_policy
 from stash_ai.storage.store import StateStore, scope_for
+from stash_ai.db.read_source import consistent_source
+from stash_ai.db.common import connect_readonly
+
+
+@contextmanager
+def report_connection(path):
+    path = Path(path).expanduser().resolve()
+    with consistent_source(path), closing(connect_readonly(path)) as connection:
+        connection.execute('BEGIN')
+        yield connection
+
+
+@contextmanager
+def report_history(args):
+    from stash_ai.history.store import HistoryStore, history_path
+    path = history_path(args)
+    with consistent_source(path), HistoryStore(path, readonly=True) as store:
+        store.connection.execute('BEGIN')
+        yield store
+
+
+def offline_report(label):
+    """Present the same expected failures at every offline report boundary."""
+    def decorate(function):
+        @wraps(function)
+        def run(*args, **kwargs):
+            try:
+                return function(*args, **kwargs)
+            except (OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+                print(label + ' failed: ' + str(exc))
+                return 1
+        return run
+    return decorate
 
 
 def report_context(runtime, args, *, both_outputs=False):
@@ -29,10 +64,13 @@ def report_memory(args):
 @contextmanager
 def report_store(runtime, args, *, cache_bytes=0, memory_budget_bytes=0):
     require_database(args)
-    with StateStore(args.state_db, scope_for(runtime.STASH_URL), True,
-                    cache_bytes=cache_bytes, memory_budget_bytes=memory_budget_bytes,
-                    allow_cleanup=True) as store:
-        yield store
+    with consistent_source(args.state_db):
+        with StateStore(args.state_db, scope_for(runtime.STASH_URL), True,
+                        cache_bytes=cache_bytes, memory_budget_bytes=memory_budget_bytes,
+                        allow_cleanup=True) as store:
+            yield store
+            from stash_ai.storage.preview import check_source
+            check_source(store)
 
 
 def require_database(args):

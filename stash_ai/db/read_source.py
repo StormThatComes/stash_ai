@@ -15,4 +15,4 @@ def consistent_source(path):
         current = path.stat()
         if ((identity.st_dev, identity.st_ino) != (current.st_dev, current.st_ino)
                 or guardian.execute('PRAGMA data_version').fetchone()[0] != version):
-            raise RuntimeError('The source state DB changed during model report; repeat the report.')
+            raise RuntimeError('The source state DB changed during offline report; repeat the report.')

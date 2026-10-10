@@ -35,11 +35,11 @@ class PreparedBatch:
         return self.count
 
 
-def prepared_batches(app, tagger, stash, paths, cues, prefetch=False, workers=1, *,
+def prepared_batches(app, tagger, stash, paths, cues, prefetch=0, workers=1, *,
                      report=None, collate=False, cancellation=None,
                      transform_executor=None, frame_lookahead=False, buffer_usage=None):
     """Bounded ordered batches; one producer owns media and worker image copies."""
-    if not isinstance(prefetch, int) or not 0 <= prefetch <= 128:
+    if type(prefetch) is not int or not 0 <= prefetch <= 128:
         raise ValueError('prefetch must be an integer in 0..128.')
     if type(workers) is not int or not 1 <= workers <= 16:
         raise ValueError('prepare workers must be an integer in 1..16.')

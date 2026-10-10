@@ -31,6 +31,49 @@ class RunTimings:
         self.timings, self.timing_calls = Counter(), Counter()
         self._timers = threading.local()
         self._timing_lock = threading.RLock()
+        self._heartbeat_condition = threading.Condition(self._timing_lock)
+        self._heartbeat_thread = None
+
+    def _start_heartbeat(self):
+        # Called under the condition lock. Reuse one ticker across short reads;
+        # idle reports release it after a short grace period without a finalizer.
+        if self._heartbeat_thread is not None:
+            return
+        ticker = threading.Thread(target=self._heartbeat, name='stash-request-heartbeat', daemon=True)
+        try:
+            ticker.start()
+        except Exception:
+            self.report.counts['heartbeat_start_failures'] += 1
+            if ticker.is_alive():
+                self._heartbeat_thread = ticker
+            return
+        self._heartbeat_thread = ticker
+
+    def _heartbeat(self):
+        with self._heartbeat_condition:
+            while True:
+                now = time.perf_counter()
+                requests = self.report.active_requests
+                if not requests:
+                    self._heartbeat_condition.wait(.5)
+                    if not requests:
+                        self._heartbeat_thread = None
+                        return
+                    continue
+                due = min(value['next_heartbeat'] for value in requests.values())
+                if due > now:
+                    self._heartbeat_condition.wait(due - now)
+                    continue
+                for value in tuple(requests.values()):
+                    if value['next_heartbeat'] > now:
+                        continue
+                    value['next_heartbeat'] = now + self.report.heartbeat_seconds
+                    try:
+                        self.report.write(f"Waiting for Stash: {value['operation']}, "
+                            f"{now - value['started']:.1f}s, active={len(requests)}, "
+                            f"{'read' if value['read'] else 'write'}.")
+                    except Exception:
+                        self.report.counts['heartbeat_write_failures'] += 1
 
     @contextmanager
     def measure(self, stage, *, model=None, work=None, units=0, unit=''):
@@ -76,20 +119,16 @@ class RunTimings:
     def request(self, operation, read):
         start, failed = time.perf_counter(), True
         details = {'response_bytes': 0}
-        token, stopped = object(), threading.Event()
-        with self._timing_lock:
-            self.report.active_requests[token] = dict(operation=operation, read=read, started=start)
-
-        def heartbeat():
-            while not stopped.wait(self.report.heartbeat_seconds):
-                with self._timing_lock:
-                    active = len(self.report.active_requests)
-                self.report.write(f'Waiting for Stash: {operation}, '
-                    f'{time.perf_counter() - start:.1f}s, active={active}, '
-                    f'{"read" if read else "write"}.')
-
-        ticker = threading.Thread(target=heartbeat, name='stash-request-heartbeat', daemon=True)
-        ticker.start()
+        token = object()
+        with self._heartbeat_condition:
+            self.report.active_requests[token] = dict(operation=operation, read=read, started=start,
+                next_heartbeat=start + self.report.heartbeat_seconds)
+            try:
+                self._start_heartbeat()
+            except BaseException:
+                self.report.active_requests.pop(token, None)
+                raise
+            self._heartbeat_condition.notify_all()
         previous = getattr(self._timers, 'request', None)
         self._timers.request = details
         try:
@@ -97,10 +136,9 @@ class RunTimings:
                 yield
             failed = False
         finally:
-            stopped.set()
-            ticker.join()
-            with self._timing_lock:
+            with self._heartbeat_condition:
                 self.report.active_requests.pop(token, None)
+                self._heartbeat_condition.notify_all()
             self._timers.request = previous
             if self.report.diagnostics is not None:
                 self.report.diagnostics.record_api(operation, time.perf_counter()-start, failed, details['response_bytes'])

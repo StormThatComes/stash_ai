@@ -263,14 +263,15 @@ def test_diagnostics_never_query_retired_import_table(tmp_path, monkeypatch):
         connection.execute('CREATE TABLE legacy_imports(private_payload BLOB)')
         connection.execute('INSERT INTO legacy_imports VALUES (?)', (b'private-import-payload',))
     before = path.read_bytes()
-    original = diagnostics.connect_readonly
+    from stash_ai.reports import runtime as report_runtime
+    original = report_runtime.connect_readonly
     def protected(*args, **kwargs):
         connection = original(*args, **kwargs)
         def authorize(action, name, *rest):
             return sqlite3.SQLITE_DENY if action == sqlite3.SQLITE_READ and name == 'legacy_imports' else sqlite3.SQLITE_OK
         connection.set_authorizer(authorize)
         return connection
-    monkeypatch.setattr(diagnostics, 'connect_readonly', protected)
+    monkeypatch.setattr(report_runtime, 'connect_readonly', protected)
     report = diagnostics.build_report(path)
     assert 'legacy_imports' not in report['state_groups']
     assert report['database']['unknown_table_count'] == 2

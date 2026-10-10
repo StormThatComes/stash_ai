@@ -1,18 +1,31 @@
 """Ordered inference lookahead with a bounded result queue and one model owner."""
 from contextlib import closing, nullcontext
-from dataclasses import dataclass
-from queue import Full, Queue
-from threading import Event, Thread
+from threading import Thread
 
 from stash_ai.inference.preparation import PreparedBatch, prepared_batches
 from stash_ai.models import validate_scores
-from stash_ai.runtime.cancellation import Cancellation
 from .buffer_usage import PreparedBatchUsage, queued_batches
+from .managed_stream import ManagedStream, StreamFailure as _Failure
+from stash_ai.runtime.cleanup import cleanup
 
 
-@dataclass(frozen=True)
-class _Failure:
-    error: BaseException
+def prediction_scores(tagger, prepared):
+    """Validate once at the pipeline boundary, including external adapters.
+
+    Only the exact native types expose their internal raw calculation here;
+    subclasses and injected backends retain the checked public-adapter path.
+    Direct native backend calls also remain validated.
+    """
+    from stash_ai.backends.loader import JoyTagger
+    from stash_ai.backends.onnx import OnnxTagger
+    collated = isinstance(prepared, PreparedBatch)
+    if type(tagger) in (JoyTagger, OnnxTagger):
+        inputs = prepared.inputs if collated else tagger.collate_batch(prepared)
+        scores = tagger._predict_collated_scores(inputs, len(prepared))
+    else:
+        scores = (tagger.predict_collated_batch(prepared.inputs, prepared.count) if collated
+                  else tagger.predict_batch(prepared))
+    return validate_scores(scores, len(prepared), tagger.labels, tagger.settings.source.title)
 
 
 class BatchPredictions:
@@ -28,9 +41,10 @@ class BatchPredictions:
             raise ValueError('result_prefetch must be an integer in 1..128.')
         self.report, self.model = report, tagger.settings.source.key
         self.work = report.work() if report is not None else ''
-        self.tagger, self.cancellation = tagger, Cancellation()
-        self.results, self.stopped = Queue(maxsize=result_prefetch), Event()
-        self.finished, self.external_inputs = object(), prepared_inputs
+        self.channel = ManagedStream(result_prefetch)
+        self.tagger, self.cancellation = tagger, self.channel.cancellation
+        self.results, self.stopped = self.channel.queue, self.channel.stopped
+        self.finished, self.external_inputs = self.channel.end, prepared_inputs
         self.input_usage = PreparedBatchUsage(prefetch)
         self.inputs = (prepared_inputs if prepared_inputs is not None else
                        prepared_batches(app, tagger, stash, paths, cues, prefetch,
@@ -44,6 +58,7 @@ class BatchPredictions:
         else:
             self.worker = Thread(target=self._produce, name='inference-batches')
             self.worker.start()
+        self.channel.worker = self.worker
 
     def measure(self, name, count=0):
         return (self.report.measure(name, model=self.model, work=self.work, units=count,
@@ -56,12 +71,7 @@ class BatchPredictions:
 
     def _send(self, value):
         with self.measure('inference_result_queue_wait'):
-            while not self.stopped.is_set():
-                try:
-                    self.results.put(value, timeout=.05)
-                    return
-                except Full:
-                    pass
+            self.channel.send(value)
 
     def _produce(self):
         try:
@@ -72,11 +82,7 @@ class BatchPredictions:
                     for prepared, batch_cues in batches:
                         self.cancellation.check()
                         with self.measure('inference_batch', len(prepared)):
-                            scores = (self.tagger.predict_collated_batch(prepared.inputs, prepared.count)
-                                      if isinstance(prepared, PreparedBatch)
-                                      else self.tagger.predict_batch(prepared))
-                            result = validate_scores(scores, len(prepared), self.tagger.labels,
-                                                     self.tagger.settings.source.title)
+                            result = prediction_scores(self.tagger, prepared)
                         self.cancellation.check()
                         self._send((result, batch_cues))
         except BaseException as error:
@@ -89,7 +95,7 @@ class BatchPredictions:
 
     def __next__(self):
         with self.measure('inference_result_wait'):
-            item = self.results.get()
+            item = self.channel.receive()
         if item is self.finished:
             raise StopIteration
         if isinstance(item, _Failure):
@@ -97,21 +103,13 @@ class BatchPredictions:
         return item
 
     def close(self):
-        self.stopped.set()
-        self.cancellation.cancel()
-        try:
-            if self.external_inputs is not None:
-                self.external_inputs.close()
-        finally:
-            if self.borrowed:
-                self.worker.cancel()
-                if not self.worker.cancelled():
-                    self.worker.result()
-            else:
-                self.worker.join()
-        # Release prefetched scores immediately after cancellation/completion.
-        while not self.results.empty():
-            self.results.get_nowait()
+        callbacks = [self.channel.stop]
+        if self.external_inputs is not None:
+            stop = getattr(self.external_inputs, 'stop', None)
+            if stop is not None:
+                callbacks.append(stop)
+            callbacks.append(self.external_inputs.close)
+        cleanup(callbacks + [self.channel.join, self.channel.drain], report=self.report)
 
 
 def predicted_batches(app, tagger, stash, paths, cues, *, prefetch=0,
@@ -119,6 +117,8 @@ def predicted_batches(app, tagger, stash, paths, cues, *, prefetch=0,
                       prepared_inputs=None, transform_executor=None, result_prefetch=32,
                       on_start=None):
     """Lazy compatibility iterator; prefetch=0 keeps caller-owned inference."""
+    if type(prefetch) is not int or not 0 <= prefetch <= 128:
+        raise ValueError('prefetch must be an integer in 0..128.')
     if prefetch:
         with closing(BatchPredictions(app, tagger, stash, paths, cues, prefetch=prefetch,
                                      prepare_workers=prepare_workers, report=report,
@@ -137,7 +137,5 @@ def predicted_batches(app, tagger, stash, paths, cues, *, prefetch=0,
                                     units=len(prepared), unit='frames')
                      if report is not None else nullcontext())
             with timer:
-                scores = (tagger.predict_collated_batch(prepared.inputs, prepared.count)
-                          if isinstance(prepared, PreparedBatch) else tagger.predict_batch(prepared))
-                result = validate_scores(scores, len(prepared), tagger.labels, tagger.settings.source.title)
+                result = prediction_scores(tagger, prepared)
             yield result, batch_cues

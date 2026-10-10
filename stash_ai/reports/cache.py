@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from itertools import groupby
 from pathlib import Path
-import sqlite3
 import zlib
 
 from tqdm import tqdm
@@ -19,6 +18,7 @@ from stash_ai.reports.cache_assessment import assess_scene
 from stash_ai.reports.cache_coverage import CoverageAccumulator
 from stash_ai.reports.cache_plan import build_plan
 from stash_ai.reports.io import write_json_report
+from stash_ai.reports.runtime import offline_report
 from stash_ai.reports.runtime import report_context, report_store, require_database
 
 
@@ -152,24 +152,21 @@ def format_summary(report):
     return '\n'.join(lines)
 
 
+@offline_report('Cache report')
 def run(app, args):
 
-    try:
-        require_database(args)
-        settings = app.services.load_model_settings(args.model_config, args.models, None, True)
-        local = report_context(app, args)
-        context = []
-        for flag, path in (('--state-db', args.state_db), ('--model-config', args.model_config),
-                           ('--temporal-policy', args.temporal_policy),
-                           ('--marker-core-exclusions', args.marker_core_exclusions),
-                           ('--scene-tag-exclusions', args.scene_tag_exclusions)):
-            context.extend((flag, str(Path(path).expanduser().resolve())))
-        with report_store(app, args) as store:
-            report = build_report(local, store, scene_ids(store, args.scene_id), settings, context)
-        destination = write_json_report(report, args.cache_report)
-        print(format_summary(report))
-        print(f'Cache report written to {destination}. No Stash requests or inference were performed.')
-        return 0
-    except (OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
-        print('Cache report failed: ' + str(exc))
-        return 1
+    require_database(args)
+    settings = app.services.load_model_settings(args.model_config, args.models, None, True)
+    local = report_context(app, args)
+    context = []
+    for flag, path in (('--state-db', args.state_db), ('--model-config', args.model_config),
+                       ('--temporal-policy', args.temporal_policy),
+                       ('--marker-core-exclusions', args.marker_core_exclusions),
+                       ('--scene-tag-exclusions', args.scene_tag_exclusions)):
+        context.extend((flag, str(Path(path).expanduser().resolve())))
+    with report_store(app, args) as store:
+        report = build_report(local, store, scene_ids(store, args.scene_id), settings, context)
+    destination = write_json_report(report, args.cache_report)
+    print(format_summary(report))
+    print(f'Cache report written to {destination}. No Stash requests or inference were performed.')
+    return 0

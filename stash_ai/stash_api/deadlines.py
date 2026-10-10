@@ -30,8 +30,15 @@ def close_later(response):
                 _closing.task_done()
     with _close_lock:
         if _closer is None:
-            _closer = Thread(target=close_worker, name='stash-close-read', daemon=True)
-            _closer.start()
+            worker = Thread(target=close_worker, name='stash-close-read', daemon=True)
+            try:
+                worker.start()
+            except BaseException:
+                # A start interrupted after launch still owns the queue.
+                if worker.is_alive():
+                    _closer = worker
+                raise
+            _closer = worker
     try:
         _closing.put_nowait(response)
     except Full:

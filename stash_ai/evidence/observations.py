@@ -15,7 +15,6 @@ class ObservationIndex:
         self.token = object()
         self.scans = 0
         self.timelines = {}
-        self.cache_keys = set()
         self.disjoint = all(a['end'] <= b['start'] for a, b in zip(events, events[1:]))
 
     def support(self, start, end, policy, allowed=None):
@@ -42,7 +41,6 @@ class ObservationIndex:
             support = self.scan_support(first, last, end, policy, allowed, start=start)
         from stash_ai.evidence.timeline import support_size
         self.cache.put(key, support, retained_bytes=support_size(support))
-        self.cache_keys.add(key)
         return support
 
     def qualified(self, start, end, policy, allowed=None):
@@ -53,15 +51,13 @@ class ObservationIndex:
         if cached is None:
             cached = qualified_extras(self.support(start, end, policy, allowed), end-start, policy)
             self.cache.put(key, cached)
-            self.cache_keys.add(key)
         return cached
 
     def close(self):
         # These token-scoped queries cannot be reused by a later scene/index.
         # Result spans retain the proofs they need; release the cache references.
-        for key in self.cache_keys:
-            self.cache.discard(key)
-        self.cache_keys.clear()
+        self.cache.discard_matching(lambda key: isinstance(key, tuple) and
+                                    len(key) > 1 and key[1] is self.token)
         self.timelines.clear()
 
     def scan_support(self, first, last, end, policy, allowed, *, start=0.0):
