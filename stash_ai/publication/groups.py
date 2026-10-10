@@ -86,7 +86,7 @@ class MarkerGroups:
         else:
             # The suffix can collide with a literal raw label ending in
             # ':occurrence'. Fail explicitly instead of mixing the two groups.
-            if not managed_group(tag) or tag.get('description') != description:
+            if _group_data(tag) != {'core': label, 'occurrence': occurrence}:
                 raise ValueError(f'Marker group name collision: {name!r}. '
                                  'The existing tag belongs to another label/type or is not managed by Stash AI.')
             wanted = {str(p['id']) for p in tag.get('parents', [])} | {str(root['id'])}
@@ -102,7 +102,7 @@ class MarkerGroups:
                     tag = {**tag, 'parents': list(parents.values()), 'ignore_auto_tag': True}
                 else:
                     tag = self.stash.find_tag_by_id(str(tag['id']))
-                    if not managed_group(tag) or tag.get('description') != description:
+                    if _group_data(tag) != {'core': label, 'occurrence': occurrence}:
                         raise ValueError(f'Marker group ownership changed for {name!r}.')
                     wanted = {str(p['id']) for p in tag.get('parents', [])} | {str(root['id'])}
                     tag = self.stash.update_tag_organization(str(tag['id']), sorted(wanted), True)
