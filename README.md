@@ -841,184 +841,218 @@ and masks. Old fingerprints require the explicit
 the same exclusion policy and output scope. New operations store only
 the current fingerprint.
 
-## Konfiguracja
+## Configuration
 
-Wszystkie modele korzystają z jednego pliku `tag_hierarchy.yml`, będącego unią
-dotychczasowych czterech hierarchii: 21 154 unikalne tagi w 92 grupach.
-Opcja `--hierarchy YAML` wskazuje wspólny plik również przy wyborze jednego modelu.
-Usunięto `--wd-hierarchy`, `--dtq-hierarchy` i `--oppai-hierarchy`.
+All models share one `tag_hierarchy.yml` file: the union of the former
+four hierarchies, containing 21,154 distinct tags across 92 groups.
+`--hierarchy YAML` selects this shared file even if only one model is
+enabled. `--wd-hierarchy`, `--dtq-hierarchy` and `--oppai-hierarchy`
+have been removed.
 
-Hierarchia ma `version: 2` i pola `source` oraz `groups`. Ścieżki grup tworzą
-bezpośrednio kategorie `ai:category:` pod korzeniem `ai:category:AI`.
-Walidacja wymaga przypisania wszystkich tagów wybranych modeli; tagi pozostałych
-modeli są dozwolone. Opcjonalne `source.tag_count` i `source.vocabulary_sha256`
-opisują cały zbiór tagów wspólnego pliku, niezależnie od wybranych modeli.
-Zmiana grupowania nie wymaga ponownej inferencji ani nowej bazy SQLite;
-przypisania można zsynchronizować przez `--sync-hierarchy-only`.
-Przy własnych zmianach w starych plikach przenieś je do wspólnego YAML-a;
-aktualizator zachowuje stare konfiguracje lokalne, ale bieżący kod ich nie czyta.
-Własne YAML-e v1 przekonwertuj za pomocą [wersji pomostowej](#migratory-w-wersji-pomostowej).
-Bieżący walidator wymaga v2 i wskazuje commit migratora bez zmiany pliku.
+The hierarchy uses `version: 2` and the `source` and `groups` fields.
+Group paths directly form `ai:category:` categories under
+`ai:category:AI`. Validation requires all tags of selected models to
+be assigned; including tags from other models is fine. Optional
+`source.tag_count` and `source.vocabulary_sha256` describe the
+complete shared tag set independently of the selected models.
+Reorganizing groups needs neither fresh inference nor a new SQLite DB;
+use `--sync-hierarchy-only` to synchronize assignments.
 
-| Plik / opcja | Rola |
+If you customized the old hierarchy files, transfer those changes
+into the shared YAML. The updater preserves legacy local configurations,
+but current code does not read them. Convert custom YAML v1 files
+using the [transition release](#migration-tools-from-the-transition-release).
+The current validator requires v2 and directs users to the migration
+commit without changing legacy files.
+
+| File / option | Purpose |
 |---|---|
-| `tagger_models.yml` | modele, katalogi, progi, batch size |
-| `temporal_policy.yml` | reguły temporalne, consensus, extras i Occurrence |
-| `scene_tag_exclusions.yml` | globalne wykluczenia tagów |
-| `marker_core_exclusions.yml` | wykluczenia głównych tagów markerów |
-| `tag_hierarchy.yml` | wspólna hierarchia kategorii wszystkich modeli |
-| `--state-db` | lokalizacja trwałej bazy stanu |
-| `--db-init` | odbudowa nowej/pustej bazy z przejęciem istniejących wyników AI |
+| `tagger_models.yml` | Models, directories, thresholds and batch sizes |
+| `temporal_policy.yml` | Temporal rules, consensus, extras and Occurrence |
+| `scene_tag_exclusions.yml` | Global scene-tag exclusions |
+| `marker_core_exclusions.yml` | Marker primary-tag exclusions |
+| `tag_hierarchy.yml` | Shared category hierarchy for all models |
+| `--state-db` | Persistent state database path |
+| `--db-init` | Initialize a new/empty database and adopt existing AI results |
 
-Publikacja nie ogranicza liczby tagów ani markerów na scenę. Wszystkie wyniki
-spełniające progi, reguły temporalne i wykluczenia mogą zostać opublikowane;
-dotyczy to każdego modelu, wspólnych wyników i punktów Occurrence.
-`MAX_TAGS` i `MAX_MARKERS_PER_SCENE` zostały usunięte. Limit tagów na klatkę
-`MARKER_MAX_TAGS_PER_FRAME` pozostaje osobnym ustawieniem (domyślnie 0).
+Publication has **no maximum number of scene tags or markers**.
+All results qualifying under thresholds, temporal policies and
+exclusions may be published, for individual models, combined results,
+and Occurrence points. `MAX_TAGS` and `MAX_MARKERS_PER_SCENE` were
+removed. The independent per-frame tag limit `MARKER_MAX_TAGS_PER_FRAME`
+remains (default `0`).
 
-Bazy v18–v26 wymagają `--db-update`. Migracja do v27 zapisuje snapshoty v7
-bez dawnych limitów liczby wyników, zachowując geometrię, własność i plany
-pending/recovery. Nie zmienia cache inferencji i nie zapisuje do Stash.
-Aby uzupełnić wcześniej obcięte wyniki z zachowanego cache, wykonaj:
+Databases on schema v18–v26 require `--db-update`. Upgrading to v27
+writes snapshot format v7 without the legacy output-count limits,
+while retaining geometry, ownership and pending/recovery plans.
+It neither modifies inference cache nor writes to Stash.
+To regenerate previously truncated published results from cached evidence:
 
 ```powershell
 python .\stash_ai.py --db-update
 python .\stash_ai.py --merge-only
 ```
 
-`--merge-only` stosuje aktualne reguły publikacji bez GPU; wymagania dotyczące
-kompletności cache nadal obowiązują. `--dry-run` pozwala obejrzeć plan publikacji.
+`--merge-only` applies the current publication rules without a GPU;
+cache-completeness requirements still apply. Use `--dry-run` to preview
+publication.
 
-Aktualne domyślne ustawienia pamięci i równoległości:
+Current memory and parallelism defaults:
+
 - `--ram-budget-gb 32`;
-- `--ram-cache-gb 24` — cache jest przydzielany na żądanie i ograniczony do
-  maksymalnie 75% budżetu;
+- `--ram-cache-gb 24` — lazy allocation, capped at 75% of the RAM budget;
 - `--prepare-workers 4`;
-- `--merge-workers 4` — równoległy CPU replay evidence; zapisy Stash/SQLite pozostają sekwencyjne;
-- Globalne `checkpoint_batches: 8` w `tagger_models.yml` lub
-  `--checkpoint-batches N` wybiera zapis postępu co N przetworzonych batchy.
-  Wartość musi być liczbą całkowitą >= 1; CLI ma pierwszeństwo, a brak pola
-  zachowuje default 8. Końcowy checkpoint oraz zapis przy obsługiwanym
-  przerwaniu/błędzie pozostają niezależne od tego interwału.
-- Globalne `prefetch_batches: 4` w `tagger_models.yml` (0–128; 0 wyłącza).
-  Jawne `--prefetch-batches N` nadpisuje YAML; brak pola zachowuje default 4.
-  Parametr steruje przygotowaniem kolejnych batchy, niezależnie od rozmiaru
-  inferencji `batch_size`, i nie unieważnia zapisanych wyników.
-- Globalne `result_prefetch_batches: 32` (1–128) lub `--result-prefetch-batches N`
-  wybiera osobno pojemność kolejki wyników CPU. Działa przy `prefetch_batches > 0`;
-  CLI nadpisuje YAML, a brak pola zachowuje default 32. Zmiana nie unieważnia
-  wyników ani checkpointów.
+- `--merge-workers 4` — parallel CPU evidence replay, with sequential
+  Stash/SQLite writes;
+- Global `checkpoint_batches: 8` in `tagger_models.yml`, or
+  `--checkpoint-batches N`, saves progress every N processed batches.
+  It must be an integer >= 1. CLI takes precedence, and the default
+  remains 8 when omitted. Final checkpoints and saves on supported
+  interruption/error paths are independent of this interval.
+- Global `prefetch_batches: 4` in `tagger_models.yml` (0–128; zero
+  disables prefetch). Explicit `--prefetch-batches N` takes precedence;
+  omission retains the default 4. This controls preparation of future
+  batches independently of inference `batch_size` and does not
+  invalidate stored predictions.
+- Global `result_prefetch_batches: 32` (1–128), or
+  `--result-prefetch-batches N`, separately controls the CPU result
+  queue. It applies when `prefetch_batches > 0`. CLI overrides YAML,
+  and the default remains 32 when omitted. Changing it does not
+  invalidate results or checkpoints.
 
-Przy `prefetch_batches > 0` jeden stały wątek ładuje model, wykonuje inferencję
-dla wszystkich jego scen i zamyka model. Nie powstaje nowy wątek backendu dla
-każdej sceny; zasoby CUDA i pule strumieni mogą zachować jednego właściciela.
-Główny wątek równolegle obrabia poprzednie wyniki i zapisuje checkpointy/SQLite. Kolejka
-wyników mieści `result_prefetch_batches` batchy; dodatkowo jeden wynik może
-czekać na wstawienie lub może trwać jedno wywołanie inferencji.
-Wyniki są odbierane w kolejności, a checkpoint obejmuje tylko w pełni
-przetworzony prefiks. Błąd późniejszego batcha zachowuje wcześniejszy postęp;
-przerwanie anuluje przygotowanie sceny i czeka na inferencję. Następnie model
-jest zamykany w swoim wątku, a wykonawca kończy pracę. Wejścia prefetch i wyniki
-w kolejce znajdują się w RAM, a nie w VRAM.
-Większa kolejka wyników pozwala kontynuować inferencję podczas wolniejszej
-obróbki, kompresji i zapisu poprzedniej sceny. Zajmuje RAM poza limitem cache;
-same macierze wyników float32 zajmują około
-`result_prefetch_batches × batch_size × liczba_etykiet × 4` bajtów,
-do czego dochodzi wynik w toku i metadane klatek. To bufor chwilowych opóźnień:
-jeśli odbiorca stale pracuje wolniej od inferencji, kolejka nadal się zapełni.
+With `prefetch_batches > 0`, one persistent thread loads a model,
+runs inference for all its scenes, then closes it. A separate
+backend thread is **not** created for every scene, so CUDA resources
+and stream pools can retain a single owner. Meanwhile, the main
+thread processes previous results and persists checkpoints/SQLite.
+The result queue holds at most `result_prefetch_batches` batches;
+one more result may be pending insertion and one inference call may
+be in flight. Results are consumed in order and checkpoints cover
+only fully processed prefixes. Failure in a later batch preserves
+earlier progress. Interruption cancels scene preparation and waits
+for inference, after which the model is closed on its owning thread.
+Prefetched inputs and queued results occupy **RAM, not VRAM**.
 
-Prefetch obejmuje też wejście jednej następnej sceny: pobranie VTT/sprite'ów
-i sprawdzenie ich hashy, dekodowanie obrazów i składanie batchy CPU mogą trwać
-podczas inferencji bieżącej sceny. Odczyt używa osobnej sesji HTTP i wspólnego
-cache RAM. Lokalny bufor mediów zachowuje najwyżej dwa
-skompresowane sprite'y w limicie 16 MiB, a wspólny cache nadal podlega budżetowi
-RAM. Kolejka wejść następnej sceny mieści `prefetch_batches` gotowych
-batchy; dodatkowo jeden batch może czekać na wstawienie, a okno transformacji
-obejmuje najwyżej `max(batch_size, prepare_workers)` klatek. Obie sceny
-współdzielą jedną pulę `prepare_workers`, więc jej liczba wątków nie podwaja się.
-Weryfikacja wejść ma własnego wykonawcę, a najwyżej dwaj producenci batchy
-CPU mają izolowane sesje HTTP. Pełna kolejka bieżącej sceny nie blokuje
-pobierania ani przygotowania następnej.
-Limit obowiązuje osobno dla każdej aktywnej kolejki wejść: bieżąca i następna
-scena mogą jednocześnie zachowywać przygotowane batche. Są one aktywnymi
-wejściami CPU, poza limitem cache `--ram-cache-gb`. Większa głębokość zwiększa
-zużycie RAM proporcjonalnie do `prefetch_batches` i rozmiaru `batch_size`;
-nie zwiększa liczby scen pobieranych z wyprzedzeniem ani kolejki wyników GPU.
-Gotowe sceny z planu reuse nie są pobierane z wyprzedzeniem.
-Błąd odczytu jest obsługiwany dopiero po dojściu do jego sceny, dzięki czemu
-nie przerywa zapisu poprzedniego wyniku. Tak samo obsługiwane są błędy
-dekodowania i inferencji następnej sceny.
+A larger result queue allows inference to continue while previous
+results undergo slower CPU post-processing, compression and saving.
+This queue occupies RAM **outside the cache limit**. Float32 result
+arrays alone use approximately
+`result_prefetch_batches × batch_size × label_count × 4` bytes,
+plus any in-flight result and frame metadata. The queue buffers
+temporary stalls; if the consumer is consistently slower than GPU
+inference, it will still fill up.
 
-Po przetworzeniu ostatniego batcha bieżącej sceny główny wątek może odebrać
-gotowe wejście następnej, sprawdzić reuse i odtworzyć jej checkpoint. Dopiero
-po tych sprawdzeniach uruchamia jej zadanie na tym samym właścicielu GPU,
-przed finalizacją, budowaniem wyniku i commitem poprzedniej sceny. Wyniki
-następnej sceny czekają w ograniczonej kolejce RAM; checkpointy i pełne wyniki
-są zapisywane w kolejności scen, w głównym wątku. Jeśli wejście nadal się
-pobiera lub jego weryfikacja zawiodła, finalizacja poprzedniej sceny przebiega
-bez czekania na nie. Handoff jest ponawiany także przed budowaniem wyniku
-i przed commitem, jeśli wejście stało się gotowe podczas finalizacji.
-Przy resume spekulacyjne batche CPU od początku sceny
-są odrzucane, a GPU otrzymuje tylko pozostałe klatki po zweryfikowanym checkpoincie.
-Ctrl+C anuluje także odczyt i zadanie następnej sceny; nieprzetworzone wyniki
-GPU nie poszerzają zapisanego checkpointu.
-`--prefetch-batches 0` wyłącza również przygotowanie wejścia następnej sceny.
+Prefetch also handles input for **one next scene**. Downloading
+VTT/sprites, verifying their hashes, decoding images and building
+CPU batches can overlap with inference of the current scene.
+It uses a separate HTTP session and the shared RAM cache.
+The media buffer retains at most two compressed sprites within
+16 MiB; the shared cache still respects its memory budget.
+The next scene's input queue holds `prefetch_batches` prepared
+batches, potentially with one batch waiting to enter it and
+a transformation window of up to
+`max(batch_size, prepare_workers)` frames.
 
-Przygotowanie CPU składa kompletne wejścia (`stack`, maski i dopełnianie
-stałego batcha ONNX) przed przekazaniem do inferencji. Workery transformacji
-mogą pracować na klatkach kolejnych batchy: batch 4 nie ogranicza już puli
-8 workerów do czterech aktywnych zadań. Odczyt mediów/PIL nadal ma jednego
-właściciela. Oprócz kolejki batchy okno transformacji jest ograniczone do
-`max(batch_size, prepare_workers)` klatek. `--prefetch-batches 0` zachowuje
-inferencję i obróbkę wyników w głównym wątku oraz dotychczasową pulę transformacji.
+Both scenes share one `prepare_workers` pool, so the thread count
+does not double. Input verification uses its own executor, and at
+most two CPU batch producers have isolated HTTP sessions.
+A full current-scene queue does not block fetching or preparing
+the next scene. Each active input queue has a separate capacity:
+current and next scenes can both retain batches simultaneously.
+These are live CPU inputs and lie outside `--ram-cache-gb`.
+Larger prefetch depth raises memory use proportionally to
+`prefetch_batches` and `batch_size`; it does not increase the
+number of look-ahead scenes or the GPU result-queue depth.
+Scenes already eligible for reuse are not prefetched.
 
-Historia uruchomień rozdziela `sprite_frame_read`, `image_prepare`,
+Read failures are surfaced only when their scene is reached,
+so they do not interrupt saving previous results. The same
+holds for next-scene decoding or inference errors.
+
+After the final batch of the current scene, the main thread may
+consume ready next-scene input, validate reuse, and restore its
+checkpoint. Only then can it start that scene on the **same GPU
+owner**, before finalizing, assembling and committing the previous
+scene. Its output waits in the bounded RAM queue; checkpoints and
+completed results are still written in scene order on the main
+thread. If next-scene input is still downloading or verification
+failed, the previous scene finalizes without waiting. Handoff
+is attempted again before result assembly and commit if input
+became ready in the meantime.
+
+During resume, speculative CPU batches from the beginning of the
+next scene are discarded; the GPU processes only the remaining
+frames after the verified checkpoint. Ctrl+C also cancels
+next-scene download and inference; unprocessed GPU results do
+not extend the saved checkpoint.
+`--prefetch-batches 0` disables look-ahead scene preparation too.
+
+CPU preparation constructs complete inputs (stacking, masks and
+fixed-size ONNX batch padding) before passing them to inference.
+Transformation workers can process frames from multiple batches:
+a batch size of 4 no longer restricts 8 workers to four simultaneous
+tasks. Media/PIL reading continues to have one owner. Besides the
+batch queue, the transformation window is limited to
+`max(batch_size, prepare_workers)` frames. With prefetch disabled,
+inference and result processing stay on the main thread with
+the existing transformation pool.
+
+Run history separates `sprite_frame_read`, `image_prepare`,
 `batch_collate`, `inference_input_wait`, `inference_batch`,
-`inference_result_wait`, `inference_result_queue_wait` i
-`inference_postprocess`. Pełna kolejka wyników wskazuje, że odbiorca nie nadąża;
-długi `inference_input_wait` wskazuje oczekiwanie na przygotowanie wejścia.
-`scene_input_prefetch` mierzy weryfikację następnej sceny w tle,
-`scene_input_wait` — oczekiwanie na jej gotowe wejście, a
-`scene_batch_prefetch` i `scene_batch_queue_wait` — przygotowanie CPU i
-oczekiwanie na miejsce w kolejce następnej sceny. `scene_handoff` mierzy
-autoryzację i rozpoczęcie jej zadania przed finalizacją poprzedniej.
-`inference_scene_finalize`, `inference_output_capture` i `inference_commit`
-rozdzielają finalizację CPU, budowanie wyniku i jego zapis. Pozwala to wskazać
-przyczynę pauz na granicach scen. `input_verify` na ścieżce synchronicznej
-nadal obejmuje odczyt i hashowanie; przy prefetch obejmuje odbiór wejścia,
-z oczekiwaniem wykazanym osobno w `scene_input_wait`.
-`inference_batch` nadal obejmuje transfery i walidację, więc nie jest pomiarem
-samych kerneli CUDA. Czasy równoległych etapów mogą się nakładać i nie należy
-sumować ich jako czasu rzeczywistego przebiegu. Zmiana pipeline'u nie wymaga
-migracji bazy ani odrzucenia zgodnych wyników/checkpointów.
+`inference_result_wait`, `inference_result_queue_wait` and
+`inference_postprocess`. A full result queue suggests that the
+consumer cannot keep up; a long `inference_input_wait` suggests
+input preparation is the bottleneck. `scene_input_prefetch`
+measures background verification, while `scene_input_wait`
+measures waiting for prepared next-scene input.
+`scene_batch_prefetch` and `scene_batch_queue_wait` cover
+CPU preparation and waiting for space in the next-scene queue.
+`scene_handoff` measures authorizing and starting the next
+scene before finalization of the previous one.
+`inference_scene_finalize`, `inference_output_capture` and
+`inference_commit` distinguish CPU finalization, result assembly
+and persistence, to help locate pauses at scene boundaries.
+On the synchronous path `input_verify` still includes reading
+and hashing; with prefetch it covers receiving input, with
+waiting tracked separately by `scene_input_wait`.
 
-Wyniki i checkpointy korzystają z szybkiej kompresji zlib na poziomie 1;
-odczyt dotychczasowych BLOB-ów pozostaje zgodny. Kosztem szybszego zapisu
-może być większa baza. `state_json_encode` i `state_compress` mierzą zapis
-wyników, a `checkpoint_json_encode` i `checkpoint_compress` — przygotowanie
-checkpointów, w tym kompresję macierzy top scores. `checkpoint_prepare`
-obejmuje przygotowanie BLOB-ów przed transakcją, `checkpoint_sqlite_write`
-obejmuje SQL i commit, a `checkpoint_write` obejmuje oba etapy.
+`inference_batch` includes transfers and validation, not just
+CUDA kernel execution. Parallel stage timings may overlap and
+must not be summed as wall-clock runtime. Pipeline changes
+require neither database migration nor rejection of compatible
+results/checkpoints.
 
-`--db-compact` utrzymuje blokadę zapisu aż do końcowej kontroli bazy i
-porównania liczników po VACUUM.
+Results and checkpoints use faster zlib level-1 compression.
+Older BLOBs remain readable; faster writes may increase database
+size. `state_json_encode` and `state_compress` track result
+serialization; `checkpoint_json_encode` and
+`checkpoint_compress` cover checkpoint preparation, including
+top-score array compression. `checkpoint_prepare` includes
+BLOB preparation before the transaction, `checkpoint_sqlite_write`
+covers SQL and commit, and `checkpoint_write` includes both.
 
-Równoległy merge dzieli budżet RAM i cache pomiędzy procesy pomocnicze oraz
-proces nadrzędny zapisujący publikacje. Przy czterech procesach pomocniczych
-każdy proces dostaje jedną piątą budżetu; po ich zamknięciu proces nadrzędny
-odzyskuje pełny budżet. Procesy raportu modeli używają tych samych ustawień
-kwalifikacji i limitów co raport sekwencyjny.
+`--db-compact` retains the write lock until final database validation
+and post-VACUUM counter comparison.
 
-## Aktualizacje
+Parallel merge divides the RAM and cache budget between helpers
+and the parent process responsible for publication. With four
+helpers, each process gets one-fifth of the budget; once they
+exit, the parent regains the entire budget. Model-report workers
+use the same eligibility settings and limits as the sequential
+report.
 
-`update_stash_ai.py` aktualizuje zarządzane pliki aplikacji bez Gita i bez
-uruchamiania `pip`. Wymaga tokena GitHub z dostępem `Contents: read` do
-prywatnego repozytorium.
+## Updating the application
 
-Bieżący updater obsługuje układ pakietowy (`stash_ai/`). Stare instalacje z
-modułami `stash_*.py` wymagają jednorazowego przejścia przez updater z commita
-[`9fcaa52502cd487455457547860b5db7d8710ad8`](https://github.com/StormThatComes/stash_ai/commit/9fcaa52502cd487455457547860b5db7d8710ad8).
-Zatrzymaj aplikację i pobierz tę wersję jako osobny plik w katalogu instalacji:
+`update_stash_ai.py` updates managed application files without Git
+or `pip`. For this private repository it requires a GitHub token
+with `Contents: read` access.
+
+The current updater supports the package layout (`stash_ai/`).
+Older installations using flat `stash_*.py` modules require a
+one-time migration via the updater from
+[commit `9fcaa52502cd487455457547860b5db7d8710ad8`](https://github.com/StormThatComes/stash_ai/commit/9fcaa52502cd487455457547860b5db7d8710ad8).
+Stop the application and download that version as a separate file
+inside the installation directory:
 
 ```powershell
 $env:GH_TOKEN = "<fine-grained PAT>"
@@ -1029,13 +1063,14 @@ python .\update_stash_ai_bridge.py --install-dir . --migrate-flat-layout --dry-r
 python .\update_stash_ai_bridge.py --install-dir . --migrate-flat-layout
 ```
 
-Jeśli dawna aktualizacja została przerwana, najpierw uruchom
+If a legacy update was interrupted, first run
 `python .\update_stash_ai_bridge.py --install-dir . --recover`.
-Updater pomostowy instaluje bieżący pakiet, zachowuje backupy, lokalne YAML,
-bazę i modele; zmodyfikowany kod wymaga `--force-code`. Następnie używaj
-zwykłego `update_stash_ai.py`. Bieżący updater nie skanuje ani nie usuwa
-nieśledzonych dawnych modułów. Przy `git pull` do układu pakietowego nie ma
-etapu pomostowego updatera.
+The bridge installs the current package while preserving backups,
+local YAML files, database and models; use `--force-code` for
+locally modified code. Continue with the regular updater afterwards.
+The current updater does not scan for or delete untracked legacy
+modules. A `git pull` directly into the package layout does not
+require the updater bridge.
 
 ```powershell
 $env:GH_TOKEN = "<fine-grained PAT>"
@@ -1045,60 +1080,65 @@ python .\update_stash_ai.py --dry-run
 python .\update_stash_ai.py
 ```
 
-Updater:
-- pobiera pliki z jednego SHA `main`;
-- instaluje launchery, pakiet `stash_ai/` oraz YAML-e; usuwa zastąpione moduły z katalogu głównego;
-- zachowuje lokalnie zmienione YAML-e i tworzy propozycje `.incoming`;
-- odmawia nadpisania zmienionego kodu bez `--force-code`;
-- nie aktualizuje modeli, `.env`, SQLite ani zależności Pythona;
-- używa blokady instalacji i dziennika odzyskiwania.
+The updater:
+- downloads application files from a single `main` commit SHA;
+- installs launchers, the `stash_ai/` package and YAML files,
+  removing replaced flat root modules;
+- preserves locally modified YAML and writes `.incoming` proposals;
+- refuses to overwrite locally changed code without `--force-code`;
+- does not update models, `.env`, SQLite or Python dependencies;
+- uses an installation lock and recovery journal.
 
-Po przerwaniu aktualizacji użyj:
+After an interrupted update:
 
 ```powershell
 python .\update_stash_ai.py --recover
 ```
 
-## Bezpieczeństwo
+## Security
 
-- używaj własnego, zrotowanego `STASH_API_KEY` z environment;
-- nie commituj tokenów GitHub ani kluczy Stash;
-- read-only GraphQL i media GET mogą być ponawiane po błędach przejściowych;
-- mutacje GraphQL **nie są automatycznie retry'owane**, ponieważ serwer mógł
-  wykonać zapis mimo utraconej odpowiedzi;
-- `--dry-run` nie zapisuje do Stash ani trwałej bazy źródłowej.
+- Use a newly generated/rotated `STASH_API_KEY` from the environment.
+- Never commit GitHub tokens or Stash API keys.
+- Read-only GraphQL requests and media GETs may be retried on transient errors.
+- GraphQL **mutations are not retried automatically**, because the server
+  may have applied a write despite a lost response.
+- `--dry-run` writes neither to Stash nor to the persistent source database.
 
-## Testy i CI
+## Tests and CI
 
 ```powershell
 pip install -r requirements-dev.txt
 python -m pytest -q
 ```
 
-CI testuje Python 3.14.7. Pełny zestaw testów działa na Linux, a updater jest
-dodatkowo sprawdzany na Windows. Testy używają atrap Stash i modeli; nie wymagają
-produkcyjnego serwera.
+CI tests Python 3.14.7. The full suite runs on Linux, with extra
+Windows coverage for the updater. Tests use mocked Stash and
+models; a production server is not needed.
 
-## Dokumentacja
+## Documentation
 
-- [Aktualny podręcznik](docs/README_multimodel.md)
-- [Indeks dokumentacji](docs/README.md)
-- [Cleanup SQL](docs/UPGRADE_cleanup_sql.md)
-- [Wydajność i pamięć](docs/UPGRADE_performance.md)
-- [Merge i szybka ścieżka](docs/UPGRADE_merge.md)
-- [Wykluczenia i cleanup](docs/UPGRADE_exclusions.md)
+- [Current user guide](docs/README_multimodel.md)
+- [Documentation index](docs/README.md)
+- [SQL cleanup](docs/UPGRADE_cleanup_sql.md)
+- [Performance and memory](docs/UPGRADE_performance.md)
+- [Merge and fast path](docs/UPGRADE_merge.md)
+- [Exclusions and cleanup](docs/UPGRADE_exclusions.md)
 - [Occurrence](docs/UPGRADE_occurrences.md)
-- [Grupy markerów](docs/UPGRADE_marker_groups.md)
-- [Porzucanie przerwanych operacji](docs/UPGRADE_abandon_pending.md)
-- [Odbudowa nowej bazy](docs/UPGRADE_db_init.md)
-- [Profilowanie merge](docs/UPGRADE_diagnostics.md)
-- [Benchmarki](benchmarks/README.md)
+- [Marker groups](docs/UPGRADE_marker_groups.md)
+- [Abandoning interrupted operations](docs/UPGRADE_abandon_pending.md)
+- [Initializing a fresh database](docs/UPGRADE_db_init.md)
+- [Merge diagnostics](docs/UPGRADE_diagnostics.md)
+- [Benchmarks](benchmarks/README.md)
 
-Pliki w `docs/validation/` są historycznymi wynikami konkretnych walidacji i
-benchmarków. Nie opisują bieżącej liczby testów ani aktualnego kontraktu aplikacji.
+Files under `docs/validation/` are historical results from specific
+validation and benchmark runs. They are not authoritative descriptions
+of the current test count or application contract.
 
-Nazwy konfiguracji i CLI są opisane w [instrukcji aktualizacji wykluczeń](docs/UPGRADE_exclusions.md#aktualizacja-starych-nazw). Używaj `excluded_scene_tags`, `--models`, `--scene-tag-exclusions` i `--cleanup-markers-only`; domyślny plik markerów to `marker_core_exclusions.yml`.
-
+Configuration and CLI naming changes are documented in the
+[exclusion migration guide](docs/UPGRADE_exclusions.md#aktualizacja-starych-nazw).
+Use `excluded_scene_tags`, `--models`,
+`--scene-tag-exclusions` and `--cleanup-markers-only`;
+the default marker-exclusions file is `marker_core_exclusions.yml`.
 
 Aktywny wynik to jeden rekord w formacie analizy 5, z opcjonalnym liczbowym progiem
 publikacji. Nowa inferencja zastępuje wynik i resetuje próg. Archiwum zachowuje tylko
