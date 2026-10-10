@@ -43,12 +43,18 @@ class PreparedBatchStream:
                                            report=self.report, collate=True,
                                            cancellation=self.cancellation,
                                            transform_executor=transforms, frame_lookahead=True)
-                for batch in batches:
+                while True:
+                    self.queue.producing(True)
+                    try:
+                        batch = next(batches)
+                    except StopIteration:
+                        break
                     self._send(batch)
                     self.cancellation.check()
         except BaseException as error:
             self._send(error)
         finally:
+            self.queue.producing(False)
             from stash_ai.runtime.cleanup import cleanup
             cleanup([lambda: batches.close() if batches is not None else None,
                      lambda: self._send(self.end)], report=self.report)
@@ -57,6 +63,7 @@ class PreparedBatchStream:
         return self
 
     def __next__(self):
+        self.queue.consuming(False)
         timer = (self.report.measure('inference_input_wait', model=self.model)
                  if self.report else nullcontext())
         with timer:

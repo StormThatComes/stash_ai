@@ -11,7 +11,7 @@ import pytest
 
 from stash_ai.inference import batches, preparation
 from stash_ai.inference.batch_stream import PreparedBatchStream
-from stash_ai.inference.buffer_usage import PreparedBatchUsage, queued_batches
+from stash_ai.inference.buffer_usage import BufferUsage, PreparedBatchUsage, queued_batches
 from stash_ai.models import WD
 from stash_ai.runs.inference_progress import InferenceProgress, buffer_lines
 from stash_ai.runtime.cache import RamCache
@@ -26,7 +26,7 @@ from stash_ai.runs.merged_model import MergedModelRun
 pytestmark = pytest.mark.usefixtures('reset_progress')
 
 
-def test_input_snapshot_ignores_unfinished_failed_cancelled_and_empty_futures():
+def test_input_snapshot_tracks_in_flight_and_ignores_failed_cancelled_and_empty_futures():
     usage = PreparedBatchUsage(8)
     ready, running, failed, cancelled, empty = [Future() for _ in range(5)]
     ready.set_result(([1, 2], ['a', 'b']))
@@ -36,10 +36,10 @@ def test_input_snapshot_ignores_unfinished_failed_cancelled_and_empty_futures():
     empty.set_result(([], []))
     for future in (ready, running, failed, cancelled, empty):
         usage.submitted(future)
-    assert usage.snapshot() == (1, 8)  # Does not wait for the running task.
+    assert usage.snapshot() == BufferUsage(1, 1, 9)  # Does not wait for the running task.
     assert ready.result() == ([1, 2], ['a', 'b'])
     usage.taken(ready)
-    assert usage.snapshot() == (0, 8)
+    assert usage.snapshot() == BufferUsage(0, 2, 9)
     held = weakref.ref(ready)
     usage.submitted(ready)
     del ready
@@ -71,8 +71,8 @@ def test_input_snapshot_tracks_real_preparation_and_releases_futures(pipeline):
             pending = tuple(usage._pending)
         for future in pending:
             future.result(timeout=5)
-        assert usage.snapshot() == (4, 4)
-    assert usage.snapshot() == (0, 4)
+        assert usage.snapshot() == BufferUsage(4, 1, 5)
+    assert usage.snapshot() == BufferUsage(0, 0, 5)
     assert_inference_workers_closed()
 
 
@@ -82,14 +82,14 @@ def test_queue_snapshot_excludes_control_markers_and_preserves_payloads():
     queue.put(payload)
     queue.put(object())
     queue.put(batches._Failure(ValueError('failed')))
-    assert queued_batches(queue) == (1, 4)
+    assert queued_batches(queue) == BufferUsage(1, 0, 4)
     assert queue.qsize() == 3 and queue.get_nowait() is payload
     stream = PreparedBatchStream(2, None, 'wd')
     stream.queue.put(payload)
     stream.queue.put(stream.end)
-    assert stream.buffer_usage() == (1, 2)
+    assert stream.buffer_usage() == BufferUsage(1, 0, 4)
     stream.close()
-    assert stream.buffer_usage() == (0, 2)
+    assert stream.buffer_usage() == BufferUsage(0, 0, 4)
 
 
 @pytest.mark.parametrize('limit', [1, 32, 128])
@@ -116,10 +116,10 @@ def test_result_snapshot_counts_full_queue_and_close_releases_scores(monkeypatch
                                          result_prefetch=limit)) as stream:
         assert next(stream)[1] == [0]
         assert full.wait(5)
-        assert stream.buffer_usage()['result'] == (limit, limit)
-        assert stream.buffer_usage()['result'] == (limit, limit)
+        assert stream.buffer_usage()['result'] == BufferUsage(limit, 2, limit + 2)
+        assert stream.buffer_usage()['result'] == BufferUsage(limit, 2, limit + 2)
         assert calls == list(range(limit + 2))
-    assert stream.buffer_usage()['result'] == (0, limit)
+    assert stream.buffer_usage()['result'] == BufferUsage(0, 0, limit + 2)
     assert all(reference() is None for reference in references)
     assert_inference_workers_closed()
 
@@ -150,9 +150,9 @@ def test_next_scene_snapshot_keeps_current_and_following_queues_separate(model_r
             run, job, _ = samples[-1]
             run._staged.preparation.job.batches.worker.result(timeout=5)
             snapshot = sample(run, job)
-            assert snapshot['current']['result'] == (0, 32)
+            assert snapshot['current']['result'] == BufferUsage(0, 0, 34)
             assert snapshot['next']['scene'] == '2'
-            assert snapshot['next']['result'] == (5, 32)
+            assert snapshot['next']['result'] == BufferUsage(5, 0, 34)
             assert 'next[2]' in buffer_lines(snapshot)[0]
         return finish(store, scene, *args)
 
@@ -186,7 +186,7 @@ def test_status_samples_only_when_the_frame_bar_redraws():
     frame = SimpleNamespace(update=lambda count: False)
     row = SimpleNamespace(set_description_str=lambda text: calls.append(text))
     display = InferenceProgress(None, total=10, initial=0, desc='', sample=lambda: dict(
-        current={'input': (1, 4), 'result': (2, 32)}, next=None, cache=(0, 0), checkpoint=(1, 8)))
+        current={'input': BufferUsage(1, 2, 4), 'result': BufferUsage(2, 1, 33)}, next=None, cache=(0, 0), checkpoint=(1, 8)))
     display.frame, display.rows = frame, [row, row]
     display.update(4)
     assert calls == []

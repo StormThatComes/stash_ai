@@ -488,6 +488,8 @@ anonymous report: run IDs, dates, configuration and aggregates describe
 your installation. Run start is saved before execution; Ctrl+C and errors
 finalize the record. Partial aggregates are flushed at stage boundaries,
 every 30 seconds, or after 32 completed model/scene/merge work units.
+Throttled checks read only those unit counters; a full snapshot is built when
+an update is due, explicitly forced, or the run finishes (including Ctrl+C).
 `last_progress_at` and `progress_seq` identify the most recent update;
 `partial=true` means a run did not finish and is not counted as a
 successful complete run. `running` means no end was recorded: the process
@@ -614,18 +616,21 @@ terminals hide the per-frame bar to avoid cursor-motion log artifacts.
 Two buffer-occupancy lines appear below the progress bars, for example:
 
 ```text
-Buffers: in=12/16 out=5/32 | next[6307]: in=16/16 out=0/32
+Buffers: in=ready=12 in-flight=2 occupied=14/17 out=ready=5 in-flight=2 occupied=7/34 | next=off
 Cache: 1.2GiB/24.0GiB | checkpoint interval=7/32 batch
 ```
 
-`in` is the number of prepared input batches relative to
-`prefetch_batches`. `out` is the number of GPU result batches waiting
-in RAM for CPU processing relative to `result_prefetch_batches`.
-`next[ID]` shows separate queues for the next scene, even before it
-starts on GPU. Batches already taken by a consumer and preprocessing
-tasks not yet producing a batch are excluded. End markers and errors
-are not counted as batches. With `prefetch_batches: 0`, queues show
-`off`; without a next scene, they show `next=off`.
+`ready` counts complete batches waiting in the queue. `in-flight` counts
+scheduled/active preparation or batches currently owned by the producer and
+consumer, including a producer waiting for a full queue. `occupied` is their
+sum. Input futures have `prefetch_batches` slots plus one consumer-owned batch;
+streamed next-scene inputs and GPU results have their configured queue slots
+plus one producer and one consumer slot. These are batch capacities, not byte
+budgets. A batch transferring into or out of a ready queue is counted once.
+`next[ID]` shows separate input and result buffers for the next scene. End
+markers, failed/empty preparation and errors are excluded. Counts reset when
+streams finish or close. With `prefetch_batches: 0`, queues show `off`; without
+a next scene, they show `next=off`.
 
 `Cache` is estimated retained memory in the shared RAM cache relative
 to its effective configured limit, after applying `ram_budget_gb`.
@@ -640,6 +645,12 @@ no faster than every 0.25 seconds), and around finalization/scene
 persistence. Samples do not wait for producers, consume queue entries,
 query SQLite or update LRU state. Extra lines are hidden outside an
 interactive terminal and cleared on errors or Ctrl+C.
+
+Read-only merge and model-report workers return ordered chunks of at most eight
+scenes. Compatible profiling histograms and model-report counters are combined
+once per chunk; merge evidence, diagnostics and errors retain their scene IDs.
+The parent rejects missing, extra, duplicate or mismatched scene results before
+using an affected chunk. Only the parent publishes or writes run history.
 
 ### Model utility / ablation report
 

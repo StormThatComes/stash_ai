@@ -67,6 +67,7 @@ class BatchPredictions:
                     self.report.work(self.work)
                 with closing(self.inputs, report=self.report) as batches:
                     for prepared, batch_cues in batches:
+                        self.results.producing(True)
                         self.cancellation.check()
                         with self.measure('inference_batch', len(prepared)):
                             result = prediction_scores(self.tagger, prepared)
@@ -75,12 +76,14 @@ class BatchPredictions:
         except BaseException as error:
             self._send(_Failure(error))
         finally:
+            self.results.producing(False)
             self._send(self.finished)
 
     def __iter__(self):
         return self
 
     def __next__(self):
+        self.results.consuming(False)
         with self.measure('inference_result_wait'):
             item = self.channel.receive()
         if item is self.finished:
