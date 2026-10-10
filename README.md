@@ -206,11 +206,12 @@ Repeating the flag also preserves progress. Dry run uses only a temporary
 overlay and writes neither to Stash nor to the source database.
 See [database initialization](docs/UPGRADE_db_init.md).
 
-### Retencja niezależna od progów publikacji
+### Evidence retention independent of publication thresholds
 
-Opcjonalne `scene_cache_floor` i `marker_cache_floor` w sekcji każdego modelu
-w `tagger_models.yml` zachowują słabsze wyniki do późniejszego przeliczenia
-progów bez GPU. Nie obniżają progów publikacji tagów ani markerów:
+Optional `scene_cache_floor` and `marker_cache_floor` settings in each
+model's `tagger_models.yml` section retain weaker predictions for later
+threshold adjustments without a GPU. They **do not** lower the thresholds
+for publishing scene tags or markers:
 
 ```yaml
 wd:
@@ -220,115 +221,136 @@ wd:
   marker_cache_floor: 0.25
 ```
 
-Wartości muszą być liczbami od 0 do 1. Pominięcie pola albo `null` zachowuje
-dotychczasową automatyczną retencję. Faktyczny próg zapisu jest minimum ustawionej
-wartości i progu wsparcia wymaganego przez bieżącą politykę publikacji, więc
-ustawienie wyższej wartości nie usuwa potrzebnych obserwacji. Cache scen zachowuje
-także dokładne agregaty dla słabszych etykiet.
+Values must be in the range 0–1. Omitting a field or setting it to `null`
+retains the previous automatic retention behavior. The effective persistence
+floor is the minimum of the configured value and the support threshold
+required by the current publication policy. A higher configured floor
+therefore does not discard observations needed for publication.
+The scene cache also stores exact aggregates for weaker labels.
 
-Po świeżej inferencji można obniżyć progi publikacji w YAML i użyć
-`--merge-only --rethreshold-scenes --rethreshold-markers`, jeśli zapisane progi
-retencji obejmują nowe wymagane progi wsparcia. Zmiana samej retencji podczas
-zwykłego przebiegu uruchamia świeżą inferencję i unieważnia częściowy checkpoint;
-`--merge-only` nie uzupełnia wcześniej odrzuconych wyników. Niższa retencja zwiększa
-rozmiar bazy i koszt przetwarzania cache. Ustawienia dotyczą trwałego cache inferencji.
+After fresh inference, lower the publication thresholds in YAML and run
+`--merge-only --rethreshold-scenes --rethreshold-markers`, provided the
+persisted retention floors cover the newly required support thresholds.
+Changing retention itself during a normal run triggers fresh inference and
+invalidates a partial checkpoint; `--merge-only` cannot recover predictions
+that were previously filtered out. Lower retention floors increase database
+size and cache-processing cost. These settings affect persistent inference
+evidence, not publication thresholds.
 
-Aktywny cache wymaga jawnych progów retencji i pełnego formatu analizy 5.
-`--db-update` wycofuje starszą inferencję; uruchom ją ponownie przed merge i cleanup.
-Nadpisanie progu publikacji nie uzupełnia wcześniej odrzuconych obserwacji.
+An active cache requires explicit retention floors and complete analysis
+format 5. `--db-update` retires older inference; run inference again before
+merge or cleanup. Overriding publication thresholds cannot restore
+observations that were previously discarded.
 
-Fazy `Check` i `Apply` rethreshold korzystają z małych rekordów `result_metadata` w SQLite,
-zamiast dekodować klatki z `results.data`. Nowe wyniki zapisują je atomowo razem
-z evidence; starsze wyniki uzupełniają metadane przy pierwszym sprawdzeniu.
-Każdy model i rodzaj wyniku ma jeden aktywny rekord oraz opcjonalny liczbowy próg publikacji. Zmiana lub usunięcie
-surowego wyniku unieważnia jego metadane przez trigger, również przy zapisie
-starszą wersją programu. `Apply` zapisuje progi w `result_thresholds` i aktualizuje
-`result_index` z metadanych: obecności wyników oraz sygnatury ostatniej inferencji
-bieżącego rekordu. Przy gotowych metadanych żadna z obu faz nie dekoduje BLOB-ów klatek.
-Dry-run uzupełnia wyłącznie tymczasową bazę; `--db-check`
-sprawdza zgodność istniejących metadanych z evidence bez ich naprawiania.
+The rethreshold `Check` and `Apply` phases read compact
+`result_metadata` rows in SQLite instead of decoding frames from
+`results.data`. New results write this metadata atomically with evidence;
+older results populate it on the first check. Each model and result kind
+has one active record and an optional numeric publication threshold.
+Replacing or removing raw results invalidates their metadata via a trigger,
+including writes by older program versions. `Apply` stores thresholds in
+`result_thresholds` and updates `result_index` using metadata: result
+presence and the current record's most recent inference signature.
+When metadata is available, neither phase decodes frame BLOBs.
+Dry run only populates a temporary database; `--db-check` verifies
+existing metadata against evidence without repairing it.
 
-Nowa inferencja zawsze zastępuje poprzednie wyniki danego modelu i rodzaju.
-Aktualizacja z v18 wycofuje niepełne wyniki starszego formatu analizy i zleca ponowną inferencję.
-Publikacje zachowują własność i geometrię, a potrzebne dowody pozostają przypięte w archiwum.
-Zwykły merge i cleanup wymagają natywnych zakresów; punkty `OccurrenceTag` pozostają punktami.
-Dawne zwykłe punkty AI, hierarchie YAML v1 i zarządzane prefiksy `jt:`, `wd:`, `dtq:` oraz
-`op:` wymagają [migratorów w wersji pomostowej](#migratory-w-wersji-pomostowej).
-Bieżący kod publikuje wyłącznie namespace `ai:` i nie konwertuje obiektów starych modeli.
-Ręczne powiązania ze starymi definicjami tagów pozostają zachowane.
+New inference always replaces the previous result for the given model and
+output kind. Upgrading from v18 retires incomplete results stored in older
+analysis formats and schedules reinference. Publications retain ownership
+and geometry, with required evidence pinned in the archive. Normal merging
+and cleanup require native intervals; `OccurrenceTag` points remain points.
+Legacy ordinary AI points, YAML v1 hierarchies, and managed `jt:`, `wd:`,
+`dtq:` and `op:` prefixes require the
+[transition-release migration tools](#migration-tools-from-the-transition-release).
+Current code only publishes the `ai:` namespace and does not convert
+legacy per-model objects. Manual associations with old tag definitions
+are preserved.
 
-### Migratory w wersji pomostowej
+### Migration tools from the transition release
 
-Trzy zakończone migracje nie należą już do bieżącego pakietu. W razie potrzeby uruchom je
-z osobnego checkoutu niezmiennego commita
+Three completed migrations are no longer included in the current package.
+If needed, run them from a separate checkout of immutable commit
 [`9fcaa52502cd487455457547860b5db7d8710ad8`](https://github.com/StormThatComes/stash_ai/commit/9fcaa52502cd487455457547860b5db7d8710ad8).
-Bieżący pakiet korzysta ze schematu v27. Bazy sprzed v18 wymagają najpierw starszego
-mostka opisanego w sekcji aktualizacji bazy. Zrób kopię bazy i konfiguracji oraz zainstaluj
-zależności checkoutu w osobnym środowisku Python 3.14 zgodnie z instrukcją instalacji.
+The current package uses schema v27. Databases older than v18 first need
+the earlier upgrade bridge described in the database maintenance section.
+Back up the database and configuration, and install the checkout's
+dependencies in a separate Python 3.14 environment.
 
 ```powershell
 git clone https://github.com/StormThatComes/stash_ai stash_ai_migration_bridge
 git -C stash_ai_migration_bridge checkout --detach 9fcaa52502cd487455457547860b5db7d8710ad8
 cd stash_ai_migration_bridge
 
-# Konwersja własnych hierarchii v1; podaj wszystkie używane pliki.
+# Convert custom v1 hierarchies; specify all hierarchy files in use.
 python -m stash_ai.commands.hierarchy_migration C:/stash_ai/joytag_hierarchy.yml C:/stash_ai/wd_hierarchy.yml C:/stash_ai/dtq_hierarchy.yml C:/stash_ai/oppai_hierarchy.yml --dry-run
 
-# Zwykłe punkty AI: długość z published/pending/recovery do end_seconds.
+# Legacy AI points: derive end_seconds from published/pending/recovery state.
 python -m stash_ai.tools.point_migration --state-db C:/stash_ai/tagger_sources.sqlite3 --dry-run
 
-# Stare prefiksy: świeża inferencja i publikacja w ai:.
+# Legacy prefixes: rerun inference and publish in the shared ai: namespace.
 python -m stash_ai.tools.namespace_migration --models all --state-db C:/stash_ai/tagger_sources.sqlite3 --model-config C:/stash_ai/tagger_models.yml --temporal-policy C:/stash_ai/temporal_policy.yml --marker-core-exclusions C:/stash_ai/marker_core_exclusions.yml --scene-tag-exclusions C:/stash_ai/scene_tag_exclusions.yml --hierarchy C:/stash_ai/joytag_hierarchy.yml --wd-hierarchy C:/stash_ai/wd_hierarchy.yml --dtq-hierarchy C:/stash_ai/dtq_hierarchy.yml --oppai-hierarchy C:/stash_ai/oppai_hierarchy.yml --dry-run
 ```
 
-Zastąp `C:/stash_ai` bezwzględną ścieżką dotychczasowej instalacji. Ustaw ten sam
-`STASH_URL` i `STASH_API_KEY`; zachowaj konfigurację modeli, polityk i zakres wyjść.
-Jeśli hierarchie są wyłączone, zastąp cztery opcje hierarchii przez `--no-hierarchy`.
-Po sprawdzeniu planu powtórz wybrane komendy bez `--dry-run`. Konwersja YAML zachowuje
-oryginały jako `*.v1.yml`, przypisania grup i metadane źródła. Migracja punktów nie ładuje
-modeli, zachowuje ID, tytuły i ręczne tagi; occurrences pozostają punktami.
-Migracja prefiksów zachowuje ręczne obiekty i dodatki markerów, a dopasowane markery
-zachowują ID. Można ograniczyć ją przez `--scene-id`, `--markers-only` lub `--scene-tags-only`.
-Przerwaną publikację prefiksów dokończ tym samym migratorem i konfiguracją przed powrotem
-do bieżącej wersji. Jej pending snapshoty nadal służą do ponowienia po błędzie API.
-Następnie wróć do bieżącej instalacji, wykonaj `--db-check` i potrzebną inferencję.
+Replace `C:/stash_ai` with the absolute path of your existing installation.
+Use the same `STASH_URL` and `STASH_API_KEY`, and preserve model selection,
+policies, and output scope. If hierarchies are disabled, replace the four
+hierarchy options with `--no-hierarchy`. Once the plan is verified, repeat
+the relevant commands without `--dry-run`. YAML conversion saves originals
+as `*.v1.yml` and retains group assignments and source metadata.
+Point migration does not load models, and retains IDs, titles, and manual
+tags; occurrences remain points. Prefix migration preserves manually
+managed objects and marker extras; matching markers keep their IDs.
+Its scope can be limited with `--scene-id`, `--markers-only`, or
+`--scene-tags-only`. Finish an interrupted prefix publication with the same
+migrator and configuration before returning to the current version.
+Pending snapshots remain available for API failure recovery.
+Then return to the current installation and perform `--db-check` plus
+any required inference.
 
-### Zdrowie, aktualizacja i kompaktowanie bazy stanu
+### Database health, upgrades, and compaction
 
-`--db-update` aktualizuje bazę wskazaną przez `--state-db` ze schematu **v18 lub nowszego**
-do aktualnego **v27**, we wszystkich scope'ach. Zwykłe uruchomienie oraz `--dry-run`
-wymagają aktualnego schematu; nowa baza od razu otrzymuje v27.
-Migracja dodaje stan odbudowy, ale nie przejmuje istniejących wyników Stash.
-To uprawnienie powstaje wyłącznie po jawnym `--db-init` na nowej/pustej bazie.
-Updater korzysta z tego samego locka writera. Pracuje offline, bez Stash i konfiguracji modeli.
-Zachowuje liczbowe progi bieżących wyników, własność publikacji, pending publication/cleanup
-i recovery. Starsze wyniki są kierowane do ponownej inferencji, a ich checkpointy usuwane.
-Snapshoty v4/v5/v6/v7 są konwertowane w jednym przebiegu, z zachowaniem współdzielonych dowodów.
-Wycofane konfiguracje algorytmów są usuwane; geometria i referencje do dowodów pozostają.
-Aktualizacja nie odtwarza utraconych detekcji. Wyniki inferencji sprzed formatu 5 wymagają ponownej inferencji.
-Metadane wyników są uzupełniane dopiero po zakończeniu konwersji. Klatki bieżących wyników
-muszą być zapisane chronologicznie. Aktualizacja bazy sprzed v23 kieruje nieuporządkowane
-rekordy do ponownej inferencji i oznacza zależne publikacje `requires_rebase`.
-Nie sortuje zapisanych payloadów ani nie zmienia ich sygnatur. Uporządkowane
-wyniki formatu 5 pozostają ważne. Odczyt i zapis odrzucają brakujące metadane
-pochodzenia, progów oraz retention floors, zamiast pomijać głosy modelu.
+`--db-update` upgrades the database selected by `--state-db` from
+schema **v18 or newer** to the current **v27**, across all scopes.
+Normal execution and `--dry-run` require the current schema; new databases
+start on v27. Migration adds database-rebuild state but does not adopt
+existing Stash results. Adoption is authorized only by an explicit
+`--db-init` on a new/empty database.
 
-Zwykły cleanup przyjmuje tylko aktualny fingerprint. Przerwany cleanup ze starym
-fingerprintem wymaga jawnej konwersji offline, z **tymi samymi** plikami YAML
-oraz zakresem wyjść (`--cleanup-only`, `--cleanup-markers-only` lub
-`--cleanup-scene-tags-only`). Narzędzie weryfikuje wszystkie polityki per model,
-zmienia wyłącznie klucz pending i zachowuje generację, maski oraz recovery:
+The updater uses the regular writer lock and runs offline, without Stash or
+model configuration. It retains numeric thresholds on current results,
+publication ownership, pending publication/cleanup and recovery state.
+Older results are marked for reinference and their checkpoints removed.
+Snapshot versions v4/v5/v6/v7 are converted in one pass, preserving shared
+evidence. Retired algorithm settings are removed while geometry and evidence
+references stay intact. Updating cannot reconstruct lost detections.
+Pre-format-5 inference requires a rerun.
+
+Result metadata is populated after conversion. Frames in active results
+must be chronologically ordered. For databases predating v23, unordered
+records are marked for reinference and dependent publications receive
+`requires_rebase`. Stored payloads are not sorted or re-signed; ordered
+format-5 results remain valid. Reads and writes reject missing provenance,
+threshold and retention-floor metadata rather than silently dropping votes.
+
+Normal cleanup accepts only the current fingerprint. An interrupted cleanup
+with a legacy fingerprint requires an explicit offline conversion using
+**the same YAML files and output scope** (`--cleanup-only`,
+`--cleanup-markers-only`, or `--cleanup-scene-tags-only`). The tool validates
+every per-model policy, updates only the pending key, and retains the
+generation, masks and recovery state:
 
 ```bash
 python -m stash_ai.tools.cleanup_pending_migration --state-db /path/to/tagger_sources.sqlite3 --cleanup-only --marker-core-exclusions marker_core_exclusions.yml --scene-tag-exclusions scene_tag_exclusions.yml --dry-run
 ```
 
-Po sprawdzeniu usuń `--dry-run`, a następnie ponów oryginalny cleanup.
-Narzędzie nie łączy się ze Stash i nie ładuje modeli.
+Remove `--dry-run` after checking the plan, then resume the original cleanup.
+The migration tool neither contacts Stash nor loads models.
 
-Dla bazy **sprzed v18** użyj najpierw kompatybilnego commita
+For databases **older than v18**, first use compatible commit
 [`c5bcd887bafe76b7ee2a9de944666799c9a0fc30`](https://github.com/StormThatComes/stash_ai/commit/c5bcd887bafe76b7ee2a9de944666799c9a0fc30)
-w osobnym katalogu, z jego zależnościami. Zachowaj kopię bazy i wskaż tę samą bazę stanu:
+in a separate directory with its dependencies. Back up the database and
+point the bridge at the same state file:
 
 ```bash
 git clone https://github.com/StormThatComes/stash_ai stash-ai-upgrade-bridge
@@ -336,90 +358,98 @@ git -C stash-ai-upgrade-bridge checkout c5bcd887bafe76b7ee2a9de944666799c9a0fc30
 python stash-ai-upgrade-bridge/stash_ai.py --db-update --state-db /path/to/tagger_sources.sqlite3
 ```
 
-Następnie uruchom `--db-update` z bieżącej instalacji. Kompatybilny commit konwertuje
-historyczne serie i importy do v20, który bieżąca wersja obsługuje bezpośrednio.
+Then run `--db-update` from the current installation. The compatibility
+commit converts historical series/imports to v20, which the current
+release can upgrade directly.
 
-`--db-update --dry-run` pokazuje wersję źródłową i docelową bez migracji, zmian pliku ani locka.
-Baza sprzed v18 otrzymuje komunikat ze ścieżką aktualizacji; obca lub nowsza baza jest odrzucana.
-Konwersja payloadów, wycofanie aktywnych wyników i ustawienie wersji są jedną transakcją.
-Tworzenie brakujących tabel jest powtarzalne; przerwaną aktualizację można ponowić.
+`--db-update --dry-run` reports source and target schema versions without
+migration, file writes or locking. Databases older than v18 receive an
+upgrade-path message; foreign or newer schemas are rejected. Payload
+conversion, retiring active results, and updating the version execute
+within one transaction. Missing-table creation is idempotent, and an
+interrupted upgrade can be retried.
 
-`--db-check` wykonuje głęboki, wyłącznie odczytowy test spójności całej bazy
-(we wszystkich scope'ach). Dla starszego schematu wykonuje tylko preflight wersji i integralności SQLite,
-a przed głęboką walidacją wymaga `--db-update`. Oprócz pełnego SQLite `integrity_check` sprawdza m.in.
-zgodność `results` z `result_index` (łącznie z zapisaną sygnaturą ostatniej
-inferencji), dekodowalność trwałych BLOB-ów, dozwolone model/kind, relacje
-checkpoint/frames/analysis, wymiary checkpointów oraz generacje cleanup/recovery.
-Waliduje też zawartość wyników scen, klatek i zakresów markerów: wymagane pola,
-tagi, czasy, prawdopodobieństwa oraz zapisane statystyki czasowe. Sprawdza klatki
-checkpointów (również `scene_tags`) i wartości float32: odrzuca `NaN`,
-nieskończoności oraz wyniki poza `[0, 1]`. Aktywne wyniki muszą spełniać bieżący
-kontrakt inferencji; starsze zakresy i częściowe statystyki są sprawdzane wyłącznie
-w archiwum dowodów. Importy i oceny `score: null` są odrzucane. Wycofane tabele
-`legacy_imports` i `refinement_progress` są zgłaszane jako błąd bez odczytu ich payloadów.
-Niektóre brakujące powiązania snapshot/recovery są raportowane jako warnings.
-Pending publication/cleanup i refresh requests są
-pokazywane jako stan roboczy, a nie automatycznie jako błędy.
+`--db-check` performs a deep, read-only consistency check across every
+database scope. On older schemas, it only checks the SQLite integrity
+and schema preflight, and requires `--db-update` before deep validation.
+In addition to a full SQLite `integrity_check`, it validates:
+- `results` against `result_index`, including recorded last-inference signatures;
+- decoding of persistent BLOBs and valid model/output kinds;
+- checkpoint/frame/analysis relationships and checkpoint dimensions;
+- cleanup/recovery generations;
+- required scene, frame and marker-interval fields, tags, times,
+  probabilities and saved temporal statistics;
+- checkpoint frames, including `scene_tags`, and float32 values
+  (rejecting `NaN`, infinities and values outside `[0, 1]`).
 
-Komenda nie łączy się ze Stash, nie ładuje modeli i niczego nie naprawia ani nie
-modyfikuje. Podczas głębokiego skanu pokazuje pasek postępu z aktualną fazą
-(np. SQLite integrity, results/index, state payloads, checkpoints). Zwraca exit
-code `0`, gdy nie znaleziono błędów logicznych, oraz `1`, gdy wykryto
-niespójność; same warnings nie powodują błędu.
+Active results must satisfy the current inference contract. Legacy
+intervals and incomplete statistics are only accepted in archived evidence.
+Imports and `score: null` assessments are rejected. Retired
+`legacy_imports` and `refinement_progress` tables are flagged without
+reading their payloads. Some missing snapshot/recovery associations are
+warnings. Pending publication/cleanup and refresh requests are treated as
+in-progress work, not automatically as errors.
 
-`--db-report` nie łączy się ze Stash ani nie ładuje modeli. Pokazuje wersję
-schematu, wynik SQLite `quick_check`, rozmiar pliku i sidecarów WAL/SHM, wolne
-strony, zagregowane rekordy `results` według modelu/rodzaju oraz liczniki
-checkpointów, refresh requests, pending/recovery i merge checks dla bieżącego
-scope. Nie wypisuje nazw tagów, ID scen ani zapisanych score'ów.
+The check does not connect to Stash, load models, repair data, or modify
+anything. A progress bar displays the current phase (e.g. SQLite integrity,
+results/index, state payloads, checkpoints). Exit code `0` indicates no
+logical errors, `1` indicates inconsistencies; warnings alone do not fail it.
 
-`--db-compact` wykonuje SQLite `VACUUM` pod tym samym lockiem co zwykły writer.
-Przed operacją ponownie sprawdza integralność, dostępne miejsce na dysku oraz brak
-niedokończonego merge/cleanup. `--dry-run` wykonuje tylko preflight i pokazuje
-szacunkowy odzysk z wolnych stron. Recovery evidence i checkpointy są zachowywane.
+`--db-report` needs neither Stash nor models. It reports schema version,
+SQLite `quick_check`, DB/WAL/SHM size, free pages, result counts grouped by
+model/output kind, and checkpoint, refresh, pending/recovery and merge-check
+counts for the current scope. It does not print tag names, scene IDs or scores.
 
-### Anonimowy raport dla developera
+`--db-compact` runs SQLite `VACUUM` under the normal writer lock. It first
+checks database integrity, free disk space, and the absence of unfinished
+merge/cleanup operations. `--dry-run` runs only the preflight and estimates
+space reclaimable from unused pages. Recovery evidence and checkpoints
+are preserved.
 
-`--anonymous-diagnostics NEW.json` tworzy lokalny raport przeznaczony do
-ręcznego przejrzenia i ewentualnego przekazania developerowi. Aplikacja **nigdy
-nie wysyła go automatycznie** i odmawia nadpisania istniejącego pliku.
+### Anonymous developer diagnostics
 
-Raport używa `format: 2`. Dla baz v18–v20 pokazuje informacje o bazie oraz
-`database.upgrade_required: true`, bez dekodowania dowodów i szczegółowych statystyk.
-Pełny raport wymaga wcześniejszego `--db-update`. Dawne tryby, pochodzenie i formaty
-analizy są oznaczane jako `other`; nie ma osobnych pól dla historycznych zakresów
-ani `scene_frames_format`.
+`--anonymous-diagnostics NEW.json` creates a local report for manual
+inspection and, optionally, sharing with a developer. The application
+**never uploads it automatically** and refuses to overwrite an existing file.
 
-Raport obejmuje całą wskazaną bazę stanu, ale nie eksportuje scene IDs, wartości
-`scope`, URL-i, ścieżek plików, nazw tagów, score'ów, timestampów markerów,
-sygnatur ani hashy wejścia. Nieznane nazwy modeli/rodzajów są zastępowane
-`other`, a niestandardowe tabele są raportowane tylko jako liczba.
+The report uses `format: 2`. For v18–v20 databases, it reports basic
+database information and `database.upgrade_required: true` without decoding
+evidence or computing detailed statistics. Generate a full report after
+`--db-update`. Legacy modes, provenance and analysis formats are identified
+as `other`, without dedicated fields for historical intervals or
+`scene_frames_format`.
 
-Dla optymalizacji schematu raport zawiera m.in.:
-- wersje Pythona/SQLite i rodzinę systemu operacyjnego;
-- page size/count, freelist, rozmiar DB/WAL oraz liczbę scope'ów i scen;
-- liczbę rekordów znanych tabel i rozkłady rozmiarów BLOB-ów;
-- per model/rodzaj: percentyle rozmiaru compressed JSON, compression ratio,
-  items/rekord, detekcje/klatkę i scene observations;
-- zagregowany stan checkpointów, result index i refresh requests.
+The report covers the entire selected state database but exports no scene
+IDs, `scope` values, URLs, file paths, tag names, scores, marker timestamps,
+signatures or input hashes. Unrecognized model/output names become `other`;
+custom tables are reported only by count.
 
-Raport jest pozbawiony bezpośrednich identyfikatorów i treści, ale dokładne
-agregaty rozmiaru/liczebności nadal opisują konkretną instalację. Przed
-udostępnieniem warto przejrzeć wygenerowany JSON.
+For schema optimization, the report includes:
+- Python/SQLite versions and operating-system family;
+- page size/count, freelist, DB/WAL size, number of scopes and scenes;
+- record counts for known tables and BLOB-size distributions;
+- per model/output kind: compressed JSON size percentiles, compression
+  ratio, items per record, detections per frame and scene observations;
+- aggregate checkpoint, result-index and refresh-request state.
 
-### Historia uruchomień i raport profilowania
+Although it removes direct identifiers and content, exact counts and size
+aggregates can still characterize a particular installation. Review the
+generated JSON before sharing it.
 
-Inferencja, merge, cleanup i operacje zapisujące stan automatycznie zapisują
-historię w osobnym pliku `<state-db>.runs.sqlite3`. `--run-history-db PATH`
-wybiera inny plik, a `--no-run-history` wyłącza zapis. Baza historii jest
-niezależna od cache: nie zmienia jego schematu, sygnatur ani zasad wznowienia.
-Warto zachować ją razem z bazą stanu, jeżeli zależy Ci na porównaniach historycznych.
+### Run history and profiling report
 
-Inspekcje i raporty domyślnie nie zapisują historii; dodaj `--record-run`, aby
-zmierzyć np. `--model-report`, `--cache-report` lub `--db-check`. `--dry-run`
-oraz programowy `DRY_RUN` nigdy nie zapisują historii, także z `--record-run`.
-Historia nie wymusza sekwencyjnego merge ani raportu modeli: procesy CPU
-zwracają swoje agregaty, a rodzic zapisuje je obok własnych pomiarów.
+Inference, merge, cleanup and state-writing commands automatically record
+run history in a separate `<state-db>.runs.sqlite3` file. Set
+`--run-history-db PATH` to choose another file or `--no-run-history` to
+disable recording. Run history is independent of cache and does not alter
+the cache schema, signatures, or resume rules. Back it up together with
+state if you need historical comparisons.
+
+Inspection and reporting commands do not record history by default. Use
+`--record-run` to profile, for example, `--model-report`, `--cache-report`
+or `--db-check`. `--dry-run` and programmatic `DRY_RUN` never write history,
+even with `--record-run`. History recording does not force sequential
+merges or model reports: CPU workers return their aggregates to the parent.
 
 ```powershell
 python .\stash_ai.py --models all
@@ -429,48 +459,56 @@ python .\stash_ai.py --run-report .\runs.json
 python .\stash_ai.py --run-report .\wd-runs.json --run-model wd --run-command inference --run-status finished --run-limit 100
 ```
 
-`--run-report NEW.json` czyta wyłącznie historię, drukuje podsumowanie i zapisuje
-nowy JSON. Nie potrzebuje bazy cache, modeli ani połączenia ze Stash.
-Filtry obejmują komendę, status i model; limit 1..10000 wybiera najnowsze
-pasujące przebiegi (domyślnie 50). Istniejący raport nie jest nadpisywany.
+`--run-report NEW.json` reads only the history database, prints a summary,
+and creates a new JSON file. It does not need the cache database, models,
+or Stash. Filters cover command, status and model; a limit of 1–10000
+selects the newest matching runs (50 by default). Existing report files
+are not overwritten.
 
-Każdy przebieg zawiera status, czas rzeczywisty i CPU rodzica, skróty plików
-konfiguracji, parametry workerów, modele i rewizje, dostępne hashe wag/słowników,
-liczniki zmian i błędów oraz pomiary etapów/API. Nie zapisuje klucza API,
-adresów mediów, payloadów ani treści błędów. Nie jest to raport anonimowy:
-identyfikatory przebiegów, daty, konfiguracja i agregaty opisują Twoją instalację.
-Zapis startu następuje przed wykonaniem akcji; Ctrl+C i błędy kończą rekord.
-Agregaty są zapisywane częściowo na granicach etapów co 30 sekund lub po 32 ukończonych
-jednostkach pracy model/scena/merge. `last_progress_at` i `progress_seq` pokazują
-ostatni zapis; `partial=true` oznacza brak końca i nie jest traktowane jako udany
-pełny przebieg. Status `running` oznacza brak zapisanego końca — proces może jeszcze pracować
-albo zostać zabity bez możliwości zamknięcia historii. Błąd zapisu historii
-nie przerywa właściwej komendy i nie przesłania jej błędu.
+Each run records status, wall time, parent CPU time, configuration hashes,
+worker settings, models and revisions, available weight/vocabulary hashes,
+change and error counts, and stage/API timing. API keys, media URLs,
+payloads, and error contents are not recorded. This is **not** an
+anonymous report: run IDs, dates, configuration and aggregates describe
+your installation. Run start is saved before execution; Ctrl+C and errors
+finalize the record. Partial aggregates are flushed at stage boundaries,
+every 30 seconds, or after 32 completed model/scene/merge work units.
+`last_progress_at` and `progress_seq` identify the most recent update;
+`partial=true` means a run did not finish and is not counted as a
+successful complete run. `running` means no end was recorded: the process
+may still be running or may have been killed. History-write failures
+neither stop the real command nor mask its errors.
 
-Raport pokazuje czasy scen, batchy inferencji, przygotowania klatek,
-checkpointów, cache, rethreshold, merge, publikacji i operacji API, jeśli dany
-etap został wykonany. Świeża inferencja, wznowienia i użycie cache są rozdzielone.
-Metryki zawierają liczbę wywołań, sumę, średnią, min/max, przybliżone p50/p95
-z ograniczonego histogramu oraz przepustowość, gdy znana jest liczba jednostek.
-Średnia to suma czasów / liczba wywołań, również przy łączeniu przebiegów.
-Porównania grupują zgodną konfigurację, środowisko i tożsamość modeli.
-Konfiguracja zawiera skrót uporządkowanego zestawu wybranych ID (kolejność i duplikaty
-nie zmieniają skrótu), hash kodu, dostępną rewizję git i wersje zainstalowanych bibliotek.
-`execution_observed=false` oznacza, że urządzenie modelu nie zostało zaobserwowane,
-np. przy użyciu cache. Zweryfikowane wejścia mają oddzielny workload: liczbę par,
-liczbę cue i fingerprint danych, również uwzględniany przy grupowaniu. Te metadane
-nie autoryzują reuse i nie zmieniają tożsamości zapisanych predykcji. Raport rozdziela
-statusy zakończenia oraz udane i nieudane operacje.
+The report includes available timings for scenes, inference batches,
+frame preparation, checkpoints, cache, rethreshold, merge, publication
+and API calls. Fresh inference, resume and cache reuse are distinguished.
+Metrics include call counts, total/mean/min/max durations, approximate
+p50/p95 from bounded histograms, and throughput where work-unit counts
+are available. Mean is total time divided by calls, including when
+aggregating runs. Comparisons group compatible configurations, environments,
+and model identities.
 
-Czasy etapów zawierają zarówno czas własny, jak i czas z wywołaniami podrzędnymi.
-Praca w wątkach/procesach może się nakładać; sumy etapów nie są czasem całego
-przebiegu. `cpu_seconds` obejmuje rodzica, a `worker_cpu` mierzone zadania workerów.
-Błąd zadania workera ma `outcome=error`, zwiększa `errors` i nie zwiększa liczby
-ukończonych scen (`units=0`), również gdy został przekazany rodzicowi jako wynik.
-Merge kontynuuje kolejne sceny po takim błędzie; raport modeli zgłasza niepowodzenie.
-Histogramy mają stały rozmiar; historia rośnie o jeden rekord na przebieg,
-bez zapisywania wszystkich pojedynczych pomiarów. Raport opisuje wybrane
-przebiegi, nie całą historię, gdy zastosowano limit lub filtry.
+Configuration includes a hash of the sorted set of selected scene IDs
+(order and duplicates do not change the hash), code hash, available Git
+revision, and installed library versions. `execution_observed=false`
+means the model's execution device was not observed, for example when
+cache was reused. Verified inputs have a separate workload identity:
+pair counts, cue counts and input fingerprints, used for grouping.
+These diagnostics do not authorize cache reuse or change stored prediction
+identities. The report separates completion statuses and successful/failed
+operations.
+
+Stage timings include inclusive time and self time. Threads/processes
+may overlap, so summed stage times are not elapsed run time.
+`cpu_seconds` covers the parent; `worker_cpu` covers measured worker tasks.
+A failed worker task has `outcome=error`, increments `errors` and
+does not count as a completed scene (`units=0`), even when delivered
+to the parent as a result. Merge continues with other scenes after
+such errors; the model report indicates failure.
+
+Histograms have bounded size; history grows by one record per run without
+storing every timing sample. Filtered/limited reports summarize only
+selected runs, not necessarily all of history.
 
 ### Dlaczego scena została przeliczona?
 
