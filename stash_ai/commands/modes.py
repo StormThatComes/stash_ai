@@ -28,6 +28,7 @@ class Command(Enum):
     RUN_REPORT = 'run_report'
     REUSE_REPORT = 'reuse_report'
     PRUNE_HISTORY = 'prune_run_history'
+    RECONCILE_HISTORY = 'reconcile_run_history'
     ABANDON = 'abandon_pending'
 
 
