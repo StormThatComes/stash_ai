@@ -1,6 +1,7 @@
 """Model identity used by retained evidence and checkpoint signatures."""
 from pathlib import Path
 import hashlib
+import os
 
 from stash_ai.models import ModelSettings
 from stash_ai.signatures import digest
@@ -9,23 +10,59 @@ from stash_ai.backends.vocabulary import metadata_files, weight_files
 PREDICTION_FORMAT = 4
 
 
-def model_identity(app, config: ModelSettings, vocabulary, *, known_files=()):
-    """Hash assets once per run; only retry missing files after model download.
+def _stamp(stat):
+    return stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns
 
-    Callers must not reuse known_files across runs: same-size replacements with
-    preserved timestamps still need a new content hash.
+
+def asset_stamps(config):
+    """Transient change guards; never include file timestamps in provenance."""
+    result = {}
+    for name in (*metadata_files(config.source), *weight_files(config)):
+        path = (config.model_dir / name).resolve()
+        try:
+            result[str(path)] = _stamp(path.stat())
+        except FileNotFoundError:
+            result[str(path)] = None
+    return result
+
+
+def require_assets_unchanged(expected, actual, *, allow_download=False):
+    for path, stamp in expected.items():
+        if actual.get(path) != stamp and not (allow_download and stamp is None):
+            raise RuntimeError(f'Model asset changed during initialization: {path}; retry with stable model files.')
+
+
+def model_identity(app, config: ModelSettings, vocabulary, *, known_files=(),
+                   known_stamps=None, require_unchanged=False):
+    """Reuse in-run hashes only with verified transient file-change guards.
+
+    Every new run hashes content. ctime/inode guards also detect same-size
+    replacements with restored mtime; they do not change retained signatures.
     """
     known = {path: checksum for path, checksum in known_files if checksum is not None}
+    current = asset_stamps(config)
+    if require_unchanged:
+        require_assets_unchanged(known_stamps or {}, current)
     def stamp(path):
         path = Path(path).resolve()
+        before = current[str(path)]
+        if before is None:
+            return [str(path), None]
         try:
-            checksum = known.get(str(path))
+            checksum = (known.get(str(path)) if known_stamps is not None
+                        and known_stamps.get(str(path)) == before else None)
             if checksum is None:
                 with path.open('rb') as stream:
+                    if _stamp(os.fstat(stream.fileno())) != before:
+                        raise RuntimeError(f'Model asset changed while hashing: {path}')
                     checksum = hashlib.file_digest(stream, 'sha256').hexdigest()
+                    if _stamp(os.fstat(stream.fileno())) != before:
+                        raise RuntimeError(f'Model asset changed while hashing: {path}')
+            if _stamp(path.stat()) != before:
+                raise RuntimeError(f'Model asset changed while hashing: {path}')
             return [str(path), checksum]
-        except FileNotFoundError:
-            return [str(path), None]
+        except FileNotFoundError as error:
+            raise RuntimeError(f'Model asset disappeared while hashing: {path}') from error
     files = [stamp(config.model_dir / name) for name in (*metadata_files(config.source), *weight_files(config))]
     loader = {}
     if config.source.key == "joytag":
