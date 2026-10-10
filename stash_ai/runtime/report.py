@@ -96,9 +96,13 @@ class RunReport:
     def record_model(self, config, *, identity=None, tagger=None):
         try:
             self._record_model(config, identity=identity, tagger=tagger)
-        except Exception:
-            # Optional backend metadata cannot turn a loaded tagger into a failure.
-            pass
+        except Exception as exc:
+            # Optional backend metadata cannot turn a loaded tagger into a failure,
+            # but its loss must be visible in run diagnostics.
+            self.counts['model_metadata_failures'] += 1
+            if self.profile is not None:
+                row = self.profile.models.setdefault(config.source.key, {})
+                row.setdefault('metadata_capture_error', type(exc).__name__)
 
     def _record_model(self, config, *, identity=None, tagger=None):
         if self.profile is None:
