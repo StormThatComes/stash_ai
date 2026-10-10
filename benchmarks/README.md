@@ -216,3 +216,22 @@ Every chunk and its boundary still validate; selective archive reads verify the
 stored key against the decoded proof signature. Policy/settings keys include
 value types and live only within one bounded operation scope, while exclusions,
 thresholds and each contribution continue to validate independently.
+
+
+`python -m benchmarks.benchmark_runtime_metrics --iterations 10000 --scenes 64 --repeats 3`
+compares the earlier metric-ingestion and history-throttle paths with lazy
+allocation, serializes eight scene envelopes versus one aggregated chunk, echoes
+those pre-serialized payloads through a spawned process pipe, and times a full
+64-scene merge including durable snapshots and writes to a zero-latency mock
+Stash. The full merge compares one-scene worker tasks with bounded chunks and
+alternates trial order. It checks identical scene state, snapshots and counters;
+process startup is included in merge time but excluded from pipe timing.
+
+The October 10 result records 10,000 -> 1 initial histogram allocations and
+10,000 -> 0 counter snapshots for throttled history checks. Eight profiled scene
+envelopes serialize to 4,096 -> 1,064 bytes. Serialization, pipe and complete
+merge timings are included in the JSON result; pipe overhead and process startup
+can dominate these tiny payloads, so smaller transport is not a guaranteed
+end-to-end speedup. This is a controlled synthetic merge, not the deferred
+retention stress benchmark. Model-report counters aggregate per chunk; merge
+diagnostics stay per scene to preserve publication-failure accounting.

@@ -361,14 +361,21 @@ def test_worker_preloads_only_assigned_chunk(monkeypatch):
         opened.append(kwargs)
         return context
     monkeypatch.setattr(model_workers, 'open_read_worker', open_worker)
-    monkeypatch.setattr(model_workers, '_report_worker_scene', lambda scene: computed.append(scene) or scene)
+    from stash_ai.runtime.worker_result import WorkerResult
+    def compute(scene):
+        computed.append(scene)
+        return WorkerResult(scene, (Counter(scenes=1), {source: Counter() for source in empty_policies()}))
+    from collections import Counter
+    monkeypatch.setattr(model_workers, '_report_worker_scene', compute)
     model_workers._init_report_worker('db', 'scope', {}, {}, {}, 0, 1, True)
     assert opened == [{'preload_sources': False}]
     assert preloaded == []
-    assert model_workers._report_worker_scenes(('2', '5')) == ['2', '5']
+    chunk = model_workers._report_worker_scenes(('2', '5'))
+    assert [row.scene_id for row in chunk.results] == ['2', '5']
+    assert chunk.payload[0]['scenes'] == 2 and all(row.payload is None for row in chunk.results)
     assert preloaded == [('2', '5')] and computed == ['2', '5']
     monkeypatch.setattr(model_workers, '_PRELOAD', False)
-    assert model_workers._report_worker_scenes(('8',)) == ['8']
+    assert model_workers._report_worker_scenes(('8',)).payload[0]['scenes'] == 1
     assert preloaded == [('2', '5')]
 
 
