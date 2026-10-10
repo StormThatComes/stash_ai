@@ -34,6 +34,21 @@ class RunTimings:
         self._heartbeat_condition = threading.Condition(self._timing_lock)
         self._heartbeat_thread = None
 
+    def bind(self, operation):
+        """Carry attribution and response accounting into one owned read worker."""
+        names = ('model', 'work', 'request')
+        captured = {name: getattr(self._timers, name, None) for name in names}
+        def bound():
+            previous = {name: getattr(self._timers, name, None) for name in names}
+            for name, value in captured.items():
+                setattr(self._timers, name, value)
+            try:
+                return operation()
+            finally:
+                for name, value in previous.items():
+                    setattr(self._timers, name, value)
+        return bound
+
     def _start_heartbeat(self):
         # Called under the condition lock. Reuse one ticker across short reads;
         # idle reports release it after a short grace period without a finalizer.
