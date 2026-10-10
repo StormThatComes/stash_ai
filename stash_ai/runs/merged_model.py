@@ -187,8 +187,10 @@ class MergedModelRun:
             # the caller is interrupted while waiting for initialization.
             before = asset_stamps(self.config)
             require_assets_unchanged(self.asset_stamps, before, allow_download=True)
-            self.tagger = self.app.services.load_tagger(
-                self.config, self.vocabulary, partial(preparation.prepare_image, self.app))
+            from stash_ai.backends.profiling import use
+            with use(self.report, enabled=bool(self.args.profile_merge)):
+                self.tagger = self.app.services.load_tagger(
+                    self.config, self.vocabulary, partial(preparation.prepare_image, self.app))
             after = asset_stamps(self.config)
             require_assets_unchanged(before, after, allow_download=True)
             self.asset_stamps = after
