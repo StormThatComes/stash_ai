@@ -34,6 +34,14 @@ class Stash:
         tag["description"]=kwargs.get("description")
         tag["ignore_auto_tag"]=kwargs.get("ignore_auto_tag",False)
         return deepcopy(tag)
+    def rename_tag(self, identifier, name):
+        assert not self.dry_run and name not in self.tags
+        tag = next(t for t in self.tags.values() if t['id'] == identifier)
+        del self.tags[tag['name']]
+        tag['name'] = name
+        self.tags[name] = tag
+        self.writes.append(('rename_tag', identifier, name))
+        return deepcopy(tag)
     def update_tag_organization(self,identifier,parents,ignore_auto_tag):
         self.update_tag_parents(identifier,parents)
         tag=next(t for t in self.tags.values() if t['id']==identifier)

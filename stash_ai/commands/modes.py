@@ -13,6 +13,7 @@ class Command(Enum):
     DOWNLOAD = 'download_models'
     MERGE = 'merge_only'
     MARKER_GROUPS = 'sync_marker_groups_only'
+    RENAME_OCCURRENCE_GROUPS = 'rename_occurrence_groups'
     EXPLAIN = 'explain_tag'
     PRUNE_TAGS = 'prune_empty_tags_only'
     DB_REPORT = 'db_report'
