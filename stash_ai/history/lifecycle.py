@@ -122,7 +122,7 @@ class RunHistory:
         finally:
             self.close()
 
-    def progress(self):
+    def progress(self, *, force=False):
         if self.store is None:
             return
         import threading
@@ -130,12 +130,15 @@ class RunHistory:
             return  # Preparation workers never touch the parent's SQLite journal.
         try:
             report, moment = self.args.report, time.perf_counter()
+            sources = (report.counts, *report.count_sources)
+            units = sum(source.get(name, 0) for source in sources for name in
+                        ('processed', 'reused', 'threshold_cache_reused', 'scenes_synced'))
+            if (not force and moment - self.last_progress < self.progress_seconds
+                    and units - self.last_units < self.progress_units):
+                return
             counts = Counter(report.counts)
             for source in report.count_sources:
                 counts.update(source)
-            units = sum(counts[name] for name in ('processed', 'reused', 'threshold_cache_reused', 'scenes_synced'))
-            if moment - self.last_progress < self.progress_seconds and units - self.last_units < self.progress_units:
-                return
             self.store.progress(self.identifier, now(), max(0., moment-self.start),
                 max(0., time.process_time()-self.cpu_start), models=report.profile.models, counts=dict(counts),
                 outcomes=report.profile.outcomes, metrics=report.profile.export(), issues=dict(report.issue_counts),

@@ -6,7 +6,8 @@ all Stash access, tag resolution, publication intent and SQLite writes serial.
 from __future__ import annotations
 
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from itertools import batched
 from concurrent.futures import ProcessPoolExecutor
 from multiprocessing import get_context
 from pathlib import Path
@@ -14,6 +15,7 @@ from pathlib import Path
 from stash_ai.runtime.workers import open_read_worker
 from stash_ai.runtime.process_pool import read_process_pool
 from stash_ai.runtime.settings import evidence_settings as runtime_settings
+from stash_ai.runtime.worker_result import pack_chunk, scene_selection, chunk_size, validated_chunks
 
 
 _WORKER_CONTEXT = None
@@ -48,6 +50,10 @@ def _worker_evidence(scene_id):
                           'merge_worker_compute', profile=_PROFILE)
 
 
+def _worker_evidence_chunk(scenes):
+    return pack_chunk(_worker_evidence(scene) for scene in scenes)
+
+
 def _compute_evidence(scene_id):
     """Compute evidence; the outer envelope captures failures after profiling."""
     if _WORKER_CONTEXT is None:
@@ -67,7 +73,7 @@ def iter_parallel_evidence(app, state_db, scope, scene_ids, core_policies,
                            scene_policies, *, workers, cache_bytes,
                            memory_budget_bytes, profile=False):
     """Yield read-only evidence in input order while a single parent publishes it."""
-    scene_ids = [str(scene_id) for scene_id in scene_ids]
+    scene_ids = scene_selection(scene_ids)
     if not scene_ids:
         return
     workers = max(1, min(int(workers), len(scene_ids)))
@@ -79,6 +85,7 @@ def iter_parallel_evidence(app, state_db, scope, scene_ids, core_policies,
     divisor = workers + 1
     worker_cache = max(0, int(cache_bytes) // divisor)
     worker_budget = max(1, int(memory_budget_bytes) // divisor)
+    size = chunk_size(len(scene_ids), workers)
 
     with read_process_pool(ProcessPoolExecutor,
         max_workers=workers,
@@ -95,9 +102,14 @@ def iter_parallel_evidence(app, state_db, scope, scene_ids, core_policies,
             profile,
         ),
     ) as executor:
-        yield from executor.map(
-            _worker_evidence,
-            scene_ids,
+        chunks = executor.map(
+            _worker_evidence_chunk,
+            batched(scene_ids, size),
             chunksize=1,
             buffersize=max(workers, 2),
         )
+        for chunk in validated_chunks(scene_ids, chunks, size):
+            for index, result in enumerate(chunk.results):
+                # The serial publisher ingests this aggregate once. Evidence
+                # and diagnostics stay attached to their original scene.
+                yield replace(result, metrics=chunk.metrics if index == 0 else None)

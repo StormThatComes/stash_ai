@@ -6,6 +6,11 @@ def ratio(value):
     return 'off' if value is None else f'{value[0]}/{value[1]}'
 
 
+def buffer_ratio(value):
+    return ('off' if value is None else
+            f'ready={value.ready} in-flight={value.in_flight} occupied={value.occupied}/{value.capacity}')
+
+
 def memory_size(value):
     for unit in ('B', 'KiB', 'MiB', 'GiB'):
         if value < 1024 or unit == 'GiB':
@@ -15,12 +20,12 @@ def memory_size(value):
 
 def buffer_lines(snapshot):
     current, following = snapshot['current'], snapshot['next']
-    queued = f"Buffers: in={ratio(current['input'])} out={ratio(current['result'])}"
+    queued = f"Buffers: in={buffer_ratio(current['input'])} out={buffer_ratio(current['result'])}"
     if following is None:
         queued += ' | next=off'
     else:
-        queued += (f" | next[{following['scene']}]: in={ratio(following['input'])}"
-                   f" out={ratio(following['result'])}")
+        queued += (f" | next[{following['scene']}]: in={buffer_ratio(following['input'])}"
+                   f" out={buffer_ratio(following['result'])}")
     used, limit = snapshot['cache']
     cache = f'{memory_size(used)}/{memory_size(limit)}' if limit else 'off'
     retained = f"Cache: {cache} | checkpoint interval={ratio(snapshot['checkpoint'])} batch"

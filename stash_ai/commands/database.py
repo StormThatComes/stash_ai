@@ -10,11 +10,13 @@ from stash_ai.db.common import format_bytes
 
 def run_mode(args, stash_url):
     from stash_ai.storage.store import scope_for
+    report = getattr(args, 'report', None)
 
     try:
         if args.db_repair:
             from stash_ai.db.repair import repair_database
-            result = repair_database(args.state_db, dry_run=args.dry_run, show_progress=True)
+            result = repair_database(args.state_db, dry_run=args.dry_run, show_progress=True, report=report)
+            _outcome(report, result)
             verb = 'Would repair' if args.dry_run else 'Repaired'
             print(f"{verb}: metadata={result['metadata_repaired']}, duplicates={result['duplicates_repaired']}; "
                   f"checked {result['results_checked']} result(s), {result['archives_checked']} archive(s).")
@@ -22,7 +24,9 @@ def run_mode(args, stash_url):
         if args.db_update:
             details = {}
             before, after = update_database(args.state_db, dry_run=args.dry_run,
-                                           show_progress=True, details=details)
+                                           show_progress=True, details=details, report=report)
+            _outcome(report, dict(details, before=before, after=after, dry_run=args.dry_run,
+                                 skipped_reason='already current' if details['noop'] else None))
             if args.dry_run:
                 print(f"DRY RUN: state DB schema v{before} -> v{after}; no migrations were run.")
                 if before == after and not details['noop']:
@@ -40,11 +44,22 @@ def run_mode(args, stash_url):
             print(format_report(inspect_database(args.state_db, scope)))
             return 0
         if args.db_check:
-            report = check_database(args.state_db, scope, show_progress=True)
-            print(format_check_report(report))
-            return 0 if report["ok"] else 1
+            from stash_ai.db.progress import maintenance_progress
+            with maintenance_progress('DB check', report=report) as progress:
+                progress('consistency', 0, 1)
+                checked = check_database(args.state_db, scope, show_progress=True)
+                progress('consistency', 1, 1)
+            _outcome(report, dict(ok=checked['ok'], errors=checked['error_count'],
+                                  warnings=checked['warning_count'], results_checked=checked['results_checked']))
+            print(format_check_report(checked))
+            return 0 if checked["ok"] else 1
 
-        before, after = compact_database(args.state_db, scope, dry_run=args.dry_run)
+        from stash_ai.db.progress import maintenance_progress
+        with maintenance_progress('DB compact', report=report) as progress:
+            progress('compaction', 0, 1)
+            before, after = compact_database(args.state_db, scope, dry_run=args.dry_run)
+            progress('compaction', 1, 1)
+        _outcome(report, dict(before_bytes=before['file_bytes'], after_bytes=after['file_bytes'], dry_run=args.dry_run))
         print(format_report(before))
         if args.dry_run:
             print(
@@ -58,3 +73,10 @@ def run_mode(args, stash_url):
     except (OSError, sqlite3.DatabaseError, ValueError, RuntimeError) as exc:
         print("Database maintenance failed: " + str(exc))
         return 1
+
+
+def _outcome(report, details):
+    if report is not None:
+        def save():
+            report.workload['maintenance'][-1]['result'] = details
+        report.optional('maintenance_history', save)

@@ -116,3 +116,26 @@ def records(store, scene, kind):
             raise ValueError('Invalid archived inference proof.')
         result.setdefault(model, []).append(StoredSegment(record))
     return result
+
+
+def matching_record(store, scene, kind, model, signature):
+    """Fetch one exact proof by its existing primary key, never unrelated BLOBs."""
+    from stash_ai.storage.segments import StoredSegment
+    from stash_ai.evidence.formats import validate_current
+    from stash_ai.db.payloads import valid_result
+    key = ('archive-record', str(scene), kind, model, signature)
+    saved = store.cached(key)
+    if saved is not None:
+        return saved
+    rows = store.read_rows('SELECT data FROM ' + store.table('inference_archive') +
+                           ' WHERE scope=? AND scene=? AND model=? AND kind=? AND signature=?',
+                           (store.scope, str(scene), model, kind, signature))
+    if not rows:
+        return None
+    record = store.unpack(rows[0][0])
+    validate_current(record)
+    if not valid_result(record, kind) or marker_segment_signature(record) != signature:
+        raise ValueError('Invalid archived inference proof or signature mismatch.')
+    record = StoredSegment(record)
+    store.retain(key, record)
+    return record

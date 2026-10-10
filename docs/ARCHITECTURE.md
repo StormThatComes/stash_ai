@@ -720,3 +720,54 @@ available in Stash 0.31.1+, checks all other
 exposed usage counters, and omits the deprecated
 `movie_count` alias of `group_count`. It never
 probes the retired Movie API.
+
+### Incremental database maintenance
+
+`--db-update` trusts an optional, derived `metadata_dirty` ledger only when its
+DDL, six invalidation triggers and metadata-format revision match. A clean
+current database then needs only schema/revision checks and an empty-ledger
+lookup: no result/metadata scan, BLOB decoding, `quick_check` or writer lock.
+Existing databases seed the ledger once under the offline maintenance writer
+lock. SQL writes by older supported executables also mark affected keys through
+triggers. Missing or changed triggers force reseeding; repair and revision
+completion remain transactional. This auxiliary cache does not change the
+supported schema range (v18–v27) or stored inference identities.
+
+`--db-repair` remains the explicit deep evidence and metadata repair. A schema
+upgrade runs required data conversions according to their recorded revision;
+DDL-only upgrades do not force a full evidence scan. Missing derived metadata
+can be rebuilt only for dirty keys. Deep `--db-check` remains authoritative for
+semantic corruption that a completeness ledger cannot prove.
+
+Run-history workload data records maintenance phases, elapsed seconds, completed
+units, operation outcomes and interruption/failure status. A current-schema
+no-op includes its skipped reason; phase recording is optional and cannot mask
+maintenance failures. Preview and history opt-out retain their read-only rules.
+`tests/fixtures/schema_v18.sql` contains actual DDL from the pinned historical
+v18 commit, including its extra `result_index.inference` column and missing later
+feature tables. Its migrations cover multiple scopes, pending publication,
+recovery, retained checkpoints and transaction rollback.
+
+### Optional backend execution profiling
+
+During inference, `--profile-merge` opts into backend stage timings. JoyTag reports
+input-transfer enqueue time, model-compute enqueue time and output-copy/wait wall
+time. On CUDA it also records stream events for transfer and model execution;
+the normal output `.cpu()` copy already provides the completion boundary. Event
+queries never add a device-wide synchronization, and absent/failed measurements
+are recorded as unavailable or optional telemetry failures. Without the profiling
+flag no CUDA timing events or ORT trace sessions are created.
+
+ORT profiling uses a temporary trace and aggregates only observed CPU/CUDA node
+event counts and durations. Configured providers remain separate metadata and
+do not prove that every node ran on a GPU. Trace/model/tensor names are not
+retained; temporary files are removed at model close. Profiling setup/collection
+failure does not change predictions. Run history contains the provider summary;
+merge diagnostics also receive observed-node counters. Real hardware integration
+coverage remains deferred under B3.
+
+Native adapters validate their public prediction output once. The public backend
+boundary additionally verifies external adapters and native subclasses, whose
+methods may be overridden. Inference batching never calls backend-private score
+methods. Equivalent RGB preparation, probability selection and max aggregation
+keep existing provenance/retention formats and checkpoint identities.

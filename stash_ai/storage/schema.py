@@ -81,6 +81,10 @@ def initialize_features(store):
     initialize_checks(store)
     initialize_recovery(store)
     initialize_preview(store)
+    from stash_ai.storage.metadata_ledger import initialize as initialize_metadata_ledger
+    if not getattr(store, 'maintenance_migration', False):
+        with store.connection:
+            initialize_metadata_ledger(store.connection)
 
 
 

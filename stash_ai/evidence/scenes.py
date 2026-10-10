@@ -135,6 +135,10 @@ def _shared_scene_contributions(app, index, scene_records, policies, existing, m
         metrics['scene_cache_missing'] += int(not usable and len(scene_records) >= policy.consensus_min_models)
     return candidates
 
+from stash_ai.evidence.temporal.policy import validated_operation
+
+
+@validated_operation
 def cleanup_scene_support(app, store, scene_id, hits, selected, policies):
     """Revoke only published sources, under their frozen rules and input records."""
     from stash_ai.signatures import digest
