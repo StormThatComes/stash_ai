@@ -104,6 +104,10 @@ class StashTransport:
         from time import monotonic
         from stash_ai.stash_api.deadlines import call_with_deadline, ReadDeadlineExceeded
         read = self._read_only(query, variables)
+        # Never schedule or time a denied mutation, including in lightweight
+        # dry-run/test clients without a configured network timeout.
+        if self.dry_run and not read:
+            raise RuntimeError("Internal error: mutation attempted during dry-run.")
         # Mutations get a response budget too, but are NEVER retried if the
         # outcome may be uncertain. Only response reads use deadline workers.
         deadline = monotonic() + self._read_budget()
