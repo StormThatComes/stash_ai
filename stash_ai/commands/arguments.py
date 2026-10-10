@@ -30,6 +30,8 @@ def build_parser(app) -> argparse.ArgumentParser:
                          help="Also record a read-only command in run history; dry runs never record history.")
     history.add_argument("--no-run-history", action="store_true",
                          help="Disable automatic history of inference, merge and write/maintenance commands.")
+    parser.add_argument('--reconcile-run-id', action='append', metavar='ID',
+                        help='Exact orphaned run ID to reconcile; repeat; requires --reconcile-run-history.')
     parser.add_argument('--history-keep-last', type=int, metavar='N',
                         help='Keep at most N finished runs in this Stash scope; --prune-run-history only.')
     parser.add_argument('--history-max-age-days', type=float, metavar='DAYS',
@@ -147,6 +149,8 @@ def build_parser(app) -> argparse.ArgumentParser:
                        help="Report scene/marker cache coverage against selected YAML models and plan targeted backfill; offline and read-only.")
     modes.add_argument("--run-report", type=Path, metavar="NEW.json",
                        help="Write offline run history and comparable-run profiling averages; no Stash, model or state DB writes.")
+    modes.add_argument('--reconcile-run-history', action='store_true',
+                       help='Inspect/mark explicitly selected proven-dead running history rows; honors --dry-run.')
     modes.add_argument('--prune-run-history', action='store_true',
                        help='Prune finished run history by count/age; honors --dry-run, protects active runs and reuse proofs.')
     modes.add_argument("--reuse-report", type=Path, metavar="NEW.json",
