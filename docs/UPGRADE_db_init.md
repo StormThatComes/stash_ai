@@ -1,85 +1,96 @@
-# Odbudowa nowej bazy: `--db-init`
+# Rebuilding a fresh database: `--db-init`
 
-Opcja pozwala rozpocząć od nowej bazy SQLite, mimo że sceny w Stash mają już
-wspólne tagi i markery AI. Przydaje się po utracie bazy albo gdy świadomie
-chcesz przeliczyć kolekcję od początku z aktualnych VTT i sprite'ów.
+This option initializes a new SQLite database even if Stash
+scenes already contain shared AI tags and markers. Use it
+after losing your database or to deliberately reprocess
+your library against current VTT and sprites.
 
-## Uruchomienie i zakres
+## Starting and scoping the rebuild
 
-Wskaż nowy plik zamiast dotychczasowej bazy:
+Point to a new file rather than the existing database:
 
 ```powershell
 python .\stash_ai.py --db-init --models all --state-db .\tagger_sources_fresh.sqlite3
 ```
 
-Możesz dodać `--scene-id 123`, powtarzając opcję dla kolejnych scen.
-Zestaw modeli i selektor scen zostają zapisane w bazie. Pierwszy udany skan
-zamyka listę scen odbudowy; flaga nie daje stałego prawa do przejmowania
-wyników nowych scen.
+You may repeat `--scene-id 123` to select individual scenes.
+The model set and scene selector are saved in the database.
+The first successful scan freezes the rebuild scene list;
+the flag does not grant permanent ownership of future scenes.
 
-Opcja wymaga nowej bazy albo aktualnej bazy zawierającej wyłącznie pusty
-schemat. Odrzuca bazę z wynikami, checkpointami, snapshotami, recovery lub
-innym stanem, również dla innego adresu Stash. Nie czyści ani nie nadpisuje
-takiej bazy. Zmiana adresu Stash, modeli lub zakresu odbudowy wymaga osobnej
-bazy. Stary plik możesz zachować do powrotu do poprzedniego stanu.
+`--db-init` requires a new database or a current database
+containing only an empty schema. It rejects databases with
+results, checkpoints, snapshots, recovery or any other
+existing state — even if it belongs to another Stash URL.
+It never clears or overwrites such a database. Changing
+Stash URL, selected models or rebuild scope requires a
+separate database; retain the old file for rollback.
 
-Zalecane jest `--models all`. Wybranie np. tylko `wd` zastępuje wcześniejsze
-wyniki AI nowymi wynikami WD, także gdy wcześniej powstały z kilku modeli.
-Baza otrzymuje rzeczywiste dowody świeżej inferencji, a nie wyniki odtworzone
-z nazw istniejących tagów. Nowe lub dokładniejsze VTT są analizowane jako
-aktualne wejście; zmiana wejścia podczas wznowienia unieważnia niezgodny cache.
+`--models all` is recommended. Selecting only `wd`, for
+example, replaces older AI output with WD-only predictions,
+even when the old output combined several models. The
+new database holds actual fresh inference evidence, not
+predictions inferred from existing tag names. New or more
+precise VTT is treated as current input; changed inputs
+during resume invalidate incompatible cache.
 
-## Przejęcie wyników i publikacja
+## Adopting results and publishing
 
-| Element | Zachowanie podczas odbudowy |
+| Item | Behavior during rebuild |
 |---|---|
-| Przypisania `ai:<label>` do sceny | Przejmowane; nieaktualne przypisania są usuwane po ukończeniu inferencji. Dotyczy także ręcznie przypisanych tagów z tym prefiksem. |
-| Kategorie `ai:category:*` i zarezerwowane tagi markerów | Nie są przejmowane jako etykiety scen. |
-| Markery `[AI] ` z tagiem `ai:marker:stash-taggers` | Synchronizowane według nowych wyników. |
-| Tagi spoza `ai:` i markery bez własności aplikacji | Podlegają dotychczasowym regułom publikacji i globalnych wykluczeń. |
-| Błąd modelu, brak VTT/sprite'a lub pusty VTT | Scena pozostaje niedokończona; dotychczasowe wyniki nie są zastępowane. |
-| Udana inferencja bez wykryć | Jest ukończonym wynikiem; stare przejęte wyniki AI mogą zostać usunięte. |
+| Scene assignments of `ai:<label>` | Adopted; outdated assignments are removed after inference completes, including manual tags with this prefix |
+| `ai:category:*` categories and reserved marker tags | Not adopted as scene labels |
+| `[AI] ` markers with `ai:marker:stash-taggers` ownership tag | Reconciled against new predictions |
+| Tags outside `ai:` and markers not owned by the application | Normal publication and global exclusion rules apply |
+| Model error, missing VTT/sprite or empty VTT | Scene remains incomplete; existing output stays intact |
+| Successful inference with zero detections | Valid complete result; old adopted AI results can be removed |
 
-Scena jest publikowana dopiero po ukończeniu obu wyjść wszystkich wybranych
-modeli. Inne gotowe sceny mogą zostać opublikowane, nawet gdy jedna ma błąd.
-Własność tagów jest zapisywana przed zmianami w Stash. Publikacja korzysta ze
-zwykłego trwałego planu: błąd API może pozostawić część zmian w Stash, ale baza
-zachowuje plan i własność do bezpiecznego ponowienia. Oznaczenie sceny jako
-odbudowanej zatwierdzane jest razem ze snapshotami obu wyjść.
+A scene is published only after both output types complete
+for all selected models. Other completed scenes may publish
+even if one scene fails. Tag ownership is saved **before**
+modifying Stash. Publication uses the normal durable plan:
+an API failure may leave partial changes in Stash, but the
+database retains enough plan/ownership data for safe retry.
+A scene is marked rebuilt in the same transaction that commits
+its two output snapshots.
 
-Zwykłe markery AI bez natywnego `end_seconds` nadal wymagają migracji opisanej
-w README. `--db-init` nie zastępuje migracji starych przestrzeni nazw ani
-geometrii markerów.
+Legacy ordinary AI markers without native `end_seconds`
+still require the migration described in the main README.
+`--db-init` does not replace legacy namespace or marker
+geometry migration.
 
-## Wznowienie i podgląd
+## Resuming and previewing
 
-Po przerwaniu wystarczy ta sama komenda bez flagi:
+After interruption, rerun the command without the flag:
 
 ```powershell
 python .\stash_ai.py --models all --state-db .\tagger_sources_fresh.sqlite3
 ```
 
-Zachowaj pierwotny zestaw modeli i ewentualne `--scene-id`. Ponowienie
-`--db-init` też nie resetuje postępu. Ukończone inferencje są używane ponownie,
-a zgodne checkpointy kontynuowane. Jeśli inferencja jest już kompletna i
-pozostał wyłącznie niedokończony zapis do Stash, możesz wznowić publikację
-przez `--merge-only` bez `--db-init`.
+Keep the original model selection and any `--scene-id` scope.
+Repeating `--db-init` also preserves progress.
+Completed results are reused and compatible checkpoints resumed.
+If inference is complete but Stash publication is still pending,
+`--merge-only` can resume it without `--db-init`.
 
 ```powershell
 python .\stash_ai.py --db-init --models all --state-db .\tagger_sources_fresh.sqlite3 --dry-run
 python .\stash_ai.py --db-report --state-db .\tagger_sources_fresh.sqlite3
 ```
 
-Podgląd działa w tymczasowej nakładce: nie tworzy wskazanego pliku bazy i nie
-zmienia istniejącego, nie zapisuje do Stash. Może pobrać modele i wykonać
-inferencję. Podsumowanie przebiegu i `--db-report` pokazują liczbę scen
-odbudowanych i oczekujących; `--db-check` sprawdza zapisany stan odbudowy.
+Dry-run uses a temporary overlay: it neither creates the specified
+database file nor changes any existing file or Stash data.
+It may still download models and perform inference.
+The run summary and `--db-report` show completed/pending
+rebuild scene counts; `--db-check` validates rebuild state.
 
-Pierwsze uruchomienie flagi wymaga normalnej inferencji obu wyjść. Nie łącz
-jej z `--merge-only`, wyjściami częściowymi, cleanupem, raportami, `--restart`
-ani `--abandon-pending`. Niedokończona odbudowa blokuje również zmianę
-zakresu, wyjścia częściowe, restart, porzucenie planu i rethreshold w zwykłym
-przebiegu inference/merge.
+The first run with `--db-init` requires normal inference
+for both outputs. Do not combine it with `--merge-only`,
+partial output modes, cleanup, reports, `--restart`, or
+`--abandon-pending`. An incomplete rebuild also blocks
+scope changes, partial output, restart, plan abandonment
+and rethreshold in ordinary inference/merge runs.
 
-Schemat SQLite ma wersję v25. Istniejące bazy v18–v24 aktualizuj przez
-`--db-update`; migracja zachowuje stan i nie uruchamia przejęcia wyników AI.
+The SQLite schema is **v27**. Upgrade existing v18–v26
+databases using `--db-update`; upgrading preserves state
+and does not adopt existing Stash AI results.
