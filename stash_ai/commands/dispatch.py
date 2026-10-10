@@ -30,6 +30,9 @@ def run_standalone_command(app, args) -> int | None:
         from stash_ai.cleanup.prune import run_prune
         app.services.validate_config(scene_work=False)
         return run_prune(app, args)
+    if args.command is Command.MODEL_ASSETS_REPORT:
+        from stash_ai.reports.model_assets import run as model_assets_report
+        return model_assets_report(app, args)
     if args.command is Command.MODEL_REPORT:
         from stash_ai.reports.model.report import run as run_model_report
         return run_model_report(app, args)
