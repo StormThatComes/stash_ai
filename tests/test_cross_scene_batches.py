@@ -231,14 +231,16 @@ def test_next_input_and_cpu_batches_start_while_long_current_queue_is_full(model
     inspect = context.inputs.inspect
 
     def inspect_scene(*args):
-        cues, media, signature = inspect(*args)
+        from stash_ai.inference.inputs import InspectedInput, VerifiedInput
+        result = inspect(*args)
+        cues, media, signature = result.snapshot.cues, result.media, result.signature
         if args[1]['vtt'] == '/vtt/2':
             cues = [Cue(index, index + 1, 'sprite', (0, 0, 1, 1))
                     for index in range(2 * (prefetch + 8))]
             signature = inference_signature(args[2], cue_manifest(cues), media.hashes)
         if args[1]['vtt'] == '/vtt/3':
             third_verified.set()
-        return cues, media, signature
+        return InspectedInput(VerifiedInput.capture(cues, media.hashes), media, signature)
 
     def predict(scene, images):
         if scene == '2' and images[0][1] == 8:

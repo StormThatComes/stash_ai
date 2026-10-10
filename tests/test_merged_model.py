@@ -492,7 +492,7 @@ def test_downloaded_weights_refresh_signatures_before_saving_and_enable_resume(m
     run_model(context)
     after = model_identity(app, context.config, context.pipeline.vocab)
     assert before != after
-    _, _, expected = inspect_input(app, context.pipeline.stash, context.scenes['1']['paths'], after)
+    expected = inspect_input(app, context.pipeline.stash, context.scenes['1']['paths'], after).signature
     for scene_id in context.scenes:
         for kind in ('scene', 'markers'):
             assert context.state.records(scene_id, kind)['wd']['meta']['inference_signature'] == expected

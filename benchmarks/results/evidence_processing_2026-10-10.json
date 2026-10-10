@@ -1,0 +1,40 @@
+{
+  "checkpoint": {
+    "frames": 5000,
+    "chunks": 100,
+    "reference": {
+      "seconds": 0.09338125300018874,
+      "python_peak_bytes": 2571007
+    },
+    "optimized": {
+      "seconds": 0.060283974000412854,
+      "python_peak_bytes": 2439026
+    }
+  },
+  "archives": {
+    "archives": 200,
+    "reference": {
+      "seconds": 0.04392314600045211,
+      "python_peak_bytes": 519246,
+      "decodes": 201
+    },
+    "optimized": {
+      "seconds": 0.0007729330000074697,
+      "python_peak_bytes": 27341,
+      "decodes": 2
+    }
+  },
+  "options": {
+    "contributions": 500,
+    "reference": {
+      "seconds": 0.03014937399984774,
+      "python_peak_bytes": 11672,
+      "policy_validations": 500
+    },
+    "optimized": {
+      "seconds": 0.027096172000710794,
+      "python_peak_bytes": 5880,
+      "policy_validations": 1
+    }
+  }
+}
