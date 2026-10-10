@@ -22,6 +22,7 @@ class Command(Enum):
     DB_COMPACT = 'db_compact'
     DIAGNOSTICS = 'anonymous_diagnostics'
     MODEL_REPORT = 'model_report'
+    MODEL_ASSETS_REPORT = 'model_assets_report'
     REVIEW_REPORT = 'tag_review_report'
     CACHE_REPORT = 'cache_report'
     RUN_REPORT = 'run_report'
@@ -81,3 +82,8 @@ MODEL_RULE = ReportRule(
     Command.MODEL_REPORT, MODEL_OPTIONS,
     '--model-report uses all saved model evidence; model/inference options do not apply.',
     '--model-report cannot be combined with tagging, threshold, pruning or dry-run modifiers.')
+
+MODEL_ASSETS_RULE = ReportRule(
+    Command.MODEL_ASSETS_REPORT, ('device', 'resume', 'restart', 'force_fetch_vtt'),
+    '--model-assets-report checks files without inference or model execution settings.',
+    '--model-assets-report is read-only; tagging/publication modifiers do not apply.', True)
