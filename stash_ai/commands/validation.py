@@ -185,9 +185,12 @@ def validate_pipeline(app, parser, args):
 
 def validate_command_capabilities(parser, args):
     """Reject user-supplied execution settings that a selected command ignores."""
+    # Cleanup and hierarchy operators intentionally accept explicit model
+    # scope in existing workflows; only reject it for commands that ignore it.
     model_users = {Command.INFERENCE, Command.MERGE, Command.DOWNLOAD,
                    Command.CACHE_REPORT, Command.REUSE_REPORT,
-                   Command.MODEL_ASSETS_REPORT}
+                   Command.MODEL_ASSETS_REPORT, Command.EXPLAIN,
+                   *CLEANUP_COMMANDS, *HIERARCHY_COMMANDS}
     if args.models and args.command not in model_users:
         parser.error('--models is not used by this command.')
     workers = {
