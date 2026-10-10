@@ -510,28 +510,33 @@ Histograms have bounded size; history grows by one record per run without
 storing every timing sample. Filtered/limited reports summarize only
 selected runs, not necessarily all of history.
 
-### Dlaczego scena została przeliczona?
+### Why was a scene recomputed?
 
-Schemat v27 dodaje zweryfikowaną tożsamość inferencji w bazie stanu. Uruchom
-`python .\stash_ai.py --db-update` przed użyciem starej bazy. Migracja zachowuje
-oryginalne BLOB-y wyników, checkpointy i frozen proofs; nie uruchamia modeli.
-Przy pierwszym zgodnym odczycie CLI zapisuje brakującą tożsamość bez inferencji.
-Następne zmiany `batch_size`, lokalizacji identycznych wag lub mniej wymagającej
-retencji korzystają z tych samych scores, jeżeli weryfikacja wejść i pokrycia
-cache przejdzie. Zmiana batcha może dawać drobne różnice numeryczne przy świeżym
-obliczeniu; reuse zachowuje dotychczasowe wyniki, nie obiecuje bitowej zgodności.
+Schema v27 adds verified inference identity to the state database.
+Run `python .\stash_ai.py --db-update` before opening an older database.
+Migration preserves original result BLOBs, checkpoints and frozen proofs;
+it does not run any models. On the first compatible read, the CLI can
+persist missing identity data without rerunning inference.
 
-Dla starego cache bez zarejestrowanej tożsamości wykonaj zgodny przebieg z
-dotychczasową konfiguracją przed przenoszeniem wag lub zmianą batcha/retencji.
-Jeżeli starej tożsamości nie można udowodnić, CLI nie zgaduje jej na podstawie
-historii diagnostycznej. Zmiana wag/wejść i brak wymaganych scores nadal mogą
-uzasadnić przeliczenie konkretnej pary scena/model. Zgodne checkpointy można
-wznawiać po zmianie batcha; ich polityka przechowywania musi pozostać zgodna.
+Subsequent changes to `batch_size`, relocation of identical model weights,
+or less restrictive retention can reuse the same scores when input
+verification and cache-coverage checks succeed. A new inference with a
+different batch size may have minor numerical differences; reuse preserves
+the existing predictions, not bitwise equivalence with a fresh run.
 
-Zwykła inferencja zapisuje w historii decyzję dla każdej pary scena/model:
-`infer`, `cache_reused`, `rethreshold`, `checkpoint_resumed` albo `blocked`.
-Dodaj `--verbose`, aby widzieć decyzje i powody podczas pracy. Osobny raport
-czyta te same dane offline, drukuje podsumowanie per model i zapisuje nowy JSON:
+For old cache without recorded inference identity, make one compatible run
+with the original configuration **before** relocating model files or
+changing batch size/retention. When the old identity cannot be proven,
+the CLI will not infer it from diagnostic history. Weight/input changes
+or missing required scores can still trigger inference for specific
+scene/model pairs. Compatible checkpoints can be resumed after changing
+batch size as long as retention policy remains compatible.
+
+Normal inference logs a decision for each scene/model pair:
+`infer`, `cache_reused`, `rethreshold`, `checkpoint_resumed` or
+`blocked`. Use `--verbose` to display decisions and reasons while running.
+A separate offline report reads those decisions, prints per-model totals
+and creates a JSON file:
 
 ```powershell
 python .\stash_ai.py --reuse-report .\reuse.json
@@ -539,274 +544,302 @@ python .\stash_ai.py --reuse-report .\wd-scene.json --models wd --scene-id 123
 python .\stash_ai.py --reuse-report .\recent-reuse.json --run-limit 20 --run-status finished
 ```
 
-Domyślnie raport wybiera ostatni pasujący przebieg z zapisanymi decyzjami.
-`--run-limit` wybiera 1..10000 takich przebiegów; filtry modeli (`--models`
-lub `--run-model`), scen (`--scene-id` można powtarzać), komendy i statusu
-stosowane są przed limitem. Późniejszy merge lub maintenance bez decyzji
-inferencji nie ukryje ostatniego raportu. Raport opisuje wykonane przebiegi;
-nie sprawdza bieżących plików ani dostępności mediów w Stash.
+By default, the report uses the latest matching run with inference decisions.
+`--run-limit` selects 1–10000 runs. Model (`--models` or `--run-model`),
+scene (repeatable `--scene-id`), command and status filters apply before
+the limit. A later merge or maintenance command without inference
+decisions does not hide the last relevant report. This report describes
+**recorded executions**, not the current files or current Stash media.
 
-Powody obejmują brak evidence, jawny restart, wyłączone resume, oczekujący
-refresh, niekompletny indeks oraz zmianę modelu, rewizji, wag, słownika,
-batch size, agregacji, retencji, progów, VTT lub sprite. Jeśli dostępna jest
-poprzednia tożsamość, JSON zawiera wartości przed/po, liczebność cue i medianę
-odstępów między ich początkami. Dla zbyt płytkiego cache pokazuje zapisany
-floor i wymaganą retencję; dla checkpointu liczbę wznowionych klatek i powód
-przyjęcia lub odrzucenia. Kilka powodów może dotyczyć jednej decyzji, więc
-ich liczebności nie muszą sumować się do liczby scen.
+Reasons include missing evidence, explicit restart, disabled resume,
+pending refresh, incomplete index, and changes to model/revision/weights,
+vocabulary, batch size, aggregation, retention, thresholds, VTT or sprite.
+When the previous identity is available, JSON includes before/after
+values, cue counts and the median spacing between cue start times.
+Insufficient cache coverage includes the stored floor and required
+retention; checkpoint decisions include the resumed frame count and
+acceptance/rejection reason. Multiple reasons may apply to one decision,
+so their counts need not sum to the scene count.
 
-Starszy cache bez historii nadal działa normalnie. Po zgodnym reuse można
-uzupełnić jego tożsamość diagnostyczną bez inferencji. Gdy wcześniejszych
-danych brakuje, `historical_identity_unavailable` oraz ogólne `input_changed`
-lub `model_or_configuration_changed` wskazują granice dostępnej informacji.
-Diagnostyka nie zmienia sygnatur, schematu cache ani warunków jego użycia.
-Historia w formacie 1 jest odczytywana bez modyfikacji i aktualizowana do
-formatu 2 dopiero podczas zapisu kolejnego przebiegu.
+Older cache without history still works. Compatible reuse can add its
+diagnostic identity without inference. Missing historical data is
+identified by `historical_identity_unavailable` and generic
+`input_changed` or `model_or_configuration_changed` reasons.
+Diagnostics do not change cache signatures, schema or reuse rules.
+Format-1 history can be read unchanged and upgrades to format 2 on
+the next write.
 
-Historia przechowuje identyfikatory scen i modeli, powody, parametry oraz
-hashe wejść, bez adresów mediów i kluczy API. Decyzje rosną wraz z liczbą
-par scena/model/przebieg; poprzednia tożsamość zajmuje jeden rekord na
-scenę/model/rodzaj wyniku. Zapis jest buforowany w krótkich transakcjach po
-maksymalnie 64 operacje, a normalne zakończenie i Ctrl+C opróżniają bufor.
-Nagłe zabicie procesu może utracić ostatnie niezapisane operacje historii.
-`--no-run-history` wyłącza ich zapis; raport wymaga wcześniej zebranych danych.
-Bez `--verbose` pomija również budowanie diagnostycznych proofs. Weryfikacja
-wejść i tożsamości cache nadal działa. Błędy metadanych GPU i opcjonalnej
-historii nie zmieniają wyniku polecenia ani decyzji o ponownej inferencji.
+History records scene/model IDs, reasons, settings and input hashes,
+but not media URLs or API keys. Decision storage grows with
+scene/model/run pairs; prior identity uses one record per
+scene/model/output kind. Writes are buffered into short transactions
+of up to 64 operations. Normal completion and Ctrl+C flush the buffer;
+a hard process kill may lose the latest unflushed history operations.
+`--no-run-history` disables recording; reports require existing data.
+Without `--verbose`, diagnostic proof construction is skipped too,
+while input verification and cache identity checks remain active.
+Failures of optional GPU metadata or run history do not change
+command outcomes or inference-reuse decisions.
 
-### Postęp inferencji
+### Inference progress
 
-W terminalu inferencja pokazuje dwa paski: sceny bieżącego modelu oraz klatki
-aktualnej sceny, np. `wd scene 6306: 128/729 frame`. Pasek klatek liczy cue
-z VTT wybrane do inferencji, a nie wszystkie klatki wideo. Przy wznowieniu
-zaczyna od poprawnie odtworzonego checkpointu i przesuwa się po obróbce
-każdego batcha przez CPU, także gdy model nie zachował żadnych tagów.
-Prefetch i inferencja następnej sceny nie przesuwają paska bieżącej sceny.
-Po osiągnięciu 100% trwa jeszcze finalizacja i zapis wyniku; pasek scen
-przesuwa się dopiero po zakończeniu obsługi sceny. Sceny użyte z cache
-nie uruchamiają paska klatek. Pasek klatek jest ukryty poza interaktywnym
-terminalem, żeby przekierowane logi nie zawierały dwóch linii z ruchem kursora.
+In an interactive terminal, inference shows two progress bars: scenes
+for the current model, and frames within the current scene, e.g.
+`wd scene 6306: 128/729 frame`. Frame progress counts VTT cues
+selected for inference, **not** every video frame. Resumed processing
+starts after the restored checkpoint and advances after CPU handling
+of each batch, even if no tags were retained. Prefetch or inference for
+the next scene does not advance the current scene's frame bar.
 
-Pod paskami pojawiają się dwa wiersze z zajętością buforów, np.:
+After the frame bar reaches 100%, result finalization and saving may
+still be in progress. The scene bar advances only after scene handling
+completes. Cache-only scenes do not show a frame bar. Non-interactive
+terminals hide the per-frame bar to avoid cursor-motion log artifacts.
+
+Two buffer-occupancy lines appear below the progress bars, for example:
 
 ```text
 Buffers: in=12/16 out=5/32 | next[6307]: in=16/16 out=0/32
 Cache: 1.2GiB/24.0GiB | checkpoint interval=7/32 batch
 ```
 
-`in` to gotowe batche wejściowe względem `prefetch_batches`, a `out` to
-wyniki GPU w RAM czekające na obróbkę CPU względem `result_prefetch_batches`.
-`next[ID]` pokazuje osobne kolejki następnej sceny, także przed przekazaniem jej
-na GPU. Licznik nie obejmuje batcha już pobranego przez konsumenta ani zadań
-preprocessingu, które jeszcze nie skończyły się przygotowaniem batcha. Sygnały
-końca i błędy nie są liczone jako batche. Przy `prefetch_batches: 0` kolejki
-pokazują `off`; brak następnej sceny również pokazuje `next=off`.
+`in` is the number of prepared input batches relative to
+`prefetch_batches`. `out` is the number of GPU result batches waiting
+in RAM for CPU processing relative to `result_prefetch_batches`.
+`next[ID]` shows separate queues for the next scene, even before it
+starts on GPU. Batches already taken by a consumer and preprocessing
+tasks not yet producing a batch are excluded. End markers and errors
+are not counted as batches. With `prefetch_batches: 0`, queues show
+`off`; without a next scene, they show `next=off`.
 
-`Cache` to szacowane bajty zatrzymane we wspólnym cache RAM i jego rzeczywisty
-skonfigurowany limit, po ograniczeniu przez `ram_budget_gb`. To wspólny cache
-mediów, wejść, wyników i indeksów, a nie całe zużycie RAM procesu lub VRAM.
-`checkpoint interval` pokazuje liczbę przetworzonych batchy od ostatniego
-udanego zapisu względem `checkpoint_batches`; nie jest pojemnością kolejki.
-Po zapisie checkpointu licznik wraca do zera.
+`Cache` is estimated retained memory in the shared RAM cache relative
+to its effective configured limit, after applying `ram_budget_gb`.
+It covers shared media, input, result and index caches, **not**
+the process's total RAM consumption or VRAM usage.
+`checkpoint interval` is processed batches since the last successful
+checkpoint divided by `checkpoint_batches`; it is not queue capacity.
+The counter resets after a checkpoint is written.
 
-Status jest odczytywany przy odświeżeniu paska klatek (domyślnie nie częściej
-niż co 0,25 s) oraz na granicach finalizacji i zapisu sceny. Są to chwilowe
-odczyty pracujących równolegle buforów, bez czekania na producerów, pobierania
-elementów, dostępu do SQLite lub zmian LRU. Dodatkowe wiersze są ukryte poza
-interaktywnym terminalem i zamykane także po błędzie lub Ctrl+C.
+Occupancy is sampled whenever frame progress refreshes (by default
+no faster than every 0.25 seconds), and around finalization/scene
+persistence. Samples do not wait for producers, consume queue entries,
+query SQLite or update LRU state. Extra lines are hidden outside an
+interactive terminal and cleared on errors or Ctrl+C.
 
-### Model Utility / Ablation Report
+### Model utility / ablation report
 
-`--model-report NEW.json` działa wyłącznie na zapisanym evidence i nie łączy się
-ze Stash ani nie uruchamia modeli. Dla każdej sceny najpierw odtwarza normalny
-wynik wszystkich zapisanych modeli, a następnie cztery kontrfaktyczne wyniki
-`all minus one model`. Oznacza to, że po usunięciu modelu od początku
-przeliczane są consensus seeds, temporal rules, shared scene tags, marker extras
-i Occurrence — raport nie filtruje jedynie gotowych markerów.
+`--model-report NEW.json` works entirely from saved evidence, without
+Stash connectivity or model inference. It first reconstructs the normal
+result across all recorded models for each scene, then computes four
+counterfactual `all minus one model` results. Omitting a model
+recalculates consensus seeds, temporal rules, shared scene tags,
+marker extras and Occurrence from scratch; it does not merely filter
+the resulting markers.
 
-Per model raport pokazuje m.in.:
-- liczbę scen z zapisanym evidence i scen, w których pominięcie modelu zmienia wynik;
-- finalne scene tags i marker components wspierane przez model;
-- scene tags, markery, extras i Occurrence utracone po jego usunięciu;
-- markery, które pozostają, ale zmieniają zakres lub extras;
-- procent scen z evidence, w których model ma mierzalny marginalny wpływ.
+Per-model metrics include:
+- scenes with retained evidence and scenes whose result changes when
+  that model is omitted;
+- final scene tags and marker components supported by the model;
+- scene tags, markers, extras and Occurrence points lost without it;
+- surviving markers with changed intervals or extras;
+- the share of evidence-bearing scenes with a measurable marginal impact.
 
-Zmiana samego badge'a źródeł markera, np. `[jt+wd]` na `[wd]`, nie jest liczona
-jako zmiana semantyczna. Dzięki temu raport mierzy wpływ na tagowanie, zakresy i
-extras, a nie samą obecność provenance. `--scene-id` może ograniczyć analizę
-do wybranych scen.
+A change only in the marker's provenance badge, e.g. `[jt+wd]` to
+`[wd]`, is not counted as a semantic change. The report measures
+the effect on tagging, geometry and extras rather than merely
+model attribution. Use `--scene-id` to restrict the sample.
 
-### Raport tagów wymagających przeglądu
+### Tag review report
 
-`--tag-review-report NEW.json` analizuje zapisane tagi scen i główne etykiety
-markerów, odtwarzając merge z efektywnymi progami zapisanymi w bazie. Używa
-wybranej polityki temporalnej i wykluczeń. Nie ładuje modeli, nie pobiera mediów,
-nie łączy się ze Stash i nie zmienia bazy źródłowej ani publikacji.
+`--tag-review-report NEW.json` examines stored scene tags and primary
+marker labels by replaying merge with effective database thresholds.
+It uses the selected temporal policy and exclusion rules. It does not
+load models, retrieve media, connect to Stash, modify source state,
+or publish changes.
 
-Sceny z `input_checks` (`missing_media`, `read_error`, `deleted`) są pomijane
-z powodem `unverified_inputs`. Dotyczy to również problemu innego modelu w tej
-samej scenie; raport zachowuje zapisane wyniki i podaje przyczynę w przykładach.
+Scenes whose `input_checks` state is `missing_media`, `read_error`
+or `deleted` are skipped with `unverified_inputs`, even when an
+unselected model caused the problem on that scene. The report keeps
+the stored evidence and includes the reason in its examples.
 
-Raport wskazuje priorytety ręcznego przeglądu:
+Review priorities are determined by the following heuristics:
 
-- `weak_or_borderline`: najlepszy wynik nie przekracza właściwego progu o więcej
-  niż `--tag-review-margin` (domyślnie `0.05`). Dla scen zakwalifikowanych przez
-  `strong_peak` używany jest próg silnego piku; pozostałe wyniki mają własny próg
-  sceny lub markera. Słabe wyniki zaakceptowane przez reguły czasowe/konsensus też
-  mogą zostać wskazane;
-- `isolated_peak`: tag sceny kwalifikuje się przez silny pik, ale tylko jedna
-  próbka przekracza próg sceny, przy co najmniej dwóch próbkach;
-- `model_disagreement`: inny model zachował tę samą etykietę na identycznym
-  wejściu, lecz nie kwalifikuje jej według własnych reguł sceny. Brak modelu lub
-  etykiety w cache nie jest głosem negatywnym; wykluczone etykiety nie służą do
-  porównań;
-- `long_marker`: po scaleniu zakres ma co najmniej
-  `--tag-review-long-marker-seconds` (domyślnie `300` sekund).
+- `weak_or_borderline`: best score is no more than
+  `--tag-review-margin` (default `0.05`) above the relevant threshold.
+  For scene tags qualifying via `strong_peak`, the strong-peak
+  threshold applies; otherwise use that scene/marker's own threshold.
+  Weak results accepted through temporal or consensus rules can
+  also be flagged.
+- `isolated_peak`: a scene tag qualified through a strong peak
+  but only one sample exceeds the scene threshold, with at least
+  two samples present.
+- `model_disagreement`: another model retained the same label for
+  identical input but did not qualify it under its own scene rules.
+  Missing models/labels are **not** negative votes, and excluded
+  labels are ignored for comparison.
+- `long_marker`: a merged interval is at least
+  `--tag-review-long-marker-seconds` (default `300`) seconds long.
 
-Tabela w terminalu i sekcja `models` JSON pokazują dla JoyTag, WD, DTQ i Oppai
-liczbę różnych etykiet do przeglądu, liczbę par scena–tag oraz liczbę scen.
-Para scena–tag per model jest liczona raz, również gdy ten tag ma kilka zakresów,
-występuje jako tag sceny i core markera lub pochodzi z kilku zapisanych przebiegów.
-Globalne liczniki dodatkowo deduplikują modele; sumowanie wierszy modeli nie daje
-liczby różnych tagów w całej kolekcji. Liczniki powodów mogą się nakładać.
-Model wspierający core markera głosem konsensusowym również jest uwzględniony,
-nawet jeśli nie utworzył własnego zakresu. Jego wynik pochodzi ze zgodnych,
-zachowanych obserwacji w zakresie wkładu, a przykład ma `support_only: true`.
+The terminal table and JSON `models` section show JoyTag, WD, DTQ,
+and Oppai counts for distinct flagged labels, scene/tag pairs,
+and scenes. Each model's scene/tag pair counts once, even when
+several intervals exist, the tag is also a scene tag or marker core,
+or it came from multiple recorded runs. Global counts deduplicate
+across models; summing model rows does not give total distinct tags.
+Reason counts may overlap. A model contributing to marker-core
+consensus also counts even if it created no independent interval:
+the supporting score is derived from compatible retained observations
+within the contribution, and its example has `support_only: true`.
 
-Sekcja `tags` zawiera wiersze model–etykieta, liczniki powodów i do trzech
-przykładowych scen z wynikami, progami i czasami. Limit przykładów zmienia
-`--tag-review-examples 1..20`; liczniki obejmują wszystkie przeanalizowane sceny.
-Wiersze są sortowane według liczby wskazanych scen, następnie liczby powodów.
-`--scene-id` może ograniczyć analizę; istniejący plik raportu nie jest nadpisywany.
+The JSON `tags` section contains model/label rows, reason counts,
+and up to three example scenes with scores, thresholds and times.
+Configure 1–20 examples using `--tag-review-examples`; counts always
+include all analyzed scenes. Rows sort by affected-scene count,
+then reason count. `--scene-id` narrows the analysis. Existing report
+files are never overwritten.
 
-Sceny z pending refresh/publication lub nieużywalnym evidence są pomijane
-i raportowane osobno z powodami, zamiast uczestniczyć w porównaniu modeli.
-Raport opisuje wynik replay cache, a nie sprawdzony na żywo stan Stash.
-Heurystyki nie oznaczają potwierdzonych błędów: poprawny tag może mieć tylko jeden
-pik, długi zakres albo wsparcie jednego modelu. Raport nie uśrednia ocen modeli.
+Scenes awaiting refresh/publication or with unusable evidence are
+skipped with explicit reasons instead of participating in comparisons.
+The report shows **replayed cache output**, not live Stash state.
+Heuristics are not proof of an error: a valid tag can have one peak,
+a long interval or support from a single model. Model scores are
+not averaged.
 
-### Raport kompletności cache i plan uzupełnienia
+### Cache coverage report and backfill plan
 
-`--cache-report NEW.json` sprawdza oba rodzaje evidence (sceny i markery) dla
-modeli włączonych w YAML lub wybranych przez `--models`. Działa offline, bez
-modeli, słowników, mediów i połączenia ze Stash. Nie zmienia źródłowej bazy
-ani publikacji i nie nadpisuje istniejącego raportu.
+`--cache-report NEW.json` checks scene and marker evidence for models
+enabled in YAML or explicitly selected with `--models`. It runs
+offline without loading models, vocabularies or media and without
+connecting to Stash. It changes neither source state nor published
+results and refuses to overwrite an existing report.
 
-Domyślny zakres obejmuje sceny znane **bieżącemu scope lokalnej bazy**, również
-te obecne tylko w checkpointach, refresh requests, snapshotach, recovery lub input_checks.
-Sceny ze Stash, które nigdy nie trafiły do tej bazy, nie wchodzą do mianownika.
-Powtarzalne `--scene-id` ustala dokładny zakres; ID bez żadnego lokalnego stanu
-jest wtedy raportowane jako brakujące. Raport nie sprawdza aktualności wag,
-słownika, VTT ani sprite'ów — ich zgodność potwierdza zwykły przebieg inferencji.
+By default, it covers scenes known to the **current local database scope**,
+including scenes only referenced by checkpoints, refresh requests,
+snapshots, recovery or `input_checks`. Stash scenes never encountered
+by this database are not counted. Repeatable `--scene-id` arguments
+set an exact scope; IDs without any local state then count as missing.
+The report does not validate current weights, vocabulary, VTT or sprites;
+a normal inference run performs those checks.
 
-Tabela terminala i `models` w JSON pokazują per model liczbę par scena–model:
-gotowych, możliwych do przeliczenia bez GPU, wymagających inferencji,
-wymagających wyłącznie rethreshold oraz zablokowanych. `outputs` rozbija
-liczniki osobno na scene/markers i rozłączne statusy:
+The terminal table and JSON `models` list per-model scene/model pairs
+that are ready, rethresholdable without GPU, requiring inference,
+requiring rethreshold only, or blocked. `outputs` splits the counts
+by scene/marker outputs and mutually exclusive statuses:
 
-| Status | Znaczenie |
+| Status | Meaning |
 |---|---|
-| `ready` | Ukończona inferencja, zgodny indeks, efektywne progi i wystarczająca retencja |
-| `rethreshold` | Cache obejmuje progi YAML; wystarczy przeliczenie bez GPU |
-| `missing` | Brak wyniku danego rodzaju |
-| `partial` | Brak wyniku, lecz istnieje checkpoint do weryfikacji przy wznowieniu |
-| `refresh_required` | Oczekujące żądanie świeżej inferencji unieważnia stary wynik |
-| `insufficient` | Brak evidence klatek, za wysoki floor lub wcześniej odfiltrowane odblokowane etykiety |
-| `inconsistent` | Wynik i indeks są niespójne albo evidence jest nieczytelne; sprawdź `--db-check` |
+| `ready` | Completed inference, consistent index, effective thresholds, sufficient retention |
+| `rethreshold` | Cache covers the YAML thresholds; only GPU-free rethreshold is required |
+| `missing` | No result for this output kind |
+| `partial` | No result, but a checkpoint exists for resume-time validation |
+| `refresh_required` | Pending fresh-inference request invalidates old results |
+| `insufficient` | No frame evidence, retention floor too high, or required labels previously filtered out |
+| `inconsistent` | Result/index mismatch or unreadable evidence; investigate with `--db-check` |
 
-Ukończony wynik bez żadnych detekcji jest poprawnym cache, a nie brakiem.
-`evidence_ready_pairs` opisuje pokrycie zapisanych wyników. Znane odroczone
-kontrole wejścia blokują `fully_ready_scenes` i cały plan dla danej sceny,
-również gdy dotyczą niewybranego modelu. `issues.input_checks` podaje model
-i przyczynę. Przywróć dostępność mediów lub wyjaśnij usuniętą scenę, następnie
-zweryfikuj wejście zwykłym uruchomieniem; sama blokada nie wymaga `--restart`.
-Retencja jest sprawdzana względem minimum floor z YAML i progu wsparcia
-potrzebnego do publikacji. Sprawdzany jest jeden aktywny wynik każdego modelu i wyjścia.
-Przy gotowych `result_metadata` raport nie dekoduje BLOB-ów predykcji; starsze
-metadane uzupełnia wyłącznie w tymczasowej bazie. Głęboka kontrola payloadów
-pozostaje zadaniem `--db-check`.
+Completed inference with zero detections is valid cache, not missing
+evidence. `evidence_ready_pairs` describes coverage of persisted
+results. Known deferred input checks block `fully_ready_scenes` and the
+whole plan for that scene, even if they concern an unselected model.
+`issues.input_checks` identifies the model and reason. Restore the media
+or resolve scene deletion, then verify input during a normal run;
+the blockage alone does not require `--restart`.
 
-`issues` zawiera konkretne pary scena–model z powodami, wymaganymi progami,
-blokadami oraz zapisanym postępem checkpointu. `plan` zawiera uporządkowane,
-pogrupowane **tablice argumentów `argv`**, po maksymalnie 50 scen na polecenie:
+Retention is compared against the lower of the YAML floor and the
+support threshold needed for publication. Exactly one active result
+per model/output is checked. With populated `result_metadata`, the
+report avoids decoding prediction BLOBs; missing legacy metadata is
+filled only in a temporary database. Use `--db-check` for deep
+payload validation.
 
-- `resume_or_infer` uzupełnia tylko wskazane modele/sceny; zwykłe resume sprawdza
-  zgodność checkpointu i wykorzystuje poprawne ukończone wyniki;
-- `restart_inference` wymusza wymianę nieużywalnego ukończonego cache. Aktywne
-  braki/refresh z checkpointem dostają zwykłe resume, aby nie kasować postępu;
-- `rethreshold` stosuje oba progi z YAML bez inferencji;
-- `merge_after_backfill` na końcu odświeża konsensus modeli i Occurrence.
+`issues` identifies scene/model pairs, reasons, required thresholds,
+blockers and checkpoint progress. `plan` provides ordered, grouped
+**argument arrays (`argv`)** with at most 50 scenes per command:
 
-Polecenia zachowują ścieżki `--state-db`, YAML modeli, polityki temporalnej
-i wykluczeń. Raport **nie wykonuje planu**. Ręczne uruchomienie tych poleceń
-może zmienić publikację w Stash; używaj tego samego `STASH_URL` i ustawień
-środowiska. Przy wielu oczekujących refreshach publikacja może pozostać
-zablokowana do ukończenia wszystkich wskazanych modeli.
+- `resume_or_infer`: fill selected models/scenes; normal resume
+  validates checkpoints and reuses matching completed results;
+- `restart_inference`: forcibly replace unusable completed cache.
+  Active missing/refresh states with checkpoints use normal resume
+  to retain progress;
+- `rethreshold`: apply both YAML thresholds without inference;
+- `merge_after_backfill`: refresh model consensus and Occurrence last.
 
-Pending publication, globalny cleanup, refresh niewybranego modelu,
-nieczytelne evidence lub wyłączone zastępowanie nieużywalnej historii blokują
-wszystkie polecenia planu dla dotkniętej sceny, również uzupełnienie innych
-modeli i końcowy merge. Każde z tych poleceń może próbować publikacji.
-Najpierw dokończ pierwotny plan
-albo wyjaśnij niespójność, a następnie wygeneruj raport ponownie. Gotowy evidence
-może nadal mieć blokadę publikacji; liczniki tych dwóch cech mogą się nakładać.
+Commands preserve `--state-db` and YAML paths for models, temporal
+policy and exclusions. The report **does not execute** its plan.
+Manually running these commands can modify Stash; keep the same
+`STASH_URL` and environment. Publication may remain blocked until
+all models with pending refreshes have finished.
 
-Merge używa także zachowanego evidence niewybranych modeli. Raport sprawdza
-jego możliwość publikacji według zapisanych efektywnych progów i wybranej
-polityki, bez wymagania retencji z YAML dla tych modeli. Niepełny lub nieczytelny
-cache takiego modelu blokuje scenę; `issues[].publication_dependencies` wskazuje
-model, rodzaj wyniku, powód i sposób rozwiązania. Dołącz wskazany model przez
-`--models` i wygeneruj raport ponownie, aby zaplanować jego naprawę. Liczniki
-kompletności i cele inferencji nadal dotyczą wybranych modeli; raport nie
-rozszerza automatycznie zakresu inferencji. `issues[].blocking_models` wskazuje
-wybrane modele, których blokada uniemożliwia zaplanowanie pozostałych par sceny.
+Pending publication, global cleanup, refresh for an unselected model,
+unreadable evidence, or disabled replacement of unusable history
+blocks all planned commands for an affected scene, including
+backfilling other models and the final merge. Every command might
+attempt publication. Finish the original operation or resolve the
+inconsistency, then generate the report again. Evidence readiness
+and publication blockage can overlap in aggregate counts.
 
-Exit code `0` oznacza poprawnie wygenerowany raport, również gdy zawiera braki.
-Archiwalne evidence po `--abandon-pending` nie blokuje cache ani inferencji:
-`publication_recovery_scene_ids` pokazuje te sceny, a końcowy merge planu
-rekonsyliuje ich publikację, również gdy cache jest już kompletny, jeśli scena
-nie ma innych blokad publikacji.
+Merge also uses retained evidence from **unselected models**.
+The report checks their publication eligibility using stored effective
+thresholds and the selected policy, without requiring those models'
+current YAML retention settings. Incomplete or unreadable evidence
+from such a model blocks the scene. `issues[].publication_dependencies`
+identifies its model, output kind, reason and remedy. Include it in
+`--models` and regenerate the report to plan repairs. Completeness
+counts and inference targets still concern only selected models;
+the report does not silently expand the inference scope.
+`issues[].blocking_models` identifies selected models whose blockage
+prevents planning other pairs for the same scene.
 
-## Wynik w Stash
+Exit code `0` means the report was successfully generated, even
+when gaps remain. Archived evidence after `--abandon-pending` does
+not block cache or inference. `publication_recovery_scene_ids`
+lists affected scenes; the plan's final merge reconciles their
+publication even with complete cache, provided no other
+publication blocker exists.
 
-W trybie `merged`:
+## Results in Stash
 
-| Element | Przykład |
+In `merged` mode:
+
+| Item | Example |
 |---|---|
-| Tag sceny / core markera | `ai:blue_hair` |
-| Tytuł markera | `[AI] blue_hair [jt+wd+op]` |
-| Tag własności | `ai:marker:stash-taggers` |
-| Punkt Occurrence | dodatkowo `ai:marker:occurrence` |
-| Grupa zwykłego markera | `m:blue_hair` |
-| Grupa Occurrence | `m:blue_hair:occurance` |
-| Korzeń grup markerów | `ai_markers` |
-| Kategorie hierarchii | `ai:category:...` |
+| Scene tag / marker core | `ai:blue_hair` |
+| Marker title | `[AI] blue_hair [jt+wd+op]` |
+| Ownership tag | `ai:marker:stash-taggers` |
+| Occurrence point | Also has `ai:marker:occurrence` |
+| Regular marker group | `m:blue_hair` |
+| Occurrence group | `m:blue_hair:occurance` |
+| Marker group root | `ai_markers` |
+| Hierarchy categories | `ai:category:...` |
 
-Pisownia `:occurance` w nazwach grup jest celowa i pozostaje zgodna z istniejącym
-formatem.
+The `:occurance` spelling in group names is intentional and must remain
+compatible with the existing format.
 
-Nowe wyniki zawsze używają wspólnej publikacji `ai:` i reguł temporalnych.
-Przełączniki `--output-mode` i `--no-temporal` oraz klucz YAML `enabled`
-zostały usunięte; usuń je ze skryptów i `temporal_policy.yml`. Poszczególne
-reguły nadal konfiguruje polityka YAML, w tym `occurrence_markers`.
-Historyczne namespace’y modeli przenosi osobny migrator; zwykłe publikowanie,
-cleanup i domyślne pruning obsługują bieżące wyniki `ai:` oraz zarządzane grupy
-`m:`. Definicje dawnych prefiksów można usuwać jawnie, np.
-`--prune-empty-tags-only --prune-prefixes jt: wd: dtq: op:`. Ręczne dodatki
-z innych namespace’ów pozostają zachowane.
+New results always use shared `ai:` publication and temporal rules.
+`--output-mode`, `--no-temporal`, and the YAML `enabled` key have been
+removed; remove them from scripts and `temporal_policy.yml`. Individual
+rules, including `occurrence_markers`, are still configurable via the
+temporal-policy YAML. Historical per-model namespaces require the
+separate migrator. Normal publication, cleanup and default pruning
+manage current `ai:` results and `m:` groups. Legacy tag definitions
+can be explicitly pruned with, for example,
+`--prune-empty-tags-only --prune-prefixes jt: wd: dtq: op:`.
+Manual extras from other namespaces are preserved.
 
-Nowa inferencja zapisuje kompletny format analizy 5: sygnatury wejścia i
-inferencji, jawne progi retencji oraz statystyki lub jawne `null` dla
-niekwalifikujących się agregatów. `--db-update` wycofuje starsze aktywne wyniki,
-które wymagają ponownej inferencji. Przypięte archiwum zachowuje dokładne dowody
-publikacji, a geometria i ownership dawnych snapshotów pozostają dostępne dla
-recovery i migracji punktów. Cleanup wymaga przebudowy wycofanych publikacji
-przez świeżą inferencję i `--merge-only`.
+Fresh inference writes complete analysis format 5: input and inference
+signatures, explicit retention floors, and statistics or explicit
+`null` for non-qualifying aggregates. `--db-update` retires older
+active results requiring reinference. The pinned archive retains
+exact publication evidence, and historical snapshot geometry and
+ownership remain available for recovery and point migration. Cleanup
+requires rebuilding retired publications via fresh inference and
+`--merge-only`.
 
-Nowy fingerprint cleanupu zawsze zawiera zakres wyjść i nie zawiera stałego
-pustego blocklist. Przerwany cleanup zachowuje generację i maski. Historyczny
-podpis wymaga jawnego narzędzia `stash_ai.tools.cleanup_pending_migration`,
-które sprawdza ten sam zakres wyjść i politykę wykluczeń. Nowe operacje zapisują tylko bieżący podpis.
+The new cleanup fingerprint always includes output scope and no
+constant empty blocklist. Interrupted cleanup retains its generation
+and masks. Old fingerprints require the explicit
+`stash_ai.tools.cleanup_pending_migration` tool, which validates
+the same exclusion policy and output scope. New operations store only
+the current fingerprint.
 
 ## Konfiguracja
 
