@@ -264,20 +264,39 @@ class GitHub:
             "X-GitHub-Api-Version": "2022-11-28",
             "User-Agent": "stash-ai-updater",
         })
+        # One elapsed budget for all attempts, response chunks and backoff.
+        deadline = time.monotonic() + 90.0
+
+        def budget():
+            left = deadline - time.monotonic()
+            if left <= 0:
+                raise UpdateError('GitHub read exceeded the total 90s deadline.')
+            return min(30.0, left)
+
         for attempt in range(3):
             try:
-                with self.opener.open(request, timeout=30) as response:
-                    raw = response.read(MAX_FILE_BYTES * 2 + 1)
-                if len(raw) > MAX_FILE_BYTES * 2:
-                    raise UpdateError("GitHub response exceeds the download limit.")
-                value = json.loads(raw)
+                with self.opener.open(request, timeout=budget()) as response:
+                    parts, size = [], 0
+                    while True:
+                        left = budget()
+                        # Bound total transferred data, even for chunked replies.
+                        raw = response.read(min(65536, MAX_FILE_BYTES * 2 + 1 - size))
+                        if not raw:
+                            break
+                        size += len(raw)
+                        if size > MAX_FILE_BYTES * 2:
+                            raise UpdateError("GitHub response exceeds the download limit.")
+                        parts.append(raw)
+                        budget()
+                value = json.loads(b''.join(parts))
                 if not isinstance(value, dict):
                     raise UpdateError("Unexpected GitHub response.")
                 return value
             except HTTPError as exc:
                 retry = exc.code in (429, 500, 502, 503, 504)
                 if retry and attempt < 2:
-                    time.sleep(2 ** attempt)
+                    time.sleep(min(2 ** attempt, budget()))
+                    budget()
                     continue
                 if exc.code in (401, 403, 404):
                     raise UpdateError(f"GitHub HTTP {exc.code}: check token expiry, repository access "
@@ -285,7 +304,8 @@ class GitHub:
                 raise UpdateError(f"GitHub HTTP {exc.code}; installation was not downloaded completely.") from None
             except (URLError, TimeoutError, OSError):
                 if attempt < 2:
-                    time.sleep(2 ** attempt)
+                    time.sleep(min(2 ** attempt, budget()))
+                    budget()
                     continue
                 raise UpdateError("Could not reach GitHub after 3 attempts. Check network/proxy settings.") from None
             except (ValueError, UnicodeError):
