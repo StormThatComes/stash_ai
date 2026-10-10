@@ -7,6 +7,7 @@ import stash_ai.evidence.intervals as merge_intervals
 import stash_ai.evidence.labels as merge_labels
 from stash_ai.storage.store import StateStore, scope_for
 from stash_ai.storage.results import KINDS
+from stash_ai.db.read_source import consistent_source
 
 REPORT_FORMAT = 2
 
@@ -73,7 +74,7 @@ def _explain_scene_contributor(app, hit, recorded_scene_sources):
 def explain(app, args, core_policies, scene_policies):
     label = merge_labels.raw_label(args.explain_tag.removeprefix(merge_labels.AI.prefix))
     # Inspection always opens a read-only snapshot, even without --dry-run.
-    with StateStore(args.state_db, scope_for(app.STASH_URL), True,
+    with consistent_source(args.state_db), StateStore(args.state_db, scope_for(app.STASH_URL), True,
                     cache_bytes=int(args.ram_cache_gb * 2**30),
                     memory_budget_bytes=int(args.ram_budget_gb * 2**30)) as store:
         reports = []
@@ -108,5 +109,7 @@ def explain(app, args, core_policies, scene_policies):
                                                      evidence=marker["extra_evidence"][label])
                                                 for marker in markers if label in marker.get("extra_evidence", {})],
                             "pending_sync": any(store.snapshot(scene_id, kind, borrow=True)[1] is not None for kind in KINDS)})
+        from stash_ai.storage.preview import check_source
+        check_source(store)
     print(json.dumps(reports, ensure_ascii=False, indent=2, allow_nan=False))
     return 0
