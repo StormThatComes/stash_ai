@@ -1135,7 +1135,7 @@ validation and benchmark runs. They are not authoritative descriptions
 of the current test count or application contract.
 
 Configuration and CLI naming changes are documented in the
-[exclusion migration guide](docs/UPGRADE_exclusions.md#aktualizacja-starych-nazw).
+[exclusion migration guide](docs/UPGRADE_exclusions.md#renamed-configuration-and-cli-options).
 Use `excluded_scene_tags`, `--models`,
 `--scene-tag-exclusions` and `--cleanup-markers-only`;
 the default marker-exclusions file is `marker_core_exclusions.yml`.
