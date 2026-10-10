@@ -64,7 +64,9 @@ def test_model_load_failure_blocks_all_remaining_scenes(tmp_path, monkeypatch):
     from stash_ai.domain import Cue
     config = ModelSettings(WD, tmp_path/'weights', .4, .7, 1)
     cues = [Cue(0, 1, 'sprite', (0,0,1,1))]
-    inputs = SimpleNamespace(inspect=lambda *a:(cues, SimpleNamespace(hashes={}), 'new-input'))
+    from stash_ai.inference.inputs import InspectedInput, VerifiedInput
+    inputs = SimpleNamespace(inspect=lambda *a:InspectedInput(
+        VerifiedInput.capture(cues, {}), SimpleNamespace(hashes={}), 'new-input'))
     monkeypatch.setattr(app.services, 'load_tagger', lambda *a: (_ for _ in ()).throw(OSError('missing weights')))
     with StateStore(tmp_path/'state.sqlite3', 's') as state:
         record = inference_record(mode='frames', items=[dict(start=0, end=1, tags=[['core',.9]])])
