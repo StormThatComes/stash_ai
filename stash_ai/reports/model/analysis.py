@@ -26,15 +26,9 @@ def _scene_baseline(app, store, scene, core_policies, scene_policies):
     labels = _scene_labels(hits)
     markers = _merged_markers(spans)
     extras = _extras(markers)
-    sources = {
-        label: {
-            source
-            for hit in hits
-            if hit["tag"] == label
-            for source in (hit["source"], *hit.get("support_sources", ()))
-        }
-        for label in labels
-    }
+    sources = {label: set() for label in labels}
+    for hit in hits:
+        sources[hit['tag']].update((hit['source'], *hit.get('support_sources', ())))
     return {
         "present": _sources_for_scene(store, scene),
         "labels": labels,
