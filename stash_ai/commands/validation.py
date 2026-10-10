@@ -31,6 +31,13 @@ def _validate_report(parser, args, rule):
 
 def validate_reports(parser, args):
     """Reject report modifiers before applying runtime defaults."""
+    if args.command is Command.RECONCILE_HISTORY:
+        if not args.reconcile_run_id:
+            parser.error('--reconcile-run-history requires at least one --reconcile-run-id.')
+        if supplied(args, (*MODEL_OPTIONS, *PUBLICATION_OPTIONS, 'record_run')) or args.scene_id:
+            parser.error('--reconcile-run-history does not use inference or publication options.')
+    elif args.reconcile_run_id:
+        parser.error('--reconcile-run-id requires --reconcile-run-history.')
     if args.command is Command.PRUNE_HISTORY:
         if supplied(args, (*MODEL_OPTIONS, *PUBLICATION_OPTIONS, 'record_run')) or args.scene_id:
             parser.error('--prune-run-history does not use inference/tagging/scene modifiers.')
