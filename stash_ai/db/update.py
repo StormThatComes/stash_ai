@@ -11,7 +11,7 @@ from stash_ai.storage.schema import APPLICATION_ID, LATEST_SCHEMA_VERSION, requi
 from .common import connect_readonly, table_names
 
 
-def update_database(path, *, dry_run=False, show_progress=False, progress=None, details=None):
+def update_database(path, *, dry_run=False, show_progress=False, progress=None, details=None, report=None):
     """Upgrade all scopes, preserving evidence and unfinished publication plans.
 
     Initializers are idempotent and may commit creation of missing feature tables.
@@ -20,7 +20,7 @@ def update_database(path, *, dry_run=False, show_progress=False, progress=None, 
     Dry-run reports the target without running migrations or taking a writer lock.
     """
     from .progress import maintenance_progress
-    with maintenance_progress('DB update', show=show_progress, callback=progress) as notify:
+    with maintenance_progress('DB update', show=show_progress, callback=progress, report=report) as notify:
         return _update_database(path, dry_run=dry_run, progress=notify, details=details)
 
 
@@ -40,8 +40,9 @@ def _update_database(path, *, dry_run, progress, details):
             raise ValueError('Not a supported stash-taggers state DB.')
         require_supported_version(version)
         from .revisions import completed, metadata_complete
+        from stash_ai.storage.metadata_ledger import trusted
         if (version == LATEST_SCHEMA_VERSION and not shape_issues(db)
-                and completed(db) and metadata_complete(db)):
+                and completed(db) and trusted(db) and metadata_complete(db)):
             details['noop'] = True
             return version, LATEST_SCHEMA_VERSION
         if not dry_run:
