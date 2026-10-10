@@ -14,6 +14,9 @@ def main(argv: list[str] | None = None, *, runtime: RuntimeContext | None = None
 
     app = runtime if runtime is not None else RuntimeContext()
     args = parse_args(app, argv)
+    if args.command is Command.RECONCILE_HISTORY:
+        from stash_ai.history.reconcile import run as reconcile_history
+        return reconcile_history(app, args)
     if args.command is Command.PRUNE_HISTORY:
         from stash_ai.history.retention import run as prune_history
         return prune_history(app, args)
