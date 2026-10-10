@@ -139,12 +139,16 @@ def prepared_batches(app, tagger, stash, paths, cues, prefetch=0, workers=1, *,
     try:
         pending = deque(submit_next() for _ in range(prefetch)) if executor else deque()
         while True:
+            if buffer_usage is not None:
+                buffer_usage.release()
             with measure('inference_input_wait', 0):
                 if executor:
                     future = pending.popleft()
-                    if buffer_usage is not None:
-                        buffer_usage.taken(future)
-                    prepared, batch_cues = future.result()
+                    try:
+                        prepared, batch_cues = future.result()
+                    finally:
+                        if buffer_usage is not None:
+                            buffer_usage.taken(future)
                 else:
                     prepared, batch_cues = prepare_next()
             if not prepared:
