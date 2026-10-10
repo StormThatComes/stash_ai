@@ -238,161 +238,212 @@ batch preparation operate on PIL images: workers
 copy their images and close them after transformation.
 Test fixtures observe the same contracts.
 
-## Komunikacja ze Stash
+## Stash communication
 
-Pakiet `stash_ai/stash_api/` grupuje klienta domenowego, transport HTTP,
-odczyt snapshotów scen przez SQL i resolver tagów. `StashClient` pozostaje
-spójną klasą z dziedziczeniem po `StashTransport`; `sql.py` zawiera wyłącznie
-odczyty, a `tags.py` zarządza katalogiem i hierarchią tagów. Wywołania importują
-bezpośrednio te moduły, bez wrapperów pod dawnymi ścieżkami.
+`stash_ai/stash_api/` groups the domain client, HTTP transport,
+SQL scene-snapshot reads and tag resolution. `StashClient`
+remains a cohesive subclass of `StashTransport`.
+`sql.py` contains only reads, and `tags.py` manages the tag
+catalog and hierarchy. Callers import directly from these
+modules without legacy-path wrappers.
 
-| Moduł / klasa | Odpowiedzialność |
-| --- | --- |
-| `stash_ai/stash_api/transport.py` / `StashTransport` | Sesje HTTP, uwierzytelnianie, retry odczytów, blokada zapisu podczas dry-run, dekodowanie GraphQL i przekierowania mediów. |
-| `stash_ai/stash_api/client.py` / `StashClient` | Zapytania dotyczące scen, tagów i markerów, wymaganie Stash 0.31.1+, stronicowanie oraz fallback z SQL na GraphQL. |
+| Module / class | Responsibility |
+|---|---|
+| `stash_ai/stash_api/transport.py` / `StashTransport` | HTTP sessions, authentication, read retries, dry-run write prevention, GraphQL decoding and media redirects |
+| `stash_ai/stash_api/client.py` / `StashClient` | Scene, tag and marker queries; enforcing Stash 0.31.1+; pagination and SQL-to-GraphQL fallback |
 
-`StashClient` jest specjalizacją `StashTransport`. Wspólny transport utrzymuje
-jedną konfigurację połączenia i jeden raport żądań. Klient jest importowany z
-`stash_ai.stash_api.client`, a funkcje pomocnicze HTTP bezpośrednio z
-`stash_ai.stash_api.transport`. Pozostałe moduły używają analogicznych
-importów pakietowych, np. `from stash_ai.storage.store import StateStore`.
+`StashClient` specializes `StashTransport`. The shared
+transport maintains one connection configuration and
+request report. Import the client from
+`stash_ai.stash_api.client` and HTTP helpers directly
+from `stash_ai.stash_api.transport`. Other packages
+use equivalent direct imports, for example
+`from stash_ai.storage.store import StateStore`.
 
-Transport ponawia tylko odczyty, w tym ściśle dozwolone operacje SQL opakowane
-w mutację GraphQL. Zapisy nie są ponawiane. Nagłówek `ApiKey` nie jest przesyłany
-przy przekierowaniu mediów do innego origin.
+The transport retries only reads, including
+strictly allowlisted SQL operations that happen to be
+wrapped as GraphQL mutations. It does not retry
+writes. The `ApiKey` header is not sent with
+cross-origin media redirects.
 
-## Cleanup przez SQL
+## SQL-based cleanup
 
-`stash_ai/cleanup/sql_session.py` zawiera ograniczony allowlistą transport SQL/API,
-metryki odczytów i zapisów oraz keyset pagination. `stash_ai/cleanup/sql.py` /
-`SQLCleanup` pozostaje warstwą domenową: wybiera kandydatów, usuwa markery i
-powiązania, obsługuje preview i pruning. Korzysta bezpośrednio ze swojej
-`CleanupSqlSession` do odczytów, zapisów, stronicowania i granic discovery.
-Stałe SQL i walidator odczytów są importowane bezpośrednio z
-`cleanup/sql_session.py`.
+`stash_ai/cleanup/sql_session.py` implements
+allowlisted SQL/API transport, read/write metrics,
+and keyset pagination. `stash_ai/cleanup/sql.py` /
+`SQLCleanup` remains the domain layer: it discovers
+candidates, removes marker relationships, handles
+previews and pruning. It uses its `CleanupSqlSession`
+directly for reads, writes, pagination and discovery
+boundaries. SQL constants and read validation are
+imported from `cleanup/sql_session.py`.
 
+## Local state
 
-## Lokalny stan
+`stash_ai/storage/` manages the database, result and
+publication stores, serialization, metadata, snapshots,
+preview overlays and completion indexes. Callers import
+from specific package modules. This arrangement does
+not change schema version, database identity, BLOB format,
+or default SQLite path.
 
-Pakiet `stash_ai/storage/` obejmuje bazę, magazyny wyników i publikacji,
-serializację, metadata, snapshoty, nakładkę preview oraz indeks ukończenia.
-Importy wskazują bezpośrednio moduły pakietu. Przeniesienie nie zmienia wersji
-schematu, identyfikatora bazy, formatu BLOB-ów ani domyślnej lokalizacji SQLite.
+| Module / class | Responsibility |
+|---|---|
+| `stash_ai/storage/database.py` / `StateDatabase` | SQLite connection lifecycle and process lock, database ID/schema checks, base tables and opening the dry-run source |
+| `stash_ai/storage/store.py` / `StateStore` | Facade owning lifecycle, cache and serialization; coordinates schema initialization and delegates persistence |
+| `stash_ai/storage/results.py` / `ResultStore` | Inference results and source indexing |
+| `stash_ai/storage/publications.py` / `PublicationStore` | Published/pending snapshots, durable publication intent and atomic promotion of prepared publications |
+| `stash_ai/storage/initialization.py` / `InitializationStore` | New-database rebuild scope, adopted tag ownership and pre-publication completion barrier |
+| `stash_ai/storage/preview.py` | Dry-run overlay views, overlay deletions and source-change detection |
+| `stash_ai/storage/codec.py` | BLOB encoding and decoding |
+| `stash_ai/storage/snapshots.py` | Versioned snapshots with shared `extra_support` proofs and reconstructed contributions on read |
 
-| Moduł / klasa | Odpowiedzialność |
-| --- | --- |
-| `stash_ai/storage/database.py` / `StateDatabase` | Cykl życia połączenia SQLite i blokady procesu, sprawdzenie identyfikatora/wersji bazy, podstawowe tabele i otwarcie źródła dry-run. |
-| `stash_ai/storage/store.py` / `StateStore` | Façade i właściciel lifecycle/cache/serializacji; koordynuje inicjalizację schematów oraz deleguje trwałe dane do wyspecjalizowanych magazynów. |
-| `stash_ai/storage/results.py` / `ResultStore` | Wyniki inferencji i indeksowanie źródeł. |
-| `stash_ai/storage/publications.py` / `PublicationStore` | Snapshoty published/pending, trwały zamiar publikacji i atomowe zatwierdzanie przygotowanych publikacji. |
-| `stash_ai/storage/initialization.py` / `InitializationStore` | Zakres odbudowy nowej bazy, przejęta własność tagów i bariera kompletności przed publikacją. |
-| `stash_ai/storage/preview.py` | Widoki nakładki dry-run, usunięcia w nakładce i wykrywanie zmian źródła. |
-| `stash_ai/storage/codec.py` | Kodowanie i dekodowanie BLOB-ów. |
-| `stash_ai/storage/snapshots.py` | Wersjonowana reprezentacja snapshotów ze współdzielonymi dowodami `extra_support` i odtwarzanie contributions przy odczycie. |
+`StateStore` owns a `StateDatabase`, `ResultStore` and
+`PublicationStore`. Its `records()/put()/snapshot()/prepare()`
+methods delegate to the responsible owner. Normal
+writes use `ResultStore.put()` and its transaction.
+Inference completion calls `ResultStore.put_in_transaction()`
+in the same transaction as checkpoint and refresh-request
+removal. `StateStore` closes its database even if
+initialization fails. The process lock spans the entire
+store lifetime, including requests to Stash.
 
-`StateStore` posiada jeden `StateDatabase`, jeden `ResultStore` i jeden
-`PublicationStore`; udostępnia metody `records()/put()/snapshot()/prepare()`
-delegujące do właściciela danej operacji. `ResultStore.put()` zarządza transakcją
-zwykłego zapisu. Zakończenie inferencji używa `ResultStore.put_in_transaction()`
-we wspólnej transakcji z usunięciem checkpointu i żądań refresh. `StateStore`
-zamyka bazę również przy błędzie inicjalizacji.
-Blokada procesu obejmuje cały czas życia magazynu, także żądania do Stash.
-Rethreshold waliduje i stosuje zmiany z małych rekordów `result_metadata`;
-`ResultStore.set_threshold(..., metadata_only=True)` zapisuje próg oraz indeks
-ukończenia z tego planu w jednej transakcji, bez odczytu BLOB-ów klatek.
-Pełne rekordy pozostają obsługiwane przez tę samą ścieżkę zapisu dla reuse inferencji.
-Dry-run wymaga aktualnego schematu i odczytuje bazę przez nakładkę ze źródłem
-otwartym tylko do odczytu. Starszą bazę aktualizuje wyłącznie `--db-update`.
+Rethreshold validates and applies changes using compact
+`result_metadata` rows.
+`ResultStore.set_threshold(..., metadata_only=True)`
+writes thresholds and completion indexes in one
+transaction without reading frame BLOBs.
+The same write path supports full records for
+inference reuse. Dry-run requires the current
+schema and uses an overlay over a read-only source.
+Only `--db-update` upgrades old databases.
 
-`StateStore.pack_snapshot()` internuje powtarzające się obiekty dowodów według
-tożsamości, bez hashowania dużych struktur. Unikatowe dowody pozostają inline.
-Kompaktowy BLOB zawiera envelope `__stash_ai_snapshot__: 3`, `snapshot` oraz
-tablicę `proofs`; wartości `extra_support` są pełnymi dowodami lub indeksami tej
-tablicy. `storage.snapshots.decode()` waliduje referencje i zwraca dotychczasową,
-rozwiniętą strukturę także dla cleanupu, recovery i kontroli bazy. Dowody są
-współdzielone i niemutowalne dla pożyczających je czytelników; odczyt publiczny
-nadal zwraca kopię oddzieloną od cache. Zmiany historycznych snapshotów i wersji
-bazy odbywają się wyłącznie offline przez `--db-update`. Promocja pending i
-archiwizacja recovery kopiują już zapisany BLOB bez ponownej serializacji.
+`StateStore.pack_snapshot()` interns repeated proof
+objects by identity, without hashing large structures.
+Unique proofs remain inline. The compact BLOB contains
+`__stash_ai_snapshot__: 3`, `snapshot` and a `proofs`
+array; `extra_support` values are complete proofs or
+indexes into that array. `storage.snapshots.decode()`
+validates references and returns an expanded structure
+compatible with cleanup, recovery and DB checks.
+Shared proofs are immutable for borrowing readers;
+public reads still return copies separate from cache.
+Historical snapshots and database versions are updated
+only offline via `--db-update`. Pending promotion and
+recovery archival copy stored BLOBs without re-encoding.
 
-Obsługa samodzielnych komend bazy znajduje się w pakiecie `stash_ai/db/`:
+Standalone database commands live in `stash_ai/db/`:
 
-| Moduł | Odpowiedzialność |
-| --- | --- |
-| `stash_ai/commands/database.py` | Dispatch komend `--db-report`, `--db-check`, `--db-update`, `--db-compact` przed inicjalizacją runtime. Funkcje utrzymania bazy są importowane bezpośrednio z modułów poniżej. |
-| `stash_ai/db/update.py` | Jawna, lokalna aktualizacja całej bazy do najnowszego schematu przez istniejące migracje stanu; odczytowy preflight i dry-run. |
-| `stash_ai/db/inspection.py` | Odczyt stanu i zajętości bazy oraz formatowanie raportu agregatów. |
-| `stash_ai/db/checks.py` | Koordynacja głębokiej kontroli bazy w jednej transakcji odczytu oraz format raportu błędów i ostrzeżeń. |
-| `stash_ai/db/validation/` | Osobne walidatory schematu i domen, wyników/indeksów/progów, checkpointów oraz payloadów i relacji cleanup/recovery; wspólne dekodowanie i rozliczanie postępu. |
-| `stash_ai/db/compaction.py` | Blokada procesu, warunki bezpiecznego VACUUM i porównanie agregatów przed i po kompaktowaniu. |
-| `stash_ai/db/common.py` | Wspólne definicje obsługiwanego schematu, połączenie SQLite tylko do odczytu i helpery zapytań. |
+| Module | Responsibility |
+|---|---|
+| `stash_ai/commands/database.py` | Dispatch `--db-report`, `--db-check`, `--db-update` and `--db-compact` before runtime initialization, importing maintenance functions directly |
+| `stash_ai/db/update.py` | Explicit offline whole-database upgrade via existing migrations; read-only preflight and dry-run |
+| `stash_ai/db/inspection.py` | Read DB state/storage and format aggregate reports |
+| `stash_ai/db/checks.py` | Coordinate deep checks in one read transaction; format errors and warnings |
+| `stash_ai/db/validation/` | Validators for schema, result/index/thresholds, checkpoints, payloads and cleanup/recovery relationships, with shared decoding/progress |
+| `stash_ai/db/compaction.py` | Process lock, safe `VACUUM` preconditions and before/after aggregate checks |
+| `stash_ai/db/common.py` | Shared supported-schema definitions, read-only SQLite connection and query helpers |
 
-`stash_ai/reports/developer/report.py` korzysta z definicji schematu i helperów odczytu
-z `stash_ai.db.common`; nadal odpowiada za własny format anonimowego raportu JSON
-i zapis JSON. `developer/database.py` zbiera agregaty bazy i checkpointów,
-`developer/evidence.py` analizuje kształt i kompresję wyników, a `distribution.py`
-przechowuje ograniczone pamięciowo rozkłady. Pakiet `db` nie uruchamia migracji ani nie
-zmienia protokołu blokady używanego przez `StateStore`.
+`stash_ai/reports/developer/report.py` uses schema
+definitions and read helpers from `stash_ai.db.common`
+but owns its anonymous JSON report format and output.
+`developer/database.py` gathers database/checkpoint
+aggregates; `developer/evidence.py` analyzes result
+shape and compression; `distribution.py` holds
+memory-bounded distributions. The `db` package does
+not invoke migrations or change `StateStore` locking.
 
-Anonymous diagnostics format 2 scans detailed evidence only on the current schema.
-Supported v18–v20 databases receive aggregate database facts and `upgrade_required`,
-without historical payload adapters. Current evidence counters expose only scene/frames,
-inference origin and the current analysis format; obsolete values become `other`.
-Retired import tables are never parsed. DB checks report their presence as a schema error.
-Tag explanations retain the scene-report list, mark each report `format: 2`, and expose
-one `record` per source instead of a singleton `records` list.
+Anonymous diagnostics format 2 scans detailed evidence
+only on the current schema. Supported v18–v20 databases
+return aggregate facts and `upgrade_required` without
+historical payload adapters. Current evidence counts
+expose only scene/frames, inference origin and current
+analysis format; obsolete values map to `other`.
+Retired import tables are never parsed; DB checks
+report their presence as a schema error.
+Tag explanations return a scene-report list with
+`format: 2` and one `record` per source rather than
+a singleton `records` list.
 
-`stash_ai/rethreshold/` oddziela lokalną zmianę progów od projekcji evidence.
-`targets.py` wybiera pary scena/model z małych indeksów i grupuje przyczyny błędów;
-`markers.py` waliduje pokrycie markerów i zapisuje ich próg, a `scenes.py` planuje
-zmiany scen oraz opcjonalnie markerów. `execution.py` wspólnie obsługuje wszystkie
-trzy tryby: pełny preflight w batchu backfill metadanych, przerwanie przy dowolnym
-błędzie, a dopiero potem Apply z dotychczasową transakcją dla pojedynczej pary.
-Marker-only nadal blokuje pending publication także przy niezmienionym progu;
-scene/combined dopuszcza pending no-op. Check i Apply korzystają z metadanych,
-zachowując surowe BLOB-y evidence oraz atomowy zapis progu i indeksu ukończenia.
-`evidence/thresholds.py` zachowuje efektywne progi markerów, podpisy i kontrakty retencji,
-a `evidence/cache_views.py` projekcję scen i konwersję obserwacji do klatek. Reuse korzysta
-bezpośrednio z planów w `rethreshold`, bez wrapperów pod dawnymi ścieżkami.
+`stash_ai/rethreshold/` separates local threshold
+changes from evidence projection. `targets.py`
+selects scene/model pairs from small indexes and
+groups validation errors. `markers.py` checks marker
+coverage and writes marker thresholds; `scenes.py`
+plans scene updates and optionally marker updates.
+`execution.py` coordinates all three modes: full
+preflight, batch metadata backfill and abort on any
+failure, followed by `Apply` in the existing
+per-pair transaction. Marker-only still blocks
+pending publication even for unchanged thresholds;
+scene/combined modes allow pending no-op.
+Check/Apply use metadata and preserve raw evidence
+BLOBs while atomically writing threshold and index.
 
-Updater instaluje pliki Pythona z pakietu `stash_ai/`, również z jego podkatalogów.
-Pozostaje samodzielnym skryptem stdlib, aby odzyskiwanie przerwanej aktualizacji
-działało także przy niekompletnym pakiecie. `RemoteSnapshot` opisuje jeden przypięty
-commit, a `UpdatePlan` zawiera operacje, konflikty i następny stan instalacji.
-`prepare` zapisuje komplet plików i backupów przed publikacją journalu;
-`PreparedUpdate` przekazuje helperowi jego tożsamość i katalog. `UpdateTransaction`
-waliduje trwały plan oraz skupia apply i rollback, z fazami `Phase`.
-`run_helper` obsługuje przekazanie blokady, usunięcie tokenów z environment i status
-procesu. Format 1 metadanych pozostaje zgodny z wcześniejszym updaterem;
-żaden z tych obiektów nie wymaga importu pakietu aplikacji. Migrację starego updatera opisuje
-[README](../README.md#aktualizacje).
+`evidence/thresholds.py` owns effective marker
+thresholds, signatures and retention contracts;
+`evidence/cache_views.py` handles scene projections
+and converting observations to frames. Reuse calls
+rethreshold plans directly without old wrappers.
 
-YAML-e, domyślna baza `tagger_sources.sqlite3` i katalog `models/` pozostają
-obok launcherów. Domyślne ścieżki są wyznaczane względem katalogu instalacji,
-nie katalogu roboczego terminala. Testy znajdują się w `tests/`, a benchmarki
-w `benchmarks/`.
+The updater installs Python files from `stash_ai/`
+and its subdirectories. It remains a standalone
+stdlib script so interrupted-update recovery works
+even with an incomplete application package.
+`RemoteSnapshot` identifies one pinned commit,
+and `UpdatePlan` contains operations, conflicts
+and the future installation state. `prepare` writes
+all files and backups before publishing a journal.
+`PreparedUpdate` conveys the identity and directory
+to the helper. `UpdateTransaction` validates
+durable plans and owns apply/rollback through
+`Phase` states. `run_helper` manages lock handoff,
+removes tokens from the environment and tracks
+process status. Metadata format 1 remains compatible
+with the previous updater; none of these classes
+requires importing the application package.
+For legacy updater migration, see
+[the main README](../README.md#updating-the-application).
 
-Moduły, które mogą zmienić wynik merged publication przy tej samej efektywnej
-polityce, zapisanym evidence i obserwowanym stanie Stash, trzeba uwzględniać w
-`PUBLICATION_CODE_FILES` w `stash_ai/publication/fingerprints.py`. Warstwy transportu,
-CLI, parser VTT oraz tryby maintenance/cleanup mają własne sygnały invalidacji
-i celowo nie należą do tego fingerprintu, aby ich refaktory nie wymuszały
-re-merge całej biblioteki. Zmiana publication fingerprintu nie unieważnia
-surowego cache inferencji.
+YAML configuration, the default
+`tagger_sources.sqlite3` database, and `models/`
+remain next to the launchers. Default paths resolve
+from the installation directory, not the terminal
+working directory. Tests live in `tests/` and
+benchmarks in `benchmarks/`.
 
-## Raport kompletności cache
+Modules that can change merged publication for
+the same policy, retained evidence and observed Stash
+state must be included in `PUBLICATION_CODE_FILES`
+in `stash_ai/publication/fingerprints.py`. Transport,
+CLI, VTT parsing and maintenance/cleanup have
+separate invalidation signals and are intentionally
+excluded: refactoring them should not trigger a
+library-wide re-merge. A changed publication
+fingerprint does not invalidate raw inference cache.
 
-`stash_ai/reports/cache.py` strumieniuje małe metadane wyników i sprawdza indeks,
-refresh requests, checkpointy oraz retencję względem wybranego YAML. Raport
-korzysta z read-only źródła i sparse preview; generuje advisory `argv` dla
-inferencji/rethreshold/merge bez ich uruchamiania. Nie dowodzi aktualności mediów
-ani modelu; głęboki test payloadów pozostaje w `--db-check`.
+## Cache coverage report
 
-Pakiet `stash_ai/reports/` grupuje raporty offline bez re-eksportów starych modułów.
-`cache_assessment.py` ocenia retencję, indeks i blokady publikacji całej sceny;
-`cache_coverage.py` agreguje liczniki oraz problemy, a `cache_plan.py` wybiera akcje
-i buduje uporządkowany plan komend w paczkach po 50 scen. `cache.py` koordynuje
-strumieniowy odczyt metadanych, kontrolę źródła preview i zapis istniejącego formatu JSON.
+`stash_ai/reports/cache.py` streams compact result
+metadata and checks indexes, refresh requests,
+checkpoints and retention against selected YAML.
+It reads from a read-only source with sparse preview
+and generates advisory `argv` for inference,
+rethreshold and merge without executing them.
+It does not establish current media or model
+identity; deep payload validation belongs to
+`--db-check`.
+
+`stash_ai/reports/` groups offline reports
+without legacy-module re-exports.
+`cache_assessment.py` checks retention, index and
+scene-wide publication blockers.
+`cache_coverage.py` aggregates counts and issues;
+`cache_plan.py` selects actions and constructs
+ordered command plans in batches of 50 scenes.
+`cache.py` orchestrates streaming metadata reads,
+preview-source verification and the existing
+JSON output format.
 
 ### Reguły czasowe i obserwacje
 
