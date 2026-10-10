@@ -1,0 +1,187 @@
+{
+  "metrics": {
+    "updates": 10000,
+    "reference_seconds": 0.04934103999949002,
+    "optimized_seconds": 0.03603854900029546,
+    "reference_initial_samples": 10000,
+    "optimized_initial_samples": 1
+  },
+  "history": {
+    "checks": 10000,
+    "reference_seconds": 0.15529075299855322,
+    "optimized_seconds": 0.01125540500106581,
+    "reference_counter_copies": 10000,
+    "optimized_counter_copies": 0
+  },
+  "ipc": {
+    "scenes": 8,
+    "transfers": 10000,
+    "reference_bytes": 4096,
+    "optimized_bytes": 1064,
+    "reference_roundtrip_seconds": 0.569731255998704,
+    "optimized_roundtrip_seconds": 0.2510237980004604,
+    "reference_pipe_seconds": 0.45137704700027825,
+    "optimized_pipe_seconds": 0.3624912810009846,
+    "pipe_note": "Echo of pre-serialized eight-scene payloads; process startup excluded"
+  },
+  "complete_offline_merge": {
+    "scenes": 64,
+    "repeats": 3,
+    "reference_trials": [
+      {
+        "seconds": 0.38677156799894874,
+        "worker_cpu_seconds": 0.15986005199999997,
+        "counts": {
+          "merge_forced": 64,
+          "scene_tags_updated": 64,
+          "markers_created": 64,
+          "markers_updated": 0,
+          "markers_deleted": 0,
+          "markers_unchanged": 0,
+          "merged_markers": 64,
+          "merged_scene_tags": 64,
+          "short_extras": 0,
+          "occurrence_markers": 0,
+          "occurrence_manual_locations": 0,
+          "cross_model_extras": 0,
+          "shared_marker_runs": 0,
+          "shared_marker_extensions": 0,
+          "shared_scene_tags": 0,
+          "scene_cache_partial": 0,
+          "scene_cache_missing": 0,
+          "scenes_synced": 64,
+          "merge_parallel_scenes": 64
+        }
+      },
+      {
+        "seconds": 0.6433890799999062,
+        "worker_cpu_seconds": 0.13540990600000014,
+        "counts": {
+          "merge_forced": 64,
+          "scene_tags_updated": 64,
+          "markers_created": 64,
+          "markers_updated": 0,
+          "markers_deleted": 0,
+          "markers_unchanged": 0,
+          "merged_markers": 64,
+          "merged_scene_tags": 64,
+          "short_extras": 0,
+          "occurrence_markers": 0,
+          "occurrence_manual_locations": 0,
+          "cross_model_extras": 0,
+          "shared_marker_runs": 0,
+          "shared_marker_extensions": 0,
+          "shared_scene_tags": 0,
+          "scene_cache_partial": 0,
+          "scene_cache_missing": 0,
+          "scenes_synced": 64,
+          "merge_parallel_scenes": 64
+        }
+      },
+      {
+        "seconds": 0.440192117001061,
+        "worker_cpu_seconds": 0.15238578700000005,
+        "counts": {
+          "merge_forced": 64,
+          "scene_tags_updated": 64,
+          "markers_created": 64,
+          "markers_updated": 0,
+          "markers_deleted": 0,
+          "markers_unchanged": 0,
+          "merged_markers": 64,
+          "merged_scene_tags": 64,
+          "short_extras": 0,
+          "occurrence_markers": 0,
+          "occurrence_manual_locations": 0,
+          "cross_model_extras": 0,
+          "shared_marker_runs": 0,
+          "shared_marker_extensions": 0,
+          "shared_scene_tags": 0,
+          "scene_cache_partial": 0,
+          "scene_cache_missing": 0,
+          "scenes_synced": 64,
+          "merge_parallel_scenes": 64
+        }
+      }
+    ],
+    "optimized_trials": [
+      {
+        "seconds": 0.3234357170003932,
+        "worker_cpu_seconds": 0.13719715399999985,
+        "counts": {
+          "merge_forced": 64,
+          "scene_tags_updated": 64,
+          "markers_created": 64,
+          "markers_updated": 0,
+          "markers_deleted": 0,
+          "markers_unchanged": 0,
+          "merged_markers": 64,
+          "merged_scene_tags": 64,
+          "short_extras": 0,
+          "occurrence_markers": 0,
+          "occurrence_manual_locations": 0,
+          "cross_model_extras": 0,
+          "shared_marker_runs": 0,
+          "shared_marker_extensions": 0,
+          "shared_scene_tags": 0,
+          "scene_cache_partial": 0,
+          "scene_cache_missing": 0,
+          "scenes_synced": 64,
+          "merge_parallel_scenes": 64
+        }
+      },
+      {
+        "seconds": 0.5501709939999273,
+        "worker_cpu_seconds": 0.1347562570000001,
+        "counts": {
+          "merge_forced": 64,
+          "scene_tags_updated": 64,
+          "markers_created": 64,
+          "markers_updated": 0,
+          "markers_deleted": 0,
+          "markers_unchanged": 0,
+          "merged_markers": 64,
+          "merged_scene_tags": 64,
+          "short_extras": 0,
+          "occurrence_markers": 0,
+          "occurrence_manual_locations": 0,
+          "cross_model_extras": 0,
+          "shared_marker_runs": 0,
+          "shared_marker_extensions": 0,
+          "shared_scene_tags": 0,
+          "scene_cache_partial": 0,
+          "scene_cache_missing": 0,
+          "scenes_synced": 64,
+          "merge_parallel_scenes": 64
+        }
+      },
+      {
+        "seconds": 0.5926992189997691,
+        "worker_cpu_seconds": 0.11562882199999991,
+        "counts": {
+          "merge_forced": 64,
+          "scene_tags_updated": 64,
+          "markers_created": 64,
+          "markers_updated": 0,
+          "markers_deleted": 0,
+          "markers_unchanged": 0,
+          "merged_markers": 64,
+          "merged_scene_tags": 64,
+          "short_extras": 0,
+          "occurrence_markers": 0,
+          "occurrence_manual_locations": 0,
+          "cross_model_extras": 0,
+          "shared_marker_runs": 0,
+          "shared_marker_extensions": 0,
+          "shared_scene_tags": 0,
+          "scene_cache_partial": 0,
+          "scene_cache_missing": 0,
+          "scenes_synced": 64,
+          "merge_parallel_scenes": 64
+        }
+      }
+    ],
+    "reference_median_seconds": 0.440192117001061,
+    "optimized_median_seconds": 0.5501709939999273
+  }
+}

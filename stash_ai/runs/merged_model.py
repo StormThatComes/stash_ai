@@ -187,8 +187,10 @@ class MergedModelRun:
             # the caller is interrupted while waiting for initialization.
             before = asset_stamps(self.config)
             require_assets_unchanged(self.asset_stamps, before, allow_download=True)
-            self.tagger = self.app.services.load_tagger(
-                self.config, self.vocabulary, partial(preparation.prepare_image, self.app))
+            from stash_ai.backends.profiling import use
+            with use(self.report, enabled=bool(self.args.profile_merge)):
+                self.tagger = self.app.services.load_tagger(
+                    self.config, self.vocabulary, partial(preparation.prepare_image, self.app))
             after = asset_stamps(self.config)
             require_assets_unchanged(before, after, allow_download=True)
             self.asset_stamps = after
@@ -409,11 +411,12 @@ class MergedModelRun:
             display.refresh()
 
     def _buffer_snapshot(self, job):
+        from stash_ai.inference.buffer_usage import BufferUsage
         args = self.args
         read = job.batches.buffer_usage if job.batches is not None else job.batch_usage
         current = (read() if read is not None else
-                   dict(input=(0, args.prefetch_batches) if args.prefetch_batches else None,
-                        result=(0, args.result_prefetch_batches) if args.prefetch_batches else None))
+                   dict(input=BufferUsage(0, 0, args.prefetch_batches + 1) if args.prefetch_batches else None,
+                        result=BufferUsage(0, 0, args.result_prefetch_batches + 2) if args.prefetch_batches else None))
         following = None
         if self._staged is not None and self._staged.preparation.job is not None:
             staged = self._staged.preparation.job
@@ -421,8 +424,8 @@ class MergedModelRun:
         elif self.input_prefetch is not None and self.input_prefetch.scene is not None:
             scene = self.input_prefetch.scene
             following = dict(scene=scene,
-                input=self.input_prefetch.buffer_usage(scene) or (0, args.prefetch_batches),
-                result=(0, args.result_prefetch_batches))
+                input=self.input_prefetch.buffer_usage(scene) or BufferUsage(0, 0, args.prefetch_batches + 2),
+                result=BufferUsage(0, 0, args.result_prefetch_batches + 2))
         return dict(current=current, next=following, cache=self.store.cache.usage(),
                     checkpoint=(job.checkpoint.batches, job.checkpoint.every))
 

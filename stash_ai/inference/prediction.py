@@ -4,6 +4,7 @@ from __future__ import annotations
 from .scene_predictions import retained_scores, candidate_scores
 
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any, TYPE_CHECKING
 
 from stash_ai.domain import Cue, FramePrediction
@@ -19,10 +20,25 @@ def select_scores(scores: np.ndarray, labels: list[str], threshold: float, limit
     return matches[:limit] if limit else matches
 
 
+@lru_cache(maxsize=128)
+def _float32_cutoff(threshold):
+    import numpy as np
+    cutoff = np.float32(threshold)
+    if float(cutoff) < threshold:
+        cutoff = np.nextafter(cutoff, np.float32(np.inf))
+    return cutoff
+
+
 def selected_scores(scores, threshold):
     import numpy as np
-    # Keep Python-float boundary comparisons and ascending vocabulary indices.
-    indexes = np.flatnonzero(scores.astype(np.float64, copy=False) >= threshold)
+    # Choose the first representable float32 at/above the Python-float floor.
+    # This preserves exact boundaries without widening every vocabulary row.
+    if scores.dtype == np.float32 and -1. <= threshold <= 2.:
+        indexes = np.flatnonzero(scores >= _float32_cutoff(threshold))
+    else:
+        indexes = np.flatnonzero(scores.astype(np.float64, copy=False) >= threshold)
+    if scores.dtype in (np.float16, np.float32, np.float64):
+        return list(zip(indexes.tolist(), scores[indexes].tolist()))
     return [(int(index), float(scores[index])) for index in indexes]
 
 
@@ -158,11 +174,14 @@ def _run_prediction_batches(app, tagger, stash, paths, cues, state, *,
             timer = (report.measure('inference_postprocess', model=settings.source.key, units=len(batch_cues), unit='frames')
                      if report is not None else nullcontext())
             with timer:
-                combined = np.concatenate((state.top_scores, result), axis=0)
-                count = min(keep, len(combined))
-                top_scores = np.partition(
-                    combined, len(combined) - count, axis=0
-                )[-count:]
+                if app.AGGREGATION == 'max':
+                    maximum = np.max(result, axis=0, keepdims=True)
+                    top_scores = (np.maximum(state.top_scores, maximum)
+                                  if len(state.top_scores) else maximum)
+                else:
+                    combined = np.concatenate((state.top_scores, result), axis=0)
+                    count = min(keep, len(combined))
+                    top_scores = np.partition(combined, len(combined) - count, axis=0)[-count:]
 
                 # One ordering per model row, then apply each retention floor.
                 batch_frames, batch_scene = [], []
