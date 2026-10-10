@@ -10,7 +10,7 @@ from stash_ai.storage.schema import APPLICATION_ID, LATEST_SCHEMA_VERSION, requi
 from .common import connect_readonly, table_names
 
 
-def update_database(path, *, dry_run=False):
+def update_database(path, *, dry_run=False, show_progress=False, progress=None, details=None):
     """Upgrade all scopes, preserving evidence and unfinished publication plans.
 
     Initializers are idempotent and may commit creation of missing feature tables.
@@ -18,6 +18,16 @@ def update_database(path, *, dry_run=False):
     failed upgrade can be retried through the same migration path.
     Dry-run reports the target without running migrations or taking a writer lock.
     """
+    from .progress import maintenance_progress
+    with maintenance_progress('DB update', show=show_progress, callback=progress) as notify:
+        return _update_database(path, dry_run=dry_run, progress=notify, details=details)
+
+
+def _update_database(path, *, dry_run, progress, details):
+    if details is None:
+        details = {}
+    details.clear()
+    details['noop'] = False
     path = Path(path).expanduser().resolve()
     if not path.is_file():
         raise FileNotFoundError(f"State database does not exist: {path}")
@@ -31,9 +41,13 @@ def update_database(path, *, dry_run=False):
         from .revisions import completed, metadata_complete
         if (version == LATEST_SCHEMA_VERSION and not shape_issues(db)
                 and completed(db) and metadata_complete(db)):
+            details['noop'] = True
             return version, LATEST_SCHEMA_VERSION
-        if not dry_run and db.execute('PRAGMA quick_check(1)').fetchone()[0] != 'ok':
-            raise RuntimeError('SQLite quick_check failed; database update was not started.')
+        if not dry_run:
+            progress('SQLite quick_check', 0, 1)
+            if db.execute('PRAGMA quick_check(1)').fetchone()[0] != 'ok':
+                raise RuntimeError('SQLite quick_check failed; database update was not started.')
+            progress('SQLite quick_check', 1, 1)
     if dry_run:
         return version, LATEST_SCHEMA_VERSION
 
@@ -41,7 +55,7 @@ def update_database(path, *, dry_run=False):
         from .migrations import migrate
         with StateDatabase(path, migration=True) as database:
             version = database.version
-            migrate(database)
+            details.update(migrate(database, progress=progress))
     except (KeyError, TypeError, zlib.error) as exc:
         raise ValueError('Saved state could not be migrated; inspect the database with --db-check.') from exc
     return version, LATEST_SCHEMA_VERSION
