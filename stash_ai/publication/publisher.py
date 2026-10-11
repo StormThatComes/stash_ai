@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from stash_ai.runtime.console import progress as console_bar
+from stash_ai.runtime.console import activity, status
 from collections import Counter
 from itertools import batched
 
@@ -24,6 +25,29 @@ class MergePublisher:
         self.core_policies, self.scene_policies = core_policies, scene_policies
         self.publication_key, self.stats, self.report = publication_key, stats, report
         self.pending_refreshes = {}
+        self.live = Counter()
+
+    def _show(self, **values):
+        self.report.workload['merge'] = dict(self.live)
+        status(self.report, decisions=' '.join(f'{key}={self.live[key]}' for key in
+               ('checked', 'reused', 'pending', 'blocked', 'failed', 'unresolved')),
+               publication=' '.join(f'{key}={self.live[key]}' for key in
+               ('evidence_received', 'published', 'planned', 'failed_publications')), **values)
+
+    def _checked_reason(self, scene_id, current, refresh_error=None):
+        self.live['checked'] += 1
+        blocked = self.live['blocked']
+        try:
+            with activity(self.report, 'publication preflight', scene=scene_id):
+                reason = self._reason(scene_id, current, refresh_error)
+            self.live['reused' if reason == 'reused' else 'pending'] += 1
+            self._show(reason=reason)
+            return reason
+        except BaseException:
+            if self.live['blocked'] == blocked:
+                self.live['failed'] += 1
+            self._show(reason='blocked' if self.live['blocked'] != blocked else 'failed read/check')
+            raise
 
     def run(self, scenes):
         refresh_kinds = progress.output_kinds(self.app)
@@ -36,6 +60,10 @@ class MergePublisher:
             # Workers cannot see the temporary dry-run overlay. Profiling needs
             # per-stage timings from the parent, so it also remains serial.
             workers = 1
+        reason = ('dry-run' if self.app.DRY_RUN else 'profiling' if self.args.profile_merge is not None
+                  else 'selection size' if len(scenes) < 2 else 'configured')
+        self._show(workers=f'{min(workers, len(scenes))} effective/{self.args.merge_workers} configured',
+                   worker_mode=reason)
         if workers <= 1 or len(scenes) < 2:
             return self._serial(scenes)
         return self._parallel(scenes, workers)
@@ -73,16 +101,22 @@ class MergePublisher:
                                  if scene_id in refreshed else current), errors.get(scene_id)
 
     def _reason(self, scene_id, current, refresh_error=None):
-        self.store.initialization.require_ready(scene_id)
+        try:
+            self.store.initialization.require_ready(scene_id)
+        except Exception:
+            self.live['blocked'] += 1
+            raise
         from stash_ai.storage.input_checks import pending as unverified_inputs
         deferred = unverified_inputs(self.store, scene_id)
         if deferred:
+            self.live['blocked'] += 1
             self.stats['merge_input_unverified'] += 1
             raise RuntimeError('Input verification pending for ' +
                                ', '.join(f'{model}/{reason}' for model, reason in sorted(deferred.items())) +
                                '; existing results retained. Restore media and resume to verify reuse.')
         pending = self.pending_refreshes.get(str(scene_id), ())
         if pending:
+            self.live['blocked'] += 1
             self.stats["merge_refresh_blocked"] += 1
             details = ", ".join(f"{model}/{kind}" for model, kind in pending)
             raise RuntimeError(
@@ -124,11 +158,11 @@ class MergePublisher:
             cache_before = self.store.cache.stats.copy()
             if prepared is None:
                 diagnostics = Counter()
-                with self.report.measure('merge_compute'):
+                with activity(self.report, 'compute evidence', scene=scene_id), self.report.measure('merge_compute'):
                     scene_hits, spans = merge.evidence(
                         self.app, self.store, scene_id, self.core_policies,
                         self.scene_policies, diagnostics)
-            with self.report.measure('merge_plan'):
+            with activity(self.report, 'plan/publish scene', scene=scene_id), self.report.measure('merge_plan'):
                 result = self._sync(current, scene_hits, spans,
                                     prepared_markers=markers if prepared is not None else None)
             self.stats.update(result)
@@ -138,11 +172,15 @@ class MergePublisher:
             })
             self.stats.update(diagnostics)
             self.stats["scenes_synced"] += 1
+            self.live['planned' if self.app.DRY_RUN else 'published'] += 1
+            self._show(completed=1, writer='idle')
             if prepared is not None:
                 self.stats["merge_parallel_scenes"] += 1
             return result + diagnostics
         except Exception as exc:
+            self.live['failed_publications'] += 1
             self._issue(scene_id, exc)
+            self._show(writer='failed')
             return None
 
     def _sync(self, current, scene_hits, spans, *, prepared_markers=None):
@@ -156,7 +194,7 @@ class MergePublisher:
         for scene_id, current, refresh_error in bar:
             with self.report.diagnostics.scene(scene_id) as sample:
                 try:
-                    reason = self._reason(scene_id, current, refresh_error)
+                    reason = self._checked_reason(scene_id, current, refresh_error)
                     sample['reason'] = reason
                     if reason == 'reused':
                         sample['status'] = 'reused'
@@ -185,7 +223,7 @@ class MergePublisher:
             # Check in the writer process before scheduling expensive replay.
             for scene_id, current, refresh_error in self._observed_scenes(scenes):
                 try:
-                    if self._reason(scene_id, current, refresh_error) != 'reused':
+                    if self._checked_reason(scene_id, current, refresh_error) != 'reused':
                         pending.append((scene_id, current))
                         continue
                 except Exception as exc:
@@ -196,6 +234,8 @@ class MergePublisher:
             if not pending:
                 return
             workers = min(workers, len(pending))
+            self._show(workers=f'{workers} effective/{self.args.merge_workers} configured',
+                       worker_mode='pending selection', evidence_wait='not started')
             if workers <= 1:
                 # Avoid process startup when only one scene needs publication.
                 for scene_id, current in pending:
@@ -222,6 +262,7 @@ class MergePublisher:
                 completed = 0
                 try:
                     missing = object()
+                    self._show(evidence_wait='ordered evidence', writer='idle')
                     for item, prepared in zip_longest(pending, evidence, fillvalue=missing):
                         if item is missing or prepared is missing:
                             raise RuntimeError('Merge worker returned incomplete or extra scene results.')
@@ -230,10 +271,13 @@ class MergePublisher:
                             raise RuntimeError('Merge worker returned an inconsistent scene ID.')
                         if self.report.profile is not None and prepared.metrics is not None:
                             self.report.profile.ingest(prepared.metrics)
+                        self.live['evidence_received'] += 1
+                        self._show(evidence_wait=None, writer='publishing', scene=scene_id)
                         self._merge_one(scene_id, current, prepared)
                         completed += 1
                         bar.update(1)
                         self.report.progress(bar, self.stats)
+                        self._show(evidence_wait='ordered evidence', writer='idle')
                 except Exception as exc:
                     # Never retry a second merge pass after a pool failure: some
                     # scenes may already have been published by the parent.
@@ -242,7 +286,8 @@ class MergePublisher:
                     self.report.issue(
                         'merge workers', '', None, exc,
                         self.app.services.safe_error(exc, api_key=self.app.STASH_API_KEY))
-                    bar.update(remaining)
+                    self.live['unresolved'] += remaining
+                    self._show(evidence_wait='pool failed', writer='stopped')
                     self.report.progress(bar, self.stats)
                 finally:
                     evidence.close()
