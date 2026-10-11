@@ -23,7 +23,13 @@ def test_one_owner_renders_bar_messages_and_heartbeat_during_blocked_work():
         owner_threads.add(current_thread().name)
         messages.append(message)
         if message.startswith('Still working:'): tick.set()
-    ui = ConsolePresenter(write, stream=StringIO(), refresh=.01, heartbeat=.02).start()
+    class Output(StringIO):
+        def write(self, value):
+            owner_threads.add(current_thread().name)
+            messages.append(value)
+            if value.startswith('Still working:'): tick.set()
+            return super().write(value)
+    ui = ConsolePresenter(write, stream=Output(), refresh=.01, heartbeat=.02).start()
     try:
         bar = ui.bar(Bar, total=2)
         Thread(target=lambda: ui.message('warning')).start()
@@ -75,12 +81,29 @@ def test_rendering_failure_does_not_change_operation_outcome():
 
 
 def test_phase_failure_is_partial_and_cleans_owner(monkeypatch):
-    monkeypatch.setattr('sys.stderr', StringIO())
+    stream = StringIO()
+    monkeypatch.setattr('sys.stderr', stream)
     messages=[]; report=RunReport(write=messages.append)
     with pytest.raises(ValueError):
         with present(report, 'auto') as ui:
             with ui.phase('preflight'):
                 raise ValueError('invalid')
-    assert 'Phase: preflight failed' in messages
+    assert 'Phase: preflight failed' in stream.getvalue()
     assert not ui.thread.is_alive()
     assert not any('preflight complete' in message for message in messages)
+
+
+def test_reset_and_redirected_milestones_preserve_stdout_contract():
+    output, diagnostics = [], StringIO()
+    ui = ConsolePresenter(output.append, stream=diagnostics).start()
+    try:
+        with ui.bar(tqdm, total=2, desc='Maintenance') as bar:
+            bar.update(2)
+            bar.reset(total=3)
+            assert bar.n == 0 and bar.total == 3
+            bar.update(1)
+            ui.message('Result')
+        assert output == ['Result']
+        assert 'inspected 1/3' in diagnostics.getvalue()
+    finally:
+        ui.close()
