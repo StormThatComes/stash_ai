@@ -24,7 +24,7 @@ def selected_settings(app, args):
     settings = app.services.load_model_settings(args.model_config, args.models, args.device, args.offline)
     for config in settings:
         args.report.record_model(config)
-    print("Selected models: " + ", ".join(f"{item.source.title} ({item.source.code})" for item in settings))
+    args.report.write("Selected models: " + ", ".join(f"{item.source.title} ({item.source.code})" for item in settings))
     return settings
 
 
@@ -63,11 +63,11 @@ def catalogs(app, settings, args, scene_policies):
         catalogs[source.key] = vocabulary
         if hierarchy is not None:
             validate_hierarchy_vocabulary(hierarchy, vocabulary.labels, source)
-        print(f"{source.title}: {len(vocabulary.labels):,} labels; "
+        args.report.write(f"{source.title}: {len(vocabulary.labels):,} labels; "
               f"hierarchy={'off' if hierarchy is None else str(len(hierarchy.category_parents)) + ' categories'}; "
               f"scene threshold={config.scene_threshold}, marker threshold={config.marker_threshold}.")
     from stash_ai.commands.hierarchy import combined_hierarchy
     merged_hierarchy = combined_hierarchy(app, args, scene_policies, hierarchy)
     if merged_hierarchy:
-        print(f"AI: {len(merged_hierarchy.leaf_parents):,} unique labels; {len(merged_hierarchy.category_parents)} shared categories.")
+        args.report.write(f"AI: {len(merged_hierarchy.leaf_parents):,} unique labels; {len(merged_hierarchy.category_parents)} shared categories.")
     return catalogs, merged_hierarchy

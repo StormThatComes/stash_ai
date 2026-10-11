@@ -49,7 +49,7 @@ class StashTransport:
 
     def close(self) -> None:
         from stash_ai.runtime.cleanup import cleanup
-        cleanup([self.api.close, self.media.close], report=self.report)
+        cleanup([('close HTTP API session', self.api.close), ('close HTTP media session', self.media.close)], report=self.report)
 
     def new_media_reader(self):
         """Give background input reads their own sessions and deadline cleanup."""

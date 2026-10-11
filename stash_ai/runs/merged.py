@@ -5,6 +5,7 @@ merge reconciliation directly; merge algorithms stay function-oriented.
 """
 from __future__ import annotations
 
+from stash_ai.runtime.resources import ResourceMonitor, observe
 from stash_ai.runtime.console import progress as console_bar
 from stash_ai.runtime.console import phase, skipped, status
 from collections import Counter
@@ -63,35 +64,36 @@ class MergedRun:
             self.stash = app.services.create_stash_client(app.DRY_RUN)
             self.stash.report = self.report
             try:
-                with phase(self.report, 'setup', errors=lambda: self.stats['errors']):
-                    self._configure_stash()
-                    self._prepare_resolver()
-                with phase(self.report, 'read sources', errors=lambda: self.stats['errors']):
-                    self._scan_scenes()
-                if args.rethreshold_markers or args.rethreshold_scenes:
-                    with phase(self.report, 'threshold update', errors=lambda: self.stats['errors']):
-                        threshold_result = self._apply_thresholds()
-                else:
-                    skipped(self.report, 'threshold update', 'disabled')
-                    threshold_result = None
-                if threshold_result is not None:
-                    return threshold_result
-                if args.merge_only:
-                    skipped(self.report, 'inference', 'merge-only')
-                else:
-                    with phase(self.report, 'inference', errors=lambda: self.stats['errors']):
-                        self._run_inference()
-                with phase(self.report, 'merge publication', errors=lambda: self.stats['errors'],
-                           mode='planned' if app.DRY_RUN else 'apply'):
-                    self._merge_scenes()
-                if self.stats['errors'] or not (args.prune_empty_tags or app.CREATE_MARKERS):
-                    skipped(self.report, 'prune', 'errors' if self.stats['errors'] else 'disabled')
-                    catalog_pruned = self._prune_outputs()
-                else:
-                    with phase(self.report, 'prune', errors=lambda: self.stats['errors']):
+                with observe(self.report, 'cache', ResourceMonitor(self.report, self.store.cache).sample):
+                    with phase(self.report, 'setup', errors=lambda: self.stats['errors']):
+                        self._configure_stash()
+                        self._prepare_resolver()
+                    with phase(self.report, 'read sources', errors=lambda: self.stats['errors']):
+                        self._scan_scenes()
+                    if args.rethreshold_markers or args.rethreshold_scenes:
+                        with phase(self.report, 'threshold update', errors=lambda: self.stats['errors']):
+                            threshold_result = self._apply_thresholds()
+                    else:
+                        skipped(self.report, 'threshold update', 'disabled')
+                        threshold_result = None
+                    if threshold_result is not None:
+                        return threshold_result
+                    if args.merge_only:
+                        skipped(self.report, 'inference', 'merge-only')
+                    else:
+                        with phase(self.report, 'inference', errors=lambda: self.stats['errors']):
+                            self._run_inference()
+                    with phase(self.report, 'merge publication', errors=lambda: self.stats['errors'],
+                               mode='planned' if app.DRY_RUN else 'apply'):
+                        self._merge_scenes()
+                    if self.stats['errors'] or not (args.prune_empty_tags or app.CREATE_MARKERS):
+                        skipped(self.report, 'prune', 'errors' if self.stats['errors'] else 'disabled')
                         catalog_pruned = self._prune_outputs()
-                with phase(self.report, 'finalize'):
-                    self._finalize_catalog_key(refresh=catalog_pruned)
+                    else:
+                        with phase(self.report, 'prune', errors=lambda: self.stats['errors']):
+                            catalog_pruned = self._prune_outputs()
+                    with phase(self.report, 'finalize'):
+                        self._finalize_catalog_key(refresh=catalog_pruned)
             finally:
                 from stash_ai.runtime.cleanup import cleanup
                 cleanup([self.stash.close], report=self.report)
