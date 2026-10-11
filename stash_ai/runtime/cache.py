@@ -19,6 +19,7 @@ class RamCache:
         self.stats = Counter()
         self.rss_budget = max(0, int(rss_budget))
         self.rss_peak = 0
+        self._sampled_rss = None
         self._next_pressure_check = 0.0
         self._effective_limit = self.limit
         self._lock = threading.RLock()
@@ -27,6 +28,14 @@ class RamCache:
         """Current retained bytes and configured cap; never changes cache state."""
         with self._lock:
             return self.size, self.limit
+
+    def snapshot(self):
+        """Read scalar accounting; do not sample, touch LRU entries or evict."""
+        with self._lock:
+            return dict(retained_bytes=self.size, configured_bytes=self.limit,
+                        effective_bytes=self._effective_limit, sampled_rss=self._sampled_rss,
+                        rss_budget=self.rss_budget, evictions=self.stats['evictions'],
+                        pressure_trims=self.stats['pressure_trims'])
 
     def get(self, key):
         with self._lock:
@@ -70,6 +79,7 @@ class RamCache:
                 return
             self._next_pressure_check = now + .25
             rss = memory.process_rss()
+            self._sampled_rss = rss
             if rss is None:
                 return
             self.rss_peak = max(self.rss_peak, rss)

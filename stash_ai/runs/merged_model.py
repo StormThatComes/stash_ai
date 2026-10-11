@@ -32,7 +32,7 @@ class MergedModelRun:
         self._staged = None
         self._load_failure = None
         self._cleanup_primary = None
-        with report.measure('model_identity', model=self.key):
+        with activity(report, 'verify model identity', model=self.key), report.measure('model_identity', model=self.key):
             self.asset_stamps = asset_stamps(config)
             self.identity = model_identity(app, config, vocabulary,
                 known_stamps=self.asset_stamps, require_unchanged=True)
@@ -102,13 +102,13 @@ class MergedModelRun:
                 self.prepare_executor = self.inference_executor = self.input_prefetch = None
                 self._staged, self._scene_sequence = None, ()
             cleanup([
-                lambda: bar.close() if bar is not None else None,
-                lambda: self._close_staged(kinds),
-                lambda: self.input_prefetch.close() if self.input_prefetch is not None else None,
-                lambda: self.prepare_executor.shutdown(wait=True) if self.prepare_executor is not None else None,
-                close_backend,
-                lambda: self.inference_executor.shutdown(wait=True) if self.inference_executor is not None else None,
-                reset,
+                ('close inference progress', lambda: bar.close() if bar is not None else None),
+                ('close staged scene', lambda: self._close_staged(kinds)),
+                *([('cancel input reads', self.input_prefetch.close)] if self.input_prefetch is not None else []),
+                *([('close image preparation workers', lambda: self.prepare_executor.shutdown(wait=True))] if self.prepare_executor is not None else []),
+                ('close model backend', close_backend),
+                *([('close inference worker', lambda: self.inference_executor.shutdown(wait=True))] if self.inference_executor is not None else []),
+                ('release inference state', reset),
             ], report=self.report, primary=self._cleanup_primary)
 
     def _prefetch_next_input(self, input_plan):
@@ -434,6 +434,7 @@ class MergedModelRun:
                 input=self.input_prefetch.buffer_usage(scene) or BufferUsage(0, 0, args.prefetch_batches + 2),
                 result=BufferUsage(0, 0, args.result_prefetch_batches + 2))
         return dict(current=current, next=following, cache=self.store.cache.usage(),
+                    cache_details=self.store.cache.snapshot(),
                     checkpoint=(job.checkpoint.batches, job.checkpoint.every))
 
     def _checkpoint_signature(self, scene_id, signature, cues, media, kinds, analysis_format, *, snapshot=None, input_options=None):

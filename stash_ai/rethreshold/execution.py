@@ -60,17 +60,18 @@ def run(app, store, scene_ids, settings, report, *, scenes=True, markers=False, 
     selected = len(scene_list) * len(settings)
     checked, errors, reasons = 0, 0, Counter()
     pending_scenes = store.pending_publication_scenes(scene_list)
+    report.preview = bool(getattr(store, 'dry_run', False))
     models = {config.source.key: Counter(selected=len(scene_list)) for config in settings}
     report.workload['rethreshold_models'] = models
     inspected, planned = 0, 0
     def show():
         status(report, preflight=f'scanned={inspected}/{selected} checked={checked} planned={planned} no_evidence={inspected-checked} errors={errors}',
                blocker='BLOCKED: ' + ', '.join(f'{name}={count}' for name, count in reasons.most_common(3)) if errors else None,
-               models='; '.join(f'{key}: checked={row["checked"]} planned={row["planned"]} no_evidence={row["no_evidence"]} errors={row["errors"]}'
-                                for key, row in models.items()), applied=0)
+               applied=0, **{'model_' + key: f'checked={row["checked"]} planned={row["planned"]} no_evidence={row["no_evidence"]} errors={row["errors"]}'
+                             for key, row in models.items()})
     # SQLite owns all validated plans until preflight succeeds globally. Unlike
     # a Python list, only a small page cache and one scene group remain in RAM.
-    with closing(sqlite3.connect(''), report=report) as spool:
+    with closing(sqlite3.connect(''), report=report, name='release rethreshold spool') as spool:
         spool.execute('PRAGMA cache_size=-2048')
         spool.execute('PRAGMA temp_store=FILE')
         spool.execute('CREATE TABLE prepared (id INTEGER PRIMARY KEY, scene TEXT, model TEXT, outputs TEXT)')
@@ -103,6 +104,8 @@ def run(app, store, scene_ids, settings, report, *, scenes=True, markers=False, 
                                 else:
                                     models[key]['unchanged'] += 1
                             except (ValueError, RuntimeError) as exc:
+                                if isinstance(exc, PendingPublication):
+                                    report.publication_pending_observed = True
                                 report.issue(issue_phase, key, scene, exc, str(exc))
                                 reasons[threshold_failure_reason(exc)] += 1
                                 errors += 1
