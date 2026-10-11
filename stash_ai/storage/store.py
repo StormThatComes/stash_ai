@@ -36,6 +36,7 @@ class StateStore(AbstractContextManager):
             raise ValueError("Parent publication updates are only valid for read-only preview stores.")
         self.cache = RamCache(cache_bytes, rss_budget=memory_budget_bytes)
         self.scope = scope
+        self.dry_run = bool(dry_run)
         self.report = None
         self.preview_data_version = None
         self.abandoned_cleanups = {}
