@@ -5,6 +5,7 @@ Only explicitly retained, compatible peer observations can prove disagreement.
 """
 from __future__ import annotations
 
+from stash_ai.runtime.console import progress as console_bar
 from .options import REASONS, ReviewOptions
 from .scenes import _scene_signals
 from .markers import _marker_signals
@@ -42,7 +43,7 @@ def build_report(app, store, scenes, core_policies, scene_policies, options=Revi
     deferred = input_checks(store, scenes)
     accumulator = ReviewAccumulator(len(scenes), options.examples, REASONS)
 
-    for scene in tqdm(scenes, desc="Tag review", unit="scene"):
+    for scene in console_bar(tqdm, scenes, desc="Tag review", unit="scene"):
         reason = ("unverified_inputs" if scene in deferred else
                   "pending_refresh" if scene in refresh else
                   "pending_publication" if scene in pending else None)

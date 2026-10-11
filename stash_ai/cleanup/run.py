@@ -1,6 +1,7 @@
 """Cleanup-specific merge reconciliation and stateful cleanup orchestration."""
 from __future__ import annotations
 
+from stash_ai.runtime.console import progress as console_bar
 from collections import Counter
 
 from tqdm import tqdm
@@ -94,7 +95,7 @@ class CleanupRun:
             self.stash.configure_merge_reads(self.report, merge_only=True)
         self.resolver = app.services.TagResolver(self.cleanup_stash, source=merge_labels.AI, report=self.report.detail,
                                         create_missing=app.CREATE_MISSING)
-        bar = tqdm(self.cleanup_stash.iter_scenes(self.scene_ids), desc="Affected scene cleanup", unit="scene")
+        bar = console_bar(tqdm, self.cleanup_stash.iter_scenes(self.scene_ids), desc="Affected scene cleanup", unit="scene")
         for current in bar:
             scene_id = str(current["id"])
             try:

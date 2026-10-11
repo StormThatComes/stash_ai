@@ -1,4 +1,5 @@
 """Run complete preflight before applying saved-evidence threshold changes."""
+from stash_ai.runtime.console import progress as console_bar
 from stash_ai.runtime.reasons import EvidenceError, Reason, PendingPublication
 from collections import Counter
 from itertools import batched
@@ -62,7 +63,7 @@ def run(app, store, scene_ids, settings, report, *, scenes=True, markers=False):
         spool.execute('PRAGMA cache_size=-2048')
         spool.execute('PRAGMA temp_store=FILE')
         spool.execute('CREATE TABLE prepared (id INTEGER PRIMARY KEY, scene TEXT, model TEXT, outputs TEXT)')
-        bar = tqdm(total=selected, desc=f'Check {mode}', unit='pair')
+        bar = console_bar(tqdm, total=selected, desc=f'Check {mode}', unit='pair')
         try:
             for group, scene_count in iter_threshold_groups(store, scene_list, settings, requested):
                 with backfill_batch(store), store.metadata.batch(
@@ -92,7 +93,7 @@ def run(app, store, scene_ids, settings, report, *, scenes=True, markers=False):
             return dict(errors=errors)
         changed = 0
         count = spool.execute('SELECT COUNT(*) FROM prepared').fetchone()[0]
-        bar = tqdm(total=count, desc=f'Apply {mode}', unit='pair')
+        bar = console_bar(tqdm, total=count, desc=f'Apply {mode}', unit='pair')
         try:
             cursor = spool.execute('SELECT scene,model,outputs FROM prepared ORDER BY id')
             for group in batched(cursor, 128):

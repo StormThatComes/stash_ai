@@ -5,6 +5,7 @@ merge reconciliation directly; merge algorithms stay function-oriented.
 """
 from __future__ import annotations
 
+from stash_ai.runtime.console import progress as console_bar
 from collections import Counter
 from itertools import batched
 
@@ -100,7 +101,7 @@ class MergedRun:
     def _scan_scenes(self):
         app, args = self.app, self.args
         with stage(self.report, 'initial_scan'):
-            for group in batched(tqdm(self.stash.iter_scenes(args.scene_id),
+            for group in batched(console_bar(tqdm, self.stash.iter_scenes(args.scene_id),
                                       desc="Read sources", unit="scene"), 128):
                 if app.CREATE_MARKERS:
                     self.store.preload_sources((current['id'] for current in group), kinds=('markers',))

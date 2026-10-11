@@ -6,6 +6,7 @@ never runs inference and never connects to or writes to Stash.
 
 from __future__ import annotations
 
+from stash_ai.runtime.console import progress as console_bar
 from .analysis import scene_report, merge_scene_report
 
 from collections import Counter
@@ -77,7 +78,7 @@ def build_report(app, store, scene_ids, core_policies, scene_policies):
     """Build the report serially; kept as the deterministic library/test path."""
     totals = Counter()
     utility = {model: Counter() for model in SOURCES}
-    for scene in tqdm(scene_ids, desc="Model report", unit="scene"):
+    for scene in console_bar(tqdm, scene_ids, desc="Model report", unit="scene"):
         merge_scene_report(
             totals,
             utility,

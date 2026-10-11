@@ -1,4 +1,5 @@
 """Bounded SELECT-only cleanup candidate discovery and prune prefilters."""
+from stash_ai.runtime.console import progress as console_bar
 import json
 from itertools import batched
 from tqdm import tqdm
@@ -42,7 +43,7 @@ class SQLDiscovery:
         selected = {i for i, name in self.catalog.records.items() if name.startswith(PREFIX)}
         if not selected:
             return []
-        with tqdm(total=len(selected), desc='Find empty marker groups', unit='tag', dynamic_ncols=True) as bar:
+        with console_bar(tqdm, total=len(selected), desc='Find empty marker groups', unit='tag', dynamic_ncols=True) as bar:
             candidates = self.unused_candidates(selected, page_size=self.session.page_size, progress=bar)
         if self.stash.dry_run:
             # SQL sees the real database, not planned removals. Let PreviewUsage

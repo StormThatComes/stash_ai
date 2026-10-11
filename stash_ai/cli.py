@@ -26,14 +26,20 @@ def main(argv: list[str] | None = None, *, runtime: RuntimeContext | None = None
     if args.command is Command.REUSE_REPORT:
         from stash_ai.reports.reuse import run as run_reuse_report
         return run_reuse_report(app, args)
+    from stash_ai.runtime.report import RunReport
+    from stash_ai.runtime.console import present
+    from tqdm import tqdm
+    if not hasattr(args, "report"):
+        args.report = RunReport(args.verbose, tqdm.write)
     from stash_ai.history.lifecycle import RunHistory
     from contextlib import nullcontext
     with args.configuration_snapshot.use(), RunHistory(app, args) as history:
-        timer = args.report.measure('command') if history.enabled else nullcontext()
-        with timer:
-            result = _execute(app, args)
-        history.result = result
-        return result
+        with present(args.report, getattr(args, 'progress_style', 'auto')):
+            timer = args.report.measure('command') if history.enabled else nullcontext()
+            with timer:
+                result = _execute(app, args)
+            history.result = result
+            return result
 
 
 def _execute(app, args):

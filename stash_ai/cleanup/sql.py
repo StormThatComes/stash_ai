@@ -6,6 +6,7 @@ Templates are also the dry-run allowlist: no caller-supplied SQL is accepted.
 from __future__ import annotations
 
 
+from stash_ai.runtime.console import progress as console_bar
 from tqdm import tqdm
 
 from stash_ai.cleanup.state import begin, finish
@@ -101,7 +102,7 @@ def run_sql_cleanup(app, sql, store, settings, args, cores, tags, stats):
         catalog, *candidate_names(app, selected, remaining_cores, remaining_tags))
     tasks = [(identifier, name) for identifier, name in catalog.items() if name in names or name in core_names]
     sql.preview.names, sql.preview.cores = names, core_names
-    with tqdm(tasks, desc='Clean excluded tags' + (' (preview)' if app.DRY_RUN else ''), unit='tag', dynamic_ncols=True) as bar:
+    with console_bar(tqdm, tasks, desc='Clean excluded tags' + (' (preview)' if app.DRY_RUN else ''), unit='tag', dynamic_ncols=True) as bar:
         sql.mutations.progress = bar
         for identifier, name in bar:
             if app.CREATE_MARKERS:

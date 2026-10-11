@@ -84,6 +84,12 @@ class RunTimings:
                         continue
                     value['next_heartbeat'] = now + self.report.heartbeat_seconds
                     try:
+                        from .console import status
+                        presenter = getattr(self.report, 'console', None)
+                        if presenter is not None and not presenter.closed:
+                            status(self.report, request=value['operation'], wait='Stash ' + ('read' if value['read'] else 'write'),
+                                   request_elapsed=f"{now-value['started']:.1f}s")
+                            continue
                         self.report.write(f"Waiting for Stash: {value['operation']}, "
                             f"{now - value['started']:.1f}s, active={len(requests)}, "
                             f"{'read' if value['read'] else 'write'}.")
@@ -135,7 +141,7 @@ class RunTimings:
     @contextmanager
     def request(self, operation, read):
         start, failed = time.perf_counter(), True
-        details = {'response_bytes': 0}
+        details = {'response_bytes': 0, 'operation': operation, 'read': read}
         token = object()
         with self._heartbeat_condition:
             self.report.active_requests[token] = dict(operation=operation, read=read, started=start,
@@ -148,6 +154,7 @@ class RunTimings:
             self._heartbeat_condition.notify_all()
         previous = getattr(self._timers, 'request', None)
         self._timers.request = details
+        self.request_state(state='request')
         try:
             with self.measure('stash_read' if read else 'stash_write'):
                 yield
@@ -157,6 +164,10 @@ class RunTimings:
                 self.report.active_requests.pop(token, None)
                 self._heartbeat_condition.notify_all()
             self._timers.request = previous
+            from .console import status
+            status(self.report, completed=not failed, request=None, wait=None,
+                   request_elapsed=None, attempt=None, backoff=None, budget=None, previous_error=None,
+                   _backoff_until=None, _deadline=None)
             if self.report.diagnostics is not None:
                 self.report.optional('diagnostics_api', self.report.diagnostics.record_api,
                     operation, time.perf_counter()-start, failed, details['response_bytes'])
@@ -171,3 +182,26 @@ class RunTimings:
         current = getattr(self._timers, 'request', None)
         if current is not None:
             current['response_bytes'] += size
+
+    def request_state(self, **values):
+        details = getattr(self._timers, 'request', None)
+        if details is None:
+            return
+        details.update(values)
+        from .console import status
+        operation = details['operation']
+        with self._timing_lock:
+            if values.get('state') == 'request' and 'attempt' in values:
+                self.report.counts['http_attempt/' + operation] += 1
+            if 'http_status' in values:
+                self.report.counts['http_status/' + operation + '/' + str(values['http_status'])] += 1
+            reason = values.get('reason')
+            if reason:
+                self.report.counts['http_reason/' + operation + '/' + reason] += 1
+        status(self.report, request=operation, wait=values.get('state'),
+               attempt=(f"{values['attempt']}/{values['attempts']}" if 'attempt' in values else None),
+               backoff=(f"{values['delay']:.1f}s" if 'delay' in values else None),
+               budget=(f"{values['budget']:.1f}s" if 'budget' in values else None),
+               previous_error=reason,
+               _backoff_until=(time.monotonic()+values['delay'] if 'delay' in values else None),
+               _deadline=(time.monotonic()+values['budget'] if 'budget' in values else None))

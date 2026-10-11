@@ -21,6 +21,9 @@ class SceneReads:
         if self.report is not None:
             self.report.counts['merge_graphql_fallback'] += 1
             self.report.detail(operation + '; using GraphQL: ' + safe_error(exc, self.client.api_key))
+            from stash_ai.runtime.console import status
+            status(self.report, read_mode='GraphQL', fallback=type(exc).__name__)
+            self.report.write('Read strategy: SQL -> GraphQL (' + type(exc).__name__ + ').')
 
     def configure(self, report, *, merge_only=False):
         self.report, self.merge_only = report, merge_only
@@ -29,6 +32,8 @@ class SceneReads:
             reader.read([])
             self.reader = reader
             report.counts['merge_sql_enabled'] += 1
+            from stash_ai.runtime.console import status
+            status(report, read_mode='SQL')
         except Exception as exc:
             self._fallback(exc, 'Merge SQL unavailable')
 

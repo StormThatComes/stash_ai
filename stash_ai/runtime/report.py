@@ -139,6 +139,9 @@ class RunReport:
     def request(self, operation, read):
         return self._timing.request(operation, read)
 
+    def request_state(self, **values):
+        self._timing.request_state(**values)
+
     def bind_read(self, operation):
         return self._timing.bind(operation)
 
