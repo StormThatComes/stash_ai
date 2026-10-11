@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from stash_ai.runtime.console import progress as console_bar
+from stash_ai.runtime.console import activity, quiet_activity, status
 from functools import partial
 from concurrent.futures import ThreadPoolExecutor
 
@@ -51,6 +52,7 @@ class MergedModelRun:
             bar = console_bar(tqdm, self._scene_sequence, desc=self.key + " inference", unit="scene",
                        position=0, dynamic_ncols=True)
             for self._scene_position, (scene_id, current) in enumerate(bar):
+                status(self.report, model=self.key, scene=scene_id, stage='eligibility', checkpoint=None)
                 self.observer.begin(scene_id)
                 self.report.work('')
                 paths = current["paths"]
@@ -88,6 +90,7 @@ class MergedModelRun:
                     raise
                 finally:
                     self.report.progress(bar, self.stats)
+                    status(self.report, stage=self.report.work() or 'inspected')
         finally:
             from stash_ai.runtime.cleanup import cleanup
             def close_backend():
@@ -197,7 +200,7 @@ class MergedModelRun:
             self.asset_stamps = after
 
         try:
-            with self.report.measure('model_load', model=self.key):
+            with activity(self.report, 'load model'), self.report.measure('model_load', model=self.key):
                 if self.args.prefetch_batches:
                     self.prepare_executor = ThreadPoolExecutor(
                         max_workers=self.args.prepare_workers, thread_name_prefix='transform-frames')
@@ -264,14 +267,14 @@ class MergedModelRun:
         app, args, store = self.app, self.args, self.store
         store.cache.pressure(force=True)
         if trust_cached:
-            with self.report.measure('inference_reuse_check', model=self.key):
+            with activity(self.report, 'check cached reuse'), self.report.measure('inference_reuse_check', model=self.key):
                 if self._reuse_cached(scene_id, paths, kinds, input_plan=input_plan, observer=context.observer):
                     return ScenePreparation(PreparationStatus.REUSED)
         from stash_ai.inference.reuse import input_options
         context.input_options = input_options(app, paths)
         from stash_ai.storage.input_checks import defer, verified
         try:
-            with self.report.measure('input_verify', model=self.key):
+            with activity(self.report, 'verify VTT/media'), self.report.measure('input_verify', model=self.key):
                 prepared = self.input_prefetch.take(scene_id) if self.input_prefetch is not None else None
                 inspected = (prepared if prepared is not None else inputs.inspect(app, paths, self.identity))
                 snapshot, media, signature = inspected.snapshot, inspected.media, inspected.signature
@@ -288,7 +291,7 @@ class MergedModelRun:
         self.report.record_input_workload(scene_id, self.key, cues, media.hashes, snapshot=snapshot)
         verified(store, scene_id, self.key)
         context.observer.inputs(self.identity, cues, media.hashes, paths, snapshot=snapshot)
-        with self.report.measure('inference_reuse_check', model=self.key):
+        with activity(self.report, 'check verified reuse'), self.report.measure('inference_reuse_check', model=self.key):
             if self._reuse(scene_id, signature, cues, media, kinds, context=context, snapshot=snapshot):
                 return ScenePreparation(PreparationStatus.REUSED)
         if not args.restart:
@@ -341,7 +344,7 @@ class MergedModelRun:
         context = SceneContext(scene_id, observer)
         prepared = ScenePreparation(PreparationStatus.REUSED)
         try:
-            with self.report.model(self.key), self.report.measure('scene_handoff', model=self.key, units=1, unit='scenes'):
+            with quiet_activity(), self.report.model(self.key), self.report.measure('scene_handoff', model=self.key, units=1, unit='scenes'):
                 prepared = self._prepare_scene(scene_id, current, current['paths'], kinds, inputs,
                     trust_cached=(input_plan is not None and scene_id in input_plan.cached[self.key]),
                     input_plan=input_plan, context=context)
@@ -370,7 +373,10 @@ class MergedModelRun:
     def _predict_scene(self, job, kinds, inputs, input_plan):
         app, args, store = self.app, self.args, self.store
         if job.state is None:
-            self._initialize_scene(job, kinds)
+            with activity(self.report, 'restore checkpoint'):
+                self._initialize_scene(job, kinds)
+        status(self.report, checkpoint=f'{job.state.processed}/{len(job.cues)}',
+               stage='predict frames' if job.state.processed < len(job.cues) else 'frames restored')
         self.report.counts['checkpoint_restored_frames'] += job.state.processed
         self.report.work('checkpoint_resumed' if job.checkpoint.resumed_frames else 'fresh')
         from .inference_progress import InferenceProgress
@@ -378,7 +384,7 @@ class MergedModelRun:
                                desc=f'{self.key} scene {job.scene}',
                                sample=lambda: self._buffer_snapshot(job)) as display:
             analysis = {}
-            with self.report.measure('inference_scene', model=self.key, units=1, unit='scenes'):
+            with activity(self.report, 'predict frames'), self.report.measure('inference_scene', model=self.key, units=1, unit='scenes'):
                 predictions, frames = prediction.predict_scene(
                     app, self.tagger, job.media, job.paths, job.cues, checkpoint=job.checkpoint,
                     prefetch=args.prefetch_batches, analysis=analysis, report=self.report,
@@ -394,7 +400,7 @@ class MergedModelRun:
             # these boundaries without ever waiting for an unfinished input.
             self._stage_next_scene(kinds, inputs, input_plan)
             display.refresh()
-            with self.report.measure('inference_output_capture', model=self.key, units=1, unit='scenes'):
+            with activity(self.report, 'capture outputs'), self.report.measure('inference_output_capture', model=self.key, units=1, unit='scenes'):
                 outputs = merge_results.capture_outputs(
                     app, self.config, self.vocabulary, job.cues, predictions, frames, analysis,
                     inference_signature=job.signature, verified_input=job.verified_input,
@@ -402,7 +408,7 @@ class MergedModelRun:
                                            frame_signature(cue_manifest(job.cues), job.media.hashes)))
             self._stage_next_scene(kinds, inputs, input_plan)
             display.refresh()
-            with self.report.measure('inference_commit', model=self.key):
+            with activity(self.report, 'commit checkpoint'), self.report.measure('inference_commit', model=self.key):
                 checkpoints.finish(store, job.scene, self.key, outputs)
                 from stash_ai.inference.provenance import prune
                 prune(store, job.scene, self.key)
