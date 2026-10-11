@@ -21,11 +21,13 @@ def write_summary(report, title, counts, cache=None):
     report.write(title)
     if report.threshold_preflight is not None:
         threshold = report.threshold_preflight
+        preview = bool(getattr(report, 'preview', False))
         report.write(
             f"  Threshold preflight: checked={threshold['checked']}, "
-            f"failed={threshold['failed']}, applied={threshold['applied']}, "
+            f"failed={threshold['failed']}, applied={0 if preview else threshold['applied']}, "
             f"selected={threshold['selected']}, "
             f"skipped_no_evidence={threshold['skipped_no_evidence']}"
+            + (f", planned={threshold['applied']}" if preview else '')
         )
         if threshold['reasons']:
             ordered = sorted(threshold['reasons'].items(), key=lambda item: (-item[1], item[0]))

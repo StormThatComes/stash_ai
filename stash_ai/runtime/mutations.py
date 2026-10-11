@@ -1,5 +1,15 @@
 """Observe logical write acknowledgement without assuming uncertain server state."""
 from .console import activity, status
+from functools import wraps
+
+
+def observed(name):
+    def decorate(method):
+        @wraps(method)
+        def wrapped(self, *args, **kwargs):
+            return write(getattr(self, 'report', None), name, lambda: method(self, *args, **kwargs))
+        return wrapped
+    return decorate
 
 
 def write(report, name, callback, *, rows=1):

@@ -6,6 +6,7 @@ import pytest
 from stash_ai.runtime.console import ConsolePresenter, activity, quiet_activity
 from stash_ai.runtime.report import RunReport
 from tests.helpers.runtime import runtime as app
+pytestmark = pytest.mark.usefixtures('reset_progress')
 
 
 def test_collected_errors_mark_phase_partial_and_lookahead_keeps_current_stage():
