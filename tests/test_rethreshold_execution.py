@@ -13,6 +13,46 @@ pytestmark = pytest.mark.usefixtures('reset_temporal')
 MODES = [(True, False), (False, True), (True, True)]
 
 
+@pytest.mark.parametrize('failure', ['limit', 'disk', 'interrupt'])
+def test_spool_failure_never_applies_thresholds(tmp_path, monkeypatch, failure):
+    import sqlite3
+    from stash_ai.rethreshold.spool import SpoolUsage, SpoolLimitExceeded
+    with StateStore(tmp_path / 'state.sqlite3', 'scope') as store:
+        store.put('1', 'wd', outputs())
+        before = blobs(store)
+        report = RunReport(write=lambda _: None)
+        if failure != 'limit':
+            def stop(*args):
+                if failure == 'interrupt': raise KeyboardInterrupt()
+                raise sqlite3.OperationalError('database or disk is full')
+            monkeypatch.setattr(SpoolUsage, 'flushed', stop)
+        with pytest.raises((SpoolLimitExceeded, sqlite3.OperationalError, KeyboardInterrupt)):
+            run(app, store, ['1'], [config(.8)], report, spool_limit_bytes=1 if failure == 'limit' else 0)
+        assert not threshold_rows(store) and blobs(store) == before
+        assert report.threshold_preflight['applied'] == 0
+
+
+@pytest.mark.parametrize('failed_scene,committed', [('2', 0), ('130', 128)])
+def test_failed_batch_only_reports_previously_committed_pairs(tmp_path, monkeypatch, failed_scene, committed):
+    from stash_ai.rethreshold import execution
+    with StateStore(tmp_path / 'state.sqlite3', 'scope') as store:
+        count = 2 if failed_scene == '2' else 130
+        ids = [str(i) for i in range(1, count+1)]
+        for scene in ids: store.put(scene, 'wd', outputs())
+        report, original = RunReport(write=lambda _: None), execution.write_plan
+        def fail(store, scene, *args):
+            original(store, scene, *args)
+            if scene == failed_scene: raise KeyboardInterrupt()
+        monkeypatch.setattr(execution, 'write_plan', fail)
+        with pytest.raises(KeyboardInterrupt):
+            run(app, store, ids, [config(.8)], report)
+        assert len({row[1] for row in threshold_rows(store)}) == committed
+        assert report.threshold_preflight['applied'] == committed
+        assert report.workload['rethreshold_apply']['committed'] == committed
+        assert report.workload['rethreshold_apply']['pending_batch'] == 0
+        assert report.counts['threshold_pairs_committed'] == committed
+
+
 @pytest.mark.parametrize('scenes,markers', MODES)
 def test_late_failure_prevents_every_threshold_and_index_update(tmp_path, scenes, markers):
     with StateStore(tmp_path / 'state.sqlite3', 'scope') as store:

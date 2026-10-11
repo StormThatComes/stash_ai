@@ -92,6 +92,8 @@ def build_parser(app) -> argparse.ArgumentParser:
                         help="Apply YAML marker thresholds to complete cached frames; requires --merge-only. "
                              "Scene/model pairs with no saved marker evidence are skipped. "
                              "Never runs inference; rejects changed scene thresholds or insufficient retention.")
+    parser.add_argument('--rethreshold-spool-limit-mb', type=float, default=0., metavar='MIB',
+                        help='Abort threshold preflight if its temporary SQLite pager exceeds this MiB limit; 0 is unlimited.')
     parser.add_argument("--abandon-pending", action="store_true",
                         help="Abandon pending merge/cleanup plans, retaining applied changes and inference. "
                              "Alone: exit after abandonment; with --merge-only or cleanup: use current YAML policies. Honors --dry-run.")

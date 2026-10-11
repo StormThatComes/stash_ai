@@ -126,6 +126,10 @@ def validate_pipeline(app, parser, args):
     if not math.isfinite(args.ram_budget_gb) or args.ram_budget_gb <= 0:
         parser.error("--ram-budget-gb must be a finite number > 0.")
     args.ram_cache_gb = min(args.ram_cache_gb, args.ram_budget_gb * .75)
+    if not math.isfinite(args.rethreshold_spool_limit_mb) or args.rethreshold_spool_limit_mb < 0:
+        parser.error('--rethreshold-spool-limit-mb must be finite and >= 0.')
+    if args.rethreshold_spool_limit_mb and not (args.rethreshold_scenes or args.rethreshold_markers):
+        parser.error('--rethreshold-spool-limit-mb requires rethresholding.')
 
     hierarchy_only, cleanup_only = mode_flags(args)
     if args.dry_run_plan is not None:
