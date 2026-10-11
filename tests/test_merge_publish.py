@@ -182,6 +182,8 @@ def test_failed_worker_scene_is_not_published_and_later_scenes_continue(publicat
     assert not p.computed
     assert p.publisher.stats['errors'] == 2 - completed
     assert p.publisher.stats['scenes_synced'] == completed
+    assert p.publisher.live['published'] == completed
+    assert p.publisher.live['unresolved'] == (2 if failure == 'scene' else 0)
     assert p.publisher.stats['merge_parallel_scenes'] == completed
 
 
@@ -223,6 +225,8 @@ def test_pool_failure_never_retries_completed_scenes(publication, monkeypatch, c
     assert not p.computed
     assert p.publisher.stats['errors'] == 3 - completed
     assert p.publisher.stats['scenes_synced'] == completed
+    assert p.publisher.live['published'] == completed
+    assert p.publisher.live['unresolved'] == 3 - completed
     assert any('merge workers' in message and 'pool failed' in message for message in p.messages)
 
 
