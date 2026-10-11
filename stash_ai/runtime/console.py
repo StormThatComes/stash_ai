@@ -84,7 +84,14 @@ class ConsolePresenter:
     def message(self, text, *, decorative=False):
         if decorative and self.style == 'off':
             return
-        self.call(lambda: self.write(text))
+        if decorative:
+            self.call(lambda: self._write_status(text))
+        else:
+            self.call(lambda: self.write(text))
+
+    def _write_status(self, text):
+        from tqdm import tqdm
+        tqdm.write(text, file=self.stream)
 
     def call(self, callback, default=None):
         if self.closed or self.thread is None or threading.current_thread() is self.thread:
@@ -118,8 +125,9 @@ class ConsolePresenter:
                 self._status = tqdm(total=0, position=4, leave=False, file=self.stream,
                                     bar_format='{desc}', dynamic_ncols=True)
             self._status.set_description_str(line)
-        elif time.monotonic()-self._last_heartbeat >= self.heartbeat:
-            self.write('Still working: ' + line)
+        elif (row['last_progress_age'] >= self.heartbeat
+              and time.monotonic()-self._last_heartbeat >= self.heartbeat):
+            self._write_status('Still working: ' + line)
             self._last_heartbeat = time.monotonic()
 
     def _run(self):
@@ -198,6 +206,13 @@ class OwnedBar:
             self.owner.update(completed=count)
         return self.owner.call(lambda: self.target.update(count)) if self.target is not None and not self.disable else False
 
+    def reset(self, total=None):
+        self.n = 0
+        if total is not None:
+            self._total = total
+        if self.target is not None:
+            self.owner.call(lambda: self.target.reset(total=total))
+
     @property
     def total(self):
         return self._total
@@ -209,10 +224,15 @@ class OwnedBar:
             self.owner.call(lambda: setattr(self.target, 'total', value))
 
     def set_postfix(self, *args, **kwargs):
+        self.owner.update(progress=', '.join(f'{k}={v}' for k, v in kwargs.items() if k != 'refresh'))
         if self.target is not None and not self.disable:
             self.owner.call(lambda: self.target.set_postfix(*args, **kwargs))
 
     def set_postfix_str(self, text, **kwargs):
+        self.owner.update(progress=text)
+        if self.disable and text != getattr(self, '_postfix', None):
+            self.owner.message(f"{self.options.get('desc', 'Progress')}: {text}", decorative=True)
+        self._postfix = text
         if self.target is not None and not self.disable:
             self.owner.call(lambda: self.target.set_postfix_str(text, **kwargs))
 
@@ -221,6 +241,7 @@ class OwnedBar:
             self.owner.call(self.target.refresh)
 
     def set_description_str(self, text, **kwargs):
+        self.options['desc'] = text
         if self.target is not None and not self.disable:
             self.owner.call(lambda: self.target.set_description_str(text, **kwargs))
 
