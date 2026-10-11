@@ -42,4 +42,7 @@ def cleanup_scene(app, stash, resolver, store, current, selected,
         result = merge_sync.sync_merged(app, stash, resolver, store, current, clean_hits, clean_spans,
                                    cleanup=True, report=report, tag_policies=scoped_tags)
         stats.update(result)
+        stats['changed'] += 1
+    else:
+        stats['unchanged'] += 1
     return stats
