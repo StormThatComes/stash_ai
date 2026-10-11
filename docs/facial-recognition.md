@@ -52,3 +52,21 @@ Face completeness/pose currently use measurable geometry and five-landmark
 ordering/symmetry estimates. They do not prove that every feature is unoccluded.
 Sharpness is measured on a normalized grayscale crop; actual face dimensions,
 exposure and clipping are retained separately.
+
+## Automatic identity policy
+
+Matching is incremental: selected-scene vectors can reuse compatible retained
+people from other scenes without fetching their media or rewriting their scene
+associations. New identities need the configured distinct cue-time support.
+Insufficient, near-threshold or ambiguous matches are withheld automatically.
+
+The best and next coherent identity compete even when the runner-up falls just
+below the match threshold. Cohesion is checked against bounded representative
+samples, avoiding transitive single-link unions. This sampled check is not a
+proof that every historical pair matches. Reference bytes, samples and identity
+counts have explicit limits; no N-by-N distance matrix is allocated.
+
+Developer-only `evaluate_pairs` accepts explicit local same/different-person
+ground truth and reports false matches/misses for that supplied dataset. Synthetic
+vector fixtures prove grouping rules, not real-world face-recognition accuracy.
+The default policy is labeled uncalibrated for a user's domain in stored provenance.
