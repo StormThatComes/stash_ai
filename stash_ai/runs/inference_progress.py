@@ -29,6 +29,11 @@ def buffer_lines(snapshot):
     used, limit = snapshot['cache']
     cache = f'{memory_size(used)}/{memory_size(limit)}' if limit else 'off'
     retained = f"Cache: {cache} | checkpoint interval={ratio(snapshot['checkpoint'])} batch"
+    details = snapshot.get('cache_details')
+    if details is not None:
+        retained += (f' | effective={memory_size(details["effective_bytes"])}'
+                     + (' | parent RSS sampled=' + memory_size(details['sampled_rss']) if details['sampled_rss'] is not None else '')
+                     + f' | evictions={details["evictions"]} pressure trims={details["pressure_trims"]}')
     return queued, retained
 
 
