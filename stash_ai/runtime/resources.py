@@ -10,17 +10,26 @@ from . import memory
 def guarded(method):
     @wraps(method)
     def wrapped(self, *args, **kwargs):
-        if not self.available.value:
-            return None
-        # A terminated process can die holding a semaphore. Diagnostics must
-        # never prevent pool shutdown or publication from continuing.
-        if not self.lock.acquire(timeout=.02):
+        acquired = False
+        try:
+            if not self.available.value:
+                return None
+            # A terminated process can die holding a semaphore. Diagnostics
+            # must never prevent shutdown or publication from continuing.
+            acquired = self.lock.acquire(timeout=.02)
+            if not acquired:
+                self.available.value = False
+                return None
+            return method(self, *args, **kwargs)
+        except Exception:
             self.available.value = False
             return None
-        try:
-            return method(self, *args, **kwargs)
         finally:
-            self.lock.release()
+            if acquired:
+                try:
+                    self.lock.release()
+                except Exception:
+                    self.available.value = False
     return wrapped
 
 

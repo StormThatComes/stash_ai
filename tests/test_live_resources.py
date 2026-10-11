@@ -2,6 +2,8 @@
 from multiprocessing import get_context
 from time import monotonic
 
+import pytest
+
 from stash_ai.runtime.cache import RamCache
 from stash_ai.runtime.resources import WorkerTelemetry, RollingRates, ResourceMonitor
 from stash_ai.runtime.report import RunReport
@@ -38,6 +40,22 @@ def test_terminated_lock_owner_makes_telemetry_unavailable_without_hanging():
     finally:
         if child.is_alive(): child.kill()
         child.join(5)
+
+
+@pytest.mark.parametrize('stage', ['acquire', 'release'])
+def test_broken_telemetry_semaphore_disables_observation(stage):
+    telemetry = WorkerTelemetry(get_context('spawn'), 2, 4)
+    class BrokenLock:
+        def acquire(self, **kwargs):
+            if stage == 'acquire': raise OSError('semaphore unavailable')
+            return True
+        def release(self):
+            raise OSError('semaphore unavailable')
+    telemetry.lock = BrokenLock()
+    telemetry.snapshot()
+    assert telemetry.snapshot() is None
+    telemetry.scene_finished()
+    assert not telemetry.available.value
 
 
 def test_busy_workers_and_ordered_ready_chunks_are_measured_independently():
