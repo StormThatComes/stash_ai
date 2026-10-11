@@ -23,6 +23,7 @@ clustering:
   cohesion_threshold: 0.60
   max_samples_per_person: 32
   max_people_per_lookup: 20000
+  max_reference_bytes: 134217728
 portraits:
   enabled: true
   min_face_pixels: 96          # Actual source pixels; upscaling adds no detail.
