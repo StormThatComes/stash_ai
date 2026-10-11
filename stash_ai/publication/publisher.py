@@ -254,7 +254,9 @@ class MergePublisher:
                 from stash_ai.runtime.resources import WorkerTelemetry, ResourceMonitor, observe
                 from multiprocessing import get_context
                 ui = getattr(self.report, 'console', None)
-                telemetry = WorkerTelemetry(get_context('spawn'), workers, max(workers, 2)+2) if ui is not None and ui.style != 'off' else None
+                telemetry = (self.report.optional('worker_telemetry', WorkerTelemetry,
+                                                 get_context('spawn'), workers, max(workers, 2)+2)
+                             if ui is not None and ui.style != 'off' else None)
                 monitor = ResourceMonitor(self.report, self.store.cache, telemetry, self.live)
                 evidence = iter_parallel_evidence(
                     self.app, self.args.state_db, self.store.scope,
@@ -304,6 +306,7 @@ class MergePublisher:
                     finally:
                         evidence.close()
                         if telemetry is not None:
-                            self.report.workload['merge_telemetry'] = telemetry.snapshot()
+                            self.report.workload['merge_telemetry'] = self.report.optional(
+                                'merge_telemetry', telemetry.snapshot)
         finally:
             bar.close()
