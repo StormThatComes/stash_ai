@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from stash_ai.runtime.console import progress as console_bar
+from stash_ai.runtime.console import status
+from stash_ai.runtime.mutations import write as confirmed_write
 from collections import Counter, deque
 from contextlib import contextmanager
 from itertools import batched
@@ -27,6 +29,14 @@ def prefixes_checked(values):
 @contextmanager
 def _waiting_for_stash(progress, batch, total_batches):
     """Refresh only the display; API calls and validation stay on the caller thread."""
+    owner = getattr(progress, 'owner', None)
+    if owner is not None:
+        owner.update(wait='Stash tag usage', batch=f'{batch}/{total_batches}')
+        try:
+            yield
+        finally:
+            owner.update(wait=None)
+        return
     stopped = Event()
     started = monotonic()
     status = f"batch={batch}/{total_batches}"
@@ -153,6 +163,11 @@ def prune_tags(stash, prefixes=None, report=print, *, names=None, candidate_ids=
     pending = deque(identifier for identifier, tag in catalog.items()
                     if selected(tag) and client.unused_leaf(tag))
     stats = Counter(tags_pruned=0, tags_retained_after_refresh=0)
+    from stash_ai.publication.groups import ROOT
+    stats['prune_root_skipped'] = sum(tag['name'] == ROOT for tag in catalog.values())
+    stats['prune_used_or_parent'] = sum(selected(tag) and not client.unused_leaf(tag) for tag in catalog.values())
+    status(getattr(stash, 'report', None), prune_candidates=len(pending),
+           root_skipped=stats['prune_root_skipped'], retained_used=stats['prune_used_or_parent'])
     if names is not None:
         stats['excluded_tags_still_used_or_parent'] = sum(selected(tag) and not client.unused_leaf(tag)
                                                         for tag in catalog.values())
@@ -173,7 +188,7 @@ def prune_tags(stash, prefixes=None, report=print, *, names=None, candidate_ids=
                     continue
                 report(f"{'[DRY] Would delete' if stash.dry_run else 'Deleting'} unused leaf tag {tag['name']!r} (id={identifier}).")
                 if not stash.dry_run:
-                    client.delete(identifier)
+                    confirmed_write(getattr(stash, 'report', None), 'tag_delete', lambda: client.delete(identifier))
                 stats["tags_pruned"] += 1
                 catalog.pop(identifier, None)
                 for parent_id in {str(parent["id"]) for parent in [*previous["parents"], *tag["parents"]]}:
@@ -186,6 +201,9 @@ def prune_tags(stash, prefixes=None, report=print, *, names=None, candidate_ids=
                         pending.append(parent_id)
                         progress.total += 1
             finally:
+                status(getattr(stash, 'report', None), prune=' '.join((
+                    f"{'planned' if stash.dry_run else 'deleted'}={stats['tags_pruned']}",
+                    f"retained={stats['tags_retained_after_refresh']}", f'pending={len(pending)}')))
                 progress.set_postfix({"planned" if stash.dry_run else "deleted": stats["tags_pruned"],
                                       "kept": stats["tags_retained_after_refresh"], "pending": len(pending)}, refresh=False)
                 progress.update(1)
@@ -199,6 +217,7 @@ def run_prune(app, args):
     from stash_ai.storage.store import StateStore, scope_for
     with StateStore(args.state_db, scope_for(app.STASH_URL), app.DRY_RUN):
         stash = app.services.create_stash_client(app.DRY_RUN)
+        stash.report = args.report
         try:
             stats = prune_tags(stash, args.prune_prefixes, report=args.report.detail)
         finally:

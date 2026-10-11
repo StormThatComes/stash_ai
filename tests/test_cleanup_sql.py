@@ -32,6 +32,22 @@ from tests.helpers.cleanup_sql import SQLStash
 pytestmark = pytest.mark.usefixtures("reset_progress")
 
 
+def test_live_cleanup_retains_confirmed_work_and_unknown_later_write(tmp_path, monkeypatch):
+    from stash_ai.runtime.report import RunReport
+    stash = SQLStash()
+    stash.scene['tags'] = [stash.tag('ai:blocked')]
+    stash.marker(merge_labels.AI, 'blocked', '1', manual=True)
+    stash.fail_after = 'CleanupDeleteTags'
+    install(monkeypatch, stash)
+    reports = []
+    monkeypatch.setattr(RunReport, 'finish', lambda self, *a, **k: reports.append(self))
+    assert app.main(args(tmp_path, ['blocked'])) == 1
+    assert reports[0].counts['mutation_marker_delete_confirmed'] == 1
+    assert reports[0].counts['mutation_unknown'] == 1
+    assert reports[0].counts['mutation_failed'] == 0
+    assert reports[0].counts['mutation_confirmed'] == 1
+
+
 @pytest.mark.parametrize('strategy', ['sql', 'scenes'])
 def test_cleanup_and_exclusion_pruning_preserve_retired_namespaces(tmp_path, monkeypatch, strategy):
     from tests.helpers.legacy_namespaces import NAMESPACES

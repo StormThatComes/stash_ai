@@ -6,6 +6,7 @@ Mutation helpers still go through Stash GraphQL so hooks and cleanup semantics r
 from __future__ import annotations
 
 from time import monotonic
+from stash_ai.runtime.console import activity, status
 
 
 READ_OPERATION = '''mutation StashAICleanupReadSQL($sql: String!, $args: [Any]) {
@@ -78,13 +79,16 @@ class CleanupSqlSession:
 
     def read(self, key, params=()):
         started = monotonic()
-        result = self.stash.gql(READ_OPERATION, {'sql': SQL[key], 'args': list(params)})['querySQL']
+        report = getattr(self.stash, 'report', None)
+        with activity(report, 'cleanup SELECT: ' + key):
+            result = self.stash.gql(READ_OPERATION, {'sql': SQL[key], 'args': list(params)})['querySQL']
         self.stats['cleanup_sql_reads'] += 1
         self.stats['cleanup_sql_read_ms'] += round((monotonic() - started) * 1000)
         rows = result.get('rows')
         if not isinstance(rows, list) or any(not isinstance(row, list) for row in rows):
             raise ValueError('Invalid SQL cleanup response; no write attempted for this batch.')
         self.stats['cleanup_rows_read'] += len(rows)
+        status(report, completed=1, sql_reads=self.stats['cleanup_sql_reads'], sql_rows=self.stats['cleanup_rows_read'])
         return rows
 
     def probe(self):
@@ -115,6 +119,8 @@ class CleanupSqlSession:
                 previous = identifier
             # Capture the cursor BEFORE yielding: the caller may delete these rows.
             cursor = previous
+            self.stats['cleanup_pages'] += 1
+            status(getattr(self.stash, 'report', None), relation=key, pages=self.stats['cleanup_pages'])
             yield rows
             if len(rows) < self.page_size:
                 return

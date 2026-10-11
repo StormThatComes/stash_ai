@@ -3,6 +3,7 @@ from collections import Counter
 from copy import deepcopy
 from stash_ai.publication.groups import PREFIX
 from stash_ai.stash_api.protocols import ReadTagView, TagReads
+from stash_ai.runtime.console import activity, status
 
 
 class PreviewUsage(ReadTagView):
@@ -31,7 +32,13 @@ def prune_groups(stash, report=print, *, candidate_ids=None, usage_delta=None):
         candidate_ids = [str(t['id']) for t in stash.iter_tags() if t['name'].startswith(PREFIX)]
     if not candidate_ids:
         return Counter()
+    status(getattr(stash, 'report', None), marker_groups=f'candidates={len(candidate_ids)} root=preserved')
     view = PreviewUsage(stash, usage_delta) if stash.dry_run and usage_delta else stash
-    stats = Counter(prune_tags(view, [PREFIX], report=report, candidate_ids=candidate_ids))
+    with activity(getattr(stash, 'report', None), 'prune managed marker groups'):
+        stats = Counter(prune_tags(view, [PREFIX], report=report, candidate_ids=candidate_ids))
+    status(getattr(stash, 'report', None), marker_groups=(
+        f"candidates={len(candidate_ids)} {'planned' if stash.dry_run else 'deleted'}={stats['tags_pruned']} "
+        f"retained={stats['tags_retained_after_refresh']} root=preserved"))
     return Counter(marker_group_tags_pruned=stats['tags_pruned'],
-                   marker_group_tags_retained=stats['tags_retained_after_refresh'])
+                   marker_group_tags_retained=stats['tags_retained_after_refresh'] + stats['prune_used_or_parent'],
+                   marker_group_root_skipped=stats['prune_root_skipped'])
