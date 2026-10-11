@@ -154,5 +154,5 @@ def test_frame_bar_is_hidden_when_output_is_redirected(pipeline, monkeypatch, ca
                         lambda *args: pytest.fail('Redirected output sampled buffer state'))
     assert app.main(pipeline.args) == 0
     assert len(captured) == 2 and captured[1].disable
-    assert 'wd inference' in capsys.readouterr().out
+    assert 'wd inference' in capsys.readouterr().err
     assert 'wd scene 1' not in output.getvalue() and '\x1b[A' not in output.getvalue()
