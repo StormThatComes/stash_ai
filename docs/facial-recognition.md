@@ -1,8 +1,9 @@
 # Facial recognition
 
 The recognition package is independent of the tag model registry and configuration.
-This first layer provides configuration, verified pinned Hugging Face assets and
-CPU YuNet/SFace adapters. The public `recognition run` command is introduced by
+The internal layers provide configuration, verified pinned HF assets,
+CPU YuNet/SFace adapters, bounded VTT extraction and checkpointed face SQLite.
+The public `recognition run` command is introduced by
 the subsequent orchestration change; no public scan/cluster/review/apply commands
 are provided.
 
@@ -32,3 +33,22 @@ existing custom/corrupt files are never silently overwritten.
 Normal core tests do not download models. The separate recognition CPU CI job
 loads the pinned detector/recognizer on Linux and Windows. This is a runtime,
 alignment and embedding-shape smoke test, not an accuracy benchmark.
+
+## Internal media and state
+
+Each selected scene verifies the VTT/sprite content before reusing observations.
+Sprite and decoded-pixel limits apply before conversion, with at most two active
+sheets. Completed cue checkpoints survive an interrupted inference; incomplete
+scans cannot publish identities. Partial sampling and rejected/no-face outcomes
+remain explicit coverage information, not proof that a person is absent.
+
+One face SQLite stores model/scan provenance, detections, normalized embeddings,
+bounded crop BLOBs, accepted identities, Stash ownership/bindings, candidate
+portraits, mutation records, progress and run history. Its independent schema
+refuses tag/history/foreign databases and hard-linked aliases. Internal backup
+uses SQLite's consistent backup API; no result/history/image sidecars are needed.
+
+Face completeness/pose currently use measurable geometry and five-landmark
+ordering/symmetry estimates. They do not prove that every feature is unoccluded.
+Sharpness is measured on a normalized grayscale crop; actual face dimensions,
+exposure and clipping are retained separately.
