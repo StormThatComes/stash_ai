@@ -90,7 +90,8 @@ def test_parallel_worker_tolerates_parent_publication_commits(tmp_path, rethresh
         merge_parallel._WORKER_CONTEXT = None
 
 
-def test_parallel_evidence_matches_serial_read_only(tmp_path):
+@pytest.mark.parametrize('telemetry_enabled', [False, True])
+def test_parallel_evidence_matches_serial_read_only(tmp_path, telemetry_enabled):
     app.TEMPORAL_POLICY = threshold_policy()
     path = tmp_path / "state.sqlite3"
     scope = merge_store.scope_for(app.STASH_URL)
@@ -108,6 +109,9 @@ def test_parallel_evidence_matches_serial_read_only(tmp_path):
                 app, store, scene_id, policies, policies, diagnostics)
             expected[scene_id] = hits, spans, diagnostics
 
+    from multiprocessing import get_context
+    from stash_ai.runtime.resources import WorkerTelemetry
+    telemetry = WorkerTelemetry(get_context('spawn'), 2, 4) if telemetry_enabled else None
     results = list(iter_parallel_evidence(
         app,
         path,
@@ -116,9 +120,13 @@ def test_parallel_evidence_matches_serial_read_only(tmp_path):
         policies,
         policies,
         workers=2,
+        **({'telemetry': telemetry} if telemetry is not None else {}),
         cache_bytes=64 * 2**20,
         memory_budget_bytes=512 * 2**20,
     ))
+    if telemetry is not None:
+        assert telemetry.snapshot()['computed_scenes'] == 2
+        assert telemetry.snapshot()['busy'] == telemetry.snapshot()['ready_chunks'] == 0
 
     assert [row.scene_id for row in results] == ["1", "2"]
     for result in results:
