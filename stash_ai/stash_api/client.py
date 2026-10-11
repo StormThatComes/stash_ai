@@ -1,5 +1,6 @@
 """Stash scene, tag and marker operations built on the shared HTTP transport."""
 from __future__ import annotations
+from stash_ai.runtime.mutations import observed
 
 import re
 from itertools import batched
@@ -100,6 +101,7 @@ class StashClient(StashTransport):
         }''', {"name": name})["findTags"]["tags"]
         return next((tag for tag in tags if tag["name"] == name), None)
 
+    @observed('tag_create')
     def create_tag(self, name: str, *, parent_ids: list[str] | None = None,
                    description: str | None = None, ignore_auto_tag: bool | None = None) -> dict:
         payload: dict = {"name": name}
@@ -113,6 +115,7 @@ class StashClient(StashTransport):
             raise RuntimeError(f"Stash did not create tag {name!r}.")
         return result
 
+    @observed('tag_organization')
     def update_tag_organization(self, tag_id: str, parent_ids: list[str], ignore_auto_tag: bool) -> dict:
         result = self.gql('''mutation StashAIMarkerGroupTag($input: TagUpdateInput!) {
             tagUpdate(input: $input) { ''' + self.tag_fields() + ''' }
@@ -121,6 +124,7 @@ class StashClient(StashTransport):
             raise RuntimeError(f"Stash did not update marker group tag {tag_id}.")
         return result
 
+    @observed('tag_parents')
     def update_tag_parents(self, tag_id: str, parent_ids: list[str]) -> dict:
         result = self.gql('''mutation StashAITagParents($input: TagUpdateInput!) {
             tagUpdate(input: $input) { ''' + self.tag_fields() + ''' }

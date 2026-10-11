@@ -114,6 +114,12 @@ def validate_maintenance(parser, args):
 
 def validate_pipeline(app, parser, args):
     """Normalize execution defaults and validate tagging/recovery combinations."""
+    if args.run_summary_json is not None:
+        if args.command not in (Command.INFERENCE, Command.MERGE, *CLEANUP_COMMANDS):
+            parser.error('--run-summary-json applies to inference, merge and cleanup execution.')
+        args.run_summary_json = args.run_summary_json.expanduser().resolve()
+        if args.run_summary_json.suffix.lower() != '.json' or args.run_summary_json.exists():
+            parser.error('--run-summary-json requires a new .json file; existing files are never overwritten.')
     if args.force_fetch_vtt and args.command is not Command.INFERENCE:
         parser.error('--force-fetch-vtt applies to normal model inference/resume runs.')
     args.resume = app.DEFAULT_RESUME if args.resume is None else args.resume

@@ -48,6 +48,7 @@ def test_one_owner_renders_bar_messages_and_heartbeat_during_blocked_work():
 
 def test_redraws_and_submissions_do_not_reset_completed_work_age():
     ui = ConsolePresenter(lambda _: None, stream=StringIO())
+    assert ui.snapshot()['last_progress_age'] is None
     ui.completed = time.monotonic()-10
     ui.update(wait='worker', queued=3)
     assert ui.snapshot()['last_progress_age'] >= 10

@@ -88,6 +88,7 @@ def run_sql_cleanup(app, sql, store, settings, args, cores, tags, stats):
     sql.set_catalog(catalog)
     # Validate all recovery gates before discovery and before the first write.
     if wide and store.has_pending_publications():
+        sql.report.publication_pending_observed = True
         raise RuntimeError('An interrupted merge is pending; run --merge-only before cleanup.')
     kinds = [kind for kind, enabled in [('scene', app.APPLY_SCENE_TAGS), ('markers', app.CREATE_MARKERS)] if enabled] if wide else []
     fingerprint = cleanup_fingerprint(tags, cores, kinds)
@@ -98,6 +99,8 @@ def run_sql_cleanup(app, sql, store, settings, args, cores, tags, stats):
     if wide and (global_labels or common_cores or store.cleanup_pending):
         begin(store, fingerprint, global_labels, common_cores,
               [i for i, n in catalog.items() if n in names], kinds=kinds)
+        if not app.DRY_RUN:
+            sql.report.cleanup_pending_observed = True
         status(sql.report, recovery='cleanup intent pending')
     remaining_tags = {s: tags[s] - global_labels for s in SOURCES}
     remaining_cores = {s: cores[s] - common_cores - global_labels for s in SOURCES}
@@ -122,6 +125,8 @@ def run_sql_cleanup(app, sql, store, settings, args, cores, tags, stats):
         with phase(sql.report, 'cleanup state commit'):
             finish(store)
         status(sql.report, recovery=None, local_commit='cleanup committed')
+        if not app.DRY_RUN:
+            sql.report.cleanup_pending_observed = False
     stats['cleanup_fast_path'] = 1
     stats['cleanup_sql_path'] = 1
     stats['cleanup_candidate_scenes'] = len(candidates)
