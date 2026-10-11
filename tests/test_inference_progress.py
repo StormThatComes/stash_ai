@@ -23,10 +23,17 @@ class Terminal(StringIO):
 @pytest.fixture
 def bars(monkeypatch):
     captured = []
-    owner = current_thread()
+    owner = None
+    from stash_ai.runtime.console import ConsolePresenter
+    initialize = ConsolePresenter.__init__
+    def terminal_owner(self, write, **options):
+        initialize(self, write, **{**options, "stream": Terminal()})
+    monkeypatch.setattr(ConsolePresenter, "__init__", terminal_owner)
 
     class RecordedBar(tqdm):
         def __init__(self, *args, **kwargs):
+            nonlocal owner
+            owner = current_thread()
             self.updates, self.closed = [], False
             kwargs['file'] = Terminal()
             super().__init__(*args, **kwargs)
@@ -132,7 +139,7 @@ def test_next_scene_gpu_work_does_not_advance_current_frame_bar(model_run, bars,
     assert_inference_workers_closed()
 
 
-def test_frame_bar_is_hidden_when_output_is_redirected(pipeline, monkeypatch):
+def test_frame_bar_is_hidden_when_output_is_redirected(pipeline, monkeypatch, capsys):
     captured = []
     output = StringIO()
 
@@ -147,5 +154,5 @@ def test_frame_bar_is_hidden_when_output_is_redirected(pipeline, monkeypatch):
                         lambda *args: pytest.fail('Redirected output sampled buffer state'))
     assert app.main(pipeline.args) == 0
     assert len(captured) == 2 and captured[1].disable
-    assert 'wd inference' in output.getvalue()
+    assert 'wd inference' in capsys.readouterr().out
     assert 'wd scene 1' not in output.getvalue() and '\x1b[A' not in output.getvalue()

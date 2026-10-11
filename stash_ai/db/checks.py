@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from stash_ai.runtime.console import progress as console_bar
 from collections import Counter
 from pathlib import Path
 import sqlite3
@@ -143,7 +144,7 @@ def check_database(path, scope, *, show_progress=False):
         progress = None
         if show_progress:
             from tqdm import tqdm
-            progress = tqdm(
+            progress = console_bar(tqdm,
                 total=validation_common.check_work_units(db, tables),
                 desc="DB check",
                 unit="item",

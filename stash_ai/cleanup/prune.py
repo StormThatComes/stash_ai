@@ -1,6 +1,7 @@
 """Prune unused leaf tag definitions through the Stash API, without model assets."""
 from __future__ import annotations
 
+from stash_ai.runtime.console import progress as console_bar
 from collections import Counter, deque
 from contextlib import contextmanager
 from itertools import batched
@@ -72,7 +73,7 @@ class PruneClient:
             if not ids:
                 return result
             total_batches = (len(ids) + 99) // 100
-            with tqdm(total=len(ids), desc="Check tag usage", unit="tag", dynamic_ncols=True) as progress:
+            with console_bar(tqdm, total=len(ids), desc="Check tag usage", unit="tag", dynamic_ncols=True) as progress:
                 for number, group in enumerate(batched(ids, 100), 1):
                     with _waiting_for_stash(progress, number, total_batches):
                         response = self.stash.gql('''query StashAIPruneCandidates($ids: [ID!]!) {
@@ -89,7 +90,7 @@ class PruneClient:
                     progress.refresh()
             return result
         page, result = 1, {}
-        with tqdm(desc="Read tag catalog", unit="tag", dynamic_ncols=True) as progress:
+        with console_bar(tqdm, desc="Read tag catalog", unit="tag", dynamic_ncols=True) as progress:
             while True:
                 # The first page supplies the total without a separate API request.
                 count_field = "count" if page == 1 else ""
@@ -156,7 +157,7 @@ def prune_tags(stash, prefixes=None, report=print, *, names=None, candidate_ids=
         stats['excluded_tags_still_used_or_parent'] = sum(selected(tag) and not client.unused_leaf(tag)
                                                         for tag in catalog.values())
     description = "Preview empty tags" if stash.dry_run else "Prune empty tags"
-    with tqdm(total=len(pending), desc=description, unit="tag", dynamic_ncols=True) as progress:
+    with console_bar(tqdm, total=len(pending), desc=description, unit="tag", dynamic_ncols=True) as progress:
         while pending:
             identifier = pending.popleft()
             try:

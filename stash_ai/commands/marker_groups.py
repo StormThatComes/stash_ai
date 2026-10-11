@@ -1,4 +1,5 @@
 """Repair marker group membership without replaying model evidence."""
+from stash_ai.runtime.console import progress as console_bar
 from collections import Counter
 from stash_ai.publication import markers as marker_ops
 from stash_ai.publication.groups import for_resolver
@@ -20,7 +21,7 @@ def run_backfill(app, args):
             resolver = app.services.TagResolver(stash, source=AI, report=report.detail, create_missing=app.CREATE_MISSING)
             resolver.preload()
             groups = for_resolver(app, resolver)
-            for row in tqdm(stash.iter_scenes(args.scene_id), desc='Marker groups', unit='scene'):
+            for row in console_bar(tqdm, stash.iter_scenes(args.scene_id), desc='Marker groups', unit='scene'):
                 try:
                     scene = stash.find_scene(str(row['id']))
                     updates = []

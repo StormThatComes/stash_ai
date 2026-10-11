@@ -1,4 +1,5 @@
 """Optional phase progress and durable phase outcomes for offline maintenance."""
+from stash_ai.runtime.console import progress as console_bar
 from contextlib import contextmanager
 import time
 
@@ -30,7 +31,7 @@ def maintenance_progress(label, *, show=False, callback=None, report=None):
             return
         if bar is None:
             from tqdm import tqdm
-            bar = tqdm(total=total, desc=label, unit='item', dynamic_ncols=True)
+            bar = console_bar(tqdm, total=total, desc=label, unit='item', dynamic_ncols=True)
         elif phase != previous:
             bar.reset(total=total)
         if phase != previous:

@@ -1,4 +1,5 @@
 """Read-only process workers for the offline model utility report."""
+from stash_ai.runtime.console import progress as console_bar
 from collections import Counter
 from concurrent.futures import ProcessPoolExecutor
 from multiprocessing import get_context
@@ -157,7 +158,7 @@ def _build_report_parallel(app, state_db, scope, scene_ids, core_policies,
         partials = executor.map(
             _report_worker_scenes, batched(scene_ids, chunksize),
             chunksize=1, buffersize=max(workers, 2))
-        with tqdm(total=len(scene_ids), desc="Model report", unit="scene") as progress:
+        with console_bar(tqdm, total=len(scene_ids), desc="Model report", unit="scene") as progress:
             for chunk in validated_chunks(scene_ids, partials, chunksize):
                 _merge_chunk(totals, utility, chunk, profile)
                 progress.update(len(chunk.results))

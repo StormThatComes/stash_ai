@@ -1,6 +1,7 @@
 """Lazy model lifecycle and per-scene inference for merged output."""
 from __future__ import annotations
 
+from stash_ai.runtime.console import progress as console_bar
 from functools import partial
 from concurrent.futures import ThreadPoolExecutor
 
@@ -47,7 +48,7 @@ class MergedModelRun:
             self.input_prefetch = SceneInputPrefetch(self.app, inputs, self.report, self.key)
         bar = None
         try:
-            bar = tqdm(self._scene_sequence, desc=self.key + " inference", unit="scene",
+            bar = console_bar(tqdm, self._scene_sequence, desc=self.key + " inference", unit="scene",
                        position=0, dynamic_ncols=True)
             for self._scene_position, (scene_id, current) in enumerate(bar):
                 self.observer.begin(scene_id)
@@ -373,7 +374,7 @@ class MergedModelRun:
         self.report.counts['checkpoint_restored_frames'] += job.state.processed
         self.report.work('checkpoint_resumed' if job.checkpoint.resumed_frames else 'fresh')
         from .inference_progress import InferenceProgress
-        with InferenceProgress(tqdm, total=len(job.cues), initial=job.state.processed,
+        with InferenceProgress(partial(console_bar, tqdm), total=len(job.cues), initial=job.state.processed,
                                desc=f'{self.key} scene {job.scene}',
                                sample=lambda: self._buffer_snapshot(job)) as display:
             analysis = {}

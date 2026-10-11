@@ -176,11 +176,18 @@ class StashTransport:
         retry_statuses = {429, 500, 502, 503, 504}
         session = self.media if media else self.api
 
-        def backoff(attempt):
+        def event(**values):
+            callback = getattr(self.report, 'request_state', None)
+            if callback is not None:
+                self.report.optional('request_status', callback, **values)
+
+        def backoff(attempt, reason):
             if self.report is not None:
                 self.report.counts['stash_media_retries' if media else 'stash_read_retries'] += 1
             delay = .5 * 2 ** attempt
             budget = remaining(deadline)
+            event(state='backoff', attempt=attempt+1, attempts=attempts,
+                  delay=min(delay, budget), budget=budget, reason=reason)
             from stash_ai.runtime.cancellation import current
             token = current()
             if token is not None:
@@ -200,6 +207,7 @@ class StashTransport:
                 timeout = ((min(self.request_timeout[0], budget), budget)
                            if isinstance(self.request_timeout, tuple) else budget)
             response = None
+            event(state='request', attempt=attempt+1, attempts=attempts, budget=budget)
             try:
                 with stage(self.report, 'stash_media_http' if media else 'stash_http'):
                     response = call_with_deadline(lambda: call(timeout), deadline) if read else call(timeout)
@@ -213,19 +221,21 @@ class StashTransport:
                 cleanup([response.close] if response is not None else [], report=self.report)
                 cleanup([session.close], report=self.report)
                 raise
-            except (RequestsConnectionError, RequestsTimeout):
+            except (RequestsConnectionError, RequestsTimeout) as exc:
                 if response is not None:
                     from stash_ai.runtime.cleanup import cleanup
                     cleanup([response.close], report=self.report)
                 if attempt + 1 == attempts:
+                    event(state='failed', reason=type(exc).__name__)
                     raise
-                backoff(attempt)
+                backoff(attempt, type(exc).__name__)
                 continue
             remaining(deadline)
+            event(state='response', http_status=response.status_code)
             if not read or response.status_code not in retry_statuses or attempt + 1 == attempts:
                 return response
             response.close()
-            backoff(attempt)
+            backoff(attempt, 'HTTP' + str(response.status_code))
         raise RuntimeError('Stash request returned no response.')
 
     def get_media(self, url: str) -> bytes:

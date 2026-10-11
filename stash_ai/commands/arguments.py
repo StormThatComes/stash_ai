@@ -77,6 +77,8 @@ def build_parser(app) -> argparse.ArgumentParser:
                         help="Flag merged marker ranges at least this long (default: 300); --tag-review-report only.")
     parser.add_argument("--tag-review-examples", type=int, default=None, metavar="N",
                         help="Retain up to N example scenes per model/tag (default: 3, maximum: 20); --tag-review-report only.")
+    parser.add_argument("--progress-style", choices=("auto", "compact", "verbose", "off"), default="auto",
+                        help="Console progress layout; redirected output uses bounded milestones. off keeps warnings/errors.")
     parser.add_argument("--verbose", action="store_true", help="Include per-scene/tag diagnostics and detailed dry-run changes.")
     parser.add_argument("--profile-merge", type=Path, metavar="NEW.jsonl",
                         help="Stream per-scene wall/CPU, stage/API timings, counts and byte sizes to a new JSONL file; merged output only.")

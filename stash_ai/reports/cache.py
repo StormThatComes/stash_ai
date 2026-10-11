@@ -6,6 +6,7 @@ streamed; older evidence is decoded only to derive metadata in the preview DB.
 """
 from __future__ import annotations
 
+from stash_ai.runtime.console import progress as console_bar
 from itertools import groupby
 from pathlib import Path
 import zlib
@@ -80,7 +81,7 @@ def _scene_evidence(store, scenes):
     """Stream compact metadata, retaining only the current scene's evidence."""
     grouped = iter(groupby(_metadata_rows(store, scenes), key=lambda row: row[0]))
     current = next(grouped, None)
-    for scene in tqdm(scenes, desc='Cache coverage', unit='scene'):
+    for scene in console_bar(tqdm, scenes, desc='Cache coverage', unit='scene'):
         while current is not None and current[0] < scene:
             current = next(grouped, None)
         if current is None or current[0] != scene:

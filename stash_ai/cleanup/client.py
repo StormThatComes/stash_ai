@@ -1,4 +1,5 @@
 """Paginated Stash tag catalog used by cleanup discovery."""
+from stash_ai.runtime.console import progress as console_bar
 from tqdm import tqdm
 from stash_ai.stash_api.protocols import QueryReads
 
@@ -11,7 +12,7 @@ class CleanupClient:
 
     def catalog(self):
         catalog = {}
-        with tqdm(desc='Read cleanup tags', unit='tag', dynamic_ncols=True) as bar:
+        with console_bar(tqdm, desc='Read cleanup tags', unit='tag', dynamic_ncols=True) as bar:
             page = 1
             while True:
                 count = 'count' if page == 1 else ''

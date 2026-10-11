@@ -1,6 +1,7 @@
 """Schedule merged evidence and publish it through the parent process's writer."""
 from __future__ import annotations
 
+from stash_ai.runtime.console import progress as console_bar
 from collections import Counter
 from itertools import batched
 
@@ -151,7 +152,7 @@ class MergePublisher:
             publication_key=self.publication_key, prepared_markers=prepared_markers)
 
     def _serial(self, scenes):
-        bar = tqdm(self._observed_scenes(scenes), total=len(scenes), desc="Merge to ai:", unit="scene")
+        bar = console_bar(tqdm, self._observed_scenes(scenes), total=len(scenes), desc="Merge to ai:", unit="scene")
         for scene_id, current, refresh_error in bar:
             with self.report.diagnostics.scene(scene_id) as sample:
                 try:
@@ -179,7 +180,7 @@ class MergePublisher:
         from itertools import zip_longest
 
         pending = []
-        bar = tqdm(total=len(scenes), desc="Merge to ai:", unit="scene")
+        bar = console_bar(tqdm, total=len(scenes), desc="Merge to ai:", unit="scene")
         try:
             # Check in the writer process before scheduling expensive replay.
             for scene_id, current, refresh_error in self._observed_scenes(scenes):
