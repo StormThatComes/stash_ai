@@ -111,6 +111,8 @@ def validate(data):
         raise ValueError('Supported detector/recognizer: yunet / sface.')
     if models['device'] not in ('auto', 'cpu', 'cuda') or type(models['download_missing']) is not bool:
         raise ValueError('Invalid face device/download policy.')
+    if models['device'] == 'cuda' and models['recognizer'] == 'sface':
+        raise ValueError('SFace uses the supported CPU OpenCV backend; choose cpu/auto.')
     for section, names in {
         'detection': ('score_threshold', 'nms_threshold'),
         'recognition': ('match_threshold', 'ambiguity_margin'),
