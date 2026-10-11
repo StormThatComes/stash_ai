@@ -21,7 +21,7 @@ def defaults():
         'recognition': {'metric': 'cosine', 'match_threshold': .65,
                         'ambiguity_margin': .1, 'min_support': 3},
         'clustering': {'cohesion_threshold': .60, 'max_samples_per_person': 32,
-                       'max_people_per_lookup': 20000},
+                       'max_people_per_lookup': 20000, 'max_reference_bytes': 134217728},
         'portraits': {'enabled': True, 'min_face_pixels': 96, 'min_sharpness': 25.,
                      'max_pose_deviation': .35, 'min_exposure': 30., 'max_exposure': 225.,
                      'max_clipped_fraction': .15, 'margin': .15, 'max_candidates': 8,
@@ -126,7 +126,8 @@ def validate(data):
     integers = {
         'detection': {'min_face_pixels': (8, 4096), 'max_faces_per_frame': (1, 1000)},
         'recognition': {'min_support': (2, 1000)},
-        'clustering': {'max_samples_per_person': (2, 128), 'max_people_per_lookup': (1, 100000)},
+        'clustering': {'max_samples_per_person': (2, 128), 'max_people_per_lookup': (1, 100000),
+                       'max_reference_bytes': (1048576, 1073741824)},
         'portraits': {'min_face_pixels': (8, 4096), 'max_candidates': (1, 64),
                       'max_video_bytes': (1048576, 1073741824)},
         'execution': {'max_cues': (0, 10000), 'checkpoint_cues': (1, 1000),
