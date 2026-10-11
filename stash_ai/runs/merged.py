@@ -201,7 +201,8 @@ class MergedRun:
             return 1
         self.stats.update(run(
             app, self.store, self.scenes, self.settings, self.report,
-            scenes=args.rethreshold_scenes, markers=args.rethreshold_markers))
+            scenes=args.rethreshold_scenes, markers=args.rethreshold_markers,
+            spool_limit_bytes=int(args.rethreshold_spool_limit_mb * 2**20)))
         if self.stats['errors']:
             self.report.finish('Threshold update aborted: 0 changes applied', self.stats, self.store.cache)
             return 1
