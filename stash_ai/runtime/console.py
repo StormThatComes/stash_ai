@@ -8,6 +8,7 @@ import threading
 import time
 
 _current = ContextVar('console_presenter', default=None)
+_quiet_activity = ContextVar('quiet_console_activity', default=False)
 
 
 def progress(factory, *args, **kwargs):
@@ -63,7 +64,8 @@ class ConsolePresenter:
                 self.counts[name] += amount
 
     @contextmanager
-    def phase(self, name, **values):
+    def phase(self, name, *, errors=None, **values):
+        before_errors = errors() if errors is not None else 0
         with self.lock:
             previous = self.phase_name, self.phase_started, self.completed, dict(self.state)
             self.phase_name = name
@@ -77,6 +79,8 @@ class ConsolePresenter:
             status = 'failed' if isinstance(error, Exception) else 'interrupted'
             raise
         finally:
+            if status == 'complete' and errors is not None and errors() > before_errors:
+                status = 'partial'
             self.message(f'Phase: {name} {status}', decorative=True)
             with self.lock:
                 self.phase_name, self.phase_started, self.completed, self.state = previous
@@ -286,3 +290,37 @@ def status(report, *, completed=0, **values):
     presenter = getattr(report, 'console', None)
     if presenter is not None:
         presenter.update(completed=completed, **values)
+
+
+def skipped(report, name, reason):
+    presenter = getattr(report, 'console', None)
+    if presenter is not None and not presenter.closed:
+        presenter.message(f'Phase: {name} skipped ({reason})', decorative=True)
+
+
+@contextmanager
+def quiet_activity():
+    """Lookahead prepares future work without replacing the consumer's stage."""
+    token = _quiet_activity.set(True)
+    try:
+        yield
+    finally:
+        _quiet_activity.reset(token)
+
+
+@contextmanager
+def activity(report, name, **values):
+    presenter = getattr(report, 'console', None)
+    if presenter is None or presenter.closed or _quiet_activity.get():
+        yield
+        return
+    keys = ('stage', *values)
+    with presenter.lock:
+        previous = {key: presenter.state.get(key) for key in keys}
+    presenter.update(stage=name, **values)
+    if presenter.style == 'verbose':
+        presenter.message('Activity: ' + name, decorative=True)
+    try:
+        yield
+    finally:
+        presenter.update(**previous)

@@ -52,6 +52,12 @@ class SceneReads:
     def page(self, after, size):
         return self._sql_read('page', after, size)
 
+    def _page_completed(self):
+        if self.report is not None:
+            self.report.counts['source_pages'] += 1
+            from stash_ai.runtime.console import status
+            status(self.report, pages=self.report.counts['source_pages'])
+
     def find_for_merge(self, scene_id):
         scenes = self.snapshots([scene_id])
         if scenes is None:
@@ -66,6 +72,8 @@ class SceneReads:
             for group in batched(dict.fromkeys(ids), min(self.client.scene_page_size, 1000)):
                 snapshots = (self.snapshots(group)
                              if self.merge_only else None)
+                if snapshots is not None:
+                    self._page_completed()
                 for scene_id in group:
                     try:
                         if snapshots is None:
@@ -87,6 +95,7 @@ class SceneReads:
                 scenes = self.page(after, min(self.client.scene_page_size, 1000))
                 if scenes is None:
                     break
+                self._page_completed()
                 yield from scenes.values()
                 if len(scenes) < min(self.client.scene_page_size, 1000):
                     return
@@ -100,6 +109,7 @@ class SceneReads:
                 }
             }''', {"filter": {"page": page, "per_page": self.client.scene_page_size,
                               "sort": "id", "direction": "ASC"}})["findScenes"]["scenes"]
+            self._page_completed()
             if reader and result:
                 snapshots = self.snapshots([scene['id'] for scene in result])
                 for scene in result:
