@@ -26,12 +26,18 @@ class ConsolePresenter:
         self.lock = threading.RLock()
         self.actions = Queue(maxsize=64)
         self.state, self.counts = {}, Counter()
-        self.started = self.completed = time.monotonic()
+        self.started, self.completed = time.monotonic(), None
         self.phase_name, self.phase_started = 'setup', self.started
         self.thread = None
         self.closed = False
         self._bars, self._status, self._last_line = [], None, None
         self._last_heartbeat = self.started
+        self.samplers = {}
+        self._resource_row = None
+        self.stopping = self.finalized = False
+        self.stop_started = None
+        self.phase_outcomes = {}
+        self.failure_phase = None
 
     def start(self):
         self.thread = threading.Thread(target=self._run, name='stash-console', daemon=True)
@@ -42,7 +48,8 @@ class ConsolePresenter:
         with self.lock:
             moment = time.monotonic()
             return dict(phase=self.phase_name, elapsed=moment-self.phase_started,
-                        last_progress_age=moment-self.completed, values=dict(self.state), counts=dict(self.counts))
+                        last_progress_age=moment-self.completed if self.completed is not None else None,
+                        values=dict(self.state), counts=dict(self.counts))
 
     def update(self, *, completed=0, **values):
         if self.closed or self.style == 'off':
@@ -67,9 +74,9 @@ class ConsolePresenter:
     def phase(self, name, *, errors=None, **values):
         before_errors = errors() if errors is not None else 0
         with self.lock:
-            previous = self.phase_name, self.phase_started, self.completed, dict(self.state)
+            previous = self.phase_name, self.phase_started, dict(self.state)
             self.phase_name = name
-            self.phase_started = self.completed = time.monotonic()
+            self.phase_started = time.monotonic()
             self.state = {k: str(v)[:180] for k, v in values.items() if v is not None}
         self.message('Phase: ' + name, decorative=True)
         status = 'complete'
@@ -77,13 +84,23 @@ class ConsolePresenter:
             yield
         except BaseException as error:
             status = 'failed' if isinstance(error, Exception) else 'interrupted'
+            if self.failure_phase is None:
+                self.failure_phase = name
+            if isinstance(error, KeyboardInterrupt):
+                self.begin_stopping()
             raise
         finally:
             if status == 'complete' and errors is not None and errors() > before_errors:
                 status = 'partial'
             self.message(f'Phase: {name} {status}', decorative=True)
+            if name in self.phase_outcomes or len(self.phase_outcomes) < 32:
+                self.phase_outcomes[name] = status
+            if status == 'partial' and self.failure_phase is None:
+                self.failure_phase = name
             with self.lock:
-                self.phase_name, self.phase_started, self.completed, self.state = previous
+                if status == 'complete':
+                    self.completed = time.monotonic()
+                self.phase_name, self.phase_started, self.state = previous
 
     def message(self, text, *, decorative=False):
         if decorative and self.style == 'off':
@@ -112,26 +129,84 @@ class ConsolePresenter:
     def bar(self, factory, iterable=None, **kwargs):
         return OwnedBar(self, factory, iterable, kwargs)
 
+    def register_sampler(self, name, callback):
+        with self.lock:
+            if len(self.samplers) < 3:
+                self.samplers[name] = callback
+
+    def remove_sampler(self, name):
+        with self.lock:
+            self.samplers.pop(name, None)
+
+    def begin_stopping(self):
+        with self.lock:
+            if self.stopping:
+                return
+            self.stopping, self.stop_started = True, time.monotonic()
+        self.message('Stopping: interruption received', decorative=True)
+
+    def finish_rendering(self):
+        self.finalized = True
+        def close_rows():
+            for bar in tuple(self._bars):
+                bar.close()
+            for row in (self._resource_row, self._status):
+                if row is not None:
+                    row.close()
+        self.call(close_rows)
+
     def _render(self):
-        if self.style == 'off':
+        if self.style == 'off' or self.finalized:
             return
+        with self.lock:
+            samplers = tuple(self.samplers.values()) if not self.stopping else ()
+        resources = None
+        for sample in samplers:
+            try:
+                candidate = sample()
+                if candidate:
+                    resources = candidate
+                    completed = (candidate.get('workers') or {}).get('last_completion')
+                    if completed:
+                        with self.lock:
+                            self.completed = max(self.completed or 0., completed)
+            except BaseException:
+                self.count('resource_sample_failures')
         row = self.snapshot()
+        if self.stopping:
+            row.update(phase='Stopping', elapsed=time.monotonic()-self.stop_started)
         fields = {k: v for k, v in row['values'].items() if not k.startswith('_')}
         for key, label in (('_backoff_until', 'backoff remaining'), ('_deadline', 'deadline remaining')):
             if key in row['values']:
                 fields[label] = f"{max(0., float(row['values'][key])-time.monotonic()):.1f}s"
         values = ' | '.join(f'{k}={v}' for k, v in fields.items())
+        age = 'none yet' if row['last_progress_age'] is None else f"{row['last_progress_age']:.1f}s ago"
         line = (f"Status: {row['phase']} elapsed={row['elapsed']:.1f}s "
-                f"last completed={row['last_progress_age']:.1f}s ago" + (' | ' + values if values else ''))
+                f"last completed={age}" + (' | ' + values if values else ''))
         if self.tty:
             if self._status is None:
                 from tqdm import tqdm
                 self._status = tqdm(total=0, position=4, leave=False, file=self.stream,
                                     bar_format='{desc}', dynamic_ncols=True)
             self._status.set_description_str(line)
-        elif (row['last_progress_age'] >= self.heartbeat
+            from .resources import resource_line
+            # Inference already owns buffer/cache rows; no duplicate resource row.
+            text = resource_line(resources) if row['phase'] != 'inference' else ''
+            if text:
+                if self._resource_row is None:
+                    from tqdm import tqdm
+                    self._resource_row = tqdm(total=0, position=5, leave=False, file=self.stream,
+                                              bar_format='{desc}', dynamic_ncols=True)
+                self._resource_row.set_description_str(text)
+            elif self._resource_row is not None:
+                self._resource_row.close()
+                self._resource_row = None
+        elif ((row['last_progress_age'] if row['last_progress_age'] is not None else row['elapsed']) >= self.heartbeat
               and time.monotonic()-self._last_heartbeat >= self.heartbeat):
             self._write_status('Still working: ' + line)
+            if resources is not None:
+                from .resources import resource_line
+                self._write_status(resource_line(resources))
             self._last_heartbeat = time.monotonic()
 
     def _run(self):
@@ -147,25 +222,28 @@ class ConsolePresenter:
             if callback is not None:
                 try:
                     result.append(callback())
-                except Exception:
+                except BaseException:
                     self.count('console_failures')
                 finally:
                     done.set()
             if time.monotonic() >= next_render:
                 try:
                     self._render()
-                except Exception:
+                except BaseException:
                     self.count('console_failures')
                 next_render = time.monotonic()+self.refresh
 
     def close(self):
         if self.closed:
             return
+        self.finalized = True
         def close_rows():
             for bar in tuple(self._bars):
                 bar.close()
             if self._status is not None:
                 self._status.close()
+            if self._resource_row is not None:
+                self._resource_row.close()
         self.call(close_rows)
         done = threading.Event()
         self.actions.put((False, done, []))
@@ -264,6 +342,7 @@ class OwnedBar:
 @contextmanager
 def present(report, style):
     presenter = ConsolePresenter(report.write, style=style).start()
+    presenter.report = report
     original = report.write
     report.console = presenter
     report.write = presenter.message
@@ -271,9 +350,12 @@ def present(report, style):
     try:
         yield presenter
     finally:
-        presenter.close()
-        _current.reset(token)
-        report.write = original
+        from .cleanup import cleanup
+        try:
+            cleanup([('finalize console', presenter.close)], report=report)
+        finally:
+            _current.reset(token)
+            report.write = original
 
 
 @contextmanager
@@ -290,6 +372,11 @@ def status(report, *, completed=0, **values):
     presenter = getattr(report, 'console', None)
     if presenter is not None:
         presenter.update(completed=completed, **values)
+
+
+def current_report():
+    presenter = _current.get()
+    return getattr(presenter, 'report', None)
 
 
 def skipped(report, name, reason):

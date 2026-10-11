@@ -50,6 +50,7 @@ class MergePublisher:
             raise
 
     def run(self, scenes):
+        self.live['selected'] = len(scenes)
         refresh_kinds = progress.output_kinds(self.app)
         if (self.app.CREATE_MARKERS
                 and self.app.TEMPORAL_POLICY.occurrence_markers):
@@ -250,6 +251,11 @@ class MergePublisher:
             budget_share = max(1, int(self.args.ram_budget_gb * 2**30) // (workers + 1))
             with self.store.cache.temporary_budget(
                     limit=min(self.store.cache.limit, cache_share), rss_budget=budget_share):
+                from stash_ai.runtime.resources import WorkerTelemetry, ResourceMonitor, observe
+                from multiprocessing import get_context
+                ui = getattr(self.report, 'console', None)
+                telemetry = WorkerTelemetry(get_context('spawn'), workers, max(workers, 2)+2) if ui is not None and ui.style != 'off' else None
+                monitor = ResourceMonitor(self.report, self.store.cache, telemetry, self.live)
                 evidence = iter_parallel_evidence(
                     self.app, self.args.state_db, self.store.scope,
                     [scene_id for scene_id, _ in pending],
@@ -258,38 +264,46 @@ class MergePublisher:
                     cache_bytes=int(self.args.ram_cache_gb * 2**30),
                     memory_budget_bytes=int(self.args.ram_budget_gb * 2**30),
                     **({'profile': True} if self.report.profile is not None else {}),
+                    **({'telemetry': telemetry} if telemetry is not None else {}),
                 )
                 completed = 0
-                try:
-                    missing = object()
-                    self._show(evidence_wait='ordered evidence', writer='idle')
-                    for item, prepared in zip_longest(pending, evidence, fillvalue=missing):
-                        if item is missing or prepared is missing:
-                            raise RuntimeError('Merge worker returned incomplete or extra scene results.')
-                        scene_id, current = item
-                        if prepared.scene_id != str(scene_id):
-                            raise RuntimeError('Merge worker returned an inconsistent scene ID.')
-                        if self.report.profile is not None and prepared.metrics is not None:
-                            self.report.profile.ingest(prepared.metrics)
-                        self.live['evidence_received'] += 1
-                        self._show(evidence_wait=None, writer='publishing', scene=scene_id)
-                        self._merge_one(scene_id, current, prepared)
-                        completed += 1
-                        bar.update(1)
-                        self.report.progress(bar, self.stats)
+                with observe(self.report, 'merge', monitor.sample):
+                    try:
+                        missing = object()
                         self._show(evidence_wait='ordered evidence', writer='idle')
-                except Exception as exc:
-                    # Never retry a second merge pass after a pool failure: some
-                    # scenes may already have been published by the parent.
-                    remaining = len(pending) - completed
-                    self.stats["errors"] += max(1, remaining)
-                    self.report.issue(
-                        'merge workers', '', None, exc,
-                        self.app.services.safe_error(exc, api_key=self.app.STASH_API_KEY))
-                    self.live['unresolved'] += remaining
-                    self._show(evidence_wait='pool failed', writer='stopped')
-                    self.report.progress(bar, self.stats)
-                finally:
-                    evidence.close()
+                        for item, prepared in zip_longest(pending, evidence, fillvalue=missing):
+                            if item is missing or prepared is missing:
+                                raise RuntimeError('Merge worker returned incomplete or extra scene results.')
+                            scene_id, current = item
+                            if prepared.scene_id != str(scene_id):
+                                raise RuntimeError('Merge worker returned an inconsistent scene ID.')
+                            if self.report.profile is not None and prepared.metrics is not None:
+                                self.report.profile.ingest(prepared.metrics)
+                            self.live['evidence_received'] += 1
+                            self._show(evidence_wait=None, writer='publishing', scene=scene_id)
+                            self._merge_one(scene_id, current, prepared)
+                            completed += 1
+                            bar.update(1)
+                            self.report.progress(bar, self.stats)
+                            self._show(evidence_wait='ordered evidence', writer='idle')
+                    except Exception as exc:
+                        # Never retry a second merge pass after a pool failure: some
+                        # scenes may already have been published by the parent.
+                        remaining = len(pending) - completed
+                        self.stats["errors"] += max(1, remaining)
+                        self.report.issue(
+                            'merge workers', '', None, exc,
+                            self.app.services.safe_error(exc, api_key=self.app.STASH_API_KEY))
+                        self.live['unresolved'] += remaining
+                        self._show(evidence_wait='pool failed', writer='stopped')
+                        self.report.progress(bar, self.stats)
+                    except KeyboardInterrupt:
+                        self.live['unresolved'] += len(pending)-completed
+                        self._show(writer='interrupted', evidence_wait='stopping')
+                        raise
+                    finally:
+                        evidence.close()
+                        if telemetry is not None:
+                            self.report.workload['merge_telemetry'] = telemetry.snapshot()
         finally:
             bar.close()

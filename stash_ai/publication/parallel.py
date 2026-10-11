@@ -20,6 +20,7 @@ from stash_ai.runtime.worker_result import pack_chunk, scene_selection, chunk_si
 
 _WORKER_CONTEXT = None
 _PROFILE = False
+_TELEMETRY = None
 
 
 @dataclass(frozen=True)
@@ -30,9 +31,10 @@ class MergeEvidence:
     diagnostics: Counter
 
 def _init_worker(state_db, scope, settings, core_policies, scene_policies,
-                 cache_bytes, memory_budget_bytes, profile=False):
-    global _WORKER_CONTEXT, _PROFILE
+                 cache_bytes, memory_budget_bytes, profile=False, telemetry=None):
+    global _WORKER_CONTEXT, _PROFILE, _TELEMETRY
     _PROFILE = profile
+    _TELEMETRY = telemetry
     if _WORKER_CONTEXT is not None:
         _WORKER_CONTEXT.close()
     _WORKER_CONTEXT = open_read_worker(
@@ -51,7 +53,19 @@ def _worker_evidence(scene_id):
 
 
 def _worker_evidence_chunk(scenes):
-    return pack_chunk(_worker_evidence(scene) for scene in scenes)
+    if _TELEMETRY is None:
+        return pack_chunk(_worker_evidence(scene) for scene in scenes)
+    index, scenes = scenes
+    _TELEMETRY.started(index)
+    def computed():
+        for scene in scenes:
+            result = _worker_evidence(scene)
+            _TELEMETRY.scene_finished(failed=result.error is not None)
+            yield result
+    try:
+        return pack_chunk(computed())
+    finally:
+        _TELEMETRY.finished(index)
 
 
 def _compute_evidence(scene_id):
@@ -71,7 +85,7 @@ def _compute_evidence(scene_id):
 
 def iter_parallel_evidence(app, state_db, scope, scene_ids, core_policies,
                            scene_policies, *, workers, cache_bytes,
-                           memory_budget_bytes, profile=False):
+                           memory_budget_bytes, profile=False, telemetry=None):
     """Yield read-only evidence in input order while a single parent publishes it."""
     scene_ids = scene_selection(scene_ids)
     if not scene_ids:
@@ -86,6 +100,10 @@ def iter_parallel_evidence(app, state_db, scope, scene_ids, core_policies,
     worker_cache = max(0, int(cache_bytes) // divisor)
     worker_budget = max(1, int(memory_budget_bytes) // divisor)
     size = chunk_size(len(scene_ids), workers)
+    def scheduled():
+        for index, group in enumerate(batched(scene_ids, size)):
+            telemetry.queued(index)
+            yield index, group
 
     with read_process_pool(ProcessPoolExecutor,
         max_workers=workers,
@@ -100,15 +118,17 @@ def iter_parallel_evidence(app, state_db, scope, scene_ids, core_policies,
             worker_cache,
             worker_budget,
             profile,
-        ),
+        ) + ((telemetry,) if telemetry is not None else ()),
     ) as executor:
         chunks = executor.map(
             _worker_evidence_chunk,
-            batched(scene_ids, size),
+            scheduled() if telemetry is not None else batched(scene_ids, size),
             chunksize=1,
             buffersize=max(workers, 2),
         )
-        for chunk in validated_chunks(scene_ids, chunks, size):
+        for number, chunk in enumerate(validated_chunks(scene_ids, chunks, size)):
+            if telemetry is not None:
+                telemetry.received(number)
             for index, result in enumerate(chunk.results):
                 # The serial publisher ingests this aggregate once. Evidence
                 # and diagnostics stay attached to their original scene.
