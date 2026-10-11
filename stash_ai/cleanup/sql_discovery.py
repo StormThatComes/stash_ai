@@ -1,5 +1,6 @@
 """Bounded SELECT-only cleanup candidate discovery and prune prefilters."""
 from stash_ai.runtime.console import progress as console_bar
+from stash_ai.runtime.console import status
 import json
 from itertools import batched
 from tqdm import tqdm
@@ -12,17 +13,22 @@ class SQLDiscovery:
 
     def candidates(self, catalog, scene_names, primary_names, extra_names):
         scenes = set()
-        for identifier, name in catalog.items():
-            params = (int(identifier),)
-            if name in primary_names:
-                for rows in self.session.pages('primary_scenes', params, self.session.bounds[0]):
-                    scenes.update(str(row[1]) for row in rows)
-            if name in extra_names:
-                for rows in self.session.pages('extra_scenes', params, self.session.bounds[1]):
-                    scenes.update(str(row[1]) for row in rows)
-            if name in scene_names:
-                for rows in self.session.pages('scenes', (int(identifier), name), self.session.bounds[2]):
-                    scenes.update(str(row[1]) for row in rows)
+        applicable = [(identifier, name) for identifier, name in catalog.items()
+                      if name in scene_names | primary_names | extra_names]
+        report = getattr(self.stash, 'report', None)
+        with console_bar(tqdm, total=len(applicable), desc='Discover cleanup scenes', unit='tag') as bar:
+            for identifier, name in applicable:
+                for key, names, bound, params in (
+                    ('primary_scenes', primary_names, self.session.bounds[0], (int(identifier),)),
+                    ('extra_scenes', extra_names, self.session.bounds[1], (int(identifier),)),
+                    ('scenes', scene_names, self.session.bounds[2], (int(identifier), name))):
+                    if name in names:
+                        status(report, relation=key, discovery_tags=f'{bar.n}/{bar.total}')
+                        for rows in self.session.pages(key, params, bound):
+                            scenes.update(str(row[1]) for row in rows)
+                            status(report, candidates=len(scenes))
+                bar.update(1)
+                status(report, discovery_tags=f'{bar.n}/{bar.total}', candidates=len(scenes))
         return scenes
 
     def unused_candidates(self, ids, *, page_size=200, progress=None):

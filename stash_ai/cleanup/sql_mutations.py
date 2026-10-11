@@ -1,6 +1,8 @@
 """Revalidate bounded cleanup batches and perform confirmed native API mutations."""
 import json
 from itertools import batched
+from stash_ai.runtime.console import status
+from stash_ai.runtime.mutations import write as confirmed_write
 
 
 class SQLMutationExecutor:
@@ -10,10 +12,23 @@ class SQLMutationExecutor:
         self.write_size, self.progress = write_size, None
 
     def tick(self):
+        status(getattr(self.stash, 'report', None),
+               cleanup_mode='planned' if self.stash.dry_run else 'confirmed',
+               cleanup_changes=f"markers={self.stats['markers_deleted']} marker_tags={self.stats['marker_tag_removals']} scene_tags={self.stats['scene_tag_removals']} definitions={self.stats['blacklisted_tags_deleted']}")
         if self.progress is not None:
             self.progress.set_postfix(deleted=self.stats['markers_deleted'],
                 removed=self.stats['marker_tag_removals'] + self.stats['scene_tag_removals'], refresh=False)
             self.progress.update(0)
+
+    def _write(self, query, variables, field, expected, message, *, name, rows):
+        def perform():
+            result = self.session.write(query, variables)[field]
+            valid = result is True if expected is True else (
+                result is not None and {str(row['id']) for row in result} == expected)
+            if not valid:
+                raise RuntimeError(message)
+            return result
+        return confirmed_write(getattr(self.stash, 'report', None), name, perform, rows=rows)
 
     def delete_primary(self, identifier, name, source=None):
         from stash_ai.publication.groups import PREFIX
@@ -29,11 +44,11 @@ class SQLMutationExecutor:
                 self.stats['cleanup_markers_changed_or_gone'] += len(group) - len(current)
                 if current and not self.stash.dry_run:
                     ids = list(map(str, current))
-                    result = self.session.write('''mutation StashAICleanupDeleteMarkers($ids: [ID!]!) {
+                    self._write('''mutation StashAICleanupDeleteMarkers($ids: [ID!]!) {
                         sceneMarkersDestroy(ids: $ids)
-                    }''', {'ids': ids})['sceneMarkersDestroy']
-                    if result is not True:
-                        raise RuntimeError('Marker deletion was not confirmed; rerun the same cleanup.')
+                    }''', {'ids': ids}, 'sceneMarkersDestroy', True,
+                        'Marker deletion was not confirmed; rerun the same cleanup.',
+                        name='marker_delete', rows=len(current))
                 if self.stash.dry_run and current and group_ids:
                     for tag_id, count in self.session.read('group_usage', (json.dumps(current), json.dumps(group_ids))):
                         self.preview.group_usage_delta[str(tag_id)] -= int(count)
@@ -55,11 +70,11 @@ class SQLMutationExecutor:
                 if current and not self.stash.dry_run:
                     field, input_type = ('bulkSceneMarkerUpdate', 'BulkSceneMarkerUpdateInput') if markers else (
                         'bulkSceneUpdate', 'BulkSceneUpdateInput')
-                    result = self.session.write('mutation StashAICleanupRemoveTags($input: ' + input_type +
+                    self._write('mutation StashAICleanupRemoveTags($input: ' + input_type +
                         '!) { ' + field + '(input: $input) { id } }', {'input': {
-                            'ids': list(map(str, current)), 'tag_ids': {'ids': [str(identifier)], 'mode': 'REMOVE'}}})[field]
-                    if result is None or {str(row['id']) for row in result} != set(map(str, current)):
-                        raise RuntimeError('Tag detachment was not confirmed; rerun the same cleanup.')
+                            'ids': list(map(str, current)), 'tag_ids': {'ids': [str(identifier)], 'mode': 'REMOVE'}}},
+                        field, set(map(str, current)), 'Tag detachment was not confirmed; rerun the same cleanup.',
+                        name='marker_tags' if markers else 'scene_tag_removals', rows=len(current))
                 # These count object/tag operations; one object can lose several tags.
                 self.stats['marker_tag_removals' if markers else 'scene_tag_removals'] += len(current)
                 self.tick()
@@ -70,10 +85,10 @@ class SQLMutationExecutor:
             return
         # One tag per mutation: a popular tag can have millions of associations.
         if not self.stash.dry_run:
-            result = self.session.write('''mutation StashAICleanupDeleteTags($ids: [ID!]!) {
+            self._write('''mutation StashAICleanupDeleteTags($ids: [ID!]!) {
                 tagsDestroy(ids: $ids)
-            }''', {'ids': [str(identifier)]})['tagsDestroy']
-            if result is not True:
-                raise RuntimeError('Tag deletion was not confirmed; rerun the same cleanup.')
+            }''', {'ids': [str(identifier)]}, 'tagsDestroy', True,
+                'Tag deletion was not confirmed; rerun the same cleanup.', name='tag_delete', rows=1)
         self.stats['blacklisted_tags_deleted'] += 1
+        self.tick()
 
