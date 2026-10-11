@@ -1,6 +1,7 @@
 """Cleanup-specific merge reconciliation and stateful cleanup orchestration."""
 from __future__ import annotations
 
+from stash_ai.runtime.resources import ResourceMonitor, observe
 from stash_ai.runtime.console import progress as console_bar
 from stash_ai.runtime.console import activity, phase, skipped, status
 from collections import Counter
@@ -54,13 +55,15 @@ class CleanupRun:
             self.stash.report = self.report
             self.store.report = self.report
             try:
-                self._impact(strategy=args.cleanup_strategy, recovery='resume' if self.store.cleanup_pending else None)
-                self._prepare_strategy()
-                with phase(self.report, 'affected scene reconciliation', errors=lambda: self.stats['errors']):
-                    self._cleanup_scenes()
-                self._prune()
-                with phase(self.report, 'cleanup finalize'):
-                    self._impact()
+                with observe(self.report, 'cache', ResourceMonitor(self.report, self.store.cache).sample):
+                    self.report.cleanup_pending_observed = bool(self.store.cleanup_pending)
+                    self._impact(strategy=args.cleanup_strategy, recovery='resume' if self.report.cleanup_pending_observed else None)
+                    self._prepare_strategy()
+                    with phase(self.report, 'affected scene reconciliation', errors=lambda: self.stats['errors']):
+                        self._cleanup_scenes()
+                    self._prune()
+                    with phase(self.report, 'cleanup finalize'):
+                        self._impact()
             except Exception as exc:
                 self.stats['errors'] += 1
                 self.report.issue('cleanup', '', None, exc, app.services.safe_error(exc, api_key=app.STASH_API_KEY))

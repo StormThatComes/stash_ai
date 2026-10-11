@@ -28,16 +28,19 @@ def main(argv: list[str] | None = None, *, runtime: RuntimeContext | None = None
         return run_reuse_report(app, args)
     from stash_ai.runtime.report import RunReport
     from stash_ai.runtime.console import present
+    from stash_ai.runtime.outcome import CommandOutcome
     from tqdm import tqdm
     if not hasattr(args, "report"):
         args.report = RunReport(args.verbose, tqdm.write)
     from stash_ai.history.lifecycle import RunHistory
     from contextlib import nullcontext
     with args.configuration_snapshot.use(), RunHistory(app, args) as history:
-        with present(args.report, getattr(args, 'progress_style', 'auto')):
+        args.report.preview = bool(app.DRY_RUN or args.dry_run)
+        with present(args.report, getattr(args, 'progress_style', 'auto')), CommandOutcome(app, args) as outcome:
             timer = args.report.measure('command') if history.enabled else nullcontext()
             with timer:
                 result = _execute(app, args)
+            outcome.result = result
             history.result = result
             return result
 

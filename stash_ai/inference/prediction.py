@@ -220,7 +220,8 @@ def _run_prediction_batches(app, tagger, stash, paths, cues, state, *,
     finally:
         # Save the last fully completed batch on Ctrl+C/inference/preparation errors.
         from stash_ai.runtime.cleanup import cleanup
-        cleanup(([checkpoint.flush] if checkpoint else []) + [batches.close], report=report)
+        cleanup(([('save partial checkpoint', checkpoint.flush)] if checkpoint else []) +
+                [('cancel preparation/results', batches.close)], report=report)
 
     if state.processed != len(cues) or not len(state.top_scores):
         raise RuntimeError("Incomplete inference; scene sync was not started.")
