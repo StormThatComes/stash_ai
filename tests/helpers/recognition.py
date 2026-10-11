@@ -80,3 +80,66 @@ class Backend:
 
     def close(self):
         self.closed = True
+
+
+class Stash:
+    """Fake server preserves manual links and can lose mutation responses."""
+    url = 'http://stash/'
+    api_key = ''
+
+    def __init__(self, **kwargs):
+        self.profiles = {'77': {'id': '77', 'name': 'Manual', 'details': '', 'image_path': ''}}
+        self.links = {'1': ['77'], '2': []}
+        self.media_calls, self.writes, self.reads = [], [], []
+        self.fail_create = self.fail_link = False
+        self.create_visible = True
+        self.media = SimpleNamespace(get=self.get)
+        self.closed = False
+
+    def get(self, url, **kwargs):
+        self.media_calls.append(url)
+        identifier = url.rsplit('/', 1)[-1].split('.')[0]
+        return MediaClient(identifier).get(url, **kwargs)
+
+    def scene(self, identifier):
+        self.reads.append(('scene', identifier))
+        return {'id': identifier, 'paths': {'vtt': f'/vtt/{identifier}.vtt',
+                'sprite': f'/sprite/{identifier}.jpg', 'stream': f'/scene/{identifier}/stream'},
+                'performers': [{'id': p} for p in self.links.setdefault(identifier, [])]}
+
+    def scene_ids(self):
+        return iter(sorted(self.links))
+
+    def performer(self, identifier):
+        self.reads.append(('performer', identifier))
+        return dict(self.profiles[identifier])
+
+    def find_token(self, token):
+        return [dict(p) for p in self.profiles.values() if token in p['details'].splitlines()]
+
+    def create_person(self, name, token):
+        self.writes.append(('create', name))
+        value = {'id': str(100 + len(self.profiles)), 'name': name, 'details': token, 'image_path': ''}
+        if self.create_visible:
+            self.profiles[value['id']] = value
+        if self.fail_create:
+            self.fail_create = False
+            raise TimeoutError('lost create response')
+        return dict(value)
+
+    def add_scene_person(self, scene, performer):
+        self.writes.append(('link', scene, performer))
+        if performer not in self.links[scene]:
+            self.links[scene].append(performer)
+        if self.fail_link:
+            self.fail_link = False
+            raise TimeoutError('lost link response')
+        return self.scene(scene)
+
+    def update_person(self, performer, **fields):
+        self.writes.append(('metadata', performer, fields))
+        self.profiles[performer].update(fields)
+        return self.performer(performer)
+
+    def close(self):
+        self.closed = True

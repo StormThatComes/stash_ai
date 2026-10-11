@@ -10,6 +10,10 @@ from stash_ai.stash_api.transport import safe_error
 
 
 def main(argv: list[str] | None = None, *, runtime: RuntimeContext | None = None) -> int:
+    selected = sys.argv[1:] if argv is None else argv
+    if selected and selected[0] == 'recognition':
+        from stash_ai.recognition.cli import main as recognition_main
+        return recognition_main(selected[1:])
     from stash_ai.commands.arguments import parse_args
 
     app = runtime if runtime is not None else RuntimeContext()
@@ -81,11 +85,15 @@ def _execute(app, args):
 
 def run() -> int:
     """CLI exit handling shared by the root launcher."""
-    runtime = RuntimeContext()
+    runtime = None
     try:
+        if sys.argv[1:2] != ['recognition']:
+            runtime = RuntimeContext()
         return main(runtime=runtime)
     except KeyboardInterrupt:
         return 130
     except Exception as exc:
-        print(f"ERROR: {safe_error(exc, api_key=runtime.STASH_API_KEY)}", file=sys.stderr)
+        import os
+        key = runtime.STASH_API_KEY if runtime is not None else os.getenv('STASH_API_KEY', '')
+        print(f"ERROR: {safe_error(exc, api_key=key)}", file=sys.stderr)
         return 1
