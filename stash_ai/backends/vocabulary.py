@@ -3,9 +3,6 @@ from __future__ import annotations
 
 import csv
 import json
-import os
-import shutil
-import tempfile
 from pathlib import Path
 
 from stash_ai import models
@@ -38,19 +35,12 @@ def ensure_files(settings: models.ModelSettings, filenames: tuple[str, ...]) -> 
     if not settings.download_missing:
         raise FileNotFoundError(f"{settings.source.title}: missing {', '.join(missing)} in {settings.model_dir}. "
                                 "Configure model_dir or enable download_missing.")
-    from huggingface_hub import hf_hub_download
+    from stash_ai.backends.downloads import install_hf_asset
     settings.model_dir.mkdir(parents=True, exist_ok=True)
     for name in missing:
         remote = "/".join(part for part in (settings.source.subdirectory, name) if part)
         print(f"Downloading {settings.source.key}/{name}...")
-        cached = hf_hub_download(repo_id=settings.source.repo, filename=remote, revision=settings.source.revision)
-        fd, temporary = tempfile.mkstemp(prefix=name + ".", suffix=".part", dir=settings.model_dir)
-        os.close(fd)
-        try:
-            shutil.copyfile(cached, temporary)
-            os.replace(temporary, settings.model_dir / name)
-        finally:
-            Path(temporary).unlink(missing_ok=True)
+        install_hf_asset(settings.source.repo, remote, settings.source.revision, settings.model_dir / name)
 
 
 def validate_labels(labels: list[str], source: models.ModelSource) -> None:

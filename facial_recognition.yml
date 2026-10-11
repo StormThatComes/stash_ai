@@ -1,0 +1,53 @@
+# Loaded only by explicit `recognition run`; never enables a background task.
+# Similarities are cosine scores, not identity probabilities. These conservative
+# starting defaults have no claimed accuracy calibration for your VTT library.
+version: 1
+models:
+  detector: yunet
+  recognizer: sface
+  device: auto                 # Official OpenCV wheels use CPU; cuda fails clearly.
+  directory: recognition_models
+  download_missing: true       # Only inside the explicit recognition invocation.
+detection:
+  score_threshold: 0.90
+  nms_threshold: 0.30
+  min_face_pixels: 32
+  min_sharpness: 10.0
+  max_faces_per_frame: 100
+recognition:
+  metric: cosine
+  match_threshold: 0.65        # Higher means more similar. Model-specific.
+  ambiguity_margin: 0.10
+  min_support: 3               # Distinct VTT cue times for a new person.
+clustering:
+  cohesion_threshold: 0.60
+  max_samples_per_person: 32
+  max_people_per_lookup: 20000
+portraits:
+  enabled: true
+  min_face_pixels: 96          # Actual source pixels; upscaling adds no detail.
+  min_sharpness: 25.0
+  max_pose_deviation: 0.35
+  min_exposure: 30.0
+  max_exposure: 225.0
+  max_clipped_fraction: 0.15
+  margin: 0.15
+  max_candidates: 8
+  time_offsets: [0.0, -0.5, 0.5]
+  timeout_seconds: 30.0
+  max_video_bytes: 67108864
+  ffmpeg: ffmpeg
+  weights: {frontal: 3.0, sharpness: 2.0, resolution: 1.0, exposure: 1.0}
+execution:
+  max_cues: 0                  # 0 = all cues in the selected scene, not all scenes.
+  checkpoint_cues: 32
+  max_vtt_bytes: 1048576
+  max_media_bytes: 16777216
+  max_image_pixels: 16777216
+  max_sheets: 256
+  timeout_seconds: 120.0
+storage:
+  database: faces_state.sqlite3
+  max_crop_bytes: 1048576
+names:
+  file: null                  # Optional instance-scoped performer_names.yml.
