@@ -7,6 +7,7 @@ from __future__ import annotations
 
 
 from stash_ai.runtime.console import progress as console_bar
+from stash_ai.runtime.console import phase, status
 from tqdm import tqdm
 
 from stash_ai.cleanup.state import begin, finish
@@ -82,7 +83,8 @@ def run_sql_cleanup(app, sql, store, settings, args, cores, tags, stats):
     common_cores = (frozenset.intersection(*cores.values()) - global_labels) if wide and app.CREATE_MARKERS else frozenset()
     names = {AI.prefix + label for label in global_labels}
     core_names = {AI.prefix + label: AI for label in common_cores}
-    catalog = sql.client.catalog()
+    with phase(sql.report, 'cleanup catalog'):
+        catalog = sql.client.catalog()
     sql.set_catalog(catalog)
     # Validate all recovery gates before discovery and before the first write.
     if wide and store.has_pending_publications():
@@ -96,15 +98,18 @@ def run_sql_cleanup(app, sql, store, settings, args, cores, tags, stats):
     if wide and (global_labels or common_cores or store.cleanup_pending):
         begin(store, fingerprint, global_labels, common_cores,
               [i for i, n in catalog.items() if n in names], kinds=kinds)
+        status(sql.report, recovery='cleanup intent pending')
     remaining_tags = {s: tags[s] - global_labels for s in SOURCES}
     remaining_cores = {s: cores[s] - common_cores - global_labels for s in SOURCES}
-    candidates = set(map(str, args.scene_id)) if args.scene_id else sql.discovery.candidates(
-        catalog, *candidate_names(app, selected, remaining_cores, remaining_tags))
+    with phase(sql.report, 'cleanup discovery'):
+        candidates = set(map(str, args.scene_id)) if args.scene_id else sql.discovery.candidates(
+            catalog, *candidate_names(app, selected, remaining_cores, remaining_tags))
     tasks = [(identifier, name) for identifier, name in catalog.items() if name in names or name in core_names]
     sql.preview.names, sql.preview.cores = names, core_names
-    with console_bar(tqdm, tasks, desc='Clean excluded tags' + (' (preview)' if app.DRY_RUN else ''), unit='tag', dynamic_ncols=True) as bar:
+    with phase(sql.report, 'global cleanup', mode='planned' if app.DRY_RUN else 'apply'), console_bar(tqdm, tasks, desc='Clean excluded tags' + (' (preview)' if app.DRY_RUN else ''), unit='tag', dynamic_ncols=True) as bar:
         sql.mutations.progress = bar
         for identifier, name in bar:
+            status(sql.report, tag_index=bar.n + 1, tag_total=bar.total)
             if app.CREATE_MARKERS:
                 sql.mutations.delete_primary(identifier, name, core_names.get(name))
             if name in names:
@@ -114,7 +119,9 @@ def run_sql_cleanup(app, sql, store, settings, args, cores, tags, stats):
                     sql.mutations.remove_associations(identifier, name, markers=app.CREATE_MARKERS)
             bar.set_postfix(deleted=stats['markers_deleted'], removed=stats['marker_tag_removals'] + stats['scene_tag_removals'])
     if store.cleanup_pending:
-        finish(store)
+        with phase(sql.report, 'cleanup state commit'):
+            finish(store)
+        status(sql.report, recovery=None, local_commit='cleanup committed')
     stats['cleanup_fast_path'] = 1
     stats['cleanup_sql_path'] = 1
     stats['cleanup_candidate_scenes'] = len(candidates)

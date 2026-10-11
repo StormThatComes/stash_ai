@@ -73,13 +73,22 @@ def publish_sync_plan(app, stash, resolver, store, scene_id, scene, markers, sce
         report.counts['publication_pending'] += 1
     status(report, local_commit='pending', recovery='pending intent')
     created = []
+    original_markers = {str(marker['id']): marker for marker in scene.get('scene_markers', [])} if plan.updates else {}
     with stage(report, 'publication_mutations'):
         for payload in plan.creates:
             created.append((payload, confirmed_write(report, 'marker_create', lambda: stash.create_marker(payload))))
         for payload in plan.updates:
             confirmed_write(report, 'marker_update', lambda: stash.update_marker(payload))
+            if report is not None and 'tag_ids' in payload:
+                original = original_markers.get(str(payload['id']))
+                if original is not None:
+                    report.counts['mutation_marker_tags_confirmed'] += len(
+                        {str(tag['id']) for tag in original.get('tags', [])} - set(map(str, payload['tag_ids'])))
         if app.APPLY_SCENE_TAGS and plan.scene_changed:
             confirmed_write(report, 'scene_tags', lambda: stash.update_scene_tags(scene_id, sorted(plan.final_scene_tag_ids)))
+            if report is not None:
+                report.counts['mutation_scene_tag_removals_confirmed'] += len(
+                    plan.existing_scene_tag_ids - plan.final_scene_tag_ids)
         for group in batched(sorted(plan.deletes), 200):
             confirmed_write(report, 'marker_delete', lambda: stash.delete_markers(list(group)), rows=len(group))
     status(report, write='idle', local_commit='Stash confirmed / local commit pending')
