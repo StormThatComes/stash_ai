@@ -20,3 +20,12 @@ transitions report only sanitized reason classes.
 The presenter keeps at most 32 status fields, 64 diagnostic counters and a bounded
 64-entry queue of synchronous output actions. It does not retain scene payloads,
 perform Stash requests, traverse cache objects or modify inference/evidence.
+
+Threshold preflight separates inspected, checked, planned, unchanged, absent
+evidence and blocked pairs, including per-model subtotals. No apply starts after
+a failed preflight. Application advances after each successful transaction, so a
+rolled-back batch contributes zero committed pairs. Dry runs label overlay changes
+as planned. `--rethreshold-spool-limit-mb MIB` optionally aborts preflight before
+application; zero keeps the existing unlimited behavior. Spool bytes are SQLite
+pager allocation measured after a spool commit, rather than a filesystem free-space
+estimate or a promise of durable threshold application.
