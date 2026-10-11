@@ -1,0 +1,9 @@
+# Optional standalone facial recognition. No Torch, tagger models or InsightFace.
+numpy>=2,<3
+opencv-python-headless>=4.10,<5
+Pillow>=9.4
+PyYAML>=6
+huggingface_hub>=0.26,<2
+requests>=2.31
+urllib3>=2,<3
+tqdm>=4.66

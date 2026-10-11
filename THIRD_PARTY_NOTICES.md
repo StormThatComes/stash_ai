@@ -18,6 +18,8 @@ Model weights are not committed to this repository.
 | WD EVA02-Large Tagger v3 | [SmilingWolf/wd-eva02-large-tagger-v3](https://huggingface.co/SmilingWolf/wd-eva02-large-tagger-v3) | [Apache-2.0](https://www.apache.org/licenses/LICENSE-2.0) | `b25b82a03f7282e41aa2f257a52c7583b710bd1c` |
 | DanbooruTagQuery L/16 | [realphongha/danbooru-tag-query](https://huggingface.co/realphongha/danbooru-tag-query) | [DINOv3 License](https://huggingface.co/facebook/dinov3-vitb16-pretrain-lvd1689m/blob/main/LICENSE.md) (`dinov3-license`, **not** GPL or Apache) | `d2f8da27a23db4adf95c3e663af183b92784ad3e` |
 | OppaiOracle V1.1 | [Grio43/OppaiOracle](https://huggingface.co/Grio43/OppaiOracle) | [Apache-2.0](https://www.apache.org/licenses/LICENSE-2.0) | `96992fa30568c386e9fe7c8a1a68f798a3202c09` |
+| YuNet face detector | [opencv/face_detection_yunet](https://huggingface.co/opencv/face_detection_yunet) | MIT | `3cc26e7f1014a5ee5d74a42acee58bafc9d0a310` |
+| SFace face embeddings | [opencv/face_recognition_sface](https://huggingface.co/opencv/face_recognition_sface) | Apache-2.0 | `3d7082438a6e4551e840c9b2bb60b71e8da4b524` |
 
 The upstream license information above describes the referenced model
 repositories and should be rechecked before redistributing model assets.
