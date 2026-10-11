@@ -3,15 +3,37 @@
 The recognition package is independent of the tag model registry and configuration.
 The internal layers provide configuration, verified pinned HF assets,
 CPU YuNet/SFace adapters, bounded VTT extraction and checkpointed face SQLite.
-The public `recognition run` command is introduced by
-the subsequent orchestration change; no public scan/cluster/review/apply commands
-are provided.
+The only public operation is the explicit, finite `recognition run` command.
+No public scan/cluster/review/apply commands are provided.
 
 Install the optional standalone dependencies on Python 3.14.7:
 
 ```powershell
 uv pip install -r requirements-recognition.txt -c constraints/recognition-py314.txt
 ```
+
+With `STASH_URL` and optional `STASH_API_KEY` set for Stash 0.31.1 or later:
+
+```powershell
+python stash_ai.py recognition run --scene-id 6306
+python stash_ai.py recognition run --scene-id 6306 --scene-id 6307 --face-config facial_recognition.yml --faces-db faces_state.sqlite3
+python stash_ai.py recognition run --all-scenes
+```
+
+The last command explicitly snapshots all scene IDs for this one invocation.
+There is no watcher, tagging hook or background recognition process. Ordinary
+tagging, merge, cleanup and `--models all` neither start recognition nor read its
+YAML. Missing pinned weights are installed automatically on recognition runs.
+Eligible identities become anonymous performers and receive additive scene
+links. Weak identities remain recorded with reasons and do not block clear ones.
+
+Ownership uses an exact installation/person token in performer details, never a
+name-only match. Each mutation intent is committed to the face SQLite before
+dispatch. Lost creation/link responses are reconciled by fresh Stash reads;
+unresolved outcomes are withheld without blindly retrying. Existing manual links
+are preserved with Stash's `ADD` mutation. Selected-scene runs do not resume links
+for other scenes. Exit 0 means the finite selection completed; exit 1 records
+partial/failed work, and interruption returns 130 from the root launcher.
 
 `facial_recognition.yml` is a versioned face-only configuration. Numeric matching
 thresholds are cosine similarities, not calibrated probabilities. The initial
