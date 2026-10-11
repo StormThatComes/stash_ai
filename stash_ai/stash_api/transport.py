@@ -107,7 +107,9 @@ class StashTransport:
         # Never schedule or time a denied mutation, including in lightweight
         # dry-run/test clients without a configured network timeout.
         if self.dry_run and not read:
-            raise RuntimeError("Internal error: mutation attempted during dry-run.")
+            error = RuntimeError("Internal error: mutation attempted during dry-run.")
+            error.write_outcome = 'failed'
+            raise error
         # Mutations get a response budget too, but are NEVER retried if the
         # outcome may be uncertain. Only response reads use deadline workers.
         deadline = monotonic() + self._read_budget()
@@ -116,9 +118,16 @@ class StashTransport:
             try:
                 return operation()
             except ReadDeadlineExceeded as exc:
-                raise RuntimeError(
+                error = RuntimeError(
                     'Stash mutation response timed out; write outcome is unknown. '
-                    'Inspect/recover pending publication before retrying.') from exc
+                    'Inspect/recover pending publication before retrying.')
+                error.write_outcome = 'unknown'
+                raise error from exc
+            except BaseException as exc:
+                from requests.exceptions import ConnectTimeout, InvalidURL, InvalidSchema, MissingSchema
+                if isinstance(exc, (ConnectTimeout, InvalidURL, InvalidSchema, MissingSchema)):
+                    exc.write_outcome = 'failed'
+                raise
         if self.report is not None:
             operation = self.report.bind_read(operation)
         try:
@@ -141,7 +150,12 @@ class StashTransport:
         try:
             if report is not None:
                 report.response_size(len(response.content))
-            response.raise_for_status()
+            try:
+                response.raise_for_status()
+            except Exception as exc:
+                if not read and response.status_code in (401, 403):
+                    exc.write_outcome = 'failed'
+                raise
             if 300 <= response.status_code < 400:
                 raise RuntimeError("Stash redirected GraphQL; configure STASH_URL to its final URL.")
             with stage(report, 'stash_json_decode'):
@@ -154,7 +168,12 @@ class StashTransport:
                         for item in errors)):
                 raise RuntimeError('Invalid GraphQL errors envelope.')
             if errors:
-                raise RuntimeError("GraphQL: " + "; ".join(error["message"] for error in errors))
+                error = RuntimeError("GraphQL: " + "; ".join(error["message"] for error in errors))
+                if not read and not payload.get('data') and all(
+                        isinstance(item.get('extensions'), dict) and item['extensions'].get('code')
+                        in ('GRAPHQL_PARSE_FAILED', 'GRAPHQL_VALIDATION_FAILED') for item in errors):
+                    error.write_outcome = 'failed'
+                raise error
             if not isinstance(payload.get("data"), dict):
                 raise RuntimeError("Stash returned no GraphQL data.")
             return payload["data"]
