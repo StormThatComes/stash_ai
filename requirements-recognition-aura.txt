@@ -1,0 +1,4 @@
+# Optional CPU AuraFace profile. In an existing GPU environment, install only
+# requirements-recognition.txt and keep its onnxruntime-gpu; never install both.
+-r requirements-recognition.txt
+onnxruntime==1.26.0
