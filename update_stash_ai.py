@@ -35,6 +35,10 @@ LOCK = ".stash-ai.install.lock"
 MAX_FILE_BYTES = 16 * 1024 * 1024
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 REQUIREMENT_PROFILES = frozenset({'requirements.txt', 'requirements-cpu.txt', 'requirements-gpu.txt'})
+DEPENDENCY_FILES = REQUIREMENT_PROFILES | frozenset({
+    'requirements-dev.txt', 'constraints/cpu-py314.txt', 'constraints/gpu-py314.txt',
+    'constraints/README.md',
+})
 PREPARING = 'preparing.json'
 
 
@@ -83,8 +87,8 @@ class Phase(StrEnum):
 
 
 def allowed(name):
-    """Install application code/configuration and the distribution's licenses."""
-    return bool(re.fullmatch(
+    """Install application code/configuration, dependency manifests and licenses."""
+    return name in DEPENDENCY_FILES or bool(re.fullmatch(
         r"(?:LICENSE|THIRD_PARTY_NOTICES\.md|stash_ai\.py|update_stash_ai\.py|[A-Za-z0-9][A-Za-z0-9_.-]*\.yml|"
         r"stash_ai/(?:[A-Za-z_][A-Za-z0-9_]*/)*[A-Za-z_][A-Za-z0-9_]*\.py)", name))
 
@@ -323,15 +327,14 @@ class GitHub:
             files, profiles = {}, {}
             for entry in tree["tree"]:
                 name = entry["path"]
-                if not allowed(name) and name not in REQUIREMENT_PROFILES:
+                if not allowed(name):
                     continue
                 if (entry["type"] != "blob" or entry["mode"] not in ("100644", "100755")
                         or not SHA.fullmatch(entry["sha"])
                         or not 0 <= entry["size"] <= MAX_FILE_BYTES):
                     raise ValueError
                 if name in REQUIREMENT_PROFILES:
-                    profiles[name] = entry['sha']  # Metadata only; never download/install packages.
-                    continue
+                    profiles[name] = entry['sha']
                 if name.casefold() in {n.casefold() for n in files}:
                     raise ValueError
                 files[name] = entry["sha"]
@@ -391,7 +394,12 @@ def plan_update(root, state, snapshot, *, overwrite_configs=False, force_code=Fa
         if current == sha:
             baseline[name] = sha
             continue
-        modified = current is not None and current != baseline.get(name)
+        previous = baseline.get(name)
+        if previous is None and name in REQUIREMENT_PROFILES:
+            # Older updaters recorded these hashes without managing the files.
+            # Only content matching that recorded upstream version is adopted.
+            previous = state.get('requirement_profiles', {}).get(name)
+        modified = current is not None and current != previous
         if name.endswith(".yml") and modified and not overwrite_configs:
             kept.append(name)
             incoming = name + ".incoming"
@@ -678,10 +686,12 @@ def describe_plan(state, snapshot, plan):
         print(f"CONFLICT {name}")
     previous = state.get('requirement_profiles', {})
     current = plan.next_state['requirement_profiles']
-    changed = sorted(name for name in previous.keys() | current.keys() if previous.get(name) != current.get(name))
+    changed = sorted({name for name in previous.keys() | current.keys()
+                      if previous.get(name) != current.get(name)}
+                     | {entry.path for entry in plan.actions if entry.path in DEPENDENCY_FILES})
     if changed:
         print(', '.join(changed) + " changed or has no recorded baseline. Review dependencies manually; "
-              "the updater does not download requirements or run pip.")
+              "dependency files are included in the update, but the updater does not run pip.")
     if not state["commit"]:
         print("First adoption: stop any application started before updater support was installed.")
 
@@ -723,7 +733,7 @@ def update(root, client, *, check=False, dry_run=False, overwrite_configs=False,
             print("Preview only: no application, configuration or updater-state writes.")
             return 2 if plan.conflicts else 0
         if plan.conflicts:
-            raise UpdateError("Local or untracked application files require --force-code; "
+            raise UpdateError("Local or untracked application/dependency files require --force-code; "
                               "edited .incoming proposals must be moved aside first. No files installed.")
         if not plan.actions and state == plan.next_state:
             print("Already up to date.")
@@ -742,7 +752,8 @@ def build_parser():
     mode.add_argument("--recover", action="store_true", help="Recover an interrupted installation, offline.")
     mode.add_argument("--_apply", help=argparse.SUPPRESS)
     parser.add_argument("--overwrite-configs", action="store_true", help="Replace local YAML files, keeping backups.")
-    parser.add_argument("--force-code", action="store_true", help="Replace modified/untracked application files, keeping backups.")
+    parser.add_argument("--force-code", action="store_true",
+                        help="Replace modified/untracked application and dependency files, keeping backups.")
     return parser
 
 
