@@ -14,7 +14,7 @@ def defaults():
     # claims about accuracy on an operator's VTT thumbnails.
     return {
         'version': 1,
-        'models': {'detector': 'yunet', 'recognizer': 'sface', 'device': 'auto',
+        'models': {'detector': 'yunet', 'recognizer': 'sface', 'device': 'cuda',
                    'directory': 'recognition_models', 'download_missing': True},
         'detection': {'score_threshold': .9, 'nms_threshold': .3,
                       'min_face_pixels': 32, 'min_sharpness': 10., 'max_faces_per_frame': 100},
@@ -111,8 +111,6 @@ def validate(data):
         raise ValueError('Supported detector/recognizer: yunet / sface or auraface.')
     if models['device'] not in ('auto', 'cpu', 'cuda') or type(models['download_missing']) is not bool:
         raise ValueError('Invalid face device/download policy.')
-    if models['device'] == 'cuda' and models['recognizer'] == 'sface':
-        raise ValueError('SFace uses the supported CPU OpenCV backend; choose cpu/auto.')
     for section, names in {
         'detection': ('score_threshold', 'nms_threshold'),
         'recognition': ('match_threshold', 'ambiguity_margin'),
@@ -194,7 +192,7 @@ class FaceConfig:
         return digest({name: self.data[name] for name in sections})
 
 
-def load(path=None, *, database=None, root=None):
+def load(path=None, *, database=None, device=None, root=None):
     root = Path.cwd() if root is None else Path(root)
     selected = Path(path).expanduser().resolve() if path is not None else root / 'facial_recognition.yml'
     if path is not None or selected.is_file():
@@ -209,6 +207,8 @@ def load(path=None, *, database=None, root=None):
         raw, supplied, base, selected = b'', {}, root.resolve(), None
     data = defaults()
     _merge(data, supplied)
+    if device is not None:
+        data['models']['device'] = device
     validate(data)
     def resolve(value):
         p = Path(value).expanduser()

@@ -1,4 +1,4 @@
-"""Pinned face assets and CPU OpenCV adapters; independent of tag vocabularies."""
+"""Pinned face assets and CPU/GPU adapters; independent of tag vocabularies."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -43,9 +43,8 @@ def verify(path, asset):
 
 
 def ensure_assets(config, *, write=print):
-    if config.data['models']['recognizer'] == 'auraface':
-        from .aura import runtime
-        runtime(config)  # Fail clearly before a large download for an unusable runtime.
+    from .runtime import runtime
+    runtime(config)  # Fail clearly before downloads for an unusable device/profile.
     from stash_ai.backends.downloads import install_hf_asset
     result = {}
     for key in (config.data['models']['detector'], config.data['models']['recognizer']):
@@ -110,19 +109,32 @@ def normalized_embedding(value, dimensions):
 
 
 class YuNetDetector:
-    """Shared CPU detector; recognizers retain independent preprocessing."""
-    def __init__(self, config, paths):
+    """Shared CPU/OpenCV or GPU/ORT detector with independent recognizers."""
+    def __init__(self, config, paths, *, runtime_info=None):
         import cv2
         self.cv = cv2
-        self.provenance = {'opencv': cv2.__version__, 'detector_device': 'cpu'}
         self.config = config
         self.device = 'cpu'
         settings = config.data['detection']
-        self.detector = cv2.FaceDetectorYN.create(str(paths['yunet']), '', (320, 320),
-                                                 settings['score_threshold'], settings['nms_threshold'],
-                                                 settings['max_faces_per_frame'])
         for key, path in paths.items():
             verify(path, ASSETS[key])
+        self.ort_detector = None
+        if config.data['models']['device'] != 'cpu':
+            if runtime_info is None:
+                from .runtime import runtime
+                runtime_info = runtime(config)
+            from .onnx_models import OnnxYuNet
+            self.ort_detector = OnnxYuNet(config, paths['yunet'], cv2, runtime_info)
+            self.detector = None
+            self.detector_device = self.ort_detector.device
+        else:
+            self.detector = cv2.FaceDetectorYN.create(str(paths['yunet']), '', (320, 320),
+                                                     settings['score_threshold'], settings['nms_threshold'],
+                                                     settings['max_faces_per_frame'])
+            self.detector_device = 'cpu'
+        self.provenance = {'opencv': cv2.__version__, 'detector_device': self.detector_device}
+        if self.ort_detector is not None:
+            self.provenance['detector'] = self.ort_detector.provenance
 
     def _bgr(self, image):
         import numpy as np
@@ -131,6 +143,8 @@ class YuNetDetector:
 
     def detect(self, image):
         data = self._bgr(image)
+        if self.ort_detector is not None:
+            return self.ort_detector.detect(data)
         self.detector.setInputSize((image.width, image.height))
         _, rows = self.detector.detect(data)
         if rows is None:
@@ -141,24 +155,45 @@ class YuNetDetector:
 
     def close(self):
         self.detector = None
+        if getattr(self, 'ort_detector', None) is not None:
+            self.ort_detector.close()
+            self.ort_detector = None
 
 
 class OpenCVFaces(YuNetDetector):
-    """YuNet + SFace. Official wheels provide a tested CPU DNN backend."""
+    """YuNet/SFace: CPU OpenCV or shared ORT GPU neural inference."""
     def __init__(self, config, paths):
-        if config.data['models']['device'] == 'cuda':
-            raise ValueError('YuNet/SFace uses the supported CPU OpenCV backend; set device: cpu/auto.')
-        super().__init__(config, paths)
-        self.recognizer = self.cv.FaceRecognizerSF.create(str(paths['sface']), '')
-        self.dimensions = ASSETS['sface'].dimensions
+        from .runtime import runtime
+        info = runtime(config)
+        self.ort_recognizer = None
+        try:
+            super().__init__(config, paths, runtime_info=info)
+            # alignCrop is kept identical on both devices; this OpenCV object
+            # never runs neural feature() in GPU/auto mode.
+            self.recognizer = self.cv.FaceRecognizerSF.create(str(paths['sface']), '')
+            if config.data['models']['device'] != 'cpu':
+                from .onnx_models import OnnxSFace
+                self.ort_recognizer = OnnxSFace(config, paths['sface'], info)
+                self.device = self.ort_recognizer.device
+                self.provenance['recognizer'] = self.ort_recognizer.provenance
+            self.dimensions = ASSETS['sface'].dimensions
+        except BaseException:
+            self.close()
+            raise
 
     def embed(self, image, detection):
         import numpy as np
         aligned = self.recognizer.alignCrop(self._bgr(image), np.asarray(detection.row, dtype=np.float32))
+        if self.ort_recognizer is not None:
+            return self.ort_recognizer.embed(aligned)
         return normalized_embedding(self.recognizer.feature(aligned), self.dimensions)
 
     def close(self):
-        self.detector = self.recognizer = None
+        super().close()
+        self.recognizer = None
+        if getattr(self, 'ort_recognizer', None) is not None:
+            self.ort_recognizer.close()
+            self.ort_recognizer = None
 
 
 def load_backend(config, paths):

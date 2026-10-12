@@ -1,34 +1,11 @@
 """Pinned AuraFace recognition only; no InsightFace model packs or attributes."""
-from importlib import metadata
-
 from .models import ASSETS, YuNetDetector, normalized_embedding
+from .runtime import runtime, session
 
 CONTRACT = {'format': 1, 'alignment': 'five-point-similarity-arcface-112',
             'color': 'RGB', 'input': 'float32 NCHW 1x3x112x112',
             'normalization': '(pixel-127.5)/127.5', 'output': 'unit-float32-512',
             'license_source': 'fal/AuraFace-v1/LICENSE.md@af6d057c9b0ec4071d4c49c80e3539258798b609'}
-
-
-def runtime(config):
-    variants = []
-    for name in ('onnxruntime', 'onnxruntime-gpu'):
-        try:
-            metadata.version(name)
-            variants.append(name)
-        except metadata.PackageNotFoundError:
-            pass
-    if len(variants) != 1:
-        raise ValueError('AuraFace requires exactly one ONNX Runtime variant: CPU or GPU; do not install both.')
-    import onnxruntime as ort
-    available = ort.get_available_providers()
-    requested = config.data['models']['device']
-    if requested == 'cuda' and 'CUDAExecutionProvider' not in available:
-        raise ValueError('AuraFace CUDA was requested but this ONNX Runtime has no CUDA provider.')
-    providers = (['CUDAExecutionProvider', 'CPUExecutionProvider']
-                 if requested != 'cpu' and 'CUDAExecutionProvider' in available else ['CPUExecutionProvider'])
-    if 'CPUExecutionProvider' not in available:
-        raise ValueError('AuraFace requires the supported ONNX Runtime CPU fallback.')
-    return ort, providers
 
 
 def similarity_matrix(landmarks):
@@ -69,10 +46,13 @@ def input_blob(aligned_bgr):
 class AuraFaces(YuNetDetector):
     def __init__(self, config, paths):
         ort, providers = runtime(config)
-        super().__init__(config, paths)
-        options = ort.SessionOptions()
-        options.intra_op_num_threads = options.inter_op_num_threads = 1
-        self.session = ort.InferenceSession(str(paths['auraface']), sess_options=options, providers=providers)
+        self.session = None
+        try:
+            super().__init__(config, paths, runtime_info=(ort, providers))
+            self.session, self.device = session(config, str(paths['auraface']), runtime_info=(ort, providers))
+        except BaseException:
+            self.close()
+            raise
         inputs, outputs = self.session.get_inputs(), self.session.get_outputs()
         if (len(inputs) != 1 or len(outputs) != 1 or inputs[0].type != 'tensor(float)' or
                 outputs[0].type != 'tensor(float)' or len(inputs[0].shape) != 4 or
@@ -98,4 +78,5 @@ class AuraFaces(YuNetDetector):
         return normalized_embedding(result[0], 512)
 
     def close(self):
-        self.detector = self.session = None
+        super().close()
+        self.session = None
