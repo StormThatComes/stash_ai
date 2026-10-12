@@ -1,5 +1,5 @@
 --extra-index-url https://download.pytorch.org/whl/cu126
-# JoyTag + WD EVA02-Large v3 + DanbooruTagQuery L/16 + OppaiOracle V1.1 -> Stash
+# Complete application: taggers and facial recognition (YuNet/SFace/AuraFace).
 
 # JoyTag
 torch==2.14.0+cu126
@@ -17,9 +17,11 @@ tqdm>=4.66.0
 # Editable tag hierarchy (safe YAML loader).
 PyYAML>=6.0
 
-# ONNX classifiers. Use only one ORT package. This GPU range uses CUDA 12/cuDNN 9.
+# ONNX taggers and face models. Use only one ORT package (CUDA 12/cuDNN 9).
 # ORT 1.21+ supplies preload_dlls for CUDA library setup.
-# CPU-only: replace onnxruntime-gpu with onnxruntime>=1.21,<2.
-numpy>=1.24,<3
+# CPU installations use requirements-cpu.txt instead.
+numpy>=2,<3
+opencv-python-headless>=4.10,<5
+onnx>=1.21,<2
 onnxruntime-gpu==1.26.0
 huggingface_hub>=0.26,<2

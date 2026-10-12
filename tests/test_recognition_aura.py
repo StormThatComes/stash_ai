@@ -37,12 +37,12 @@ def test_rgb_normalization_nchw_is_exact_and_has_no_upstream_normalization_twice
 
 def test_only_recognition_weight_and_detector_are_downloaded(tmp_path, monkeypatch):
     import stash_ai.backends.downloads as downloads
-    import stash_ai.recognition.aura as aura
+    import stash_ai.recognition.runtime as face_runtime
     import stash_ai.recognition.models as models
     path = tmp_path / 'face.yml'
     path.write_text('version: 1\nmodels: {recognizer: auraface}\n')
     calls = []
-    monkeypatch.setattr(aura, 'runtime', lambda config: None)
+    monkeypatch.setattr(face_runtime, 'runtime', lambda config: None)
     monkeypatch.setattr(models, 'verify', lambda *args: None)
     monkeypatch.setattr(downloads, 'install_hf_asset', lambda repo, filename, revision, destination, **kwargs:
                         calls.append((repo, filename, revision)))
@@ -52,15 +52,15 @@ def test_only_recognition_weight_and_detector_are_downloaded(tmp_path, monkeypat
 
 
 def test_runtime_rejects_duplicate_packages_and_missing_cuda(tmp_path, monkeypatch):
-    import stash_ai.recognition.aura as aura
-    monkeypatch.setattr(aura.metadata, 'version', lambda name: '1.26.0')
+    import stash_ai.recognition.runtime as face_runtime
+    monkeypatch.setattr(face_runtime.metadata, 'version', lambda name: '1.26.0')
     with pytest.raises(ValueError, match='exactly one'):
         runtime(load(root=tmp_path))
     def version(name):
         if name == 'onnxruntime-gpu':
-            raise aura.metadata.PackageNotFoundError(name)
+            raise face_runtime.metadata.PackageNotFoundError(name)
         return '1.26.0'
-    monkeypatch.setattr(aura.metadata, 'version', version)
+    monkeypatch.setattr(face_runtime.metadata, 'version', version)
     monkeypatch.setitem(sys.modules, 'onnxruntime', SimpleNamespace(get_available_providers=lambda: ['CPUExecutionProvider']))
     path = tmp_path / 'face.yml'
     path.write_text('version: 1\nmodels: {recognizer: auraface, device: cuda}')
