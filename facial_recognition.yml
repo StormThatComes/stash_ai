@@ -4,8 +4,8 @@
 version: 1
 models:
   detector: yunet
-  recognizer: sface
-  device: auto                 # Official OpenCV wheels use CPU; cuda fails clearly.
+  recognizer: sface             # Optional auraface needs exactly one ONNX Runtime variant.
+  device: auto                 # SFace = CPU. AuraFace reports its actual ORT provider.
   directory: recognition_models
   download_missing: true       # Only inside the explicit recognition invocation.
 detection:
