@@ -1,11 +1,41 @@
 """One application ORT distribution and shared CUDA library/provider policy."""
-from importlib import metadata
+from importlib import import_module, metadata
+import os
+import shlex
+import sys
 from types import SimpleNamespace
 
 from stash_ai.backends.onnx_session import _execution_providers
 
 
+def check_dependencies(config):
+    """Explain missing recognition packages before downloading weights/media."""
+    required = [('cv2', 'opencv-python-headless>=4.10,<5')]
+    if config.data['models']['device'] != 'cpu':
+        required.append(('onnx', 'onnx>=1.21,<2'))
+    missing = []
+    for module, requirement in required:
+        try:
+            import_module(module)
+        except ModuleNotFoundError as error:
+            if error.name != module:
+                raise  # A broken package's internal import is a different failure.
+            missing.append((module, requirement))
+    if missing:
+        arguments = [sys.executable, '-m', 'pip', 'install', *(item[1] for item in missing)]
+        if os.name == 'nt':
+            # PowerShell needs the call operator for a quoted executable path.
+            command = '& ' + ' '.join("'" + item.replace("'", "''") + "'" for item in arguments)
+        else:
+            command = shlex.join(arguments)
+        modules = ', '.join(item[0] for item in missing)
+        raise ValueError(f'Recognition dependencies missing: {modules}. '
+                         'The code updater does not install Python packages. '
+                         f'Install into the Python running this command: {command}')
+
+
 def runtime(config):
+    check_dependencies(config)
     variants = []
     for name in ('onnxruntime', 'onnxruntime-gpu'):
         try:

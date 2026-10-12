@@ -19,6 +19,8 @@ def one_variant(monkeypatch):
         return '1.26.0'
     monkeypatch.setattr(face_runtime.metadata, 'version', version)
     monkeypatch.setitem(sys.modules, 'torch', None)
+    monkeypatch.setitem(sys.modules, 'cv2', SimpleNamespace())
+    monkeypatch.setitem(sys.modules, 'onnx', SimpleNamespace())
 
 
 def test_default_is_gpu_and_cpu_override_keeps_existing_namespace(tmp_path):

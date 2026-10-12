@@ -14,6 +14,27 @@ uv pip install -r requirements-gpu.txt -c constraints/gpu-py314.txt --index-stra
 uv pip install -r requirements-cpu.txt -c constraints/cpu-py314.txt --index-strategy unsafe-best-match
 ```
 
+Existing installations updated with `update_stash_ai.py` must also update their
+Python dependencies: the updater installs code/configuration, but neither
+requirements files nor Python packages. Both application profiles already include
+`opencv-python-headless`, which provides the `cv2` module. OpenCV is needed for
+image decoding/alignment on both CPU and CUDA; CUDA/auto also requires `onnx` for
+in-memory model adaptation.
+
+If recognition reports missing `cv2` after a code update, run this with the same
+Python/environment used for `stash_ai.py`, then retry recognition:
+
+```powershell
+python -m pip install "opencv-python-headless>=4.10,<5" "onnx>=1.21,<2"
+python -c "import cv2, onnx; print(cv2.__version__, onnx.__version__)"
+```
+
+This adds the missing packages to an existing tagging environment. For a complete
+environment refresh, use the current CPU/GPU profile and matching constraints
+above from a fresh checkout. Recognition checks these imports before downloading
+weights or fetching scene media and prints a repair command for its exact Python
+executable. It does not install packages automatically.
+
 With `STASH_URL` and optional `STASH_API_KEY` set for Stash 0.31.1 or later:
 
 ```powershell

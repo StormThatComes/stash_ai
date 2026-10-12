@@ -53,6 +53,8 @@ def test_only_recognition_weight_and_detector_are_downloaded(tmp_path, monkeypat
 
 def test_runtime_rejects_duplicate_packages_and_missing_cuda(tmp_path, monkeypatch):
     import stash_ai.recognition.runtime as face_runtime
+    monkeypatch.setitem(sys.modules, 'cv2', SimpleNamespace())
+    monkeypatch.setitem(sys.modules, 'onnx', SimpleNamespace())
     monkeypatch.setattr(face_runtime.metadata, 'version', lambda name: '1.26.0')
     with pytest.raises(ValueError, match='exactly one'):
         runtime(load(root=tmp_path))
