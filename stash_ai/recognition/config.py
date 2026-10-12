@@ -179,11 +179,16 @@ class FaceConfig:
     names_path: Path | None
 
     def snapshot(self):
+        baseline = defaults()
+        custom = any(plain(self.data[section]) != baseline[section]
+                     for section in ('detection', 'recognition', 'clustering', 'portraits'))
         return {'version': 1, 'source_sha256': hashlib.sha256(self.source).hexdigest(),
                 'source': self.source.decode('utf-8-sig'), 'effective': plain(self.data),
                 'paths': {'database': str(self.database), 'models': str(self.model_dir),
                           'names': str(self.names_path) if self.names_path else None},
-                'default_policy': 'conservative-v1-not-domain-calibrated'}
+                'policy_origin': 'custom' if custom else 'bundled-default',
+                'default_policy': ('custom-operator-policy-not-domain-calibrated' if custom
+                                   else 'conservative-v1-not-domain-calibrated')}
 
     def identity(self, *sections):
         return digest({name: self.data[name] for name in sections})
