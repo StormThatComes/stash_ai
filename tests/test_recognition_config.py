@@ -25,6 +25,9 @@ def test_default_config_and_immutable_snapshot(tmp_path):
     'version: 1\nrecognition: {match_threshold: 0.4}',
     'version: 1\nportraits: {weights: {frontal: 0, sharpness: 0, resolution: 0, exposure: 0}}',
     'version: 1\nmodels: {recognizer: unknown}', 'version: 1\nnames: {file: false}',
+    'version: 1\nportraits: {source: unknown}', 'version: 1\nportraits: {source: false}',
+    'version: 1\nportraits: {aspect_ratio: 0}', 'version: 1\nportraits: {aspect_ratio: .nan}',
+    'version: 1\nportraits: {jpeg_quality: 101}', 'version: 1\nportraits: {jpeg_quality: true}',
     'version: 1\nmodels: &a {device: cpu}\nnames: *a',
 ])
 def test_reject_bad_configuration_before_work(tmp_path, text):
@@ -55,3 +58,18 @@ def test_semantic_cache_identity_ignores_filename_and_names(tmp_path):
 def test_shipped_template_matches_default_schema():
     config = load(Path(__file__).resolve().parents[1] / 'facial_recognition.yml')
     assert config.data['recognition']['min_support'] == 3
+    assert config.data['portraits']['source'] == 'vtt'
+    assert config.data['portraits']['margin'] == .35
+
+
+def test_portrait_source_and_framing_do_not_invalidate_face_scan(tmp_path):
+    from stash_ai.recognition.models import namespace
+    from stash_ai.recognition.scanning import scan_identity
+    initial = load(root=tmp_path)
+    path = tmp_path / 'changed.yml'
+    path.write_text('version: 1\nportraits: {source: video, margin: 0.5, aspect_ratio: 0.8, jpeg_quality: 85}\n')
+    changed = load(path)
+    assert initial.data['portraits']['source'] == 'vtt'
+    assert namespace(initial) == namespace(changed)
+    assert scan_identity(initial, namespace(initial)) == scan_identity(changed, namespace(changed))
+    assert initial.identity('portraits') != changed.identity('portraits')

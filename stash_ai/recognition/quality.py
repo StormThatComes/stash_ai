@@ -66,6 +66,31 @@ def crop_bytes(image, detection, *, margin=.15, limit=1048576):
     return data, list(bounds)
 
 
+def portrait_bytes(image, detection, policy, *, limit):
+    """Frame from the full source; padding may shrink at its edges, never upscale."""
+    x, y, width, height = detection.box
+    wanted_width, wanted_height = width * (1 + 2 * policy['margin']), height * (1 + 2 * policy['margin'])
+    ratio = policy['aspect_ratio']
+    if ratio is not None:
+        wanted_width, wanted_height = max(wanted_width, wanted_height * ratio), max(wanted_height, wanted_width / ratio)
+        scale = min(1., image.width / wanted_width, image.height / wanted_height)
+        wanted_width, wanted_height = wanted_width * scale, wanted_height * scale
+        if wanted_width < width or wanted_height < height:
+            raise ValueError('Portrait aspect ratio cannot contain the full face in this source.')
+    wanted_width, wanted_height = min(image.width, wanted_width), min(image.height, wanted_height)
+    left = max(0., min(x + width / 2 - wanted_width / 2, image.width - wanted_width))
+    top = max(0., min(y + height / 2 - wanted_height / 2, image.height - wanted_height))
+    bounds = (int(left), int(top), min(image.width, math.ceil(left + wanted_width)),
+              min(image.height, math.ceil(top + wanted_height)))
+    with image.crop(bounds) as crop, crop.convert('RGB') as rgb:
+        output = BytesIO()
+        rgb.save(output, format='JPEG', quality=policy['jpeg_quality'])
+        data = output.getvalue()
+    if len(data) > limit:
+        raise ValueError('Portrait exceeds configured BLOB limit.')
+    return data, list(bounds)
+
+
 def portrait_score(quality, policy):
     weights = policy['weights']
     parts = {'frontal': max(0., 1 - quality['pose_deviation']),

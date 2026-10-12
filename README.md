@@ -9,8 +9,9 @@ sequentially, with only one model loaded on the GPU at a time.
 The default `merged` mode publishes shared `ai:` tags, combines compatible
 model predictions, and retains per-model provenance and confidence in a local
 SQLite database. Tagging input comes exclusively from Stash VTT files and
-sprites. Explicit `recognition run` uses VTT faces and may decode selected video
-frames for portraits, with its own face SQLite and configuration.
+sprites. Explicit `recognition run` uses VTT faces and defaults to wider VTT
+portraits; optional video portraits decode selected frames. Recognition has its
+own face SQLite and configuration.
 
 ## License
 

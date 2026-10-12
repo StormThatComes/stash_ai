@@ -117,6 +117,22 @@ class SpriteInput:
                 sheet.close()
             self.cache.clear()
 
+    def thumbnail(self, index):
+        """Read one full cue image, sharing the bounded verified sheet cache."""
+        from PIL import Image
+        cue = self.cues[index]
+        data = self._sheet(cue.image)
+        if hashlib.sha256(data).hexdigest() != self.hashes[cue.image]:
+            raise ValueError('Sprite changed during portrait selection.')
+        with Image.open(BytesIO(data)) as raw:
+            if raw.width * raw.height > self.config.data['execution']['max_image_pixels']:
+                raise ValueError('Sprite exceeds recognition decoded-pixel limit.')
+            x, y, width, height = cue.rect
+            if x + width > raw.width or y + height > raw.height:
+                raise ValueError('Recognition VTT rectangle exceeds sprite bounds.')
+            with raw.crop((x, y, x + width, y + height)) as crop:
+                return crop.convert('RGB')
+
     def close(self):
         self.cache.clear()
 

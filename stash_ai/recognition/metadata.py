@@ -11,7 +11,7 @@ def enrich(database, client, report, config, plan, scope, target, paths, service
     for name, action in (
         ('names', lambda: sync_name(database, client, report, scope, target, plan)),
         ('portraits', lambda: fill_portrait(database, client, report, config, scope, target, paths,
-                                           services.backend, services.decoder)),
+                                           services.backend, services.decoder, services.source)),
     ):
         try:
             counts.update(action())
