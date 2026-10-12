@@ -1,4 +1,4 @@
-"""Identity-first ranking of actual video frames, with SQLite image provenance."""
+"""Identity-first ranking of video frames or the original VTT observations."""
 import base64
 import hashlib
 import json
@@ -10,10 +10,10 @@ from stash_ai.stash_api.transport import absolute_stash_url, origin
 from .clustering import _groups
 from .config import digest, plain
 from .database import encoded
-from .media import bounded_media, safe_url
+from .media import bounded_media, safe_url, SpriteInput
 from .models import normalized_embedding
-from .publication import operation_id, perform, PendingRecognition
-from .quality import assess, crop_bytes, portrait_score, rejection
+from .publication import operation_id, perform, PendingRecognition, save_operation
+from .quality import assess, portrait_bytes, portrait_score, rejection
 from .stash import checked_id, owns
 
 
@@ -36,7 +36,8 @@ def hints(database, target, config):
     policy = config.data['portraits']
     queues = []
     for item in sorted(target['scans'], key=lambda x: x['scene']):
-        rows = database.connection.execute('''SELECT o.* FROM observations o JOIN members m ON m.observation=o.id
+        rows = database.connection.execute('''SELECT o.id,o.scan,o.cue,o.seconds,o.source,o.rect,o.geometry,o.quality
+          FROM observations o JOIN members m ON m.observation=o.id
           WHERE m.person=? AND o.scan=? AND o.rejected IS NULL
           ORDER BY json_extract(o.quality,'$.sharpness') DESC,o.cue,o.id LIMIT ?''',
           (target['person'], item['scan'], policy['max_candidates'] * 8)).fetchall()
@@ -76,7 +77,11 @@ def identity_reason(vector, groups, person, config):
     return None, score, runner
 
 
-def choose(database, client, config, scope, target, paths, backend_factory, decoder_factory):
+def choose(database, client, config, scope, target, paths, backend_factory, decoder_factory,
+           source_factory=SpriteInput):
+    if config.data['portraits']['source'] == 'vtt':
+        from .vtt_portraits import choose_vtt
+        return choose_vtt(database, client, config, scope, target, source_factory)
     policy = config.data['portraits']
     person = database.connection.execute('SELECT * FROM people WHERE id=? AND scope=?',
                                          (target['person'], scope)).fetchone()
@@ -101,7 +106,7 @@ def choose(database, client, config, scope, target, paths, backend_factory, deco
                             if winning_key is None or key < winning_key:
                                 winner, winning_key = existing, key
                         continue
-                    metadata = {'version': 1, 'selection_policy': 'identity-first-full-face-v1',
+                    metadata = {'version': 1, 'source_type': 'video', 'selection_policy': 'identity-first-full-face-v1',
                                 'policy_sha': policy_sha, 'policy': plain(policy), 'shortlist': selection,
                                 'observation': row['id'], 'scan': row['scan'], 'scene': scene_id,
                                 'person': target['person'], 'performer': target['performer'],
@@ -140,8 +145,8 @@ def choose(database, client, config, scope, target, paths, backend_factory, deco
                             metadata['exclusions'] = exclusions
                             if candidates:
                                 record, face = min(candidates, key=lambda pair: (-pair[0]['score'], pair[0]['geometry']))
-                                image_bytes, bounds = crop_bytes(image, face, margin=policy['margin'],
-                                                                limit=config.data['storage']['max_crop_bytes'])
+                                image_bytes, bounds = portrait_bytes(image, face, policy,
+                                                                    limit=config.data['storage']['max_crop_bytes'])
                                 metadata.update(record)
                                 metadata['crop'] = bounds
                             else:
@@ -171,7 +176,44 @@ def choose(database, client, config, scope, target, paths, backend_factory, deco
     return winner
 
 
-def fill_portrait(database, client, report, config, scope, target, paths, backend_factory, decoder_factory):
+def image_digest(client, live, performer, config):
+    if missing_image(live, client, performer):
+        return None
+    data = bounded_media(client, absolute_stash_url(live['image_path'], client.url),
+                         config.data['storage']['max_crop_bytes'], config.data['execution']['timeout_seconds'])
+    return hashlib.sha256(data).hexdigest()
+
+
+def image_baseline(database, client, config, live, performer, previous):
+    """Recognize only our acknowledged bytes; reconcile uncertain writes first."""
+    if previous is None:
+        return missing_image(live, client, performer), None, None
+    current = image_digest(client, live, performer, config)
+    intent = json.loads(previous['payload'])
+    if previous['status'] in ('pending', 'unknown'):
+        if current == intent['sha256']:
+            with database.connection:
+                database.connection.execute("UPDATE publications SET status='observed',error=NULL WHERE id=?",
+                                            (previous['id'],))
+                database.connection.execute("UPDATE portraits SET status='published' WHERE id=?", (intent['portrait'],))
+            previous = database.connection.execute('SELECT * FROM publications WHERE id=?', (previous['id'],)).fetchone()
+        elif current is None or current == json.loads(previous['precondition']).get('image_sha256'):
+            raise PendingRecognition('Earlier image write is unresolved; no blind retry.')
+        else:
+            with database.connection:
+                database.connection.execute("UPDATE publications SET status='conflict',error=NULL WHERE id=?",
+                                            (previous['id'],))
+            return False, current, previous
+    if current is None:
+        return True, None, previous
+    expected = (intent['sha256'] if previous['status'] in ('confirmed', 'observed')
+                else json.loads(previous['precondition']).get('image_sha256')
+                if previous['status'] == 'failed' else None)
+    return current == expected, current, previous
+
+
+def fill_portrait(database, client, report, config, scope, target, paths, backend_factory, decoder_factory,
+                 source_factory=SpriteInput):
     performer, person = target['performer'], target['person']
     if not config.data['portraits']['enabled']:
         return {'portraits_disabled': 1}
@@ -181,28 +223,34 @@ def fill_portrait(database, client, report, config, scope, target, paths, backen
         raise PendingRecognition('Portrait target ownership changed.')
     identifier = operation_id(scope, '', person, 'image')
     previous = database.connection.execute('SELECT * FROM publications WHERE id=?', (identifier,)).fetchone()
-    if not missing_image(live, client, performer):
-        if previous and previous['status'] in ('pending', 'unknown'):
-            intent = json.loads(previous['payload'])
-            data = bounded_media(client, absolute_stash_url(live['image_path'], client.url),
-                                 config.data['storage']['max_crop_bytes'], config.data['execution']['timeout_seconds'])
-            same = hashlib.sha256(data).hexdigest() == intent['sha256']
-            with database.connection:
-                database.connection.execute('UPDATE publications SET status=?,error=NULL WHERE id=?',
-                                            ('observed' if same else 'conflict', identifier))
-                if same:
-                    database.connection.execute("UPDATE portraits SET status='published' WHERE id=?", (intent['portrait'],))
+    managed, baseline, previous = image_baseline(database, client, config, live, performer, previous)
+    if not managed:
         return {'portraits_preserved': 1}
-    if previous and previous['status'] in ('pending', 'unknown'):
-        raise PendingRecognition('Earlier image write is unresolved; no blind retry.')
-    winner = choose(database, client, config, scope, target, paths, backend_factory, decoder_factory)
+    policy_sha = config.identity('portraits', 'recognition', 'clustering')
+    if baseline is not None and previous['status'] in ('confirmed', 'observed'):
+        portrait = database.connection.execute('SELECT metadata FROM portraits WHERE id=?',
+                                               (json.loads(previous['payload'])['portrait'],)).fetchone()
+        if portrait and json.loads(portrait['metadata'])['policy_sha'] == policy_sha:
+            return {'portraits_preserved': 1}
+    winner = choose(database, client, config, scope, target, paths, backend_factory, decoder_factory, source_factory)
     if winner is None:
         return {'portraits_skipped': 1}
-    # Protect an image supplied while extraction was in progress.
+    # Protect manual replacements/removals while extraction was in progress.
     live = checked_id(client.performer(performer), performer)
     if not owns(live, token):
         raise PendingRecognition('Portrait target ownership changed during extraction.')
-    if not missing_image(live, client, performer):
+    if missing_image(live, client, performer) != (baseline is None):
+        return {'portraits_preserved': 1}
+    if image_digest(client, live, performer, config) != baseline:
+        return {'portraits_preserved': 1}
+    intent = {'portrait': winner['id'], 'sha256': winner['digest']}
+    precondition = {'missing': baseline is None, 'image_sha256': baseline,
+                    'image_path': safe_url(live.get('image_path') or ''), 'token': token}
+    if winner['digest'] == baseline:
+        save_operation(database, scope=scope, scene='', person=person, kind='image', target=performer,
+                       payload=intent, precondition=precondition, status='observed')
+        with database.connection:
+            database.connection.execute("UPDATE portraits SET status='published' WHERE id=?", (winner['id'],))
         return {'portraits_preserved': 1}
     payload = 'data:image/jpeg;base64,' + base64.b64encode(winner['image']).decode('ascii')
     def update():
@@ -218,9 +266,7 @@ def fill_portrait(database, client, report, config, scope, target, paths, backen
             raise PendingRecognition('Live portrait differs from the submitted image; preserved for reconciliation.')
         return value
     perform(database, client, report, scope=scope, scene='', person=person, kind='image', target=performer,
-            payload={'portrait': winner['id'], 'sha256': winner['digest']},
-            precondition={'missing': True, 'image_path': safe_url(live.get('image_path') or ''), 'token': token},
-            callback=update)
+            payload=intent, precondition=precondition, callback=update)
     with database.connection:
         database.connection.execute("UPDATE portraits SET status='published' WHERE id=?", (winner['id'],))
-    return {'portraits_filled': 1}
+    return {'portraits_filled' if baseline is None else 'portraits_updated': 1}

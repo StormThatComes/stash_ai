@@ -39,7 +39,7 @@ def setup(tmp_path, monkeypatch, *, names=False):
     monkeypatch.setenv('STASH_URL', 'http://stash/')
     path = tmp_path / 'facial_recognition.yml'
     path.write_text('version: 1\ndetection: {min_sharpness: 0}\n'
-                    'portraits: {min_sharpness: 0, margin: 0.1, max_candidates: 2, time_offsets: [0]}\n'
+                    'portraits: {source: video, min_sharpness: 0, margin: 0.1, max_candidates: 2, time_offsets: [0]}\n'
                     + ('names: {file: performer_names.yml}\n' if names else ''))
     config = load(path)
     stash = Stash()

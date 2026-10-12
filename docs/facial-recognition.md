@@ -104,16 +104,63 @@ The default policy is labeled uncalibrated for a user's domain in stored provena
 
 ## Automatic portraits and operator names
 
-An eligible person without an image receives the best evaluated identity-verified
-video-frame crop. Install system FFmpeg (or configure `portraits.ffmpeg`); absence
-or unsupported/budget-limited video is recorded as an image skip while links
-remain eligible. Existing Stash images are preserved. The baseline missing-image
+Portraits default to the original VTT thumbnail used for an accepted recognition
+observation. The retained geometry and embedding select and verify that person's
+face without running detection/recognition a second time. The selected scene's
+VTT/sprite content is checked against the scan fingerprint before extracting a
+wider crop from the full thumbnail. No video stream, FFmpeg process or video
+decoder is used in this mode. Sheets share a bounded cache within a scene's
+portrait selection. The portrait can have lower source resolution than a video
+frame; no upscaling invents additional detail.
+
+Configure framing and JPEG encoding in `facial_recognition.yml`:
+
+```yaml
+portraits:
+  enabled: true
+  source: vtt             # Default; use video for FFmpeg frame extraction.
+  margin: 0.35            # Add 35% of face width/height on each side.
+  aspect_ratio: null     # Keep padded face shape; 0.8 requests a 4:5 portrait.
+  jpeg_quality: 90       # Integer 1..100.
+```
+
+The default requested VTT portrait is 1.7 times the detected face width/height,
+compared with the recognition cache crop's 1.3 times. Padding is limited by the
+full thumbnail boundaries. An optional width/height aspect ratio expands the
+crop, shifts it inside the source, and reduces padding if necessary; an
+impossible ratio that would cut the face is skipped. Actual crop coordinates,
+source rectangle, observation/cue, input fingerprint, quality, identity scores
+and source type remain in face SQLite. The cue time describes the VTT cue, not
+a claimed decoder-measured video timestamp. Existing portrait quality gates and
+ranking weights apply to both modes and can also be changed in YAML.
+
+`portraits.source: video` retains the video-frame mode. Install system FFmpeg
+(or configure `portraits.ffmpeg`); absence or unsupported/budget-limited video
+is recorded as an image skip while links remain eligible. `time_offsets`,
+`timeout_seconds`, `max_video_bytes` and `ffmpeg` in the portraits section are
+used only by the video source. A source failure never silently falls back to the
+other mode.
+
+On the next explicit `recognition run`, changed portrait settings re-evaluate
+selected accepted people and refresh their application-owned images. The face
+scan and its embeddings remain reusable when only portrait settings change.
+Refresh requires the live image bytes to still match the last acknowledged
+application image digest. Existing manual images and manual replacements,
+including replacements served at the same URL, are preserved. Unchanged policy
+does not cause an image write, and a changed policy yielding identical JPEG bytes
+only updates stored provenance. If no replacement meets the new requirements,
+the current image is retained. `enabled: false` neither updates nor removes
+photos. Changes to `source`, framing, quality filters or ranking are included in
+the portrait policy identity. A lost update response is reconciled against the
+new image digest; seeing the old image does not authorize a blind retry.
+
+The baseline missing-image
 contract is its own `/performer/ID/image?...&default=true` URL, not a guessed
 placeholder filename. A fresh check immediately before the mutation also protects
 images supplied during extraction. Stash has no atomic image/name compare-and-set
 mutation: a server-side edit between this check and dispatch remains a race.
 
-The shortlist alternates selected scenes and spreads cue times. At most
+The shortlist alternates selected scenes and spreads cue times. In video mode at most
 `max_candidates` observations times `time_offsets` are evaluated; each selected
 scene decoder shares one byte/time budget across its seeks. Only selected-scene
 video is fetched, even for a historically known person. FFmpeg receives an owned
