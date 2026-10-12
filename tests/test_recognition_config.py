@@ -11,6 +11,7 @@ def test_default_config_and_immutable_snapshot(tmp_path):
     config = load(p)
     p.write_text('version: 1\nrecognition: {match_threshold: 0.95}\n')
     assert config.data['recognition']['match_threshold'] == .75
+    assert config.snapshot()['policy_origin'] == 'custom'
     assert config.database == tmp_path / 'faces_state.sqlite3'
     assert '.75' in config.snapshot()['source'] or '0.75' in config.snapshot()['source']
     with pytest.raises(TypeError):
@@ -36,6 +37,7 @@ def test_reject_bad_configuration_before_work(tmp_path, text):
 
 def test_missing_explicit_file_and_limits(tmp_path):
     assert load(root=tmp_path).source == b''
+    assert load(root=tmp_path).snapshot()['policy_origin'] == 'bundled-default'
     with pytest.raises(FileNotFoundError):
         load(tmp_path / 'missing.yml')
     with pytest.raises(ValueError):
