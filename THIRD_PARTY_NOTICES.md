@@ -20,6 +20,7 @@ Model weights are not committed to this repository.
 | OppaiOracle V1.1 | [Grio43/OppaiOracle](https://huggingface.co/Grio43/OppaiOracle) | [Apache-2.0](https://www.apache.org/licenses/LICENSE-2.0) | `96992fa30568c386e9fe7c8a1a68f798a3202c09` |
 | YuNet face detector | [opencv/face_detection_yunet](https://huggingface.co/opencv/face_detection_yunet) | MIT | `3cc26e7f1014a5ee5d74a42acee58bafc9d0a310` |
 | SFace face embeddings | [opencv/face_recognition_sface](https://huggingface.co/opencv/face_recognition_sface) | Apache-2.0 | `3d7082438a6e4551e840c9b2bb60b71e8da4b524` |
+| AuraFace recognition (`glintr100.onnx` only) | [fal/AuraFace-v1](https://huggingface.co/fal/AuraFace-v1) | [Apache-2.0 repository notice](https://huggingface.co/fal/AuraFace-v1/blob/af6d057c9b0ec4071d4c49c80e3539258798b609/LICENSE.md) and model card | `af6d057c9b0ec4071d4c49c80e3539258798b609` |
 
 The upstream license information above describes the referenced model
 repositories and should be rechecked before redistributing model assets.

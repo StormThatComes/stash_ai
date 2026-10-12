@@ -27,6 +27,10 @@ ASSETS = {
                    'face_recognition_sface_2021dec.onnx',
                    '0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79', 38696353,
                    'Apache-2.0', 128),
+    'auraface': Asset('fal/AuraFace-v1', 'af6d057c9b0ec4071d4c49c80e3539258798b609',
+                     'glintr100.onnx',
+                     'a7933ea5330113b01c9b60351d8f4c33003f145d8470ac5f0e52ee2effe25c60',
+                     260694151, 'Apache-2.0', 512),
 }
 
 
@@ -39,6 +43,9 @@ def verify(path, asset):
 
 
 def ensure_assets(config, *, write=print):
+    if config.data['models']['recognizer'] == 'auraface':
+        from .aura import runtime
+        runtime(config)  # Fail clearly before a large download for an unusable runtime.
     from stash_ai.backends.downloads import install_hf_asset
     result = {}
     for key in (config.data['models']['detector'], config.data['models']['recognizer']):
@@ -57,7 +64,9 @@ def ensure_assets(config, *, write=print):
 
 def namespace(config):
     from dataclasses import asdict
-    return digest({'format': 1, 'alignment': 'opencv-five-landmarks-v1',
+    alignment = ('arcface-112-similarity-rgb-127.5-v1' if config.data['models']['recognizer'] == 'auraface'
+                 else 'opencv-five-landmarks-v1')
+    return digest({'format': 1, 'alignment': alignment,
                    'assets': {key: asdict(ASSETS[key]) for key in
                               (config.data['models']['detector'], config.data['models']['recognizer'])}})
 
@@ -100,21 +109,18 @@ def normalized_embedding(value, dimensions):
     return (result / norm).copy()
 
 
-class OpenCVFaces:
-    """YuNet + SFace. Official wheels provide a tested CPU DNN backend."""
+class YuNetDetector:
+    """Shared CPU detector; recognizers retain independent preprocessing."""
     def __init__(self, config, paths):
-        if config.data['models']['device'] == 'cuda':
-            raise ValueError('YuNet/SFace uses the supported CPU OpenCV backend; set device: cpu/auto.')
         import cv2
         self.cv = cv2
+        self.provenance = {'opencv': cv2.__version__, 'detector_device': 'cpu'}
         self.config = config
         self.device = 'cpu'
         settings = config.data['detection']
         self.detector = cv2.FaceDetectorYN.create(str(paths['yunet']), '', (320, 320),
                                                  settings['score_threshold'], settings['nms_threshold'],
                                                  settings['max_faces_per_frame'])
-        self.recognizer = cv2.FaceRecognizerSF.create(str(paths['sface']), '')
-        self.dimensions = ASSETS['sface'].dimensions
         for key, path in paths.items():
             verify(path, ASSETS[key])
 
@@ -133,6 +139,19 @@ class OpenCVFaces:
             raise ValueError('Face detector exceeded configured result count.')
         return [checked_detection(row) for row in rows]
 
+    def close(self):
+        self.detector = None
+
+
+class OpenCVFaces(YuNetDetector):
+    """YuNet + SFace. Official wheels provide a tested CPU DNN backend."""
+    def __init__(self, config, paths):
+        if config.data['models']['device'] == 'cuda':
+            raise ValueError('YuNet/SFace uses the supported CPU OpenCV backend; set device: cpu/auto.')
+        super().__init__(config, paths)
+        self.recognizer = self.cv.FaceRecognizerSF.create(str(paths['sface']), '')
+        self.dimensions = ASSETS['sface'].dimensions
+
     def embed(self, image, detection):
         import numpy as np
         aligned = self.recognizer.alignCrop(self._bgr(image), np.asarray(detection.row, dtype=np.float32))
@@ -143,4 +162,7 @@ class OpenCVFaces:
 
 
 def load_backend(config, paths):
+    if config.data['models']['recognizer'] == 'auraface':
+        from .aura import AuraFaces
+        return AuraFaces(config, paths)
     return OpenCVFaces(config, paths)
