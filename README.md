@@ -1114,12 +1114,28 @@ python .\update_stash_ai.py
 
 The updater:
 - downloads application files from a single `main` commit SHA;
-- installs launchers, the `stash_ai/` package and YAML files,
-  removing replaced flat root modules;
+- installs launchers, the `stash_ai/` package, YAML files, all four
+  requirements files and CPU/GPU constraints (including their README);
 - preserves locally modified YAML and writes `.incoming` proposals;
-- refuses to overwrite locally changed code without `--force-code`;
+- refuses to overwrite locally changed code or dependency files without `--force-code`;
 - does not update models, `.env`, SQLite or Python dependencies;
 - uses an installation lock and recovery journal.
+
+After updating, prepare or refresh the local environment manually using the
+downloaded dependency files. Choose one application profile:
+
+```powershell
+python -m pip install -r requirements-gpu.txt -c constraints/gpu-py314.txt
+# Or, for a CPU environment:
+python -m pip install -r requirements-cpu.txt -c constraints/cpu-py314.txt
+```
+
+`requirements.txt` selects the GPU profile. `requirements-dev.txt` is available
+for development and tests. The updater downloads these manifests but does not
+run `pip` or modify the installed Python packages.
+
+If the installed updater predates dependency-file downloads, run it once to
+update itself, then run it again to fetch requirements and constraints.
 
 After an interrupted update:
 

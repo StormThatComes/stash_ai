@@ -30,7 +30,15 @@ class Remote(updater.GitHub):
             "test_updater.py": b"DO NOT DOWNLOAD TESTS",
             "benchmark_merge.py": b"DO NOT DOWNLOAD BENCHMARKS",
             ".github/workflows/tests.yml": b"DO NOT DOWNLOAD WORKFLOWS",
-            "requirements.txt": b"DO NOT DOWNLOAD REQUIREMENTS",
+            "requirements.txt": b"-r requirements-gpu.txt\n",
+            "requirements-cpu.txt": b"package==1\n",
+            "requirements-gpu.txt": b"package==2\n",
+            "requirements-dev.txt": b"pytest>=8\n",
+            "constraints/cpu-py314.txt": b"package==1\n",
+            "constraints/gpu-py314.txt": b"package==2\n",
+            "constraints/README.md": b"Install requirements with the matching constraints.\n",
+            "requirements-local.txt": b"DO NOT DOWNLOAD UNKNOWN PROFILES",
+            "constraints/local.txt": b"DO NOT DOWNLOAD UNKNOWN CONSTRAINTS",
             "README.md": b"DO NOT DOWNLOAD DOCS",
         }
         self.commit = COMMIT
@@ -72,7 +80,7 @@ def test_license_files_install_update_and_protect_local_edits(tmp_path, name):
 
 
 @pytest.mark.parametrize('name', sorted(updater.REQUIREMENT_PROFILES))
-def test_dependency_profile_changes_are_named_without_downloading(tmp_path, capsys, name):
+def test_dependency_profile_changes_are_planned_without_preview_downloads(tmp_path, capsys, name):
     remote = Remote()
     remote.files.update({profile: b'package==1\n' for profile in updater.REQUIREMENT_PROFILES})
     installed(tmp_path, remote)
@@ -83,11 +91,78 @@ def test_dependency_profile_changes_are_named_without_downloading(tmp_path, caps
     updater.describe_plan(state, version, plan)
     output = capsys.readouterr().out
     assert name + ' changed' in output
-    assert not any(action.path in updater.REQUIREMENT_PROFILES for action in plan.actions)
+    assert any(action.path == name for action in plan.actions)
+    assert 'does not run pip' in output
     assert not any(call.startswith('git/blobs/') for call in remote.calls)
     capsys.readouterr()
     updater.describe_plan(plan.next_state, version, updater.plan_update(tmp_path, plan.next_state, version))
     assert 'Review dependencies manually' not in capsys.readouterr().out
+
+
+DEPENDENCY_FILES = (
+    'requirements.txt', 'requirements-cpu.txt', 'requirements-gpu.txt',
+    'requirements-dev.txt', 'constraints/cpu-py314.txt',
+    'constraints/gpu-py314.txt', 'constraints/README.md',
+)
+
+
+@pytest.mark.parametrize('name', DEPENDENCY_FILES)
+def test_dependency_files_install_and_refresh_with_real_helper(tmp_path, name):
+    remote = Remote()
+    assert updater.update(tmp_path, remote) == 0
+    assert (tmp_path/name).read_bytes() == remote.files[name]
+    remote.files[name] += b'# upstream revision\n'
+    remote.commit = 'c' * 40
+    assert updater.update(tmp_path, remote) == 0
+    assert (tmp_path/name).read_bytes() == remote.files[name]
+    assert updater.load_state(tmp_path)['baseline'][name] == updater.blob_sha(remote.files[name])
+
+
+@pytest.mark.parametrize('tracked', [False, True])
+@pytest.mark.parametrize('name', DEPENDENCY_FILES)
+def test_local_dependency_edits_require_force_and_are_backed_up(tmp_path, name, tracked):
+    remote = Remote()
+    if tracked:
+        installed(tmp_path, remote)
+    local = b'# local dependencies\n'
+    target = tmp_path/name
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(local)
+    with pytest.raises(updater.UpdateError, match='force-code'):
+        updater.update(tmp_path, remote)
+    assert target.read_bytes() == local
+    assert not any(call.startswith('git/blobs/') for call in remote.calls)
+    assert updater.update(tmp_path, remote, force_code=True) == 0
+    assert target.read_bytes() == remote.files[name]
+    assert local in [path.read_bytes() for path in (tmp_path/updater.META/'transactions').glob('*/old-*')]
+
+
+@pytest.mark.parametrize('name,legacy', [
+    ('requirements.txt', True), ('requirements.txt', False),
+    ('requirements-cpu.txt', False), ('requirements-gpu.txt', False),
+])
+@pytest.mark.parametrize('modified', [False, True])
+def test_metadata_only_requirements_history_adopts_unchanged_files(tmp_path, name, legacy, modified):
+    remote = Remote()
+    installed(tmp_path, remote)
+    state = updater.load_state(tmp_path)
+    for key in ('baseline', 'upstream'):
+        state[key] = {path: sha for path, sha in state[key].items() if path not in DEPENDENCY_FILES}
+    if legacy:
+        state.pop('requirement_profiles')
+    updater.atomic_write(tmp_path/updater.STATE, updater.json_bytes(state))
+    if modified:
+        (tmp_path/name).write_bytes(b'# local dependencies\n')
+    before = (tmp_path/name).read_bytes()
+    remote.files[name] += b'# upstream revision\n'
+    if modified:
+        with pytest.raises(updater.UpdateError, match='force-code'):
+            updater.update(tmp_path, remote)
+        assert (tmp_path/name).read_bytes() == before
+        assert not any(call.startswith('git/blobs/') for call in remote.calls)
+    else:
+        assert updater.update(tmp_path, remote) == 0
+        assert (tmp_path/name).read_bytes() == remote.files[name]
 
 
 def test_legacy_requirements_history_preserves_managed_file_baselines(tmp_path):
@@ -220,7 +295,9 @@ def test_real_helper_selective_install_and_self_update(tmp_path):
     assert updater.update(tmp_path, remote) == 0
     expected = {name for name in remote.files if updater.allowed(name)}
     assert expected.issubset(snapshot(tmp_path))
-    assert not {"test_updater.py", "README.md", "requirements.txt", "benchmark_merge.py"} & snapshot(tmp_path).keys()
+    assert set(DEPENDENCY_FILES).issubset(snapshot(tmp_path))
+    assert not {"test_updater.py", "README.md", "benchmark_merge.py",
+                "requirements-local.txt", "constraints/local.txt"} & snapshot(tmp_path).keys()
     assert not (tmp_path / ".github").exists()
     downloaded = {call.split("/")[-1] for call in remote.calls if call.startswith("git/blobs/")}
     assert downloaded == {updater.blob_sha(remote.files[name]) for name in expected}
@@ -787,10 +864,11 @@ def test_bad_tree_is_rejected_before_downloading(tmp_path, problem):
     assert not any(c.startswith("git/blobs/") for c in remote.calls)
 
 
-@pytest.mark.parametrize("path", ["stash_ai.py", "stash_ai", updater.META, "tagger_models.yml.incoming"])
+@pytest.mark.parametrize("path", ["stash_ai.py", "stash_ai", updater.META, "tagger_models.yml.incoming",
+                                  "requirements.txt", "constraints"])
 def test_local_symlinks_are_not_followed(tmp_path, path):
     external = tmp_path / "external"
-    if path in (updater.META, 'stash_ai'):
+    if path in (updater.META, 'stash_ai', 'constraints'):
         external.mkdir()
     else:
         external.write_bytes(b"outside")
@@ -811,6 +889,8 @@ def test_replace_failure_rolls_back_code_configs_and_state(tmp_path, monkeypatch
     previous_state = (tmp_path / updater.STATE).read_bytes()
     remote.files["stash_ai.py"] = b"NEW = 1\n"
     remote.files["tagger_models.yml"] = b"device: cpu\n"
+    remote.files['constraints/cpu-py314.txt'] += b'# revised constraints\n'
+    remote.files['requirements.txt'] += b'# revised requirements\n'
     identity, _ = stage(tmp_path, remote)
     original = updater.put_entry
     calls = []
@@ -832,7 +912,11 @@ def test_recover_all_durable_phases_offline(tmp_path, phase, monkeypatch):
     remote = Remote()
     installed(tmp_path, remote)
     old_code = (tmp_path / "stash_ai.py").read_bytes()
+    old_requirements = (tmp_path/'requirements.txt').read_bytes()
+    old_constraints = (tmp_path/'constraints/cpu-py314.txt').read_bytes()
     remote.files["stash_ai.py"] = b"NEW = 1\n"
+    remote.files['requirements.txt'] += b'# revised requirements\n'
+    remote.files['constraints/cpu-py314.txt'] += b'# revised constraints\n'
     identity, directory = stage(tmp_path, remote)
     entries = updater.UpdateTransaction.load(tmp_path).entries
     if phase != "prepared":
@@ -845,6 +929,10 @@ def test_recover_all_durable_phases_offline(tmp_path, phase, monkeypatch):
     monkeypatch.delenv("GITHUB_TOKEN", raising=False)
     assert updater.main(["--install-dir", str(tmp_path), "--recover"]) == 0
     assert (tmp_path / "stash_ai.py").read_bytes() == (remote.files["stash_ai.py"] if phase == "committed" else old_code)
+    assert (tmp_path/'requirements.txt').read_bytes() == (
+        remote.files['requirements.txt'] if phase == 'committed' else old_requirements)
+    assert (tmp_path/'constraints/cpu-py314.txt').read_bytes() == (
+        remote.files['constraints/cpu-py314.txt'] if phase == 'committed' else old_constraints)
     assert not (tmp_path / updater.JOURNAL).exists()
 
 
