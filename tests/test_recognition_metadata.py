@@ -113,7 +113,7 @@ def test_names_snapshot_and_selected_id_intersection(tmp_path, monkeypatch):
     assert run(config, services, '1') == 0
     performer = stash.links['1'][-1]
     names = tmp_path / 'performer_names.yml'
-    names.write_text(f'version: 1\nstash_scope: http://stash\nperformers:\n  "{performer}": "Żółć 漢字"\n  "77": Other\n')
+    names.write_text(f'version: 1\nstash_scope: http://stash\nperformers:\n  "{performer}": "Żółć 漢字"\n  "77": Other\n', encoding='utf-8')
     config = replace(config, names_path=names)
     assert run(config, services, '1') == 0
     assert stash.profiles[performer]['name'] == 'Żółć 漢字'
