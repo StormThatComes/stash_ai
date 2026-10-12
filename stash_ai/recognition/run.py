@@ -16,6 +16,9 @@ from .scanning import scan_scene
 from .clustering import cluster_scene
 from .publication import publish_person
 from .stash import RecognitionStash
+from .names import load_names, plan_names, starter
+from .metadata import enrich
+from .video import VideoFrames
 
 
 def instance_scope(url):
@@ -33,8 +36,10 @@ class Services:
     assets: object = ensure_assets
     backend: object = load_backend
     source: object = SpriteInput
-    metadata_config: object = None
-    metadata: object = None
+    metadata_config: object = load_names
+    metadata_plan: object = plan_names
+    metadata: object = enrich
+    decoder: object = VideoFrames
 
 
 def execute(args, config, *, services=None):
@@ -54,8 +59,12 @@ def execute(args, config, *, services=None):
                 identifiers = list(dict.fromkeys(client.scene_ids()))
             else:
                 identifiers = list(dict.fromkeys(args.scene_id))
-            run = database.start_run(scope, identifiers, config.snapshot())
+            snapshot = config.snapshot()
+            if extra is not None:
+                snapshot['names'] = extra.snapshot()
+            run = database.start_run(scope, identifiers, snapshot)
             outcome, failure = 'success', None
+            ready = {}
             try:
                 with phase(report, 'Recognition assets'):
                     paths = services.assets(config, write=report.write)
@@ -88,10 +97,8 @@ def execute(args, config, *, services=None):
                                 with phase(report, 'Recognition Stash publication', scene=identifier):
                                     performer = publish_person(database, client, report, scope, identifier, person)
                                     counts['people_linked_or_observed'] += 1
-                                    if services.metadata:
-                                        values = services.metadata(database, client, report, config, extra,
-                                                                   scope, identifier, scan, person, performer, paths)
-                                        counts.update(values or {})
+                                    target = ready.setdefault(person, {'person': person, 'performer': performer, 'scans': []})
+                                    target['scans'].append({'scene': identifier, 'scan': scan})
                             except KeyboardInterrupt:
                                 raise
                             except Exception as error:
@@ -106,7 +113,32 @@ def execute(args, config, *, services=None):
                         report.optional('recognition_error', report.write,
                                         f'Recognition scene {identifier} failed: ' + safe_error(error, key))
                     database.progress(run, 'run', dict(counts))
-                if counts['scenes_failed'] or counts['people_failed']:
+                targets = [ready[key] for key in sorted(ready)]
+                if services.metadata:
+                    with phase(report, 'Recognition names preflight'):
+                        try:
+                            plan = services.metadata_plan(database, client, report, config, extra, scope, targets)
+                            database.progress(run, 'names', {'plan': plan, 'target_ids': [t['performer'] for t in targets]})
+                        except KeyboardInterrupt:
+                            raise
+                        except Exception as error:
+                            plan = {}
+                            counts['metadata_failed'] += 1
+                            report.optional('recognition_names_preflight', report.write,
+                                            'Name batch withheld: ' + safe_error(error, key))
+                    for target in targets:
+                        with phase(report, 'Recognition metadata'):
+                            counts.update(services.metadata(database, client, report, config, plan,
+                                                           scope, target, paths, services) or {})
+                            database.progress(run, 'metadata', dict(counts))
+                if targets:
+                    try:
+                        output = starter(client, targets, scope)
+                        database.progress(run, 'name_starter', {'yaml': output, 'truncated': len(targets) > 50})
+                        report.optional('recognition_name_starter', report.write, 'Performer names starter (selected IDs, maximum 50):\n' + output)
+                    except Exception as error:
+                        report.optional('recognition_name_starter', report.write, 'Name starter unavailable: ' + safe_error(error, key))
+                if counts['scenes_failed'] or counts['people_failed'] or counts['metadata_failed']:
                     outcome = 'partial'
                 report.optional('recognition_summary', report.write, 'Recognition complete: ' +
                                 ' '.join(f'{name}={value}' for name, value in sorted(counts.items())))
