@@ -1,15 +1,16 @@
 # Stash AI
 
-Automatic scene tagging and time-based marker generation for [Stash](https://github.com/stashapp/stash).
+Automatic scene tagging, time-based markers and on-demand facial recognition for [Stash](https://github.com/stashapp/stash).
 
-Stash AI supports four models: JoyTag (`jt`), WD EVA02-Large v3 (`wd`),
+Stash AI supports four tagging models: JoyTag (`jt`), WD EVA02-Large v3 (`wd`),
 DanbooruTagQuery L/16 (`dtq`), and OppaiOracle V1.1 (`op`). Models run
 sequentially, with only one model loaded on the GPU at a time.
 
 The default `merged` mode publishes shared `ai:` tags, combines compatible
 model predictions, and retains per-model provenance and confidence in a local
-SQLite database. Visual input comes exclusively from Stash VTT files and
-sprites; the application never opens video files.
+SQLite database. Tagging input comes exclusively from Stash VTT files and
+sprites. Explicit `recognition run` uses VTT faces and may decode selected video
+frames for portraits, with its own face SQLite and configuration.
 
 ## License
 
@@ -39,8 +40,12 @@ including during `--dry-run`. Local commands such as `--db-update`,
 Known intervals always publish an end time; occurrences and imported markers
 whose end is unknown have `end_seconds: null`.
 
-For CPU-only environments, replace `onnxruntime-gpu` with a compatible
-`onnxruntime>=1.21,<2` version.
+Both application profiles include tagging and on-demand facial recognition.
+Install `requirements-gpu.txt` (also selected by `requirements.txt`) or
+`requirements-cpu.txt`, with the matching constraints; keep exactly one ORT package.
+Recognition defaults to CUDA. CPU installations use `models.device: cpu` in
+`facial_recognition.yml`, or the command's `--device cpu` override.
+See [facial recognition](docs/facial-recognition.md) for scope and configuration.
 
 ## Quick start
 

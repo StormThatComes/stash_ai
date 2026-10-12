@@ -21,12 +21,13 @@ def parser():
     scope.add_argument('--all-scenes', action='store_true', help='Explicit one-time full-library selection.')
     run.add_argument('--face-config', type=Path, help='Face-only YAML; default facial_recognition.yml.')
     run.add_argument('--faces-db', type=Path, help='Override the separate face SQLite; default faces_state.sqlite3.')
+    run.add_argument('--device', choices=('cuda', 'cpu', 'auto'), help='Override models.device; default CUDA, CPU is explicit.')
     run.add_argument('--progress-style', choices=('auto', 'compact', 'verbose', 'off'), default='auto')
     return root
 
 
 def main(argv=None, *, services=None):
     args = parser().parse_args(argv)
-    config = load(args.face_config, database=args.faces_db)
+    config = load(args.face_config, database=args.faces_db, device=args.device)
     from .run import execute
     return execute(args, config, services=services)

@@ -90,7 +90,7 @@ def execute(args, config, *, services=None):
                                     value = services.backend(config, paths)
                                     try:
                                         database.progress(run, 'backend', {'namespace': model_namespace,
-                                            'embedding_device': value.device, 'detector_device': 'cpu',
+                                            'embedding_device': value.device, 'detector_device': getattr(value, 'detector_device', 'cpu'),
                                             'dimensions': value.dimensions, 'runtime': getattr(value, 'provenance', {})})
                                     except BaseException:
                                         value.close()

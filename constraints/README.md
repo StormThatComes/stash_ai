@@ -4,6 +4,15 @@ The CPU and CUDA 12.6/cuDNN 9 variants pin the complete runtime and development
 resolution, with exactly one ONNX Runtime distribution. They target CPython
 3.14.7 on Linux x86_64 and Windows amd64; CI resolves binary wheels for both.
 The GPU job checks installation compatibility, without claiming GPU execution.
+Both profiles install the complete application: tagging and on-demand recognition
+with YuNet/SFace/AuraFace. `requirements.txt` selects the GPU profile by default.
+There are no separate recognition installation/constraint profiles. Development
+tests still use `requirements-dev.txt` in addition to the selected application profile.
+
+Recognition defaults to `models.device: cuda`. For CPU runs explicitly set
+`models.device: cpu` in `facial_recognition.yml` or use `recognition run --device cpu`.
+An existing environment must contain only its selected ORT distribution; remove
+the other one before changing profiles.
 
 ```sh
 python -m pip install -r requirements-cpu.txt -c constraints/cpu-py314.txt

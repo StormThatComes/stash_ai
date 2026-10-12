@@ -2,14 +2,16 @@
 
 The recognition package is independent of the tag model registry and configuration.
 The internal layers provide configuration, verified pinned HF assets,
-CPU YuNet/SFace adapters, bounded VTT extraction and checkpointed face SQLite.
+CPU/GPU YuNet/SFace adapters, bounded VTT extraction and checkpointed face SQLite.
 The only public operation is the explicit, finite `recognition run` command.
 No public scan/cluster/review/apply commands are provided.
 
-Install the optional standalone dependencies on Python 3.14.7:
+Use the same complete application profile as tagging on Python 3.14.7:
 
 ```powershell
-uv pip install -r requirements-recognition.txt -c constraints/recognition-py314.txt
+uv pip install -r requirements-gpu.txt -c constraints/gpu-py314.txt --index-strategy unsafe-best-match
+# CPU alternative in a separate environment:
+uv pip install -r requirements-cpu.txt -c constraints/cpu-py314.txt --index-strategy unsafe-best-match
 ```
 
 With `STASH_URL` and optional `STASH_API_KEY` set for Stash 0.31.1 or later:
@@ -47,13 +49,20 @@ missing file fails. Values are immutable during an invocation. The default
 `faces_state.sqlite3` is reserved for face information and is independent of
 tagger state/history. A names/portrait/threshold setting is not a raw model identity.
 
-Official OpenCV Python wheels run these adapters on CPU. `device: auto` reports
-CPU, and an explicit unsupported `cuda` request fails instead of claiming GPU
-execution. Weights are checked against immutable revision-bound SHA256 values;
+Recognition defaults to `models.device: cuda`, including when default YAML is absent.
+Both YuNet detection and SFace/AuraFace neural recognition use the application's
+ONNX Runtime CUDA provider. CPU image decoding, alignment/NMS and SQLite/identity
+matching remain local host work. CPU runs explicitly set `models.device: cpu` or
+use `recognition run --scene-id ID --device cpu`. Only an explicit `auto` permits
+CPU fallback; the CUDA default fails clearly if unavailable or if a session
+initializes only CPU. CUDA libraries are preloaded through the same policy as
+ONNX taggers, and actual detector/embedding devices are recorded in face SQLite. Weights are checked against immutable revision-bound SHA256 values;
 existing custom/corrupt files are never silently overwritten.
 
-Normal core tests do not download models. The separate recognition CPU CI job
-loads the pinned detector/recognizer on Linux and Windows. This is a runtime,
+Normal core tests do not download models. Recognition CPU CI jobs install the complete application CPU profile and
+load pinned detector/recognizers on Linux and Windows. GPU provider routing,
+strict fallback handling and device overrides are tested without GPU hardware;
+these hosted jobs do not claim actual CUDA inference. This is a runtime,
 alignment and embedding-shape smoke test, not an accuracy benchmark.
 
 ## Internal media and state
@@ -145,20 +154,13 @@ conflicting result and its live image is preserved, rather than silently retried
 
 ## Optional AuraFace recognizer
 
-SFace remains the default. For a standalone CPU environment install:
-
-```powershell
-uv pip install -r requirements-recognition-aura.txt -c constraints/recognition-aura-py314.txt
-```
-
-Then set `models.recognizer: auraface` in `facial_recognition.yml` and invoke the
-same `recognition run --scene-id ID`. An existing GPU environment should instead
-install only `requirements-recognition.txt` and retain its `onnxruntime-gpu`.
-Exactly one ORT variant is required. CPU is runtime-tested on Python 3.14.7 on
-Linux/Windows. CUDA uses the installed ORT provider only when available; explicit
-CUDA requests fail if unavailable or if initialization falls back to CPU. CUDA
-hardware execution is not covered by this CPU CI. YuNet detection stays on CPU;
-actual embedding provider/runtime and preprocessing provenance are stored in SQLite.
+SFace remains the default. Both CPU/GPU application profiles already include
+AuraFace's runtime: set `models.recognizer: auraface` in `facial_recognition.yml`
+and invoke the same `recognition run --scene-id ID`; no additional requirements
+file or ORT package is installed. Exactly one ORT variant is required. CPU is
+runtime-tested on Python 3.14.7 on Linux/Windows. The default CUDA device is strict;
+CUDA hardware execution is not covered by hosted CPU CI. Actual detector and
+embedding providers/runtime/preprocessing provenance are stored in SQLite.
 
 Only the pinned publisher's `glintr100.onnx` recognition weight plus YuNet are
 downloaded; no InsightFace dependency, default model pack, landmarks, age/gender
@@ -218,3 +220,19 @@ It makes no Stash/media calls or changes to published membership. Labels,
 configuration, derived results and scope stay in the existing face SQLite's run
 progress/history; no evaluation state sidecars or manual normal-use workflow are
 needed. There is no claimed real-library accuracy until such labeled data exists.
+
+
+## Shared CPU/GPU runtime and cache compatibility
+
+Pinned files, normalized vector spaces and the SFace/AuraFace namespace hashes
+remain unchanged when selecting a device. CUDA uses the original OpenCV SFace
+alignCrop and raw RGB float32 pixels; normalization remains inside the SFace graph.
+YuNet follows OpenCV's BGR/divisor-32 padding, stride decoding, integer-box NMS and
+bounded top-K contract. ONNX input/output declarations are adapted in memory for
+YuNet spatial dimensions, and legacy initializer-inputs are frozen to their
+original values. No neural nodes or initializer values are changed, no transformed
+weights are stored, and original assets are checksum-verified first. Transformation
+digests and active providers are recorded as runtime provenance. Native CPU ORT
+smoke checks validate non-square YuNet inputs and SFace embedding agreement with
+OpenCV; CPU/GPU floating-point differences are expected. Device selection alone
+does not request a new namespace, model switch or duplicate-profile publication.
