@@ -92,3 +92,53 @@ Developer-only `evaluate_pairs` accepts explicit local same/different-person
 ground truth and reports false matches/misses for that supplied dataset. Synthetic
 vector fixtures prove grouping rules, not real-world face-recognition accuracy.
 The default policy is labeled uncalibrated for a user's domain in stored provenance.
+
+## Automatic portraits and operator names
+
+An eligible person without an image receives the best evaluated identity-verified
+video-frame crop. Install system FFmpeg (or configure `portraits.ffmpeg`); absence
+or unsupported/budget-limited video is recorded as an image skip while links
+remain eligible. Existing Stash images are preserved. The baseline missing-image
+contract is its own `/performer/ID/image?...&default=true` URL, not a guessed
+placeholder filename. A fresh check immediately before the mutation also protects
+images supplied during extraction. Stash has no atomic image/name compare-and-set
+mutation: a server-side edit between this check and dispatch remains a race.
+
+The shortlist alternates selected scenes and spreads cue times. At most
+`max_candidates` observations times `time_offsets` are evaluated; each selected
+scene decoder shares one byte/time budget across its seeks. Only selected-scene
+video is fetched, even for a historically known person. FFmpeg receives an owned
+loopback range URL, not Stash credentials or signed media URLs. Authenticated
+same-origin requests, byte/deadline limits, process/log/output limits and downscale-only
+pixel limits apply. Actual presentation times, identity comparisons, quality,
+exclusions, crop/margin, policy and final bounded JPEG BLOBs stay in face SQLite.
+The best evaluated crop under these budgets is not a global-best-frame claim.
+Visibility remains the documented five-landmark estimate, not semantic occlusion
+detection. Failed decoding may be retried on a later explicit run.
+
+Configure `names.file: performer_names.yml` to opt into this separate optional file:
+
+```yaml
+version: 1
+stash_scope: "http://localhost:9999"
+performers:
+  "123": "Example Performer"
+```
+
+Use the exact configured Stash base URL (or the scope digest printed in the bounded
+starter). IDs must be quoted canonical positive strings. The complete file is
+validated and snapshotted once before Stash/state/model initialization. Within
+the run, only mapped accepted/bound selected IDs enter the name plan; all selected
+targets are resolved before any name updates. An unknown selected target prevents
+the whole name batch; unrelated mapping entries are not resolved or changed.
+Updates change only the name, with fresh ownership/current-name checks, typed
+responses and uncertain-outcome reconciliation. Equal names do not merge IDs.
+Both YAML snapshots, resolved names/preconditions and history remain in face SQLite.
+
+Normal output includes at most 50 selected published IDs/current names as a YAML
+starter, also stored in SQLite. It never overwrites your mapping file or treats
+these generated anonymous placeholders as rename instructions. No additional
+command, manual portrait picker or persistent image/operation sidecar is required.
+Image acknowledgement recovery compares the submitted JPEG digest to Stash's
+served image. A server that transforms the image is treated as an unresolved or
+conflicting result and its live image is preserved, rather than silently retried.

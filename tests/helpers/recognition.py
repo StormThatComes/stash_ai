@@ -37,6 +37,9 @@ class Response:
     def __exit__(self, *args):
         pass
 
+    def close(self):
+        pass
+
 
 class MediaClient:
     url = 'http://stash/'
@@ -93,11 +96,15 @@ class Stash:
         self.media_calls, self.writes, self.reads = [], [], []
         self.fail_create = self.fail_link = False
         self.create_visible = True
+        self.images = {}
         self.media = SimpleNamespace(get=self.get)
         self.closed = False
 
     def get(self, url, **kwargs):
         self.media_calls.append(url)
+        if '/performer/' in url:
+            identifier = url.split('/performer/')[1].split('/')[0]
+            return Response(self.images[identifier])
         identifier = url.rsplit('/', 1)[-1].split('.')[0]
         return MediaClient(identifier).get(url, **kwargs)
 
@@ -138,6 +145,10 @@ class Stash:
 
     def update_person(self, performer, **fields):
         self.writes.append(('metadata', performer, fields))
+        if 'image' in fields:
+            import base64
+            self.images[performer] = base64.b64decode(fields.pop('image').split(',', 1)[1])
+            fields['image_path'] = self.url + f'performer/{performer}/image?t=123'
         self.profiles[performer].update(fields)
         return self.performer(performer)
 
