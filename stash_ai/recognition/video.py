@@ -132,7 +132,7 @@ class VideoFrames(AbstractContextManager):
                    '-format_whitelist', 'mov,matroska,webm,avi,mpegts',
                    '-rw_timeout', str(int(timeout * 1000000)),
                    '-threads', '1', '-copyts', '-ss', str(seconds), '-i', address,
-                   '-map', '0:v:0', '-an', '-sn', '-dn', '-frames:v', '1', '-vsync', '0',
+                   '-map', '0:v:0', '-an', '-sn', '-dn', '-frames:v', '1', '-fps_mode', 'passthrough',
                    '-filter_threads', '1', '-vf', scale, '-threads', '1',
                    '-f', 'image2pipe', '-vcodec', 'png', 'pipe:1']
         environment = {k: v for k, v in os.environ.items()
@@ -171,7 +171,11 @@ class VideoFrames(AbstractContextManager):
         if self.error:
             raise RuntimeError('Portrait video source failed (byte/time/validator/origin check).') from self.error
         if process.returncode or not output:
-            raise RuntimeError('Portrait decoding is unavailable for this source; no image was chosen.')
+            log = b''.join(errors).decode('utf-8', errors='replace')
+            diagnostic = re.findall(r'(?m)^(?:Unrecognized option|Option |Error )[^\r\n]*', log)
+            hint = re.sub(r'https?://\S+', '[media URL]', '; '.join(diagnostic[-2:]))[:400]
+            raise RuntimeError('Portrait decoding is unavailable for this source; no image was chosen.'
+                               + (' Decoder: ' + hint if hint else ''))
         matches = re.findall(rb'pts_time:([-+0-9.eE]+)', b''.join(errors))
         if not matches:
             raise ValueError('Decoder did not report actual frame presentation time.')
