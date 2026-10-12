@@ -142,3 +142,79 @@ command, manual portrait picker or persistent image/operation sidecar is require
 Image acknowledgement recovery compares the submitted JPEG digest to Stash's
 served image. A server that transforms the image is treated as an unresolved or
 conflicting result and its live image is preserved, rather than silently retried.
+
+## Optional AuraFace recognizer
+
+SFace remains the default. For a standalone CPU environment install:
+
+```powershell
+uv pip install -r requirements-recognition-aura.txt -c constraints/recognition-aura-py314.txt
+```
+
+Then set `models.recognizer: auraface` in `facial_recognition.yml` and invoke the
+same `recognition run --scene-id ID`. An existing GPU environment should instead
+install only `requirements-recognition.txt` and retain its `onnxruntime-gpu`.
+Exactly one ORT variant is required. CPU is runtime-tested on Python 3.14.7 on
+Linux/Windows. CUDA uses the installed ORT provider only when available; explicit
+CUDA requests fail if unavailable or if initialization falls back to CPU. CUDA
+hardware execution is not covered by this CPU CI. YuNet detection stays on CPU;
+actual embedding provider/runtime and preprocessing provenance are stored in SQLite.
+
+Only the pinned publisher's `glintr100.onnx` recognition weight plus YuNet are
+downloaded; no InsightFace dependency, default model pack, landmarks, age/gender
+weights or external recognition service is used. The pinned model card and
+`LICENSE.md` declare Apache-2.0 for AuraFace; library licenses are separate.
+
+The upstream [ArcFace adapter](https://github.com/deepinsight/insightface/blob/master/python-package/insightface/model_zoo/arcface_onnx.py)
+and [five-point alignment](https://github.com/deepinsight/insightface/blob/master/python-package/insightface/utils/face_align.py)
+define a least-squares similarity transform to the 112px ArcFace reference,
+BGR-to-RGB conversion, `(pixel-127.5)/127.5` float32 NCHW and normalized embeddings.
+The pinned AuraFace graph starts with Conv/PRelu (no built-in initial Sub/Mul),
+accepts `data` with dynamic batch and `3x112x112`, and returns `1333` with `1x512`.
+Size/hash, runtime I/O, known affine alignment and exact RGB normalization are
+checked. This alignment/preprocessing has its own namespace; the SFace namespace
+and existing evidence are unchanged.
+
+Switching models computes selected-scene observations in the new namespace;
+vectors and ownership bindings are never compared/merged across recognizers.
+If this Stash instance already has published identities in another namespace,
+new unbound identities are withheld with `incompatible_published_namespace`,
+while retaining their analysis. Existing compatible bindings can still be reused.
+There is no automatic migration, duplicate-profile creation or hidden review
+command. Use the developer pilot for comparison before choosing a model for a new
+installation; future cross-model binding/migration is outside this release.
+
+### Measured runtime and pilot scope
+
+`python -m benchmarks.benchmark_recognition_adapters` explicitly runs two isolated
+CPU workers on the same synthetic 128px texture/supplied landmarks, with warmup
+and five embeddings. This developer benchmark is not a public recognition stage.
+A local run on 2026-10-12 (Python 3.14.7, OpenCV 4.14.0.94, ORT 1.26.0) measured:
+
+| Adapter | Owned model assets | Load | Median embedding | Sampled peak RSS |
+| --- | ---: | ---: | ---: | ---: |
+| SFace | 37.1 MiB | 0.137 s | 11.7 ms | 190.4 MiB |
+| AuraFace | 248.8 MiB | 0.652 s | 238.6 ms | 581.5 MiB |
+
+RSS is sampled every 10ms, so this is an observed lower bound, not an exact peak
+allocation guarantee. Artifact bytes include YuNet and the selected recognizer;
+the external shared HF cache is not included. Absolute timing depends on host and
+runtime threading. Neither fixture contains a labeled human face: detected faces
+were zero, and false merges/misses/accuracy are deliberately unmeasured here.
+The measured cost and lack of a user-domain quality pilot support keeping SFace
+as the initial baseline, without claiming either model is universally superior.
+
+For an explicit developer pilot, call
+`stash_ai.recognition.pilot.evaluate_observations(database, run_id, configurations, labels)`
+with both model-specific `FaceConfig` objects and a bounded mapping of selected
+retained observation IDs to human ground-truth person labels. Use representative
+different/same people, blur, pose and thumbnail sizes; choose thresholds separately
+per model on a calibration subset, then evaluate a separate held-out subset.
+Both adapters receive exactly the same retained crop and re-based source landmarks.
+The helper runs the real grouping policy in disposable in-memory SQLite and
+reports embedding/accepted coverage, withheld/ambiguous observations, pair false
+merges and misses (including withheld), pair threshold errors, time and asset size.
+It makes no Stash/media calls or changes to published membership. Labels,
+configuration, derived results and scope stay in the existing face SQLite's run
+progress/history; no evaluation state sidecars or manual normal-use workflow are
+needed. There is no claimed real-library accuracy until such labeled data exists.
