@@ -81,6 +81,21 @@ sheets. Completed cue checkpoints survive an interrupted inference; incomplete
 scans cannot publish identities. Partial sampling and rejected/no-face outcomes
 remain explicit coverage information, not proof that a person is absent.
 
+`execution.max_image_pixels` defaults to **196,000,000** pixels for the whole
+sprite sheet, not an individual VTT thumbnail. The lazy header open honors this
+configured limit even above Pillow's default decompression-bomb threshold, then
+restores Pillow's default before decoding; an oversized image is still rejected
+before RGB conversion. `execution.max_media_bytes` remains **16,777,216** bytes
+per downloaded sheet. Existing YAML overrides remain explicit operator settings.
+
+Scene performer associations use Stash's `BulkUpdateIds.ids` with mode `ADD`,
+preserving unrelated performers. On the next explicit run, a legacy unconfirmed
+link with the old malformed input and its exact recorded HTTP 400 can recover
+after fresh ownership and scene reads; new intents record their input contract.
+Timeouts, connection failures, other HTTP errors and unrelated uncertain writes
+remain protected from blind retries. HTTP 400 GraphQL validation messages are
+reported with bounded credential-redacted detail instead of only the endpoint.
+
 One face SQLite stores model/scan provenance, detections, normalized embeddings,
 bounded crop BLOBs, accepted identities, Stash ownership/bindings, candidate
 portraits, mutation records, progress and run history. Its independent schema

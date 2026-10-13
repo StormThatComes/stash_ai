@@ -15,6 +15,7 @@ from stash_ai.stash_api.transport import absolute_stash_url, origin
 from stash_ai.stash_api.deadlines import call_with_deadline, abort_response
 from stash_ai.stash_api.read_connections import shutdown
 from stash_ai.runtime.cancellation import Cancellation, use
+from .images import open_image
 
 
 def scene_timing(log, requested):
@@ -150,7 +151,6 @@ class VideoFrames(AbstractContextManager):
             raise
 
     def frame(self, seconds):
-        from PIL import Image
         if not math.isfinite(seconds) or seconds < 0:
             raise ValueError('Invalid portrait seek time.')
         timeout = self.deadline - time.monotonic()
@@ -216,9 +216,7 @@ class VideoFrames(AbstractContextManager):
         if self.timeline_origin is not None and abs(self.timeline_origin - start) > .000002:
             raise ValueError('Video source timeline origin changed between portrait seeks.')
         self.timeline_origin = start
-        with Image.open(BytesIO(b''.join(output))) as raw:
-            if raw.width * raw.height > pixels:
-                raise ValueError('Decoded portrait exceeds the pixel budget.')
+        with open_image(BytesIO(b''.join(output)), pixels) as raw:
             image = raw.convert('RGB')
         return image, {'requested_seconds': seconds, **timing,
                        'decoder': 'ffmpeg-copyts-showinfo-scene-time-v2', 'pixels': [image.width, image.height],

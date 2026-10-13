@@ -4,7 +4,30 @@ import uuid
 from stash_ai.runtime.mutations import write
 from stash_ai.stash_api.transport import safe_error
 from .database import encoded
-from .stash import owns, checked_id
+from .stash import owns, checked_id, RecognitionStash
+
+
+LINK_INPUT_CONTRACT = 'bulk-scene-update-ids-v1'
+
+
+def legacy_rejected_link(row, client, performer):
+    """Only the old malformed BulkUpdateIds.values request plus recorded 400.
+
+    That legacy request cannot execute on the supported Stash schema. New link
+    intents carry an input contract so a later unrelated 400 cannot qualify.
+    Other uncertain operations still require observation, never a blind retry.
+    """
+    import json
+    from stash_ai.stash_api.transport import absolute_stash_url
+    try:
+        payload = json.loads(row['payload'])
+    except (TypeError, ValueError):
+        return False
+    return (isinstance(client, RecognitionStash) and row['status'] == 'unknown'
+            and row['target'] == performer
+            and payload == {'performer': performer}
+            and row['error'] == '400 Client Error: Bad Request for url: '
+            + absolute_stash_url('graphql', client.url))
 
 
 class PendingRecognition(RuntimeError):
@@ -94,13 +117,17 @@ def publish_person(database, client, report, scope, scene, person):
     identifier = operation_id(scope, scene, person, 'link')
     if performer in existing:
         save_operation(database, scope=scope, scene=scene, person=person, kind='link', target=performer,
-                       payload={'performer': performer}, precondition={}, status='observed')
+                       payload={'performer': performer, 'input_contract': LINK_INPUT_CONTRACT},
+                       precondition={}, status='observed')
         return performer
-    pending = database.connection.execute('SELECT status FROM publications WHERE id=?', (identifier,)).fetchone()
+    pending = database.connection.execute('SELECT * FROM publications WHERE id=?', (identifier,)).fetchone()
+    precondition = {'performers': sorted(existing)}
     if pending and pending['status'] in ('pending', 'unknown'):
-        raise PendingRecognition('Earlier additive scene link is unresolved; no blind retry.')
+        if not legacy_rejected_link(pending, client, performer):
+            raise PendingRecognition('Earlier additive scene link is unresolved; no blind retry.')
+        precondition['legacy_validation_failure'] = 'BulkUpdateIds.values rejected with HTTP 400'
     perform(database, client, report, scope=scope, scene=scene, person=person, kind='link', target=performer,
-            payload={'performer': performer}, precondition={'performers': sorted(existing)},
+            payload={'performer': performer, 'input_contract': LINK_INPUT_CONTRACT}, precondition=precondition,
             callback=lambda: client.add_scene_person(scene, performer))
     # Refresh after acknowledgement; unrelated concurrently added performers
     # are preserved by ADD, not rewritten from a stale full list.

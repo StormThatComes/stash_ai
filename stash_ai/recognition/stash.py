@@ -75,7 +75,7 @@ class RecognitionStash(StashTransport):
     def add_scene_person(self, scene, performer):
         rows = self.gql('mutation StashAIRecognitionLink($input:BulkSceneUpdateInput!) {'
                         'bulkSceneUpdate(input:$input) { id performers { id } }}',
-                        {'input': {'ids': [scene], 'performer_ids': {'values': [performer], 'mode': 'ADD'}}})['bulkSceneUpdate']
+                        {'input': {'ids': [scene], 'performer_ids': {'ids': [performer], 'mode': 'ADD'}}})['bulkSceneUpdate']
         if not isinstance(rows, list) or len(rows) != 1:
             raise RuntimeError('Stash additive performer association was not acknowledged.')
         checked_id(rows[0], scene)

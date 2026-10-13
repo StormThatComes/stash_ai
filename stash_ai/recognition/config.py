@@ -31,7 +31,7 @@ def defaults():
                      'weights': {'frontal': 3., 'sharpness': 2., 'resolution': 1., 'exposure': 1.}},
         'execution': {'max_cues': 0, 'checkpoint_cues': 32,
                       'max_vtt_bytes': 1048576, 'max_media_bytes': 16777216,
-                      'max_image_pixels': 16777216, 'max_sheets': 256,
+                      'max_image_pixels': 196000000, 'max_sheets': 256,
                       'timeout_seconds': 120.},
         'storage': {'database': 'faces_state.sqlite3', 'max_crop_bytes': 1048576},
         'names': {'file': None},
@@ -133,7 +133,7 @@ def validate(data):
                       'max_video_bytes': (1048576, 1073741824)},
         'execution': {'max_cues': (0, 10000), 'checkpoint_cues': (1, 1000),
                       'max_vtt_bytes': (1024, 4194304), 'max_media_bytes': (1024, 134217728),
-                      'max_image_pixels': (1024, 67108864), 'max_sheets': (1, 1000)},
+                      'max_image_pixels': (1024, 196000000), 'max_sheets': (1, 1000)},
         'storage': {'max_crop_bytes': (1024, 8388608)},
     }
     for section, fields in integers.items():
