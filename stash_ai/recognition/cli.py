@@ -22,6 +22,8 @@ def parser():
     run.add_argument('--face-config', type=Path, help='Face-only YAML; default facial_recognition.yml.')
     run.add_argument('--faces-db', type=Path, help='Override the separate face SQLite; default faces_state.sqlite3.')
     run.add_argument('--device', choices=('cuda', 'cpu', 'auto'), help='Override models.device; default CUDA, CPU is explicit.')
+    run.add_argument('--retry-unresolved-images', action='store_true',
+                     help='Retry uncertain portrait writes for selected owned performers after fresh image/identity checks.')
     run.add_argument('--progress-style', choices=('auto', 'compact', 'verbose', 'off'), default='auto')
     return root
 
