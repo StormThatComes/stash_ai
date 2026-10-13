@@ -15,7 +15,8 @@ from .media import SpriteInput
 from .scanning import scan_scene
 from .clustering import cluster_scene
 from .reference_usage import usage_line
-from .publication import publish_person, save_operation
+from .publication import publish_person, save_operation, ensure_person
+from .merge_publication import canonical_targets, scene_merge_roots, sync_merges
 from .stash import RecognitionStash
 from .names import load_names, plan_names, starter
 from .metadata import enrich
@@ -113,6 +114,7 @@ def execute(args, config, *, services=None):
                                     backend, progress=progress)
                             counts['scenes_reused' if reused else 'scenes_scanned'] += 1
                         with phase(report, 'Recognition matching', scene=identifier):
+                            merges_before = database.connection.execute('SELECT COUNT(*) FROM identity_merges').fetchone()[0]
                             def reference_progress(**values):
                                 values['peak_bytes'] = max(references.get('peak_bytes', 0), values['peak_bytes'])
                                 references.update(scene=identifier, recognizer=config.data['models']['recognizer'],
@@ -149,13 +151,38 @@ def execute(args, config, *, services=None):
                                             kind='namespace', target=None, payload={'namespace': model_namespace},
                                             precondition={'published_namespace': incompatible['namespace']}, status='withheld')
                             database.progress(run, 'matching', {'scene': identifier, 'groups': groups})
+                            merged = database.connection.execute('SELECT COUNT(*) FROM identity_merges').fetchone()[0] - merges_before
+                            counts['identities_merged'] += merged
+                            if merged:
+                                report.optional('recognition_merges', report.write,
+                                                f'Recognition scene {identifier}: identities_merged={merged} (oldest identity retained)')
                         accepted = sorted({g['person'] for g in groups if g['status'] == 'accepted'})
                         counts['groups_withheld'] += sum(g['status'] == 'withheld' for g in groups)
                         counts['observations_withheld'] += sum(g['observations'] for g in groups if g['status'] == 'withheld')
+                        # A coherent pair can merge while a third rival still
+                        # makes this scene ambiguous. Reconcile that pair without
+                        # publishing an unproven link to the selected scene.
+                        for person in sorted(scene_merge_roots(database.connection, scope, scan) - set(accepted)):
+                            binding = database.connection.execute('SELECT performer FROM people WHERE id=?', (person,)).fetchone()
+                            if incompatible and not binding['performer']:
+                                save_operation(database, scope=scope, scene=identifier, person=person,
+                                    kind='namespace', target=None, payload={'namespace': model_namespace},
+                                    precondition={'published_namespace': incompatible['namespace']}, status='withheld')
+                                continue
+                            try:
+                                with phase(report, 'Recognition Stash merge', scene=identifier):
+                                    performer = ensure_person(database, client, report, scope, identifier, person)
+                                    sync_merges(database, client, report, scope, person, performer, counts=counts)
+                            except KeyboardInterrupt:
+                                raise
+                            except Exception as error:
+                                counts['people_failed'] += 1
+                                report.optional('recognition_error', report.write,
+                                                'Recognition merge withheld: ' + safe_error(error, key))
                         for person in accepted:
                             try:
                                 with phase(report, 'Recognition Stash publication', scene=identifier):
-                                    performer = publish_person(database, client, report, scope, identifier, person)
+                                    performer = publish_person(database, client, report, scope, identifier, person, merge_counts=counts)
                                     counts['people_linked_or_observed'] += 1
                                     target = ready.setdefault(person, {'person': person, 'performer': performer, 'scans': []})
                                     target['scans'].append({'scene': identifier, 'scan': scan})
@@ -173,7 +200,7 @@ def execute(args, config, *, services=None):
                         report.optional('recognition_error', report.write,
                                         f'Recognition scene {identifier} failed: ' + safe_error(error, key))
                     database.progress(run, 'run', dict(counts))
-                targets = [ready[key] for key in sorted(ready)]
+                targets = canonical_targets(database, ready)
                 if services.metadata:
                     with phase(report, 'Recognition names preflight'):
                         try:

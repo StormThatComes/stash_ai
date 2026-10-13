@@ -35,7 +35,7 @@ links. Weak identities remain recorded with reasons and do not block clear ones.
 
 Ownership uses an exact installation/person token in performer details, never a
 name-only match. Each mutation intent is committed to the face SQLite before
-dispatch. Lost creation/link responses are reconciled by fresh Stash reads;
+dispatch. Lost creation/link/merge responses are reconciled by fresh Stash reads;
 unresolved outcomes are withheld without blindly retrying. Existing manual links
 are preserved with Stash's `ADD` mutation. Selected-scene runs do not resume links
 for other scenes. Exit 0 means the finite selection completed; exit 1 records
@@ -114,6 +114,9 @@ bounded crop BLOBs, accepted identities, Stash ownership/bindings, candidate
 portraits, mutation records, progress and run history. Its independent schema
 refuses tag/history/foreign databases and hard-linked aliases. Internal backup
 uses SQLite's consistent backup API; no result/history/image sidecars are needed.
+Recognition schema v1 upgrades atomically to v2 to retain identity merge aliases
+and their evidence. Existing observations, IDs, performer bindings and history
+are preserved. An incomplete v1 database is refused before migration.
 
 Face completeness/pose currently use measurable geometry and five-landmark
 ordering/symmetry estimates. They do not prove that every feature is unoccluded.
@@ -123,8 +126,8 @@ exposure and clipping are retained separately.
 ## Automatic identity policy
 
 Matching is incremental: selected-scene vectors can reuse compatible retained
-people from other scenes without fetching their media or rewriting their scene
-associations. New identities need the configured distinct cue-time support.
+people from other scenes without fetching their media. New identities need the
+configured distinct cue-time support.
 Insufficient, near-threshold or ambiguous matches are withheld automatically.
 
 The best and next coherent identity compete even when the runner-up falls just
@@ -132,6 +135,81 @@ below the match threshold. Cohesion is checked against bounded representative
 samples, avoiding transitive single-link unions. This sampled check is not a
 proof that every historical pair matches. Reference bytes, samples and identity
 counts have explicit limits; no N-by-N distance matrix is allocated.
+
+### Consolidating identity fragments
+
+Each uncached matching pass also checks whether the selected evidence supports
+joining existing identities in the same Stash instance and model namespace.
+At least `recognition.min_support` distinct cue times in that selected scan must
+match both groups at `recognition.match_threshold`, with the usual sample
+cohesion check. The average of cross-group sample similarities must reach
+`match_threshold`, and their minimum must reach `clustering.cohesion_threshold`.
+Different assigned faces in one retained cue block a merge; selected-scene
+assignments are recorded before this check so new co-occurrence also counts.
+Samples are bounded by `max_samples_per_person` for each original group. While
+combining several groups in a pass, all constituents remain available for the
+cross-check: A-B and B-C similarity cannot override incompatible A-C evidence.
+This is a sampled rule, not an identity probability or proof about every frame.
+
+The oldest accepted recognition identity wins by SQLite `people.created`, with
+lexical identity ID as a deterministic tie-break. Its UUID, ownership token and
+Stash performer ID stay stable. Members and derived candidate assignments from
+all affected scenes move to it in one SQLite transaction. Retired identities
+remain as durable aliases, are excluded from matching/reference budgets and
+cannot create another performer. Unrelated groups are not merged merely because
+an older database contains them: independently timed evidence from the selected
+scan is required. Supported merge decisions survive later configuration changes;
+they are not automatically split again when thresholds increase.
+
+For example, if four retained fragments mutually pass the cross-check and
+three new cue times match them, the three younger identities retire into the
+oldest. A query that matches two otherwise incompatible people remains ambiguous
+and does not merge them. Raising or lowering thresholds reruns these decisions
+using valid retained vectors; it does not require another recognition inference.
+
+Owned published profiles are consolidated with Stash's native `performerMerge`
+(`source`, `destination`, `values` from the
+[Stash v0.31.1 performer schema](https://github.com/stashapp/stash/blob/v0.31.1/graphql/schema/types/performer.graphql)).
+Its transactional
+[repository implementation](https://github.com/stashapp/stash/blob/v0.31.1/pkg/sqlite/performer.go)
+transfers scene, image, gallery and tag associations and deletes the younger
+profile. Associations in unselected historical scenes move as part of that
+merge; their VTT/video media are not fetched. The oldest destination keeps its
+name, image and other scalar metadata. Details/notes and ownership tokens from
+both profiles are retained in the destination. Unpublished local fragments do
+not cause throwaway profiles to be created. Name mappings should continue to
+use the surviving performer ID; mappings for retired IDs no longer apply.
+
+Merge intent is committed before dispatch. A fresh read must confirm the
+destination ownership and carried merge marker and the source's disappearance.
+After a timeout/interruption, those same facts reconcile the original intent;
+absence of the source alone cannot confirm success. An unresolved outcome or
+changed ownership withholds the merge without a blind retry or a duplicate
+profile. Subsequent selected runs resume relevant pending merges. A valid pair
+can still merge when a third rival makes the selected scene ambiguous, without
+adding an unproven scene link. Multi-scene metadata targets are remapped to the
+survivor before names/portraits run; its existing image follows the usual manual
+image and configuration ownership rules. Historical portrait bytes/metadata and
+mutation intents remain in SQLite as evidence.
+
+Run summaries report `identities_merged` (committed local consolidations),
+`identities_merged_in_stash` (acknowledged profile merges) and
+`identity_merges_observed` (reconciled previous acknowledgements). Merge evidence
+in `identity_merges` retains supporting times, policy, sampled scores and
+constituent reference fingerprints. The matching cache fingerprints only active
+references; repeating an unchanged run does not repeat merges or inference.
+
+| Setting | Effect on merging |
+| --- | --- |
+| `recognition.match_threshold` | Minimum mean match to each endpoint and mean cross-group similarity. |
+| `recognition.min_support` | Required distinct supporting cue times in a selected scan. |
+| `recognition.ambiguity_margin` | Withholds competing assignments; cannot relax merge evidence requirements. |
+| `clustering.cohesion_threshold` | Minimum representative similarity, including cross-group comparisons. |
+| `clustering.max_samples_per_person` | Bounds each group's retained representatives and the final survivor's lookup sample. |
+| `clustering.max_people_per_lookup` | Caps active compatible identities, including provisional groups; aliases are excluded. |
+| `clustering.max_reference_bytes` | Caps the bounded reference vectors; exceeding it rolls back that scene's matching and local merges. |
+
+### Reference budget
 
 `clustering.max_reference_bytes` caps the sum of the float32 embedding array
 bytes used as references in a lookup, including provisional new groups while
@@ -172,13 +250,14 @@ The peak is the highest logical reference demand across matching scenes in this
 run, including provisional groups that may later be withheld and the first
 over-budget request if one fails. It is not process RSS or simultaneous Python
 heap allocation. `loading` is a partial reference load, `matching` includes
-provisional groups, `retained` is the bounded persisted set after successful
+provisional groups, `merging` checks supported consolidations using the retained
+references, `retained` is the bounded persisted set after successful
 matching, and `cached` means the matching decisions were reused after reference
 validation. `no_observations` uses zero references because matching was skipped;
 it does not mean the database contains no people. Peaks are maxima, never sums
 across scenes. The last snapshot and run peak are retained in the same SQLite's
-`progress` (`references` phase) and `runs.summary.references`; no extra files or
-schema migration are needed. History writes occur after the matching transaction
+`progress` (`references` phase) and `runs.summary.references`; these metrics need
+no extra files. History writes occur after the matching transaction
 so reporting cannot commit partially formed candidates.
 
 Keep 128 MiB while the reported peak has comfortable headroom. If it approaches

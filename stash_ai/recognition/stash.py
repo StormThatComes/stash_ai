@@ -1,4 +1,4 @@
-"""Face-only Stash reads and validated additive performer mutations."""
+"""Face-only Stash reads and validated performer/link/merge mutations."""
 from stash_ai.stash_api.transport import StashTransport
 
 PERFORMER_FIELDS = 'id name details image_path'
@@ -50,9 +50,12 @@ class RecognitionStash(StashTransport):
             page += 1
 
     def performer(self, identifier):
+        return checked_id(self.lookup_performer(identifier), identifier)
+
+    def lookup_performer(self, identifier):
         value = self.gql('query StashAIRecognitionPerformer($id:ID!) { findPerformer(id:$id) { '
                          + PERFORMER_FIELDS + ' } }', {'id': identifier})['findPerformer']
-        return checked_id(value, identifier)
+        return None if value is None else checked_id(value, identifier)
 
     def find_token(self, token):
         payload = self.gql('query StashAIRecognitionOwnership($token:String!) {'
@@ -90,3 +93,14 @@ class RecognitionStash(StashTransport):
                          'performerUpdate(input:$input) { ' + PERFORMER_FIELDS + ' }}',
                          {'input': {'id': performer, **fields}})['performerUpdate']
         return checked_id(value, performer)
+
+    def merge_person(self, source, destination, details):
+        checked_id({'id': source})
+        checked_id({'id': destination})
+        if source == destination:
+            raise ValueError('Recognition cannot merge a performer into itself.')
+        value = self.gql('mutation StashAIRecognitionMerge($input:PerformerMergeInput!) {'
+                         'performerMerge(input:$input) { ' + PERFORMER_FIELDS + ' }}',
+                         {'input': {'source': [source], 'destination': destination,
+                                    'values': {'id': destination, 'details': details}}})['performerMerge']
+        return checked_id(value, destination)
