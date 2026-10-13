@@ -183,7 +183,11 @@ scene decoder shares one byte/time budget across its seeks. Only selected-scene
 video is fetched, even for a historically known person. FFmpeg receives an owned
 loopback range URL, not Stash credentials or signed media URLs. Authenticated
 same-origin requests, byte/deadline limits, process/log/output limits and downscale-only
-pixel limits apply. Actual presentation times, identity comparisons, quality,
+pixel limits apply. Requested and actual times use scene-relative seconds. The
+decoder records raw frame PTS and the source timeline origin separately, using
+the same FFmpeg invocation to normalize nonzero container starts before checking
+seek consistency. Missing timestamps or a changing timeline origin withhold the
+portrait. Actual presentation times, identity comparisons, quality,
 exclusions, crop/margin, policy and final bounded JPEG BLOBs stay in face SQLite.
 The best evaluated crop under these budgets is not a global-best-frame claim.
 Visibility remains the documented five-landmark estimate, not semantic occlusion
