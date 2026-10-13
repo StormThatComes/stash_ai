@@ -23,7 +23,7 @@ clustering:
   cohesion_threshold: 0.60
   max_samples_per_person: 32
   max_people_per_lookup: 20000
-  max_reference_bytes: 134217728
+  max_reference_bytes: 134217728 # 128 MiB of float32 references; run reports usage/peak. Not total RAM/VRAM.
 portraits:
   enabled: true               # false removes app-owned portraits for selected accepted people.
   source: vtt                  # Default: recognition thumbnail. Optional video uses FFmpeg.

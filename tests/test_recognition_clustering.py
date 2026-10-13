@@ -1,18 +1,20 @@
 import json
+from dataclasses import replace
 import numpy as np
 import pytest
 
 from stash_ai.recognition.clustering import cluster_scene
-from stash_ai.recognition.config import load
+from stash_ai.recognition.config import load, plain
 from stash_ai.recognition.database import FaceDatabase
 from stash_ai.recognition.media import SpriteInput
 from stash_ai.recognition.scanning import scan_scene
 from tests.helpers.recognition import MediaClient, Backend
 
 
-def setup(tmp_path):
+def setup(tmp_path, clustering=None):
     path = tmp_path / 'face.yml'
-    path.write_text('version: 1\ndetection: {min_sharpness: 0}\n')
+    path.write_text('version: 1\ndetection: {min_sharpness: 0}\n' +
+                    ('clustering: ' + json.dumps(clustering) + '\n' if clustering else ''))
     return load(path)
 
 
@@ -20,6 +22,7 @@ def scan(state, config, scene, vectors=None, count=3):
     client = MediaClient(scene, count)
     backend = Backend()
     if vectors is not None:
+        backend.dimensions = len(vectors[0])
         iterator = iter(vectors)
         backend.embed = lambda image, face: next(iterator)
     with SpriteInput(client, client.scene, config) as source:
@@ -101,3 +104,106 @@ def test_local_pair_evaluation_reports_only_dataset_results():
     assert result['false_match'] == result['false_miss'] == 0
     assert result['samples'] == 2
     assert result['scope'] == 'supplied-local-pairs-only'
+
+
+@pytest.mark.parametrize('dimensions', [128, 512])
+def test_reference_usage_counts_model_bytes_sample_cap_and_cached_lookup(tmp_path, dimensions):
+    config = setup(tmp_path, {'max_samples_per_person': 2})
+    embedding = np.zeros(dimensions, dtype='float32')
+    embedding[0] = 1
+    events = []
+    with FaceDatabase(config.database) as state:
+        selected, _ = scan(state, config, '1', [embedding] * 3)
+        result = cluster_scene(state, selected, config, progress=lambda **v: events.append(v))
+        assert result[0]['status'] == 'accepted'
+        assert events[-1] == {
+            'bytes': 2 * dimensions * 4, 'budget_bytes': 134217728,
+            'peak_bytes': 2 * dimensions * 4, 'people': 1, 'samples': 2, 'stage': 'retained'}
+        assert cluster_scene(state, selected, config, progress=lambda **v: events.append(v)) == result
+        assert events[-1]['stage'] == 'cached'
+        assert events[-1]['bytes'] == events[-1]['peak_bytes'] == 2 * dimensions * 4
+        assert events[-1]['samples'] == 2
+
+
+def test_reference_peak_includes_withheld_groups_but_current_usage_does_not(tmp_path):
+    config = setup(tmp_path)
+    events = []
+    with FaceDatabase(config.database) as state:
+        selected, _ = scan(state, config, '1', count=1)
+        result = cluster_scene(state, selected, config, progress=lambda **v: events.append(v))
+        assert result[0]['status'] == 'withheld'
+        assert events[-1]['bytes'] == events[-1]['samples'] == events[-1]['people'] == 0
+        assert events[-1]['peak_bytes'] == 16
+        assert any(v['stage'] == 'matching' and v['bytes'] == 16 for v in events)
+
+
+def test_reference_usage_reports_over_budget_new_samples_and_rolls_back(tmp_path):
+    config = setup(tmp_path)
+    events = []
+    with FaceDatabase(config.database) as state:
+        first, _ = scan(state, config, '1')
+        cluster_scene(state, first, config)
+        # A tiny internal limit makes boundary checks cheap; YAML requires >=1 MiB.
+        config = replace(config, data=plain(config.data))
+        config.data['clustering']['max_reference_bytes'] = 64
+        selected, _ = scan(state, config, '2', [np.array([0., 1., 0., 0.])] * 3)
+        with pytest.raises(ValueError, match=r'Selected.*required=80 bytes, limit=64 bytes.*people=2, samples=5'):
+            cluster_scene(state, selected, config, progress=lambda **v: events.append(v))
+        assert events[-1]['bytes'] == events[-1]['peak_bytes'] == 80
+        assert events[-1]['budget_bytes'] == 64
+        assert events[-1]['stage'] == 'matching'
+        assert state.connection.execute('SELECT COUNT(*) FROM candidates WHERE scan=?', (selected,)).fetchone()[0] == 0
+        assert state.connection.execute('SELECT COUNT(*) FROM people').fetchone()[0] == 1
+        assert state.connection.execute('SELECT COUNT(*) FROM members').fetchone()[0] == 3
+
+
+@pytest.mark.parametrize('column', ['scope', 'namespace'])
+def test_loading_reference_usage_failure_reports_only_compatible_people(tmp_path, column):
+    config = setup(tmp_path)
+    events = []
+    with FaceDatabase(config.database) as state:
+        first, _ = scan(state, config, '1')
+        cluster_scene(state, first, config)
+        selected, _ = scan(state, config, '2')
+        config = replace(config, data=plain(config.data))
+        config.data['clustering']['max_reference_bytes'] = 32
+        with pytest.raises(ValueError, match=r'Retained.*required=48 bytes, limit=32 bytes'):
+            cluster_scene(state, selected, config, progress=lambda **v: events.append(v))
+        assert events[-1]['stage'] == 'loading'
+        assert events[-1]['bytes'] == 48 and events[-1]['samples'] == 3
+        # Neither another instance nor another recognizer contributes references.
+        state.connection.execute(f"UPDATE people SET {column}='other'")
+        state.connection.commit()
+        config.data['clustering']['max_reference_bytes'] = 64
+        cluster_scene(state, selected, config, progress=lambda **v: events.append(v))
+        assert events[-1]['bytes'] == 48 and events[-1]['people'] == 1
+
+
+def test_empty_selected_scan_reports_no_reference_lookup(tmp_path):
+    config = setup(tmp_path)
+    events = []
+    with FaceDatabase(config.database) as state:
+        selected, _ = scan(state, config, '1')
+        state.connection.execute("UPDATE observations SET rejected='synthetic' WHERE scan=?", (selected,))
+        state.connection.commit()
+        assert cluster_scene(state, selected, config, progress=lambda **v: events.append(v)) == []
+        assert len(events) == 1 and events[0]['stage'] == 'no_observations'
+        assert events[0]['bytes'] == events[0]['peak_bytes'] == 0
+
+
+def test_reference_progress_is_throttled_without_losing_final_or_failure_usage(monkeypatch):
+    from types import SimpleNamespace
+    from stash_ai.recognition.reference_usage import ReferenceUsage
+    now, events = [0.], []
+    monkeypatch.setattr('stash_ai.recognition.reference_usage.time', SimpleNamespace(monotonic=lambda: now[0]))
+    usage = ReferenceUsage(16016, lambda **v: events.append(v))
+    usage.begin('matching')
+    for _ in range(1000):
+        usage.add([np.array([1., 0., 0., 0.], dtype='float32')], kind='Selected')
+    assert len(events) == 1
+    now[0] = 1.
+    usage.add([np.array([1., 0., 0., 0.], dtype='float32')], kind='Selected')
+    assert len(events) == 2 and events[-1]['bytes'] == 16016
+    with pytest.raises(ValueError, match='required=16032'):
+        usage.add([np.array([1., 0., 0., 0.], dtype='float32')], kind='Selected')
+    assert len(events) == 3 and events[-1]['bytes'] == events[-1]['peak_bytes'] == 16032
