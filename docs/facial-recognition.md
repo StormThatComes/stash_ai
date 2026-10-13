@@ -104,6 +104,15 @@ The default policy is labeled uncalibrated for a user's domain in stored provena
 
 ## Automatic portraits and operator names
 
+Candidate eligibility is rechecked when the compatible identity references
+change, using retained embeddings without rescanning media. Cached VTT and
+video portrait images also require current identity eligibility before a new
+publication. Existing confirmed/manual associations and images are preserved.
+Older cached video portraits without retained identity vectors keep their bytes
+but cannot authorize a new upload; no replacement inference runs merely to
+upgrade their cache. Unknown name writes are reconciled against their original
+journal payload and ownership, independently of a later names YAML edit.
+
 Portraits default to the original VTT thumbnail used for an accepted recognition
 observation. The retained geometry and embedding select and verify that person's
 face without running detection/recognition a second time. The selected scene's

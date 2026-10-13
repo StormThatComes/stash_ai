@@ -1,6 +1,7 @@
 """Optional immutable, server-scoped operator names; no public sync command."""
 from dataclasses import dataclass
 import hashlib
+import json
 from types import MappingProxyType
 import unicodedata
 
@@ -76,13 +77,15 @@ def sync_name(database, client, report, scope, target, plan):
     live = checked_id(client.performer(performer), performer)
     if not owns(live, expected['token']):
         raise PendingRecognition('Performer ownership changed before name synchronization.')
-    if live['name'] == expected['after']:
-        if previous and previous['status'] in ('pending', 'unknown'):
-            with database.connection:
-                database.connection.execute("UPDATE publications SET status='observed',error=NULL WHERE id=?", (identifier,))
-        return {'names_unchanged': 1}
     if previous and previous['status'] in ('pending', 'unknown'):
-        raise PendingRecognition('Earlier name mutation is unresolved; no blind retry.')
+        intent, precondition = json.loads(previous['payload']), json.loads(previous['precondition'])
+        if (previous['target'] != performer or precondition.get('token') != expected['token']
+                or live['name'] != intent.get('name')):
+            raise PendingRecognition('Earlier name mutation is unresolved; original intent was not observed.')
+        with database.connection:
+            database.connection.execute("UPDATE publications SET status='observed',error=NULL WHERE id=?", (identifier,))
+    if live['name'] == expected['after']:
+        return {'names_unchanged': 1}
     if live['name'] != expected['before']:
         raise PendingRecognition('Concurrent name edit preserved; selected name plan is stale.')
     def update():
