@@ -35,7 +35,7 @@ class RunTimings:
         self._heartbeat_thread = None
 
     def bind(self, operation):
-        """Carry attribution and response accounting into one owned read worker."""
+        """Carry attribution and response accounting into one owned HTTP worker."""
         names = ('model', 'work', 'request')
         captured = {name: getattr(self._timers, name, None) for name in names}
         def bound():
@@ -47,7 +47,8 @@ class RunTimings:
             finally:
                 for name, value in previous.items():
                     setattr(self._timers, name, value)
-        return bound
+        diagnostics = self.report.diagnostics
+        return diagnostics.bind(bound) if diagnostics is not None else bound
 
     def _start_heartbeat(self):
         # Called under the condition lock. Reuse one ticker across short reads;

@@ -32,6 +32,19 @@ class MergeDiagnostics:
         self.slowest, self.statuses = [], Counter()
         self.local = threading.local()
         self.lock = threading.RLock()
+        self.active_scenes = set()
+
+    def bind(self, operation):
+        """Carry the captured scene to HTTP workers without leaking thread state."""
+        captured = getattr(self.local, 'scene', None)
+        def bound():
+            previous = getattr(self.local, 'scene', None)
+            self.local.scene = captured
+            try:
+                return operation()
+            finally:
+                self.local.scene = previous
+        return bound
 
     def __enter__(self):
         if self.path:
@@ -66,21 +79,21 @@ class MergeDiagnostics:
         with self.lock:
             add_sample(self.stages, name, elapsed, exclusive, failed)
             scene = getattr(self.local, 'scene', None)
-            if scene is not None:
+            if scene is not None and id(scene) in self.active_scenes:
                 add_sample(scene['stages'], name, elapsed, exclusive, failed)
 
     def record_api(self, name, elapsed, failed, response_bytes):
         with self.lock:
             add_sample(self.api, name, elapsed, elapsed, failed, response_bytes)
             scene = getattr(self.local, 'scene', None)
-            if scene is not None:
+            if scene is not None and id(scene) in self.active_scenes:
                 add_sample(scene['api'], name, elapsed, elapsed, failed, response_bytes)
 
     def record_counts(self, values):
         with self.lock:
             self.counts.update(values)
             scene = getattr(self.local, 'scene', None)
-            if scene is not None:
+            if scene is not None and id(scene) in self.active_scenes:
                 scene['counts'].update(values)
 
     @contextmanager
@@ -89,6 +102,8 @@ class MergeDiagnostics:
                       stages={}, api={}, counts=Counter(), statistics={})
         previous = getattr(self.local, 'scene', None)
         self.local.scene = record
+        with self.lock:
+            self.active_scenes.add(id(record))
         start, cpu = time.perf_counter(), time.process_time()
         try:
             yield record
@@ -97,8 +112,10 @@ class MergeDiagnostics:
             raise
         finally:
             wall, used = time.perf_counter()-start, time.process_time()-cpu
-            record.update(wall_seconds=wall, cpu_seconds=used,
-                          unmeasured_seconds=max(0.0, wall-sum(v['seconds'] for v in record['stages'].values())))
+            with self.lock:
+                self.active_scenes.discard(id(record))
+                record.update(wall_seconds=wall, cpu_seconds=used,
+                              unmeasured_seconds=max(0.0, wall-sum(v['seconds'] for v in record['stages'].values())))
             self.local.scene = previous
             self.scenes += 1
             self.scene_wall += wall
