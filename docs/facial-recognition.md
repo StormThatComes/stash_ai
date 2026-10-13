@@ -173,7 +173,8 @@ portraits:
   aspect_ratio: null     # Keep padded face shape; 0.8 requests a 4:5 portrait.
   jpeg_quality: 90       # Integer 1..100.
   min_visible_face_fraction: 0.80
-  weights: {visibility: 3.0}
+  weights:
+    visibility: 3.0
 ```
 
 The default requested VTT portrait is 1.7 times the detected face width/height,
