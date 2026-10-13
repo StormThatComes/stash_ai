@@ -64,6 +64,13 @@ counts are null. Raw paths, URLs, payloads and error examples are omitted. Expor
 failure is diagnostic and cannot replace an existing execution error. Reporting
 uses observed state without extra Stash reads, journal writes or inference.
 
+The summary reservation uses an advisory lock released automatically when the
+process exits; the final JSON name appears only after a complete validated
+document is atomically published. A failed export leaves that name available
+for another explicit run. Existing or concurrently created files stay intact.
+Setup failures report setup rather than an unentered finalize phase, and
+deliberately skipped phases include bounded reasons in both progress styles.
+
 An illustrative local Python 3.14.7 scalar-update measurement (100,000 updates)
 took 17.9 ms with progress off and 75.5 ms with auto: approximately 0.58 µs extra
 per update. 100,000 throttled resource polls took 10.5 ms. These are coordination

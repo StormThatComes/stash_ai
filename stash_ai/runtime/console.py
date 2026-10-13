@@ -37,6 +37,8 @@ class ConsolePresenter:
         self.stopping = self.finalized = False
         self.stop_started = None
         self.phase_outcomes = {}
+        self.skipped_reasons = {}
+        self.last_phase = None
         self.failure_phase = None
 
     def start(self):
@@ -76,8 +78,11 @@ class ConsolePresenter:
         with self.lock:
             previous = self.phase_name, self.phase_started, dict(self.state)
             self.phase_name = name
+            self.last_phase = name
             self.phase_started = time.monotonic()
             self.state = {k: str(v)[:180] for k, v in values.items() if v is not None}
+            if name in self.phase_outcomes or len(self.phase_outcomes) < 32:
+                self.phase_outcomes[name] = 'running'
         self.message('Phase: ' + name, decorative=True)
         status = 'complete'
         try:
@@ -93,11 +98,11 @@ class ConsolePresenter:
             if status == 'complete' and errors is not None and errors() > before_errors:
                 status = 'partial'
             self.message(f'Phase: {name} {status}', decorative=True)
-            if name in self.phase_outcomes or len(self.phase_outcomes) < 32:
-                self.phase_outcomes[name] = status
             if status == 'partial' and self.failure_phase is None:
                 self.failure_phase = name
             with self.lock:
+                if name in self.phase_outcomes or len(self.phase_outcomes) < 32:
+                    self.phase_outcomes[name] = status
                 if status == 'complete':
                     self.completed = time.monotonic()
                 self.phase_name, self.phase_started, self.state = previous
@@ -382,6 +387,10 @@ def current_report():
 def skipped(report, name, reason):
     presenter = getattr(report, 'console', None)
     if presenter is not None and not presenter.closed:
+        with presenter.lock:
+            if name in presenter.phase_outcomes or len(presenter.phase_outcomes) < 32:
+                presenter.phase_outcomes[name] = 'skipped'
+                presenter.skipped_reasons[name] = str(reason)[:160]
         presenter.message(f'Phase: {name} skipped ({reason})', decorative=True)
 
 
