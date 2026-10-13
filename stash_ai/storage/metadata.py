@@ -20,8 +20,7 @@ def encode(record):
     return json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(',', ':'), allow_nan=False)
 
 
-def decode(data):
-    record = json.loads(data)
+def validate_record(record):
     required = {'mode', 'meta', 'has_frames', 'populated'}
     if (not isinstance(record, dict) or set(record) != required
             or record['mode'] not in ('scene', 'frames') or not isinstance(record['meta'], dict)
@@ -30,6 +29,11 @@ def decode(data):
         raise ValueError('Invalid result metadata.')
     from stash_ai.evidence.formats import validate_current
     validate_current(record)
+
+
+def decode(data):
+    record = json.loads(data)
+    validate_record(record)
     return record
 
 
