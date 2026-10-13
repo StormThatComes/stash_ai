@@ -12,6 +12,9 @@ from urllib.parse import urljoin, urlsplit
 import uuid
 
 from stash_ai.stash_api.transport import absolute_stash_url, origin
+from stash_ai.stash_api.deadlines import call_with_deadline, abort_response
+from stash_ai.stash_api.read_connections import shutdown
+from stash_ai.runtime.cancellation import Cancellation, use
 
 
 class VideoFrames(AbstractContextManager):
@@ -27,6 +30,7 @@ class VideoFrames(AbstractContextManager):
         self.error, self.active, self.process = None, None, None
         self.server = self.thread = None
         self.guard = threading.Lock()
+        self.cancellation = Cancellation()
         self.path = '/' + uuid.uuid4().hex
         self.validator = None
 
@@ -39,8 +43,9 @@ class VideoFrames(AbstractContextManager):
             remaining = self.deadline - time.monotonic()
             if remaining <= 0 or self.remaining <= 0:
                 raise TimeoutError('Portrait video byte/time budget exhausted.')
-            response = self.client.media.get(url, headers={'Range': byte_range} if byte_range else {},
-                    stream=True, allow_redirects=False, timeout=(min(5., remaining), remaining))
+            response = call_with_deadline(lambda: self.client.media.get(url,
+                    headers={'Range': byte_range} if byte_range else {}, stream=True, allow_redirects=False,
+                    timeout=(min(5., remaining), remaining)), self.deadline)
             if response.status_code in (301, 302, 303, 307, 308):
                 location = response.headers.get('Location')
                 response.close()
@@ -73,6 +78,15 @@ class VideoFrames(AbstractContextManager):
                 if byte_range and not re.fullmatch(r'bytes=\d+-\d*', byte_range):
                     self.send_error(400)
                     return
+                try:
+                    with use(owner.cancellation):
+                        call_with_deadline(lambda: self.forward(byte_range), owner.deadline,
+                                           cancel=lambda: shutdown(self.connection))
+                except BaseException as error:
+                    owner.error = error
+                    self.close_connection = True
+
+            def forward(self, byte_range):
                 response = None
                 try:
                     response = owner._response(byte_range)
@@ -195,15 +209,19 @@ class VideoFrames(AbstractContextManager):
             self.process.kill()
             self.process.wait()
         with self.guard:
-            if self.active is not None:
-                self.active.close()
+            active = self.active
+        from stash_ai.runtime.cleanup import cleanup
+        actions = [('cancel portrait bridge', self.cancellation.cancel)]
+        if active is not None:
+            actions.append(('abort portrait response', lambda: abort_response(active)))
         if self.server is not None:
             if self.thread is not None and self.thread.is_alive():
-                self.server.shutdown()
-                self.thread.join()
-            self.server.server_close()
+                actions.extend([('stop portrait server', self.server.shutdown),
+                                ('join portrait server', self.thread.join)])
+            actions.append(('close portrait server', self.server.server_close))
         if self.owned_client:
-            self.client.close()
+            actions.append(('close portrait media client', self.client.close))
+        cleanup(actions)
 
     def __exit__(self, *args):
         self.close()
