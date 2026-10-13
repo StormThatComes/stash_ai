@@ -25,7 +25,7 @@ clustering:
   max_people_per_lookup: 20000
   max_reference_bytes: 134217728
 portraits:
-  enabled: true
+  enabled: true               # false removes app-owned portraits for selected accepted people.
   source: vtt                  # Default: recognition thumbnail. Optional video uses FFmpeg.
   min_face_pixels: 96          # Actual source pixels; upscaling adds no detail.
   min_sharpness: 25.0

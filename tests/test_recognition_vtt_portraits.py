@@ -172,13 +172,15 @@ def test_changed_sprite_between_recognition_and_portraits_is_withheld(tmp_path, 
                    for row in db.connection.execute('SELECT metadata FROM portraits'))
 
 
-def test_stricter_yaml_quality_keeps_existing_photo_when_no_replacement_qualifies(tmp_path, monkeypatch):
+def test_stricter_yaml_quality_removes_owned_photo_when_no_replacement_qualifies(tmp_path, monkeypatch):
     config, stash, services, _ = setup(tmp_path, monkeypatch)
     assert run(config, services, '1') == 0
-    initial = dict(stash.images)
+    performer = stash.links['1'][-1]
     write_config(config.source_path, min_face_pixels=200)
     assert run(load(config.source_path), services, '1') == 0
-    assert stash.images == initial and len(image_writes(stash)) == 1
+    assert performer not in stash.images and len(image_writes(stash)) == 2
+    assert run(load(config.source_path), services, '1') == 0
+    assert len(image_writes(stash)) == 2
 
 
 def test_selected_scene_vtt_shortlist_never_reads_historical_other_scene(tmp_path, monkeypatch):

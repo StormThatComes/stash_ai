@@ -3,6 +3,10 @@ from io import BytesIO
 import math
 
 
+class PortraitFramingError(ValueError):
+    """The requested crop/encoding cannot produce an eligible portrait."""
+
+
 def assess(image, detection):
     import numpy as np
     x, y, width, height = detection.box
@@ -84,7 +88,7 @@ def portrait_bytes(image, detection, policy, *, limit):
         scale = min(1., image.width / wanted_width, image.height / wanted_height)
         wanted_width, wanted_height = wanted_width * scale, wanted_height * scale
         if wanted_width < width or wanted_height < height:
-            raise ValueError('Portrait aspect ratio cannot contain the full face in this source.')
+            raise PortraitFramingError('Portrait aspect ratio cannot contain the full face in this source.')
     wanted_width, wanted_height = min(image.width, wanted_width), min(image.height, wanted_height)
     left = max(0., min(x + width / 2 - wanted_width / 2, image.width - wanted_width))
     top = max(0., min(y + height / 2 - wanted_height / 2, image.height - wanted_height))
@@ -95,7 +99,7 @@ def portrait_bytes(image, detection, policy, *, limit):
         rgb.save(output, format='JPEG', quality=policy['jpeg_quality'])
         data = output.getvalue()
     if len(data) > limit:
-        raise ValueError('Portrait exceeds configured BLOB limit.')
+        raise PortraitFramingError('Portrait exceeds configured BLOB limit.')
     return data, list(bounds)
 
 
