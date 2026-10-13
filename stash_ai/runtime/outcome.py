@@ -1,6 +1,5 @@
 """Content-free terminal outcome from already observed execution boundaries."""
 from collections import Counter
-import json
 from time import monotonic
 
 from stash_ai.commands.modes import Command, CLEANUP_COMMANDS
@@ -10,13 +9,13 @@ from stash_ai.signatures import digest
 class CommandOutcome:
     def __init__(self, app, args):
         self.app, self.args, self.report = app, args, args.report
-        self.started, self.result, self.file = monotonic(), None, None
+        self.started, self.result, self.export = monotonic(), None, None
 
     def __enter__(self):
         destination = getattr(self.args, 'run_summary_json', None)
         if destination is not None:
-            # Reserve before execution and never replace an existing export.
-            self.file = destination.open('x', encoding='utf-8')
+            from stash_ai.reports.io import ReservedJsonReport
+            self.export = ReservedJsonReport(destination).__enter__()
         return self
 
     def snapshot(self, kind):
@@ -28,6 +27,14 @@ class CommandOutcome:
         ui = getattr(report, 'console', None)
         status = ('interrupted' if kind is not None and issubclass(kind, KeyboardInterrupt) else
                   'failed' if kind is not None or self.result else 'completed')
+        phases, skipped_reasons = {}, {}
+        current_phase = 'setup'
+        if ui is not None:
+            with ui.lock:
+                phases, skipped_reasons = dict(ui.phase_outcomes), dict(ui.skipped_reasons)
+                current_phase = ui.failure_phase or (ui.phase_name if kind is not None else ui.last_phase) or 'setup'
+        if kind is not None and (ui is None or ui.failure_phase is None):
+            phases[current_phase] = 'interrupted' if issubclass(kind, KeyboardInterrupt) else 'failed'
         merge = report.workload.get('merge', {})
         telemetry = report.workload.get('merge_telemetry') or {}
         selection = sorted(set(map(str, args.scene_id))) if args.scene_id else None
@@ -52,8 +59,7 @@ class CommandOutcome:
                 guidance = 'Rerun with the same state DB and models; default --resume reuses valid checkpoints.'
         return dict(schema_version=1, status=status, command=args.command.value,
                     mode='planned' if preview else 'apply',
-                    phase=ui.failure_phase if ui is not None and ui.failure_phase else 'finalize',
-                    phases=dict(ui.phase_outcomes) if ui is not None else {},
+                    phase=current_phase, phases=phases, skipped_phase_reasons=skipped_reasons,
                     elapsed_seconds=max(0., monotonic()-self.started),
                     scope=dict(mode='explicit' if selection is not None else 'scope',
                                selected_scene_count=len(selection) if selection is not None else None,
@@ -98,10 +104,8 @@ class CommandOutcome:
                     f'mutations confirmed={mutations["confirmed"]} failed={mutations["failed"]} unknown={mutations["outcome_unknown"]} batch.')
                 if row['resume_guidance']:
                     self.report.write(row['resume_guidance'])
-            if self.file is not None:
-                json.dump(row, self.file, indent=2, sort_keys=True, allow_nan=False)
-                self.file.write('\n')
-                self.file.flush()
+            if self.export is not None:
+                self.export.publish(row)
         except BaseException as failure:
             if error is not None:
                 error.add_note('Outcome reporting failed: ' + type(failure).__name__)
@@ -110,6 +114,7 @@ class CommandOutcome:
             else:
                 raise
         finally:
-            if self.file is not None:
+            if self.export is not None:
                 from .cleanup import cleanup
-                cleanup([('close outcome export', self.file.close)], report=self.report, primary=error)
+                self.report.optional('outcome_cleanup', cleanup, [('release outcome reservation', self.export.close)],
+                                     report=self.report, primary=error)

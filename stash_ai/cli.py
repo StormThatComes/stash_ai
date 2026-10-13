@@ -57,24 +57,29 @@ def _execute(app, args):
     if result is not None:
         return result
 
-    hierarchy_only, cleanup_only = bootstrap.runtime_options(app, args)
+    from stash_ai.runtime.console import phase
+    with phase(args.report, 'setup'):
+        hierarchy_only, cleanup_only = bootstrap.runtime_options(app, args)
     result = run_standalone_command(app, args)
     if result is not None:
         return result
-    settings = bootstrap.selected_settings(app, args)
+    with phase(args.report, 'setup'):
+        settings = bootstrap.selected_settings(app, args)
     if args.command is Command.DOWNLOAD:
         bootstrap.download_models(app, settings)
         return 0
-    core_policies, scene_policies = bootstrap.policies(
-        app, args, hierarchy_only=hierarchy_only, cleanup_only=cleanup_only)
+    with phase(args.report, 'setup'):
+        core_policies, scene_policies = bootstrap.policies(
+            app, args, hierarchy_only=hierarchy_only, cleanup_only=cleanup_only)
     if cleanup_only:
         from stash_ai.cleanup.run import CleanupRun
         return CleanupRun(app, settings, args, core_policies, scene_policies).run()
     result = run_saved_merge_command(app, settings, args, core_policies, scene_policies)
     if result is not None:
         return result
-    catalogs, merged_hierarchy = bootstrap.catalogs(
-        app, settings, args, scene_policies)
+    with phase(args.report, 'vocabulary setup'):
+        catalogs, merged_hierarchy = bootstrap.catalogs(
+            app, settings, args, scene_policies)
     if args.command is Command.VALIDATE_HIERARCHY:
         print("Vocabularies/hierarchies validated. No Stash requests or model weights loaded.")
         return 0
