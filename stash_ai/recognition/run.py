@@ -13,7 +13,7 @@ from .database import FaceDatabase, encoded
 from .models import ASSETS, ensure_assets, load_backend, namespace
 from .media import SpriteInput
 from .scanning import scan_scene
-from .clustering import cluster_scene
+from .clustering import cluster_scene, matching_policy
 from .reference_usage import usage_line
 from .publication import publish_person, save_operation, ensure_person
 from .merge_publication import canonical_targets, scene_merge_roots, sync_merges
@@ -186,6 +186,12 @@ def execute(args, config, *, services=None):
                                     counts['people_linked_or_observed'] += 1
                                     target = ready.setdefault(person, {'person': person, 'performer': performer, 'scans': []})
                                     target['scans'].append({'scene': identifier, 'scan': scan})
+                                    evidence = database.connection.execute("SELECT json_extract(payload,'$.reference_context') "
+                                        'FROM candidates WHERE scan=? AND policy=? AND person=? '
+                                        "AND status='accepted' LIMIT 1", (scan, matching_policy(config), person)).fetchone()
+                                    if evidence is not None:
+                                        target.setdefault('matching', {})[scan] = {'policy': matching_policy(config),
+                                            'reference_context': evidence[0], 'person': person}
                             except KeyboardInterrupt:
                                 raise
                             except Exception as error:

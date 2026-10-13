@@ -16,7 +16,7 @@ class VisibilityError(RuntimeError):
 
 
 def required(policy):
-    return policy['min_visible_face_fraction'] > 0 or policy['weights']['visibility'] > 0
+    return policy['weights']['visibility'] > 0
 
 
 def valid_fraction(value):
@@ -34,11 +34,18 @@ class LazyVisibility:
     def __init__(self, config, paths, factory=None):
         self.config, self.paths, self.factory = config, paths, factory or FaceVisibility
         self.model = None
+        self._initialization_error = None
 
     def measure(self, image, face):
         try:
             if self.model is None:
-                self.model = self.factory(self.config, self.paths)
+                if self._initialization_error is not None:
+                    raise ValueError(self._initialization_error)
+                try:
+                    self.model = self.factory(self.config, self.paths)
+                except Exception as error:
+                    self._initialization_error = str(error)[:500]
+                    raise
             value = self.model.measure(image, face)
         except Exception as error:
             raise VisibilityError('Face visibility measurement failed: ' + str(error)) from error
@@ -47,6 +54,7 @@ class LazyVisibility:
         return value
 
     def close(self):
+        self._initialization_error = None
         if self.model is not None:
             self.model.close()
             self.model = None

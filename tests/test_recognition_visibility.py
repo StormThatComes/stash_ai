@@ -43,11 +43,11 @@ def test_vtt_selects_uncovered_late_observation_beyond_old_shortlist_and_pool(tm
     assert run(config, services, '1') == 0
     _, metadata = winner(config)
     assert metadata['cue'] == 100 and metadata['quality']['visible_face_fraction'] == 1
-    assert metadata['eligible_observations'] == 1
+    assert metadata['eligible_observations'] == 101
     assert len(backends) == 1 and backends[0].calls == 101
     with FaceDatabase(config.database) as db:
         assert db.connection.execute('SELECT COUNT(*) FROM portraits WHERE image IS NOT NULL').fetchone()[0] == 1
-        assert sum(json.loads(r[0]).get('reason') == 'face_occluded'
+        assert sum('face_occluded' in json.loads(r[0]).get('quality_shortfalls', [])
                    for r in db.connection.execute('SELECT metadata FROM portraits')) == 100
     writes = list(stash.writes)
     write_config(config.source_path, max_candidates=64, time_offsets=[2], max_video_bytes=1048576)
@@ -113,17 +113,17 @@ def test_visibility_disabled_skips_model_and_measurements(tmp_path, monkeypatch)
 
 
 @pytest.mark.parametrize('source', ['vtt', 'video'])
-def test_visibility_model_failure_withholds_image_and_closes_session(tmp_path, monkeypatch, source, capsys):
+def test_visibility_model_failure_ranks_other_quality_and_closes_session(tmp_path, monkeypatch, source, capsys):
     config, stash, services = setup(tmp_path, monkeypatch)[:3] if source == 'vtt' else video_setup(tmp_path, monkeypatch)
     model = Visibility()
     model.measure = lambda *args: {'visible_face_fraction': float('nan'), 'visibility': {'contract': CONTRACT_ID}}
     services.visibility = lambda *args: model
-    assert run(config, services, '1') == 1
-    assert not stash.images and model.closed
+    assert run(config, services, '1') == 0
+    assert stash.images and model.closed
     assert 'invalid or incompatible measurement' in capsys.readouterr().out
 
 
-def test_video_applies_visibility_gate_to_actual_video_face(tmp_path, monkeypatch):
+def test_video_ranks_occluded_actual_video_face_instead_of_leaving_profile_blank(tmp_path, monkeypatch):
     config, stash, services = video_setup(tmp_path, monkeypatch)
     model = Visibility()
     def occluded(*args):
@@ -131,9 +131,9 @@ def test_video_applies_visibility_gate_to_actual_video_face(tmp_path, monkeypatc
     model.measure = occluded
     services.visibility = lambda *args: model
     assert run(config, services, '1') == 0
-    assert not stash.images and model.closed
+    assert stash.images and model.closed
     with FaceDatabase(config.database) as db:
-        assert all(json.loads(r[0])['exclusions'][0]['reason'] == 'face_occluded'
+        assert all('face_occluded' in json.loads(r[0])['quality_shortfalls']
                    for r in db.connection.execute('SELECT metadata FROM portraits'))
 
 
@@ -205,7 +205,7 @@ def test_disabled_visibility_does_not_download_faceocc(tmp_path, monkeypatch):
     import stash_ai.backends.downloads as downloads
     import stash_ai.recognition.models as models
     import stash_ai.recognition.runtime as runtime
-    config, _, _, _ = setup(tmp_path, monkeypatch, min_visible_face_fraction=0, weights={'visibility': 0})
+    config, _, _, _ = setup(tmp_path, monkeypatch, weights={'visibility': 0})
     downloaded = []
     monkeypatch.setattr(runtime, 'runtime', lambda *args: None)
     monkeypatch.setattr(models, 'verify', lambda *args: None)

@@ -79,6 +79,11 @@ def _result(db, scan, policy):
     return [dict(row) for row in rows]
 
 
+def matching_policy(config):
+    return digest({'format': 2, 'recognition': config.data['recognition'],
+                   'clustering': config.data['clustering']})
+
+
 def cluster_scene(database, scan, config, *, progress=None):
     """Selected evidence can merge compatible historical identities oldest-first.
 
@@ -90,8 +95,7 @@ def cluster_scene(database, scan, config, *, progress=None):
     record = db.execute('SELECT * FROM scans WHERE id=?', (scan,)).fetchone()
     if record is None or record['status'] != 'complete':
         raise ValueError('Face matching requires a complete selected-scene scan.')
-    policy = digest({'format': 2, 'recognition': config.data['recognition'],
-                     'clustering': config.data['clustering']})
+    policy = matching_policy(config)
     count = db.execute('SELECT COUNT(*) FROM observations WHERE scan=? AND rejected IS NULL', (scan,)).fetchone()[0]
     usage = ReferenceUsage(config.data['clustering']['max_reference_bytes'], progress)
     if not count:

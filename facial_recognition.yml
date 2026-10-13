@@ -27,16 +27,18 @@ clustering:
 portraits:
   enabled: true               # false removes app-owned portraits for selected accepted people.
   source: vtt                  # Default: recognition thumbnail. Optional video uses FFmpeg.
-  min_face_pixels: 96          # Actual source pixels; upscaling adds no detail.
+  # Quality targets are ranking preferences: imperfect faces still supply a portrait.
+  # detection.* remains the separate hard gate for recognition observations.
+  min_face_pixels: 96          # Preferred actual face pixels; 0 removes this target penalty.
   min_sharpness: 25.0
   max_pose_deviation: 0.35
   min_exposure: 30.0
   max_exposure: 225.0
   max_clipped_fraction: 0.15
-  min_visible_face_fraction: 0.80 # Estimated visible fraction of the face region; 0 disables this gate.
+  min_visible_face_fraction: 0.80 # Preferred visible fraction; 0 removes the extra target penalty.
   margin: 0.35                 # Extra padding per side, relative to face width/height.
-  aspect_ratio: null           # null = padded face shape; 0.8 = 4:5 portrait (width/height).
-  jpeg_quality: 90             # 1..100. Framing/quality changes refresh app-owned images on the next run.
+  aspect_ratio: null           # null = padded face shape; 0.8 = 4:5. Adapts if the source cannot fit it.
+  jpeg_quality: 90             # Preferred 1..100; lowers quality/size to fit storage.max_crop_bytes.
   max_candidates: 8           # Video only. VTT ranks all retained observations of selected people.
   time_offsets: [0.0, -0.5, 0.5] # Video only.
   timeout_seconds: 30.0        # Video only.
@@ -47,7 +49,7 @@ portraits:
     sharpness: 2.0
     resolution: 1.0
     exposure: 1.0
-    visibility: 3.0
+    visibility: 3.0            # 0 disables visibility model inference; all-zero weights use general quality.
     neutral_expression: 0.0    # Opt-in: e.g. 3.0 prefers weaker visible expression.
     closed_mouth: 0.0          # Opt-in: e.g. 2.0 favors a lower jawOpen score.
     open_mouth: 0.0            # Favors jawOpen instead; normally choose one mouth weight.

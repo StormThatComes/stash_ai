@@ -1,4 +1,4 @@
-"""Reuse historical frame evidence/JPEGs when only portrait ranking changes."""
+"""Reuse historical frame evidence/JPEGs when quality preferences change."""
 import json
 
 from .config import plain
@@ -23,8 +23,10 @@ def reuse(database, config, scope, target, observation, scene, seconds, namespac
     metadata = json.loads(old['metadata'])
     previous_policy = dict(metadata.get('policy', {}))
     current_policy = plain(policy)
-    previous_policy.pop('weights', None)
-    current_policy.pop('weights', None)
+    for field in ('weights', 'min_face_pixels', 'min_sharpness', 'max_pose_deviation',
+                  'min_exposure', 'max_exposure', 'max_clipped_fraction', 'min_visible_face_fraction'):
+        previous_policy.pop(field, None)
+        current_policy.pop(field, None)
     if previous_policy != current_policy:
         return None
     quality = metadata.get('quality', {})
@@ -34,7 +36,7 @@ def reuse(database, config, scope, target, observation, scene, seconds, namespac
         return None
     metadata.update(policy_sha=policy_sha, policy=plain(policy), shortlist=selection,
                     performer=target['performer'], reused_from=old['id'])
-    # Current identity and quality gates are checked by the caller before reuse
+    # Current identity eligibility and soft scores are checked before reuse
     # can authorize publication. The historical record itself is never relabeled.
     with db:
         db.execute('INSERT INTO portraits VALUES (?,?,?,?,?,?,?,?)',

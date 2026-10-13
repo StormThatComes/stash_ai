@@ -68,11 +68,18 @@ class LazyExpression:
     def __init__(self, config, paths, factory=None):
         self.config, self.paths, self.factory = config, paths, factory or FaceExpression
         self.model = None
+        self._initialization_error = None
 
     def measure(self, image, face):
         try:
             if self.model is None:
-                self.model = self.factory(self.config, self.paths)
+                if self._initialization_error is not None:
+                    raise ValueError(self._initialization_error)
+                try:
+                    self.model = self.factory(self.config, self.paths)
+                except Exception as error:
+                    self._initialization_error = str(error)[:500]
+                    raise
             value = self.model.measure(image, face)
             if not isinstance(value, dict) or not cached(value):
                 raise ValueError('Expression model returned an invalid or incompatible measurement.')
@@ -81,6 +88,7 @@ class LazyExpression:
             raise ExpressionError('Face expression measurement failed: ' + str(error)) from error
 
     def close(self):
+        self._initialization_error = None
         if self.model is not None:
             self.model.close()
             self.model = None
