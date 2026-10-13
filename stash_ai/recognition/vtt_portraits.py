@@ -4,12 +4,12 @@ from itertools import groupby
 import json
 import uuid
 
-from .clustering import _groups, vector
+from .clustering import _groups, vector, reference_context
 from .config import plain
 from .database import encoded
 from .media import safe_url
 from .models import checked_detection
-from .portraits import hints, identity_reason
+from .portraits import hints, identity_reason, recheck_cached
 from .quality import portrait_bytes, portrait_score, rejection
 
 
@@ -17,6 +17,7 @@ def choose_vtt(database, client, config, scope, target, source_factory):
     db, policy = database.connection, config.data['portraits']
     person = db.execute('SELECT * FROM people WHERE id=? AND scope=?', (target['person'], scope)).fetchone()
     groups = {group.identifier: group for group in _groups(db, scope, person['namespace'], config.data['clustering'])}
+    context = reference_context(groups.values())
     selected = hints(database, target, config)
     shortlist = [{'scene': scene, 'observation': row['id']} for scene, row in selected]
     policy_sha = config.identity('portraits', 'recognition', 'clustering')
@@ -32,9 +33,17 @@ def choose_vtt(database, client, config, scope, target, source_factory):
                 identifier = str(uuid.uuid5(uuid.NAMESPACE_URL,
                     encoded([scope, target['person'], observation['id'], 'vtt', policy_sha])))
                 existing = db.execute('SELECT * FROM portraits WHERE id=?', (identifier,)).fetchone()
+                row = db.execute('''SELECT o.embedding,o.dimensions,s.input_sha FROM observations o
+                  JOIN members m ON m.observation=o.id JOIN scans s ON s.id=o.scan
+                  WHERE o.id=? AND o.scan=? AND m.person=? AND s.scene=? AND s.scope=?
+                  AND s.namespace=? AND s.status='complete' AND o.rejected IS NULL''',
+                  (observation['id'], observation['scan'], target['person'], scene, scope,
+                   person['namespace'])).fetchone()
                 if existing and existing['image'] is not None:
-                    metadata = json.loads(existing['metadata'])
-                    if not metadata.get('reason'):
+                    existing = recheck_cached(database, existing, groups, config, target, person['namespace'], context,
+                                             evidence=row if row is not None else {})
+                    if existing is not None:
+                        metadata = json.loads(existing['metadata'])
                         key = (-metadata['score'], scene, observation['seconds'], identifier)
                         if winning_key is None or key < winning_key:
                             winner, winning_key = existing, key
@@ -49,17 +58,12 @@ def choose_vtt(database, client, config, scope, target, source_factory):
                             'geometry': json.loads(observation['geometry']), 'quality': quality}
                 reason, image_bytes = rejection(quality, policy, portrait=True), None
                 if not reason:
-                    row = db.execute('''SELECT o.embedding,o.dimensions,s.input_sha FROM observations o
-                      JOIN members m ON m.observation=o.id JOIN scans s ON s.id=o.scan
-                      WHERE o.id=? AND o.scan=? AND m.person=? AND s.scene=? AND s.scope=?
-                      AND s.namespace=? AND s.status='complete' AND o.rejected IS NULL''',
-                      (observation['id'], observation['scan'], target['person'], scene, scope,
-                       person['namespace'])).fetchone()
                     try:
                         if row is None or row['embedding'] is None:
                             raise ValueError('VTT recognition evidence is unavailable.')
                         reason, similarity, runner = identity_reason(vector(row), groups, target['person'], config)
-                        metadata.update(similarity=similarity, runner_up=runner, input_sha=row['input_sha'])
+                        metadata.update(similarity=similarity, runner_up=runner, input_sha=row['input_sha'],
+                                        reference_context=context)
                         if not reason:
                             if source_failed:
                                 raise ValueError('VTT source could not be verified.')

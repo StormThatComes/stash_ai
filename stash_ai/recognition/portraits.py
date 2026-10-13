@@ -5,9 +5,8 @@ import json
 import uuid
 from urllib.parse import parse_qs, urlsplit
 
-from stash_ai.runtime.cleanup import closing
 from stash_ai.stash_api.transport import absolute_stash_url, origin
-from .clustering import _groups
+from .clustering import _groups, reference_context, vector as retained_vector
 from .config import digest, plain
 from .database import encoded
 from .media import bounded_media, safe_url, SpriteInput
@@ -77,6 +76,40 @@ def identity_reason(vector, groups, person, config):
     return None, score, runner
 
 
+def recheck_cached(database, existing, groups, config, target, namespace, context, *, evidence=None):
+    """Keep the JPEG but refresh its eligibility from retained identity evidence."""
+    import numpy as np
+    metadata = json.loads(existing['metadata'])
+    updated = dict(metadata)
+    similarity = runner = None
+    try:
+        if metadata.get('namespace') != namespace or metadata.get('person') != target['person']:
+            raise ValueError('Cached portrait identity namespace changed.')
+        if evidence is None:
+            stored = metadata['identity_embedding']
+            dimensions, values = stored['dimensions'], stored['values']
+            if (type(dimensions) is not int or not 1 <= dimensions <= 1024 or not isinstance(values, list)
+                    or len(values) != dimensions or any(type(item) not in (int, float) for item in values)):
+                raise ValueError('Cached portrait has no valid identity embedding.')
+            evidence = {'dimensions': dimensions, 'embedding': np.asarray(values, dtype='<f4').tobytes()}
+        query = retained_vector(evidence)
+        reason, similarity, runner = identity_reason(query, groups, target['person'], config)
+    except (KeyError, TypeError, ValueError):
+        # Older video portraits lack an embedding. Preserve their bytes, but do
+        # not infer from a new source or publish unverified old eligibility.
+        reason = 'portrait_identity_unverified'
+    updated.update(reference_context=context, similarity=similarity, runner_up=runner)
+    if reason:
+        updated['reason'] = reason
+    else:
+        updated.pop('reason', None)
+    if updated != metadata:
+        with database.connection:
+            database.connection.execute('UPDATE portraits SET metadata=? WHERE id=?', (encoded(updated), existing['id']))
+        existing = database.connection.execute('SELECT * FROM portraits WHERE id=?', (existing['id'],)).fetchone()
+    return None if reason else existing
+
+
 def choose(database, client, config, scope, target, paths, backend_factory, decoder_factory,
            source_factory=SpriteInput):
     if config.data['portraits']['source'] == 'vtt':
@@ -86,90 +119,99 @@ def choose(database, client, config, scope, target, paths, backend_factory, deco
     person = database.connection.execute('SELECT * FROM people WHERE id=? AND scope=?',
                                          (target['person'], scope)).fetchone()
     groups = {g.identifier: g for g in _groups(database.connection, scope, person['namespace'], config.data['clustering'])}
+    context = reference_context(groups.values())
     selected = hints(database, target, config)
     selection = [{'scene': scene, 'observation': row['id']} for scene, row in selected]
     policy_sha = config.identity('portraits', 'recognition', 'clustering')
     winner, winning_key = None, None
     decoders = {}
-    with closing(backend_factory(config, paths), name='close portrait face backend') as backend:
-        try:
-            for scene_id, row in selected:
-                for offset in policy['time_offsets']:
-                    seconds = max(0., row['seconds'] + offset)
-                    identifier = str(uuid.uuid5(uuid.NAMESPACE_URL,
-                        encoded([scope, target['person'], row['id'], seconds, policy_sha])))
-                    existing = database.connection.execute('SELECT * FROM portraits WHERE id=?', (identifier,)).fetchone()
-                    if existing and existing['image'] is not None:
+    backend = None
+    try:
+        for scene_id, row in selected:
+            for offset in policy['time_offsets']:
+                seconds = max(0., row['seconds'] + offset)
+                identifier = str(uuid.uuid5(uuid.NAMESPACE_URL,
+                    encoded([scope, target['person'], row['id'], seconds, policy_sha])))
+                existing = database.connection.execute('SELECT * FROM portraits WHERE id=?', (identifier,)).fetchone()
+                if existing and existing['image'] is not None:
+                    existing = recheck_cached(database, existing, groups, config, target, person['namespace'], context)
+                    if existing is not None:
                         metadata = json.loads(existing['metadata'])
-                        if existing['image'] is not None and not metadata.get('reason'):
-                            key = (-metadata['score'], scene_id, seconds, identifier)
-                            if winning_key is None or key < winning_key:
-                                winner, winning_key = existing, key
-                        continue
-                    metadata = {'version': 1, 'source_type': 'video', 'selection_policy': 'identity-first-full-face-v1',
-                                'policy_sha': policy_sha, 'policy': plain(policy), 'shortlist': selection,
-                                'observation': row['id'], 'scan': row['scan'], 'scene': scene_id,
-                                'person': target['person'], 'performer': target['performer'],
-                                'namespace': person['namespace'], 'requested_seconds': seconds}
-                    image_bytes = None
-                    try:
-                        if scene_id not in decoders:
-                            scene = client.scene(scene_id)
-                            metadata['source'] = safe_url(absolute_stash_url(scene['paths'].get('stream') or '', client.url))
-                            decoders[scene_id] = decoder_factory(client, scene, config).__enter__()
-                        metadata['source'] = safe_url(decoders[scene_id].url) if hasattr(decoders[scene_id], 'url') else scene_id
-                        image, timing = decoders[scene_id].frame(seconds)
-                        with image:
-                            metadata.update(timing)
-                            candidates = []
-                            exclusions = []
-                            for face in backend.detect(image):
-                                quality = assess(image, face)
-                                reason = rejection(quality, policy, portrait=True)
-                                x, y, width, height = face.box
-                                if not reason and (x - width * policy['margin'] < 0 or y - height * policy['margin'] < 0 or
-                                        x + width * (1 + policy['margin']) > image.width or
-                                        y + height * (1 + policy['margin']) > image.height):
-                                    reason = 'portrait_margin_clipped'
-                                similarity, runner = None, None
-                                if not reason:
-                                    vector = normalized_embedding(backend.embed(image, face), backend.dimensions)
-                                    reason, similarity, runner = identity_reason(vector, groups, target['person'], config)
-                                record = {'geometry': list(face.row), 'quality': quality, 'reason': reason,
-                                          'similarity': similarity, 'runner_up': runner}
-                                if reason:
-                                    exclusions.append(record)
-                                else:
-                                    record['score'] = portrait_score(quality, policy)
-                                    candidates.append((record, face))
-                            metadata['exclusions'] = exclusions
-                            if candidates:
-                                record, face = min(candidates, key=lambda pair: (-pair[0]['score'], pair[0]['geometry']))
-                                image_bytes, bounds = portrait_bytes(image, face, policy,
-                                                                    limit=config.data['storage']['max_crop_bytes'])
-                                metadata.update(record)
-                                metadata['crop'] = bounds
-                            else:
-                                metadata['reason'] = 'no_identity_verified_full_face'
-                    except KeyboardInterrupt:
-                        raise
-                    except Exception:
-                        # Decoder/source limitations are honest image skips, not
-                        # failed profile/link publication or relabeled VTT crops.
-                        metadata['reason'] = 'video_unavailable_or_budget_exceeded'
-                    sha = hashlib.sha256(image_bytes).hexdigest() if image_bytes else None
-                    with database.connection:
-                        database.connection.execute('INSERT OR REPLACE INTO portraits VALUES (?,?,?,?,?,?,?,?)',
-                            (identifier, scope, target['person'], scene_id, encoded(metadata), image_bytes, sha,
-                             'candidate' if image_bytes else 'skipped'))
-                    if image_bytes:
                         key = (-metadata['score'], scene_id, seconds, identifier)
                         if winning_key is None or key < winning_key:
-                            winner = database.connection.execute('SELECT * FROM portraits WHERE id=?', (identifier,)).fetchone()
-                            winning_key = key
-        finally:
-            from stash_ai.runtime.cleanup import cleanup
-            cleanup([('close portrait video decoder', decoder.close) for decoder in decoders.values()])
+                            winner, winning_key = existing, key
+                    continue
+                if backend is None:
+                    backend = backend_factory(config, paths)
+                metadata = {'version': 1, 'source_type': 'video', 'selection_policy': 'identity-first-full-face-v1',
+                            'policy_sha': policy_sha, 'policy': plain(policy), 'shortlist': selection,
+                            'observation': row['id'], 'scan': row['scan'], 'scene': scene_id,
+                            'person': target['person'], 'performer': target['performer'],
+                            'namespace': person['namespace'], 'requested_seconds': seconds}
+                image_bytes = None
+                try:
+                    if scene_id not in decoders:
+                        scene = client.scene(scene_id)
+                        metadata['source'] = safe_url(absolute_stash_url(scene['paths'].get('stream') or '', client.url))
+                        decoders[scene_id] = decoder_factory(client, scene, config).__enter__()
+                    metadata['source'] = safe_url(decoders[scene_id].url) if hasattr(decoders[scene_id], 'url') else scene_id
+                    image, timing = decoders[scene_id].frame(seconds)
+                    with image:
+                        metadata.update(timing)
+                        candidates = []
+                        exclusions = []
+                        for face in backend.detect(image):
+                            quality = assess(image, face)
+                            reason = rejection(quality, policy, portrait=True)
+                            x, y, width, height = face.box
+                            if not reason and (x - width * policy['margin'] < 0 or y - height * policy['margin'] < 0 or
+                                    x + width * (1 + policy['margin']) > image.width or
+                                    y + height * (1 + policy['margin']) > image.height):
+                                reason = 'portrait_margin_clipped'
+                            similarity, runner = None, None
+                            if not reason:
+                                vector = normalized_embedding(backend.embed(image, face), backend.dimensions)
+                                reason, similarity, runner = identity_reason(vector, groups, target['person'], config)
+                            record = {'geometry': list(face.row), 'quality': quality, 'reason': reason,
+                                      'similarity': similarity, 'runner_up': runner}
+                            if reason:
+                                exclusions.append(record)
+                            else:
+                                record['identity_embedding'] = {'dimensions': backend.dimensions, 'values': vector.tolist()}
+                                record['reference_context'] = context
+                                record['score'] = portrait_score(quality, policy)
+                                candidates.append((record, face))
+                        metadata['exclusions'] = exclusions
+                        if candidates:
+                            record, face = min(candidates, key=lambda pair: (-pair[0]['score'], pair[0]['geometry']))
+                            image_bytes, bounds = portrait_bytes(image, face, policy,
+                                                                limit=config.data['storage']['max_crop_bytes'])
+                            metadata.update(record)
+                            metadata['crop'] = bounds
+                        else:
+                            metadata['reason'] = 'no_identity_verified_full_face'
+                except KeyboardInterrupt:
+                    raise
+                except Exception:
+                    # Decoder/source limitations are honest image skips, not
+                    # failed profile/link publication or relabeled VTT crops.
+                    metadata['reason'] = 'video_unavailable_or_budget_exceeded'
+                sha = hashlib.sha256(image_bytes).hexdigest() if image_bytes else None
+                with database.connection:
+                    database.connection.execute('INSERT OR REPLACE INTO portraits VALUES (?,?,?,?,?,?,?,?)',
+                        (identifier, scope, target['person'], scene_id, encoded(metadata), image_bytes, sha,
+                         'candidate' if image_bytes else 'skipped'))
+                if image_bytes:
+                    key = (-metadata['score'], scene_id, seconds, identifier)
+                    if winning_key is None or key < winning_key:
+                        winner = database.connection.execute('SELECT * FROM portraits WHERE id=?', (identifier,)).fetchone()
+                        winning_key = key
+    finally:
+        from stash_ai.runtime.cleanup import cleanup
+        actions = [('close portrait video decoder', decoder.close) for decoder in decoders.values()]
+        if backend is not None:
+            actions.append(('close portrait face backend', backend.close))
+        cleanup(actions)
     if winner:
         with database.connection:
             database.connection.execute("UPDATE portraits SET status='selected' WHERE id=?", (winner['id'],))
