@@ -52,6 +52,8 @@ def parse_vtt_cues(vtt_text: str) -> list[Cue]:
         if len(payloads) != 1:
             raise ValueError("VTT cue is missing a single valid sprite rectangle.")
         image, *coordinates = payloads[0].groups()
+        if not image.strip():
+            raise ValueError('VTT thumbnail requires a nonempty sprite image reference; regenerate Stash sprites.')
         rect = tuple(map(int, coordinates))
         if rect[2] == 0 or rect[3] == 0:
             raise ValueError("VTT contains a zero-sized thumbnail.")
