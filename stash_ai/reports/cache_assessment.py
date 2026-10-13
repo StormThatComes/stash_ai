@@ -3,6 +3,7 @@ from stash_ai.evidence.formats import validate_current
 from dataclasses import dataclass, field, replace
 
 from stash_ai.storage.results import KINDS
+from stash_ai.stash_api.transport import safe_error
 
 STATUSES = (
     'ready', 'rethreshold', 'missing', 'partial', 'refresh_required',
@@ -21,7 +22,7 @@ def inspect_output(app, config, kind, record, index, refresh, checkpoint, error)
         return dict(status=status, reason=reason, **details)
 
     if error:
-        return result('inconsistent', error, unreadable=True)
+        return result('inconsistent', safe_error(ValueError(error), getattr(app, 'STASH_API_KEY', ''))[:1000], unreadable=True)
     if refresh:
         return result('refresh_required', 'An outstanding refresh invalidates the saved result.')
     if record is None:
@@ -58,7 +59,7 @@ def inspect_output(app, config, kind, record, index, refresh, checkpoint, error)
         if floor > required_floor:
             raise ValueError(f'Retained floor {floor:g} exceeds required {required_floor:g}.')
     except (KeyError, ValueError) as exc:
-        return result('insufficient', str(exc), required_floor=required_floor,
+        return result('insufficient', safe_error(exc, getattr(app, 'STASH_API_KEY', ''))[:1000], required_floor=required_floor,
                       target_threshold=threshold)
     changed = saved != threshold
     return result('rethreshold' if changed else 'ready',
@@ -90,7 +91,7 @@ def publication_dependencies(app, evidence, selected):
                 threshold = scene_threshold(record)
                 validate_scene(app, record, threshold, has_frames=record['has_frames'])
         except (KeyError, TypeError, ValueError) as exc:
-            dependencies.append(dict(model=model, kind=kind, reason=str(exc),
+            dependencies.append(dict(model=model, kind=kind, reason=safe_error(exc, getattr(app, 'STASH_API_KEY', ''))[:1000],
                 resolution=f'Include {model} with --models and regenerate the report; '
                            'resolve unreadable or invalid evidence with --db-check first.'))
     return dependencies
