@@ -17,31 +17,42 @@ def safe_url(url):
 
 
 def bounded_media(client, url, limit, timeout):
+    from stash_ai.runtime.cleanup import closing
+    from stash_ai.stash_api.deadlines import call_with_deadline, abort_response
     deadline = time.monotonic() + timeout
-    for _ in range(6):
-        parts = urlsplit(url)
-        if parts.username or parts.password or origin(url) != origin(client.url):
-            raise ValueError('Recognition media must use the configured Stash origin.')
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            raise TimeoutError('Recognition media deadline exceeded.')
-        with client.media.get(url, stream=True, allow_redirects=False,
-                              timeout=(min(5., remaining), remaining)) as response:
-            if response.status_code in (301, 302, 303, 307, 308):
-                location = response.headers.get('Location')
-                if not location:
-                    raise ValueError('Recognition media redirect has no destination.')
-                url = urljoin(url, location)
-                continue
-            response.raise_for_status()
-            parts, size = [], 0
-            for chunk in response.iter_content(65536):
-                size += len(chunk)
-                if size > limit or time.monotonic() >= deadline:
-                    raise ValueError('Recognition media exceeds its byte/time budget.')
-                parts.append(chunk)
-            return b''.join(parts)
-    raise ValueError('Too many recognition media redirects.')
+
+    def acquire():
+        current = url
+        for _ in range(6):
+            parts = urlsplit(current)
+            if parts.username or parts.password or origin(current) != origin(client.url):
+                raise ValueError('Recognition media must use the configured Stash origin.')
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError('Recognition media deadline exceeded.')
+            response = call_with_deadline(lambda: client.media.get(current, stream=True, allow_redirects=False,
+                                         timeout=(min(5., remaining), remaining)), deadline)
+            with closing(response, name='close recognition media response'):
+                if response.status_code in (301, 302, 303, 307, 308):
+                    location = response.headers.get('Location')
+                    if not location:
+                        raise ValueError('Recognition media redirect has no destination.')
+                    current = urljoin(current, location)
+                    continue
+                response.raise_for_status()
+
+                def body():
+                    chunks, size = [], 0
+                    for chunk in response.iter_content(65536):
+                        size += len(chunk)
+                        if size > limit:
+                            raise ValueError('Recognition media exceeds its byte budget.')
+                        chunks.append(chunk)
+                    return b''.join(chunks)
+                return call_with_deadline(body, deadline, cancel=lambda: abort_response(response))
+        raise ValueError('Too many recognition media redirects.')
+
+    return call_with_deadline(acquire, deadline)
 
 
 class SpriteInput:

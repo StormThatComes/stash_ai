@@ -1,4 +1,4 @@
-"""Per-read socket tracking, including headers, without instrumenting writes."""
+"""Per-operation socket tracking for bounded reads and single write attempts."""
 from contextlib import contextmanager
 import socket
 from threading import Event, Lock, local
