@@ -14,18 +14,20 @@ from .revisions import mark_completed
 def repair_missing_metadata(db, *, progress=None):
     from stash_ai.storage.codec import decode
     from stash_ai.storage.metadata import FORMAT, encode, summarize
-    query = '''
-            SELECT r.scope,r.scene,r.model,r.kind,r.data FROM results AS r
-            LEFT JOIN result_metadata AS m USING(scope,scene,model,kind)
-            WHERE m.format IS NULL OR m.format!=? OR NOT json_valid(m.data)'''
-    from stash_ai.storage.metadata_ledger import trusted
+    query = 'SELECT r.scope,r.scene,r.model,r.kind,r.data '
+    from stash_ai.storage.metadata_ledger import trusted, _valid_metadata_sql
     if trusted(db):
-        query = query.replace('FROM results AS r', 'FROM metadata_dirty AS d JOIN results AS r USING(scope,scene,model,kind)')
-    total = db.execute('SELECT COUNT(*) FROM (' + query + ')', (FORMAT,)).fetchone()[0]
+        query += 'FROM metadata_dirty AS d JOIN results AS r USING(scope,scene,model,kind)'
+        params = ()
+    else:
+        query += ('FROM results AS r LEFT JOIN result_metadata AS m USING(scope,scene,model,kind) '
+                  f'WHERE m.format IS NULL OR m.format!=? OR NOT {_valid_metadata_sql("m")}')
+        params = (FORMAT,)
+    total = db.execute('SELECT COUNT(*) FROM (' + query + ')', params).fetchone()[0]
     if progress is not None:
         progress('missing metadata', 0, total)
     count = 0
-    for scope, scene, model, kind, data in db.execute(query, (FORMAT,)):
+    for scope, scene, model, kind, data in db.execute(query, params):
         db.execute('INSERT OR REPLACE INTO result_metadata VALUES (?,?,?,?,?,?)',
                    (scope, scene, model, kind, FORMAT, encode(summarize(decode(data)))))
         count += 1

@@ -21,11 +21,20 @@ def _mark(row):
 
 
 def _valid_metadata_sql(row):
-    """SQLite-side shape test: a JSON object alone is not valid metadata."""
+    """The small metadata contract, including required nested provenance."""
     data = f'{row}.data'
     from stash_ai.storage.metadata import META_KEYS
     allowed = ','.join("'" + key + "'" for key in sorted(META_KEYS))
-    return (f"(CASE WHEN json_valid({data}) THEN "
+    from stash_ai.evidence.formats import ANALYSIS_FORMAT, REQUIRED_SCORE_FIELDS
+    def score(key):
+        path = '$.meta.' + key
+        return (f"json_type({data},'{path}') IN ('integer','real') "
+                f"AND json_extract({data},'{path}') BETWEEN 0 AND 1")
+    scores = ' AND '.join(score(key) for key in REQUIRED_SCORE_FIELDS)
+    signatures = ' AND '.join(f"json_type({data},'$.meta.{key}')='text' "
+                             f"AND length(json_extract({data},'$.meta.{key}'))>0"
+                             for key in ('inference_signature', 'frame_input_signature'))
+    return (f"COALESCE((CASE WHEN json_valid({data}) THEN "
             f"json_type({data})='object' "
             f"AND json_type({data},'$.mode')='text' "
             f"AND json_extract({data},'$.mode') IN ('scene','frames') "
@@ -34,7 +43,15 @@ def _valid_metadata_sql(row):
             f"AND json_type({data},'$.populated') IN ('true','false') "
             f"AND (SELECT COUNT(*) FROM json_each({data}))=4 "
             f"AND NOT EXISTS (SELECT 1 FROM json_each({data},'$.meta') "
-            f"WHERE key NOT IN ({allowed})) ELSE 0 END)")
+            f"WHERE key NOT IN ({allowed})) "
+            f"AND (SELECT COUNT(*)=COUNT(DISTINCT key) FROM json_each({data},'$.meta')) "
+            f"AND json_extract({data},'$.meta.origin')='inference' "
+            f"AND json_type({data},'$.meta.analysis_format')='integer' "
+            f"AND json_extract({data},'$.meta.analysis_format')={ANALYSIS_FORMAT} "
+            f"AND {signatures} AND {scores} "
+            f"AND (json_extract({data},'$.mode')!='scene' OR "
+            f"(json_type({data},'$.has_frames')='true' AND {score('scene_score_floor')})) "
+            f"ELSE 0 END),0)")
 
 
 def definitions():
