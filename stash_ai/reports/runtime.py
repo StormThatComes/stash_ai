@@ -36,7 +36,9 @@ def offline_report(label):
             try:
                 return function(*args, **kwargs)
             except (OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
-                print(label + ' failed: ' + str(exc))
+                from stash_ai.stash_api.transport import safe_error
+                app = args[0] if args else kwargs.get('app')
+                print(label + ' failed: ' + safe_error(exc, getattr(app, 'STASH_API_KEY', '')))
                 return 1
         return run
     return decorate

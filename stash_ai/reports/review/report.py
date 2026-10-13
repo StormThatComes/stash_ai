@@ -9,6 +9,7 @@ from stash_ai.runtime.console import progress as console_bar
 from .options import REASONS, ReviewOptions
 from .scenes import _scene_signals
 from .markers import _marker_signals
+from stash_ai.stash_api.transport import safe_error
 
 from dataclasses import asdict
 
@@ -56,7 +57,7 @@ def build_report(app, store, scenes, core_policies, scene_policies, options=Revi
                 _scene_signals(app, store, scene, hits, rows, options, scene_policies)
                 _marker_signals(app, store, scene, spans, rows, options)
             except (ValueError, RuntimeError, KeyError, TypeError) as exc:
-                reason, message = "unusable_evidence", str(exc)
+                reason, message = "unusable_evidence", safe_error(exc, getattr(app, 'STASH_API_KEY', ''))[:1000]
         if reason is not None:
             accumulator.skip(scene, reason, message)
             continue
