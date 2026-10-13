@@ -39,7 +39,7 @@ def assess(image, detection):
                 visibility_method='five-landmark-geometry-estimate-v1')
 
 
-def rejection(quality, policy, *, portrait=False, visibility=True):
+def rejection(quality, policy, *, portrait=False, visibility=True, expression=True):
     if quality['pixels'] < policy['min_face_pixels']:
         return 'face_too_small'
     if quality['sharpness'] < policy['min_sharpness']:
@@ -61,6 +61,10 @@ def rejection(quality, policy, *, portrait=False, visibility=True):
                     return 'face_visibility_unavailable'
                 if fraction < policy['min_visible_face_fraction']:
                     return 'face_occluded'
+        if expression:
+            from .expression import required, cached
+            if required(policy) and not cached(quality):
+                return 'face_expression_unavailable'
     return None
 
 
@@ -103,11 +107,18 @@ def portrait_bytes(image, detection, policy, *, limit):
     return data, list(bounds)
 
 
-def portrait_score(quality, policy):
+def portrait_score(quality, policy, *, expression=True):
     weights = policy['weights']
     parts = {'frontal': max(0., 1 - quality['pose_deviation']),
              'sharpness': min(1., math.log1p(quality['sharpness']) / math.log1p(1000)),
              'resolution': min(1., quality['pixels'] / 512),
              'exposure': max(0., 1 - abs(quality['exposure'] - 128) / 128),
              'visibility': quality.get('visible_face_fraction', 0.)}
-    return sum(parts[k] * weights[k] for k in parts) / sum(weights.values())
+    if expression:
+        from .expression import WEIGHTS, required, cached
+        if required(policy):
+            if not cached(quality):
+                raise ValueError('Portrait ranking requires valid expression measurements.')
+            parts.update({name: quality[name] for name in WEIGHTS})
+    total = sum(weights[k] for k in parts)
+    return sum(parts[k] * weights[k] for k in parts) / total if total else 0.

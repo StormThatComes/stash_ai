@@ -25,10 +25,15 @@ def runtime(config):
     return ort, providers
 
 
-def session(config, model, *, runtime_info=None):
+def session(config, model, *, runtime_info=None, cpu_fallback=True):
     ort, providers = runtime_info or runtime(config)
     options = ort.SessionOptions()
     options.intra_op_num_threads = options.inter_op_num_threads = 1
+    if config.data['models']['device'] == 'cuda' and not cpu_fallback:
+        # Expression models contain CUDA-supported float operators. Refuse a
+        # partially CPU-assigned graph as well as a CPU-only provider fallback.
+        options.add_session_config_entry('session.disable_cpu_ep_fallback', '1')
+        providers = [item for item in providers if item != 'CPUExecutionProvider']
     try:
         result = ort.InferenceSession(model, sess_options=options, providers=providers)
     except Exception:
