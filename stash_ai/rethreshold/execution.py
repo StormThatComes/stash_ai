@@ -51,7 +51,8 @@ def run(app, store, scene_ids, settings, report, *, scenes=True, markers=False, 
     from .plans import ThresholdPlan
     from stash_ai.storage.metadata import backfill_batch
     from stash_ai.runtime.cleanup import closing
-    from .spool import SpoolUsage
+    from .spool import SpoolUsage, fingerprint, validate_plans
+    import hashlib
     import sqlite3
     import json
     from time import perf_counter
@@ -76,6 +77,7 @@ def run(app, store, scene_ids, settings, report, *, scenes=True, markers=False, 
         spool.execute('PRAGMA temp_store=FILE')
         spool.execute('CREATE TABLE prepared (id INTEGER PRIMARY KEY, scene TEXT, model TEXT, outputs TEXT)')
         usage = SpoolUsage(spool, report, spool_limit_bytes)
+        prepared_digest = hashlib.sha256()
         bar = console_bar(tqdm, total=selected, desc=f'Check {mode}', unit='pair')
         try:
             with phase(report, 'threshold preflight', errors=lambda: errors):
@@ -97,8 +99,9 @@ def run(app, store, scene_ids, settings, report, *, scenes=True, markers=False, 
                                     models[key]['planned'] += 1
                                     planned += 1
                                     started = perf_counter()
-                                    spool.execute('INSERT INTO prepared (scene,model,outputs) VALUES (?,?,?)',
-                                        (scene, key, json.dumps(prepared.outputs, allow_nan=False, separators=(',', ':'))))
+                                    serialized = json.dumps(prepared.outputs, allow_nan=False, separators=(',', ':'))
+                                    spool.execute('INSERT INTO prepared (scene,model,outputs) VALUES (?,?,?)', (scene, key, serialized))
+                                    fingerprint(prepared_digest, scene, key, serialized)
                                     write_seconds += perf_counter()-started
                                     queued += 1
                                 else:
@@ -141,6 +144,19 @@ def run(app, store, scene_ids, settings, report, *, scenes=True, markers=False, 
             return dict(errors=errors)
         changed = 0
         count = spool.execute('SELECT COUNT(*) FROM prepared').fetchone()[0]
+        try:
+            usage.row['state'] = 'validating'
+            # Only this process owns the anonymous spool. Freeze it against
+            # accidental writes before validating its entire serialized view.
+            spool.execute('PRAGMA query_only=ON')
+            with phase(report, 'threshold spool validation'):
+                validate_plans(spool, prepared_digest.digest(), planned, requested)
+        except BaseException as error:
+            usage.row['state'] = 'interrupted' if isinstance(error, KeyboardInterrupt) else 'invalid'
+            report.record_threshold_preflight(checked, int(isinstance(error, Exception)), applied=0,
+                                              selected=selected, skipped_no_evidence=skipped)
+            report.write('Threshold spool validation failed; applied=0 (' + type(error).__name__ + ').')
+            raise
         usage.row['state'] = 'apply'
         preview = bool(getattr(store, 'dry_run', False))
         apply_row = dict(mode='planned' if preview else 'committed', committed=0, planned=0,

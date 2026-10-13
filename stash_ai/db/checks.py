@@ -112,6 +112,7 @@ def check_database(path, scope, *, show_progress=False):
     from stash_ai.storage.codec import decoded_cache
     from contextlib import closing
     with closing(connect_readonly(path)) as db, decoded_cache():
+        db.execute('BEGIN')
         application_id = db.execute("PRAGMA application_id").fetchone()[0]
         version = db.execute("PRAGMA user_version").fetchone()[0]
         if application_id != APPLICATION_ID or version not in KNOWN_VERSIONS:
@@ -119,7 +120,6 @@ def check_database(path, scope, *, show_progress=False):
 
         # Keep all relation/decode checks on one read snapshot even if another
         # process commits through WAL while this command is running.
-        db.execute("BEGIN")
         tables = table_names(db)
         # Historical payload adapters belong exclusively to offline migration.
         # Diagnose the version/shape before running queries against current SQL.
@@ -200,13 +200,13 @@ def check_database(path, scope, *, show_progress=False):
             refresh_requests = count_rows(db, tables, "refresh_requests")
             checkpoints = count_rows(db, tables, "checkpoints")
             validation_common.tick(progress, phase="summary")
+            # Counts and bounded IDs describe the same snapshot, even if a WAL
+            # writer commits repairs while this read-only check is running.
+            error_examples = _bounded_examples(db, errors)
         finally:
             if progress is not None:
                 progress.close()
 
-    # Bound diagnostic examples separately from large aggregate counts.
-    with closing(connect_readonly(path)) as examples_db:
-        error_examples = _bounded_examples(examples_db, errors)
     error_rows = _issue_list(errors, error_examples)
     warning_rows = _issue_list(warnings)
     return {
