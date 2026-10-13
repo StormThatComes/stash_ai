@@ -68,6 +68,8 @@ def reconcile(store, scope, identifiers, *, dry_run=True):
                 configuration = json.loads(record[3])
             except (TypeError, ValueError):
                 configuration = {}
+            if not isinstance(configuration, dict):
+                configuration = {}
             dead = owner_is_dead(configuration.get('process_owner'))
             action = 'orphaned' if dead else 'active' if dead is False else 'unverified'
             rows.append(dict(id=identifier, action=action))
