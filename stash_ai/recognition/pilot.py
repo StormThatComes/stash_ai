@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from .clustering import cluster_scene
 from .database import SCHEMA, encoded
 from .evaluation import evaluate_pairs
+from .images import open_image
 from .models import ensure_assets, load_backend, namespace, checked_detection, normalized_embedding
 
 
@@ -21,7 +22,6 @@ def evaluate_observations(database, run, configurations, labels, *, assets=ensur
     automatically. Peak/model loading performance belongs to the isolated smoke
     benchmark rather than being misattributed across models in this process.
     """
-    from PIL import Image
     if not isinstance(labels, dict) or not 1 <= len(labels) <= 128:
         raise ValueError('Pilot requires 1..128 explicitly labeled observation IDs.')
     if any(not isinstance(k, str) or not isinstance(v, str) or not v.strip() or len(v) > 100 for k,v in labels.items()):
@@ -61,9 +61,7 @@ def evaluate_observations(database, run, configurations, labels, *, assets=ensur
                 for i in range(4, 14, 2):
                     geometry[i] -= x
                     geometry[i+1] -= y
-                with Image.open(BytesIO(row['crop'])) as raw:
-                    if raw.width * raw.height > config.data['execution']['max_image_pixels']:
-                        raise ValueError('Pilot crop pixel budget exceeded.')
+                with open_image(BytesIO(row['crop']), config.data['execution']['max_image_pixels']) as raw:
                     with raw.convert('RGB') as image:
                         vectors[row['id']] = normalized_embedding(adapter.embed(image, checked_detection(geometry)), adapter.dimensions)
         finally:

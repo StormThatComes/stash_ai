@@ -159,6 +159,27 @@ class StashTransport:
             except Exception as exc:
                 if not read and response.status_code in (401, 403):
                     exc.write_outcome = 'failed'
+                if response.status_code == 400:
+                    # Stash returns variable/schema validation details in the
+                    # JSON body of HTTP 400. Keep HTTPError compatibility while
+                    # exposing bounded, credential-redacted messages, not the
+                    # complete response or submitted variables.
+                    try:
+                        rejected = call_with_deadline(response.json, deadline)
+                    except Exception:
+                        rejected = None
+                    errors = rejected.get('errors') if isinstance(rejected, dict) else None
+                    if (isinstance(errors, list) and errors and all(
+                            isinstance(item, dict) and isinstance(item.get('message'), str) for item in errors)):
+                        from requests import HTTPError
+                        messages = [safe_error(item['message'], self.api_key)[:400] for item in errors[:8]]
+                        error = HTTPError(safe_error(exc, self.api_key) + '; GraphQL: ' + '; '.join(messages)[:1600],
+                                          response=response, request=getattr(response, 'request', None))
+                        if not read and not rejected.get('data') and all(
+                                isinstance(item.get('extensions'), dict) and item['extensions'].get('code')
+                                in ('GRAPHQL_PARSE_FAILED', 'GRAPHQL_VALIDATION_FAILED') for item in errors):
+                            error.write_outcome = 'failed'
+                        raise error from exc
                 raise
             if 300 <= response.status_code < 400:
                 raise RuntimeError("Stash redirected GraphQL; configure STASH_URL to its final URL.")

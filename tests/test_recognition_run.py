@@ -115,7 +115,7 @@ def test_root_dispatch_avoids_tag_runtime_and_normalizes_ids(monkeypatch):
 def test_graphql_link_uses_add_and_rejects_wrong_acknowledgement():
     client = RecognitionStash.__new__(RecognitionStash)
     def gql(query, variables):
-        assert variables == {'input': {'ids': ['1'], 'performer_ids': {'values': ['5'], 'mode': 'ADD'}}}
+        assert variables == {'input': {'ids': ['1'], 'performer_ids': {'ids': ['5'], 'mode': 'ADD'}}}
         return {'bulkSceneUpdate': [{'id': '2', 'performers': [{'id': '5'}]}]}
     client.gql = gql
     with pytest.raises(RuntimeError, match='ID'):
