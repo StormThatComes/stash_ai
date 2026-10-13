@@ -75,8 +75,6 @@ class SpriteInput:
             from stash_ai.inference.sprites import evenly_sample
             cues = evenly_sample(cues, count)
         urls = list(dict.fromkeys(c.image for c in cues))
-        if len(urls) > settings['max_sheets']:
-            raise ValueError('Recognition VTT exceeds the sprite-sheet limit.')
         self.hashes = {}
         for url in urls:
             data = self._sheet(url)

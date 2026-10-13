@@ -29,8 +29,7 @@ def defaults():
                      'time_offsets': [0., -.5, .5], 'timeout_seconds': 30.,
                      'max_video_bytes': 67108864, 'ffmpeg': 'ffmpeg',
                      'weights': {'frontal': 3., 'sharpness': 2., 'resolution': 1., 'exposure': 1.}},
-        'execution': {'max_cues': 0, 'checkpoint_cues': 32, 'max_sheets': 256,
-                      'timeout_seconds': 120.},
+        'execution': {'max_cues': 0, 'checkpoint_cues': 32, 'timeout_seconds': 120.},
         'storage': {'database': 'faces_state.sqlite3', 'max_crop_bytes': 1048576},
         'names': {'file': None},
     }
@@ -129,7 +128,7 @@ def validate(data):
                        'max_reference_bytes': (1048576, 1073741824)},
         'portraits': {'min_face_pixels': (8, 4096), 'max_candidates': (1, 64), 'jpeg_quality': (1, 100),
                       'max_video_bytes': (1048576, 1073741824)},
-        'execution': {'max_cues': (0, 10000), 'checkpoint_cues': (1, 1000), 'max_sheets': (1, 1000)},
+        'execution': {'max_cues': (0, 10000), 'checkpoint_cues': (1, 1000)},
         'storage': {'max_crop_bytes': (1024, 8388608)},
     }
     for section, fields in integers.items():
