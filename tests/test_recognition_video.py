@@ -10,7 +10,7 @@ import pytest
 import requests
 
 from stash_ai.recognition.config import load
-from stash_ai.recognition.video import VideoFrames
+from stash_ai.recognition.video import VideoFrames, scene_timing
 
 
 @pytest.fixture
@@ -140,4 +140,81 @@ def test_cancellation_kills_decoder_and_closes_owned_bridge(tmp_path, video, mon
         with pytest.raises(KeyboardInterrupt):
             with VideoFrames(client, {'paths': {'stream': '/stream'}}, config) as decoder:
                 decoder.frame(.5)
+        assert not decoder.thread.is_alive() and decoder.process is None
+
+
+@pytest.mark.parametrize('container,offset', [('mp4', 0), ('mp4', 12), ('mpegts', 0), ('mpegts', 12)])
+def test_container_timestamps_are_normalized_without_extra_media_probe(tmp_path, monkeypatch, container, offset):
+    binary = shutil.which('ffmpeg')
+    if not binary:
+        pytest.skip('optional system FFmpeg is not installed')
+    destination = tmp_path / ('tiny.mp4' if container == 'mp4' else 'tiny.ts')
+    command = [binary, '-hide_banner', '-loglevel', 'error', '-f', 'lavfi',
+               '-i', 'testsrc=size=160x160:rate=10', '-t', '2', '-threads', '1',
+               '-c:v', 'mpeg4' if container == 'mp4' else 'mpeg2video', '-pix_fmt', 'yuv420p',
+               '-output_ts_offset', str(offset)]
+    # Every TS frame is independently seekable so this control checks timeline
+    # coordinates rather than a sparse-GOP decoder's keyframe approximation.
+    command += ['-movflags', '+faststart'] if container == 'mp4' else ['-g', '1', '-bf', '0', '-f', 'mpegts']
+    subprocess.run([*command, str(destination)], check=True, timeout=15, capture_output=True)
+    processes = []
+    original = subprocess.Popen
+    def popen(command, **kwargs):
+        processes.append((command, original(command, **kwargs)))
+        return processes[-1][1]
+    monkeypatch.setattr(subprocess, 'Popen', popen)
+    with media_server(destination.read_bytes()) as (client, calls):
+        with VideoFrames(client, {'paths': {'stream': '/stream'}}, load(root=tmp_path)) as decoder:
+            for requested in (.5, .7):
+                image, metadata = decoder.frame(requested)
+                with image:
+                    assert image.size == (160, 160)
+                assert requested - .000002 <= metadata['actual_seconds'] <= requested + .11
+                assert metadata['source_pts_seconds'] - metadata['timeline_origin_seconds'] == pytest.approx(
+                    metadata['actual_seconds'])
+                assert metadata['time_coordinate_system'] == 'scene-relative'
+                assert metadata['decoder'] == 'ffmpeg-copyts-showinfo-scene-time-v2'
+                assert metadata['timeline_origin_seconds'] == pytest.approx(
+                    offset if container == 'mp4' else offset + 1.5, abs=.11)
+            assert calls and all(call[1] == 'private-key' for call in calls)
+            assert any(call[2] for call in calls)
+        assert not decoder.thread.is_alive() and decoder.process is None
+    assert len(processes) == 2 and all(process.poll() == 0 for _, process in processes)
+    assert all('-copyts' in command and '-ss' in command for command, _ in processes)
+
+
+@pytest.mark.parametrize('log', [
+    b'pts_time:12.5',
+    b'Duration: 00:00:01.00, start: 12.000000, bitrate: 100 kb/s',
+    b'Duration: 00:00:01.00, start: nan, bitrate: 100 kb/s\npts_time:12.5',
+    b'Duration: 00:00:01.00, start: 1e999, bitrate: 100 kb/s\npts_time:12.5',
+    b'Duration: 00:00:01.00, start: 12, bitrate: 100 kb/s\npts_time:1e999',
+    b'Duration: 00:00:01.00, start: 12, bitrate: 100 kb/s\npts_time:11',
+    b'Duration: 00:00:01.00, start: 12, bitrate: 100 kb/s\npts_time:18',
+])
+def test_missing_nonfinite_and_inconsistent_timestamps_are_rejected(log):
+    with pytest.raises(ValueError):
+        scene_timing(log, .5)
+
+
+def test_negative_timeline_origin_and_only_rounding_at_zero_are_supported():
+    timing = scene_timing(b'  Duration: N/A, start: -2.0, bitrate: N/A\npts_time:-1.5', .5)
+    assert timing['actual_seconds'] == .5 and timing['timeline_origin_seconds'] == -2
+    assert scene_timing(b'Duration: N/A, start: 0.000001, bitrate: N/A\npts_time:0', 0)[
+        'actual_seconds'] == 0
+
+
+def test_changed_timeline_origin_between_seeks_leaves_no_workers(tmp_path, video, monkeypatch):
+    from stash_ai.recognition import video as module
+    with media_server(video) as (client, _):
+        with VideoFrames(client, {'paths': {'stream': '/stream'}}, load(root=tmp_path)) as decoder:
+            image, _ = decoder.frame(.5)
+            image.close()
+            def changed(log, seconds):
+                timing = scene_timing(log, seconds)
+                timing['timeline_origin_seconds'] += 1
+                return timing
+            monkeypatch.setattr(module, 'scene_timing', changed)
+            with pytest.raises(ValueError, match='origin changed'):
+                decoder.frame(.7)
         assert not decoder.thread.is_alive() and decoder.process is None
