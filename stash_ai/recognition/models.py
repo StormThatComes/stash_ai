@@ -20,6 +20,14 @@ class Asset:
 
 
 ASSETS = {
+    'expression_mesh': Asset('thedemons/mirayu-models', 'dc44090caa7ce49c81139e4fd7c22b63f81943a3',
+                             'mediapipe-face-landmarker/face_landmarks_detector.onnx',
+                             'de2cda3bdaab8ba37d8f1236a7091c301c1cff4dd0460f5b43c03df042c6d9c0',
+                             4921002, 'Apache-2.0'),
+    'expression_blendshapes': Asset('thedemons/mirayu-models', 'dc44090caa7ce49c81139e4fd7c22b63f81943a3',
+                                   'mediapipe-face-landmarker/face_blendshapes.onnx',
+                                   '24ce8a9c501db3d2c6d32958d1b9d867d3b15de3de3a896cdc8d28641b30b608',
+                                   1883471, 'Apache-2.0'),
     'faceocc': Asset('mertakin/FaceOcc', '03f229dc75fa14ae480cca9810f983912c2730ad',
                      'model.safetensors', '5d6d27a9cb221692425840a80eb4efc07e6245670b233e2eb618e83fd9b7caf6',
                      57377516, 'MIT'),
@@ -54,6 +62,9 @@ def ensure_assets(config, *, write=print):
     selected = [config.data['models']['detector'], config.data['models']['recognizer']]
     if config.data['portraits']['enabled'] and required(config.data['portraits']):
         selected.append('faceocc')
+    from .expression import required as expression_required
+    if config.data['portraits']['enabled'] and expression_required(config.data['portraits']):
+        selected.extend(('expression_mesh', 'expression_blendshapes'))
     for key in selected:
         asset = ASSETS[key]
         path = config.model_dir / key / asset.filename

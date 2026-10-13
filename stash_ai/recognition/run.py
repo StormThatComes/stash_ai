@@ -21,6 +21,7 @@ from .names import load_names, plan_names, starter
 from .metadata import enrich
 from .video import VideoFrames
 from .visibility import FaceVisibility, LazyVisibility
+from .expression import FaceExpression, LazyExpression, required as expression_required
 
 
 def instance_scope(url):
@@ -43,6 +44,7 @@ class Services:
     metadata: object = enrich
     decoder: object = VideoFrames
     visibility: object = FaceVisibility
+    expression: object = FaceExpression
 
 
 def execute(args, config, *, services=None):
@@ -73,10 +75,12 @@ def execute(args, config, *, services=None):
             outcome, failure = 'success', None
             ready = {}
             visibility = None
+            expression = None
             try:
                 with phase(report, 'Recognition assets'):
                     paths = services.assets(config, write=report.write)
                     visibility = LazyVisibility(config, paths, services.visibility)
+                    expression = LazyExpression(config, paths, services.expression)
                     model_namespace = namespace(config)
                     provenance = {name: asdict(ASSETS[name]) for name in
                                   (config.data['models']['detector'], config.data['models']['recognizer'])}
@@ -185,6 +189,8 @@ def execute(args, config, *, services=None):
                     for target in targets:
                         with phase(report, 'Recognition metadata'):
                             options = {'visibility': visibility}
+                            if expression_required(config.data['portraits']):
+                                options['expression'] = expression
                             if retry_images:
                                 options['retry_unresolved_images'] = True
                             counts.update(services.metadata(database, client, report, config, plan,
@@ -212,5 +218,7 @@ def execute(args, config, *, services=None):
                 if references:
                     summary['references'] = dict(references)
                 actions = [('close portrait visibility model', visibility.close)] if visibility is not None else []
+                if expression is not None:
+                    actions.append(('close portrait expression model', expression.close))
                 cleanup(actions + [('finish recognition history',
                           lambda: database.finish_run(run, outcome, summary, failure))], report=report)

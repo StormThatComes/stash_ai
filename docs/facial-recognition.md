@@ -14,6 +14,10 @@ uv pip install -r requirements-gpu.txt -c constraints/gpu-py314.txt --index-stra
 uv pip install -r requirements-cpu.txt -c constraints/cpu-py314.txt --index-strategy unsafe-best-match
 ```
 
+Optional portrait expression inference uses the same ONNX Runtime CPU/GPU
+distribution as recognition. No MediaPipe/TensorFlow package or graphics runtime
+is added to the application profiles.
+
 With `STASH_URL` and optional `STASH_API_KEY` set for Stash 0.31.1 or later:
 
 ```powershell
@@ -241,6 +245,104 @@ source rectangle, observation/cue, input fingerprint, quality, identity scores
 and source type remain in face SQLite. The cue time describes the VTT cue, not
 a claimed decoder-measured video timestamp. Existing portrait quality gates and
 ranking weights apply to both modes and can also be changed in YAML.
+
+### Portrait expression, mouth and eye preferences
+
+Four optional nonnegative weights (0..100) rank visible facial cues:
+
+| Weight | Score favored by a positive weight |
+| --- | --- |
+| `neutral_expression` | Weaker visible expression activity, including smile/frown, brow, cheek, mouth and jaw cues |
+| `closed_mouth` | Lower MediaPipe `jawOpen`: score `1 - jawOpen` |
+| `open_mouth` | Higher MediaPipe `jawOpen`: score `jawOpen` |
+| `open_eyes` | Neither eye blinking: score `1 - max(eyeBlinkLeft, eyeBlinkRight)` |
+
+All four default to **0**, preserving the existing ranking and avoiding expression
+model downloads/inference. For a preference for neutral expression, closed mouth
+and open eyes, add these keys to your existing weights:
+
+```yaml
+portraits:
+  weights:
+    neutral_expression: 3.0
+    closed_mouth: 2.0
+    open_mouth: 0.0
+    open_eyes: 2.0
+```
+
+These scores join the existing weighted average after identity, size, sharpness,
+pose, exposure and visibility gates. They are soft preferences, not absolute
+precedence or rejection thresholds: a sufficiently better portrait can still win
+with a smile/open mouth. Prefer one mouth weight; equal positive `open_mouth` and
+`closed_mouth` weights sum to a constant and cancel the mouth preference. All
+ranking weights together must have a positive sum. Expression-only ranking is
+supported, with deterministic time/ID ordering for the video's initial hints.
+
+Two pinned ONNX exports of [MediaPipe Face Landmarker](https://developers.google.com/edge/mediapipe/solutions/vision/face_landmarker)
+produce a mesh and blendshape coefficients. The original Google bundle is
+`face_landmarker/float16/1`; the unchanged-weight exports come from
+`thedemons/mirayu-models` at `dc44090caa7ce49c81139e4fd7c22b63f81943a3`:
+
+| Model | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `face_landmarks_detector.onnx` | 4921002 | `de2cda3bdaab8ba37d8f1236a7091c301c1cff4dd0460f5b43c03df042c6d9c0` |
+| `face_blendshapes.onnx` | 1883471 | `24ce8a9c501db3d2c6d32958d1b9d867d3b15de3de3a896cdc8d28641b30b608` |
+
+They load lazily once per recognition run through the shared application ORT.
+**`models.device: cuda` requires both graphs to use CUDA**, and disables CPU
+execution-provider fallback at node level for these graphs. An unavailable CUDA
+provider, failed GPU initialization or unsupported GPU graph is an error, not a
+silent CPU expression run. Explicit `cpu` and `auto` remain supported; only `auto`
+permits automatic CPU fallback. Measured device/provider provenance is stored with
+the expression evidence. Preprocessing and the small scoring calculations use
+CPU; both neural networks run on the configured provider.
+
+Downloads use the existing pinned Hugging Face cache, exact size/checksum checks
+and atomic installation. Existing custom/invalid files are not overwritten.
+The models are Apache-2.0; upstream/export attribution is in
+[expression-attribution.md](expression-attribution.md).
+
+Analysis uses a fixed square RGB crop 1.5 times the larger face-box side, aligned
+to the eye line and mapped to float32 NHWC 256px RGB in 0..1. Its framing is
+independent of portrait `margin`, `aspect_ratio` and JPEG quality. The mesh must
+confirm face presence, and five mesh anchors must agree with the
+identity-verified YuNet face; a neighboring or ambiguous face cannot provide its
+expression. The mesh is mapped back to original-image pixels; the upstream 146
+point subset is then passed to the 52-score blendshape model. The
+`neutral_expression` score is the explicit heuristic
+`1 - max(activity coefficients)` over the brow/cheek/squint/wide-eye, jaw, mouth
+and nose-sneer channels listed in `expression.ACTIVITY`. Eye blink and gaze are
+excluded from that activity list. It is not MediaPipe's `_neutral` output or an
+emotion/probability classification. Neither `jawOpen` nor eye blink is a literal
+percentage of mouth/eye opening. Mouth and expression criteria overlap, so their
+weights are not independent measurements of confidence.
+
+VTT mode measures every otherwise eligible selected observation, with no new
+shortlist or candidate cap. It caches raw coefficients, derived scores and a
+model/preprocessing contract and runtime provenance in the observation's existing SQLite quality
+JSON. Changing weights/framing reuses valid measurements without another identity
+scan or expression inference; no FFmpeg is used. Video mode measures the actual
+decoded face, retaining its evidence in portrait metadata. When only weights
+change, compatible cached frames/JPEGs are rescored with fresh identity checks
+without video decoding or neural inference. Other video policy changes and frames
+without valid measurements may need decoding again; the existing video candidate
+and offset limits still apply.
+
+The weights and measurement contract participate in portrait policy identity.
+The next selected-scene run updates an application-owned Stash image if a
+different winner produces different JPEG bytes, and repeated runs do not repeat
+that update. Manual replacements remain protected. Missing, invalid, unmatched or
+failed expression measurements withhold the portrait update and preserve the old
+owned image rather than deleting it as a policy rejection. Disabling all four
+weights reranks using the original quality criteria and keeps cached expression
+evidence. No face-identity namespace or SQLite schema migration is introduced.
+
+Offline tests use synthetic coefficient fixtures. The explicit Linux/Windows
+model smoke verifies both ONNX models, face association and mouth/eye output
+on the checksum-pinned public-domain Grace Hopper image. These checks do not
+calibrate neutral-expression accuracy or ranking weights for your VTT library.
+CUDA provider routing and refusal of CPU fallback are covered by offline adapter
+tests; hosted CPU jobs do not claim measurements on actual CUDA hardware.
 
 `portraits.source: video` retains the video-frame mode. Install system FFmpeg
 (or configure `portraits.ffmpeg`); absence or unsupported/budget-limited video

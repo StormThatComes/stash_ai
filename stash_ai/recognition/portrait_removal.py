@@ -24,7 +24,7 @@ def selection_incomplete(database, scope, target, policy_sha):
       AND json_extract(metadata,'$.scan') IN (SELECT value FROM json_each(?))
       AND json_extract(metadata,'$.reason') IN
         ('vtt_source_unavailable_or_changed','video_unavailable_or_budget_exceeded',
-         'portrait_identity_unverified','face_visibility_unavailable') LIMIT 1''',
+         'portrait_identity_unverified','face_visibility_unavailable','face_expression_unavailable') LIMIT 1''',
       (scope, target['person'], policy_sha, encoded(scans))).fetchone()
     return row is not None
 

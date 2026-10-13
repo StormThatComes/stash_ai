@@ -13,6 +13,7 @@ from .models import checked_detection
 from .portraits import identity_reason, policy_identity
 from .quality import PortraitFramingError, portrait_bytes, portrait_score, rejection
 from .visibility import cached as cached_visibility, required as visibility_required
+from .expression import cached as cached_expression, required as expression_required
 
 
 class Sources:
@@ -67,7 +68,7 @@ def store(database, identifier, scope, target, scene, metadata):
                  'skipped' if metadata.get('reason') else 'eligible'))
 
 
-def choose_vtt(database, client, config, scope, target, source_factory, visibility):
+def choose_vtt(database, client, config, scope, target, source_factory, visibility, expression):
     db, policy = database.connection, config.data['portraits']
     person = db.execute('SELECT * FROM people WHERE id=? AND scope=?', (target['person'], scope)).fetchone()
     groups = {group.identifier: group for group in _groups(db, scope, person['namespace'], config.data['clustering'])}
@@ -94,27 +95,32 @@ def choose_vtt(database, client, config, scope, target, source_factory, visibili
                     'source': row['source'], 'rect': json.loads(row['rect']), 'cue': row['cue'],
                     'cue_seconds': row['seconds'], 'geometry': json.loads(row['geometry']),
                     'quality': quality, 'reference_context': context, 'input_sha': row['input_sha']}
-                reason = rejection(quality, policy, portrait=True, visibility=False)
+                reason = rejection(quality, policy, portrait=True, visibility=False, expression=False)
                 if not reason:
                     try:
                         reason, similarity, runner = identity_reason(vector(row), groups, target['person'], config)
                         metadata.update(similarity=similarity, runner_up=runner)
                     except (TypeError, ValueError):
                         reason = 'portrait_identity_unverified'
-                if not reason and visibility_required(policy):
-                    if not cached_visibility(quality):
-                        try:
-                            image = sources.thumbnail(scene, row)
-                        except Exception:
-                            reason = 'vtt_source_unavailable_or_changed'
-                        else:
-                            with image:
-                                quality.update(visibility.measure(image, checked_detection(metadata['geometry'])))
-                            # Independent of framing, thresholds, weights and selected performer.
-                            with db:
-                                db.execute('UPDATE observations SET quality=? WHERE id=?', (encoded(quality), row['id']))
-                    if not reason:
-                        reason = rejection(quality, policy, portrait=True)
+                needs_visibility = visibility_required(policy) and not cached_visibility(quality)
+                needs_expression = expression_required(policy) and not cached_expression(quality)
+                if not reason and (needs_visibility or needs_expression):
+                    try:
+                        image = sources.thumbnail(scene, row)
+                    except Exception:
+                        reason = 'vtt_source_unavailable_or_changed'
+                    else:
+                        with image:
+                            face = checked_detection(metadata['geometry'])
+                            if needs_visibility:
+                                quality.update(visibility.measure(image, face))
+                            if needs_expression:
+                                quality.update(expression.measure(image, face))
+                        # Independent of framing, thresholds, weights and selected performer.
+                        with db:
+                            db.execute('UPDATE observations SET quality=? WHERE id=?', (encoded(quality), row['id']))
+                if not reason:
+                    reason = rejection(quality, policy, portrait=True)
                 if reason:
                     metadata['reason'] = reason
                 else:

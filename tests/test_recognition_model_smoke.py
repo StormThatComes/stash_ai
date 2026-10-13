@@ -90,3 +90,32 @@ def test_faceocc_checkpoint_detects_lower_face_covering_on_public_domain_portrai
         assert model.device == 'cpu'
     finally:
         model.close()
+
+
+@pytest.mark.skipif(os.getenv('STASH_AI_RECOGNITION_SMOKE') != '1', reason='explicit pinned expression-model smoke')
+def test_pinned_expression_task_associates_mesh_and_scores_public_domain_portrait(tmp_path):
+    import hashlib
+    from io import BytesIO
+    import requests
+    from PIL import Image
+    from stash_ai.recognition.config import load
+    from stash_ai.recognition.expression import FaceExpression, cached
+    from stash_ai.recognition.models import checked_detection, ensure_assets
+    with requests.get('https://raw.githubusercontent.com/matplotlib/matplotlib/v3.10.1/lib/matplotlib/mpl-data/sample_data/grace_hopper.jpg', timeout=30) as response:
+        response.raise_for_status(); data = response.content
+    assert hashlib.sha256(data).hexdigest() == 'a8ca6d734765703b09728ab47fe59f473d93ae3967fc24c7c0288c3c7adb7130'
+    path = tmp_path / 'expression.yml'
+    path.write_text('version: 1\nmodels: {device: cpu}\nportraits: {weights: {closed_mouth: 2}}\n')
+    config = load(path)
+    model = FaceExpression(config, ensure_assets(config))
+    face = checked_detection([182.86642, 120.47789, 170.25731, 212.48526, 227.11728, 193.32774,
+                              307.84845, 195.3718, 266.4793, 240.008, 228.50974, 267.86563,
+                              302.18546, 269.56985, .94316435])
+    try:
+        with Image.open(BytesIO(data)) as image:
+            result = model.measure(image, face)
+        assert cached(result) and result['expression']['device'] == 'cpu'
+        assert result['closed_mouth'] > .8 and result['open_eyes'] > .5
+        assert result['open_mouth'] + result['closed_mouth'] == pytest.approx(1)
+    finally:
+        model.close()
