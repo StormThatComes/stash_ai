@@ -4,6 +4,7 @@ import math
 from itertools import pairwise
 
 ANALYSIS_FORMAT = 5
+REQUIRED_SCORE_FIELDS = ('marker_score_floor', 'scene_support_floor', 'scene_threshold', 'marker_threshold')
 
 
 class UnorderedFrames(ValueError):
@@ -44,7 +45,7 @@ def _validate_current(segment):
     if 'items' in segment and (not isinstance(segment['items'], list)
                               or any(not isinstance(item, dict) for item in segment['items'])):
         raise ValueError('Invalid current inference observations; run --db-check and inference again.')
-    required_scores = ['marker_score_floor', 'scene_support_floor', 'scene_threshold', 'marker_threshold']
+    required_scores = list(REQUIRED_SCORE_FIELDS)
     if segment['mode'] == 'scene':
         items = segment.get('items', ())
         if all(isinstance(item.get('tag'), str) for item in items) and len({item['tag'] for item in items}) != len(items):
