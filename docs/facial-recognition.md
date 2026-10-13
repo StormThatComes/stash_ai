@@ -67,6 +67,14 @@ alignment and embedding-shape smoke test, not an accuracy benchmark.
 
 ## Internal media and state
 
+Each media acquisition has one elapsed budget covering redirects, headers and
+body reads, including trickling responses. The video bridge shares one budget
+across its seeks and cancels owned socket reads when closed. GraphQL mutations
+also use one bounded attempt: expiry before dispatch is a known failed write;
+after possible dispatch it is unknown and requires fresh-state reconciliation.
+No elapsed timeout automatically retries a mutation. Owned HTTP workers have
+shared bounded capacity; expired results cannot authorize subsequent writes.
+
 Each selected scene verifies the VTT/sprite content before reusing observations.
 Sprite and decoded-pixel limits apply before conversion, with at most two active
 sheets. Completed cue checkpoints survive an interrupted inference; incomplete

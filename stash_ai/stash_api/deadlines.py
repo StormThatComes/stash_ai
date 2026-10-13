@@ -1,4 +1,4 @@
-"""Hard caller deadlines for proven reads, including a trickling response body."""
+"""Owned elapsed HTTP boundaries; retry policy belongs to the caller."""
 from queue import Empty, Full, Queue
 from threading import Event, Thread, Lock, BoundedSemaphore
 from time import monotonic
@@ -56,12 +56,14 @@ def remaining(deadline):
     return value
 
 
-def call_with_deadline(operation, deadline, *, cancel=None):
-    """Only a read runs here. A late result is discarded and closed, never applied.
+def call_with_deadline(operation, deadline, *, cancel=None, label='read'):
+    """Run one owned network operation; discard late results, never retry it.
 
     requests' socket read timeout measures inactivity, so trickling bytes alone
     cannot enforce a wall-clock budget. A daemon performs this one blocking read;
-    the caller remains bounded. It never schedules retries or any writes.
+    the caller remains bounded. Proven reads and single mutation attempts share
+    the bounded worker capacity. Mutation callers own a pre-dispatch expiry gate
+    and durable uncertainty handling; this helper never repeats an operation.
     """
     from stash_ai.runtime.cancellation import current, use
     from stash_ai.stash_api.read_connections import ReadControl
@@ -153,7 +155,7 @@ def call_with_deadline(operation, deadline, *, cancel=None):
                 break
         worker = None
         try:
-            worker = Thread(target=run, name='stash-deadline-read', daemon=True)
+            worker = Thread(target=run, name='stash-deadline-' + label, daemon=True)
             worker.start()
         except BaseException:
             # start() can be interrupted after the worker has actually started.
@@ -203,7 +205,7 @@ def abort_response(response):
     control = getattr(response, '_stash_read_control', None)
     if control is not None:
         control.cancel()
-    connection = getattr(response.raw, 'connection', None)
+    connection = getattr(getattr(response, 'raw', None), 'connection', None)
     if connection is not None:
         shutdown(connection.sock)
     # Closing a buffered reader can wait for a read lock; never block the caller.
