@@ -6,12 +6,13 @@ from .names import sync_name
 from .portraits import fill_portrait
 
 
-def enrich(database, client, report, config, plan, scope, target, paths, services):
+def enrich(database, client, report, config, plan, scope, target, paths, services, *, retry_unresolved_images=False):
     counts = Counter()
     for name, action in (
         ('names', lambda: sync_name(database, client, report, scope, target, plan)),
         ('portraits', lambda: fill_portrait(database, client, report, config, scope, target, paths,
-                                           services.backend, services.decoder, services.source)),
+                                           services.backend, services.decoder, services.source,
+                                           retry_unresolved_images=retry_unresolved_images)),
     ):
         try:
             counts.update(action())

@@ -44,6 +44,7 @@ class Services:
 
 def execute(args, config, *, services=None):
     services = services or Services()
+    retry_images = bool(getattr(args, 'retry_unresolved_images', False))
     url = os.getenv('STASH_URL', 'http://localhost:9999')
     key = os.getenv('STASH_API_KEY', '')
     scope = instance_scope(url)
@@ -60,6 +61,8 @@ def execute(args, config, *, services=None):
             else:
                 identifiers = list(dict.fromkeys(args.scene_id))
             snapshot = config.snapshot()
+            if retry_images:
+                snapshot['invocation'] = {'retry_unresolved_images': True}
             if extra is not None:
                 snapshot['names'] = extra.snapshot()
             run = database.start_run(scope, identifiers, snapshot)
@@ -157,8 +160,9 @@ def execute(args, config, *, services=None):
                                             'Name batch withheld: ' + safe_error(error, key))
                     for target in targets:
                         with phase(report, 'Recognition metadata'):
+                            options = {'retry_unresolved_images': True} if retry_images else {}
                             counts.update(services.metadata(database, client, report, config, plan,
-                                                           scope, target, paths, services) or {})
+                                                           scope, target, paths, services, **options) or {})
                             database.progress(run, 'metadata', dict(counts))
                 if targets:
                     try:

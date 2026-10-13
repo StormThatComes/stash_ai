@@ -226,7 +226,7 @@ def image_digest(client, live, performer, config):
     return hashlib.sha256(data).hexdigest()
 
 
-def image_baseline(database, client, config, live, performer, previous):
+def image_baseline(database, client, config, live, performer, previous, *, retry_unresolved_images=False):
     """Recognize only our acknowledged bytes; reconcile uncertain writes first."""
     if previous is None:
         return missing_image(live, client, performer), None, None
@@ -240,7 +240,12 @@ def image_baseline(database, client, config, live, performer, previous):
                 database.connection.execute("UPDATE portraits SET status='published' WHERE id=?", (intent['portrait'],))
             previous = database.connection.execute('SELECT * FROM publications WHERE id=?', (previous['id'],)).fetchone()
         elif current is None or current == json.loads(previous['precondition']).get('image_sha256'):
-            raise PendingRecognition('Earlier image write is unresolved; no blind retry.')
+            if retry_unresolved_images:
+                # Keep the uncertain intent until a freshly checked replacement
+                # is ready. Opt-in authorizes an attempt, not a successful outcome.
+                return True, current, previous
+            raise PendingRecognition(f'Earlier image write is unresolved for performer {performer}; '
+                                     'rerun the selected scenes with --retry-unresolved-images to retry.')
         else:
             with database.connection:
                 database.connection.execute("UPDATE publications SET status='conflict',error=NULL WHERE id=?",
@@ -255,7 +260,7 @@ def image_baseline(database, client, config, live, performer, previous):
 
 
 def fill_portrait(database, client, report, config, scope, target, paths, backend_factory, decoder_factory,
-                 source_factory=SpriteInput):
+                 source_factory=SpriteInput, *, retry_unresolved_images=False):
     performer, person = target['performer'], target['person']
     if not config.data['portraits']['enabled']:
         return {'portraits_disabled': 1}
@@ -265,9 +270,11 @@ def fill_portrait(database, client, report, config, scope, target, paths, backen
         raise PendingRecognition('Portrait target ownership changed.')
     identifier = operation_id(scope, '', person, 'image')
     previous = database.connection.execute('SELECT * FROM publications WHERE id=?', (identifier,)).fetchone()
-    managed, baseline, previous = image_baseline(database, client, config, live, performer, previous)
+    managed, baseline, previous = image_baseline(database, client, config, live, performer, previous,
+                                                retry_unresolved_images=retry_unresolved_images)
     if not managed:
         return {'portraits_preserved': 1}
+    retrying = previous is not None and previous['status'] in ('pending', 'unknown')
     policy_sha = config.identity('portraits', 'recognition', 'clustering')
     if baseline is not None and previous['status'] in ('confirmed', 'observed'):
         portrait = database.connection.execute('SELECT metadata FROM portraits WHERE id=?',
@@ -276,6 +283,8 @@ def fill_portrait(database, client, report, config, scope, target, paths, backen
             return {'portraits_preserved': 1}
     winner = choose(database, client, config, scope, target, paths, backend_factory, decoder_factory, source_factory)
     if winner is None:
+        if retrying:
+            raise PendingRecognition('Earlier image write remains unresolved; no currently eligible portrait for retry.')
         return {'portraits_skipped': 1}
     # Protect manual replacements/removals while extraction was in progress.
     live = checked_id(client.performer(performer), performer)
@@ -288,6 +297,13 @@ def fill_portrait(database, client, report, config, scope, target, paths, backen
     intent = {'portrait': winner['id'], 'sha256': winner['digest']}
     precondition = {'missing': baseline is None, 'image_sha256': baseline,
                     'image_path': safe_url(live.get('image_path') or ''), 'token': token}
+    if retrying:
+        # One bounded predecessor snapshot, never a recursive chain. Do not
+        # relabel the earlier uncertain write as failed to bypass reconciliation.
+        precondition['retry_of'] = {'id': previous['id'], 'status': previous['status'],
+                                   'payload': json.loads(previous['payload']),
+                                   'image_sha256': json.loads(previous['precondition']).get('image_sha256'),
+                                   'error': previous['error']}
     if winner['digest'] == baseline:
         save_operation(database, scope=scope, scene='', person=person, kind='image', target=performer,
                        payload=intent, precondition=precondition, status='observed')
@@ -311,4 +327,7 @@ def fill_portrait(database, client, report, config, scope, target, paths, backen
             payload=intent, precondition=precondition, callback=update)
     with database.connection:
         database.connection.execute("UPDATE portraits SET status='published' WHERE id=?", (winner['id'],))
-    return {'portraits_filled' if baseline is None else 'portraits_updated': 1}
+    counts = {'portraits_filled' if baseline is None else 'portraits_updated': 1}
+    if retrying:
+        counts['portraits_retried'] = 1
+    return counts

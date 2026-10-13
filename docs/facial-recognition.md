@@ -193,6 +193,28 @@ photos. Changes to `source`, framing, quality filters or ranking are included in
 the portrait policy identity. A lost update response is reconciled against the
 new image digest; seeing the old image does not authorize a blind retry.
 
+If output says `Earlier image write is unresolved`, the previous attempt may
+have reached Stash without a confirmed response. A normal rerun acknowledges it
+without another write when Stash serves the submitted JPEG. If the image is still
+missing or matches the image from before that attempt, explicitly allow another
+attempt for the selected scenes:
+
+```bash
+python stash_ai.py recognition run --scene-id 123 --retry-unresolved-images
+```
+
+Use the same `--face-config`, `--faces-db` and `--device` overrides as the original
+run, if any. This invocation-only flag retries unresolved portrait writes for
+currently accepted, application-owned performers in the selected scenes. It
+revalidates identity and image ownership, reuses eligible cached JPEGs, and
+checks the live image again immediately before dispatch. A changed/manual image
+is preserved. It does not retry uncertain performer creation, linking or name
+writes. No YAML key, database reset or deletion of retained images is needed.
+Run history records the flag and successful `portraits_retried` count; the new
+image intent retains one bounded snapshot of the preceding uncertain attempt.
+A lost response to the retry remains uncertain and needs fresh reconciliation
+or another explicit invocation with the flag.
+
 The baseline missing-image
 contract is its own `/performer/ID/image?...&default=true` URL, not a guessed
 placeholder filename. A fresh check immediately before the mutation also protects
