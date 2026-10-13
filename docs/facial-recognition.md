@@ -129,6 +129,61 @@ samples, avoiding transitive single-link unions. This sampled check is not a
 proof that every historical pair matches. Reference bytes, samples and identity
 counts have explicit limits; no N-by-N distance matrix is allocated.
 
+`clustering.max_reference_bytes` caps the sum of the float32 embedding array
+bytes used as references in a lookup, including provisional new groups while
+matching the selected scene. Compatible retained people from the same Stash
+instance and model namespace participate even when their scenes are not selected.
+Each person contributes at most `max_samples_per_person` vectors (default 32).
+The default limit is 134217728 bytes (128 MiB); the supported range is 1 MiB
+through 1 GiB. Exceeding it fails that scene's matching instead of silently
+dropping people or samples. The error includes required bytes, configured limit
+and the numbers of people/groups and samples reached at the failure.
+
+SFace uses 128 float32 components (512 bytes per vector), while AuraFace uses
+512 (2048 bytes per vector). For example, with 32 samples for every person:
+
+| Compatible people | SFace reference bytes | AuraFace reference bytes |
+| --- | --- | --- |
+| 1000 | 15.625 MiB | 62.5 MiB |
+| 5000 | 78.125 MiB | 312.5 MiB |
+| 10000 | 156.25 MiB | 625 MiB |
+
+People with fewer retained samples use less. Raising the byte limit only permits
+a larger reference set; it does not reserve memory, increase samples per person,
+improve the similarity scores or speed up matching. More actual references mean
+more comparisons. This budget excludes Python/SQLite overhead, image buffers,
+model memory and GPU VRAM, so leave room for them in system RAM.
+
+During `recognition run`, the matching status shows reference MiB used/limit,
+percentage, run peak, people/groups, sample count and stage. Snapshots are
+throttled to once a second, with immediate stage-boundary and budget-failure
+updates. A per-scene line and the final summary also expose usage, including
+when `--progress-style off` disables the live status. For example:
+
+```text
+Face references scene 6306: 78.12/128.00 MiB (61.0%) peak=79.00 MiB (61.7%) people=5000 samples=160000 stage=retained
+```
+
+The peak is the highest logical reference demand across matching scenes in this
+run, including provisional groups that may later be withheld and the first
+over-budget request if one fails. It is not process RSS or simultaneous Python
+heap allocation. `loading` is a partial reference load, `matching` includes
+provisional groups, `retained` is the bounded persisted set after successful
+matching, and `cached` means the matching decisions were reused after reference
+validation. `no_observations` uses zero references because matching was skipped;
+it does not mean the database contains no people. Peaks are maxima, never sums
+across scenes. The last snapshot and run peak are retained in the same SQLite's
+`progress` (`references` phase) and `runs.summary.references`; no extra files or
+schema migration are needed. History writes occur after the matching transaction
+so reporting cannot commit partially formed candidates.
+
+Keep 128 MiB while the reported peak has comfortable headroom. If it approaches
+the limit or a scene fails for this budget, and system RAM is available, increase
+it to 268435456 (256 MiB) or 536870912 (512 MiB). The independent
+`max_people_per_lookup` limit still applies. Changing this setting currently
+changes the grouping policy fingerprint, so the next run recomputes matching
+from retained vectors without repeating neural inference for unchanged scans.
+
 Developer-only `evaluate_pairs` accepts explicit local same/different-person
 ground truth and reports false matches/misses for that supplied dataset. Synthetic
 vector fixtures prove grouping rules, not real-world face-recognition accuracy.

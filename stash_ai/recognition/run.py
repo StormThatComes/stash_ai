@@ -14,6 +14,7 @@ from .models import ASSETS, ensure_assets, load_backend, namespace
 from .media import SpriteInput
 from .scanning import scan_scene
 from .clustering import cluster_scene
+from .reference_usage import usage_line
 from .publication import publish_person, save_operation
 from .stash import RecognitionStash
 from .names import load_names, plan_names, starter
@@ -54,6 +55,7 @@ def execute(args, config, *, services=None):
     extra = services.metadata_config(config, scope) if services.metadata_config else None
     report = RunReport(False, print)
     counts = Counter()
+    references = {}
     with FaceDatabase(config.database) as database:
         client = services.client(url=url, api_key=key, timeout=config.data['execution']['timeout_seconds'])
         with closing(client, report=report, name='close recognition HTTP'), present(report, args.progress_style):
@@ -107,7 +109,25 @@ def execute(args, config, *, services=None):
                                     backend, progress=progress)
                             counts['scenes_reused' if reused else 'scenes_scanned'] += 1
                         with phase(report, 'Recognition matching', scene=identifier):
-                            groups = cluster_scene(database, scan, config)
+                            def reference_progress(**values):
+                                values['peak_bytes'] = max(references.get('peak_bytes', 0), values['peak_bytes'])
+                                references.update(scene=identifier, recognizer=config.data['models']['recognizer'],
+                                                  max_samples_per_person=config.data['clustering']['max_samples_per_person'],
+                                                  **values)
+                                status(report, references=usage_line(references),
+                                       reference_people=values['people'], reference_samples=values['samples'],
+                                       reference_stage=values['stage'])
+                            try:
+                                groups = cluster_scene(database, scan, config, progress=reference_progress)
+                            finally:
+                                if references.get('scene') == identifier:
+                                    # Progress writes commit SQLite. Persist only after
+                                    # matching's transaction has committed or rolled back.
+                                    database.progress(run, 'references', references)
+                                    report.optional('recognition_references', report.write,
+                                        f'Face references scene {identifier}: ' + usage_line(references) +
+                                        f" people={references['people']} samples={references['samples']} "
+                                        f"stage={references['stage']}")
                             # A different recognizer cannot infer the old binding
                             # from incompatible vectors. Retain its analysis, but
                             # withhold new profiles when this instance already has
@@ -180,7 +200,8 @@ def execute(args, config, *, services=None):
                 if counts['scenes_failed'] or counts['people_failed'] or counts['metadata_failed']:
                     outcome = 'partial'
                 report.optional('recognition_summary', report.write, 'Recognition complete: ' +
-                                ' '.join(f'{name}={value}' for name, value in sorted(counts.items())))
+                                ' '.join(f'{name}={value}' for name, value in sorted(counts.items())) +
+                                (' | face references=' + usage_line(references) if references else ''))
                 return 0 if outcome == 'success' else 1
             except BaseException as error:
                 outcome = 'interrupted' if isinstance(error, KeyboardInterrupt) else 'failed'
@@ -188,6 +209,8 @@ def execute(args, config, *, services=None):
                 raise
             finally:
                 summary = {'counts': dict(counts), 'mutations': dict(report.counts)}
+                if references:
+                    summary['references'] = dict(references)
                 actions = [('close portrait visibility model', visibility.close)] if visibility is not None else []
                 cleanup(actions + [('finish recognition history',
                           lambda: database.finish_run(run, outcome, summary, failure))], report=report)

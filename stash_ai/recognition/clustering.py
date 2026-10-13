@@ -7,6 +7,7 @@ import uuid
 
 from .config import digest
 from .database import encoded
+from .reference_usage import ReferenceUsage
 
 
 def vector(row):
@@ -28,14 +29,15 @@ class Group:
     known: bool
 
 
-def _groups(db, scope, namespace, policy):
+def _groups(db, scope, namespace, policy, *, usage=None, stage='loading'):
+    usage = usage or ReferenceUsage(policy['max_reference_bytes'])
+    usage.begin(stage, reset=True)
     maximum = policy['max_people_per_lookup']
     rows = db.execute('SELECT id FROM people WHERE scope=? AND namespace=? ORDER BY id LIMIT ?',
                       (scope, namespace, maximum + 1)).fetchall()
     if len(rows) > maximum:
         raise ValueError('Face identity lookup exceeds configured person budget.')
     result = []
-    reference_bytes = 0
     for person in rows:
         samples = db.execute('SELECT o.dimensions,o.embedding FROM observations o JOIN members m '
                              'ON m.observation=o.id WHERE m.person=? ORDER BY o.id LIMIT ?',
@@ -43,10 +45,9 @@ def _groups(db, scope, namespace, policy):
         if not samples:
             raise ValueError('Accepted face identity has no retained supporting embeddings.')
         vectors = [vector(row) for row in samples]
-        reference_bytes += sum(item.nbytes for item in vectors)
-        if reference_bytes > policy['max_reference_bytes']:
-            raise ValueError('Retained face references exceed the configured RAM budget.')
+        usage.add(vectors, people=1, kind='Retained')
         result.append(Group(person['id'], vectors, True))
+    usage.emit(force=True)
     return result
 
 
@@ -75,7 +76,7 @@ def _result(db, scan, policy):
     return [dict(row) for row in rows]
 
 
-def cluster_scene(database, scan, config):
+def cluster_scene(database, scan, config, *, progress=None):
     """Only selected observations change. Existing identities are read references.
 
     Cohesion uses a bounded representative sample, not an N-by-N matrix or a
@@ -89,18 +90,21 @@ def cluster_scene(database, scan, config):
     policy = digest({'format': 1, 'recognition': config.data['recognition'],
                      'clustering': config.data['clustering']})
     count = db.execute('SELECT COUNT(*) FROM observations WHERE scan=? AND rejected IS NULL', (scan,)).fetchone()[0]
+    usage = ReferenceUsage(config.data['clustering']['max_reference_bytes'], progress)
     if not count:
+        usage.begin('no_observations')
         return []
     settings, grouping = config.data['recognition'], config.data['clustering']
-    groups = _groups(db, record['scope'], record['namespace'], grouping)
+    groups = _groups(db, record['scope'], record['namespace'], grouping, usage=usage)
     context = reference_context(groups)
     existing = db.execute('SELECT COUNT(*) FROM candidates WHERE scan=? AND policy=? '
                           "AND json_extract(payload,'$.reference_context')=?", (scan, policy, context)).fetchone()[0]
     if existing == count and count:
         for row in db.execute('SELECT dimensions,embedding FROM observations WHERE scan=? AND rejected IS NULL', (scan,)):
             vector(row)
+        usage.begin('cached')
         return _result(db, scan, policy)
-    reference_bytes = sum(v.nbytes for g in groups for v in g.samples)
+    usage.begin('matching')
     by_id = {g.identifier: g for g in groups}
     with db:
         db.execute('DELETE FROM candidates WHERE scan=? AND policy=?', (scan, policy))
@@ -124,9 +128,7 @@ def cluster_scene(database, scan, config):
                 group = ranked[0][2]
                 person, status, reason = group.identifier, 'pending', 'known_identity' if group.known else 'candidate_group'
                 if not group.known and len(group.samples) < grouping['max_samples_per_person']:
-                    reference_bytes += query.nbytes
-                    if reference_bytes > grouping['max_reference_bytes']:
-                        raise ValueError('Selected face references exceed the configured RAM budget.')
+                    usage.add([query], kind='Selected')
                     group.samples.append(query.copy())
             elif near:
                 person, status, reason = None, 'withheld', 'insufficient_match_or_cohesion'
@@ -135,10 +137,8 @@ def cluster_scene(database, scan, config):
                     raise ValueError('Selected-scene face groups exceed the configured budget.')
                 person = str(uuid.uuid5(uuid.UUID(database.installation),
                                        encoded([record['scope'], record['namespace'], observation['id']])))
+                usage.add([query], people=1, kind='Selected')
                 group = Group(person, [query.copy()], False)
-                reference_bytes += query.nbytes
-                if reference_bytes > grouping['max_reference_bytes']:
-                    raise ValueError('Selected face references exceed the configured RAM budget.')
                 groups.append(group)
                 by_id[person] = group
                 status, reason = 'pending', 'candidate_group'
@@ -147,6 +147,7 @@ def cluster_scene(database, scan, config):
                        (candidate, scan, policy, person, status,
                         encoded({'observation': observation['id'], 'reason': reason, 'scores': scores,
                                  'policy': policy, 'representative_limit': grouping['max_samples_per_person']})))
+        usage.emit(force=True)
         people = [row[0] for row in db.execute('SELECT DISTINCT person FROM candidates '
                                                 "WHERE scan=? AND policy=? AND status='pending'", (scan, policy))]
         for person in people:
@@ -167,7 +168,8 @@ def cluster_scene(database, scan, config):
                            'WHERE scan=? AND policy=? AND person=?', (scan, policy, person))
         # Include the members accepted above, so a stable next invocation does
         # not invalidate its own cache merely by having established a person.
-        context = reference_context(_groups(db, record['scope'], record['namespace'], grouping))
+        context = reference_context(_groups(db, record['scope'], record['namespace'], grouping,
+                                           usage=usage, stage='retained'))
         db.execute("UPDATE candidates SET payload=json_set(payload,'$.reference_context',?) "
                    'WHERE scan=? AND policy=?', (context, scan, policy))
     return _result(db, scan, policy)
