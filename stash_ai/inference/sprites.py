@@ -9,6 +9,7 @@ from urllib.parse import urljoin
 from stash_ai.domain import Cue
 from stash_ai.stash_api.transport import absolute_stash_url
 from stash_ai.vtt import format_time, parse_vtt_cues
+from .image_io import open_image
 
 if TYPE_CHECKING:
     from PIL.Image import Image as PILImage
@@ -45,14 +46,12 @@ def fetch_cues(app, stash, paths: dict) -> tuple[list[Cue], int]:
 
 
 def iter_sprite_frames(stash, paths: dict, cues: list[Cue]) -> Iterator[tuple[Cue, PILImage]]:
-    from PIL import Image
-
     sheets: OrderedDict[str, PILImage] = OrderedDict()
     try:
         for cue in cues:
             url = cue.image
             if url not in sheets:
-                with Image.open(BytesIO(stash.get_media(url))) as opened:
+                with open_image(BytesIO(stash.get_media(url))) as opened:
                     sheets[url] = opened.convert("RGB")
                 if len(sheets) > 2:
                     _, old = sheets.popitem(last=False)

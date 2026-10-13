@@ -97,6 +97,8 @@ def test_actual_frame_seek_uses_authenticated_range_bridge_and_cleans_workers(tm
         assert any(item[2] for item in calls)
     assert 'signed-secret' not in repr(commands) and 'private-key' not in repr(commands)
     assert '-vsync' not in commands[0] and '-fps_mode' in commands[0]
+    assert commands[0][commands[0].index('-vf') + 1] == 'showinfo'
+    assert '-max_alloc' not in commands[0]
 
 
 @pytest.mark.skipif(not shutil.which('ffmpeg'), reason='optional system FFmpeg is not installed')

@@ -45,9 +45,6 @@ portraits:
 execution:
   max_cues: 0                  # 0 = all cues in the selected scene, not all scenes.
   checkpoint_cues: 32
-  max_vtt_bytes: 1048576
-  max_media_bytes: 16777216
-  max_image_pixels: 196000000   # Pixels in the entire sprite sheet, before RGB conversion.
   max_sheets: 256
   timeout_seconds: 120.0
 storage:
