@@ -17,6 +17,26 @@ from stash_ai.stash_api.read_connections import shutdown
 from stash_ai.runtime.cancellation import Cancellation, use
 
 
+def scene_timing(log, requested):
+    """Input -ss seeks relative to the demuxer start; copyts preserves raw PTS."""
+    origin = re.search(rb'(?m)^\s*Duration:[^\r\n]*?\bstart:\s*([-+0-9.eE]+)(?:,|\s|$)', log)
+    times = re.findall(rb'pts_time:([-+0-9.eE]+)', log)
+    if origin is None or not times:
+        raise ValueError('Decoder did not report the source timeline origin and frame presentation time.')
+    start, raw = float(origin[1]), float(times[0])
+    if not math.isfinite(start) or not math.isfinite(raw):
+        raise ValueError('Decoder reported non-finite source timestamps.')
+    actual = raw - start
+    # Both log fields are rounded decimal seconds. Tolerate only microsecond
+    # rounding at timeline zero; retain the existing large-seek rejection.
+    if -0.000002 <= actual < 0:
+        actual = 0.
+    if actual < 0 or abs(actual - requested) > 5:
+        raise ValueError('Decoded timestamp is inconsistent with the requested portrait time.')
+    return dict(actual_seconds=actual, source_pts_seconds=raw, timeline_origin_seconds=start,
+                time_coordinate_system='scene-relative')
+
+
 class VideoFrames(AbstractContextManager):
     def __init__(self, client, scene, config):
         self.config = config
@@ -33,6 +53,7 @@ class VideoFrames(AbstractContextManager):
         self.cancellation = Cancellation()
         self.path = '/' + uuid.uuid4().hex
         self.validator = None
+        self.timeline_origin = None
 
     def _response(self, byte_range):
         url = self.url
@@ -190,18 +211,17 @@ class VideoFrames(AbstractContextManager):
             hint = re.sub(r'https?://\S+', '[media URL]', '; '.join(diagnostic[-2:]))[:400]
             raise RuntimeError('Portrait decoding is unavailable for this source; no image was chosen.'
                                + (' Decoder: ' + hint if hint else ''))
-        matches = re.findall(rb'pts_time:([-+0-9.eE]+)', b''.join(errors))
-        if not matches:
-            raise ValueError('Decoder did not report actual frame presentation time.')
-        actual = float(matches[0])
-        if not math.isfinite(actual) or actual < 0 or abs(actual - seconds) > 5:
-            raise ValueError('Decoded timestamp is inconsistent with the requested portrait time.')
+        timing = scene_timing(b''.join(errors), seconds)
+        start = timing['timeline_origin_seconds']
+        if self.timeline_origin is not None and abs(self.timeline_origin - start) > .000002:
+            raise ValueError('Video source timeline origin changed between portrait seeks.')
+        self.timeline_origin = start
         with Image.open(BytesIO(b''.join(output))) as raw:
             if raw.width * raw.height > pixels:
                 raise ValueError('Decoded portrait exceeds the pixel budget.')
             image = raw.convert('RGB')
-        return image, {'requested_seconds': seconds, 'actual_seconds': actual,
-                       'decoder': 'ffmpeg-copyts-showinfo-v1', 'pixels': [image.width, image.height],
+        return image, {'requested_seconds': seconds, **timing,
+                       'decoder': 'ffmpeg-copyts-showinfo-scene-time-v2', 'pixels': [image.width, image.height],
                        'source_validator': list(self.validator or (None, None))}
 
     def close(self):
