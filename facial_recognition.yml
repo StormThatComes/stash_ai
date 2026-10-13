@@ -42,7 +42,12 @@ portraits:
   timeout_seconds: 30.0        # Video only.
   max_video_bytes: 67108864    # Video only.
   ffmpeg: ffmpeg               # Video only; executable name or path.
-  weights: {frontal: 3.0, sharpness: 2.0, resolution: 1.0, exposure: 1.0, visibility: 3.0}
+  weights:
+    frontal: 3.0
+    sharpness: 2.0
+    resolution: 1.0
+    exposure: 1.0
+    visibility: 3.0
 execution:
   max_cues: 0                  # 0 = all cues in the selected scene, not all scenes.
   checkpoint_cues: 32
