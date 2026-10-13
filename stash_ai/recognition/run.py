@@ -19,6 +19,7 @@ from .stash import RecognitionStash
 from .names import load_names, plan_names, starter
 from .metadata import enrich
 from .video import VideoFrames
+from .visibility import FaceVisibility, LazyVisibility
 
 
 def instance_scope(url):
@@ -40,6 +41,7 @@ class Services:
     metadata_plan: object = plan_names
     metadata: object = enrich
     decoder: object = VideoFrames
+    visibility: object = FaceVisibility
 
 
 def execute(args, config, *, services=None):
@@ -68,9 +70,11 @@ def execute(args, config, *, services=None):
             run = database.start_run(scope, identifiers, snapshot)
             outcome, failure = 'success', None
             ready = {}
+            visibility = None
             try:
                 with phase(report, 'Recognition assets'):
                     paths = services.assets(config, write=report.write)
+                    visibility = LazyVisibility(config, paths, services.visibility)
                     model_namespace = namespace(config)
                     provenance = {name: asdict(ASSETS[name]) for name in
                                   (config.data['models']['detector'], config.data['models']['recognizer'])}
@@ -160,7 +164,9 @@ def execute(args, config, *, services=None):
                                             'Name batch withheld: ' + safe_error(error, key))
                     for target in targets:
                         with phase(report, 'Recognition metadata'):
-                            options = {'retry_unresolved_images': True} if retry_images else {}
+                            options = {'visibility': visibility}
+                            if retry_images:
+                                options['retry_unresolved_images'] = True
                             counts.update(services.metadata(database, client, report, config, plan,
                                                            scope, target, paths, services, **options) or {})
                             database.progress(run, 'metadata', dict(counts))
@@ -182,5 +188,6 @@ def execute(args, config, *, services=None):
                 raise
             finally:
                 summary = {'counts': dict(counts), 'mutations': dict(report.counts)}
-                cleanup([('finish recognition history',
+                actions = [('close portrait visibility model', visibility.close)] if visibility is not None else []
+                cleanup(actions + [('finish recognition history',
                           lambda: database.finish_run(run, outcome, summary, failure))], report=report)

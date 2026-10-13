@@ -11,7 +11,7 @@ from stash_ai.recognition.database import FaceDatabase
 from stash_ai.recognition.media import SpriteInput
 from stash_ai.recognition.models import checked_detection
 from stash_ai.recognition.run import Services
-from tests.helpers.recognition import Backend, Response, Stash
+from tests.helpers.recognition import Backend, Response, Stash, Visibility
 from tests.test_recognition_run import run
 
 
@@ -48,7 +48,7 @@ def setup(tmp_path, monkeypatch, **portraits):
         backends.append(value)
         return value
     services = Services(client=lambda **kwargs: stash, assets=lambda *a, **k: {}, backend=backend,
-                        decoder=lambda *args: pytest.fail('VTT portraits must not initialize FFmpeg/video'))
+                        decoder=lambda *args: pytest.fail('VTT portraits must not initialize FFmpeg/video'), visibility=Visibility)
     return load(path), stash, services, backends
 
 

@@ -23,7 +23,7 @@ def test_default_config_and_immutable_snapshot(tmp_path):
     'version: 1\nrecognition: {match_threshold: .nan}',
     'version: 1\nrecognition: {min_support: true}',
     'version: 1\nrecognition: {match_threshold: 0.4}',
-    'version: 1\nportraits: {weights: {frontal: 0, sharpness: 0, resolution: 0, exposure: 0}}',
+    'version: 1\nportraits: {weights: {frontal: 0, sharpness: 0, resolution: 0, exposure: 0, visibility: 0}}',
     'version: 1\nmodels: {recognizer: unknown}', 'version: 1\nnames: {file: false}',
     'version: 1\nportraits: {source: unknown}', 'version: 1\nportraits: {source: false}',
     'version: 1\nportraits: {aspect_ratio: 0}', 'version: 1\nportraits: {aspect_ratio: .nan}',

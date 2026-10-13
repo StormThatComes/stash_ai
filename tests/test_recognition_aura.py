@@ -35,19 +35,21 @@ def test_rgb_normalization_nchw_is_exact_and_has_no_upstream_normalization_twice
         input_blob(np.zeros((128,128,3), dtype='uint8'))
 
 
-def test_only_recognition_weight_and_detector_are_downloaded(tmp_path, monkeypatch):
+@pytest.mark.parametrize('portraits', [False, True])
+def test_only_selected_recognition_and_enabled_visibility_assets_are_downloaded(tmp_path, monkeypatch, portraits):
     import stash_ai.backends.downloads as downloads
     import stash_ai.recognition.runtime as face_runtime
     import stash_ai.recognition.models as models
     path = tmp_path / 'face.yml'
-    path.write_text('version: 1\nmodels: {recognizer: auraface}\n')
+    path.write_text(f'version: 1\nmodels: {{recognizer: auraface}}\nportraits: {{enabled: {str(portraits).lower()}}}\n')
     calls = []
     monkeypatch.setattr(face_runtime, 'runtime', lambda config: None)
     monkeypatch.setattr(models, 'verify', lambda *args: None)
     monkeypatch.setattr(downloads, 'install_hf_asset', lambda repo, filename, revision, destination, **kwargs:
                         calls.append((repo, filename, revision)))
     ensure_assets(load(path), write=lambda text: None)
-    assert [item[1] for item in calls] == [ASSETS['yunet'].filename, 'glintr100.onnx']
+    expected = [ASSETS['yunet'].filename, 'glintr100.onnx'] + (['model.safetensors'] if portraits else [])
+    assert [item[1] for item in calls] == expected
     assert all('gender' not in item[1] and '1k3' not in item[1] for item in calls)
 
 

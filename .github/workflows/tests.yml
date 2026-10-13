@@ -108,7 +108,7 @@ jobs:
       - uses: astral-sh/setup-uv@v10.2.0
       - name: Install complete application CPU profile
         run: uv pip install --system pytest -r requirements-cpu.txt -c constraints/cpu-py314.txt --index-strategy unsafe-best-match
-      - name: Load pinned YuNet, SFace and AuraFace on CPU
+      - name: Load pinned YuNet, SFace, AuraFace and FaceOcc on CPU
         env:
           STASH_AI_RECOGNITION_SMOKE: '1'
           STASH_API_KEY: ''
@@ -117,4 +117,4 @@ jobs:
         if: runner.os == 'Windows'
         run: choco install ffmpeg -y --no-progress
       - name: Verify selected-scene video and metadata lifecycle
-        run: python -m pytest -q tests/test_recognition_video.py tests/test_recognition_metadata.py tests/test_recognition_vtt_portraits.py tests/test_recognition_image_retry.py tests/test_recognition_aura.py tests/test_recognition_runtime.py --tb=short
+        run: python -m pytest -q tests/test_recognition_video.py tests/test_recognition_metadata.py tests/test_recognition_vtt_portraits.py tests/test_recognition_visibility.py tests/test_recognition_image_retry.py tests/test_recognition_aura.py tests/test_recognition_runtime.py --tb=short

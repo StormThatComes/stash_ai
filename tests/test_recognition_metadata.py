@@ -11,7 +11,7 @@ from stash_ai.recognition.names import load_names, plan_names, sync_name
 from stash_ai.recognition.portraits import missing_image
 from stash_ai.recognition.publication import PendingRecognition
 from stash_ai.recognition.run import Services, execute, instance_scope
-from tests.helpers.recognition import Backend, Stash, textured_image
+from tests.helpers.recognition import Backend, Stash, Visibility, textured_image
 
 
 class Decoder:
@@ -44,7 +44,7 @@ def setup(tmp_path, monkeypatch, *, names=False):
     config = load(path)
     stash = Stash()
     services = Services(client=lambda **kwargs: stash, assets=lambda *a, **k: {},
-                        backend=lambda *a: Backend(), decoder=Decoder)
+                        backend=lambda *a: Backend(), decoder=Decoder, visibility=Visibility)
     return config, stash, services
 
 
