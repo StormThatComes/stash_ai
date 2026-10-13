@@ -8,6 +8,7 @@ import uuid
 from .config import digest
 from .database import encoded
 from .reference_usage import ReferenceUsage
+from .identity_merges import supported_merges
 
 
 def vector(row):
@@ -33,7 +34,9 @@ def _groups(db, scope, namespace, policy, *, usage=None, stage='loading'):
     usage = usage or ReferenceUsage(policy['max_reference_bytes'])
     usage.begin(stage, reset=True)
     maximum = policy['max_people_per_lookup']
-    rows = db.execute('SELECT id FROM people WHERE scope=? AND namespace=? ORDER BY id LIMIT ?',
+    rows = db.execute('SELECT id FROM people WHERE scope=? AND namespace=? '
+                      'AND NOT EXISTS (SELECT 1 FROM identity_merges WHERE source=people.id) '
+                      'ORDER BY created,id LIMIT ?',
                       (scope, namespace, maximum + 1)).fetchall()
     if len(rows) > maximum:
         raise ValueError('Face identity lookup exceeds configured person budget.')
@@ -77,7 +80,7 @@ def _result(db, scan, policy):
 
 
 def cluster_scene(database, scan, config, *, progress=None):
-    """Only selected observations change. Existing identities are read references.
+    """Selected evidence can merge compatible historical identities oldest-first.
 
     Cohesion uses a bounded representative sample, not an N-by-N matrix or a
     transitive single-link union. Approximation is explicit in policy provenance.
@@ -87,7 +90,7 @@ def cluster_scene(database, scan, config, *, progress=None):
     record = db.execute('SELECT * FROM scans WHERE id=?', (scan,)).fetchone()
     if record is None or record['status'] != 'complete':
         raise ValueError('Face matching requires a complete selected-scene scan.')
-    policy = digest({'format': 1, 'recognition': config.data['recognition'],
+    policy = digest({'format': 2, 'recognition': config.data['recognition'],
                      'clustering': config.data['clustering']})
     count = db.execute('SELECT COUNT(*) FROM observations WHERE scan=? AND rejected IS NULL', (scan,)).fetchone()[0]
     usage = ReferenceUsage(config.data['clustering']['max_reference_bytes'], progress)
@@ -105,8 +108,8 @@ def cluster_scene(database, scan, config, *, progress=None):
         usage.begin('cached')
         return _result(db, scan, policy)
     usage.begin('matching')
-    by_id = {g.identifier: g for g in groups}
     with db:
+        by_id = {g.identifier: g for g in groups}
         db.execute('DELETE FROM candidates WHERE scan=? AND policy=?', (scan, policy))
         for observation in db.execute('SELECT * FROM observations WHERE scan=? AND rejected IS NULL '
                                        'ORDER BY cue,id', (scan,)):
@@ -168,8 +171,36 @@ def cluster_scene(database, scan, config, *, progress=None):
                            'WHERE scan=? AND policy=? AND person=?', (scan, policy, person))
         # Include the members accepted above, so a stable next invocation does
         # not invalidate its own cache merely by having established a person.
-        context = reference_context(_groups(db, record['scope'], record['namespace'], grouping,
-                                           usage=usage, stage='retained'))
+        retained = _groups(db, record['scope'], record['namespace'], grouping, usage=usage, stage='retained')
+        if supported_merges(database, scan, config, retained, policy, usage=usage):
+            retained = _groups(db, record['scope'], record['namespace'], grouping, usage=usage, stage='retained')
+            _recheck_after_merge(db, scan, policy, retained, config)
+            retained = _groups(db, record['scope'], record['namespace'], grouping, usage=usage, stage='retained')
+        context = reference_context(retained)
         db.execute("UPDATE candidates SET payload=json_set(payload,'$.reference_context',?) "
                    'WHERE scan=? AND policy=?', (context, scan, policy))
     return _result(db, scan, policy)
+
+
+def _recheck_after_merge(db, scan, policy, groups, config):
+    """Resolve ambiguity against the surviving groups, preserving raw evidence."""
+    settings = config.data['recognition']
+    for row in db.execute('SELECT * FROM observations WHERE scan=? AND rejected IS NULL ORDER BY cue,id', (scan,)):
+        query = vector(row)
+        ranked = []
+        for group in groups:
+            mean, minimum = _similarities(group, query)
+            if (mean >= settings['match_threshold'] - settings['ambiguity_margin'] and
+                    minimum >= config.data['clustering']['cohesion_threshold']):
+                ranked.append((mean, group.identifier))
+        ranked.sort(key=lambda item: (-item[0], item[1]))
+        person, status, reason = None, 'withheld', 'insufficient_match_or_cohesion'
+        if ranked and ranked[0][0] >= settings['match_threshold']:
+            if len(ranked) > 1 and ranked[0][0] - ranked[1][0] < settings['ambiguity_margin']:
+                reason = 'ambiguous_identity'
+            else:
+                person, status, reason = ranked[0][1], 'accepted', 'known_identity'
+                db.execute('INSERT OR IGNORE INTO members VALUES (?,?)', (row['id'], person))
+        candidate = str(uuid.uuid5(uuid.UUID(row['id']), policy))
+        db.execute("UPDATE candidates SET person=?,status=?,payload=json_set(payload,'$.reason',?,'$.scores',json(?)) "
+                   'WHERE id=?', (person, status, reason, encoded([r[0] for r in ranked[:2]]), candidate))

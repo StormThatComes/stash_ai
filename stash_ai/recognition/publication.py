@@ -69,6 +69,9 @@ def perform(database, client, report, *, scope, scene, person, kind, target, pay
 
 
 def ensure_person(database, client, report, scope, scene, person):
+    from .identity_merges import canonical
+    if canonical(database.connection, person) != person:
+        raise PendingRecognition('Merged identity cannot recreate its former Stash profile.')
     row = database.connection.execute('SELECT * FROM people WHERE id=? AND scope=?', (person, scope)).fetchone()
     if row is None:
         raise ValueError('Accepted recognition identity is missing or belongs to another Stash instance.')
@@ -110,8 +113,10 @@ def ensure_person(database, client, report, scope, scene, person):
     return value['id']
 
 
-def publish_person(database, client, report, scope, scene, person):
+def publish_person(database, client, report, scope, scene, person, *, merge_counts=None):
     performer = ensure_person(database, client, report, scope, scene, person)
+    from .merge_publication import sync_merges
+    sync_merges(database, client, report, scope, person, performer, counts=merge_counts)
     live = client.scene(scene)
     existing = {checked_id(item)['id'] for item in live['performers']}
     identifier = operation_id(scope, scene, person, 'link')

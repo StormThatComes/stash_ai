@@ -7,7 +7,7 @@ import time
 import uuid
 
 APPLICATION_ID = 0x46524347  # FRCG; never accept a tagger or arbitrary database.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 SCHEMA = '''
 CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE runs (id TEXT PRIMARY KEY, scope TEXT NOT NULL, selection TEXT NOT NULL,
@@ -43,6 +43,16 @@ CREATE TABLE progress (run TEXT NOT NULL REFERENCES runs(id), phase TEXT NOT NUL
 '''
 TABLES = ('metadata', 'runs', 'models', 'scans', 'observations', 'people', 'members',
           'candidates', 'publications', 'portraits', 'progress')
+SCHEMA_V1, TABLES_V1 = SCHEMA, TABLES
+MERGE_SCHEMA = '''
+CREATE TABLE identity_merges (source TEXT PRIMARY KEY REFERENCES people(id),
+ target TEXT NOT NULL REFERENCES people(id), created REAL NOT NULL,
+ evidence TEXT NOT NULL, status TEXT NOT NULL, CHECK(source<>target),
+ CHECK(status IN ('pending','confirmed','observed','local')));
+CREATE INDEX identity_merges_target ON identity_merges(target);
+'''
+SCHEMA += MERGE_SCHEMA
+TABLES += ('identity_merges',)
 
 
 def encoded(value):
@@ -93,13 +103,28 @@ class FaceDatabase(AbstractContextManager):
             except BaseException:
                 db.rollback()
                 raise
-        elif (db.execute('PRAGMA application_id').fetchone()[0] != APPLICATION_ID
-              or version != SCHEMA_VERSION or tables != set(TABLES)):
+        elif version == 1 and db.execute('PRAGMA application_id').fetchone()[0] == APPLICATION_ID:
+            self._validate(SCHEMA_V1, TABLES_V1, tables)
+            try:
+                db.executescript('BEGIN IMMEDIATE;\n' + MERGE_SCHEMA)
+                db.execute(f'PRAGMA user_version={SCHEMA_VERSION}')
+                db.commit()
+            except BaseException:
+                db.rollback()
+                raise
+        elif db.execute('PRAGMA application_id').fetchone()[0] != APPLICATION_ID or version != SCHEMA_VERSION:
+            raise ValueError('Unsupported or incomplete facial recognition schema; restore a consistent backup.')
+        tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        self._validate(SCHEMA, TABLES, tables)
+
+    def _validate(self, schema, tables, actual_tables):
+        db = self.connection
+        if actual_tables != set(tables):
             raise ValueError('Unsupported or incomplete facial recognition schema; restore a consistent backup.')
         # Validate full column shape, not only the existence of tables.
         with closing(sqlite3.connect(':memory:')) as reference:
-            reference.executescript(SCHEMA)
-            for table in TABLES:
+            reference.executescript(schema)
+            for table in tables:
                 expected = [(r[1], r[2], r[3], r[5]) for r in reference.execute(f'PRAGMA table_info({table})')]
                 actual = [(r[1], r[2], r[3], r[5]) for r in db.execute(f'PRAGMA table_info({table})')]
                 if expected != actual:

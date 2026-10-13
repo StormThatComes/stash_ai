@@ -109,6 +109,8 @@ class Stash:
         self.links = {'1': ['77'], '2': []}
         self.media_calls, self.writes, self.reads = [], [], []
         self.fail_create = self.fail_link = False
+        self.fail_merge = False
+        self.merge_visible = True
         self.create_visible = True
         self.images = {}
         self.media = SimpleNamespace(get=self.get)
@@ -134,6 +136,23 @@ class Stash:
     def performer(self, identifier):
         self.reads.append(('performer', identifier))
         return dict(self.profiles[identifier])
+
+    def lookup_performer(self, identifier):
+        self.reads.append(('lookup_performer', identifier))
+        return dict(self.profiles[identifier]) if identifier in self.profiles else None
+
+    def merge_person(self, source, destination, details):
+        self.writes.append(('merge', source, destination))
+        if self.merge_visible:
+            for scene, links in self.links.items():
+                self.links[scene] = list(dict.fromkeys(destination if p == source else p for p in links))
+            self.profiles[destination]['details'] = details
+            del self.profiles[source]
+            self.images.pop(source, None)
+        if self.fail_merge:
+            self.fail_merge = False
+            raise TimeoutError('lost merge response')
+        return self.performer(destination)
 
     def find_token(self, token):
         return [dict(p) for p in self.profiles.values() if token in p['details'].splitlines()]

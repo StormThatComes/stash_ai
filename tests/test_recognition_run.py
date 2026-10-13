@@ -185,3 +185,98 @@ def test_reference_history_write_cannot_commit_failed_matching(tmp_path, monkeyp
         assert state.connection.execute('SELECT COUNT(*) FROM members').fetchone()[0] == 3
         assert state.connection.execute('SELECT COUNT(*) FROM candidates').fetchone()[0] == 3
         assert state.connection.execute("SELECT COUNT(*) FROM candidates c JOIN scans s ON s.id=c.scan WHERE s.scene='2'").fetchone()[0] == 0
+
+
+def test_later_scene_merges_earlier_metadata_target_and_preserves_oldest_profile(tmp_path, monkeypatch, capsys):
+    import math
+    import numpy as np
+    config, client, services, _ = setup(tmp_path, monkeypatch)
+    strict = replace(config, data=plain(config.data))
+    strict.data['recognition'].update(match_threshold=.9, ambiguity_margin=.01)
+    assert run(strict, services, '1') == 0
+    oldest = client.links['1'][-1]
+    values = iter([np.array([x, math.sqrt(1-x*x), 0., 0.]) for x in [.61, .61, .88]])
+    def varied(*args):
+        backend = Backend()
+        backend.embed = lambda image, face: next(values)
+        return backend
+    services.backend = varied
+    assert run(strict, services, '2') == 0
+    youngest = client.links['2'][0]
+    assert oldest != youngest
+    targets = []
+    services.metadata = lambda database, client, report, config, plan, scope, target, *args, **kwargs: targets.append(target) or {}
+    services.backend = lambda *args: Backend(vector=np.array([1.8, .6, 0., 0.]) / math.sqrt(3.6))
+    assert run(config, services, '2', '10') == 0
+    assert youngest not in client.profiles and client.links['2'] == [oldest]
+    assert len(targets) == 1 and targets[0]['performer'] == oldest
+    assert [s['scene'] for s in targets[0]['scans']] == ['2', '10']
+    assert 'identities_merged_in_stash=1' in capsys.readouterr().out
+    writes = list(client.writes)
+    services.backend = lambda *args: pytest.fail('merge rerun must reuse retained embeddings')
+    assert run(config, services, '2', '10') == 0
+    assert client.writes == writes
+    with FaceDatabase(config.database) as db:
+        assert db.connection.execute('SELECT COUNT(*) FROM identity_merges').fetchone()[0] == 1
+        assert db.connection.execute('SELECT status FROM identity_merges').fetchone()[0] == 'confirmed'
+
+
+def test_merge_publishes_even_when_third_rival_keeps_selected_scene_ambiguous(tmp_path, monkeypatch):
+    import math
+    config, client, services, _ = setup(tmp_path, monkeypatch)
+    strict = replace(config, data=plain(config.data))
+    strict.data['recognition'].update(match_threshold=.98, ambiguity_margin=.01)
+    performers = []
+    for scene, vector in [('1', [1.,0,0,0]), ('2', [.8,.6,0,0]), ('3', [.35,math.sqrt(1-.35**2),0,0])]:
+        services.backend = lambda *args, vector=vector: Backend(vector=vector)
+        assert run(strict, services, scene) == 0
+        performers.append(client.links[scene][-1])
+    services.backend = lambda *args: Backend(vector=[.8,.6,0,0])
+    assert run(config, services, '10') == 0
+    assert performers[1] not in client.profiles
+    assert performers[2] in client.profiles
+    assert client.links['10'] == []
+    assert client.links['2'] == [performers[0]]
+    with FaceDatabase(config.database) as db:
+        summary = json.loads(db.connection.execute('SELECT summary FROM runs ORDER BY started DESC LIMIT 1').fetchone()[0])
+        assert summary['counts']['identities_merged_in_stash'] == 1
+        assert summary['counts']['observations_withheld'] == 3
+
+
+def test_unrelated_selected_scene_does_not_resume_uncertain_merge(tmp_path, monkeypatch):
+    config, client, services, _ = setup(tmp_path, monkeypatch)
+    strict = replace(config, data=plain(config.data))
+    strict.data['recognition'].update(match_threshold=.98, ambiguity_margin=.01)
+    assert run(strict, services, '1') == 0
+    services.backend = lambda *args: Backend(vector=[.8,.6,0,0])
+    assert run(strict, services, '2') == 0
+    client.fail_merge, client.merge_visible = True, False
+    services.backend = lambda *args: Backend(vector=[.8,.6,0,0])
+    assert run(config, services, '10') == 1
+    assert sum(w[0] == 'merge' for w in client.writes) == 1
+    services.backend = lambda *args: Backend(vector=[0,0,1.,0])
+    assert run(config, services, '99') == 0
+    assert sum(w[0] == 'merge' for w in client.writes) == 1
+    assert run(config, services, '10') == 1
+    assert sum(w[0] == 'merge' for w in client.writes) == 1
+
+
+def test_local_merge_does_not_bypass_incompatible_published_namespace(tmp_path, monkeypatch):
+    import math
+    config, client, services, _ = setup(tmp_path, monkeypatch)
+    assert run(config, services, '99') == 0
+    writes = list(client.writes)
+    other = replace(config, data=plain(config.data))
+    other.data['models']['recognizer'] = 'auraface'
+    strict = replace(other, data=plain(other.data))
+    strict.data['recognition'].update(match_threshold=.98, ambiguity_margin=.01)
+    assert run(strict, services, '1') == 0
+    services.backend = lambda *args: Backend(vector=[.8,.6,0,0])
+    assert run(strict, services, '2') == 0
+    services.backend = lambda *args: Backend(vector=[1.8 / math.sqrt(3.6), .6 / math.sqrt(3.6), 0, 0])
+    assert run(other, services, '10') == 0
+    assert client.writes == writes
+    assert client.links['1'] == ['77'] and client.links['2'] == [] and client.links['10'] == []
+    with FaceDatabase(config.database) as db:
+        assert db.connection.execute('SELECT COUNT(*) FROM identity_merges').fetchone()[0] == 1
+        assert db.connection.execute('SELECT status FROM identity_merges').fetchone()[0] == 'pending'
