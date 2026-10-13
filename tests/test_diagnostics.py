@@ -3,6 +3,7 @@
 from copy import deepcopy
 import json
 from types import SimpleNamespace
+from threading import Event, Thread
 
 import pytest
 
@@ -89,6 +90,30 @@ def test_codec_measures_bytes_without_changing_persisted_format(tmp_path):
     assert scene['counts']['state_blob_bytes_read'] == scene['counts']['state_blob_bytes_written'] == len(encoded)
     assert scene['counts']['state_json_bytes_read'] == scene['counts']['state_json_bytes_written'] > len(encoded)
     assert set(scene['stages']) == {'state_json_encode', 'state_compress', 'state_decompress', 'state_json_decode'}
+
+
+def test_late_http_worker_does_not_attach_stages_to_a_completed_or_new_scene(tmp_path):
+    report = RunReport(write=lambda _: None)
+    entered, release = Event(), Event()
+    path = tmp_path/'late.jsonl'
+    def operation():
+        entered.set()
+        release.wait(1)
+        with report.measure('late_http'):
+            pass
+    with MergeDiagnostics(report, path) as diagnostics:
+        with diagnostics.scene('old'):
+            worker = Thread(target=report.bind_read(operation))
+            worker.start()
+            assert entered.wait(1)
+        with diagnostics.scene('new'):
+            release.set()
+            worker.join(1)
+            assert not worker.is_alive()
+    data = records(path)
+    assert all('late_http' not in row['stages'] for row in data if row['type'] == 'scene')
+    assert data[-1]['stages']['late_http']['calls'] == 1
+    assert not diagnostics.active_scenes
 
 
 def test_interrupted_profile_keeps_completed_rows_and_closes_file(tmp_path):
