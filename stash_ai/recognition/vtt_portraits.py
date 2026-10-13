@@ -11,7 +11,7 @@ from .database import encoded
 from .media import safe_url
 from .models import checked_detection
 from .portraits import identity_reason, policy_identity
-from .quality import portrait_bytes, portrait_score, rejection
+from .quality import PortraitFramingError, portrait_bytes, portrait_score, rejection
 from .visibility import cached as cached_visibility, required as visibility_required
 
 
@@ -141,6 +141,10 @@ def choose_vtt(database, client, config, scope, target, source_factory, visibili
                     data, bounds = portrait_bytes(image, checked_detection(metadata['geometry']), policy,
                                                  limit=config.data['storage']['max_crop_bytes'])
                 metadata.update(crop=bounds, pixels=[bounds[2] - bounds[0], bounds[3] - bounds[1]])
+            except PortraitFramingError:
+                metadata['reason'] = 'portrait_framing_ineligible'
+                store(database, identifier, scope, target, scene, metadata)
+                continue
             except Exception:
                 metadata['reason'] = 'vtt_source_unavailable_or_changed'
                 store(database, identifier, scope, target, scene, metadata)

@@ -49,6 +49,12 @@ def endpoint():
                     assert variables['input']['ids'] == ['1'] and association['mode'] == 'ADD'
                     state.performers = list(dict.fromkeys([*state.performers, *association['ids']]))
                     result = {'bulkSceneUpdate': [{'id': '1', 'performers': [{'id': p} for p in state.performers]}]}
+            elif 'StashAIRecognitionMetadata' in query:
+                # Stash v0.31.1 processes an included empty image string as an
+                # empty image BLOB, and returns its default-image URL afterward.
+                assert variables == {'input': {'id': '5', 'image': ''}}
+                result = {'performerUpdate': {'id': '5', 'name': 'AI Person', 'details': 'owned-token',
+                    'image_path': f'http://127.0.0.1:{self.server.server_port}/performer/5/image?t=1&default=true'}}
             else:
                 raise AssertionError(query)
             body = json.dumps(result if status == 400 else {'data': result}).encode()
@@ -74,6 +80,14 @@ def endpoint():
 
 def links(state):
     return [call for call in state.calls if 'StashAIRecognitionLink' in call['query']]
+
+
+def test_performer_image_removal_sends_included_empty_string_and_recognizes_placeholder():
+    from stash_ai.recognition.portraits import missing_image
+    with endpoint() as (client, state):
+        value = client.update_person('5', image='')
+        assert missing_image(value, client, '5')
+        assert state.calls[-1]['variables'] == {'input': {'id': '5', 'image': ''}}
 
 
 def person(db):

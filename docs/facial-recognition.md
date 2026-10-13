@@ -234,11 +234,29 @@ Refresh requires the live image bytes to still match the last acknowledged
 application image digest. Existing manual images and manual replacements,
 including replacements served at the same URL, are preserved. Unchanged policy
 does not cause an image write, and a changed policy yielding identical JPEG bytes
-only updates stored provenance. If no replacement meets the new requirements,
-the current image is retained. `enabled: false` neither updates nor removes
-photos. Changes to `source`, framing, quality filters or ranking are included in
+only updates stored provenance. If a complete evaluation finds no replacement
+meeting the new requirements, the old application-owned image is removed from
+Stash. Setting `enabled: false` also removes the application-owned image for
+selected accepted people. Manual images/replacements are preserved in both
+cases. Changes to `source`, framing, quality filters or ranking are included in
 the portrait policy identity. A lost update response is reconciled against the
 new image digest; seeing the old image does not authorize a blind retry.
+
+Removal uses the same intent-before-dispatch image journal, records the policy
+and old image digest, and freshly verifies ownership/image bytes before clearing
+Stash with `image: ""`. The acknowledgement and a fresh performer read must both
+confirm absence. Removed JPEG evidence remains in SQLite; no person, scene link
+or manual metadata is deleted. An unchanged rejecting/disabled policy does not
+repeat the removal, and relaxing/re-enabling the policy can refill the portrait
+from retained evidence. The summary reports `portraits_removed` when a removal
+is confirmed. Lost removal responses are reconciled by observing absence; if the
+old image remains, `--retry-unresolved-images` explicitly permits another attempt.
+
+A media/source/decoder failure is an incomplete evaluation, not proof that no
+portrait qualifies. Such failures retain the current image and report a metadata
+failure rather than deleting it. Visibility model failures also retain it. An
+impossible configured aspect ratio or crop byte limit is a framing rejection,
+so a complete evaluation with no alternative removes the old owned image.
 
 If output says `Earlier image write is unresolved`, the previous attempt may
 have reached Stash without a confirmed response. A normal rerun acknowledges it

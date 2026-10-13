@@ -161,8 +161,13 @@ class Stash:
         self.writes.append(('metadata', performer, fields))
         if 'image' in fields:
             import base64
-            self.images[performer] = base64.b64decode(fields.pop('image').split(',', 1)[1])
-            fields['image_path'] = self.url + f'performer/{performer}/image?t=123'
+            image = fields.pop('image')
+            if image == '':
+                self.images.pop(performer, None)
+                fields['image_path'] = self.url + f'performer/{performer}/image?t=123&default=true'
+            else:
+                self.images[performer] = base64.b64decode(image.split(',', 1)[1])
+                fields['image_path'] = self.url + f'performer/{performer}/image?t=123'
         self.profiles[performer].update(fields)
         return self.performer(performer)
 
