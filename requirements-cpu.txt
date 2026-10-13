@@ -1,5 +1,5 @@
 --extra-index-url https://download.pytorch.org/whl/cpu
-# Complete application: taggers and facial recognition (YuNet/SFace/AuraFace).
+# Complete application: taggers and facial recognition (YuNet/SFace/AuraFace/FaceOcc).
 
 # JoyTag
 torch==2.14.0+cpu

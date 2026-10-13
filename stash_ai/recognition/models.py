@@ -20,6 +20,9 @@ class Asset:
 
 
 ASSETS = {
+    'faceocc': Asset('mertakin/FaceOcc', '03f229dc75fa14ae480cca9810f983912c2730ad',
+                     'model.safetensors', '5d6d27a9cb221692425840a80eb4efc07e6245670b233e2eb618e83fd9b7caf6',
+                     57377516, 'MIT'),
     'yunet': Asset('opencv/face_detection_yunet', '3cc26e7f1014a5ee5d74a42acee58bafc9d0a310',
                    'face_detection_yunet_2023mar.onnx',
                    '8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4', 232589, 'MIT'),
@@ -47,7 +50,11 @@ def ensure_assets(config, *, write=print):
     runtime(config)  # Fail clearly before downloads for an unusable device/profile.
     from stash_ai.backends.downloads import install_hf_asset
     result = {}
-    for key in (config.data['models']['detector'], config.data['models']['recognizer']):
+    from .visibility import required
+    selected = [config.data['models']['detector'], config.data['models']['recognizer']]
+    if config.data['portraits']['enabled'] and required(config.data['portraits']):
+        selected.append('faceocc')
+    for key in selected:
         asset = ASSETS[key]
         path = config.model_dir / key / asset.filename
         if not path.is_file():

@@ -60,7 +60,9 @@ ONNX taggers, and actual detector/embedding devices are recorded in face SQLite.
 existing custom/corrupt files are never silently overwritten.
 
 Normal core tests do not download models. Recognition CPU CI jobs install the complete application CPU profile and
-load pinned detector/recognizers on Linux and Windows. GPU provider routing,
+load pinned detector/recognizers and FaceOcc on Linux and Windows. A public-domain
+portrait with a synthetic lower-face covering tests the real visibility mask;
+this is a behavior smoke, not domain accuracy calibration. GPU provider routing,
 strict fallback handling and device overrides are tested without GPU hardware;
 these hosted jobs do not claim actual CUDA inference. This is a runtime,
 alignment and embedding-shape smoke test, not an accuracy benchmark.
@@ -145,12 +147,21 @@ journal payload and ownership, independently of a later names YAML edit.
 
 Portraits default to the original VTT thumbnail used for an accepted recognition
 observation. The retained geometry and embedding select and verify that person's
-face without running detection/recognition a second time. The selected scene's
-VTT/sprite content is checked against the scan fingerprint before extracting a
+face without running detection/recognition a second time. Semantic visibility
+assessment runs its own FaceOcc segmentation once per observation and is cached
+independently. The selected scene's VTT/sprite content is checked against the scan
+fingerprint before extracting a
 wider crop from the full thumbnail. No video stream, FFmpeg process or video
-decoder is used in this mode. Sheets share a bounded cache within a scene's
-portrait selection. The portrait can have lower source resolution than a video
-frame; no upscaling invents additional detail.
+decoder is used in this mode. All retained observations belonging to the accepted
+person in the selected scans are evaluated, without `max_candidates`, a sharpness
+shortlist or temporal/scene sampling. Quality, identity and visibility gates run
+before the final weighted ranking. Only the highest-ranked usable observation is
+encoded as a JPEG; an unavailable source or impossible crop tries the next ranked
+observation. Other eligible candidates retain metadata, not additional JPEG BLOBs.
+Existing prepared JPEGs remain reusable and rejected caches keep their bytes for
+provenance. Only one scene's source/sprite cache is active at a time.
+The portrait can have lower source resolution than a video frame; no upscaling
+invents additional detail.
 
 Configure framing and JPEG encoding in `facial_recognition.yml`:
 
@@ -161,6 +172,8 @@ portraits:
   margin: 0.35            # Add 35% of face width/height on each side.
   aspect_ratio: null     # Keep padded face shape; 0.8 requests a 4:5 portrait.
   jpeg_quality: 90       # Integer 1..100.
+  min_visible_face_fraction: 0.80
+  weights: {visibility: 3.0}
 ```
 
 The default requested VTT portrait is 1.7 times the detected face width/height,
@@ -176,9 +189,42 @@ ranking weights apply to both modes and can also be changed in YAML.
 `portraits.source: video` retains the video-frame mode. Install system FFmpeg
 (or configure `portraits.ffmpeg`); absence or unsupported/budget-limited video
 is recorded as an image skip while links remain eligible. `time_offsets`,
-`timeout_seconds`, `max_video_bytes` and `ffmpeg` in the portraits section are
+`max_candidates`, `timeout_seconds`, `max_video_bytes` and `ffmpeg` in the portraits section are
 used only by the video source. A source failure never silently falls back to the
 other mode.
+
+`portraits.min_visible_face_fraction` is a number in `[0, 1]`, default `0.8`:
+require at least 80% estimated visible facial surface. `portraits.weights.visibility`
+is a nonnegative ranking weight, default `3.0`, which favors more visible faces
+among candidates that meet the gates. A zero threshold removes the visibility
+gate; a zero weight removes its ranking contribution. Set both to zero to disable
+visibility model downloads/inference entirely. Unknown YAML keys still fail validation.
+
+The pinned MIT-licensed FaceOcc v1.0.0 SafeTensors model predicts visible face
+versus background/occluder pixels. Its U-Net/ResNet18 runs on the existing
+application torch/torchvision CPU or CUDA profile, with no SMP/timm dependency or
+ImageNet weight download. `models.device: cuda` stays strict; only explicit `auto`
+allows CPU fallback. One lazy segmentation model is shared across selected people
+and closed at the end of the invocation. Enabled visibility failures withhold the
+portrait and report a metadata failure; they never imply that a face is uncovered.
+
+The application reports the fraction of mask-positive pixels (`logit > 0`) within
+a fixed elliptical face region derived from the detector box, excluding artificial
+padding. The model input is a fixed square crop around that box, resized to RGB
+256x256 with ImageNet normalization. Portrait `margin`, aspect ratio and JPEG
+encoding do not change this denominator. This is a model estimate of visible
+surface, not an exact anatomical percentage or an occluder type classifier. Hair,
+beards, glasses, pose, box/alignment error and low-resolution thumbnails can affect it;
+the default gate is not calibrated to an operator's VTT library. The application
+does not infer hidden features from landmark placement.
+
+VTT measurements, contract/model digest, pixel counts and device are retained in
+observation quality and selected portrait metadata in the face SQLite. Changing
+framing, ranking weights or the visibility threshold reuses these measurements
+without repeating face recognition or segmentation. A changed source/model contract
+requires a fresh measurement. Video measures the actual decoded face and retains
+that result in portrait metadata. Attribution and pinned inference provenance are
+in [faceocc-attribution.md](faceocc-attribution.md).
 
 On the next explicit `recognition run`, changed portrait settings re-evaluate
 selected accepted people and refresh their application-owned images. The face
@@ -221,7 +267,7 @@ placeholder filename. A fresh check immediately before the mutation also protect
 images supplied during extraction. Stash has no atomic image/name compare-and-set
 mutation: a server-side edit between this check and dispatch remains a race.
 
-The shortlist alternates selected scenes and spreads cue times. In video mode at most
+The video shortlist alternates selected scenes and spreads cue times. At most
 `max_candidates` observations times `time_offsets` are evaluated; each selected
 scene decoder shares one byte/time budget across its seeks. Only selected-scene
 video is fetched, even for a historically known person. FFmpeg receives an owned

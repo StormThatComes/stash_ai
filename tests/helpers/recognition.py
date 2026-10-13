@@ -85,6 +85,20 @@ class Backend:
         self.closed = True
 
 
+class Visibility:
+    """Synthetic visibility only; real model behavior has a separate opt-in smoke."""
+    def __init__(self, *args):
+        self.calls, self.closed = 0, False
+
+    def measure(self, image, face):
+        from stash_ai.recognition.visibility import CONTRACT_ID
+        self.calls += 1
+        return {'visible_face_fraction': 1., 'visibility': {'contract': CONTRACT_ID, 'device': 'cpu'}}
+
+    def close(self):
+        self.closed = True
+
+
 class Stash:
     """Fake server preserves manual links and can lose mutation responses."""
     url = 'http://stash/'

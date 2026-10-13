@@ -33,15 +33,16 @@ portraits:
   min_exposure: 30.0
   max_exposure: 225.0
   max_clipped_fraction: 0.15
+  min_visible_face_fraction: 0.80 # Estimated visible fraction of the face region; 0 disables this gate.
   margin: 0.35                 # Extra padding per side, relative to face width/height.
   aspect_ratio: null           # null = padded face shape; 0.8 = 4:5 portrait (width/height).
   jpeg_quality: 90             # 1..100. Framing/quality changes refresh app-owned images on the next run.
-  max_candidates: 8
+  max_candidates: 8           # Video only. VTT ranks all retained observations of selected people.
   time_offsets: [0.0, -0.5, 0.5] # Video only.
   timeout_seconds: 30.0        # Video only.
   max_video_bytes: 67108864    # Video only.
   ffmpeg: ffmpeg               # Video only; executable name or path.
-  weights: {frontal: 3.0, sharpness: 2.0, resolution: 1.0, exposure: 1.0}
+  weights: {frontal: 3.0, sharpness: 2.0, resolution: 1.0, exposure: 1.0, visibility: 3.0}
 execution:
   max_cues: 0                  # 0 = all cues in the selected scene, not all scenes.
   checkpoint_cues: 32

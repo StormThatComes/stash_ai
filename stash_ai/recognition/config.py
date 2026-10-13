@@ -25,10 +25,10 @@ def defaults():
         'portraits': {'enabled': True, 'source': 'vtt', 'min_face_pixels': 96, 'min_sharpness': 25.,
                      'max_pose_deviation': .35, 'min_exposure': 30., 'max_exposure': 225.,
                      'max_clipped_fraction': .15, 'margin': .35, 'aspect_ratio': None,
-                     'jpeg_quality': 90, 'max_candidates': 8,
+                     'jpeg_quality': 90, 'min_visible_face_fraction': .8, 'max_candidates': 8,
                      'time_offsets': [0., -.5, .5], 'timeout_seconds': 30.,
                      'max_video_bytes': 67108864, 'ffmpeg': 'ffmpeg',
-                     'weights': {'frontal': 3., 'sharpness': 2., 'resolution': 1., 'exposure': 1.}},
+                     'weights': {'frontal': 3., 'sharpness': 2., 'resolution': 1., 'exposure': 1., 'visibility': 3.}},
         'execution': {'max_cues': 0, 'checkpoint_cues': 32, 'timeout_seconds': 120.},
         'storage': {'database': 'faces_state.sqlite3', 'max_crop_bytes': 1048576},
         'names': {'file': None},
@@ -113,7 +113,7 @@ def validate(data):
         'detection': ('score_threshold', 'nms_threshold'),
         'recognition': ('match_threshold', 'ambiguity_margin'),
         'clustering': ('cohesion_threshold',),
-        'portraits': ('max_pose_deviation', 'max_clipped_fraction', 'margin'),
+        'portraits': ('max_pose_deviation', 'max_clipped_fraction', 'margin', 'min_visible_face_fraction'),
     }.items():
         for key in names:
             _number(data[section][key], f'{section}.{key}', 0, 1)
