@@ -82,11 +82,11 @@ scans cannot publish identities. Partial sampling and rejected/no-face outcomes
 remain explicit coverage information, not proof that a person is absent.
 
 Recognition has no byte ceiling on VTT/sprite inputs, no fixed VTT cue-count
-ceiling, and no pixel ceiling on decoded images or detector input. Optional
-`execution.max_cues` still selects an evenly distributed sample; `0` processes
-all cues in the selected scene. The retired `max_vtt_bytes`, `max_media_bytes`
-and `max_image_pixels` execution keys have been removed from the configuration
-and bundled template. Remove them from existing local YAML before running;
+or sprite-sheet count ceiling, and no pixel ceiling on decoded images or detector
+input. Optional `execution.max_cues` still selects an evenly distributed sample; `0` processes
+all cues in the selected scene. The retired `max_vtt_bytes`, `max_media_bytes`,
+`max_image_pixels` and `max_sheets` execution keys have been removed from the
+configuration and bundled template. Remove them from existing local YAML before running;
 unknown keys are rejected rather than ignored.
 
 Tagging and recognition share a Pillow reader that disables decompression-bomb

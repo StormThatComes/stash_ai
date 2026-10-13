@@ -18,7 +18,7 @@ from stash_ai.vtt import format_time
 from tests.helpers.recognition import MediaClient, Response
 
 
-RETIRED = {'max_image_pixels', 'max_media_bytes', 'max_vtt_bytes'}
+RETIRED = {'max_image_pixels', 'max_media_bytes', 'max_vtt_bytes', 'max_sheets'}
 
 
 @pytest.fixture(autouse=True)
@@ -114,3 +114,32 @@ def test_sprite_above_sixteen_mib_downloads_and_decodes(tmp_path):
 def test_invalid_images_still_fail_without_suppressing_general_validation():
     with pytest.raises(Image.UnidentifiedImageError):
         open_image(BytesIO(b'not an image'))
+
+
+def test_more_than_256_sheets_are_verified_with_bounded_cache_and_correct_resolution(tmp_path):
+    output = BytesIO()
+    with Image.new('RGB', (1, 1), 'red') as image:
+        image.save(output, format='PNG')
+    sprite = output.getvalue()
+    text = 'WEBVTT\n\n' + '\n\n'.join(
+        f'{format_time(i)} --> {format_time(i+1)}\nsheet{i}.png#xywh=0,0,1,1' for i in range(257))
+    calls = []
+    def get(url, **kwargs):
+        calls.append(url)
+        if url == 'http://stash/vtt/list.vtt':
+            return Response(text.encode())
+        assert url.startswith('http://stash/vtt/sheet') and url.endswith('.png')
+        return Response(sprite)
+    client = SimpleNamespace(url='http://stash', media=SimpleNamespace(get=get))
+    # A single-sheet override must not replace these distinct VTT sources.
+    scene = {'paths': {'vtt': '/vtt/list.vtt', 'sprite': '/unused.jpg'}}
+    with SpriteInput(client, scene, load(root=tmp_path)) as source:
+        assert len(source.hashes) == 257 and len(source.manifest['sheets']) == 257
+        assert len(source.cache) == 2 and len(calls) == 258
+        assert source.cues[0].image == 'http://stash/vtt/sheet0.png'
+        assert source.cues[-1].image == 'http://stash/vtt/sheet256.png'
+        count = 0
+        for index, cue, image in source.frames():
+            assert image.getpixel((0, 0)) == (255, 0, 0)
+            count += 1
+        assert count == 257 and not source.cache
