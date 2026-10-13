@@ -486,6 +486,12 @@ or Stash. Filters cover command, status and model; a limit of 1–10000
 selects the newest matching runs (50 by default). Existing report files
 are not overwritten.
 
+Legacy runs without a configuration fingerprint remain visible in isolated,
+explicitly incomparable groups. Invalid metric entries are excluded from the
+export and aggregates, with warning counts and at most 20 diagnostic examples;
+the stored history is unchanged. Reconciliation leaves non-object or malformed
+owner configurations unverified while continuing other selected run IDs.
+
 Each run records status, wall time, parent CPU time, configuration hashes,
 worker settings, models and revisions, available weight/vocabulary hashes,
 change and error counts, and stage/API timing. API keys, media URLs,
