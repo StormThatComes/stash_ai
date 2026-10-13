@@ -69,11 +69,11 @@ def test_automatic_video_portrait_is_scoped_stored_and_rerun_preserves_image(tmp
         assert rows[0]['image'] and rows[0]['digest']
     writes = list(stash.writes)
     assert run(config, services, '2') == 0
-    assert len(Decoder.instances) == 1  # existing portrait prevents other video fetches
+    assert len(Decoder.instances) == 2  # a newly selected scene can supply a better portrait
     assert sum(w[0] == 'metadata' for w in stash.writes) == 1
 
 
-def test_wrong_identity_video_is_skipped_without_breaking_links(tmp_path, monkeypatch):
+def test_wrong_identity_video_uses_recognition_thumbnail_without_breaking_links(tmp_path, monkeypatch):
     config, stash, services = setup(tmp_path, monkeypatch)
     calls = 0
     def backend(*args):
@@ -82,10 +82,13 @@ def test_wrong_identity_video_is_skipped_without_breaking_links(tmp_path, monkey
         return Backend(vector=(1, 0, 0, 0) if calls == 1 else (0, 1, 0, 0))
     services.backend = backend
     assert run(config, services, '1') == 0
-    assert len(stash.links['1']) == 2 and not stash.images
+    assert len(stash.links['1']) == 2 and stash.images
     with FaceDatabase(config.database) as db:
-        metadata = json.loads(db.connection.execute('SELECT metadata FROM portraits').fetchone()[0])
+        metadata = json.loads(db.connection.execute("SELECT metadata FROM portraits WHERE json_extract(metadata,'$.source_type')='video'").fetchone()[0])
         assert metadata['exclusions'][0]['reason'] == 'portrait_identity_mismatch'
+        fallback = json.loads(db.connection.execute("SELECT metadata FROM portraits WHERE status='published'").fetchone()[0])
+        assert fallback['source_type'] == 'vtt' and fallback['requested_source'] == 'video'
+        assert 'actual_seconds' not in fallback
 
 
 def test_image_supplied_during_extraction_is_preserved(tmp_path, monkeypatch):
@@ -171,7 +174,7 @@ def test_name_concurrent_edit_and_unknown_write_are_not_overwritten(tmp_path, mo
 
 
 def test_portrait_quality_ranks_complete_frontal_sharp_face():
-    from stash_ai.recognition.quality import portrait_score, rejection
+    from stash_ai.recognition.quality import portrait_score, portrait_shortfalls
     from stash_ai.recognition.config import defaults
     policy = defaults()['portraits']
     good = dict(complete=True, landmarks_inside=True, pixels=128, sharpness=500,
@@ -180,7 +183,8 @@ def test_portrait_quality_ranks_complete_frontal_sharp_face():
                            ({'landmarks_inside': False}, 'face_incomplete'),
                            ({'sharpness': 1}, 'face_blurred'), ({'pixels': 32}, 'face_too_small'),
                            ({'pose_deviation': .8}, 'face_pose'), ({'exposure': 250}, 'face_exposure')]:
-        assert rejection({**good, **changed}, policy, portrait=True) == reason
+        assert reason in portrait_shortfalls({**good, **changed}, policy)
+        assert portrait_score(good, policy) > portrait_score({**good, **changed}, policy)
     assert portrait_score(good, policy) > portrait_score({**good, 'pose_deviation': .3, 'sharpness': 30}, policy)
 
 

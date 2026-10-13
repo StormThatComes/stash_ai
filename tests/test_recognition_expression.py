@@ -120,7 +120,7 @@ def test_video_weight_changes_reuse_actual_frame_scores_jpegs_and_embeddings(tmp
 
 
 @pytest.mark.parametrize('source', ['vtt', 'video'])
-def test_expression_failure_preserves_old_owned_photo_and_closes_model(tmp_path, monkeypatch, source):
+def test_expression_failure_keeps_a_portrait_and_closes_model(tmp_path, monkeypatch, source):
     config, stash, services = (vtt_setup(tmp_path, monkeypatch)[:3] if source == 'vtt'
                                 else video_setup(tmp_path, monkeypatch))
     assert run(config, services, '1') == 0
@@ -129,18 +129,18 @@ def test_expression_failure_preserves_old_owned_photo_and_closes_model(tmp_path,
     model.measure = lambda *args: {'open_mouth': float('nan')}
     services.expression = lambda *args: model
     changed = change(config, weights={'closed_mouth': 2})
-    assert run(changed, services, '1') == 1
+    assert run(changed, services, '1') == 0
     assert stash.images == images and stash.writes == writes and model.closed
-    assert last_counts(config)['portraits_failed'] == 1
+    assert last_counts(config).get('portraits_failed', 0) == 0
     assert last_counts(config).get('portraits_removed', 0) == 0
 
 
 @pytest.mark.parametrize('source', ['vtt', 'video'])
-def test_quality_rejection_precedes_expression_measurement(tmp_path, monkeypatch, source):
-    config, stash, services, _ = setup(tmp_path, monkeypatch, source, closed_mouth=2)
+def test_imperfect_face_still_receives_expression_preferences(tmp_path, monkeypatch, source):
+    config, stash, services, model = setup(tmp_path, monkeypatch, source, closed_mouth=2)
     config = change(config, min_face_pixels=200)
-    services.expression = no_inference
-    assert run(config, services, '1') == 0 and not stash.images
+    assert run(config, services, '1') == 0 and stash.images
+    assert model.calls > 0 and model.closed
 
 
 def test_zero_expression_weights_do_not_initialize_model(tmp_path, monkeypatch):

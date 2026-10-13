@@ -30,7 +30,7 @@ def last_counts(config):
 
 @pytest.mark.parametrize('source', ['vtt', 'video'])
 @pytest.mark.parametrize('restriction', ['quality', 'visibility', 'framing', 'disabled'])
-def test_policy_rejection_removes_only_owned_photo_once_and_restoring_policy_refills(tmp_path, monkeypatch, source, restriction):
+def test_quality_goals_keep_a_photo_and_only_disabling_removes_it(tmp_path, monkeypatch, source, restriction):
     config, stash, services = setup(tmp_path, monkeypatch, source)
     assert run(config, services, '1') == 0
     performer = stash.links['1'][-1]
@@ -57,18 +57,25 @@ def test_policy_rejection_removes_only_owned_photo_once_and_restoring_policy_ref
     else:
         changed = change(config, enabled=False)
     assert run(changed, services, '1') == 0
-    assert performer not in stash.images
-    assert missing_image(stash.performer(performer), stash, performer)
     assert stash.links['1'] == ['77', performer]
-    assert last_counts(config)['portraits_removed'] == 1
     operation = image_operation(config)
     payload = json.loads(operation['payload'])
-    assert operation['status'] == 'confirmed' and payload['action'] == 'remove' and payload['sha256'] is None
-    assert json.loads(operation['precondition'])['image_sha256'] == hashlib.sha256(original_image).hexdigest()
+    if restriction == 'disabled':
+        assert performer not in stash.images
+        assert missing_image(stash.performer(performer), stash, performer)
+        assert last_counts(config)['portraits_removed'] == 1
+        assert operation['status'] == 'confirmed' and payload['action'] == 'remove' and payload['sha256'] is None
+        assert json.loads(operation['precondition'])['image_sha256'] == hashlib.sha256(original_image).hexdigest()
+    else:
+        assert performer in stash.images and not missing_image(stash.performer(performer), stash, performer)
+        assert last_counts(config).get('portraits_removed', 0) == 0
+        assert 'action' not in payload and payload['sha256'] == hashlib.sha256(stash.images[performer]).hexdigest()
     with FaceDatabase(config.database) as db:
         row = db.connection.execute('SELECT * FROM portraits WHERE id=?',
                                     (json.loads(original_operation['payload'])['portrait'],)).fetchone()
-        assert row['status'] == 'removed' and row['image'] == original_image  # keep evidence, clear Stash only
+        assert row['image'] == original_image  # keep original evidence in both cases
+        if restriction == 'disabled':
+            assert row['status'] == 'removed'
         assert db.connection.execute('SELECT COUNT(*) FROM scans').fetchone()[0] == 1
     writes = list(stash.writes)
     assert run(changed, services, '1') == 0
@@ -87,7 +94,7 @@ def test_policy_rejection_removes_only_owned_photo_once_and_restoring_policy_ref
     config.source_path.write_text(original_config)
     assert run(load(config.source_path), services, '1') == 0
     assert stash.images[performer] == original_image
-    assert len(image_writes(stash)) == 3
+    assert len(image_writes(stash)) == (3 if restriction == 'disabled' or restriction == 'visibility' and source == 'vtt' else 1)
 
 
 @pytest.mark.parametrize('disabled', [False, True])
@@ -106,7 +113,7 @@ def test_uncertain_removal_reconciles_or_requires_explicit_retry(tmp_path, monke
     config, stash, services = setup(tmp_path, monkeypatch, 'vtt')
     assert run(config, services, '1') == 0
     performer = stash.links['1'][-1]
-    changed = change(config, min_face_pixels=200)
+    changed = change(config, enabled=False)
     original, calls = stash.update_person, []
     def lost(identifier, **fields):
         assert fields == {'image': ''}
@@ -139,26 +146,25 @@ def test_uncertain_removal_reconciles_or_requires_explicit_retry(tmp_path, monke
 
 @pytest.mark.parametrize('kind', ['image', 'ownership'])
 def test_concurrent_manual_change_before_removal_is_preserved(tmp_path, monkeypatch, kind):
-    import stash_ai.recognition.portraits as portraits
+    import stash_ai.recognition.portrait_removal as removal
     config, stash, services = setup(tmp_path, monkeypatch, 'vtt')
     assert run(config, services, '1') == 0
     performer = stash.links['1'][-1]
-    changed = change(config, min_face_pixels=200)
-    choose = portraits.choose
+    changed = change(config, enabled=False)
+    remove = removal.remove_owned
     def concurrent(*args, **kwargs):
-        result = choose(*args, **kwargs)
         if kind == 'image':
             stash.images[performer] = b'concurrent manual replacement'
         else:
             stash.profiles[performer]['details'] = 'ownership changed'
-        return result
-    monkeypatch.setattr(portraits, 'choose', concurrent)
+        return remove(*args, **kwargs)
+    monkeypatch.setattr(removal, 'remove_owned', concurrent)
     assert run(changed, services, '1') == (0 if kind == 'image' else 1)
     assert performer in stash.images and len(image_writes(stash)) == 1
 
 
 @pytest.mark.parametrize('source', ['vtt', 'video'])
-def test_source_failure_after_policy_change_does_not_mean_no_eligible_portrait(tmp_path, monkeypatch, source, capsys):
+def test_source_failure_after_policy_change_uses_available_recognition_pixels(tmp_path, monkeypatch, source, capsys):
     config, stash, services = setup(tmp_path, monkeypatch, source)
     assert run(config, services, '1') == 0
     initial = dict(stash.images)
@@ -174,9 +180,14 @@ def test_source_failure_after_policy_change_does_not_mean_no_eligible_portrait(t
         services.source = fail
     else:
         services.decoder = lambda *args: (_ for _ in ()).throw(TimeoutError('video unavailable'))
-    assert run(changed, services, '1') == 1
-    assert stash.images == initial and len(image_writes(stash)) == 1
-    assert 'Portrait evaluation is incomplete' in capsys.readouterr().out
+    assert run(changed, services, '1') == 0
+    assert set(stash.images) == set(initial) and len(image_writes(stash)) == 2
+    operation = image_operation(config)
+    with FaceDatabase(config.database) as db:
+        metadata = json.loads(db.connection.execute('SELECT metadata FROM portraits WHERE id=?',
+                              (json.loads(operation['payload'])['portrait'],)).fetchone()[0])
+        assert metadata['fallback'] and metadata['source_type'] == ('recognition_crop' if source == 'vtt' else 'vtt')
+    assert last_counts(config)['portraits_fallback'] == 1
 
 
 def test_removal_only_visits_people_accepted_in_selected_scenes(tmp_path, monkeypatch):
@@ -192,7 +203,7 @@ def test_removal_only_visits_people_accepted_in_selected_scenes(tmp_path, monkey
     assert run(config, services, '2') == 0
     second = stash.links['2'][-1]
     assert first != second
-    changed = change(config, min_face_pixels=200)
+    changed = change(config, enabled=False)
     assert run(changed, services, '2') == 0
     assert first in stash.images and second not in stash.images
     assert len(image_writes(stash)) == 3
@@ -215,15 +226,16 @@ def test_visibility_model_failure_retains_old_photo_instead_of_removing_it(tmp_p
     model = Visibility()
     model.measure = lambda *args: (_ for _ in ()).throw(RuntimeError('visibility unavailable'))
     services.visibility = lambda *args: model
-    assert run(changed, services, '1') == 1
-    assert stash.images == initial and len(image_writes(stash)) == 1
+    assert run(changed, services, '1') == 0
+    assert set(stash.images) == set(initial) and len(image_writes(stash)) == 2
+    assert last_counts(config).get('portraits_removed', 0) == 0
 
 
 def test_manual_replacement_after_uncertain_removal_is_not_removed_on_retry(tmp_path, monkeypatch):
     config, stash, services = setup(tmp_path, monkeypatch, 'vtt')
     assert run(config, services, '1') == 0
     performer = stash.links['1'][-1]
-    changed = change(config, min_face_pixels=200)
+    changed = change(config, enabled=False)
     def lost(*args, **kwargs):
         raise TimeoutError('removal was not applied')
     original = stash.update_person

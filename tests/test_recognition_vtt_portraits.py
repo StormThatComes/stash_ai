@@ -157,7 +157,7 @@ def test_uncertain_portrait_refresh_is_reconciled_or_withheld_without_retry(tmp_
             'observed' if applied else 'unknown')
 
 
-def test_changed_sprite_between_recognition_and_portraits_is_withheld(tmp_path, monkeypatch):
+def test_changed_sprite_uses_the_retained_recognition_pixels(tmp_path, monkeypatch):
     config, stash, services, _ = setup(tmp_path, monkeypatch)
     class ChangedSource(SpriteInput):
         def __enter__(self):
@@ -166,21 +166,24 @@ def test_changed_sprite_between_recognition_and_portraits_is_withheld(tmp_path, 
             return self
     services.source = ChangedSource
     assert run(config, services, '1') == 0
-    assert len(stash.links['1']) == 2 and not stash.images
+    assert len(stash.links['1']) == 2 and stash.images
     with FaceDatabase(config.database) as db:
-        assert all(json.loads(row[0])['reason'] == 'vtt_source_unavailable_or_changed'
-                   for row in db.connection.execute('SELECT metadata FROM portraits'))
+        row = db.connection.execute("SELECT metadata FROM portraits WHERE status='published'").fetchone()
+        metadata = json.loads(row[0])
+        assert metadata['source_type'] == 'recognition_crop'
+        assert metadata['fallback']['reason'] == 'vtt_source_unavailable_or_changed'
+        assert metadata['crop_coordinate_system'] == 'retained_recognition_crop'
 
 
-def test_stricter_yaml_quality_removes_owned_photo_when_no_replacement_qualifies(tmp_path, monkeypatch):
+def test_stricter_yaml_quality_rescores_owned_photo_without_removing_it(tmp_path, monkeypatch):
     config, stash, services, _ = setup(tmp_path, monkeypatch)
     assert run(config, services, '1') == 0
     performer = stash.links['1'][-1]
     write_config(config.source_path, min_face_pixels=200)
     assert run(load(config.source_path), services, '1') == 0
-    assert performer not in stash.images and len(image_writes(stash)) == 2
+    assert performer in stash.images and len(image_writes(stash)) == 1
     assert run(load(config.source_path), services, '1') == 0
-    assert len(image_writes(stash)) == 2
+    assert len(image_writes(stash)) == 1
 
 
 def test_selected_scene_vtt_shortlist_never_reads_historical_other_scene(tmp_path, monkeypatch):
@@ -236,7 +239,7 @@ def test_switching_portrait_sources_refreshes_the_same_owned_performer(tmp_path,
     assert sum(write[0] == 'create' for write in stash.writes) == 1
 
 
-def test_vtt_identity_ambiguity_is_withheld_without_reading_portrait_source(tmp_path, monkeypatch):
+def test_vtt_current_run_assignment_can_illustrate_a_group_despite_late_ambiguity(tmp_path, monkeypatch):
     import stash_ai.recognition.vtt_portraits as vtt
     from stash_ai.recognition.clustering import Group
     config, stash, services, _ = setup(tmp_path, monkeypatch, enabled=False)
@@ -248,10 +251,10 @@ def test_vtt_identity_ambiguity_is_withheld_without_reading_portrait_source(tmp_
     monkeypatch.setattr(vtt, '_groups', ambiguous)
     write_config(config.source_path)
     assert run(load(config.source_path), services, '1') == 0
-    assert not stash.images
-    assert stash.media_calls.count('http://stash/sprite/1.jpg') == 2  # scans only
+    assert stash.images
+    assert stash.media_calls.count('http://stash/sprite/1.jpg') == 3  # scans and one portrait source
     with FaceDatabase(config.database) as db:
-        assert all(json.loads(row[0])['reason'] == 'portrait_identity_ambiguous'
+        assert all(json.loads(row[0])['identity_basis'] == 'current_run_accepted_assignment'
                    for row in db.connection.execute('SELECT metadata FROM portraits'))
 
 

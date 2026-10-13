@@ -112,7 +112,9 @@ def test_legacy_video_cache_without_embedding_keeps_bytes_but_is_not_published(t
         metadata.pop('identity_embedding')
         with db.connection:
             db.connection.execute('UPDATE portraits SET metadata=?', (json.dumps(metadata),))
-        assert choose(db, Stash(), config, 'scope', target, {}, no_inference, no_inference) is None
+        fallback = choose(db, Stash(), config, 'scope', target, {}, no_inference, no_inference)
+        assert fallback is not None and fallback['id'] != winner['id']
+        assert json.loads(fallback['metadata'])['source_type'] == 'vtt'
         assert db.connection.execute('SELECT image FROM portraits WHERE id=?', (winner['id'],)).fetchone()[0] == winner['image']
 
 

@@ -275,9 +275,12 @@ The default policy is labeled uncalibrated for a user's domain in stored provena
 ## Automatic portraits and operator names
 
 Candidate eligibility is rechecked when the compatible identity references
-change, using retained embeddings without rescanning media. Cached VTT and
-video portrait images also require current identity eligibility before a new
-publication. Existing confirmed/manual associations and images are preserved.
+change, using retained embeddings without rescanning media. VTT portraits can
+illustrate an accepted assignment under the current matching policy, including
+one accepted earlier in this run before a later scene added competing references.
+Historical membership alone cannot override a current rejected assignment.
+Decoded video faces and cached video embeddings require an independent identity
+comparison. Existing confirmed/manual associations and images are preserved.
 Older cached video portraits without retained identity vectors keep their bytes
 but cannot authorize a new upload; no replacement inference runs merely to
 upgrade their cache. Unknown name writes are reconciled against their original
@@ -292,10 +295,12 @@ fingerprint before extracting a
 wider crop from the full thumbnail. No video stream, FFmpeg process or video
 decoder is used in this mode. All retained observations belonging to the accepted
 person in the selected scans are evaluated, without `max_candidates`, a sharpness
-shortlist or temporal/scene sampling. Quality, identity and visibility gates run
-before the final weighted ranking. Only the highest-ranked usable observation is
-encoded as a JPEG; an unavailable source or impossible crop tries the next ranked
-observation. Other eligible candidates retain metadata, not additional JPEG BLOBs.
+shortlist or temporal/scene sampling. Quality targets and visibility are soft
+ranking preferences: a blurry, angled, partially covered or incomplete face can
+still supply the best available portrait. Only the highest-ranked usable
+observation is encoded as a JPEG; an unavailable source tries the next ranked
+observation. If no original thumbnail is usable, the retained recognition crop
+supplies a smaller fallback portrait. Other candidates retain metadata, not additional JPEG BLOBs.
 Existing prepared JPEGs remain reusable and rejected caches keep their bytes for
 provenance. Only one scene's source/sprite cache is active at a time.
 The portrait can have lower source resolution than a video frame; no upscaling
@@ -318,12 +323,57 @@ portraits:
 The default requested VTT portrait is 1.7 times the detected face width/height,
 compared with the recognition cache crop's 1.3 times. Padding is limited by the
 full thumbnail boundaries. An optional width/height aspect ratio expands the
-crop, shifts it inside the source, and reduces padding if necessary; an
-impossible ratio that would cut the face is skipped. Actual crop coordinates,
+crop, shifts it inside the source, and reduces padding if necessary. If the
+requested ratio would cut the face, the crop uses the available padded face
+shape instead. `jpeg_quality` is preferred: encoding lowers JPEG quality and,
+if needed, image dimensions to fit `storage.max_crop_bytes`, without upscaling.
+Actual crop coordinates,
 source rectangle, observation/cue, input fingerprint, quality, identity scores
 and source type remain in face SQLite. The cue time describes the VTT cue, not
-a claimed decoder-measured video timestamp. Existing portrait quality gates and
-ranking weights apply to both modes and can also be changed in YAML.
+a claimed decoder-measured video timestamp. Fallbacks record both
+`requested_source` and actual `source_type` (`vtt` or `recognition_crop`), with
+the actual crop coordinate system and fallback reason.
+
+### Best available quality targets
+
+The existing YAML keys retain their names and default values, but portrait
+minimums/maximums now describe preferred quality rather than eligibility:
+
+| Portrait setting | Default | Effect on ranking |
+| --- | ---: | --- |
+| `min_face_pixels` | 96 | Extra resolution penalty below the preferred shorter face-box side; 0 removes this penalty |
+| `min_sharpness` | 25 | Extra sharpness penalty below the preferred Laplacian variance; 0 removes this penalty |
+| `max_pose_deviation` | 0.35 | Increasing penalty above the preferred five-landmark pose estimate |
+| `min_exposure`, `max_exposure` | 30, 225 | Favor mean brightness near the center of the preferred range |
+| `max_clipped_fraction` | 0.15 | Extra exposure penalty above the preferred fraction of near-black/white pixels |
+| `min_visible_face_fraction` | 0.80 | Extra visibility penalty below the preferred visible-face estimate |
+
+Resolution, sharpness, pose and visibility also retain their general quality
+scores. Each preference affects its corresponding nonnegative `weights` entry;
+zero weight removes that component from the main score. The score is a bounded
+weighted average. Equal scores use general face quality, then stable time/ID
+ordering. All weights may be zero: selection then uses general quality without
+loading optional models. For example, a 70px face below a 96px target remains a
+candidate; a sharp, frontal 120px face usually scores better, while the 70px face
+can still be the only available portrait.
+
+Missing optional visibility/expression measurements contribute zero to their
+enabled components. They do not imply an uncovered face or neutral expression,
+and do not prevent a portrait. Initialization failures are attempted once per
+component per run and reported as a warning; a later run can retry. Missing,
+invalid or unavailable optional model assets also produce warnings and unavailable
+cues, without accepting unchecked files. Detector/recognizer assets and the
+required recognition runtime remain mandatory. Strict CUDA
+model routing remains unchanged, with no implicit neural CPU fallback.
+Detection `min_face_pixels`, `min_sharpness` and `score_threshold` remain hard
+recognition filters, independently of these portrait preferences.
+
+The chosen metadata records `quality_shortfalls`, optional `quality_errors`,
+actual encoding settings and any adjusted padding/ratio/downscaling. Run summaries
+count `portraits_quality_limited` and `portraits_fallback`, including preserved
+portraits. These diagnostics help tune detection and group matching without
+hiding imperfect accepted faces. If no identity-verified image pixels can be
+recovered, the existing owned image is preserved; a missing image is skipped.
 
 ### Portrait expression, mouth and eye preferences
 
@@ -349,13 +399,14 @@ portraits:
     open_eyes: 2.0
 ```
 
-These scores join the existing weighted average after identity, size, sharpness,
-pose, exposure and visibility gates. They are soft preferences, not absolute
+These scores join the quality weighted average after identity verification.
+They are soft preferences, not absolute
 precedence or rejection thresholds: a sufficiently better portrait can still win
 with a smile/open mouth. Prefer one mouth weight; equal positive `open_mouth` and
 `closed_mouth` weights sum to a constant and cancel the mouth preference. All
-ranking weights together must have a positive sum. Expression-only ranking is
-supported, with deterministic time/ID ordering for the video's initial hints.
+ranking weights may also be zero, using general quality as the tie-breaker.
+Expression-only ranking is supported, with general quality breaking equal scores
+and deterministic time/ID ordering for the video's initial hints.
 
 Two pinned ONNX exports of [MediaPipe Face Landmarker](https://developers.google.com/edge/mediapipe/solutions/vision/face_landmarker)
 produce a mesh and blendshape coefficients. The original Google bundle is
@@ -401,18 +452,19 @@ shortlist or candidate cap. It caches raw coefficients, derived scores and a
 model/preprocessing contract and runtime provenance in the observation's existing SQLite quality
 JSON. Changing weights/framing reuses valid measurements without another identity
 scan or expression inference; no FFmpeg is used. Video mode measures the actual
-decoded face, retaining its evidence in portrait metadata. When only weights
-change, compatible cached frames/JPEGs are rescored with fresh identity checks
-without video decoding or neural inference. Other video policy changes and frames
-without valid measurements may need decoding again; the existing video candidate
-and offset limits still apply.
+decoded face, retaining its evidence in portrait metadata. Changed quality targets
+and weights rescore compatible cached frames/JPEGs with fresh identity checks
+without video decoding or repeated successful inference. Missing optional cues
+on a verified cached video JPEG can be retried from those pixels without a seek;
+metadata records `quality_source: cached_portrait`. Other video policy changes
+may need decoding again; the existing video candidate and offset limits still apply.
 
 The weights and measurement contract participate in portrait policy identity.
 The next selected-scene run updates an application-owned Stash image if a
 different winner produces different JPEG bytes, and repeated runs do not repeat
 that update. Manual replacements remain protected. Missing, invalid, unmatched or
-failed expression measurements withhold the portrait update and preserve the old
-owned image rather than deleting it as a policy rejection. Disabling all four
+failed expression measurements lower ranking confidence and record an unavailable
+cue; they do not withhold the portrait. Disabling all four
 weights reranks using the original quality criteria and keeps cached expression
 evidence. No face-identity namespace or SQLite schema migration is introduced.
 
@@ -425,25 +477,27 @@ tests; hosted CPU jobs do not claim measurements on actual CUDA hardware.
 
 `portraits.source: video` retains the video-frame mode. Install system FFmpeg
 (or configure `portraits.ffmpeg`); absence or unsupported/budget-limited video
-is recorded as an image skip while links remain eligible. `time_offsets`,
+is recorded on the video candidate while links remain eligible. `time_offsets`,
 `max_candidates`, `timeout_seconds`, `max_video_bytes` and `ffmpeg` in the portraits section are
-used only by the video source. A source failure never silently falls back to the
-other mode.
+used only by the video source. When no usable identity-verified video portrait is
+found, selection tries accepted VTT observations and then retained recognition
+crops. Metadata records the fallback rather than claiming a video frame/time.
 
 `portraits.min_visible_face_fraction` is a number in `[0, 1]`, default `0.8`:
-require at least 80% estimated visible facial surface. `portraits.weights.visibility`
-is a nonnegative ranking weight, default `3.0`, which favors more visible faces
-among candidates that meet the gates. A zero threshold removes the visibility
-gate; a zero weight removes its ranking contribution. Set both to zero to disable
-visibility model downloads/inference entirely. Unknown YAML keys still fail validation.
+prefer at least 80% estimated visible facial surface. `portraits.weights.visibility`
+is a nonnegative ranking weight, default `3.0`, which favors more visible faces.
+A zero target removes the extra shortfall penalty while retaining the base
+visibility score. A zero weight disables visibility model downloads/inference
+and removes its main ranking contribution. Unknown YAML keys still fail validation.
 
 The pinned MIT-licensed FaceOcc v1.0.0 SafeTensors model predicts visible face
 versus background/occluder pixels. Its U-Net/ResNet18 runs on the existing
 application torch/torchvision CPU or CUDA profile, with no SMP/timm dependency or
 ImageNet weight download. `models.device: cuda` stays strict; only explicit `auto`
 allows CPU fallback. One lazy segmentation model is shared across selected people
-and closed at the end of the invocation. Enabled visibility failures withhold the
-portrait and report a metadata failure; they never imply that a face is uncovered.
+and closed at the end of the invocation. Visibility failures record an unavailable
+cue and warning while ranking other available quality; they never imply that a
+face is uncovered and do not block its portrait.
 
 The application reports the fraction of mask-positive pixels (`logit > 0`) within
 a fixed elliptical face region derived from the detector box, excluding artificial
@@ -452,7 +506,7 @@ padding. The model input is a fixed square crop around that box, resized to RGB
 encoding do not change this denominator. This is a model estimate of visible
 surface, not an exact anatomical percentage or an occluder type classifier. Hair,
 beards, glasses, pose, box/alignment error and low-resolution thumbnails can affect it;
-the default gate is not calibrated to an operator's VTT library. The application
+the default target is not calibrated to an operator's VTT library. The application
 does not infer hidden features from landmark placement.
 
 VTT measurements, contract/model digest, pixel counts and device are retained in
@@ -468,13 +522,14 @@ selected accepted people and refresh their application-owned images. The face
 scan and its embeddings remain reusable when only portrait settings change.
 Refresh requires the live image bytes to still match the last acknowledged
 application image digest. Existing manual images and manual replacements,
-including replacements served at the same URL, are preserved. Unchanged policy
-does not cause an image write, and a changed policy yielding identical JPEG bytes
-only updates stored provenance. If a complete evaluation finds no replacement
-meeting the new requirements, the old application-owned image is removed from
-Stash. Setting `enabled: false` also removes the application-owned image for
-selected accepted people. Manual images/replacements are preserved in both
-cases. Changes to `source`, framing, quality filters or ranking are included in
+including replacements served at the same URL, are preserved. New selected
+scenes can improve a portrait under the same policy; a worse candidate does not
+replace a better acknowledged image. Changed preferences re-evaluate the best
+available choice. Identical JPEG bytes cause no remote image write; changed
+policy/winner provenance can still be stored. Quality shortfalls and unavailable
+sources/models never remove an owned portrait. Setting `enabled: false` removes
+the application-owned image for selected accepted people, preserving manual
+images/replacements. Changes to `source`, framing, quality targets or ranking are included in
 the portrait policy identity. A lost update response is reconciled against the
 new image digest; seeing the old image does not authorize a blind retry.
 
@@ -482,17 +537,16 @@ Removal uses the same intent-before-dispatch image journal, records the policy
 and old image digest, and freshly verifies ownership/image bytes before clearing
 Stash with `image: ""`. The acknowledgement and a fresh performer read must both
 confirm absence. Removed JPEG evidence remains in SQLite; no person, scene link
-or manual metadata is deleted. An unchanged rejecting/disabled policy does not
-repeat the removal, and relaxing/re-enabling the policy can refill the portrait
+or manual metadata is deleted. An unchanged disabled policy does not
+repeat the removal, and re-enabling the policy can refill the portrait
 from retained evidence. The summary reports `portraits_removed` when a removal
 is confirmed. Lost removal responses are reconciled by observing absence; if the
 old image remains, `--retry-unresolved-images` explicitly permits another attempt.
 
-A media/source/decoder failure is an incomplete evaluation, not proof that no
-portrait qualifies. Such failures retain the current image and report a metadata
-failure rather than deleting it. Visibility model failures also retain it. An
-impossible configured aspect ratio or crop byte limit is a framing rejection,
-so a complete evaluation with no alternative removes the old owned image.
+Source/decoder failures try the fallback chain before preserving the current
+image. Impossible configured aspect ratios adapt to the available face shape;
+oversized JPEGs lower quality or dimensions while respecting the byte budget.
+There is no quality-rejection removal path.
 
 If output says `Earlier image write is unresolved`, the previous attempt may
 have reached Stash without a confirmed response. A normal rerun acknowledges it
@@ -531,12 +585,12 @@ same-origin requests, video byte/deadline budgets and decoder log limits apply.
 Requested and actual times use scene-relative seconds. The
 decoder records raw frame PTS and the source timeline origin separately, using
 the same FFmpeg invocation to normalize nonzero container starts before checking
-seek consistency. Missing timestamps or a changing timeline origin withhold the
-portrait. Actual presentation times, identity comparisons, quality,
+seek consistency. Missing timestamps or a changing timeline origin exclude that
+video frame and allow the fallback chain. Actual presentation times, identity comparisons, quality,
 exclusions, crop/margin, policy and final bounded JPEG BLOBs stay in face SQLite.
 The best evaluated crop under these budgets is not a global-best-frame claim.
-Visibility remains the documented five-landmark estimate, not semantic occlusion
-detection. Failed decoding may be retried on a later explicit run.
+Five-landmark geometry estimates pose/completeness; FaceOcc estimates semantic
+visibility. Failed decoding may be retried on a later explicit run.
 
 Configure `names.file: performer_names.yml` to opt into this separate optional file:
 

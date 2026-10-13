@@ -1,4 +1,4 @@
-"""Converge an owned Stash portrait to absence after a complete policy rejection."""
+"""Explicit portrait disabling and reconciliation of uncertain image intents."""
 import json
 
 from .database import encoded
@@ -15,18 +15,6 @@ def retry_precondition(previous):
                         'payload': json.loads(previous['payload']),
                         'image_sha256': json.loads(previous['precondition']).get('image_sha256'),
                         'error': previous['error']}}
-
-
-def selection_incomplete(database, scope, target, policy_sha):
-    scans = [item['scan'] for item in target['scans']]
-    row = database.connection.execute('''SELECT 1 FROM portraits WHERE scope=? AND person=?
-      AND json_extract(metadata,'$.policy_sha')=?
-      AND json_extract(metadata,'$.scan') IN (SELECT value FROM json_each(?))
-      AND json_extract(metadata,'$.reason') IN
-        ('vtt_source_unavailable_or_changed','video_unavailable_or_budget_exceeded',
-         'portrait_identity_unverified','face_visibility_unavailable','face_expression_unavailable') LIMIT 1''',
-      (scope, target['person'], policy_sha, encoded(scans))).fetchone()
-    return row is not None
 
 
 def remove_owned(database, client, report, config, scope, target, token, baseline, previous, *, reason):

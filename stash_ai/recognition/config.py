@@ -127,7 +127,7 @@ def validate(data):
         'recognition': {'min_support': (2, 1000)},
         'clustering': {'max_samples_per_person': (2, 128), 'max_people_per_lookup': (1, 100000),
                        'max_reference_bytes': (1048576, 1073741824)},
-        'portraits': {'min_face_pixels': (8, 4096), 'max_candidates': (1, 64), 'jpeg_quality': (1, 100),
+        'portraits': {'min_face_pixels': (0, 4096), 'max_candidates': (1, 64), 'jpeg_quality': (1, 100),
                       'max_video_bytes': (1048576, 1073741824)},
         'execution': {'max_cues': (0, 10000), 'checkpoint_cues': (1, 1000)},
         'storage': {'max_crop_bytes': (1024, 8388608)},
@@ -157,8 +157,6 @@ def validate(data):
         _number(offset, 'portraits.time_offsets', -5, 5)
     for key, value in portrait['weights'].items():
         _number(value, f'portraits.weights.{key}', 0, 100)
-    if not sum(portrait['weights'].values()):
-        raise ValueError('Portrait ranking weights cannot all be zero.')
     for section, key in (('models', 'directory'), ('storage', 'database'), ('portraits', 'ffmpeg')):
         value = data[section][key]
         if not isinstance(value, str) or not value.strip() or '\x00' in value:

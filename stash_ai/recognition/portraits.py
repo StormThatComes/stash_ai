@@ -12,10 +12,11 @@ from .database import encoded
 from .media import bounded_media, safe_url, SpriteInput
 from .models import normalized_embedding
 from .publication import operation_id, perform, PendingRecognition, save_operation
-from .quality import PortraitFramingError, assess, portrait_bytes, portrait_score, rejection
+from .quality import PortraitFramingError, assess, portrait_bytes, portrait_score, portrait_tiebreak, portrait_shortfalls
+from .portrait_availability import measure_available, score_metadata, refresh_cached_quality
 from .stash import checked_id, owns
-from .visibility import LazyVisibility, CONTRACT_ID, VisibilityError, cached as cached_visibility, required as visibility_required
-from .expression import LazyExpression, ExpressionError, CONTRACT_ID as EXPRESSION_CONTRACT_ID, required as expression_required
+from .visibility import LazyVisibility, CONTRACT_ID
+from .expression import LazyExpression, CONTRACT_ID as EXPRESSION_CONTRACT_ID
 
 
 def policy_identity(config):
@@ -23,7 +24,9 @@ def policy_identity(config):
     if policy['source'] == 'vtt':
         for name in ('max_candidates', 'time_offsets', 'timeout_seconds', 'max_video_bytes', 'ffmpeg'):
             policy.pop(name)
-    return digest({'version': 2, 'portraits': policy,
+    from .visibility import required as visibility_required
+    from .expression import required as expression_required
+    return digest({'version': 3, 'portraits': policy,
                    'recognition': plain(config.data['recognition']), 'clustering': plain(config.data['clustering']),
                    'visibility_contract': CONTRACT_ID if visibility_required(policy) else None,
                    'expression_contract': EXPRESSION_CONTRACT_ID if expression_required(policy) else None})
@@ -90,7 +93,8 @@ def identity_reason(vector, groups, person, config):
     return None, score, runner
 
 
-def recheck_cached(database, existing, groups, config, target, namespace, context, *, evidence=None):
+def recheck_cached(database, existing, groups, config, target, namespace, context, *, evidence=None,
+                   client=None, visibility=None, expression=None):
     """Keep the JPEG but refresh its eligibility from retained identity evidence."""
     import numpy as np
     metadata = json.loads(existing['metadata'])
@@ -109,14 +113,10 @@ def recheck_cached(database, existing, groups, config, target, namespace, contex
         query = retained_vector(evidence)
         reason, similarity, runner = identity_reason(query, groups, target['person'], config)
         if not reason:
+            if client is not None:
+                refresh_cached_quality(client, existing, updated, config.data['portraits'], visibility, expression)
             quality = metadata.get('quality', {})
-            reason = rejection(quality, config.data['portraits'], portrait=True, visibility=False, expression=False)
-            if not reason and visibility_required(config.data['portraits']) and not cached_visibility(quality):
-                reason = 'face_visibility_unavailable'
-            if not reason:
-                reason = rejection(quality, config.data['portraits'], portrait=True)
-            if not reason:
-                updated['score'] = portrait_score(quality, config.data['portraits'])
+            score_metadata(updated, updated.get('quality', quality), config.data['portraits'])
     except (KeyError, TypeError, ValueError):
         # Older video portraits lack an embedding. Preserve their bytes, but do
         # not infer from a new source or publish unverified old eligibility.
@@ -171,16 +171,18 @@ def choose(database, client, config, scope, target, paths, backend_factory, deco
                     existing = reuse(database, config, scope, target, row, scene_id, seconds, person['namespace'],
                                      identifier, policy_sha, selection)
                 if existing and existing['image'] is not None:
-                    existing = recheck_cached(database, existing, groups, config, target, person['namespace'], context)
+                    existing = recheck_cached(database, existing, groups, config, target, person['namespace'], context,
+                                              client=client, visibility=visibility, expression=expression)
                     if existing is not None:
                         metadata = json.loads(existing['metadata'])
-                        key = (-metadata['score'], scene_id, seconds, identifier)
+                        key = (-metadata['score'], -metadata['quality_tiebreak'], scene_id, seconds, identifier)
                         if winning_key is None or key < winning_key:
                             winner, winning_key = existing, key
                     continue
                 if backend is None:
                     backend = backend_factory(config, paths)
-                metadata = {'version': 1, 'source_type': 'video', 'selection_policy': 'identity-first-full-face-v1',
+                metadata = {'version': 3, 'source_type': 'video', 'requested_source': 'video',
+                            'selection_policy': 'best-available-video-identity-first-v3',
                             'policy_sha': policy_sha, 'policy': plain(policy), 'shortlist': selection,
                             'observation': row['id'], 'scan': row['scan'], 'scene': scene_id,
                             'person': target['person'], 'performer': target['performer'],
@@ -199,50 +201,44 @@ def choose(database, client, config, scope, target, paths, backend_factory, deco
                         exclusions = []
                         for face in backend.detect(image):
                             quality = assess(image, face)
-                            reason = rejection(quality, policy, portrait=True, visibility=False, expression=False)
-                            x, y, width, height = face.box
-                            if not reason and (x - width * policy['margin'] < 0 or y - height * policy['margin'] < 0 or
-                                    x + width * (1 + policy['margin']) > image.width or
-                                    y + height * (1 + policy['margin']) > image.height):
-                                reason = 'portrait_margin_clipped'
                             similarity, runner = None, None
-                            if not reason:
+                            try:
                                 vector = normalized_embedding(backend.embed(image, face), backend.dimensions)
                                 reason, similarity, runner = identity_reason(vector, groups, target['person'], config)
-                            if not reason and visibility_required(policy):
-                                quality.update(visibility.measure(image, face))
-                                reason = rejection(quality, policy, portrait=True, expression=False)
-                            if not reason and expression_required(policy):
-                                quality.update(expression.measure(image, face))
-                            if not reason:
-                                reason = rejection(quality, policy, portrait=True)
+                            except Exception:
+                                reason = 'portrait_identity_unverified'
                             record = {'geometry': list(face.row), 'quality': quality, 'reason': reason,
                                       'similarity': similarity, 'runner_up': runner}
                             if reason:
                                 exclusions.append(record)
                             else:
+                                record['quality_errors'] = measure_available(client, image, face, quality, policy, visibility, expression)
                                 record['identity_embedding'] = {'dimensions': backend.dimensions, 'values': vector.tolist()}
                                 record['reference_context'] = context
-                                record['score'] = portrait_score(quality, policy)
+                                score_metadata(record, quality, policy)
                                 candidates.append((record, face))
                         metadata['exclusions'] = exclusions
-                        if candidates:
-                            record, face = min(candidates, key=lambda pair: (-pair[0]['score'], pair[0]['geometry']))
-                            image_bytes, bounds = portrait_bytes(image, face, policy,
-                                                                limit=config.data['storage']['max_crop_bytes'])
+                        for record, face in sorted(candidates, key=lambda pair: (-pair[0]['score'], -pair[0]['quality_tiebreak'], pair[0]['geometry'])):
+                            encoding = {}
+                            try:
+                                image_bytes, bounds = portrait_bytes(image, face, policy,
+                                                                    limit=config.data['storage']['max_crop_bytes'], details=encoding)
+                            except PortraitFramingError:
+                                exclusions.append({**record, 'reason': 'portrait_encoding_unavailable'})
+                                continue
                             metadata.update(record)
-                            metadata['crop'] = bounds
+                            metadata.update(crop=bounds, encoding=encoding, pixels=encoding['pixels'], crop_coordinate_system='video_frame')
+                            break
                         else:
-                            metadata['reason'] = 'no_identity_verified_full_face'
+                            metadata['reason'] = 'portrait_encoding_unavailable' if candidates else 'no_identity_verified_face'
                 except KeyboardInterrupt:
                     raise
-                except (VisibilityError, ExpressionError):
-                    raise
                 except PortraitFramingError:
-                    metadata['reason'] = 'portrait_framing_ineligible'
+                    metadata['reason'] = 'portrait_encoding_unavailable'
                 except Exception:
                     # Decoder/source limitations are honest image skips, not
-                    # failed profile/link publication or relabeled VTT crops.
+                    # failed profile/link publication. A fallback retains its
+                    # actual VTT/recognition source in separate metadata.
                     metadata['reason'] = 'video_unavailable_or_budget_exceeded'
                 sha = hashlib.sha256(image_bytes).hexdigest() if image_bytes else None
                 with database.connection:
@@ -250,10 +246,16 @@ def choose(database, client, config, scope, target, paths, backend_factory, deco
                         (identifier, scope, target['person'], scene_id, encoded(metadata), image_bytes, sha,
                          'candidate' if image_bytes else 'skipped'))
                 if image_bytes:
-                    key = (-metadata['score'], scene_id, seconds, identifier)
+                    key = (-metadata['score'], -metadata['quality_tiebreak'], scene_id, seconds, identifier)
                     if winning_key is None or key < winning_key:
                         winner = database.connection.execute('SELECT * FROM portraits WHERE id=?', (identifier,)).fetchone()
                         winning_key = key
+    except Exception as error:
+        report = getattr(client, 'report', None)
+        if report is not None:
+            from stash_ai.stash_api.transport import safe_error
+            report.optional('recognition_portrait_video', report.write,
+                            'Video portrait unavailable; using recognition evidence: ' + safe_error(error, getattr(client, 'api_key', '')))
     finally:
         from stash_ai.runtime.cleanup import cleanup
         actions = [('close portrait video decoder', decoder.close) for decoder in decoders.values()]
@@ -263,6 +265,10 @@ def choose(database, client, config, scope, target, paths, backend_factory, deco
     if winner:
         with database.connection:
             database.connection.execute("UPDATE portraits SET status='selected' WHERE id=?", (winner['id'],))
+    else:
+        from .vtt_portraits import choose_vtt
+        winner = choose_vtt(database, client, config, scope, target, source_factory, visibility, expression,
+                            fallback_reason='no_usable_identity_verified_video_portrait')
     return winner
 
 
@@ -310,7 +316,7 @@ def image_baseline(database, client, config, live, performer, previous, *, retry
 
 def fill_portrait(database, client, report, config, scope, target, paths, backend_factory, decoder_factory,
                  source_factory=SpriteInput, *, retry_unresolved_images=False, visibility=None, expression=None):
-    from .portrait_removal import remove_owned, retry_precondition, selection_incomplete
+    from .portrait_removal import remove_owned, retry_precondition
     performer, person = target['performer'], target['person']
     enabled = config.data['portraits']['enabled']
     token = database.connection.execute('SELECT token FROM people WHERE id=? AND scope=?', (person, scope)).fetchone()[0]
@@ -331,22 +337,29 @@ def fill_portrait(database, client, report, config, scope, target, paths, backen
                                reason='portraits_disabled') if baseline is not None else {})
         return {'portraits_disabled': 1, **counts}
     policy_sha = policy_identity(config)
+    prior = None
     if baseline is not None and previous['status'] in ('confirmed', 'observed'):
-        portrait = database.connection.execute('SELECT metadata FROM portraits WHERE id=?',
+        portrait = database.connection.execute('SELECT * FROM portraits WHERE id=?',
                                                (json.loads(previous['payload'])['portrait'],)).fetchone()
         if portrait and json.loads(portrait['metadata'])['policy_sha'] == policy_sha:
-            return {'portraits_preserved': 1}
+            prior = portrait
     winner = choose(database, client, config, scope, target, paths, backend_factory, decoder_factory, source_factory,
                     visibility=visibility, expression=expression)
     if winner is None:
         if baseline is not None:
-            if selection_incomplete(database, scope, target, policy_sha):
-                raise PendingRecognition('Portrait evaluation is incomplete; previous image preserved.')
-            return remove_owned(database, client, report, config, scope, target, token, baseline, previous,
-                                reason='no_eligible_portrait')
+            return {'portraits_preserved': 1, 'portraits_no_candidate': 1}
         if retrying:
             raise PendingRecognition('Earlier image write remains unresolved; no currently eligible portrait for retry.')
         return {'portraits_skipped': 1}
+    if prior is not None:
+        old, new = json.loads(prior['metadata']), json.loads(winner['metadata'])
+        ranks = {'video': 0, 'vtt': 1, 'recognition_crop': 2}
+        def key(metadata):
+            quality = metadata.get('quality', {})
+            return (-portrait_score(quality, config.data['portraits']),
+                    -portrait_tiebreak(quality, config.data['portraits']), ranks.get(metadata.get('source_type'), 3))
+        if key(old) < key(new):
+            return {'portraits_preserved': 1, **quality_counts(prior, config)}
     # Protect manual replacements/removals while extraction was in progress.
     live = checked_id(client.performer(performer), performer)
     if not owns(live, token):
@@ -360,11 +373,12 @@ def fill_portrait(database, client, report, config, scope, target, paths, backen
                     'image_path': safe_url(live.get('image_path') or ''), 'token': token}
     precondition.update(retry_precondition(previous))
     if winner['digest'] == baseline:
-        save_operation(database, scope=scope, scene='', person=person, kind='image', target=performer,
-                       payload=intent, precondition=precondition, status='observed')
+        if previous is None or previous['status'] not in ('confirmed', 'observed') or json.loads(previous['payload']) != intent:
+            save_operation(database, scope=scope, scene='', person=person, kind='image', target=performer,
+                           payload=intent, precondition=precondition, status='observed')
         with database.connection:
             database.connection.execute("UPDATE portraits SET status='published' WHERE id=?", (winner['id'],))
-        return {'portraits_preserved': 1}
+        return {'portraits_preserved': 1, **quality_counts(winner, config)}
     payload = 'data:image/jpeg;base64,' + base64.b64encode(winner['image']).decode('ascii')
     def update():
         value = checked_id(client.update_person(performer, image=payload), performer)
@@ -383,6 +397,17 @@ def fill_portrait(database, client, report, config, scope, target, paths, backen
     with database.connection:
         database.connection.execute("UPDATE portraits SET status='published' WHERE id=?", (winner['id'],))
     counts = {'portraits_filled' if baseline is None else 'portraits_updated': 1}
+    counts.update(quality_counts(winner, config))
     if retrying:
         counts['portraits_retried'] = 1
     return counts
+
+
+def quality_counts(winner, config):
+    metadata = json.loads(winner['metadata'])
+    encoding = metadata.get('encoding', {})
+    limited = (portrait_shortfalls(metadata.get('quality', {}), config.data['portraits'])
+               or any(encoding.get(name) for name in ('aspect_ratio_adjusted', 'padding_adjusted', 'downscaled'))
+               or encoding.get('jpeg_quality', config.data['portraits']['jpeg_quality']) < config.data['portraits']['jpeg_quality'])
+    return {**({'portraits_quality_limited': 1} if limited else {}),
+            **({'portraits_fallback': 1} if metadata.get('fallback') else {})}

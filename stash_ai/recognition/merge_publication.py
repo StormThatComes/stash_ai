@@ -122,6 +122,8 @@ def canonical_targets(database, ready):
         if row is None or not row['performer'] or any(r['merge_status'] not in COMPLETE for r in aliases(db, person)):
             continue
         current = result.setdefault(person, {'person': person, 'performer': row['performer'], 'scans': []})
+        if target.get('matching'):
+            current.setdefault('matching', {}).update(target['matching'])
         for scan in target['scans']:
             if scan not in current['scans']:
                 current['scans'].append(scan)

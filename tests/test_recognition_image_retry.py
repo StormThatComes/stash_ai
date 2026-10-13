@@ -144,15 +144,17 @@ def test_retry_rechecks_live_state_after_cached_selection(tmp_path, monkeypatch,
     assert len(attempts) == 1 and image_operation(config)['status'] == 'unknown'
 
 
-def test_retry_does_not_publish_portrait_rejected_by_current_quality(tmp_path, monkeypatch, capsys):
+def test_explicit_retry_can_publish_an_imperfect_portrait_under_current_preferences(tmp_path, monkeypatch, capsys):
     config, stash, services, _ = setup(tmp_path, monkeypatch)
-    _, attempts = lose_images(stash)
+    original, attempts = lose_images(stash)
     assert run(config, services, '1') == 1
     previous = image_operation(config)
     write_config(config.source_path, min_face_pixels=200)
-    assert run(load(config.source_path), services, '1', retry=True) == 1
-    assert len(attempts) == 1 and image_operation(config) == previous
-    assert 'no currently eligible portrait for retry' in capsys.readouterr().out
+    stash.update_person = original
+    assert run(load(config.source_path), services, '1', retry=True) == 0
+    assert len(attempts) == 1 and stash.images
+    current = image_operation(config)
+    assert json.loads(current['precondition'])['retry_of']['payload'] == json.loads(previous['payload'])
 
 
 def test_repeated_unknown_retry_needs_opt_in_again_and_keeps_bounded_audit(tmp_path, monkeypatch):
@@ -176,7 +178,7 @@ def test_repeated_unknown_retry_needs_opt_in_again_and_keeps_bounded_audit(tmp_p
 
 def test_retry_revalidates_cached_video_identity_instead_of_trusting_old_selection(tmp_path, monkeypatch):
     config, stash, services = video_setup(tmp_path, monkeypatch)
-    _, attempts = lose_images(stash)
+    original, attempts = lose_images(stash)
     assert run(config, services, '1') == 1
     previous = image_operation(config)
     with FaceDatabase(config.database) as db:
@@ -187,8 +189,15 @@ def test_retry_revalidates_cached_video_identity_instead_of_trusting_old_selecti
         db.connection.commit()
     services.backend = lambda *args: pytest.fail('do not infer to replace rejected cached identity')
     services.decoder = lambda *args: pytest.fail('do not decode to replace rejected cached identity')
-    assert run(config, services, '1', retry=True) == 1
-    assert image_operation(config) == previous and len(attempts) == 1
+    stash.update_person = original
+    assert run(config, services, '1', retry=True) == 0
+    current = image_operation(config)
+    assert len(attempts) == 1 and stash.images
+    with FaceDatabase(config.database) as db:
+        metadata = json.loads(db.connection.execute('SELECT metadata FROM portraits WHERE id=?',
+                            (json.loads(current['payload'])['portrait'],)).fetchone()[0])
+        assert metadata['source_type'] == 'vtt' and metadata['fallback']['from'] == 'video'
+    assert json.loads(current['precondition'])['retry_of']['payload'] == json.loads(previous['payload'])
 
 
 def test_retry_flag_only_visits_people_accepted_in_selected_scenes(tmp_path, monkeypatch):
