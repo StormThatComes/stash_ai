@@ -191,7 +191,7 @@ def test_selected_scene_vtt_shortlist_never_reads_historical_other_scene(tmp_pat
     assert stash.images
 
 
-def test_thumbnail_pixel_limits_and_changed_sheet_are_enforced(tmp_path, monkeypatch):
+def test_thumbnail_native_dimensions_and_changed_sheet_are_enforced(tmp_path, monkeypatch):
     config, stash, _, _ = setup(tmp_path, monkeypatch)
     with SpriteInput(stash, stash.scene('1'), config) as source:
         with source.thumbnail(0) as image:
@@ -199,12 +199,6 @@ def test_thumbnail_pixel_limits_and_changed_sheet_are_enforced(tmp_path, monkeyp
         source.hashes[source.cues[0].image] = 'changed'
         with pytest.raises(ValueError, match='changed'):
             source.thumbnail(1)
-    write_config(config.source_path)
-    text = config.source_path.read_text() + 'execution: {max_image_pixels: 1024}\n'
-    config.source_path.write_text(text)
-    with SpriteInput(stash, stash.scene('1'), load(config.source_path)) as source:
-        with pytest.raises(ValueError, match='pixel limit'):
-            source.thumbnail(0)
 
 
 def test_switching_portrait_sources_refreshes_the_same_owned_performer(tmp_path, monkeypatch):

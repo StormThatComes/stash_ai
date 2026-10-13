@@ -9,7 +9,7 @@ from types import SimpleNamespace
 from .clustering import cluster_scene
 from .database import SCHEMA, encoded
 from .evaluation import evaluate_pairs
-from .images import open_image
+from stash_ai.inference.image_io import open_image
 from .models import ensure_assets, load_backend, namespace, checked_detection, normalized_embedding
 
 
@@ -61,7 +61,7 @@ def evaluate_observations(database, run, configurations, labels, *, assets=ensur
                 for i in range(4, 14, 2):
                     geometry[i] -= x
                     geometry[i+1] -= y
-                with open_image(BytesIO(row['crop']), config.data['execution']['max_image_pixels']) as raw:
+                with open_image(BytesIO(row['crop'])) as raw:
                     with raw.convert('RGB') as image:
                         vectors[row['id']] = normalized_embedding(adapter.embed(image, checked_detection(geometry)), adapter.dimensions)
         finally:

@@ -56,7 +56,7 @@ def test_no_face_is_complete_scan_not_inferred_presence(tmp_path):
         assert state.connection.execute('SELECT COUNT(*) FROM observations').fetchone()[0] == 0
 
 
-def test_media_budgets_and_cross_origin_are_enforced(tmp_path):
+def test_retained_image_byte_budget_and_cross_origin_are_enforced(tmp_path):
     client = MediaClient()
     with pytest.raises(ValueError, match='origin'):
         bounded_media(client, 'http://elsewhere/image', 1024, 5)

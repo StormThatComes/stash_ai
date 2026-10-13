@@ -61,8 +61,6 @@ class OnnxYuNet:
     def detect(self, data):
         import numpy as np
         height, width = data.shape[:2]
-        if height * width > self.config.data['execution']['max_image_pixels']:
-            raise ValueError('YuNet input exceeds the decoded-pixel budget.')
         padded_height, padded_width = (height+31)//32*32, (width+31)//32*32
         padded = np.zeros((padded_height,padded_width,3), dtype=np.float32)
         padded[:height,:width] = data

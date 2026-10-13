@@ -9,7 +9,7 @@ from stash_ai.vtt import parse_vtt_cues
 from stash_ai.domain import Cue
 from stash_ai.stash_api.transport import origin, absolute_stash_url
 from .config import digest
-from .images import open_image
+from stash_ai.inference.image_io import open_image
 
 
 def safe_url(url):
@@ -46,7 +46,7 @@ def bounded_media(client, url, limit, timeout):
                     chunks, size = [], 0
                     for chunk in response.iter_content(65536):
                         size += len(chunk)
-                        if size > limit:
+                        if limit is not None and size > limit:
                             raise ValueError('Recognition media exceeds its byte budget.')
                         chunks.append(chunk)
                     return b''.join(chunks)
@@ -64,10 +64,8 @@ class SpriteInput:
         if not paths.get('vtt'):
             raise ValueError('Scene has no VTT; generate Stash sprites first.')
         vtt = absolute_stash_url(paths['vtt'], client.url)
-        text = self.read(vtt, settings['max_vtt_bytes']).decode('utf-8-sig')
+        text = self.read(vtt).decode('utf-8-sig')
         cues = parse_vtt_cues(text)
-        if len(cues) > 10000:
-            raise ValueError('Recognition VTT exceeds the supported cue limit.')
         single = len({cue.image for cue in cues}) == 1
         cues = [Cue(c.start, c.end, absolute_stash_url(paths['sprite'], client.url)
                     if single and paths.get('sprite') else urljoin(vtt, c.image), c.rect) for c in cues]
@@ -89,12 +87,12 @@ class SpriteInput:
                          'sheets': [[safe_url(url), self.hashes[url]] for url in urls]}
         self.fingerprint = digest(self.manifest)
 
-    def read(self, url, limit):
-        return bounded_media(self.client, url, limit, self.config.data['execution']['timeout_seconds'])
+    def read(self, url):
+        return bounded_media(self.client, url, None, self.config.data['execution']['timeout_seconds'])
 
     def _sheet(self, url):
         if url not in self.cache:
-            self.cache[url] = self.read(url, self.config.data['execution']['max_media_bytes'])
+            self.cache[url] = self.read(url)
             if len(self.cache) > 2:
                 self.cache.popitem(last=False)
         self.cache.move_to_end(url)
@@ -109,7 +107,7 @@ class SpriteInput:
                     data = self._sheet(cue.image)
                     if hashlib.sha256(data).hexdigest() != self.hashes[cue.image]:
                         raise ValueError('Sprite changed during recognition; rerun with stable inputs.')
-                    with open_image(BytesIO(data), self.config.data['execution']['max_image_pixels']) as raw:
+                    with open_image(BytesIO(data)) as raw:
                         sheets[cue.image] = raw.convert('RGB')
                     if len(sheets) > 2:
                         _, removed = sheets.popitem(last=False)
@@ -132,7 +130,7 @@ class SpriteInput:
         data = self._sheet(cue.image)
         if hashlib.sha256(data).hexdigest() != self.hashes[cue.image]:
             raise ValueError('Sprite changed during portrait selection.')
-        with open_image(BytesIO(data), self.config.data['execution']['max_image_pixels']) as raw:
+        with open_image(BytesIO(data)) as raw:
             x, y, width, height = cue.rect
             if x + width > raw.width or y + height > raw.height:
                 raise ValueError('Recognition VTT rectangle exceeds sprite bounds.')

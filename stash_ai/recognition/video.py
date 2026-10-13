@@ -15,7 +15,7 @@ from stash_ai.stash_api.transport import absolute_stash_url, origin
 from stash_ai.stash_api.deadlines import call_with_deadline, abort_response
 from stash_ai.stash_api.read_connections import shutdown
 from stash_ai.runtime.cancellation import Cancellation, use
-from .images import open_image
+from stash_ai.inference.image_io import open_image
 
 
 def scene_timing(log, requested):
@@ -156,19 +156,15 @@ class VideoFrames(AbstractContextManager):
         timeout = self.deadline - time.monotonic()
         if timeout <= 0 or self.error:
             raise RuntimeError('Portrait source budget exhausted or source failed.')
-        pixels = self.config.data['execution']['max_image_pixels']
         address = f'http://127.0.0.1:{self.server.server_port}{self.path}'
-        # Downscale only when the source exceeds the output pixel budget.
-        # There is no upscaling or copied thumbnail rectangle.
-        scale = f"scale=w='min(iw,floor(sqrt({pixels}*iw/ih)/2)*2)':h=-2:flags=area,showinfo"
         command = [self.config.data['portraits']['ffmpeg'], '-hide_banner', '-nostdin', '-nostats',
-                   '-loglevel', 'info', '-max_alloc', str(max(16777216, pixels * 8)),
+                   '-loglevel', 'info',
                    '-protocol_whitelist', 'http,tcp',
                    '-format_whitelist', 'mov,matroska,webm,avi,mpegts',
                    '-rw_timeout', str(int(timeout * 1000000)),
                    '-threads', '1', '-copyts', '-ss', str(seconds), '-i', address,
                    '-map', '0:v:0', '-an', '-sn', '-dn', '-frames:v', '1', '-fps_mode', 'passthrough',
-                   '-filter_threads', '1', '-vf', scale, '-threads', '1',
+                   '-filter_threads', '1', '-vf', 'showinfo', '-threads', '1',
                    '-f', 'image2pipe', '-vcodec', 'png', 'pipe:1']
         environment = {k: v for k, v in os.environ.items()
                        if 'proxy' not in k.lower() and k not in ('STASH_API_KEY', 'STASH_URL')}
@@ -180,7 +176,7 @@ class VideoFrames(AbstractContextManager):
             try:
                 while chunk := stream.read(65536):
                     size += len(chunk)
-                    if size > limit:
+                    if limit is not None and size > limit:
                         raise ValueError('Portrait decoder output/log limit exceeded.')
                     result.append(chunk)
             except BaseException as error:
@@ -188,7 +184,7 @@ class VideoFrames(AbstractContextManager):
                 process.kill()
             finally:
                 stream.close()
-        workers = [threading.Thread(target=read, args=(process.stdout, output, pixels * 4 + 65536)),
+        workers = [threading.Thread(target=read, args=(process.stdout, output, None)),
                    threading.Thread(target=read, args=(process.stderr, errors, 131072))]
         for worker in workers:
             worker.start()
@@ -216,7 +212,7 @@ class VideoFrames(AbstractContextManager):
         if self.timeline_origin is not None and abs(self.timeline_origin - start) > .000002:
             raise ValueError('Video source timeline origin changed between portrait seeks.')
         self.timeline_origin = start
-        with open_image(BytesIO(b''.join(output)), pixels) as raw:
+        with open_image(BytesIO(b''.join(output))) as raw:
             image = raw.convert('RGB')
         return image, {'requested_seconds': seconds, **timing,
                        'decoder': 'ffmpeg-copyts-showinfo-scene-time-v2', 'pixels': [image.width, image.height],

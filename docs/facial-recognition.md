@@ -76,17 +76,24 @@ No elapsed timeout automatically retries a mutation. Owned HTTP workers have
 shared bounded capacity; expired results cannot authorize subsequent writes.
 
 Each selected scene verifies the VTT/sprite content before reusing observations.
-Sprite and decoded-pixel limits apply before conversion, with at most two active
-sheets. Completed cue checkpoints survive an interrupted inference; incomplete
+The sprite cache keeps at most two active sheets. Completed cue checkpoints
+survive an interrupted inference; incomplete
 scans cannot publish identities. Partial sampling and rejected/no-face outcomes
 remain explicit coverage information, not proof that a person is absent.
 
-`execution.max_image_pixels` defaults to **196,000,000** pixels for the whole
-sprite sheet, not an individual VTT thumbnail. The lazy header open honors this
-configured limit even above Pillow's default decompression-bomb threshold, then
-restores Pillow's default before decoding; an oversized image is still rejected
-before RGB conversion. `execution.max_media_bytes` remains **16,777,216** bytes
-per downloaded sheet. Existing YAML overrides remain explicit operator settings.
+Recognition has no byte ceiling on VTT/sprite inputs, no fixed VTT cue-count
+ceiling, and no pixel ceiling on decoded images or detector input. Optional
+`execution.max_cues` still selects an evenly distributed sample; `0` processes
+all cues in the selected scene. The retired `max_vtt_bytes`, `max_media_bytes`
+and `max_image_pixels` execution keys have been removed from the configuration
+and bundled template. Remove them from existing local YAML before running;
+unknown keys are rejected rather than ignored.
+
+Tagging and recognition share a Pillow reader that disables decompression-bomb
+pixel thresholds for Stash images, including subsequent crop checks. Large-image
+warnings no longer clutter output; other warnings and image/rectangle validation
+remain active. Video portraits use native frame dimensions without pixel-driven
+downscaling.
 
 Scene performer associations use Stash's `BulkUpdateIds.ids` with mode `ADD`,
 preserving unrelated performers. On the next explicit run, a legacy unconfirmed
@@ -197,8 +204,8 @@ The shortlist alternates selected scenes and spreads cue times. In video mode at
 scene decoder shares one byte/time budget across its seeks. Only selected-scene
 video is fetched, even for a historically known person. FFmpeg receives an owned
 loopback range URL, not Stash credentials or signed media URLs. Authenticated
-same-origin requests, byte/deadline limits, process/log/output limits and downscale-only
-pixel limits apply. Requested and actual times use scene-relative seconds. The
+same-origin requests, video byte/deadline budgets and decoder log limits apply.
+Requested and actual times use scene-relative seconds. The
 decoder records raw frame PTS and the source timeline origin separately, using
 the same FFmpeg invocation to normalize nonzero container starts before checking
 seek consistency. Missing timestamps or a changing timeline origin withhold the
