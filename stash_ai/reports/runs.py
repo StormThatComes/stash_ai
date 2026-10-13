@@ -1,11 +1,46 @@
 """Offline run history and weighted profiling aggregates for comparable runs."""
 from collections import Counter
+import math
 
 from stash_ai.reports.io import write_json_report
 from stash_ai.reports.runtime import offline_report, report_history
 from stash_ai.runtime.profile import combine, describe, empty_sample
 from stash_ai.signatures import digest
 from stash_ai.storage.store import scope_for
+
+METRIC_KEYS = ('kind', 'name', 'model', 'work', 'outcome', 'unit')
+
+
+def finite_nonnegative(value):
+    try:
+        return type(value) in (int, float) and math.isfinite(value) and value >= 0
+    except OverflowError:
+        return False
+
+
+def valid_metric(metric):
+    if not isinstance(metric, dict):
+        return False
+    for key in METRIC_KEYS:
+        value = metric.get(key)
+        if not isinstance(value, str) and not (key in ('model', 'work', 'unit') and key in metric and value is None):
+            return False
+    for key in ('calls', 'errors', 'units'):
+        if type(metric.get(key)) is not int or metric[key] < 0:
+            return False
+    for key in ('seconds', 'inclusive_seconds', 'max_seconds'):
+        value = metric.get(key)
+        if not finite_nonnegative(value):
+            return False
+    minimum, maximum = metric.get('min_seconds'), metric['max_seconds']
+    if 'min_seconds' not in metric or (minimum is None and metric['calls']):
+        return False
+    if minimum is not None and (not finite_nonnegative(minimum) or minimum > maximum):
+        return False
+    histogram = metric.get('histogram')
+    return (isinstance(histogram, list) and len(histogram) == 64
+            and all(type(value) is int and value >= 0 for value in histogram)
+            and sum(histogram) == metric['calls'] and metric['errors'] <= metric['calls'])
 
 
 def work_profile(run):
@@ -21,30 +56,59 @@ def work_profile(run):
 
 def build_report(rows):
     rows, groups = list(rows), {}
-    for run in rows:
+    warnings, warning_counts, reported_rows = [], Counter(), []
+    def warn(code, index, metric_index=None):
+        warning_counts[code] += 1
+        if len(warnings) < 20:
+            warnings.append(dict(code=code, run_index=index,
+                                 **({'metric_index': metric_index} if metric_index is not None else {})))
+    for index, run in enumerate(rows):
         # Failed/interrupted/running work must not lower successful-run averages.
         partial = run.get('partial', run.get('finished_at') is None and run['status'] == 'running')
         workload = run.get('workload', {})
         work = work_profile(run)
-        key = digest([run['command'], run['status'], partial, run['configuration']['fingerprint'], run['models'], workload, work])
+        configuration = run.get('configuration')
+        fingerprint = configuration.get('fingerprint') if isinstance(configuration, dict) else None
+        comparable = isinstance(fingerprint, str) and bool(fingerprint)
+        if not comparable:
+            fingerprint = None
+            warn('unknown_configuration_fingerprint', index)
+        # Unknown fingerprints describe isolated runs, not a verified cohort.
+        identity = fingerprint if comparable else ['unverified-run', index]
+        key = digest([run['command'], run['status'], partial, identity, run['models'], workload, work])
         group = groups.setdefault(key, dict(command=run['command'], status=run['status'],
-            configuration_fingerprint=run['configuration']['fingerprint'], models=run['models'],
-            partial=partial, workload=workload, work_profile=work, runs=0, wall_seconds=0.0, cpu_seconds=0.0, counts=Counter(), outcomes={}, samples={}))
+            configuration_fingerprint=fingerprint, configuration_comparable=comparable, models=run['models'],
+            partial=partial, workload=workload, work_profile=work, runs=0, wall_seconds=0.0, cpu_seconds=0.0,
+            counts=Counter(), outcomes={}, samples={}, invalid_metrics=0))
         group['runs'] += 1
         group['wall_seconds'] += run['wall_seconds'] or 0.0
         group['cpu_seconds'] += run['cpu_seconds'] or 0.0
         group['counts'].update(run['counts'])
         for model, counts in run['outcomes'].items():
             group['outcomes'].setdefault(model, Counter()).update(counts)
-        for metric in run['metrics']:
-            metric_key = tuple(metric[name] for name in ('kind', 'name', 'model', 'work', 'outcome', 'unit'))
+        metrics = run.get('metrics', [])
+        if not isinstance(metrics, (list, tuple)):
+            metrics = [None]
+        valid_metrics = []
+        invalid_metrics = 0
+        for metric_index, metric in enumerate(metrics):
+            if not valid_metric(metric):
+                group['invalid_metrics'] += 1
+                invalid_metrics += 1
+                warn('invalid_metric', index, metric_index)
+                continue
+            valid_metrics.append(metric)
+            metric_key = tuple(metric[name] for name in METRIC_KEYS)
             combine(group['samples'].setdefault(metric_key, empty_sample()), metric)
+        reported_rows.append({**run, 'metrics': valid_metrics,
+                              **({'invalid_metrics': invalid_metrics} if invalid_metrics else {})})
     for group in groups.values():
         group['mean_wall_seconds'] = group['wall_seconds'] / group['runs']
         group['mean_cpu_seconds'] = group['cpu_seconds'] / group['runs']
-        group['metrics'] = [dict(zip(('kind', 'name', 'model', 'work', 'outcome', 'unit'), key), **describe(value))
-                            for key, value in sorted(group.pop('samples').items())]
-    return dict(format=1, runs=rows, groups=list(groups.values()),
+        group['metrics'] = [dict(zip(METRIC_KEYS, key), **describe(value))
+                            for key, value in sorted(group.pop('samples').items(),
+                                key=lambda item: tuple('' if value is None else value for value in item[0]))]
+    return dict(format=1, runs=reported_rows, groups=list(groups.values()), warnings=warnings, warning_counts=dict(warning_counts),
         notes=['Means use total elapsed seconds / total calls, not a mean of run means.',
                'p50/p95 are upper-bucket estimates from bounded logarithmic histograms.',
                'Worker/thread time can overlap; sums of stages are not run wall time.',
@@ -53,6 +117,7 @@ def build_report(rows):
                'Selection digests, code/package provenance, observed execution metadata and verified-input workloads separate comparison groups when available.',
                'Fresh, checkpoint resume and reuse outcomes and performed/restored frame counts separate averages.',
                'Legacy records missing provenance/workload/frame accounting remain readable; their comparability is limited.',
+               'Missing/invalid configuration fingerprints form isolated, explicitly incomparable per-run groups. Invalid metrics are excluded with bounded warnings.',
                'Groups describe only the selected, most recent matching runs.'])
 
 
@@ -69,6 +134,10 @@ def run(app, args):
     for group in report['groups']:
         print(f"  Profile {group['command']}/{group['status']} ({group['runs']} runs): "
               f"mean wall={group['mean_wall_seconds']:.3f}s")
+        if not group['configuration_comparable']:
+            print('    Configuration fingerprint unknown; this run is not a verified comparison group.')
+        if group['invalid_metrics']:
+            print(f"    Excluded invalid metrics: {group['invalid_metrics']}")
         for metric in sorted(group['metrics'], key=lambda row: -row['inclusive_seconds'])[:12]:
             print(f"    {metric['kind']}/{metric['model'] or 'all'}/{metric['name']}/{metric['work'] or 'all'}/{metric['outcome']}: "
                   f"calls={metric['calls']}, total={metric['inclusive_seconds']:.3f}s, "
