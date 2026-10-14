@@ -1,7 +1,7 @@
 """CUDA-capable MediaPipe mesh/blendshape exports on the application ORT."""
 import math
 
-from .models import ASSETS, verify
+from .models import ASSETS, verified_bytes
 from .runtime import runtime, session
 
 # MediaPipe Authors, Apache-2.0. Subset/order from face_blendshapes_graph.cc;
@@ -77,14 +77,14 @@ def check_io(value, input_name, input_shape, outputs):
 class ExpressionBackend:
     def __init__(self, config, paths):
         self.mesh = self.blendshapes = None
-        for key in ('expression_mesh','expression_blendshapes'):
-            verify(paths[key],ASSETS[key])
+        blobs = {key: verified_bytes(paths[key], ASSETS[key])
+                 for key in ('expression_mesh', 'expression_blendshapes')}
         info = runtime(config)
         try:
-            self.mesh, mesh_device = session(config,str(paths['expression_mesh']), runtime_info=info, cpu_fallback=False)
+            self.mesh, mesh_device = session(config,blobs['expression_mesh'], runtime_info=info, cpu_fallback=False)
             check_io(self.mesh,'input_12',(None,256,256,3),
                      {'Identity':(None,1,1,1434),'Identity_1':(None,1,1,1),'Identity_2':(None,1)})
-            self.blendshapes, blend_device = session(config,str(paths['expression_blendshapes']), runtime_info=info, cpu_fallback=False)
+            self.blendshapes, blend_device = session(config,blobs['expression_blendshapes'], runtime_info=info, cpu_fallback=False)
             check_io(self.blendshapes,'serving_default_input_points:0',(1,146,2),{'StatefulPartitionedCall:0':(52,)})
             self.device = mesh_device if mesh_device == blend_device else 'mixed'
             self.provenance = {'ort':info[0].__version__, 'mesh_device':mesh_device, 'blendshape_device':blend_device,

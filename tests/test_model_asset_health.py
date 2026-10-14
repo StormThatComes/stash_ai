@@ -124,3 +124,42 @@ def test_missing_empty_invalid_metadata_and_cli_failure_status(tmp_path, monkeyp
     assert report['models'][1]['files']['model.onnx']['status'] == 'missing'
     assert report['models'][1]['metadata'] == 'invalid_ValueError'
     assert 'No inference backends were loaded' in capsys.readouterr().out
+
+
+def test_diagnostic_reports_assets_despite_invalid_or_missing_inference_tuning(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from stash_ai.config import load_model_settings
+    from stash_ai.reports.model_assets import run
+    values = settings(tmp_path)
+    config = tmp_path/'models.yml'
+    config.write_text('version: 1\nenabled_models: [joytag, wd]\ndevice: invalid\n'
+                      'checkpoint_batches: false\nprefetch_batches: -1\nprepare_workers: []\n'
+                      'joytag: {model_dir: joy, batch_size: 0, scene_threshold: wrong}\n'
+                      'wd: {model_dir: wd, marker_cache_floor: false}\n')
+    with pytest.raises(ValueError): load_model_settings(config, None, None, offline=True)
+    # No backend, download or connection is involved in this command.
+    destination = tmp_path/'assets.json'
+    args = SimpleNamespace(model_config=config, models=None, model_assets_report=destination)
+    assert run(None, args) == 0
+    assert all(row['healthy'] for row in json.loads(destination.read_text())['models'])
+    config.write_text('version: 1\nenabled_models: [joytag]\njoytag: {model_dir: []}\n')
+    with pytest.raises(ValueError, match='path'): run(None, args)
+
+
+@pytest.mark.parametrize('value', [[], {}, True, '0', .0, None])
+def test_dtq_category_types_have_controlled_diagnostic_failure(tmp_path, value):
+    from stash_ai.backends.vocabulary import load_vocabulary
+    directory = tmp_path/'dtq'
+    directory.mkdir()
+    (directory/'tag_to_id.json').write_text('{"one":0}')
+    (directory/'tag_category.json').write_text(json.dumps({'one':value}))
+    (directory/'config.json').write_text('{"num_classes":1,"image_size":448}')
+    (directory/'model.onnx').write_bytes(b'weights')
+    setting = ModelSettings(SOURCES['dtq'], directory, .4, .4, 1, download_missing=False)
+    with pytest.raises(ValueError, match='integer category'): load_vocabulary(setting)
+    report = build_report([setting])
+    assert report['models'][0]['metadata'] == 'invalid_ValueError'
+    (directory/'tag_category.json').write_text('{"one":999}')
+    assert load_vocabulary(setting).categories == {'one':'Uncategorized'}
+    (directory/'tag_category.json').write_text('{}')
+    assert load_vocabulary(setting).categories == {'one':'Uncategorized'}

@@ -1,5 +1,5 @@
 """Pinned AuraFace recognition only; no InsightFace model packs or attributes."""
-from .models import ASSETS, YuNetDetector, normalized_embedding
+from .models import ASSETS, YuNetDetector, normalized_embedding, verified_bytes
 from .runtime import runtime, session
 
 CONTRACT = {'format': 1, 'alignment': 'five-point-similarity-arcface-112',
@@ -49,7 +49,7 @@ class AuraFaces(YuNetDetector):
         self.session = None
         try:
             super().__init__(config, paths, runtime_info=(ort, providers))
-            self.session, self.device = session(config, str(paths['auraface']), runtime_info=(ort, providers))
+            self.session, self.device = session(config, verified_bytes(paths['auraface'], ASSETS['auraface']), runtime_info=(ort, providers))
         except BaseException:
             self.close()
             raise

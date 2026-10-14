@@ -45,6 +45,8 @@ def test_only_selected_recognition_and_enabled_visibility_assets_are_downloaded(
     calls = []
     monkeypatch.setattr(face_runtime, 'runtime', lambda config: None)
     monkeypatch.setattr(models, 'verify', lambda *args: None)
+    monkeypatch.setattr(models, 'verified_bytes', lambda *args: b'weights')
+    monkeypatch.setattr('stash_ai.recognition.aura.verified_bytes', lambda *args: b'weights')
     monkeypatch.setattr(downloads, 'install_hf_asset', lambda repo, filename, revision, destination, **kwargs:
                         calls.append((repo, filename, revision)))
     ensure_assets(load(path), write=lambda text: None)
