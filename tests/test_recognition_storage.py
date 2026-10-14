@@ -134,3 +134,34 @@ def test_failed_v1_migration_rolls_back_ddl_version_and_releases_writer(tmp_path
     monkeypatch.setattr(module, 'MERGE_SCHEMA', schema)
     with FaceDatabase(path) as state:
         assert state.connection.execute('PRAGMA user_version').fetchone()[0] == SCHEMA_VERSION
+
+
+@pytest.mark.parametrize('old_scope,new_scope,old_selection,new_selection',[
+    ('scope','scope',['1'],['2']),('scope','scope',['1','2'],['2','1']),
+    ('scope','scope',['1'],['1']),('old-instance','new-instance',['1'],['2']),
+])
+def test_new_writer_recovers_only_prior_owner_runs_independent_of_selection(tmp_path,old_scope,new_scope,old_selection,new_selection):
+    path=tmp_path/'faces.sqlite3'
+    with FaceDatabase(path) as db:
+        orphan=db.start_run(old_scope,old_selection,{})
+        db.progress(orphan,'scan',{'completed':2})
+        db.connection.execute('UPDATE runs SET summary=? WHERE id=?', ('{"counts":{"retained":2}}',orphan))
+        completed=db.start_run(old_scope,['complete'],{})
+        db.finish_run(completed,'completed',{'done':True})
+        db.connection.execute('INSERT INTO publications VALUES (?,?,?,?,?,?,?,?,?,?)',
+            ('unknown','scope','1','person','image','42','{}','{}','unknown','lost response'))
+        db.connection.commit()
+        summary=db.connection.execute('SELECT summary FROM runs WHERE id=?',(orphan,)).fetchone()[0]
+        progress=[tuple(row) for row in db.connection.execute('SELECT * FROM progress')]
+        pending=[tuple(row) for row in db.connection.execute('SELECT * FROM publications')]
+    with FaceDatabase(path) as db:
+        current=db.start_run(new_scope,new_selection,{})
+        previous=db.connection.execute('SELECT * FROM runs WHERE id=?',(orphan,)).fetchone()
+        assert previous['status']=='interrupted' and previous['finished'] is not None
+        assert previous['summary']==summary
+        assert [tuple(row) for row in db.connection.execute('SELECT * FROM progress')]==progress
+        assert [tuple(row) for row in db.connection.execute('SELECT * FROM publications')]==pending
+        assert db.connection.execute('SELECT status FROM runs WHERE id=?',(completed,)).fetchone()[0]=='completed'
+        assert db.connection.execute('SELECT status FROM runs WHERE id=?',(current,)).fetchone()[0]=='running'
+        with pytest.raises(RuntimeError,match='recognition writer'): FaceDatabase(path)
+        assert db.connection.execute('SELECT status FROM runs WHERE id=?',(current,)).fetchone()[0]=='running'
