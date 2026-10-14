@@ -1,7 +1,7 @@
 """ORT neural inference with the pinned OpenCV YuNet/SFace contracts."""
 import hashlib
 
-from .models import checked_detection, normalized_embedding
+from .models import ASSETS, verified_bytes, checked_detection, normalized_embedding
 from .runtime import session
 
 
@@ -14,7 +14,7 @@ def prepared_model(path, *, detector=False):
     The verified upstream weights are never rewritten or stored as sidecars.
     """
     import onnx
-    model = onnx.load(str(path))
+    model = onnx.load_model_from_string(verified_bytes(path, ASSETS['yunet' if detector else 'sface']))
     initializers = {item.name for item in model.graph.initializer}
     inputs = [item for item in model.graph.input if item.name not in initializers]
     del model.graph.input[:]

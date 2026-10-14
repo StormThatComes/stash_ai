@@ -232,8 +232,8 @@ def test_visibility_device_policy_has_no_implicit_cuda_fallback(tmp_path, monkey
             return self
         def eval(self): return self
     monkeypatch.setattr(torch.cuda, 'is_available', lambda: available)
-    monkeypatch.setattr(visibility, 'verify', lambda *args: None)
-    monkeypatch.setattr(safetensors.torch, 'load_file', lambda *args, **kwargs: {})
+    monkeypatch.setattr(visibility, 'verified_bytes', lambda *args: b'weights')
+    monkeypatch.setattr(safetensors.torch, 'load', lambda *args, **kwargs: {})
     monkeypatch.setattr(faceocc, 'build_model', Model)
     config = load(root=tmp_path, device=requested)
     if expected is None:

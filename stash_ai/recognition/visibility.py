@@ -3,7 +3,7 @@ from dataclasses import asdict
 import math
 
 from .config import digest
-from .models import ASSETS, verify
+from .models import ASSETS, verified_bytes
 
 CONTRACT = {'version': 1, 'model': asdict(ASSETS['faceocc']), 'input': 'RGB-256-ImageNet-mean-std',
             'crop': 'square-face-box-padding-0.25', 'region': 'face-box-ellipse-0.45w-0.48h',
@@ -100,17 +100,17 @@ def measurement(logits, region, device):
 class FaceVisibility:
     def __init__(self, config, paths):
         import torch
-        from safetensors.torch import load_file
+        from safetensors.torch import load
         from .faceocc import build_model
         path = paths['faceocc']
-        verify(path, ASSETS['faceocc'])
+        blob = verified_bytes(path, ASSETS['faceocc'])
         requested = config.data['models']['device']
         available = torch.cuda.is_available()
         if requested == 'cuda' and not available:
             raise ValueError('Face visibility requested CUDA but PyTorch CUDA is unavailable.')
         self.device = 'cuda' if available and requested != 'cpu' else 'cpu'
         self.model = build_model()
-        self.model.load_state_dict(load_file(str(path), device='cpu'), strict=True)
+        self.model.load_state_dict(load(blob), strict=True)
         try:
             self.model.to(self.device).eval()
         except Exception:
