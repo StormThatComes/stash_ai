@@ -85,6 +85,11 @@ class FaceDatabase(AbstractContextManager):
             self.connection.execute('PRAGMA foreign_keys=ON')
             self.connection.execute('PRAGMA cache_size=-32768')
             self._initialize()
+            # Exclusive file ownership proves that every prior writer ended.
+            # Runs created later by this owner are never classified as orphans.
+            with self.connection:
+                self.connection.execute("UPDATE runs SET status='interrupted',finished=COALESCE(finished,?) "
+                                        "WHERE status='running'", (time.time(),))
         except BaseException:
             self.close()
             raise
@@ -142,9 +147,6 @@ class FaceDatabase(AbstractContextManager):
     def start_run(self, scope, selection, configuration):
         identifier = str(uuid.uuid4())
         with self.connection:
-            self.connection.execute("UPDATE runs SET status='interrupted',finished=? "
-                                    "WHERE status='running' AND scope=? AND selection=?",
-                                    (time.time(), scope, encoded(selection)))
             self.connection.execute('INSERT INTO runs(id,scope,selection,config,started,status) VALUES (?,?,?,?,?,?)',
                                     (identifier, scope, encoded(selection), encoded(configuration), time.time(), 'running'))
         return identifier
