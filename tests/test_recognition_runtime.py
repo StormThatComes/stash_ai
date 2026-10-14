@@ -140,6 +140,7 @@ def test_default_sface_routes_both_neural_models_through_cuda_not_opencv(tmp_pat
                          FaceDetectorYN=SimpleNamespace(create=lambda *args: pytest.fail('GPU YuNet executed CPU detector')))
     monkeypatch.setitem(sys.modules, 'cv2', cv)
     monkeypatch.setattr(models, 'verify', lambda *args: None)
+    monkeypatch.setattr(models, 'verified_bytes', lambda *args: b'weights')
     monkeypatch.setattr(onnx_models, 'prepared_model', lambda path, **kwargs: (str(path).encode(), 'sha'))
     backend = load_backend(load(root=tmp_path), {'yunet': 'yunet', 'sface': 'sface'})
     try:

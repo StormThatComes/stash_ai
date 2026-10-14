@@ -65,7 +65,7 @@ def load_exclusion_policy(path: Path, key: str) -> dict[str, frozenset[str]]:
         raise ValueError("by_model must contain only joytag, wd, dtq, and/or oppai keys.")
     return {name: common | checked(additions.get(name, []), f"by_model.{name}") for name in SOURCES}
 
-def load_model_configuration(path: Path):
+def load_model_configuration(path: Path, *, assets_only=False):
     data = load_unique_yaml(path, "Model configuration")
     allowed = {"version", "enabled_models", "device", "download_missing", "checkpoint_batches", "prefetch_batches", "result_prefetch_batches",
                "prepare_workers", "merge_workers", "model_report_workers", *SOURCES}
@@ -73,24 +73,24 @@ def load_model_configuration(path: Path):
         raise ValueError("Unknown model configuration keys.")
     if type(data.get("version")) is not int or data["version"] != 1:
         raise ValueError("Model configuration version must be 1.")
-    if 'checkpoint_batches' in data and (type(data['checkpoint_batches']) is not int or
+    if not assets_only and 'checkpoint_batches' in data and (type(data['checkpoint_batches']) is not int or
                                          data['checkpoint_batches'] < 1):
         raise ValueError('checkpoint_batches must be an integer >= 1.')
-    if 'prefetch_batches' in data and (type(data['prefetch_batches']) is not int or
+    if not assets_only and 'prefetch_batches' in data and (type(data['prefetch_batches']) is not int or
                                       not 0 <= data['prefetch_batches'] <= 128):
         raise ValueError('prefetch_batches must be an integer in 0..128.')
-    if 'result_prefetch_batches' in data and (type(data['result_prefetch_batches']) is not int or
+    if not assets_only and 'result_prefetch_batches' in data and (type(data['result_prefetch_batches']) is not int or
                                              not 1 <= data['result_prefetch_batches'] <= 128):
         raise ValueError('result_prefetch_batches must be an integer in 1..128.')
     for name in ('prepare_workers', 'merge_workers', 'model_report_workers'):
-        if name in data and (type(data[name]) is not int or not 1 <= data[name] <= 16):
+        if not assets_only and name in data and (type(data[name]) is not int or not 1 <= data[name] <= 16):
             raise ValueError(f'{name} must be an integer in 1..16.')
     return data
 
 
 def load_model_settings(path: Path, chosen: list[str] | None, device: str | None,
-                        offline: bool = False) -> list[ModelSettings]:
-    data = load_model_configuration(path)
+                        offline: bool = False, *, assets_only: bool = False) -> list[ModelSettings]:
+    data = load_model_configuration(path, assets_only=assets_only)
     if chosen is None and "enabled_models" not in data:
         raise ValueError("enabled_models is required when --models is omitted.")
     selected = select_models(chosen if chosen is not None else data["enabled_models"])
@@ -104,7 +104,7 @@ def load_model_settings(path: Path, chosen: list[str] | None, device: str | None
         if name not in selected:
             continue
         required = {"scene_threshold", "marker_threshold", "batch_size"}
-        if missing := required - values.keys():
+        if not assets_only and (missing := required - values.keys()):
             raise ValueError(f"Missing {name} settings: {', '.join(sorted(missing))}.")
         def local_path(key: str, default: Path) -> Path:
             environment_name = f"{name.upper()}_MODEL_PATH"
@@ -121,13 +121,13 @@ def load_model_settings(path: Path, chosen: list[str] | None, device: str | None
         model_dir = local_path("model_dir", path.resolve().parent / "models" / name)
         config = ModelSettings(
             source=SOURCES[name], model_dir=model_dir,
-            scene_threshold=values["scene_threshold"],
-            marker_threshold=values["marker_threshold"],
-            batch_size=values["batch_size"],
-            scene_cache_floor=values.get("scene_cache_floor"),
-            marker_cache_floor=values.get("marker_cache_floor"),
-            device=device or data.get("device", "auto"),
-            download_missing=False if offline else data.get("download_missing", True))
+            scene_threshold=.5 if assets_only else values["scene_threshold"],
+            marker_threshold=.5 if assets_only else values["marker_threshold"],
+            batch_size=1 if assets_only else values["batch_size"],
+            scene_cache_floor=None if assets_only else values.get("scene_cache_floor"),
+            marker_cache_floor=None if assets_only else values.get("marker_cache_floor"),
+            device="cpu" if assets_only else device or data.get("device", "auto"),
+            download_missing=False if offline or assets_only else data.get("download_missing", True))
         config.validate()
         settings.append(config)
     return sorted(settings, key=lambda item: selected.index(item.source.key))
