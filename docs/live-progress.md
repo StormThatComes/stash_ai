@@ -6,12 +6,19 @@ infrequent liveness messages. `compact` keeps the short layout; `verbose` permit
 additional details; `off` disables decorative progress while retaining warnings,
 errors and normal command summaries.
 
-`recognition run` shares this owner with a compact three-row terminal layout:
-selected scenes, VTT frames in the active scene, and live status. Publication
+`recognition run` shares this owner with two work rows (selected scenes and VTT
+frames in the active scene) followed by a status area. Publication
 and names/portraits replace the work rows with their own stage totals. Remaining
 time estimates cover each measured stage; redirected frame updates appear in
 throttled heartbeats rather than one log entry per frame or scene. Recognition
 quality/reference details and the names YAML starter require `verbose`.
+
+Terminal status separates phase, activity (`Stage`), current work, timing,
+progress, rates and references into labeled rows. Activity appears directly
+after the phase, before counters or ETA fields. Rows wrap to the current output
+terminal width and resize without leaving stale activity or resource rows.
+The status area uses at most 12 rows, with an overflow marker for exceptionally
+large snapshots. Redirected heartbeats retain their single-line log format.
 
 The console has one dedicated rendering owner. HTTP/CPU workers only publish
 bounded snapshots; execution is never moved to the rendering thread. The owner
@@ -53,8 +60,9 @@ configured and effective budgets plus pressure/eviction counters without travers
 entries or invoking eviction. Parent RSS is sampled at most once per second;
 child RSS and accelerator utilization are unavailable. Cache budgets describe
 headroom policy, not an operating-system memory limit. Inference reuses its buffer
-and cache rows; other phases use one resource row. The layout occupies at most six
-rows; redirected liveness remains infrequent and diagnostics use stderr.
+and cache rows; other phases use one resource row below the status area.
+Work rows and the bounded status area occupy at most 17 rows; redirected
+liveness remains infrequent and diagnostics use stderr.
 
 After interruption, stopping milestones describe only entered shutdown operations:
 checkpoint saving, cancellation, worker termination, HTTP closure and spool release.
