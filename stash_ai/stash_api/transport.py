@@ -36,20 +36,42 @@ class StashTransport:
         self.http_retries = http_retries
         self.dry_run = dry_run
         self.report = None
-        self.api = requests.Session()  # No transport-level POST retries; _gql retries only proven read-only operations.
-        self.media = requests.Session()
-        if self.api_key:
-            self.api.headers["ApiKey"] = self.api_key
-            self.media.headers["ApiKey"] = self.api_key
-        # All read retries share one caller deadline, including media redirects.
-        for session in (self.api, self.media):
-            adapter = ReadAdapter(max_retries=0)
-            session.mount("http://", adapter)
-            session.mount("https://", adapter)
+        self.api = self.media = None
+        pending_adapter = None
+        try:
+            # No transport-level POST retries; _gql retries proven reads only.
+            self.api = requests.Session()
+            self.media = requests.Session()
+            if self.api_key:
+                self.api.headers["ApiKey"] = self.api_key
+                self.media.headers["ApiKey"] = self.api_key
+            # Sessions own each adapter only after both mounts succeed.
+            for session in (self.api, self.media):
+                pending_adapter = ReadAdapter(max_retries=0)
+                session.mount("http://", pending_adapter)
+                session.mount("https://", pending_adapter)
+                pending_adapter = None
+        except BaseException:
+            from stash_ai.runtime.cleanup import cleanup
+            actions = []
+            if pending_adapter is not None:
+                def detach():
+                    for session in (self.api, self.media):
+                        mounted = getattr(session, 'adapters', None)
+                        if isinstance(mounted, dict):
+                            for prefix, adapter in tuple(mounted.items()):
+                                if adapter is pending_adapter:
+                                    del mounted[prefix]
+                actions = [('detach incomplete HTTP adapter', detach),
+                           ('close incomplete HTTP adapter', pending_adapter.close)]
+            cleanup(actions + [('close partially initialized HTTP client', self.close)])
+            raise
 
     def close(self) -> None:
         from stash_ai.runtime.cleanup import cleanup
-        cleanup([('close HTTP API session', self.api.close), ('close HTTP media session', self.media.close)], report=self.report)
+        cleanup([(name, session.close) for name, session in
+                 (('close HTTP API session', self.api), ('close HTTP media session', self.media))
+                 if session is not None], report=self.report)
 
     def new_media_reader(self):
         """Give background input reads their own sessions and deadline cleanup."""

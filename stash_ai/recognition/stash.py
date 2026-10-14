@@ -24,7 +24,8 @@ class RecognitionStash(StashTransport):
             from stash_ai.stash_api.client import StashClient
             StashClient._require_supported_version(self)
         except BaseException:
-            self.close()
+            from stash_ai.runtime.cleanup import cleanup
+            cleanup([('close failed recognition Stash client', self.close)])
             raise
 
     def new_media_reader(self):

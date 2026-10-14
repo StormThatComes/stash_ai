@@ -123,7 +123,13 @@ class PruneClient:
                     return result
                 page += 1
 
-    def validate(self, tag):
+    def validate(self, tag, *, expected=None):
+        identifier = tag.get('id') if isinstance(tag, dict) else None
+        if (not isinstance(identifier, str) or not identifier.isascii() or not identifier.isdecimal()
+                or int(identifier) <= 0 or str(int(identifier)) != identifier):
+            raise ValueError('Invalid prune tag ID; stopped before deleting this tag.')
+        if expected is not None and identifier != str(expected):
+            raise ValueError('Refreshed prune tag ID does not match the requested tag; stopped before deleting this tag.')
         if not isinstance(tag.get("name"), str) or not isinstance(tag.get("children"), list) or not isinstance(tag.get("parents"), list):
             raise ValueError("Incomplete tag relationships returned by Stash; pruning stopped.")
         if any(type(tag.get(name)) is not int or tag[name] < 0 for name in self.counts):
@@ -134,9 +140,12 @@ class PruneClient:
         return not tag["children"] and all(tag[name] == 0 for name in self.counts)
 
     def refresh(self, identifier):
-        return self.stash.gql('''query StashAIPruneTag($id: ID!) {
+        tag = self.stash.gql('''query StashAIPruneTag($id: ID!) {
             findTag(id: $id) { ''' + self.fields + ''' }
         }''', {"id": identifier})["findTag"]
+        if tag is not None:
+            self.validate(tag, expected=identifier)
+        return tag
 
     def delete(self, identifier):
         result = self.stash.gql('''mutation StashAIPruneTag($input: TagDestroyInput!) {
