@@ -65,6 +65,7 @@ class ConsolePresenter:
         self.thread = None
         self.closed = False
         self._bars, self._status, self._last_line = [], None, None
+        self._status_rows = []
         self._last_heartbeat = self.started
         self.samplers = {}
         self._resource_row = None
@@ -243,7 +244,7 @@ class ConsolePresenter:
         def close_rows():
             for bar in tuple(self._bars):
                 bar.close()
-            for row in (self._resource_row, self._status):
+            for row in (self._resource_row, *reversed(self._status_rows)):
                 if row is not None:
                     row.close()
         self.call(close_rows)
@@ -277,18 +278,15 @@ class ConsolePresenter:
         line = (f"Status: {row['phase']} elapsed={row['elapsed']:.1f}s "
                 f"last completed={age}" + (' | ' + values if values else ''))
         if self.tty:
-            if self._status is None:
-                from tqdm import tqdm
-                self._status = tqdm(total=0, position=self.status_position, leave=False, file=self.stream,
-                                    bar_format='{desc}', dynamic_ncols=True)
-            self._status.set_description_str(line)
+            from .console_layout import status_lines, terminal_width
+            self._render_status(status_lines(row, fields, terminal_width(self.stream)))
             from .resources import resource_line
             # Inference already owns buffer/cache rows; no duplicate resource row.
             text = resource_line(resources) if row['phase'] != 'inference' else ''
             if text:
                 if self._resource_row is None:
                     from tqdm import tqdm
-                    self._resource_row = tqdm(total=0, position=self.status_position + 1, leave=False, file=self.stream,
+                    self._resource_row = tqdm(total=0, position=self.status_position + len(self._status_rows), leave=False, file=self.stream,
                                               bar_format='{desc}', dynamic_ncols=True)
                 self._resource_row.set_description_str(text)
             elif self._resource_row is not None:
@@ -301,6 +299,22 @@ class ConsolePresenter:
                 from .resources import resource_line
                 self._write_status(resource_line(resources))
             self._last_heartbeat = time.monotonic()
+
+    def _render_status(self, lines):
+        from tqdm import tqdm
+        if len(lines) != len(self._status_rows) and self._resource_row is not None:
+            # A changed status height moves the resource row; clear its old slot
+            # before any status row can reuse it.
+            self._resource_row.close()
+            self._resource_row = None
+        while len(self._status_rows) > len(lines):
+            self._status_rows.pop().close()
+        for index, text in enumerate(lines):
+            if index == len(self._status_rows):
+                self._status_rows.append(tqdm(total=0, position=self.status_position + index,
+                                             leave=False, file=self.stream, bar_format='{desc}', dynamic_ncols=True))
+            self._status_rows[index].set_description_str(text)
+        self._status = self._status_rows[0]
 
     def _run(self):
         next_render = time.monotonic()+self.refresh
@@ -335,10 +349,11 @@ class ConsolePresenter:
             if bar.target is not None:
                 callbacks.append(bar.target.close)
         self._bars.clear()
-        for row in (self._status, self._resource_row):
+        for row in (self._resource_row, *reversed(self._status_rows)):
             if row is not None:
                 callbacks.append(row.close)
         self._status = self._resource_row = None
+        self._status_rows.clear()
         cleanup(callbacks)
 
     def close(self):

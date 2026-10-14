@@ -22,12 +22,12 @@ def test_one_owner_renders_bar_messages_and_heartbeat_during_blocked_work():
     def write(message):
         owner_threads.add(current_thread().name)
         messages.append(message)
-        if message.startswith('Still working:'): tick.set()
+        if message.startswith('Still working:') and 'wait=evidence' in message: tick.set()
     class Output(StringIO):
         def write(self, value):
             owner_threads.add(current_thread().name)
             messages.append(value)
-            if value.startswith('Still working:'): tick.set()
+            if value.startswith('Still working:') and 'wait=evidence' in value: tick.set()
             return super().write(value)
     ui = ConsolePresenter(write, stream=Output(), refresh=.01, heartbeat=.02).start()
     try:
