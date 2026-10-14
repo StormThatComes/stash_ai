@@ -3,6 +3,7 @@ import hashlib
 import time
 
 from .database import encoded
+from .progress import tracking
 
 
 def canonical(db, person):
@@ -165,65 +166,77 @@ def supported_merges(database, scan, config, groups, policy, *, usage=None):
     merged = 0
     settings = config.data['recognition']
     evidence_policy = _merge_support_policy(config)
-    for observation in db.execute('SELECT id,seconds,dimensions,embedding FROM observations '
-                                   'WHERE scan=? AND rejected IS NULL ORDER BY cue,id', (scan,)):
-        if usage is not None:
-            usage.emit()
-        query = vector(observation)
-        eligible = []
-        for root, component in components.items():
-            if all((scores := _similarities(group, query))[0] >= settings['match_threshold']
-                   and scores[1] >= config.data['clustering']['cohesion_threshold'] for group in component):
-                eligible.append(root)
-        eligible.sort(key=order)
-        for index, source in enumerate(eligible[1:], 1):
-            source = roots[source]
-            for target in eligible[:index]:
-                target = roots[target]
-                if source == target:
-                    continue
-                target, source = sorted((target, source), key=order)
-                scores = _compatible(components[target], components[source], config)
-                if scores is None:
-                    continue
-                previous = nominations.get(source)
-                if previous is not None and roots[previous] != target:
-                    if order(roots[previous]) < order(target):
-                        break
-                nominations[source] = target
-                db.execute('INSERT OR IGNORE INTO merge_support(source,target,observation,policy) VALUES (?,?,?,?)',
-                           (source, target, observation['id'], evidence_policy))
-                supporting = _supporting_cues(db, selected, evidence_policy, source, target,
-                                              components, config, settings['min_merge_support'])
-                if len(supporting) >= settings['min_merge_support']:
-                    cooccurring = _cooccurs(db, target, source, components, selected, config)
-                    stronger = max(settings['match_threshold'], settings['cooccurrence_merge_threshold'])
-                    if cooccurring and scores['minimum_cross_similarity'] < stronger:
-                        # Reflections may co-occur, but need stronger proof.
-                        db.execute("UPDATE candidates SET payload=json_set(payload,'$.merge_withheld_reason',?) "
-                                   "WHERE scan=? AND policy=? AND status='withheld' AND json_extract(payload,'$.observation')=?",
-                                   ('cooccurrence_identity_evidence_insufficient', scan, policy, observation['id']))
-                        break
-                    evidence = {'format': 3, 'cooccurring': cooccurring,
-                        'cooccurrence_merge_threshold': stronger, 'scan': scan, 'policy': policy,
-                        'support_cues': supporting,
-                        'support_seconds': [item['seconds'] for item in supporting],
-                        'scores': scores, 'representative_limit': config.data['clustering']['max_samples_per_person'],
-                        'source_created': rows[source]['created'], 'target_created': rows[target]['created'],
-                        'source_constituents': {'count': len(components[source]),
-                                                'references': reference_context(components[source])},
-                        'target_constituents': {'count': len(components[target]),
-                                                'references': reference_context(components[target])}}
-                    db.execute('INSERT INTO identity_merges VALUES (?,?,?,?,?)',
-                               (source, target, time.time(), encoded(evidence), 'pending'))
-                    db.execute('UPDATE members SET person=? WHERE person=?', (target, source))
-                    db.execute("UPDATE candidates SET payload=json_set(payload,'$.merged_from',person),person=? "
-                               'WHERE person=?', (target, source))
-                    for group in components.pop(source):
-                        roots[group.identifier] = target
-                        components[target].append(group)
-                    merged += 1
-                break
+    with tracking(
+        db.execute(
+            'SELECT id,seconds,dimensions,embedding FROM observations WHERE scan=? AND rejected IS '
+            'NULL ORDER BY cue,id',
+            (scan,),
+        ),
+        'Check identity merges',
+        unit='observation',
+        total=lambda: db.execute(
+            'SELECT COUNT(*) FROM observations WHERE scan=? AND rejected IS NULL',
+            (scan,),
+        ).fetchone()[0],
+    ) as tracked:
+        for observation in tracked:
+            if usage is not None:
+                usage.emit()
+            query = vector(observation)
+            eligible = []
+            for root, component in components.items():
+                if all((scores := _similarities(group, query))[0] >= settings['match_threshold']
+                       and scores[1] >= config.data['clustering']['cohesion_threshold'] for group in component):
+                    eligible.append(root)
+            eligible.sort(key=order)
+            for index, source in enumerate(eligible[1:], 1):
+                source = roots[source]
+                for target in eligible[:index]:
+                    target = roots[target]
+                    if source == target:
+                        continue
+                    target, source = sorted((target, source), key=order)
+                    scores = _compatible(components[target], components[source], config)
+                    if scores is None:
+                        continue
+                    previous = nominations.get(source)
+                    if previous is not None and roots[previous] != target:
+                        if order(roots[previous]) < order(target):
+                            break
+                    nominations[source] = target
+                    db.execute('INSERT OR IGNORE INTO merge_support(source,target,observation,policy) VALUES (?,?,?,?)',
+                               (source, target, observation['id'], evidence_policy))
+                    supporting = _supporting_cues(db, selected, evidence_policy, source, target,
+                                                  components, config, settings['min_merge_support'])
+                    if len(supporting) >= settings['min_merge_support']:
+                        cooccurring = _cooccurs(db, target, source, components, selected, config)
+                        stronger = max(settings['match_threshold'], settings['cooccurrence_merge_threshold'])
+                        if cooccurring and scores['minimum_cross_similarity'] < stronger:
+                            # Reflections may co-occur, but need stronger proof.
+                            db.execute("UPDATE candidates SET payload=json_set(payload,'$.merge_withheld_reason',?) "
+                                       "WHERE scan=? AND policy=? AND status='withheld' AND json_extract(payload,'$.observation')=?",
+                                       ('cooccurrence_identity_evidence_insufficient', scan, policy, observation['id']))
+                            break
+                        evidence = {'format': 3, 'cooccurring': cooccurring,
+                            'cooccurrence_merge_threshold': stronger, 'scan': scan, 'policy': policy,
+                            'support_cues': supporting,
+                            'support_seconds': [item['seconds'] for item in supporting],
+                            'scores': scores, 'representative_limit': config.data['clustering']['max_samples_per_person'],
+                            'source_created': rows[source]['created'], 'target_created': rows[target]['created'],
+                            'source_constituents': {'count': len(components[source]),
+                                                    'references': reference_context(components[source])},
+                            'target_constituents': {'count': len(components[target]),
+                                                    'references': reference_context(components[target])}}
+                        db.execute('INSERT INTO identity_merges VALUES (?,?,?,?,?)',
+                                   (source, target, time.time(), encoded(evidence), 'pending'))
+                        db.execute('UPDATE members SET person=? WHERE person=?', (target, source))
+                        db.execute("UPDATE candidates SET payload=json_set(payload,'$.merged_from',person),person=? "
+                                   'WHERE person=?', (target, source))
+                        for group in components.pop(source):
+                            roots[group.identifier] = target
+                            components[target].append(group)
+                        merged += 1
+                    break
     query = None
     if usage is not None:
         usage.begin('retained')

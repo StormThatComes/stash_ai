@@ -26,8 +26,8 @@ from .metadata import enrich
 from .video import VideoFrames
 from .visibility import FaceVisibility, LazyVisibility
 from .expression import FaceExpression, LazyExpression, required as expression_required
-from .progress import WorkProgress, frame_progress
 from .diagnostics import snapshot as error_snapshot, render as render_errors, message as safe_error
+from .progress import WorkProgress, frame_progress, work, tracking
 
 
 def instance_scope(url):
@@ -67,27 +67,37 @@ def _publish_selection(database, client, report, config, scope, namespace, selec
             targets = {}
             blocked = False
             # Resolve every desired identity before replacing this scene's links.
-            for person in accepted:
-                binding = db.execute('SELECT performer FROM people WHERE id=?', (person,)).fetchone()
-                if incompatible and not binding['performer']:
-                    blocked = True
-                    save_operation(database, scope=scope, scene=scene, person=person, kind='namespace', target=None,
-                        payload={'namespace': namespace}, precondition={'published_namespace': incompatible['namespace']},
-                        status='withheld')
-                    continue
-                targets[person] = ensure_person(database, client, report, scope, scene, person)
-            for person, performer in targets.items():
-                with activity(report, 'publish identity', scene=scene, person=performer):
-                    publish_person(database, client, report, scope, scene, person, reconcile_merges=False)
-                counts['people_linked_or_observed'] += 1
-                target = ready.setdefault(person, {'person': person, 'performer': performer, 'scans': []})
-                target['scans'].append(item)
-                evidence = db.execute("SELECT json_extract(payload,'$.reference_context') FROM candidates "
-                                      "WHERE scan=? AND policy=? AND person=? AND status='accepted' LIMIT 1",
-                                      (scan, matching_policy(config), person)).fetchone()
-                if evidence:
-                    target.setdefault('matching', {})[scan] = {'policy': matching_policy(config),
-                                                              'reference_context': evidence[0], 'person': person}
+            with tracking(
+                accepted,
+                'Prepare scene identities',
+                unit='person',
+            ) as tracked:
+                for person in tracked:
+                    binding = db.execute('SELECT performer FROM people WHERE id=?', (person,)).fetchone()
+                    if incompatible and not binding['performer']:
+                        blocked = True
+                        save_operation(database, scope=scope, scene=scene, person=person, kind='namespace', target=None,
+                            payload={'namespace': namespace}, precondition={'published_namespace': incompatible['namespace']},
+                            status='withheld')
+                        continue
+                    targets[person] = ensure_person(database, client, report, scope, scene, person)
+            with tracking(
+                targets.items(),
+                'Link scene identities',
+                unit='person',
+            ) as tracked:
+                for person, performer in tracked:
+                    with activity(report, 'publish identity', scene=scene, person=performer):
+                        publish_person(database, client, report, scope, scene, person, reconcile_merges=False)
+                    counts['people_linked_or_observed'] += 1
+                    target = ready.setdefault(person, {'person': person, 'performer': performer, 'scans': []})
+                    target['scans'].append(item)
+                    evidence = db.execute("SELECT json_extract(payload,'$.reference_context') FROM candidates "
+                                          "WHERE scan=? AND policy=? AND person=? AND status='accepted' LIMIT 1",
+                                          (scan, matching_policy(config), person)).fetchone()
+                    if evidence:
+                        target.setdefault('matching', {})[scan] = {'policy': matching_policy(config),
+                                                                  'reference_context': evidence[0], 'person': person}
             if not blocked:
                 counts['scene_links_removed'] += remove_stale_links(database, client, report, scope, scene,
                                                                      set(targets.values()), namespace)
@@ -119,10 +129,19 @@ def execute(args, config, *, services=None):
         with closing(client, report=report, name='close recognition HTTP'), present(report, args.progress_style, status_position=2):
             client.report = report
             with phase(report, 'Recognition selection'):
-                if args.all_scenes:
-                    identifiers = list(dict.fromkeys(client.scene_ids()))
-                else:
-                    identifiers = list(dict.fromkeys(args.scene_id))
+                source = client.scene_ids() if args.all_scenes else dict.fromkeys(args.scene_id)
+                identifiers = []
+                seen = set()
+                with tracking(
+                    source,
+                    'Read recognition scene IDs',
+                    unit='scene',
+                    position=0,
+                ) as selected_ids:
+                    for identifier in selected_ids:
+                        if identifier not in seen:
+                            identifiers.append(identifier)
+                            seen.add(identifier)
             snapshot = config.snapshot()
             if retry_images:
                 snapshot['invocation'] = {'retry_unresolved_images': True}
@@ -137,7 +156,9 @@ def execute(args, config, *, services=None):
             inputs = None
             try:
                 with phase(report, 'Recognition assets'):
-                    paths = services.assets(config, write=report.write)
+                    with work('Prepare recognition assets', 1, unit='step', position=0) as assets:
+                        paths = services.assets(config, write=report.write)
+                        assets.advance()
                     visibility = LazyVisibility(config, paths, services.visibility)
                     expression = LazyExpression(config, paths, services.expression)
                     model_namespace = namespace(config)
@@ -210,9 +231,16 @@ def execute(args, config, *, services=None):
                                reference_samples=values['samples'], reference_stage=values['stage'])
                     try:
                         with phase(report, 'Recognition identity rebuild'):
-                            with activity(report, 'reconcile previous publication'):
+                            with work('Reconcile previous merges', 1, unit='step', position=0) as merges:
                                 reconcile_legacy_merges(database, client, scope, [s['scene'] for s in selected])
-                                for item in selected:
+                                merges.advance()
+                            with tracking(
+                                selected,
+                                'Reconcile scene publications',
+                                unit='scene',
+                                position=0,
+                            ) as publications:
+                                for item in publications:
                                     reconcile_unlinks(database, client, scope, item['scene'])
                             rebuilt = rebuild_selected(database, selected, config, progress=reference_progress)
                         database.progress(run, 'rebuild', {'mode': 'cold_selected_replay', 'selection': selected,
@@ -231,11 +259,14 @@ def execute(args, config, *, services=None):
                             report.optional('recognition_references', report.detail,
                                 f'Face references scene {last_scene}: ' + usage_line(references) +
                                 f" people={references['people']} samples={references['samples']} stage={references['stage']}")
-                targets = canonical_targets(database, ready)
+                with phase(report, 'Recognition performer selection'):
+                    targets = canonical_targets(database, ready)
                 if services.metadata:
                     with phase(report, 'Recognition names preflight'):
                         try:
-                            plan = services.metadata_plan(database, client, report, config, extra, scope, targets)
+                            with work('Prepare selected names', 1, unit='step', position=0) as preflight:
+                                plan = services.metadata_plan(database, client, report, config, extra, scope, targets)
+                                preflight.advance()
                             database.progress(run, 'names', {'plan': plan, 'target_ids': [t['performer'] for t in targets]})
                         except KeyboardInterrupt:
                             raise
@@ -258,7 +289,8 @@ def execute(args, config, *, services=None):
                                 people.advance(failed=counts['metadata_failed'])
                 if targets:
                     try:
-                        output = starter(client, targets, scope)
+                        with phase(report, 'Recognition names starter'):
+                            output = starter(client, targets, scope)
                         database.progress(run, 'name_starter', {'yaml': output, 'truncated': len(targets) > 50})
                         report.optional('recognition_name_starter', report.detail, 'Performer names starter (selected IDs, maximum 50):\n' + output)
                     except Exception as error:

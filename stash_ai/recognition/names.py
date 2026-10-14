@@ -9,6 +9,7 @@ from .config import parse_yaml
 from .database import encoded
 from .publication import operation_id, perform, PendingRecognition
 from .stash import checked_id, owns
+from .progress import tracking
 
 
 @dataclass(frozen=True)
@@ -54,16 +55,21 @@ def load_names(config, scope):
 def plan_names(database, client, report, config, names, scope, targets):
     plan = {}
     # Validate the entire selected intersection before any name mutations.
-    for target in targets:
-        identifier = target['performer']
-        if identifier not in names.values:
-            continue
-        live = checked_id(client.performer(identifier), identifier)
-        row = database.connection.execute('SELECT token FROM people WHERE id=? AND scope=?',
-                                         (target['person'], scope)).fetchone()
-        if row is None or not owns(live, row['token']) or not isinstance(live.get('name'), str):
-            raise PendingRecognition('Selected name mapping target identity/name was not confirmed.')
-        plan[identifier] = {'before': live['name'], 'after': names.values[identifier], 'token': row['token']}
+    with tracking(
+        targets,
+        'Validate selected names',
+        unit='person',
+    ) as tracked:
+        for target in tracked:
+            identifier = target['performer']
+            if identifier not in names.values:
+                continue
+            live = checked_id(client.performer(identifier), identifier)
+            row = database.connection.execute('SELECT token FROM people WHERE id=? AND scope=?',
+                                             (target['person'], scope)).fetchone()
+            if row is None or not owns(live, row['token']) or not isinstance(live.get('name'), str):
+                raise PendingRecognition('Selected name mapping target identity/name was not confirmed.')
+            plan[identifier] = {'before': live['name'], 'after': names.values[identifier], 'token': row['token']}
     return plan
 
 
@@ -102,8 +108,14 @@ def sync_name(database, client, report, scope, target, plan):
 def starter(client, targets, scope):
     import yaml
     values = {}
-    for target in targets[:50]:
-        identifier = target['performer']
-        values[identifier] = checked_id(client.performer(identifier), identifier)['name']
+    with tracking(
+        targets[:50],
+        'Read names starter',
+        unit='person',
+        position=0,
+    ) as tracked:
+        for target in tracked:
+            identifier = target['performer']
+            values[identifier] = checked_id(client.performer(identifier), identifier)['name']
     return yaml.safe_dump({'version': 1, 'stash_scope': scope, 'performers': values},
                           allow_unicode=True, sort_keys=False)
