@@ -109,16 +109,27 @@ def retained_image(row):
     if (not isinstance(bounds, list) or len(bounds) != 4 or any(type(v) is not int for v in bounds)
             or bounds[2] <= bounds[0] or bounds[3] <= bounds[1]):
         raise ValueError('Retained recognition crop has no valid source bounds.')
-    geometry = json.loads(row['geometry'])
-    geometry[0] -= bounds[0]
-    geometry[1] -= bounds[1]
-    for index in range(4, 14, 2):
-        geometry[index] -= bounds[0]
-        geometry[index + 1] -= bounds[1]
-    face = checked_detection(geometry)
+    source_size = bounds[2] - bounds[0], bounds[3] - bounds[1]
+    pixels = source_size
+    encoding = quality.get('crop_encoding')
+    if encoding is not None:
+        pixels = encoding.get('pixels') if isinstance(encoding, dict) else None
+        if (not isinstance(pixels, list) or len(pixels) != 2
+                or any(type(value) is not int or not 1 <= value <= maximum
+                       for value, maximum in zip(pixels, source_size))
+                or encoding.get('downscaled') is not (tuple(pixels) != source_size)):
+            raise ValueError('Retained crop has invalid encoding dimensions.')
     with open_image(BytesIO(row['crop'])) as raw:
-        if raw.size != (bounds[2] - bounds[0], bounds[3] - bounds[1]):
+        if raw.size != tuple(pixels):
             raise ValueError('Retained crop dimensions do not match recognition evidence.')
+        scale_x, scale_y = raw.width / source_size[0], raw.height / source_size[1]
+        geometry = json.loads(row['geometry'])
+        geometry[0], geometry[1] = (geometry[0] - bounds[0]) * scale_x, (geometry[1] - bounds[1]) * scale_y
+        geometry[2], geometry[3] = geometry[2] * scale_x, geometry[3] * scale_y
+        for index in range(4, 14, 2):
+            geometry[index] = (geometry[index] - bounds[0]) * scale_x
+            geometry[index + 1] = (geometry[index + 1] - bounds[1]) * scale_y
+        face = checked_detection(geometry)
         image = raw.convert('RGB')
     return image, face
 
