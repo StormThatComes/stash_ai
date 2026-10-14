@@ -7,7 +7,7 @@ import time
 import uuid
 
 APPLICATION_ID = 0x46524347  # FRCG; never accept a tagger or arbitrary database.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 SCHEMA = '''
 CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE runs (id TEXT PRIMARY KEY, scope TEXT NOT NULL, selection TEXT NOT NULL,
@@ -53,6 +53,19 @@ CREATE INDEX identity_merges_target ON identity_merges(target);
 '''
 SCHEMA += MERGE_SCHEMA
 TABLES += ('identity_merges',)
+SCHEMA_V2, TABLES_V2 = SCHEMA, TABLES
+SUPPORT_SCHEMA = '''
+CREATE TABLE merge_support (
+ source TEXT NOT NULL REFERENCES people(id),
+ target TEXT NOT NULL REFERENCES people(id),
+ observation TEXT NOT NULL REFERENCES observations(id),
+ policy TEXT NOT NULL,
+ PRIMARY KEY(source,target,observation,policy),
+ CHECK(source<>target));
+CREATE INDEX merge_support_policy_pair ON merge_support(policy,source,target);
+'''
+SCHEMA += SUPPORT_SCHEMA
+TABLES += ('merge_support',)
 
 
 def encoded(value):
@@ -108,10 +121,11 @@ class FaceDatabase(AbstractContextManager):
             except BaseException:
                 db.rollback()
                 raise
-        elif version == 1 and db.execute('PRAGMA application_id').fetchone()[0] == APPLICATION_ID:
-            self._validate(SCHEMA_V1, TABLES_V1, tables)
+        elif version in (1, 2) and db.execute('PRAGMA application_id').fetchone()[0] == APPLICATION_ID:
+            previous_schema = (SCHEMA_V1, TABLES_V1) if version == 1 else (SCHEMA_V2, TABLES_V2)
+            self._validate(*previous_schema, tables)
             try:
-                db.executescript('BEGIN IMMEDIATE;\n' + MERGE_SCHEMA)
+                db.executescript('BEGIN IMMEDIATE;\n' + (MERGE_SCHEMA if version == 1 else '') + SUPPORT_SCHEMA)
                 db.execute(f'PRAGMA user_version={SCHEMA_VERSION}')
                 db.commit()
             except BaseException:
