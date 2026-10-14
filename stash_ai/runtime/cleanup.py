@@ -40,7 +40,7 @@ def shutdown_step(report, name, primary=None):
 
 
 def cleanup(callbacks, *, report=None, primary=None):
-    primary = sys.exception() or primary
+    primary = primary if primary is not None else sys.exception()
     failures = []
     for item in callbacks:
         name, callback = item if isinstance(item, tuple) else (getattr(item, '__name__', 'close resource'), item)

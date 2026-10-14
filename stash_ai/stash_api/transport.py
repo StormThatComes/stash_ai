@@ -282,7 +282,12 @@ class StashTransport:
                 raise
             if not read or response.status_code not in retry_statuses or attempt + 1 == attempts:
                 return response
-            response.close()
+            # A cleanup fault cannot consume an otherwise safe read retry.
+            # Preserve the discarded HTTP outcome as the primary event.
+            from requests import HTTPError
+            from stash_ai.runtime.cleanup import cleanup
+            cleanup([response.close], report=self.report,
+                    primary=HTTPError('Discarded retryable HTTP response.', response=response))
             backoff(attempt, 'HTTP' + str(response.status_code))
         raise RuntimeError('Stash request returned no response.')
 

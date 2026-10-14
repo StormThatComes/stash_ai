@@ -74,9 +74,9 @@ def call_with_deadline(operation, deadline, *, cancel=None, label='read'):
         if cancel is not None:
             with callback_lock:
                 callbacks.add(cancel)
-            if control.cancelled.is_set():
-                cancel()
         try:
+            if cancel is not None and control.cancelled.is_set():
+                cancel()
             token = current()
             if token is not None:
                 token.check()
@@ -102,14 +102,11 @@ def call_with_deadline(operation, deadline, *, cancel=None, label='read'):
                 slot_returned = True
                 _slots.release()
 
-    def abort():
-        control.cancel()
+    def abort(primary=None):
         with callback_lock:
             active = tuple(callbacks)
-        for callback in active:
-            callback()
-        if cancel is not None:
-            cancel()
+        from stash_ai.runtime.cleanup import cleanup
+        cleanup([control.cancel, *active, *([cancel] if cancel is not None else [])], primary=primary)
 
     if token is not None:
         token.subscribe(abort)
@@ -183,8 +180,9 @@ def call_with_deadline(operation, deadline, *, cancel=None, label='read'):
         succeeded = True
         return value
     except Empty:
-        abort()
-        raise ReadDeadlineExceeded('Stash read exceeded its total deadline.') from None
+        error = ReadDeadlineExceeded('Stash read exceeded its total deadline.')
+        abort(error)
+        raise error from None
     except (ReadDeadlineExceeded, KeyboardInterrupt):
         abort()
         raise

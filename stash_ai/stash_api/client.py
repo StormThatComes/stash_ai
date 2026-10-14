@@ -8,6 +8,7 @@ from typing import Iterator
 
 from stash_ai.stash_api.transport import StashTransport
 from stash_ai.stash_api.scene_reads import SceneReads
+from stash_ai.stash_api.acknowledgements import entity, boolean
 
 
 class StashClient(StashTransport):
@@ -110,63 +111,51 @@ class StashClient(StashTransport):
                 payload[key] = value
         result = self.gql('''mutation StashAICreateTag($input: TagCreateInput!) {
             tagCreate(input: $input) { ''' + self.tag_fields() + ''' }
-        }''', {"input": payload})["tagCreate"]
-        if not result:
-            raise RuntimeError(f"Stash did not create tag {name!r}.")
-        return result
+        }''', {"input": payload}).get("tagCreate")
+        return entity(result)
 
     @observed('tag_organization')
     def update_tag_organization(self, tag_id: str, parent_ids: list[str], ignore_auto_tag: bool) -> dict:
         result = self.gql('''mutation StashAIMarkerGroupTag($input: TagUpdateInput!) {
             tagUpdate(input: $input) { ''' + self.tag_fields() + ''' }
-        }''', {"input": {"id": tag_id, "parent_ids": parent_ids, "ignore_auto_tag": ignore_auto_tag}})["tagUpdate"]
-        if not result:
-            raise RuntimeError(f"Stash did not update marker group tag {tag_id}.")
-        return result
+        }''', {"input": {"id": tag_id, "parent_ids": parent_ids, "ignore_auto_tag": ignore_auto_tag}}).get("tagUpdate")
+        return entity(result, tag_id)
 
     @observed('tag_parents')
     def update_tag_parents(self, tag_id: str, parent_ids: list[str]) -> dict:
         result = self.gql('''mutation StashAITagParents($input: TagUpdateInput!) {
             tagUpdate(input: $input) { ''' + self.tag_fields() + ''' }
-        }''', {"input": {"id": tag_id, "parent_ids": parent_ids}})["tagUpdate"]
-        if not result:
-            raise RuntimeError(f"Stash did not update parents of tag {tag_id}.")
-        return result
+        }''', {"input": {"id": tag_id, "parent_ids": parent_ids}}).get("tagUpdate")
+        return entity(result, tag_id)
 
     def update_scene_tags(self, scene_id: str, tag_ids: list[str]) -> None:
         result = self.gql('''mutation StashAISceneTags($input: SceneUpdateInput!) {
             sceneUpdate(input: $input) { id }
-        }''', {"input": {"id": scene_id, "tag_ids": tag_ids}})["sceneUpdate"]
-        if not result:
-            raise RuntimeError("Stash did not update scene tags.")
+        }''', {"input": {"id": scene_id, "tag_ids": tag_ids}}).get("sceneUpdate")
+        entity(result, scene_id)
 
     def create_marker(self, payload: dict) -> str:
         result = self.gql('''mutation StashAICreateMarker($input: SceneMarkerCreateInput!) {
             sceneMarkerCreate(input: $input) { id }
-        }''', {"input": payload})["sceneMarkerCreate"]
-        if not result:
-            raise RuntimeError("Stash did not create the scene marker.")
-        return str(result['id'])
+        }''', {"input": payload}).get("sceneMarkerCreate")
+        return entity(result)['id']
 
     def update_marker(self, payload: dict) -> None:
         result = self.gql('''mutation StashAIUpdateMarker($input: SceneMarkerUpdateInput!) {
             sceneMarkerUpdate(input: $input) { id }
-        }''', {"input": payload})["sceneMarkerUpdate"]
-        if not result:
-            raise RuntimeError("Stash did not update the scene marker.")
+        }''', {"input": payload}).get("sceneMarkerUpdate")
+        entity(result, payload['id'])
 
     def delete_marker(self, marker_id: str) -> None:
         result = self.gql('''mutation StashAIDeleteMarker($id: ID!) {
             sceneMarkerDestroy(id: $id)
-        }''', {"id": marker_id})["sceneMarkerDestroy"]
-        if not result:
-            raise RuntimeError(f"Stash did not delete marker {marker_id}.")
+        }''', {"id": marker_id}).get("sceneMarkerDestroy")
+        boolean(result)
 
     def delete_markers(self, marker_ids):
         """Bounded native mutations; ambiguous responses leave durable recovery."""
         for group in batched(dict.fromkeys(map(str, marker_ids)), 200):
             result = self.gql('''mutation StashAIDeleteMarkers($ids: [ID!]!) {
                 sceneMarkersDestroy(ids: $ids)
-            }''', {'ids': list(group)})['sceneMarkersDestroy']
-            if result is not True:
-                raise RuntimeError('Marker batch deletion was not confirmed; resume the pending merge.')
+            }''', {'ids': list(group)}).get('sceneMarkersDestroy')
+            boolean(result)
