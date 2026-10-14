@@ -21,7 +21,8 @@ def defaults():
                       'max_pose_deviation': .5, 'min_visible_face_fraction': .8,
                       'require_complete_face': True},
         'recognition': {'metric': 'cosine', 'match_threshold': .65,
-                        'ambiguity_margin': .1, 'min_support': 3, 'cooccurrence_merge_threshold': .90},
+                        'ambiguity_margin': .1, 'min_identity_support': 1, 'min_merge_support': 3,
+                        'cooccurrence_merge_threshold': .90},
         'clustering': {'cohesion_threshold': .60, 'max_samples_per_person': 32,
                        'max_people_per_lookup': 20000, 'max_reference_bytes': 134217728},
         'portraits': {'enabled': True, 'source': 'vtt', 'min_face_pixels': 96, 'min_sharpness': 25.,
@@ -130,7 +131,7 @@ def validate(data):
         raise ValueError('clustering.cohesion_threshold must not exceed recognition.match_threshold.')
     integers = {
         'detection': {'min_face_pixels': (8, 4096), 'max_faces_per_frame': (1, 1000)},
-        'recognition': {'min_support': (2, 1000)},
+        'recognition': {'min_identity_support': (1, 1000), 'min_merge_support': (1, 1000)},
         'clustering': {'max_samples_per_person': (2, 128), 'max_people_per_lookup': (1, 100000),
                        'max_reference_bytes': (1048576, 1073741824)},
         'portraits': {'min_face_pixels': (0, 4096), 'max_candidates': (1, 64), 'jpeg_quality': (1, 100),
@@ -210,6 +211,16 @@ def load(path=None, *, database=None, device=None, root=None):
         base = selected.parent
     else:
         raw, supplied, base, selected = b'', {}, root.resolve(), None
+    # Keep older local YAML configurations valid without silently weakening
+    # their existing identity/merge policies.
+    old = supplied.get('recognition', {}) if isinstance(supplied, dict) else {}
+    if isinstance(old, dict) and 'min_support' in old:
+        if 'min_identity_support' in old or 'min_merge_support' in old:
+            raise ValueError('recognition.min_support cannot be combined with split support settings.')
+        supplied = dict(supplied)
+        supplied['recognition'] = dict(old)
+        support = supplied['recognition'].pop('min_support')
+        supplied['recognition'].update(min_identity_support=support, min_merge_support=support)
     data = defaults()
     _merge(data, supplied)
     if device is not None:
