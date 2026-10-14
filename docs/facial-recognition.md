@@ -37,6 +37,22 @@ The frame bar starts at the saved checkpoint cursor; cached scenes show all
 frames reused without treating them as newly inferred work. Frame progress
 updates independently of the configured SQLite checkpoint interval.
 
+Identity rebuild has separate progress for publication reconciliation, copying
+selected evidence, matching scenes and their face observations, binding historical
+identities, saving memberships/candidates, and collecting results. A large scene
+therefore advances its observation counter before the scene finishes. Cached
+rebuilds show validation work instead of claiming that matching ran again.
+The apply bar counts one transaction and completes only after its commit; inner
+record counters describe preparation inside that transaction.
+
+Scene selection, model asset verification, name preflight/starter reads and
+portrait candidate checks also expose work counters. VTT portraits count ranked
+observations; video portraits count candidate frame checks. Known totals show
+stage throughput and ETA after completed work is observed. Sources without a
+known total, such as paginated all-scene discovery, remain indeterminate and show
+completed units and elapsed time. Nested detail bars are terminal-only; redirected
+output keeps bounded status heartbeats and major-stage milestones.
+
 Redirected output keeps phase milestones and infrequent status heartbeats,
 including scene/frame counts and stage ETAs, without per-scene frame logs.
 `--progress-style verbose` adds per-scene quality/reference details and the

@@ -3,6 +3,7 @@ import json
 
 from .publication import operation_id, perform, PendingRecognition
 from .stash import checked_id, owns
+from .progress import tracking
 
 COMPLETE = ('confirmed', 'observed', 'local')
 
@@ -116,15 +117,21 @@ def canonical_targets(database, ready):
     """Remap earlier scenes in a multi-scene run before names/portraits execute."""
     from .identity_merges import canonical
     db, result = database.connection, {}
-    for target in ready.values():
-        person = canonical(db, target['person'])
-        row = db.execute('SELECT performer FROM people WHERE id=?', (person,)).fetchone()
-        if row is None or not row['performer'] or any(r['merge_status'] not in COMPLETE for r in aliases(db, person)):
-            continue
-        current = result.setdefault(person, {'person': person, 'performer': row['performer'], 'scans': []})
-        if target.get('matching'):
-            current.setdefault('matching', {}).update(target['matching'])
-        for scan in target['scans']:
-            if scan not in current['scans']:
-                current['scans'].append(scan)
+    with tracking(
+        ready.values(),
+        'Resolve metadata targets',
+        unit='person',
+        position=0,
+    ) as tracked:
+        for target in tracked:
+            person = canonical(db, target['person'])
+            row = db.execute('SELECT performer FROM people WHERE id=?', (person,)).fetchone()
+            if row is None or not row['performer'] or any(r['merge_status'] not in COMPLETE for r in aliases(db, person)):
+                continue
+            current = result.setdefault(person, {'person': person, 'performer': row['performer'], 'scans': []})
+            if target.get('matching'):
+                current.setdefault('matching', {}).update(target['matching'])
+            for scan in target['scans']:
+                if scan not in current['scans']:
+                    current['scans'].append(scan)
     return [result[key] for key in sorted(result)]

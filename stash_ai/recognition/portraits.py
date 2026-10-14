@@ -18,6 +18,7 @@ from .stash import checked_id, owns
 from .visibility import LazyVisibility, CONTRACT_ID
 from .expression import LazyExpression, CONTRACT_ID as EXPRESSION_CONTRACT_ID
 from .diagnostics import metadata as safe_metadata
+from .progress import tracking
 
 
 def policy_identity(config):
@@ -164,9 +165,15 @@ def choose(database, client, config, scope, target, paths, backend_factory, deco
     winner, winning_key = None, None
     decoders = {}
     backend = None
+    attempts = ((scene_id, row, offset) for scene_id, row in selected for offset in policy['time_offsets'])
     try:
-        for scene_id, row in selected:
-            for offset in policy['time_offsets']:
+        with tracking(
+            attempts,
+            'Check video portrait frames',
+            total=len(selected) * len(policy['time_offsets']),
+            unit='frame',
+        ) as frames:
+            for scene_id, row, offset in frames:
                 seconds = max(0., row['seconds'] + offset)
                 identifier = str(uuid.uuid5(uuid.NAMESPACE_URL,
                     encoded([scope, target['person'], row['id'], seconds, policy_sha])))

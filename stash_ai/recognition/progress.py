@@ -4,16 +4,17 @@ import time
 
 from tqdm import tqdm
 
-from stash_ai.runtime.console import progress as console_bar, status
+from stash_ai.runtime.console import progress as console_bar, status, activity, current_report
 
 
 class WorkProgress:
     """Throttle UI updates independently of inference and SQLite checkpoints."""
-    def __init__(self, report, label, total, *, unit='scene', key='scenes', initial=0, transient=False):
+    def __init__(self, report, label, total, *, unit='scene', key='scenes', initial=0, transient=False, position=None):
         self.report, self.label, self.total = report, label, total
         self.unit, self.key, self.initial = unit, key, initial
         self.n = self.rendered = initial
         self.transient, self.bar = transient, None
+        self.position = (1 if transient else 0) if position is None else position
         self.started = self.last_render = time.monotonic()
         self.postfix = {}
 
@@ -24,7 +25,7 @@ class WorkProgress:
         # frame milestones for every scene. Terminal rows have fixed positions.
         if self.enabled and (console.tty or not self.transient):
             self.bar = console_bar(tqdm, total=self.total, initial=self.initial, desc=self.label,
-                                   unit=self.unit, position=1 if self.transient else 0,
+                                   unit=self.unit, position=self.position,
                                    leave=False, dynamic_ncols=True, disable=None)
         self._render(force=True)
         return self
@@ -45,11 +46,11 @@ class WorkProgress:
             return
         elapsed, observed = now - self.started, self.n - self.initial
         rate = observed / elapsed if observed > 0 and elapsed > 0 else None
-        eta = ('00:00' if self.n == self.total else
+        eta = ('unknown' if self.total is None else '00:00' if self.n == self.total else
                tqdm.format_interval((self.total - self.n) / rate) if rate else 'warming up')
         delta = self.n - self.rendered
         status(self.report, completed=delta, **{
-            self.key: f'{self.n}/{self.total}', self.key + '_eta': eta,
+            self.key: f'{self.n}/{self.total if self.total is not None else "?"}', self.key + '_eta': eta,
             self.key + '_rate': f'{rate:.2f} {self.unit}/s' if rate else 'warming up',
         })
         if self.bar is not None:
@@ -66,6 +67,67 @@ class WorkProgress:
             if self.bar is not None:
                 self.bar.close()
             status(self.report, **{self.key: None, self.key + '_eta': None, self.key + '_rate': None})
+
+
+@contextmanager
+def work(label, total=None, *, unit='item', position=1, **values):
+    """Shared run-owned progress, also for calls below injected service boundaries."""
+    report = current_report()
+    console = getattr(report, 'console', None)
+    if callable(total):
+        # Counting is optional telemetry, never another BLOB materialization.
+        if console is None or console.style == 'off':
+            total = None
+        else:
+            try:
+                total = total()
+            except Exception:
+                report.counts['recognition_progress_total_failures'] += 1
+                total = None
+    with activity(report, label, **values), WorkProgress(
+            report, label, total, unit=unit, key='work' if position == 0 else 'detail',
+            transient=position != 0, position=position) as progress:
+        yield progress
+
+
+class _Tracked:
+    def __init__(self, iterable, progress):
+        self.iterator, self.progress, self.pending = iter(iterable), progress, False
+
+    def completed(self):
+        if self.pending:
+            self.progress.advance()
+            self.pending = False
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        # Advancing means the previous loop body completed. An exception in
+        # that body must not contribute a completed record.
+        self.completed()
+        value = next(self.iterator)
+        self.pending = True
+        return value
+
+
+@contextmanager
+def tracking(iterable, label, *, total=None, unit='item', position=1, **values):
+    """Close rows deterministically, including early return, failure and Ctrl+C."""
+    report = current_report()
+    console = getattr(report, 'console', None)
+    if console is None or console.style == 'off':
+        yield iterable
+        return
+    if total is None and hasattr(iterable, '__len__'):
+        total = len(iterable)
+    with work(label, total, unit=unit, position=position, **values) as progress:
+        items = _Tracked(iterable, progress)
+        try:
+            yield items
+            items.completed()
+        finally:
+            items.iterator = None
 
 
 @contextmanager

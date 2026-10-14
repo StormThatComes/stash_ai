@@ -12,6 +12,14 @@ and names/portraits replace the work rows with their own stage totals. Remaining
 time estimates cover each measured stage; redirected frame updates appear in
 throttled heartbeats rather than one log entry per frame or scene. Recognition
 quality/reference details and the names YAML starter require `verbose`.
+
+Recognition also measures identity replay (copy, matching, historical binding,
+transactional apply and cached validation), name preflight, model assets, and
+portrait candidates. Scene-level work uses the first row; observations,
+references or candidate checks use the second. UI refreshes are throttled and
+record totals use scalar counts rather than materializing embeddings/JPEGs.
+`off` and standalone calls skip optional total queries. Unknown totals remain
+indeterminate; a failed transaction never completes its apply bar.
 The final recognition error summary retains at most six groups and two examples
 per group (350 characters each), with exact counts and overflow totals. Distinct
 reasons sharing an exception type remain available in auto/compact/off output.

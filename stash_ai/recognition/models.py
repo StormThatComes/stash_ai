@@ -8,6 +8,7 @@ import stat
 from pathlib import Path
 
 from .config import digest
+from .progress import tracking
 
 
 @dataclass(frozen=True)
@@ -101,25 +102,30 @@ def ensure_assets(config, *, write=print):
     from .expression import required as expression_required
     if config.data['portraits']['enabled'] and expression_required(config.data['portraits']):
         selected.extend(('expression_mesh', 'expression_blendshapes'))
-    for key in selected:
-        asset = ASSETS[key]
-        path = config.model_dir / key / asset.filename
-        result[key] = path
-        try:
-            if not path.is_file():
-                if not config.data['models']['download_missing']:
-                    raise FileNotFoundError(f'Missing face asset {path}; download_missing is disabled.')
-                write(f'Recognition asset: downloading {key} at {asset.revision[:12]}.')
-                install_hf_asset(asset.repo, asset.filename, asset.revision, path,
-                                 expected_sha256=asset.sha256, max_bytes=asset.size)
-            verify(path, asset)
-        except Exception as error:
-            if key in identity_assets:
-                raise
-            from stash_ai.stash_api.transport import safe_error
-            # Keep the requested path so lazy initialization checks the pinned
-            # asset again and reports an unavailable cue, never an unverified model.
-            write(f'Portrait quality asset {key} unavailable: ' + safe_error(error)[:500])
+    with tracking(
+        selected,
+        'Verify recognition assets',
+        unit='asset',
+    ) as tracked:
+        for key in tracked:
+            asset = ASSETS[key]
+            path = config.model_dir / key / asset.filename
+            result[key] = path
+            try:
+                if not path.is_file():
+                    if not config.data['models']['download_missing']:
+                        raise FileNotFoundError(f'Missing face asset {path}; download_missing is disabled.')
+                    write(f'Recognition asset: downloading {key} at {asset.revision[:12]}.')
+                    install_hf_asset(asset.repo, asset.filename, asset.revision, path,
+                                     expected_sha256=asset.sha256, max_bytes=asset.size)
+                verify(path, asset)
+            except Exception as error:
+                if key in identity_assets:
+                    raise
+                from stash_ai.stash_api.transport import safe_error
+                # Keep the requested path so lazy initialization checks the pinned
+                # asset again and reports an unavailable cue, never an unverified model.
+                write(f'Portrait quality asset {key} unavailable: ' + safe_error(error)[:500])
     return result
 
 

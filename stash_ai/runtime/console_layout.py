@@ -32,7 +32,7 @@ def status_lines(row, fields, width, *, max_rows=12):
         if key in fields:
             timing += f' | {key}={fields.pop(key)}'
     sections.append(('Time', timing))
-    take('Progress', lambda key: key in ('scenes', 'frames', 'people', 'progress', 'frame_cache', 'checkpoint'))
+    take('Progress', lambda key: key in ('scenes', 'frames', 'people', 'work', 'detail', 'progress', 'frame_cache', 'checkpoint'))
     take('Rates', lambda key: key.endswith(('_eta', '_rate')))
     take('References', lambda key: key.startswith('reference'))
     take('Details', lambda key: True)
