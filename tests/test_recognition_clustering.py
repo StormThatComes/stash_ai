@@ -272,7 +272,12 @@ def test_valid_one_mib_budget_does_not_overlap_reference_reload_allocations(tmp_
 
 
 def test_default_accepts_one_detected_face_without_relaxing_merges(tmp_path):
-    config = load(root=tmp_path)
+    assert load(root=tmp_path).data['recognition']['min_identity_support'] == 1
+    config = setup(tmp_path)
+    # Reuse the fixture's disabled quality gates, but exercise the new default
+    # singleton acceptance instead of the legacy 3-cue regression fixture.
+    config = replace(config, data=plain(config.data))
+    config.data['recognition']['min_identity_support'] = 1
     with FaceDatabase(config.database) as db:
         selected, _ = scan(db, config, '1', count=1)
         result = cluster_scene(db, selected, config)
