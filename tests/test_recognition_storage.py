@@ -4,7 +4,7 @@ import sqlite3
 
 import pytest
 
-from stash_ai.recognition.database import FaceDatabase, APPLICATION_ID, SCHEMA_V1, SCHEMA_VERSION
+from stash_ai.recognition.database import FaceDatabase, APPLICATION_ID, SCHEMA_V1, SCHEMA_V2, SCHEMA_VERSION
 
 
 def test_one_database_owns_history_progress_and_backup(tmp_path):
@@ -165,3 +165,34 @@ def test_new_writer_recovers_only_prior_owner_runs_independent_of_selection(tmp_
         assert db.connection.execute('SELECT status FROM runs WHERE id=?',(current,)).fetchone()[0]=='running'
         with pytest.raises(RuntimeError,match='recognition writer'): FaceDatabase(path)
         assert db.connection.execute('SELECT status FROM runs WHERE id=?',(current,)).fetchone()[0]=='running'
+
+
+def test_v2_migration_retains_people_and_adds_persistent_merge_support(tmp_path):
+    path = tmp_path / 'faces.sqlite3'
+    with sqlite3.connect(path) as db:
+        db.executescript(SCHEMA_V2)
+        db.execute(f'PRAGMA application_id={APPLICATION_ID}')
+        db.execute('PRAGMA user_version=2')
+        db.execute('INSERT INTO metadata VALUES (?,?)', ('installation', '01234567-89ab-cdef-0123-456789abcdef'))
+        db.execute('INSERT INTO people VALUES (?,?,?,?,?,?)', ('oldest', 'scope', 'ns', 123., '77', 'token'))
+    for _ in range(2):
+        with FaceDatabase(path) as db:
+            assert db.connection.execute('PRAGMA user_version').fetchone()[0] == SCHEMA_VERSION
+            assert db.connection.execute('SELECT performer FROM people WHERE id=?', ('oldest',)).fetchone()[0] == '77'
+            assert db.connection.execute('SELECT * FROM merge_support').fetchall() == []
+
+
+def test_failed_v2_merge_support_migration_is_atomic(tmp_path, monkeypatch):
+    import stash_ai.recognition.database as module
+    path = tmp_path / 'faces.sqlite3'
+    with sqlite3.connect(path) as db:
+        db.executescript(SCHEMA_V2)
+        db.execute(f'PRAGMA application_id={APPLICATION_ID}')
+        db.execute('PRAGMA user_version=2')
+    original = module.SUPPORT_SCHEMA
+    monkeypatch.setattr(module, 'SUPPORT_SCHEMA', original + '\nINVALID SQL;')
+    with pytest.raises(sqlite3.Error):
+        FaceDatabase(path)
+    with sqlite3.connect(path) as db:
+        assert db.execute('PRAGMA user_version').fetchone()[0] == 2
+        assert db.execute("SELECT name FROM sqlite_master WHERE name='merge_support'").fetchone() is None
