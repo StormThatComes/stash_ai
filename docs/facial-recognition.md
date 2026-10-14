@@ -203,6 +203,17 @@ remain resumable on a later explicit run. An unavailable measurement never count
 as an uncovered face. Cheap size/sharpness/geometry gates run before segmentation.
 One lazy visibility model is shared across selected scenes and portraits; accepted
 VTT observations retain the raw measurement so portrait ranking does not repeat it.
+If `require_complete_face: false` permits a partial face whose visibility region
+extends outside the real source, that observation is rejected as
+`face_visibility_unmeasurable`, without an embedding/crop. Other valid cues continue.
+This local geometry rejection does not turn a broken or unavailable model into a
+successful scan.
+
+Fresh retained face JPEGs also obey `storage.max_crop_bytes` (minimum 1024 bytes).
+Encoding starts at quality 90, then reduces JPEG quality and, if needed, dimensions
+without upscaling. `crop_bounds` retains source coordinates; `crop_encoding`
+records the actual JPEG quality, pixel size and downscaling. This applies even
+when portrait publication is disabled; normal-budget JPEG bytes stay unchanged.
 
 Changing detection gates or the enabled visibility model contract starts a new
 selected-scene scan, while preserving the recognizer namespace and existing
@@ -254,6 +265,12 @@ compete even when the runner-up falls just below the match threshold. A-B and B-
 similarities cannot override incompatible A-C evidence. Possible reflections retain
 the stronger `cooccurrence_merge_threshold` cross-sample requirement. These are
 sampled similarity checks, not identity probabilities or universal accuracy claims.
+Co-presence includes compatible observations withheld for ambiguous identity,
+not just accepted memberships; increasing ambiguity cannot remove this safeguard.
+Exact duplicate geometry/embeddings in one cue count as one physical observation.
+Co-presence is contextual evidence, not an unconditional different-person rule:
+strongly supported reflections may still merge. The matching-policy revision
+replays grouping from cached embeddings without invalidating completed scans.
 
 ### Retuning and stable performer labels
 

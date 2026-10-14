@@ -9,7 +9,7 @@ from .media import safe_url
 from .quality import assess, rejection, crop_bytes
 from .models import normalized_embedding
 from .prefetch import frames as frame_inputs
-from .visibility import CONTRACT_ID, VisibilityError, cached as visibility_cached
+from .visibility import CONTRACT_ID, VisibilityError, VisibilityGeometryError, cached as visibility_cached
 
 
 def scan_identity(config, namespace):
@@ -62,17 +62,23 @@ def scan_scene(database, scope, scene, config, namespace, source, backend_factor
                         if reason is None and config.data['detection']['min_visible_face_fraction'] > 0:
                             if visibility is None:
                                 raise VisibilityError('Recognition visibility gate requires a visibility model.')
-                            quality.update(visibility.measure(image, face))
-                            if not visibility_cached(quality):
-                                raise VisibilityError('Recognition visibility gate received an invalid measurement.')
-                            if quality['visible_face_fraction'] < config.data['detection']['min_visible_face_fraction']:
-                                reason = 'face_occluded'
+                            try:
+                                quality.update(visibility.measure(image, face))
+                            except VisibilityGeometryError:
+                                reason = 'face_visibility_unmeasurable'
+                            else:
+                                if not visibility_cached(quality):
+                                    raise VisibilityError('Recognition visibility gate received an invalid measurement.')
+                                if quality['visible_face_fraction'] < config.data['detection']['min_visible_face_fraction']:
+                                    reason = 'face_occluded'
                         vector = None
                         crop = None
                         if reason is None:
                             vector = normalized_embedding(backend.embed(image, face), backend.dimensions).astype('<f4').tobytes()
-                            crop, bounds = crop_bytes(image, face, limit=config.data['storage']['max_crop_bytes'])
+                            encoding = {}
+                            crop, bounds = crop_bytes(image, face, limit=config.data['storage']['max_crop_bytes'], details=encoding)
                             quality['crop_bounds'] = bounds
+                            quality['crop_encoding'] = encoding
                         observation = str(uuid.uuid5(uuid.UUID(identifier), encoded([index, face_index, face.row])))
                         pending.append((observation, identifier, index, cue.start, safe_url(cue.image), encoded(list(cue.rect)),
                                         encoded(list(face.row)), encoded(quality), reason, backend.dimensions, vector, crop))

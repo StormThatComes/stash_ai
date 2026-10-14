@@ -55,17 +55,13 @@ def rejection(quality, policy):
     return None
 
 
-def crop_bytes(image, detection, *, margin=.15, limit=1048576):
+def crop_bytes(image, detection, *, margin=.15, limit=1048576, details=None):
     x, y, width, height = detection.box
     bounds = (max(0, int(x - width * margin)), max(0, int(y - height * margin)),
               min(image.width, math.ceil(x + width * (1 + margin))),
               min(image.height, math.ceil(y + height * (1 + margin))))
     with image.crop(bounds) as crop, crop.convert('RGB') as rgb:
-        output = BytesIO()
-        rgb.save(output, format='JPEG', quality=90)
-        data = output.getvalue()
-    if len(data) > limit:
-        raise ValueError('Retained face crop exceeds configured BLOB limit.')
+        data = encode_portrait(rgb, {'jpeg_quality': 90}, limit=limit, details=details)
     return data, list(bounds)
 
 

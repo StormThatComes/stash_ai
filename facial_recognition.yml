@@ -67,6 +67,6 @@ execution:
   prefetch_scenes: true        # Verify/download one next scene while the current one scans.
 storage:
   database: faces_state.sqlite3
-  max_crop_bytes: 1048576
+  max_crop_bytes: 1048576      # JPEG byte budget (minimum 1024); adapts quality/size, including retained scan crops.
 names:
   file: null                  # Optional instance-scoped performer_names.yml.

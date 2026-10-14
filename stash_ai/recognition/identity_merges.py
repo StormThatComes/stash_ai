@@ -1,4 +1,5 @@
 """Evidence-backed, oldest-first aliases; never a transitive single-link union."""
+import hashlib
 import time
 
 from .database import encoded
@@ -45,11 +46,51 @@ def _compatible(first, second, config):
     return {'minimum_cross_mean': worst_mean, 'minimum_cross_similarity': worst_minimum}
 
 
-def _cooccurs(db, first, second):
-    return db.execute('''SELECT 1 FROM members a JOIN observations x ON x.id=a.observation
+def _matches(component, query, config):
+    from .clustering import _similarities
+    for group in component:
+        mean, lowest = _similarities(group, query)
+        if (mean < config.data['recognition']['match_threshold'] or
+                lowest < config.data['clustering']['cohesion_threshold']):
+            return False
+    return True
+
+
+def _cooccurs(db, first, second, components, selected, config):
+    if db.execute('''SELECT 1 FROM members a JOIN observations x ON x.id=a.observation
       JOIN observations y ON y.scan=x.scan AND y.cue=x.cue
       JOIN members b ON b.observation=y.id WHERE a.person=? AND b.person=?
-      AND x.id<>y.id AND x.rejected IS NULL AND y.rejected IS NULL LIMIT 1''', (first, second)).fetchone() is not None
+      AND x.id<>y.id AND x.rejected IS NULL AND y.rejected IS NULL LIMIT 1''', (first, second)).fetchone() is not None:
+        return True
+    # Membership is not a prerequisite for contextual evidence: the most
+    # ambiguous observations are precisely those withheld from members.
+    # Stream compatible, non-superseded cues, with one vector and at most four
+    # small signatures in scratch. Exact duplicate detections are one sample.
+    from .clustering import vector
+    cue, left, right = None, [], []
+    for row in db.execute('''SELECT s.rowid AS scan_order,o.cue,o.dimensions,o.embedding,o.geometry
+      FROM observations o JOIN scans s ON s.id=o.scan
+      WHERE s.scope=? AND s.namespace=? AND s.policy_sha=? AND s.status='complete'
+        AND o.rejected IS NULL
+        AND s.rowid=(SELECT MAX(newer.rowid) FROM scans newer
+                     WHERE newer.scope=s.scope AND newer.namespace=s.namespace AND newer.scene=s.scene)
+        AND EXISTS (SELECT 1 FROM observations y WHERE y.scan=o.scan AND y.cue=o.cue
+                    AND y.id<>o.id AND y.rejected IS NULL)
+      ORDER BY s.rowid,o.cue,o.id''', (selected['scope'], selected['namespace'], selected['policy_sha'])):
+        key = row['scan_order'], row['cue']
+        if key != cue:
+            cue, left, right = key, [], []
+        query = vector(row)
+        signature = hashlib.sha256(row['geometry'].encode() + row['embedding']).digest()
+        matches_left = _matches(components[first], query, config)
+        matches_right = _matches(components[second], query, config)
+        if (matches_left and any(other != signature for other in right) or
+                matches_right and any(other != signature for other in left)):
+            return True
+        for matched, seen in ((matches_left, left), (matches_right, right)):
+            if matched and signature not in seen and len(seen) < 2:
+                seen.append(signature)
+    return False
 
 
 def _merge_support_policy(config):
@@ -71,15 +112,7 @@ def _supporting_cues(db, selected, policy, source, target, components, config, m
     A newer scan supersedes its earlier scene scan, even when its detection
     policy or media content changed; superseded observations cannot vote.
     """
-    from .clustering import _similarities, vector
-
-    def matches(component, query):
-        for group in component:
-            mean, lowest = _similarities(group, query)
-            if (mean < config.data['recognition']['match_threshold'] or
-                    lowest < config.data['clustering']['cohesion_threshold']):
-                return False
-        return True
+    from .clustering import vector
 
     cues, seen = [], set()
     for row in db.execute('''SELECT o.id,o.seconds,o.dimensions,o.embedding,s.scene
@@ -99,7 +132,7 @@ def _supporting_cues(db, selected, policy, source, target, components, config, m
         if key in seen:
             continue
         query = vector(row)
-        if matches(components[target], query) and matches(components[source], query):
+        if _matches(components[target], query, config) and _matches(components[source], query, config):
             seen.add(key)
             cues.append({'scene': row['scene'], 'seconds': row['seconds'], 'observation': row['id']})
             if len(cues) >= minimum:
@@ -163,7 +196,7 @@ def supported_merges(database, scan, config, groups, policy, *, usage=None):
                 supporting = _supporting_cues(db, selected, evidence_policy, source, target,
                                               components, config, settings['min_merge_support'])
                 if len(supporting) >= settings['min_merge_support']:
-                    cooccurring = _cooccurs(db, target, source)
+                    cooccurring = _cooccurs(db, target, source, components, selected, config)
                     stronger = max(settings['match_threshold'], settings['cooccurrence_merge_threshold'])
                     if cooccurring and scores['minimum_cross_similarity'] < stronger:
                         # Reflections may co-occur, but need stronger proof.

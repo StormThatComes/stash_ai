@@ -15,6 +15,10 @@ class VisibilityError(RuntimeError):
     pass
 
 
+class VisibilityGeometryError(ValueError):
+    """This observation has no measurable face region in the source image."""
+
+
 def required(policy):
     return policy['weights']['visibility'] > 0
 
@@ -46,7 +50,12 @@ class LazyVisibility:
                 except Exception as error:
                     self._initialization_error = str(error)[:500]
                     raise
+        except Exception as error:
+            raise VisibilityError('Face visibility measurement failed: ' + str(error)) from error
+        try:
             value = self.model.measure(image, face)
+        except VisibilityGeometryError:
+            raise
         except Exception as error:
             raise VisibilityError('Face visibility measurement failed: ' + str(error)) from error
         if not isinstance(value, dict) or not cached(value):
@@ -78,7 +87,7 @@ def prepare(image, face):
     real = ((left + (columns + .5) * side / 256 >= 0) & (left + (columns + .5) * side / 256 < image.width)
             & (top + (rows + .5) * side / 256 >= 0) & (top + (rows + .5) * side / 256 < image.height))
     if not region.any() or not real[region].all():
-        raise ValueError('Visibility face region extends beyond the real source.')
+        raise VisibilityGeometryError('Visibility face region extends beyond the real source.')
     return np.ascontiguousarray(data.transpose(2, 0, 1)[None]), region
 
 
