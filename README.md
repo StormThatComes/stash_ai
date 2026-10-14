@@ -38,6 +38,8 @@ redistributing model assets.
 The Stash version is checked before reading scenes or changing server data,
 including during `--dry-run`. Local commands such as `--db-update`,
 `--db-check`, and `--db-report` do not require a Stash connection.
+Failed or interrupted client startup releases acquired HTTP sessions/adapters;
+secondary cleanup faults do not replace the original error or Ctrl+C.
 Known intervals always publish an end time; occurrences and imported markers
 whose end is unknown have `end_seconds: null`.
 
@@ -871,6 +873,9 @@ manage current `ai:` results and `m:` groups. Legacy tag definitions
 can be explicitly pruned with, for example,
 `--prune-empty-tags-only --prune-prefixes jt: wd: dtq: op:`.
 Manual extras from other namespaces are preserved.
+Before deleting an unused tag, pruning refreshes its usage and requires the
+response to identify exactly that tag. A malformed/mismatched ID stops pruning
+before deleting that candidate; a tag already removed by another client is skipped.
 
 Fresh inference writes complete analysis format 5: input and inference
 signatures, explicit retention floors, and statistics or explicit
