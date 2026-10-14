@@ -36,6 +36,7 @@ def _groups(db, scope, namespace, policy, *, usage=None, stage='loading'):
     maximum = policy['max_people_per_lookup']
     rows = db.execute('SELECT id FROM people WHERE scope=? AND namespace=? '
                       'AND NOT EXISTS (SELECT 1 FROM identity_merges WHERE source=people.id) '
+                      'AND EXISTS (SELECT 1 FROM members WHERE person=people.id) '
                       'ORDER BY created,id LIMIT ?',
                       (scope, namespace, maximum + 1)).fetchall()
     if len(rows) > maximum:
@@ -175,7 +176,8 @@ def cluster_scene(database, scan, config, *, progress=None):
             if accepted:
                 token = f'stash-ai-recognition:{database.installation}:{person}'
                 db.execute('INSERT OR IGNORE INTO people VALUES (?,?,?,?,?,?)',
-                           (person, record['scope'], record['namespace'], time.time(), None, token))
+                           (person, record['scope'], record['namespace'],
+                            getattr(database, 'identity_clock', time.time)(), None, token))
                 db.execute('INSERT OR IGNORE INTO members SELECT '
                            "json_extract(payload,'$.observation'),person FROM candidates "
                            'WHERE scan=? AND policy=? AND person=?', (scan, policy, person))

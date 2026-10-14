@@ -190,5 +190,10 @@ class Stash:
         self.profiles[performer].update(fields)
         return self.performer(performer)
 
+    def remove_scene_person(self, scene, performer):
+        self.writes.append(('unlink', scene, performer))
+        self.links[scene] = [p for p in self.links[scene] if p != performer]
+        return self.scene(scene)
+
     def close(self):
         self.closed = True

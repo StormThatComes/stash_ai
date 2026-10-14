@@ -273,7 +273,7 @@ def test_optional_quality_recovers_from_cached_video_without_seeking_or_rewritin
     assert stash.writes == writes and Decoder.instances == decoders
 
 
-def test_later_rival_does_not_hide_the_face_this_run_assigned_to_an_earlier_cluster(tmp_path, monkeypatch):
+def test_cold_replay_portrait_uses_the_face_assigned_to_current_cluster(tmp_path, monkeypatch):
     config, stash, services, _ = setup(tmp_path, monkeypatch)
     scope = instance_scope(stash.url)
     media = MediaClient('99', count=32)
@@ -286,12 +286,12 @@ def test_later_rival_does_not_hide_the_face_this_run_assigned_to_an_earlier_clus
     values = iter([query, np.array([0.,1.,0.,0.])])
     services.backend = lambda *a: Backend(vector=next(values))
     assert run(config, services, '2', '3') == 0
-    assert performer in stash.images and len(stash.images) == 2
+    assert performer in stash.images and len(stash.images) == 1
     with FaceDatabase(config.database) as db:
         photo = db.connection.execute('SELECT metadata FROM portraits WHERE person=? AND status=?', (person, 'published')).fetchone()
         metadata = json.loads(photo[0])
-        assert metadata['identity_basis'] == 'current_run_accepted_assignment'
-        assert metadata['similarity'] - metadata['runner_up'] < config.data['recognition']['ambiguity_margin']
+        assert metadata['scene'] == '2'
+        assert db.connection.execute("SELECT COUNT(*) FROM candidates c JOIN scans s ON s.id=c.scan WHERE s.scene='3' AND c.status='withheld'").fetchone()[0] == 3
 
 
 def test_impossible_ratio_and_byte_budget_adapt_framing_without_upscaling():
