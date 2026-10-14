@@ -12,7 +12,7 @@ from .media import safe_url
 from .models import checked_detection
 from .portraits import policy_identity
 from .quality import PortraitFramingError, portrait_bytes
-from .portrait_availability import measure_available, score_metadata, observation_identity, retained_image, retained_portrait, cached_thumbnail
+from .portrait_availability import measure_available, score_metadata, observation_identity, retained_image, retained_portrait, cached_thumbnail, fit_cached_bytes
 from .visibility import cached as cached_visibility, required as visibility_required
 from .expression import cached as cached_expression, required as expression_required
 
@@ -146,9 +146,15 @@ def choose_vtt(database, client, config, scope, target, source_factory, visibili
             metadata = json.loads(existing['metadata'])
             metadata['eligible_observations'] = considered
             if existing['image'] is not None and metadata['source_type'] == 'vtt':
-                with db:
-                    db.execute("UPDATE portraits SET metadata=?,status='selected' WHERE id=?", (encoded(metadata), identifier))
-                return db.execute('SELECT * FROM portraits WHERE id=?', (identifier,)).fetchone()
+                try:
+                    data, sha = fit_cached_bytes(existing['image'], existing['digest'], config, metadata)
+                except (OSError, ValueError):
+                    pass  # Try verified old/source pixels, preserving corrupt historical bytes.
+                else:
+                    with db:
+                        db.execute("UPDATE portraits SET metadata=?,image=?,digest=?,status='selected' WHERE id=?",
+                                   (encoded(metadata), data, sha, identifier))
+                    return db.execute('SELECT * FROM portraits WHERE id=?', (identifier,)).fetchone()
             row = db.execute('SELECT o.*,s.input_sha FROM observations o JOIN scans s ON s.id=o.scan WHERE o.id=?',
                              (metadata['observation'],)).fetchone()
             reused = cached_thumbnail(database, config, scope, target, row, identifier, metadata)

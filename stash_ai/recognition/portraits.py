@@ -26,7 +26,8 @@ def policy_identity(config):
             policy.pop(name)
     from .visibility import required as visibility_required
     from .expression import required as expression_required
-    return digest({'version': 3, 'portraits': policy,
+    return digest({'version': 4, 'portraits': policy,
+                   'max_crop_bytes': config.data['storage']['max_crop_bytes'],
                    'recognition': plain(config.data['recognition']), 'clustering': plain(config.data['clustering']),
                    'visibility_contract': CONTRACT_ID if visibility_required(policy) else None,
                    'expression_contract': EXPRESSION_CONTRACT_ID if expression_required(policy) else None})
@@ -100,7 +101,10 @@ def recheck_cached(database, existing, groups, config, target, namespace, contex
     metadata = json.loads(existing['metadata'])
     updated = dict(metadata)
     similarity = runner = None
+    data, sha = existing['image'], existing['digest']
     try:
+        from .portrait_availability import fit_cached_bytes
+        data, sha = fit_cached_bytes(data, sha, config, updated)
         if metadata.get('namespace') != namespace or metadata.get('person') != target['person']:
             raise ValueError('Cached portrait identity namespace changed.')
         if evidence is None:
@@ -126,9 +130,9 @@ def recheck_cached(database, existing, groups, config, target, namespace, contex
         updated['reason'] = reason
     else:
         updated.pop('reason', None)
-    if updated != metadata:
+    if updated != metadata or data != existing['image']:
         with database.connection:
-            database.connection.execute('UPDATE portraits SET metadata=? WHERE id=?', (encoded(updated), existing['id']))
+            database.connection.execute('UPDATE portraits SET metadata=?,image=?,digest=? WHERE id=?', (encoded(updated), data, sha, existing['id']))
         existing = database.connection.execute('SELECT * FROM portraits WHERE id=?', (existing['id'],)).fetchone()
     return None if reason else existing
 
@@ -276,7 +280,9 @@ def image_digest(client, live, performer, config):
     if missing_image(live, client, performer):
         return None
     data = bounded_media(client, absolute_stash_url(live['image_path'], client.url),
-                         config.data['storage']['max_crop_bytes'], config.data['execution']['timeout_seconds'])
+                         8388608, config.data['execution']['timeout_seconds'])
+    # Confirmation covers any previously supported owned JPEG, independently
+    # of today's encoding budget. Manual/unknown bytes still need an exact hash.
     return hashlib.sha256(data).hexdigest()
 
 
@@ -379,6 +385,9 @@ def fill_portrait(database, client, report, config, scope, target, paths, backen
         with database.connection:
             database.connection.execute("UPDATE portraits SET status='published' WHERE id=?", (winner['id'],))
         return {'portraits_preserved': 1, **quality_counts(winner, config)}
+    if (len(winner['image']) > config.data['storage']['max_crop_bytes']
+            or hashlib.sha256(winner['image']).hexdigest() != winner['digest']):
+        raise PendingRecognition('Selected portrait bytes do not satisfy the verified encoding budget.')
     payload = 'data:image/jpeg;base64,' + base64.b64encode(winner['image']).decode('ascii')
     def update():
         value = checked_id(client.update_person(performer, image=payload), performer)

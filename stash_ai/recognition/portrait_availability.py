@@ -138,6 +138,25 @@ def retained_portrait(row, metadata, policy, limit):
     return data, result
 
 
+def fit_cached_bytes(data, sha, config, metadata):
+    """Verify historical bytes and re-encode their pixels for a smaller budget."""
+    if (not isinstance(data, bytes) or not data or len(data) > 8388608
+            or hashlib.sha256(data).hexdigest() != sha):
+        raise ValueError('Cached portrait bytes do not match their bounded digest.')
+    if len(data) <= config.data['storage']['max_crop_bytes']:
+        return data, sha
+    from .quality import encode_portrait
+    encoding = dict(metadata.get('encoding', {}))
+    was_downscaled = encoding.get('downscaled', False)
+    with open_image(BytesIO(data)) as raw, raw.convert('RGB') as image:
+        data = encode_portrait(image, config.data['portraits'],
+                               limit=config.data['storage']['max_crop_bytes'], details=encoding)
+    encoding.update(reencoded_from_cached_jpeg=True,
+                    downscaled=was_downscaled or encoding['downscaled'])
+    metadata.update(encoding=encoding, pixels=encoding['pixels'])
+    return data, hashlib.sha256(data).hexdigest()
+
+
 def cached_thumbnail(database, config, scope, target, row, identifier, metadata):
     """Re-score the same physical thumbnail JPEG under changed preferences."""
     db, policy = database.connection, config.data['portraits']
@@ -148,8 +167,7 @@ def cached_thumbnail(database, config, scope, target, row, identifier, metadata)
       AND json_extract(metadata,'$.policy.jpeg_quality') IS ? ORDER BY rowid DESC LIMIT 1''',
       (scope, target['person'], metadata['scene'], metadata['namespace'], row['scan'], row['id'],
        policy['margin'], policy['aspect_ratio'], policy['jpeg_quality'])).fetchone()
-    if (old is None or len(old['image']) > config.data['storage']['max_crop_bytes']
-            or hashlib.sha256(old['image']).hexdigest() != old['digest']):
+    if old is None:
         return None
     before = json.loads(old['metadata'])
     if before.get('input_sha') != metadata['input_sha'] or before.get('geometry') != metadata['geometry']:
@@ -164,8 +182,12 @@ def cached_thumbnail(database, config, scope, target, row, identifier, metadata)
     else:
         metadata['fallback'] = {'from': 'video', 'reason': 'no_usable_identity_verified_video_portrait'}
     metadata.update(source_type='vtt', reused_from=old['id'], crop_coordinate_system='thumbnail')
+    try:
+        data, sha = fit_cached_bytes(old['image'], old['digest'], config, metadata)
+    except (OSError, ValueError):
+        return None
     from .database import encoded
     with db:
         db.execute('INSERT OR REPLACE INTO portraits VALUES (?,?,?,?,?,?,?,?)',
-                   (identifier, scope, target['person'], metadata['scene'], encoded(metadata), old['image'], old['digest'], 'selected'))
+                   (identifier, scope, target['person'], metadata['scene'], encoded(metadata), data, sha, 'selected'))
     return db.execute('SELECT * FROM portraits WHERE id=?', (identifier,)).fetchone()
