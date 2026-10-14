@@ -27,7 +27,7 @@ def changed(config, **sections):
 def library(tmp_path, monkeypatch, vectors):
     tmp_path.mkdir(parents=True, exist_ok=True)
     config, client, services, _ = setup(tmp_path, monkeypatch)
-    current, loaded = {}, []
+    loaded = []
     original_get = client.get
     def get(url, **kwargs):
         if '/vtt/' in url or '/sprite/' in url:
@@ -35,19 +35,23 @@ def library(tmp_path, monkeypatch, vectors):
             return MediaClient(scene, count=len(vectors[scene])).get(url, **kwargs)
         return original_get(url, **kwargs)
     client.media.get = get
-    def source(client, scene, config):
-        current['scene'] = scene['id']
-        return SpriteInput(client, scene, config)
+    class Source(SpriteInput):
+        def __init__(self, client, scene, config):
+            self.scene_id = scene['id']
+            super().__init__(client, scene, config)
+        def frames(self, start=0):
+            for index, cue, image in super().frames(start):
+                image.info['test_vector'] = vectors[self.scene_id][index]
+                yield index, cue, image
     def backend(*args):
         model = Backend()
-        values = iter(vectors[current['scene']])
-        def embed(*args):
+        def embed(image, face):
             model.calls += 1
-            return np.asarray(next(values), dtype='float32')
+            return np.asarray(image.info['test_vector'], dtype='float32')
         model.embed = embed
         loaded.append(model)
         return model
-    services.source, services.backend = source, backend
+    services.source, services.backend = Source, backend
     return config, client, services, loaded
 
 
@@ -79,7 +83,7 @@ def test_tight_loose_tight_matches_fresh_db_and_reactivates_same_profiles(tmp_pa
     assert run(strict, services, '1', '2') == 0
     assert partition(strict) == initial
     assert {scene: client.links[scene][-1] for scene in profiles} == profiles
-    assert len(loaded) == 2 and sum(w[0] == 'create' for w in client.writes) == 2
+    assert len(loaded) == 1 and sum(w[0] == 'create' for w in client.writes) == 2
     writes = list(client.writes)
     assert run(strict, services, '2', '1') == 0 and client.writes == writes
     cold, cold_client, cold_services, _ = library(tmp_path / 'cold', monkeypatch, two_people())
@@ -121,7 +125,7 @@ def test_policy_changes_match_independent_cold_run(tmp_path, monkeypatch, change
     cold, _, cold_services, _ = library(tmp_path / 'cold', monkeypatch, merge_evidence())
     cold = changed(cold, **changes)
     assert run(cold, cold_services, '1', '2', '3') == 0
-    assert actual == partition(cold) and len(loaded) == 3
+    assert actual == partition(cold) and len(loaded) == 1
 
 
 def test_merge_support_is_recomputed_in_both_directions(tmp_path, monkeypatch):
@@ -169,7 +173,7 @@ def test_raise_support_retires_assignments_and_lowering_restores_without_inferen
     assert performer in client.profiles
     assert run(config, services, '1', '2') == 0
     assert partition(config) == initial and client.links['2'] == [performer]
-    assert len(loaded) == 2 and sum(w[0] == 'create' for w in client.writes) == 1
+    assert len(loaded) == 1 and sum(w[0] == 'create' for w in client.writes) == 1
 
 
 def test_smaller_rebuild_can_fit_new_budget_even_when_history_did_not(tmp_path, monkeypatch):
@@ -192,7 +196,7 @@ def test_detection_change_removes_all_superseded_selected_members(tmp_path, monk
         assert db.connection.execute('SELECT COUNT(*) FROM observations WHERE rejected IS NOT NULL').fetchone()[0] == 6
         assert db.connection.execute('SELECT COUNT(*) FROM members').fetchone()[0] == 0
     assert run(config, services, '1', '2') == 0 and client.links['2'] == [performer]
-    assert len(loaded) == 4  # restore the original compatible scan, not a third inference
+    assert len(loaded) == 2  # restore the original compatible scan, not a third inference
 
 
 def test_subset_rebuild_does_not_change_other_scene_members_or_links(tmp_path, monkeypatch):
