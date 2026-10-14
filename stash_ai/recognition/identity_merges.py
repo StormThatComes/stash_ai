@@ -52,14 +52,68 @@ def _cooccurs(db, first, second):
       AND x.id<>y.id AND x.rejected IS NULL AND y.rejected IS NULL LIMIT 1''', (first, second)).fetchone() is not None
 
 
-def supported_merges(database, scan, config, groups, policy, *, usage=None):
-    """One nomination per identity, bounded references, distinct selected times.
+def _merge_support_policy(config):
+    """Only thresholds that affect a nomination's evidence, not support counts.
 
-    Only a selected observation matching both endpoints can support a merge.
-    Every constituent pair must pass mean match and minimum cohesion; a weak
-    bridge between incompatible identities stays ambiguous. No all-person
-    distance matrix or pair-support dictionary is built.
-    Caller owns the transaction, including member/candidate transfers.
+    Changing the minimum support should reuse valid proofs; changes to match
+    or cohesion thresholds must obtain new nominations from selected scenes.
+    """
+    from .config import digest
+    return digest({'format': 1,
+                   'match_threshold': config.data['recognition']['match_threshold'],
+                   'cohesion_threshold': config.data['clustering']['cohesion_threshold']})
+
+
+def _supporting_cues(db, selected, policy, source, target, components, config, minimum):
+    """Revalidate durable nominations against the current bounded references.
+
+    One (scene, timestamp) is one vote, regardless of duplicated detections.
+    A newer scan supersedes its earlier scene scan, even when its detection
+    policy or media content changed; superseded observations cannot vote.
+    """
+    from .clustering import _similarities, vector
+
+    def matches(component, query):
+        for group in component:
+            mean, lowest = _similarities(group, query)
+            if (mean < config.data['recognition']['match_threshold'] or
+                    lowest < config.data['clustering']['cohesion_threshold']):
+                return False
+        return True
+
+    cues, seen = [], set()
+    for row in db.execute('''SELECT o.id,o.seconds,o.dimensions,o.embedding,s.scene
+      FROM merge_support m
+      JOIN observations o ON o.id=m.observation
+      JOIN scans s ON s.id=o.scan
+      WHERE m.source=? AND m.target=? AND m.policy=?
+        AND s.scope=? AND s.namespace=? AND s.policy_sha=?
+        AND s.status='complete' AND o.rejected IS NULL
+        AND s.rowid=(SELECT MAX(newer.rowid) FROM scans newer
+                     WHERE newer.scope=s.scope AND newer.namespace=s.namespace
+                       AND newer.scene=s.scene)
+      ORDER BY s.rowid,o.cue,o.id''',
+      (source, target, policy, selected['scope'], selected['namespace'],
+       selected['policy_sha'])):
+        key = (row['scene'], row['seconds'])
+        if key in seen:
+            continue
+        query = vector(row)
+        if matches(components[target], query) and matches(components[source], query):
+            seen.add(key)
+            cues.append({'scene': row['scene'], 'seconds': row['seconds'], 'observation': row['id']})
+            if len(cues) >= minimum:
+                break
+    return cues
+
+
+def supported_merges(database, scan, config, groups, policy, *, usage=None):
+    """Evidence-backed consolidation with persisted cross-scene nominations.
+
+    Only explicit selected completed scans can contribute; current sample
+    comparisons, independent cue times, and oldest-first identity ownership
+    still control every merge. No transitive single-link union is allowed.
+    Caller owns the transaction including support and membership writes.
     """
     from .clustering import _similarities, vector, reference_context
     db = database.connection
@@ -67,6 +121,7 @@ def supported_merges(database, scan, config, groups, policy, *, usage=None):
         return 0
     if usage is not None:
         usage.begin('merging')
+    selected = db.execute('SELECT scope,namespace,policy_sha FROM scans WHERE id=?', (scan,)).fetchone()
     rows = {row['id']: row for row in db.execute(
         'SELECT p.id,p.created FROM people p JOIN scans s ON s.scope=p.scope AND s.namespace=p.namespace '
         'WHERE s.id=? AND NOT EXISTS (SELECT 1 FROM identity_merges WHERE source=p.id)', (scan,))}
@@ -76,6 +131,7 @@ def supported_merges(database, scan, config, groups, policy, *, usage=None):
     nominations = {}
     merged = 0
     settings = config.data['recognition']
+    evidence_policy = _merge_support_policy(config)
     for observation in db.execute('SELECT id,seconds,dimensions,embedding FROM observations '
                                    'WHERE scan=? AND rejected IS NULL ORDER BY cue,id', (scan,)):
         if usage is not None:
@@ -98,29 +154,28 @@ def supported_merges(database, scan, config, groups, policy, *, usage=None):
                 if scores is None:
                     continue
                 previous = nominations.get(source)
-                if previous and roots[previous['target']] != target:
-                    if order(roots[previous['target']]) < order(target):
+                if previous is not None and roots[previous] != target:
+                    if order(roots[previous]) < order(target):
                         break
-                    previous = None
-                nomination = previous or {'target': target, 'times': set()}
-                if len(nomination['times']) < settings['min_support']:
-                    nomination['times'].add(observation['seconds'])
-                nominations[source] = nomination
-                if len(nomination['times']) >= settings['min_support']:
+                nominations[source] = target
+                db.execute('INSERT OR IGNORE INTO merge_support(source,target,observation,policy) VALUES (?,?,?,?)',
+                           (source, target, observation['id'], evidence_policy))
+                supporting = _supporting_cues(db, selected, evidence_policy, source, target,
+                                              components, config, settings['min_merge_support'])
+                if len(supporting) >= settings['min_merge_support']:
                     cooccurring = _cooccurs(db, target, source)
                     stronger = max(settings['match_threshold'], settings['cooccurrence_merge_threshold'])
                     if cooccurring and scores['minimum_cross_similarity'] < stronger:
-                        # Context may be a reflection or two real people. Require
-                        # stronger independent identity evidence, not a permanent
-                        # cannot-link inferred from boxes or cue membership.
+                        # Reflections may co-occur, but need stronger proof.
                         db.execute("UPDATE candidates SET payload=json_set(payload,'$.merge_withheld_reason',?) "
                                    "WHERE scan=? AND policy=? AND status='withheld' AND json_extract(payload,'$.observation')=?",
                                    ('cooccurrence_identity_evidence_insufficient', scan, policy, observation['id']))
                         break
-                    evidence = {'format': 2, 'cooccurring': cooccurring,
+                    evidence = {'format': 3, 'cooccurring': cooccurring,
                         'cooccurrence_merge_threshold': stronger, 'scan': scan, 'policy': policy,
-                        'support_seconds': sorted(nomination['times']), 'scores': scores,
-                        'representative_limit': config.data['clustering']['max_samples_per_person'],
+                        'support_cues': supporting,
+                        'support_seconds': [item['seconds'] for item in supporting],
+                        'scores': scores, 'representative_limit': config.data['clustering']['max_samples_per_person'],
                         'source_created': rows[source]['created'], 'target_created': rows[target]['created'],
                         'source_constituents': {'count': len(components[source]),
                                                 'references': reference_context(components[source])},
