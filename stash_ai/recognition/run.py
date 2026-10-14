@@ -12,6 +12,7 @@ from .config import digest
 from .database import FaceDatabase, encoded
 from .models import ASSETS, ensure_assets, load_backend, namespace
 from .backend import LazyBackend
+from .prefetch import ScenePrefetch
 from .media import SpriteInput
 from .scanning import scan_scene
 from .clustering import matching_policy
@@ -129,6 +130,7 @@ def execute(args, config, *, services=None):
             visibility = None
             expression = None
             backend = None
+            inputs = None
             try:
                 with phase(report, 'Recognition assets'):
                     paths = services.assets(config, write=report.write)
@@ -150,12 +152,17 @@ def execute(args, config, *, services=None):
                     backend = LazyBackend(config, paths, services.backend, loaded=loaded)
                     runtime_services = replace(services, backend=backend.borrow)
                 selected = []
-                for identifier in sorted(identifiers, key=int):
+                ordered = sorted(identifiers, key=int)
+                inputs = ScenePrefetch(client, config, services.source, report=report)
+                inputs.submit(ordered[0] if ordered else None)
+                for position, identifier in enumerate(ordered):
+                    following = ordered[position + 1] if position + 1 < len(ordered) else None
                     status(report, scene=identifier, scenes_completed=counts['scenes_processed'], scenes_total=len(identifiers))
                     try:
-                        scene = client.scene(identifier)
                         with phase(report, 'Recognition VTT', scene=identifier):
-                            with services.source(client, scene, config) as source:
+                            with inputs.take(identifier) as prepared:
+                                scene, source = prepared.scene, prepared.source
+                                inputs.submit(following)
                                 def progress(**values):
                                     database.progress(run, 'scan', values)
                                     status(report, completed=1, **values)
@@ -179,7 +186,9 @@ def execute(args, config, *, services=None):
                         counts['scenes_failed'] += 1
                         report.optional('recognition_error', report.write,
                                         f'Recognition scene {identifier} failed: ' + safe_error(error, key))
+                    inputs.submit(following)
                     database.progress(run, 'run', dict(counts))
+                inputs.close()
                 if selected:
                     last_scene = selected[-1]['scene']
                     def reference_progress(**values):
@@ -254,6 +263,8 @@ def execute(args, config, *, services=None):
                 if references:
                     summary['references'] = dict(references)
                 actions = [('close face visibility model', visibility.close)] if visibility is not None else []
+                if inputs is not None:
+                    actions.insert(0, ('close recognition input prefetch', inputs.close))
                 if expression is not None:
                     actions.append(('close portrait expression model', expression.close))
                 if backend is not None:

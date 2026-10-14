@@ -60,6 +60,19 @@ def test_shipped_template_matches_default_schema():
     assert config.data['recognition']['min_merge_support'] == 3
     assert config.data['portraits']['source'] == 'vtt'
     assert config.data['portraits']['margin'] == .35
+    assert config.data['execution']['prefetch_frames'] == 4
+    assert config.data['execution']['prefetch_scenes'] is True
+
+
+@pytest.mark.parametrize('settings', [
+    'prefetch_frames: -1', 'prefetch_frames: 129', 'prefetch_frames: true',
+    'prefetch_frames: 1.5', 'prefetch_scenes: 1', 'prefetch_scenes: null',
+])
+def test_reject_invalid_prefetch_configuration(tmp_path, settings):
+    path = tmp_path / 'invalid.yml'
+    path.write_text(f'version: 1\nexecution: {{{settings}}}\n')
+    with pytest.raises(ValueError, match='execution.prefetch'):
+        load(path)
 
 
 def test_portrait_source_and_framing_do_not_invalidate_face_scan(tmp_path):

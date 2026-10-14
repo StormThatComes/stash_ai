@@ -27,6 +27,12 @@ class RecognitionStash(StashTransport):
             self.close()
             raise
 
+    def new_media_reader(self):
+        reader = RecognitionReader(True, url=self.url, api_key=self.api_key,
+                                   request_timeout=self.request_timeout, http_retries=self.http_retries)
+        reader.report = self.report
+        return reader
+
     def scene(self, identifier):
         value = self.gql('query StashAIRecognitionScene($id:ID!) { findScene(id:$id) { '
                          + SCENE_FIELDS + ' } }', {'id': identifier})['findScene']
@@ -117,3 +123,8 @@ class RecognitionStash(StashTransport):
                          {'input': {'source': [source], 'destination': destination,
                                     'values': {'id': destination, 'details': details}}})['performerMerge']
         return checked_id(value, destination)
+
+
+class RecognitionReader(StashTransport):
+    """Isolated read-only HTTP sessions with the same validated scene query."""
+    scene = RecognitionStash.scene

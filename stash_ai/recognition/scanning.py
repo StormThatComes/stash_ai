@@ -1,11 +1,14 @@
 """Checkpoint selected-scene detections without publishing anything to Stash."""
 import uuid
 
+from stash_ai.runtime.cleanup import closing
+
 from .config import digest
 from .database import encoded
 from .media import safe_url
 from .quality import assess, rejection, crop_bytes
 from .models import normalized_embedding
+from .prefetch import frames as frame_inputs
 from .visibility import CONTRACT_ID, VisibilityError, cached as visibility_cached
 
 
@@ -46,31 +49,34 @@ def scan_scene(database, scope, scene, config, namespace, source, backend_factor
         progress(scanned=cursor, total=record['total'], scene=str(scene['id']))
 
     try:
-        for index, cue, image in source.frames(cursor):
-            faces = sorted(backend.detect(image), key=lambda f: tuple(f.row))
-            for face_index, face in enumerate(faces):
-                quality = assess(image, face)
-                reason = rejection(quality, config.data['detection'])
-                if reason is None and config.data['detection']['min_visible_face_fraction'] > 0:
-                    if visibility is None:
-                        raise VisibilityError('Recognition visibility gate requires a visibility model.')
-                    quality.update(visibility.measure(image, face))
-                    if not visibility_cached(quality):
-                        raise VisibilityError('Recognition visibility gate received an invalid measurement.')
-                    if quality['visible_face_fraction'] < config.data['detection']['min_visible_face_fraction']:
-                        reason = 'face_occluded'
-                vector = None
-                crop = None
-                if reason is None:
-                    vector = normalized_embedding(backend.embed(image, face), backend.dimensions).astype('<f4').tobytes()
-                    crop, bounds = crop_bytes(image, face, limit=config.data['storage']['max_crop_bytes'])
-                    quality['crop_bounds'] = bounds
-                observation = str(uuid.uuid5(uuid.UUID(identifier), encoded([index, face_index, face.row])))
-                pending.append((observation, identifier, index, cue.start, safe_url(cue.image), encoded(list(cue.rect)),
-                                encoded(list(face.row)), encoded(quality), reason, backend.dimensions, vector, crop))
-            cursor = index + 1
-            if cursor % config.data['execution']['checkpoint_cues'] == 0:
-                checkpoint()
+        with closing(frame_inputs(source, cursor, config.data['execution']['prefetch_frames']),
+                     name='close recognition frame input') as frames:
+            for index, cue, image in frames:
+                with closing(image, name='close recognition cue image'):
+                    faces = sorted(backend.detect(image), key=lambda f: tuple(f.row))
+                    for face_index, face in enumerate(faces):
+                        quality = assess(image, face)
+                        reason = rejection(quality, config.data['detection'])
+                        if reason is None and config.data['detection']['min_visible_face_fraction'] > 0:
+                            if visibility is None:
+                                raise VisibilityError('Recognition visibility gate requires a visibility model.')
+                            quality.update(visibility.measure(image, face))
+                            if not visibility_cached(quality):
+                                raise VisibilityError('Recognition visibility gate received an invalid measurement.')
+                            if quality['visible_face_fraction'] < config.data['detection']['min_visible_face_fraction']:
+                                reason = 'face_occluded'
+                        vector = None
+                        crop = None
+                        if reason is None:
+                            vector = normalized_embedding(backend.embed(image, face), backend.dimensions).astype('<f4').tobytes()
+                            crop, bounds = crop_bytes(image, face, limit=config.data['storage']['max_crop_bytes'])
+                            quality['crop_bounds'] = bounds
+                        observation = str(uuid.uuid5(uuid.UUID(identifier), encoded([index, face_index, face.row])))
+                        pending.append((observation, identifier, index, cue.start, safe_url(cue.image), encoded(list(cue.rect)),
+                                        encoded(list(face.row)), encoded(quality), reason, backend.dimensions, vector, crop))
+                cursor = index + 1
+                if cursor % config.data['execution']['checkpoint_cues'] == 0:
+                    checkpoint()
         checkpoint()
         with db:
             db.execute("UPDATE scans SET status='complete' WHERE id=?", (identifier,))
