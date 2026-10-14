@@ -214,6 +214,9 @@ Encoding starts at quality 90, then reduces JPEG quality and, if needed, dimensi
 without upscaling. `crop_bounds` retains source coordinates; `crop_encoding`
 records the actual JPEG quality, pixel size and downscaling. This applies even
 when portrait publication is disabled; normal-budget JPEG bytes stay unchanged.
+When a retained crop supplies a fallback portrait, its face box and landmarks
+are mapped to the recorded encoded dimensions. Older full-size crops retain
+their original coordinate contract.
 
 Changing detection gates or the enabled visibility model contract starts a new
 selected-scene scan, while preserving the recognizer namespace and existing

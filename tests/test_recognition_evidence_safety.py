@@ -189,3 +189,60 @@ def test_cold_replay_preserves_uncertain_co_presence_under_reference_drift(tmp_p
         pair_cues(db, selected[-1]['scan'])
         result = rebuild_selected(db, selected, config)
         assert len({r['person'] for rows in result.values() for r in rows if r['status'] == 'accepted'}) == 2
+
+
+def test_downscaled_retained_crop_maps_landmarks_to_encoded_pixels(tmp_path):
+    from stash_ai.recognition.portrait_availability import retained_image
+    config = changed(setup(tmp_path), storage={'max_crop_bytes': 1024})
+    client = MediaClient()
+    with Image.fromarray(np.random.default_rng(4).integers(0, 255, (160, 160, 3), dtype='uint8')) as image:
+        output = BytesIO()
+        image.save(output, format='PNG')
+        client.data['http://stash/sprite/1.jpg'] = output.getvalue()
+    with FaceDatabase(config.database) as db, SpriteInput(client, client.scene, config) as source:
+        identifier, _ = scan_scene(db, 'scope', client.scene, config, 'ns', source, Backend)
+        row = dict(db.connection.execute('SELECT * FROM observations WHERE scan=? LIMIT 1', (identifier,)).fetchone())
+        quality = json.loads(row['quality'])
+        assert quality['crop_encoding']['downscaled']
+        image, face = retained_image(row)
+        with image:
+            bounds = quality['crop_bounds']
+            sx, sy = image.width / (bounds[2] - bounds[0]), image.height / (bounds[3] - bounds[1])
+            assert face.box == pytest.approx(((FACE.box[0]-bounds[0])*sx, (FACE.box[1]-bounds[1])*sy,
+                                             FACE.box[2]*sx, FACE.box[3]*sy))
+            assert face.landmarks[0] == pytest.approx(((FACE.landmarks[0][0]-bounds[0])*sx,
+                                                     (FACE.landmarks[0][1]-bounds[1])*sy))
+        quality['crop_encoding']['pixels'][0] += 1
+        row['quality'] = json.dumps(quality)
+        with pytest.raises(ValueError, match='dimensions'):
+            retained_image(row)
+
+
+def test_small_crop_budget_still_supplies_a_portrait_when_thumbnail_read_fails(tmp_path, monkeypatch):
+    import yaml
+    from stash_ai.recognition.run import execute
+    from types import SimpleNamespace
+    from tests.test_recognition_vtt_portraits import setup as portraits
+    config, stash, services, _ = portraits(tmp_path, monkeypatch, enabled=False)
+    data = yaml.safe_load(config.source_path.read_text())
+    data['storage'] = {'max_crop_bytes': 1024}
+    config.source_path.write_text(yaml.safe_dump(data))
+    config = load(config.source_path)
+    args = SimpleNamespace(scene_id=['1'], all_scenes=False, progress_style='off')
+    assert execute(args, config, services=services) == 0
+    data['portraits']['enabled'] = True
+    config.source_path.write_text(yaml.safe_dump(data))
+    config = load(config.source_path)
+    factory, calls = services.source, []
+    def source(*args):
+        calls.append(1)
+        if len(calls) > 1:
+            raise OSError('thumbnail unavailable after scan verification')
+        return factory(*args)
+    services.source = source
+    services.backend = lambda *args: pytest.fail('fallback must reuse accepted embeddings')
+    assert execute(args, config, services=services) == 0
+    assert len(stash.images) == 1 and len(next(iter(stash.images.values()))) <= 1024
+    with FaceDatabase(config.database) as db:
+        row = db.connection.execute("SELECT metadata FROM portraits WHERE status='published'").fetchone()
+        assert json.loads(row[0])['source_type'] == 'recognition_crop'
