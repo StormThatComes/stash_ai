@@ -89,6 +89,8 @@ def load_vocabulary(settings: models.ModelSettings) -> models.Vocabulary:
         raw_categories = json.loads((settings.model_dir / "tag_category.json").read_text(encoding="utf-8-sig"))
         if not isinstance(raw_categories, dict):
             raise ValueError("DTQ tag_category.json must be a mapping.")
+        if any(type(value) is not int for value in raw_categories.values()):
+            raise ValueError("DTQ tag_category.json values must be integer category codes.")
         for label in labels:
             categories[label] = CATEGORY_NAMES.get(raw_categories.get(label), "Uncategorized")
     validate_labels(labels, source)

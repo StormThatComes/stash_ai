@@ -310,8 +310,8 @@ def test_both_expression_networks_use_the_cuda_adapter_and_original_pixel_subset
             return [result]
     def create(config,path,**kwargs):
         calls.append((config.data['models']['device'],kwargs['cpu_fallback']))
-        return Model('mesh' if path=='mesh' else 'blend'),'cuda'
-    monkeypatch.setattr(adapter,'verify',lambda *a: None)
+        return Model('mesh' if path==b'mesh' else 'blend'),'cuda'
+    monkeypatch.setattr(adapter,'verified_bytes',lambda path,asset: str(path).encode())
     monkeypatch.setattr(adapter,'runtime',lambda *a: (SimpleNamespace(__version__='1.26.0'),['CUDAExecutionProvider']))
     monkeypatch.setattr(adapter,'session',create)
     model=FaceExpression(load(root=tmp_path),{'expression_mesh':'mesh','expression_blendshapes':'blend'})

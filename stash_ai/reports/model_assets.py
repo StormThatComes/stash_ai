@@ -102,7 +102,7 @@ def build_report(settings):
 
 
 def run(app, args):
-    settings = load_model_settings(args.model_config, args.models, None, offline=True)
+    settings = load_model_settings(args.model_config, args.models, None, offline=True, assets_only=True)
     report = build_report(settings)
     destination = write_json_report(report, args.model_assets_report)
     print(f"Model asset health report written to {destination}. No inference backends were loaded.")

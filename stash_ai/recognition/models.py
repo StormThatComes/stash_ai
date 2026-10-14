@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
+import os
+import stat
 from pathlib import Path
 
 from .config import digest
@@ -45,12 +47,42 @@ ASSETS = {
 }
 
 
-def verify(path, asset):
+def _asset_bytes(path, asset, *, materialize):
+    """Hash a bounded descriptor read; materialized bytes are the loader input."""
     with Path(path).open('rb') as stream:
-        if Path(path).stat().st_size != asset.size:
+        before = os.fstat(stream.fileno())
+        if not stat.S_ISREG(before.st_mode) or before.st_size != asset.size:
             raise ValueError(f'{asset.filename}: wrong asset size; existing files were not replaced.')
-        if hashlib.file_digest(stream, 'sha256').hexdigest() != asset.sha256:
+        if materialize:
+            blob = stream.read(asset.size + 1)
+            size, checksum = len(blob), hashlib.sha256(blob).hexdigest()
+        else:
+            remaining, size, checksum = asset.size + 1, 0, hashlib.sha256()
+            while remaining:
+                chunk = stream.read(min(1024 * 1024, remaining))
+                if not chunk:
+                    break
+                size += len(chunk)
+                remaining -= len(chunk)
+                checksum.update(chunk)
+            checksum = checksum.hexdigest()
+            blob = None
+        after = os.fstat(stream.fileno())
+        if size != asset.size or after.st_size != asset.size:
+            raise ValueError(f'{asset.filename}: wrong asset size; existing files were not replaced.')
+        if checksum != asset.sha256:
             raise ValueError(f'{asset.filename}: wrong checksum; existing files were not replaced.')
+        return blob
+
+
+def verify(path, asset):
+    _asset_bytes(path, asset, materialize=False)
+
+
+def verified_bytes(path, asset):
+    # Returning immutable bytes binds verification to the exact object consumed
+    # by OpenCV/ORT/safetensors. No verified path is reopened by a loader.
+    return _asset_bytes(path, asset, materialize=True)
 
 
 def ensure_assets(config, *, write=print):
@@ -129,10 +161,13 @@ def normalized_embedding(value, dimensions):
     result = np.asarray(value, dtype=np.float32).reshape(-1)
     if result.shape != (dimensions,) or not np.isfinite(result).all():
         raise ValueError('Face recognizer returned incompatible/non-finite embedding.')
-    norm = float(np.linalg.norm(result))
+    norm = float(np.linalg.norm(result.astype(np.float64)))
     if norm <= 1e-12:
         raise ValueError('Face recognizer returned a zero-norm embedding.')
-    return (result / norm).copy()
+    result = (result.astype(np.float64) / norm).astype(np.float32)
+    if not np.isfinite(result).all() or abs(float(np.linalg.norm(result.astype(np.float64))) - 1.) > .001:
+        raise ValueError("Face recognizer returned an invalid normalized embedding.")
+    return result
 
 
 class YuNetDetector:
@@ -155,7 +190,10 @@ class YuNetDetector:
             self.detector = None
             self.detector_device = self.ort_detector.device
         else:
-            self.detector = cv2.FaceDetectorYN.create(str(paths['yunet']), '', (320, 320),
+            import numpy as np
+            blob = verified_bytes(paths['yunet'], ASSETS['yunet'])
+            self.detector = cv2.FaceDetectorYN.create('onnx', np.frombuffer(blob, dtype=np.uint8),
+                                                     np.empty(0, dtype=np.uint8), (320, 320),
                                                      settings['score_threshold'], settings['nms_threshold'],
                                                      settings['max_faces_per_frame'])
             self.detector_device = 'cpu'
@@ -197,7 +235,10 @@ class OpenCVFaces(YuNetDetector):
             super().__init__(config, paths, runtime_info=info)
             # alignCrop is kept identical on both devices; this OpenCV object
             # never runs neural feature() in GPU/auto mode.
-            self.recognizer = self.cv.FaceRecognizerSF.create(str(paths['sface']), '')
+            import numpy as np
+            blob = verified_bytes(paths['sface'], ASSETS['sface'])
+            self.recognizer = self.cv.FaceRecognizerSF.create('onnx', np.frombuffer(blob, dtype=np.uint8),
+                                                            np.empty(0, dtype=np.uint8))
             if config.data['models']['device'] != 'cpu':
                 from .onnx_models import OnnxSFace
                 self.ort_recognizer = OnnxSFace(config, paths['sface'], info)
