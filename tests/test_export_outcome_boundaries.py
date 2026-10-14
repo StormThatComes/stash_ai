@@ -128,3 +128,21 @@ def test_offline_report_console_failure_redacts_active_key(capsys, monkeypatch):
     def fail(app): raise ValueError('Authorization PRIVATE_TEST_TOKEN')
     assert fail(app) == 1
     assert 'PRIVATE_TEST_TOKEN' not in capsys.readouterr().out
+
+
+def test_unavailable_console_still_exports_primary_interruption(pipeline, tmp_path, monkeypatch):
+    from stash_ai.runtime.console import ConsolePresenter
+    original = ConsolePresenter.message
+    def message(self, text, **kwargs):
+        if text.startswith('Outcome:'):
+            self._abandon()
+        return original(self, text, **kwargs)
+    monkeypatch.setattr(ConsolePresenter, 'message', message)
+    pipeline.fail['wd'] = 4
+    destination = tmp_path/'console-unavailable.json'
+    with pytest.raises(KeyboardInterrupt):
+        app.main([*pipeline.args, '--run-summary-json', str(destination)])
+    row = json.loads(destination.read_text())
+    assert row['status'] == 'interrupted' and row['confirmed']['inference_frames'] == 4
+    assert row['counts']['console_critical_unconfirmed'] >= 1
+    assert row['counts']['outcome_console_failures'] >= 1

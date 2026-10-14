@@ -47,10 +47,7 @@ def prepared_batches(app, tagger, stash, paths, cues, prefetch=0, workers=1, *,
     from stash_ai.runtime.cancellation import Cancellation, use
     cancellation = cancellation if cancellation is not None else Cancellation()
     work = report.work() if report is not None else ''
-    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="prepare-frames") if prefetch else None
-    transforms = transform_executor
-    if transforms is None and workers > 1:
-        transforms = ThreadPoolExecutor(max_workers=workers, thread_name_prefix='transform-frames')
+    executor, transforms = None, transform_executor
     frames = deque()
     current_future = None
     exhausted = False
@@ -67,7 +64,8 @@ def prepared_batches(app, tagger, stash, paths, cues, prefetch=0, workers=1, *,
             with use(cancellation), measure('image_prepare'):
                 return tagger.prepare(image)
         finally:
-            image.close()
+            from stash_ai.runtime.cleanup import cleanup
+            cleanup([image.close], report=report)
 
     def fill_frames():
         nonlocal exhausted
@@ -82,11 +80,13 @@ def prepared_batches(app, tagger, stash, paths, cues, prefetch=0, workers=1, *,
                 cue, image = frame
                 owned = image.copy()
                 try:
-                    future = transforms.submit(transform, owned)
+                    from stash_ai.runtime.startup import submit_owned
+                    submit_owned(transforms, lambda owned=owned: transform(owned),
+                                 lambda future: frames.append((cue, future)))
                 except BaseException:
-                    owned.close()
+                    from stash_ai.runtime.cleanup import cleanup
+                    cleanup([owned.close], report=report)
                     raise
-                frames.append((cue, future))
             except BaseException as error:
                 # A lookahead failure belongs after the already read frames.
                 # Preserve their complete batches for inference/checkpointing.
@@ -131,12 +131,14 @@ def prepared_batches(app, tagger, stash, paths, cues, prefetch=0, workers=1, *,
         return prepared, batch_cues
 
     def submit_next():
-        future = executor.submit(prepare_next)
-        if buffer_usage is not None:
-            buffer_usage.submitted(future)
-        return future
+        from stash_ai.runtime.startup import submit_owned
+        return submit_owned(executor, prepare_next,
+                            lambda future: buffer_usage.submitted(future) if buffer_usage is not None else None)
 
     try:
+        executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="prepare-frames") if prefetch else None
+        if transforms is None and workers > 1:
+            transforms = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="transform-frames")
         pending = deque(submit_next() for _ in range(prefetch)) if executor else deque()
         while True:
             if buffer_usage is not None:

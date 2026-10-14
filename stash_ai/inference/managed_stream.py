@@ -56,7 +56,8 @@ class ManagedStream:
             if not self.worker.cancelled():
                 self.worker.result()
         else:
-            self.worker.join()
+            if self.worker.ident is not None:
+                self.worker.join()
 
     def drain(self):
         while True:

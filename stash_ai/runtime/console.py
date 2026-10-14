@@ -2,13 +2,45 @@
 from collections import Counter
 from contextlib import contextmanager
 from contextvars import ContextVar
-from queue import Queue, Empty
+from queue import Queue, Empty, Full
 import sys
 import threading
 import time
 
 _current = ContextVar('console_presenter', default=None)
 _quiet_activity = ContextVar('quiet_console_activity', default=False)
+
+
+class ConsoleDeliveryError(RuntimeError):
+    """Critical output was not confirmed; an already started OS write may finish."""
+
+
+class _Action:
+    def __init__(self, callback):
+        self.callback, self.done, self.lock = callback, threading.Event(), threading.Lock()
+        self.started = self.cancelled = False
+        self.result = None
+        self.error = None
+
+    def cancel(self):
+        with self.lock:
+            self.cancelled = True
+            if not self.started:
+                self.callback = None
+                self.done.set()
+
+    def run(self):
+        with self.lock:
+            if self.cancelled:
+                return
+            self.started = True
+            callback, self.callback = self.callback, None
+        try:
+            self.result = callback()
+        except BaseException as error:
+            self.error = error
+        finally:
+            self.done.set()
 
 
 def progress(factory, *args, **kwargs):
@@ -18,7 +50,7 @@ def progress(factory, *args, **kwargs):
 
 class ConsolePresenter:
     """Workers update snapshots; only the console thread touches tqdm/output."""
-    def __init__(self, write, *, style='auto', stream=None, refresh=.25, heartbeat=5.):
+    def __init__(self, write, *, style='auto', stream=None, refresh=.25, heartbeat=5., coordination_timeout=1.):
         self.write, self.style = write, style
         self.stream = sys.stderr if stream is None else stream
         self.tty = bool(self.stream.isatty()) and style != 'off'
@@ -40,6 +72,9 @@ class ConsolePresenter:
         self.skipped_reasons = {}
         self.last_phase = None
         self.failure_phase = None
+        self.coordination_timeout = coordination_timeout
+        self.stopped = threading.Event()
+        self.degraded = False
 
     def start(self):
         self.thread = threading.Thread(target=self._run, name='stash-console', daemon=True)
@@ -113,23 +148,74 @@ class ConsolePresenter:
         if decorative:
             self.call(lambda: self._write_status(text))
         else:
-            self.call(lambda: self.write(text))
+            self.call(lambda: self.write(text), critical=True)
 
     def _write_status(self, text):
         from tqdm import tqdm
         tqdm.write(text, file=self.stream)
 
-    def call(self, callback, default=None):
-        if self.closed or self.thread is None or threading.current_thread() is self.thread:
+    def call(self, callback, default=None, *, critical=False):
+        def unavailable(error=None):
+            if critical:
+                self.count('console_critical_unconfirmed')
+                raise ConsoleDeliveryError('Console output delivery was not confirmed; renderer unavailable.') from error
+            return default
+        if self.closed or self.degraded:
+            return unavailable()
+        if self.thread is None or threading.current_thread() is self.thread:
             try:
                 return callback()
-            except Exception:
+            except Exception as error:
                 self.count('console_failures')
-                return default
-        done, result = threading.Event(), []
-        self.actions.put((callback, done, result))
-        done.wait()
-        return result[0] if result else default
+                return unavailable(error)
+        action = _Action(callback)
+        deadline = time.monotonic() + self.coordination_timeout
+        try:
+            while not self.closed and not self.degraded and self.thread.is_alive():
+                left = deadline-time.monotonic()
+                if left <= 0:
+                    break
+                try:
+                    self.actions.put(action, timeout=min(left, .05))
+                    break
+                except Full:
+                    continue
+            else:
+                action.cancel()
+                return unavailable()
+            while not action.done.is_set():
+                left = deadline-time.monotonic()
+                if left <= 0 or self.closed or self.degraded or not self.thread.is_alive():
+                    action.cancel()
+                    self._abandon()
+                    return unavailable()
+                action.done.wait(min(left, .05))
+        except BaseException:
+            action.cancel()
+            self._abandon()
+            raise
+        if action.cancelled:
+            return unavailable()
+        if action.error is not None:
+            self.count('console_failures')
+            return unavailable(action.error)
+        return action.result
+
+    def _release_pending(self):
+        while True:
+            try:
+                self.actions.get_nowait().cancel()
+            except Empty:
+                return
+
+    def _abandon(self):
+        # Arbitrary blocked OS sinks cannot be killed safely. Quarantine this
+        # one daemon owner; never spawn replacement writers or replay actions.
+        if not self.degraded:
+            self.count('console_stalls')
+        self.degraded = True
+        self.stopped.set()
+        self._release_pending()
 
     def bar(self, factory, iterable=None, **kwargs):
         return OwnedBar(self, factory, iterable, kwargs)
@@ -216,45 +302,60 @@ class ConsolePresenter:
 
     def _run(self):
         next_render = time.monotonic()+self.refresh
-        while True:
+        try:
+            while not self.stopped.is_set():
+                try:
+                    action = self.actions.get(timeout=min(.05, max(0., next_render-time.monotonic())))
+                except Empty:
+                    action = None
+                if action is not None:
+                    action.run()
+                if self.stopped.is_set():
+                    break
+                if time.monotonic() >= next_render:
+                    try:
+                        self._render()
+                    except BaseException:
+                        self.count('console_failures')
+                    next_render = time.monotonic()+self.refresh
+        finally:
+            self._release_pending()
             try:
-                callback, done, result = self.actions.get(timeout=max(0., next_render-time.monotonic()))
-            except Empty:
-                callback = None
-            if callback is False:
-                done.set()
-                return
-            if callback is not None:
-                try:
-                    result.append(callback())
-                except BaseException:
-                    self.count('console_failures')
-                finally:
-                    done.set()
-            if time.monotonic() >= next_render:
-                try:
-                    self._render()
-                except BaseException:
-                    self.count('console_failures')
-                next_render = time.monotonic()+self.refresh
+                self._dispose()
+            except BaseException:
+                self.count('console_failures')
+
+    def _dispose(self):
+        from .cleanup import cleanup
+        callbacks = []
+        for bar in tuple(self._bars):
+            bar.closed = True
+            if bar.target is not None:
+                callbacks.append(bar.target.close)
+        self._bars.clear()
+        for row in (self._status, self._resource_row):
+            if row is not None:
+                callbacks.append(row.close)
+        self._status = self._resource_row = None
+        cleanup(callbacks)
 
     def close(self):
         if self.closed:
             return
         self.finalized = True
-        def close_rows():
-            for bar in tuple(self._bars):
-                bar.close()
-            if self._status is not None:
-                self._status.close()
-            if self._resource_row is not None:
-                self._resource_row.close()
-        self.call(close_rows)
-        done = threading.Event()
-        self.actions.put((False, done, []))
-        done.wait()
-        self.thread.join()
+        if self.thread is None or self.thread.ident is None:
+            self.closed = True
+            self.stopped.set()
+            return
+        if not self.degraded:
+            self.call(self._dispose)
         self.closed = True
+        self.stopped.set()
+        self._release_pending()
+        if threading.current_thread() is not self.thread:
+            self.thread.join(timeout=self.coordination_timeout)
+            if self.thread.is_alive():
+                self.count('console_owner_quarantined')
 
 
 class OwnedBar:
@@ -346,20 +447,24 @@ class OwnedBar:
 
 @contextmanager
 def present(report, style):
-    presenter = ConsolePresenter(report.write, style=style).start()
+    presenter = ConsolePresenter(report.write, style=style)
     presenter.report = report
     original = report.write
     report.console = presenter
-    report.write = presenter.message
-    token = _current.set(presenter)
+    report.watch_counts(presenter.counts)
+    token = None
     try:
+        presenter.start()
+        report.write = presenter.message
+        token = _current.set(presenter)
         yield presenter
     finally:
         from .cleanup import cleanup
         try:
             cleanup([('finalize console', presenter.close)], report=report)
         finally:
-            _current.reset(token)
+            if token is not None:
+                _current.reset(token)
             report.write = original
 
 

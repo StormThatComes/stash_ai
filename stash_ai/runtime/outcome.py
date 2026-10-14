@@ -99,11 +99,22 @@ class CommandOutcome:
             self.report.outcome = row
             if row['status'] != 'completed':
                 confirmed, mutations = row['confirmed'], row['mutations']
-                self.report.write(f'Outcome: {row["status"]}; mode={row["mode"]}; '
+                messages = [f'Outcome: {row["status"]}; mode={row["mode"]}; '
                     f'published={confirmed["published_scenes"]} scene; thresholds={confirmed["threshold_pairs"]} pair; '
-                    f'mutations confirmed={mutations["confirmed"]} failed={mutations["failed"]} unknown={mutations["outcome_unknown"]} batch.')
+                    f'mutations confirmed={mutations["confirmed"]} failed={mutations["failed"]} unknown={mutations["outcome_unknown"]} batch.']
                 if row['resume_guidance']:
-                    self.report.write(row['resume_guidance'])
+                    messages.append(row['resume_guidance'])
+                for message in messages:
+                    try:
+                        self.report.write(message)
+                    except Exception as failure:
+                        self.report.counts['outcome_console_failures'] += 1
+                        if error is not None:
+                            error.add_note('Outcome console delivery failed: ' + type(failure).__name__)
+                # Include failed console delivery without suppressing the
+                # independent durable summary export or changing work counts.
+                row = self.snapshot(kind)
+                self.report.outcome = row
             if self.export is not None:
                 self.export.publish(row)
         except BaseException as failure:
