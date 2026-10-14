@@ -207,3 +207,64 @@ def test_reference_progress_is_throttled_without_losing_final_or_failure_usage(m
     with pytest.raises(ValueError, match='required=16032'):
         usage.add([np.array([1., 0., 0., 0.], dtype='float32')], kind='Selected')
     assert len(events) == 3 and events[-1]['bytes'] == events[-1]['peak_bytes'] == 16032
+
+
+def test_stricter_replay_withholds_unsafe_reassignment_without_empty_identities(tmp_path):
+    from tests.test_recognition_identity_merges import changed
+    config = setup(tmp_path)
+    a,b = np.array([1.,0,0,0]),np.array([.8,.6,0,0])
+    with FaceDatabase(config.database) as db:
+        selected,_ = scan(db,config,'1',[a]*3+[b]*3,count=6)
+        person = cluster_scene(db,selected,config)[0]['person']
+        other,_ = scan(db,config,'2',[a]*3)
+        cluster_scene(db,other,config)
+        db.connection.execute('UPDATE people SET performer=? WHERE id=?', ('42',person))
+        db.connection.commit()
+        before = [tuple(row) for row in db.connection.execute('SELECT * FROM members ORDER BY observation')]
+        evidence = [tuple(row) for row in db.connection.execute('SELECT * FROM observations ORDER BY id')]
+        strict = changed(config,recognition={'match_threshold':.98,'ambiguity_margin':.01})
+        rows = cluster_scene(db,selected,strict)
+        assert all(row['status']=='withheld' for row in rows)
+        assert any(json.loads(row[0])['reason']=='policy_reassignment_requires_review'
+                   for row in db.connection.execute('SELECT payload FROM candidates WHERE scan=?',(selected,)))
+        assert before == [tuple(row) for row in db.connection.execute('SELECT * FROM members ORDER BY observation')]
+        assert evidence == [tuple(row) for row in db.connection.execute('SELECT * FROM observations ORDER BY id')]
+        assert db.connection.execute('SELECT COUNT(*) FROM people').fetchone()[0]==1
+        assert db.connection.execute('SELECT performer FROM people').fetchone()[0]=='42'
+        assert cluster_scene(db,selected,strict)==rows
+
+
+def test_valid_one_mib_budget_does_not_overlap_reference_reload_allocations(tmp_path,monkeypatch):
+    import uuid
+    import weakref
+    from stash_ai.recognition import clustering
+    config = setup(tmp_path,{'max_samples_per_person':128,'max_reference_bytes':1048576})
+    a,b = np.zeros(1024,dtype='float32'),np.zeros(1024,dtype='float32')
+    a[0],b[1]=1,1
+    with FaceDatabase(config.database) as db:
+        for scene,embedding in [('1',a),('2',b)]:
+            selected,_ = scan(db,config,scene,[embedding]*3)
+            person = cluster_scene(db,selected,config)[0]['person']
+            row = list(db.connection.execute('SELECT * FROM observations WHERE scan=? LIMIT 1',(selected,)).fetchone())
+            for index in range(125):
+                values = list(row)
+                values[0],values[2],values[3]=str(uuid.uuid4()),index+3,float(index+3)
+                db.connection.execute('INSERT INTO observations VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',values)
+                db.connection.execute('INSERT INTO members VALUES (?,?)',(values[0],person))
+        db.connection.commit()
+        selected,_ = scan(db,config,'3',[a]*3)
+        original,allocations,events = clustering.vector,[],[]
+        def tracked(row):
+            result=original(row)
+            allocations.append(weakref.ref(result))
+            return result
+        def progress(**values):
+            live=sum(ref().nbytes for ref in allocations if ref() is not None)
+            events.append((values,live))
+        monkeypatch.setattr(clustering,'vector',tracked)
+        assert cluster_scene(db,selected,config,progress=progress)[0]['status']=='accepted'
+        for values,live in events:
+            if values['stage'] in ('loading','retained','cached'):
+                assert live <= values['budget_bytes']
+                assert live == values['bytes']
+        assert events[-1][0]['bytes']==events[-1][0]['peak_bytes']==1048576
