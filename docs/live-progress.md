@@ -12,6 +12,12 @@ and names/portraits replace the work rows with their own stage totals. Remaining
 time estimates cover each measured stage; redirected frame updates appear in
 throttled heartbeats rather than one log entry per frame or scene. Recognition
 quality/reference details and the names YAML starter require `verbose`.
+The final recognition error summary retains at most six groups and two examples
+per group (350 characters each), with exact counts and overflow totals. Distinct
+reasons sharing an exception type remain available in auto/compact/off output.
+The same sanitized, format-1 structure is stored in recognition run history under
+`summary.errors`, including collected failures before interruption. Optional
+console/snapshot failures cannot skip independent run-history finalization.
 
 Terminal status separates phase, activity (`Stage`), current work, timing,
 progress, rates and references into labeled rows. Activity appears directly

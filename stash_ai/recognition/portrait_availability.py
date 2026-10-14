@@ -5,7 +5,7 @@ import json
 import uuid
 
 from stash_ai.inference.image_io import open_image
-from stash_ai.stash_api.transport import safe_error
+from .diagnostics import message as safe_error
 from .models import checked_detection
 from .quality import portrait_bytes, portrait_score, portrait_shortfalls, portrait_tiebreak
 from .visibility import required as visibility_required, cached as visibility_cached

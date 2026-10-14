@@ -99,6 +99,10 @@ also use one bounded attempt: expiry before dispatch is a known failed write;
 after possible dispatch it is unknown and requires fresh-state reconciliation.
 No elapsed timeout automatically retries a mutation. Owned HTTP workers have
 shared bounded capacity; expired results cannot authorize subsequent writes.
+Stored source URLs omit username/password userinfo, queries and fragments.
+Recognition diagnostic URLs use the same sanitized source identity; authentication
+still uses the original request/header path. Selected cached metadata and copied
+retry-error snapshots are sanitized without reloading models or rewriting images.
 
 Each selected scene verifies the VTT/sprite content before reusing observations.
 The sprite cache keeps at most two active sheets. Completed cue checkpoints

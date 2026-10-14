@@ -7,7 +7,6 @@ from urllib.parse import urlsplit
 from stash_ai.runtime.cleanup import closing, cleanup
 from stash_ai.runtime.console import present, phase, status, activity
 from stash_ai.runtime.report import RunReport
-from stash_ai.stash_api.transport import safe_error
 from .config import digest
 from .database import FaceDatabase, encoded
 from .models import ASSETS, ensure_assets, load_backend, namespace
@@ -28,6 +27,7 @@ from .video import VideoFrames
 from .visibility import FaceVisibility, LazyVisibility
 from .expression import FaceExpression, LazyExpression, required as expression_required
 from .progress import WorkProgress, frame_progress
+from .diagnostics import snapshot as error_snapshot, render as render_errors, message as safe_error
 
 
 def instance_scope(url):
@@ -277,9 +277,18 @@ def execute(args, config, *, services=None):
                 failure = safe_error(error, key)[:1000]
                 raise
             finally:
-                summary = {'counts': dict(counts), 'mutations': dict(report.counts)}
-                if references:
-                    summary['references'] = dict(references)
+                summary = {'errors': {'format': 1, 'unavailable': True}}
+                def collect_errors():
+                    errors = report.optional('recognition_error_snapshot', error_snapshot, report, key)
+                    if errors is not None:
+                        summary['errors'] = errors
+                def show_errors():
+                    report.optional('recognition_error_summary', render_errors, report, summary['errors'])
+                def finish_history():
+                    summary.update(counts=dict(counts), mutations=dict(report.counts))
+                    if references:
+                        summary['references'] = dict(references)
+                    database.finish_run(run, outcome, summary, failure)
                 actions = [('close face visibility model', visibility.close)] if visibility is not None else []
                 if inputs is not None:
                     actions.insert(0, ('close recognition input prefetch', inputs.close))
@@ -287,5 +296,8 @@ def execute(args, config, *, services=None):
                     actions.append(('close portrait expression model', expression.close))
                 if backend is not None:
                     actions.append(('close recognition identity models', backend.close))
-                cleanup(actions + [('finish recognition history',
-                          lambda: database.finish_run(run, outcome, summary, failure))], report=report)
+                # Console diagnostics cannot skip independent durable history
+                # finalization or replace an inference/publication interruption.
+                cleanup(actions + [('collect recognition error summary', collect_errors),
+                                   ('render recognition error summary', show_errors),
+                                   ('finish recognition history', finish_history)], report=report)

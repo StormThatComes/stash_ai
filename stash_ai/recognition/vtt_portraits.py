@@ -9,6 +9,7 @@ from .clustering import _groups, reference_context
 from .config import plain
 from .database import encoded
 from .media import safe_url
+from .diagnostics import metadata as safe_metadata
 from .models import checked_detection
 from .portraits import policy_identity
 from .quality import PortraitFramingError, portrait_bytes
@@ -39,7 +40,7 @@ class Sources:
             if self.source.fingerprint != row['input_sha']:
                 raise ValueError('VTT source changed after recognition.')
             cue = self.source.cues[row['cue']]
-            if (cue.start != row['seconds'] or safe_url(cue.image) != row['source']
+            if (cue.start != row['seconds'] or safe_url(cue.image) != safe_url(row['source'])
                     or list(cue.rect) != json.loads(row['rect'])):
                 raise ValueError('VTT cue does not match its recognition observation.')
             return self.source.thumbnail(row['cue'])
@@ -69,7 +70,7 @@ def store(database, identifier, scope, target, scene, metadata):
             retained.update(metadata)
             if not metadata.get('reason'):
                 retained.pop('reason', None)
-            database.connection.execute('UPDATE portraits SET metadata=? WHERE id=?', (encoded(retained), identifier))
+            database.connection.execute('UPDATE portraits SET metadata=? WHERE id=?', (encoded(safe_metadata(retained)), identifier))
         else:
             database.connection.execute('INSERT INTO portraits VALUES (?,?,?,?,?,?,?,?)',
                 (identifier, scope, target['person'], scene, encoded(metadata), None, None,
@@ -100,7 +101,7 @@ def choose_vtt(database, client, config, scope, target, source_factory, visibili
                     'policy_sha': policy_sha, 'policy': plain(policy), 'observation': row['id'],
                     'scan': row['scan'], 'scene': scene, 'person': target['person'],
                     'performer': target['performer'], 'namespace': person['namespace'],
-                    'source': row['source'], 'rect': json.loads(row['rect']), 'cue': row['cue'],
+                    'source': safe_url(row['source']), 'rect': json.loads(row['rect']), 'cue': row['cue'],
                     'cue_seconds': row['seconds'], 'geometry': json.loads(row['geometry']),
                     'quality': quality, 'quality_errors': {}, 'reference_context': context, 'input_sha': row['input_sha']}
                 if fallback_reason:
