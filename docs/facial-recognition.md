@@ -93,6 +93,20 @@ load these models. Scene cleanup releases its borrowed backend; the invocation
 closes the actual models on completion or interruption. An inference failure
 discards the failed backend so a later scene can initialize a fresh instance.
 
+`execution.prefetch_frames` defaults to 4 ready thumbnail crops. A CPU producer
+decodes/crops images ahead of inference, preserves cue order and owns independent
+copies until consumed. The queue retains at most that many ready crops, plus the
+producer and consumer's in-flight frames; `0` uses synchronous frame preparation.
+`execution.prefetch_scenes` defaults to `true` and verifies/downloads one next
+selected scene while the current scene scans. Each input owns isolated read-only
+HTTP sessions; only the current and one next input are retained. Set it to `false`
+to disable scene lookahead independently of frame preparation.
+
+Both options leave model/scan identities unchanged, so existing observations are
+reused. Producers never run models, write SQLite or publish Stash mutations.
+Queued frames are speculative until inference completes: failures/interruption
+save only completed cues, cancel media reads and close queued images/readers.
+
 Recognition has no byte ceiling on VTT/sprite inputs, no fixed VTT cue-count
 or sprite-sheet count ceiling, and no pixel ceiling on decoded images or detector
 input. Optional `execution.max_cues` still selects an evenly distributed sample; `0` processes

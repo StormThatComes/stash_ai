@@ -133,6 +133,10 @@ class Stash:
     def scene_ids(self):
         return iter(sorted(self.links))
 
+    def new_media_reader(self):
+        return SimpleNamespace(url=self.url, api_key=self.api_key, scene=self.scene,
+                               media=SimpleNamespace(get=self.media.get), close=lambda: None)
+
     def performer(self, identifier):
         self.reads.append(('performer', identifier))
         return dict(self.profiles[identifier])

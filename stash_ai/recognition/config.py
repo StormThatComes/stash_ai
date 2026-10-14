@@ -33,7 +33,8 @@ def defaults():
                      'max_video_bytes': 67108864, 'ffmpeg': 'ffmpeg',
                      'weights': {'frontal': 3., 'sharpness': 2., 'resolution': 1., 'exposure': 1., 'visibility': 3.,
                                  'neutral_expression': 0., 'closed_mouth': 0., 'open_mouth': 0., 'open_eyes': 0.}},
-        'execution': {'max_cues': 0, 'checkpoint_cues': 32, 'timeout_seconds': 120.},
+        'execution': {'max_cues': 0, 'checkpoint_cues': 32, 'timeout_seconds': 120.,
+                      'prefetch_frames': 4, 'prefetch_scenes': True},
         'storage': {'database': 'faces_state.sqlite3', 'max_crop_bytes': 1048576},
         'names': {'file': None},
     }
@@ -136,7 +137,7 @@ def validate(data):
                        'max_reference_bytes': (1048576, 1073741824)},
         'portraits': {'min_face_pixels': (0, 4096), 'max_candidates': (1, 64), 'jpeg_quality': (1, 100),
                       'max_video_bytes': (1048576, 1073741824)},
-        'execution': {'max_cues': (0, 10000), 'checkpoint_cues': (1, 1000)},
+        'execution': {'max_cues': (0, 10000), 'checkpoint_cues': (1, 1000), 'prefetch_frames': (0, 128)},
         'storage': {'max_crop_bytes': (1024, 8388608)},
     }
     for section, fields in integers.items():
@@ -146,6 +147,8 @@ def validate(data):
         _number(data[section]['min_sharpness'], f'{section}.min_sharpness', 0, 100000)
     for section in ('execution', 'portraits'):
         _number(data[section]['timeout_seconds'], f'{section}.timeout_seconds', 1, 600)
+    if type(data['execution']['prefetch_scenes']) is not bool:
+        raise ValueError('execution.prefetch_scenes must be boolean.')
     portrait = data['portraits']
     if type(portrait['enabled']) is not bool:
         raise ValueError('portraits.enabled must be boolean.')

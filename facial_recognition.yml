@@ -63,6 +63,8 @@ execution:
   max_cues: 0                  # 0 = all cues in the selected scene, not all scenes.
   checkpoint_cues: 32
   timeout_seconds: 120.0
+  prefetch_frames: 4           # Ready CPU frames queued ahead of inference; 0 disables.
+  prefetch_scenes: true        # Verify/download one next scene while the current one scans.
 storage:
   database: faces_state.sqlite3
   max_crop_bytes: 1048576

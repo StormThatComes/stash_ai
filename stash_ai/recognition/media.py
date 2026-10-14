@@ -10,6 +10,7 @@ from stash_ai.domain import Cue
 from stash_ai.stash_api.transport import origin, absolute_stash_url
 from .config import digest
 from stash_ai.inference.image_io import open_image
+from stash_ai.runtime.cleanup import closing
 
 
 def safe_url(url):
@@ -115,7 +116,7 @@ class SpriteInput:
                 x, y, width, height = cue.rect
                 if x + width > sheet.width or y + height > sheet.height:
                     raise ValueError('Recognition VTT rectangle exceeds sprite bounds.')
-                with sheet.crop((x, y, x + width, y + height)) as image:
+                with closing(sheet.crop((x, y, x + width, y + height)), name='close recognition source crop') as image:
                     yield index, cue, image
         finally:
             for sheet in sheets.values():
