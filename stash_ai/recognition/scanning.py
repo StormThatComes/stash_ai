@@ -20,7 +20,7 @@ def scan_identity(config, namespace):
 
 
 def scan_scene(database, scope, scene, config, namespace, source, backend_factory, *,
-               visibility=None, progress=lambda **kw: None):
+               visibility=None, progress=lambda **kw: None, frame_progress=lambda **kw: None):
     db = database.connection
     policy = scan_identity(config, namespace)
     identifier = str(uuid.uuid5(uuid.NAMESPACE_URL, encoded([scope, str(scene['id']), namespace,
@@ -36,8 +36,10 @@ def scan_scene(database, scope, scene, config, namespace, source, backend_factor
     if record['status'] == 'complete':
         if record['cursor'] != record['total']:
             raise ValueError('Incomplete recognition scan marked complete.')
+        frame_progress(completed=record['total'], total=record['total'], reused=True)
         progress(reused=record['total'], scene=str(scene['id']))
         return identifier, True
+    frame_progress(completed=record['cursor'], total=record['total'])
     backend = backend_factory()
     pending, cursor = [], record['cursor']
 
@@ -75,6 +77,7 @@ def scan_scene(database, scope, scene, config, namespace, source, backend_factor
                         pending.append((observation, identifier, index, cue.start, safe_url(cue.image), encoded(list(cue.rect)),
                                         encoded(list(face.row)), encoded(quality), reason, backend.dimensions, vector, crop))
                 cursor = index + 1
+                frame_progress(completed=cursor, total=record['total'])
                 if cursor % config.data['execution']['checkpoint_cues'] == 0:
                     checkpoint()
         checkpoint()
