@@ -134,7 +134,15 @@ The best and next coherent identity compete even when the runner-up falls just
 below the match threshold. Cohesion is checked against bounded representative
 samples, avoiding transitive single-link unions. This sampled check is not a
 proof that every historical pair matches. Reference bytes, samples and identity
-counts have explicit limits; no N-by-N distance matrix is allocated.
+counts have explicit limits; no N-by-N distance matrix is allocated. Reference
+sets are released before database reloads, so current/peak counts cover live
+representatives without overlapping copies. One query vector (up to 4 KiB),
+SQLite/Python overhead and model memory are separate from this reference budget.
+
+A stricter policy can withhold an existing assignment with
+`policy_reassignment_requires_review`. Retained memberships and published
+performer bindings stay stable; replay does not create an empty person or
+silently split a performer across scenes.
 
 ### Consolidating identity fragments
 
@@ -144,8 +152,14 @@ At least `recognition.min_support` distinct cue times in that selected scan must
 match both groups at `recognition.match_threshold`, with the usual sample
 cohesion check. The average of cross-group sample similarities must reach
 `match_threshold`, and their minimum must reach `clustering.cohesion_threshold`.
-Different assigned faces in one retained cue block a merge; selected-scene
-assignments are recorded before this check so new co-occurrence also counts.
+A person can appear together with their reflection. Co-occurrence therefore
+does not create a permanent cannot-link: it requires every cross-sample
+similarity to reach `recognition.cooccurrence_merge_threshold` (default `0.90`)
+as well as the usual match/cohesion checks and distinct selected cue times.
+The effective stronger threshold never falls below `match_threshold`. This is
+identity evidence, not a mirror detector; uncertain cases remain withheld with
+`cooccurrence_identity_evidence_insufficient`. Selected-scene assignments are
+recorded before this check so new co-occurrence also counts.
 Samples are bounded by `max_samples_per_person` for each original group. While
 combining several groups in a pass, all constituents remain available for the
 cross-check: A-B and B-C similarity cannot override incompatible A-C evidence.
