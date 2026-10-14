@@ -1,6 +1,5 @@
 """Offline run history and weighted profiling aggregates for comparable runs."""
 from collections import Counter
-import math
 
 from stash_ai.reports.io import write_json_report
 from stash_ai.reports.runtime import offline_report, report_history
@@ -11,11 +10,7 @@ from stash_ai.storage.store import scope_for
 METRIC_KEYS = ('kind', 'name', 'model', 'work', 'outcome', 'unit')
 
 
-def finite_nonnegative(value):
-    try:
-        return type(value) in (int, float) and math.isfinite(value) and value >= 0
-    except OverflowError:
-        return False
+from .run_validation import finite_nonnegative, sanitize
 
 
 def valid_metric(metric):
@@ -46,9 +41,12 @@ def valid_metric(metric):
 def work_profile(run):
     """Legacy profiles remain readable, with explicit unknown frame accounting."""
     counts = run.get('counts', {})
+    counts = counts if isinstance(counts, dict) else {}
+    outcomes = run.get('outcomes', {})
+    outcomes = outcomes if isinstance(outcomes, dict) else {}
     return dict(
         outcomes={model: dict(sorted(values.items()))
-                  for model, values in sorted(run.get('outcomes', {}).items())},
+                  for model, values in sorted(outcomes.items()) if isinstance(values, dict)},
         processed_frames=counts.get('inference_processed_frames'),
         restored_frames=counts.get('checkpoint_restored_frames'),
     )
@@ -62,7 +60,10 @@ def build_report(rows):
         if len(warnings) < 20:
             warnings.append(dict(code=code, run_index=index,
                                  **({'metric_index': metric_index} if metric_index is not None else {})))
-    for index, run in enumerate(rows):
+    for index, raw in enumerate(rows):
+        run, invalid_record = sanitize(raw, lambda code: warn(code, index))
+        if run is None:
+            continue
         # Failed/interrupted/running work must not lower successful-run averages.
         partial = run.get('partial', run.get('finished_at') is None and run['status'] == 'running')
         workload = run.get('workload', {})
@@ -73,16 +74,26 @@ def build_report(rows):
         if not comparable:
             fingerprint = None
             warn('unknown_configuration_fingerprint', index)
+        comparable = comparable and not invalid_record
         # Unknown fingerprints describe isolated runs, not a verified cohort.
         identity = fingerprint if comparable else ['unverified-run', index]
         key = digest([run['command'], run['status'], partial, identity, run['models'], workload, work])
+        if key in groups and any(run[field] is not None and not finite_nonnegative(
+                groups[key][field] + run[field]) for field in ('wall_seconds', 'cpu_seconds')):
+            warn('elapsed_aggregate_overflow', index)
+            comparable = False
+            invalid_record = True
+            key = digest([key, 'unverified-run', index])
         group = groups.setdefault(key, dict(command=run['command'], status=run['status'],
             configuration_fingerprint=fingerprint, configuration_comparable=comparable, models=run['models'],
             partial=partial, workload=workload, work_profile=work, runs=0, wall_seconds=0.0, cpu_seconds=0.0,
-            counts=Counter(), outcomes={}, samples={}, invalid_metrics=0))
+            counts=Counter(), outcomes={}, samples={}, invalid_metrics=0,
+            wall_samples=0, cpu_samples=0))
         group['runs'] += 1
-        group['wall_seconds'] += run['wall_seconds'] or 0.0
-        group['cpu_seconds'] += run['cpu_seconds'] or 0.0
+        for field, sample_key in (('wall_seconds','wall_samples'), ('cpu_seconds','cpu_samples')):
+            if run[field] is not None:
+                group[field] += run[field]
+                group[sample_key] += 1
         group['counts'].update(run['counts'])
         for model, counts in run['outcomes'].items():
             group['outcomes'].setdefault(model, Counter()).update(counts)
@@ -101,10 +112,11 @@ def build_report(rows):
             metric_key = tuple(metric[name] for name in METRIC_KEYS)
             combine(group['samples'].setdefault(metric_key, empty_sample()), metric)
         reported_rows.append({**run, 'metrics': valid_metrics,
+                              **({'comparison_valid': False} if invalid_record else {}),
                               **({'invalid_metrics': invalid_metrics} if invalid_metrics else {})})
     for group in groups.values():
-        group['mean_wall_seconds'] = group['wall_seconds'] / group['runs']
-        group['mean_cpu_seconds'] = group['cpu_seconds'] / group['runs']
+        group['mean_wall_seconds'] = group['wall_seconds'] / group['wall_samples'] if group['wall_samples'] else None
+        group['mean_cpu_seconds'] = group['cpu_seconds'] / group['cpu_samples'] if group['cpu_samples'] else None
         group['metrics'] = [dict(zip(METRIC_KEYS, key), **describe(value))
                             for key, value in sorted(group.pop('samples').items(),
                                 key=lambda item: tuple('' if value is None else value for value in item[0]))]
@@ -117,7 +129,7 @@ def build_report(rows):
                'Selection digests, code/package provenance, observed execution metadata and verified-input workloads separate comparison groups when available.',
                'Fresh, checkpoint resume and reuse outcomes and performed/restored frame counts separate averages.',
                'Legacy records missing provenance/workload/frame accounting remain readable; their comparability is limited.',
-               'Missing/invalid configuration fingerprints form isolated, explicitly incomparable per-run groups. Invalid metrics are excluded with bounded warnings.',
+               'Missing/invalid comparison fields form isolated, explicitly incomparable per-run groups. Invalid counters and metrics are excluded with bounded warnings; elapsed means use only available valid samples.',
                'Groups describe only the selected, most recent matching runs.'])
 
 
@@ -130,12 +142,12 @@ def run(app, args):
     print('Run history: ' + str(len(report['runs'])) + ' runs')
     for item in report['runs']:
         print(f"  {item['started_at']} {item['command']} {item['status']}: "
-              + (f"{item['wall_seconds']:.3f}s" if item['wall_seconds'] is not None else 'unfinished'))
+              + (f"{item['wall_seconds']:.3f}s" if item['wall_seconds'] is not None else 'elapsed unknown'))
     for group in report['groups']:
         print(f"  Profile {group['command']}/{group['status']} ({group['runs']} runs): "
-              f"mean wall={group['mean_wall_seconds']:.3f}s")
+              + (f"mean wall={group['mean_wall_seconds']:.3f}s" if group['mean_wall_seconds'] is not None else 'mean wall=unknown'))
         if not group['configuration_comparable']:
-            print('    Configuration fingerprint unknown; this run is not a verified comparison group.')
+            print('    This run has unverified comparison fields and is kept in a separate group.')
         if group['invalid_metrics']:
             print(f"    Excluded invalid metrics: {group['invalid_metrics']}")
         for metric in sorted(group['metrics'], key=lambda row: -row['inclusive_seconds'])[:12]:
