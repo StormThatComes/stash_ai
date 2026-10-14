@@ -3,7 +3,7 @@ import json
 import uuid
 
 from stash_ai.runtime.mutations import write
-from stash_ai.stash_api.transport import safe_error
+from .diagnostics import message as safe_error
 from .database import encoded
 from .stash import owns, checked_id, RecognitionStash
 

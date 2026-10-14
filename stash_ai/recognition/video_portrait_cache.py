@@ -3,6 +3,7 @@ import json
 
 from .config import plain
 from .database import encoded
+from .diagnostics import metadata as safe_metadata
 
 
 def reuse(database, config, scope, target, observation, scene, seconds, namespace, identifier, policy_sha, selection):
@@ -18,7 +19,7 @@ def reuse(database, config, scope, target, observation, scene, seconds, namespac
        policy['margin'], policy['aspect_ratio'], policy['jpeg_quality'])).fetchone()
     if old is None:
         return None
-    metadata = json.loads(old['metadata'])
+    metadata = safe_metadata(json.loads(old['metadata']))
     previous_policy = dict(metadata.get('policy', {}))
     current_policy = plain(policy)
     for field in ('weights', 'min_face_pixels', 'min_sharpness', 'max_pose_deviation',

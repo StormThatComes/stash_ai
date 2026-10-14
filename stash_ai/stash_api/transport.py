@@ -19,6 +19,8 @@ def safe_error(exc: Exception, api_key: str = "") -> str:
     message = str(exc)
     if api_key:
         message = message.replace(api_key, "[redacted]")
+    message = re.sub(r'(?i)((?:https?:)?//)[^/?#\"\'<>]*@', r'\1', message)
+    message = re.sub(r'(?i)(netloc\s+[\"\'])[^\"\']*@', r'\1', message)
     return re.sub(r"(?i)([?&](?:apikey|api_key|token)=)[^&\s\"'<>]+", r"\1[redacted]", message)
 
 

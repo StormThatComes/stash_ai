@@ -17,6 +17,7 @@ from .portrait_availability import measure_available, score_metadata, refresh_ca
 from .stash import checked_id, owns
 from .visibility import LazyVisibility, CONTRACT_ID
 from .expression import LazyExpression, CONTRACT_ID as EXPRESSION_CONTRACT_ID
+from .diagnostics import metadata as safe_metadata
 
 
 def policy_identity(config):
@@ -99,7 +100,7 @@ def recheck_cached(database, existing, groups, config, target, namespace, contex
     """Keep the JPEG but refresh its eligibility from retained identity evidence."""
     import numpy as np
     metadata = json.loads(existing['metadata'])
-    updated = dict(metadata)
+    updated = safe_metadata(metadata, getattr(client, 'api_key', '') if client is not None else '')
     similarity = runner = None
     data, sha = existing['image'], existing['digest']
     try:
@@ -257,7 +258,7 @@ def choose(database, client, config, scope, target, paths, backend_factory, deco
     except Exception as error:
         report = getattr(client, 'report', None)
         if report is not None:
-            from stash_ai.stash_api.transport import safe_error
+            from .diagnostics import message as safe_error
             report.optional('recognition_portrait_video', report.write,
                             'Video portrait unavailable; using recognition evidence: ' + safe_error(error, getattr(client, 'api_key', '')))
     finally:
@@ -383,7 +384,7 @@ def fill_portrait(database, client, report, config, scope, target, paths, backen
     intent = {'portrait': winner['id'], 'sha256': winner['digest']}
     precondition = {'missing': baseline is None, 'image_sha256': baseline,
                     'image_path': safe_url(live.get('image_path') or ''), 'token': token}
-    precondition.update(retry_precondition(previous))
+    precondition.update(retry_precondition(previous, api_key=getattr(client, 'api_key', '')))
     if winner['digest'] == baseline:
         if previous is None or previous['status'] not in ('confirmed', 'observed') or json.loads(previous['payload']) != intent:
             save_operation(database, scope=scope, scene='', person=person, kind='image', target=performer,

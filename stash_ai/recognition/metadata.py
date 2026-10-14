@@ -1,7 +1,7 @@
 """Automatic metadata extension, independent name and portrait outcomes."""
 from collections import Counter
 
-from stash_ai.stash_api.transport import safe_error
+from .diagnostics import message as safe_error
 from .names import sync_name
 from .portraits import fill_portrait
 
