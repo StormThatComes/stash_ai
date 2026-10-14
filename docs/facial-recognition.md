@@ -117,6 +117,11 @@ uses SQLite's consistent backup API; no result/history/image sidecars are needed
 Recognition schema v1 upgrades atomically to v2 to retain identity merge aliases
 and their evidence. Existing observations, IDs, performer bindings and history
 are preserved. An incomplete v1 database is refused before migration.
+After acquiring this database's exclusive writer lock, a new owner marks prior
+`running` recognition histories interrupted regardless of instance scope or
+selected scene order. Their saved summaries/progress and pending or unknown
+Stash intents remain intact. Runs started by the current owner are left active;
+another writer cannot acquire the database while that owner holds it.
 
 Face completeness/pose currently use measurable geometry and five-landmark
 ordering/symmetry estimates. They do not prove that every feature is unoccluded.
