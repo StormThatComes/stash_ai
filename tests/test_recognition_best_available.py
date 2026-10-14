@@ -236,20 +236,18 @@ def test_repeated_source_failure_keeps_the_retained_portrait_idempotent(tmp_path
     assert len(image_writes(stash)) == 1 and image_operation(config) == operation
 
 
-def test_video_backend_initialization_failure_uses_the_accepted_thumbnail(tmp_path, monkeypatch):
+def test_video_backend_inference_failure_uses_the_accepted_thumbnail(tmp_path, monkeypatch):
     config, stash, services = video_setup(tmp_path, monkeypatch)
     calls, backends = [], []
     def backend(*args):
         calls.append(1)
-        if len(calls) > 1:
-            raise RuntimeError('video face backend unavailable')
-        model = Backend(); backends.append(model); return model
+        model = Backend(fail_at=4); backends.append(model); return model
     services.backend = backend
     assert run(config, services, '1') == 0
     _, metadata = published(config)
     assert metadata['source_type'] == 'vtt' and metadata['requested_source'] == 'video'
     assert metadata['fallback']['reason'] == 'no_usable_identity_verified_video_portrait'
-    assert not Decoder.instances and backends[0].closed
+    assert len(calls) == 1 and Decoder.instances and backends[0].closed
     assert last_counts(config).get('metadata_failed', 0) == 0
 
 
@@ -283,8 +281,10 @@ def test_cold_replay_portrait_uses_the_face_assigned_to_current_cluster(tmp_path
         person = cluster_scene(db, scan, config)[0]['person']
         performer = publish_person(db, stash, RunReport(write=lambda _: None), scope, '99', person)
     query = np.array([.68, .64, math.sqrt(1 - .68**2 - .64**2), 0.])
-    values = iter([query, np.array([0.,1.,0.,0.])])
-    services.backend = lambda *a: Backend(vector=next(values))
+    values = iter([query] * 3 + [np.array([0.,1.,0.,0.])] * 3)
+    model = Backend()
+    model.embed = lambda *args: next(values)
+    services.backend = lambda *a: model
     assert run(config, services, '2', '3') == 0
     assert performer in stash.images and len(stash.images) == 1
     with FaceDatabase(config.database) as db:

@@ -87,6 +87,12 @@ survive an interrupted inference; incomplete
 scans cannot publish identities. Partial sampling and rejected/no-face outcomes
 remain explicit coverage information, not proof that a person is absent.
 
+The detector and recognizer are initialized lazily once per invocation and shared
+by selected-scene scans and video portrait inference. A fully cached run does not
+load these models. Scene cleanup releases its borrowed backend; the invocation
+closes the actual models on completion or interruption. An inference failure
+discards the failed backend so a later scene can initialize a fresh instance.
+
 Recognition has no byte ceiling on VTT/sprite inputs, no fixed VTT cue-count
 or sprite-sheet count ceiling, and no pixel ceiling on decoded images or detector
 input. Optional `execution.max_cues` still selects an evenly distributed sample; `0` processes

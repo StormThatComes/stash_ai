@@ -75,12 +75,12 @@ def test_automatic_video_portrait_is_scoped_stored_and_rerun_preserves_image(tmp
 
 def test_wrong_identity_video_uses_recognition_thumbnail_without_breaking_links(tmp_path, monkeypatch):
     config, stash, services = setup(tmp_path, monkeypatch)
-    calls = 0
-    def backend(*args):
-        nonlocal calls
-        calls += 1
-        return Backend(vector=(1, 0, 0, 0) if calls == 1 else (0, 1, 0, 0))
-    services.backend = backend
+    model = Backend()
+    def embed(image, face):
+        model.calls += 1
+        return np.asarray((1, 0, 0, 0) if model.calls <= 3 else (0, 1, 0, 0), dtype='float32')
+    model.embed = embed
+    services.backend = lambda *args: model
     assert run(config, services, '1') == 0
     assert len(stash.links['1']) == 2 and stash.images
     with FaceDatabase(config.database) as db:

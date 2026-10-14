@@ -1,6 +1,6 @@
 """Finite selected-scene orchestration; no tag runtime or automatic hook."""
 from collections import Counter
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 import os
 from urllib.parse import urlsplit
 
@@ -11,6 +11,7 @@ from stash_ai.stash_api.transport import safe_error
 from .config import digest
 from .database import FaceDatabase, encoded
 from .models import ASSETS, ensure_assets, load_backend, namespace
+from .backend import LazyBackend
 from .media import SpriteInput
 from .scanning import scan_scene
 from .clustering import matching_policy
@@ -127,6 +128,7 @@ def execute(args, config, *, services=None):
             ready = {}
             visibility = None
             expression = None
+            backend = None
             try:
                 with phase(report, 'Recognition assets'):
                     paths = services.assets(config, write=report.write)
@@ -141,6 +143,12 @@ def execute(args, config, *, services=None):
                     with database.connection:
                         database.connection.execute('INSERT OR IGNORE INTO models VALUES (?,?)',
                                                     (model_namespace, encoded(provenance)))
+                    def loaded(value):
+                        database.progress(run, 'backend', {'namespace': model_namespace,
+                            'embedding_device': value.device, 'detector_device': getattr(value, 'detector_device', 'cpu'),
+                            'dimensions': value.dimensions, 'runtime': getattr(value, 'provenance', {})})
+                    backend = LazyBackend(config, paths, services.backend, loaded=loaded)
+                    runtime_services = replace(services, backend=backend.borrow)
                 selected = []
                 for identifier in sorted(identifiers, key=int):
                     status(report, scene=identifier, scenes_completed=counts['scenes_processed'], scenes_total=len(identifiers))
@@ -151,18 +159,8 @@ def execute(args, config, *, services=None):
                                 def progress(**values):
                                     database.progress(run, 'scan', values)
                                     status(report, completed=1, **values)
-                                def backend():
-                                    value = services.backend(config, paths)
-                                    try:
-                                        database.progress(run, 'backend', {'namespace': model_namespace,
-                                            'embedding_device': value.device, 'detector_device': getattr(value, 'detector_device', 'cpu'),
-                                            'dimensions': value.dimensions, 'runtime': getattr(value, 'provenance', {})})
-                                    except BaseException:
-                                        value.close()
-                                        raise
-                                    return value
                                 scan, reused = scan_scene(database, scope, scene, config, model_namespace, source,
-                                    backend, visibility=visibility, progress=progress)
+                                    backend.borrow, visibility=visibility, progress=progress)
                             counts['scenes_reused' if reused else 'scenes_scanned'] += 1
                             rejected = {row['rejected']: row['total'] for row in database.connection.execute(
                                 'SELECT rejected,COUNT(*) AS total FROM observations WHERE scan=? AND rejected IS NOT NULL '
@@ -232,7 +230,7 @@ def execute(args, config, *, services=None):
                             if retry_images:
                                 options['retry_unresolved_images'] = True
                             counts.update(services.metadata(database, client, report, config, plan,
-                                                           scope, target, paths, services, **options) or {})
+                                                           scope, target, paths, runtime_services, **options) or {})
                             database.progress(run, 'metadata', dict(counts))
                 if targets:
                     try:
@@ -258,5 +256,7 @@ def execute(args, config, *, services=None):
                 actions = [('close face visibility model', visibility.close)] if visibility is not None else []
                 if expression is not None:
                     actions.append(('close portrait expression model', expression.close))
+                if backend is not None:
+                    actions.append(('close recognition identity models', backend.close))
                 cleanup(actions + [('finish recognition history',
                           lambda: database.finish_run(run, outcome, summary, failure))], report=report)
