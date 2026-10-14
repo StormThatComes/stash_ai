@@ -145,6 +145,7 @@ def test_failed_input_advances_inspected_scenes_and_groups_repeated_errors(tmp_p
     assert output.out.count('ERROR recognition scan:') == 1
     assert 'Recognition partial:' in output.out and 'scenes_failed=3' in output.out
     assert 'Recognition scenes: inspected 3/3 scene' in output.err
+    assert 'Phase: Recognition VTT partial' in output.err
 
 
 def test_interruption_closes_live_rows_without_claiming_unfinished_scene(tmp_path, monkeypatch):
