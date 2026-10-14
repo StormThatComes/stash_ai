@@ -22,7 +22,8 @@ recognition:
   match_threshold: 0.65        # Higher means more similar. Model-specific.
   ambiguity_margin: 0.10
   cooccurrence_merge_threshold: 0.90 # Stronger cross-sample evidence for possible reflections.
-  min_support: 3               # Distinct cue times for a new person or identity merge.
+  min_identity_support: 1      # Independent cue times for a new person.
+  min_merge_support: 3         # Distinct scene/time observations before merging identities.
 clustering:
   cohesion_threshold: 0.60     # Minimum sample similarity for matching and group merges.
   max_samples_per_person: 32
