@@ -93,8 +93,11 @@ def ensure_assets(config, *, write=print):
     from .visibility import required
     selected = [config.data['models']['detector'], config.data['models']['recognizer']]
     identity_assets = set(selected)
-    if config.data['portraits']['enabled'] and required(config.data['portraits']):
+    detection_visibility = config.data['detection']['min_visible_face_fraction'] > 0
+    if detection_visibility or (config.data['portraits']['enabled'] and required(config.data['portraits'])):
         selected.append('faceocc')
+    if detection_visibility:
+        identity_assets.add('faceocc')
     from .expression import required as expression_required
     if config.data['portraits']['enabled'] and expression_required(config.data['portraits']):
         selected.extend(('expression_mesh', 'expression_blendshapes'))

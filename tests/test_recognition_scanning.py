@@ -11,7 +11,7 @@ from tests.helpers.recognition import MediaClient, Backend
 
 def config(tmp_path):
     p = tmp_path / 'face.yml'
-    p.write_text('version: 1\ndetection: {min_sharpness: 0}\nexecution: {checkpoint_cues: 1}\n')
+    p.write_text('version: 1\ndetection: {min_sharpness: 0, max_pose_deviation: null, min_visible_face_fraction: 0, require_complete_face: false}\nexecution: {checkpoint_cues: 1}\n')
     return load(p)
 
 

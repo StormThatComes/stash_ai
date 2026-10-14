@@ -17,7 +17,9 @@ def defaults():
         'models': {'detector': 'yunet', 'recognizer': 'sface', 'device': 'cuda',
                    'directory': 'recognition_models', 'download_missing': True},
         'detection': {'score_threshold': .9, 'nms_threshold': .3,
-                      'min_face_pixels': 32, 'min_sharpness': 10., 'max_faces_per_frame': 100},
+                      'min_face_pixels': 32, 'min_sharpness': 10., 'max_faces_per_frame': 100,
+                      'max_pose_deviation': .5, 'min_visible_face_fraction': .8,
+                      'require_complete_face': True},
         'recognition': {'metric': 'cosine', 'match_threshold': .65,
                         'ambiguity_margin': .1, 'min_support': 3, 'cooccurrence_merge_threshold': .90},
         'clustering': {'cohesion_threshold': .60, 'max_samples_per_person': 32,
@@ -111,13 +113,17 @@ def validate(data):
     if models['device'] not in ('auto', 'cpu', 'cuda') or type(models['download_missing']) is not bool:
         raise ValueError('Invalid face device/download policy.')
     for section, names in {
-        'detection': ('score_threshold', 'nms_threshold'),
+        'detection': ('score_threshold', 'nms_threshold', 'min_visible_face_fraction'),
         'recognition': ('match_threshold', 'ambiguity_margin', 'cooccurrence_merge_threshold'),
         'clustering': ('cohesion_threshold',),
         'portraits': ('max_pose_deviation', 'max_clipped_fraction', 'margin', 'min_visible_face_fraction'),
     }.items():
         for key in names:
             _number(data[section][key], f'{section}.{key}', 0, 1)
+    if data['detection']['max_pose_deviation'] is not None:
+        _number(data['detection']['max_pose_deviation'], 'detection.max_pose_deviation', 0, 1)
+    if type(data['detection']['require_complete_face']) is not bool:
+        raise ValueError('detection.require_complete_face must be boolean.')
     if data['recognition']['metric'] != 'cosine':
         raise ValueError('Face recognition uses cosine similarity (higher means more similar).')
     if data['clustering']['cohesion_threshold'] > data['recognition']['match_threshold']:

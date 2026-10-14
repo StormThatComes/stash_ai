@@ -41,7 +41,7 @@ def test_only_selected_recognition_and_enabled_visibility_assets_are_downloaded(
     import stash_ai.recognition.runtime as face_runtime
     import stash_ai.recognition.models as models
     path = tmp_path / 'face.yml'
-    path.write_text(f'version: 1\nmodels: {{recognizer: auraface}}\nportraits: {{enabled: {str(portraits).lower()}}}\n')
+    path.write_text(f'version: 1\nmodels: {{recognizer: auraface}}\ndetection: {{min_visible_face_fraction: 0}}\nportraits: {{enabled: {str(portraits).lower()}}}\n')
     calls = []
     monkeypatch.setattr(face_runtime, 'runtime', lambda config: None)
     monkeypatch.setattr(models, 'verify', lambda *args: None)
@@ -78,7 +78,7 @@ def test_model_switch_retains_evidence_and_profiles_without_duplicate_publicatio
     writes = list(client.writes)
     path = tmp_path / 'aura.yml'
     path.write_text('version: 1\nmodels: {recognizer: auraface, device: cpu}\n'
-                    'detection: {min_sharpness: 0}\nportraits: {enabled: false}\n')
+                    'detection: {min_sharpness: 0, max_pose_deviation: null, min_visible_face_fraction: 0, require_complete_face: false}\nportraits: {enabled: false}\n')
     aura = replace(load(path), database=config.database)
     assert namespace(config) != namespace(aura)
     assert run(aura, services, '1') == 0

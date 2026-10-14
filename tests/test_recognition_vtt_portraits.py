@@ -53,7 +53,8 @@ def setup(tmp_path, monkeypatch, **portraits):
 
 
 def write_config(path, **portraits):
-    path.write_text(yaml.safe_dump({'version': 1, 'detection': {'min_sharpness': 0},
+    path.write_text(yaml.safe_dump({'version': 1, 'detection': {'min_sharpness': 0, 'max_pose_deviation': None,
+                                                'min_visible_face_fraction': 0, 'require_complete_face': False},
                                   'portraits': {'min_sharpness': 0, 'max_candidates': 2, **portraits}}))
 
 

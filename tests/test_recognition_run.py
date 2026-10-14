@@ -15,7 +15,7 @@ from tests.helpers.recognition import Backend, Stash
 def setup(tmp_path, monkeypatch, **settings):
     monkeypatch.setenv('STASH_URL', 'http://stash/')
     path = tmp_path / 'facial_recognition.yml'
-    path.write_text('version: 1\ndetection: {min_sharpness: 0}\nportraits: {enabled: false}\n')
+    path.write_text('version: 1\ndetection: {min_sharpness: 0, max_pose_deviation: null, min_visible_face_fraction: 0, require_complete_face: false}\nportraits: {enabled: false}\n')
     config = load(path)
     client = Stash()
     backends = []

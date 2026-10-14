@@ -128,6 +128,59 @@ ordering/symmetry estimates. They do not prove that every feature is unoccluded.
 Sharpness is measured on a normalized grayscale crop; actual face dimensions,
 exposure and clipping are retained separately.
 
+## Recognition observation quality
+
+Detection quality gates run before embedding and grouping. They keep unreliable
+profile/covered faces from seeding identity fragments without lowering matching,
+ambiguity, cohesion or reflection-merge thresholds. Rejected observations retain
+geometry, measured quality and a reason in SQLite, but no embedding/crop; they
+cannot become reference samples, supply distinct-time support or support merges.
+The run prints per-scene rejection counts, saves the reason breakdown in detection
+progress, and includes `observations_rejected` in its summary, including reused scans.
+
+| `detection` setting | Default | Meaning |
+| --- | ---: | --- |
+| `min_face_pixels` | 32 | Minimum shorter face-box side in source pixels |
+| `min_sharpness` | 10 | Minimum Laplacian variance on the normalized grayscale crop; 0 disables |
+| `max_pose_deviation` | 0.50 | Maximum five-landmark pose estimate in `[0, 1]`; `null` disables this gate |
+| `min_visible_face_fraction` | 0.80 | Minimum FaceOcc visible-face estimate in `[0, 1]`; 0 disables recognition segmentation |
+| `require_complete_face` | true | Reject face boxes extending beyond the source thumbnail |
+
+The pose gate also requires valid, ordered landmarks inside the face box. Its
+dimensionless score combines nose/eye/mouth geometry; it is not an angle in degrees
+or a calibrated head-pose measurement. Completeness checks image boundaries, not
+semantic occlusion. Visibility uses the same fixed FaceOcc crop, ellipse and model
+contract as portraits. It is an estimate, not an anatomical percentage; hair,
+beards, glasses, pose and small thumbnails can affect it. These starting defaults
+are not calibrated on the operator's library. Inspect rejected examples before
+tightening them further; filtering can miss people seen only in difficult poses.
+
+Recognition visibility is independent of `portraits.enabled` and
+`portraits.weights.visibility`. When its threshold is positive, FaceOcc becomes
+a required recognition asset. Missing/invalid assets or failed/invalid measurements
+fail the scene without publishing its partial scan; completed cue checkpoints
+remain resumable on a later explicit run. An unavailable measurement never counts
+as an uncovered face. Cheap size/sharpness/geometry gates run before segmentation.
+One lazy visibility model is shared across selected scenes and portraits; accepted
+VTT observations retain the raw measurement so portrait ranking does not repeat it.
+
+Changing detection gates or the enabled visibility model contract starts a new
+selected-scene scan, while preserving the recognizer namespace and existing
+performer bindings. Unchanged completed scans reuse their decisions. Portrait-only
+preferences still do not invalidate recognition scans, and imperfect portraits
+remain eligible among accepted observations. Earlier scans, reference memberships,
+published people and links are retained; these gates do not retroactively clean
+historical references or delete/repair identity fragments already published.
+
+To explicitly restore the earlier size/sharpness-only observation policy:
+
+```yaml
+detection:
+  max_pose_deviation: null
+  min_visible_face_fraction: 0
+  require_complete_face: false
+```
+
 ## Automatic identity policy
 
 Matching is incremental: selected-scene vectors can reuse compatible retained
@@ -515,8 +568,10 @@ crops. Metadata records the fallback rather than claiming a video frame/time.
 prefer at least 80% estimated visible facial surface. `portraits.weights.visibility`
 is a nonnegative ranking weight, default `3.0`, which favors more visible faces.
 A zero target removes the extra shortfall penalty while retaining the base
-visibility score. A zero weight disables visibility model downloads/inference
-and removes its main ranking contribution. Unknown YAML keys still fail validation.
+visibility score. A zero weight disables portrait visibility inference and removes
+its main ranking contribution. FaceOcc is still required when the independent
+`detection.min_visible_face_fraction` gate is positive. Set that threshold to 0
+as well to disable all visibility downloads/inference. Unknown YAML keys still fail validation.
 
 The pinned MIT-licensed FaceOcc v1.0.0 SafeTensors model predicts visible face
 versus background/occluder pixels. Its U-Net/ResNet18 runs on the existing
