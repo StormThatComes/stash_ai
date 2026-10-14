@@ -23,7 +23,8 @@ def sample_key(row):
 
 
 def _observations(db, scan):
-    return db.execute('SELECT o.*,s.scope,s.namespace,s.scene,s.input_sha FROM observations o '
+    return db.execute('SELECT o.id,o.scan,o.cue,o.seconds,o.source,o.rect,o.geometry,o.quality,'
+                      'o.rejected,o.dimensions,o.embedding,s.scope,s.namespace,s.scene,s.input_sha FROM observations o '
                       'JOIN scans s ON s.id=o.scan WHERE o.scan=? ORDER BY o.cue,o.id', (scan,))
 
 
