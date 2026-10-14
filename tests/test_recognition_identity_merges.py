@@ -386,3 +386,63 @@ def test_duplicate_detections_in_one_cue_do_not_impose_a_one_person_rule(tmp_pat
         db.connection.commit()
         rows = cluster_scene(db, selected, config)
         assert len(rows)==1 and rows[0]['status']=='accepted' and rows[0]['observations']==6
+
+
+def test_merging_accumulates_independent_selected_scenes(tmp_path):
+    config = setup(tmp_path)
+    bridge_vector = np.array([1.8, .6, 0., 0.])
+    bridge_vector /= np.linalg.norm(bridge_vector)
+    with FaceDatabase(config.database) as db:
+        people, _ = fragments(db, config)
+        for count, scene in enumerate(('10', '11', '12'), 1):
+            selected, _ = scan(db, config, scene, [bridge_vector], count=1)
+            cluster_scene(db, selected, config)
+            assert db.connection.execute('SELECT COUNT(*) FROM identity_merges').fetchone()[0] == (1 if count == 3 else 0)
+        evidence = json.loads(db.connection.execute('SELECT evidence FROM identity_merges').fetchone()[0])
+        assert {item['scene'] for item in evidence['support_cues']} == {'10', '11', '12'}
+        assert len(evidence['support_cues']) == 3
+        assert canonical(db.connection, people[1]) == people[0]
+
+
+def test_old_scan_does_not_supply_support_after_newer_detection_scan(tmp_path):
+    config = setup(tmp_path)
+    bridge_vector = np.array([1.8, .6, 0., 0.])
+    bridge_vector /= np.linalg.norm(bridge_vector)
+    with FaceDatabase(config.database) as db:
+        fragments(db, config)
+        for scene in ('10', '11'):
+            selected, _ = scan(db, config, scene, [bridge_vector], count=1)
+            cluster_scene(db, selected, config)
+        # Later completed scan for scene 10 supersedes its stored nominations.
+        new_detection = changed(config, detection={'min_sharpness': 1.0})
+        rescanned, _ = scan(db, new_detection, '10', [bridge_vector], count=1)
+        cluster_scene(db, rescanned, new_detection)
+        third, _ = scan(db, config, '12', [bridge_vector], count=1)
+        cluster_scene(db, third, config)
+        assert not db.connection.execute('SELECT * FROM identity_merges').fetchall()
+
+
+def test_threshold_change_does_not_reuse_old_merge_nominations(tmp_path):
+    config = setup(tmp_path)
+    bridge_vector = np.array([1.8, .6, 0., 0.])
+    bridge_vector /= np.linalg.norm(bridge_vector)
+    with FaceDatabase(config.database) as db:
+        fragments(db, config)
+        for scene in ('10', '11'):
+            selected, _ = scan(db, config, scene, [bridge_vector], count=1)
+            cluster_scene(db, selected, config)
+        tuned = changed(config, recognition={'match_threshold': .75})
+        selected, _ = scan(db, tuned, '12', [bridge_vector], count=1)
+        cluster_scene(db, selected, tuned)
+        assert not db.connection.execute('SELECT * FROM identity_merges').fetchall()
+
+
+def test_same_timestamp_in_one_scene_counts_only_once_across_repeated_faces(tmp_path):
+    config = setup(tmp_path)
+    with FaceDatabase(config.database) as db:
+        fragments(db, config)
+        selected = bridge(db, config)
+        db.connection.execute('UPDATE observations SET seconds=0 WHERE scan=?', (selected,))
+        db.connection.commit()
+        cluster_scene(db, selected, config)
+        assert not db.connection.execute('SELECT * FROM identity_merges').fetchall()
