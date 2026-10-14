@@ -2,10 +2,25 @@
 from __future__ import annotations
 
 from typing import Any
+from contextlib import contextmanager
 
 
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
+
+
+@contextmanager
+def owned_images():
+    """Attempt every close while preserving a transform's primary exception."""
+    from stash_ai.runtime.cleanup import cleanup
+    callbacks = []
+    class Owner:
+        def callback(self, callback):
+            callbacks.insert(0, callback)
+    try:
+        yield Owner()
+    finally:
+        cleanup(callbacks)
 
 
 
@@ -13,9 +28,7 @@ def prepare_oppai(image: Any, size: int = 448) -> tuple[Any, Any]:
     """Author's V1.1 letterbox: no upscaling; True in mask means padding."""
     import numpy as np
     from PIL import Image, ImageOps
-    from contextlib import ExitStack
-
-    with ExitStack() as owned:
+    with owned_images() as owned:
         transposed = ImageOps.exif_transpose(image)
         owned.callback(transposed.close)
         if transposed.mode in ("RGBA", "LA") or "transparency" in transposed.info:
@@ -51,9 +64,7 @@ def prepare_oppai(image: Any, size: int = 448) -> tuple[Any, Any]:
 def prepare_wd(image: Any, size: int) -> Any:
     import numpy as np
     from PIL import Image
-    from contextlib import ExitStack
-
-    with ExitStack() as owned:
+    with owned_images() as owned:
         if image.mode == 'RGB' and 'transparency' not in image.info:
             rgb = image  # borrowed, never close
         else:
@@ -77,9 +88,7 @@ def prepare_wd(image: Any, size: int) -> Any:
 def prepare_dtq(image: Any, size: int) -> Any:
     import numpy as np
     from PIL import Image
-    from contextlib import ExitStack
-
-    with ExitStack() as owned:
+    with owned_images() as owned:
         rgb = image.convert("RGB")
         owned.callback(rgb.close)
         scale = size / max(rgb.size)

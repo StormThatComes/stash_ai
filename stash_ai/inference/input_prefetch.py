@@ -27,8 +27,15 @@ class SceneInputPrefetch:
         self.scene, self.token = scene, Cancellation()
         with self.lock:
             self.streams = [stream for stream in self.streams if not stream.stopped]
-        self.pending = self.executor.submit(self._prepare, scene, dict(paths), identity, self.token,
-                                            tagger, prefetch, workers, transforms)
+        from stash_ai.runtime.startup import submit_owned
+        token = self.token
+        try:
+            submit_owned(self.executor, lambda: self._prepare(scene, dict(paths), identity, token,
+                         tagger, prefetch, workers, transforms), lambda future: setattr(self, 'pending', future))
+        except BaseException:
+            from stash_ai.runtime.cleanup import cleanup
+            cleanup([self.close], report=self.report)
+            raise
 
     def _prepare(self, scene, paths, identity, token, tagger, prefetch, workers, transforms):
         with use(token), self.report.model(self.model) if self.report else nullcontext():
@@ -52,8 +59,9 @@ class SceneInputPrefetch:
                         if self.batch_executor is None:
                             self.batch_executor = ThreadPoolExecutor(
                                 max_workers=2, thread_name_prefix='scene-batches')
-                        stream.task = self.batch_executor.submit(self._prepare_batches, stream, tagger,
-                                                                  paths, result, workers, transforms)
+                        from stash_ai.runtime.startup import submit_owned
+                        submit_owned(self.batch_executor, lambda: self._prepare_batches(stream, tagger,
+                                     paths, result, workers, transforms), lambda future: setattr(stream, 'task', future))
                 return result
 
     def _prepare_batches(self, stream, tagger, paths, result, workers, transforms):
@@ -143,6 +151,7 @@ class SceneInputPrefetch:
             lambda: self.executor.submit(self._close_reader).result(),
             lambda: self.batch_executor.shutdown(wait=True, cancel_futures=True) if self.batch_executor is not None else None,
             lambda: self.executor.shutdown(wait=True),
+            self._close_reader,
             reset,
         ], report=self.report)
 
