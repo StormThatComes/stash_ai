@@ -107,11 +107,18 @@ def supported_merges(database, scan, config, groups, policy, *, usage=None):
                     nomination['times'].add(observation['seconds'])
                 nominations[source] = nomination
                 if len(nomination['times']) >= settings['min_support']:
-                    if _cooccurs(db, target, source):
-                        # Distinct detected faces in one cue are negative
-                        # evidence, even when their embeddings look similar.
+                    cooccurring = _cooccurs(db, target, source)
+                    stronger = max(settings['match_threshold'], settings['cooccurrence_merge_threshold'])
+                    if cooccurring and scores['minimum_cross_similarity'] < stronger:
+                        # Context may be a reflection or two real people. Require
+                        # stronger independent identity evidence, not a permanent
+                        # cannot-link inferred from boxes or cue membership.
+                        db.execute("UPDATE candidates SET payload=json_set(payload,'$.merge_withheld_reason',?) "
+                                   "WHERE scan=? AND policy=? AND status='withheld' AND json_extract(payload,'$.observation')=?",
+                                   ('cooccurrence_identity_evidence_insufficient', scan, policy, observation['id']))
                         break
-                    evidence = {'format': 1, 'scan': scan, 'policy': policy,
+                    evidence = {'format': 2, 'cooccurring': cooccurring,
+                        'cooccurrence_merge_threshold': stronger, 'scan': scan, 'policy': policy,
                         'support_seconds': sorted(nomination['times']), 'scores': scores,
                         'representative_limit': config.data['clustering']['max_samples_per_person'],
                         'source_created': rows[source]['created'], 'target_created': rows[target]['created'],
@@ -129,6 +136,7 @@ def supported_merges(database, scan, config, groups, policy, *, usage=None):
                         components[target].append(group)
                     merged += 1
                 break
+    query = None
     if usage is not None:
         usage.begin('retained')
     return merged

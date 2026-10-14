@@ -80,7 +80,7 @@ def _result(db, scan, policy):
 
 
 def matching_policy(config):
-    return digest({'format': 2, 'recognition': config.data['recognition'],
+    return digest({'format': 3, 'recognition': config.data['recognition'],
                    'clustering': config.data['clustering']})
 
 
@@ -118,6 +118,8 @@ def cluster_scene(database, scan, config, *, progress=None):
         for observation in db.execute('SELECT * FROM observations WHERE scan=? AND rejected IS NULL '
                                        'ORDER BY cue,id', (scan,)):
             query = vector(observation)
+            previous = db.execute("SELECT person FROM members WHERE observation=?", (observation["id"],)).fetchone()
+            prior_person = previous[0] if previous is not None else None
             ranked = []
             near = False
             for group in groups:
@@ -134,18 +136,22 @@ def cluster_scene(database, scan, config, *, progress=None):
             elif eligible:
                 group = ranked[0][2]
                 person, status, reason = group.identifier, 'pending', 'known_identity' if group.known else 'candidate_group'
-                if not group.known and len(group.samples) < grouping['max_samples_per_person']:
+                if prior_person is not None and prior_person != person:
+                    person, status, reason = None, 'withheld', 'policy_reassignment_requires_review'
+                if person is not None and not group.known and len(group.samples) < grouping['max_samples_per_person']:
                     usage.add([query], kind='Selected')
-                    group.samples.append(query.copy())
+                    group.samples.append(query)
             elif near:
                 person, status, reason = None, 'withheld', 'insufficient_match_or_cohesion'
+            elif prior_person is not None:
+                person, status, reason = None, 'withheld', 'policy_reassignment_requires_review'
             else:
                 if len(groups) >= grouping['max_people_per_lookup']:
                     raise ValueError('Selected-scene face groups exceed the configured budget.')
                 person = str(uuid.uuid5(uuid.UUID(database.installation),
                                        encoded([record['scope'], record['namespace'], observation['id']])))
                 usage.add([query], people=1, kind='Selected')
-                group = Group(person, [query.copy()], False)
+                group = Group(person, [query], False)
                 groups.append(group)
                 by_id[person] = group
                 status, reason = 'pending', 'candidate_group'
@@ -175,10 +181,19 @@ def cluster_scene(database, scan, config, *, progress=None):
                            'WHERE scan=? AND policy=? AND person=?', (scan, policy, person))
         # Include the members accepted above, so a stable next invocation does
         # not invalidate its own cache merely by having established a person.
+        # Release every owner of the old reference set before resetting its
+        # accounting and allocating the database replacement. Query scratch is
+        # one bounded vector, distinct from retained representative storage.
+        groups.clear()
+        by_id.clear()
+        ranked.clear()
+        group = query = observation = None
         retained = _groups(db, record['scope'], record['namespace'], grouping, usage=usage, stage='retained')
         if supported_merges(database, scan, config, retained, policy, usage=usage):
+            retained.clear()
             retained = _groups(db, record['scope'], record['namespace'], grouping, usage=usage, stage='retained')
             _recheck_after_merge(db, scan, policy, retained, config)
+            retained.clear()
             retained = _groups(db, record['scope'], record['namespace'], grouping, usage=usage, stage='retained')
         context = reference_context(retained)
         db.execute("UPDATE candidates SET payload=json_set(payload,'$.reference_context',?) "
@@ -204,7 +219,11 @@ def _recheck_after_merge(db, scan, policy, groups, config):
                 reason = 'ambiguous_identity'
             else:
                 person, status, reason = ranked[0][1], 'accepted', 'known_identity'
-                db.execute('INSERT OR IGNORE INTO members VALUES (?,?)', (row['id'], person))
+                previous = db.execute('SELECT person FROM members WHERE observation=?', (row['id'],)).fetchone()
+                if previous is not None and previous[0] != person:
+                    person, status, reason = None, 'withheld', 'policy_reassignment_requires_review'
+                else:
+                    db.execute('INSERT OR IGNORE INTO members VALUES (?,?)', (row['id'], person))
         candidate = str(uuid.uuid5(uuid.UUID(row['id']), policy))
         db.execute("UPDATE candidates SET person=?,status=?,payload=json_set(payload,'$.reason',?,'$.scores',json(?)) "
                    'WHERE id=?', (person, status, reason, encoded([r[0] for r in ranked[:2]]), candidate))
