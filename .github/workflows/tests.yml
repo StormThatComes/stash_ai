@@ -96,7 +96,9 @@ jobs:
   recognition-models:
     name: recognition CPU models (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
+    # Windows can finish its CPU/lifecycle tests near the old 10-minute limit;
+    # leave time for model installation and post-job cleanup as well.
+    timeout-minutes: 20
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest]
