@@ -111,8 +111,18 @@ def execute(args, config, *, services=None):
                                         raise
                                     return value
                                 scan, reused = scan_scene(database, scope, scene, config, model_namespace, source,
-                                    backend, progress=progress)
+                                    backend, visibility=visibility, progress=progress)
                             counts['scenes_reused' if reused else 'scenes_scanned'] += 1
+                            rejected = {row['rejected']: row['total'] for row in database.connection.execute(
+                                'SELECT rejected,COUNT(*) AS total FROM observations WHERE scan=? AND rejected IS NOT NULL '
+                                'GROUP BY rejected', (scan,))}
+                            counts['observations_rejected'] += sum(rejected.values())
+                            database.progress(run, 'detection', {'scene': identifier, 'scan': scan,
+                                                               'rejected': rejected, 'reused': reused})
+                            if rejected:
+                                report.optional('recognition_quality', report.write,
+                                    f'Recognition quality scene {identifier}: ' +
+                                    ' '.join(f'{reason}={total}' for reason, total in sorted(rejected.items())))
                         with phase(report, 'Recognition matching', scene=identifier):
                             merges_before = database.connection.execute('SELECT COUNT(*) FROM identity_merges').fetchone()[0]
                             def reference_progress(**values):
@@ -250,7 +260,7 @@ def execute(args, config, *, services=None):
                 summary = {'counts': dict(counts), 'mutations': dict(report.counts)}
                 if references:
                     summary['references'] = dict(references)
-                actions = [('close portrait visibility model', visibility.close)] if visibility is not None else []
+                actions = [('close face visibility model', visibility.close)] if visibility is not None else []
                 if expression is not None:
                     actions.append(('close portrait expression model', expression.close))
                 cleanup(actions + [('finish recognition history',

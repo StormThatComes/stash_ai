@@ -245,7 +245,7 @@ def test_expression_asset_is_downloaded_only_when_enabled(tmp_path, monkeypatch)
     assert len(calls)==8
     path.write_text('version: 1\nportraits: {enabled: false, weights: {closed_mouth: 2}}\n')
     assert not {'expression_mesh','expression_blendshapes'} & models.ensure_assets(load(path)).keys()
-    assert len(calls)==10
+    assert len(calls)==11  # recognition still requires FaceOcc
 
 
 def test_mesh_decoding_preserves_pixel_coordinates_and_validates_presence():

@@ -14,6 +14,9 @@ detection:
   min_face_pixels: 32
   min_sharpness: 10.0
   max_faces_per_frame: 100
+  max_pose_deviation: 0.50     # Hard five-landmark pose gate, not degrees; null disables.
+  min_visible_face_fraction: 0.80 # Hard FaceOcc visibility gate; 0 disables recognition segmentation.
+  require_complete_face: true # Reject face boxes cut off by the thumbnail boundary.
 recognition:
   metric: cosine
   match_threshold: 0.65        # Higher means more similar. Model-specific.
@@ -50,7 +53,7 @@ portraits:
     sharpness: 2.0
     resolution: 1.0
     exposure: 1.0
-    visibility: 3.0            # 0 disables visibility model inference; all-zero weights use general quality.
+    visibility: 3.0            # 0 disables portrait visibility inference; detection gate is independent.
     neutral_expression: 0.0    # Opt-in: e.g. 3.0 prefers weaker visible expression.
     closed_mouth: 0.0          # Opt-in: e.g. 2.0 favors a lower jawOpen score.
     open_mouth: 0.0            # Favors jawOpen instead; normally choose one mouth weight.

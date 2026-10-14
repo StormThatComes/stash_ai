@@ -45,6 +45,13 @@ def rejection(quality, policy):
         return 'face_too_small'
     if quality['sharpness'] < policy['min_sharpness']:
         return 'face_blurred'
+    if policy['require_complete_face'] and not quality['complete']:
+        return 'face_incomplete'
+    if policy['max_pose_deviation'] is not None:
+        if not quality['landmarks_inside']:
+            return 'face_landmarks_invalid'
+        if quality['pose_deviation'] > policy['max_pose_deviation']:
+            return 'face_pose'
     return None
 
 

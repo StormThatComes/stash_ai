@@ -13,7 +13,7 @@ from tests.helpers.recognition import MediaClient, Backend
 
 def setup(tmp_path, clustering=None):
     path = tmp_path / 'face.yml'
-    path.write_text('version: 1\ndetection: {min_sharpness: 0}\n' +
+    path.write_text('version: 1\ndetection: {min_sharpness: 0, max_pose_deviation: null, min_visible_face_fraction: 0, require_complete_face: false}\n' +
                     ('clustering: ' + json.dumps(clustering) + '\n' if clustering else ''))
     return load(path)
 

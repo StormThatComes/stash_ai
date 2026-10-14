@@ -20,7 +20,7 @@ QUERY = np.array([.68, .64, math.sqrt(1 - .68 ** 2 - .64 ** 2), 0], dtype='float
 
 def config_at(root, source='vtt'):
     path = root / 'facial_recognition.yml'
-    path.write_text('version: 1\ndetection: {min_sharpness: 0}\n'
+    path.write_text('version: 1\ndetection: {min_sharpness: 0, max_pose_deviation: null, min_visible_face_fraction: 0, require_complete_face: false}\n'
                     f'portraits: {{source: {source}, min_sharpness: 0, margin: .1, max_candidates: 2, time_offsets: [0], '
                     'min_visible_face_fraction: 0, weights: {visibility: 0}}\n')
     return load(path)

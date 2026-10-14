@@ -6,14 +6,18 @@ from .database import encoded
 from .media import safe_url
 from .quality import assess, rejection, crop_bytes
 from .models import normalized_embedding
+from .visibility import CONTRACT_ID, VisibilityError, cached as visibility_cached
 
 
 def scan_identity(config, namespace):
+    visibility_contract = CONTRACT_ID if config.data['detection']['min_visible_face_fraction'] > 0 else None
     return digest({'namespace': namespace, 'detection': config.data['detection'],
-                   'max_cues': config.data['execution']['max_cues'], 'quality_format': 1})
+                   'max_cues': config.data['execution']['max_cues'], 'quality_format': 1,
+                   'visibility_contract': visibility_contract})
 
 
-def scan_scene(database, scope, scene, config, namespace, source, backend_factory, *, progress=lambda **kw: None):
+def scan_scene(database, scope, scene, config, namespace, source, backend_factory, *,
+               visibility=None, progress=lambda **kw: None):
     db = database.connection
     policy = scan_identity(config, namespace)
     identifier = str(uuid.uuid5(uuid.NAMESPACE_URL, encoded([scope, str(scene['id']), namespace,
@@ -47,6 +51,14 @@ def scan_scene(database, scope, scene, config, namespace, source, backend_factor
             for face_index, face in enumerate(faces):
                 quality = assess(image, face)
                 reason = rejection(quality, config.data['detection'])
+                if reason is None and config.data['detection']['min_visible_face_fraction'] > 0:
+                    if visibility is None:
+                        raise VisibilityError('Recognition visibility gate requires a visibility model.')
+                    quality.update(visibility.measure(image, face))
+                    if not visibility_cached(quality):
+                        raise VisibilityError('Recognition visibility gate received an invalid measurement.')
+                    if quality['visible_face_fraction'] < config.data['detection']['min_visible_face_fraction']:
+                        reason = 'face_occluded'
                 vector = None
                 crop = None
                 if reason is None:
