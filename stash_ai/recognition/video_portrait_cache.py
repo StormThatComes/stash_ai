@@ -3,8 +3,6 @@ import json
 
 from .config import plain
 from .database import encoded
-from .expression import cached as cached_expression, required as expression_required
-from .visibility import cached as cached_visibility, required as visibility_required
 
 
 def reuse(database, config, scope, target, observation, scene, seconds, namespace, identifier, policy_sha, selection):
@@ -29,16 +27,18 @@ def reuse(database, config, scope, target, observation, scene, seconds, namespac
         current_policy.pop(field, None)
     if previous_policy != current_policy:
         return None
-    quality = metadata.get('quality', {})
-    if ('identity_embedding' not in metadata or
-            expression_required(policy) and not cached_expression(quality) or
-            visibility_required(policy) and not cached_visibility(quality)):
+    if 'identity_embedding' not in metadata:
         return None
     metadata.update(policy_sha=policy_sha, policy=plain(policy), shortlist=selection,
                     performer=target['performer'], reused_from=old['id'])
+    from .portrait_availability import fit_cached_bytes
+    try:
+        data, sha = fit_cached_bytes(old['image'], old['digest'], config, metadata)
+    except (OSError, ValueError):
+        return None
     # Current identity eligibility and soft scores are checked before reuse
     # can authorize publication. The historical record itself is never relabeled.
     with db:
         db.execute('INSERT INTO portraits VALUES (?,?,?,?,?,?,?,?)',
-                   (identifier, scope, target['person'], scene, encoded(metadata), old['image'], old['digest'], 'candidate'))
+                   (identifier, scope, target['person'], scene, encoded(metadata), data, sha, 'candidate'))
     return db.execute('SELECT * FROM portraits WHERE id=?', (identifier,)).fetchone()

@@ -91,34 +91,41 @@ def portrait_bytes(image, detection, policy, *, limit, details=None):
             (x - bounds[0], width * policy['margin']), (bounds[2] - x - width, width * policy['margin']),
             (y - bounds[1], height * policy['margin']), (bounds[3] - y - height, height * policy['margin'])))
     with image.crop(bounds) as crop, crop.convert('RGB') as rgb:
-        qualities = sorted({policy['jpeg_quality'], *[min(policy['jpeg_quality'], q) for q in (75, 50, 25, 10, 1)]}, reverse=True)
-        data = None
-        for jpeg_quality in qualities:
-            output = BytesIO()
-            rgb.save(output, format='JPEG', quality=jpeg_quality)
-            data = output.getvalue()
-            if len(data) <= limit:
-                break
-        resized = rgb
-        try:
-            while len(data) > limit and resized.size != (1, 1):
-                factor = min(.9, math.sqrt(limit / len(data)) * .9)
-                smaller = resized.resize((max(1, int(resized.width * factor)), max(1, int(resized.height * factor))))
-                if resized is not rgb:
-                    resized.close()
-                resized = smaller
-                output = BytesIO()
-                resized.save(output, format='JPEG', quality=jpeg_quality)
-                data = output.getvalue()
-            if details is not None:
-                details.update(jpeg_quality=jpeg_quality, pixels=list(resized.size),
-                               downscaled=resized.size != (bounds[2] - bounds[0], bounds[3] - bounds[1]))
-        finally:
+        data = encode_portrait(rgb, policy, limit=limit, details=details)
+    return data, list(bounds)
+
+
+def encode_portrait(image, policy, *, limit, details=None):
+    """Encode existing RGB pixels within the byte budget without changing framing."""
+    rgb = image
+    qualities = sorted({policy['jpeg_quality'], *[min(policy['jpeg_quality'], q) for q in (75, 50, 25, 10, 1)]}, reverse=True)
+    data = None
+    for jpeg_quality in qualities:
+        output = BytesIO()
+        rgb.save(output, format='JPEG', quality=jpeg_quality)
+        data = output.getvalue()
+        if len(data) <= limit:
+            break
+    resized = rgb
+    try:
+        while len(data) > limit and resized.size != (1, 1):
+            factor = min(.9, math.sqrt(limit / len(data)) * .9)
+            smaller = resized.resize((max(1, int(resized.width * factor)), max(1, int(resized.height * factor))))
             if resized is not rgb:
                 resized.close()
+            resized = smaller
+            output = BytesIO()
+            resized.save(output, format='JPEG', quality=jpeg_quality)
+            data = output.getvalue()
+        if details is not None:
+            details.update(jpeg_quality=jpeg_quality, pixels=list(resized.size),
+                           downscaled=resized.size != rgb.size)
+    finally:
+        if resized is not rgb:
+            resized.close()
     if len(data) > limit:
         raise PortraitFramingError('Portrait cannot fit the configured byte budget.')
-    return data, list(bounds)
+    return data
 
 
 def portrait_score(quality, policy, *, expression=True):
