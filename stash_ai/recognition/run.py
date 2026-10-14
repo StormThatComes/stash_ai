@@ -163,7 +163,7 @@ def execute(args, config, *, services=None):
                 inputs = ScenePrefetch(client, config, services.source, report=report)
                 inputs.submit(ordered[0] if ordered else None)
                 rejected_totals = Counter()
-                with phase(report, 'Recognition VTT'), WorkProgress(report, 'Recognition scenes', len(ordered)) as scenes:
+                with phase(report, 'Recognition VTT', errors=lambda: counts['scenes_failed']), WorkProgress(report, 'Recognition scenes', len(ordered)) as scenes:
                     for position, identifier in enumerate(ordered):
                         following = ordered[position + 1] if position + 1 < len(ordered) else None
                         try:
@@ -217,7 +217,7 @@ def execute(args, config, *, services=None):
                             rebuilt = rebuild_selected(database, selected, config, progress=reference_progress)
                         database.progress(run, 'rebuild', {'mode': 'cold_selected_replay', 'selection': selected,
                                                          'matching_policy': matching_policy(config)})
-                        with phase(report, 'Recognition Stash publication'), WorkProgress(report, 'Publish recognition', len(selected)) as publication:
+                        with phase(report, 'Recognition Stash publication', errors=lambda: counts['people_failed']), WorkProgress(report, 'Publish recognition', len(selected)) as publication:
                             _publish_selection(database, client, report, config, scope, model_namespace,
                                                selected, rebuilt, ready, counts, key, run, publication)
                     except KeyboardInterrupt:
@@ -244,7 +244,7 @@ def execute(args, config, *, services=None):
                             counts['metadata_failed'] += 1
                             report.optional('recognition_names_preflight', report.write,
                                             'Name batch withheld: ' + safe_error(error, key))
-                    with phase(report, 'Recognition metadata'), WorkProgress(report, 'Names and portraits', len(targets), unit='person', key='people') as people:
+                    with phase(report, 'Recognition metadata', errors=lambda: counts['metadata_failed']), WorkProgress(report, 'Names and portraits', len(targets), unit='person', key='people') as people:
                         for target in targets:
                             with activity(report, 'names and portraits', person=target['performer']):
                                 options = {'visibility': visibility}
