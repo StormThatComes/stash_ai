@@ -19,13 +19,14 @@ class StashClient(StashTransport):
                  create_markers: bool):
         super().__init__(dry_run, url=url, api_key=api_key,
                          request_timeout=request_timeout, http_retries=http_retries)
-        self.scene_page_size = scene_page_size
-        self.create_markers = create_markers
-        self.scene_access = SceneReads(self)
         try:
+            self.scene_page_size = scene_page_size
+            self.create_markers = create_markers
+            self.scene_access = SceneReads(self)
             self._require_supported_version()
-        except Exception:
-            self.close()
+        except BaseException:
+            from stash_ai.runtime.cleanup import cleanup
+            cleanup([('close failed Stash client', self.close)])
             raise
 
     def _require_supported_version(self):
