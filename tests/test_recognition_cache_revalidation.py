@@ -48,7 +48,13 @@ def test_candidate_cache_reassesses_late_rival_without_changing_evidence(tmp_pat
 
 
 def test_withheld_candidate_can_match_later_known_identity_with_stable_cache(tmp_path):
+    # This test exercises the conservative withheld-to-known transition,
+    # rather than the new default which accepts one valid observation.
     config = config_at(tmp_path)
+    from dataclasses import replace
+    from stash_ai.recognition.config import plain
+    config = replace(config, data=plain(config.data))
+    config.data['recognition']['min_identity_support'] = 3
     with FaceDatabase(config.database) as db:
         short, _ = scan(db, config, '1', count=1)
         assert cluster_scene(db, short, config)[0]['status'] == 'withheld'
