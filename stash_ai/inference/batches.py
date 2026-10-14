@@ -40,12 +40,25 @@ class BatchPredictions:
                                         transform_executor=transform_executor,
                                         buffer_usage=self.input_usage))
         self.borrowed = inference_executor is not None
-        if self.borrowed:
-            self.worker = inference_executor.submit(self._produce)
-        else:
-            self.worker = Thread(target=self._produce, name='inference-batches')
-            self.worker.start()
-        self.channel.worker = self.worker
+        self.worker = None
+        try:
+            if self.borrowed:
+                from stash_ai.runtime.startup import submit_owned
+                def register(worker):
+                    self.worker = self.channel.worker = worker
+                submit_owned(inference_executor, self._produce, register)
+            else:
+                self.worker = self.channel.worker = Thread(target=self._produce, name='inference-batches')
+                self.worker.start()
+        except BaseException:
+            # A borrowed input is transferred only to an actually started
+            # producer. A failed launch cannot close it again on the caller.
+            callbacks = [self.channel.stop, self.channel.join, self.channel.drain]
+            if self.external_inputs is None and (self.worker is None or
+                    hasattr(self.worker, 'ident') and self.worker.ident is None):
+                callbacks.append(self.inputs.close)
+            cleanup(callbacks, report=report)
+            raise
 
     def measure(self, name, count=0):
         return (self.report.measure(name, model=self.model, work=self.work, units=count,

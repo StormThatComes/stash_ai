@@ -76,7 +76,7 @@ def test_rendering_failure_does_not_change_operation_outcome():
     def fail(_): raise OSError('closed output')
     ui=ConsolePresenter(fail, stream=StringIO()).start()
     try:
-        ui.message('warning')
+        ui.call(lambda: fail('optional status'))
         assert ui.counts['console_failures'] == 1
     finally: ui.close()
 
