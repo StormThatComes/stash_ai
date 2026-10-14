@@ -338,3 +338,51 @@ def test_confirmed_remote_merge_survives_interrupted_alias_status_commit(tmp_pat
         monkeypatch.setattr(module, '_complete', original)
         assert publish_person(db, client, report, 'scope', '10', people[0]) == performers[0]
         assert sum(w[0] == 'merge' for w in client.writes) == 1
+
+
+def test_supported_person_and_reflection_can_merge_despite_historical_cooccurrence(tmp_path):
+    config = setup(tmp_path)
+    a, b = np.array([1.,0,0,0]), np.array([.95, math.sqrt(1-.95**2),0,0])
+    with FaceDatabase(config.database) as db:
+        people, old = fragments(db, config, [a,b])
+        db.connection.execute('UPDATE observations SET scan=? WHERE scan=?', (old[0], old[1]))
+        # Controlled person/reflection ground truth; spatial separation is
+        # deliberately irrelevant to the production identity evidence rule.
+        geometry = [100,4,48,48,110,16,138,16,124,28,114,40,134,40,.99]
+        db.connection.execute('UPDATE observations SET geometry=? WHERE id IN '
+                              '(SELECT observation FROM members WHERE person=?)', (json.dumps(geometry),people[1]))
+        db.connection.commit()
+        selected = bridge(db, config, a+b)
+        rows = cluster_scene(db, selected, config)
+        assert rows == [{'person':people[0], 'status':'accepted', 'observations':3}]
+        evidence = json.loads(db.connection.execute('SELECT evidence FROM identity_merges').fetchone()[0])
+        assert evidence['cooccurring'] is True and evidence['cooccurrence_merge_threshold'] == .9
+        assert evidence['support_seconds'] == [0.,1.,2.]
+        assert canonical(db.connection, people[1]) == people[0]
+        assert cluster_scene(db, selected, config) == rows
+
+
+def test_uncertain_cooccurring_pair_records_reason_instead_of_claiming_distinct_people(tmp_path):
+    config = setup(tmp_path)
+    with FaceDatabase(config.database) as db:
+        people, old = fragments(db, config)
+        db.connection.execute('UPDATE observations SET scan=? WHERE scan=?', (old[0],old[1]))
+        db.connection.commit()
+        selected = bridge(db, config)
+        assert all(row['status']=='withheld' for row in cluster_scene(db, selected, config))
+        records = [json.loads(row[0]) for row in db.connection.execute('SELECT payload FROM candidates WHERE scan=?', (selected,))]
+        assert any(row.get('merge_withheld_reason')=='cooccurrence_identity_evidence_insufficient' for row in records)
+        assert not db.connection.execute('SELECT * FROM identity_merges').fetchall()
+
+
+def test_duplicate_detections_in_one_cue_do_not_impose_a_one_person_rule(tmp_path):
+    config = setup(tmp_path)
+    a = np.array([1.,0,0,0])
+    with FaceDatabase(config.database) as db:
+        selected, _ = scan(db, config, '1', [a]*6, count=6)
+        for row in db.connection.execute('SELECT id,cue FROM observations WHERE scan=?', (selected,)).fetchall():
+            db.connection.execute('UPDATE observations SET cue=?,seconds=? WHERE id=?',
+                                  (row['cue']//2,row['cue']//2,row['id']))
+        db.connection.commit()
+        rows = cluster_scene(db, selected, config)
+        assert len(rows)==1 and rows[0]['status']=='accepted' and rows[0]['observations']==6

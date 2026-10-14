@@ -19,7 +19,7 @@ def defaults():
         'detection': {'score_threshold': .9, 'nms_threshold': .3,
                       'min_face_pixels': 32, 'min_sharpness': 10., 'max_faces_per_frame': 100},
         'recognition': {'metric': 'cosine', 'match_threshold': .65,
-                        'ambiguity_margin': .1, 'min_support': 3},
+                        'ambiguity_margin': .1, 'min_support': 3, 'cooccurrence_merge_threshold': .90},
         'clustering': {'cohesion_threshold': .60, 'max_samples_per_person': 32,
                        'max_people_per_lookup': 20000, 'max_reference_bytes': 134217728},
         'portraits': {'enabled': True, 'source': 'vtt', 'min_face_pixels': 96, 'min_sharpness': 25.,
@@ -112,7 +112,7 @@ def validate(data):
         raise ValueError('Invalid face device/download policy.')
     for section, names in {
         'detection': ('score_threshold', 'nms_threshold'),
-        'recognition': ('match_threshold', 'ambiguity_margin'),
+        'recognition': ('match_threshold', 'ambiguity_margin', 'cooccurrence_merge_threshold'),
         'clustering': ('cohesion_threshold',),
         'portraits': ('max_pose_deviation', 'max_clipped_fraction', 'margin', 'min_visible_face_fraction'),
     }.items():
