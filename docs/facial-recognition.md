@@ -341,6 +341,13 @@ crop, shifts it inside the source, and reduces padding if necessary. If the
 requested ratio would cut the face, the crop uses the available padded face
 shape instead. `jpeg_quality` is preferred: encoding lowers JPEG quality and,
 if needed, image dimensions to fit `storage.max_crop_bytes`, without upscaling.
+Changing that budget invalidates only the portrait encoding policy. Compatible,
+digest-verified cached JPEG pixels can be re-encoded without another face-model
+call or video decode; the historical JPEG and source coordinates are preserved.
+Confirmation/removal reads use the separate supported historical-image ceiling
+of 8 MiB, so lowering today's encoding budget cannot block acknowledgement or
+explicit removal of an older owned photo. Exact ownership and digest checks
+still protect manual replacements and unresolved writes.
 Actual crop coordinates,
 source rectangle, observation/cue, input fingerprint, quality, identity scores
 and source type remain in face SQLite. The cue time describes the VTT cue, not
@@ -375,7 +382,9 @@ Missing optional visibility/expression measurements contribute zero to their
 enabled components. They do not imply an uncovered face or neutral expression,
 and do not prevent a portrait. Initialization failures are attempted once per
 component per run and reported as a warning; a later run can retry. Missing,
-invalid or unavailable optional model assets also produce warnings and unavailable
+Identity loaders initialize only the selected detector and recognizer; optional
+quality paths are verified by their own lazy loaders. Invalid or unavailable
+optional model assets also produce warnings and unavailable
 cues, without accepting unchecked files. Detector/recognizer assets and the
 required recognition runtime remain mandatory. Strict CUDA
 model routing remains unchanged, with no implicit neural CPU fallback.

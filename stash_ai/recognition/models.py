@@ -178,8 +178,9 @@ class YuNetDetector:
         self.config = config
         self.device = 'cpu'
         settings = config.data['detection']
-        for key, path in paths.items():
-            verify(path, ASSETS[key])
+        # Identity construction owns only its detector. Optional quality
+        # models verify their own bytes during lazy initialization.
+        verify(paths['yunet'], ASSETS['yunet'])
         self.ort_detector = None
         if config.data['models']['device'] != 'cpu':
             if runtime_info is None:
