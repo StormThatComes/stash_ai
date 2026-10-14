@@ -94,6 +94,19 @@ class RecognitionStash(StashTransport):
                          {'input': {'id': performer, **fields}})['performerUpdate']
         return checked_id(value, performer)
 
+    def remove_scene_person(self, scene, performer):
+        rows = self.gql('mutation StashAIRecognitionUnlink($input:BulkSceneUpdateInput!) {'
+                        'bulkSceneUpdate(input:$input) { id performers { id } }}',
+                        {'input': {'ids': [scene], 'performer_ids': {'ids': [performer], 'mode': 'REMOVE'}}})['bulkSceneUpdate']
+        if not isinstance(rows, list) or len(rows) != 1:
+            raise RuntimeError('Stash performer disassociation was not acknowledged.')
+        checked_id(rows[0], scene)
+        if not isinstance(rows[0].get('performers'), list):
+            raise RuntimeError('Stash performer disassociation lacks an association acknowledgement.')
+        if performer in {checked_id(row)['id'] for row in rows[0]['performers']}:
+            raise RuntimeError('Stash did not confirm the requested performer disassociation.')
+        return rows[0]
+
     def merge_person(self, source, destination, details):
         checked_id({'id': source})
         checked_id({'id': destination})

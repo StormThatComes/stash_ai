@@ -35,7 +35,7 @@ links. Weak identities remain recorded with reasons and do not block clear ones.
 
 Ownership uses an exact installation/person token in performer details, never a
 name-only match. Each mutation intent is committed to the face SQLite before
-dispatch. Lost creation/link/merge responses are reconciled by fresh Stash reads;
+dispatch. Lost creation/link/unlink and legacy merge responses are reconciled by fresh Stash reads;
 unresolved outcomes are withheld without blindly retrying. Existing manual links
 are preserved with Stash's `ADD` mutation. Selected-scene runs do not resume links
 for other scenes. Exit 0 means the finite selection completed; exit 1 records
@@ -101,7 +101,7 @@ warnings no longer clutter output; other warnings and image/rectangle validation
 remain active. Video portraits use native frame dimensions without pixel-driven
 downscaling.
 
-Scene performer associations use Stash's `BulkUpdateIds.ids` with mode `ADD`,
+Scene performer associations use Stash's `BulkUpdateIds.ids` with modes `ADD`/`REMOVE`,
 preserving unrelated performers. On the next explicit run, a legacy unconfirmed
 link with the old malformed input and its exact recorded HTTP 400 can recover
 after fresh ownership and scene reads; new intents record their input contract.
@@ -114,8 +114,9 @@ bounded crop BLOBs, accepted identities, Stash ownership/bindings, candidate
 portraits, mutation records, progress and run history. Its independent schema
 refuses tag/history/foreign databases and hard-linked aliases. Internal backup
 uses SQLite's consistent backup API; no result/history/image sidecars are needed.
-Recognition schema v1 upgrades atomically to v2 to retain identity merge aliases
-and their evidence. Existing observations, IDs, performer bindings and history
+Recognition schemas v1, v2 and v3 upgrade atomically to v4, retaining merge
+aliases/evidence and cross-scene support and adding original sample ownership for
+reversible identity binding. Existing observations, IDs, performer bindings and history
 are preserved. An incomplete v1 database is refused before migration.
 After acquiring this database's exclusive writer lock, a new owner marks prior
 `running` recognition histories interrupted regardless of instance scope or
@@ -168,9 +169,11 @@ Changing detection gates or the enabled visibility model contract starts a new
 selected-scene scan, while preserving the recognizer namespace and existing
 performer bindings. Unchanged completed scans reuse their decisions. Portrait-only
 preferences still do not invalidate recognition scans, and imperfect portraits
-remain eligible among accepted observations. Earlier scans, reference memberships,
-published people and links are retained; these gates do not retroactively clean
-historical references or delete/repair identity fragments already published.
+remain eligible among accepted observations. Earlier raw scans and histories are
+retained. The identity replay described below
+replaces selected-scene memberships, so superseded/rejected selected samples no
+longer remain in the active reference set. Published profiles are preserved for
+stable labels and future splits; stale managed links are reconciled separately.
 
 To explicitly restore the earlier size/sharpness-only observation policy:
 
@@ -183,109 +186,97 @@ detection:
 
 ## Automatic identity policy
 
-Matching is incremental: selected-scene vectors can reuse compatible retained
-people from other scenes without fetching their media. New identities need the
-configured `recognition.min_identity_support` distinct cue-time support (default 1).
-Insufficient, near-threshold or ambiguous matches are withheld automatically.
+Every explicit `recognition run` prepares the complete selected evidence set before
+publishing identities. It then replays grouping from an empty, temporary SQLite,
+ordered by numeric scene ID, cue and detection ID. Previous people, memberships,
+merge aliases and accumulated merge votes never seed this replay. Only the current
+complete scan of each selected scene enters it; older detection policies and
+superseded media cannot contribute duplicate observations.
 
-The best and next coherent identity compete even when the runner-up falls just
-below the match threshold. Cohesion is checked against bounded representative
-samples, avoiding transitive single-link unions. This sampled check is not a
-proof that every historical pair matches. Reference bytes, samples and identity
-counts have explicit limits; no N-by-N distance matrix is allocated. Reference
-sets are released before database reloads, so current/peak counts cover live
-representatives without overlapping copies. One query vector (up to 4 KiB),
-SQLite/Python overhead and model memory are separate from this reference budget.
+The resulting partition is equivalent to a cold run of **the same selected scenes,
+media, model and configuration**. Scene argument order and prior threshold changes
+do not change that partition. `--all-scenes` supplies the library-wide input set;
+`--scene-id` rebuilds only the indicated subset and does not promise a library-wide
+repartition. Failed scenes remain untouched and the invocation reports partial
+work; they are never treated as empty/no-person scenes.
 
-A stricter policy can withhold an existing assignment with
-`policy_reassignment_requires_review`. Retained memberships and published
-performer bindings stay stable; replay does not create an empty person or
-silently split a performer across scenes.
+Near-threshold or ambiguous matches are withheld. `recognition.min_identity_support`
+controls acceptance of a new group (default 1 distinct cue time in a scan).
+`recognition.min_merge_support` independently controls consolidation evidence
+(default 3 distinct scene/time observations). Proofs accumulate across scenes
+**inside the current replay**, are revalidated against its current representatives,
+and are rebuilt when settings change. The same time in the same scene counts once,
+even with duplicate detections. Historical `merge_support` rows remain as recovery
+history but do not vote in a new replay.
 
-For older local YAML files, `recognition.min_support` remains accepted as a
-deprecated compatibility alias and sets both minimums to its value. Remove it
-before specifying either replacement key. The bundled configuration uses the
-split keys; legacy YAML retains its previous conservative behavior.
+Mean similarity must reach `match_threshold`; every bounded representative must
+also pass `clustering.cohesion_threshold`. The best and next coherent identity
+compete even when the runner-up falls just below the match threshold. A-B and B-C
+similarities cannot override incompatible A-C evidence. Possible reflections retain
+the stronger `cooccurrence_merge_threshold` cross-sample requirement. These are
+sampled similarity checks, not identity probabilities or universal accuracy claims.
 
-### Consolidating identity fragments
+### Retuning and stable performer labels
 
-Each uncached matching pass also checks whether the selected evidence supports
-joining existing identities in the same Stash instance and model namespace.
-At least `recognition.min_merge_support` independent (scene, cue-time)
-observations (default 3) must match both groups at `recognition.match_threshold`,
-with the usual sample cohesion check. Supporting observations accumulate from
-explicitly scanned scenes in the same Stash instance, recognizer namespace and
-detection policy. One repeated face at the same time in the same scene counts
-once. Evidence is persisted in `merge_support`; before merging, it is
-revalidated against the current bounded identity references. A newer scan for
-a scene supersedes older evidence; rejected/partial scans and stale detection
-policies cannot supply support. Only scenes previously selected for recognition
-contribute; this does not scan the rest of the library.
+After the cold partition is complete, a separate one-to-one binding step assigns
+historical person IDs to its groups. Original physical sample ownership is stored
+in `identity_origins`, independently of the current partition. The oldest matching
+identity wins a consolidation. If it splits, its largest overlapping piece retains
+its ID, and historical retired profiles can reactivate for other pieces. IDs never
+cause two cold groups to combine. Compatible unselected references can help reuse
+an unambiguous historical label for a new scene; they do not seed grouping or alter
+the selected partition. New groups with no suitable unused label receive new IDs.
 
-The average of cross-group sample similarities must reach
-`match_threshold`, and their minimum must reach `clustering.cohesion_threshold`.
-A person can appear together with their reflection. Co-occurrence therefore
-does not create a permanent cannot-link: it requires every cross-sample
-similarity to reach `recognition.cooccurrence_merge_threshold` (default `0.90`)
-as well as the usual match/cohesion checks and distinct selected cue times.
-The effective stronger threshold never falls below `match_threshold`. This is
-identity evidence, not a mirror detector; uncertain cases remain withheld with
-`cooccurrence_identity_evidence_insufficient`. Selected-scene assignments are
-recorded before this check so new co-occurrence also counts.
-Samples are bounded by `max_samples_per_person` for each original group. While
-combining several groups in a pass, all constituents remain available for the
-cross-check: A-B and B-C similarity cannot override incompatible A-C evidence.
-This is a sampled rule, not an identity probability or proof about every frame.
+Both stricter and looser `recognition`/`clustering` settings can therefore split,
+join or withhold groups. Stored compatible embeddings are reused. Changing detection
+settings creates current selected scans (and may require new inference); returning
+to a compatible earlier scan reuses it. Selected old memberships are replaced in
+one transaction, including when all current observations are rejected or withheld.
+Unselected memberships, raw evidence and histories are preserved. Reference limits
+are checked before the replacement commits; a failed replay leaves the previous
+partition intact. No all-person distance matrix is allocated. The replay streams
+embeddings into disk-backed temporary SQLite without copying JPEGs; this scratch
+is automatically removed on close, and the face SQLite remains the durable state.
+An unchanged selected input/policy/reference context reuses the committed partition.
 
-The oldest accepted recognition identity wins by SQLite `people.created`, with
-lexical identity ID as a deterministic tie-break. Its UUID, ownership token and
-Stash performer ID stay stable. Members and derived candidate assignments from
-all affected scenes move to it in one SQLite transaction. Retired identities
-remain as durable aliases, are excluded from matching/reference budgets and
-cannot create another performer. Unrelated groups are not merged merely because
-an older database contains them: explicit selected-scene evidence, checked
-against the current identity representatives, is required. Supported merge
-decisions survive later configuration changes;
-they are not automatically split again when thresholds increase.
+### Reversible Stash synchronization
 
-For example, if four retained fragments mutually pass the cross-check and
-three cue times from one or several previously selected scenes match them, the
-three younger identities retire into the oldest. A query that matches two
-otherwise incompatible people remains ambiguous
-and does not merge them. Raising or lowering thresholds reruns these decisions
-using valid retained vectors; it does not require another recognition inference.
+For each successfully rebuilt selected scene, current owned performers are resolved
+and linked before stale application links are removed with `BulkSceneUpdateInput.performer_ids`
+`ADD`/`REMOVE` operations. Unrelated performers and manual associations are preserved.
+Only journaled application links to freshly verified owned profiles qualify for
+removal. Future observed links preserve whether the application added them; a
+pre-existing manual link is not adopted, and a manual re-addition after an
+acknowledged removal is preserved. Legacy journaled links retain their recorded
+application ownership. Names, notes, images, galleries and other manual metadata
+are not transferred or deleted by consolidation.
 
-Owned published profiles are consolidated with Stash's native `performerMerge`
-(`source`, `destination`, `values` from the
-[Stash v0.31.1 performer schema](https://github.com/stashapp/stash/blob/v0.31.1/graphql/schema/types/performer.graphql)).
-Its transactional
-[repository implementation](https://github.com/stashapp/stash/blob/v0.31.1/pkg/sqlite/performer.go)
-transfers scene, image, gallery and tag associations and deletes the younger
-profile. Associations in unselected historical scenes move as part of that
-merge; their VTT/video media are not fetched. The oldest destination keeps its
-name, image and other scalar metadata. Details/notes and ownership tokens from
-both profiles are retained in the destination. Unpublished local fragments do
-not cause throwaway profiles to be created. Name mappings should continue to
-use the surviving performer ID; mappings for retired IDs no longer apply.
+Normal recognition no longer calls destructive `performerMerge`: inactive profiles
+remain available so a later split can reuse their IDs and metadata. Equivalence to
+a cold run concerns the grouping and managed selected-scene links, not deletion of
+historical profiles or equality of numeric Stash IDs. `scene_links_removed` reports
+confirmed stale-link removals. The `rebuild` history phase records the exact scan
+selection and matching policy used for the partition.
 
-Merge intent is committed before dispatch. A fresh read must confirm the
-destination ownership and carried merge marker and the source's disappearance.
-After a timeout/interruption, those same facts reconcile the original intent;
-absence of the source alone cannot confirm success. An unresolved outcome or
-changed ownership withholds the merge without a blind retry or a duplicate
-profile. Subsequent selected runs resume relevant pending merges. A valid pair
-can still merge when a third rival makes the selected scene ambiguous, without
-adding an unproven scene link. Multi-scene metadata targets are remapped to the
-survivor before names/portraits run; its existing image follows the usual manual
-image and configuration ownership rules. Historical portrait bytes/metadata and
-mutation intents remain in SQLite as evidence.
+Every ADD/REMOVE has an intent committed before dispatch and a fresh association
+check. Lost removal acknowledgements are reconciled by observing absence. If the
+performer remains linked, the unresolved operation blocks replacement writes and
+is not blindly retried, including after another threshold change. Ownership edits
+also withhold synchronization rather than unlinking a manually edited profile.
+Metadata/portrait selection runs only after binding; a historical portrait that
+lost its supporting membership cannot outrank a current eligible face simply
+because its saved quality score was higher.
 
-Run summaries report `identities_merged` (committed local consolidations),
-`identities_merged_in_stash` (acknowledged profile merges) and
-`identity_merges_observed` (reconciled previous acknowledgements). Merge evidence
-in `identity_merges` retains supporting times, policy, sampled scores and
-constituent reference fingerprints. The matching cache fingerprints only active
-references; repeating an unchanged run does not repeat merges or inference.
+Legacy destructive merges remain in the recovery journal. An uncertain legacy
+merge touching selected people must first be confirmed by its carried marker,
+both ownership tokens and disappearance of the source; otherwise the selection
+is withheld. Already deleted legacy profiles cannot regain their old Stash IDs:
+a split allocates a separate owned profile rather than treating an inherited source
+token on the old survivor as a new binding. Unrelated pending legacy merges are not
+resumed by a selected-scene run.
+
+Older YAML `recognition.min_support` remains a deprecated compatibility alias for
+both support minimums; remove it before specifying either split key.
 
 | Setting | Effect on merging |
 | --- | --- |

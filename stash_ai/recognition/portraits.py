@@ -347,8 +347,14 @@ def fill_portrait(database, client, report, config, scope, target, paths, backen
     if baseline is not None and previous['status'] in ('confirmed', 'observed'):
         portrait = database.connection.execute('SELECT * FROM portraits WHERE id=?',
                                                (json.loads(previous['payload'])['portrait'],)).fetchone()
-        if portrait and json.loads(portrait['metadata'])['policy_sha'] == policy_sha:
-            prior = portrait
+        if portrait:
+            metadata = json.loads(portrait['metadata'])
+            observation = metadata.get('observation')
+            still_member = database.connection.execute('SELECT 1 FROM members m JOIN observations o '
+                'ON o.id=m.observation WHERE m.person=? AND m.observation=? AND o.rejected IS NULL',
+                (target['person'], observation)).fetchone()
+            if metadata['policy_sha'] == policy_sha and still_member:
+                prior = portrait
     winner = choose(database, client, config, scope, target, paths, backend_factory, decoder_factory, source_factory,
                     visibility=visibility, expression=expression)
     if winner is None:

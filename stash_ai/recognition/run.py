@@ -13,10 +13,12 @@ from .database import FaceDatabase, encoded
 from .models import ASSETS, ensure_assets, load_backend, namespace
 from .media import SpriteInput
 from .scanning import scan_scene
-from .clustering import cluster_scene, matching_policy
+from .clustering import matching_policy
+from .rebuild import rebuild_selected
+from .scene_sync import reconcile_unlinks, remove_stale_links, reconcile_legacy_merges
 from .reference_usage import usage_line
 from .publication import publish_person, save_operation, ensure_person
-from .merge_publication import canonical_targets, scene_merge_roots, sync_merges
+from .merge_publication import canonical_targets
 from .stash import RecognitionStash
 from .names import load_names, plan_names, starter
 from .metadata import enrich
@@ -46,6 +48,54 @@ class Services:
     decoder: object = VideoFrames
     visibility: object = FaceVisibility
     expression: object = FaceExpression
+
+
+def _publish_selection(database, client, report, config, scope, namespace, selected, rebuilt, ready, counts, key, run):
+    db = database.connection
+    incompatible = db.execute('SELECT namespace FROM people WHERE scope=? AND namespace<>? '
+                               'AND performer IS NOT NULL LIMIT 1', (scope, namespace)).fetchone()
+    for item in selected:
+        scene, scan = item['scene'], item['scan']
+        groups = rebuilt[scan]
+        accepted = sorted({g['person'] for g in groups if g['status'] == 'accepted'})
+        counts['groups_withheld'] += sum(g['status'] == 'withheld' for g in groups)
+        counts['observations_withheld'] += sum(g['observations'] for g in groups if g['status'] == 'withheld')
+        try:
+            targets = {}
+            blocked = False
+            # Resolve every desired identity before replacing this scene's links.
+            for person in accepted:
+                binding = db.execute('SELECT performer FROM people WHERE id=?', (person,)).fetchone()
+                if incompatible and not binding['performer']:
+                    blocked = True
+                    save_operation(database, scope=scope, scene=scene, person=person, kind='namespace', target=None,
+                        payload={'namespace': namespace}, precondition={'published_namespace': incompatible['namespace']},
+                        status='withheld')
+                    continue
+                targets[person] = ensure_person(database, client, report, scope, scene, person)
+            for person, performer in targets.items():
+                with phase(report, 'Recognition Stash publication', scene=scene):
+                    publish_person(database, client, report, scope, scene, person, reconcile_merges=False)
+                counts['people_linked_or_observed'] += 1
+                target = ready.setdefault(person, {'person': person, 'performer': performer, 'scans': []})
+                target['scans'].append(item)
+                evidence = db.execute("SELECT json_extract(payload,'$.reference_context') FROM candidates "
+                                      "WHERE scan=? AND policy=? AND person=? AND status='accepted' LIMIT 1",
+                                      (scan, matching_policy(config), person)).fetchone()
+                if evidence:
+                    target.setdefault('matching', {})[scan] = {'policy': matching_policy(config),
+                                                              'reference_context': evidence[0], 'person': person}
+            if not blocked:
+                counts['scene_links_removed'] += remove_stale_links(database, client, report, scope, scene,
+                                                                     set(targets.values()), namespace)
+            counts['scenes_processed'] += 1
+            database.progress(run, 'matching',
+                              {'scene': scene, 'groups': groups, 'policy': 'cold_selected_replay'})
+        except KeyboardInterrupt:
+            raise
+        except Exception as error:
+            counts['people_failed'] += 1
+            report.optional('recognition_error', report.write, f'Recognition scene {scene} publication failed: ' + safe_error(error, key))
 
 
 def execute(args, config, *, services=None):
@@ -91,7 +141,8 @@ def execute(args, config, *, services=None):
                     with database.connection:
                         database.connection.execute('INSERT OR IGNORE INTO models VALUES (?,?)',
                                                     (model_namespace, encoded(provenance)))
-                for identifier in identifiers:
+                selected = []
+                for identifier in sorted(identifiers, key=int):
                     status(report, scene=identifier, scenes_completed=counts['scenes_processed'], scenes_total=len(identifiers))
                     try:
                         scene = client.scene(identifier)
@@ -123,92 +174,7 @@ def execute(args, config, *, services=None):
                                 report.optional('recognition_quality', report.write,
                                     f'Recognition quality scene {identifier}: ' +
                                     ' '.join(f'{reason}={total}' for reason, total in sorted(rejected.items())))
-                        with phase(report, 'Recognition matching', scene=identifier):
-                            merges_before = database.connection.execute('SELECT COUNT(*) FROM identity_merges').fetchone()[0]
-                            def reference_progress(**values):
-                                values['peak_bytes'] = max(references.get('peak_bytes', 0), values['peak_bytes'])
-                                references.update(scene=identifier, recognizer=config.data['models']['recognizer'],
-                                                  max_samples_per_person=config.data['clustering']['max_samples_per_person'],
-                                                  **values)
-                                status(report, references=usage_line(references),
-                                       reference_people=values['people'], reference_samples=values['samples'],
-                                       reference_stage=values['stage'])
-                            try:
-                                groups = cluster_scene(database, scan, config, progress=reference_progress)
-                            finally:
-                                if references.get('scene') == identifier:
-                                    # Progress writes commit SQLite. Persist only after
-                                    # matching's transaction has committed or rolled back.
-                                    database.progress(run, 'references', references)
-                                    report.optional('recognition_references', report.write,
-                                        f'Face references scene {identifier}: ' + usage_line(references) +
-                                        f" people={references['people']} samples={references['samples']} "
-                                        f"stage={references['stage']}")
-                            # A different recognizer cannot infer the old binding
-                            # from incompatible vectors. Retain its analysis, but
-                            # withhold new profiles when this instance already has
-                            # published identities in another namespace.
-                            incompatible = database.connection.execute('SELECT namespace FROM people WHERE scope=? '
-                                'AND namespace<>? AND performer IS NOT NULL LIMIT 1', (scope, model_namespace)).fetchone()
-                            if incompatible:
-                                for group in groups:
-                                    bound = database.connection.execute('SELECT performer FROM people WHERE id=?',
-                                                                        (group['person'],)).fetchone()
-                                    if group['status'] == 'accepted' and bound is not None and not bound['performer']:
-                                        group['status'] = 'withheld'
-                                        group['reason'] = 'incompatible_published_namespace'
-                                        save_operation(database, scope=scope, scene=identifier, person=group['person'],
-                                            kind='namespace', target=None, payload={'namespace': model_namespace},
-                                            precondition={'published_namespace': incompatible['namespace']}, status='withheld')
-                            database.progress(run, 'matching', {'scene': identifier, 'groups': groups})
-                            merged = database.connection.execute('SELECT COUNT(*) FROM identity_merges').fetchone()[0] - merges_before
-                            counts['identities_merged'] += merged
-                            if merged:
-                                report.optional('recognition_merges', report.write,
-                                                f'Recognition scene {identifier}: identities_merged={merged} (oldest identity retained)')
-                        accepted = sorted({g['person'] for g in groups if g['status'] == 'accepted'})
-                        counts['groups_withheld'] += sum(g['status'] == 'withheld' for g in groups)
-                        counts['observations_withheld'] += sum(g['observations'] for g in groups if g['status'] == 'withheld')
-                        # A coherent pair can merge while a third rival still
-                        # makes this scene ambiguous. Reconcile that pair without
-                        # publishing an unproven link to the selected scene.
-                        for person in sorted(scene_merge_roots(database.connection, scope, scan) - set(accepted)):
-                            binding = database.connection.execute('SELECT performer FROM people WHERE id=?', (person,)).fetchone()
-                            if incompatible and not binding['performer']:
-                                save_operation(database, scope=scope, scene=identifier, person=person,
-                                    kind='namespace', target=None, payload={'namespace': model_namespace},
-                                    precondition={'published_namespace': incompatible['namespace']}, status='withheld')
-                                continue
-                            try:
-                                with phase(report, 'Recognition Stash merge', scene=identifier):
-                                    performer = ensure_person(database, client, report, scope, identifier, person)
-                                    sync_merges(database, client, report, scope, person, performer, counts=counts)
-                            except KeyboardInterrupt:
-                                raise
-                            except Exception as error:
-                                counts['people_failed'] += 1
-                                report.optional('recognition_error', report.write,
-                                                'Recognition merge withheld: ' + safe_error(error, key))
-                        for person in accepted:
-                            try:
-                                with phase(report, 'Recognition Stash publication', scene=identifier):
-                                    performer = publish_person(database, client, report, scope, identifier, person, merge_counts=counts)
-                                    counts['people_linked_or_observed'] += 1
-                                    target = ready.setdefault(person, {'person': person, 'performer': performer, 'scans': []})
-                                    target['scans'].append({'scene': identifier, 'scan': scan})
-                                    evidence = database.connection.execute("SELECT json_extract(payload,'$.reference_context') "
-                                        'FROM candidates WHERE scan=? AND policy=? AND person=? '
-                                        "AND status='accepted' LIMIT 1", (scan, matching_policy(config), person)).fetchone()
-                                    if evidence is not None:
-                                        target.setdefault('matching', {})[scan] = {'policy': matching_policy(config),
-                                            'reference_context': evidence[0], 'person': person}
-                            except KeyboardInterrupt:
-                                raise
-                            except Exception as error:
-                                counts['people_failed'] += 1
-                                report.optional('recognition_error', report.write,
-                                                'Recognition person withheld: ' + safe_error(error, key))
-                        counts['scenes_processed'] += 1
+                        selected.append({'scene': identifier, 'scan': scan})
                     except KeyboardInterrupt:
                         raise
                     except Exception as error:
@@ -216,6 +182,35 @@ def execute(args, config, *, services=None):
                         report.optional('recognition_error', report.write,
                                         f'Recognition scene {identifier} failed: ' + safe_error(error, key))
                     database.progress(run, 'run', dict(counts))
+                if selected:
+                    last_scene = selected[-1]['scene']
+                    def reference_progress(**values):
+                        values['peak_bytes'] = max(references.get('peak_bytes', 0), values['peak_bytes'])
+                        references.update(scene=last_scene, recognizer=config.data['models']['recognizer'],
+                                          max_samples_per_person=config.data['clustering']['max_samples_per_person'], **values)
+                        status(report, references=usage_line(references), reference_people=values['people'],
+                               reference_samples=values['samples'], reference_stage=values['stage'])
+                    try:
+                        reconcile_legacy_merges(database, client, scope, [s['scene'] for s in selected])
+                        for item in selected:
+                            reconcile_unlinks(database, client, scope, item['scene'])
+                        with phase(report, 'Recognition identity rebuild'):
+                            rebuilt = rebuild_selected(database, selected, config, progress=reference_progress)
+                        database.progress(run, 'rebuild', {'mode': 'cold_selected_replay', 'selection': selected,
+                                                         'matching_policy': matching_policy(config)})
+                        _publish_selection(database, client, report, config, scope, model_namespace,
+                                           selected, rebuilt, ready, counts, key, run)
+                    except KeyboardInterrupt:
+                        raise
+                    except Exception as error:
+                        counts['scenes_failed'] += len(selected)
+                        report.optional('recognition_error', report.write, 'Recognition rebuild failed: ' + safe_error(error, key))
+                    finally:
+                        if references:
+                            database.progress(run, 'references', references)
+                            report.optional('recognition_references', report.write,
+                                f'Face references scene {last_scene}: ' + usage_line(references) +
+                                f" people={references['people']} samples={references['samples']} stage={references['stage']}")
                 targets = canonical_targets(database, ready)
                 if services.metadata:
                     with phase(report, 'Recognition names preflight'):

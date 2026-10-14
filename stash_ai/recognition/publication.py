@@ -1,4 +1,5 @@
 """SQLite intent-before-dispatch and reconciliation without uncertain retries."""
+import json
 import uuid
 
 from stash_ai.runtime.mutations import write
@@ -113,26 +114,31 @@ def ensure_person(database, client, report, scope, scene, person):
     return value['id']
 
 
-def publish_person(database, client, report, scope, scene, person, *, merge_counts=None):
+def publish_person(database, client, report, scope, scene, person, *, merge_counts=None, reconcile_merges=True):
     performer = ensure_person(database, client, report, scope, scene, person)
-    from .merge_publication import sync_merges
-    sync_merges(database, client, report, scope, person, performer, counts=merge_counts)
+    if reconcile_merges:
+        from .merge_publication import sync_merges
+        sync_merges(database, client, report, scope, person, performer, counts=merge_counts)
     live = client.scene(scene)
     existing = {checked_id(item)['id'] for item in live['performers']}
     identifier = operation_id(scope, scene, person, 'link')
-    if performer in existing:
-        save_operation(database, scope=scope, scene=scene, person=person, kind='link', target=performer,
-                       payload={'performer': performer, 'input_contract': LINK_INPUT_CONTRACT},
-                       precondition={}, status='observed')
-        return performer
     pending = database.connection.execute('SELECT * FROM publications WHERE id=?', (identifier,)).fetchone()
+    if performer in existing:
+        # A pre-existing manual link is not adopted. Legacy recorded links retain
+        # their historical managed status; future observed reruns keep provenance.
+        prior = json.loads(pending['payload']) if pending else {}
+        managed = bool(pending and prior.get('managed', True) and prior.get('active', True))
+        save_operation(database, scope=scope, scene=scene, person=person, kind='link', target=performer,
+                       payload={'performer': performer, 'input_contract': LINK_INPUT_CONTRACT, 'managed': managed, 'active': True},
+                       precondition=json.loads(pending['precondition']) if pending else {}, status='observed')
+        return performer
     precondition = {'performers': sorted(existing)}
     if pending and pending['status'] in ('pending', 'unknown'):
         if not legacy_rejected_link(pending, client, performer):
             raise PendingRecognition('Earlier additive scene link is unresolved; no blind retry.')
         precondition['legacy_validation_failure'] = 'BulkUpdateIds.values rejected with HTTP 400'
     perform(database, client, report, scope=scope, scene=scene, person=person, kind='link', target=performer,
-            payload={'performer': performer, 'input_contract': LINK_INPUT_CONTRACT}, precondition=precondition,
+            payload={'performer': performer, 'input_contract': LINK_INPUT_CONTRACT, 'managed': True, 'active': True}, precondition=precondition,
             callback=lambda: client.add_scene_person(scene, performer))
     # Refresh after acknowledgement; unrelated concurrently added performers
     # are preserved by ADD, not rewritten from a stale full list.
