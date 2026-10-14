@@ -220,7 +220,9 @@ once. Evidence is persisted in `merge_support`; before merging, it is
 revalidated against the current bounded identity references. A newer scan for
 a scene supersedes older evidence; rejected/partial scans and stale detection
 policies cannot supply support. Only scenes previously selected for recognition
-contribute; this does not scan the rest of the library. The average of cross-group sample similarities must reach
+contribute; this does not scan the rest of the library.
+
+The average of cross-group sample similarities must reach
 `match_threshold`, and their minimum must reach `clustering.cohesion_threshold`.
 A person can appear together with their reflection. Co-occurrence therefore
 does not create a permanent cannot-link: it requires every cross-sample
@@ -242,12 +244,14 @@ all affected scenes move to it in one SQLite transaction. Retired identities
 remain as durable aliases, are excluded from matching/reference budgets and
 cannot create another performer. Unrelated groups are not merged merely because
 an older database contains them: explicit selected-scene evidence, checked
-against the current identity representatives, is required. Supported merge decisions survive later configuration changes;
+against the current identity representatives, is required. Supported merge
+decisions survive later configuration changes;
 they are not automatically split again when thresholds increase.
 
 For example, if four retained fragments mutually pass the cross-check and
 three cue times from one or several previously selected scenes match them, the
-three younger identities retire into the oldest. A query that matches two otherwise incompatible people remains ambiguous
+three younger identities retire into the oldest. A query that matches two
+otherwise incompatible people remains ambiguous
 and does not merge them. Raising or lowering thresholds reruns these decisions
 using valid retained vectors; it does not require another recognition inference.
 
