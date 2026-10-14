@@ -3,18 +3,19 @@ import json
 
 from .database import encoded
 from .media import safe_url
+from .diagnostics import message as safe_error
 from .publication import PendingRecognition, perform
 from .stash import checked_id, owns
 
 
-def retry_precondition(previous):
+def retry_precondition(previous, *, api_key=''):
     if previous is None or previous['status'] not in ('pending', 'unknown'):
         return {}
     # One bounded predecessor snapshot, including set and removal intents.
     return {'retry_of': {'id': previous['id'], 'status': previous['status'],
                         'payload': json.loads(previous['payload']),
                         'image_sha256': json.loads(previous['precondition']).get('image_sha256'),
-                        'error': previous['error']}}
+                        'error': safe_error(previous['error'], api_key) if previous['error'] is not None else None}}
 
 
 def remove_owned(database, client, report, config, scope, target, token, baseline, previous, *, reason):
@@ -31,7 +32,7 @@ def remove_owned(database, client, report, config, scope, target, token, baselin
               'sha256': None, 'policy_sha': policy_identity(config), 'reason': reason}
     precondition = {'missing': False, 'image_sha256': baseline, 'token': token,
                     'image_path': safe_url(live.get('image_path') or '')}
-    precondition.update(retry_precondition(previous))
+    precondition.update(retry_precondition(previous, api_key=getattr(client, 'api_key', '')))
 
     def remove():
         value = checked_id(client.update_person(performer, image=''), performer)

@@ -14,8 +14,12 @@ from stash_ai.runtime.cleanup import closing
 
 
 def safe_url(url):
-    parts = urlsplit(url)
-    return urlunsplit((parts.scheme, parts.netloc, parts.path, '', ''))
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        # urllib can include credential-bearing netloc text in its exception.
+        raise ValueError('Invalid recognition source URL.') from None
+    return urlunsplit((parts.scheme, parts.netloc.rsplit('@', 1)[-1], parts.path, '', ''))
 
 
 def bounded_media(client, url, limit, timeout):
