@@ -14,6 +14,7 @@ from tests.helpers.recognition import MediaClient, Backend
 def setup(tmp_path, clustering=None):
     path = tmp_path / 'face.yml'
     path.write_text('version: 1\ndetection: {min_sharpness: 0, max_pose_deviation: null, min_visible_face_fraction: 0, require_complete_face: false}\n' +
+                    'recognition: {min_identity_support: 3}\n' +
                     ('clustering: ' + json.dumps(clustering) + '\n' if clustering else ''))
     return load(path)
 
@@ -268,3 +269,13 @@ def test_valid_one_mib_budget_does_not_overlap_reference_reload_allocations(tmp_
                 assert live <= values['budget_bytes']
                 assert live == values['bytes']
         assert events[-1][0]['bytes']==events[-1][0]['peak_bytes']==1048576
+
+
+def test_default_accepts_one_detected_face_without_relaxing_merges(tmp_path):
+    config = load(root=tmp_path)
+    with FaceDatabase(config.database) as db:
+        selected, _ = scan(db, config, '1', count=1)
+        result = cluster_scene(db, selected, config)
+        assert result[0]['status'] == 'accepted'
+        assert result[0]['observations'] == 1
+        assert db.connection.execute('SELECT COUNT(*) FROM people').fetchone()[0] == 1
