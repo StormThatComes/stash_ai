@@ -81,7 +81,7 @@ def _result(db, scan, policy):
 
 
 def matching_policy(config):
-    return digest({'format': 3, 'recognition': config.data['recognition'],
+    return digest({'format': 4, 'recognition': config.data['recognition'],
                    'clustering': config.data['clustering']})
 
 
