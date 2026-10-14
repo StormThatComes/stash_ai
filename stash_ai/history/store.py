@@ -26,40 +26,89 @@ class HistoryStore:
                 self.path.parent.mkdir(parents=True, exist_ok=True)
                 self.connection = sqlite3.connect(self.path, timeout=1)
             db = self.connection
+            if not readonly:
+                db.execute('BEGIN IMMEDIATE')
             app = db.execute('PRAGMA application_id').fetchone()[0]
             version = db.execute('PRAGMA user_version').fetchone()[0]
             populated = bool(db.execute("SELECT 1 FROM sqlite_master WHERE type='table' LIMIT 1").fetchone())
             if (app not in (0, APPLICATION_ID) or (populated and app != APPLICATION_ID)
                     or version not in (0, 1, 2, FORMAT) or (readonly and (app != APPLICATION_ID or version not in (1, 2, FORMAT)))):
                 raise ValueError('Not a supported run history DB; choose another --run-history-db.')
+            self._validate_schema(complete=readonly and version == FORMAT, allow_empty=not readonly)
             if not readonly:
-                with db:
-                    db.execute(f'PRAGMA application_id={APPLICATION_ID}')
-                    db.execute(f'PRAGMA user_version={FORMAT}')
-                    db.execute('''CREATE TABLE IF NOT EXISTS runs (
-                        id TEXT PRIMARY KEY, scope TEXT NOT NULL, command TEXT NOT NULL,
-                        started_at TEXT NOT NULL, finished_at TEXT, status TEXT NOT NULL,
-                        wall_seconds REAL, cpu_seconds REAL, configuration TEXT NOT NULL,
-                        models TEXT NOT NULL DEFAULT '{}', counts TEXT NOT NULL DEFAULT '{}',
-                        outcomes TEXT NOT NULL DEFAULT '{}', metrics TEXT NOT NULL DEFAULT '[]',
-                        issues TEXT NOT NULL DEFAULT '{}')''')
-                    columns = {row[1] for row in db.execute('PRAGMA table_info(runs)')}
-                    for name, declaration in (('last_progress_at', 'TEXT'), ('progress_seq', 'INTEGER NOT NULL DEFAULT 0'),
-                                              ('workload', "TEXT NOT NULL DEFAULT '{}'")):
-                        if name not in columns:
-                            db.execute(f'ALTER TABLE runs ADD COLUMN {name} {declaration}')
-                    db.execute('CREATE INDEX IF NOT EXISTS runs_scope_started ON runs(scope,started_at DESC,id)')
-                    db.execute('''CREATE TABLE IF NOT EXISTS reuse_decisions (
-                        run_id TEXT NOT NULL, scope TEXT NOT NULL, scene TEXT NOT NULL, model TEXT NOT NULL,
-                        action TEXT NOT NULL, status TEXT NOT NULL, reasons TEXT NOT NULL, details TEXT NOT NULL,
-                        PRIMARY KEY(run_id,scene,model))''')
-                    db.execute('CREATE INDEX IF NOT EXISTS reuse_scope_scene ON reuse_decisions(scope,scene,model,run_id)')
-                    db.execute('''CREATE TABLE IF NOT EXISTS reuse_proofs (
-                        scope TEXT NOT NULL, scene TEXT NOT NULL, model TEXT NOT NULL, kind TEXT NOT NULL,
-                        signature TEXT NOT NULL, proof TEXT NOT NULL, PRIMARY KEY(scope,scene,model,kind))''')
+                db.execute('''CREATE TABLE IF NOT EXISTS runs (
+                    id TEXT PRIMARY KEY, scope TEXT NOT NULL, command TEXT NOT NULL,
+                    started_at TEXT NOT NULL, finished_at TEXT, status TEXT NOT NULL,
+                    wall_seconds REAL, cpu_seconds REAL, configuration TEXT NOT NULL,
+                    models TEXT NOT NULL DEFAULT '{}', counts TEXT NOT NULL DEFAULT '{}',
+                    outcomes TEXT NOT NULL DEFAULT '{}', metrics TEXT NOT NULL DEFAULT '[]',
+                    issues TEXT NOT NULL DEFAULT '{}')''')
+                columns = {row[1] for row in db.execute('PRAGMA table_info(runs)')}
+                for name, declaration in (('last_progress_at', 'TEXT'), ('progress_seq', 'INTEGER NOT NULL DEFAULT 0'),
+                                          ('workload', "TEXT NOT NULL DEFAULT '{}'")):
+                    if name not in columns:
+                        db.execute(f'ALTER TABLE runs ADD COLUMN {name} {declaration}')
+                db.execute('CREATE INDEX IF NOT EXISTS runs_scope_started ON runs(scope,started_at DESC,id)')
+                db.execute('''CREATE TABLE IF NOT EXISTS reuse_decisions (
+                    run_id TEXT NOT NULL, scope TEXT NOT NULL, scene TEXT NOT NULL, model TEXT NOT NULL,
+                    action TEXT NOT NULL, status TEXT NOT NULL, reasons TEXT NOT NULL, details TEXT NOT NULL,
+                    PRIMARY KEY(run_id,scene,model))''')
+                db.execute('CREATE INDEX IF NOT EXISTS reuse_scope_scene ON reuse_decisions(scope,scene,model,run_id)')
+                db.execute('''CREATE TABLE IF NOT EXISTS reuse_proofs (
+                    scope TEXT NOT NULL, scene TEXT NOT NULL, model TEXT NOT NULL, kind TEXT NOT NULL,
+                    signature TEXT NOT NULL, proof TEXT NOT NULL, PRIMARY KEY(scope,scene,model,kind))''')
+                self._validate_schema(complete=True)
+                db.execute(f'PRAGMA application_id={APPLICATION_ID}')
+                db.execute(f'PRAGMA user_version={FORMAT}')
+                db.commit()
         except BaseException:
-            self.close()
+            from stash_ai.runtime.cleanup import cleanup
+            cleanup([self.connection.rollback, self.close] if self.connection is not None else [self.close])
             raise
+
+    def _validate_schema(self, *, complete, allow_empty=False):
+        """Known legacy subsets are readable; current format needs every feature."""
+        db = self.connection
+        expected = {
+            'runs': {'id':'TEXT', 'scope':'TEXT', 'command':'TEXT', 'started_at':'TEXT',
+                     'finished_at':'TEXT', 'status':'TEXT', 'wall_seconds':'REAL', 'cpu_seconds':'REAL',
+                     'configuration':'TEXT', 'models':'TEXT', 'counts':'TEXT', 'outcomes':'TEXT',
+                     'metrics':'TEXT', 'issues':'TEXT', 'last_progress_at':'TEXT',
+                     'progress_seq':'INTEGER', 'workload':'TEXT'},
+            'reuse_decisions': {'run_id':'TEXT', 'scope':'TEXT', 'scene':'TEXT', 'model':'TEXT',
+                                'action':'TEXT', 'status':'TEXT', 'reasons':'TEXT', 'details':'TEXT'},
+            'reuse_proofs': {'scope':'TEXT', 'scene':'TEXT', 'model':'TEXT', 'kind':'TEXT',
+                             'signature':'TEXT', 'proof':'TEXT'},
+        }
+        tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if not tables and allow_empty:
+            return
+        if tables - expected.keys() or 'runs' not in tables or complete and tables != expected.keys():
+            raise ValueError('Incomplete/unsupported run history schema; reopen writable history to repair known missing features.')
+        for table in tables:
+            columns = {row[1]: row[2].upper() for row in db.execute(f'PRAGMA table_info({table})')}
+            required = set(expected[table])
+            if table == 'runs' and not complete:
+                required -= {'last_progress_at', 'progress_seq', 'workload'}
+            if not required <= columns.keys() or any(expected[table].get(name) != kind for name,kind in columns.items()):
+                raise ValueError(f'Unsupported run history column shape: {table}; restore a consistent backup.')
+        for table in tables:
+            nullable = {'id','finished_at','wall_seconds','cpu_seconds','last_progress_at'} if table=='runs' else set()
+            if any(bool(row[3]) != (row[1] not in nullable) for row in db.execute(f'PRAGMA table_info({table})')):
+                raise ValueError(f'Unsupported run history nullability: {table}; restore a consistent backup.')
+        indexes = {'runs_scope_started': ('runs',['scope','started_at','id']),
+                   'reuse_scope_scene': ('reuse_decisions',['scope','scene','model','run_id'])}
+        for name,(table,columns) in indexes.items():
+            present = db.execute("SELECT tbl_name FROM sqlite_master WHERE type='index' AND name=?", (name,)).fetchone()
+            if (present is None and complete or present is not None and
+                    (present[0] != table or [row[2] for row in db.execute(f'PRAGMA index_info({name})')] != columns)):
+                raise ValueError(f'Incomplete/unsupported run history index shape: {name}.')
+        keys = {'runs':['id'], 'reuse_decisions':['run_id','scene','model'],
+                'reuse_proofs':['scope','scene','model','kind']}
+        for table in tables:
+            primary = sorted((row[5],row[1]) for row in db.execute(f'PRAGMA table_info({table})') if row[5])
+            if [name for _,name in primary] != keys[table]:
+                raise ValueError(f'Unsupported run history primary key: {table}; restore a consistent backup.')
 
     def start(self, identifier, scope, command, started, configuration):
         with self.connection:
@@ -91,7 +140,7 @@ class HistoryStore:
                 filters.append(name + '=?')
                 params.append(value)
         if model:
-            filters.append('json_type(models,?) IS NOT NULL')
+            filters.append('CASE WHEN json_valid(models) THEN json_type(models,?) END IS NOT NULL')
             params.append('$.' + model)
         params.append(limit)
         cursor = self.connection.execute('SELECT * FROM runs WHERE ' + ' AND '.join(filters) +
@@ -99,19 +148,28 @@ class HistoryStore:
         names = [column[0] for column in cursor.description]
         for values in cursor:
             row = dict(zip(names, values))
-            for name in ('configuration', 'models', 'counts', 'outcomes', 'metrics', 'issues'):
-                row[name] = json.loads(row[name])
+            invalid = []
+            for name in ('configuration', 'models', 'counts', 'outcomes', 'metrics', 'issues', 'workload'):
+                if name == 'workload' and name not in row:
+                    row[name] = {}
+                    continue
+                try:
+                    row[name] = json.loads(row[name])
+                except (TypeError, ValueError):
+                    row[name] = None
+                    invalid.append(name)
+            if invalid:
+                row['invalid_json_fields'] = invalid
             row.setdefault('last_progress_at', None)
             row.setdefault('progress_seq', 0)
-            row['workload'] = json.loads(row['workload']) if 'workload' in row else {}
             row['partial'] = row['finished_at'] is None
             yield row
 
     def close(self):
         self.pending.clear()
         if self.connection is not None:
-            self.connection.close()
-            self.connection = None
+            connection, self.connection = self.connection, None
+            connection.close()
 
     def record_decision(self, run_id, scope, scene, model, action, status, reasons, details):
         self.queue('decision', (run_id, scope, str(scene), model, action, status, encode(reasons), encode(details)))

@@ -485,6 +485,14 @@ and creates a new JSON file. It does not need the cache database, models,
 or Stash. Filters cover command, status and model; a limit of 1–10000
 selects the newest matching runs (50 by default). Existing report files
 are not overwritten.
+Malformed counters, outcomes and elapsed values are excluded with bounded
+structured warnings. Affected records stay in separate unverified comparison
+groups; usable runs and weighted metrics remain available, and unknown elapsed
+values are reported explicitly. Reading a report never repairs its source DB.
+History initialization/upgrades serialize with an explicit SQLite transaction;
+tables, indexes and version stamps commit together. Known missing history
+features can be restored by a writable open while existing rows/proofs remain;
+read-only access rejects an incomplete current schema with a maintenance error.
 
 Legacy runs without a configuration fingerprint remain visible in isolated,
 explicitly incomparable groups. Invalid metric entries are excluded from the
