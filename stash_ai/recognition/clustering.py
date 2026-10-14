@@ -168,7 +168,7 @@ def cluster_scene(database, scan, config, *, progress=None):
             support = db.execute('SELECT COUNT(DISTINCT o.seconds) FROM candidates c JOIN observations o '
                                  "ON o.id=json_extract(c.payload,'$.observation') "
                                  'WHERE c.scan=? AND c.policy=? AND c.person=?', (scan, policy, person)).fetchone()[0]
-            accepted = group.known or support >= settings['min_support']
+            accepted = group.known or support >= settings['min_identity_support']
             status = 'accepted' if accepted else 'withheld'
             db.execute('UPDATE candidates SET status=? WHERE scan=? AND policy=? AND person=?',
                        (status, scan, policy, person))
