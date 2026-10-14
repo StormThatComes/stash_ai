@@ -24,7 +24,8 @@ def parser():
     run.add_argument('--device', choices=('cuda', 'cpu', 'auto'), help='Override models.device; default CUDA, CPU is explicit.')
     run.add_argument('--retry-unresolved-images', action='store_true',
                      help='Retry uncertain portrait writes for selected owned performers after fresh image/identity checks.')
-    run.add_argument('--progress-style', choices=('auto', 'compact', 'verbose', 'off'), default='auto')
+    run.add_argument('--progress-style', choices=('auto', 'compact', 'verbose', 'off'), default='auto',
+                     help='Scene/frame progress and ETA; verbose includes quality details and the names YAML starter; off keeps errors and summary.')
     return root
 
 

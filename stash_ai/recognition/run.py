@@ -5,7 +5,7 @@ import os
 from urllib.parse import urlsplit
 
 from stash_ai.runtime.cleanup import closing, cleanup
-from stash_ai.runtime.console import present, phase, status
+from stash_ai.runtime.console import present, phase, status, activity
 from stash_ai.runtime.report import RunReport
 from stash_ai.stash_api.transport import safe_error
 from .config import digest
@@ -27,6 +27,7 @@ from .metadata import enrich
 from .video import VideoFrames
 from .visibility import FaceVisibility, LazyVisibility
 from .expression import FaceExpression, LazyExpression, required as expression_required
+from .progress import WorkProgress, frame_progress
 
 
 def instance_scope(url):
@@ -52,7 +53,7 @@ class Services:
     expression: object = FaceExpression
 
 
-def _publish_selection(database, client, report, config, scope, namespace, selected, rebuilt, ready, counts, key, run):
+def _publish_selection(database, client, report, config, scope, namespace, selected, rebuilt, ready, counts, key, run, progress):
     db = database.connection
     incompatible = db.execute('SELECT namespace FROM people WHERE scope=? AND namespace<>? '
                                'AND performer IS NOT NULL LIMIT 1', (scope, namespace)).fetchone()
@@ -76,7 +77,7 @@ def _publish_selection(database, client, report, config, scope, namespace, selec
                     continue
                 targets[person] = ensure_person(database, client, report, scope, scene, person)
             for person, performer in targets.items():
-                with phase(report, 'Recognition Stash publication', scene=scene):
+                with activity(report, 'publish identity', scene=scene, person=performer):
                     publish_person(database, client, report, scope, scene, person, reconcile_merges=False)
                 counts['people_linked_or_observed'] += 1
                 target = ready.setdefault(person, {'person': person, 'performer': performer, 'scans': []})
@@ -97,7 +98,8 @@ def _publish_selection(database, client, report, config, scope, namespace, selec
             raise
         except Exception as error:
             counts['people_failed'] += 1
-            report.optional('recognition_error', report.write, f'Recognition scene {scene} publication failed: ' + safe_error(error, key))
+            report.optional('recognition_error', report.issue, 'recognition', 'publication', scene, error, safe_error(error, key))
+        progress.advance(linked=counts['people_linked_or_observed'], failed=counts['people_failed'])
 
 
 def execute(args, config, *, services=None):
@@ -108,17 +110,19 @@ def execute(args, config, *, services=None):
     scope = instance_scope(url)
     # Optional extensions read immutable config before any Stash mutations.
     extra = services.metadata_config(config, scope) if services.metadata_config else None
-    report = RunReport(False, print)
+    from tqdm import tqdm
+    report = RunReport(args.progress_style == 'verbose', tqdm.write)
     counts = Counter()
     references = {}
     with FaceDatabase(config.database) as database:
         client = services.client(url=url, api_key=key, timeout=config.data['execution']['timeout_seconds'])
-        with closing(client, report=report, name='close recognition HTTP'), present(report, args.progress_style):
+        with closing(client, report=report, name='close recognition HTTP'), present(report, args.progress_style, status_position=2):
             client.report = report
-            if args.all_scenes:
-                identifiers = list(dict.fromkeys(client.scene_ids()))
-            else:
-                identifiers = list(dict.fromkeys(args.scene_id))
+            with phase(report, 'Recognition selection'):
+                if args.all_scenes:
+                    identifiers = list(dict.fromkeys(client.scene_ids()))
+                else:
+                    identifiers = list(dict.fromkeys(args.scene_id))
             snapshot = config.snapshot()
             if retry_images:
                 snapshot['invocation'] = {'retry_unresolved_images': True}
@@ -149,45 +153,52 @@ def execute(args, config, *, services=None):
                         database.progress(run, 'backend', {'namespace': model_namespace,
                             'embedding_device': value.device, 'detector_device': getattr(value, 'detector_device', 'cpu'),
                             'dimensions': value.dimensions, 'runtime': getattr(value, 'provenance', {})})
-                    backend = LazyBackend(config, paths, services.backend, loaded=loaded)
+                    def load_models(config, paths):
+                        with activity(report, 'load detection and recognition models'):
+                            return services.backend(config, paths)
+                    backend = LazyBackend(config, paths, load_models, loaded=loaded)
                     runtime_services = replace(services, backend=backend.borrow)
                 selected = []
                 ordered = sorted(identifiers, key=int)
                 inputs = ScenePrefetch(client, config, services.source, report=report)
                 inputs.submit(ordered[0] if ordered else None)
-                for position, identifier in enumerate(ordered):
-                    following = ordered[position + 1] if position + 1 < len(ordered) else None
-                    status(report, scene=identifier, scenes_completed=counts['scenes_processed'], scenes_total=len(identifiers))
-                    try:
-                        with phase(report, 'Recognition VTT', scene=identifier):
-                            with inputs.take(identifier) as prepared:
+                rejected_totals = Counter()
+                with phase(report, 'Recognition VTT'), WorkProgress(report, 'Recognition scenes', len(ordered)) as scenes:
+                    for position, identifier in enumerate(ordered):
+                        following = ordered[position + 1] if position + 1 < len(ordered) else None
+                        try:
+                            with activity(report, 'prepare VTT input', scene=identifier):
+                                prepared = inputs.take(identifier)
+                            with prepared:
                                 scene, source = prepared.scene, prepared.source
                                 inputs.submit(following)
                                 def progress(**values):
                                     database.progress(run, 'scan', values)
-                                    status(report, completed=1, **values)
-                                scan, reused = scan_scene(database, scope, scene, config, model_namespace, source,
-                                    backend.borrow, visibility=visibility, progress=progress)
+                                with activity(report, 'detect and embed VTT faces', scene=identifier), frame_progress(report, identifier) as frames:
+                                    scan, reused = scan_scene(database, scope, scene, config, model_namespace, source,
+                                        backend.borrow, visibility=visibility, progress=progress, frame_progress=frames)
                             counts['scenes_reused' if reused else 'scenes_scanned'] += 1
                             rejected = {row['rejected']: row['total'] for row in database.connection.execute(
                                 'SELECT rejected,COUNT(*) AS total FROM observations WHERE scan=? AND rejected IS NOT NULL '
                                 'GROUP BY rejected', (scan,))}
                             counts['observations_rejected'] += sum(rejected.values())
+                            rejected_totals.update(rejected)
                             database.progress(run, 'detection', {'scene': identifier, 'scan': scan,
                                                                'rejected': rejected, 'reused': reused})
                             if rejected:
-                                report.optional('recognition_quality', report.write,
+                                report.optional('recognition_quality', report.detail,
                                     f'Recognition quality scene {identifier}: ' +
                                     ' '.join(f'{reason}={total}' for reason, total in sorted(rejected.items())))
-                        selected.append({'scene': identifier, 'scan': scan})
-                    except KeyboardInterrupt:
-                        raise
-                    except Exception as error:
-                        counts['scenes_failed'] += 1
-                        report.optional('recognition_error', report.write,
-                                        f'Recognition scene {identifier} failed: ' + safe_error(error, key))
-                    inputs.submit(following)
-                    database.progress(run, 'run', dict(counts))
+                            selected.append({'scene': identifier, 'scan': scan})
+                        except KeyboardInterrupt:
+                            raise
+                        except Exception as error:
+                            counts['scenes_failed'] += 1
+                            report.optional('recognition_error', report.issue, 'recognition', 'scan', identifier, error,
+                                            safe_error(error, key))
+                        scenes.advance(scanned=counts['scenes_scanned'], reused=counts['scenes_reused'], failed=counts['scenes_failed'])
+                        inputs.submit(following)
+                        database.progress(run, 'run', dict(counts))
                 inputs.close()
                 if selected:
                     last_scene = selected[-1]['scene']
@@ -198,15 +209,17 @@ def execute(args, config, *, services=None):
                         status(report, references=usage_line(references), reference_people=values['people'],
                                reference_samples=values['samples'], reference_stage=values['stage'])
                     try:
-                        reconcile_legacy_merges(database, client, scope, [s['scene'] for s in selected])
-                        for item in selected:
-                            reconcile_unlinks(database, client, scope, item['scene'])
                         with phase(report, 'Recognition identity rebuild'):
+                            with activity(report, 'reconcile previous publication'):
+                                reconcile_legacy_merges(database, client, scope, [s['scene'] for s in selected])
+                                for item in selected:
+                                    reconcile_unlinks(database, client, scope, item['scene'])
                             rebuilt = rebuild_selected(database, selected, config, progress=reference_progress)
                         database.progress(run, 'rebuild', {'mode': 'cold_selected_replay', 'selection': selected,
                                                          'matching_policy': matching_policy(config)})
-                        _publish_selection(database, client, report, config, scope, model_namespace,
-                                           selected, rebuilt, ready, counts, key, run)
+                        with phase(report, 'Recognition Stash publication'), WorkProgress(report, 'Publish recognition', len(selected)) as publication:
+                            _publish_selection(database, client, report, config, scope, model_namespace,
+                                               selected, rebuilt, ready, counts, key, run, publication)
                     except KeyboardInterrupt:
                         raise
                     except Exception as error:
@@ -215,7 +228,7 @@ def execute(args, config, *, services=None):
                     finally:
                         if references:
                             database.progress(run, 'references', references)
-                            report.optional('recognition_references', report.write,
+                            report.optional('recognition_references', report.detail,
                                 f'Face references scene {last_scene}: ' + usage_line(references) +
                                 f" people={references['people']} samples={references['samples']} stage={references['stage']}")
                 targets = canonical_targets(database, ready)
@@ -231,28 +244,33 @@ def execute(args, config, *, services=None):
                             counts['metadata_failed'] += 1
                             report.optional('recognition_names_preflight', report.write,
                                             'Name batch withheld: ' + safe_error(error, key))
-                    for target in targets:
-                        with phase(report, 'Recognition metadata'):
-                            options = {'visibility': visibility}
-                            if expression_required(config.data['portraits']):
-                                options['expression'] = expression
-                            if retry_images:
-                                options['retry_unresolved_images'] = True
-                            counts.update(services.metadata(database, client, report, config, plan,
-                                                           scope, target, paths, runtime_services, **options) or {})
-                            database.progress(run, 'metadata', dict(counts))
+                    with phase(report, 'Recognition metadata'), WorkProgress(report, 'Names and portraits', len(targets), unit='person', key='people') as people:
+                        for target in targets:
+                            with activity(report, 'names and portraits', person=target['performer']):
+                                options = {'visibility': visibility}
+                                if expression_required(config.data['portraits']):
+                                    options['expression'] = expression
+                                if retry_images:
+                                    options['retry_unresolved_images'] = True
+                                counts.update(services.metadata(database, client, report, config, plan,
+                                                               scope, target, paths, runtime_services, **options) or {})
+                                database.progress(run, 'metadata', dict(counts))
+                                people.advance(failed=counts['metadata_failed'])
                 if targets:
                     try:
                         output = starter(client, targets, scope)
                         database.progress(run, 'name_starter', {'yaml': output, 'truncated': len(targets) > 50})
-                        report.optional('recognition_name_starter', report.write, 'Performer names starter (selected IDs, maximum 50):\n' + output)
+                        report.optional('recognition_name_starter', report.detail, 'Performer names starter (selected IDs, maximum 50):\n' + output)
                     except Exception as error:
                         report.optional('recognition_name_starter', report.write, 'Name starter unavailable: ' + safe_error(error, key))
                 if counts['scenes_failed'] or counts['people_failed'] or counts['metadata_failed']:
                     outcome = 'partial'
-                report.optional('recognition_summary', report.write, 'Recognition complete: ' +
+                report.console.finish_rendering()
+                report.optional('recognition_summary', report.write, f'Recognition {outcome}: ' +
                                 ' '.join(f'{name}={value}' for name, value in sorted(counts.items())) +
-                                (' | face references=' + usage_line(references) if references else ''))
+                                (' | rejected: ' + ' '.join(f'{reason}={total}' for reason, total in sorted(rejected_totals.items())) if rejected_totals else '') +
+                                (' | face references=' + usage_line(references) +
+                                 f" people={references['people']} samples={references['samples']} stage={references['stage']}" if references else ''))
                 return 0 if outcome == 'success' else 1
             except BaseException as error:
                 outcome = 'interrupted' if isinstance(error, KeyboardInterrupt) else 'failed'

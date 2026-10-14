@@ -6,6 +6,13 @@ infrequent liveness messages. `compact` keeps the short layout; `verbose` permit
 additional details; `off` disables decorative progress while retaining warnings,
 errors and normal command summaries.
 
+`recognition run` shares this owner with a compact three-row terminal layout:
+selected scenes, VTT frames in the active scene, and live status. Publication
+and names/portraits replace the work rows with their own stage totals. Remaining
+time estimates cover each measured stage; redirected frame updates appear in
+throttled heartbeats rather than one log entry per frame or scene. Recognition
+quality/reference details and the names YAML starter require `verbose`.
+
 The console has one dedicated rendering owner. HTTP/CPU workers only publish
 bounded snapshots; execution is never moved to the rendering thread. The owner
 continues rendering while the command is blocked on Stash or worker results.

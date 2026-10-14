@@ -50,11 +50,13 @@ def progress(factory, *args, **kwargs):
 
 class ConsolePresenter:
     """Workers update snapshots; only the console thread touches tqdm/output."""
-    def __init__(self, write, *, style='auto', stream=None, refresh=.25, heartbeat=5., coordination_timeout=1.):
+    def __init__(self, write, *, style='auto', stream=None, refresh=.25, heartbeat=5., coordination_timeout=1.,
+                 status_position=4):
         self.write, self.style = write, style
         self.stream = sys.stderr if stream is None else stream
         self.tty = bool(self.stream.isatty()) and style != 'off'
         self.refresh, self.heartbeat = refresh, heartbeat
+        self.status_position = status_position
         self.lock = threading.RLock()
         self.actions = Queue(maxsize=64)
         self.state, self.counts = {}, Counter()
@@ -277,7 +279,7 @@ class ConsolePresenter:
         if self.tty:
             if self._status is None:
                 from tqdm import tqdm
-                self._status = tqdm(total=0, position=4, leave=False, file=self.stream,
+                self._status = tqdm(total=0, position=self.status_position, leave=False, file=self.stream,
                                     bar_format='{desc}', dynamic_ncols=True)
             self._status.set_description_str(line)
             from .resources import resource_line
@@ -286,7 +288,7 @@ class ConsolePresenter:
             if text:
                 if self._resource_row is None:
                     from tqdm import tqdm
-                    self._resource_row = tqdm(total=0, position=5, leave=False, file=self.stream,
+                    self._resource_row = tqdm(total=0, position=self.status_position + 1, leave=False, file=self.stream,
                                               bar_format='{desc}', dynamic_ncols=True)
                 self._resource_row.set_description_str(text)
             elif self._resource_row is not None:
@@ -446,8 +448,8 @@ class OwnedBar:
 
 
 @contextmanager
-def present(report, style):
-    presenter = ConsolePresenter(report.write, style=style)
+def present(report, style, *, status_position=4):
+    presenter = ConsolePresenter(report.write, style=style, status_position=status_position)
     presenter.report = report
     original = report.write
     report.console = presenter

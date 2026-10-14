@@ -27,6 +27,25 @@ python stash_ai.py recognition run --all-scenes
 ```
 
 The last command explicitly snapshots all scene IDs for this one invocation.
+
+Recognition uses the same console renderer as tagging. Terminals show a scene
+bar and a second bar for VTT frames in the active scene, with elapsed time,
+throughput and estimated remaining time. Publication has its own scene bar;
+names and portraits have a performer bar. ETAs describe the current stage,
+not the whole invocation, and remain unavailable until work has completed.
+The frame bar starts at the saved checkpoint cursor; cached scenes show all
+frames reused without treating them as newly inferred work. Frame progress
+updates independently of the configured SQLite checkpoint interval.
+
+Redirected output keeps phase milestones and infrequent status heartbeats,
+including scene/frame counts and stage ETAs, without per-scene frame logs.
+`--progress-style verbose` adds per-scene quality/reference details and the
+performer names YAML starter. The starter remains recorded in face SQLite
+history in every style. `--progress-style off` keeps errors and the final
+summary, including aggregate rejection reasons and reference usage. Repeated
+scan/publication errors are grouped; failed scenes still count as inspected
+work and are reported separately from successful scans and reused evidence.
+
 There is no watcher, tagging hook or background recognition process. Ordinary
 tagging, merge, cleanup and `--models all` neither start recognition nor read its
 YAML. Missing pinned weights are installed automatically on recognition runs.

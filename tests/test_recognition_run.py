@@ -137,8 +137,9 @@ def test_reference_metrics_reach_console_history_and_cached_run(tmp_path, monkey
     monkeypatch.setattr(runner, 'status', lambda report, **values: statuses.append(values))
     assert run(config, services, '1') == 0
     first_output = capsys.readouterr().out
-    assert 'Face references scene 1:' in first_output and 'samples=3 stage=retained' in first_output
-    assert 'Recognition complete:' in first_output and '| face references=' in first_output
+    assert 'Face references scene 1:' not in first_output
+    assert 'samples=3 stage=retained' in first_output
+    assert 'Recognition success:' in first_output and '| face references=' in first_output
     assert any('MiB (' in v.get('references', '') and v['reference_samples'] == 3 for v in statuses)
     assert run(config, services, '1') == 0
     assert 'stage=cached' in capsys.readouterr().out
