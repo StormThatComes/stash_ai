@@ -185,7 +185,7 @@ detection:
 
 Matching is incremental: selected-scene vectors can reuse compatible retained
 people from other scenes without fetching their media. New identities need the
-configured distinct cue-time support.
+configured `recognition.min_identity_support` distinct cue-time support (default 1).
 Insufficient, near-threshold or ambiguous matches are withheld automatically.
 
 The best and next coherent identity compete even when the runner-up falls just
@@ -202,13 +202,25 @@ A stricter policy can withhold an existing assignment with
 performer bindings stay stable; replay does not create an empty person or
 silently split a performer across scenes.
 
+For older local YAML files, `recognition.min_support` remains accepted as a
+deprecated compatibility alias and sets both minimums to its value. Remove it
+before specifying either replacement key. The bundled configuration uses the
+split keys; legacy YAML retains its previous conservative behavior.
+
 ### Consolidating identity fragments
 
 Each uncached matching pass also checks whether the selected evidence supports
 joining existing identities in the same Stash instance and model namespace.
-At least `recognition.min_support` distinct cue times in that selected scan must
-match both groups at `recognition.match_threshold`, with the usual sample
-cohesion check. The average of cross-group sample similarities must reach
+At least `recognition.min_merge_support` independent (scene, cue-time)
+observations (default 3) must match both groups at `recognition.match_threshold`,
+with the usual sample cohesion check. Supporting observations accumulate from
+explicitly scanned scenes in the same Stash instance, recognizer namespace and
+detection policy. One repeated face at the same time in the same scene counts
+once. Evidence is persisted in `merge_support`; before merging, it is
+revalidated against the current bounded identity references. A newer scan for
+a scene supersedes older evidence; rejected/partial scans and stale detection
+policies cannot supply support. Only scenes previously selected for recognition
+contribute; this does not scan the rest of the library. The average of cross-group sample similarities must reach
 `match_threshold`, and their minimum must reach `clustering.cohesion_threshold`.
 A person can appear together with their reflection. Co-occurrence therefore
 does not create a permanent cannot-link: it requires every cross-sample
@@ -229,13 +241,13 @@ Stash performer ID stay stable. Members and derived candidate assignments from
 all affected scenes move to it in one SQLite transaction. Retired identities
 remain as durable aliases, are excluded from matching/reference budgets and
 cannot create another performer. Unrelated groups are not merged merely because
-an older database contains them: independently timed evidence from the selected
-scan is required. Supported merge decisions survive later configuration changes;
+an older database contains them: explicit selected-scene evidence, checked
+against the current identity representatives, is required. Supported merge decisions survive later configuration changes;
 they are not automatically split again when thresholds increase.
 
 For example, if four retained fragments mutually pass the cross-check and
-three new cue times match them, the three younger identities retire into the
-oldest. A query that matches two otherwise incompatible people remains ambiguous
+three cue times from one or several previously selected scenes match them, the
+three younger identities retire into the oldest. A query that matches two otherwise incompatible people remains ambiguous
 and does not merge them. Raising or lowering thresholds reruns these decisions
 using valid retained vectors; it does not require another recognition inference.
 
@@ -274,7 +286,8 @@ references; repeating an unchanged run does not repeat merges or inference.
 | Setting | Effect on merging |
 | --- | --- |
 | `recognition.match_threshold` | Minimum mean match to each endpoint and mean cross-group similarity. |
-| `recognition.min_support` | Required distinct supporting cue times in a selected scan. |
+| `recognition.min_identity_support` | Minimum distinct cue times to accept a new person (default 1). |
+| `recognition.min_merge_support` | Minimum supporting (scene, cue-time) observations across selected scans (default 3). |
 | `recognition.ambiguity_margin` | Withholds competing assignments; cannot relax merge evidence requirements. |
 | `clustering.cohesion_threshold` | Minimum representative similarity, including cross-group comparisons. |
 | `clustering.max_samples_per_person` | Bounds each group's retained representatives and the final survivor's lookup sample. |
