@@ -56,7 +56,8 @@ def test_semantic_cache_identity_ignores_filename_and_names(tmp_path):
 
 def test_shipped_template_matches_default_schema():
     config = load(Path(__file__).resolve().parents[1] / 'facial_recognition.yml')
-    assert config.data['recognition']['min_support'] == 3
+    assert config.data['recognition']['min_identity_support'] == 1
+    assert config.data['recognition']['min_merge_support'] == 3
     assert config.data['portraits']['source'] == 'vtt'
     assert config.data['portraits']['margin'] == .35
 
@@ -72,3 +73,23 @@ def test_portrait_source_and_framing_do_not_invalidate_face_scan(tmp_path):
     assert namespace(initial) == namespace(changed)
     assert scan_identity(initial, namespace(initial)) == scan_identity(changed, namespace(changed))
     assert initial.identity('portraits') != changed.identity('portraits')
+
+
+def test_split_support_defaults_singletons_legacy_alias_and_validation(tmp_path):
+    config = load(root=tmp_path)
+    assert config.data['recognition']['min_identity_support'] == 1
+    assert config.data['recognition']['min_merge_support'] == 3
+    for key in ('min_identity_support', 'min_merge_support'):
+        valid = tmp_path / (key + '.yml')
+        valid.write_text(f'version: 1\nrecognition: {{{key}: 1}}\n')
+        assert load(valid).data['recognition'][key] == 1
+        valid.write_text(f'version: 1\nrecognition: {{{key}: 0}}\n')
+        with pytest.raises(ValueError, match=key):
+            load(valid)
+    old = tmp_path / 'old.yml'
+    old.write_text('version: 1\nrecognition: {min_support: 2}\n')
+    assert load(old).data['recognition']['min_identity_support'] == 2
+    assert load(old).data['recognition']['min_merge_support'] == 2
+    old.write_text('version: 1\nrecognition: {min_support: 2, min_merge_support: 3}\n')
+    with pytest.raises(ValueError, match='cannot be combined'):
+        load(old)
