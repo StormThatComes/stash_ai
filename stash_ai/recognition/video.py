@@ -50,12 +50,19 @@ class VideoFrames(AbstractContextManager):
         self.deadline = time.monotonic() + config.data['portraits']['timeout_seconds']
         self.remaining = config.data['portraits']['max_video_bytes']
         self.error, self.active, self.process = None, None, None
+        self.last_error = None
         self.server = self.thread = None
         self.guard = threading.Lock()
         self.cancellation = Cancellation()
         self.path = '/' + uuid.uuid4().hex
         self.validator = None
         self.timeline_origin = None
+
+    def _failed_request(self, error):
+        self.last_error = error
+        if (not isinstance(error, Exception) or isinstance(error, ValueError)
+                or self.remaining <= 0 or time.monotonic() >= self.deadline):
+            self.error = error
 
     def _response(self, byte_range):
         url = self.url
@@ -67,7 +74,7 @@ class VideoFrames(AbstractContextManager):
             if remaining <= 0 or self.remaining <= 0:
                 raise TimeoutError('Portrait video byte/time budget exhausted.')
             response = call_with_deadline(lambda: self.client.media.get(url,
-                    headers={'Range': byte_range} if byte_range else {}, stream=True, allow_redirects=False,
+                    headers={'Accept-Encoding': 'identity', **({'Range': byte_range} if byte_range else {})}, stream=True, allow_redirects=False,
                     timeout=(min(5., remaining), remaining)), self.deadline)
             if response.status_code in (301, 302, 303, 307, 308):
                 location = response.headers.get('Location')
@@ -107,7 +114,7 @@ class VideoFrames(AbstractContextManager):
                         call_with_deadline(lambda: self.forward(byte_range), owner.deadline,
                                            cancel=lambda: shutdown(self.connection))
                 except BaseException as error:
-                    owner.error = error
+                    owner._failed_request(error)
                     self.close_connection = True
 
             def forward(self, byte_range):
@@ -122,10 +129,18 @@ class VideoFrames(AbstractContextManager):
                     if owner.validator is not None and validator != owner.validator:
                         raise ValueError('Video source changed during portrait extraction.')
                     owner.validator = validator
+                    encoded = response.headers.get('Content-Encoding', '').lower() not in ('', 'identity')
+                    if encoded and response.status_code == 206:
+                        raise ValueError('Compressed ranged video response cannot preserve byte offsets.')
                     self.send_response(response.status_code)
                     for key in ('Content-Length', 'Content-Range', 'Accept-Ranges', 'Content-Type'):
+                        if encoded and key != 'Content-Type':
+                            continue  # iter_content yields decoded bytes; compressed lengths do not apply.
                         if key in response.headers:
                             self.send_header(key, response.headers[key])
+                    if encoded:
+                        self.send_header('Connection', 'close')
+                        self.close_connection = True
                     self.end_headers()
                     for chunk in response.iter_content(65536):
                         if len(chunk) > owner.remaining or time.monotonic() >= owner.deadline:
@@ -135,7 +150,7 @@ class VideoFrames(AbstractContextManager):
                 except (BrokenPipeError, ConnectionResetError):
                     pass  # FFmpeg stopped reading after obtaining its frame.
                 except Exception as error:
-                    owner.error = error
+                    owner._failed_request(error)
                     self.close_connection = True
                 finally:
                     try:
@@ -162,11 +177,12 @@ class VideoFrames(AbstractContextManager):
         timeout = self.deadline - time.monotonic()
         if timeout <= 0 or self.error:
             raise RuntimeError('Portrait source budget exhausted or source failed.')
+        self.last_error = None
         address = f'http://127.0.0.1:{self.server.server_port}{self.path}'
         command = [self.config.data['portraits']['ffmpeg'], '-hide_banner', '-nostdin', '-nostats',
                    '-loglevel', 'info',
                    '-protocol_whitelist', 'http,tcp',
-                   '-format_whitelist', 'mov,matroska,webm,avi,mpegts',
+                   '-format_whitelist', 'mov,matroska,webm,avi,mpegts,mpeg',
                    '-rw_timeout', str(int(timeout * 1000000)),
                    '-threads', '1', '-copyts', '-ss', str(seconds), '-i', address,
                    '-map', '0:v:0', '-an', '-sn', '-dn', '-frames:v', '1', '-fps_mode', 'passthrough',
@@ -218,6 +234,10 @@ class VideoFrames(AbstractContextManager):
         if self.error:
             raise RuntimeError('Portrait video source failed (byte/time/validator/origin check).') from self.error
         if process.returncode or not output:
+            if self.last_error is not None:
+                from .diagnostics import message
+                raise RuntimeError('Portrait video request failed; later candidates may retry: ' +
+                                   message(self.last_error, getattr(self.client, 'api_key', ''))[:500]) from self.last_error
             log = b''.join(errors).decode('utf-8', errors='replace')
             diagnostic = re.findall(r'(?m)^(?:Unrecognized option|Option |Error )[^\r\n]*', log)
             hint = re.sub(r'https?://\S+', '[media URL]', '; '.join(diagnostic[-2:]))[:400]

@@ -281,11 +281,18 @@ def choose(database, client, config, scope, target, paths, backend_factory, deco
                     raise
                 except PortraitFramingError:
                     metadata['reason'] = 'portrait_encoding_unavailable'
-                except Exception:
+                except Exception as error:
                     # Decoder/source limitations are honest image skips, not
                     # failed profile/link publication. A fallback retains its
                     # actual VTT/recognition source in separate metadata.
                     metadata['reason'] = 'video_unavailable_or_budget_exceeded'
+                    from .diagnostics import message
+                    diagnostic = message(error, getattr(client, 'api_key', ''))[:500]
+                    metadata['error'] = {'kind': type(error).__name__, 'message': diagnostic}
+                    report = getattr(client, 'report', None)
+                    if report is not None:
+                        report.optional('recognition_video_diagnostic', report.issue, 'recognition',
+                                        'portrait_video', scene_id, error, diagnostic)
                 sha = hashlib.sha256(image_bytes).hexdigest() if image_bytes else None
                 with database.connection:
                     database.connection.execute('INSERT OR REPLACE INTO portraits VALUES (?,?,?,?,?,?,?,?)',
