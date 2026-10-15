@@ -1,16 +1,15 @@
 """Developer evaluation of bounded, explicitly labeled retained face crops."""
-from contextlib import closing
-from io import BytesIO
+from stash_ai.runtime.cleanup import closing
 import json
 import sqlite3
 import time
 from types import SimpleNamespace
 
-from .clustering import cluster_scene
+from .rebuild import rebuild_selected
 from .database import SCHEMA, encoded
 from .evaluation import evaluate_pairs
-from stash_ai.inference.image_io import open_image
-from .models import ensure_assets, load_backend, namespace, checked_detection, normalized_embedding
+from .portrait_availability import retained_image
+from .models import ensure_assets, load_backend, namespace, normalized_embedding, verify, ASSETS
 
 
 def evaluate_observations(database, run, configurations, labels, *, assets=ensure_assets, backend=load_backend):
@@ -53,30 +52,24 @@ def evaluate_observations(database, run, configurations, labels, *, assets=ensur
                 if row['crop'] is None or row['rejected'] is not None:
                     skipped[row['id']] = 'no_retained_eligible_crop'
                     continue
-                quality = json.loads(row['quality'])
-                x, y, _, _ = quality['crop_bounds']
-                geometry = json.loads(row['geometry'])
-                geometry[0] -= x
-                geometry[1] -= y
-                for i in range(4, 14, 2):
-                    geometry[i] -= x
-                    geometry[i+1] -= y
-                with open_image(BytesIO(row['crop'])) as raw:
-                    with raw.convert('RGB') as image:
-                        vectors[row['id']] = normalized_embedding(adapter.embed(image, checked_detection(geometry)), adapter.dimensions)
+                image, face = retained_image(row)
+                with image:
+                    vectors[row['id']] = normalized_embedding(adapter.embed(image, face), adapter.dimensions)
         finally:
-            adapter.close()
+            from stash_ai.runtime.cleanup import cleanup
+            cleanup([('close pilot identity adapter', adapter.close)])
         embedding_seconds = time.perf_counter() - started
         identifiers = sorted(vectors)
         pairs = ((vectors[a], vectors[b], labels[a] == labels[b]) for i,a in enumerate(identifiers) for b in identifiers[i+1:])
         pair_metrics = evaluate_pairs(pairs, config.data['recognition']['match_threshold'])
-        # Run the real incremental grouping rules in disposable in-memory SQLite,
+        # Run the production selected-scene replay in disposable in-memory SQLite,
         # never changing the operator's retained published identities/membership.
         with closing(sqlite3.connect(':memory:')) as temporary:
             temporary.row_factory = sqlite3.Row
             temporary.executescript(SCHEMA)
             pilot = SimpleNamespace(connection=temporary, installation=database.installation)
-            for scene in sorted({r['scene'] for r in records}):
+            selected = []
+            for scene in sorted({r['scene'] for r in records}, key=int):
                 scan = 'pilot-' + scene
                 rows = [r for r in records if r['scene'] == scene and r['id'] in vectors]
                 temporary.execute('INSERT INTO scans VALUES (?,?,?,?,?,?,?,?,?,?,?)',
@@ -84,10 +77,11 @@ def evaluate_observations(database, run, configurations, labels, *, assets=ensur
                 for row in rows:
                     vector = vectors[row['id']]
                     temporary.execute('INSERT INTO observations VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
-                        (row['id'], scan, row['cue'], row['seconds'], '', '[]', '[]', '{}', None,
+                        (row['id'], scan, row['cue'], row['seconds'], row['source'], row['rect'], row['geometry'], row['quality'], None,
                          len(vector), vector.astype('<f4').tobytes(), None))
                 temporary.commit()
-                cluster_scene(pilot, scan, config)
+                selected.append({'scene': scene, 'scan': scan})
+            rebuild_selected(pilot, selected, config)
             assignments = dict(temporary.execute('SELECT observation,person FROM members'))
             ambiguous = temporary.execute("SELECT COUNT(*) FROM candidates WHERE json_extract(payload,'$.reason')='ambiguous_identity'").fetchone()[0]
         false_merge = false_miss = 0
@@ -97,6 +91,19 @@ def evaluate_observations(database, run, configurations, labels, *, assets=ensur
                 grouped = first in assignments and second in assignments and assignments[first] == assignments[second]
                 false_merge += int(grouped and not same)
                 false_miss += int(same and not grouped)
+        artifacts, unavailable = {}, {}
+        required_assets = {config.data['models']['detector'], config.data['models']['recognizer']}
+        if config.data['detection']['min_visible_face_fraction'] > 0:
+            required_assets.add('faceocc')
+        for key, path in paths.items():
+            try:
+                if key in ASSETS:
+                    verify(path, ASSETS[key])
+                artifacts[key] = path.stat().st_size
+            except (OSError, ValueError) as error:
+                if key in required_assets:
+                    raise
+                unavailable[key] = type(error).__name__
         results[name] = {'namespace': namespace(config), 'config': config.snapshot(),
             'scope': 'supplied-selected-retained-crops-only', 'observations': len(records),
             'embedding_coverage': len(vectors), 'accepted_coverage': len(assignments),
@@ -104,7 +111,8 @@ def evaluate_observations(database, run, configurations, labels, *, assets=ensur
             'pair_false_merge': false_merge, 'pair_false_miss_including_withheld': false_miss,
             'embedding_pair_metrics': pair_metrics, 'skipped': skipped,
             'load_and_embedding_seconds': embedding_seconds,
-            'artifact_bytes': sum(p.stat().st_size for p in paths.values()),
+            'artifact_bytes': sum(artifacts.values()), 'artifact_sizes': artifacts,
+            'unavailable_optional_artifacts': unavailable,
             'ram': 'measure separately with isolated benchmark; shared-process peak is not per-adapter'}
     database.progress(run, 'pilot_comparison', results)
     return results

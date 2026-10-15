@@ -13,7 +13,7 @@ from .diagnostics import metadata as safe_metadata
 from .models import checked_detection
 from .portraits import policy_identity
 from .quality import PortraitFramingError, portrait_bytes
-from .portrait_availability import measure_available, score_metadata, observation_identity, retained_image, retained_portrait, cached_thumbnail, fit_cached_bytes
+from .portrait_availability import measure_available, score_metadata, observation_identity, retained_image, retained_portrait, cached_thumbnail, fit_cached_bytes, measurement_basis
 from .visibility import cached as cached_visibility, required as visibility_required
 from .expression import cached as cached_expression, required as expression_required
 from .progress import tracking
@@ -108,6 +108,7 @@ def choose_vtt(database, client, config, scope, target, source_factory, visibili
                     identifier = str(uuid.uuid5(uuid.NAMESPACE_URL,
                         encoded([scope, target['person'], row['id'], 'vtt', policy_sha])))
                     quality = json.loads(row['quality'])
+                    original_quality = encoded(quality)
                     metadata = {'version': 3, 'source_type': 'vtt', 'requested_source': policy['source'],
                         'selection_policy': 'best-available-vtt-observations-v3',
                         'policy_sha': policy_sha, 'policy': plain(policy), 'observation': row['id'],
@@ -123,25 +124,49 @@ def choose_vtt(database, client, config, scope, target, source_factory, visibili
                         metadata.update(similarity=similarity, runner_up=runner, identity_basis=basis)
                     except (TypeError, ValueError):
                         reason = 'portrait_identity_unverified'
-                    needs_visibility = visibility_required(policy) and not cached_visibility(quality)
-                    needs_expression = expression_required(policy) and not cached_expression(quality)
-                    if not reason and (needs_visibility or needs_expression):
+                    required = {name for name, needed in (
+                        ('visibility', visibility_required(policy)), ('expression', expression_required(policy))) if needed}
+                    cached = {'visibility': cached_visibility, 'expression': cached_expression}
+                    bases = quality.setdefault('measurement_basis', {})
+                    # Older fallback caches recorded provenance only on portraits.
+                    # Recover it before trusting their model-contract-only cache.
+                    legacy_crop = db.execute("SELECT 1 FROM portraits WHERE scope=? AND person=? "
+                        "AND json_extract(metadata,'$.observation')=? "
+                        "AND json_extract(metadata,'$.quality_source')='recognition_crop' LIMIT 1",
+                        (scope, target['person'], row['id'])).fetchone()
+                    for name in required:
+                        if cached[name](quality) and name not in bases:
+                            bases[name] = measurement_basis(row, 'recognition_crop' if legacy_crop else 'vtt')
+                    missing = {name for name in required if not cached[name](quality)}
+                    approximate = {name for name in required if bases.get(name, {}).get('source_type') == 'recognition_crop'}
+                    if not reason and (missing or approximate):
+                        source_type = 'vtt'
                         try:
                             face = checked_detection(metadata['geometry'])
                             image = sources.thumbnail(scene, row)
                         except Exception:
                             metadata['source_warning'] = 'vtt_source_unavailable_or_changed'
+                            source_type = 'recognition_crop'
                             try:
                                 image, face = retained_image(row)
-                                metadata['quality_source'] = 'recognition_crop'
                             except Exception:
                                 image = None
                         if image is not None:
+                            force = approximate if source_type == 'vtt' else set()
+                            requested = missing | force
                             with image:
-                                metadata['quality_errors'] = measure_available(client, image, face, quality, policy, visibility, expression)
-                            # Independent of framing, thresholds, weights and selected performer.
-                            with db:
-                                db.execute('UPDATE observations SET quality=? WHERE id=?', (encoded(quality), row['id']))
+                                metadata['quality_errors'] = measure_available(client, image, face, quality, policy,
+                                    visibility, expression, force=force)
+                            for name in requested:
+                                if name not in metadata['quality_errors'] and cached[name](quality):
+                                    bases[name] = measurement_basis(row, source_type)
+                    # Reuse remains independent of framing and ranking preferences.
+                    if encoded(quality) != original_quality:
+                        with db:
+                            db.execute('UPDATE observations SET quality=? WHERE id=?', (encoded(quality), row['id']))
+                    source_types = {basis['source_type'] for name, basis in bases.items() if name in required}
+                    if source_types:
+                        metadata['quality_source'] = next(iter(source_types)) if len(source_types) == 1 else 'mixed'
                     if reason:
                         metadata['reason'] = reason
                     else:
