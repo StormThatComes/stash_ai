@@ -50,8 +50,15 @@ def _groups(db, scope, namespace, policy, *, usage=None, stage='loading'):
         unit='person',
     ) as tracked:
         for person in tracked:
+            invalid = db.execute('SELECT 1 FROM members m JOIN observations o ON o.id=m.observation '
+                'JOIN scans s ON s.id=o.scan WHERE m.person=? AND '
+                "(s.scope<>? OR s.namespace<>? OR s.status<>'complete' OR o.rejected IS NOT NULL) LIMIT 1",
+                (person['id'], scope, namespace)).fetchone()
+            if invalid:
+                raise ValueError('Face identity has incompatible retained membership evidence.')
             samples = db.execute('SELECT o.dimensions,o.embedding FROM observations o JOIN members m '
-                                 'ON m.observation=o.id WHERE m.person=? ORDER BY o.id LIMIT ?',
+                                 'ON m.observation=o.id JOIN scans s ON s.id=o.scan WHERE m.person=? '
+                                 'ORDER BY CAST(s.scene AS INTEGER),s.scene,o.cue,o.seconds,o.geometry,o.embedding,o.id LIMIT ?',
                                  (person['id'], policy['max_samples_per_person'])).fetchall()
             if not samples:
                 raise ValueError('Accepted face identity has no retained supporting embeddings.')
@@ -119,10 +126,36 @@ def _result(db, scan, policy):
     return [dict(row) for row in rows]
 
 
+def complete_candidates(db, scan, policy, context, count, *, exact_memberships=False):
+    """Derived cache absence cannot mean that supported identities disappeared."""
+    totals = db.execute("SELECT COUNT(*),COUNT(DISTINCT json_extract(payload,'$.observation')) "
+                        'FROM candidates WHERE scan=? AND policy=?', (scan, policy)).fetchone()
+    if tuple(totals) != (count, count):
+        return False
+    rows = db.execute("SELECT c.id,c.person,c.status,json_extract(c.payload,'$.observation') AS observation,"
+        "json_extract(c.payload,'$.reference_context') AS context,o.scan,o.rejected,m.person AS member "
+        "FROM candidates c LEFT JOIN observations o ON o.id=json_extract(c.payload,'$.observation') "
+        'LEFT JOIN members m ON m.observation=o.id WHERE c.scan=? AND c.policy=?', (scan, policy))
+    for row in rows:
+        try:
+            expected = str(uuid.uuid5(uuid.UUID(row['observation']), policy))
+        except (ValueError, TypeError, AttributeError):
+            return False
+        if (row['id'] != expected or row['scan'] != scan or row['rejected'] is not None
+                or row['context'] != context or row['status'] not in ('accepted', 'withheld')):
+            return False
+        if row['status'] == 'accepted':
+            if row['person'] is None or row['member'] != row['person']:
+                return False
+        elif exact_memberships and row['member'] is not None:
+            return False
+    return True
+
+
 def matching_policy(config):
     from .context import policy_digest
-    return policy_digest(config, 'matching-v5', lambda: {
-        'format': 5, 'recognition': config.data['recognition'],
+    return policy_digest(config, 'matching-v6', lambda: {
+        'format': 6, 'recognition': config.data['recognition'],
         'clustering': config.data['clustering']})
 
 
@@ -150,7 +183,7 @@ def cluster_scene(database, scan, config, *, progress=None, _cold_replay=False):
         context = reference_context(groups)
         existing = db.execute('SELECT COUNT(*) FROM candidates WHERE scan=? AND policy=? '
                               "AND json_extract(payload,'$.reference_context')=?", (scan, policy, context)).fetchone()[0]
-    if existing == count and count:
+    if existing == count and count and complete_candidates(db, scan, policy, context, count):
         with tracking(
             db.execute(
                 'SELECT dimensions,embedding FROM observations WHERE scan=? AND rejected IS NULL',
@@ -171,7 +204,7 @@ def cluster_scene(database, scan, config, *, progress=None, _cold_replay=False):
         with tracking(
             db.execute(
                 'SELECT o.*,m.person AS prior_person FROM observations o LEFT JOIN members m '
-                'ON m.observation=o.id WHERE o.scan=? AND o.rejected IS NULL ORDER BY o.cue,o.id',
+                'ON m.observation=o.id WHERE o.scan=? AND o.rejected IS NULL ORDER BY o.cue,o.geometry,o.embedding,o.id',
                 (scan,),
             ),
             'Match face observations',
@@ -187,8 +220,7 @@ def cluster_scene(database, scan, config, *, progress=None, _cold_replay=False):
                     score, cohesion = _similarities(group, query)
                     near |= score >= settings['match_threshold'] - settings['ambiguity_margin']
                     if (score >= settings['match_threshold'] - settings['ambiguity_margin'] and
-                            cohesion >= grouping['cohesion_threshold'] and
-                            co_presence_allows(db, observation, group, groups, query, config)):
+                            cohesion >= grouping['cohesion_threshold']):
                         best_two(ranked, (score, group.identifier, group))
                 scores = [item[0] for item in ranked[:2]]
                 eligible = bool(ranked and ranked[0][0] >= settings['match_threshold'])
@@ -197,7 +229,9 @@ def cluster_scene(database, scan, config, *, progress=None, _cold_replay=False):
                 elif eligible:
                     group = ranked[0][2]
                     person, status, reason = group.identifier, 'pending', 'known_identity' if group.known else 'candidate_group'
-                    if prior_person is not None and prior_person != person:
+                    if not co_presence_allows(db, observation, group, groups, query, config):
+                        person, status, reason = None, 'withheld', 'co_present_identity_conflict'
+                    elif prior_person is not None and prior_person != person:
                         person, status, reason = None, 'withheld', 'policy_reassignment_requires_review'
                     if person is not None and not group.known and len(group.samples) < grouping['max_samples_per_person']:
                         usage.add([query], kind='Selected')
@@ -276,7 +310,7 @@ def _recheck_after_merge(db, scan, policy, groups, config):
     with tracking(
         db.execute(
             'SELECT o.*,m.person AS prior_person FROM observations o LEFT JOIN members m '
-            'ON m.observation=o.id WHERE o.scan=? AND o.rejected IS NULL ORDER BY o.cue,o.id',
+            'ON m.observation=o.id WHERE o.scan=? AND o.rejected IS NULL ORDER BY o.cue,o.geometry,o.embedding,o.id',
             (scan,),
         ),
         'Recheck merged observations',
@@ -292,19 +326,22 @@ def _recheck_after_merge(db, scan, policy, groups, config):
             for group in groups:
                 mean, minimum = _similarities(group, query)
                 if (mean >= settings['match_threshold'] - settings['ambiguity_margin'] and
-                        minimum >= config.data['clustering']['cohesion_threshold'] and
-                        co_presence_allows(db, row, group, groups, query, config)):
-                    best_two(ranked, (mean, group.identifier))
+                        minimum >= config.data['clustering']['cohesion_threshold']):
+                    best_two(ranked, (mean, group.identifier, group))
             person, status, reason = None, 'withheld', 'insufficient_match_or_cohesion'
             if ranked and ranked[0][0] >= settings['match_threshold']:
                 if len(ranked) > 1 and ranked[0][0] - ranked[1][0] < settings['ambiguity_margin']:
                     reason = 'ambiguous_identity'
                 else:
                     person, status, reason = ranked[0][1], 'accepted', 'known_identity'
-                    if row['prior_person'] is not None and row['prior_person'] != person:
+                    if not co_presence_allows(db, row, ranked[0][2], groups, query, config):
+                        person, status, reason = None, 'withheld', 'co_present_identity_conflict'
+                    elif row['prior_person'] is not None and row['prior_person'] != person:
                         person, status, reason = None, 'withheld', 'policy_reassignment_requires_review'
                     else:
                         db.execute('INSERT OR IGNORE INTO members VALUES (?,?)', (row['id'], person))
+            if person is None:
+                db.execute('DELETE FROM members WHERE observation=?', (row['id'],))
             candidate = str(uuid.uuid5(uuid.UUID(row['id']), policy))
             db.execute("UPDATE candidates SET person=?,status=?,payload=json_set(payload,'$.reason',?,'$.scores',json(?)) "
                        'WHERE id=?', (person, status, reason, encoded([r[0] for r in ranked[:2]]), candidate))

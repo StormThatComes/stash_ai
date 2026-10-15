@@ -125,7 +125,9 @@ def test_only_complete_current_owned_identity_memberships_are_targets(tmp_path, 
     forbid_recognition(monkeypatch, services, stash)
     services.metadata = services.assets = services.backend = forbidden
     writes = list(stash.writes)
-    assert refresh(config, services) == 0
+    assert refresh(config, services) == (1 if excluded == 'pending_merge' else 0)
+    if excluded == 'pending_merge':
+        assert last_counts(config)['metadata_withheld'] == 1
     assert last_counts(config)['portrait_people_selected'] == 0 and stash.writes == writes
 
 

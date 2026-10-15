@@ -12,7 +12,7 @@ from stash_ai.recognition.merge_publication import canonical_targets
 def test_policy_scope_preserves_keys_and_does_not_reuse_mutated_or_later_config(tmp_path, monkeypatch):
     from stash_ai.recognition import context
     config = load(root=tmp_path)
-    expected = digest({'format': 5, 'recognition': config.data['recognition'],
+    expected = digest({'format': 6, 'recognition': config.data['recognition'],
                        'clustering': config.data['clustering']})
     calls, original = [], context.digest
     def counted(value):
@@ -61,7 +61,9 @@ def test_canonical_target_snapshot_deduplicates_scans_and_blocks_pending_descend
         result = canonical_targets(database, ready)
         assert result == [{'person': 'old', 'performer': '1', 'scans': [scan, {'scene': '3', 'scan': 's3'}]}]
         db.execute("UPDATE identity_merges SET status='pending' WHERE source='young'")
-        assert canonical_targets(database, ready) == []
+        from stash_ai.recognition.publication import PendingRecognition
+        with pytest.raises(PendingRecognition, match='metadata withheld'):
+            canonical_targets(database, ready)
         db.execute("UPDATE identity_merges SET target='young' WHERE source='middle'")
         with pytest.raises(ValueError, match='cycle'):
             canonical_targets(database, ready)

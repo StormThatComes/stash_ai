@@ -39,6 +39,11 @@ def evaluate_observations(database, run, configurations, labels, *, assets=ensur
         if retained > 33554432:
             raise ValueError('Pilot retained crop byte budget exceeded.')
         records.append(record)
+    versions = {}
+    for record in records:
+        prior = versions.setdefault(record['scene'], record['scan'])
+        if prior != record['scan']:
+            raise ValueError('Pilot requires one retained scan revision per scene.')
     database.progress(run, 'pilot_ground_truth', {'labels': labels, 'observations': len(records)})
     results = {}
     for name, config in configurations.items():

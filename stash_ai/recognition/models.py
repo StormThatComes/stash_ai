@@ -87,11 +87,7 @@ def verified_bytes(path, asset):
     return _asset_bytes(path, asset, materialize=True)
 
 
-def ensure_assets(config, *, write=print):
-    from .runtime import runtime
-    runtime(config)  # Fail clearly before downloads for an unusable device/profile.
-    from stash_ai.backends.downloads import install_hf_asset
-    result = {}
+def asset_selection(config):
     from .visibility import required
     selected = [config.data['models']['detector'], config.data['models']['recognizer']]
     identity_assets = set(selected)
@@ -103,6 +99,22 @@ def ensure_assets(config, *, write=print):
     from .expression import required as expression_required
     if config.data['portraits']['enabled'] and expression_required(config.data['portraits']):
         selected.extend(('expression_mesh', 'expression_blendshapes'))
+    return selected, identity_assets
+
+
+def ensure_assets(config, *, write=print, keys=None):
+    if keys is None:
+        selected, identity_assets = asset_selection(config)
+    else:
+        selected = list(dict.fromkeys(keys))
+        identity_assets = set(selected).intersection(asset_selection(config)[1])
+    if any(key not in ASSETS for key in selected):
+        raise ValueError('Unknown recognition asset requested.')
+    if any(key != 'faceocc' for key in selected):
+        from .runtime import runtime
+        runtime(config)  # Prepare a device only for assets whose consumers need ORT.
+    from stash_ai.backends.downloads import install_hf_asset
+    result = {}
     with tracking(
         selected,
         'Verify recognition assets',
@@ -171,7 +183,10 @@ def checked_detection(row):
 
 def normalized_embedding(value, dimensions):
     import numpy as np
-    result = np.asarray(value, dtype=np.float32).reshape(-1)
+    raw = np.asarray(value)
+    if raw.dtype.kind not in 'fiu':
+        raise ValueError('Face recognizer must return real numeric embedding values.')
+    result = raw.astype(np.float32).reshape(-1)
     if result.shape != (dimensions,) or not np.isfinite(result).all():
         raise ValueError('Face recognizer returned incompatible/non-finite embedding.')
     norm = float(np.linalg.norm(result.astype(np.float64)))
@@ -300,6 +315,8 @@ class OpenCVFaces(YuNetDetector):
 
 
 def load_backend(config, paths):
+    from stash_ai.runtime.shutdown import require_idle
+    require_idle()
     if config.data['models']['recognizer'] == 'auraface':
         from .aura import AuraFaces
         return AuraFaces(config, paths)

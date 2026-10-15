@@ -5,7 +5,7 @@ import uuid
 from stash_ai.runtime.mutations import write
 from .diagnostics import message as safe_error
 from .database import encoded
-from .stash import owns, checked_id, RecognitionStash
+from .stash import owns, checked_id, checked_token, RecognitionStash
 
 
 LINK_INPUT_CONTRACT = 'bulk-scene-update-ids-v1'
@@ -76,6 +76,7 @@ def ensure_person(database, client, report, scope, scene, person):
     row = database.connection.execute('SELECT * FROM people WHERE id=? AND scope=?', (person, scope)).fetchone()
     if row is None:
         raise ValueError('Accepted recognition identity is missing or belongs to another Stash instance.')
+    checked_token(database, person, row['token'])
     if row['performer']:
         live = client.performer(row['performer'])
         if not owns(live, row['token']):
@@ -127,7 +128,8 @@ def publish_person(database, client, report, scope, scene, person, *, merge_coun
         # A pre-existing manual link is not adopted. Legacy recorded links retain
         # their historical managed status; future observed reruns keep provenance.
         prior = json.loads(pending['payload']) if pending else {}
-        managed = bool(pending and prior.get('managed', True) and prior.get('active', True))
+        managed = bool(pending and pending['status'] in ('pending', 'unknown', 'confirmed', 'observed')
+                       and prior.get('managed', True) and prior.get('active', True))
         save_operation(database, scope=scope, scene=scene, person=person, kind='link', target=performer,
                        payload={'performer': performer, 'input_contract': LINK_INPUT_CONTRACT, 'managed': managed, 'active': True},
                        precondition=json.loads(pending['precondition']) if pending else {}, status='observed')

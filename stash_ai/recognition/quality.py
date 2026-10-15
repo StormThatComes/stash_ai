@@ -7,14 +7,24 @@ class PortraitFramingError(ValueError):
     """The available pixels cannot produce a bounded portrait image."""
 
 
-def alignable(detection):
+def alignable(detection, image=None):
     """Basic recognizer alignment validity, independent of optional pose gates."""
     from .aura import similarity_matrix
     try:
-        similarity_matrix(detection.landmarks)
+        matrix = similarity_matrix(detection.landmarks)
     except ValueError:
         return False
-    return True
+    if image is None:
+        return True
+    import cv2
+    import numpy as np
+    inverse = cv2.invertAffineTransform(matrix)
+    # The actual 112x112 alignment samples must overlap real source pixels.
+    # Do not infer this from a finite transform or the detector's box alone.
+    rows, columns = np.ogrid[:112, :112]
+    x = inverse[0, 0] * columns + inverse[0, 1] * rows + inverse[0, 2]
+    y = inverse[1, 0] * columns + inverse[1, 1] * rows + inverse[1, 2]
+    return bool(((x >= 0) & (x < image.width) & (y >= 0) & (y < image.height)).any())
 
 
 def assess(image, detection):
@@ -24,7 +34,7 @@ def assess(image, detection):
     bounds = (max(0, int(x)), max(0, int(y)), min(image.width, math.ceil(x + width)),
               min(image.height, math.ceil(y + height)))
     if bounds[2] <= bounds[0] or bounds[3] <= bounds[1]:
-        return dict(complete=False, landmarks_inside=False, pixels=0, sharpness=0.,
+        return dict(complete=False, landmarks_inside=False, alignment_valid=False, pixels=0, sharpness=0.,
                     exposure=0., clipped_fraction=1., pose_deviation=1.)
     with image.crop(bounds) as crop, crop.convert('L') as grey, grey.resize((112, 112)) as resized:
         values = np.asarray(resized, dtype=np.float32)
@@ -43,7 +53,7 @@ def assess(image, detection):
     yaw = abs(float(points[2, 0] - eye_mid[0])) / max(eye_distance, 1)
     roll = abs(float(points[0, 1] - points[1, 1])) / max(eye_distance, 1)
     pitch = abs(float((points[2, 1] - eye_mid[1]) / max(float(mouth_mid[1] - eye_mid[1]), 1)) - .5)
-    return dict(complete=complete, landmarks_inside=inside and ordered, alignment_valid=alignable(detection),
+    return dict(complete=complete, landmarks_inside=inside and ordered, alignment_valid=alignable(detection, image),
                 pixels=float(min(width, height)), sharpness=sharpness, exposure=exposure,
                 clipped_fraction=clipped, pose_deviation=max(yaw, roll, pitch),
                 visibility_method='five-landmark-geometry-estimate-v1')
@@ -161,7 +171,13 @@ def _weighted_score(quality, policy, parts, *, expression=True, expression_valid
 
 def _number(quality, name):
     value = quality.get(name, 0.)
-    return max(0., float(value)) if type(value) in (float, int) and math.isfinite(value) else 0.
+    if type(value) not in (float, int):
+        return 0.
+    try:
+        value = float(value)
+    except OverflowError:
+        return 0.
+    return max(0., value) if math.isfinite(value) else 0.
 
 
 def _attainment(value, goal):

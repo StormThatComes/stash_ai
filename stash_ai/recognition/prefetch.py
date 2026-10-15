@@ -17,7 +17,7 @@ class FramePrefetch:
 
     def launch(self):
         try:
-            self.channel.worker = Thread(target=self._produce, name='recognition-frames')
+            self.channel.worker = Thread(target=self._produce, name='recognition-frames', daemon=True)
             self.channel.worker.start()
             return self
         except BaseException:
@@ -78,7 +78,8 @@ class FramePrefetch:
         cleanup(images)
 
     def close(self):
-        cleanup([self.channel.stop, self.channel.join, self._drain])
+        from stash_ai.runtime.shutdown import release
+        cleanup([self.channel.stop, self.channel.join, lambda: release(self, self._drain)])
 
 
 def frames(source, start, limit):
@@ -95,10 +96,12 @@ class _SceneInput:
         return self
 
     def __exit__(self, *args):
-        return self.stack.__exit__(*args)
+        from stash_ai.runtime.shutdown import release
+        release(self, lambda: self.stack.__exit__(*args))
 
     def close(self):
-        self.stack.close()
+        from stash_ai.runtime.shutdown import release
+        release(self, self.stack.close)
 
 
 class ScenePrefetch:
@@ -160,21 +163,29 @@ class ScenePrefetch:
         return result
 
     def _close_pending(self):
+        from stash_ai.runtime.shutdown import join, release, ShutdownIncomplete
         if self.pending is not None and not self.pending.cancelled():
             try:
+                join(self.pending, self)
                 result = self.pending.result()
+            except ShutdownIncomplete:
+                release(self.pending, self._close_pending)
+                raise
             except BaseException:
                 # Unconsumed speculative work cannot fail a completed scene.
                 return
             result.close()
 
     def close(self):
+        from stash_ai.runtime.shutdown import call, release
+        def reset():
+            self.executor = self.pending = self.active = self.token = self.identifier = None
         cleanup([
             ('cancel recognition next-scene input', lambda: self.token.cancel() if self.token is not None else None),
             ('cancel recognition scene task', lambda: self.pending.cancel() if self.pending is not None else None),
             ('close recognition pending input', self._close_pending),
-            ('stop recognition scene reader', lambda: self.executor.shutdown(wait=True, cancel_futures=True)
+            ('stop recognition scene reader', lambda: call(lambda: self.executor.shutdown(wait=True, cancel_futures=True), self)
              if self.executor is not None else None),
             ('close recognition active input', lambda: self.active.close() if self.active is not None else None),
+            ('release recognition prefetch state', lambda: release(self, reset)),
         ], report=self.report)
-        self.executor = self.pending = self.active = self.token = self.identifier = None

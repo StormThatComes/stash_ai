@@ -20,7 +20,7 @@ from stash_ai.runtime.report import RunReport
 
 @contextmanager
 def endpoint():
-    state = SimpleNamespace(calls=[], performers=['77'], rejection=None, message='schema rejected input')
+    state = SimpleNamespace(calls=[], performers=['77'], rejection=None, message='schema rejected input', token='owned-token')
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
             pass
@@ -34,7 +34,7 @@ def endpoint():
             if 'StashAIVersion' in query:
                 result = {'version': {'version': 'v0.31.1'}}
             elif 'StashAIRecognitionPerformer' in query:
-                result = {'findPerformer': {'id': '5', 'name': 'AI Person', 'details': 'owned-token', 'image_path': None}}
+                result = {'findPerformer': {'id': '5', 'name': 'AI Person', 'details': state.token, 'image_path': None}}
             elif 'StashAIRecognitionScene' in query:
                 result = {'findScene': {'id': '1', 'performers': [{'id': p} for p in state.performers]}}
             elif 'StashAIRecognitionLink' in query:
@@ -53,7 +53,7 @@ def endpoint():
                 # Stash v0.31.1 processes an included empty image string as an
                 # empty image BLOB, and returns its default-image URL afterward.
                 assert variables == {'input': {'id': '5', 'image': ''}}
-                result = {'performerUpdate': {'id': '5', 'name': 'AI Person', 'details': 'owned-token',
+                result = {'performerUpdate': {'id': '5', 'name': 'AI Person', 'details': state.token,
                     'image_path': f'http://127.0.0.1:{self.server.server_port}/performer/5/image?t=1&default=true'}}
             else:
                 raise AssertionError(query)
@@ -90,10 +90,11 @@ def test_performer_image_removal_sends_included_empty_string_and_recognizes_plac
         assert state.calls[-1]['variables'] == {'input': {'id': '5', 'image': ''}}
 
 
-def person(db):
+def person(db, state):
+    state.token = f'stash-ai-recognition:{db.installation}:person'
     with db.connection:
         db.connection.execute('INSERT INTO people VALUES (?,?,?,?,?,?)',
-                              ('person', 'scope', 'model', 0, '5', 'owned-token'))
+                              ('person', 'scope', 'model', 0, '5', state.token))
 
 
 def test_legacy_shape_reproduces_400_and_correct_request_preserves_manual_performers():
@@ -111,7 +112,7 @@ def test_legacy_shape_reproduces_400_and_correct_request_preserves_manual_perfor
 
 def test_original_400_journal_recovers_on_explicit_run_and_retains_evidence(tmp_path):
     with endpoint() as (client, state), FaceDatabase(tmp_path / 'faces.sqlite3') as db:
-        person(db)
+        person(db, state)
         save_operation(db, scope='scope', scene='1', person='person', kind='link', target='5',
                        payload={'performer': '5'}, precondition={'performers': ['77']}, status='unknown',
                        error=f'400 Client Error: Bad Request for url: {client.url}/graphql')
@@ -134,7 +135,7 @@ def test_original_400_journal_recovers_on_explicit_run_and_retains_evidence(tmp_
 ])
 def test_other_unresolved_links_are_not_retried(tmp_path, status, error, contract):
     with endpoint() as (client, state), FaceDatabase(tmp_path / 'faces.sqlite3') as db:
-        person(db)
+        person(db, state)
         payload = {'performer': '5'} | ({'input_contract': LINK_INPUT_CONTRACT} if contract else {})
         save_operation(db, scope='scope', scene='1', person='person', kind='link', target='5',
                        payload=payload, precondition={}, status=status,
@@ -147,7 +148,7 @@ def test_other_unresolved_links_are_not_retried(tmp_path, status, error, contrac
 @pytest.mark.parametrize('rejection,outcome', [('validation', 'failed'), ('unclassified', 'unknown')])
 def test_400_details_are_bounded_redacted_and_do_not_authorize_uncertain_retries(tmp_path, rejection, outcome):
     with endpoint() as (client, state), FaceDatabase(tmp_path / 'faces.sqlite3') as db:
-        person(db)
+        person(db, state)
         state.rejection, state.message = rejection, ('private-key ' * 200) + 'validation error'
         report = RunReport(write=lambda _: None)
         with pytest.raises(requests.HTTPError) as caught:
