@@ -106,3 +106,22 @@ def test_split_support_defaults_singletons_legacy_alias_and_validation(tmp_path)
     old.write_text('version: 1\nrecognition: {min_support: 2, min_merge_support: 3}\n')
     with pytest.raises(ValueError, match='cannot be combined'):
         load(old)
+
+
+import json
+import sqlite3
+import uuid
+from dataclasses import replace
+from types import SimpleNamespace
+
+import numpy as np
+import pytest
+
+
+def test_recognition_numeric_validation_reports_oversized_integer_field(tmp_path):
+    from stash_ai.recognition.config import load
+    path = tmp_path / 'face.yml'
+    path.write_text('version: 1\nexecution: {checkpoint_cues: ' + str(10**1000) + '}\n')
+    with pytest.raises(ValueError, match='execution.checkpoint_cues'):
+        load(path)
+
