@@ -1,6 +1,9 @@
 """One independently owned SQLite for all face evidence, history and recovery."""
-from contextlib import AbstractContextManager, closing
+from contextlib import AbstractContextManager
+from stash_ai.runtime.cleanup import closing, cleanup
 import json
+import os
+import tempfile
 from pathlib import Path
 import sqlite3
 import time
@@ -114,7 +117,7 @@ class FaceDatabase(AbstractContextManager):
                 self.connection.execute("UPDATE runs SET status='interrupted',finished=COALESCE(finished,?) "
                                         "WHERE status='running'", (time.time(),))
         except BaseException:
-            self.close()
+            cleanup([('close failed recognition database', self.close)])
             raise
 
     def _initialize(self):
@@ -129,7 +132,7 @@ class FaceDatabase(AbstractContextManager):
                 db.execute(f'PRAGMA user_version={SCHEMA_VERSION}')
                 db.commit()
             except BaseException:
-                db.rollback()
+                cleanup([('roll back recognition schema', db.rollback)])
                 raise
         elif version in (1, 2, 3) and db.execute('PRAGMA application_id').fetchone()[0] == APPLICATION_ID:
             previous_schema = {1: (SCHEMA_V1, TABLES_V1), 2: (SCHEMA_V2, TABLES_V2),
@@ -141,7 +144,7 @@ class FaceDatabase(AbstractContextManager):
                 db.execute(f'PRAGMA user_version={SCHEMA_VERSION}')
                 db.commit()
             except BaseException:
-                db.rollback()
+                cleanup([('roll back recognition schema', db.rollback)])
                 raise
         elif db.execute('PRAGMA application_id').fetchone()[0] != APPLICATION_ID or version != SCHEMA_VERSION:
             raise ValueError('Unsupported or incomplete facial recognition schema; restore a consistent backup.')
@@ -160,6 +163,17 @@ class FaceDatabase(AbstractContextManager):
                 actual = [(r[1], r[2], r[3], r[5]) for r in db.execute(f'PRAGMA table_info({table})')]
                 if expected != actual:
                     raise ValueError(f'Invalid facial recognition schema shape: {table}.')
+                expected_keys = {tuple(row[2:]) for row in reference.execute(f'PRAGMA foreign_key_list({table})')}
+                actual_keys = {tuple(row[2:]) for row in db.execute(f'PRAGMA foreign_key_list({table})')}
+                if expected_keys != actual_keys:
+                    raise ValueError(f'Invalid facial recognition foreign-key constraints: {table}.')
+                def unique_keys(connection):
+                    return {tuple((row[2], row[4]) for row in connection.execute(
+                                'SELECT * FROM pragma_index_xinfo(?) WHERE key=1 ORDER BY seqno', (index[1],)))
+                            for index in connection.execute(f'PRAGMA index_list({table})')
+                            if index[2] and not index[4]}
+                if not unique_keys(reference) <= unique_keys(db):
+                    raise ValueError(f'Invalid facial recognition unique constraints: {table}.')
         if db.execute('PRAGMA foreign_key_check').fetchone():
             raise ValueError('Facial recognition state has invalid foreign-key references.')
 
@@ -188,24 +202,29 @@ class FaceDatabase(AbstractContextManager):
 
     def backup(self, destination):
         destination = Path(destination)
-        with destination.open('xb'):
-            pass
+        # A crash can leave a staging file, never an empty/partial public backup.
+        # link() publishes the completed inode exclusively, including on Windows.
+        descriptor, staged = tempfile.mkstemp(prefix='.' + destination.name + '-', suffix='.tmp', dir=destination.parent)
+        os.close(descriptor)
+        staged = Path(staged)
         try:
-            with closing(sqlite3.connect(destination)) as target:
+            with closing(sqlite3.connect(staged), name='close recognition backup') as target:
                 self.connection.backup(target)
-        except BaseException:
-            destination.unlink(missing_ok=True)
-            raise
+            with staged.open('rb') as saved:
+                os.fsync(saved.fileno())
+            os.link(staged, destination)
+        finally:
+            cleanup([('remove staged recognition backup', lambda: staged.unlink(missing_ok=True))])
 
     def close(self):
         connection, self.connection = self.connection, None
         lock, self.lock = self.lock, None
-        try:
-            if connection is not None:
-                connection.close()
-        finally:
-            if lock is not None:
-                lock.close()
+        actions = []
+        if connection is not None:
+            actions.append(('close recognition SQLite connection', connection.close))
+        if lock is not None:
+            actions.append(('release recognition writer lock', lock.close))
+        cleanup(actions)
 
-    def __exit__(self, *args):
-        self.close()
+    def __exit__(self, exc_type, exc, traceback):
+        cleanup([('close recognition database', self.close)], primary=exc)

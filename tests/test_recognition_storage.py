@@ -196,3 +196,169 @@ def test_failed_v2_merge_support_migration_is_atomic(tmp_path, monkeypatch):
     with sqlite3.connect(path) as db:
         assert db.execute('PRAGMA user_version').fetchone()[0] == 2
         assert db.execute("SELECT name FROM sqlite_master WHERE name='merge_support'").fetchone() is None
+
+
+import json
+import sqlite3
+import uuid
+from dataclasses import replace
+from types import SimpleNamespace
+
+import numpy as np
+import pytest
+
+
+def test_face_schema_rejects_missing_foreign_key_and_unique_token(tmp_path):
+    from stash_ai.recognition.database import FaceDatabase, SCHEMA, APPLICATION_ID, SCHEMA_VERSION
+    path = tmp_path / 'faces.sqlite3'
+    schema = SCHEMA.replace(' REFERENCES people(id)','').replace('token TEXT NOT NULL UNIQUE','token TEXT NOT NULL')
+    with sqlite3.connect(path) as db:
+        db.executescript(schema)
+        db.execute('INSERT INTO metadata VALUES (?,?)',('installation',str(uuid.uuid4())))
+        db.execute(f'PRAGMA application_id={APPLICATION_ID}')
+        db.execute(f'PRAGMA user_version={SCHEMA_VERSION}')
+    before = path.read_bytes()
+    with pytest.raises(ValueError, match='constraints'):
+        FaceDatabase(path)
+    assert path.read_bytes() == before
+
+
+import json
+import sqlite3
+import uuid
+from dataclasses import replace
+from types import SimpleNamespace
+
+import numpy as np
+import pytest
+
+
+def test_crashed_face_backup_leaves_final_destination_available(tmp_path):
+    import os
+    import subprocess
+    import sys
+    from stash_ai.recognition.database import FaceDatabase
+    source,destination = tmp_path/'faces.sqlite3',tmp_path/'backup.sqlite3'
+    with FaceDatabase(source):pass
+    script = '''import os,sys
+from stash_ai.recognition.database import FaceDatabase
+with FaceDatabase(sys.argv[1]) as db:
+    class Crash:
+        def backup(self,target): os._exit(17)
+    db.connection.close()
+    db.connection=Crash()
+    db.backup(sys.argv[2])
+'''
+    process = subprocess.run([sys.executable,'-c',script,str(source),str(destination)],capture_output=True,timeout=10)
+    assert process.returncode == 17
+    assert not destination.exists()
+    with FaceDatabase(source) as db:
+        db.backup(destination)
+    with FaceDatabase(destination) as restored:
+        assert restored.connection.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
+
+
+
+import json
+import os
+from types import SimpleNamespace
+
+import numpy as np
+import pytest
+
+
+def test_face_database_close_preserves_primary_interruption(tmp_path):
+    from stash_ai.recognition.database import FaceDatabase
+    database = FaceDatabase(tmp_path / 'faces.sqlite3')
+    connection = database.connection
+    class FailedClose:
+        def close(self):
+            connection.close()
+            raise OSError('synthetic connection close failure')
+    database.connection = FailedClose()
+    with pytest.raises(KeyboardInterrupt, match='primary recognition interruption') as caught:
+        with database:
+            raise KeyboardInterrupt('primary recognition interruption')
+    assert database.lock is None
+    assert any('synthetic connection close failure' in note for note in caught.value.__notes__)
+    database.close()
+
+
+
+@pytest.mark.parametrize('change', ['foreign_key', 'token', 'scan_unique', 'partial_unique'])
+def test_required_schema_constraints_are_independently_validated(tmp_path, change):
+    import uuid
+    from stash_ai.recognition.database import SCHEMA
+    schema = SCHEMA
+    if change == 'foreign_key':
+        schema = schema.replace(' REFERENCES observations(id)', '')
+    elif change in ('token', 'partial_unique'):
+        schema = schema.replace('token TEXT NOT NULL UNIQUE', 'token TEXT NOT NULL')
+        if change == 'partial_unique':
+            schema += "CREATE UNIQUE INDEX partial_token ON people(token) WHERE token<>'';"
+    else:
+        schema = schema.replace('UNIQUE(scope,scene,namespace,input_sha,policy_sha)', 'CHECK(total>=0)')
+    path = tmp_path / 'invalid.sqlite3'
+    with sqlite3.connect(path) as db:
+        db.executescript(schema)
+        db.execute('INSERT INTO metadata VALUES (?,?)', ('installation', str(uuid.uuid4())))
+        db.execute(f'PRAGMA application_id={APPLICATION_ID}')
+        db.execute(f'PRAGMA user_version={SCHEMA_VERSION}')
+    before = path.read_bytes()
+    with pytest.raises(ValueError, match='constraints'):
+        FaceDatabase(path)
+    assert path.read_bytes() == before
+
+
+def test_supported_constraints_reject_duplicate_tokens_and_orphans(tmp_path):
+    with FaceDatabase(tmp_path / 'state.sqlite3') as state:
+        state.connection.execute('INSERT INTO people VALUES (?,?,?,?,?,?)', ('one', 'scope', 'ns', 1., None, 'token'))
+        with pytest.raises(sqlite3.IntegrityError):
+            state.connection.execute('INSERT INTO people VALUES (?,?,?,?,?,?)', ('two', 'scope', 'ns', 1., None, 'token'))
+        with pytest.raises(sqlite3.IntegrityError):
+            state.connection.execute('INSERT INTO identity_merges VALUES (?,?,?,?,?)', ('one', 'missing', 1., '{}', 'pending'))
+
+
+def test_backup_preserves_racing_destination_and_cleans_stage(tmp_path, monkeypatch):
+    import stash_ai.recognition.database as module
+    path, destination = tmp_path / 'state.sqlite3', tmp_path / 'backup.sqlite3'
+    link = module.os.link
+    def race(stage, target):
+        target.write_bytes(b'other writer')
+        link(stage, target)
+    with FaceDatabase(path) as state:
+        before = path.read_bytes()
+        monkeypatch.setattr(module.os, 'link', race)
+        with pytest.raises(FileExistsError):
+            state.backup(destination)
+        assert destination.read_bytes() == b'other writer'
+        assert path.read_bytes() == before
+        assert not list(tmp_path.glob('.backup.sqlite3-*.tmp'))
+
+
+@pytest.mark.parametrize('primary', [False, True])
+def test_database_connection_and_lock_close_are_exhaustive(tmp_path, primary):
+    state = FaceDatabase(tmp_path / 'state.sqlite3')
+    connection, lock = state.connection, state.lock
+    calls = []
+    class Connection:
+        def close(self):
+            calls.append('connection')
+            connection.close()
+            raise OSError('connection failed')
+    class Lock:
+        def close(self):
+            calls.append('lock')
+            lock.close()
+            raise RuntimeError('lock failed')
+    state.connection, state.lock = Connection(), Lock()
+    if primary:
+        with pytest.raises(KeyboardInterrupt, match='primary') as caught:
+            with state:
+                raise KeyboardInterrupt('primary')
+    else:
+        with pytest.raises(OSError, match='connection failed') as caught:
+            state.close()
+    assert calls == ['connection', 'lock']
+    assert any('lock failed' in note for note in caught.value.__notes__)
+    state.close()
