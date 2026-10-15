@@ -343,3 +343,46 @@ def test_remove_contract_uses_remove_and_validates_absence():
     client.gql = lambda *args: {'bulkSceneUpdate': [{'id': '1'}]}
     with pytest.raises(RuntimeError, match='acknowledgement'):
         client.remove_scene_person('1', '5')
+
+
+import json
+import sqlite3
+import uuid
+from dataclasses import replace
+from types import SimpleNamespace
+
+import numpy as np
+import pytest
+
+
+def test_binding_keeps_a_better_historical_rival_when_its_label_is_used(tmp_path):
+    from tests.test_recognition_clustering import setup, scan
+    from tests.test_recognition_identity_merges import changed
+    from stash_ai.recognition.database import FaceDatabase
+    from stash_ai.recognition.clustering import cluster_scene, _groups, _similarities
+    from stash_ai.recognition.rebuild import rebuild_selected
+    config = changed(setup(tmp_path),clustering={'max_samples_per_person':2})
+    strict = changed(config,recognition={'match_threshold':.98,'ambiguity_margin':.01})
+    loose = changed(config,recognition={'match_threshold':.35,'ambiguity_margin':.01},clustering={'cohesion_threshold':.3})
+    a,b,c = np.array([1.,0,0,0]),np.array([.8,.6,0,0]),np.array([.4,0,np.sqrt(.84),0])
+    with FaceDatabase(config.database) as db:
+        def fixed_scan(scene, vector, base):
+            identifier,_ = scan(db,config,scene,[vector]*3)
+            for offset,row in enumerate(db.connection.execute('SELECT id FROM observations WHERE scan=? ORDER BY cue',(identifier,)).fetchall()):
+                db.connection.execute('UPDATE observations SET id=? WHERE id=?',(str(uuid.UUID(int=base+offset)),row['id']))
+            db.connection.commit()
+            return identifier
+        first = fixed_scan('1',a,100)
+        first_person = cluster_scene(db,first,strict)[0]['person']
+        second = fixed_scan('9',b,200)
+        second_person = cluster_scene(db,second,strict)[0]['person']
+        drift = fixed_scan('2',c,300)
+        assert cluster_scene(db,drift,loose)[0]['person'] == first_person
+        selected = fixed_scan('3',a,400)
+        groups = {g.identifier:g for g in _groups(db.connection,'scope','ns',config.data['clustering'])}
+        assert _similarities(groups[first_person],a)[0] > _similarities(groups[second_person],a)[0]
+        result = rebuild_selected(db,[{'scene':'2','scan':drift},{'scene':'3','scan':selected}],config)
+        assert result[drift][0]['person'] == first_person
+        assert result[selected][0]['person'] not in (first_person, second_person)
+        assert rebuild_selected(db,[{'scene':'3','scan':selected},{'scene':'2','scan':drift}],config) == result
+

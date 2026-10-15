@@ -69,6 +69,34 @@ def _similarities(group, query):
     return float(scores.mean()), float(scores.min())
 
 
+def co_presence_allows(db, observation, group, groups, query, config):
+    """A distinct cue peer competing for this identity needs stronger evidence.
+
+    Inspect the entire cue, including observations not assigned yet, so reader
+    order cannot hide a second face. A peer clearly belonging to another group
+    does not make an otherwise unambiguous identity unsafe. Stream vectors;
+    exact duplicate detections remain one piece of evidence.
+    """
+    import numpy as np
+    settings = config.data['recognition']
+    stronger = max(settings['match_threshold'], settings['cooccurrence_merge_threshold'])
+    for peer in db.execute('SELECT * FROM observations WHERE scan=? AND cue=? '
+                           'AND id<>? AND rejected IS NULL ORDER BY id',
+                           (observation['scan'], observation['cue'], observation['id'])):
+        if peer['geometry'] == observation['geometry'] and peer['embedding'] == observation['embedding']:
+            continue
+        other = vector(peer)
+        mean, minimum = _similarities(group, other)
+        if mean < settings['match_threshold'] or minimum < config.data['clustering']['cohesion_threshold']:
+            continue
+        best = max(_similarities(rival, other)[0] for rival in groups)
+        if best - mean >= settings['ambiguity_margin'] and best > mean:
+            continue
+        if min(_similarities(group, query)[1], minimum, float(np.dot(query, other))) < stronger:
+            return False
+    return True
+
+
 def reference_context(groups):
     """Fingerprint exactly the bounded references used for identity decisions."""
     result = hashlib.sha256()
@@ -87,7 +115,7 @@ def _result(db, scan, policy):
 
 
 def matching_policy(config):
-    return digest({'format': 4, 'recognition': config.data['recognition'],
+    return digest({'format': 5, 'recognition': config.data['recognition'],
                    'clustering': config.data['clustering']})
 
 
@@ -150,7 +178,8 @@ def cluster_scene(database, scan, config, *, progress=None):
                     score, cohesion = _similarities(group, query)
                     near |= score >= settings['match_threshold'] - settings['ambiguity_margin']
                     if (score >= settings['match_threshold'] - settings['ambiguity_margin'] and
-                            cohesion >= grouping['cohesion_threshold']):
+                            cohesion >= grouping['cohesion_threshold'] and
+                            co_presence_allows(db, observation, group, groups, query, config)):
                         ranked.append((score, group.identifier, group))
                 ranked.sort(key=lambda item: (-item[0], item[1]))
                 scores = [item[0] for item in ranked[:2]]
@@ -252,7 +281,8 @@ def _recheck_after_merge(db, scan, policy, groups, config):
             for group in groups:
                 mean, minimum = _similarities(group, query)
                 if (mean >= settings['match_threshold'] - settings['ambiguity_margin'] and
-                        minimum >= config.data['clustering']['cohesion_threshold']):
+                        minimum >= config.data['clustering']['cohesion_threshold'] and
+                        co_presence_allows(db, row, group, groups, query, config)):
                     ranked.append((mean, group.identifier))
             ranked.sort(key=lambda item: (-item[0], item[1]))
             person, status, reason = None, 'withheld', 'insufficient_match_or_cohesion'
