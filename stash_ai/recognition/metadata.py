@@ -7,7 +7,7 @@ from .portraits import fill_portrait
 
 
 def enrich(database, client, report, config, plan, scope, target, paths, services, *, retry_unresolved_images=False,
-           visibility=None, expression=None):
+           visibility=None, expression=None, portraits_only=False):
     counts = Counter()
     for name, action in (
         ('names', lambda: sync_name(database, client, report, scope, target, plan)),
@@ -16,6 +16,8 @@ def enrich(database, client, report, config, plan, scope, target, paths, service
                                            retry_unresolved_images=retry_unresolved_images, visibility=visibility,
                                            expression=expression)),
     ):
+        if portraits_only and name == 'names':
+            continue
         try:
             counts.update(action())
         except KeyboardInterrupt:
