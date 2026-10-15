@@ -15,7 +15,7 @@ from .models import normalized_embedding
 from .publication import operation_id, perform, PendingRecognition, save_operation
 from .quality import PortraitFramingError, assess, portrait_bytes, portrait_score, portrait_tiebreak, portrait_shortfalls
 from .portrait_availability import measure_available, score_metadata, refresh_cached_quality
-from .stash import checked_id, owns
+from .stash import checked_id, checked_token, owns
 from .visibility import LazyVisibility, CONTRACT_ID
 from .expression import LazyExpression, CONTRACT_ID as EXPRESSION_CONTRACT_ID
 from .diagnostics import metadata as safe_metadata
@@ -395,6 +395,7 @@ def fill_portrait(database, client, report, config, scope, target, paths, backen
     performer, person = target['performer'], target['person']
     enabled = config.data['portraits']['enabled']
     token = database.connection.execute('SELECT token FROM people WHERE id=? AND scope=?', (person, scope)).fetchone()[0]
+    checked_token(database, person, token)
     live = checked_id(client.performer(performer), performer)
     if not owns(live, token):
         raise PendingRecognition('Portrait target ownership changed.')
