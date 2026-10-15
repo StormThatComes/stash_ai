@@ -220,3 +220,141 @@ def test_changed_timeline_origin_between_seeks_leaves_no_workers(tmp_path, video
             with pytest.raises(ValueError, match='origin changed'):
                 decoder.frame(.7)
         assert not decoder.thread.is_alive() and decoder.process is None
+
+
+from dataclasses import replace
+from types import SimpleNamespace
+from io import BytesIO
+import json
+import time
+import sqlite3
+
+import numpy as np
+import pytest
+
+from tests.test_recognition_clustering import setup, scan
+from tests.test_recognition_identity_merges import changed, fragments
+from stash_ai.recognition.database import FaceDatabase
+from stash_ai.recognition.clustering import cluster_scene
+from stash_ai.models import ModelSettings, SOURCES
+
+
+def stub_video_owner(tmp_path):
+    from stash_ai.recognition.video import VideoFrames
+    owner = VideoFrames(SimpleNamespace(url='http://stash/'), {'paths': {'stream': '/video'}}, setup(tmp_path))
+    owner.server = SimpleNamespace(server_port=8000, server_close=lambda: None)
+    return owner
+
+@pytest.mark.parametrize('failed_start', [1, 2])
+def test_decoder_reader_start_failure_reaps_owned_process(tmp_path, monkeypatch, failed_start):
+    from stash_ai.recognition import video as module
+    owner = stub_video_owner(tmp_path)
+    calls = []
+    def process(number):
+        result = SimpleNamespace(stdout=BytesIO(), stderr=BytesIO(), returncode=None)
+        result.poll = lambda: result.returncode
+        result.kill = lambda: calls.append(('kill', number))
+        def wait(**kw):
+            calls.append(('wait', number))
+            result.returncode = 0
+        result.wait = wait
+        return result
+    first, second = process(1), process(2)
+    processes = iter([first, second])
+    monkeypatch.setattr(module.subprocess, 'Popen', lambda *a, **kw: next(processes))
+    class Thread:
+        starts = 0
+        def __init__(self, *a, **kw): pass
+        def start(self):
+            Thread.starts += 1
+            if Thread.starts == failed_start: raise RuntimeError('reader startup')
+        def join(self, **kw): calls.append('join')
+    monkeypatch.setattr(module.threading, 'Thread', Thread)
+    with pytest.raises(RuntimeError, match='reader startup'):
+        owner.frame(0)
+    assert owner.process is None and ('kill', 1) in calls and ('wait', 1) in calls
+    assert calls.count('join') == failed_start - 1
+    assert first.stderr.closed
+    if failed_start == 1: assert first.stdout.closed
+    with pytest.raises(RuntimeError, match='no image was chosen'): owner.frame(1)
+    assert ('wait', 2) in calls and ('kill', 1) in calls and owner.process is None
+    for value in (first, second): value.stdout.close(); value.stderr.close()
+    owner.close()
+
+
+
+from dataclasses import replace
+from types import SimpleNamespace
+from io import BytesIO
+import json
+import time
+import sqlite3
+
+import numpy as np
+import pytest
+
+from tests.test_recognition_clustering import setup, scan
+from tests.test_recognition_identity_merges import changed, fragments
+from stash_ai.recognition.database import FaceDatabase
+from stash_ai.recognition.clustering import cluster_scene
+from stash_ai.models import ModelSettings, SOURCES
+
+
+def stub_video_owner(tmp_path):
+    from stash_ai.recognition.video import VideoFrames
+    owner = VideoFrames(SimpleNamespace(url='http://stash/'), {'paths': {'stream': '/video'}}, setup(tmp_path))
+    owner.server = SimpleNamespace(server_port=8000, server_close=lambda: None)
+    return owner
+
+def test_decoder_kill_failure_still_completes_other_teardown(tmp_path):
+    owner = stub_video_owner(tmp_path)
+    calls = []
+    def kill(): raise OSError('kill failure')
+    owner.process = SimpleNamespace(poll=lambda: None, kill=kill, wait=lambda **kw: calls.append('wait'))
+    owner.cancellation = SimpleNamespace(cancel=lambda: calls.append('cancel'))
+    owner.server = SimpleNamespace(server_close=lambda: calls.append('server_close'))
+    owner.owned_client = True
+    owner.client = SimpleNamespace(close=lambda: calls.append('client_close'))
+    with pytest.raises(OSError, match='kill failure'): owner.close()
+    assert calls == ['cancel', 'wait', 'server_close', 'client_close']
+
+
+
+@pytest.mark.parametrize('fault', ['kill', 'wait', 'response'])
+def test_video_exit_keeps_primary_and_attempts_all_teardown(tmp_path, monkeypatch, fault):
+    from stash_ai.recognition import video as module
+    owner = stub_video_owner(tmp_path)
+    calls = []
+    def action(name):
+        def call(*args, **kwargs):
+            calls.append(name)
+            if name == fault:
+                raise OSError(name + ' cleanup failure')
+        return call
+    owner.process = SimpleNamespace(poll=lambda: None, kill=action('kill'), wait=action('wait'))
+    owner.active = object()
+    monkeypatch.setattr(module, 'abort_response', lambda active: action('response')())
+    owner.cancellation = SimpleNamespace(cancel=action('cancel'))
+    owner.server = SimpleNamespace(server_close=action('server_close'))
+    owner.owned_client = True
+    owner.client = SimpleNamespace(close=action('client_close'))
+    with pytest.raises(KeyboardInterrupt, match='primary interruption') as caught:
+        try:
+            raise KeyboardInterrupt('primary interruption')
+        except KeyboardInterrupt as error:
+            owner.__exit__(type(error), error, error.__traceback__)
+            raise
+    assert all(name in calls for name in ('cancel', 'response', 'kill', 'wait', 'server_close', 'client_close'))
+    assert any('cleanup failure' in note for note in caught.value.__notes__)
+
+
+def test_rejected_video_response_close_keeps_status_error(tmp_path):
+    owner = stub_video_owner(tmp_path)
+    def status(): raise ValueError('primary HTTP status')
+    def close(): raise OSError('response close failure')
+    response = SimpleNamespace(status_code=500, raise_for_status=status, close=close)
+    owner.client.media = SimpleNamespace(get=lambda *a, **kw: response)
+    with pytest.raises(ValueError, match='primary HTTP status') as caught:
+        owner._response(None)
+    assert any('response close failure' in note for note in caught.value.__notes__)
+    owner.close()
