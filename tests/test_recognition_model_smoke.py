@@ -6,6 +6,7 @@ import pytest
 @pytest.mark.skipif(os.getenv('STASH_AI_RECOGNITION_SMOKE') != '1', reason='explicit pinned face-model smoke')
 @pytest.mark.parametrize('recognizer,dimensions', [('sface', 128), ('auraface', 512)])
 def test_pinned_face_models_on_cpu(tmp_path, recognizer, dimensions):
+    import numpy as np
     from PIL import Image
     from stash_ai.recognition.config import load
     from stash_ai.recognition.models import ensure_assets, load_backend, checked_detection
@@ -15,11 +16,16 @@ def test_pinned_face_models_on_cpu(tmp_path, recognizer, dimensions):
     backend = load_backend(config, ensure_assets(config))
     try:
         with Image.new('RGB', (128, 128), (100, 120, 140)) as image:
-            assert isinstance(backend.detect(image), list)
+            faces = backend.detect(image)
+            assert isinstance(faces, list)
             detection = checked_detection([0, 0, 128, 128, 38, 44, 88, 44, 64, 66, 42, 90, 86, 90, .99])
             embedding = backend.embed(image, detection)
             assert embedding.shape == (dimensions,)
             assert backend.device == 'cpu'
+            with backend.prepared_frame(image):
+                assert [face.row for face in backend.detect(image)] == [face.row for face in faces]
+                assert np.allclose(backend.embed(image, detection), embedding, atol=1e-7)
+            assert backend._prepared_frame is None
     finally:
         backend.close()
 
