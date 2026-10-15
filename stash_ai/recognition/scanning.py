@@ -1,6 +1,7 @@
 """Checkpoint selected-scene detections without publishing anything to Stash."""
 import json
 import uuid
+from types import SimpleNamespace
 
 from stash_ai.runtime.cleanup import closing
 
@@ -20,6 +21,10 @@ def scan_identity(config, namespace):
                    'visibility_contract': visibility_contract})
 
 
+def geometry_contract(face, cue):
+    return digest(['real-source-alignment-v2', list(face.row), list(cue.rect)])
+
+
 def scan_scene(database, scope, scene, config, namespace, source, backend_factory, *,
                visibility=None, progress=lambda **kw: None, frame_progress=lambda **kw: None):
     db = database.connection
@@ -34,13 +39,22 @@ def scan_scene(database, scope, scene, config, namespace, source, backend_factor
     if (record['status'] not in ('partial', 'complete') or
             not 0 <= record['cursor'] <= record['total'] or record['total'] != len(source.cues)):
         raise ValueError('Invalid recognition scan checkpoint.')
-    # Recheck only legacy geometry, without loading models or losing valid scans.
+    # Validate retained geometry even when an old alignment flag says true.
+    # Reuse valid vectors; retire only evidence invalid under this same policy.
     with db:
-        for row in db.execute('SELECT id,geometry,quality FROM observations WHERE scan=? AND rejected IS NULL', (identifier,)):
+        for row in db.execute('SELECT id,cue,geometry,quality FROM observations WHERE scan=? AND rejected IS NULL', (identifier,)):
             quality = json.loads(row['quality'])
-            if 'alignment_valid' not in quality:
-                quality['alignment_valid'] = alignable(checked_detection(json.loads(row['geometry'])))
-                if not quality['alignment_valid']:
+            face = checked_detection(json.loads(row['geometry']))
+            if type(row['cue']) is not int or not 0 <= row['cue'] < len(source.cues):
+                raise ValueError('Retained face observation has an invalid cue.')
+            cue = source.cues[row['cue']]
+            stamp = geometry_contract(face, cue)
+            if quality.get('geometry_contract') != stamp or face.score <= config.data['detection']['score_threshold']:
+                quality['alignment_valid'] = alignable(face, SimpleNamespace(width=cue.rect[2], height=cue.rect[3]))
+                quality['geometry_contract'] = stamp
+                reason = ('face_detection_score' if face.score <= config.data['detection']['score_threshold']
+                          else None if quality['alignment_valid'] else 'face_landmarks_invalid')
+                if reason:
                     # Earlier SFace scans may already have matching memberships.
                     # Keep raw geometry/origins, retire only this invalid support,
                     # and replay matching instead of serving its old cached result.
@@ -49,8 +63,7 @@ def scan_scene(database, scope, scene, config, namespace, source, backend_factor
                     db.execute('DELETE FROM metadata WHERE key=?', ('identity-rebuild:' + digest([scope, namespace]),))
                 db.execute('UPDATE observations SET quality=?,rejected=?,embedding=CASE WHEN ? THEN embedding ELSE NULL END,'
                            'crop=CASE WHEN ? THEN crop ELSE NULL END WHERE id=?',
-                           (encoded(quality), None if quality['alignment_valid'] else 'face_landmarks_invalid',
-                            quality['alignment_valid'], quality['alignment_valid'], row['id']))
+                           (encoded(quality), reason, reason is None, reason is None, row['id']))
     if record['status'] == 'complete':
         if record['cursor'] != record['total']:
             raise ValueError('Incomplete recognition scan marked complete.')
@@ -82,7 +95,9 @@ def scan_scene(database, scope, scene, config, namespace, source, backend_factor
                     faces = sorted(backend.detect(image), key=lambda f: tuple(f.row))
                     for face_index, face in enumerate(faces):
                         quality = assess(image, face)
-                        reason = rejection(quality, config.data['detection'])
+                        quality['geometry_contract'] = geometry_contract(face, cue)
+                        reason = ('face_detection_score' if face.score <= config.data['detection']['score_threshold']
+                                  else rejection(quality, config.data['detection']))
                         if reason is None and config.data['detection']['min_visible_face_fraction'] > 0:
                             if visibility is None:
                                 raise VisibilityError('Recognition visibility gate requires a visibility model.')

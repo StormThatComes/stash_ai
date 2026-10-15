@@ -11,7 +11,7 @@ import time
 from types import SimpleNamespace
 import uuid
 
-from .clustering import _groups, _result, _similarities, cluster_scene, matching_policy, reference_context, vector
+from .clustering import _groups, _result, _similarities, cluster_scene, matching_policy, reference_context, vector, complete_candidates
 from .config import digest
 from .database import SCHEMA, encoded
 from .reference_usage import ReferenceUsage
@@ -358,7 +358,10 @@ def rebuild_selected(database, selected, config, *, progress=None):
         references = _groups(db, scope, namespace, config.data['clustering'], usage=usage)
         context = reference_context(references)
         references.clear()
-        if json.loads(state[0]).get('context') == context:
+        complete = all(complete_candidates(db, item['scan'], matching_policy(config), context,
+            db.execute('SELECT COUNT(*) FROM observations WHERE scan=? AND rejected IS NULL',
+                       (item['scan'],)).fetchone()[0], exact_memberships=True) for item in selected)
+        if json.loads(state[0]).get('context') == context and complete:
             with tracking(
                 selected,
                 'Validate cached identity rebuild',
