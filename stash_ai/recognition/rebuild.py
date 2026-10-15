@@ -168,7 +168,7 @@ def _copy_selection(database, replay, selected, scope, namespace):
         committed.advance()
 
 
-def _bind(database, replay, config, scope, namespace):
+def _bind(database, replay, config, scope, namespace, *, usage=None):
     """One historical identity per new cluster; IDs cannot change the partition."""
     with work('Compute identity votes', 1, unit='query', position=0) as votes:
         replay.executescript('''CREATE TABLE votes AS
@@ -199,11 +199,13 @@ def _bind(database, replay, config, scope, namespace):
                 if row['performer']:
                     performers.add(row['performer'])
     unmatched = [r['id'] for r in replay.execute('SELECT id FROM people WHERE NOT EXISTS '
-                 '(SELECT 1 FROM identity_merges WHERE source=people.id) ORDER BY created,id') if r['id'] not in mapping]
+                 '(SELECT 1 FROM identity_merges WHERE source=people.id) AND EXISTS '
+                 '(SELECT 1 FROM members WHERE person=people.id) ORDER BY created,id') if r['id'] not in mapping]
     old_groups = []
     if unmatched:
         try:
-            old_groups = _groups(database.connection, scope, namespace, config.data['clustering'])
+            old_groups = _groups(database.connection, scope, namespace, config.data['clustering'],
+                                 usage=usage, stage='historical_binding')
         except ValueError as error:
             # Optional label reuse cannot prevent a smaller cold partition from
             # fixing a historical reference set that exceeds the new budgets.
@@ -219,7 +221,8 @@ def _bind(database, replay, config, scope, namespace):
             ranked = []
             samples = ([vector(row) for row in replay.execute(
                 'SELECT o.dimensions,o.embedding FROM observations o JOIN members m '
-                'ON m.observation=o.id WHERE m.person=? ORDER BY o.id LIMIT ?',
+                'ON m.observation=o.id JOIN scans s ON s.id=o.scan WHERE m.person=? '
+                'ORDER BY CAST(s.scene AS INTEGER),s.scene,o.cue,o.seconds,o.geometry,o.embedding,o.id LIMIT ?',
                 (cluster, config.data['clustering']['max_samples_per_person']))] if old_groups else [])
             with tracking(
                 old_groups,
@@ -259,9 +262,9 @@ def _bind(database, replay, config, scope, namespace):
     return mapping
 
 
-def _apply(database, replay, selected, config, scope, namespace, mapping, fingerprint, progress):
+def _apply(database, replay, selected, config, scope, namespace, mapping, fingerprint, progress, *, usage=None):
     db, policy = database.connection, matching_policy(config)
-    usage = ReferenceUsage(config.data['clustering']['max_reference_bytes'], progress)
+    usage = usage or ReferenceUsage(config.data['clustering']['max_reference_bytes'], progress)
     with work('Apply rebuilt identities', 1, unit='transaction', position=0) as committed:
         with db:
             with tracking(
@@ -339,6 +342,9 @@ def rebuild_selected(database, selected, config, *, progress=None):
     """
     if not selected:
         return {}
+    scenes = [int(item['scene']) for item in selected]
+    if len(set(scenes)) != len(scenes):
+        raise ValueError('Identity rebuild requires exactly one selected scan per scene.')
     selected = sorted(selected, key=lambda item: (int(item['scene']), item['scan']))
     db = database.connection
     first = db.execute('SELECT scope,namespace FROM scans WHERE id=?', (selected[0]['scan'],)).fetchone()
@@ -393,8 +399,8 @@ def rebuild_selected(database, selected, config, *, progress=None):
         ) as tracked:
             for item in tracked:
                 cluster_scene(temporary, item['scan'], config, progress=progress, _cold_replay=True)
-        mapping = _bind(database, replay, config, scope, namespace)
-        _apply(database, replay, selected, config, scope, namespace, mapping, fingerprint, progress)
+        mapping = _bind(database, replay, config, scope, namespace, usage=usage)
+        _apply(database, replay, selected, config, scope, namespace, mapping, fingerprint, progress, usage=usage)
     return _results(db, selected, config)
 
 
