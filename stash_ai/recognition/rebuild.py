@@ -29,6 +29,58 @@ def _observations(db, scan):
                       'JOIN scans s ON s.id=o.scan WHERE o.scan=? ORDER BY o.cue,o.id', (scan,))
 
 
+def _batches(rows, size=256):
+    iterator = iter(rows)
+    while batch := list(itertools.islice(iterator, size)):
+        yield batch
+
+
+def _inserted(db, sql, rows):
+    """Expose completed work only after each bounded SQL batch succeeds."""
+    for batch in _batches(rows):
+        db.executemany(sql, batch)
+        yield from batch
+
+
+def _copy_observations(db, replay, scan):
+    names = ('id', 'scan', 'cue', 'seconds', 'source', 'rect', 'geometry', 'quality',
+             'rejected', 'dimensions', 'embedding')
+    for batch in _batches(_observations(db, scan)):
+        replay.executemany('INSERT INTO observations VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+                           (tuple(row[name] for name in names) + (None,) for row in batch))
+        replay.executemany('INSERT INTO sample_keys VALUES (?,?)',
+                           ((row['id'], sample_key(row)) for row in batch))
+        yield from batch
+
+
+def _restore_origins(db, replay, scan):
+    keys = replay.execute('SELECT k.sample_key FROM sample_keys k JOIN observations o '
+                          'ON o.id=k.observation WHERE o.scan=?', (scan,))
+    for batch in _batches(keys):
+        old = db.execute('SELECT * FROM identity_origins WHERE sample_key IN '
+                         '(SELECT value FROM json_each(?))', (encoded([row[0] for row in batch]),))
+        replay.executemany('INSERT OR REPLACE INTO origins VALUES (?,?,?)', old)
+        yield from batch
+
+
+def _apply_members(db, replay, mapping):
+    rows = replay.execute('SELECT m.observation,m.person,k.sample_key FROM members m '
+                          'JOIN sample_keys k ON k.observation=m.observation')
+    for batch in _batches(rows):
+        db.executemany('INSERT INTO members VALUES (?,?)',
+                       ((row['observation'], mapping[row['person']]) for row in batch))
+        db.executemany('INSERT OR IGNORE INTO identity_origins VALUES (?,?,?)',
+                       ((row['sample_key'], mapping[row['person']], row['observation']) for row in batch))
+        yield from batch
+
+
+def _mapped_candidates(replay, mapping, policy):
+    for row in replay.execute('SELECT * FROM candidates WHERE policy=?', (policy,)):
+        payload = json.loads(row['payload'])
+        payload['identity_basis'] = 'cold_selected_replay'
+        yield (row['id'], row['scan'], policy, mapping.get(row['person']), row['status'], encoded(payload))
+
+
 def _copy_selection(database, replay, selected, scope, namespace):
     db = database.connection
     replay.executescript(SCHEMA + '''
@@ -64,7 +116,7 @@ def _copy_selection(database, replay, selected, scope, namespace):
                 raise ValueError('Identity rebuild requires complete compatible selected scans.')
             replay.execute('INSERT INTO scans VALUES (?,?,?,?,?,?,?,?,?,?,?)', tuple(record))
             with tracking(
-                _observations(db, item['scan']),
+                _copy_observations(db, replay, item['scan']),
                 'Copy face observations',
                 unit='observation',
                 total=lambda: db.execute(
@@ -73,22 +125,20 @@ def _copy_selection(database, replay, selected, scope, namespace):
                 ).fetchone()[0],
             ) as tracked:
                 for row in tracked:
-                    # Stream one embedding at a time; JPEGs never enter the scratch DB.
-                    replay.execute('INSERT INTO observations VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
-                        tuple(row[name] for name in ('id','scan','cue','seconds','source','rect','geometry','quality',
-                                                     'rejected','dimensions','embedding')) + (None,))
-                    replay.execute('INSERT INTO sample_keys VALUES (?,?)', (row['id'], sample_key(row)))
+                    pass  # The bounded copy iterator has completed both inserts.
             # Seed origins from old memberships only when no older origin exists.
             # Superseded scans are useful for identity labels, never grouping evidence.
-            with tracking(
-                db.execute(
+            historical = db.execute(
                     'SELECT '
                     'o.cue,o.seconds,o.source,o.rect,o.geometry,o.id,s.scope,s.namespace,s.scene,s.input_sha,m.person'
                     ' FROM members m JOIN observations o ON o.id=m.observation JOIN scans s ON '
                     's.id=o.scan WHERE s.scope=? AND s.namespace=? AND s.scene=? ORDER BY '
                     's.rowid,o.cue,o.id',
                     (scope, namespace, item['scene']),
-                ),
+                )
+            with tracking(
+                _inserted(replay, 'INSERT OR IGNORE INTO origins VALUES (?,?,?)',
+                          ((sample_key(row), row['person'], row['id']) for row in historical)),
                 'Read historical sample ownership',
                 unit='member',
                 total=lambda: db.execute(
@@ -98,14 +148,9 @@ def _copy_selection(database, replay, selected, scope, namespace):
                 ).fetchone()[0],
             ) as tracked:
                 for row in tracked:
-                    key = sample_key(row)
-                    replay.execute('INSERT OR IGNORE INTO origins VALUES (?,?,?)', (key, row['person'], row['id']))
+                    pass
             with tracking(
-                replay.execute(
-                    'SELECT sample_key FROM sample_keys WHERE observation IN (SELECT id FROM '
-                    'observations WHERE scan=?)',
-                    (item['scan'],),
-                ),
+                _restore_origins(db, replay, item['scan']),
                 'Restore original sample ownership',
                 unit='observation',
                 total=lambda: replay.execute(
@@ -114,9 +159,7 @@ def _copy_selection(database, replay, selected, scope, namespace):
                 ).fetchone()[0],
             ) as tracked:
                 for row in tracked:
-                    old = db.execute('SELECT * FROM identity_origins WHERE sample_key=?', (row[0],)).fetchone()
-                    if old is not None:
-                        replay.execute('INSERT OR REPLACE INTO origins VALUES (?,?,?)', tuple(old))
+                    pass
     with work('Commit replay evidence', 1, unit='transaction', position=0) as committed:
         replay.commit()
         committed.advance()
@@ -171,6 +214,10 @@ def _bind(database, replay, config, scope, namespace):
     ) as tracked:
         for cluster in tracked:
             ranked = []
+            samples = ([vector(row) for row in replay.execute(
+                'SELECT o.dimensions,o.embedding FROM observations o JOIN members m '
+                'ON m.observation=o.id WHERE m.person=? ORDER BY o.id LIMIT ?',
+                (cluster, config.data['clustering']['max_samples_per_person']))] if old_groups else [])
             with tracking(
                 old_groups,
                 'Compare historical identities',
@@ -178,10 +225,8 @@ def _bind(database, replay, config, scope, namespace):
             ) as tracked:
                 for old in tracked:
                     means, minimum = [], 1.
-                    for row in replay.execute('SELECT o.dimensions,o.embedding FROM observations o JOIN members m '
-                                              'ON m.observation=o.id WHERE m.person=? ORDER BY o.id LIMIT ?',
-                                              (cluster, config.data['clustering']['max_samples_per_person'])):
-                        mean, low = _similarities(old, vector(row))
+                    for query in samples:
+                        mean, low = _similarities(old, query)
                         means.append(mean)
                         minimum = min(minimum, low)
                     if means and minimum >= config.data['clustering']['cohesion_threshold']:
@@ -218,9 +263,8 @@ def _apply(database, replay, selected, config, scope, namespace, mapping, finger
     with work('Apply rebuilt identities', 1, unit='transaction', position=0) as committed:
         with db:
             with tracking(
-                replay.execute(
-                    'SELECT * FROM origins',
-                ),
+                _inserted(db, 'INSERT OR IGNORE INTO identity_origins VALUES (?,?,?)',
+                          replay.execute('SELECT * FROM origins')),
                 'Save original sample ownership',
                 unit='member',
                 total=lambda: replay.execute(
@@ -228,7 +272,7 @@ def _apply(database, replay, selected, config, scope, namespace, mapping, finger
                 ).fetchone()[0],
             ) as tracked:
                 for row in tracked:
-                    db.execute('INSERT OR IGNORE INTO identity_origins VALUES (?,?,?)', tuple(row))
+                    pass
             with tracking(
                 mapping.values(),
                 'Save rebuilt identities',
@@ -247,9 +291,7 @@ def _apply(database, replay, selected, config, scope, namespace, mapping, finger
                                'ON s.id=o.scan WHERE s.scope=? AND s.namespace=? AND s.scene=?)', (scope, namespace, item['scene']))
                     db.execute('DELETE FROM candidates WHERE scan=? AND policy=?', (item['scan'], policy))
             with tracking(
-                replay.execute(
-                    'SELECT * FROM members',
-                ),
+                _apply_members(db, replay, mapping),
                 'Save rebuilt memberships',
                 unit='member',
                 total=lambda: replay.execute(
@@ -257,15 +299,10 @@ def _apply(database, replay, selected, config, scope, namespace, mapping, finger
                 ).fetchone()[0],
             ) as tracked:
                 for row in tracked:
-                    person = mapping[row['person']]
-                    db.execute('INSERT INTO members VALUES (?,?)', (row['observation'], person))
-                    key = replay.execute('SELECT sample_key FROM sample_keys WHERE observation=?', (row['observation'],)).fetchone()[0]
-                    db.execute('INSERT OR IGNORE INTO identity_origins VALUES (?,?,?)', (key, person, row['observation']))
+                    pass
             with tracking(
-                replay.execute(
-                    'SELECT * FROM candidates WHERE policy=?',
-                    (policy,),
-                ),
+                _inserted(db, 'INSERT INTO candidates VALUES (?,?,?,?,?,?)',
+                          _mapped_candidates(replay, mapping, policy)),
                 'Save rebuilt candidates',
                 unit='candidate',
                 total=lambda: replay.execute(
@@ -274,12 +311,7 @@ def _apply(database, replay, selected, config, scope, namespace, mapping, finger
                 ).fetchone()[0],
             ) as tracked:
                 for row in tracked:
-                    payload = json.loads(row['payload'])
-                    # A provisional group may be withheld and have no accepted person.
-                    person = mapping.get(row['person'])
-                    payload['identity_basis'] = 'cold_selected_replay'
-                    db.execute('INSERT INTO candidates VALUES (?,?,?,?,?,?)',
-                        (row['id'], row['scan'], policy, person, row['status'], encoded(payload)))
+                    pass
             references = _groups(db, scope, namespace, config.data['clustering'], usage=usage, stage='retained')
             context = reference_context(references)
             references.clear()
@@ -366,12 +398,24 @@ def rebuild_selected(database, selected, config, *, progress=None):
 
 def _results(db, selected, config):
     result = {}
+    policy = matching_policy(config)
+    def summaries():
+        for batch in _batches(selected):
+            grouped = {item['scan']: [] for item in batch}
+            for row in db.execute('SELECT scan,person,status,COUNT(*) AS observations FROM candidates '
+                'WHERE scan IN (SELECT value FROM json_each(?)) AND policy=? '
+                'GROUP BY scan,person,status ORDER BY scan,person,status',
+                (encoded(list(grouped)), policy)):
+                grouped[row['scan']].append({name: row[name] for name in ('person', 'status', 'observations')})
+            for item in batch:
+                yield item['scan'], grouped[item['scan']]
     with tracking(
-        selected,
+        summaries(),
         'Collect rebuilt identities',
         unit='scene',
         position=0,
+        total=len(selected),
     ) as tracked:
-        for item in tracked:
-            result[item['scan']] = _result(db, item['scan'], matching_policy(config))
+        for scan, rows in tracked:
+            result[scan] = rows
     return result

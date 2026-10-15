@@ -167,7 +167,8 @@ def cluster_scene(database, scan, config, *, progress=None):
         db.execute('DELETE FROM candidates WHERE scan=? AND policy=?', (scan, policy))
         with tracking(
             db.execute(
-                'SELECT * FROM observations WHERE scan=? AND rejected IS NULL ORDER BY cue,id',
+                'SELECT o.*,m.person AS prior_person FROM observations o LEFT JOIN members m '
+                'ON m.observation=o.id WHERE o.scan=? AND o.rejected IS NULL ORDER BY o.cue,o.id',
                 (scan,),
             ),
             'Match face observations',
@@ -176,8 +177,7 @@ def cluster_scene(database, scan, config, *, progress=None):
         ) as tracked:
             for observation in tracked:
                 query = vector(observation)
-                previous = db.execute("SELECT person FROM members WHERE observation=?", (observation["id"],)).fetchone()
-                prior_person = previous[0] if previous is not None else None
+                prior_person = observation['prior_person']
                 ranked = []
                 near = False
                 for group in groups:
@@ -222,6 +222,9 @@ def cluster_scene(database, scan, config, *, progress=None):
         usage.emit(force=True)
         people = [row[0] for row in db.execute('SELECT DISTINCT person FROM candidates '
                                                 "WHERE scan=? AND policy=? AND status='pending'", (scan, policy))]
+        support_counts = dict(db.execute('SELECT c.person,COUNT(DISTINCT o.seconds) FROM candidates c '
+            "JOIN observations o ON o.id=json_extract(c.payload,'$.observation') "
+            'WHERE c.scan=? AND c.policy=? GROUP BY c.person', (scan, policy)))
         with tracking(
             people,
             'Resolve identity support',
@@ -229,9 +232,7 @@ def cluster_scene(database, scan, config, *, progress=None):
         ) as tracked:
             for person in tracked:
                 group = by_id[person]
-                support = db.execute('SELECT COUNT(DISTINCT o.seconds) FROM candidates c JOIN observations o '
-                                     "ON o.id=json_extract(c.payload,'$.observation') "
-                                     'WHERE c.scan=? AND c.policy=? AND c.person=?', (scan, policy, person)).fetchone()[0]
+                support = support_counts.get(person, 0)
                 accepted = group.known or support >= settings['min_identity_support']
                 status = 'accepted' if accepted else 'withheld'
                 db.execute('UPDATE candidates SET status=? WHERE scan=? AND policy=? AND person=?',
@@ -271,7 +272,8 @@ def _recheck_after_merge(db, scan, policy, groups, config):
     settings = config.data['recognition']
     with tracking(
         db.execute(
-            'SELECT * FROM observations WHERE scan=? AND rejected IS NULL ORDER BY cue,id',
+            'SELECT o.*,m.person AS prior_person FROM observations o LEFT JOIN members m '
+            'ON m.observation=o.id WHERE o.scan=? AND o.rejected IS NULL ORDER BY o.cue,o.id',
             (scan,),
         ),
         'Recheck merged observations',
@@ -297,8 +299,7 @@ def _recheck_after_merge(db, scan, policy, groups, config):
                     reason = 'ambiguous_identity'
                 else:
                     person, status, reason = ranked[0][1], 'accepted', 'known_identity'
-                    previous = db.execute('SELECT person FROM members WHERE observation=?', (row['id'],)).fetchone()
-                    if previous is not None and previous[0] != person:
+                    if row['prior_person'] is not None and row['prior_person'] != person:
                         person, status, reason = None, 'withheld', 'policy_reassignment_requires_review'
                     else:
                         db.execute('INSERT OR IGNORE INTO members VALUES (?,?)', (row['id'], person))
