@@ -17,6 +17,8 @@ from .portrait_availability import measure_available, score_metadata, observatio
 from .visibility import cached as cached_visibility, required as visibility_required
 from .expression import cached as cached_expression, required as expression_required
 from .progress import tracking
+from .portrait_availability import candidate_observations, crop_row
+from .clustering import matching_policy
 
 
 class Sources:
@@ -57,11 +59,12 @@ class Sources:
 
 def store(database, identifier, scope, target, scene, metadata):
     with database.connection:
-        existing = database.connection.execute('SELECT metadata,image FROM portraits WHERE id=?', (identifier,)).fetchone()
+        existing = database.connection.execute('SELECT metadata,image IS NOT NULL AS has_image '
+                                               'FROM portraits WHERE id=?', (identifier,)).fetchone()
         if existing:
             # Retain any previously prepared JPEG, including one now ineligible.
             retained = json.loads(existing['metadata'])
-            if existing['image'] is not None:
+            if existing['has_image']:
                 # Re-ranking cannot relabel a cached recognition crop as a live
                 # thumbnail, or change the coordinates of already encoded bytes.
                 for name in ('source_type', 'crop', 'crop_coordinate_system', 'encoding', 'pixels',
@@ -71,7 +74,9 @@ def store(database, identifier, scope, target, scene, metadata):
             retained.update(metadata)
             if not metadata.get('reason'):
                 retained.pop('reason', None)
-            database.connection.execute('UPDATE portraits SET metadata=? WHERE id=?', (encoded(safe_metadata(retained)), identifier))
+            payload = encoded(safe_metadata(retained))
+            if payload != existing['metadata']:
+                database.connection.execute('UPDATE portraits SET metadata=? WHERE id=?', (payload, identifier))
         else:
             database.connection.execute('INSERT INTO portraits VALUES (?,?,?,?,?,?,?,?)',
                 (identifier, scope, target['person'], scene, encoded(metadata), None, None,
@@ -89,13 +94,14 @@ def choose_vtt(database, client, config, scope, target, source_factory, visibili
     with closing(Sources(client, config, source_factory), name='close VTT portrait source') as sources:
         for selected in sorted(target['scans'], key=lambda item: (item['scene'], item['scan'])):
             scene = selected['scene']
-            rows = db.execute('''SELECT o.*,s.input_sha FROM observations o
+            rows = db.execute('''SELECT o.id,o.scan,o.cue,o.seconds,o.source,o.rect,o.geometry,o.quality,
+              o.dimensions,o.embedding,s.input_sha FROM observations o
               JOIN members m ON m.observation=o.id JOIN scans s ON s.id=o.scan
               WHERE m.person=? AND o.scan=? AND s.scene=? AND s.scope=?
               AND s.namespace=? AND s.status='complete' AND o.rejected IS NULL
               ORDER BY o.cue,o.id''', (target['person'], selected['scan'], scene, scope, person['namespace']))
             with tracking(
-                rows,
+                candidate_observations(db, rows, selected['scan'], matching_policy(config)),
                 'Rank VTT portrait observations',
                 unit='observation',
                 total=lambda: db.execute(
@@ -105,7 +111,7 @@ def choose_vtt(database, client, config, scope, target, source_factory, visibili
                     (target['person'], selected['scan'], scene, scope, person['namespace']),
                 ).fetchone()[0],
             ) as tracked:
-                for row in tracked:
+                for row, candidate in tracked:
                     identifier = str(uuid.uuid5(uuid.NAMESPACE_URL,
                         encoded([scope, target['person'], row['id'], 'vtt', policy_sha])))
                     quality = json.loads(row['quality'])
@@ -121,7 +127,8 @@ def choose_vtt(database, client, config, scope, target, source_factory, visibili
                     if fallback_reason:
                         metadata['fallback'] = {'from': policy['source'], 'reason': fallback_reason}
                     try:
-                        reason, similarity, runner, basis = observation_identity(database, row, groups, target, config, context)
+                        reason, similarity, runner, basis = observation_identity(database, row, groups, target, config, context,
+                                                                                candidate=candidate)
                         metadata.update(similarity=similarity, runner_up=runner, identity_basis=basis)
                     except (TypeError, ValueError):
                         reason = 'portrait_identity_unverified'
@@ -137,7 +144,8 @@ def choose_vtt(database, client, config, scope, target, source_factory, visibili
                         (scope, target['person'], row['id'])).fetchone()
                     for name in required:
                         if cached[name](quality) and name not in bases:
-                            bases[name] = measurement_basis(row, 'recognition_crop' if legacy_crop else 'vtt')
+                            bases[name] = measurement_basis(crop_row(db, row) if legacy_crop else row,
+                                                            'recognition_crop' if legacy_crop else 'vtt')
                     missing = {name for name in required if not cached[name](quality)}
                     approximate = {name for name in required if bases.get(name, {}).get('source_type') == 'recognition_crop'}
                     if not reason and (missing or approximate):
@@ -149,7 +157,7 @@ def choose_vtt(database, client, config, scope, target, source_factory, visibili
                             metadata['source_warning'] = 'vtt_source_unavailable_or_changed'
                             source_type = 'recognition_crop'
                             try:
-                                image, face = retained_image(row)
+                                image, face = retained_image(crop_row(db, row))
                             except Exception:
                                 image = None
                         if image is not None:
@@ -160,7 +168,8 @@ def choose_vtt(database, client, config, scope, target, source_factory, visibili
                                     visibility, expression, force=force)
                             for name in requested:
                                 if name not in metadata['quality_errors'] and cached[name](quality):
-                                    bases[name] = measurement_basis(row, source_type)
+                                    bases[name] = measurement_basis(crop_row(db, row) if source_type == 'recognition_crop' else row,
+                                                                    source_type)
                     # Reuse remains independent of framing and ranking preferences.
                     if encoded(quality) != original_quality:
                         with db:
