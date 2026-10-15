@@ -880,6 +880,8 @@ retained observation IDs to human ground-truth person labels. Use representative
 different/same people, blur, pose and thumbnail sizes; choose thresholds separately
 per model on a calibration subset, then evaluate a separate held-out subset.
 Both adapters receive exactly the same retained crop and re-based source landmarks.
+Each selected scene must use observations from one retained scan revision;
+mixing versions is rejected before model preparation to avoid false co-presence.
 The helper runs the real grouping policy in disposable in-memory SQLite and
 reports embedding/accepted coverage, withheld/ambiguous observations, pair false
 merges and misses (including withheld), pair threshold errors, time and asset size.
