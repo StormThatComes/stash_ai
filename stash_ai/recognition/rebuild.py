@@ -24,7 +24,7 @@ def sample_key(row):
 
 
 def _observations(db, scan):
-    return db.execute('SELECT o.id,o.scan,o.cue,o.seconds,o.source,o.rect,o.geometry,o.quality,'
+    return db.execute('SELECT o.id,o.scan,o.cue,o.seconds,o.source,o.rect,o.geometry,'
                       'o.rejected,o.dimensions,o.embedding,s.scope,s.namespace,s.scene,s.input_sha FROM observations o '
                       'JOIN scans s ON s.id=o.scan WHERE o.scan=? ORDER BY o.cue,o.id', (scan,))
 
@@ -43,11 +43,13 @@ def _inserted(db, sql, rows):
 
 
 def _copy_observations(db, replay, scan):
-    names = ('id', 'scan', 'cue', 'seconds', 'source', 'rect', 'geometry', 'quality',
-             'rejected', 'dimensions', 'embedding')
     for batch in _batches(_observations(db, scan)):
+        # Source/rect are consumed by sample_key on the authoritative row.
+        # Grouping needs geometry, time and embeddings, never quality or JPEGs.
         replay.executemany('INSERT INTO observations VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
-                           (tuple(row[name] for name in names) + (None,) for row in batch))
+                           ((row['id'], row['scan'], row['cue'], row['seconds'], '', '[]',
+                             row['geometry'], '{}', row['rejected'], row['dimensions'],
+                             row['embedding'], None) for row in batch))
         replay.executemany('INSERT INTO sample_keys VALUES (?,?)',
                            ((row['id'], sample_key(row)) for row in batch))
         yield from batch
@@ -390,7 +392,7 @@ def rebuild_selected(database, selected, config, *, progress=None):
             position=0,
         ) as tracked:
             for item in tracked:
-                cluster_scene(temporary, item['scan'], config, progress=progress)
+                cluster_scene(temporary, item['scan'], config, progress=progress, _cold_replay=True)
         mapping = _bind(database, replay, config, scope, namespace)
         _apply(database, replay, selected, config, scope, namespace, mapping, fingerprint, progress)
     return _results(db, selected, config)
