@@ -1,5 +1,11 @@
 """Invocation-owned identity models borrowed by scans and video portraits."""
 from stash_ai.runtime.cleanup import cleanup
+from contextlib import contextmanager, nullcontext
+
+
+def prepared_frame(backend, image):
+    factory = getattr(backend, 'prepared_frame', None)
+    return factory(image) if factory is not None else nullcontext()
 
 
 class LazyBackend:
@@ -60,6 +66,20 @@ class _BorrowedBackend:
 
     def embed(self, image, face):
         return self._infer('embed', image, face)
+
+    @contextmanager
+    def prepared_frame(self, image):
+        if not self.active:
+            raise RuntimeError('Recognition backend lease is no longer active.')
+        if not hasattr(self.model, 'prepare_frame'):
+            yield
+            return
+        previous = self._infer('prepare_frame', image)
+        try:
+            yield
+        finally:
+            if self.active:
+                cleanup([('release prepared recognition frame', lambda: self._infer('release_frame', previous))])
 
     def close(self):
         # Scene/portrait cleanup releases only its lease. The run owns weights.
