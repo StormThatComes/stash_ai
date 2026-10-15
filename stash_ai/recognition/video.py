@@ -52,6 +52,7 @@ class VideoFrames(AbstractContextManager):
         self.error, self.active, self.process = None, None, None
         self.last_error = None
         self.server = self.thread = None
+        self.readers = []
         self.guard = threading.Lock()
         self.cancellation = Cancellation()
         self.path = '/' + uuid.uuid4().hex
@@ -162,7 +163,7 @@ class VideoFrames(AbstractContextManager):
         try:
             self.server = HTTPServer(('127.0.0.1', 0), Handler)
             self.thread = threading.Thread(target=self.server.serve_forever,
-                                           kwargs={'poll_interval': .05}, name='recognition-video')
+                                           kwargs={'poll_interval': .05}, name='recognition-video', daemon=True)
             self.thread.start()
             return self
         except BaseException:
@@ -215,18 +216,25 @@ class VideoFrames(AbstractContextManager):
             # Process ownership already exists before either thread allocation
             # or start can fail. Only successfully started readers may be joined.
             for stream, result, limit in ((process.stdout, output, None), (process.stderr, errors, 131072)):
-                worker = threading.Thread(target=read, args=(stream, result, limit))
+                worker = threading.Thread(target=read, args=(stream, result, limit), daemon=True)
                 worker.start()
                 workers.append(worker)
+                self.readers.append((worker, stream))
             process.wait(timeout=max(.01, self.deadline - time.monotonic()))
         finally:
+            from stash_ai.runtime.shutdown import TIMEOUT, quarantine, release
+            def join_reader(worker):
+                worker.join(timeout=TIMEOUT)
+                if getattr(worker, 'is_alive', lambda: False)():
+                    quarantine(lambda: not worker.is_alive(), self, key=worker)
             def release_process():
-                if process.poll() is not None:
+                if process.poll() is not None and not any(getattr(w, 'is_alive', lambda: False)() for w in workers):
                     self.process = None
+                    self.readers.clear()
             actions = [('stop portrait decoder', lambda: process.kill() if process.poll() is None else None),
-                       ('reap portrait decoder', lambda: process.wait(timeout=5))]
-            actions.extend(('join portrait pipe reader', lambda worker=worker: worker.join(timeout=5)) for worker in workers)
-            actions.extend(('close portrait pipe', stream.close) for stream in streams)
+                       ('reap portrait decoder', lambda: process.wait(timeout=TIMEOUT))]
+            actions.extend(('join portrait pipe reader', lambda worker=worker: join_reader(worker)) for worker in workers)
+            actions.extend(('close portrait pipe', lambda stream=stream: release(stream, stream.close)) for stream in streams)
             actions.append(('release portrait decoder', release_process))
             cleanup(actions)
         if failures:
@@ -255,27 +263,34 @@ class VideoFrames(AbstractContextManager):
                        'source_validator': list(self.validator or (None, None))}
 
     def close(self):
+        from stash_ai.runtime.shutdown import TIMEOUT, call, join, release
         with self.guard:
             active, self.active = self.active, None
         process = self.process
-        server, self.server = self.server, None
+        server = self.server
         thread = self.thread
-        owned, self.owned_client = self.owned_client, False
+        owned = self.owned_client
         actions = [('cancel portrait bridge', self.cancellation.cancel)]
         if active is not None:
             actions.append(('abort portrait response', lambda: abort_response(active)))
         if process is not None:
             actions.extend([
                 ('stop portrait decoder', lambda: process.kill() if process.poll() is None else None),
-                ('reap portrait decoder', lambda: process.wait(timeout=5)),
+                ('reap portrait decoder', lambda: process.wait(timeout=TIMEOUT)),
             ])
         if server is not None:
             if thread is not None and thread.is_alive():
-                actions.extend([('stop portrait server', server.shutdown),
-                                ('join portrait server', thread.join)])
-            actions.append(('close portrait server', server.server_close))
+                actions.extend([('stop portrait server', lambda: call(server.shutdown, server)),
+                                ('join portrait server', lambda: join(thread, self))])
+            def close_server():
+                server.server_close()
+                self.server = None
+            actions.append(('close portrait server', lambda: release(server, close_server)))
         if owned:
-            actions.append(('close portrait media client', self.client.close))
+            def close_client():
+                self.client.close()
+                self.owned_client = False
+            actions.append(('close portrait media client', lambda: release(self.client, close_client)))
         def release_process():
             if process is not None and process.poll() is not None:
                 self.process = None

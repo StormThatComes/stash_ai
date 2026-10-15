@@ -46,20 +46,19 @@ class ManagedStream:
     def stop(self):
         # Stop queue writers before a cancellation callback can fail.
         self.stopped.set()
-        cleanup([self.cancellation.cancel,
+        from stash_ai.runtime.shutdown import call
+        cleanup([lambda: call(self.cancellation.cancel, self),
                  lambda: self.worker.cancel() if self.worker is not None and hasattr(self.worker, 'cancel') else None])
 
     def join(self):
-        if self.worker is None:
-            return
-        if hasattr(self.worker, 'result'):
-            if not self.worker.cancelled():
-                self.worker.result()
-        else:
-            if self.worker.ident is not None:
-                self.worker.join()
+        from stash_ai.runtime.shutdown import join
+        join(self.worker, self)
 
     def drain(self):
+        from stash_ai.runtime.shutdown import release
+        release(self, self._drain)
+
+    def _drain(self):
         while True:
             try:
                 self.queue.get_nowait()

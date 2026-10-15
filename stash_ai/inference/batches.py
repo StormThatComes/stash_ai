@@ -9,6 +9,8 @@ from stash_ai.runtime.cleanup import cleanup, closing
 
 
 def prediction_scores(tagger, prepared):
+    from stash_ai.runtime.shutdown import require_idle
+    require_idle()
     from stash_ai.backends.predictions import checked_prediction
     collated = isinstance(prepared, PreparedBatch)
     return checked_prediction(tagger, prepared.inputs if collated else prepared,
@@ -106,13 +108,16 @@ class BatchPredictions:
         return item
 
     def close(self):
+        from stash_ai.runtime.shutdown import release
         callbacks = [self.channel.stop]
         if self.external_inputs is not None:
             stop = getattr(self.external_inputs, 'stop', None)
             if stop is not None:
                 callbacks.append(stop)
-            callbacks.append(self.external_inputs.close)
-        cleanup(callbacks + [self.channel.join, self.channel.drain], report=self.report)
+        callbacks.append(self.channel.join)
+        if self.external_inputs is not None:
+            callbacks.append(lambda: release(self.external_inputs, self.external_inputs.close))
+        cleanup(callbacks + [self.channel.drain], report=self.report)
 
 
 def predicted_batches(app, tagger, stash, paths, cues, *, prefetch=0,

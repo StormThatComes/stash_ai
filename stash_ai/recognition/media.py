@@ -169,7 +169,8 @@ class SpriteInput:
             cached[2].close()
 
     def close(self):
-        cleanup([self._close_portrait_sheet, self.cache.clear])
+        from stash_ai.runtime.shutdown import release
+        release(self, lambda: cleanup([self._close_portrait_sheet, self.cache.clear]))
 
     def __enter__(self):
         return self
