@@ -125,7 +125,7 @@ def matching_policy(config):
         'clustering': config.data['clustering']})
 
 
-def cluster_scene(database, scan, config, *, progress=None):
+def cluster_scene(database, scan, config, *, progress=None, _cold_replay=False):
     """Selected evidence can merge compatible historical identities oldest-first.
 
     Cohesion uses a bounded representative sample, not an N-by-N matrix or a
@@ -144,9 +144,11 @@ def cluster_scene(database, scan, config, *, progress=None):
         return []
     settings, grouping = config.data['recognition'], config.data['clustering']
     groups = _groups(db, record['scope'], record['namespace'], grouping, usage=usage)
-    context = reference_context(groups)
-    existing = db.execute('SELECT COUNT(*) FROM candidates WHERE scan=? AND policy=? '
-                          "AND json_extract(payload,'$.reference_context')=?", (scan, policy, context)).fetchone()[0]
+    existing = 0
+    if not _cold_replay:
+        context = reference_context(groups)
+        existing = db.execute('SELECT COUNT(*) FROM candidates WHERE scan=? AND policy=? '
+                              "AND json_extract(payload,'$.reference_context')=?", (scan, policy, context)).fetchone()[0]
     if existing == count and count:
         with tracking(
             db.execute(
@@ -261,9 +263,10 @@ def cluster_scene(database, scan, config, *, progress=None):
             _recheck_after_merge(db, scan, policy, retained, config)
             retained.clear()
             retained = _groups(db, record['scope'], record['namespace'], grouping, usage=usage, stage='retained')
-        context = reference_context(retained)
-        db.execute("UPDATE candidates SET payload=json_set(payload,'$.reference_context',?) "
-                   'WHERE scan=? AND policy=?', (context, scan, policy))
+        if not _cold_replay:
+            context = reference_context(retained)
+            db.execute("UPDATE candidates SET payload=json_set(payload,'$.reference_context',?) "
+                       'WHERE scan=? AND policy=?', (context, scan, policy))
     return _result(db, scan, policy)
 
 
