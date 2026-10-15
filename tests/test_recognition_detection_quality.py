@@ -290,10 +290,13 @@ def test_unalignable_face_is_rejected_when_only_pose_filter_is_disabled(tmp_path
 
 
 def test_legacy_complete_scan_rechecks_alignment_without_loading_models(tmp_path):
+    from stash_ai.recognition.rebuild import rebuild_selected
     from tests.test_recognition_clustering import setup as simple_setup, scan
     config = simple_setup(tmp_path)
     with FaceDatabase(config.database) as db:
         identifier, _ = scan(db, config, '1')
+        selection = [{'scene': '1', 'scan': identifier}]
+        assert rebuild_selected(db, selection, config)[identifier][0]['status'] == 'accepted'
         rows = db.connection.execute('SELECT id,quality FROM observations WHERE scan=? ORDER BY cue', (identifier,)).fetchall()
         for row in rows:
             quality = json.loads(row['quality'])
@@ -309,3 +312,6 @@ def test_legacy_complete_scan_rechecks_alignment_without_loading_models(tmp_path
         assert db.connection.execute('SELECT COUNT(*) FROM observations WHERE rejected IS NULL').fetchone()[0] == 2
         rejected = db.connection.execute('SELECT rejected,embedding,crop FROM observations WHERE id=?', (rows[0]['id'],)).fetchone()
         assert rejected[:] == ('face_landmarks_invalid', None, None)
+        replayed = rebuild_selected(db, selection, config)[identifier]
+        assert sum(row['observations'] for row in replayed if row['status'] == 'accepted') == 0
+        assert sum(row['observations'] for row in replayed) == 2
