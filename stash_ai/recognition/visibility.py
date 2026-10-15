@@ -24,7 +24,7 @@ def required(policy):
 
 
 def valid_fraction(value):
-    return type(value) in (int, float) and math.isfinite(value) and 0 <= value <= 1
+    return type(value) in (int, float) and 0 <= value <= 1 and math.isfinite(value)
 
 
 def cached(quality):

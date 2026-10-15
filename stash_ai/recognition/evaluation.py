@@ -10,7 +10,7 @@ def evaluate_pairs(pairs, threshold):
     """
     import numpy as np
     from .models import normalized_embedding
-    if type(threshold) not in (float, int) or not math.isfinite(threshold) or not 0 <= threshold <= 1:
+    if type(threshold) not in (float, int) or not 0 <= threshold <= 1 or not math.isfinite(threshold):
         raise ValueError('Face evaluation threshold must be a finite cosine value in [0,1].')
     counts = dict(same=0, different=0, false_match=0, false_miss=0)
     for first, second, same in pairs:

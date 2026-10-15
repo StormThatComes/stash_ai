@@ -171,7 +171,10 @@ def checked_detection(row):
 
 def normalized_embedding(value, dimensions):
     import numpy as np
-    result = np.asarray(value, dtype=np.float32).reshape(-1)
+    raw = np.asarray(value)
+    if raw.dtype.kind not in 'fiu':
+        raise ValueError('Face recognizer must return real numeric embedding values.')
+    result = raw.astype(np.float32).reshape(-1)
     if result.shape != (dimensions,) or not np.isfinite(result).all():
         raise ValueError('Face recognizer returned incompatible/non-finite embedding.')
     norm = float(np.linalg.norm(result.astype(np.float64)))
