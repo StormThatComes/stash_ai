@@ -276,7 +276,12 @@ def execute(args, config, *, services=None):
                                     f'Face references scene {last_scene}: ' + usage_line(references) +
                                     f" people={references['people']} samples={references['samples']} stage={references['stage']}")
                 with phase(report, 'Recognition performer selection'):
-                    targets = canonical_targets(database, ready)
+                    def blocked_metadata(person, error):
+                        counts['metadata_failed'] += 1
+                        counts['metadata_withheld'] += 1
+                        report.optional('recognition_metadata_withheld', report.issue, 'recognition',
+                                        'performer_selection', person, error, safe_error(error, key))
+                    targets = canonical_targets(database, ready, on_blocked=blocked_metadata)
                 if portraits_only:
                     counts['portrait_people_selected'] = len(targets)
                     counts['portrait_scenes_selected'] = len(identifiers)

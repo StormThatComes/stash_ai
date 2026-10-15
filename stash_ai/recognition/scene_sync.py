@@ -2,7 +2,7 @@
 import json
 
 from .publication import PendingRecognition, operation_id, perform
-from .stash import checked_id, owns
+from .stash import checked_id, checked_token, owns
 from .database import encoded
 from .progress import tracking
 
@@ -51,6 +51,7 @@ def remove_stale_links(database, client, report, scope, scene, wanted, namespace
             payload = json.loads(row['payload'])
             if row['target'] in wanted or not payload.get('managed', True):
                 continue
+            checked_token(database, row['person'], row['token'])
             if not payload.get('active', True):
                 removal = db.execute('SELECT status FROM publications WHERE id=?',
                     (operation_id(scope, scene, row['person'], 'unlink'),)).fetchone()
