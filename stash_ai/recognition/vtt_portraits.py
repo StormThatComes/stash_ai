@@ -81,8 +81,9 @@ def store(database, identifier, scope, target, scene, metadata):
 def choose_vtt(database, client, config, scope, target, source_factory, visibility, expression, *, fallback_reason=None):
     db, policy = database.connection, config.data['portraits']
     person = db.execute('SELECT * FROM people WHERE id=? AND scope=?', (target['person'], scope)).fetchone()
-    groups = {group.identifier: group for group in _groups(db, scope, person['namespace'], config.data['clustering'])}
-    context = reference_context(groups.values())
+    from .context import portrait_references
+    groups, context = portrait_references(database, scope, person['namespace'], config,
+        lambda: _groups(db, scope, person['namespace'], config.data['clustering']))
     policy_sha = policy_identity(config)
     ranked = []  # Only scores/IDs, never all embedding or JPEG BLOBs.
     with closing(Sources(client, config, source_factory), name='close VTT portrait source') as sources:

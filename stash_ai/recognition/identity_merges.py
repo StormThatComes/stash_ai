@@ -100,8 +100,8 @@ def _merge_support_policy(config):
     Changing the minimum support should reuse valid proofs; changes to match
     or cohesion thresholds must obtain new nominations from selected scenes.
     """
-    from .config import digest
-    return digest({'format': 1,
+    from .context import policy_digest
+    return policy_digest(config, 'merge-support-v1', lambda: {'format': 1,
                    'match_threshold': config.data['recognition']['match_threshold'],
                    'cohesion_threshold': config.data['clustering']['cohesion_threshold']})
 
