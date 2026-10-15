@@ -16,6 +16,8 @@ class LazyBackend:
 
     def borrow(self, config=None, paths=None):
         """Accept the scan/video factory signatures without transferring ownership."""
+        from stash_ai.runtime.shutdown import require_idle
+        require_idle()
         if self.closed:
             raise RuntimeError('Recognition backend owner is closed.')
         if self.model is None:
@@ -36,6 +38,10 @@ class LazyBackend:
             cleanup([('close failed recognition backend', model.close)])
 
     def close(self):
+        from stash_ai.runtime.shutdown import release
+        release(self, self._close)
+
+    def _close(self):
         self.closed = True
         if self.model is not None:
             self.invalidate(self.model)
@@ -53,6 +59,8 @@ class _BorrowedBackend:
         return getattr(self.model, name)
 
     def _infer(self, method, *args):
+        from stash_ai.runtime.shutdown import require_idle
+        require_idle()
         if self.model is None or self.owner.model is not self.model:
             raise RuntimeError('Recognition backend lease is no longer active.')
         try:

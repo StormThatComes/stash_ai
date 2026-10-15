@@ -170,8 +170,7 @@ def execute(args, config, *, services=None):
             try:
                 with phase(report, 'Recognition assets'):
                     with work('Prepare recognition assets', 1, unit='step', position=0) as assets:
-                        paths = (LazyAssets(config, services.assets, report) if portraits_only else
-                                 services.assets(config, write=report.write))
+                        paths = LazyAssets(config, services.assets, report)
                         assets.advance()
                     visibility = LazyVisibility(config, paths, services.visibility)
                     expression = LazyExpression(config, paths, services.expression)
@@ -191,6 +190,7 @@ def execute(args, config, *, services=None):
                             'dimensions': value.dimensions, 'runtime': getattr(value, 'provenance', {})})
                     def load_models(config, paths):
                         with activity(report, 'load detection and recognition models'):
+                            paths.prepare_identity()
                             return services.backend(config, paths)
                     backend = LazyBackend(config, paths, load_models, loaded=loaded)
                     runtime_services = replace(services, backend=backend.borrow)
@@ -359,8 +359,22 @@ def execute(args, config, *, services=None):
                     actions.append(('close portrait expression model', expression.close))
                 if backend is not None:
                     actions.append(('close recognition identity models', backend.close))
-                # Console diagnostics cannot skip independent durable history
-                # finalization or replace an inference/publication interruption.
-                cleanup(actions + [('collect recognition error summary', collect_errors),
-                                   ('render recognition error summary', show_errors),
-                                   ('finish recognition history', finish_history)], report=report)
+                resource_error = None
+                before_cleanup = report.counts['cleanup_failures']
+                try:
+                    cleanup(actions, report=report)
+                except BaseException as error:
+                    resource_error = error
+                    if outcome in ('success', 'partial'):
+                        outcome, failure = 'failed', safe_error(error, key)[:1000]
+                finally:
+                    if report.counts['cleanup_failures'] > before_cleanup and outcome == 'success':
+                        outcome, failure = 'failed', 'Recognition resource cleanup failed.'
+                    # History stays on its SQLite owner, even while a worker's
+                    # resources must remain quarantined. Preserve any primary.
+                    cleanup([('collect recognition error summary', collect_errors),
+                             ('render recognition error summary', show_errors),
+                             ('finish recognition history', finish_history)],
+                            report=report, primary=resource_error)
+                if resource_error is not None:
+                    raise resource_error

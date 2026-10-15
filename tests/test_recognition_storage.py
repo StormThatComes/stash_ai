@@ -189,6 +189,7 @@ def test_failed_v2_merge_support_migration_is_atomic(tmp_path, monkeypatch):
         db.executescript(SCHEMA_V2)
         db.execute(f'PRAGMA application_id={APPLICATION_ID}')
         db.execute('PRAGMA user_version=2')
+        db.execute('INSERT INTO metadata VALUES (?,?)', ('installation', '01234567-89ab-cdef-0123-456789abcdef'))
     original = module.SUPPORT_SCHEMA
     monkeypatch.setattr(module, 'SUPPORT_SCHEMA', original + '\nINVALID SQL;')
     with pytest.raises(sqlite3.Error):
@@ -244,6 +245,7 @@ def test_crashed_face_backup_leaves_final_destination_available(tmp_path):
 from stash_ai.recognition.database import FaceDatabase
 with FaceDatabase(sys.argv[1]) as db:
     class Crash:
+        in_transaction = False
         def backup(self,target): os._exit(17)
     db.connection.close()
     db.connection=Crash()
@@ -333,7 +335,7 @@ def test_backup_preserves_racing_destination_and_cleans_stage(tmp_path, monkeypa
             state.backup(destination)
         assert destination.read_bytes() == b'other writer'
         assert path.read_bytes() == before
-        assert not list(tmp_path.glob('.backup.sqlite3-*.tmp'))
+        assert not list(tmp_path.glob('.recognition-backup-*.tmp'))
 
 
 @pytest.mark.parametrize('primary', [False, True])

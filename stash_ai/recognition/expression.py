@@ -32,6 +32,10 @@ class ExpressionError(RuntimeError):
     pass
 
 
+class ExpressionGeometryError(ValueError):
+    """An observation-local face association failure, not a poisoned session."""
+
+
 def required(policy):
     return any(policy['weights'][name] > 0 for name in WEIGHTS)
 
@@ -69,8 +73,11 @@ class LazyExpression:
         self.config, self.paths, self.factory = config, paths, factory or FaceExpression
         self.model = None
         self._initialization_error = None
+        self._inference_failures = 0
 
     def measure(self, image, face):
+        from stash_ai.runtime.shutdown import require_idle
+        require_idle()
         try:
             if self.model is None:
                 if self._initialization_error is not None:
@@ -84,14 +91,24 @@ class LazyExpression:
             if not isinstance(value, dict) or not cached(value):
                 raise ValueError('Expression model returned an invalid or incompatible measurement.')
             return value
+        except ExpressionGeometryError as error:
+            raise ExpressionError('Face expression measurement failed: ' + str(error)) from error
         except Exception as error:
+            if self.model is not None:
+                from stash_ai.runtime.cleanup import cleanup
+                model, self.model = self.model, None
+                self._inference_failures += 1
+                if self._inference_failures >= 2:
+                    self._initialization_error = 'Expression session recovery exhausted after repeated inference failures.'
+                cleanup([('close failed expression model', model.close)])
             raise ExpressionError('Face expression measurement failed: ' + str(error)) from error
 
     def close(self):
         self._initialization_error = None
+        self._inference_failures = 0
         if self.model is not None:
-            self.model.close()
-            self.model = None
+            model, self.model = self.model, None
+            model.close()
 
 
 
@@ -106,14 +123,14 @@ def associated(landmarks, face):
     expected[3:] = expected[3:][np.argsort(expected[3:, 0])]
     scale = float(np.linalg.norm(expected[0] - expected[1]))
     if not math.isfinite(scale) or scale <= 1:
-        raise ValueError('Expression target landmarks are invalid.')
+        raise ExpressionGeometryError('Expression target landmarks are invalid.')
     anchors = np.array([(points[33] + points[133]) / 2, (points[362] + points[263]) / 2,
                         points[1], points[61], points[291]])
     anchors[:2] = anchors[:2][np.argsort(anchors[:2, 0])]
     anchors[3:] = anchors[3:][np.argsort(anchors[3:, 0])]
     error = float(np.linalg.norm(anchors - expected, axis=1).mean() / scale)
     if error > .35:
-        raise ValueError('Expression mesh cannot be associated with the verified identity.')
+        raise ExpressionGeometryError('Expression mesh cannot be associated with the verified identity.')
 
 
 class FaceExpression:

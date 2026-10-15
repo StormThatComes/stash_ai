@@ -5,6 +5,7 @@ from collections import deque
 from concurrent.futures import Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from contextlib import nullcontext
+import sys
 from typing import Any, TYPE_CHECKING
 
 from stash_ai.inference import sprites
@@ -160,16 +161,21 @@ def prepared_batches(app, tagger, stash, paths, cues, prefetch=0, workers=1, *,
             yield prepared, batch_cues
     finally:
         from stash_ai.runtime.cleanup import cleanup
+        from stash_ai.runtime.shutdown import call, release, futures
         callbacks = [cancellation.cancel]
         if executor:
-            callbacks.append(lambda: executor.shutdown(wait=True, cancel_futures=True))
+            callbacks.append(lambda: call(lambda: executor.shutdown(wait=True, cancel_futures=True), executor))
         if buffer_usage is not None:
-            callbacks.append(buffer_usage.clear)
+            callbacks.append(lambda: release(buffer_usage, buffer_usage.clear))
         if transforms is not None and transform_executor is None:
-            callbacks.append(lambda: transforms.shutdown(wait=True))
+            callbacks.append(lambda: call(lambda: transforms.shutdown(wait=True), transforms))
         elif transforms is not None:
             # Borrowed workers outlive the scene. Let every owned image reach
             # transform()'s finally before closing media/the backend.
-            callbacks.append(lambda: wait([future for _, future in frames] +
-                                          ([current_future] if current_future else [])))
-        cleanup(callbacks + [iterator.close], report=report)
+            callbacks.append(lambda: futures([future for _, future in frames] +
+                                            ([current_future] if current_future else []), iterator))
+        cleanup(callbacks + [lambda: release(iterator, iterator.close)], report=report)
+        if isinstance(sys.exception(), GeneratorExit):
+            from stash_ai.runtime.shutdown import busy, ShutdownIncomplete
+            if busy():
+                raise ShutdownIncomplete('Input preparation shutdown is incomplete; live resources remain quarantined.')
