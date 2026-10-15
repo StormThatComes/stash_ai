@@ -132,6 +132,7 @@ class SceneInputPrefetch:
             self.closed = True
             streams = tuple(self.streams)
         from stash_ai.runtime.cleanup import cleanup
+        from stash_ai.runtime.shutdown import call, join, release
         def reset():
             self.executor = self.pending = self.token = self.scene = self.batch_executor = None
             self.prepared.clear()
@@ -148,11 +149,12 @@ class SceneInputPrefetch:
             lambda: self.pending.cancel() if self.pending is not None else None,
             *[stream.stop for stream in streams],
             *[stream.close for stream in streams],
-            lambda: self.executor.submit(self._close_reader).result(),
-            lambda: self.batch_executor.shutdown(wait=True, cancel_futures=True) if self.batch_executor is not None else None,
-            lambda: self.executor.shutdown(wait=True),
-            self._close_reader,
-            reset,
+            lambda: join(self.executor.submit(self._close_reader), self),
+            lambda: call(lambda: self.batch_executor.shutdown(wait=True, cancel_futures=True), self.batch_executor)
+                if self.batch_executor is not None else None,
+            lambda: call(lambda: self.executor.shutdown(wait=True), self.executor),
+            lambda: release(self, self._close_reader),
+            lambda: release(self, reset),
         ], report=self.report)
 
     def _close_reader(self):

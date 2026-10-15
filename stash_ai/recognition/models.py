@@ -315,6 +315,8 @@ class OpenCVFaces(YuNetDetector):
 
 
 def load_backend(config, paths):
+    from stash_ai.runtime.shutdown import require_idle
+    require_idle()
     if config.data['models']['recognizer'] == 'auraface':
         from .aura import AuraFaces
         return AuraFaces(config, paths)
