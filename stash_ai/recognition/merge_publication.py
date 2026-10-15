@@ -113,10 +113,49 @@ def sync_merges(database, client, report, scope, person, performer, *, counts=No
     return counts
 
 
+def _target_context(db, identifiers):
+    """Read only the alias forest reachable from the requested targets."""
+    from .database import encoded
+    identifiers = list(identifiers)
+    edges, roots = {}, {}
+    for start in range(0, len(identifiers), 256):
+        selected = encoded(identifiers[start:start + 256])
+        for row in db.execute('''WITH RECURSIVE ancestors(id) AS (
+          SELECT value FROM json_each(?)
+          UNION SELECT m.target FROM identity_merges m JOIN ancestors a ON m.source=a.id)
+          SELECT m.source,m.target FROM identity_merges m JOIN ancestors a ON m.source=a.id''', (selected,)):
+            edges[row['source']] = row['target']
+    for identifier in identifiers:
+        person, path, seen = identifier, [], set()
+        while person in edges and person not in roots:
+            if person in seen:
+                raise ValueError('Recognition identity aliases contain a cycle.')
+            seen.add(person)
+            path.append(person)
+            person = edges[person]
+        person = roots.get(person, person)
+        roots[identifier] = person
+        for item in path:
+            roots[item] = person
+    people, blocked = {}, set()
+    unique = sorted(set(roots.values()))
+    for start in range(0, len(unique), 256):
+        selected = encoded(unique[start:start + 256])
+        people.update((row['id'], row['performer']) for row in db.execute(
+            'SELECT id,performer FROM people WHERE id IN (SELECT value FROM json_each(?))', (selected,)))
+        blocked.update(row[0] for row in db.execute('''WITH RECURSIVE descendants(root,id) AS (
+          SELECT value,value FROM json_each(?)
+          UNION SELECT a.root,m.source FROM identity_merges m JOIN descendants a ON m.target=a.id)
+          SELECT DISTINCT a.root FROM descendants a JOIN identity_merges m ON m.source=a.id
+          WHERE m.status NOT IN ('confirmed','observed','local')''', (selected,)))
+    return roots, people, blocked
+
+
 def canonical_targets(database, ready):
     """Remap earlier scenes in a multi-scene run before names/portraits execute."""
-    from .identity_merges import canonical
     db, result = database.connection, {}
+    roots, performers, blocked = _target_context(db, (target['person'] for target in ready.values()))
+    seen = {}
     with tracking(
         ready.values(),
         'Resolve metadata targets',
@@ -124,14 +163,17 @@ def canonical_targets(database, ready):
         position=0,
     ) as tracked:
         for target in tracked:
-            person = canonical(db, target['person'])
-            row = db.execute('SELECT performer FROM people WHERE id=?', (person,)).fetchone()
-            if row is None or not row['performer'] or any(r['merge_status'] not in COMPLETE for r in aliases(db, person)):
+            person = roots[target['person']]
+            performer = performers.get(person)
+            if not performer or person in blocked:
                 continue
-            current = result.setdefault(person, {'person': person, 'performer': row['performer'], 'scans': []})
+            current = result.setdefault(person, {'person': person, 'performer': performer, 'scans': []})
+            known = seen.setdefault(person, set())
             if target.get('matching'):
                 current.setdefault('matching', {}).update(target['matching'])
             for scan in target['scans']:
-                if scan not in current['scans']:
+                key = scan['scene'], scan['scan']
+                if key not in known:
+                    known.add(key)
                     current['scans'].append(scan)
     return [result[key] for key in sorted(result)]

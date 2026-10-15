@@ -22,17 +22,23 @@ from .progress import tracking
 
 
 def policy_identity(config):
+    from .context import policy_digest
+    return policy_digest(config, ('portraits-v4', CONTRACT_ID, EXPRESSION_CONTRACT_ID),
+                         lambda: _policy_value(config))
+
+
+def _policy_value(config):
     policy = plain(config.data['portraits'])
     if policy['source'] == 'vtt':
         for name in ('max_candidates', 'time_offsets', 'timeout_seconds', 'max_video_bytes', 'ffmpeg'):
             policy.pop(name)
     from .visibility import required as visibility_required
     from .expression import required as expression_required
-    return digest({'version': 4, 'portraits': policy,
+    return {'version': 4, 'portraits': policy,
                    'max_crop_bytes': config.data['storage']['max_crop_bytes'],
                    'recognition': plain(config.data['recognition']), 'clustering': plain(config.data['clustering']),
                    'visibility_contract': CONTRACT_ID if visibility_required(policy) else None,
-                   'expression_contract': EXPRESSION_CONTRACT_ID if expression_required(policy) else None})
+                   'expression_contract': EXPRESSION_CONTRACT_ID if expression_required(policy) else None}
 
 
 def missing_image(value, client, performer):
@@ -157,8 +163,9 @@ def choose(database, client, config, scope, target, paths, backend_factory, deco
     policy = config.data['portraits']
     person = database.connection.execute('SELECT * FROM people WHERE id=? AND scope=?',
                                          (target['person'], scope)).fetchone()
-    groups = {g.identifier: g for g in _groups(database.connection, scope, person['namespace'], config.data['clustering'])}
-    context = reference_context(groups.values())
+    from .context import portrait_references
+    groups, context = portrait_references(database, scope, person['namespace'], config,
+        lambda: _groups(database.connection, scope, person['namespace'], config.data['clustering']))
     selected = hints(database, target, config)
     selection = [{'scene': scene, 'observation': row['id']} for scene, row in selected]
     policy_sha = policy_identity(config)

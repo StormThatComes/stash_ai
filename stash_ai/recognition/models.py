@@ -131,9 +131,12 @@ def ensure_assets(config, *, write=print):
 
 def namespace(config):
     from dataclasses import asdict
+    from .context import policy_digest
     alignment = ('arcface-112-similarity-rgb-127.5-v1' if config.data['models']['recognizer'] == 'auraface'
                  else 'opencv-five-landmarks-v1')
-    return digest({'format': 1, 'alignment': alignment,
+    return policy_digest(config, ('namespace', alignment, ASSETS[config.data['models']['detector']],
+                                 ASSETS[config.data['models']['recognizer']]), lambda: {
+                   'format': 1, 'alignment': alignment,
                    'assets': {key: asdict(ASSETS[key]) for key in
                               (config.data['models']['detector'], config.data['models']['recognizer'])}})
 

@@ -11,6 +11,7 @@ from .config import digest
 from .database import FaceDatabase, encoded
 from .models import ASSETS, ensure_assets, load_backend, namespace
 from .backend import LazyBackend
+from .context import policy_scope, portrait_reference_scope
 from .portrait_refresh import LazyAssets, retained_targets
 from .prefetch import ScenePrefetch
 from .media import SpriteInput
@@ -131,7 +132,7 @@ def execute(args, config, *, services=None):
     report = RunReport(args.progress_style == 'verbose', tqdm.write)
     counts = Counter()
     references = {}
-    with FaceDatabase(config.database) as database:
+    with policy_scope(), FaceDatabase(config.database) as database:
         client = services.client(url=url, api_key=key, timeout=config.data['execution']['timeout_seconds'])
         with closing(client, report=report, name='close recognition HTTP'), present(report, args.progress_style, status_position=2):
             client.report = report
@@ -298,7 +299,7 @@ def execute(args, config, *, services=None):
                                 report.optional('recognition_names_preflight', report.issue, 'recognition', 'names_preflight',
                                                 'selected performers', error, safe_error(error, key))
                     label = 'Portraits' if portraits_only else 'Names and portraits'
-                    with phase(report, 'Recognition portraits' if portraits_only else 'Recognition metadata', errors=lambda: counts['metadata_failed']), WorkProgress(report, label, len(targets), unit='person', key='people') as people:
+                    with portrait_reference_scope(), phase(report, 'Recognition portraits' if portraits_only else 'Recognition metadata', errors=lambda: counts['metadata_failed']), WorkProgress(report, label, len(targets), unit='person', key='people') as people:
                         for target in targets:
                             with activity(report, label.lower(), person=target['performer']):
                                 options = {'visibility': visibility}

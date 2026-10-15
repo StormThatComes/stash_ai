@@ -119,8 +119,10 @@ def _result(db, scan, policy):
 
 
 def matching_policy(config):
-    return digest({'format': 5, 'recognition': config.data['recognition'],
-                   'clustering': config.data['clustering']})
+    from .context import policy_digest
+    return policy_digest(config, 'matching-v5', lambda: {
+        'format': 5, 'recognition': config.data['recognition'],
+        'clustering': config.data['clustering']})
 
 
 def cluster_scene(database, scan, config, *, progress=None):
