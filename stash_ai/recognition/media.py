@@ -62,10 +62,15 @@ def bounded_media(client, url, limit, timeout):
 
 
 class SpriteInput:
+    # A portrait source owns at most one additional decoded RGB sheet.
+    # Oversized sheets keep the original crop-before-conversion path.
+    portrait_sheet_bytes = 64 * 1048576
+
     def __init__(self, client, scene, config):
         self.client, self.config = client, config
         settings, paths = config.data['execution'], scene['paths']
         self.cache = OrderedDict()
+        self._portrait_sheet = None
         if not paths.get('vtt'):
             raise ValueError('Scene has no VTT; generate Stash sprites first.')
         vtt = absolute_stash_url(paths['vtt'], client.url)
@@ -131,16 +136,38 @@ class SpriteInput:
         """Read one full cue image, sharing the bounded verified sheet cache."""
         cue = self.cues[index]
         data = self._sheet(cue.image)
-        if hashlib.sha256(data).hexdigest() != self.hashes[cue.image]:
-            raise ValueError('Sprite changed during portrait selection.')
+        cached = self._portrait_sheet
+        if (cached is None or cached[0] != cue.image or cached[1] is not data
+                or cached[3] != self.hashes[cue.image]):
+            if hashlib.sha256(data).hexdigest() != self.hashes[cue.image]:
+                raise ValueError('Sprite changed during portrait selection.')
+            self._close_portrait_sheet()
+            with open_image(BytesIO(data)) as raw:
+                pixels = raw.convert('RGB') if raw.width * raw.height * 3 <= self.portrait_sheet_bytes else None
+                self._portrait_sheet = cue.image, data, pixels, self.hashes[cue.image]
+                if pixels is None:
+                    return self._thumbnail_crop(raw, cue)
+        sheet = self._portrait_sheet[2]
+        if sheet is not None:
+            return self._thumbnail_crop(sheet, cue)
         with open_image(BytesIO(data)) as raw:
-            x, y, width, height = cue.rect
-            if x + width > raw.width or y + height > raw.height:
-                raise ValueError('Recognition VTT rectangle exceeds sprite bounds.')
-            with raw.crop((x, y, x + width, y + height)) as crop:
-                return crop.convert('RGB')
+            return self._thumbnail_crop(raw, cue)
+
+    @staticmethod
+    def _thumbnail_crop(sheet, cue):
+        x, y, width, height = cue.rect
+        if x + width > sheet.width or y + height > sheet.height:
+            raise ValueError('Recognition VTT rectangle exceeds sprite bounds.')
+        with sheet.crop((x, y, x + width, y + height)) as crop:
+            return crop.convert('RGB')
+
+    def _close_portrait_sheet(self):
+        cached, self._portrait_sheet = self._portrait_sheet, None
+        if cached is not None and cached[2] is not None:
+            cached[2].close()
 
     def close(self):
+        self._close_portrait_sheet()
         self.cache.clear()
 
     def __enter__(self):

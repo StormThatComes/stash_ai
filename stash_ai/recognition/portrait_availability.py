@@ -3,6 +3,7 @@ from io import BytesIO
 import hashlib
 import json
 import uuid
+import itertools
 
 from stash_ai.inference.image_io import open_image
 from .diagnostics import message as safe_error
@@ -79,7 +80,41 @@ def score_metadata(metadata, quality, policy):
                     quality_shortfalls=portrait_shortfalls(quality, policy))
 
 
-def observation_identity(database, row, groups, target, config, context):
+_UNREAD = object()
+
+
+def candidate_observations(db, rows, scan, policy):
+    """Read exact UUID-addressed assignment proofs in bounded batches."""
+    from .database import encoded
+    iterator = iter(rows)
+    while batch := list(itertools.islice(iterator, 256)):
+        cache = {}
+        def proof(row, batch=batch, cache=cache):
+            identifier = str(uuid.uuid5(uuid.UUID(row['id']), policy))
+            if 'candidates' not in cache:
+                identifiers = []
+                for item in batch:
+                    try:
+                        identifiers.append(str(uuid.uuid5(uuid.UUID(item['id']), policy)))
+                    except (ValueError, TypeError, AttributeError):
+                        pass  # Only a requested invalid proof may fail its observation.
+                cache['candidates'] = {item['id']: item for item in db.execute(
+                    'SELECT id,person,status,payload FROM candidates WHERE scan=? AND id IN '
+                    '(SELECT value FROM json_each(?))', (scan, encoded(identifiers)))}
+            return cache['candidates'].get(identifier)
+        for row in batch:
+            yield row, lambda row=row, proof=proof: proof(row)
+
+
+def crop_row(db, row):
+    if 'crop' in row.keys():
+        return row
+    result = dict(row)
+    result['crop'] = db.execute('SELECT crop FROM observations WHERE id=?', (row['id'],)).fetchone()[0]
+    return result
+
+
+def observation_identity(database, row, groups, target, config, context, *, candidate=_UNREAD):
     """A current accepted assignment can illustrate its own imperfect cluster.
 
     A stale/historical membership cannot override a current ambiguous decision.
@@ -94,9 +129,12 @@ def observation_identity(database, row, groups, target, config, context):
     reason, similarity, runner = identity_reason(vector(row), groups, person, config)
     basis = 'retained_embedding_comparison'
     if reason:
-        identifier = str(uuid.uuid5(uuid.UUID(row['id']), matching_policy(config)))
-        candidate = database.connection.execute('SELECT person,status,payload FROM candidates WHERE id=? AND scan=?',
-                                                (identifier, row['scan'])).fetchone()
+        if callable(candidate):
+            candidate = candidate()
+        if candidate is _UNREAD:
+            identifier = str(uuid.uuid5(uuid.UUID(row['id']), matching_policy(config)))
+            candidate = database.connection.execute('SELECT person,status,payload FROM candidates WHERE id=? AND scan=?',
+                                                    (identifier, row['scan'])).fetchone()
         if candidate and candidate['person'] == person and candidate['status'] == 'accepted':
             accepted_context = json.loads(candidate['payload']).get('reference_context')
             proof = target.get('matching', {}).get(row['scan'], {})
