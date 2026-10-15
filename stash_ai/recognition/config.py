@@ -102,7 +102,7 @@ def _merge(base, supplied, path=''):
 
 def _number(value, name, low, high, *, integer=False):
     valid = type(value) is int if integer else type(value) in (int, float)
-    if not valid or not math.isfinite(value) or not low <= value <= high:
+    if not valid or not low <= value <= high or not math.isfinite(value):
         raise ValueError(f'{name}: expected {"integer" if integer else "finite number"} in [{low}, {high}].')
 
 

@@ -250,3 +250,62 @@ def test_detection_visibility_asset_is_required_independently_of_portraits(tmp_p
     else:
         assert set(models.ensure_assets(config)) == {'yunet', 'sface', 'faceocc'}
     assert downloaded.count(models.ASSETS['faceocc'].filename) == 1
+
+
+import json
+import sqlite3
+import uuid
+from dataclasses import replace
+from types import SimpleNamespace
+
+import numpy as np
+import pytest
+
+
+def test_unalignable_face_is_rejected_when_only_pose_filter_is_disabled(tmp_path):
+    from tests.test_recognition_clustering import setup
+    from tests.test_recognition_identity_merges import changed
+    from stash_ai.recognition.database import FaceDatabase
+    from stash_ai.recognition.media import SpriteInput
+    from stash_ai.recognition.models import checked_detection
+    from stash_ai.recognition.scanning import scan_scene
+    from stash_ai.recognition.aura import similarity_matrix
+    from tests.helpers.recognition import Backend,MediaClient,FACE
+    config = changed(setup(tmp_path),models={'recognizer':'auraface'})
+    bad = checked_detection([16,16,128,128,49,80,111,80,80,80,56,80,104,80,.99])
+    assert config.data['detection']['max_pose_deviation'] is None
+    class AlignmentBackend(Backend):
+        def detect(self,image):return [FACE,bad]
+        def embed(self,image,face):
+            similarity_matrix(face.landmarks)
+            return super().embed(image,face)
+    client,model = MediaClient('1'),AlignmentBackend()
+    with FaceDatabase(config.database) as db,SpriteInput(client,client.scene,config) as source:
+        scan_scene(db,'scope',client.scene,config,'ns',source,lambda:model)
+        assert db.connection.execute('SELECT cursor,status FROM scans').fetchone()[:] == (3,'complete')
+        assert db.connection.execute('SELECT COUNT(*) FROM observations WHERE rejected IS NULL').fetchone()[0] == 3
+        assert db.connection.execute("SELECT COUNT(*) FROM observations WHERE rejected='face_landmarks_invalid' AND embedding IS NULL").fetchone()[0] == 3
+        assert model.calls == 3
+
+
+
+def test_legacy_complete_scan_rechecks_alignment_without_loading_models(tmp_path):
+    from tests.test_recognition_clustering import setup as simple_setup, scan
+    config = simple_setup(tmp_path)
+    with FaceDatabase(config.database) as db:
+        identifier, _ = scan(db, config, '1')
+        rows = db.connection.execute('SELECT id,quality FROM observations WHERE scan=? ORDER BY cue', (identifier,)).fetchall()
+        for row in rows:
+            quality = json.loads(row['quality'])
+            quality.pop('alignment_valid')
+            db.connection.execute('UPDATE observations SET quality=? WHERE id=?', (json.dumps(quality), row['id']))
+        bad = [16,16,128,128,49,80,111,80,80,80,56,80,104,80,.99]
+        db.connection.execute('UPDATE observations SET geometry=? WHERE id=?', (json.dumps(bad), rows[0]['id']))
+        db.connection.commit()
+        client = MediaClient('1')
+        with SpriteInput(client, client.scene, config) as source:
+            assert scan_scene(db, 'scope', client.scene, config, 'ns', source,
+                              lambda: pytest.fail('legacy scan loaded models')) == (identifier, True)
+        assert db.connection.execute('SELECT COUNT(*) FROM observations WHERE rejected IS NULL').fetchone()[0] == 2
+        rejected = db.connection.execute('SELECT rejected,embedding,crop FROM observations WHERE id=?', (rows[0]['id'],)).fetchone()
+        assert rejected[:] == ('face_landmarks_invalid', None, None)
