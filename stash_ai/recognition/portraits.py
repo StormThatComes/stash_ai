@@ -165,6 +165,14 @@ def choose(database, client, config, scope, target, paths, backend_factory, deco
     winner, winning_key = None, None
     decoders = {}
     backend = None
+    def identity_backend():
+        nonlocal backend
+        if backend is None or not getattr(backend, 'active', True):
+            if backend is not None:
+                backend.close()
+            backend = backend_factory(config, paths)
+        return backend
+
     attempts = ((scene_id, row, offset) for scene_id, row in selected for offset in policy['time_offsets'])
     try:
         with tracking(
@@ -191,8 +199,6 @@ def choose(database, client, config, scope, target, paths, backend_factory, deco
                         if winning_key is None or key < winning_key:
                             winner, winning_key = existing, key
                     continue
-                if backend is None:
-                    backend = backend_factory(config, paths)
                 metadata = {'version': 3, 'source_type': 'video', 'requested_source': 'video',
                             'selection_policy': 'best-available-video-identity-first-v3',
                             'policy_sha': policy_sha, 'policy': plain(policy), 'shortlist': selection,
@@ -211,11 +217,12 @@ def choose(database, client, config, scope, target, paths, backend_factory, deco
                         metadata.update(timing)
                         candidates = []
                         exclusions = []
-                        for face in backend.detect(image):
+                        for face in identity_backend().detect(image):
                             quality = assess(image, face)
                             similarity, runner = None, None
                             try:
-                                vector = normalized_embedding(backend.embed(image, face), backend.dimensions)
+                                model = identity_backend()
+                                vector = normalized_embedding(model.embed(image, face), model.dimensions)
                                 reason, similarity, runner = identity_reason(vector, groups, target['person'], config)
                             except Exception:
                                 reason = 'portrait_identity_unverified'

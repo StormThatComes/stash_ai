@@ -39,6 +39,10 @@ class _BorrowedBackend:
     def __init__(self, owner, model):
         self.owner, self.model = owner, model
 
+    @property
+    def active(self):
+        return self.model is not None and self.owner.model is self.model
+
     def __getattr__(self, name):
         return getattr(self.model, name)
 
