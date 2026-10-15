@@ -81,7 +81,7 @@ class OnnxYuNet:
                     raise ValueError('YuNet returned malformed/non-finite predictions.')
             scores = np.sqrt(np.clip(outputs[f'cls_{stride}'][0,:,0],0,1) *
                              np.clip(outputs[f'obj_{stride}'][0,:,0],0,1))
-            indices = np.flatnonzero(scores >= settings['score_threshold'])
+            indices = np.flatnonzero(scores > settings['score_threshold'])
             maximum = settings['max_faces_per_frame']
             if len(indices) > maximum:
                 # A global top-K candidate must be in its stride's top K.

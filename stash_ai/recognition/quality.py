@@ -7,6 +7,16 @@ class PortraitFramingError(ValueError):
     """The available pixels cannot produce a bounded portrait image."""
 
 
+def alignable(detection):
+    """Basic recognizer alignment validity, independent of optional pose gates."""
+    from .aura import similarity_matrix
+    try:
+        similarity_matrix(detection.landmarks)
+    except ValueError:
+        return False
+    return True
+
+
 def assess(image, detection):
     import numpy as np
     x, y, width, height = detection.box
@@ -33,7 +43,7 @@ def assess(image, detection):
     yaw = abs(float(points[2, 0] - eye_mid[0])) / max(eye_distance, 1)
     roll = abs(float(points[0, 1] - points[1, 1])) / max(eye_distance, 1)
     pitch = abs(float((points[2, 1] - eye_mid[1]) / max(float(mouth_mid[1] - eye_mid[1]), 1)) - .5)
-    return dict(complete=complete, landmarks_inside=inside and ordered,
+    return dict(complete=complete, landmarks_inside=inside and ordered, alignment_valid=alignable(detection),
                 pixels=float(min(width, height)), sharpness=sharpness, exposure=exposure,
                 clipped_fraction=clipped, pose_deviation=max(yaw, roll, pitch),
                 visibility_method='five-landmark-geometry-estimate-v1')
@@ -41,6 +51,8 @@ def assess(image, detection):
 
 def rejection(quality, policy):
     """Hard detection gates only; portrait quality is a ranking preference."""
+    if not quality.get('alignment_valid', True):
+        return 'face_landmarks_invalid'
     if quality['pixels'] < policy['min_face_pixels']:
         return 'face_too_small'
     if quality['sharpness'] < policy['min_sharpness']:

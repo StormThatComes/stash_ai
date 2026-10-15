@@ -1,4 +1,5 @@
 """Checkpoint selected-scene detections without publishing anything to Stash."""
+import json
 import uuid
 
 from stash_ai.runtime.cleanup import closing
@@ -6,8 +7,8 @@ from stash_ai.runtime.cleanup import closing
 from .config import digest
 from .database import encoded
 from .media import safe_url
-from .quality import assess, rejection, crop_bytes
-from .models import normalized_embedding
+from .quality import assess, rejection, crop_bytes, alignable
+from .models import normalized_embedding, checked_detection
 from .prefetch import frames as frame_inputs
 from .visibility import CONTRACT_ID, VisibilityError, VisibilityGeometryError, cached as visibility_cached
 
@@ -33,9 +34,25 @@ def scan_scene(database, scope, scene, config, namespace, source, backend_factor
     if (record['status'] not in ('partial', 'complete') or
             not 0 <= record['cursor'] <= record['total'] or record['total'] != len(source.cues)):
         raise ValueError('Invalid recognition scan checkpoint.')
+    # Recheck only legacy geometry, without loading models or losing valid scans.
+    with db:
+        for row in db.execute('SELECT id,geometry,quality FROM observations WHERE scan=? AND rejected IS NULL', (identifier,)):
+            quality = json.loads(row['quality'])
+            if 'alignment_valid' not in quality:
+                quality['alignment_valid'] = alignable(checked_detection(json.loads(row['geometry'])))
+                db.execute('UPDATE observations SET quality=?,rejected=?,embedding=CASE WHEN ? THEN embedding ELSE NULL END,'
+                           'crop=CASE WHEN ? THEN crop ELSE NULL END WHERE id=?',
+                           (encoded(quality), None if quality['alignment_valid'] else 'face_landmarks_invalid',
+                            quality['alignment_valid'], quality['alignment_valid'], row['id']))
     if record['status'] == 'complete':
         if record['cursor'] != record['total']:
             raise ValueError('Incomplete recognition scan marked complete.')
+        frame_progress(completed=record['total'], total=record['total'], reused=True)
+        progress(reused=record['total'], scene=str(scene['id']))
+        return identifier, True
+    if record['cursor'] == record['total']:
+        with db:
+            db.execute("UPDATE scans SET status='complete' WHERE id=?", (identifier,))
         frame_progress(completed=record['total'], total=record['total'], reused=True)
         progress(reused=record['total'], scene=str(scene['id']))
         return identifier, True

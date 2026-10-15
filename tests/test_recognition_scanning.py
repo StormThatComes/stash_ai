@@ -68,3 +68,33 @@ def test_retained_image_byte_budget_and_cross_origin_are_enforced(tmp_path):
         source.hashes[source.cues[0].image] = 'changed'
         with pytest.raises(ValueError, match='changed'):
             list(source.frames())
+
+
+import json
+import sqlite3
+import uuid
+from dataclasses import replace
+from types import SimpleNamespace
+
+import numpy as np
+import pytest
+
+
+def test_fully_checkpointed_partial_scan_finishes_without_a_backend(tmp_path):
+    from tests.test_recognition_clustering import setup, scan
+    from tests.helpers.recognition import MediaClient
+    from stash_ai.recognition.database import FaceDatabase
+    from stash_ai.recognition.scanning import scan_scene
+    from stash_ai.recognition.media import SpriteInput
+    config = setup(tmp_path)
+    with FaceDatabase(config.database) as db:
+        identifier, _ = scan(db, config, '1')
+        db.connection.execute("UPDATE scans SET status='partial' WHERE id=?",(identifier,))
+        db.connection.commit()
+        def unavailable():
+            raise RuntimeError('backend unavailable although every cue is checkpointed')
+        client = MediaClient('1')
+        with SpriteInput(client, client.scene, config) as source:
+            assert scan_scene(db,'scope',client.scene,config,'ns',source,unavailable) == (identifier, True)
+        assert db.connection.execute('SELECT cursor,total,status FROM scans').fetchone()[:] == (3,3,'complete')
+
