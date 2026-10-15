@@ -202,6 +202,12 @@ def choose(database, client, config, scope, target, paths, backend_factory, deco
                     existing = reuse(database, config, scope, target, row, scene_id, seconds, person['namespace'],
                                      identifier, policy_sha, selection)
                 if existing and existing['image'] is not None:
+                    from .portrait_availability import fit_cached_bytes
+                    try:
+                        fit_cached_bytes(existing['image'], existing['digest'], config, json.loads(existing['metadata']))
+                    except (OSError, ValueError):
+                        existing = None  # Reacquire corrupt bytes; never trust their old identity proof.
+                if existing and existing['image'] is not None:
                     existing = recheck_cached(database, existing, groups, config, target, person['namespace'], context,
                                               client=client, visibility=visibility, expression=expression)
                     if existing is not None:
