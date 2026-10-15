@@ -16,6 +16,7 @@ from .config import digest
 from .database import SCHEMA, encoded
 from .reference_usage import ReferenceUsage
 from .progress import tracking, work
+from .ranking import best_two
 
 
 def sample_key(row):
@@ -232,8 +233,7 @@ def _bind(database, replay, config, scope, namespace):
                         means.append(mean)
                         minimum = min(minimum, low)
                     if means and minimum >= config.data['clustering']['cohesion_threshold']:
-                        ranked.append((sum(means) / len(means), old.identifier))
-            ranked.sort(key=lambda item: (-item[0], item[1]))
+                        best_two(ranked, (sum(means) / len(means), old.identifier))
             if (ranked and ranked[0][0] >= config.data['recognition']['match_threshold']
                     and (len(ranked) == 1 or ranked[0][0] - ranked[1][0] >= config.data['recognition']['ambiguity_margin'])):
                 candidate = ranked[0][1]
