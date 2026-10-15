@@ -86,15 +86,18 @@ def hints(database, target, config):
 def identity_reason(vector, groups, person, config):
     import numpy as np
     policy = config.data['recognition']
-    scores = {}
+    score, runner = -1., None
     for identifier, group in groups.items():
         if not group.samples or len(group.samples[0]) != len(vector):
             raise ValueError('Portrait embedding namespace/dimensions are incompatible.')
         values = [float(np.dot(vector, sample)) for sample in group.samples]
         if min(values) >= config.data['clustering']['cohesion_threshold']:
-            scores[identifier] = sum(values) / len(values)
-    score = scores.get(person, -1.)
-    runner = max((v for k, v in scores.items() if k != person), default=-1.)
+            mean = sum(values) / len(values)
+            if identifier == person:
+                score = mean
+            else:
+                runner = mean if runner is None else max(runner, mean)
+    runner = -1. if runner is None else runner
     if score < policy['match_threshold']:
         return 'portrait_identity_mismatch', score, runner
     if score - runner < policy['ambiguity_margin']:

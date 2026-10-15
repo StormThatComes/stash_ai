@@ -181,11 +181,12 @@ def choose_vtt(database, client, config, scope, target, source_factory, visibili
                         metadata['reason'] = reason
                     else:
                         score_metadata(metadata, quality, policy)
-                        heapq.heappush(ranked, (-metadata['score'], -metadata['quality_tiebreak'], scene, row['seconds'], identifier))
+                        ranked.append((-metadata['score'], -metadata['quality_tiebreak'], scene, row['seconds'], identifier))
                     store(database, identifier, scope, target, scene, metadata)
 
         # All eligibility and ranking decisions precede JPEG preparation. A bad
         # crop does not hide a later valid observation behind a candidate limit.
+        heapq.heapify(ranked)
         considered = len(ranked)
         fallbacks = []
         def candidates():

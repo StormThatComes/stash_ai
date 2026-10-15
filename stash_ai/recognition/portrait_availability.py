@@ -8,7 +8,7 @@ import itertools
 from stash_ai.inference.image_io import open_image
 from .diagnostics import message as safe_error
 from .models import checked_detection
-from .quality import portrait_bytes, portrait_score, portrait_shortfalls, portrait_tiebreak
+from .quality import portrait_bytes, portrait_evaluation
 from .visibility import required as visibility_required, cached as visibility_cached
 from .expression import required as expression_required, cached as expression_cached
 
@@ -75,9 +75,7 @@ def refresh_cached_quality(client, existing, metadata, policy, visibility, expre
 
 
 def score_metadata(metadata, quality, policy):
-    metadata.update(quality=quality, score=portrait_score(quality, policy),
-                    quality_tiebreak=portrait_tiebreak(quality, policy),
-                    quality_shortfalls=portrait_shortfalls(quality, policy))
+    metadata.update(quality=quality, **portrait_evaluation(quality, policy))
 
 
 _UNREAD = object()
