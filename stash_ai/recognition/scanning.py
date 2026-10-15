@@ -40,6 +40,13 @@ def scan_scene(database, scope, scene, config, namespace, source, backend_factor
             quality = json.loads(row['quality'])
             if 'alignment_valid' not in quality:
                 quality['alignment_valid'] = alignable(checked_detection(json.loads(row['geometry'])))
+                if not quality['alignment_valid']:
+                    # Earlier SFace scans may already have matching memberships.
+                    # Keep raw geometry/origins, retire only this invalid support,
+                    # and replay matching instead of serving its old cached result.
+                    db.execute('DELETE FROM members WHERE observation=?', (row['id'],))
+                    db.execute('DELETE FROM candidates WHERE scan=?', (identifier,))
+                    db.execute('DELETE FROM metadata WHERE key=?', ('identity-rebuild:' + digest([scope, namespace]),))
                 db.execute('UPDATE observations SET quality=?,rejected=?,embedding=CASE WHEN ? THEN embedding ELSE NULL END,'
                            'crop=CASE WHEN ? THEN crop ELSE NULL END WHERE id=?',
                            (encoded(quality), None if quality['alignment_valid'] else 'face_landmarks_invalid',
