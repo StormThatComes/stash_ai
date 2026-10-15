@@ -246,3 +246,60 @@ def test_small_crop_budget_still_supplies_a_portrait_when_thumbnail_read_fails(t
     with FaceDatabase(config.database) as db:
         row = db.connection.execute("SELECT metadata FROM portraits WHERE status='published'").fetchone()
         assert json.loads(row[0])['source_type'] == 'recognition_crop'
+
+
+import json
+import os
+from types import SimpleNamespace
+
+import numpy as np
+import pytest
+
+
+@pytest.mark.parametrize('known', [False, True])
+def test_co_present_assignment_respects_stronger_guard(tmp_path, known):
+    from stash_ai.recognition.database import FaceDatabase
+    from stash_ai.recognition.clustering import cluster_scene
+    from tests.test_recognition_clustering import setup, scan
+    from tests.test_recognition_evidence_safety import pair_cues
+    config = setup(tmp_path)
+    a, b = np.array([1.,0,0,0]), np.array([.8,.6,0,0])
+    assert config.data['recognition']['cooccurrence_merge_threshold'] == .9
+    with FaceDatabase(config.database) as db:
+        if known:
+            previous, _ = scan(db, config, '1', [a]*3)
+            cluster_scene(db, previous, config)
+        selected, _ = scan(db, config, '2', [a,b]*3, count=6)
+        pair_cues(db, selected)
+        # Make the two detections geometrically distinct within each cue.
+        for row in db.connection.execute('SELECT id,embedding,geometry FROM observations WHERE scan=?',(selected,)).fetchall():
+            geometry = json.loads(row['geometry'])
+            # Two small nonoverlapping valid faces inside the same 160px cue.
+            shifted = np.frombuffer(row['embedding'], dtype='<f4')[1] > .1
+            for index in (0,2,4,6,8,10,12):
+                geometry[index] = geometry[index] / 3 + (80 if shifted and index != 2 else 0)
+            db.connection.execute('UPDATE observations SET geometry=? WHERE id=?',(json.dumps(geometry),row['id']))
+        db.connection.commit()
+        result = cluster_scene(db, selected, config)
+        assert not any(row['status'] == 'accepted' and row['observations'] == 6 for row in result)
+        assert db.connection.execute('SELECT COUNT(DISTINCT person) FROM members WHERE observation IN (SELECT id FROM observations WHERE scan=?)',(selected,)).fetchone()[0] != 1
+        assert db.connection.execute('SELECT COUNT(*) FROM identity_merges').fetchone()[0] == 0
+        from stash_ai.recognition.rebuild import rebuild_selected
+        replayed = rebuild_selected(db, [{'scene':'2', 'scan': selected}], config)[selected]
+        assert not any(row['status'] == 'accepted' and row['observations'] == 6 for row in replayed)
+
+
+
+@pytest.mark.parametrize('similarity', [.95, 1.])
+def test_ordinary_assignment_allows_strong_reflections_and_exact_duplicates(tmp_path, similarity):
+    config = setup(tmp_path)
+    a = np.array([1., 0, 0, 0])
+    b = np.array([similarity, np.sqrt(1 - similarity ** 2), 0, 0])
+    with FaceDatabase(config.database) as db:
+        selected, _ = scan(db, config, '2', [a, b] * 3, count=6)
+        pair_cues(db, selected)
+        result = cluster_scene(db, selected, config)
+        assert len(result) == 1 and result[0]['status'] == 'accepted'
+        assert result[0]['observations'] == 6
+        replayed = rebuild_selected(db, [{'scene': '2', 'scan': selected}], config)[selected]
+        assert len(replayed) == 1 and replayed[0]['observations'] == 6

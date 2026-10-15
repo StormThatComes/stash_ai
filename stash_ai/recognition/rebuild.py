@@ -177,8 +177,6 @@ def _bind(database, replay, config, scope, namespace):
                 unit='identity',
             ) as tracked:
                 for old in tracked:
-                    if old.identifier in used:
-                        continue
                     means, minimum = [], 1.
                     for row in replay.execute('SELECT o.dimensions,o.embedding FROM observations o JOIN members m '
                                               'ON m.observation=o.id WHERE m.person=? ORDER BY o.id LIMIT ?',
@@ -193,7 +191,7 @@ def _bind(database, replay, config, scope, namespace):
                     and (len(ranked) == 1 or ranked[0][0] - ranked[1][0] >= config.data['recognition']['ambiguity_margin'])):
                 candidate = ranked[0][1]
                 performer = replay.execute('SELECT performer FROM old_people WHERE id=?', (candidate,)).fetchone()[0]
-                if not performer or performer not in performers:
+                if candidate not in used and (not performer or performer not in performers):
                     mapping[cluster] = candidate
                     used.add(candidate)
                     if performer:
