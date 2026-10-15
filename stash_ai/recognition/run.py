@@ -359,8 +359,22 @@ def execute(args, config, *, services=None):
                     actions.append(('close portrait expression model', expression.close))
                 if backend is not None:
                     actions.append(('close recognition identity models', backend.close))
-                # Console diagnostics cannot skip independent durable history
-                # finalization or replace an inference/publication interruption.
-                cleanup(actions + [('collect recognition error summary', collect_errors),
-                                   ('render recognition error summary', show_errors),
-                                   ('finish recognition history', finish_history)], report=report)
+                resource_error = None
+                before_cleanup = report.counts['cleanup_failures']
+                try:
+                    cleanup(actions, report=report)
+                except BaseException as error:
+                    resource_error = error
+                    if outcome in ('success', 'partial'):
+                        outcome, failure = 'failed', safe_error(error, key)[:1000]
+                finally:
+                    if report.counts['cleanup_failures'] > before_cleanup and outcome == 'success':
+                        outcome, failure = 'failed', 'Recognition resource cleanup failed.'
+                    # History stays on its SQLite owner, even while a worker's
+                    # resources must remain quarantined. Preserve any primary.
+                    cleanup([('collect recognition error summary', collect_errors),
+                             ('render recognition error summary', show_errors),
+                             ('finish recognition history', finish_history)],
+                            report=report, primary=resource_error)
+                if resource_error is not None:
+                    raise resource_error

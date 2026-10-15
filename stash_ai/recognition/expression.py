@@ -76,6 +76,8 @@ class LazyExpression:
         self._inference_failures = 0
 
     def measure(self, image, face):
+        from stash_ai.runtime.shutdown import require_idle
+        require_idle()
         try:
             if self.model is None:
                 if self._initialization_error is not None:

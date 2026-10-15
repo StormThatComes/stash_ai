@@ -77,6 +77,8 @@ class JoyTagger:
 
 
 def load_tagger(settings: models.ModelSettings, vocabulary: models.Vocabulary, prepare_joytag):
+    from stash_ai.runtime.shutdown import require_idle
+    require_idle()
     settings.validate()
     if settings.source.key == "joytag":
         return JoyTagger(settings, vocabulary, prepare_joytag)
