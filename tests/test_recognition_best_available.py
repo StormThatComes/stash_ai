@@ -241,13 +241,15 @@ def test_video_backend_inference_failure_uses_the_accepted_thumbnail(tmp_path, m
     calls, backends = [], []
     def backend(*args):
         calls.append(1)
-        model = Backend(fail_at=4); backends.append(model); return model
+        model = Backend(fail_at=4 if not backends else 1)
+        backends.append(model)
+        return model
     services.backend = backend
     assert run(config, services, '1') == 0
     _, metadata = published(config)
     assert metadata['source_type'] == 'vtt' and metadata['requested_source'] == 'video'
     assert metadata['fallback']['reason'] == 'no_usable_identity_verified_video_portrait'
-    assert len(calls) == 1 and Decoder.instances and backends[0].closed
+    assert len(calls) == 2 and Decoder.instances and all(model.closed for model in backends)
     assert last_counts(config).get('metadata_failed', 0) == 0
 
 
