@@ -220,3 +220,32 @@ def test_retry_predecessor_error_is_sanitized_without_changing_its_recovery_iden
     result = retry_precondition(previous, api_key='synthetic-key')['retry_of']
     assert result['id'] == 'intent' and result['payload'] == {'portrait': 'cached', 'sha256': 'abc'}
     assert result['image_sha256'] == 'old' and result['error'] == 'http://stash/a [redacted]'
+
+
+import json
+import pytest
+
+@pytest.mark.parametrize('stage', ['rebuild', 'names', 'portraits'])
+def test_non_scene_errors_are_retained_in_history(tmp_path, monkeypatch, stage):
+    import stash_ai.recognition.run as runner
+    from stash_ai.recognition.database import FaceDatabase
+    from tests.test_recognition_run import setup, run
+    config, client, services, _ = setup(tmp_path, monkeypatch)
+    reason = 'synthetic ' + stage + ' failure'
+    def fail(*a, **kw):
+        raise RuntimeError(reason)
+    if stage == 'rebuild':
+        monkeypatch.setattr(runner, 'rebuild_selected', fail)
+    elif stage == 'names':
+        services.metadata_plan = fail
+    else:
+        import stash_ai.recognition.metadata as metadata
+        monkeypatch.setattr(metadata, 'fill_portrait', fail)
+    assert run(config, services, '1') == 1
+    with FaceDatabase(config.database) as db:
+        row = db.connection.execute('SELECT * FROM runs').fetchone()
+        assert row['status'] == 'partial' and row['error'] is None
+        assert reason in row['summary']
+        assert json.loads(row['summary'])['errors']['total'] == 1
+        assert reason not in ''.join(r[0] for r in db.connection.execute('SELECT data FROM progress'))
+

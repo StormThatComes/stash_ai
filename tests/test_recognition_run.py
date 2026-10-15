@@ -276,3 +276,33 @@ def test_local_merge_does_not_bypass_incompatible_published_namespace(tmp_path, 
     with FaceDatabase(config.database) as db:
         assert db.connection.execute('SELECT COUNT(*) FROM identity_merges').fetchone()[0] == 0
         assert db.connection.execute("SELECT COUNT(*) FROM publications WHERE kind='namespace' AND status='withheld'").fetchone()[0] > 0
+
+
+import json
+import sqlite3
+import uuid
+from dataclasses import replace
+from types import SimpleNamespace
+
+import numpy as np
+import pytest
+
+
+def test_namespace_withholding_is_visible_in_console_and_summary(tmp_path,monkeypatch,capsys):
+    from tests.test_recognition_run import setup,run
+    from tests.test_recognition_rebuild import changed
+    from stash_ai.recognition.database import FaceDatabase
+    config,client,services,_ = setup(tmp_path,monkeypatch)
+    assert run(config,services,'1') == 0
+    capsys.readouterr()
+    alternate = changed(config,models={'recognizer':'auraface'})
+    assert run(alternate,services,'1') == 0
+    output = capsys.readouterr().out
+    assert 'Recognition success' in output and 'groups_withheld=1' in output
+    assert 'namespace' in output.lower()
+    with FaceDatabase(config.database) as db:
+        assert db.connection.execute("SELECT COUNT(*) FROM publications WHERE kind='namespace' AND status='withheld'").fetchone()[0] == 1
+        summary = json.loads(db.connection.execute('SELECT summary FROM runs ORDER BY started DESC LIMIT 1').fetchone()[0])
+        assert summary['counts']['namespace_groups_withheld'] == 1
+        assert summary['counts']['groups_withheld'] == 1
+

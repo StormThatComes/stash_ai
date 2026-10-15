@@ -386,3 +386,43 @@ def test_binding_keeps_a_better_historical_rival_when_its_label_is_used(tmp_path
         assert result[selected][0]['person'] not in (first_person, second_person)
         assert rebuild_selected(db,[{'scene':'3','scan':selected},{'scene':'2','scan':drift}],config) == result
 
+
+
+import json
+import sqlite3
+import uuid
+from dataclasses import replace
+from types import SimpleNamespace
+
+import numpy as np
+import pytest
+
+
+@pytest.mark.parametrize('legacy_inactive', [False, True])
+def test_late_unknown_add_retains_ownership_until_future_cleanup(tmp_path, monkeypatch, legacy_inactive):
+    from tests.test_recognition_run import setup, run
+    from tests.test_recognition_rebuild import changed
+    from stash_ai.recognition.database import FaceDatabase
+    config, client, services, _ = setup(tmp_path, monkeypatch)
+    attempts = []
+    def delayed(scene, performer):
+        attempts.append((scene, performer))
+        raise TimeoutError('ADD is still uncertain')
+    client.add_scene_person = delayed
+    assert run(config, services, '1') == 1
+    if legacy_inactive:
+        with FaceDatabase(config.database) as db:
+            db.connection.execute("UPDATE publications SET payload=json_set(payload,'$.active',json('false')) WHERE kind='link'")
+            db.connection.commit()
+    strict = changed(config, detection={'min_face_pixels':200})
+    assert run(strict, services, '1') == 1
+    with FaceDatabase(config.database) as db:
+        row = db.connection.execute("SELECT * FROM publications WHERE kind='link'").fetchone()
+        assert row['status'] == 'unknown' and json.loads(row['payload']).get('active', True) is True
+    scene, performer = attempts[0]
+    client.links[scene].append(performer)  # the original uncertain ADD completes later
+    assert run(strict, services, '1') == 0
+    assert performer not in client.links[scene]
+    assert any(w[0]=='unlink' for w in client.writes)
+    assert len(attempts) == 1
+

@@ -23,6 +23,6 @@ def enrich(database, client, report, config, plan, scope, target, paths, service
         except Exception as error:
             counts[name + '_failed'] += 1
             counts['metadata_failed'] += 1
-            report.optional('recognition_metadata', report.write,
-                            f'Recognition {name} withheld: ' + safe_error(error, client.api_key))
+            report.optional('recognition_metadata', report.issue, 'recognition', name,
+                            target['performer'], error, safe_error(error, client.api_key))
     return counts

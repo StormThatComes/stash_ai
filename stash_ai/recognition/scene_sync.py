@@ -49,13 +49,28 @@ def remove_stale_links(database, client, report, scope, scene, wanted, namespace
     ) as tracked:
         for row in tracked:
             payload = json.loads(row['payload'])
-            if row['target'] in wanted or not payload.get('managed', True) or not payload.get('active', True):
+            if row['target'] in wanted or not payload.get('managed', True):
                 continue
+            if not payload.get('active', True):
+                removal = db.execute('SELECT status FROM publications WHERE id=?',
+                    (operation_id(scope, scene, row['person'], 'unlink'),)).fetchone()
+                if row['status'] not in ('pending', 'unknown') or removal and removal['status'] in ('confirmed', 'observed'):
+                    continue
+                # Older writers retired absent uncertain ADDs without an unlink.
+                # Recover that unresolved ownership, preserving acknowledged removals.
+                payload['active'] = True
+                with db:
+                    db.execute('UPDATE publications SET payload=? WHERE id=?', (encoded(payload), row['id']))
             live = {checked_id(p)['id'] for p in client.scene(scene)['performers']}
             if row['target'] not in live:
+                if row['status'] in ('pending', 'unknown'):
+                    raise PendingRecognition('Earlier scene ADD is unresolved; retain ownership until its outcome is observed.')
                 with db:
                     _inactive(db, scope, scene, row['person'])
                 continue
+            if row['status'] in ('pending', 'unknown'):
+                with db:
+                    db.execute("UPDATE publications SET status='observed',error=NULL WHERE id=?", (row['id'],))
             if not owns(client.performer(row['target']), row['token']):
                 raise PendingRecognition('Performer ownership changed before stale scene link removal.')
             identifier = operation_id(scope, scene, row['person'], 'unlink')
@@ -84,6 +99,7 @@ def remove_stale_links(database, client, report, scope, scene, wanted, namespace
 def reconcile_legacy_merges(database, client, scope, scenes):
     """Observe uncertain old destructive merges before assigning their profiles."""
     from .merge_publication import _reconcile
+    from .identity_merges import canonical
     selected = set(scenes)
     with tracking(
         database.connection.execute("SELECT * FROM publications WHERE scope=? AND kind='merge' "
@@ -97,9 +113,10 @@ def reconcile_legacy_merges(database, client, scope, scenes):
         ).fetchone()[0],
     ) as tracked:
         for row in tracked:
+            root = canonical(database.connection, row['person'])
             involved = database.connection.execute('SELECT DISTINCT s.scene FROM scans s JOIN observations o ON o.scan=s.id '
-                'JOIN members m ON m.observation=o.id JOIN identity_merges a ON a.target=m.person WHERE a.source=?',
-                (row['person'],)).fetchall()
+                'JOIN members m ON m.observation=o.id WHERE m.person=? AND s.scope=?',
+                (root, scope)).fetchall()
             if not any(r[0] in selected for r in involved):
                 continue
             _reconcile(database, client, row)
