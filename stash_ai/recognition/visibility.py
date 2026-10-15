@@ -39,6 +39,7 @@ class LazyVisibility:
         self.config, self.paths, self.factory = config, paths, factory or FaceVisibility
         self.model = None
         self._initialization_error = None
+        self._inference_failures = 0
 
     def measure(self, image, face):
         try:
@@ -54,19 +55,26 @@ class LazyVisibility:
             raise VisibilityError('Face visibility measurement failed: ' + str(error)) from error
         try:
             value = self.model.measure(image, face)
+            if not isinstance(value, dict) or not cached(value):
+                raise ValueError('Visibility model returned an invalid or incompatible measurement.')
         except VisibilityGeometryError:
             raise
         except Exception as error:
+            from stash_ai.runtime.cleanup import cleanup
+            model, self.model = self.model, None
+            self._inference_failures += 1
+            if self._inference_failures >= 2:
+                self._initialization_error = 'Visibility session recovery exhausted after repeated inference failures.'
+            cleanup([('close failed visibility model', model.close)])
             raise VisibilityError('Face visibility measurement failed: ' + str(error)) from error
-        if not isinstance(value, dict) or not cached(value):
-            raise VisibilityError('Visibility model returned an invalid or incompatible measurement.')
         return value
 
     def close(self):
         self._initialization_error = None
+        self._inference_failures = 0
         if self.model is not None:
-            self.model.close()
-            self.model = None
+            model, self.model = self.model, None
+            model.close()
 
 
 def prepare(image, face):

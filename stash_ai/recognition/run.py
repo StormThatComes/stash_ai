@@ -170,8 +170,7 @@ def execute(args, config, *, services=None):
             try:
                 with phase(report, 'Recognition assets'):
                     with work('Prepare recognition assets', 1, unit='step', position=0) as assets:
-                        paths = (LazyAssets(config, services.assets, report) if portraits_only else
-                                 services.assets(config, write=report.write))
+                        paths = LazyAssets(config, services.assets, report)
                         assets.advance()
                     visibility = LazyVisibility(config, paths, services.visibility)
                     expression = LazyExpression(config, paths, services.expression)
@@ -191,6 +190,7 @@ def execute(args, config, *, services=None):
                             'dimensions': value.dimensions, 'runtime': getattr(value, 'provenance', {})})
                     def load_models(config, paths):
                         with activity(report, 'load detection and recognition models'):
+                            paths.prepare_identity()
                             return services.backend(config, paths)
                     backend = LazyBackend(config, paths, load_models, loaded=loaded)
                     runtime_services = replace(services, backend=backend.borrow)

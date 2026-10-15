@@ -1,5 +1,6 @@
 """ORT neural inference with the pinned OpenCV YuNet/SFace contracts."""
 import hashlib
+from stash_ai.runtime.cleanup import cleanup
 
 from .models import ASSETS, verified_bytes, checked_detection, normalized_embedding
 from .runtime import session
@@ -45,18 +46,23 @@ class OnnxYuNet:
     names = tuple(f'{kind}_{stride}' for kind in ('cls', 'obj', 'bbox', 'kps') for stride in (8,16,32))
 
     def __init__(self, config, path, cv, runtime_info):
-        self.config, self.cv = config, cv
-        blob, sha = prepared_model(path, detector=True)
-        self.session, self.device = session(config, blob, runtime_info=runtime_info)
-        inputs = self.session.get_inputs()
-        if len(inputs) != 1 or inputs[0].type != 'tensor(float)' or list(inputs[0].shape[:2]) != [1,3]:
-            raise ValueError('YuNet ORT input contract changed.')
-        outputs = self.session.get_outputs()
-        if {o.name for o in outputs} != set(self.names) or any(o.type != 'tensor(float)' for o in outputs):
-            raise ValueError('YuNet ORT output contract changed.')
-        self.input = inputs[0].name
-        self.provenance = {'onnxruntime': runtime_info[0].__version__, 'providers': self.session.get_providers(),
-                           'transform': 'opencv-pad32-dynamic-declarations-v1', 'prepared_sha256': sha}
+        self.session = None
+        try:
+            self.config, self.cv = config, cv
+            blob, sha = prepared_model(path, detector=True)
+            self.session, self.device = session(config, blob, runtime_info=runtime_info)
+            inputs = self.session.get_inputs()
+            if len(inputs) != 1 or inputs[0].type != 'tensor(float)' or list(inputs[0].shape[:2]) != [1,3]:
+                raise ValueError('YuNet ORT input contract changed.')
+            outputs = self.session.get_outputs()
+            if {o.name for o in outputs} != set(self.names) or any(o.type != 'tensor(float)' for o in outputs):
+                raise ValueError('YuNet ORT output contract changed.')
+            self.input = inputs[0].name
+            self.provenance = {'onnxruntime': runtime_info[0].__version__, 'providers': self.session.get_providers(),
+                               'transform': 'opencv-pad32-dynamic-declarations-v1', 'prepared_sha256': sha}
+        except BaseException:
+            cleanup([('close failed ONNX adapter', self.close)])
+            raise
 
     def detect(self, data):
         import numpy as np
@@ -111,15 +117,20 @@ class OnnxYuNet:
 
 class OnnxSFace:
     def __init__(self, config, path, runtime_info):
-        blob, sha = prepared_model(path)
-        self.session, self.device = session(config, blob, runtime_info=runtime_info)
-        inputs, outputs = self.session.get_inputs(), self.session.get_outputs()
-        if (len(inputs) != 1 or inputs[0].type != 'tensor(float)' or list(inputs[0].shape) != [1,3,112,112]
-                or len(outputs) != 1 or outputs[0].type != 'tensor(float)' or list(outputs[0].shape) != [1,128]):
-            raise ValueError('Pinned SFace ORT input/output contract changed.')
-        self.input, self.output = inputs[0].name, outputs[0].name
-        self.provenance = {'onnxruntime': runtime_info[0].__version__, 'providers': self.session.get_providers(),
-                           'transform': 'opencv-aligncrop-raw-rgb-constant-initializers-v1', 'prepared_sha256': sha}
+        self.session = None
+        try:
+            blob, sha = prepared_model(path)
+            self.session, self.device = session(config, blob, runtime_info=runtime_info)
+            inputs, outputs = self.session.get_inputs(), self.session.get_outputs()
+            if (len(inputs) != 1 or inputs[0].type != 'tensor(float)' or list(inputs[0].shape) != [1,3,112,112]
+                    or len(outputs) != 1 or outputs[0].type != 'tensor(float)' or list(outputs[0].shape) != [1,128]):
+                raise ValueError('Pinned SFace ORT input/output contract changed.')
+            self.input, self.output = inputs[0].name, outputs[0].name
+            self.provenance = {'onnxruntime': runtime_info[0].__version__, 'providers': self.session.get_providers(),
+                               'transform': 'opencv-aligncrop-raw-rgb-constant-initializers-v1', 'prepared_sha256': sha}
+        except BaseException:
+            cleanup([('close failed ONNX adapter', self.close)])
+            raise
 
     def embed(self, aligned_bgr):
         result = self.session.run([self.output], {self.input: sface_blob(aligned_bgr)})

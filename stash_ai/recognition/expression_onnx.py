@@ -32,10 +32,12 @@ def prepare(image, face):
     from PIL import Image
     x, y, width, height = face.box
     if x < 0 or y < 0 or x + width > image.width or y + height > image.height:
-        raise ValueError('Expression face extends beyond the real source.')
+        from .expression import ExpressionGeometryError
+        raise ExpressionGeometryError('Expression face extends beyond the real source.')
     eyes = sorted(face.landmarks[:2], key=lambda point: point[0])
     if math.dist(*eyes) <= 1:
-        raise ValueError('Expression target eye landmarks are invalid.')
+        from .expression import ExpressionGeometryError
+        raise ExpressionGeometryError('Expression target eye landmarks are invalid.')
     angle = math.atan2(eyes[1][1] - eyes[0][1], eyes[1][0] - eyes[0][0])
     scale = max(width, height) * 1.5 / 256
     a, b = scale * math.cos(angle), -scale * math.sin(angle)
@@ -55,7 +57,8 @@ def decode_mesh(points, presence, transform):
             not np.isfinite(values).all() or not np.isfinite(confidence).all()):
         raise ValueError('Expression mesh outputs have invalid shapes/values.')
     if float(confidence.ravel()[0]) < 0:
-        raise ValueError('Expression mesh does not confirm a face in the verified crop.')
+        from .expression import ExpressionGeometryError
+        raise ExpressionGeometryError('Expression mesh does not confirm a face in the verified crop.')
     coordinates = values.reshape(478,3)[:,:2]
     return coordinates @ transform[:,:2].T + transform[:,2]
 
