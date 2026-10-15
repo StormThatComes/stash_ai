@@ -199,6 +199,10 @@ def fit_cached_bytes(data, sha, config, metadata):
     if (not isinstance(data, bytes) or not data or len(data) > 8388608
             or hashlib.sha256(data).hexdigest() != sha):
         raise ValueError('Cached portrait bytes do not match their bounded digest.')
+    with open_image(BytesIO(data)) as raw:
+        if raw.format != 'JPEG' or raw.width * raw.height > 32 * 1048576:
+            raise ValueError('Cached portrait is not a bounded JPEG image.')
+        raw.load()
     if len(data) <= config.data['storage']['max_crop_bytes']:
         return data, sha
     from .quality import encode_portrait
@@ -216,15 +220,24 @@ def fit_cached_bytes(data, sha, config, metadata):
 def cached_thumbnail(database, config, scope, target, row, identifier, metadata):
     """Re-score the same physical thumbnail JPEG under changed preferences."""
     db, policy = database.connection, config.data['portraits']
-    old = db.execute('''SELECT * FROM portraits WHERE scope=? AND person=? AND scene=? AND image IS NOT NULL
+    rows = db.execute('''SELECT * FROM portraits WHERE scope=? AND person=? AND scene=? AND image IS NOT NULL
       AND json_extract(metadata,'$.source_type')='vtt' AND json_extract(metadata,'$.namespace')=?
       AND json_extract(metadata,'$.scan')=? AND json_extract(metadata,'$.observation')=?
       AND json_extract(metadata,'$.policy.margin') IS ? AND json_extract(metadata,'$.policy.aspect_ratio') IS ?
-      AND json_extract(metadata,'$.policy.jpeg_quality') IS ? ORDER BY rowid DESC LIMIT 1''',
+      AND json_extract(metadata,'$.policy.jpeg_quality') IS ? ORDER BY rowid DESC LIMIT 32''',
       (scope, target['person'], metadata['scene'], metadata['namespace'], row['scan'], row['id'],
-       policy['margin'], policy['aspect_ratio'], policy['jpeg_quality'])).fetchone()
-    if old is None:
-        return None
+       policy['margin'], policy['aspect_ratio'], policy['jpeg_quality']))
+    for old in rows:
+        candidate = dict(metadata)
+        reused = _cached_thumbnail_row(database, config, scope, target, identifier, candidate, old)
+        if reused is not None:
+            metadata.update(candidate)
+            return reused
+    return None
+
+
+def _cached_thumbnail_row(database, config, scope, target, identifier, metadata, old):
+    db, policy = database.connection, config.data['portraits']
     before = json.loads(old['metadata'])
     if before.get('input_sha') != metadata['input_sha'] or before.get('geometry') != metadata['geometry']:
         return None

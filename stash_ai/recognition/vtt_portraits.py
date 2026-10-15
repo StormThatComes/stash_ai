@@ -37,7 +37,8 @@ class Sources:
                 self.source = self.factory(self.client, self.client.scene(scene), self.config).__enter__()
                 self.scene = scene
             except Exception:
-                self.failed.add(scene)
+                # A later candidate can retry a transient acquisition failure.
+                self.scene = self.source = None
                 raise
         try:
             if self.source.fingerprint != row['input_sha']:
@@ -46,15 +47,16 @@ class Sources:
             if (cue.start != row['seconds'] or safe_url(cue.image) != safe_url(row['source'])
                     or list(cue.rect) != json.loads(row['rect'])):
                 raise ValueError('VTT cue does not match its recognition observation.')
-            return self.source.thumbnail(row['cue'])
-        except Exception:
+        except (ValueError, IndexError, KeyError, TypeError):
             self.failed.add(scene)
             raise
+        return self.source.thumbnail(row['cue'])
 
     def close(self):
-        if self.source is not None:
-            self.source.close()
+        source = self.source
         self.scene = self.source = None
+        if source is not None:
+            source.close()
 
 
 def store(database, identifier, scope, target, scene, metadata):

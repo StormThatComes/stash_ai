@@ -10,7 +10,7 @@ from stash_ai.domain import Cue
 from stash_ai.stash_api.transport import origin, absolute_stash_url
 from .config import digest
 from stash_ai.inference.image_io import open_image
-from stash_ai.runtime.cleanup import closing
+from stash_ai.runtime.cleanup import closing, cleanup
 
 
 def safe_url(url):
@@ -93,6 +93,10 @@ class SpriteInput:
         self.coverage = {'total_cues': total, 'selected_cues': len(cues), 'complete_sampling': total == len(cues)}
         self.manifest = {'cues': [[c.start, c.end, safe_url(c.image), list(c.rect)] for c in cues],
                          'sheets': [[safe_url(url), self.hashes[url]] for url in urls]}
+        if len({safe_url(url) for url in urls}) != len(urls):
+            # Bind each ambiguous sanitized URL to its actual pixels, without
+            # retaining credentials or invalidating ordinary historical scans.
+            self.manifest['cue_sheets'] = [self.hashes[cue.image] for cue in cues]
         self.fingerprint = digest(self.manifest)
 
     def read(self, url):
@@ -128,9 +132,7 @@ class SpriteInput:
                 with closing(sheet.crop((x, y, x + width, y + height)), name='close recognition source crop') as image:
                     yield index, cue, image
         finally:
-            for sheet in sheets.values():
-                sheet.close()
-            self.cache.clear()
+            cleanup([*(sheet.close for sheet in sheets.values()), self.cache.clear])
 
     def thumbnail(self, index):
         """Read one full cue image, sharing the bounded verified sheet cache."""
@@ -167,11 +169,10 @@ class SpriteInput:
             cached[2].close()
 
     def close(self):
-        self._close_portrait_sheet()
-        self.cache.clear()
+        cleanup([self._close_portrait_sheet, self.cache.clear])
 
     def __enter__(self):
         return self
 
     def __exit__(self, *args):
-        self.close()
+        cleanup([self.close], primary=args[1])

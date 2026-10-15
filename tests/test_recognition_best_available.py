@@ -222,12 +222,13 @@ def test_retained_crop_is_upgraded_to_full_thumbnail_when_source_recovers(tmp_pa
 
 def test_repeated_source_failure_keeps_the_retained_portrait_idempotent(tmp_path, monkeypatch):
     config, stash, services, _ = setup(tmp_path, monkeypatch)
-    original, calls = services.source, []
+    original = services.source
     def unavailable(client, scene, configuration):
-        calls.append(scene['id'])
-        if len(calls) % 2 == 0:
+        source = original(client, scene, configuration)
+        def thumbnail(index):
             raise TimeoutError('thumbnail unavailable after scan')
-        return original(client, scene, configuration)
+        source.thumbnail = thumbnail
+        return source
     services.source = unavailable
     assert run(config, services, '1') == 0 and stash.images
     operation = image_operation(config)
