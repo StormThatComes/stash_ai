@@ -53,6 +53,8 @@ def remove_stale_links(database, client, report, scope, scene, wanted, namespace
                 continue
             live = {checked_id(p)['id'] for p in client.scene(scene)['performers']}
             if row['target'] not in live:
+                if row['status'] in ('pending', 'unknown'):
+                    raise PendingRecognition('Earlier scene ADD is unresolved; retain ownership until its outcome is observed.')
                 with db:
                     _inactive(db, scope, scene, row['person'])
                 continue
@@ -84,6 +86,7 @@ def remove_stale_links(database, client, report, scope, scene, wanted, namespace
 def reconcile_legacy_merges(database, client, scope, scenes):
     """Observe uncertain old destructive merges before assigning their profiles."""
     from .merge_publication import _reconcile
+    from .identity_merges import canonical
     selected = set(scenes)
     with tracking(
         database.connection.execute("SELECT * FROM publications WHERE scope=? AND kind='merge' "
@@ -97,9 +100,10 @@ def reconcile_legacy_merges(database, client, scope, scenes):
         ).fetchone()[0],
     ) as tracked:
         for row in tracked:
+            root = canonical(database.connection, row['person'])
             involved = database.connection.execute('SELECT DISTINCT s.scene FROM scans s JOIN observations o ON o.scan=s.id '
-                'JOIN members m ON m.observation=o.id JOIN identity_merges a ON a.target=m.person WHERE a.source=?',
-                (row['person'],)).fetchall()
+                'JOIN members m ON m.observation=o.id WHERE m.person=? AND s.scope=?',
+                (root, scope)).fetchall()
             if not any(r[0] in selected for r in involved):
                 continue
             _reconcile(database, client, row)
