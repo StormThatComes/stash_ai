@@ -362,3 +362,25 @@ def test_database_connection_and_lock_close_are_exhaustive(tmp_path, primary):
     assert calls == ['connection', 'lock']
     assert any('lock failed' in note for note in caught.value.__notes__)
     state.close()
+
+
+
+def test_backup_sync_handle_supports_windows_commit_requirement(tmp_path, monkeypatch):
+    import stash_ai.recognition.database as module
+    original = module.os.fsync
+    synced = []
+    def sync(descriptor):
+        # Windows _commit rejects a read-only file descriptor. Exercise the
+        # same required capability with a real syscall on every test platform.
+        os.write(descriptor, b'')
+        synced.append(descriptor)
+        return original(descriptor)
+    monkeypatch.setattr(module.os, 'fsync', sync)
+    destination = tmp_path / 'backup.sqlite3'
+    with FaceDatabase(tmp_path / 'state.sqlite3') as state:
+        installation = state.installation
+        state.backup(destination)
+    assert len(synced) == 1
+    with FaceDatabase(destination) as state:
+        assert state.installation == installation
+        assert state.connection.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
