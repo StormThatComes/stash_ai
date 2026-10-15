@@ -3,30 +3,55 @@ from collections.abc import Mapping
 
 from stash_ai.runtime.console import activity
 from .database import encoded
-from .models import namespace
+from .models import namespace, ensure_assets, asset_selection
 from .progress import tracking
 
 
 class LazyAssets(Mapping):
-    """Cached portrait reranking needs no model installation or device setup."""
+    """Prepare only model assets actually consumed by this invocation."""
     def __init__(self, config, factory, report):
         self.config, self.factory, self.report = config, factory, report
-        self.paths = None
+        self.selective = factory is ensure_assets
+        self.paths = {} if self.selective else None
+        self.errors = {}
 
-    def _load(self):
-        if self.paths is None:
-            with activity(self.report, 'prepare portrait model assets'):
-                self.paths = self.factory(self.config, write=self.report.write)
+    def _load(self, keys=None):
+        group = tuple(keys) if self.selective else ('all',)
+        if group in self.errors:
+            raise ValueError(self.errors[group])
+        needed = self.paths is None or self.selective and any(key not in self.paths for key in group)
+        if needed:
+            try:
+                with activity(self.report, 'prepare required recognition assets'):
+                    if self.selective:
+                        self.paths.update(self.factory(self.config, write=self.report.write, keys=group))
+                    else:
+                        self.paths = self.factory(self.config, write=self.report.write)
+            except Exception as error:
+                from .diagnostics import message
+                self.errors[group] = message(error)[:500]
+                raise
         return self.paths
 
+    def prepare_identity(self):
+        models = self.config.data['models']
+        return self._load((models['detector'], models['recognizer']))
+
     def __getitem__(self, key):
-        return self._load()[key]
+        if key in ('expression_mesh', 'expression_blendshapes'):
+            keys = ('expression_mesh', 'expression_blendshapes')
+        elif key in (self.config.data['models']['detector'], self.config.data['models']['recognizer']):
+            models = self.config.data['models']
+            keys = (models['detector'], models['recognizer'])
+        else:
+            keys = (key,)
+        return self._load(keys)[key]
 
     def __iter__(self):
-        return iter(self._load())
+        return iter(asset_selection(self.config)[0] if self.selective else self._load())
 
     def __len__(self):
-        return len(self._load())
+        return len(asset_selection(self.config)[0] if self.selective else self._load())
 
 
 def retained_targets(database, config, scope, scene_ids=None):

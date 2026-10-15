@@ -93,11 +93,12 @@ class MergedModelRun:
                     status(self.report, stage=self.report.work() or 'inspected')
         finally:
             from stash_ai.runtime.cleanup import cleanup
+            from stash_ai.runtime.shutdown import call, release, join
             def close_backend():
                 if self.inference_executor is None:
                     self._close_tagger()
                 else:
-                    self.inference_executor.submit(self._close_tagger).result()
+                    join(self.inference_executor.submit(self._close_tagger), self)
             def reset():
                 self.prepare_executor = self.inference_executor = self.input_prefetch = None
                 self._staged, self._scene_sequence = None, ()
@@ -105,10 +106,11 @@ class MergedModelRun:
                 ('close inference progress', lambda: bar.close() if bar is not None else None),
                 ('close staged scene', lambda: self._close_staged(kinds)),
                 *([('cancel input reads', self.input_prefetch.close)] if self.input_prefetch is not None else []),
-                *([('close image preparation workers', lambda: self.prepare_executor.shutdown(wait=True))] if self.prepare_executor is not None else []),
-                ('close model backend', close_backend),
-                *([('close inference worker', lambda: self.inference_executor.shutdown(wait=True))] if self.inference_executor is not None else []),
-                ('release inference state', reset),
+                *([('close image preparation workers', lambda: call(lambda: self.prepare_executor.shutdown(wait=True), self.prepare_executor))] if self.prepare_executor is not None else []),
+                ('close model backend', lambda: release(self, close_backend)),
+                *([('close inference worker', lambda: release(self.inference_executor,
+                    lambda: call(lambda: self.inference_executor.shutdown(wait=True), self.inference_executor)))] if self.inference_executor is not None else []),
+                ('release inference state', lambda: release(self, reset)),
             ], report=self.report, primary=self._cleanup_primary)
 
     def _prefetch_next_input(self, input_plan):
@@ -129,6 +131,10 @@ class MergedModelRun:
             break
 
     def _close_tagger(self):
+        from stash_ai.runtime.shutdown import release
+        release(self, self._release_tagger)
+
+    def _release_tagger(self):
         if self.tagger is not None:
             try:
                 self.tagger.close()
@@ -186,6 +192,8 @@ class MergedModelRun:
         return False
 
     def _load_tagger(self):
+        from stash_ai.runtime.shutdown import require_idle
+        require_idle()
         def load():
             # Assign on the owner thread so finally can close a model even if
             # the caller is interrupted while waiting for initialization.

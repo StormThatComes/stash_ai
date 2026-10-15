@@ -203,6 +203,15 @@ bounded crop BLOBs, accepted identities, Stash ownership/bindings, candidate
 portraits, mutation records, progress and run history. Its independent schema
 refuses tag/history/foreign databases and hard-linked aliases. Internal backup
 uses SQLite's consistent backup API; no result/history/image sidecars are needed.
+The source connection must have no active transaction before backup; callers
+must explicitly commit or roll back first. Backups publish a complete staged
+file exclusively and preserve any existing destination. A setup failure removes
+the owned staging file; a process crash can leave a hidden staging file.
+
+Opening state validates column defaults, required constraints and the installation
+identity before migration or interrupted-run recovery. Unknown triggers and views
+are refused. Close the SQLite owner on its creating thread: a rejected close or
+a failed close that leaves SQLite live retains the writer lock.
 Recognition schemas v1, v2 and v3 upgrade atomically to v4, retaining merge
 aliases/evidence and cross-scene support and adding original sample ownership for
 reversible identity binding. Existing observations, IDs, performer bindings and history
@@ -880,6 +889,8 @@ retained observation IDs to human ground-truth person labels. Use representative
 different/same people, blur, pose and thumbnail sizes; choose thresholds separately
 per model on a calibration subset, then evaluate a separate held-out subset.
 Both adapters receive exactly the same retained crop and re-based source landmarks.
+Each selected scene must use observations from one retained scan revision;
+mixing versions is rejected before model preparation to avoid false co-presence.
 The helper runs the real grouping policy in disposable in-memory SQLite and
 reports embedding/accepted coverage, withheld/ambiguous observations, pair false
 merges and misses (including withheld), pair threshold errors, time and asset size.

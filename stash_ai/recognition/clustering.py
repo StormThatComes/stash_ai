@@ -126,6 +126,32 @@ def _result(db, scan, policy):
     return [dict(row) for row in rows]
 
 
+def complete_candidates(db, scan, policy, context, count, *, exact_memberships=False):
+    """Derived cache absence cannot mean that supported identities disappeared."""
+    totals = db.execute("SELECT COUNT(*),COUNT(DISTINCT json_extract(payload,'$.observation')) "
+                        'FROM candidates WHERE scan=? AND policy=?', (scan, policy)).fetchone()
+    if tuple(totals) != (count, count):
+        return False
+    rows = db.execute("SELECT c.id,c.person,c.status,json_extract(c.payload,'$.observation') AS observation,"
+        "json_extract(c.payload,'$.reference_context') AS context,o.scan,o.rejected,m.person AS member "
+        "FROM candidates c LEFT JOIN observations o ON o.id=json_extract(c.payload,'$.observation') "
+        'LEFT JOIN members m ON m.observation=o.id WHERE c.scan=? AND c.policy=?', (scan, policy))
+    for row in rows:
+        try:
+            expected = str(uuid.uuid5(uuid.UUID(row['observation']), policy))
+        except (ValueError, TypeError, AttributeError):
+            return False
+        if (row['id'] != expected or row['scan'] != scan or row['rejected'] is not None
+                or row['context'] != context or row['status'] not in ('accepted', 'withheld')):
+            return False
+        if row['status'] == 'accepted':
+            if row['person'] is None or row['member'] != row['person']:
+                return False
+        elif exact_memberships and row['member'] is not None:
+            return False
+    return True
+
+
 def matching_policy(config):
     from .context import policy_digest
     return policy_digest(config, 'matching-v6', lambda: {
@@ -157,7 +183,7 @@ def cluster_scene(database, scan, config, *, progress=None, _cold_replay=False):
         context = reference_context(groups)
         existing = db.execute('SELECT COUNT(*) FROM candidates WHERE scan=? AND policy=? '
                               "AND json_extract(payload,'$.reference_context')=?", (scan, policy, context)).fetchone()[0]
-    if existing == count and count:
+    if existing == count and count and complete_candidates(db, scan, policy, context, count):
         with tracking(
             db.execute(
                 'SELECT dimensions,embedding FROM observations WHERE scan=? AND rejected IS NULL',

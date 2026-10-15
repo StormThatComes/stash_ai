@@ -8,9 +8,17 @@ SCENE_FIELDS = 'id title paths { vtt sprite stream } performers { id }'
 def checked_id(value, expected=None):
     if (not isinstance(value, dict) or not isinstance(value.get('id'), str) or
             not value['id'].isascii() or not value['id'].isdecimal() or int(value['id']) <= 0 or
+            value['id'] != str(int(value['id'])) or
             expected is not None and value['id'] != str(expected)):
         raise RuntimeError('Stash performer/scene acknowledgement ID was not confirmed.')
     return value
+
+
+def checked_token(database, person, token):
+    expected = f'stash-ai-recognition:{database.installation}:{person}'
+    if token != expected:
+        raise ValueError('Recognition ownership token does not match installation and person identity.')
+    return token
 
 
 def owns(performer, token):

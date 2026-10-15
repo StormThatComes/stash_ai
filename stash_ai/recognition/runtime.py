@@ -21,7 +21,12 @@ def runtime(config):
         raise ValueError('Recognition requested CUDA but this runtime has no CUDA provider; install the GPU profile or set models.device: cpu.')
     if 'CPUExecutionProvider' not in available:
         raise ValueError('Recognition requires the supported ONNX Runtime CPU fallback.')
-    providers, _ = _execution_providers(ort, SimpleNamespace(device=config.data['models']['device']))
+    try:
+        providers, _ = _execution_providers(ort, SimpleNamespace(device=config.data['models']['device']))
+    except Exception:
+        if config.data['models']['device'] != 'auto' or 'CUDAExecutionProvider' not in available:
+            raise
+        providers = ['CPUExecutionProvider']
     return ort, providers
 
 
@@ -43,5 +48,6 @@ def session(config, model, *, runtime_info=None, cpu_fallback=True):
     active = result.get_providers()
     device = 'cuda' if active and active[0] == 'CUDAExecutionProvider' else 'cpu'
     if config.data['models']['device'] == 'cuda' and device != 'cuda':
+        result = None
         raise ValueError('Recognition CUDA initialization fell back to CPU; requested GPU was not met. Check CUDA/cuDNN libraries.')
     return result, device

@@ -293,6 +293,7 @@ def test_failed_v3_migration_is_atomic(tmp_path, monkeypatch):
         db.executescript(SCHEMA_V3)
         db.execute(f'PRAGMA application_id={APPLICATION_ID}')
         db.execute('PRAGMA user_version=3')
+        db.execute('INSERT INTO metadata VALUES (?,?)', ('installation', '01234567-89ab-cdef-0123-456789abcdef'))
     monkeypatch.setattr(database, 'REBUILD_SCHEMA', database.REBUILD_SCHEMA + '\nINVALID SQL;')
     with pytest.raises(sqlite3.Error):
         FaceDatabase(path)

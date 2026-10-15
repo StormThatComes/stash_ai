@@ -1,6 +1,7 @@
 """Identity-first ranking of video frames or the original VTT observations."""
 import base64
 import hashlib
+import heapq
 import json
 import uuid
 from urllib.parse import parse_qs, urlsplit
@@ -14,7 +15,7 @@ from .models import normalized_embedding
 from .publication import operation_id, perform, PendingRecognition, save_operation
 from .quality import PortraitFramingError, assess, portrait_bytes, portrait_score, portrait_tiebreak, portrait_shortfalls
 from .portrait_availability import measure_available, score_metadata, refresh_cached_quality
-from .stash import checked_id, owns
+from .stash import checked_id, checked_token, owns
 from .visibility import LazyVisibility, CONTRACT_ID
 from .expression import LazyExpression, CONTRACT_ID as EXPRESSION_CONTRACT_ID
 from .diagnostics import metadata as safe_metadata
@@ -57,29 +58,36 @@ def missing_image(value, client, performer):
 
 
 def hints(database, target, config):
-    """Bounded quality shortlist with scene and temporal diversity."""
+    """Stream all weighted hints, retaining bounded scene/temporal diversity."""
     policy = config.data['portraits']
-    queues = []
-    for item in sorted(target['scans'], key=lambda x: x['scene']):
-        rows = database.connection.execute('''SELECT o.id,o.scan,o.cue,o.seconds,o.source,o.rect,o.geometry,o.quality
-          FROM observations o JOIN members m ON m.observation=o.id
-          WHERE m.person=? AND o.scan=? AND o.rejected IS NULL
-          ORDER BY json_extract(o.quality,'$.sharpness') DESC,o.cue,o.id LIMIT ?''',
-          (target['person'], item['scan'], policy['max_candidates'] * 8)).fetchall()
-        # These are VTT hints, not the expression of the eventual video frame.
-        scored = [(portrait_score(json.loads(row['quality']), policy, expression=False), row) for row in rows]
-        scored.sort(key=lambda pair: (-pair[0], pair[1]['seconds'], pair[1]['id']))
-        selected = []
-        while scored and len(selected) < policy['max_candidates']:
+    maximum = policy['max_candidates']
+    def rank(row):
+        return (-portrait_score(json.loads(row['quality']), policy, expression=False),
+                row['seconds'], row['id'])
+
+    def scene_queues():
+        for item in target['scans']:
+            rows = database.connection.execute('''SELECT o.id,o.scan,o.cue,o.seconds,o.source,o.rect,o.geometry,o.quality
+              FROM observations o JOIN members m ON m.observation=o.id
+              WHERE m.person=? AND o.scan=? AND o.rejected IS NULL''', (target['person'], item['scan']))
+            # No sharpness prefix may hide the configured weighted winner.
+            scored = heapq.nsmallest(maximum * 8, rows, key=rank)
+            selected = []
+            while scored and len(selected) < maximum:
+                if selected:
+                    scored.sort(key=lambda row: (-min(abs(row['seconds'] - other['seconds'])
+                        for other in selected), *rank(row)))
+                selected.append(scored.pop(0))
             if selected:
-                scored.sort(key=lambda pair: (-min(abs(pair[1]['seconds'] - r['seconds'])
-                                                 for r in selected), -pair[0], pair[1]['id']))
-            selected.append(scored.pop(0)[1])
-        queues.append((item['scene'], selected))
+                yield item['scene'], selected
+
+    # At most maximum scene queues survive, regardless of library size.
+    queues = heapq.nsmallest(maximum, scene_queues(),
+        key=lambda item: (rank(item[1][0])[0], item[0], *rank(item[1][0])[1:]))
     result = []
-    while any(rows for _, rows in queues) and len(result) < policy['max_candidates']:
+    while any(rows for _, rows in queues) and len(result) < maximum:
         for scene, rows in queues:
-            if rows and len(result) < policy['max_candidates']:
+            if rows and len(result) < maximum:
                 result.append((scene, rows.pop(0)))
     return result
 
@@ -273,11 +281,18 @@ def choose(database, client, config, scope, target, paths, backend_factory, deco
                     raise
                 except PortraitFramingError:
                     metadata['reason'] = 'portrait_encoding_unavailable'
-                except Exception:
+                except Exception as error:
                     # Decoder/source limitations are honest image skips, not
                     # failed profile/link publication. A fallback retains its
                     # actual VTT/recognition source in separate metadata.
                     metadata['reason'] = 'video_unavailable_or_budget_exceeded'
+                    from .diagnostics import message
+                    diagnostic = message(error, getattr(client, 'api_key', ''))[:500]
+                    metadata['error'] = {'kind': type(error).__name__, 'message': diagnostic}
+                    report = getattr(client, 'report', None)
+                    if report is not None:
+                        report.optional('recognition_video_diagnostic', report.issue, 'recognition',
+                                        'portrait_video', scene_id, error, diagnostic)
                 sha = hashlib.sha256(image_bytes).hexdigest() if image_bytes else None
                 with database.connection:
                     database.connection.execute('INSERT OR REPLACE INTO portraits VALUES (?,?,?,?,?,?,?,?)',
@@ -354,12 +369,40 @@ def image_baseline(database, client, config, live, performer, previous, *, retry
     return current == expected, current, previous
 
 
+def _current_prior(database, prior, client, config, scope, target, visibility, expression):
+    """Compare only fresh, identity-eligible historical portrait metadata."""
+    prior = database.connection.execute('SELECT * FROM portraits WHERE id=?', (prior['id'],)).fetchone()
+    if prior is None:
+        return None
+    metadata = json.loads(prior['metadata'])
+    namespace = database.connection.execute('SELECT namespace FROM people WHERE id=? AND scope=?',
+                                           (target['person'], scope)).fetchone()[0]
+    from .context import portrait_references
+    groups, context = portrait_references(database, scope, namespace, config,
+        lambda: _groups(database.connection, scope, namespace, config.data['clustering']))
+    if metadata.get('source_type') == 'video':
+        return recheck_cached(database, prior, groups, config, target, namespace, context,
+                              client=client, visibility=visibility, expression=expression)
+    from .portrait_availability import observation_identity, fit_cached_bytes
+    row = database.connection.execute('SELECT * FROM observations WHERE id=?',
+                                     (metadata.get('observation'),)).fetchone()
+    if row is None or row['rejected'] is not None or metadata.get('reason'):
+        return None
+    try:
+        reason, *_ = observation_identity(database, row, groups, target, config, context)
+        fit_cached_bytes(prior['image'], prior['digest'], config, dict(metadata))
+    except (KeyError, TypeError, OSError, ValueError):
+        return None
+    return None if reason else prior
+
+
 def fill_portrait(database, client, report, config, scope, target, paths, backend_factory, decoder_factory,
                  source_factory=SpriteInput, *, retry_unresolved_images=False, visibility=None, expression=None):
     from .portrait_removal import remove_owned, retry_precondition
     performer, person = target['performer'], target['person']
     enabled = config.data['portraits']['enabled']
     token = database.connection.execute('SELECT token FROM people WHERE id=? AND scope=?', (person, scope)).fetchone()[0]
+    checked_token(database, person, token)
     live = checked_id(client.performer(performer), performer)
     if not owns(live, token):
         raise PendingRecognition('Portrait target ownership changed.')
@@ -397,6 +440,9 @@ def fill_portrait(database, client, report, config, scope, target, paths, backen
         if retrying:
             raise PendingRecognition('Earlier image write remains unresolved; no currently eligible portrait for retry.')
         return {'portraits_skipped': 1}
+    if prior is not None:
+        prior = (winner if prior['id'] == winner['id'] else
+                 _current_prior(database, prior, client, config, scope, target, visibility, expression))
     if prior is not None:
         old, new = json.loads(prior['metadata']), json.loads(winner['metadata'])
         ranks = {'video': 0, 'vtt': 1, 'recognition_crop': 2}

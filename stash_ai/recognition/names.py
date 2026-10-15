@@ -8,7 +8,7 @@ import unicodedata
 from .config import parse_yaml
 from .database import encoded
 from .publication import operation_id, perform, PendingRecognition
-from .stash import checked_id, owns
+from .stash import checked_id, checked_token, owns
 from .progress import tracking
 
 
@@ -67,6 +67,8 @@ def plan_names(database, client, report, config, names, scope, targets):
             live = checked_id(client.performer(identifier), identifier)
             row = database.connection.execute('SELECT token FROM people WHERE id=? AND scope=?',
                                              (target['person'], scope)).fetchone()
+            if row is not None:
+                checked_token(database, target['person'], row['token'])
             if row is None or not owns(live, row['token']) or not isinstance(live.get('name'), str):
                 raise PendingRecognition('Selected name mapping target identity/name was not confirmed.')
             plan[identifier] = {'before': live['name'], 'after': names.values[identifier], 'token': row['token']}
@@ -78,6 +80,7 @@ def sync_name(database, client, report, scope, target, plan):
     if performer not in plan:
         return {}
     expected = plan[performer]
+    checked_token(database, person, expected['token'])
     identifier = operation_id(scope, '', person, 'name')
     previous = database.connection.execute('SELECT * FROM publications WHERE id=?', (identifier,)).fetchone()
     live = checked_id(client.performer(performer), performer)

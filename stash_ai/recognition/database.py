@@ -3,7 +3,9 @@ from contextlib import AbstractContextManager
 from stash_ai.runtime.cleanup import closing, cleanup
 import json
 import os
+import re
 import tempfile
+import threading
 from pathlib import Path
 import sqlite3
 import time
@@ -85,15 +87,52 @@ def encoded(value):
     return json.dumps(value, sort_keys=True, separators=(',', ':'), allow_nan=False)
 
 
+def _reject_executable_schema(connection):
+    if connection.execute("SELECT 1 FROM sqlite_master WHERE type IN ('trigger','view') LIMIT 1").fetchone():
+        raise ValueError('Unsupported facial recognition schema triggers or views.')
+
+
+def _checks(connection, table):
+    """Compare CHECK expressions as SQL tokens, including nested parentheses.
+
+    Never execute schema SQL read from the database. Comments, spacing and
+    identifier quoting may vary; string literals retain their exact meaning.
+    """
+    sql = connection.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone()[0]
+    tokens = []
+    for token in re.findall(r"--[^\n]*|/\*[\s\S]*?\*/|'(?:''|[^'])*'|\"(?:\"\"|[^\"])*\"|"
+                            r"`(?:``|[^`])*`|\[[^\]]*\]|[A-Za-z_][A-Za-z_0-9]*|<>|!=|<=|>=|==|[^\s]", sql):
+        if token.startswith(('--', '/*')):
+            continue
+        if token.startswith(('"', '`', '[')):
+            quote = token[0]
+            token = token[1:-1].replace(quote * 2, quote)
+        tokens.append(token if token.startswith("'") else token.casefold())
+    checks = []
+    for index, token in enumerate(tokens[:-1]):
+        if token != 'check' or tokens[index + 1] != '(':
+            continue
+        depth = 0
+        for end in range(index + 1, len(tokens)):
+            depth += (tokens[end] == '(') - (tokens[end] == ')')
+            if depth == 0:
+                checks.append(tuple(tokens[index + 2:end]))
+                break
+    return sorted(checks)
+
+
 class FaceDatabase(AbstractContextManager):
     def __init__(self, path):
         self.path = Path(path).expanduser().resolve()
         self.connection = self.lock = None
+        self._sqlite_connection = None
+        self._owner_thread = threading.get_ident()
         try:
             if self.path.exists():
                 if self.path.stat().st_nlink > 1:
                     raise ValueError('Recognition SQLite must not be a hard-linked file.')
                 with closing(sqlite3.connect(self.path.as_uri() + '?mode=ro', uri=True)) as check:
+                    _reject_executable_schema(check)
                     application = check.execute('PRAGMA application_id').fetchone()[0]
                     version = check.execute('PRAGMA user_version').fetchone()[0]
                     tables = check.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
@@ -107,10 +146,13 @@ class FaceDatabase(AbstractContextManager):
             except RuntimeError as error:
                 raise RuntimeError('Another recognition writer owns this SQLite database.') from error
             self.connection = sqlite3.connect(self.path, timeout=30)
+            self._sqlite_connection = self.connection
             self.connection.row_factory = sqlite3.Row
             self.connection.execute('PRAGMA foreign_keys=ON')
             self.connection.execute('PRAGMA cache_size=-32768')
             self._initialize()
+            # Validate ownership identity before orphan recovery changes history.
+            self.installation
             # Exclusive file ownership proves that every prior writer ended.
             # Runs created later by this owner are never classified as orphans.
             with self.connection:
@@ -122,6 +164,7 @@ class FaceDatabase(AbstractContextManager):
 
     def _initialize(self):
         db = self.connection
+        _reject_executable_schema(db)
         version = db.execute('PRAGMA user_version').fetchone()[0]
         tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         if not tables:
@@ -138,6 +181,7 @@ class FaceDatabase(AbstractContextManager):
             previous_schema = {1: (SCHEMA_V1, TABLES_V1), 2: (SCHEMA_V2, TABLES_V2),
                                3: (SCHEMA_V3, TABLES_V3)}[version]
             self._validate(*previous_schema, tables)
+            self.installation
             try:
                 db.executescript('BEGIN IMMEDIATE;\n' + (MERGE_SCHEMA if version == 1 else '')
                                  + (SUPPORT_SCHEMA if version <= 2 else '') + REBUILD_SCHEMA)
@@ -159,8 +203,8 @@ class FaceDatabase(AbstractContextManager):
         with closing(sqlite3.connect(':memory:')) as reference:
             reference.executescript(schema)
             for table in tables:
-                expected = [(r[1], r[2], r[3], r[5]) for r in reference.execute(f'PRAGMA table_info({table})')]
-                actual = [(r[1], r[2], r[3], r[5]) for r in db.execute(f'PRAGMA table_info({table})')]
+                expected = [tuple(r[1:]) for r in reference.execute(f'PRAGMA table_info({table})')]
+                actual = [tuple(r[1:]) for r in db.execute(f'PRAGMA table_info({table})')]
                 if expected != actual:
                     raise ValueError(f'Invalid facial recognition schema shape: {table}.')
                 expected_keys = {tuple(row[2:]) for row in reference.execute(f'PRAGMA foreign_key_list({table})')}
@@ -174,6 +218,8 @@ class FaceDatabase(AbstractContextManager):
                             if index[2] and not index[4]}
                 if not unique_keys(reference) <= unique_keys(db):
                     raise ValueError(f'Invalid facial recognition unique constraints: {table}.')
+                if _checks(reference, table) != _checks(db, table):
+                    raise ValueError(f'Invalid facial recognition CHECK constraints: {table}.')
         if db.execute('PRAGMA foreign_key_check').fetchone():
             raise ValueError('Facial recognition state has invalid foreign-key references.')
 
@@ -182,7 +228,10 @@ class FaceDatabase(AbstractContextManager):
         row = self.connection.execute("SELECT value FROM metadata WHERE key='installation'").fetchone()
         if row is None:
             raise ValueError('Recognition installation identity is missing.')
-        return str(uuid.UUID(row[0]))
+        try:
+            return str(uuid.UUID(row[0]))
+        except (ValueError, TypeError, AttributeError) as error:
+            raise ValueError('Recognition installation identity is invalid.') from error
 
     def start_run(self, scope, selection, configuration):
         identifier = str(uuid.uuid4())
@@ -202,12 +251,14 @@ class FaceDatabase(AbstractContextManager):
 
     def backup(self, destination):
         destination = Path(destination)
+        if self.connection.in_transaction:
+            raise ValueError('Commit or roll back the active recognition transaction before backup.')
         # A crash can leave a staging file, never an empty/partial public backup.
         # link() publishes the completed inode exclusively, including on Windows.
-        descriptor, staged = tempfile.mkstemp(prefix='.' + destination.name + '-', suffix='.tmp', dir=destination.parent)
-        os.close(descriptor)
+        descriptor, staged = tempfile.mkstemp(prefix='.recognition-backup-', suffix='.tmp', dir=destination.parent)
         staged = Path(staged)
         try:
+            os.close(descriptor)
             with closing(sqlite3.connect(staged), name='close recognition backup') as target:
                 self.connection.backup(target)
             with staged.open('r+b') as saved:
@@ -217,14 +268,32 @@ class FaceDatabase(AbstractContextManager):
             cleanup([('remove staged recognition backup', lambda: staged.unlink(missing_ok=True))])
 
     def close(self):
-        connection, self.connection = self.connection, None
+        if (self.connection is not None or self.lock is not None) and threading.get_ident() != self._owner_thread:
+            raise sqlite3.ProgrammingError('Recognition SQLite must be closed by its owning thread.')
+        def close_connection():
+            if self.connection is None:
+                return
+            try:
+                self.connection.close()
+            except BaseException:
+                # A failed close may still own a live SQLite handle. Release the
+                # writer only after the underlying connection is confirmed shut.
+                try:
+                    self._sqlite_connection.in_transaction
+                except sqlite3.ProgrammingError:
+                    self.connection = self._sqlite_connection = None
+                raise
+            self.connection = self._sqlite_connection = None
+        def release_writer():
+            if self.connection is None:
+                self._release_lock()
+        cleanup([('close recognition SQLite connection', close_connection),
+                 ('release recognition writer lock', release_writer)])
+
+    def _release_lock(self):
         lock, self.lock = self.lock, None
-        actions = []
-        if connection is not None:
-            actions.append(('close recognition SQLite connection', connection.close))
         if lock is not None:
-            actions.append(('release recognition writer lock', lock.close))
-        cleanup(actions)
+            lock.close()
 
     def __exit__(self, exc_type, exc, traceback):
         cleanup([('close recognition database', self.close)], primary=exc)

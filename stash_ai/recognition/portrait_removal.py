@@ -5,7 +5,7 @@ from .database import encoded
 from .media import safe_url
 from .diagnostics import message as safe_error
 from .publication import PendingRecognition, perform
-from .stash import checked_id, owns
+from .stash import checked_id, checked_token, owns
 
 
 def retry_precondition(previous, *, api_key=''):
@@ -21,6 +21,7 @@ def retry_precondition(previous, *, api_key=''):
 def remove_owned(database, client, report, config, scope, target, token, baseline, previous, *, reason):
     from .portraits import image_digest, missing_image, policy_identity
     performer, person = target['performer'], target['person']
+    checked_token(database, person, token)
     live = checked_id(client.performer(performer), performer)
     if not owns(live, token):
         raise PendingRecognition('Portrait target ownership changed before removal.')

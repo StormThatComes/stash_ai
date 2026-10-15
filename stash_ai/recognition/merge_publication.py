@@ -2,7 +2,7 @@
 import json
 
 from .publication import operation_id, perform, PendingRecognition
-from .stash import checked_id, owns
+from .stash import checked_id, checked_token, owns
 from .progress import tracking
 
 COMPLETE = ('confirmed', 'observed', 'local')
@@ -41,6 +41,12 @@ def _reconcile(database, client, previous):
     """A missing source alone cannot prove a merge; require our carried marker."""
     payload = json.loads(previous['payload'])
     expected = json.loads(previous['precondition'])
+    checked_token(database, previous['person'], expected['source_token'])
+    destination = database.connection.execute('SELECT id FROM people WHERE scope=? AND token=?',
+                                               (previous['scope'], expected['destination_token'])).fetchone()
+    if destination is None:
+        raise PendingRecognition('Earlier performer merge destination ownership is unavailable.')
+    checked_token(database, destination['id'], expected['destination_token'])
     matches = client.find_token(payload['marker'])
     if (len(matches) != 1 or not owns(matches[0], expected['source_token'])
             or not owns(matches[0], expected['destination_token'])
@@ -54,10 +60,12 @@ def _reconcile(database, client, previous):
 def sync_merges(database, client, report, scope, person, performer, *, counts=None):
     db = database.connection
     winner = db.execute('SELECT * FROM people WHERE id=? AND scope=?', (person, scope)).fetchone()
+    checked_token(database, person, winner['token'])
     counts = {} if counts is None else counts
     for source in aliases(db, person):
         if source['scope'] != scope or source['namespace'] != winner['namespace']:
             raise ValueError('Recognition merge crosses an instance or embedding namespace.')
+        checked_token(database, source['id'], source['token'])
         if (winner['created'], person) >= (source['created'], source['id']):
             raise ValueError('Recognition merge destination is not the oldest identity.')
         if source['merge_status'] in COMPLETE:
@@ -151,10 +159,15 @@ def _target_context(db, identifiers):
     return roots, people, blocked
 
 
-def canonical_targets(database, ready):
+def canonical_targets(database, ready, *, on_blocked=None):
     """Remap earlier scenes in a multi-scene run before names/portraits execute."""
     db, result = database.connection, {}
     roots, performers, blocked = _target_context(db, (target['person'] for target in ready.values()))
+    for person in sorted(blocked.intersection(roots.values())):
+        error = PendingRecognition('Recognition performer merge remains unresolved; metadata withheld for identity ' + person + '.')
+        if on_blocked is None:
+            raise error
+        on_blocked(person, error)
     seen = {}
     with tracking(
         ready.values(),
