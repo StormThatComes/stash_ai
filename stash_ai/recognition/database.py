@@ -210,7 +210,7 @@ class FaceDatabase(AbstractContextManager):
         try:
             with closing(sqlite3.connect(staged), name='close recognition backup') as target:
                 self.connection.backup(target)
-            with staged.open('rb') as saved:
+            with staged.open('r+b') as saved:
                 os.fsync(saved.fileno())
             os.link(staged, destination)
         finally:
