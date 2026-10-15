@@ -89,7 +89,11 @@ def co_presence_allows(db, observation, group, groups, query, config):
         mean, minimum = _similarities(group, other)
         if mean < settings['match_threshold'] or minimum < config.data['clustering']['cohesion_threshold']:
             continue
-        best = max(_similarities(rival, other)[0] for rival in groups)
+        best = mean
+        for rival in groups:
+            rival_mean, rival_minimum = _similarities(rival, other)
+            if rival_minimum >= config.data['clustering']['cohesion_threshold']:
+                best = max(best, rival_mean)
         if best - mean >= settings['ambiguity_margin'] and best > mean:
             continue
         if min(_similarities(group, query)[1], minimum, float(np.dot(query, other))) < stronger:

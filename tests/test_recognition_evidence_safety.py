@@ -303,3 +303,20 @@ def test_ordinary_assignment_allows_strong_reflections_and_exact_duplicates(tmp_
         assert result[0]['observations'] == 6
         replayed = rebuild_selected(db, [{'scene': '2', 'scan': selected}], config)[selected]
         assert len(replayed) == 1 and replayed[0]['observations'] == 6
+
+
+
+def test_incohesive_rival_cannot_hide_same_cue_competition(tmp_path):
+    from stash_ai.recognition.clustering import Group, co_presence_allows, vector
+    config = changed(setup(tmp_path), recognition={'ambiguity_margin': .01})
+    a, b = np.array([1., 0, 0, 0]), np.array([.6, .8, 0, 0])
+    group = Group('target', [a, b], True)
+    rival = Group('rival', [a, a, a, np.array([.4, np.sqrt(.84), 0, 0])], True)
+    with FaceDatabase(config.database) as db:
+        selected, _ = scan(db, config, '2', [a, a] * 3, count=6)
+        pair_cues(db, selected)
+        rows = db.connection.execute('SELECT * FROM observations WHERE scan=? ORDER BY cue,id', (selected,)).fetchall()
+        geometry = json.loads(rows[1]['geometry'])
+        geometry[0] += 1
+        db.connection.execute('UPDATE observations SET geometry=? WHERE id=?', (json.dumps(geometry), rows[1]['id']))
+        assert not co_presence_allows(db.connection, rows[0], group, [group, rival], vector(rows[0]), config)
