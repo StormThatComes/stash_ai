@@ -446,3 +446,41 @@ def test_same_timestamp_in_one_scene_counts_only_once_across_repeated_faces(tmp_
         db.connection.commit()
         cluster_scene(db, selected, config)
         assert not db.connection.execute('SELECT * FROM identity_merges').fetchall()
+
+
+import json
+import sqlite3
+import uuid
+from dataclasses import replace
+from types import SimpleNamespace
+
+import numpy as np
+import pytest
+
+
+def test_legacy_merge_scope_follows_transitive_aliases(tmp_path):
+    from tests.test_recognition_clustering import setup,scan
+    from tests.test_recognition_identity_merges import fragments
+    from stash_ai.recognition.database import FaceDatabase
+    from stash_ai.recognition.publication import save_operation
+    from stash_ai.recognition.scene_sync import reconcile_legacy_merges
+    config = setup(tmp_path)
+    with FaceDatabase(config.database) as db:
+        people,scans = fragments(db,config,[np.array([1.,0,0,0]),np.array([.8,.6,0,0]),np.array([0.,0,1,0])])
+        root,middle,source = people
+        for person,performer in zip(people,['101','102','103']):
+            db.connection.execute('UPDATE people SET performer=? WHERE id=?',(performer,person))
+        for left,right,status in [(source,middle,'pending'),(middle,root,'pending')]:
+            db.connection.execute('INSERT INTO identity_merges VALUES (?,?,?,?,?)',(left,right,1.,'{}',status))
+        db.connection.execute('UPDATE members SET person=?',(root,))
+        db.connection.commit()
+        save_operation(db,scope='scope',scene='',person=source,kind='merge',target='102',
+                       payload={'source':'103','marker':'unobserved'},precondition={'source_token':'s','destination_token':'t'},status='unknown')
+        reads = []
+        client = SimpleNamespace(find_token=lambda token:reads.append(token) or [],lookup_performer=lambda x:None)
+        from stash_ai.recognition.publication import PendingRecognition
+        with pytest.raises(PendingRecognition, match='unresolved'):
+            reconcile_legacy_merges(db,client,'scope',['1','2','3'])
+        assert reads == ['unobserved']
+        assert db.connection.execute("SELECT status FROM publications WHERE kind='merge'").fetchone()[0] == 'unknown'
+

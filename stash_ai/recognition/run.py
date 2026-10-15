@@ -76,6 +76,11 @@ def _publish_selection(database, client, report, config, scope, namespace, selec
                     binding = db.execute('SELECT performer FROM people WHERE id=?', (person,)).fetchone()
                     if incompatible and not binding['performer']:
                         blocked = True
+                        counts['namespace_groups_withheld'] += 1
+                        counts['groups_withheld'] += 1
+                        counts['observations_withheld'] += sum(g['observations'] for g in groups if g['person'] == person)
+                        report.optional('recognition_namespace', report.write,
+                            f'Recognition scene {scene}: publication withheld because a different model namespace already owns published profiles.')
                         save_operation(database, scope=scope, scene=scene, person=person, kind='namespace', target=None,
                             payload={'namespace': namespace}, precondition={'published_namespace': incompatible['namespace']},
                             status='withheld')
@@ -252,7 +257,7 @@ def execute(args, config, *, services=None):
                         raise
                     except Exception as error:
                         counts['scenes_failed'] += len(selected)
-                        report.optional('recognition_error', report.write, 'Recognition rebuild failed: ' + safe_error(error, key))
+                        report.optional('recognition_error', report.issue, 'recognition', 'rebuild', 'selected scenes', error, safe_error(error, key))
                     finally:
                         if references:
                             database.progress(run, 'references', references)
@@ -273,8 +278,8 @@ def execute(args, config, *, services=None):
                         except Exception as error:
                             plan = {}
                             counts['metadata_failed'] += 1
-                            report.optional('recognition_names_preflight', report.write,
-                                            'Name batch withheld: ' + safe_error(error, key))
+                            report.optional('recognition_names_preflight', report.issue, 'recognition', 'names_preflight',
+                                            'selected performers', error, safe_error(error, key))
                     with phase(report, 'Recognition metadata', errors=lambda: counts['metadata_failed']), WorkProgress(report, 'Names and portraits', len(targets), unit='person', key='people') as people:
                         for target in targets:
                             with activity(report, 'names and portraits', person=target['performer']):
