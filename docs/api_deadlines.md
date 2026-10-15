@@ -24,6 +24,20 @@ results, retry or issue mutations. Source state remains intact.
 Closing prefetch propagates cancellation through preparation and media reads,
 then joins the producer to release its images. The last complete prediction
 batch is saved first; interrupted work cannot publish incomplete evidence.
+Each coordinator shutdown wait is bounded to one second. If foreign work does
+not return, `ShutdownIncomplete` retains its stream, payloads and dependent
+resource releases in process-local quarantine. No new model can run until the
+work exits and deferred releases complete. Repeated close attempts reuse the
+same pending shutdown helper instead of accumulating waiting threads. SQLite
+checkpoints/history remain on their original caller, never on a cleanup worker.
+
+This bounds coordinator waits, not arbitrary native execution or total process
+exit. Non-daemon executor/GPU work can still keep a process alive and may need
+operator process termination. Threads are not forcibly killed and a timeout
+does not claim that a model stopped. Recognition's source/pipe daemon readers
+retain their own source ownership; busy buffered pipes are never closed by a
+different thread. Healthy cancellation still joins and disposes resources
+normally. Late work cannot publish or start a replacement model.
 Programmatic HTTP_RETRIES accepts integer 0..10, and REQUEST_TIMEOUT requires
 positive finite scalar or (connect, read) values, excluding booleans.
 

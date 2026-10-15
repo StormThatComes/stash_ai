@@ -215,7 +215,8 @@ def test_lost_merge_response_observes_marker_or_blocks_blind_retry(tmp_path, vis
         else:
             with pytest.raises(PendingRecognition, match='no blind merge retry'):
                 publish_person(db, client, report, 'scope', '10', people[0])
-            assert canonical_targets(db, {people[0]: {'person': people[0], 'scans': []}}) == []
+            with pytest.raises(PendingRecognition, match='metadata withheld'):
+                canonical_targets(db, {people[0]: {'person': people[0], 'scans': []}})
         assert sum(w[0] == 'merge' for w in client.writes) == 1
 
 
@@ -475,7 +476,9 @@ def test_legacy_merge_scope_follows_transitive_aliases(tmp_path):
         db.connection.execute('UPDATE members SET person=?',(root,))
         db.connection.commit()
         save_operation(db,scope='scope',scene='',person=source,kind='merge',target='102',
-                       payload={'source':'103','marker':'unobserved'},precondition={'source_token':'s','destination_token':'t'},status='unknown')
+                       payload={'source':'103','marker':'unobserved'},
+                       precondition={'source_token':f'stash-ai-recognition:{db.installation}:{source}',
+                                     'destination_token':f'stash-ai-recognition:{db.installation}:{middle}'},status='unknown')
         reads = []
         client = SimpleNamespace(find_token=lambda token:reads.append(token) or [],lookup_performer=lambda x:None)
         from stash_ai.recognition.publication import PendingRecognition

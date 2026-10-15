@@ -1,6 +1,7 @@
 """Every recognition phase exposes actual work, including cold/cached replay."""
 from io import StringIO
 import json
+import sqlite3
 from threading import current_thread
 from types import SimpleNamespace
 
@@ -159,9 +160,15 @@ def test_failed_apply_keeps_transaction_progress_zero_and_rolls_back_assignments
     with FaceDatabase(config.database) as db:
         before = [tuple(row) for row in db.connection.execute('SELECT * FROM members ORDER BY observation')]
         candidates = [tuple(row) for row in db.connection.execute('SELECT * FROM candidates ORDER BY id')]
-        db.connection.executescript('''CREATE TRIGGER reject_rebuild BEFORE INSERT ON metadata
-          WHEN NEW.key LIKE 'identity-rebuild:%'
-          BEGIN SELECT RAISE(ABORT,'synthetic rebuild write failure'); END;''')
+    # Fail a real SQLite write after constructor validation, without persisting
+    # an unsupported trigger that must now be refused before recovery.
+    class RejectRebuild(FaceDatabase):
+        def __init__(self, path):
+            super().__init__(path)
+            self.connection.set_authorizer(lambda action, table, *args:
+                sqlite3.SQLITE_DENY if action == sqlite3.SQLITE_INSERT and table == 'metadata'
+                else sqlite3.SQLITE_OK)
+    monkeypatch.setattr('stash_ai.recognition.run.FaceDatabase', RejectRebuild)
     capsys.readouterr()
     tuned = changed(config, recognition={'match_threshold': .95})
     writes = list(client.writes)
@@ -240,3 +247,18 @@ def test_failed_optional_total_falls_back_to_indeterminate_work(terminal):
     row = next(bar for bar in terminal[0] if bar.desc == 'Optional total')
     assert row.n == 2 and row.total is None
     assert report.counts['recognition_progress_total_failures'] == 1
+
+
+def test_lazy_asset_subphase_suspends_and_restores_detail_row(terminal):
+    report = RunReport(False)
+    with present(report, 'auto', status_position=2):
+        with work('Outer candidate phase', 2, position=1) as outer:
+            outer.advance()
+            with work('Nested asset phase', 1, position=1) as inner:
+                inner.advance()
+            outer.advance()
+    bars, owners = terminal
+    assert outer.n == 2 and inner.n == 1
+    assert max(bar.n for bar in bars if bar.desc == 'Outer candidate phase') == 2
+    assert next(bar for bar in bars if bar.desc == 'Nested asset phase').n == 1
+    assert owners == {'stash-console'}
