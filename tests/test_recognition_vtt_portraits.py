@@ -266,3 +266,68 @@ def test_default_framing_at_thumbnail_edge_keeps_face_and_never_upscales(tmp_pat
     with Image.open(BytesIO(stash.sprite)) as image:
         data, bounds = portrait_bytes(image, edge, config.data['portraits'], limit=1048576)
         assert bounds == [0, 0, 170, 170] and image_size(data) == (170, 170)
+
+
+import json
+import sqlite3
+import uuid
+from dataclasses import replace
+from types import SimpleNamespace
+
+import numpy as np
+import pytest
+
+
+@pytest.mark.parametrize('legacy', [False, True])
+@pytest.mark.parametrize('failed_upgrade', [False, True])
+def test_fallback_quality_cache_upgrades_when_original_thumbnail_returns(tmp_path,monkeypatch,legacy,failed_upgrade):
+    from tests.test_recognition_vtt_portraits import setup
+    from tests.test_recognition_run import run
+    from stash_ai.recognition.database import FaceDatabase
+    from stash_ai.recognition.media import SpriteInput
+    from stash_ai.recognition.visibility import CONTRACT_ID
+    config,client,services,_ = setup(tmp_path,monkeypatch)
+    calls = []
+    class Quality:
+        def __init__(self,*a):pass
+        def measure(self,image,face):
+            calls.append(image.size)
+            return {'visible_face_fraction': .3 if image.width < 500 else 1.,
+                    'visibility':{'contract':CONTRACT_ID}}
+        def close(self):pass
+    class Unavailable(SpriteInput):
+        def thumbnail(self,index):
+            raise OSError('original thumbnail temporarily unavailable')
+    services.source,services.visibility = Unavailable,Quality
+    assert run(config,services,'1') == 0 and len(calls) == 3
+    assert all(size[0] < 500 for size in calls)
+    calls.clear()
+    if legacy:
+        with FaceDatabase(config.database) as db:
+            for row in db.connection.execute('SELECT id,quality FROM observations').fetchall():
+                quality = json.loads(row['quality'])
+                quality.pop('measurement_basis', None)
+                db.connection.execute('UPDATE observations SET quality=? WHERE id=?', (json.dumps(quality), row['id']))
+            db.connection.commit()
+    services.source = SpriteInput
+    if failed_upgrade:
+        def unavailable(*args): raise RuntimeError('optional model temporarily unavailable')
+        services.visibility = unavailable
+        assert run(config,services,'1') == 0 and not calls
+        with FaceDatabase(config.database) as db:
+            for row in db.connection.execute('SELECT quality FROM observations'):
+                quality = json.loads(row[0])
+                assert quality['visible_face_fraction'] == .3
+                assert quality['measurement_basis']['visibility']['source_type'] == 'recognition_crop'
+        services.visibility = Quality
+    assert run(config,services,'1') == 0 and len(calls) == 3
+    assert all(size[0] == 500 for size in calls)
+    with FaceDatabase(config.database) as db:
+        assert all(json.loads(row[0])['visible_face_fraction'] == 1. for row in db.connection.execute('SELECT quality FROM observations'))
+        current = json.loads(db.connection.execute("SELECT metadata FROM portraits WHERE status='published' ORDER BY rowid DESC LIMIT 1").fetchone()[0])
+        assert current['source_type'] == 'vtt' and current.get('quality_source') == 'vtt'
+
+
+    calls.clear()
+    services.backend = services.visibility = lambda *a: pytest.fail('upgraded evidence should reuse models and quality')
+    assert run(config,services,'1') == 0 and not calls

@@ -12,13 +12,13 @@ from .visibility import required as visibility_required, cached as visibility_ca
 from .expression import required as expression_required, cached as expression_cached
 
 
-def measure_available(client, image, face, quality, policy, visibility, expression):
+def measure_available(client, image, face, quality, policy, visibility, expression, *, force=()):
     errors = {}
     for name, required, cached, model in (
         ('visibility', visibility_required, visibility_cached, visibility),
         ('expression', expression_required, expression_cached, expression),
     ):
-        if not required(policy) or cached(quality):
+        if not required(policy) or (cached(quality) and name not in force):
             continue
         try:
             quality.update(model.measure(image, face))
@@ -33,6 +33,15 @@ def measure_available(client, image, face, quality, policy, visibility, expressi
                     report.optional('recognition_portrait_quality', report.write,
                                     f'Portrait {name} unavailable; ranking available face quality: ' + errors[name])
     return errors
+
+
+def measurement_basis(row, source_type):
+    """Identify the pixels/geometry behind an optional observation measurement."""
+    from .config import digest
+    inputs = [row['input_sha'], row['cue'], row['seconds'], row['source'], row['rect'], row['geometry']]
+    if source_type == 'recognition_crop':
+        inputs.append(hashlib.sha256(row['crop']).hexdigest())
+    return {'source_type': source_type, 'identity': digest(inputs)}
 
 
 def refresh_cached_quality(client, existing, metadata, policy, visibility, expression):
