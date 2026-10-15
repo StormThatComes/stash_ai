@@ -110,3 +110,42 @@ def test_interrupt_closes_shared_models_and_records_only_completed_cues(tmp_path
         history = state.connection.execute('SELECT * FROM runs').fetchone()
         assert history['status'] == 'interrupted'
         assert json.loads(history['selection']) == ['1', '2']
+
+
+import json
+import os
+from types import SimpleNamespace
+
+import numpy as np
+import pytest
+
+
+@pytest.mark.parametrize('failure', ['embed', 'detect'])
+def test_video_backend_lease_is_reacquired_after_one_candidate_failure(tmp_path, monkeypatch, failure):
+    from stash_ai.recognition.database import FaceDatabase
+    from tests.helpers.recognition import Backend
+    from tests.test_recognition_metadata import setup, run, Decoder
+    config, client, services = setup(tmp_path, monkeypatch)
+    models = []
+    def load(*a):
+        first = not models
+        model = Backend(fail_at=4 if first and failure == 'embed' else None)
+        if first and failure == 'detect':
+            detect = model.detect
+            def failing_detect(image):
+                if model.calls == 3:
+                    raise RuntimeError('synthetic portrait detection failure')
+                return detect(image)
+            model.detect = failing_detect
+        models.append(model)
+        return model
+    services.backend = load
+    assert run(config, services, '1') == 0
+    assert len(models) == 2 and models[0].calls == (4 if failure == 'embed' else 3) and models[1].calls == 1
+    assert len(Decoder.instances[0].calls) == 2
+    with FaceDatabase(config.database) as db:
+        video = db.connection.execute("SELECT image,metadata FROM portraits WHERE json_extract(metadata,'$.source_type')='video'").fetchall()
+        assert len(video) == 2 and sum(r['image'] is not None for r in video) == 1
+        final = json.loads(db.connection.execute("SELECT metadata FROM portraits WHERE status='published'").fetchone()[0])
+        assert final['source_type'] == 'video'
+
