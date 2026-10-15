@@ -238,6 +238,8 @@ def choose(database, client, config, scope, target, paths, backend_factory, deco
                             quality = assess(image, face)
                             similarity, runner = None, None
                             try:
+                                if not quality.get('alignment_valid', False):
+                                    raise ValueError('Portrait face has invalid alignment geometry.')
                                 model = identity_backend()
                                 vector = normalized_embedding(model.embed(image, face), model.dimensions)
                                 reason, similarity, runner = identity_reason(vector, groups, target['person'], config)

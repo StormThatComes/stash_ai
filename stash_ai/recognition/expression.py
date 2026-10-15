@@ -37,7 +37,7 @@ def required(policy):
 
 
 def valid_score(value):
-    return type(value) in (int, float) and math.isfinite(value) and 0 <= value <= 1
+    return type(value) in (int, float) and 0 <= value <= 1 and math.isfinite(value)
 
 
 def measurement(blendshapes, *, crop=None, device='cpu', provenance=None):
