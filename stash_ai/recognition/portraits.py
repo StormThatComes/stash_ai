@@ -19,6 +19,7 @@ from .visibility import LazyVisibility, CONTRACT_ID
 from .expression import LazyExpression, CONTRACT_ID as EXPRESSION_CONTRACT_ID
 from .diagnostics import metadata as safe_metadata
 from .progress import tracking
+from .backend import prepared_frame
 
 
 def policy_identity(config):
@@ -223,7 +224,7 @@ def choose(database, client, config, scope, target, paths, backend_factory, deco
                         decoders[scene_id] = decoder_factory(client, scene, config).__enter__()
                     metadata['source'] = safe_url(decoders[scene_id].url) if hasattr(decoders[scene_id], 'url') else scene_id
                     image, timing = decoders[scene_id].frame(seconds)
-                    with image:
+                    with image, prepared_frame(identity_backend(), image):
                         metadata.update(timing)
                         candidates = []
                         exclusions = []
