@@ -10,6 +10,7 @@ from .database import encoded
 from .reference_usage import ReferenceUsage
 from .identity_merges import supported_merges
 from .progress import tracking
+from .ranking import best_two
 
 
 def vector(row):
@@ -188,8 +189,7 @@ def cluster_scene(database, scan, config, *, progress=None, _cold_replay=False):
                     if (score >= settings['match_threshold'] - settings['ambiguity_margin'] and
                             cohesion >= grouping['cohesion_threshold'] and
                             co_presence_allows(db, observation, group, groups, query, config)):
-                        ranked.append((score, group.identifier, group))
-                ranked.sort(key=lambda item: (-item[0], item[1]))
+                        best_two(ranked, (score, group.identifier, group))
                 scores = [item[0] for item in ranked[:2]]
                 eligible = bool(ranked and ranked[0][0] >= settings['match_threshold'])
                 if eligible and len(ranked) > 1 and ranked[0][0] - ranked[1][0] < settings['ambiguity_margin']:
@@ -294,8 +294,7 @@ def _recheck_after_merge(db, scan, policy, groups, config):
                 if (mean >= settings['match_threshold'] - settings['ambiguity_margin'] and
                         minimum >= config.data['clustering']['cohesion_threshold'] and
                         co_presence_allows(db, row, group, groups, query, config)):
-                    ranked.append((mean, group.identifier))
-            ranked.sort(key=lambda item: (-item[0], item[1]))
+                    best_two(ranked, (mean, group.identifier))
             person, status, reason = None, 'withheld', 'insufficient_match_or_cohesion'
             if ranked and ranked[0][0] >= settings['match_threshold']:
                 if len(ranked) > 1 and ranked[0][0] - ranked[1][0] < settings['ambiguity_margin']:

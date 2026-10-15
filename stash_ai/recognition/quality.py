@@ -144,12 +144,17 @@ def encode_portrait(image, policy, *, limit, details=None):
 
 
 def portrait_score(quality, policy, *, expression=True):
-    weights = policy['weights']
     parts = portrait_components(quality, policy)
+    return _weighted_score(quality, policy, parts, expression=expression)
+
+
+def _weighted_score(quality, policy, parts, *, expression=True, expression_valid=None):
+    weights = policy['weights']
     if expression:
         from .expression import WEIGHTS, required, cached
         if required(policy):
-            parts.update({name: quality[name] if cached(quality) else 0. for name in WEIGHTS})
+            valid = cached(quality) if expression_valid is None else expression_valid
+            parts.update({name: quality[name] if valid else 0. for name in WEIGHTS})
     total = sum(weights[k] for k in parts)
     return sum(parts[k] * weights[k] for k in parts) / total if total else 0.
 
@@ -167,15 +172,17 @@ def _upper_attainment(value, goal):
     return 1 / (1 + max(0., value - goal) / max(.01, goal))
 
 
-def portrait_components(quality, policy):
+def portrait_components(quality, policy, *, _visibility_valid=None, _numbers=None):
     """Bounded soft scores: missing a preferred target never rejects a face."""
     from .visibility import cached
-    pixels, sharpness, pose = (_number(quality, name) for name in ('pixels', 'sharpness', 'pose_deviation'))
-    exposure = _number(quality, 'exposure')
+    number = (lambda name: _number(quality, name)) if _numbers is None else _numbers.__getitem__
+    pixels, sharpness, pose = (number(name) for name in ('pixels', 'sharpness', 'pose_deviation'))
+    exposure = number('exposure')
     middle = (policy['min_exposure'] + policy['max_exposure']) / 2
     spread = max(1., (policy['max_exposure'] - policy['min_exposure']) / 2)
-    clipped = _number(quality, 'clipped_fraction')
-    visibility = quality['visible_face_fraction'] if cached(quality) else 0.
+    clipped = number('clipped_fraction')
+    valid = cached(quality) if _visibility_valid is None else _visibility_valid
+    visibility = quality['visible_face_fraction'] if valid else 0.
     frontal = 1 / (1 + pose) * _upper_attainment(pose, policy['max_pose_deviation'])
     if not quality.get('complete') or not quality.get('landmarks_inside'):
         frontal *= .5
@@ -188,30 +195,50 @@ def portrait_components(quality, policy):
 
 def portrait_tiebreak(quality, policy):
     parts = portrait_components(quality, policy)
+    return _tiebreak(parts)
+
+
+def _tiebreak(parts):
     weights = {'frontal': 3., 'sharpness': 2., 'resolution': 1., 'exposure': 1., 'visibility': 3.}
     return sum(parts[name] * weight for name, weight in weights.items()) / sum(weights.values())
 
 
-def portrait_shortfalls(quality, policy):
+def portrait_shortfalls(quality, policy, *, _visibility_valid=None, _expression_valid=None, _numbers=None):
     """Explain imperfect candidates without making these flags exclusions."""
     from .visibility import required, cached
     from .expression import required as expression_required, cached as expression_cached
+    number = (lambda name: _number(quality, name)) if _numbers is None else _numbers.__getitem__
     result = []
     for name, missed in (
-        ('face_too_small', _number(quality, 'pixels') < policy['min_face_pixels']),
-        ('face_blurred', _number(quality, 'sharpness') < policy['min_sharpness']),
+        ('face_too_small', number('pixels') < policy['min_face_pixels']),
+        ('face_blurred', number('sharpness') < policy['min_sharpness']),
         ('face_incomplete', not quality.get('complete') or not quality.get('landmarks_inside')),
-        ('face_pose', _number(quality, 'pose_deviation') > policy['max_pose_deviation']),
-        ('face_exposure', not policy['min_exposure'] <= _number(quality, 'exposure') <= policy['max_exposure']),
-        ('face_clipped_exposure', _number(quality, 'clipped_fraction') > policy['max_clipped_fraction']),
+        ('face_pose', number('pose_deviation') > policy['max_pose_deviation']),
+        ('face_exposure', not policy['min_exposure'] <= number('exposure') <= policy['max_exposure']),
+        ('face_clipped_exposure', number('clipped_fraction') > policy['max_clipped_fraction']),
     ):
         if missed:
             result.append(name)
     if required(policy):
-        if not cached(quality):
+        if not (cached(quality) if _visibility_valid is None else _visibility_valid):
             result.append('face_visibility_unavailable')
         elif quality['visible_face_fraction'] < policy['min_visible_face_fraction']:
             result.append('face_occluded')
-    if expression_required(policy) and not expression_cached(quality):
+    if expression_required(policy) and not (expression_cached(quality) if _expression_valid is None else _expression_valid):
         result.append('face_expression_unavailable')
     return result
+
+
+def portrait_evaluation(quality, policy):
+    """Evaluate one immutable quality record without repeated component work."""
+    from .visibility import cached
+    from .expression import required, cached as expression_cached
+    visible = cached(quality)
+    expression = expression_cached(quality) if required(policy) else False
+    numbers = {name: _number(quality, name) for name in
+               ('pixels', 'sharpness', 'pose_deviation', 'exposure', 'clipped_fraction')}
+    parts = portrait_components(quality, policy, _visibility_valid=visible, _numbers=numbers)
+    return {'score': _weighted_score(quality, policy, dict(parts), expression_valid=expression),
+            'quality_tiebreak': _tiebreak(parts),
+            'quality_shortfalls': portrait_shortfalls(quality, policy, _visibility_valid=visible,
+                                                     _expression_valid=expression, _numbers=numbers)}
