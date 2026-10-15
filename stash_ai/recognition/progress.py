@@ -1,10 +1,13 @@
 """Recognition work rows on the tagger's single console rendering owner."""
 from contextlib import contextmanager
+from contextvars import ContextVar
 import time
 
 from tqdm import tqdm
 
 from stash_ai.runtime.console import progress as console_bar, status, activity, current_report
+
+_work_rows = ContextVar('recognition_work_rows', default=())
 
 
 class WorkProgress:
@@ -21,14 +24,24 @@ class WorkProgress:
     def __enter__(self):
         console = getattr(self.report, 'console', None)
         self.enabled = console is not None and console.style != 'off'
+        self.suspended = next((row for row in reversed(_work_rows.get())
+                               if row.position == self.position and row.bar is not None), None)
+        if self.suspended is not None:
+            self.suspended.bar.close()
+            self.suspended.bar = None
+        self._row_token = _work_rows.set((*_work_rows.get(), self))
+        self._open_bar()
+        self._render(force=True)
+        return self
+
+    def _open_bar(self):
+        console = getattr(self.report, 'console', None)
         # Redirected runs get stage milestones and heartbeats, never a pair of
         # frame milestones for every scene. Terminal rows have fixed positions.
         if self.enabled and (console.tty or not self.transient):
-            self.bar = console_bar(tqdm, total=self.total, initial=self.initial, desc=self.label,
+            self.bar = console_bar(tqdm, total=self.total, initial=self.n, desc=self.label,
                                    unit=self.unit, position=self.position,
                                    leave=False, dynamic_ncols=True, disable=None)
-        self._render(force=True)
-        return self
 
     def advance(self, amount=1, **postfix):
         self.set_completed(self.n + amount, **postfix)
@@ -67,6 +80,10 @@ class WorkProgress:
             if self.bar is not None:
                 self.bar.close()
             status(self.report, **{self.key: None, self.key + '_eta': None, self.key + '_rate': None})
+            _work_rows.reset(self._row_token)
+            if self.suspended is not None:
+                self.suspended._open_bar()
+                self.suspended._render(force=True)
 
 
 @contextmanager

@@ -3,7 +3,7 @@
 Historical identities never seed the replay. Original sample ownership is kept
 separately so a later split can reactivate profiles retired by consolidation.
 """
-from contextlib import closing
+from stash_ai.runtime.cleanup import closing
 import json
 import itertools
 import sqlite3

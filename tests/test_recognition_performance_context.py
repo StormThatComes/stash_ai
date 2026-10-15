@@ -61,7 +61,9 @@ def test_canonical_target_snapshot_deduplicates_scans_and_blocks_pending_descend
         result = canonical_targets(database, ready)
         assert result == [{'person': 'old', 'performer': '1', 'scans': [scan, {'scene': '3', 'scan': 's3'}]}]
         db.execute("UPDATE identity_merges SET status='pending' WHERE source='young'")
-        assert canonical_targets(database, ready) == []
+        from stash_ai.recognition.publication import PendingRecognition
+        with pytest.raises(PendingRecognition, match='metadata withheld'):
+            canonical_targets(database, ready)
         db.execute("UPDATE identity_merges SET target='young' WHERE source='middle'")
         with pytest.raises(ValueError, match='cycle'):
             canonical_targets(database, ready)

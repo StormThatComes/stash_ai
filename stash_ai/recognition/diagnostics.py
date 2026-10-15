@@ -19,17 +19,24 @@ def message(error, api_key=''):
 
 
 def metadata(value, api_key=''):
-    """Do not copy historical source/error credentials into a new cache record."""
-    result = dict(value)
-    if isinstance(result.get('source'), str):
-        try:
-            result['source'] = safe_url(result['source'])
-        except ValueError:
-            result['source'] = '[invalid recognition URL]'
-    if isinstance(result.get('quality_errors'), dict):
-        result['quality_errors'] = {name: message(error, api_key) if isinstance(error, str) else error
-                                    for name, error in result['quality_errors'].items()}
-    return result
+    """Sanitize nested cached exclusions/quality errors without mutating history."""
+    def clean(item, depth=0):
+        if depth >= 64:
+            return '[metadata nesting limit]'
+        if isinstance(item, dict):
+            result = {}
+            for key, child in item.items():
+                if key == 'source' and isinstance(child, str):
+                    try:
+                        child = safe_url(child)
+                    except ValueError:
+                        child = '[invalid recognition URL]'
+                result[key] = clean(child, depth + 1)
+            return result
+        if isinstance(item, (list, tuple)):
+            return [clean(child, depth + 1) for child in item]
+        return message(item, api_key) if isinstance(item, str) else item
+    return clean(value)
 
 
 def snapshot(report, api_key=''):

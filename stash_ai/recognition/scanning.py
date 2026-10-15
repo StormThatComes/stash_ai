@@ -76,8 +76,8 @@ def scan_scene(database, scope, scene, config, namespace, source, backend_factor
         frame_progress(completed=record['total'], total=record['total'], reused=True)
         progress(reused=record['total'], scene=str(scene['id']))
         return identifier, True
-    frame_progress(completed=record['cursor'], total=record['total'])
     backend = backend_factory()
+    frame_progress(completed=record['cursor'], total=record['total'])
     pending, cursor = [], record['cursor']
 
     def checkpoint():
