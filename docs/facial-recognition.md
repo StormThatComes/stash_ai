@@ -28,6 +28,36 @@ python stash_ai.py recognition run --all-scenes
 
 The last command explicitly snapshots all scene IDs for this one invocation.
 
+To refresh portraits after editing the portrait YAML settings, reuse the existing
+identity memberships without scanning scenes, rebuilding identities, changing
+scene links, or applying performer names:
+
+```powershell
+python stash_ai.py recognition run --portraits-only
+python stash_ai.py recognition run --portraits-only --scene-id 6306 --scene-id 6307
+```
+
+With no scene IDs (or with `--all-scenes`), this mode selects all published
+identities with retained, complete evidence in the current Stash instance and
+configured model namespace. It reads the local face SQLite instead of listing
+the entire Stash library. Each performer is processed once. `--scene-id` limits
+both the identities and the evidence used for their portraits. Empty selections
+are recorded as successful no-ops with `portrait_people_selected=0`.
+
+Portrait scoring, framing, VTT/video selection, manual-image protection and
+`portraits.enabled: false` use the same rules as a normal run. Cached VTT
+reranking does not load detection/recognition models; original thumbnails may
+still be fetched for measurement or encoding. Model assets are prepared lazily
+if portrait inference needs them. Video mode can decode and verify new portrait
+frames, and newly requested quality measurements can run their models. This mode
+keeps identity memberships unchanged: use a normal scoped run to apply detection
+or grouping changes. Pending performer merges are left for a normal run too.
+
+`--retry-unresolved-images` can be combined with `--portraits-only` under the
+same fresh ownership/image checks. Run history records `invocation.portraits_only`,
+the selected scene IDs, portrait progress and the existing portrait counters.
+The console shows a performer progress bar and nested portrait-candidate work.
+
 Recognition uses the same console renderer as tagging. Terminals show a scene
 bar and a second bar for VTT frames in the active scene, with elapsed time,
 throughput and estimated remaining time. Publication has its own scene bar;
