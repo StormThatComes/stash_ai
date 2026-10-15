@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from contextlib import contextmanager
 import hashlib
 import os
 import stat
@@ -215,9 +216,29 @@ class YuNetDetector:
             self.provenance['detector'] = self.ort_detector.provenance
 
     def _bgr(self, image):
+        prepared = getattr(self, '_prepared_frame', None)
+        if prepared is not None and prepared[0] is image:
+            return prepared[1]
         import numpy as np
         with image.convert('RGB') as converted:
             return np.ascontiguousarray(np.asarray(converted)[:, :, ::-1])
+
+    def prepare_frame(self, image):
+        previous = getattr(self, '_prepared_frame', None)
+        self._prepared_frame = image, self._bgr(image)
+        return previous
+
+    def release_frame(self, previous):
+        self._prepared_frame = previous
+
+    @contextmanager
+    def prepared_frame(self, image):
+        previous = self.prepare_frame(image)
+        try:
+            yield
+        finally:
+            from stash_ai.runtime.cleanup import cleanup
+            cleanup([('release prepared recognition frame', lambda: self.release_frame(previous))])
 
     def detect(self, image):
         data = self._bgr(image)
@@ -232,6 +253,7 @@ class YuNetDetector:
         return [checked_detection(row) for row in rows]
 
     def close(self):
+        self._prepared_frame = None
         self.detector = None
         if getattr(self, 'ort_detector', None) is not None:
             self.ort_detector.close()
