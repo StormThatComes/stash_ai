@@ -398,7 +398,8 @@ import numpy as np
 import pytest
 
 
-def test_late_unknown_add_retains_ownership_until_future_cleanup(tmp_path, monkeypatch):
+@pytest.mark.parametrize('legacy_inactive', [False, True])
+def test_late_unknown_add_retains_ownership_until_future_cleanup(tmp_path, monkeypatch, legacy_inactive):
     from tests.test_recognition_run import setup, run
     from tests.test_recognition_rebuild import changed
     from stash_ai.recognition.database import FaceDatabase
@@ -409,6 +410,10 @@ def test_late_unknown_add_retains_ownership_until_future_cleanup(tmp_path, monke
         raise TimeoutError('ADD is still uncertain')
     client.add_scene_person = delayed
     assert run(config, services, '1') == 1
+    if legacy_inactive:
+        with FaceDatabase(config.database) as db:
+            db.connection.execute("UPDATE publications SET payload=json_set(payload,'$.active',json('false')) WHERE kind='link'")
+            db.connection.commit()
     strict = changed(config, detection={'min_face_pixels':200})
     assert run(strict, services, '1') == 1
     with FaceDatabase(config.database) as db:
