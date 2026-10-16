@@ -8,6 +8,7 @@ from collections import OrderedDict
 from contextlib import contextmanager
 from contextvars import ContextVar
 from functools import wraps
+import weakref
 
 from .profiling import count
 
@@ -42,11 +43,14 @@ def _prepared(groups, query):
     state = _blocks.get()
     key = tuple(('tuple', id(group.samples)) if isinstance(group.samples, tuple)
                 else tuple(id(sample) for sample in group.samples) for group in groups)
+    arrays = [sample for group in groups for sample in group.samples]
     if state is not None and key in state['entries']:
         value = state['entries'].pop(key)
-        state['entries'][key] = value
-        return value[:4]
-    arrays = [sample for group in groups for sample in group.samples]
+        if len(value[4]) == len(arrays) and all(ref() is sample for ref, sample in zip(value[4], arrays)):
+            state['entries'][key] = value
+            return value[:4]
+        state['size'] -= value[-1]
+
     if (not arrays or any(not isinstance(sample, np.ndarray) or sample.dtype != np.float32
                           or sample.shape != query.shape for sample in arrays)
             or any(not group.samples for group in groups)):
@@ -62,9 +66,8 @@ def _prepared(groups, query):
         while state['entries'] and state['size'] + size > state['limit']:
             _, removed = state['entries'].popitem(last=False)
             state['size'] -= removed[-1]
-        # Keep the immutable input owners alive so identity keys cannot alias.
-        owners = [group.samples for group in groups]
-        state['entries'][key] = matrix, lengths, starts, norms, arrays, owners, size
+        # Weak owners guard identity keys without retaining obsolete references.
+        state['entries'][key] = matrix, lengths, starts, norms, tuple(weakref.ref(a) for a in arrays), size
         state['size'] += size
     return matrix, lengths, starts, norms
 

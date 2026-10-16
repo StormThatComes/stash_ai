@@ -17,11 +17,12 @@ class ReferenceUsage:
         self.stage, self.last_report = 'loading', None
         self.last_values = None
 
-    def begin(self, stage, *, reset=False):
+    def begin(self, stage, *, reset=False, report=True):
         self.stage = stage
         if reset:
             self.bytes = self.people = self.samples = 0
-        self.emit(force=True)
+        if report:
+            self.emit(force=True)
 
     def add(self, vectors, *, people=0, kind):
         self.add_counts(sum(vector.nbytes for vector in vectors), len(vectors), people=people, kind=kind)

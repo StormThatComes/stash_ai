@@ -9,12 +9,14 @@ from .progress import tracking, work
 from .ranking import best_two
 from .reference_usage import ReferenceUsage
 from .scoring import comparisons
+from .evidence_cache import current as evidence_for
 
 
-def _rank(groups, query, config):
+def _rank(groups, query, config, *, cache=None, observation=None):
     ranked = []
     cohesion = config.data['clustering']['cohesion_threshold']
-    for group, mean, minimum in comparisons(groups, query, cohesion=cohesion):
+    for group, mean, minimum in comparisons(groups, query, cohesion=cohesion,
+            exact=(lambda g,q: cache.scores(g,q,observation)) if cache is not None else None):
         if minimum >= cohesion:
             best_two(ranked, (mean, group.identifier, group))
     return ranked
@@ -26,6 +28,7 @@ def _unambiguous(ranked, margin):
 
 def _cores(db, scan, policy, groups, config):
     """Revalidate strong accepted members against the final strict references."""
+    cache = evidence_for(db)
     settings = config.data['recognition']
     minimum = config.data['clustering']['same_scene_min_support']
     support = {}
@@ -40,7 +43,8 @@ def _cores(db, scan, policy, groups, config):
             cues = support.setdefault(row['person'], {})
             if len(cues) >= minimum or row['seconds'] in cues:
                 continue
-            ranked = _rank(groups, vector(row), config)
+            query = cache.vector(row) if cache is not None else vector(row)
+            ranked = _rank(groups, query, config, cache=cache, observation=row['id'])
             if (ranked and ranked[0][1] == row['person'] and ranked[0][0] >= settings['match_threshold']
                     and _unambiguous(ranked, settings['ambiguity_margin'])):
                 cues[row['seconds']] = row['id']
@@ -58,6 +62,7 @@ def apply_scene_context(database, selected, config, *, progress=None):
     if not bonus or not selected:
         return
     db, policy = database.connection, matching_policy(config)
+    cache = evidence_for(db)
     if not db.execute("SELECT 1 FROM candidates WHERE policy=? AND status='withheld' LIMIT 1", (policy,)).fetchone():
         return
     # Replay-only index: each selected scene must not rescan every candidate
@@ -87,8 +92,8 @@ def apply_scene_context(database, selected, config, *, progress=None):
                           total=lambda: db.execute('SELECT COUNT(*) ' + source, (policy, scan)).fetchone()[0]) as observations:
                 for row in observations:
                     usage.emit()
-                    query = vector(row)
-                    ranked = _rank(groups, query, config)
+                    query = cache.vector(row) if cache is not None else vector(row)
+                    ranked = _rank(groups, query, config, cache=cache, observation=row['id'])
                     if (not ranked or ranked[0][0] < threshold or ranked[0][1] not in cores
                             or not _unambiguous(ranked, settings['ambiguity_margin'])):
                         continue
