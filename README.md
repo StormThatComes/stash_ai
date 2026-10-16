@@ -1431,3 +1431,22 @@ identities, 128 dimensions, four representatives) measured medians 4.55 s file,
 image was 5.5 MiB. These synthetic results support keeping serial preparation
 default; they do not predict a production rebuild's completion time. The
 benchmark reports process RSS after each trial, not isolated peak process RAM.
+
+Matching policy v8 separates representative/decision semantics from the
+`max_reference_bytes` and `max_people_per_lookup` admission limits. Existing v7
+candidates receive one retained-evidence replay; no new inference is requested.
+Completed rebuilds can reuse results after monotonic capacity increases only
+when all current input, reference, label-origin, alias and exact candidate
+integrity checks pass. Decreases replay conservatively, as does an increase
+when historical label matching previously skipped an over-budget reference set.
+Standalone scene caches also record and check their original admission limits.
+
+Keep at most eight completed selection descriptors per scope/namespace. A subset
+run does not discard a full selection's descriptor, but it can invalidate that
+selection's dependencies or assignments. Descriptors contain bounded hashes and
+limits, not copied vectors or historical assignments. Current memberships,
+accepted/withheld coverage, exact candidate UUID addresses, raw input repairs and
+performer uniqueness are revalidated. Broken derived descriptors/candidates fall
+back to retained-evidence replay. Warm checks read 256-scan chunks and validate
+homogeneous vector blocks of at most 128 rows/1 MiB; norm-boundary and malformed
+records use the original scalar validator for exact error behavior.

@@ -12,6 +12,7 @@ from .identity_merges import supported_merges
 from .progress import tracking
 from .ranking import best_two
 from .replay_addresses import address
+from .rebuild_cache import resource_limits
 from .profiling import measured, count
 from .scoring import comparisons, scoped
 from .evidence_cache import current as evidence, scoped as evidence_owned
@@ -157,14 +158,15 @@ def _result(db, scan, policy):
     return [dict(row) for row in rows]
 
 
-def complete_candidates(db, scan, policy, context, count, *, exact_memberships=False):
+def complete_candidates(db, scan, policy, context, count, *, exact_memberships=False, admission=None):
     """Derived cache absence cannot mean that supported identities disappeared."""
     totals = db.execute("SELECT COUNT(*),COUNT(DISTINCT json_extract(payload,'$.observation')) "
                         'FROM candidates WHERE scan=? AND policy=?', (scan, policy)).fetchone()
     if tuple(totals) != (count, count):
         return False
     rows = db.execute("SELECT c.id,c.person,c.status,json_extract(c.payload,'$.observation') AS observation,"
-        "json_extract(c.payload,'$.reference_context') AS context,o.scan,o.rejected,m.person AS member "
+        "json_extract(c.payload,'$.reference_context') AS context,json_extract(c.payload,'$.resource_limits') AS limits,"
+        "o.scan,o.rejected,m.person AS member "
         "FROM candidates c LEFT JOIN observations o ON o.id=json_extract(c.payload,'$.observation') "
         'LEFT JOIN members m ON m.observation=o.id WHERE c.scan=? AND c.policy=?', (scan, policy))
     for row in rows:
@@ -175,6 +177,13 @@ def complete_candidates(db, scan, policy, context, count, *, exact_memberships=F
         if (row['id'] != expected or row['scan'] != scan or row['rejected'] is not None
                 or row['context'] != context or row['status'] not in ('accepted', 'withheld')):
             return False
+        if admission is not None:
+            try:
+                limits=json.loads(row['limits'])
+            except (ValueError,TypeError):
+                return False
+            if not isinstance(limits,dict) or any(type(limits.get(k)) is not int or admission[k]<limits[k] for k in admission):
+                return False
         if row['status'] == 'accepted':
             if row['person'] is None or row['member'] != row['person']:
                 return False
@@ -185,9 +194,10 @@ def complete_candidates(db, scan, policy, context, count, *, exact_memberships=F
 
 def matching_policy(config):
     from .context import policy_digest
-    return policy_digest(config, 'matching-v7', lambda: {
-        'format': 7, 'recognition': config.data['recognition'],
-        'clustering': config.data['clustering']})
+    return policy_digest(config, 'matching-v8', lambda: {
+        'format': 8, 'recognition': config.data['recognition'],
+        'clustering': {key:value for key,value in config.data['clustering'].items()
+                       if key not in ('max_reference_bytes','max_people_per_lookup')}})
 
 
 @measured('scene')
@@ -218,7 +228,7 @@ def cluster_scene(database, scan, config, *, progress=None, _cold_replay=False):
         context = reference_context(groups)
         existing = db.execute('SELECT COUNT(*) FROM candidates WHERE scan=? AND policy=? '
                               "AND json_extract(payload,'$.reference_context')=?", (scan, policy, context)).fetchone()[0]
-    if existing == count and count and complete_candidates(db, scan, policy, context, count):
+    if existing == count and count and complete_candidates(db, scan, policy, context, count, admission=resource_limits(config)):
         with tracking(
             db.execute(
                 'SELECT dimensions,embedding FROM observations WHERE scan=? AND rejected IS NULL',
@@ -290,7 +300,8 @@ def cluster_scene(database, scan, config, *, progress=None, _cold_replay=False):
                 db.execute('INSERT INTO candidates VALUES (?,?,?,?,?,?)',
                            (candidate, scan, policy, person, status,
                             encoded({'observation': observation['id'], 'reason': reason, 'scores': scores,
-                                     'policy': policy, 'representative_limit': grouping['max_samples_per_person']})))
+                                     'policy': policy, 'representative_limit': grouping['max_samples_per_person'],
+                                     'resource_limits': resource_limits(config)})))
         usage.emit(force=True)
         people = [row[0] for row in db.execute('SELECT DISTINCT person FROM candidates '
                                                 "WHERE scan=? AND policy=? AND status='pending'", (scan, policy))]
