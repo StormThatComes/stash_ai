@@ -72,6 +72,45 @@ class RecognitionStash(StashTransport):
                          + PERFORMER_FIELDS + ' } }', {'id': identifier})['findPerformer']
         return None if value is None else checked_id(value, identifier)
 
+    def _read_batch(self, identifiers, *, scenes=False):
+        values=list(dict.fromkeys(str(value) for value in identifiers))
+        for identifier in values:
+            checked_id({'id':identifier})
+        result={}
+        for offset in range(0,len(values),32):
+            batch=values[offset:offset+32]
+            declarations=','.join(f'$id{i}:ID!' for i in range(len(batch)))
+            field,fields=('findScene',SCENE_FIELDS) if scenes else ('findPerformer',PERFORMER_FIELDS)
+            selections=' '.join(f'n{i}:{field}(id:$id{i}) {{ {fields} }}' for i in range(len(batch)))
+            operation='StashAIRecognitionScenesBatch' if scenes else 'StashAIRecognitionPerformersBatch'
+            try:
+                payload=self.gql(f'query {operation}({declarations}) {{ {selections} }}',
+                                 {f'id{i}':value for i,value in enumerate(batch)})
+                if not isinstance(payload,dict) or set(payload)!={f'n{i}' for i in range(len(batch))}:
+                    raise RuntimeError('Stash batch read did not return the expected aliases.')
+            except Exception:
+                # A field error can reject a complete GraphQL envelope. Isolate
+                # entries through the existing proven-read/retry surface.
+                for value in batch:
+                    try:
+                        result[value]=self.scene(value) if scenes else self.lookup_performer(value)
+                    except Exception as error:
+                        result[value]=error
+                continue
+            for index,value in enumerate(batch):
+                try:
+                    row=payload[f'n{index}']
+                    result[value]=None if row is None else checked_id(row,value)
+                except Exception as error:
+                    result[value]=error
+        return result
+
+    def scenes(self, identifiers):
+        return self._read_batch(identifiers,scenes=True)
+
+    def performers(self, identifiers):
+        return self._read_batch(identifiers)
+
     def find_token(self, token):
         payload = self.gql('query StashAIRecognitionOwnership($token:String!) {'
                            'findPerformers(performer_filter:{details:{value:$token,modifier:INCLUDES}},'
@@ -137,3 +176,8 @@ class RecognitionStash(StashTransport):
 class RecognitionReader(StashTransport):
     """Isolated read-only HTTP sessions with the same validated scene query."""
     scene = RecognitionStash.scene
+    performer = RecognitionStash.performer
+    lookup_performer = RecognitionStash.lookup_performer
+    _read_batch = RecognitionStash._read_batch
+    scenes = RecognitionStash.scenes
+    performers = RecognitionStash.performers

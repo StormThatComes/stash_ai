@@ -25,6 +25,7 @@ from .merge_publication import canonical_targets
 from .stash import RecognitionStash
 from .names import load_names, plan_names, starter
 from .metadata import enrich
+from .portrait_pipeline import Pipeline as PortraitPipeline
 from .video import VideoFrames
 from .visibility import FaceVisibility, LazyVisibility
 from .expression import FaceExpression, LazyExpression, required as expression_required
@@ -307,18 +308,21 @@ def execute(args, config, *, services=None):
                                 report.optional('recognition_names_preflight', report.issue, 'recognition', 'names_preflight',
                                                 'selected performers', error, safe_error(error, key))
                     label = 'Portraits' if portraits_only else 'Names and portraits'
-                    with portrait_reference_scope(), phase(report, 'Recognition portraits' if portraits_only else 'Recognition metadata', errors=lambda: counts['metadata_failed']), WorkProgress(report, label, len(targets), unit='person', key='people') as people:
-                        for target in targets:
+                    with portrait_reference_scope(), PortraitPipeline(database,client,config,scope,targets,services.source,visibility,expression,
+                        enabled=services.metadata is enrich) as preparation, phase(report, 'Recognition portraits' if portraits_only else 'Recognition metadata', errors=lambda: counts['metadata_failed']), WorkProgress(report, label, len(targets), unit='person', key='people') as people:
+                        for target_index,target in enumerate(targets):
+                            preparation.activate(target_index)
                             with activity(report, label.lower(), person=target['performer']):
-                                options = {'visibility': visibility}
+                                options = {'visibility': preparation.visibility}
                                 if portraits_only:
                                     options['portraits_only'] = True
                                 if expression_required(config.data['portraits']):
-                                    options['expression'] = expression
+                                    options['expression'] = preparation.expression
                                 if retry_images:
                                     options['retry_unresolved_images'] = True
                                 counts.update(services.metadata(database, client, report, config, plan,
                                                                scope, target, paths, runtime_services, **options) or {})
+                                preparation.promote()
                                 database.progress(run, 'metadata', dict(counts))
                                 people.advance(failed=counts['metadata_failed'])
                 if targets and not portraits_only:

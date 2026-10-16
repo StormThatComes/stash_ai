@@ -339,11 +339,12 @@ def image_digest(client, live, performer, config):
     return hashlib.sha256(data).hexdigest()
 
 
-def image_baseline(database, client, config, live, performer, previous, *, retry_unresolved_images=False):
+def image_baseline(database, client, config, live, performer, previous, *, retry_unresolved_images=False,
+                   initial_digest=Ellipsis):
     """Recognize only our acknowledged bytes; reconcile uncertain writes first."""
     if previous is None:
         return missing_image(live, client, performer), None, None
-    current = image_digest(client, live, performer, config)
+    current = image_digest(client, live, performer, config) if initial_digest is Ellipsis else initial_digest
     intent = json.loads(previous['payload'])
     if previous['status'] in ('pending', 'unknown'):
         if current == intent['sha256']:
@@ -407,13 +408,21 @@ def fill_portrait(database, client, report, config, scope, target, paths, backen
     enabled = config.data['portraits']['enabled']
     token = database.connection.execute('SELECT token FROM people WHERE id=? AND scope=?', (person, scope)).fetchone()[0]
     checked_token(database, person, token)
-    live = checked_id(client.performer(performer), performer)
+    from .portrait_pipeline import current as portrait_pipeline, MISSING as UNREAD
+    pipeline=portrait_pipeline()
+    preflight=pipeline.initial(target) if pipeline is not None else UNREAD
+    live = checked_id(preflight[0] if preflight is not UNREAD else client.performer(performer), performer)
     if not owns(live, token):
         raise PendingRecognition('Portrait target ownership changed.')
     identifier = operation_id(scope, '', person, 'image')
     previous = database.connection.execute('SELECT * FROM publications WHERE id=?', (identifier,)).fetchone()
+    if previous is not None and previous['status'] in ('pending','unknown') and preflight is not UNREAD:
+        preflight=UNREAD
+        live=checked_id(client.performer(performer),performer)
+        if not owns(live,token):raise PendingRecognition('Portrait target ownership changed.')
     managed, baseline, previous = image_baseline(database, client, config, live, performer, previous,
-                                                retry_unresolved_images=retry_unresolved_images)
+                                                retry_unresolved_images=retry_unresolved_images,
+                                                initial_digest=preflight[1] if preflight is not UNREAD else Ellipsis)
     if not managed:
         return {'portraits_preserved': 1}
     retrying = previous is not None and previous['status'] in ('pending', 'unknown')
@@ -456,6 +465,7 @@ def fill_portrait(database, client, report, config, scope, target, paths, backen
                     -portrait_tiebreak(quality, config.data['portraits']), ranks.get(metadata.get('source_type'), 3))
         if key(old) < key(new):
             return {'portraits_preserved': 1, **quality_counts(prior, config)}
+    if pipeline is not None:pipeline.promote()
     # Protect manual replacements/removals while extraction was in progress.
     live = checked_id(client.performer(performer), performer)
     if not owns(live, token):

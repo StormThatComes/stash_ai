@@ -1469,3 +1469,31 @@ confirmation retain their separate durable transactions. A partial provenance
 index covers scope/person/observation lookups without indexing malformed JSON.
 Explicit scene selections drive portrait-target discovery from selected scans
 in 256-scene chunks; all-scene discovery preserves the retained-scan contract.
+
+`execution.prefetch_portraits` enables bounded VTT preparation (default true;
+false keeps the serial path). The metadata phase shares two verified scene
+sources through an isolated read owner, prefetches at most two upcoming
+thumbnails, and retains at most eight decoded thumbnails. Queue allowances
+scale from `execution.rebuild_memory_bytes`, capped at 256 MiB: thumbnail pixels
+use at most one quarter, and detached next-target descriptors use one eighth
+and at most 128 observations. Oversized sources/frames use original serial
+acquisition; no working data spills to disk. Source caches and decoded sheets
+have separate bounded item/pixel allowances; model/runtime memory is additional.
+
+The coordinator snapshots descriptors, identity proofs and policy; a source
+worker owns its read sessions, a preparation worker handles detached quality
+results, and one model consumer serializes visibility/expression initialization,
+inference and recovery. Model assets and warning rendering stay on the
+coordinator. The next new target can prepare while the current verified image
+is published; existing portrait targets keep demand-driven evaluation without
+a second history prepass. All eligible observations still reach ordered ranking.
+The queues do not predict assignments or mutate memberships.
+
+Preflight performer/scene reads support validated GraphQL aliases in chunks of
+32. Null or invalid IDs stay isolated, and an envelope error falls back to
+separate proven reads. Initial ownership/image snapshots can be prefetched;
+pending/unknown image reconciliation starts from fresh reads, and every
+publication still refreshes live ownership and image bytes before dispatch.
+Workers never reconcile publication rows or use the coordinator's SQLite.
+Image copies remain owned until inference finishes even if their consumer is
+interrupted. Shutdown cancels reads, joins owners and releases queued images.
