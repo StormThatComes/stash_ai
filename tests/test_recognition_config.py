@@ -58,6 +58,8 @@ def test_shipped_template_matches_default_schema():
     config = load(Path(__file__).resolve().parents[1] / 'facial_recognition.yml')
     assert config.data['recognition']['min_identity_support'] == 1
     assert config.data['recognition']['min_merge_support'] == 3
+    assert config.data['clustering']['same_scene_match_bonus'] == .03
+    assert config.data['clustering']['same_scene_min_support'] == 3
     assert config.data['portraits']['source'] == 'vtt'
     assert config.data['portraits']['margin'] == .35
     assert config.data['execution']['prefetch_frames'] == 4

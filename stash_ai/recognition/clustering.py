@@ -77,7 +77,7 @@ def _similarities(group, query):
     return float(scores.mean()), float(scores.min())
 
 
-def co_presence_allows(db, observation, group, groups, query, config):
+def co_presence_allows(db, observation, group, groups, query, config, *, peer_threshold=None):
     """A distinct cue peer competing for this identity needs stronger evidence.
 
     Inspect the entire cue, including observations not assigned yet, so reader
@@ -87,6 +87,7 @@ def co_presence_allows(db, observation, group, groups, query, config):
     """
     import numpy as np
     settings = config.data['recognition']
+    peer_threshold = settings['match_threshold'] if peer_threshold is None else peer_threshold
     stronger = max(settings['match_threshold'], settings['cooccurrence_merge_threshold'])
     for peer in db.execute('SELECT * FROM observations WHERE scan=? AND cue=? '
                            'AND id<>? AND rejected IS NULL ORDER BY id',
@@ -95,7 +96,7 @@ def co_presence_allows(db, observation, group, groups, query, config):
             continue
         other = vector(peer)
         mean, minimum = _similarities(group, other)
-        if mean < settings['match_threshold'] or minimum < config.data['clustering']['cohesion_threshold']:
+        if mean < peer_threshold or minimum < config.data['clustering']['cohesion_threshold']:
             continue
         best = mean
         for rival in groups:
@@ -154,8 +155,8 @@ def complete_candidates(db, scan, policy, context, count, *, exact_memberships=F
 
 def matching_policy(config):
     from .context import policy_digest
-    return policy_digest(config, 'matching-v6', lambda: {
-        'format': 6, 'recognition': config.data['recognition'],
+    return policy_digest(config, 'matching-v7', lambda: {
+        'format': 7, 'recognition': config.data['recognition'],
         'clustering': config.data['clustering']})
 
 

@@ -23,7 +23,8 @@ def defaults():
         'recognition': {'metric': 'cosine', 'match_threshold': .65,
                         'ambiguity_margin': .1, 'min_identity_support': 1, 'min_merge_support': 3,
                         'cooccurrence_merge_threshold': .90},
-        'clustering': {'cohesion_threshold': .60, 'max_samples_per_person': 32,
+        'clustering': {'cohesion_threshold': .60, 'same_scene_match_bonus': .03,
+                       'same_scene_min_support': 3, 'max_samples_per_person': 32,
                        'max_people_per_lookup': 20000, 'max_reference_bytes': 134217728},
         'portraits': {'enabled': True, 'source': 'vtt', 'min_face_pixels': 96, 'min_sharpness': 25.,
                      'max_pose_deviation': .35, 'min_exposure': 30., 'max_exposure': 225.,
@@ -130,10 +131,12 @@ def validate(data):
         raise ValueError('Face recognition uses cosine similarity (higher means more similar).')
     if data['clustering']['cohesion_threshold'] > data['recognition']['match_threshold']:
         raise ValueError('clustering.cohesion_threshold must not exceed recognition.match_threshold.')
+    _number(data['clustering']['same_scene_match_bonus'], 'clustering.same_scene_match_bonus', 0, .1)
     integers = {
         'detection': {'min_face_pixels': (8, 4096), 'max_faces_per_frame': (1, 1000)},
         'recognition': {'min_identity_support': (1, 1000), 'min_merge_support': (1, 1000)},
-        'clustering': {'max_samples_per_person': (2, 128), 'max_people_per_lookup': (1, 100000),
+        'clustering': {'same_scene_min_support': (1, 1000),
+                       'max_samples_per_person': (2, 128), 'max_people_per_lookup': (1, 100000),
                        'max_reference_bytes': (1048576, 1073741824)},
         'portraits': {'min_face_pixels': (0, 4096), 'max_candidates': (1, 64), 'jpeg_quality': (1, 100),
                       'max_video_bytes': (1048576, 1073741824)},
