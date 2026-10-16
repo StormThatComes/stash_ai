@@ -26,6 +26,8 @@ recognition:
   min_merge_support: 3         # Distinct scene/time observations before merging identities.
 clustering:
   cohesion_threshold: 0.60     # Minimum sample similarity for matching and group merges.
+  same_scene_match_bonus: 0.03 # Final local assignment only; 0 disables. Never relaxes identity merges.
+  same_scene_min_support: 3    # Strong, unambiguous independent cue times in the same VTT.
   max_samples_per_person: 32
   max_people_per_lookup: 20000
   max_reference_bytes: 134217728 # 128 MiB of float32 references; run reports usage/peak. Not total RAM/VRAM.

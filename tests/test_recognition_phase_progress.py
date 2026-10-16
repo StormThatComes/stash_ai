@@ -92,6 +92,20 @@ def test_cached_rebuild_validates_observations_without_fabricating_replay_work(t
     assert len(models) == loaded and owners == {'stash-console'}
 
 
+def test_same_scene_context_reports_scene_support_and_assignment_work(tmp_path, monkeypatch, terminal):
+    import math
+    from tests.test_recognition_rebuild import library
+    vectors = {'1': [[1., 0., 0., 0.]] * 3 + [[.63, math.sqrt(1 - .63**2), 0., 0.]]}
+    config, _, services, _ = library(tmp_path, monkeypatch, vectors)
+    bars, owners = terminal
+    assert execute(args('1'), config, services=services) == 0
+    rows = {bar.desc: bar for bar in bars}
+    for phase, count in [('Apply same-scene context', 1), ('Validate same-scene support', 3),
+                         ('Match same-scene observations', 1)]:
+        assert rows[phase].n == rows[phase].total == count
+    assert all(bar.disable for bar in bars) and owners == {'stash-console'}
+
+
 def test_selection_preflight_publication_and_names_starter_also_have_progress(tmp_path, monkeypatch, terminal):
     config, _, services, _ = setup(tmp_path, monkeypatch)
     bars, _ = terminal
