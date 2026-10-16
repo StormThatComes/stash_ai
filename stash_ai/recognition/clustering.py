@@ -16,6 +16,7 @@ from .rebuild_cache import resource_limits
 from .profiling import measured, count
 from .scoring import comparisons, scoped
 from .evidence_cache import current as evidence, scoped as evidence_owned
+from .parallel_scores import scored_rows, contributions
 
 
 def vector(row):
@@ -244,25 +245,26 @@ def cluster_scene(database, scan, config, *, progress=None, _cold_replay=False):
         return _result(db, scan, policy)
     usage.begin('matching')
     with db:
+        fixed_count = len(groups)
         by_id = {g.identifier: g for g in groups}
         db.execute('DELETE FROM candidates WHERE scan=? AND policy=?', (scan, policy))
         with tracking(
-            db.execute(
+            scored_rows(db.execute(
                 'SELECT o.*,m.person AS prior_person FROM observations o LEFT JOIN members m '
                 'ON m.observation=o.id WHERE o.scan=? AND o.rejected IS NULL ORDER BY o.cue,o.geometry,o.embedding,o.id',
                 (scan,),
-            ),
+            ), groups, settings['match_threshold'] - settings['ambiguity_margin']),
             'Match face observations',
             unit='observation',
             total=count,
         ) as tracked:
-            for observation in tracked:
+            for observation, frozen in tracked:
                 query = cache.vector(observation) if cache is not None else vector(observation)
                 prior_person = observation['prior_person']
                 ranked = []
                 near = False
-                for group, score, cohesion in comparisons(
-                        groups, query, settings['match_threshold'] - settings['ambiguity_margin'],
+                for group, score, cohesion in contributions(
+                        groups, query, frozen, fixed_count, settings['match_threshold'] - settings['ambiguity_margin'],
                         exact=(lambda g,q: cache.scores(g,q,observation['id'])) if cache is not None else None):
                     near |= score >= settings['match_threshold'] - settings['ambiguity_margin']
                     if (score >= settings['match_threshold'] - settings['ambiguity_margin'] and
@@ -359,11 +361,12 @@ def _recheck_after_merge(db, scan, policy, groups, config):
     settings = config.data['recognition']
     cache = evidence(db)
     with tracking(
-        db.execute(
+        scored_rows(db.execute(
             'SELECT o.*,m.person AS prior_person FROM observations o LEFT JOIN members m '
             'ON m.observation=o.id WHERE o.scan=? AND o.rejected IS NULL ORDER BY o.cue,o.geometry,o.embedding,o.id',
             (scan,),
-        ),
+        ), groups, settings['match_threshold'] - settings['ambiguity_margin'],
+            config.data['clustering']['cohesion_threshold']),
         'Recheck merged observations',
         unit='observation',
         total=lambda: db.execute(
@@ -371,10 +374,10 @@ def _recheck_after_merge(db, scan, policy, groups, config):
             (scan,),
         ).fetchone()[0],
     ) as tracked:
-        for row in tracked:
+        for row, frozen in tracked:
             query = cache.vector(row) if cache is not None else vector(row)
             ranked = []
-            for group, mean, minimum in comparisons(groups, query,
+            for group, mean, minimum in contributions(groups, query, frozen, len(groups),
                     settings['match_threshold'] - settings['ambiguity_margin'],
                     config.data['clustering']['cohesion_threshold'],
                     exact=(lambda g,q: cache.scores(g,q,row['id'])) if cache is not None else None):

@@ -128,6 +128,17 @@ class Evidence:
             self.cache.put(key, value, sum(sample.nbytes + 128 for sample in group.samples))
         return value[0]
 
+    def remember_scores(self, group, observation, scores):
+        """Import a verified immutable worker result on the coordinator only."""
+        if not all(not sample.flags.writeable and isinstance(sample.base, bytes)
+                   for sample in group.samples):
+            return
+        version = (('tuple', id(group.samples)) if isinstance(group.samples, tuple)
+                   else tuple(id(sample) for sample in group.samples))
+        self.cache.put(('scores', observation, version),
+                       (scores, tuple(weakref.ref(sample) for sample in group.samples)),
+                       sum(sample.nbytes + 128 for sample in group.samples))
+
     def contextual(self, sql, parameters, selected):
         key = 'context', selected['scope'], selected['namespace'], selected['policy_sha']
         value = self.cache.get(key)
