@@ -18,6 +18,7 @@ from .reference_usage import ReferenceUsage
 from .progress import tracking, work
 from .ranking import best_two
 from .profiling import measured, profile, connection
+from .reference_index import references as reference_scope
 from .scene_context import apply_scene_context
 
 
@@ -406,18 +407,19 @@ def _rebuild_selected(database, selected, config, *, progress=None):
         temporary = SimpleNamespace(connection=replay,
             installation=str(uuid.uuid5(uuid.NAMESPACE_URL, encoded([scope, namespace, 'cold-replay']))),
             identity_clock=itertools.count(1).__next__)
-        with tracking(
-            selected,
-            'Rebuild selected identities',
-            unit='scene',
-            position=0,
-        ) as tracked:
-            for item in tracked:
-                cluster_scene(temporary, item['scan'], config, progress=progress, _cold_replay=True)
-        # Freeze strict references after every selected scene has matched and
-        # merged. Contextual attachments cannot become another scene's anchors
-        # or bridge identities during the replay.
-        apply_scene_context(temporary, selected, config, progress=progress)
+        with reference_scope(replay, scope, namespace, config):
+            with tracking(
+                selected,
+                'Rebuild selected identities',
+                unit='scene',
+                position=0,
+            ) as tracked:
+                for item in tracked:
+                    cluster_scene(temporary, item['scan'], config, progress=progress, _cold_replay=True)
+            # Freeze strict references after every selected scene has matched and
+            # merged. Contextual attachments cannot become another scene's anchors
+            # or bridge identities during the replay.
+            apply_scene_context(temporary, selected, config, progress=progress)
         mapping = _bind(database, replay, config, scope, namespace, usage=usage)
         _apply(database, replay, selected, config, scope, namespace, mapping, fingerprint, progress, usage=usage)
     return _results(db, selected, config)
