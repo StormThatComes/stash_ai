@@ -54,12 +54,16 @@ class LazyAssets(Mapping):
         return len(asset_selection(self.config)[0] if self.selective else self._load())
 
 
-def retained_targets(database, config, scope, scene_ids=None):
+def retained_targets(database, config, scope, scene_ids=None, *, performer_ids=None):
     """Current memberships only; never resurrect historical candidate decisions.
 
     The normal canonical-target pass additionally excludes roots with unresolved
     performer merges. Model namespaces and Stash instances cannot be mixed.
+    Performer and scene filters intersect; performer selection alone retains all
+    of each selected person's eligible evidence.
     """
+    scenes = None if scene_ids is None else encoded(scene_ids)
+    performers = None if performer_ids is None else encoded(performer_ids)
     rows = database.connection.execute('''SELECT DISTINCT p.id,p.performer,s.scene,s.id AS scan
       FROM people p JOIN members m ON m.person=p.id
       JOIN observations o ON o.id=m.observation JOIN scans s ON s.id=o.scan
@@ -68,9 +72,9 @@ def retained_targets(database, config, scope, scene_ids=None):
         AND o.rejected IS NULL
         AND NOT EXISTS (SELECT 1 FROM identity_merges a WHERE a.source=p.id)
         AND (? IS NULL OR s.scene IN (SELECT value FROM json_each(?)))
+        AND (? IS NULL OR p.performer IN (SELECT value FROM json_each(?)))
       ORDER BY p.id,s.scene,s.id''',
-      (scope, namespace(config), None if scene_ids is None else encoded(scene_ids),
-       None if scene_ids is None else encoded(scene_ids)))
+      (scope, namespace(config), scenes, scenes, performers, performers))
     ready = {}
     with tracking(rows, 'Read retained portrait identities', unit='assignment', position=0) as assignments:
         for row in assignments:

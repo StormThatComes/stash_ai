@@ -12,6 +12,9 @@ SQLite database. Tagging input comes exclusively from Stash VTT files and
 sprites. Explicit `recognition run` uses VTT faces and defaults to wider VTT
 portraits; optional video portraits decode selected frames. Recognition has its
 own face SQLite and configuration.
+Use `recognition portraits --performer-id ID` to refresh one existing Stash
+performer's portrait from retained evidence, or omit the filter to refresh all
+eligible identities, without scanning scenes or rebuilding identities.
 
 ## License
 
