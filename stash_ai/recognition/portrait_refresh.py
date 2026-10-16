@@ -62,22 +62,34 @@ def retained_targets(database, config, scope, scene_ids=None, *, performer_ids=N
     Performer and scene filters intersect; performer selection alone retains all
     of each selected person's eligible evidence.
     """
-    scenes = None if scene_ids is None else encoded(scene_ids)
     performers = None if performer_ids is None else encoded(performer_ids)
-    rows = database.connection.execute('''SELECT DISTINCT p.id,p.performer,s.scene,s.id AS scan
-      FROM people p JOIN members m ON m.person=p.id
-      JOIN observations o ON o.id=m.observation JOIN scans s ON s.id=o.scan
-      WHERE p.scope=? AND p.namespace=? AND p.performer IS NOT NULL
-        AND s.scope=p.scope AND s.namespace=p.namespace AND s.status='complete'
-        AND o.rejected IS NULL
-        AND NOT EXISTS (SELECT 1 FROM identity_merges a WHERE a.source=p.id)
-        AND (? IS NULL OR s.scene IN (SELECT value FROM json_each(?)))
-        AND (? IS NULL OR p.performer IN (SELECT value FROM json_each(?)))
-      ORDER BY p.id,s.scene,s.id''',
-      (scope, namespace(config), scenes, scenes, performers, performers))
     ready = {}
-    with tracking(rows, 'Read retained portrait identities', unit='assignment', position=0) as assignments:
-        for row in assignments:
-            target = ready.setdefault(row['id'], {'person': row['id'], 'performer': row['performer'], 'scans': []})
-            target['scans'].append({'scene': row['scene'], 'scan': row['scan']})
+    if scene_ids is not None:
+        scene_ids=list(dict.fromkeys(scene_ids))
+    selections = [None] if scene_ids is None else [scene_ids[i:i+256] for i in range(0,len(scene_ids),256)]
+    for selection in selections:
+        source = ('people p JOIN members m ON m.person=p.id JOIN observations o ON o.id=m.observation '
+                  'JOIN scans s ON s.id=o.scan')
+        parameters=[scope,namespace(config)]
+        selected_filter=''
+        if selection is not None:
+            source = ('json_each(?) chosen CROSS JOIN scans s ON s.scene=chosen.value AND s.scope=? AND s.namespace=? '
+                      'JOIN observations o ON o.scan=s.id JOIN members m ON m.observation=o.id JOIN people p ON p.id=m.person')
+            parameters=[encoded(selection),scope,namespace(config),*parameters]
+        if performers is not None:
+            selected_filter=' AND p.performer IN (SELECT value FROM json_each(?))'
+            parameters.append(performers)
+        rows = database.connection.execute('SELECT DISTINCT p.id,p.performer,s.scene,s.id AS scan FROM '+source+
+            " WHERE p.scope=? AND p.namespace=? AND p.performer IS NOT NULL AND s.scope=p.scope "
+            "AND s.namespace=p.namespace AND s.status='complete' AND o.rejected IS NULL "
+            'AND NOT EXISTS (SELECT 1 FROM identity_merges a WHERE a.source=p.id)'+selected_filter+
+            ' ORDER BY p.id,s.scene,s.id',parameters)
+        with tracking(rows,'Read retained portrait identities',unit='assignment',position=0) as assignments:
+            for row in assignments:
+                target=ready.setdefault(row['id'],dict(person=row['id'],performer=row['performer'],scans=[]))
+                item=dict(scene=row['scene'],scan=row['scan'])
+                target['scans'].append(item)
+    for target in ready.values():
+        target['scans'].sort(key=lambda item:(item['scene'],item['scan']))
+    ready=dict(sorted(ready.items()))
     return ready

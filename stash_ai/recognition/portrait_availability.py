@@ -220,7 +220,7 @@ def fit_cached_bytes(data, sha, config, metadata):
 def cached_thumbnail(database, config, scope, target, row, identifier, metadata):
     """Re-score the same physical thumbnail JPEG under changed preferences."""
     db, policy = database.connection, config.data['portraits']
-    rows = db.execute('''SELECT * FROM portraits WHERE scope=? AND person=? AND scene=? AND image IS NOT NULL
+    rows = db.execute('''SELECT * FROM portraits WHERE scope=? AND person=? AND scene=? AND image IS NOT NULL AND json_valid(metadata)
       AND json_extract(metadata,'$.source_type')='vtt' AND json_extract(metadata,'$.namespace')=?
       AND json_extract(metadata,'$.scan')=? AND json_extract(metadata,'$.observation')=?
       AND json_extract(metadata,'$.policy.margin') IS ? AND json_extract(metadata,'$.policy.aspect_ratio') IS ?

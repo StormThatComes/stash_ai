@@ -1450,3 +1450,22 @@ performer uniqueness are revalidated. Broken derived descriptors/candidates fall
 back to retained-evidence replay. Warm checks read 256-scan chunks and validate
 homogeneous vector blocks of at most 128 rows/1 MiB; norm-boundary and malformed
 records use the original scalar validator for exact error behavior.
+
+VTT portrait refresh can reuse a completed full ranking after verifying the
+exact selected memberships/inputs, reference context, assignment proofs,
+measurement contracts/bases, target and portrait metadata. Cached ranks do not
+skip live ownership/current-image checks before publication or JPEG digest and
+framing checks. Missing measurements, recognition-crop approximations, quality
+errors and source failures keep the full evaluation/retry path. Corrupt or
+changed descriptors also recompute. The catalogue retains at most 64 descriptors
+of at most 1 MiB each; oversized results are not cached or truncated. Ranking
+continues to score every eligible VTT observation in RAM.
+
+Changed VTT quality/candidate metadata writes are committed in batches bounded
+by 128 writes/4 MiB, with a final flush before winner preparation/return.
+Unchanged metadata does not start a write transaction. Failed tails roll back;
+previous complete batches remain reusable. Publication intent, dispatch and
+confirmation retain their separate durable transactions. A partial provenance
+index covers scope/person/observation lookups without indexing malformed JSON.
+Explicit scene selections drive portrait-target discovery from selected scans
+in 256-scene chunks; all-scene discovery preserves the retained-scan contract.
