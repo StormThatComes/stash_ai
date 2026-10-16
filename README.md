@@ -1451,6 +1451,53 @@ back to retained-evidence replay. Warm checks read 256-scan chunks and validate
 homogeneous vector blocks of at most 128 rows/1 MiB; norm-boundary and malformed
 records use the original scalar validator for exact error behavior.
 
+Interrupted cold rebuilds can optionally keep durable recovery generations with
+`execution.rebuild_checkpoint_scenes` (default **0**, disabled; for example **256**).
+Active replay, temporary work and caches remain in RAM. The sidecar directory
+`<recognition-database>.rebuild` stores only derived strict grouping/candidate,
+alias and merge-support rows, without observations, vectors, JPEGs or old labels.
+`execution.rebuild_checkpoint_bytes` caps each generation (default 512 MiB,
+maximum 8 GiB); publication briefly needs both old and new generations. Raw
+selected evidence and current historical labels are copied again on resume.
+
+Resume validates directory/database ownership, engine/schema versions, exact
+canonical selection, the **entire** previous selected input catalogue (including
+unprocessed future scenes), matching policy, admission limits, checksum, cursor,
+exact next identity clock and accepted/withheld/support/address invariants. It
+then skips only a fully committed strict prefix. Same-scene context runs once
+after all strict scenes; label binding and durable assignments still apply in
+one final transaction. Progress starts at the restored scene cursor, and ETA
+uses only new work. No inference or remote publication is requested to restore.
+
+Immutable generation files are fsynced before an atomic manifest publication;
+failed/cancelled writes preserve the previous generation. Owned stale generations
+are pruned, foreign files/symlinks are refused, and invalid derived state falls
+back to full retained-evidence replay. Optional checkpoint I/O/capacity failure
+is reported once and disables saving for that run without failing recognition.
+A successful strict generation remains available after final apply.
+
+Append-prefix reuse is deliberately narrow: the old full canonical selection
+must be an unchanged prefix, policy/engine and old raw inputs must match, admission
+limits cannot decrease, and every added cue must contain at most one distinct
+physical face signature. Exact duplicate detections are allowed. This proves
+added contextual evidence cannot veto an earlier merge; any distinct co-present
+faces, inserted/replaced scenes or uncertain dependency cause full replay. All
+future selected contextual evidence remains visible to the original matcher.
+Checkpointing prevents repeated work after interruption; it does not promise a
+faster uninterrupted first run. Run
+`python -m benchmarks.benchmark_replay_checkpoints --scenes 960 --repeats 2`
+to measure full, checkpointed, resumed and safely appended synthetic selections.
+
+An offline Linux probe (Python 3.14.7, NumPy 2.5.3, SQLite 3.53.1;
+960 scenes / 2,880 observations / six orthogonal identities / 128 dimensions /
+four representatives; two trials, interval 240) measured medians: full 3.83 s,
+checkpointed 4.05 s, resume after 720 scenes 0.84 s, safe append from 720 scenes
+0.92 s. Partitions and exact candidate scores matched across all modes. The
+retained generation was 2.01 MiB; the new benchmark samples process RSS every
+10 ms. These are complete synthetic replay timings without models/network and
+include input copying, dependency verification, binding and final apply. They
+are not estimates for the operator's 9,000-scene workload.
+
 VTT portrait refresh can reuse a completed full ranking after verifying the
 exact selected memberships/inputs, reference context, assignment proofs,
 measurement contracts/bases, target and portrait metadata. Cached ranks do not

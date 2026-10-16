@@ -26,6 +26,7 @@ from .sample_keys import sample_key, physical_keys
 from .replay_addresses import addresses
 from .replay_memory import memory_replay, Lookahead, report_pages
 from . import rebuild_cache
+from .replay_checkpoint import Checkpoints, ReplayClock
 
 
 def _observations(db, scan):
@@ -364,25 +365,31 @@ def _rebuild_selected(database, selected, config, *, progress=None):
         replay.row_factory = sqlite3.Row
         replay = connection(replay)
         _copy_selection(database, replay, selected, scope, namespace)
+        checkpoints = Checkpoints(database, selected, config, scope, namespace)
+        cursor, next_clock = checkpoints.restore(replay)
+        clock = ReplayClock(next_clock)
         # Stable replay identity removes installation-dependent UUID tie order.
         temporary = SimpleNamespace(connection=replay,
             installation=str(uuid.uuid5(uuid.NAMESPACE_URL, encoded([scope, namespace, 'cold-replay']))),
-            identity_clock=itertools.count(1).__next__)
+            identity_clock=clock)
         with addresses(replay), reference_scope(replay, scope, namespace, config), evidence_scope(replay, config):
             with Lookahead(replay_uri, config) as lookahead:
                 with tracking(
-                    selected,
+                    selected[cursor:],
                     'Rebuild selected identities',
+                    total=len(selected), initial=cursor,
                     unit='scene',
                     position=0,
                 ) as tracked:
-                    for index, item in enumerate(tracked):
+                    for index, item in enumerate(tracked, start=cursor):
                         lookahead.take(item['scan'])
                         lookahead.submit(selected[index+1]['scan'] if index+1<len(selected) else None)
                         cluster_scene(temporary, item['scan'], config, progress=progress, _cold_replay=True)
+                        checkpoints.save(replay, index+1, clock.value)
             # Freeze strict references after every selected scene has matched and
             # merged. Contextual attachments cannot become another scene's anchors
             # or bridge identities during the replay.
+            checkpoints.save(replay, len(selected), clock.value, final=True)
             apply_scene_context(temporary, selected, config, progress=progress)
         report_pages(replay)
         mapping = _bind(database, replay, config, scope, namespace, usage=usage)
