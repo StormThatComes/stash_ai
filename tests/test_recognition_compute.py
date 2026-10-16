@@ -145,5 +145,8 @@ def test_live_native_work_keeps_owners_quarantined_until_it_exits(cpus, monkeypa
     finally:
         finish.set()
         owner.executor.shutdown(wait=True, cancel_futures=True)
+        # The owned shutdown helper can finish a moment after the executor's
+        # workers. Wait for that actual owner, not a timing-dependent idle poll.
+        shutdown._calls[id(owner)][3].join(5)
         shutdown.require_idle()
     assert owner.native is None and not owner.pending
