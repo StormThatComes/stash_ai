@@ -84,7 +84,10 @@ class Evidence:
         key = 'vector', row['id']
         value = self.cache.get(key)
         if value is MISSING:
-            value = vector(row)
+            from .replay_memory import prepared_vector, MISSING as UNPREPARED
+            value = prepared_vector(row)
+            if value is UNPREPARED:
+                value = vector(row)
             self.cache.put(key, value, value.nbytes + 256)
         return value
 

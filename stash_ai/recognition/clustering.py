@@ -322,6 +322,8 @@ def cluster_scene(database, scan, config, *, progress=None, _cold_replay=False):
         # Release every owner of the old reference set before resetting its
         # accounting and allocating the database replacement. Query scratch is
         # one bounded vector, distinct from retained representative storage.
+        from .replay_memory import release_vectors
+        release_vectors()
         groups.clear()
         by_id.clear()
         ranked.clear()

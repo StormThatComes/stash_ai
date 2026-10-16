@@ -1408,3 +1408,26 @@ Physical sample keys use a bounded RAM cache keyed by every canonical dependency
 so changed geometry, source or scan input cannot reuse an old key. Final candidate
 payloads receive their reference context during insertion rather than a second
 JSON update pass.
+
+The disposable replay database now resides in RAM, including SQLite temporary
+work. Half of `execution.rebuild_memory_bytes` caps its main database pages;
+reference storage, model memory, transient SQLite sorts and separately bounded
+Python caches are additional allocations. Exceeding the page ceiling aborts the
+private replay before durable apply; increase the setting rather than spilling
+to disk. Durable FaceDatabase transactions retain their existing guarantees.
+
+`execution.rebuild_prefetch_scenes` defaults to false. This experimental option
+uses one isolated read-only reader to validate at most one upcoming scene
+(256 observations, at most 8 MiB and further limited by the working budget).
+Only immutable vectors are prepared; assignments and SQLite writes stay ordered
+on the coordinator. Large scenes use the serial path. Invalid vectors are
+reported when originally consumed, and cancellation closes the reader/worker.
+
+Run `python -m benchmarks.benchmark_recognition_replay --scenes 960 --repeats 2`
+for an offline comparison with the former temporary-file path. One Linux run
+(Python 3.14.7, NumPy 2.5.3, SQLite 3.53.1; 2,880 observations, six orthogonal
+identities, 128 dimensions, four representatives) measured medians 4.55 s file,
+4.19 s RAM serial, 4.72 s RAM lookahead, with identical partitions. The replay
+image was 5.5 MiB. These synthetic results support keeping serial preparation
+default; they do not predict a production rebuild's completion time. The
+benchmark reports process RSS after each trial, not isolated peak process RAM.

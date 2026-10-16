@@ -63,6 +63,7 @@ portraits:
     open_eyes: 0.0             # Opt-in: e.g. 2.0 penalizes either eye blinking.
 execution:
   rebuild_memory_bytes: 8589934592  # Lazy working-cache budget (8 GiB); configurable for large-RAM hosts.
+  rebuild_prefetch_scenes: false # Experimental next-scene immutable input lookahead.
   profile_rebuild: false       # Bounded rebuild timings/work counts saved in run history.
   max_cues: 0                  # 0 = all cues in the selected scene, not all scenes.
   checkpoint_cues: 32

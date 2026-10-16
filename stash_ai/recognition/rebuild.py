@@ -24,6 +24,7 @@ from .evidence_cache import evidence_scope
 from .scene_context import apply_scene_context
 from .sample_keys import sample_key, physical_keys
 from .replay_addresses import addresses
+from .replay_memory import memory_replay, Lookahead, report_pages
 
 
 def _observations(db, scan):
@@ -322,7 +323,7 @@ def rebuild_selected(database, selected, config, *, progress=None):
 def _rebuild_selected(database, selected, config, *, progress=None):
     """Replay exactly these scans; all historical membership is label-only input.
 
-    The temporary SQLite uses disk-backed scratch, streaming vectors without
+    The private SQLite stays in RAM, streaming vectors without
     JPEGs. Only the final assignment replacement commits to the durable DB.
     """
     if not selected:
@@ -371,28 +372,31 @@ def _rebuild_selected(database, selected, config, *, progress=None):
                             vector(row)
             usage.begin('cached')
             return _results(db, selected, config)
-    with closing(sqlite3.connect('')) as replay:
+    with memory_replay(config) as (replay, replay_uri):
         replay.row_factory = sqlite3.Row
         replay = connection(replay)
-        replay.execute('PRAGMA cache_size=-32768')
         _copy_selection(database, replay, selected, scope, namespace)
         # Stable replay identity removes installation-dependent UUID tie order.
         temporary = SimpleNamespace(connection=replay,
             installation=str(uuid.uuid5(uuid.NAMESPACE_URL, encoded([scope, namespace, 'cold-replay']))),
             identity_clock=itertools.count(1).__next__)
         with addresses(replay), reference_scope(replay, scope, namespace, config), evidence_scope(replay, config):
-            with tracking(
-                selected,
-                'Rebuild selected identities',
-                unit='scene',
-                position=0,
-            ) as tracked:
-                for item in tracked:
-                    cluster_scene(temporary, item['scan'], config, progress=progress, _cold_replay=True)
+            with Lookahead(replay_uri, config) as lookahead:
+                with tracking(
+                    selected,
+                    'Rebuild selected identities',
+                    unit='scene',
+                    position=0,
+                ) as tracked:
+                    for index, item in enumerate(tracked):
+                        lookahead.take(item['scan'])
+                        lookahead.submit(selected[index+1]['scan'] if index+1<len(selected) else None)
+                        cluster_scene(temporary, item['scan'], config, progress=progress, _cold_replay=True)
             # Freeze strict references after every selected scene has matched and
             # merged. Contextual attachments cannot become another scene's anchors
             # or bridge identities during the replay.
             apply_scene_context(temporary, selected, config, progress=progress)
+        report_pages(replay)
         mapping = _bind(database, replay, config, scope, namespace, usage=usage)
         _apply(database, replay, selected, config, scope, namespace, mapping, fingerprint, progress, usage=usage)
     return _results(db, selected, config)
