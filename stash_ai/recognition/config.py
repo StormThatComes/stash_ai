@@ -35,7 +35,7 @@ def defaults():
                      'weights': {'frontal': 3., 'sharpness': 2., 'resolution': 1., 'exposure': 1., 'visibility': 3.,
                                  'neutral_expression': 0., 'closed_mouth': 0., 'open_mouth': 0., 'open_eyes': 0.}},
         'execution': {'max_cues': 0, 'checkpoint_cues': 32, 'timeout_seconds': 120.,
-                      'prefetch_frames': 4, 'prefetch_scenes': True},
+                      'prefetch_frames': 4, 'prefetch_scenes': True, 'profile_rebuild': False},
         'storage': {'database': 'faces_state.sqlite3', 'max_crop_bytes': 1048576},
         'names': {'file': None},
     }
@@ -125,6 +125,8 @@ def validate(data):
             _number(data[section][key], f'{section}.{key}', 0, 1)
     if data['detection']['max_pose_deviation'] is not None:
         _number(data['detection']['max_pose_deviation'], 'detection.max_pose_deviation', 0, 1)
+    if type(data['execution']['profile_rebuild']) is not bool:
+        raise ValueError('execution.profile_rebuild must be boolean.')
     if type(data['detection']['require_complete_face']) is not bool:
         raise ValueError('detection.require_complete_face must be boolean.')
     if data['recognition']['metric'] != 'cosine':

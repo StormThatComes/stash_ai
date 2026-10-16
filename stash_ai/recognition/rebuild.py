@@ -17,6 +17,7 @@ from .database import SCHEMA, encoded
 from .reference_usage import ReferenceUsage
 from .progress import tracking, work
 from .ranking import best_two
+from .profiling import measured, profile, connection
 from .scene_context import apply_scene_context
 
 
@@ -85,6 +86,7 @@ def _mapped_candidates(replay, mapping, policy):
         yield (row['id'], row['scan'], policy, mapping.get(row['person']), row['status'], encoded(payload))
 
 
+@measured('copy')
 def _copy_selection(database, replay, selected, scope, namespace):
     db = database.connection
     replay.executescript(SCHEMA + '''
@@ -169,6 +171,7 @@ def _copy_selection(database, replay, selected, scope, namespace):
         committed.advance()
 
 
+@measured('binding')
 def _bind(database, replay, config, scope, namespace, *, usage=None):
     """One historical identity per new cluster; IDs cannot change the partition."""
     with work('Compute identity votes', 1, unit='query', position=0) as votes:
@@ -263,6 +266,7 @@ def _bind(database, replay, config, scope, namespace, *, usage=None):
     return mapping
 
 
+@measured('apply')
 def _apply(database, replay, selected, config, scope, namespace, mapping, fingerprint, progress, *, usage=None):
     db, policy = database.connection, matching_policy(config)
     usage = usage or ReferenceUsage(config.data['clustering']['max_reference_bytes'], progress)
@@ -336,6 +340,12 @@ def _apply(database, replay, selected, config, scope, namespace, mapping, finger
 
 
 def rebuild_selected(database, selected, config, *, progress=None):
+    with profile(database, config.data['execution'].get('profile_rebuild', False)):
+        return _rebuild_selected(database, selected, config, progress=progress)
+
+
+@measured('rebuild')
+def _rebuild_selected(database, selected, config, *, progress=None):
     """Replay exactly these scans; all historical membership is label-only input.
 
     The temporary SQLite uses disk-backed scratch, streaming vectors without
@@ -389,6 +399,7 @@ def rebuild_selected(database, selected, config, *, progress=None):
             return _results(db, selected, config)
     with closing(sqlite3.connect('')) as replay:
         replay.row_factory = sqlite3.Row
+        replay = connection(replay)
         replay.execute('PRAGMA cache_size=-32768')
         _copy_selection(database, replay, selected, scope, namespace)
         # Stable replay identity removes installation-dependent UUID tie order.
@@ -412,6 +423,7 @@ def rebuild_selected(database, selected, config, *, progress=None):
     return _results(db, selected, config)
 
 
+@measured('results')
 def _results(db, selected, config):
     result = {}
     policy = matching_policy(config)
