@@ -349,7 +349,9 @@ clustering:
 With `match_threshold: 0.65`, the final pass may accept a raw mean cosine score
 of `0.62` or higher. `same_scene_match_bonus` accepts 0..0.10; 0 disables this
 pass. It is a threshold adjustment, not a probability or an added ranking score.
-`same_scene_min_support` accepts 2..1000 independent cue times (default 3).
+`same_scene_min_support` accepts 1..1000 independent cue times (default 3).
+Setting 1 permits one strong local observation to enable the preference; higher
+values require repeated confirmation before accepting borderline observations.
 Duplicate detections/timestamps cannot establish this local support. Each core
 observation must remain a standard-threshold, unambiguous match against the final
 strict references. A person established only in another scene has no local bonus.
@@ -439,7 +441,7 @@ both support minimums; remove it before specifying either split key.
 | `recognition.ambiguity_margin` | Withholds competing assignments; cannot relax merge evidence requirements. |
 | `clustering.cohesion_threshold` | Minimum representative similarity, including cross-group comparisons. |
 | `clustering.same_scene_match_bonus` | Final same-scene assignment threshold reduction (default 0.03; 0 disables; range 0..0.10). |
-| `clustering.same_scene_min_support` | Strong independent cue times in that scene before the bonus applies (default 3; range 2..1000). |
+| `clustering.same_scene_min_support` | Strong independent cue times in that scene before the bonus applies (default 3; range 1..1000). |
 | `clustering.max_samples_per_person` | Bounds each group's retained representatives and the final survivor's lookup sample. |
 | `clustering.max_people_per_lookup` | Caps active compatible identities, including provisional groups; aliases are excluded. |
 | `clustering.max_reference_bytes` | Caps the bounded reference vectors; exceeding it rolls back that scene's matching and local merges. |

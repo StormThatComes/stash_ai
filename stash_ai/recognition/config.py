@@ -135,7 +135,7 @@ def validate(data):
     integers = {
         'detection': {'min_face_pixels': (8, 4096), 'max_faces_per_frame': (1, 1000)},
         'recognition': {'min_identity_support': (1, 1000), 'min_merge_support': (1, 1000)},
-        'clustering': {'same_scene_min_support': (2, 1000),
+        'clustering': {'same_scene_min_support': (1, 1000),
                        'max_samples_per_person': (2, 128), 'max_people_per_lookup': (1, 100000),
                        'max_reference_bytes': (1048576, 1073741824)},
         'portraits': {'min_face_pixels': (0, 4096), 'max_candidates': (1, 64), 'jpeg_quality': (1, 100),

@@ -69,6 +69,17 @@ def test_duplicate_timestamps_do_not_establish_a_local_core(tmp_path):
         assert candidates(db, identifier, config)[-1][0] == 'withheld'
 
 
+def test_one_strong_local_observation_can_enable_bonus_when_configured(tmp_path):
+    config = changed(setup(tmp_path), recognition={'min_identity_support': 1},
+                     clustering={'same_scene_min_support': 1})
+    with FaceDatabase(config.database) as db:
+        selected = replay(db, config, {'1': [A, B]})
+        rows = candidates(db, selected[0]['scan'], config)
+        assert all(status == 'accepted' for status, _, _ in rows)
+        assert len({person for _, person, _ in rows}) == 1
+        assert len(rows[-1][2]['same_scene_context']['support']) == 1
+
+
 def test_context_does_not_override_raw_ambiguity(tmp_path):
     rival = np.array([0., 1., 0., 0.])
     ambiguous = np.array([.63, .64, math.sqrt(1 - .63**2 - .64**2), 0.])
@@ -132,7 +143,7 @@ def test_retuning_context_replays_cached_embeddings_and_matches_cold_run(tmp_pat
 
 @pytest.mark.parametrize('text', [
     'same_scene_match_bonus: -0.01', 'same_scene_match_bonus: 0.11', 'same_scene_match_bonus: true',
-    'same_scene_match_bonus: .nan', 'same_scene_min_support: 1', 'same_scene_min_support: true',
+    'same_scene_match_bonus: .nan', 'same_scene_min_support: 0', 'same_scene_min_support: true',
     'same_scene_min_support: 3.5',
 ])
 def test_invalid_context_settings_fail_before_creating_state(tmp_path, text):
