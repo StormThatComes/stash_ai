@@ -4,6 +4,7 @@ import time
 
 from .database import encoded
 from .progress import tracking
+from .profiling import measured, count
 
 
 def canonical(db, person):
@@ -33,6 +34,7 @@ def _cross(first, second, config):
     return {'mean': mean, 'minimum': minimum}
 
 
+@measured('merge_compatibility')
 def _compatible(first, second, config):
     # Keep the original bounded references for every constituent until this
     # pass finishes. Capping a union early could hide an incompatible endpoint.
@@ -57,6 +59,7 @@ def _matches(component, query, config):
     return True
 
 
+@measured('merge_copresence')
 def _cooccurs(db, first, second, components, selected, config):
     if db.execute('''SELECT 1 FROM members a JOIN observations x ON x.id=a.observation
       JOIN observations y ON y.scan=x.scan AND y.cue=x.cue
@@ -106,6 +109,7 @@ def _merge_support_policy(config):
                    'cohesion_threshold': config.data['clustering']['cohesion_threshold']})
 
 
+@measured('merge_support')
 def _supporting_cues(db, selected, policy, source, target, components, config, minimum):
     """Revalidate durable nominations against the current bounded references.
 
@@ -141,6 +145,7 @@ def _supporting_cues(db, selected, policy, source, target, components, config, m
     return cues
 
 
+@measured('merging')
 def supported_merges(database, scan, config, groups, policy, *, usage=None):
     """Evidence-backed consolidation with persisted cross-scene nominations.
 
@@ -196,6 +201,7 @@ def supported_merges(database, scan, config, groups, policy, *, usage=None):
                     if source == target:
                         continue
                     target, source = sorted((target, source), key=order)
+                    count('merge_pairs')
                     scores = _compatible(components[target], components[source], config)
                     if scores is None:
                         continue

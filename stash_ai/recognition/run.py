@@ -349,6 +349,8 @@ def execute(args, config, *, services=None):
                     report.optional('recognition_error_summary', render_errors, report, summary['errors'])
                 def finish_history():
                     summary.update(counts=dict(counts), mutations=dict(report.counts))
+                    if getattr(report, 'recognition_rebuild_profile', None) is not None:
+                        summary['rebuild_profile'] = report.recognition_rebuild_profile
                     if references:
                         summary['references'] = dict(references)
                     database.finish_run(run, outcome, summary, failure)

@@ -953,3 +953,17 @@ digests and active providers are recorded as runtime provenance. Native CPU ORT
 smoke checks validate non-square YuNet inputs and SFace embedding agreement with
 OpenCV; CPU/GPU floating-point differences are expected. Device selection alone
 does not request a new namespace, model switch or duplicate-profile publication.
+
+### Rebuild performance diagnostics
+
+Set `execution.profile_rebuild: true` to save bounded `rebuild_profile` aggregates
+in recognition run history, including failed/interrupted attempts. The default
+is false. Measurements contain no SQL text, scene/person IDs, images or vectors.
+They cover copy, reference loading, scene matching, contextual checks, merge
+support/compatibility, rechecks, binding and final apply. Work counters include
+validated vectors and group/sample comparisons. SQL buckets count statement
+execution and transaction exits; statement seconds exclude later lazy cursor
+consumption. Stage seconds are inclusive and nested, so do not add them together.
+Record runtime, observation/person counts and warm versus cold state when
+comparing runs. Profiling has overhead and does not alter matching policy or
+require fresh inference. Ordinary progress remains throttled independently.

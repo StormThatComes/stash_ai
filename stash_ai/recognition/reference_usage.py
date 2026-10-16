@@ -15,6 +15,7 @@ class ReferenceUsage:
         self.limit, self.progress = limit, progress
         self.bytes = self.people = self.samples = self.peak = 0
         self.stage, self.last_report = 'loading', None
+        self.last_values = None
 
     def begin(self, stage, *, reset=False):
         self.stage = stage
@@ -39,7 +40,11 @@ class ReferenceUsage:
         if self.progress is None:
             return
         now = time.monotonic()
+        values = self.bytes, self.people, self.samples, self.peak, self.stage
+        if values == self.last_values and self.last_report is not None and now - self.last_report < 1:
+            return
         if force or self.last_report is None or now - self.last_report >= 1:
+            self.last_values = values
             self.last_report = now
             self.progress(bytes=self.bytes, budget_bytes=self.limit, peak_bytes=self.peak,
                           people=self.people, samples=self.samples, stage=self.stage)

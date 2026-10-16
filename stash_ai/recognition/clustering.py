@@ -11,10 +11,12 @@ from .reference_usage import ReferenceUsage
 from .identity_merges import supported_merges
 from .progress import tracking
 from .ranking import best_two
+from .profiling import measured, count
 
 
 def vector(row):
     import numpy as np
+    count('validated_vectors')
     dimensions, blob = row['dimensions'], row['embedding']
     if (type(dimensions) is not int or not 1 <= dimensions <= 1024 or
             not isinstance(blob, bytes) or len(blob) != 4 * dimensions):
@@ -32,6 +34,7 @@ class Group:
     known: bool
 
 
+@measured('references')
 def _groups(db, scope, namespace, policy, *, usage=None, stage='loading'):
     usage = usage or ReferenceUsage(policy['max_reference_bytes'])
     usage.begin(stage, reset=True)
@@ -73,10 +76,13 @@ def _similarities(group, query):
     import numpy as np
     if any(sample.shape != query.shape for sample in group.samples):
         raise ValueError('Face namespace contains mixed embedding dimensions.')
+    count('group_comparisons')
+    count('sample_comparisons', len(group.samples))
     scores = np.asarray([float(np.dot(sample, query)) for sample in group.samples])
     return float(scores.mean()), float(scores.min())
 
 
+@measured('cue_context')
 def co_presence_allows(db, observation, group, groups, query, config, *, peer_threshold=None):
     """A distinct cue peer competing for this identity needs stronger evidence.
 
@@ -160,6 +166,7 @@ def matching_policy(config):
         'clustering': config.data['clustering']})
 
 
+@measured('scene')
 def cluster_scene(database, scan, config, *, progress=None, _cold_replay=False):
     """Selected evidence can merge compatible historical identities oldest-first.
 
@@ -305,6 +312,7 @@ def cluster_scene(database, scan, config, *, progress=None, _cold_replay=False):
     return _result(db, scan, policy)
 
 
+@measured('recheck')
 def _recheck_after_merge(db, scan, policy, groups, config):
     """Resolve ambiguity against the surviving groups, preserving raw evidence."""
     settings = config.data['recognition']

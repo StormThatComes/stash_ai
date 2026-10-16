@@ -37,6 +37,8 @@ CREATE INDEX members_person ON members(person);
 CREATE INDEX people_scope ON people(scope,namespace,id);
 CREATE TABLE candidates (id TEXT PRIMARY KEY, scan TEXT NOT NULL REFERENCES scans(id),
  policy TEXT NOT NULL, person TEXT, status TEXT NOT NULL, payload TEXT NOT NULL);
+CREATE INDEX candidates_scan_policy ON candidates(scan,policy,person,status);
+CREATE INDEX candidates_person ON candidates(person);
 CREATE TABLE publications (id TEXT PRIMARY KEY, scope TEXT NOT NULL, scene TEXT NOT NULL,
  person TEXT NOT NULL, kind TEXT NOT NULL, target TEXT, payload TEXT NOT NULL,
  precondition TEXT NOT NULL, status TEXT NOT NULL, error TEXT);
@@ -194,6 +196,10 @@ class FaceDatabase(AbstractContextManager):
             raise ValueError('Unsupported or incomplete facial recognition schema; restore a consistent backup.')
         tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         self._validate(SCHEMA, TABLES, tables)
+        # Additive access paths: old valid state needs no evidence migration.
+        with db:
+            db.execute('CREATE INDEX IF NOT EXISTS candidates_scan_policy ON candidates(scan,policy,person,status)')
+            db.execute('CREATE INDEX IF NOT EXISTS candidates_person ON candidates(person)')
 
     def _validate(self, schema, tables, actual_tables):
         db = self.connection
