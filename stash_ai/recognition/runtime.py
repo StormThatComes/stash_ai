@@ -30,10 +30,13 @@ def runtime(config):
     return ort, providers
 
 
-def session(config, model, *, runtime_info=None, cpu_fallback=True):
+def session(config, model, *, runtime_info=None, cpu_fallback=True, cpu_threads=1):
+    if type(cpu_threads) is not int or not 1<=cpu_threads<=16:
+        raise ValueError('Recognition CPU session threads must be between one and sixteen.')
     ort, providers = runtime_info or runtime(config)
     options = ort.SessionOptions()
-    options.intra_op_num_threads = options.inter_op_num_threads = 1
+    options.intra_op_num_threads = cpu_threads
+    options.inter_op_num_threads = 1
     if config.data['models']['device'] == 'cuda' and not cpu_fallback:
         # Expression models contain CUDA-supported float operators. Refuse a
         # partially CPU-assigned graph as well as a CPU-only provider fallback.

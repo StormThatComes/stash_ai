@@ -89,7 +89,7 @@ def candidate_observations(db, rows, scan, policy, *, prepare=False):
     """Read exact UUID-addressed assignment proofs in bounded batches."""
     from .database import encoded
     iterator = iter(rows)
-    while batch := list(itertools.islice(iterator, 256)):
+    while batch := list(itertools.islice(iterator,128 if prepare else 256)):
         from .portrait_pipeline import current as pipeline
         preparation=pipeline()
         if prepare and preparation is not None and batch:
@@ -109,8 +109,10 @@ def candidate_observations(db, rows, scan, policy, *, prepare=False):
                     'SELECT id,person,status,payload FROM candidates WHERE scan=? AND id IN '
                     '(SELECT value FROM json_each(?))', (scan, encoded(identifiers)))}
             return cache['candidates'].get(identifier)
-        for row in batch:
-            yield row, lambda row=row, proof=proof: proof(row)
+        pairs=[(row,lambda row=row,proof=proof:proof(row)) for row in batch]
+        if prepare and preparation is not None and batch:
+            preparation.prepare_batch(scene,pairs)
+        yield from pairs
 
 
 def crop_row(db, row):

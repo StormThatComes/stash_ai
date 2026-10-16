@@ -3,6 +3,7 @@ import hashlib
 import heapq
 import json
 import uuid
+from copy import deepcopy
 
 from stash_ai.runtime.cleanup import closing
 from .clustering import _groups, reference_context
@@ -22,6 +23,7 @@ from .clustering import matching_policy
 from .portrait_writes import execute as cache_write, flush, batched
 from .vtt_ranking_cache import Ranking
 from .portrait_pipeline import current as portrait_pipeline, Capacity
+from .portrait_encoding import Encoder
 
 
 class Sources:
@@ -109,6 +111,8 @@ def choose_vtt(database, client, config, scope, target, source_factory, visibili
     ranking=Ranking(db,config,scope,target,person['namespace'],context,policy_sha,
                     enabled=policy['source']=='vtt' and fallback_reason is None)
     cached=ranking.load()
+    preparation=portrait_pipeline()
+    if preparation is not None:preparation.begin_ranking(target,groups,context)
     ranked=cached if cached is not None else []
     def finish(result):
         flush(db)
@@ -229,7 +233,7 @@ def choose_vtt(database, client, config, scope, target, source_factory, visibili
         def candidates():
             while ranked:
                 yield heapq.heappop(ranked)
-        with tracking(
+        with Encoder(config,portrait_bytes,small=considered<2) as encodings, tracking(
             candidates(),
             'Choose VTT portrait',
             total=considered,
@@ -255,10 +259,11 @@ def choose_vtt(database, client, config, scope, target, source_factory, visibili
                 if reused is not None:
                     return finish(reused)
                 try:
-                    encoding = {}
-                    with sources.thumbnail(scene, row) as image:
-                        data, bounds = portrait_bytes(image, checked_detection(metadata['geometry']), policy,
-                                                     limit=config.data['storage']['max_crop_bytes'], details=encoding)
+                    face=checked_detection(metadata['geometry'])
+                    image=sources.thumbnail(scene,row)
+                    data,bounds,encoding=encodings.encode(image,face,policy,
+                        config.data['storage']['max_crop_bytes'],
+                        before_wait=preparation.ranking_finished if preparation is not None else lambda:None)
                     metadata.update(source_type='vtt', crop=bounds, pixels=encoding['pixels'], encoding=encoding,
                                     crop_coordinate_system='thumbnail')
                     metadata.pop('source_warning', None)
@@ -283,7 +288,7 @@ def choose_vtt(database, client, config, scope, target, source_factory, visibili
                 return finish(db.execute('SELECT * FROM portraits WHERE id=?', (identifier,)).fetchone())
         # Prefer a real thumbnail whenever one is usable; retained recognition
         # pixels still illustrate the accepted identity if every source fails.
-        with tracking(
+        with Encoder(config,portrait_bytes,small=len(fallbacks)<2) as encodings, tracking(
             fallbacks,
             'Check retained portrait fallbacks',
             unit='candidate',
@@ -293,7 +298,14 @@ def choose_vtt(database, client, config, scope, target, source_factory, visibili
                 metadata = json.loads(existing['metadata'])
                 row = db.execute('SELECT * FROM observations WHERE id=?', (metadata['observation'],)).fetchone()
                 try:
-                    data, metadata = retained_portrait(row, metadata, policy, config.data['storage']['max_crop_bytes'])
+                    quality=json.loads(row['quality'])
+                    bounds=quality.get('crop_bounds',[0,0,0,0])
+                    encoded_crop=quality.get('crop_encoding')
+                    pixels=(encoded_crop.get('pixels') if isinstance(encoded_crop,dict) else
+                            [bounds[2]-bounds[0],bounds[3]-bounds[1]])
+                    size=max(0,pixels[0])*max(0,pixels[1])*3+config.data['storage']['max_crop_bytes']
+                    data,metadata=encodings.call(retained_portrait,dict(row),deepcopy(metadata),policy,
+                        config.data['storage']['max_crop_bytes'],size=size)
                 except Exception:
                     metadata['reason'] = 'portrait_source_unavailable'
                     store(database, identifier, scope, target, existing['scene'], metadata)

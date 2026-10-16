@@ -23,3 +23,6 @@ opencv-python-headless>=4.10,<5
 onnx>=1.21,<2
 onnxruntime==1.26.0
 huggingface_hub>=0.26,<2
+
+# Scoped portrait CPU/BLAS thread budgets.
+threadpoolctl>=3.6,<4

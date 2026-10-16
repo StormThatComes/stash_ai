@@ -89,6 +89,10 @@ def test_faceocc_checkpoint_detects_lower_face_covering_on_public_domain_portrai
             ImageDraw.Draw(covered).rectangle((x, y + height * .6, x + width, y + height), fill=(70, 90, 160))
             visible = model.measure(image, face)
             occluded = model.measure(covered, face)
+            batched = model.measure_many([(image,face),(covered,face)])
+            assert [v['visibility']['face_pixels'] for v in batched]==[visible['visibility']['face_pixels']]*2
+            assert [v['visible_face_fraction'] for v in batched]==pytest.approx(
+                [visible['visible_face_fraction'],occluded['visible_face_fraction']],abs=.001)
         assert visible['visible_face_fraction'] > .8
         assert occluded['visible_face_fraction'] < .8
         assert visible['visible_face_fraction'] - occluded['visible_face_fraction'] > .2
