@@ -196,10 +196,13 @@ class FaceDatabase(AbstractContextManager):
             raise ValueError('Unsupported or incomplete facial recognition schema; restore a consistent backup.')
         tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         self._validate(SCHEMA, TABLES, tables)
+        self.installation
         # Additive access paths: old valid state needs no evidence migration.
         with db:
             db.execute('CREATE INDEX IF NOT EXISTS candidates_scan_policy ON candidates(scan,policy,person,status)')
             db.execute('CREATE INDEX IF NOT EXISTS candidates_person ON candidates(person)')
+            db.execute("CREATE INDEX IF NOT EXISTS portraits_observation ON portraits(scope,person,"
+                       "json_extract(metadata,'$.observation')) WHERE json_valid(metadata)")
 
     def _validate(self, schema, tables, actual_tables):
         db = self.connection
