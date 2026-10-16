@@ -991,3 +991,12 @@ stored scores, ambiguity, ties and decisions. Small catalogues keep the scalar
 path. Native block caches are invocation-owned and byte-bounded, including their
 retained input owners; no approximate-nearest-neighbor or truncated rival list is
 introduced. Same-scene contextual matching retains its full cohort of rivals.
+
+Cold replay and each standalone scene match own a RAM-only evidence cache. Cue
+rows are narrow and vectors/signatures are validated lazily, preserving existing
+short-circuit failure behavior. Exact peer scores are reused only for the same
+observation and immutable representative version. Contextual merge checks share
+verified latest-scan heads and complete multi-face evidence, including withheld
+observations and later selected scenes. Newer partial or differently configured
+scans still supersede old evidence. The cache uses a bounded share of the working
+budget and recomputes evicted data instead of spilling to disk.

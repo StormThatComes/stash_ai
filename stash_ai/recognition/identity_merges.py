@@ -5,6 +5,7 @@ import time
 from .database import encoded
 from .progress import tracking
 from .profiling import measured, count
+from .evidence_cache import current as evidence, latest_rows
 
 
 def canonical(db, person):
@@ -49,10 +50,11 @@ def _compatible(first, second, config):
     return {'minimum_cross_mean': worst_mean, 'minimum_cross_similarity': worst_minimum}
 
 
-def _matches(component, query, config):
+def _matches(component, query, config, *, cache=None, observation=None):
     from .clustering import _similarities
     for group in component:
-        mean, lowest = _similarities(group, query)
+        mean, lowest = (cache.scores(group, query, observation) if cache is not None
+                        else _similarities(group, query))
         if (mean < config.data['recognition']['match_threshold'] or
                 lowest < config.data['clustering']['cohesion_threshold']):
             return False
@@ -72,22 +74,27 @@ def _cooccurs(db, first, second, components, selected, config):
     # small signatures in scratch. Exact duplicate detections are one sample.
     from .clustering import vector
     cue, left, right = None, [], []
-    for row in db.execute('''SELECT s.rowid AS scan_order,o.cue,o.dimensions,o.embedding,o.geometry
+    sql = '''SELECT o.id,s.id AS scan,s.scene,s.rowid AS scan_order,o.cue,o.dimensions,o.embedding,o.geometry
       FROM observations o JOIN scans s ON s.id=o.scan
       WHERE s.scope=? AND s.namespace=? AND s.policy_sha=? AND s.status='complete'
         AND o.rejected IS NULL
-        AND s.rowid=(SELECT MAX(newer.rowid) FROM scans newer
-                     WHERE newer.scope=s.scope AND newer.namespace=s.namespace AND newer.scene=s.scene)
+        {latest}
         AND EXISTS (SELECT 1 FROM observations y WHERE y.scan=o.scan AND y.cue=o.cue
                     AND y.id<>o.id AND y.rejected IS NULL)
-      ORDER BY s.rowid,o.cue,o.id''', (selected['scope'], selected['namespace'], selected['policy_sha'])):
+      ORDER BY s.rowid,o.cue,o.id'''
+    parameters = selected['scope'], selected['namespace'], selected['policy_sha']
+    cache = evidence(db)
+    rows = (cache.contextual(sql, parameters, selected) if cache is not None
+            else latest_rows(db, sql, parameters, selected))
+    for row in rows:
         key = row['scan_order'], row['cue']
         if key != cue:
             cue, left, right = key, [], []
-        query = vector(row)
-        signature = hashlib.sha256(row['geometry'].encode() + row['embedding']).digest()
-        matches_left = _matches(components[first], query, config)
-        matches_right = _matches(components[second], query, config)
+        query = cache.vector(row) if cache is not None else vector(row)
+        signature = (cache.signature(row) if cache is not None else
+                     hashlib.sha256(row['geometry'].encode() + row['embedding']).digest())
+        matches_left = _matches(components[first], query, config, cache=cache, observation=row['id'])
+        matches_right = _matches(components[second], query, config, cache=cache, observation=row['id'])
         if (matches_left and any(other != signature for other in right) or
                 matches_right and any(other != signature for other in left)):
             return True
@@ -120,24 +127,23 @@ def _supporting_cues(db, selected, policy, source, target, components, config, m
     from .clustering import vector
 
     cues, seen = [], set()
-    for row in db.execute('''SELECT o.id,o.seconds,o.dimensions,o.embedding,s.scene
+    cache = evidence(db)
+    for row in latest_rows(db, '''SELECT o.id,o.seconds,o.dimensions,o.embedding,s.scene,s.id AS scan
       FROM merge_support m
       JOIN observations o ON o.id=m.observation
       JOIN scans s ON s.id=o.scan
       WHERE m.source=? AND m.target=? AND m.policy=?
         AND s.scope=? AND s.namespace=? AND s.policy_sha=?
         AND s.status='complete' AND o.rejected IS NULL
-        AND s.rowid=(SELECT MAX(newer.rowid) FROM scans newer
-                     WHERE newer.scope=s.scope AND newer.namespace=s.namespace
-                       AND newer.scene=s.scene)
+        {latest}
       ORDER BY s.rowid,o.cue,o.id''',
       (source, target, policy, selected['scope'], selected['namespace'],
-       selected['policy_sha'])):
+       selected['policy_sha']), selected):
         key = (row['scene'], row['seconds'])
         if key in seen:
             continue
-        query = vector(row)
-        if _matches(components[target], query, config) and _matches(components[source], query, config):
+        query = cache.vector(row) if cache is not None else vector(row)
+        if _matches(components[target], query, config, cache=cache, observation=row['id']) and _matches(components[source], query, config, cache=cache, observation=row['id']):
             seen.add(key)
             cues.append({'scene': row['scene'], 'seconds': row['seconds'], 'observation': row['id']})
             if len(cues) >= minimum:

@@ -20,6 +20,7 @@ from .ranking import best_two
 from .profiling import measured, profile, connection
 from .reference_index import references as reference_scope
 from .scoring import score_scope
+from .evidence_cache import evidence_scope
 from .scene_context import apply_scene_context
 
 
@@ -408,7 +409,7 @@ def _rebuild_selected(database, selected, config, *, progress=None):
         temporary = SimpleNamespace(connection=replay,
             installation=str(uuid.uuid5(uuid.NAMESPACE_URL, encoded([scope, namespace, 'cold-replay']))),
             identity_clock=itertools.count(1).__next__)
-        with reference_scope(replay, scope, namespace, config):
+        with reference_scope(replay, scope, namespace, config), evidence_scope(replay, config):
             with tracking(
                 selected,
                 'Rebuild selected identities',

@@ -13,6 +13,7 @@ from .progress import tracking
 from .ranking import best_two
 from .profiling import measured, count
 from .scoring import comparisons, scoped
+from .evidence_cache import current as evidence, scoped as evidence_owned
 
 
 def vector(row):
@@ -107,23 +108,30 @@ def co_presence_allows(db, observation, group, groups, query, config, *, peer_th
     settings = config.data['recognition']
     peer_threshold = settings['match_threshold'] if peer_threshold is None else peer_threshold
     stronger = max(settings['match_threshold'], settings['cooccurrence_merge_threshold'])
-    for peer in db.execute('SELECT * FROM observations WHERE scan=? AND cue=? '
-                           'AND id<>? AND rejected IS NULL ORDER BY id',
-                           (observation['scan'], observation['cue'], observation['id'])):
+    cache = evidence(db)
+    peers = (cache.peers(observation['scan'], observation['cue']) if cache is not None else
+        db.execute('SELECT id,geometry,dimensions,embedding FROM observations WHERE scan=? AND cue=? '
+                   'AND rejected IS NULL ORDER BY id', (observation['scan'], observation['cue'])))
+    for peer in peers:
+        if peer['id'] == observation['id']:
+            continue
         if peer['geometry'] == observation['geometry'] and peer['embedding'] == observation['embedding']:
             continue
-        other = vector(peer)
-        mean, minimum = _similarities(group, other)
+        other = cache.vector(peer) if cache is not None else vector(peer)
+        mean, minimum = cache.scores(group, other, peer['id']) if cache is not None else _similarities(group, other)
         if mean < peer_threshold or minimum < config.data['clustering']['cohesion_threshold']:
             continue
         best = mean
         for rival in groups:
-            rival_mean, rival_minimum = _similarities(rival, other)
+            rival_mean, rival_minimum = (cache.scores(rival, other, peer['id']) if cache is not None
+                                          else _similarities(rival, other))
             if rival_minimum >= config.data['clustering']['cohesion_threshold']:
                 best = max(best, rival_mean)
         if best - mean >= settings['ambiguity_margin'] and best > mean:
             continue
-        if min(_similarities(group, query)[1], minimum, float(np.dot(query, other))) < stronger:
+        query_minimum = (cache.scores(group, query, observation['id'])[1] if cache is not None
+                         else _similarities(group, query)[1])
+        if min(query_minimum, minimum, float(np.dot(query, other))) < stronger:
             return False
     return True
 
@@ -180,6 +188,7 @@ def matching_policy(config):
 
 @measured('scene')
 @scoped
+@evidence_owned
 def cluster_scene(database, scan, config, *, progress=None, _cold_replay=False):
     """Selected evidence can merge compatible historical identities oldest-first.
 
