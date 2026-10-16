@@ -35,7 +35,7 @@ def defaults():
                      'weights': {'frontal': 3., 'sharpness': 2., 'resolution': 1., 'exposure': 1., 'visibility': 3.,
                                  'neutral_expression': 0., 'closed_mouth': 0., 'open_mouth': 0., 'open_eyes': 0.}},
         'execution': {'max_cues': 0, 'checkpoint_cues': 32, 'timeout_seconds': 120.,
-                      'prefetch_frames': 4, 'prefetch_scenes': True, 'profile_rebuild': False, 'rebuild_prefetch_scenes': False, 'rebuild_memory_bytes': 8589934592},
+                      'prefetch_frames': 4, 'prefetch_scenes': True, 'profile_rebuild': False, 'rebuild_prefetch_scenes': False, 'prefetch_portraits': True, 'rebuild_memory_bytes': 8589934592},
         'storage': {'database': 'faces_state.sqlite3', 'max_crop_bytes': 1048576},
         'names': {'file': None},
     }
@@ -152,6 +152,8 @@ def validate(data):
         _number(data[section]['min_sharpness'], f'{section}.min_sharpness', 0, 100000)
     for section in ('execution', 'portraits'):
         _number(data[section]['timeout_seconds'], f'{section}.timeout_seconds', 1, 600)
+    if type(data['execution']['prefetch_portraits']) is not bool:
+        raise ValueError('execution.prefetch_portraits must be boolean.')
     if type(data['execution']['rebuild_prefetch_scenes']) is not bool:
         raise ValueError('execution.rebuild_prefetch_scenes must be boolean.')
     if type(data['execution']['prefetch_scenes']) is not bool:

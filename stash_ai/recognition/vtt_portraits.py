@@ -21,6 +21,7 @@ from .portrait_availability import candidate_observations, crop_row
 from .clustering import matching_policy
 from .portrait_writes import execute as cache_write, flush, batched
 from .vtt_ranking_cache import Ranking
+from .portrait_pipeline import current as portrait_pipeline, Capacity
 
 
 class Sources:
@@ -31,6 +32,10 @@ class Sources:
         self.failed = set()
 
     def thumbnail(self, scene, row):
+        pipeline=portrait_pipeline()
+        if pipeline is not None:
+            try:return pipeline.thumbnail(scene,row)
+            except Capacity:pass  # Oversized preparation keeps the original serial path.
         if scene in self.failed:
             raise ValueError('VTT source could not be verified.')
         if self.scene != scene:
@@ -120,7 +125,7 @@ def choose_vtt(database, client, config, scope, target, source_factory, visibili
                   AND s.namespace=? AND s.status='complete' AND o.rejected IS NULL
                   ORDER BY o.cue,o.id''', (target['person'], selected['scan'], scene, scope, person['namespace']))
                 with tracking(
-                    candidate_observations(db, rows, selected['scan'], matching_policy(config)),
+                    candidate_observations(db, rows, selected['scan'], matching_policy(config), prepare=True),
                     'Rank VTT portrait observations',
                     unit='observation',
                     total=lambda: db.execute(
@@ -145,8 +150,13 @@ def choose_vtt(database, client, config, scope, target, source_factory, visibili
                             'quality': quality, 'quality_errors': {}, 'reference_context': context, 'input_sha': row['input_sha']}
                         if fallback_reason:
                             metadata['fallback'] = {'from': policy['source'], 'reason': fallback_reason}
+                        pipeline=portrait_pipeline()
+                        prepared=pipeline.outcome(row,context) if pipeline is not None else None
                         try:
-                            reason, similarity, runner, basis = observation_identity(database, row, groups, target, config, context,
+                            if prepared is not None:
+                                reason, similarity, runner, basis = prepared['identity']
+                            else:
+                                reason, similarity, runner, basis = observation_identity(database, row, groups, target, config, context,
                                                                                     candidate=candidate)
                             metadata.update(similarity=similarity, runner_up=runner, identity_basis=basis)
                         except (TypeError, ValueError):
@@ -167,7 +177,14 @@ def choose_vtt(database, client, config, scope, target, source_factory, visibili
                                                                 'recognition_crop' if legacy_crop else 'vtt')
                         missing = {name for name in required if not cached[name](quality)}
                         approximate = {name for name in required if bases.get(name, {}).get('source_type') == 'recognition_crop'}
-                        if not reason and (missing or approximate):
+                        if prepared is not None:
+                            quality.clear();quality.update(prepared['quality'])
+                            bases=quality.setdefault('measurement_basis',{})
+                            metadata['quality_errors']=prepared['errors']
+                            if prepared['warning']:metadata['source_warning']=prepared['warning']
+                            from .portrait_availability import quality_warnings
+                            quality_warnings(client,prepared['errors'])
+                        elif not reason and (missing or approximate):
                             source_type = 'vtt'
                             try:
                                 face = checked_detection(metadata['geometry'])

@@ -25,15 +25,19 @@ def measure_available(client, image, face, quality, policy, visibility, expressi
             quality.update(model.measure(image, face))
         except Exception as error:
             errors[name] = safe_error(error, getattr(client, 'api_key', ''))[:500]
-            report = getattr(client, 'report', None)
-            if report is not None:
-                seen = getattr(report, '_portrait_quality_warnings', set())
-                if name not in seen:
-                    seen.add(name)
-                    report._portrait_quality_warnings = seen
-                    report.optional('recognition_portrait_quality', report.write,
-                                    f'Portrait {name} unavailable; ranking available face quality: ' + errors[name])
+            quality_warnings(client,{name:errors[name]})
     return errors
+
+
+def quality_warnings(client,errors):
+    for name,message in errors.items():
+        report=getattr(client,'report',None)
+        if report is not None:
+            seen=getattr(report,'_portrait_quality_warnings',set())
+            if name not in seen:
+                seen.add(name);report._portrait_quality_warnings=seen
+                report.optional('recognition_portrait_quality',report.write,
+                    f'Portrait {name} unavailable; ranking available face quality: '+message)
 
 
 def measurement_basis(row, source_type):
@@ -81,11 +85,16 @@ def score_metadata(metadata, quality, policy):
 _UNREAD = object()
 
 
-def candidate_observations(db, rows, scan, policy):
+def candidate_observations(db, rows, scan, policy, *, prepare=False):
     """Read exact UUID-addressed assignment proofs in bounded batches."""
     from .database import encoded
     iterator = iter(rows)
     while batch := list(itertools.islice(iterator, 256)):
+        from .portrait_pipeline import current as pipeline
+        preparation=pipeline()
+        if prepare and preparation is not None and batch:
+            scene=db.execute('SELECT scene FROM scans WHERE id=?',(scan,)).fetchone()[0]
+            preparation.prime(scene,batch)
         cache = {}
         def proof(row, batch=batch, cache=cache):
             identifier = str(uuid.uuid5(uuid.UUID(row['id']), policy))
