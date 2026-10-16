@@ -970,3 +970,50 @@ digests and active providers are recorded as runtime provenance. Native CPU ORT
 smoke checks validate non-square YuNet inputs and SFace embedding agreement with
 OpenCV; CPU/GPU floating-point differences are expected. Device selection alone
 does not request a new namespace, model switch or duplicate-profile publication.
+
+### Rebuild performance diagnostics
+
+Set `execution.profile_rebuild: true` to save bounded `rebuild_profile` aggregates
+in recognition run history, including failed/interrupted attempts. The default
+is false. Measurements contain no SQL text, scene/person IDs, images or vectors.
+They cover copy, reference loading, scene matching, contextual checks, merge
+support/compatibility, rechecks, binding and final apply. Work counters include
+validated vectors and group/sample comparisons. SQL buckets count statement
+execution and transaction exits; statement seconds exclude later lazy cursor
+consumption. Stage seconds are inclusive and nested, so do not add them together.
+Record runtime, observation/person counts and warm versus cold state when
+comparing runs. Profiling has overhead and does not alter matching policy or
+require fresh inference. Ordinary progress remains throttled independently.
+
+Cold replay now owns a RAM-resident canonical reference index for its immutable
+selected observation catalogue. Membership inserts, moves and retractions update
+that private index; unchanged representatives reuse validated vectors. Known
+references remain frozen inside each scene. The exact canonical sample order,
+reference fingerprint and logical reference budget are preserved. General
+reference loads use bounded person batches, including full membership-scope
+validation outside the representative cap.
+
+`execution.rebuild_memory_bytes` is a lazy working-index budget (8 GiB by default),
+not an upfront allocation or the existing representative-vector limit. It can be
+increased on hosts with more RAM, such as a 96 GB system. If the canonical index
+cannot fit its conservative per-observation allowance, replay uses the existing
+ordered queries without a new disk-spill cache. A failed replay discards its
+private index; it is never reused after rollback or by another invocation.
+
+Similarity scoring uses bounded native NumPy blocks for sufficiently large
+catalogues. A conservative floating-point error interval may reject only groups
+that cannot meet the relevant threshold/cohesion condition. Every remaining
+comparison uses the original scalar dot products and reductions, preserving
+stored scores, ambiguity, ties and decisions. Small catalogues keep the scalar
+path. Native block caches are invocation-owned and byte-bounded, including their
+retained input owners; no approximate-nearest-neighbor or truncated rival list is
+introduced. Same-scene contextual matching retains its full cohort of rivals.
+
+Cold replay and each standalone scene match own a RAM-only evidence cache. Cue
+rows are narrow and vectors/signatures are validated lazily, preserving existing
+short-circuit failure behavior. Exact peer scores are reused only for the same
+observation and immutable representative version. Contextual merge checks share
+verified latest-scan heads and complete multi-face evidence, including withheld
+observations and later selected scenes. Newer partial or differently configured
+scans still supersede old evidence. The cache uses a bounded share of the working
+budget and recomputes evicted data instead of spilling to disk.

@@ -15,6 +15,7 @@ class ReferenceUsage:
         self.limit, self.progress = limit, progress
         self.bytes = self.people = self.samples = self.peak = 0
         self.stage, self.last_report = 'loading', None
+        self.last_values = None
 
     def begin(self, stage, *, reset=False):
         self.stage = stage
@@ -23,9 +24,13 @@ class ReferenceUsage:
         self.emit(force=True)
 
     def add(self, vectors, *, people=0, kind):
-        self.bytes += sum(vector.nbytes for vector in vectors)
+        self.add_counts(sum(vector.nbytes for vector in vectors), len(vectors), people=people, kind=kind)
+
+    def add_counts(self, size, samples, *, people=0, kind):
+        """Reuse exact accounting for an already validated immutable snapshot."""
+        self.bytes += size
         self.people += people
-        self.samples += len(vectors)
+        self.samples += samples
         self.peak = max(self.peak, self.bytes)
         if self.bytes > self.limit:
             self.emit(force=True)
@@ -39,7 +44,11 @@ class ReferenceUsage:
         if self.progress is None:
             return
         now = time.monotonic()
+        values = self.bytes, self.people, self.samples, self.peak, self.stage
+        if values == self.last_values and self.last_report is not None and now - self.last_report < 1:
+            return
         if force or self.last_report is None or now - self.last_report >= 1:
+            self.last_values = values
             self.last_report = now
             self.progress(bytes=self.bytes, budget_bytes=self.limit, peak_bytes=self.peak,
                           people=self.people, samples=self.samples, stage=self.stage)

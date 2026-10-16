@@ -11,10 +11,14 @@ from .reference_usage import ReferenceUsage
 from .identity_merges import supported_merges
 from .progress import tracking
 from .ranking import best_two
+from .profiling import measured, count
+from .scoring import comparisons, scoped
+from .evidence_cache import current as evidence, scoped as evidence_owned
 
 
 def vector(row):
     import numpy as np
+    count('validated_vectors')
     dimensions, blob = row['dimensions'], row['embedding']
     if (type(dimensions) is not int or not 1 <= dimensions <= 1024 or
             not isinstance(blob, bytes) or len(blob) != 4 * dimensions):
@@ -32,9 +36,16 @@ class Group:
     known: bool
 
 
+@measured('references')
 def _groups(db, scope, namespace, policy, *, usage=None, stage='loading'):
     usage = usage or ReferenceUsage(policy['max_reference_bytes'])
     usage.begin(stage, reset=True)
+    from .reference_index import current
+    index = current(db)
+    if index is not None:
+        result = index.snapshot(policy, usage)
+        usage.emit(force=True)
+        return result
     maximum = policy['max_people_per_lookup']
     rows = db.execute('SELECT id FROM people WHERE scope=? AND namespace=? '
                       'AND NOT EXISTS (SELECT 1 FROM identity_merges WHERE source=people.id) '
@@ -44,27 +55,32 @@ def _groups(db, scope, namespace, policy, *, usage=None, stage='loading'):
     if len(rows) > maximum:
         raise ValueError('Face identity lookup exceeds configured person budget.')
     result = []
-    with tracking(
-        rows,
-        'Load identity references',
-        unit='person',
-    ) as tracked:
-        for person in tracked:
-            invalid = db.execute('SELECT 1 FROM members m JOIN observations o ON o.id=m.observation '
-                'JOIN scans s ON s.id=o.scan WHERE m.person=? AND '
-                "(s.scope<>? OR s.namespace<>? OR s.status<>'complete' OR o.rejected IS NOT NULL) LIMIT 1",
-                (person['id'], scope, namespace)).fetchone()
-            if invalid:
-                raise ValueError('Face identity has incompatible retained membership evidence.')
-            samples = db.execute('SELECT o.dimensions,o.embedding FROM observations o JOIN members m '
-                                 'ON m.observation=o.id JOIN scans s ON s.id=o.scan WHERE m.person=? '
-                                 'ORDER BY CAST(s.scene AS INTEGER),s.scene,o.cue,o.seconds,o.geometry,o.embedding,o.id LIMIT ?',
-                                 (person['id'], policy['max_samples_per_person'])).fetchall()
-            if not samples:
-                raise ValueError('Accepted face identity has no retained supporting embeddings.')
-            vectors = [vector(row) for row in samples]
-            usage.add(vectors, people=1, kind='Retained')
-            result.append(Group(person['id'], vectors, True))
+    from itertools import islice
+    iterator = iter(rows)
+    while batch := list(islice(iterator, 256)):
+        identifiers = encoded([person['id'] for person in batch])
+        invalid = db.execute('SELECT 1 FROM members m JOIN observations o ON o.id=m.observation '
+            'JOIN scans s ON s.id=o.scan WHERE m.person IN (SELECT value FROM json_each(?)) AND '
+            "(s.scope<>? OR s.namespace<>? OR s.status<>'complete' OR o.rejected IS NOT NULL) LIMIT 1",
+            (identifiers, scope, namespace)).fetchone()
+        if invalid:
+            raise ValueError('Face identity has incompatible retained membership evidence.')
+        samples = {person['id']: [] for person in batch}
+        for row in db.execute('SELECT person,dimensions,embedding FROM ('
+            'SELECT m.person,o.dimensions,o.embedding,ROW_NUMBER() OVER (PARTITION BY m.person '
+            'ORDER BY CAST(s.scene AS INTEGER),s.scene,o.cue,o.seconds,o.geometry,o.embedding,o.id) AS position '
+            'FROM observations o JOIN members m ON m.observation=o.id JOIN scans s ON s.id=o.scan '
+            'WHERE m.person IN (SELECT value FROM json_each(?))) WHERE position<=? ORDER BY person,position',
+            (identifiers, policy['max_samples_per_person'])):
+            samples[row['person']].append(vector(row))
+        with tracking(batch, 'Load identity references', unit='person') as tracked:
+            for person in tracked:
+                vectors = samples[person['id']]
+                if not vectors:
+                    raise ValueError('Accepted face identity has no retained supporting embeddings.')
+                usage.add(vectors, people=1, kind='Retained')
+                result.append(Group(person['id'], tuple(vectors), True))
+
     usage.emit(force=True)
     return result
 
@@ -73,10 +89,13 @@ def _similarities(group, query):
     import numpy as np
     if any(sample.shape != query.shape for sample in group.samples):
         raise ValueError('Face namespace contains mixed embedding dimensions.')
+    count('group_comparisons')
+    count('sample_comparisons', len(group.samples))
     scores = np.asarray([float(np.dot(sample, query)) for sample in group.samples])
     return float(scores.mean()), float(scores.min())
 
 
+@measured('cue_context')
 def co_presence_allows(db, observation, group, groups, query, config, *, peer_threshold=None):
     """A distinct cue peer competing for this identity needs stronger evidence.
 
@@ -89,23 +108,30 @@ def co_presence_allows(db, observation, group, groups, query, config, *, peer_th
     settings = config.data['recognition']
     peer_threshold = settings['match_threshold'] if peer_threshold is None else peer_threshold
     stronger = max(settings['match_threshold'], settings['cooccurrence_merge_threshold'])
-    for peer in db.execute('SELECT * FROM observations WHERE scan=? AND cue=? '
-                           'AND id<>? AND rejected IS NULL ORDER BY id',
-                           (observation['scan'], observation['cue'], observation['id'])):
+    cache = evidence(db)
+    peers = (cache.peers(observation['scan'], observation['cue']) if cache is not None else
+        db.execute('SELECT id,geometry,dimensions,embedding FROM observations WHERE scan=? AND cue=? '
+                   'AND rejected IS NULL ORDER BY id', (observation['scan'], observation['cue'])))
+    for peer in peers:
+        if peer['id'] == observation['id']:
+            continue
         if peer['geometry'] == observation['geometry'] and peer['embedding'] == observation['embedding']:
             continue
-        other = vector(peer)
-        mean, minimum = _similarities(group, other)
+        other = cache.vector(peer) if cache is not None else vector(peer)
+        mean, minimum = cache.scores(group, other, peer['id']) if cache is not None else _similarities(group, other)
         if mean < peer_threshold or minimum < config.data['clustering']['cohesion_threshold']:
             continue
         best = mean
         for rival in groups:
-            rival_mean, rival_minimum = _similarities(rival, other)
+            rival_mean, rival_minimum = (cache.scores(rival, other, peer['id']) if cache is not None
+                                          else _similarities(rival, other))
             if rival_minimum >= config.data['clustering']['cohesion_threshold']:
                 best = max(best, rival_mean)
         if best - mean >= settings['ambiguity_margin'] and best > mean:
             continue
-        if min(_similarities(group, query)[1], minimum, float(np.dot(query, other))) < stronger:
+        query_minimum = (cache.scores(group, query, observation['id'])[1] if cache is not None
+                         else _similarities(group, query)[1])
+        if min(query_minimum, minimum, float(np.dot(query, other))) < stronger:
             return False
     return True
 
@@ -160,6 +186,9 @@ def matching_policy(config):
         'clustering': config.data['clustering']})
 
 
+@measured('scene')
+@scoped
+@evidence_owned
 def cluster_scene(database, scan, config, *, progress=None, _cold_replay=False):
     """Selected evidence can merge compatible historical identities oldest-first.
 
@@ -217,8 +246,8 @@ def cluster_scene(database, scan, config, *, progress=None, _cold_replay=False):
                 prior_person = observation['prior_person']
                 ranked = []
                 near = False
-                for group in groups:
-                    score, cohesion = _similarities(group, query)
+                for group, score, cohesion in comparisons(
+                        groups, query, settings['match_threshold'] - settings['ambiguity_margin']):
                     near |= score >= settings['match_threshold'] - settings['ambiguity_margin']
                     if (score >= settings['match_threshold'] - settings['ambiguity_margin'] and
                             cohesion >= grouping['cohesion_threshold']):
@@ -305,6 +334,7 @@ def cluster_scene(database, scan, config, *, progress=None, _cold_replay=False):
     return _result(db, scan, policy)
 
 
+@measured('recheck')
 def _recheck_after_merge(db, scan, policy, groups, config):
     """Resolve ambiguity against the surviving groups, preserving raw evidence."""
     settings = config.data['recognition']
@@ -324,8 +354,9 @@ def _recheck_after_merge(db, scan, policy, groups, config):
         for row in tracked:
             query = vector(row)
             ranked = []
-            for group in groups:
-                mean, minimum = _similarities(group, query)
+            for group, mean, minimum in comparisons(groups, query,
+                    settings['match_threshold'] - settings['ambiguity_margin'],
+                    config.data['clustering']['cohesion_threshold']):
                 if (mean >= settings['match_threshold'] - settings['ambiguity_margin'] and
                         minimum >= config.data['clustering']['cohesion_threshold']):
                     best_two(ranked, (mean, group.identifier, group))

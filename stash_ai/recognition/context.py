@@ -32,9 +32,11 @@ def policy_digest(config, key, build):
 @contextmanager
 def portrait_reference_scope():
     """Only the metadata phase borrows this snapshot: membership is finalized."""
+    from .scoring import score_scope
     token = _references.set({})
     try:
-        yield
+        with score_scope():
+            yield
     finally:
         _references.reset(token)
 
