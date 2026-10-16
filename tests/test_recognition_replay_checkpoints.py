@@ -1,4 +1,5 @@
 """Recovery skips only proven committed strict prefixes, never source evidence."""
+from contextlib import closing
 from dataclasses import replace
 import json
 from pathlib import Path
@@ -79,7 +80,7 @@ def test_resume_exact_prefix_and_clock_matches_full_replay(tmp_path, monkeypatch
         selected = selection(state, config)
         interrupt(monkeypatch,state,selected,config,after=3)
         directory, _, generation = files(config)
-        with sqlite3.connect(generation) as saved:
+        with closing(sqlite3.connect(generation)) as saved, saved:
             header = json.loads(saved.execute('SELECT value FROM metadata').fetchone()[0])
             # A known identity visit consumes a clock tick without inserting a
             # new person. max(created)+1 would silently change later evidence.
@@ -106,7 +107,7 @@ def test_known_visits_keep_next_clock_beyond_max_created(tmp_path,monkeypatch):
         selected = selection(state,config)
         interrupt(monkeypatch,state,selected,config,after=2)
         _,_,generation=files(config)
-        with sqlite3.connect(generation) as saved:
+        with closing(sqlite3.connect(generation)) as saved, saved:
             assert json.loads(saved.execute('SELECT value FROM metadata').fetchone()[0])['next_clock']==3
             assert saved.execute('SELECT MAX(created) FROM people').fetchone()[0]==1
         calls=count_replay(monkeypatch)
@@ -159,7 +160,7 @@ def test_corrupt_or_executable_checkpoint_rejected_without_source_loss(tmp_path,
         selected=selection(state,config)
         interrupt(monkeypatch,state,selected,config)
         _,_,generation=files(config)
-        with sqlite3.connect(generation) as damaged:damaged.execute(mutation)
+        with closing(sqlite3.connect(generation)) as damaged, damaged:damaged.execute(mutation)
         raw=[tuple(r) for r in state.connection.execute('SELECT * FROM observations ORDER BY id')]
         calls=count_replay(monkeypatch)
         rebuild.rebuild_selected(state,selected,config)
@@ -367,7 +368,7 @@ def test_valid_checksum_cannot_hide_incomplete_or_future_grouping(tmp_path,monke
         selected=selection(state,config)
         interrupt(monkeypatch,state,selected,config)
         directory,manifest,generation=files(config)
-        with sqlite3.connect(generation) as damaged:
+        with closing(sqlite3.connect(generation)) as damaged, damaged:
             damaged.execute('DELETE FROM candidates WHERE id=(SELECT id FROM candidates LIMIT 1)')
             damaged.commit()
             header=checkpoint._header(damaged)
@@ -428,7 +429,7 @@ def test_valid_checksum_still_requires_grouping_invariants(tmp_path,monkeypatch,
         selected=selection(state,config)
         interrupt(monkeypatch,state,selected,config,after=3)
         directory,manifest,generation=files(config)
-        with sqlite3.connect(generation) as damaged:
+        with closing(sqlite3.connect(generation)) as damaged, damaged:
             damaged.execute(mutation);damaged.commit()
             manifest['checksum']=checkpoint._checksum(damaged,checkpoint._header(damaged))
         (directory/'current.json').write_text(encoded(manifest))
