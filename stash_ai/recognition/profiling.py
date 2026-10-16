@@ -16,6 +16,13 @@ def count(name, amount=1):
         metrics['counts'][name] += amount
 
 
+def compute_summary(value):
+    """Called only by the coordinator; worker contexts are never shared."""
+    metrics = _active.get()
+    if metrics is not None:
+        metrics['cpu'] = value
+
+
 def measured(name):
     def decorate(function):
         @wraps(function)

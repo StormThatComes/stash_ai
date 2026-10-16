@@ -41,6 +41,7 @@ class Compute:
         settings = config.data['execution']
         available = available_cpus()
         requested = settings.get('rebuild_workers', 1)
+        self.requested_workers, self.available = requested, available
         native = settings.get('rebuild_native_threads', 1)
         self.workers = max(1, min(requested or min(16, max(1, available-2)),
                                   max(1, available//native)))
@@ -55,6 +56,16 @@ class Compute:
         self.bytes = self.peak_bytes = 0
         self.submitted = self.applied = 0
         self.worker_seconds = self.worker_cpu_seconds = self.wait_seconds = 0.
+
+    def summary(self):
+        return dict(format=1, requested_workers=self.requested_workers,
+                    effective_workers=self.workers, available_cpus=self.available,
+                    native_threads=self.native_threads, backend='threads',
+                    queue_limit_bytes=self.limit, peak_queued_bytes=self.peak_bytes,
+                    submitted_blocks=self.submitted, applied_blocks=self.applied,
+                    successful_worker_wall_seconds=self.worker_seconds,
+                    successful_worker_thread_cpu_seconds=self.worker_cpu_seconds,
+                    ordered_wait_seconds=self.wait_seconds)
 
     def _owned(self):
         if threading.get_ident() != self.owner:
@@ -172,4 +183,6 @@ def compute_scope(config):
         yield value
     finally:
         _active.reset(token)
-        cleanup([('close recognition CPU owner', value.close)])
+        from .profiling import compute_summary
+        cleanup([('record recognition CPU work', lambda: compute_summary(value.summary())),
+                 ('close recognition CPU owner', value.close)])

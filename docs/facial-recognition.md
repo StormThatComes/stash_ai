@@ -1017,3 +1017,76 @@ verified latest-scan heads and complete multi-face evidence, including withheld
 observations and later selected scenes. Newer partial or differently configured
 scans still supersede old evidence. The cache uses a bounded share of the working
 budget and recomputes evicted data instead of spilling to disk.
+
+### CPU workers during identity rebuild
+
+`execution.rebuild_workers` controls the rebuild compute pool independently of
+`portrait_cpu_threads` and the optional one-reader `rebuild_prefetch_scenes`.
+The default `1` keeps serial execution. `0` chooses up to sixteen workers,
+leaving two available CPUs free where possible. Explicit values from 1 to 256
+are capped by available CPUs divided by `rebuild_native_threads` (1..16).
+These are logical CPU budgets, not core pinning or guaranteed utilization.
+
+For an initial comparison on a 24-core host, try 1, 8, 16 and 20 workers with
+one native BLAS thread per worker. For example:
+
+```yaml
+execution:
+  rebuild_workers: 16
+  rebuild_native_threads: 1
+  rebuild_queue_bytes: 67108864
+  profile_rebuild: true
+```
+
+This is a tuning starting point, not a measured fastest setting. Worker startup,
+Python loops, matrix packing, memory bandwidth and serial decisions can dominate
+small workloads. Sufficiently large immutable reference catalogues use bounded
+read-only matrix shards and query batches. Small catalogues, mutable inputs and
+work that cannot fit admission keep the existing serial score path.
+
+The coordinator still visits scenes and observations in canonical order. It
+alone grows new candidate groups, makes merge/support/co-presence decisions,
+claims historical person/performer labels and writes SQLite. Workers calculate
+frozen-reference scores used by assignment, post-merge rechecks, merge
+nominations, final same-scene rankings and historical fallback. Native batch
+scores may only prove rejection; finalists retain the scalar decision values.
+Peer checks, component-pair compatibility and support/co-occurrence evidence
+traversal retain their existing coordinator path in this implementation.
+
+Rebuild uses retained embeddings and never loads or invokes GPU models. CPU
+workers receive neither models nor SQLite connections. Scan and portrait model
+ownership remains separate from this CPU pool; invocation-wide unification of
+all model owners is tracked separately in #849/#850.
+
+`rebuild_queue_bytes` bounds queued CPU jobs including estimated scratch/results;
+its effective value is capped at `rebuild_memory_bytes / 16`. Packed matrix
+caches, the bounded current query batch and sparse-result accumulator retain
+their separate bounded ownership. This field is not a total-process RSS cap or
+unified accounting of every rebuild cache. No disk-backed working cache is
+introduced. Native BLAS limits are restored only after their workers stop;
+incomplete shutdown retains borrowed owners under the existing quarantine rule.
+
+With profiling enabled, `rebuild_profile.cpu` records requested/effective workers,
+native limits, queue capacity/peak, submitted/applied blocks and ordered wait.
+Successful worker wall seconds are summed parallel task durations, not elapsed
+run time. Worker-thread CPU seconds exclude native helper-thread CPU time; the
+benchmark additionally records process CPU time. Worker metrics do not retain
+scene IDs, embeddings or SQL. Progress remains based on coordinator-applied
+scenes, so prefetched computations cannot advance the bar early.
+
+Execution budgets do not change matching policy or semantic checkpoint identity.
+A restored checkpoint resumes only the applied strict prefix and can use a
+different worker count. Changing workers on an already valid completed rebuild
+can reuse the result, so it does not measure cold-rebuild scaling.
+
+Run the synthetic cold/cached comparison independently of production state:
+
+```powershell
+python -m benchmarks.benchmark_recognition_parallel --scenes 480 --people 96 --dimensions 512 --workers 1 8 16 20 --repeats 3
+```
+
+The fixture contains repeated orthogonal identities and omits model inference,
+media, API latency and realistic face/merge distributions. Its timings are not a
+forecast for a 9,000-scene library. The JSON includes semantic hashes, effective
+budgets, stage profiles, process CPU and RSS after each trial. Use representative
+retained evidence and inspect the limiting stage before promoting a default.

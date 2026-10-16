@@ -128,3 +128,13 @@ def test_frozen_scores_combine_with_current_local_representatives():
         actual = list(parallel_scores.contributions(references, query, values, known, .65))
         result = next((mean, low) for g, mean, low in actual if g is local)
         assert result == _similarities(local, query)
+
+
+def test_serial_input_stream_does_not_materialize_parallel_reference_owners(monkeypatch):
+    def unexpected(*args):
+        raise AssertionError('serial path packed the complete reference catalogue')
+    monkeypatch.setattr(parallel_scores, 'FrozenScores', unexpected)
+    with compute.compute_scope(configured()):
+        source = iter([dict(id='one'), dict(id='two')])
+        assert list(parallel_scores.scored_rows(source, [None]*20000, .65)) == [
+            (dict(id='one'), None), (dict(id='two'), None)]
