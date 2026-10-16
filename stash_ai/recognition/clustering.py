@@ -12,6 +12,7 @@ from .identity_merges import supported_merges
 from .progress import tracking
 from .ranking import best_two
 from .profiling import measured, count
+from .scoring import comparisons, scoped
 
 
 def vector(row):
@@ -77,7 +78,7 @@ def _groups(db, scope, namespace, policy, *, usage=None, stage='loading'):
                 if not vectors:
                     raise ValueError('Accepted face identity has no retained supporting embeddings.')
                 usage.add(vectors, people=1, kind='Retained')
-                result.append(Group(person['id'], vectors, True))
+                result.append(Group(person['id'], tuple(vectors), True))
 
     usage.emit(force=True)
     return result
@@ -178,6 +179,7 @@ def matching_policy(config):
 
 
 @measured('scene')
+@scoped
 def cluster_scene(database, scan, config, *, progress=None, _cold_replay=False):
     """Selected evidence can merge compatible historical identities oldest-first.
 
@@ -235,8 +237,8 @@ def cluster_scene(database, scan, config, *, progress=None, _cold_replay=False):
                 prior_person = observation['prior_person']
                 ranked = []
                 near = False
-                for group in groups:
-                    score, cohesion = _similarities(group, query)
+                for group, score, cohesion in comparisons(
+                        groups, query, settings['match_threshold'] - settings['ambiguity_margin']):
                     near |= score >= settings['match_threshold'] - settings['ambiguity_margin']
                     if (score >= settings['match_threshold'] - settings['ambiguity_margin'] and
                             cohesion >= grouping['cohesion_threshold']):
@@ -343,8 +345,9 @@ def _recheck_after_merge(db, scan, policy, groups, config):
         for row in tracked:
             query = vector(row)
             ranked = []
-            for group in groups:
-                mean, minimum = _similarities(group, query)
+            for group, mean, minimum in comparisons(groups, query,
+                    settings['match_threshold'] - settings['ambiguity_margin'],
+                    config.data['clustering']['cohesion_threshold']):
                 if (mean >= settings['match_threshold'] - settings['ambiguity_margin'] and
                         minimum >= config.data['clustering']['cohesion_threshold']):
                     best_two(ranked, (mean, group.identifier, group))

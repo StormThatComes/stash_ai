@@ -8,13 +8,13 @@ from .database import encoded
 from .progress import tracking, work
 from .ranking import best_two
 from .reference_usage import ReferenceUsage
+from .scoring import comparisons
 
 
 def _rank(groups, query, config):
     ranked = []
     cohesion = config.data['clustering']['cohesion_threshold']
-    for group in groups:
-        mean, minimum = _similarities(group, query)
+    for group, mean, minimum in comparisons(groups, query, cohesion=cohesion):
         if minimum >= cohesion:
             best_two(ranked, (mean, group.identifier, group))
     return ranked

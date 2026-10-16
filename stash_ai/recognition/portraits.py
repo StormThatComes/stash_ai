@@ -96,13 +96,17 @@ def identity_reason(vector, groups, person, config):
     import numpy as np
     policy = config.data['recognition']
     score, runner = -1., None
-    for identifier, group in groups.items():
-        if not group.samples or len(group.samples[0]) != len(vector):
+    from .scoring import comparisons
+    for group in groups.values():
+        if not group.samples or any(len(sample) != len(vector) for sample in group.samples):
             raise ValueError('Portrait embedding namespace/dimensions are incompatible.')
-        values = [float(np.dot(vector, sample)) for sample in group.samples]
-        if min(values) >= config.data['clustering']['cohesion_threshold']:
-            mean = sum(values) / len(values)
-            if identifier == person:
+    def exact(group, query):
+        values = [float(np.dot(query, sample)) for sample in group.samples]
+        return sum(values) / len(values), min(values)
+    for group, mean, minimum in comparisons(groups.values(), vector,
+            cohesion=config.data['clustering']['cohesion_threshold'], exact=exact):
+        if minimum >= config.data['clustering']['cohesion_threshold']:
+            if group.identifier == person:
                 score = mean
             else:
                 runner = mean if runner is None else max(runner, mean)

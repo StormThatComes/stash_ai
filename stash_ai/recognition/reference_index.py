@@ -146,7 +146,7 @@ class ReferenceIndex:
         for person in people:
             samples = self.groups[person][1]
             usage.add([], people=1, kind='Retained')
-            result.append(Group(person, samples, True))
+            result.append(Group(person, tuple(samples), True))
         count('reference_snapshot_reuses')
         count('reference_people_refreshed', refreshed)
         self.cached = identity, tuple(result), usage.bytes, usage.samples
