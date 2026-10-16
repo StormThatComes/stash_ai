@@ -27,6 +27,7 @@ from .replay_addresses import addresses
 from .replay_memory import memory_replay, Lookahead, report_pages
 from . import rebuild_cache
 from .replay_checkpoint import Checkpoints, ReplayClock
+from .compute import compute_scope
 
 
 def _observations(db, scan):
@@ -322,7 +323,7 @@ def _apply(database, replay, selected, config, scope, namespace, mapping, finger
 
 
 def rebuild_selected(database, selected, config, *, progress=None):
-    with profile(database, config.data['execution'].get('profile_rebuild', False)), score_scope(), physical_keys(database, config):
+    with profile(database, config.data['execution'].get('profile_rebuild', False)), compute_scope(config), score_scope(), physical_keys(database, config):
         return _rebuild_selected(database, selected, config, progress=progress)
 
 
