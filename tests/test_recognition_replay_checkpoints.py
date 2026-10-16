@@ -182,7 +182,9 @@ def test_foreign_recovery_paths_untouched(tmp_path,monkeypatch,foreign):
             marker=directory/'current.json'
             if foreign=='manifest':marker.write_bytes(b'{"foreign":true}')
             else:
-                target=tmp_path/'personal.json';target.write_bytes(b'keep me');marker.symlink_to(target)
+                target=tmp_path/'personal.json';target.write_bytes(b'keep me')
+                try:marker.symlink_to(target)
+                except OSError:pytest.skip('OS does not permit creating symlinks')
         before=marker.read_bytes()
         rebuild.rebuild_selected(state,selected,config)
         assert marker.read_bytes()==before
