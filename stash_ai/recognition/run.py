@@ -26,6 +26,7 @@ from .stash import RecognitionStash
 from .names import load_names, plan_names, starter
 from .metadata import enrich
 from .portrait_pipeline import Pipeline as PortraitPipeline
+from .portrait_threads import NativeBudget
 from .video import VideoFrames
 from .visibility import FaceVisibility, LazyVisibility
 from .expression import FaceExpression, LazyExpression, required as expression_required
@@ -308,7 +309,7 @@ def execute(args, config, *, services=None):
                                 report.optional('recognition_names_preflight', report.issue, 'recognition', 'names_preflight',
                                                 'selected performers', error, safe_error(error, key))
                     label = 'Portraits' if portraits_only else 'Names and portraits'
-                    with portrait_reference_scope(), PortraitPipeline(database,client,config,scope,targets,services.source,visibility,expression,
+                    with NativeBudget(config), portrait_reference_scope(), PortraitPipeline(database,client,config,scope,targets,services.source,visibility,expression,
                         enabled=services.metadata is enrich) as preparation, phase(report, 'Recognition portraits' if portraits_only else 'Recognition metadata', errors=lambda: counts['metadata_failed']), WorkProgress(report, label, len(targets), unit='person', key='people') as people:
                         for target_index,target in enumerate(targets):
                             preparation.activate(target_index)

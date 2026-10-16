@@ -169,6 +169,7 @@ def test_model_image_copy_outlives_interrupted_consumer():
         try:
             with Image.new('RGB',(4,4),(1,2,3)) as image:
                 with pytest.raises(KeyboardInterrupt,match='consumer stopped'):model.measure(image,None)
+                image.close()
         finally:release.set()
     assert seen==[(1,2,3)]
 

@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 from stash_ai.inference.image_io import open_image
 from stash_ai.runtime.cancellation import Cancellation,use
-from stash_ai.runtime.cleanup import cleanup
+from stash_ai.runtime.cleanup import cleanup, closing
 from .media import safe_url
 from .models import checked_detection
 from .visibility import cached as visible,required as needs_visible
@@ -208,11 +208,40 @@ class ModelProxy:
         self.prepare_assets()
         owned=image.copy()
         def invoke():
-            with owned:return self.model.measure(owned,face)
+            with closing(owned,name='release portrait model pixels'):return self.model.measure(owned,face)
         try:future=self.executor.submit(invoke)
         except BaseException:
             owned.close();raise
         future.add_done_callback(lambda f:owned.close() if f.cancelled() else None)
+        try:return future.result()
+        except BaseException:
+            future.cancel();raise
+
+    def measure_many(self,items):
+        from .visibility import LazyVisibility,FaceVisibility,prepare,VisibilityGeometryError
+        self.prepare_assets()
+        if len(items)>8:raise ValueError('Portrait model microbatch exceeds eight faces.')
+        if isinstance(self.model,LazyVisibility) and self.model.factory is FaceVisibility:
+            prepared=[]
+            for image,face in items:
+                try:prepared.append(prepare(image,face))
+                except VisibilityGeometryError as error:prepared.append(error)
+            return self.executor.submit(self.model.measure_prepared_many,prepared).result()
+        owned=[(image.copy(),face) for image,face in items]
+        def invoke():
+            try:
+                many=getattr(self.model,'measure_many',None)
+                if callable(many):return many(owned)
+                values=[]
+                for image,face in owned:
+                    try:values.append(self.model.measure(image,face))
+                    except Exception as error:values.append(error)
+                return values
+            finally:cleanup([image.close for image,_ in owned])
+        try:future=self.executor.submit(invoke)
+        except BaseException:
+            cleanup([image.close for image,_ in owned]);raise
+        future.add_done_callback(lambda f:cleanup([image.close for image,_ in owned]) if f.cancelled() else None)
         try:return future.result()
         except BaseException:
             future.cancel();raise
@@ -223,6 +252,7 @@ class Pipeline:
         self.db,self.client,self.config,self.scope,self.targets=database,client,config,scope,targets
         self.source_factory=source
         self.enabled=(enabled and config.data['execution'].get('prefetch_portraits',True)
+                      and config.data['execution'].get('portrait_cpu_threads',0)!=1
                       and config.data['portraits']['enabled'] and config.data['portraits']['source']=='vtt'
                       and callable(getattr(client,'new_media_reader',None)))
         self.original_visibility,self.original_expression=visibility,expression
@@ -262,39 +292,92 @@ class Pipeline:
         person=db.execute('SELECT namespace FROM people WHERE id=? AND scope=?',(target['person'],self.scope)).fetchone()
         groups,context=portrait_references(self.db,self.scope,person['namespace'],self.config,
             lambda:_groups(db,self.scope,person['namespace'],self.config.data['clustering']))
-        result=[];size=visited=0
+        def pairs():
+            for item in sorted(target['scans'],key=lambda s:(s['scene'],s['scan'])):
+                rows=db.execute('SELECT o.id,o.scan,o.cue,o.seconds,o.source,o.rect,o.geometry,o.quality,'
+                    'o.dimensions,o.embedding,s.input_sha FROM observations o JOIN scans s ON s.id=o.scan '
+                    'JOIN members m ON m.observation=o.id WHERE m.person=? AND o.scan=? AND s.scope=? '
+                    "AND s.scene=? AND s.namespace=? AND s.status='complete' AND o.rejected IS NULL ORDER BY o.cue,o.id",
+                    (target['person'],item['scan'],self.scope,item['scene'],person['namespace']))
+                for row,candidate in candidate_observations(db,rows,item['scan'],matching_policy(self.config)):
+                    yield item['scene'],row,candidate
+        return self._build(target,groups,context,pairs())
+
+    def _build(self,target,groups,context,pairs):
+        from .portrait_availability import observation_identity,crop_row,measurement_basis
+        from .database import encoded
+        db=self.db.connection;policy=self.config.data['portraits'];result=[];size=0
         required={name for name,needed in [('visibility',needs_visible(policy)),('expression',needs_expression(policy))] if needed}
         cached={'visibility':visible,'expression':expressive}
-        for item in sorted(target['scans'],key=lambda s:(s['scene'],s['scan'])):
-            rows=db.execute('SELECT o.id,o.scan,o.cue,o.seconds,o.source,o.rect,o.geometry,o.quality,'
-                'o.dimensions,o.embedding,s.input_sha FROM observations o JOIN scans s ON s.id=o.scan '
-                'JOIN members m ON m.observation=o.id WHERE m.person=? AND o.scan=? AND s.scope=? '
-                "AND s.scene=? AND s.namespace=? AND s.status='complete' AND o.rejected IS NULL ORDER BY o.cue,o.id",
-                (target['person'],item['scan'],self.scope,item['scene'],person['namespace']))
-            for row,candidate in candidate_observations(db,rows,item['scan'],matching_policy(self.config)):
-                visited+=1
-                if visited>128:return result
-                quality=json.loads(row['quality']);bases=quality.setdefault('measurement_basis',{})
-                legacy=None
-                for name in required:
-                    if cached[name](quality) and name not in bases:
-                        if legacy is None:
-                            legacy=db.execute("SELECT 1 FROM portraits WHERE scope=? AND person=? AND json_valid(metadata) "
-                                "AND json_extract(metadata,'$.observation')=? AND json_extract(metadata,'$.quality_source')='recognition_crop' LIMIT 1",
-                                (self.scope,target['person'],row['id'])).fetchone()
-                        bases[name]=measurement_basis(crop_row(db,row) if legacy else row,'recognition_crop' if legacy else 'vtt')
-                missing={n for n in required if not cached[n](quality)}
-                approximate={n for n in required if bases.get(n,{}).get('source_type')=='recognition_crop'}
-                if not (missing or approximate):continue
-                try:identity=observation_identity(self.db,row,groups,target,self.config,context,candidate=candidate)
-                except (ValueError,TypeError):continue
-                if identity[0]:continue
-                owned=dict(crop_row(db,row))
-                cost=2048+sum(len(v)*4 if isinstance(v,str) else len(v) if isinstance(v,bytes) else 64 for v in owned.values())
-                if len(result)>=128 or size+cost>self.descriptor_limit:return result
-                size+=cost
-                result.append((item['scene'],owned,quality,missing,approximate,identity,context))
+        for visited,(scene,row,candidate) in enumerate(pairs):
+            if visited>=128:break
+            if self.outcome(row,context) is not None:continue
+            quality=json.loads(row['quality']);bases=quality.setdefault('measurement_basis',{})
+            legacy=None
+            for name in required:
+                if cached[name](quality) and name not in bases:
+                    if legacy is None:
+                        legacy=db.execute("SELECT 1 FROM portraits WHERE scope=? AND person=? AND json_valid(metadata) "
+                            "AND json_extract(metadata,'$.observation')=? AND json_extract(metadata,'$.quality_source')='recognition_crop' LIMIT 1",
+                            (self.scope,target['person'],row['id'])).fetchone()
+                    bases[name]=measurement_basis(crop_row(db,row) if legacy else row,'recognition_crop' if legacy else 'vtt')
+            missing={n for n in required if not cached[n](quality)}
+            approximate={n for n in required if bases.get(n,{}).get('source_type')=='recognition_crop'}
+            if not (missing or approximate):continue
+            try:identity=observation_identity(self.db,row,groups,target,self.config,context,candidate=candidate)
+            except (ValueError,TypeError):continue
+            if identity[0]:continue
+            owned=dict(row)
+            cost=2048+sum(len(v)*4 if isinstance(v,str) else len(v) if isinstance(v,bytes) else 64 for v in owned.values())
+            if size+cost>self.descriptor_limit:break
+            size+=cost
+            result.append((scene,owned,quality,missing,approximate,identity,context))
+        # Read fallback JPEGs only in bounded ordered sets, never in a worker.
+        ids=[]
+        for row in db.execute('SELECT o.id,LENGTH(o.crop) AS bytes FROM json_each(?) chosen '
+            'JOIN observations o ON o.id=chosen.value ORDER BY chosen.key',
+            (encoded([item[1]['id'] for item in result]),)):
+            cost=row['bytes'] or 0
+            if size+cost>self.descriptor_limit:break
+            size+=cost;ids.append(row['id'])
+        allowed=set(ids)
+        result=[item for item in result if item[1]['id'] in allowed]
+        crops={row['id']:row['crop'] for row in db.execute('SELECT id,crop FROM observations WHERE id IN '
+            '(SELECT value FROM json_each(?))',(encoded(ids),))}
+        for item in result:item[1]['crop']=crops[item[1]['id']]
         return result
+
+    def begin_ranking(self,target,groups,context):self.ranking=target,groups,context
+
+    def ranking_finished(self):
+        if self.config.data['execution'].get('portrait_cpu_threads',0) in (1,2):return
+        if not getattr(self,'ranking',None):return
+        target=self.ranking[0]
+        if self.db.connection.execute('SELECT 1 FROM portraits WHERE scope=? AND person=? '
+            'AND image IS NOT NULL AND json_valid(metadata) LIMIT 1',(self.scope,target['person'])).fetchone():return
+        self.promote()
+
+    def prepare_batch(self,scene,pairs):
+        if not getattr(self,'ranking',None):return
+        target,groups,context=self.ranking
+        try:
+            descriptors=self._build(target,groups,context,((scene,row,candidate) for row,candidate in pairs))
+            if len(descriptors)<2:return
+            if needs_visible(self.config.data['portraits']):self.visibility.prepare_assets()
+            if needs_expression(self.config.data['portraits']):self.expression.prepare_assets()
+            self.completed=0
+            future=self.preparer.submit(self._prepare,descriptors)
+            from .progress import work
+            with work('Prepare VTT quality batches',len(descriptors),unit='observation') as progress:
+                while True:
+                    try:
+                        self.prepared.update(future.result(timeout=.1))
+                        progress.set_completed(self.completed);break
+                    except TimeoutError:
+                        if future.done():raise
+                        progress.set_completed(self.completed)
+        except Exception:
+            pass  # Scalar demand evaluation retains its original error boundary.
 
     def activate(self,index):
         self.index=index;self.prepared={}
@@ -366,33 +449,59 @@ class Pipeline:
         return preflight[1]==expected
 
     def _prepare(self,descriptors):
-        from .portrait_availability import retained_image,measure_available,measurement_basis
-        result={};quiet=SimpleNamespace(api_key=getattr(self.client,'api_key',''),report=None)
-        with use(self.cancel):
-            for scene,row,quality,missing,approximate,identity,context in descriptors:
-                self.cancel.check();source='vtt';warning=None
-                try:
-                    face=checked_detection(json.loads(row['geometry']))
-                    image=self.thumbnail(scene,row)
-                except Capacity:
-                    self.completed+=1;continue
-                except Exception:
-                    warning='vtt_source_unavailable_or_changed';source='recognition_crop'
-                    try:image,face=retained_image(row)
-                    except Exception:image=None
-                errors={}
-                if image is not None:
-                    force=approximate if source=='vtt' else set()
-                    with image:
-                        errors=measure_available(quiet,image,face,quality,self.config.data['portraits'],
-                                                 self.visibility,self.expression,force=force)
+        from .portrait_availability import retained_image,measurement_basis
+        from .diagnostics import message as safe_error
+        result={};group=[];pixels=0
+        maximum=self.config.data['execution'].get('portrait_faceocc_batch_size',4)
+        allowance=self.descriptor_limit
+        def finish():
+            if not group:return
+            try:
+                selected=[entry for entry in group if entry['image'] is not None and 'visibility' in entry['requested']]
+                if selected:
+                    values=self.visibility.measure_many([(e['image'],e['face']) for e in selected])
+                    for entry,value in zip(selected,values):
+                        if isinstance(value,Exception):entry['errors']['visibility']=safe_error(value,getattr(self.client,'api_key',''))[:500]
+                        else:entry['quality'].update(value)
+                for entry in group:
+                    if entry['image'] is not None and 'expression' in entry['requested']:
+                        try:entry['quality'].update(self.expression.measure(entry['image'],entry['face']))
+                        except Exception as error:entry['errors']['expression']=safe_error(error,getattr(self.client,'api_key',''))[:500]
                     checks={'visibility':visible,'expression':expressive}
-                    for name in missing|force:
-                        if name not in errors and checks[name](quality):
-                            quality['measurement_basis'][name]=measurement_basis(row,source)
-                result[row['id']]=dict(signature=signature(row),quality=quality,errors=errors,warning=warning,
-                                       identity=identity,context=context)
-                self.completed+=1
+                    for name in entry['requested']:
+                        if entry['image'] is not None and name not in entry['errors'] and checks[name](entry['quality']):
+                            entry['quality']['measurement_basis'][name]=measurement_basis(entry['row'],entry['source'])
+                    row=entry['row']
+                    result[row['id']]=dict(signature=signature(row),quality=entry['quality'],errors=entry['errors'],
+                        warning=entry['warning'],identity=entry['identity'],context=entry['context'])
+                    self.completed+=1
+            finally:
+                cleanup([e['image'].close for e in group if e['image'] is not None])
+                group.clear()
+        with use(self.cancel):
+            try:
+                for scene,row,quality,missing,approximate,identity,context in descriptors:
+                    self.cancel.check()
+                    rect=json.loads(row['rect']);estimated=rect[2]*rect[3]*3
+                    if group and (len(group)>=maximum or pixels+estimated>allowance):finish();pixels=0
+                    source='vtt';warning=None;face=None
+                    try:
+                        face=checked_detection(json.loads(row['geometry']))
+                        image=self.thumbnail(scene,row)
+                    except Capacity:
+                        self.completed+=1;continue
+                    except Exception:
+                        warning='vtt_source_unavailable_or_changed';source='recognition_crop'
+                        try:image,face=retained_image(row)
+                        except Exception:image=None
+                    size=image.width*image.height*3 if image is not None else 0
+                    if group and pixels+size>allowance:finish();pixels=0
+                    pixels+=size
+                    group.append(dict(row=row,quality=quality,requested=missing|(approximate if source=='vtt' else set()),
+                        identity=identity,context=context,image=image,face=face,source=source,warning=warning,errors={}))
+                finish()
+            finally:
+                cleanup([e['image'].close for e in group if e['image'] is not None])
         return result
 
     def outcome(self,row,context):
