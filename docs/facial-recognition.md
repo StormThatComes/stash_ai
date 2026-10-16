@@ -3,7 +3,8 @@
 The recognition package is independent of the tag model registry and configuration.
 The internal layers provide configuration, verified pinned HF assets,
 CPU/GPU YuNet/SFace adapters, bounded VTT extraction and checkpointed face SQLite.
-The only public operation is the explicit, finite `recognition run` command.
+The public operations are the explicit, finite `recognition run` command and
+`recognition portraits` for refreshing existing identities' portraits.
 No public scan/cluster/review/apply commands are provided.
 
 Use the same complete application profile as tagging on Python 3.14.7:
@@ -33,29 +34,43 @@ identity memberships without scanning scenes, rebuilding identities, changing
 scene links, or applying performer names:
 
 ```powershell
-python stash_ai.py recognition run --portraits-only
-python stash_ai.py recognition run --portraits-only --scene-id 6306 --scene-id 6307
+python stash_ai.py recognition portraits
+python stash_ai.py recognition portraits --performer-id 123
+python stash_ai.py recognition portraits --performer-id 123 --performer-id 456
+python stash_ai.py recognition portraits --performer-id 123 --scene-id 6306
+python stash_ai.py recognition portraits --scene-id 6306 --scene-id 6307
 ```
 
-With no scene IDs (or with `--all-scenes`), this mode selects all published
+With no filters (or with `--all-scenes`), this action selects all published
 identities with retained, complete evidence in the current Stash instance and
 configured model namespace. It reads the local face SQLite instead of listing
-the entire Stash library. Each performer is processed once. `--scene-id` limits
-both the identities and the evidence used for their portraits. Empty selections
-are recorded as successful no-ops with `portrait_people_selected=0`.
+the entire Stash library. Each performer is processed once. Repeated
+`--performer-id` selects numeric Stash performer IDs, rather than internal
+recognition UUIDs, and uses all their eligible retained scenes. `--scene-id`
+limits both the identities and the evidence used for their portraits; combining
+it with `--performer-id` intersects the filters. Unknown or ineligible performer
+IDs do not expand the selection. Empty selections are recorded as successful
+no-ops with `portrait_people_selected=0`.
+
+`recognition portraits` replaces `recognition run --portraits-only`; the old
+switch is no longer accepted. `--performer-id` belongs only to the portraits
+action. Normal `recognition run` still requires `--scene-id` or `--all-scenes`.
+Both actions support `--face-config`, `--faces-db`, `--device`,
+`--progress-style`, and `--retry-unresolved-images`.
 
 Portrait scoring, framing, VTT/video selection, manual-image protection and
 `portraits.enabled: false` use the same rules as a normal run. Cached VTT
 reranking does not load detection/recognition models; original thumbnails may
 still be fetched for measurement or encoding. Model assets are prepared lazily
 if portrait inference needs them. Video mode can decode and verify new portrait
-frames, and newly requested quality measurements can run their models. This mode
+frames, and newly requested quality measurements can run their models. This action
 keeps identity memberships unchanged: use a normal scoped run to apply detection
 or grouping changes. Pending performer merges are left for a normal run too.
 
-`--retry-unresolved-images` can be combined with `--portraits-only` under the
-same fresh ownership/image checks. Run history records `invocation.portraits_only`,
-the selected scene IDs, portrait progress and the existing portrait counters.
+`--retry-unresolved-images` can be used with `recognition portraits` under the
+same fresh ownership/image checks. Run history records `invocation.command: portraits`,
+any explicitly selected `invocation.performer_ids`, the selected scene IDs,
+portrait progress and the existing portrait counters.
 The console shows a performer progress bar and nested portrait-candidate work.
 
 Recognition uses the same console renderer as tagging. Terminals show a scene
@@ -804,11 +819,13 @@ attempt for the selected scenes:
 
 ```bash
 python stash_ai.py recognition run --scene-id 123 --retry-unresolved-images
+# Retry only one existing performer's portrait, without scene recognition:
+python stash_ai.py recognition portraits --performer-id 456 --retry-unresolved-images
 ```
 
 Use the same `--face-config`, `--faces-db` and `--device` overrides as the original
 run, if any. This invocation-only flag retries unresolved portrait writes for
-currently accepted, application-owned performers in the selected scenes. It
+currently accepted, application-owned performers in the selected scope. It
 revalidates identity and image ownership, reuses eligible cached JPEGs, and
 checks the live image again immediately before dispatch. A changed/manual image
 is preserved. It does not retry uncertain performer creation, linking or name

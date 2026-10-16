@@ -1,4 +1,4 @@
-"""Finite selected-scene orchestration; no tag runtime or automatic hook."""
+"""Finite recognition and retained-portrait orchestration; no tag runtime or hook."""
 from collections import Counter
 from dataclasses import asdict, dataclass, replace
 import os
@@ -122,7 +122,8 @@ def _publish_selection(database, client, report, config, scope, namespace, selec
 def execute(args, config, *, services=None):
     services = services or Services()
     retry_images = bool(getattr(args, 'retry_unresolved_images', False))
-    portraits_only = bool(getattr(args, 'portraits_only', False))
+    portraits_only = getattr(args, 'command', 'run') == 'portraits'
+    performer_ids = list(dict.fromkeys(getattr(args, 'performer_id', None) or []))
     url = os.getenv('STASH_URL', 'http://localhost:9999')
     key = os.getenv('STASH_API_KEY', '')
     scope = instance_scope(url)
@@ -139,7 +140,8 @@ def execute(args, config, *, services=None):
             with phase(report, 'Recognition selection'):
                 ready = {}
                 if portraits_only:
-                    ready = retained_targets(database, config, scope, args.scene_id or None)
+                    ready = retained_targets(database, config, scope, args.scene_id or None,
+                                             performer_ids=performer_ids or None)
                     source = args.scene_id or sorted({s['scene'] for t in ready.values() for s in t['scans']}, key=int)
                 else:
                     source = client.scene_ids() if args.all_scenes else dict.fromkeys(args.scene_id)
@@ -157,7 +159,8 @@ def execute(args, config, *, services=None):
                             seen.add(identifier)
             snapshot = config.snapshot()
             if portraits_only or retry_images:
-                snapshot['invocation'] = {**({'portraits_only': True} if portraits_only else {}),
+                snapshot['invocation'] = {**({'command': 'portraits'} if portraits_only else {}),
+                                          **({'performer_ids': performer_ids} if performer_ids else {}),
                                           **({'retry_unresolved_images': True} if retry_images else {})}
             if extra is not None:
                 snapshot['names'] = extra.snapshot()

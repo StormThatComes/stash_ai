@@ -1,4 +1,4 @@
-# Loaded only by explicit `recognition run`; never enables a background task.
+# Loaded only by explicit `recognition run` / `recognition portraits`; never enables a background task.
 # Similarities are cosine scores, not identity probabilities. These conservative
 # starting defaults have no claimed accuracy calibration for your VTT library.
 version: 1

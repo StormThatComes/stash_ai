@@ -102,14 +102,15 @@ def test_scope_and_excluded_commands_fail_before_resources(argv):
         parser().parse_args(argv)
 
 
-def test_root_dispatch_avoids_tag_runtime_and_normalizes_ids(monkeypatch):
+@pytest.mark.parametrize('argv', [['run', '--scene-id', '6306'], ['portraits', '--performer-id', '123']])
+def test_root_dispatch_avoids_tag_runtime_and_normalizes_ids(monkeypatch, argv):
     import stash_ai.cli as cli
     import stash_ai.recognition.cli as recognition
     monkeypatch.setattr(cli, 'RuntimeContext', lambda: pytest.fail('tag runtime must stay dormant'))
     seen = []
     monkeypatch.setattr(recognition, 'main', lambda args: seen.append(args) or 0)
-    assert cli.main(['recognition', 'run', '--scene-id', '6306']) == 0
-    assert seen == [['run', '--scene-id', '6306']]
+    assert cli.main(['recognition', *argv]) == 0
+    assert seen == [argv]
     assert parser().parse_args(['run', '--scene-id', '0001']).scene_id == ['1']
 
 
