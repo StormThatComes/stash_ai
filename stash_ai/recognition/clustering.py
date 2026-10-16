@@ -39,9 +39,12 @@ class Group:
 @measured('references')
 def _groups(db, scope, namespace, policy, *, usage=None, stage='loading'):
     usage = usage or ReferenceUsage(policy['max_reference_bytes'])
-    usage.begin(stage, reset=True)
+    cache = evidence(db)
+    if cache is not None:
+        cache.discard_vectors()
     from .reference_index import current
     index = current(db)
+    usage.begin(stage, reset=True, report=index is None)
     if index is not None:
         result = index.snapshot(policy, usage)
         usage.emit(force=True)
@@ -197,6 +200,7 @@ def cluster_scene(database, scan, config, *, progress=None, _cold_replay=False):
     """
     import numpy as np
     db = database.connection
+    cache = evidence(db)
     record = db.execute('SELECT * FROM scans WHERE id=?', (scan,)).fetchone()
     if record is None or record['status'] != 'complete':
         raise ValueError('Face matching requires a complete selected-scene scan.')
@@ -242,12 +246,13 @@ def cluster_scene(database, scan, config, *, progress=None, _cold_replay=False):
             total=count,
         ) as tracked:
             for observation in tracked:
-                query = vector(observation)
+                query = cache.vector(observation) if cache is not None else vector(observation)
                 prior_person = observation['prior_person']
                 ranked = []
                 near = False
                 for group, score, cohesion in comparisons(
-                        groups, query, settings['match_threshold'] - settings['ambiguity_margin']):
+                        groups, query, settings['match_threshold'] - settings['ambiguity_margin'],
+                        exact=(lambda g,q: cache.scores(g,q,observation['id'])) if cache is not None else None):
                     near |= score >= settings['match_threshold'] - settings['ambiguity_margin']
                     if (score >= settings['match_threshold'] - settings['ambiguity_margin'] and
                             cohesion >= grouping['cohesion_threshold']):
@@ -338,6 +343,7 @@ def cluster_scene(database, scan, config, *, progress=None, _cold_replay=False):
 def _recheck_after_merge(db, scan, policy, groups, config):
     """Resolve ambiguity against the surviving groups, preserving raw evidence."""
     settings = config.data['recognition']
+    cache = evidence(db)
     with tracking(
         db.execute(
             'SELECT o.*,m.person AS prior_person FROM observations o LEFT JOIN members m '
@@ -352,11 +358,12 @@ def _recheck_after_merge(db, scan, policy, groups, config):
         ).fetchone()[0],
     ) as tracked:
         for row in tracked:
-            query = vector(row)
+            query = cache.vector(row) if cache is not None else vector(row)
             ranked = []
             for group, mean, minimum in comparisons(groups, query,
                     settings['match_threshold'] - settings['ambiguity_margin'],
-                    config.data['clustering']['cohesion_threshold']):
+                    config.data['clustering']['cohesion_threshold'],
+                    exact=(lambda g,q: cache.scores(g,q,row['id'])) if cache is not None else None):
                 if (mean >= settings['match_threshold'] - settings['ambiguity_margin'] and
                         minimum >= config.data['clustering']['cohesion_threshold']):
                     best_two(ranked, (mean, group.identifier, group))

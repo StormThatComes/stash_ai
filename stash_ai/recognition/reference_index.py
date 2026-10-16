@@ -123,6 +123,8 @@ class ReferenceIndex:
                 refreshed += 1
             wanted[person] = ids
         desired = {identifier for ids in wanted.values() for identifier in ids}
+        unchanged = {person: self.groups[person] for person, ids in wanted.items()
+                     if person in self.groups and self.groups[person][0] == ids}
         # Reuse unchanged vectors and release obsolete representatives before
         # allocating replacements. Never hold two complete reference sets.
         values = {identifier: value for ids, samples in self.groups.values()
@@ -139,14 +141,14 @@ class ReferenceIndex:
                 usage.add([value], kind='Retained')
                 values[row['id']] = value
         for person, ids in wanted.items():
-            self.groups[person] = ids, [values[identifier] for identifier in ids]
+            self.groups[person] = unchanged.get(person) or (ids, tuple(values[identifier] for identifier in ids))
         self.groups = {person: self.groups[person] for person in people}
         self.dirty.clear()
         result = []
         for person in people:
             samples = self.groups[person][1]
             usage.add([], people=1, kind='Retained')
-            result.append(Group(person, tuple(samples), True))
+            result.append(Group(person, samples, True))
         count('reference_snapshot_reuses')
         count('reference_people_refreshed', refreshed)
         self.cached = identity, tuple(result), usage.bytes, usage.samples

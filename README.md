@@ -1391,3 +1391,11 @@ A current-schema update that restores metadata or completes a data
 revision reports that work rather than claiming no changes were
 needed. A complete no-op creates no progress bar and performs
 no full scan.
+
+Replay proof caches reuse exact scores only while immutable representative
+versions remain live. Directional constituent compatibility (including rejected
+pairs) and earliest distinct support-cue prefixes share the byte-bounded RAM
+owner. Every changed representative set, threshold or support minimum causes
+revalidation; evicted entries are recomputed. Co-presence still includes all
+eligible selected scenes, and membership checks remain current. Weak input
+owners prevent caches from keeping obsolete reference sets across reloads.

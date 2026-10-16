@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from functools import wraps
 import hashlib
+import weakref
 
 from .profiling import count
 
@@ -87,6 +88,12 @@ class Evidence:
             self.cache.put(key, value, value.nbytes + 256)
         return value
 
+    def discard_vectors(self):
+        for key in list(self.cache.entries):
+            if key[0] == 'vector':
+                _, size = self.cache.entries.pop(key)
+                self.cache.size -= size
+
     def signature(self, row):
         key = 'signature', row['id']
         value = self.cache.get(key)
@@ -112,9 +119,9 @@ class Evidence:
                    else tuple(id(sample) for sample in group.samples))
         key = 'scores', observation, version
         value = self.cache.get(key)
-        if value is MISSING:
+        if value is MISSING or not same_owners(value[1], group.samples):
             scores = _similarities(group, query)
-            value = scores, tuple(group.samples)
+            value = scores, tuple(weakref.ref(sample) for sample in group.samples)
             self.cache.put(key, value, sum(sample.nbytes + 128 for sample in group.samples))
         return value[0]
 
@@ -135,14 +142,18 @@ class Evidence:
         return latest_rows(self.db, sql, parameters, selected) if value is None else iter(value)
 
 
+def same_owners(refs, samples):
+    return len(refs) == len(samples) and all(ref() is sample for ref, sample in zip(refs, samples))
+
+
 def _row_bytes(row):
     return 512 + sum(len(row[name]) if isinstance(row[name], (str, bytes)) else 0
                      for name in ('embedding', 'geometry'))
 
 
-def current(db):
+def current(db=None):
     value = _active.get()
-    return value if value is not None and value.db is db else None
+    return value if value is not None and (db is None or value.db is db) else None
 
 
 def latest_rows(db, sql, parameters, selected):

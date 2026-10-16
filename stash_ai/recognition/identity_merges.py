@@ -5,7 +5,9 @@ import time
 from .database import encoded
 from .progress import tracking
 from .profiling import measured, count
-from .evidence_cache import current as evidence, latest_rows
+from .evidence_cache import current as evidence_for, latest_rows, MISSING
+from .merge_cache import cached_cross, support_identity, incremental_votes, save_votes
+from .scoring import comparisons
 
 
 def canonical(db, person):
@@ -42,7 +44,7 @@ def _compatible(first, second, config):
     worst_mean = worst_minimum = 1.
     for left in first:
         for right in second:
-            scores = _cross(left, right, config)
+            scores = cached_cross(left, right, config, _cross)
             if scores is None:
                 return None
             worst_mean = min(worst_mean, scores['mean'])
@@ -83,7 +85,7 @@ def _cooccurs(db, first, second, components, selected, config):
                     AND y.id<>o.id AND y.rejected IS NULL)
       ORDER BY s.rowid,o.cue,o.id'''
     parameters = selected['scope'], selected['namespace'], selected['policy_sha']
-    cache = evidence(db)
+    cache = evidence_for(db)
     rows = (cache.contextual(sql, parameters, selected) if cache is not None
             else latest_rows(db, sql, parameters, selected))
     for row in rows:
@@ -117,7 +119,7 @@ def _merge_support_policy(config):
 
 
 @measured('merge_support')
-def _supporting_cues(db, selected, policy, source, target, components, config, minimum):
+def _supporting_cues(db, selected, policy, source, target, components, config, minimum, *, nomination=None):
     """Revalidate durable nominations against the current bounded references.
 
     One (scene, timestamp) is one vote, regardless of duplicated detections.
@@ -127,8 +129,13 @@ def _supporting_cues(db, selected, policy, source, target, components, config, m
     from .clustering import vector
 
     cues, seen = [], set()
-    cache = evidence(db)
-    for row in latest_rows(db, '''SELECT o.id,o.seconds,o.dimensions,o.embedding,s.scene,s.id AS scan
+    cache = evidence_for(db)
+    identity = support_identity(cache, selected, policy, source, target, components, config, minimum) if nomination is not None else None
+    reused = incremental_votes(cache, identity, selected, nomination, components, config, minimum, _matches)
+    if reused is not MISSING:
+        return reused
+    votes = []
+    for row in latest_rows(db, '''SELECT o.id,o.seconds,o.cue,o.dimensions,o.embedding,s.scene,s.id AS scan,s.rowid AS scan_order
       FROM merge_support m
       JOIN observations o ON o.id=m.observation
       JOIN scans s ON s.id=o.scan
@@ -146,8 +153,10 @@ def _supporting_cues(db, selected, policy, source, target, components, config, m
         if _matches(components[target], query, config, cache=cache, observation=row['id']) and _matches(components[source], query, config, cache=cache, observation=row['id']):
             seen.add(key)
             cues.append({'scene': row['scene'], 'seconds': row['seconds'], 'observation': row['id']})
+            votes.append(dict(cues[-1], order=(row['scan_order'],row['cue'],row['id'])))
             if len(cues) >= minimum:
                 break
+    save_votes(cache, identity, votes)
     return cues
 
 
@@ -166,7 +175,7 @@ def supported_merges(database, scan, config, groups, policy, *, usage=None):
         return 0
     if usage is not None:
         usage.begin('merging')
-    selected = db.execute('SELECT scope,namespace,policy_sha FROM scans WHERE id=?', (scan,)).fetchone()
+    selected = db.execute('SELECT id,scope,namespace,policy_sha,scene,status,rowid AS scan_order FROM scans WHERE id=?', (scan,)).fetchone()
     rows = {row['id']: row for row in db.execute(
         'SELECT p.id,p.created FROM people p JOIN scans s ON s.scope=p.scope AND s.namespace=p.namespace '
         'WHERE s.id=? AND NOT EXISTS (SELECT 1 FROM identity_merges WHERE source=p.id)', (scan,))}
@@ -177,9 +186,10 @@ def supported_merges(database, scan, config, groups, policy, *, usage=None):
     merged = 0
     settings = config.data['recognition']
     evidence_policy = _merge_support_policy(config)
+    cache = evidence_for(db)
     with tracking(
         db.execute(
-            'SELECT id,seconds,dimensions,embedding FROM observations WHERE scan=? AND rejected IS '
+            'SELECT id,cue,seconds,dimensions,embedding FROM observations WHERE scan=? AND rejected IS '
             'NULL ORDER BY cue,id',
             (scan,),
         ),
@@ -193,11 +203,15 @@ def supported_merges(database, scan, config, groups, policy, *, usage=None):
         for observation in tracked:
             if usage is not None:
                 usage.emit()
-            query = vector(observation)
+            query = cache.vector(observation) if cache is not None else vector(observation)
+            constituents = [group for component in components.values() for group in component]
+            matched = {group.identifier for group, mean, low in comparisons(constituents, query,
+                settings['match_threshold'], config.data['clustering']['cohesion_threshold'],
+                exact=(lambda g,q: cache.scores(g,q,observation['id'])) if cache is not None else None)
+                if mean >= settings['match_threshold'] and low >= config.data['clustering']['cohesion_threshold']}
             eligible = []
             for root, component in components.items():
-                if all((scores := _similarities(group, query))[0] >= settings['match_threshold']
-                       and scores[1] >= config.data['clustering']['cohesion_threshold'] for group in component):
+                if all(group.identifier in matched for group in component):
                     eligible.append(root)
             eligible.sort(key=order)
             for index, source in enumerate(eligible[1:], 1):
@@ -216,10 +230,11 @@ def supported_merges(database, scan, config, groups, policy, *, usage=None):
                         if order(roots[previous]) < order(target):
                             break
                     nominations[source] = target
-                    db.execute('INSERT OR IGNORE INTO merge_support(source,target,observation,policy) VALUES (?,?,?,?)',
+                    inserted = db.execute('INSERT OR IGNORE INTO merge_support(source,target,observation,policy) VALUES (?,?,?,?)',
                                (source, target, observation['id'], evidence_policy))
                     supporting = _supporting_cues(db, selected, evidence_policy, source, target,
-                                                  components, config, settings['min_merge_support'])
+                                                  components, config, settings['min_merge_support'],
+                                                  nomination=(inserted.rowcount == 1, observation))
                     if len(supporting) >= settings['min_merge_support']:
                         cooccurring = _cooccurs(db, target, source, components, selected, config)
                         stronger = max(settings['match_threshold'], settings['cooccurrence_merge_threshold'])
@@ -250,6 +265,8 @@ def supported_merges(database, scan, config, groups, policy, *, usage=None):
                         merged += 1
                     break
     query = None
+    if cache is not None:
+        cache.discard_vectors()
     if usage is not None:
         usage.begin('retained')
     return merged
