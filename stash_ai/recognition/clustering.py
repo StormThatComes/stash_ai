@@ -11,6 +11,7 @@ from .reference_usage import ReferenceUsage
 from .identity_merges import supported_merges
 from .progress import tracking
 from .ranking import best_two
+from .replay_addresses import address
 from .profiling import measured, count
 from .scoring import comparisons, scoped
 from .evidence_cache import current as evidence, scoped as evidence_owned
@@ -294,7 +295,7 @@ def cluster_scene(database, scan, config, *, progress=None, _cold_replay=False):
         people = [row[0] for row in db.execute('SELECT DISTINCT person FROM candidates '
                                                 "WHERE scan=? AND policy=? AND status='pending'", (scan, policy))]
         support_counts = dict(db.execute('SELECT c.person,COUNT(DISTINCT o.seconds) FROM candidates c '
-            "JOIN observations o ON o.id=json_extract(c.payload,'$.observation') "
+            f"JOIN observations o ON o.id={address(db, 'c')} "
             'WHERE c.scan=? AND c.policy=? GROUP BY c.person', (scan, policy)))
         with tracking(
             people,
@@ -314,7 +315,7 @@ def cluster_scene(database, scan, config, *, progress=None, _cold_replay=False):
                                (person, record['scope'], record['namespace'],
                                 getattr(database, 'identity_clock', time.time)(), None, token))
                     db.execute('INSERT OR IGNORE INTO members SELECT '
-                               "json_extract(payload,'$.observation'),person FROM candidates "
+                               f"{address(db)},person FROM candidates "
                                'WHERE scan=? AND policy=? AND person=?', (scan, policy, person))
         # Include the members accepted above, so a stable next invocation does
         # not invalidate its own cache merely by having established a person.

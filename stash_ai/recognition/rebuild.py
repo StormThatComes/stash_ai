@@ -22,11 +22,8 @@ from .reference_index import references as reference_scope
 from .scoring import score_scope
 from .evidence_cache import evidence_scope
 from .scene_context import apply_scene_context
-
-
-def sample_key(row):
-    return digest([row['scope'], row['namespace'], row['scene'], row['input_sha'],
-                   row['cue'], row['seconds'], row['source'], row['rect'], row['geometry']])
+from .sample_keys import sample_key, physical_keys
+from .replay_addresses import addresses
 
 
 def _observations(db, scan):
@@ -61,9 +58,8 @@ def _copy_observations(db, replay, scan):
         yield from batch
 
 
-def _restore_origins(db, replay, scan):
-    keys = replay.execute('SELECT k.sample_key FROM sample_keys k JOIN observations o '
-                          'ON o.id=k.observation WHERE o.scan=?', (scan,))
+def _restore_origins(db, replay):
+    keys = replay.execute('SELECT sample_key FROM sample_keys')
     for batch in _batches(keys):
         old = db.execute('SELECT * FROM identity_origins WHERE sample_key IN '
                          '(SELECT value FROM json_each(?))', (encoded([row[0] for row in batch]),))
@@ -82,10 +78,11 @@ def _apply_members(db, replay, mapping):
         yield from batch
 
 
-def _mapped_candidates(replay, mapping, policy):
+def _mapped_candidates(replay, mapping, policy, context):
     for row in replay.execute('SELECT * FROM candidates WHERE policy=?', (policy,)):
         payload = json.loads(row['payload'])
         payload['identity_basis'] = 'cold_selected_replay'
+        payload['reference_context'] = context
         yield (row['id'], row['scan'], policy, mapping.get(row['person']), row['status'], encoded(payload))
 
 
@@ -95,11 +92,12 @@ def _copy_selection(database, replay, selected, scope, namespace):
     replay.executescript(SCHEMA + '''
       CREATE TABLE sample_keys(observation TEXT PRIMARY KEY, sample_key TEXT NOT NULL);
       CREATE TABLE origins(sample_key TEXT PRIMARY KEY, person TEXT, observation TEXT);
-      CREATE TABLE old_people(id TEXT PRIMARY KEY, created REAL, performer TEXT);
+      CREATE TABLE old_people(id TEXT PRIMARY KEY, created REAL, performer TEXT, retired INTEGER);
     ''')
     with tracking(
         db.execute(
-            'SELECT id,created,performer FROM people WHERE scope=? AND namespace=?',
+            'SELECT id,created,performer,EXISTS(SELECT 1 FROM identity_merges WHERE source=people.id) '
+            'FROM people WHERE scope=? AND namespace=?',
             (scope, namespace),
         ),
         'Copy historical identity labels',
@@ -111,7 +109,7 @@ def _copy_selection(database, replay, selected, scope, namespace):
         ).fetchone()[0],
     ) as tracked:
         for row in tracked:
-            replay.execute('INSERT INTO old_people VALUES (?,?,?)', tuple(row))
+            replay.execute('INSERT INTO old_people VALUES (?,?,?,?)', tuple(row))
     with tracking(
         selected,
         'Copy selected evidence',
@@ -135,40 +133,24 @@ def _copy_selection(database, replay, selected, scope, namespace):
             ) as tracked:
                 for row in tracked:
                     pass  # The bounded copy iterator has completed both inserts.
-            # Seed origins from old memberships only when no older origin exists.
-            # Superseded scans are useful for identity labels, never grouping evidence.
-            historical = db.execute(
-                    'SELECT '
-                    'o.cue,o.seconds,o.source,o.rect,o.geometry,o.id,s.scope,s.namespace,s.scene,s.input_sha,m.person'
-                    ' FROM members m JOIN observations o ON o.id=m.observation JOIN scans s ON '
-                    's.id=o.scan WHERE s.scope=? AND s.namespace=? AND s.scene=? ORDER BY '
-                    's.rowid,o.cue,o.id',
-                    (scope, namespace, item['scene']),
-                )
-            with tracking(
-                _inserted(replay, 'INSERT OR IGNORE INTO origins VALUES (?,?,?)',
-                          ((sample_key(row), row['person'], row['id']) for row in historical)),
-                'Read historical sample ownership',
-                unit='member',
-                total=lambda: db.execute(
-                    'SELECT COUNT(*) FROM members m JOIN observations o ON o.id=m.observation JOIN '
-                    'scans s ON s.id=o.scan WHERE s.scope=? AND s.namespace=? AND s.scene=?',
-                    (scope, namespace, item['scene']),
-                ).fetchone()[0],
-            ) as tracked:
-                for row in tracked:
-                    pass
-            with tracking(
-                _restore_origins(db, replay, item['scan']),
-                'Restore original sample ownership',
-                unit='observation',
-                total=lambda: replay.execute(
-                    'SELECT COUNT(*) FROM observations WHERE scan=?',
-                    (item['scan'],),
-                ).fetchone()[0],
-            ) as tracked:
-                for row in tracked:
-                    pass
+    # Physical keys include the scene, so batching scene traversal preserves
+    # first-origin precedence within each historical scan/cue/observation order.
+    for batch in _batches(selected):
+        scenes = encoded([item['scene'] for item in batch])
+        historical = db.execute('SELECT o.cue,o.seconds,o.source,o.rect,o.geometry,o.id,'
+            's.scope,s.namespace,s.scene,s.input_sha,m.person FROM members m '
+            'JOIN observations o ON o.id=m.observation JOIN scans s ON s.id=o.scan '
+            'WHERE s.scope=? AND s.namespace=? AND s.scene IN (SELECT value FROM json_each(?)) '
+            'ORDER BY s.rowid,o.cue,o.id', (scope,namespace,scenes))
+        with tracking(_inserted(replay, 'INSERT OR IGNORE INTO origins VALUES (?,?,?)',
+                ((sample_key(row),row['person'],row['id']) for row in historical)),
+                'Read historical sample ownership', unit='member') as tracked:
+            for row in tracked:
+                pass
+    with tracking(_restore_origins(db,replay), 'Restore original sample ownership',
+                  unit='observation') as tracked:
+        for row in tracked:
+            pass
     with work('Commit replay evidence', 1, unit='transaction', position=0) as committed:
         replay.commit()
         committed.advance()
@@ -178,28 +160,21 @@ def _copy_selection(database, replay, selected, scope, namespace):
 def _bind(database, replay, config, scope, namespace, *, usage=None):
     """One historical identity per new cluster; IDs cannot change the partition."""
     with work('Compute identity votes', 1, unit='query', position=0) as votes:
-        replay.executescript('''CREATE TABLE votes AS
-          SELECT m.person AS cluster,o.person AS person,COUNT(*) AS total
-          FROM members m JOIN sample_keys k ON k.observation=m.observation
-          JOIN origins o ON o.sample_key=k.sample_key GROUP BY m.person,o.person;''')
+        replay.execute('CREATE TABLE votes(cluster TEXT,person TEXT,total INTEGER,performer TEXT,retired INTEGER)')
+        inserted = replay.execute('INSERT INTO votes SELECT m.person,o.person,COUNT(*),p.performer,p.retired '
+            'FROM members m JOIN sample_keys k ON k.observation=m.observation '
+            'JOIN origins o ON o.sample_key=k.sample_key JOIN old_people p ON p.id=o.person '
+            'GROUP BY m.person,o.person ORDER BY p.created,p.id,COUNT(*) DESC,m.person')
+        vote_count = inserted.rowcount
         votes.advance()
     mapping, used, performers = {}, set(), set()
     # Oldest wins a consolidation. On a split its largest overlapping piece wins.
     with tracking(
-        replay.execute(
-            'SELECT v.*,p.performer FROM votes v JOIN old_people p ON p.id=v.person ORDER BY '
-            'p.created,p.id,v.total DESC,v.cluster',
-        ),
-        'Bind historical identity votes',
-        unit='vote',
-        position=0,
-        total=lambda: replay.execute(
-            'SELECT COUNT(*) FROM votes v JOIN old_people p ON p.id=v.person',
-        ).fetchone()[0],
+        replay.execute('SELECT * FROM votes ORDER BY rowid'),
+        'Bind historical identity votes', unit='vote', position=0, total=vote_count,
     ) as tracked:
         for row in tracked:
-            alias = database.connection.execute('SELECT 1 FROM identity_merges WHERE source=?', (row['person'],)).fetchone()
-            if (not alias and row['cluster'] not in mapping and row['person'] not in used
+            if (not row['retired'] and row['cluster'] not in mapping and row['person'] not in used
                     and (not row['performer'] or row['performer'] not in performers)):
                 mapping[row['cluster']] = row['person']
                 used.add(row['person'])
@@ -218,6 +193,10 @@ def _bind(database, replay, config, scope, namespace, *, usage=None):
             # fixing a historical reference set that exceeds the new budgets.
             if 'budget' not in str(error):
                 raise
+    historical_performers = {}
+    for batch in _batches(old_groups):
+        historical_performers.update(replay.execute('SELECT id,performer FROM old_people WHERE id IN '
+            '(SELECT value FROM json_each(?))', (encoded([g.identifier for g in batch]),)))
     with tracking(
         unmatched,
         'Bind rebuilt identities',
@@ -247,7 +226,7 @@ def _bind(database, replay, config, scope, namespace, *, usage=None):
             if (ranked and ranked[0][0] >= config.data['recognition']['match_threshold']
                     and (len(ranked) == 1 or ranked[0][0] - ranked[1][0] >= config.data['recognition']['ambiguity_margin'])):
                 candidate = ranked[0][1]
-                performer = replay.execute('SELECT performer FROM old_people WHERE id=?', (candidate,)).fetchone()[0]
+                performer = historical_performers[candidate]
                 if candidate not in used and (not performer or performer not in performers):
                     mapping[cluster] = candidate
                     used.add(candidate)
@@ -313,9 +292,12 @@ def _apply(database, replay, selected, config, scope, namespace, mapping, finger
             ) as tracked:
                 for row in tracked:
                     pass
+            references = _groups(db, scope, namespace, config.data['clustering'], usage=usage, stage='retained')
+            context = reference_context(references)
+            references.clear()
             with tracking(
                 _inserted(db, 'INSERT INTO candidates VALUES (?,?,?,?,?,?)',
-                          _mapped_candidates(replay, mapping, policy)),
+                          _mapped_candidates(replay, mapping, policy, context)),
                 'Save rebuilt candidates',
                 unit='candidate',
                 total=lambda: replay.execute(
@@ -325,17 +307,6 @@ def _apply(database, replay, selected, config, scope, namespace, mapping, finger
             ) as tracked:
                 for row in tracked:
                     pass
-            references = _groups(db, scope, namespace, config.data['clustering'], usage=usage, stage='retained')
-            context = reference_context(references)
-            references.clear()
-            with tracking(
-                selected,
-                'Save reference fingerprints',
-                unit='scene',
-            ) as tracked:
-                for item in tracked:
-                    db.execute("UPDATE candidates SET payload=json_set(payload,'$.reference_context',?) WHERE scan=? AND policy=?",
-                               (context, item['scan'], policy))
             state = {'fingerprint': fingerprint, 'context': context}
             db.execute('INSERT OR REPLACE INTO metadata VALUES (?,?)',
                        ('identity-rebuild:' + digest([scope, namespace]), encoded(state)))
@@ -343,7 +314,7 @@ def _apply(database, replay, selected, config, scope, namespace, mapping, finger
 
 
 def rebuild_selected(database, selected, config, *, progress=None):
-    with profile(database, config.data['execution'].get('profile_rebuild', False)), score_scope():
+    with profile(database, config.data['execution'].get('profile_rebuild', False)), score_scope(), physical_keys(database, config):
         return _rebuild_selected(database, selected, config, progress=progress)
 
 
@@ -409,7 +380,7 @@ def _rebuild_selected(database, selected, config, *, progress=None):
         temporary = SimpleNamespace(connection=replay,
             installation=str(uuid.uuid5(uuid.NAMESPACE_URL, encoded([scope, namespace, 'cold-replay']))),
             identity_clock=itertools.count(1).__next__)
-        with reference_scope(replay, scope, namespace, config), evidence_scope(replay, config):
+        with addresses(replay), reference_scope(replay, scope, namespace, config), evidence_scope(replay, config):
             with tracking(
                 selected,
                 'Rebuild selected identities',
