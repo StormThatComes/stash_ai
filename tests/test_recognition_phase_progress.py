@@ -86,7 +86,7 @@ def test_cached_rebuild_validates_observations_without_fabricating_replay_work(t
     assert execute(args('1', '2'), config, services=services) == 0
     rows = {bar.desc: bar for bar in bars}
     assert rows['Validate cached identity rebuild'].n == rows['Validate cached identity rebuild'].total == 2
-    assert rows['Validate cached face observations'].n == rows['Validate cached face observations'].total == 3
+    assert rows['Validate cached face observations'].n == rows['Validate cached face observations'].total == 6
     assert 'Copy selected evidence' not in rows and 'Match face observations' not in rows
     assert 'Apply rebuilt identities' not in rows
     assert len(models) == loaded and owners == {'stash-console'}

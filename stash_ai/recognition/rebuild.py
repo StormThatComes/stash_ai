@@ -25,6 +25,7 @@ from .scene_context import apply_scene_context
 from .sample_keys import sample_key, physical_keys
 from .replay_addresses import addresses
 from .replay_memory import memory_replay, Lookahead, report_pages
+from . import rebuild_cache
 
 
 def _observations(db, scan):
@@ -160,6 +161,7 @@ def _copy_selection(database, replay, selected, scope, namespace):
 @measured('binding')
 def _bind(database, replay, config, scope, namespace, *, usage=None):
     """One historical identity per new cluster; IDs cannot change the partition."""
+    database._rebuild_optional_budget_fallback = False
     with work('Compute identity votes', 1, unit='query', position=0) as votes:
         replay.execute('CREATE TABLE votes(cluster TEXT,person TEXT,total INTEGER,performer TEXT,retired INTEGER)')
         inserted = replay.execute('INSERT INTO votes SELECT m.person,o.person,COUNT(*),p.performer,p.retired '
@@ -194,6 +196,7 @@ def _bind(database, replay, config, scope, namespace, *, usage=None):
             # fixing a historical reference set that exceeds the new budgets.
             if 'budget' not in str(error):
                 raise
+            database._rebuild_optional_budget_fallback = True
     historical_performers = {}
     for batch in _batches(old_groups):
         historical_performers.update(replay.execute('SELECT id,performer FROM old_people WHERE id IN '
@@ -308,9 +311,12 @@ def _apply(database, replay, selected, config, scope, namespace, mapping, finger
             ) as tracked:
                 for row in tracked:
                     pass
-            state = {'fingerprint': fingerprint, 'context': context}
-            db.execute('INSERT OR REPLACE INTO metadata VALUES (?,?)',
-                       ('identity-rebuild:' + digest([scope, namespace]), encoded(state)))
+            state = dict(format=2, fingerprint=fingerprint, context=context,
+                inputs=rebuild_cache.input_context(db,selected,scope,namespace),
+                bindings=rebuild_cache.binding_context(db,scope,namespace),
+                limits=rebuild_cache.resource_limits(config),
+                resource_reuse=not getattr(database,'_rebuild_optional_budget_fallback',False))
+            rebuild_cache.save(db,scope,namespace,state)
         committed.advance()
 
 
@@ -339,39 +345,21 @@ def _rebuild_selected(database, selected, config, *, progress=None):
     scope, namespace = first['scope'], first['namespace']
     fingerprint = digest({'format': 1, 'scans': selected, 'policy': matching_policy(config)})
     usage = ReferenceUsage(config.data['clustering']['max_reference_bytes'], progress)
-    state = db.execute('SELECT value FROM metadata WHERE key=?', ('identity-rebuild:' + digest([scope, namespace]),)).fetchone()
-    if state and json.loads(state[0]).get('fingerprint') == fingerprint:
-        references = _groups(db, scope, namespace, config.data['clustering'], usage=usage)
+    state = rebuild_cache.lookup(db,scope,namespace,fingerprint)
+    if state and rebuild_cache.admissible(state,config):
+        references = _groups(db,scope,namespace,config.data['clustering'],usage=usage)
         context = reference_context(references)
         references.clear()
-        complete = all(complete_candidates(db, item['scan'], matching_policy(config), context,
-            db.execute('SELECT COUNT(*) FROM observations WHERE scan=? AND rejected IS NULL',
-                       (item['scan'],)).fetchone()[0], exact_memberships=True) for item in selected)
-        if json.loads(state[0]).get('context') == context and complete:
-            with tracking(
-                selected,
-                'Validate cached identity rebuild',
-                unit='scene',
-                position=0,
-            ) as tracked:
-                for item in tracked:
-                    with tracking(
-                        db.execute(
-                            'SELECT dimensions,embedding FROM observations WHERE scan=? AND rejected '
-                            'IS NULL',
-                            (item['scan'],),
-                        ),
-                        'Validate cached face observations',
-                        unit='observation',
-                        total=lambda: db.execute(
-                            'SELECT COUNT(*) FROM observations WHERE scan=? AND rejected IS NULL',
-                            (item['scan'],),
-                        ).fetchone()[0],
-                    ) as tracked:
-                        for row in tracked:
-                            vector(row)
-            usage.begin('cached')
-            return _results(db, selected, config)
+        if (state.get('context')==context
+                and state.get('inputs')==rebuild_cache.input_context(db,selected,scope,namespace)
+                and state.get('bindings')==rebuild_cache.binding_context(db,scope,namespace)):
+            with work('Validate cached identity rebuild',len(selected),unit='scene',position=0) as checked:
+                complete=rebuild_cache.complete(db,selected,matching_policy(config),context)
+                if complete:
+                    checked.advance(len(selected))
+            if complete:
+                usage.begin('cached')
+                return _results(db,selected,config)
     with memory_replay(config) as (replay, replay_uri):
         replay.row_factory = sqlite3.Row
         replay = connection(replay)
