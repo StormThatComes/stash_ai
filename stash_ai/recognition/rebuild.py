@@ -19,6 +19,7 @@ from .progress import tracking, work
 from .ranking import best_two
 from .profiling import measured, profile, connection
 from .reference_index import references as reference_scope
+from .scoring import score_scope
 from .scene_context import apply_scene_context
 
 
@@ -341,7 +342,7 @@ def _apply(database, replay, selected, config, scope, namespace, mapping, finger
 
 
 def rebuild_selected(database, selected, config, *, progress=None):
-    with profile(database, config.data['execution'].get('profile_rebuild', False)):
+    with profile(database, config.data['execution'].get('profile_rebuild', False)), score_scope():
         return _rebuild_selected(database, selected, config, progress=progress)
 
 

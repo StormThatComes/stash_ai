@@ -982,3 +982,12 @@ increased on hosts with more RAM, such as a 96 GB system. If the canonical index
 cannot fit its conservative per-observation allowance, replay uses the existing
 ordered queries without a new disk-spill cache. A failed replay discards its
 private index; it is never reused after rollback or by another invocation.
+
+Similarity scoring uses bounded native NumPy blocks for sufficiently large
+catalogues. A conservative floating-point error interval may reject only groups
+that cannot meet the relevant threshold/cohesion condition. Every remaining
+comparison uses the original scalar dot products and reductions, preserving
+stored scores, ambiguity, ties and decisions. Small catalogues keep the scalar
+path. Native block caches are invocation-owned and byte-bounded, including their
+retained input owners; no approximate-nearest-neighbor or truncated rival list is
+introduced. Same-scene contextual matching retains its full cohort of rivals.
