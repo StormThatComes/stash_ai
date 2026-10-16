@@ -28,6 +28,7 @@ from .replay_memory import memory_replay, Lookahead, report_pages
 from . import rebuild_cache
 from .replay_checkpoint import Checkpoints, ReplayClock
 from .compute import compute_scope
+from .parallel_scores import FrozenScores
 
 
 def _observations(db, scan):
@@ -200,6 +201,7 @@ def _bind(database, replay, config, scope, namespace, *, usage=None):
                 raise
             database._rebuild_optional_budget_fallback = True
     historical_performers = {}
+    historical_scores = FrozenScores(old_groups)
     for batch in _batches(old_groups):
         historical_performers.update(replay.execute('SELECT id,performer FROM old_people WHERE id IN '
             '(SELECT value FROM json_each(?))', (encoded([g.identifier for g in batch]),)))
@@ -216,17 +218,31 @@ def _bind(database, replay, config, scope, namespace, *, usage=None):
                 'ON m.observation=o.id JOIN scans s ON s.id=o.scan WHERE m.person=? '
                 'ORDER BY CAST(s.scene AS INTEGER),s.scene,o.cue,o.seconds,o.geometry,o.embedding,o.id LIMIT ?',
                 (cluster, config.data['clustering']['max_samples_per_person']))] if old_groups else [])
+            parallel = historical_scores.score(tuple(samples), float('-inf'),
+                                                config.data['clustering']['cohesion_threshold'])
+            contributions = None
+            if parallel is not None:
+                contributions = {}
+                for values in parallel:
+                    for position, mean, low in values:
+                        contributions.setdefault(position, []).append((mean, low))
             with tracking(
                 old_groups,
                 'Compare historical identities',
                 unit='identity',
             ) as tracked:
-                for old in tracked:
+                for position, old in enumerate(tracked):
                     means, minimum = [], 1.
-                    for query in samples:
-                        mean, low = _similarities(old, query)
-                        means.append(mean)
-                        minimum = min(minimum, low)
+                    if contributions is None:
+                        for query in samples:
+                            mean, low = _similarities(old, query)
+                            means.append(mean)
+                            minimum = min(minimum, low)
+                    else:
+                        values = contributions.get(position, [])
+                        if len(values) == len(samples):
+                            means = [mean for mean, _ in values]
+                            minimum = min([1.] + [low for _, low in values])
                     if means and minimum >= config.data['clustering']['cohesion_threshold']:
                         best_two(ranked, (sum(means) / len(means), old.identifier))
             if (ranked and ranked[0][0] >= config.data['recognition']['match_threshold']
