@@ -967,3 +967,18 @@ consumption. Stage seconds are inclusive and nested, so do not add them together
 Record runtime, observation/person counts and warm versus cold state when
 comparing runs. Profiling has overhead and does not alter matching policy or
 require fresh inference. Ordinary progress remains throttled independently.
+
+Cold replay now owns a RAM-resident canonical reference index for its immutable
+selected observation catalogue. Membership inserts, moves and retractions update
+that private index; unchanged representatives reuse validated vectors. Known
+references remain frozen inside each scene. The exact canonical sample order,
+reference fingerprint and logical reference budget are preserved. General
+reference loads use bounded person batches, including full membership-scope
+validation outside the representative cap.
+
+`execution.rebuild_memory_bytes` is a lazy working-index budget (8 GiB by default),
+not an upfront allocation or the existing representative-vector limit. It can be
+increased on hosts with more RAM, such as a 96 GB system. If the canonical index
+cannot fit its conservative per-observation allowance, replay uses the existing
+ordered queries without a new disk-spill cache. A failed replay discards its
+private index; it is never reused after rollback or by another invocation.

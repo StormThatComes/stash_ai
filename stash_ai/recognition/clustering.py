@@ -38,6 +38,12 @@ class Group:
 def _groups(db, scope, namespace, policy, *, usage=None, stage='loading'):
     usage = usage or ReferenceUsage(policy['max_reference_bytes'])
     usage.begin(stage, reset=True)
+    from .reference_index import current
+    index = current(db)
+    if index is not None:
+        result = index.snapshot(policy, usage)
+        usage.emit(force=True)
+        return result
     maximum = policy['max_people_per_lookup']
     rows = db.execute('SELECT id FROM people WHERE scope=? AND namespace=? '
                       'AND NOT EXISTS (SELECT 1 FROM identity_merges WHERE source=people.id) '
@@ -47,27 +53,32 @@ def _groups(db, scope, namespace, policy, *, usage=None, stage='loading'):
     if len(rows) > maximum:
         raise ValueError('Face identity lookup exceeds configured person budget.')
     result = []
-    with tracking(
-        rows,
-        'Load identity references',
-        unit='person',
-    ) as tracked:
-        for person in tracked:
-            invalid = db.execute('SELECT 1 FROM members m JOIN observations o ON o.id=m.observation '
-                'JOIN scans s ON s.id=o.scan WHERE m.person=? AND '
-                "(s.scope<>? OR s.namespace<>? OR s.status<>'complete' OR o.rejected IS NOT NULL) LIMIT 1",
-                (person['id'], scope, namespace)).fetchone()
-            if invalid:
-                raise ValueError('Face identity has incompatible retained membership evidence.')
-            samples = db.execute('SELECT o.dimensions,o.embedding FROM observations o JOIN members m '
-                                 'ON m.observation=o.id JOIN scans s ON s.id=o.scan WHERE m.person=? '
-                                 'ORDER BY CAST(s.scene AS INTEGER),s.scene,o.cue,o.seconds,o.geometry,o.embedding,o.id LIMIT ?',
-                                 (person['id'], policy['max_samples_per_person'])).fetchall()
-            if not samples:
-                raise ValueError('Accepted face identity has no retained supporting embeddings.')
-            vectors = [vector(row) for row in samples]
-            usage.add(vectors, people=1, kind='Retained')
-            result.append(Group(person['id'], vectors, True))
+    from itertools import islice
+    iterator = iter(rows)
+    while batch := list(islice(iterator, 256)):
+        identifiers = encoded([person['id'] for person in batch])
+        invalid = db.execute('SELECT 1 FROM members m JOIN observations o ON o.id=m.observation '
+            'JOIN scans s ON s.id=o.scan WHERE m.person IN (SELECT value FROM json_each(?)) AND '
+            "(s.scope<>? OR s.namespace<>? OR s.status<>'complete' OR o.rejected IS NOT NULL) LIMIT 1",
+            (identifiers, scope, namespace)).fetchone()
+        if invalid:
+            raise ValueError('Face identity has incompatible retained membership evidence.')
+        samples = {person['id']: [] for person in batch}
+        for row in db.execute('SELECT person,dimensions,embedding FROM ('
+            'SELECT m.person,o.dimensions,o.embedding,ROW_NUMBER() OVER (PARTITION BY m.person '
+            'ORDER BY CAST(s.scene AS INTEGER),s.scene,o.cue,o.seconds,o.geometry,o.embedding,o.id) AS position '
+            'FROM observations o JOIN members m ON m.observation=o.id JOIN scans s ON s.id=o.scan '
+            'WHERE m.person IN (SELECT value FROM json_each(?))) WHERE position<=? ORDER BY person,position',
+            (identifiers, policy['max_samples_per_person'])):
+            samples[row['person']].append(vector(row))
+        with tracking(batch, 'Load identity references', unit='person') as tracked:
+            for person in tracked:
+                vectors = samples[person['id']]
+                if not vectors:
+                    raise ValueError('Accepted face identity has no retained supporting embeddings.')
+                usage.add(vectors, people=1, kind='Retained')
+                result.append(Group(person['id'], vectors, True))
+
     usage.emit(force=True)
     return result
 
