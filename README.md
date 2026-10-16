@@ -1399,3 +1399,12 @@ owner. Every changed representative set, threshold or support minimum causes
 revalidation; evicted entries are recomputed. Co-presence still includes all
 eligible selected scenes, and membership checks remain current. Weak input
 owners prevent caches from keeping obsolete reference sets across reloads.
+
+Cold replay batches historical ownership reads and prepares a single ordered
+label-vote stream with frozen alias/performer metadata. A private, transactionally
+maintained candidate-address relation avoids repeated payload decoding in hot
+joins; durable payloads and their integrity checks keep the existing format.
+Physical sample keys use a bounded RAM cache keyed by every canonical dependency,
+so changed geometry, source or scan input cannot reuse an old key. Final candidate
+payloads receive their reference context during insertion rather than a second
+JSON update pass.

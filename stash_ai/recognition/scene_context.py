@@ -9,6 +9,7 @@ from .progress import tracking, work
 from .ranking import best_two
 from .reference_usage import ReferenceUsage
 from .scoring import comparisons
+from .replay_addresses import address
 from .evidence_cache import current as evidence_for
 
 
@@ -32,7 +33,7 @@ def _cores(db, scan, policy, groups, config):
     settings = config.data['recognition']
     minimum = config.data['clustering']['same_scene_min_support']
     support = {}
-    source = ("FROM candidates c JOIN observations o ON o.id=json_extract(c.payload,'$.observation') "
+    source = (f"FROM candidates c JOIN observations o ON o.id={address(db, 'c')} "
         "JOIN members m ON m.observation=o.id AND c.person=m.person "
         "WHERE c.policy=? AND c.scan=o.scan AND o.scan=? AND o.rejected IS NULL AND c.status='accepted'")
     rows = db.execute("SELECT o.id,o.seconds,o.dimensions,o.embedding,m.person " + source +
@@ -84,7 +85,7 @@ def apply_scene_context(database, selected, config, *, progress=None):
             cores = _cores(db, scan, policy, groups, config)
             if not cores:
                 continue
-            source = ("FROM candidates c JOIN observations o ON o.id=json_extract(c.payload,'$.observation') "
+            source = (f"FROM candidates c JOIN observations o ON o.id={address(db, 'c')} "
                 "WHERE c.policy=? AND c.scan=o.scan AND o.scan=? AND o.rejected IS NULL AND c.status='withheld'")
             rows = db.execute("SELECT o.*,c.id AS candidate " + source +
                 " ORDER BY o.cue,o.geometry,o.embedding,o.id", (policy, scan))
