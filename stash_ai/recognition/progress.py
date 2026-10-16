@@ -87,7 +87,7 @@ class WorkProgress:
 
 
 @contextmanager
-def work(label, total=None, *, unit='item', position=1, **values):
+def work(label, total=None, *, unit='item', position=1, initial=0, **values):
     """Shared run-owned progress, also for calls below injected service boundaries."""
     report = current_report()
     console = getattr(report, 'console', None)
@@ -103,7 +103,7 @@ def work(label, total=None, *, unit='item', position=1, **values):
                 total = None
     with activity(report, label, **values), WorkProgress(
             report, label, total, unit=unit, key='work' if position == 0 else 'detail',
-            transient=position != 0, position=position) as progress:
+            transient=position != 0, position=position, initial=initial) as progress:
         yield progress
 
 
