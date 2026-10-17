@@ -11,12 +11,14 @@ from .reference_usage import ReferenceUsage
 from .scoring import comparisons
 from .replay_addresses import address
 from .evidence_cache import current as evidence_for
+from .parallel_scores import scored_rows, contributions
 
 
-def _rank(groups, query, config, *, cache=None, observation=None):
+def _rank(groups, query, config, *, cache=None, observation=None, frozen=None):
     ranked = []
     cohesion = config.data['clustering']['cohesion_threshold']
-    for group, mean, minimum in comparisons(groups, query, cohesion=cohesion,
+    for group, mean, minimum in contributions(groups, query, frozen, len(groups),
+            float('-inf'), cohesion,
             exact=(lambda g,q: cache.scores(g,q,observation)) if cache is not None else None):
         if minimum >= cohesion:
             best_two(ranked, (mean, group.identifier, group))
@@ -38,14 +40,15 @@ def _cores(db, scan, policy, groups, config):
         "WHERE c.policy=? AND c.scan=o.scan AND o.scan=? AND o.rejected IS NULL AND c.status='accepted'")
     rows = db.execute("SELECT o.id,o.seconds,o.dimensions,o.embedding,m.person " + source +
         " ORDER BY o.cue,o.geometry,o.embedding,o.id", (policy, scan))
-    with tracking(rows, 'Validate same-scene support', unit='observation',
+    with tracking(scored_rows(rows, groups, float('-inf'), config.data['clustering']['cohesion_threshold']),
+                  'Validate same-scene support', unit='observation',
                   total=lambda: db.execute('SELECT COUNT(*) ' + source, (policy, scan)).fetchone()[0]) as tracked:
-        for row in tracked:
+        for row, frozen in tracked:
             cues = support.setdefault(row['person'], {})
             if len(cues) >= minimum or row['seconds'] in cues:
                 continue
             query = cache.vector(row) if cache is not None else vector(row)
-            ranked = _rank(groups, query, config, cache=cache, observation=row['id'])
+            ranked = _rank(groups, query, config, cache=cache, observation=row['id'], frozen=frozen)
             if (ranked and ranked[0][1] == row['person'] and ranked[0][0] >= settings['match_threshold']
                     and _unambiguous(ranked, settings['ambiguity_margin'])):
                 cues[row['seconds']] = row['id']
@@ -89,12 +92,13 @@ def apply_scene_context(database, selected, config, *, progress=None):
                 "WHERE c.policy=? AND c.scan=o.scan AND o.scan=? AND o.rejected IS NULL AND c.status='withheld'")
             rows = db.execute("SELECT o.*,c.id AS candidate " + source +
                 " ORDER BY o.cue,o.geometry,o.embedding,o.id", (policy, scan))
-            with tracking(rows, 'Match same-scene observations', unit='observation',
+            with tracking(scored_rows(rows, groups, float('-inf'), grouping['cohesion_threshold']),
+                          'Match same-scene observations', unit='observation',
                           total=lambda: db.execute('SELECT COUNT(*) ' + source, (policy, scan)).fetchone()[0]) as observations:
-                for row in observations:
+                for row, frozen in observations:
                     usage.emit()
                     query = cache.vector(row) if cache is not None else vector(row)
-                    ranked = _rank(groups, query, config, cache=cache, observation=row['id'])
+                    ranked = _rank(groups, query, config, cache=cache, observation=row['id'], frozen=frozen)
                     if (not ranked or ranked[0][0] < threshold or ranked[0][1] not in cores
                             or not _unambiguous(ranked, settings['ambiguity_margin'])):
                         continue

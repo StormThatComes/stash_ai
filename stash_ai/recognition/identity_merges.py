@@ -8,6 +8,7 @@ from .profiling import measured, count
 from .evidence_cache import current as evidence_for, latest_rows, MISSING
 from .merge_cache import cached_cross, support_identity, incremental_votes, save_votes
 from .scoring import comparisons
+from .parallel_scores import scored_rows, contributions
 
 
 def canonical(db, person):
@@ -188,11 +189,11 @@ def supported_merges(database, scan, config, groups, policy, *, usage=None):
     evidence_policy = _merge_support_policy(config)
     cache = evidence_for(db)
     with tracking(
-        db.execute(
+        scored_rows(db.execute(
             'SELECT id,cue,seconds,dimensions,embedding FROM observations WHERE scan=? AND rejected IS '
             'NULL ORDER BY cue,id',
             (scan,),
-        ),
+        ), groups, settings['match_threshold'], config.data['clustering']['cohesion_threshold']),
         'Check identity merges',
         unit='observation',
         total=lambda: db.execute(
@@ -200,12 +201,11 @@ def supported_merges(database, scan, config, groups, policy, *, usage=None):
             (scan,),
         ).fetchone()[0],
     ) as tracked:
-        for observation in tracked:
+        for observation, frozen in tracked:
             if usage is not None:
                 usage.emit()
             query = cache.vector(observation) if cache is not None else vector(observation)
-            constituents = [group for component in components.values() for group in component]
-            matched = {group.identifier for group, mean, low in comparisons(constituents, query,
+            matched = {group.identifier for group, mean, low in contributions(groups, query, frozen, len(groups),
                 settings['match_threshold'], config.data['clustering']['cohesion_threshold'],
                 exact=(lambda g,q: cache.scores(g,q,observation['id'])) if cache is not None else None)
                 if mean >= settings['match_threshold'] and low >= config.data['clustering']['cohesion_threshold']}
