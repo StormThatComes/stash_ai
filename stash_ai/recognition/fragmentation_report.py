@@ -156,6 +156,20 @@ def build(config, scene_id, *, limit=20, min_mean=None, scope=None):
         total, rejected = db.execute(
             'SELECT COUNT(*),COUNT(*) FILTER (WHERE rejected IS NOT NULL) '
             'FROM observations WHERE scan=?', (scan['id'],)).fetchone()
+        rejected_reasons = [dict(row) for row in db.execute(
+            'SELECT rejected AS reason,COUNT(*) AS count FROM observations '
+            'WHERE scan=? AND rejected IS NOT NULL GROUP BY rejected ORDER BY count DESC,rejected',
+            (scan['id'],))]
+        withheld_examples = [dict(row) for row in db.execute(
+            "SELECT o.id AS observation_id,o.cue,o.seconds,"
+            "json_extract(c.payload,'$.reason') AS reason,"
+            "json_extract(c.payload,'$.scores') AS score_json "
+            "FROM candidates c JOIN observations o ON o.id=json_extract(c.payload,'$.observation') "
+            "WHERE c.scan=? AND c.policy=? AND c.status='withheld' "
+            "AND o.scan=c.scan ORDER BY o.cue,o.seconds,o.id LIMIT 50",
+            (scan['id'], policy))]
+        for example in withheld_examples:
+            example['scores'] = json.loads(example.pop('score_json') or '[]')
         people = {item['identity_id']: item for item in identities}
         ids = list(people)
         pairs = []
@@ -208,7 +222,8 @@ def build(config, scene_id, *, limit=20, min_mean=None, scope=None):
             'summary': {'observations': total, 'rejected': rejected,
                         'identities': len(identities), 'pairs_checked': len(ids)*(len(ids)-1)//2,
                         'pairs_above_min_mean': len(pairs), 'pairs_reported': len(selected_pairs)},
-            'decisions': decisions, 'identities': identities,
+            'decisions': decisions, 'rejected_reasons': rejected_reasons,
+            'withheld_examples': withheld_examples, 'identities': identities,
             'potential_fragments': selected_pairs,
             'limitations': [
                 'Pair checks use current bounded references, not a complete cold replay.',
