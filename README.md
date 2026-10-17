@@ -1421,7 +1421,9 @@ uses one isolated read-only reader to validate at most one upcoming scene.
 There are no fixed 256-observation or 8 MiB scene eligibility limits. Instead,
 lookahead retains validated vectors up to one sixteenth of
 `execution.rebuild_memory_bytes` (512 MiB by default). Larger scenes still
-benefit from partial prefetch; remaining observations are decoded on demand.
+benefit from bounded-prefix prefetch; remaining observations are decoded on demand.
+The read-only worker traverses the indexed observation order without a large
+SQLite sort; transient SQLite lock contention falls back to serial decoding.
 Only immutable vectors are prepared; assignments and SQLite writes stay ordered
 on the coordinator. Invalid vectors are reported when originally consumed,
 and cancellation closes the reader/worker.

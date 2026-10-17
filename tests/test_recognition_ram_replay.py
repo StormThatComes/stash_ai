@@ -110,3 +110,36 @@ def test_prefetch_memory_budget_keeps_large_scene_eligible(tmp_path):
             assert prepared_vector(dict(id=first,dimensions=1024,embedding=blob))[0]==1.
             missing=next(str(i) for i in range(120) if str(i) not in ahead.prepared)
             assert prepared_vector(dict(id=missing,dimensions=1024,embedding=blob)) is MISSING
+
+
+
+def test_prefetch_is_opportunistic_when_sqlite_table_is_locked(tmp_path):
+    config=enabled(setup(tmp_path),rebuild_prefetch_scenes=True)
+    blob=np.array([1.,0.,0.,0.],dtype='<f4').tobytes()
+    with memory_replay(config) as (db,uri):
+        db.execute('CREATE TABLE observations(id TEXT,scan TEXT,dimensions INTEGER,embedding BLOB,rejected TEXT,cue INTEGER,geometry TEXT)')
+        db.execute("INSERT INTO observations VALUES ('one','s',4,?,NULL,0,'{}')",(blob,))
+        db.commit()
+        # Shared-cache memory databases reject speculative reads of a table
+        # currently owned by a writer. Matching remains responsible for errors.
+        db.execute("UPDATE observations SET dimensions=dimensions WHERE id='one'")
+        with Lookahead(uri,config) as ahead:
+            ahead.submit('s');ahead.take('s')
+            assert ahead.prepared=={}
+            assert ahead.pending is None and ahead.scan is None
+        db.rollback()
+        with Lookahead(uri,config) as ahead:
+            ahead.submit('s');ahead.take('s')
+            assert len(ahead.prepared)==1
+
+
+def test_prefetch_uses_scan_index_without_temp_sort(tmp_path):
+    config=enabled(setup(tmp_path),rebuild_prefetch_scenes=True)
+    with memory_replay(config) as (db,uri):
+        db.execute('CREATE TABLE observations(id TEXT,scan TEXT,dimensions INTEGER,embedding BLOB,rejected TEXT,cue INTEGER,geometry TEXT)')
+        db.execute('CREATE INDEX observations_scan ON observations(scan,cue,id)')
+        plan=[row[3] for row in db.execute(
+            "EXPLAIN QUERY PLAN SELECT id,dimensions,embedding FROM observations WHERE scan=? "
+            "AND rejected IS NULL ORDER BY cue,id",('s',))]
+        assert any('USING INDEX observations_scan' in part for part in plan)
+        assert not any('TEMP B-TREE' in part for part in plan)

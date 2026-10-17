@@ -63,15 +63,18 @@ class Lookahead:
             db.execute('PRAGMA query_only=ON')
             values={}
             retained_bytes=0
+            # This is a keyed cache, so matching-order sort keys are unnecessary.
+            # ORDER BY cue,id uses observations_scan, avoiding an unbounded
+            # temporary SQLite sort for large scenes.
             for row in db.execute('SELECT id,dimensions,embedding FROM observations WHERE scan=? '
-                                  'AND rejected IS NULL ORDER BY cue,geometry,embedding,id',(scan,)):
+                                  'AND rejected IS NULL ORDER BY cue,id',(scan,)):
                 self.cancel.check()
                 blob=row['embedding']
                 # Approximate Python ownership and a NumPy view alongside the
                 # retained embedding; avoid retaining the entire scene in RAM.
                 charge=2*len(blob)+1024 if isinstance(blob,bytes) else 1024
                 if charge>self.budget_bytes-retained_bytes:
-                    continue  # This observation is validated on demand by its owner.
+                    break  # Decode this and all subsequent observations on demand.
                 try:
                     value=vector(row)
                 except ValueError as error:
@@ -96,8 +99,17 @@ class Lookahead:
             return
         if self.scan!=scan:
             raise RuntimeError('Replay lookahead order changed.')
-        self.prepared=self.pending.result()
-        self.pending=self.scan=None
+        try:
+            self.prepared=self.pending.result()
+        except sqlite3.OperationalError as error:
+            # A speculative reader can collide with SQLite shared-cache
+            # writers. Never turn an optional prefetch lock into a failed rebuild.
+            code=getattr(error,'sqlite_errorcode',None)
+            if code is None or code & 255 not in (sqlite3.SQLITE_BUSY,sqlite3.SQLITE_LOCKED):
+                raise
+            self.prepared={}
+        finally:
+            self.pending=self.scan=None
 
     def __exit__(self,*error):
         _active.reset(self.context)
