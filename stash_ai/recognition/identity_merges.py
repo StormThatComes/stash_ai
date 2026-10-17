@@ -9,7 +9,7 @@ from .evidence_cache import current as evidence_for, latest_rows, MISSING
 from .merge_cache import support_identity, incremental_votes, save_votes
 from .scoring import comparisons
 from .parallel_scores import scored_rows, contributions
-from .parallel_merges import cross_pairs, cross_scores
+from .parallel_merges import cross_pairs, cross_scores, matching_rows
 
 
 def canonical(db, person):
@@ -77,15 +77,18 @@ def _cooccurs(db, first, second, components, selected, config):
     cache = evidence_for(db)
     rows = (cache.contextual(sql, parameters, selected) if cache is not None
             else latest_rows(db, sql, parameters, selected))
-    for row in rows:
+    for row, mask in matching_rows(rows, (components[first], components[second]), config):
         key = row['scan_order'], row['cue']
         if key != cue:
             cue, left, right = key, [], []
-        query = cache.vector(row) if cache is not None else vector(row)
+        query = (cache.vector(row) if cache is not None else vector(row)) if mask is None else None
         signature = (cache.signature(row) if cache is not None else
                      hashlib.sha256(row['geometry'].encode() + row['embedding']).digest())
-        matches_left = _matches(components[first], query, config, cache=cache, observation=row['id'])
-        matches_right = _matches(components[second], query, config, cache=cache, observation=row['id'])
+        if mask is None:
+            matches_left = _matches(components[first], query, config, cache=cache, observation=row['id'])
+            matches_right = _matches(components[second], query, config, cache=cache, observation=row['id'])
+        else:
+            matches_left, matches_right = bool(mask & 1), bool(mask & 2)
         if (matches_left and any(other != signature for other in right) or
                 matches_right and any(other != signature for other in left)):
             return True
@@ -124,7 +127,7 @@ def _supporting_cues(db, selected, policy, source, target, components, config, m
     if reused is not MISSING:
         return reused
     votes = []
-    for row in latest_rows(db, '''SELECT o.id,o.seconds,o.cue,o.dimensions,o.embedding,s.scene,s.id AS scan,s.rowid AS scan_order
+    rows = latest_rows(db, '''SELECT o.id,o.seconds,o.cue,o.dimensions,o.embedding,s.scene,s.id AS scan,s.rowid AS scan_order
       FROM merge_support m
       JOIN observations o ON o.id=m.observation
       JOIN scans s ON s.id=o.scan
@@ -134,12 +137,18 @@ def _supporting_cues(db, selected, policy, source, target, components, config, m
         {latest}
       ORDER BY s.rowid,o.cue,o.id''',
       (source, target, policy, selected['scope'], selected['namespace'],
-       selected['policy_sha']), selected):
+       selected['policy_sha']), selected)
+    for row, mask in matching_rows(rows, (components[target], components[source]), config):
         key = (row['scene'], row['seconds'])
         if key in seen:
             continue
-        query = cache.vector(row) if cache is not None else vector(row)
-        if _matches(components[target], query, config, cache=cache, observation=row['id']) and _matches(components[source], query, config, cache=cache, observation=row['id']):
+        if mask is None:
+            query = cache.vector(row) if cache is not None else vector(row)
+            matched = (_matches(components[target], query, config, cache=cache, observation=row['id'])
+                       and _matches(components[source], query, config, cache=cache, observation=row['id']))
+        else:
+            matched = mask == 3
+        if matched:
             seen.add(key)
             cues.append({'scene': row['scene'], 'seconds': row['seconds'], 'observation': row['id']})
             votes.append(dict(cues[-1], order=(row['scan_order'],row['cue'],row['id'])))
