@@ -165,7 +165,7 @@ def test_prefetch_worker_failure_keeps_durable_assignments_unchanged(tmp_path,mo
         selected=[]
         for index in range(3):
             identifier,_=scan(state,config,str(index+1),
-                              [np.array([1.,0.,0.,0.],dtype='<f4')]*2)
+                              [np.array([1.,0.,0.,0.],dtype='<f4')]*3)
             selected.append(dict(scene=str(index+1),scan=identifier))
         expected_members=[tuple(row) for row in state.connection.execute(
             'SELECT * FROM members ORDER BY observation')]
