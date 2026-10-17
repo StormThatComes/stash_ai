@@ -47,20 +47,23 @@ def _selected_scan(db, scene, model_namespace, policy, scope=None):
     if len(scopes) != 1:
         raise ValueError('Scene ID is present in multiple Stash scopes; a scoped report is required.')
     scan = scans[0]
-    if not db.execute('SELECT 1 FROM candidates WHERE scan=? AND policy=? LIMIT 1',
-                      (scan['id'], policy)).fetchone():
+    if (db.execute('SELECT 1 FROM observations WHERE scan=? AND rejected IS NULL LIMIT 1',
+                   (scan['id'],)).fetchone()
+            and not db.execute('SELECT 1 FROM candidates WHERE scan=? AND policy=? LIMIT 1',
+                               (scan['id'], policy)).fetchone()):
         raise ValueError('Latest scene scan has no grouping evidence for the current face configuration; '
                          'run recognition with this scene/configuration before reporting.')
     return scan
 
 
-def _scene_identities(db, scan):
+def _scene_identities(db, scan, policy):
     return [dict(row) for row in db.execute(
         'SELECT m.person AS identity_id,p.performer AS performer_id,COUNT(*) AS observations '
-        'FROM members m JOIN observations o ON o.id=m.observation '
-        'JOIN people p ON p.id=m.person '
-        'WHERE o.scan=? AND o.rejected IS NULL '
-        'GROUP BY m.person,p.performer ORDER BY m.person', (scan,))]
+        'FROM candidates c JOIN observations o ON o.id=json_extract(c.payload,\'$.observation\') '
+        'JOIN members m ON m.observation=o.id JOIN people p ON p.id=m.person '
+        'WHERE c.scan=? AND c.policy=? AND c.status=\'accepted\' '
+        'AND o.scan=c.scan AND o.rejected IS NULL '
+        'GROUP BY m.person,p.performer ORDER BY m.person', (scan, policy))]
 
 
 def _representatives(db, scan, person, maximum):
@@ -140,7 +143,7 @@ def build(config, scene_id, *, limit=20, min_mean=None, scope=None):
     policy = matching_policy(config)
     with closing(_open_readonly(config.database)) as db:
         scan = _selected_scan(db, str(scene_id), namespace(config), policy, scope=scope)
-        identities = _scene_identities(db, scan['id'])
+        identities = _scene_identities(db, scan['id'], policy)
         references = {person['identity_id']: _representatives(
             db, scan, person['identity_id'], clustering['max_samples_per_person']) for person in identities}
         if any(not records for records in references.values()):
