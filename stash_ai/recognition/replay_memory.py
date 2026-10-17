@@ -1,4 +1,4 @@
-"""Disposable RAM replay and optional immutable next-scene validation lookahead."""
+"""Disposable RAM replay and explicitly enabled, fail-fast next-scene lookahead."""
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -36,15 +36,16 @@ def report_pages(db):
 
 
 class Lookahead:
-    """One immutable next scene, <=256 rows and <=8 MiB, on an isolated reader.
+    """One immutable next scene on an isolated reader, without fixed scene caps.
 
-    Disabled by default: RAM-resident replay often has no I/O to hide. The
-    coordinator never consumes prepared membership or decisions from a worker.
+    Once enabled, each selected scene must be prepared successfully or the
+    rebuild fails. No extra per-scene RAM fraction or observation cap applies;
+    each scene is prepared in full and memory allocation failures propagate.
+    The coordinator never consumes prepared membership or decisions from a worker.
     """
     def __init__(self, uri, config):
         self.uri = uri
         self.enabled = config.data['execution'].get('rebuild_prefetch_scenes',False)
-        self.limit = min(8*1024*1024,config.data['execution']['rebuild_memory_bytes']//64)
         self.executor = self.pending = self.scan = None
         self.prepared = {}
         self.cancel = Cancellation()
@@ -58,19 +59,19 @@ class Lookahead:
         with use(self.cancel), closing(sqlite3.connect(self.uri,uri=True),name='close replay lookahead reader') as db:
             db.row_factory=sqlite3.Row
             db.execute('PRAGMA query_only=ON')
-            n,size=db.execute('SELECT COUNT(*),COALESCE(SUM(LENGTH(embedding)),0) FROM observations '
-                             'WHERE scan=? AND rejected IS NULL',(scan,)).fetchone()
-            if n>256 or size*2+n*1024>self.limit:
-                return {}
             values={}
+            # This is a keyed cache, so matching-order sort keys are unnecessary.
+            # ORDER BY cue,id uses observations_scan, avoiding an unbounded
+            # temporary SQLite sort for large scenes.
             for row in db.execute('SELECT id,dimensions,embedding FROM observations WHERE scan=? '
-                                  'AND rejected IS NULL ORDER BY cue,geometry,embedding,id',(scan,)):
+                                  'AND rejected IS NULL ORDER BY cue,id',(scan,)):
                 self.cancel.check()
+                blob=row['embedding']
                 try:
                     value=vector(row)
                 except ValueError as error:
                     value=error  # Expose malformed evidence only at its original use.
-                values[row['id']]=(row['dimensions'],row['embedding'],value)
+                values[row['id']]=(row['dimensions'],blob,value)
             return values
 
     def submit(self, scan):
@@ -85,12 +86,21 @@ class Lookahead:
 
     def take(self, scan):
         self.prepared.clear()
-        if self.pending is None:
+        if not self.enabled:
             return
+        if self.pending is None:
+            raise RuntimeError(f'Recognition rebuild prefetch was not scheduled for scan {scan}.')
         if self.scan!=scan:
             raise RuntimeError('Replay lookahead order changed.')
-        self.prepared=self.pending.result()
-        self.pending=self.scan=None
+        try:
+            self.prepared=self.pending.result()
+        except Exception as error:
+            # Enabled lookahead is an explicit execution contract. Report
+            # SQLite lock/IO errors, worker failures and MemoryError rather
+            # than silently replacing this mode with serial vector decoding.
+            raise RuntimeError(f'Recognition rebuild prefetch failed for scan {scan}: {error}') from error
+        finally:
+            self.pending=self.scan=None
 
     def __exit__(self,*error):
         _active.reset(self.context)
@@ -103,8 +113,10 @@ class Lookahead:
 def prepared_vector(row):
     active=_active.get()
     found=active.prepared.get(row['id']) if active is not None else None
-    if found is None or found[:2]!=(row['dimensions'],row['embedding']):
-        return MISSING
+    if found is None:
+        return MISSING  # Reference from another scene or already released.
+    if found[:2]!=(row['dimensions'],row['embedding']):
+        raise RuntimeError('Recognition rebuild prefetched evidence changed during matching.')
     count('prefetched_replay_vectors')
     count('validated_vectors')
     if isinstance(found[2],ValueError):

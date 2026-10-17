@@ -1417,11 +1417,19 @@ private replay before durable apply; increase the setting rather than spilling
 to disk. Durable FaceDatabase transactions retain their existing guarantees.
 
 `execution.rebuild_prefetch_scenes` defaults to false. This experimental option
-uses one isolated read-only reader to validate at most one upcoming scene
-(256 observations, at most 8 MiB and further limited by the working budget).
-Only immutable vectors are prepared; assignments and SQLite writes stay ordered
-on the coordinator. Large scenes use the serial path. Invalid vectors are
-reported when originally consumed, and cancellation closes the reader/worker.
+uses one isolated read-only reader to validate at most one upcoming scene.
+There are no fixed 256-observation or 8 MiB scene eligibility limits. Once
+`execution.rebuild_prefetch_scenes: true` is selected, prefetch is mandatory for
+each selected scene, including the first scene in a cold replay. It prepares
+all eligible vectors without a separate per-scene prefetch RAM fraction or
+observation limit. Actual allocation failures, SQLite lock/read failures and
+worker errors fail the rebuild instead of silently falling back to serial
+decoding. `execution.rebuild_memory_bytes` still governs other rebuild caches
+and the in-memory replay database, not the prefetch's own ceiling. Disable the
+option explicitly to use serial input handling. The read-only worker traverses indexed observation order
+without a large SQLite sort. Only immutable vectors are prepared; assignments
+and SQLite writes stay ordered on the coordinator. Invalid vectors are reported
+when originally consumed, and cancellation closes the reader/worker.
 
 Run `python -m benchmarks.benchmark_recognition_replay --scenes 960 --repeats 2`
 for an offline comparison with the former temporary-file path. One Linux run

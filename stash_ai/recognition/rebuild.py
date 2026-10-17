@@ -391,6 +391,10 @@ def _rebuild_selected(database, selected, config, *, progress=None):
             identity_clock=clock)
         with addresses(replay), reference_scope(replay, scope, namespace, config), evidence_scope(replay, config):
             with Lookahead(replay_uri, config) as lookahead:
+                # Prime the first remaining scene as well: with explicit
+                # prefetch enabled no selected scene may silently go serial.
+                if cursor < len(selected):
+                    lookahead.submit(selected[cursor]['scan'])
                 with tracking(
                     selected[cursor:],
                     'Rebuild selected identities',
