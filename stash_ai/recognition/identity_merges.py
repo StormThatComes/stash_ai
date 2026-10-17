@@ -105,10 +105,11 @@ def _merge_support_policy(config, *, scene_scan=None):
     or cohesion thresholds must obtain new nominations from selected scenes.
     """
     from .context import policy_digest
-    return policy_digest(config, 'merge-support-v1', lambda: {'format': 1,
-                   'match_threshold': config.data['recognition']['match_threshold'],
-                   'cohesion_threshold': config.data['clustering']['cohesion_threshold'],
-                   'scene_scan': scene_scan})
+    return policy_digest(config, 'merge-support-v1', lambda: dict(
+        {'format': 1,
+         'match_threshold': config.data['recognition']['match_threshold'],
+         'cohesion_threshold': config.data['clustering']['cohesion_threshold']},
+        **({'scene_scan': scene_scan} if scene_scan is not None else {})))
 
 
 @measured('merge_support')
@@ -290,8 +291,15 @@ def supported_merges(database, scan, config, groups, policy, *, usage=None,
                         db.execute('INSERT INTO identity_merges VALUES (?,?,?,?,?)',
                                    (source, target, time.time(), encoded(evidence), 'pending'))
                         db.execute('UPDATE members SET person=? WHERE person=?', (target, source))
-                        db.execute("UPDATE candidates SET payload=json_set(payload,'$.merged_from',person),person=? "
-                                   'WHERE person=?', (target, source))
+                        if local_state is None:
+                            db.execute("UPDATE candidates SET payload=json_set(payload,'$.merged_from',person),person=? "
+                                       'WHERE person=?', (target, source))
+                        else:
+                            # Local mergers are ephemeral in the replay. Preserve
+                            # their complete proof on durable candidate rows.
+                            db.execute("UPDATE candidates SET payload=json_set(payload,"
+                                "'$.merged_from',person,'$.same_scene_merge',json(?)),person=? WHERE person=?",
+                                (encoded(evidence), target, source))
                         for group in components.pop(source):
                             roots[group.identifier] = target
                             components[target].append(group)
