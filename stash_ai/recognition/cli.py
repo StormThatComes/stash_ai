@@ -50,11 +50,24 @@ def parser():
     portraits.add_argument('--performer-id', action='append', type=stash_id,
         help='Only this Stash performer ID; repeat for multiple people. Uses all their retained scenes unless --scene-id limits the evidence.')
     _arguments(portraits, retained=True)
+    report = commands.add_parser('report', allow_abbrev=False,
+        help='Explain suspected identity fragmentation in one retained scene (offline, read-only).')
+    report.add_argument('--scene-id', required=True, type=stash_id)
+    report.add_argument('--face-config', type=Path, help='Recognition YAML used for the selected run.')
+    report.add_argument('--faces-db', type=Path, help='Existing face SQLite database.')
+    report.add_argument('--scope', help='Stash scope, required only when the same scene ID occurs in multiple scopes.')
+    report.add_argument('--output', type=Path, help='New JSON report path; stdout if omitted.')
+    report.add_argument('--limit', type=int, default=20, help='Maximum suspect pairs to include (1..500).')
+    report.add_argument('--min-mean', type=float,
+                        help='Minimum cross-group cosine mean to include; default match_threshold - 0.20.')
     return root
 
 
 def main(argv=None, *, services=None):
     args = parser().parse_args(argv)
-    config = load(args.face_config, database=args.faces_db, device=args.device)
+    config = load(args.face_config, database=args.faces_db, device=getattr(args, 'device', None))
+    if args.command == 'report':
+        from .fragmentation_report import execute
+        return execute(args, config)
     from .run import execute
     return execute(args, config, services=services)
