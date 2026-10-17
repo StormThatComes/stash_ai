@@ -98,16 +98,18 @@ def _cooccurs(db, first, second, components, selected, config):
     return False
 
 
-def _merge_support_policy(config):
+def _merge_support_policy(config, *, scene_scan=None):
     """Only thresholds that affect a nomination's evidence, not support counts.
 
     Changing the minimum support should reuse valid proofs; changes to match
     or cohesion thresholds must obtain new nominations from selected scenes.
     """
     from .context import policy_digest
-    return policy_digest(config, 'merge-support-v1', lambda: {'format': 1,
-                   'match_threshold': config.data['recognition']['match_threshold'],
-                   'cohesion_threshold': config.data['clustering']['cohesion_threshold']})
+    return policy_digest(config, 'merge-support-v1', lambda: dict(
+        {'format': 1,
+         'match_threshold': config.data['recognition']['match_threshold'],
+         'cohesion_threshold': config.data['clustering']['cohesion_threshold']},
+        **({'scene_scan': scene_scan} if scene_scan is not None else {})))
 
 
 @measured('merge_support')
@@ -159,7 +161,8 @@ def _supporting_cues(db, selected, policy, source, target, components, config, m
 
 
 @measured('merging')
-def supported_merges(database, scan, config, groups, policy, *, usage=None):
+def supported_merges(database, scan, config, groups, policy, *, usage=None,
+                     local_state=None, local_groups=None, local_cores=None):
     """Evidence-backed consolidation with persisted cross-scene nominations.
 
     Only explicit selected completed scans can contribute; current sample
@@ -174,23 +177,56 @@ def supported_merges(database, scan, config, groups, policy, *, usage=None):
     if usage is not None:
         usage.begin('merging')
     selected = db.execute('SELECT id,scope,namespace,policy_sha,scene,status,rowid AS scan_order FROM scans WHERE id=?', (scan,)).fetchone()
-    rows = {row['id']: row for row in db.execute(
-        'SELECT p.id,p.created FROM people p JOIN scans s ON s.scope=p.scope AND s.namespace=p.namespace '
-        'WHERE s.id=? AND NOT EXISTS (SELECT 1 FROM identity_merges WHERE source=p.id)', (scan,))}
+    if local_state is None:
+        rows = {row['id']: row for row in db.execute(
+            'SELECT p.id,p.created FROM people p JOIN scans s ON s.scope=p.scope AND s.namespace=p.namespace '
+            'WHERE s.id=? AND NOT EXISTS (SELECT 1 FROM identity_merges WHERE source=p.id)', (scan,))}
+        roots = {g.identifier: g.identifier for g in groups}
+        components = {g.identifier: [g] for g in groups}
+    else:
+        # Keep original constituents across *all* same-scene merge passes.
+        # Rebuilding representatives after each scene would permit A-B-C
+        # chaining and could hide an incompatible original endpoint.
+        if not local_state:
+            local_state['rows'] = {row['id']: row for row in db.execute(
+                'SELECT p.id,p.created FROM people p JOIN scans s ON s.scope=p.scope AND s.namespace=p.namespace '
+                'WHERE s.id=?', (scan,))}
+            local_state['roots'] = {g.identifier: g.identifier for g in groups}
+            local_state['components'] = {g.identifier: [g] for g in groups}
+        rows = local_state['rows']
+        roots = local_state['roots']
+        components = local_state['components']
+        local_groups = {roots.get(person, person) for person in local_groups or ()}
+        local_cores = {roots.get(person, person) for person in local_cores or ()}
     order = lambda person: (rows[person]['created'], person)
-    roots = {g.identifier: g.identifier for g in groups}
-    components = {g.identifier: [g] for g in groups}
     nominations = {}
     merged = 0
+    # Local nominations only compare representatives of roots actually present
+    # in this scene, including all frozen constituents of a previously merged
+    # root. Avoid rescoring every identity in the entire selected library.
+    scoring_groups = (groups if local_state is None else
+                      [group for group in groups if roots[group.identifier] in local_groups])
+    if local_state is not None and len(local_groups) < 2:
+        return 0
     settings = config.data['recognition']
-    evidence_policy = _merge_support_policy(config)
+    evidence_policy = _merge_support_policy(config, scene_scan=scan if local_state is not None else None)
     cache = evidence_for(db)
-    with tracking(
-        scored_rows(db.execute(
+    if local_state is None:
+        observations = db.execute(
             'SELECT id,cue,seconds,dimensions,embedding FROM observations WHERE scan=? AND rejected IS '
-            'NULL ORDER BY cue,id',
-            (scan,),
-        ), groups, settings['match_threshold'], config.data['clustering']['cohesion_threshold']),
+            'NULL ORDER BY cue,id', (scan,))
+    else:
+        # Contextual attachments cannot cast merger votes or seed local proof.
+        from .replay_addresses import address
+        observations = db.execute(
+            f'SELECT o.id,o.cue,o.seconds,o.dimensions,o.embedding FROM candidates c '
+            f'JOIN observations o ON o.id={address(db, "c")} '
+            "WHERE c.scan=? AND c.policy=? AND c.status='accepted' "
+            "AND json_extract(c.payload,'$.reason')<>'same_scene_identity' "
+            'AND o.rejected IS NULL ORDER BY o.cue,o.id', (scan, policy))
+    with tracking(
+        scored_rows(observations, scoring_groups, settings['match_threshold'],
+                    config.data['clustering']['cohesion_threshold']),
         'Check identity merges',
         unit='observation',
         total=lambda: db.execute(
@@ -202,20 +238,27 @@ def supported_merges(database, scan, config, groups, policy, *, usage=None):
             if usage is not None:
                 usage.emit()
             query = cache.vector(observation) if cache is not None else vector(observation)
-            matched = {group.identifier for group, mean, low in contributions(groups, query, frozen, len(groups),
+            matched = {group.identifier for group, mean, low in contributions(scoring_groups, query, frozen, len(scoring_groups),
                 settings['match_threshold'], config.data['clustering']['cohesion_threshold'],
                 exact=(lambda g,q: cache.scores(g,q,observation['id'])) if cache is not None else None)
                 if mean >= settings['match_threshold'] and low >= config.data['clustering']['cohesion_threshold']}
             eligible = []
             for root, component in components.items():
+                if local_state is not None and root not in local_groups:
+                    continue
                 if all(group.identifier in matched for group in component):
                     eligible.append(root)
+            if local_state is not None:
+                eligible = [root for root in eligible if root in local_groups]
             eligible.sort(key=order)
             for index, source in enumerate(eligible[1:], 1):
                 source = roots[source]
                 for target in eligible[:index]:
                     target = roots[target]
                     if source == target:
+                        continue
+                    if (local_state is not None and
+                            target not in local_cores and source not in local_cores):
                         continue
                     target, source = sorted((target, source), key=order)
                     count('merge_pairs')
@@ -242,6 +285,9 @@ def supported_merges(database, scan, config, groups, policy, *, usage=None):
                                        ('cooccurrence_identity_evidence_insufficient', scan, policy, observation['id']))
                             break
                         evidence = {'format': 3, 'cooccurring': cooccurring,
+                            'same_scene_local': local_state is not None,
+                            'effective_match_threshold': settings['match_threshold'],
+                            'effective_cohesion_threshold': config.data['clustering']['cohesion_threshold'],
                             'cooccurrence_merge_threshold': stronger, 'scan': scan, 'policy': policy,
                             'support_cues': supporting,
                             'support_seconds': [item['seconds'] for item in supporting],
@@ -254,8 +300,15 @@ def supported_merges(database, scan, config, groups, policy, *, usage=None):
                         db.execute('INSERT INTO identity_merges VALUES (?,?,?,?,?)',
                                    (source, target, time.time(), encoded(evidence), 'pending'))
                         db.execute('UPDATE members SET person=? WHERE person=?', (target, source))
-                        db.execute("UPDATE candidates SET payload=json_set(payload,'$.merged_from',person),person=? "
-                                   'WHERE person=?', (target, source))
+                        if local_state is None:
+                            db.execute("UPDATE candidates SET payload=json_set(payload,'$.merged_from',person),person=? "
+                                       'WHERE person=?', (target, source))
+                        else:
+                            # Local mergers are ephemeral in the replay. Preserve
+                            # their complete proof on durable candidate rows.
+                            db.execute("UPDATE candidates SET payload=json_set(payload,"
+                                "'$.merged_from',person,'$.same_scene_merge',json(?)),person=? WHERE person=?",
+                                (encoded(evidence), target, source))
                         for group in components.pop(source):
                             roots[group.identifier] = target
                             components[target].append(group)
