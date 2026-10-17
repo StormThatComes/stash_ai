@@ -311,6 +311,56 @@ detection:
   require_complete_face: false
 ```
 
+## Offline scene fragmentation report
+
+To inspect suspected splits between recognized identities without Stash, model loading,
+GPU inference, or an identity rebuild, run:
+
+```powershell
+python stash_ai.py recognition report --scene-id 6306 --output fragmentation-6306.json
+# Or print JSON to standard output:
+python stash_ai.py recognition report --scene-id 6306
+# Widen the similarity range or include more ranked pairs:
+python stash_ai.py recognition report --scene-id 6306 --min-mean 0.35 --limit 50
+```
+
+The report uses `--face-config` and `--faces-db` to select the same model and
+threshold policy as the completed recognition run; if the latest completed scan
+does not contain matching-policy candidates, it fails instead of silently mixing
+in stale results. In rare multi-Stash databases, `--scope` disambiguates scene
+IDs. `--output` must name a **new** JSON file (no overwrite). Without it, JSON is
+written to stdout. The database is opened in SQLite read-only mode using a
+consistent snapshot; the reporter never acquires the recognition writer lock,
+creates run history, downloads models, or calls Stash.
+
+The JSON contains selected-scene identities and performer IDs, counts of accepted,
+withheld and rejected observations, candidate decision reasons, and ranked
+potential-fragment pairs. Each pair includes cross-group mean/minimum cosine
+scores over the *currently retained bounded representatives*, the observation
+IDs and VTT timestamps for the least similar pair, and the direct numerical
+blockers for `recognition.match_threshold`,
+`clustering.cohesion_threshold` and observed co-presence. The report also
+rechecks any *recorded* merge nominations against current representatives and
+reports how many independent scene/time cues still qualify. Missing nominations
+do **not** prove that evidence is missing: there is no complete persisted log
+of every rejected or never-proposed merge.
+
+By default, pairs with cross mean below `match_threshold - 0.20` are excluded.
+`--min-mean` adjusts this search floor (`-1..1`), while `--limit` (1..500,
+default 20) bounds output size but **not** the number of evaluated pairs.
+The report compares only identities actually assigned within the selected
+scene, though representatives can come from their other retained scenes.
+Large crowds have quadratic pair comparison cost, unlike the production
+demand-driven merge path. It does not discover pairs solely among withheld
+observations or infer that two performers are the same real person.
+
+**Interpretation:** a pair with no numeric blocker is only a candidate for
+review. It is not a predicted merge. Full cold replay still depends on
+chronological nominations, revalidated merge support, ambiguous third-party
+matches, constituent history and co-presence (including withheld observations).
+The reported indicative per-pair thresholds are *not* calibrated recommendations
+or guarantees. No edits to thresholds, memberships or published performers occur.
+
 ## Automatic identity policy
 
 Every explicit `recognition run` prepares the complete selected evidence set before
