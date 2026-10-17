@@ -54,7 +54,7 @@ def test_lookahead_matches_serial_decisions_and_keeps_writes_on_owner(tmp_path):
         state.connection.set_trace_callback(None)
 
 
-def test_prefetch_defers_bad_vectors_and_refuses_oversized_scene(tmp_path):
+def test_prefetch_defers_bad_vectors_and_accepts_large_scene(tmp_path):
     config=enabled(setup(tmp_path),rebuild_prefetch_scenes=True)
     with memory_replay(config) as (db,uri):
         db.execute('CREATE TABLE observations(id TEXT,scan TEXT,dimensions INTEGER,embedding BLOB,rejected TEXT,cue INTEGER,geometry TEXT)')
@@ -65,8 +65,48 @@ def test_prefetch_defers_bad_vectors_and_refuses_oversized_scene(tmp_path):
             with pytest.raises(ValueError,match='embedding'):
                 prepared_vector(dict(id='bad',dimensions=4,embedding=b'bad'))
             assert prepared_vector(dict(id='bad',dimensions=4,embedding=b'changed')) is MISSING
-        db.executemany("INSERT INTO observations VALUES (?,'large',4,?,NULL,0,'{}')",[(str(i),b'bad') for i in range(257)])
+        embedding=np.array([1.,0.,0.,0.],dtype='<f4').tobytes()
+        db.executemany("INSERT INTO observations VALUES (?,'large',4,?,NULL,0,'{}')",
+                       [(str(i),embedding) for i in range(257)])
         db.commit()
         with Lookahead(uri,config) as ahead:
             ahead.submit('large');ahead.take('large')
-            assert ahead.prepared=={}
+            assert len(ahead.prepared)==257
+            assert prepared_vector(dict(id='256',dimensions=4,embedding=embedding))[0]==1.
+
+
+def test_prefetch_handles_more_than_eight_mib_of_embeddings(tmp_path):
+    config=enabled(setup(tmp_path),rebuild_prefetch_scenes=True)
+    embedding=np.zeros(1024,dtype='<f4')
+    embedding[0]=1.
+    blob=embedding.tobytes()
+    total=2050
+    assert total*len(blob)>8*1024*1024
+    with memory_replay(config) as (db,uri):
+        db.execute('CREATE TABLE observations(id TEXT,scan TEXT,dimensions INTEGER,embedding BLOB,rejected TEXT,cue INTEGER,geometry TEXT)')
+        db.executemany("INSERT INTO observations VALUES (?,'large',1024,?,NULL,0,'{}')",
+                       ((str(i),blob) for i in range(total)))
+        db.commit()
+        with Lookahead(uri,config) as ahead:
+            ahead.submit('large');ahead.take('large')
+            assert len(ahead.prepared)==total
+            assert prepared_vector(dict(id=str(total-1),dimensions=1024,embedding=blob))[0]==1.
+
+
+def test_prefetch_memory_budget_keeps_large_scene_eligible(tmp_path):
+    # Even after the configurable cache fills, matching can decode unprepared
+    # observations on demand rather than discarding the whole scene's prefetch.
+    config=enabled(setup(tmp_path),rebuild_prefetch_scenes=True,rebuild_memory_bytes=4*1024*1024)
+    blob=np.array([1.]+[0.]*1023,dtype='<f4').tobytes()
+    with memory_replay(config) as (db,uri):
+        db.execute('CREATE TABLE observations(id TEXT,scan TEXT,dimensions INTEGER,embedding BLOB,rejected TEXT,cue INTEGER,geometry TEXT)')
+        db.executemany("INSERT INTO observations VALUES (?,'large',1024,?,NULL,0,'{}')",
+                       ((str(i),blob) for i in range(120)))
+        db.commit()
+        with Lookahead(uri,config) as ahead:
+            ahead.submit('large');ahead.take('large')
+            assert 0<len(ahead.prepared)<120
+            first=next(iter(ahead.prepared))
+            assert prepared_vector(dict(id=first,dimensions=1024,embedding=blob))[0]==1.
+            missing=next(str(i) for i in range(120) if str(i) not in ahead.prepared)
+            assert prepared_vector(dict(id=missing,dimensions=1024,embedding=blob)) is MISSING

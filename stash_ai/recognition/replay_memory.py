@@ -36,15 +36,18 @@ def report_pages(db):
 
 
 class Lookahead:
-    """One immutable next scene, <=256 rows and <=8 MiB, on an isolated reader.
+    """One immutable next scene on an isolated reader, without fixed scene caps.
 
-    Disabled by default: RAM-resident replay often has no I/O to hide. The
-    coordinator never consumes prepared membership or decisions from a worker.
+    A slice of the configured rebuild RAM budget bounds retained lookahead
+    vectors. When it fills, remaining observations use ordinary lazy decoding.
+    The coordinator never consumes prepared membership or decisions from a worker.
     """
     def __init__(self, uri, config):
         self.uri = uri
         self.enabled = config.data['execution'].get('rebuild_prefetch_scenes',False)
-        self.limit = min(8*1024*1024,config.data['execution']['rebuild_memory_bytes']//64)
+        # The prefetch is opportunistic: a large scene must never be rejected
+        # outright because of its observation count or embedding bytes.
+        self.budget_bytes = config.data['execution']['rebuild_memory_bytes']//16
         self.executor = self.pending = self.scan = None
         self.prepared = {}
         self.cancel = Cancellation()
@@ -58,19 +61,23 @@ class Lookahead:
         with use(self.cancel), closing(sqlite3.connect(self.uri,uri=True),name='close replay lookahead reader') as db:
             db.row_factory=sqlite3.Row
             db.execute('PRAGMA query_only=ON')
-            n,size=db.execute('SELECT COUNT(*),COALESCE(SUM(LENGTH(embedding)),0) FROM observations '
-                             'WHERE scan=? AND rejected IS NULL',(scan,)).fetchone()
-            if n>256 or size*2+n*1024>self.limit:
-                return {}
             values={}
+            retained_bytes=0
             for row in db.execute('SELECT id,dimensions,embedding FROM observations WHERE scan=? '
                                   'AND rejected IS NULL ORDER BY cue,geometry,embedding,id',(scan,)):
                 self.cancel.check()
+                blob=row['embedding']
+                # Approximate Python ownership and a NumPy view alongside the
+                # retained embedding; avoid retaining the entire scene in RAM.
+                charge=2*len(blob)+1024 if isinstance(blob,bytes) else 1024
+                if charge>self.budget_bytes-retained_bytes:
+                    continue  # This observation is validated on demand by its owner.
                 try:
                     value=vector(row)
                 except ValueError as error:
                     value=error  # Expose malformed evidence only at its original use.
-                values[row['id']]=(row['dimensions'],row['embedding'],value)
+                values[row['id']]=(row['dimensions'],blob,value)
+                retained_bytes+=charge
             return values
 
     def submit(self, scan):
