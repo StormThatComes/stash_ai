@@ -7,7 +7,7 @@ import math
 from pathlib import Path
 import sqlite3
 
-from .clustering import matching_policy, vector
+from .clustering import Group, _similarities, matching_policy, vector
 from .database import APPLICATION_ID, SCHEMA_VERSION, _reject_executable_schema
 from .identity_merges import _merge_support_policy
 from .models import namespace
@@ -34,13 +34,15 @@ def _open_readonly(path):
         raise
 
 
-def _selected_scan(db, scene, model_namespace, policy):
+def _selected_scan(db, scene, model_namespace, policy, scope=None):
     scans = db.execute(
         "SELECT id,scope,scene,namespace,policy_sha FROM scans "
         "WHERE scene=? AND namespace=? AND status='complete' ORDER BY rowid DESC",
         (scene, model_namespace)).fetchall()
+    if scope is not None:
+        scans = [row for row in scans if row['scope'] == scope]
     if not scans:
-        raise ValueError('No completed recognition scan for this scene and recognizer.')
+        raise ValueError('No completed recognition scan for this scene, recognizer and scope.')
     scopes = {row['scope'] for row in scans}
     if len(scopes) != 1:
         raise ValueError('Scene ID is present in multiple Stash scopes; a scoped report is required.')
@@ -112,7 +114,8 @@ def _recorded_support(db, scan, left, right, references, config):
         ' AND newer.scene=s.scene AND newer.status=\'complete\' AND newer.rowid>s.rowid) '
         'ORDER BY CAST(s.scene AS INTEGER),s.scene,o.seconds,o.id',
         (policy, left, right, right, left, scan['scope'], scan['namespace'], scan['policy_sha']))
-    from .clustering import _similarities
+    groups = [Group(person, [sample for _, sample in references[person]], True)
+              for person in (left, right)]
     cues = set()
     for row in rows:
         cue = (row['scene'], row['seconds'])
@@ -120,14 +123,12 @@ def _recorded_support(db, scan, left, right, references, config):
             continue
         face = vector(row)
         if all((mean >= settings['match_threshold'] and low >= clustering['cohesion_threshold'])
-               for mean, low in (_similarities(group, face) for group in (
-                   type('Reference', (), {'samples': [vec for _, vec in references[person]]})()
-                   for person in (left, right)))):
+               for mean, low in (_similarities(group, face) for group in groups)):
             cues.add(cue)
     return len(cues)
 
 
-def build(config, scene_id, *, limit=20, min_mean=None):
+def build(config, scene_id, *, limit=20, min_mean=None, scope=None):
     """Read only committed state; returned suggestions do not promise a cold-replay merge."""
     if not 1 <= limit <= 500:
         raise ValueError('Report limit must be 1..500.')
@@ -138,7 +139,7 @@ def build(config, scene_id, *, limit=20, min_mean=None):
         raise ValueError('Report min-mean must be between -1 and 1.')
     policy = matching_policy(config)
     with closing(_open_readonly(config.database)) as db:
-        scan = _selected_scan(db, str(scene_id), namespace(config), policy)
+        scan = _selected_scan(db, str(scene_id), namespace(config), policy, scope=scope)
         identities = _scene_identities(db, scan['id'])
         references = {person['identity_id']: _representatives(
             db, scan, person['identity_id'], clustering['max_samples_per_person']) for person in identities}
@@ -218,7 +219,7 @@ def build(config, scene_id, *, limit=20, min_mean=None):
 
 
 def execute(args, config):
-    result = build(config, args.scene_id, limit=args.limit, min_mean=args.min_mean)
+    result = build(config, args.scene_id, limit=args.limit, min_mean=args.min_mean, scope=args.scope)
     output = json.dumps(result, indent=2, ensure_ascii=False, allow_nan=False) + '\n'
     if args.output is None:
         print(output, end='')
