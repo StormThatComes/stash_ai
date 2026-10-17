@@ -1055,8 +1055,18 @@ multiple constituent pairs are needed. Each proof keeps the directional scalar
 dot/mean/min order; the coordinator validates reference ownership and imports
 both positive and negative proofs into the existing bounded cache. A small
 batch is retired before an incompatible endpoint stops later work. No global
-all-pairs identity graph is scheduled. Peer checks and support/co-occurrence
-evidence traversal retain their existing coordinator path in this implementation.
+all-pairs identity graph is scheduled.
+
+For longer demanded support/context streams, bounded CPU blocks compute exact
+constituent predicates. The coordinator still selects the authoritative latest
+scans, reduces votes in scan/cue/observation order, counts each scene/time once
+and applies distinct-signature co-occurrence rules. Mutable direct membership
+is checked at decision time before contextual work. A complete small batch is
+retired before exposing its ordered results, allowing early exit without
+abandoning an active CPU stream. Invalid vectors keep their original point of
+failure, and small/oversized streams use the scalar path. These ephemeral masks
+are not persisted or reused across component changes; shared versioned mask
+caching remains separate work. Cue-peer/rival checks remain on the coordinator.
 
 Rebuild uses retained embeddings and never loads or invokes GPU models. CPU
 workers receive neither models nor SQLite connections. Scan and portrait model
