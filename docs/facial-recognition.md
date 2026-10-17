@@ -1050,8 +1050,13 @@ claims historical person/performer labels and writes SQLite. Workers calculate
 frozen-reference scores used by assignment, post-merge rechecks, merge
 nominations, final same-scene rankings and historical fallback. Native batch
 scores may only prove rejection; finalists retain the scalar decision values.
-Peer checks, component-pair compatibility and support/co-occurrence evidence
-traversal retain their existing coordinator path in this implementation.
+Demanded component-pair compatibility proofs also use immutable CPU jobs when
+multiple constituent pairs are needed. Each proof keeps the directional scalar
+dot/mean/min order; the coordinator validates reference ownership and imports
+both positive and negative proofs into the existing bounded cache. A small
+batch is retired before an incompatible endpoint stops later work. No global
+all-pairs identity graph is scheduled. Peer checks and support/co-occurrence
+evidence traversal retain their existing coordinator path in this implementation.
 
 Rebuild uses retained embeddings and never loads or invokes GPU models. CPU
 workers receive neither models nor SQLite connections. Scan and portrait model

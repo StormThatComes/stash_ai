@@ -6,9 +6,10 @@ from .database import encoded
 from .progress import tracking
 from .profiling import measured, count
 from .evidence_cache import current as evidence_for, latest_rows, MISSING
-from .merge_cache import cached_cross, support_identity, incremental_votes, save_votes
+from .merge_cache import support_identity, incremental_votes, save_votes
 from .scoring import comparisons
 from .parallel_scores import scored_rows, contributions
+from .parallel_merges import cross_pairs, cross_scores
 
 
 def canonical(db, person):
@@ -23,19 +24,8 @@ def canonical(db, person):
 
 
 def _cross(first, second, config):
-    from .clustering import _similarities
-    total = 0.
-    minimum = 1.
-    for sample in first.samples:
-        mean, low = _similarities(second, sample)
-        minimum = min(minimum, low)
-        if minimum < config.data['clustering']['cohesion_threshold']:
-            return None
-        total += mean
-    mean = total / len(first.samples)
-    if mean < config.data['recognition']['match_threshold']:
-        return None
-    return {'mean': mean, 'minimum': minimum}
+    return cross_scores(first, second, config.data['recognition']['match_threshold'],
+                        config.data['clustering']['cohesion_threshold'])
 
 
 @measured('merge_compatibility')
@@ -43,13 +33,11 @@ def _compatible(first, second, config):
     # Keep the original bounded references for every constituent until this
     # pass finishes. Capping a union early could hide an incompatible endpoint.
     worst_mean = worst_minimum = 1.
-    for left in first:
-        for right in second:
-            scores = cached_cross(left, right, config, _cross)
-            if scores is None:
-                return None
-            worst_mean = min(worst_mean, scores['mean'])
-            worst_minimum = min(worst_minimum, scores['minimum'])
+    for scores in cross_pairs(first, second, config, _cross):
+        if scores is None:
+            return None
+        worst_mean = min(worst_mean, scores['mean'])
+        worst_minimum = min(worst_minimum, scores['minimum'])
     return {'minimum_cross_mean': worst_mean, 'minimum_cross_similarity': worst_minimum}
 
 
