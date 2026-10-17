@@ -361,30 +361,40 @@ clustering:
   same_scene_min_support: 3
 ```
 
-With `match_threshold: 0.65`, the final pass may accept a raw mean cosine score
-of `0.62` or higher. `same_scene_match_bonus` accepts 0..0.10; 0 disables this
-pass. It is a threshold adjustment, not a probability or an added ranking score.
-`same_scene_min_support` accepts 1..1000 independent cue times (default 3).
-Setting 1 permits one strong local observation to enable the preference; higher
-values require repeated confirmation before accepting borderline observations.
-Duplicate detections/timestamps cannot establish this local support. Each core
-observation must remain a standard-threshold, unambiguous match against the final
-strict references. A person established only in another scene has no local bonus.
+The bonus lowers **both** local thresholds: effective
+`match_threshold = max(0, match_threshold - bonus)` and
+`cohesion_threshold = max(0, cohesion_threshold - bonus)`. For example,
+with 0.65 match, 0.60 cohesion and a 0.03 bonus, local checks require at least
+0.62 mean and 0.57 minimum representative cosine similarity. The bonus accepts
+0..0.10; zero disables both local passes. This adjusts thresholds, not
+similarity scores or probabilities.
 
-Raw-score `ambiguity_margin`, every representative's `cohesion_threshold`, and
-the stronger reflection/co-presence requirement still apply. Peers in the same
-cue are checked at the lowered threshold too. References are frozen before this
-pass: contextual attachments never provide local support, seed later-scene
-matching, or vote for identity merges. Existing distinct groups are consolidated
-only by the ordinary strict merge rules; scene context attaches withheld faces.
-The policy is conservative when strict grouping cannot establish a local core.
+The first final pass attaches withheld observations only to a strictly established
+person in the **same scene**. `same_scene_min_support` is the number of distinct
+strictly accepted cue times establishing the local core (1..1000; default 3).
+Duplicate cue times do not help. Core observations must remain unambiguous under
+the original strict thresholds. The local check retains the original
+`ambiguity_margin` and `cooccurrence_merge_threshold`; it checks competing
+groups and cue peers using the same lowered local cohesion and match thresholds.
 
-The final assignments retain raw scores, the strict-reference fingerprint and
-supporting observation IDs/times in their `same_scene_context` candidate evidence.
-This phase has scene/observation progress and uses the existing reference-vector
-memory budget. Retuning either
-setting replays cached embeddings without new face inference. These defaults
-are starting values, not accuracy claims for an operator's library.
+The second final pass can consolidate *existing distinct identities*, but only
+when both have strictly accepted observations in the same scene, at least one
+has `same_scene_min_support` independent cue times, and at least
+`recognition.min_merge_support` independent nominations from **that same scan**
+pass both effective thresholds against all constituents. All original bounded
+representatives remain frozen across local consolidations and selected scenes:
+A-B and B-C cannot conceal an incompatible A-C endpoint. Distinct co-present
+faces retain the original stronger reflection requirement. Attaching withheld
+observations never creates local anchors or merge-support votes. Local mergers run
+**after** strict replay, so they never loosen the matching of subsequent scenes.
+
+Each weak attachment retains raw scores, strict-reference fingerprints and
+supporting cue IDs/times in `same_scene_context`. Local consolidation records
+`same_scene_merge` in the source candidates with threshold, support and
+constituent evidence. The contextual stages expose scene/observation progress;
+retuning replays cached embeddings without new inference. These are heuristic
+thresholds, not accuracy guarantees, and a too-low local threshold can still
+create false-positive identities.
 
 ### Retuning and stable performer labels
 
@@ -455,7 +465,7 @@ both support minimums; remove it before specifying either split key.
 | `recognition.min_merge_support` | Minimum supporting (scene, cue-time) observations across selected scans (default 3). |
 | `recognition.ambiguity_margin` | Withholds competing assignments; cannot relax merge evidence requirements. |
 | `clustering.cohesion_threshold` | Minimum representative similarity, including cross-group comparisons. |
-| `clustering.same_scene_match_bonus` | Final same-scene assignment threshold reduction (default 0.03; 0 disables; range 0..0.10). |
+| `clustering.same_scene_match_bonus` | Local match + cohesion threshold reduction for withheld assignment and supported same-scene identity merges (default 0.03; 0 disables; range 0..0.10). |
 | `clustering.same_scene_min_support` | Strong independent cue times in that scene before the bonus applies (default 3; range 1..1000). |
 | `clustering.max_samples_per_person` | Bounds each group's retained representatives and the final survivor's lookup sample. |
 | `clustering.max_people_per_lookup` | Caps active compatible identities, including provisional groups; aliases are excluded. |
