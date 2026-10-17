@@ -335,7 +335,9 @@ creates run history, downloads models, or calls Stash.
 
 The JSON contains selected-scene identities and performer IDs, counts of accepted,
 withheld and rejected observations, candidate decision reasons, and ranked
-potential-fragment pairs. Each pair includes cross-group mean/minimum cosine
+potential-fragment pairs. The diagnostic also includes rejection reason counts
+and up to 50 timestamped withheld observations with their recorded best-two
+scores/reasons. Each pair includes cross-group mean/minimum cosine
 scores over the *currently retained bounded representatives*, the observation
 IDs and VTT timestamps for the least similar pair, and the direct numerical
 blockers for `recognition.match_threshold`,
