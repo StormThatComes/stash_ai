@@ -24,20 +24,42 @@ def valid_owners(refs, owners):
     return len(refs) == len(owners) and all(same_owners(a, b) for a, b in zip(refs, owners))
 
 
-def cached_cross(first, second, config, compute):
-    cache = current()
-    version = versions((first, second)) if cache is not None else None
+def cross_identity(first, second, config):
+    version = versions((first, second))
     if version is None:
-        return compute(first, second, config)
+        return None
     keys, owners = version
     key = ('cross', keys, config.data['recognition']['match_threshold'],
            config.data['clustering']['cohesion_threshold'])
+    return key, owners
+
+
+def find_cross(cache, identity):
+    if cache is None or identity is None:
+        return MISSING
+    key, owners = identity
     found = cache.cache.get(key)
     if found is not MISSING and valid_owners(found[1], owners):
         count('reused_constituent_pairs')
         return found[0]
-    result = compute(first, second, config)
+    return MISSING
+
+
+def save_cross(cache, identity, result):
+    if cache is None or identity is None:
+        return
+    key, owners = identity
     cache.cache.put(key, (result, weak_owners(owners)), sum(sample.nbytes+128 for group in owners for sample in group))
+
+
+def cached_cross(first, second, config, compute):
+    cache = current()
+    identity = cross_identity(first, second, config) if cache is not None else None
+    found = find_cross(cache, identity)
+    if found is not MISSING:
+        return found
+    result = compute(first, second, config)
+    save_cross(cache, identity, result)
     return result
 
 
