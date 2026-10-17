@@ -201,6 +201,13 @@ def supported_merges(database, scan, config, groups, policy, *, usage=None,
     order = lambda person: (rows[person]['created'], person)
     nominations = {}
     merged = 0
+    # Local nominations only compare representatives of roots actually present
+    # in this scene, including all frozen constituents of a previously merged
+    # root. Avoid rescoring every identity in the entire selected library.
+    scoring_groups = (groups if local_state is None else
+                      [group for group in groups if roots[group.identifier] in local_groups])
+    if local_state is not None and len(local_groups) < 2:
+        return 0
     settings = config.data['recognition']
     evidence_policy = _merge_support_policy(config, scene_scan=scan if local_state is not None else None)
     cache = evidence_for(db)
@@ -218,7 +225,7 @@ def supported_merges(database, scan, config, groups, policy, *, usage=None,
             "AND json_extract(c.payload,'$.reason')<>'same_scene_identity' "
             'AND o.rejected IS NULL ORDER BY o.cue,o.id', (scan, policy))
     with tracking(
-        scored_rows(observations, groups, settings['match_threshold'],
+        scored_rows(observations, scoring_groups, settings['match_threshold'],
                     config.data['clustering']['cohesion_threshold']),
         'Check identity merges',
         unit='observation',
@@ -231,12 +238,14 @@ def supported_merges(database, scan, config, groups, policy, *, usage=None,
             if usage is not None:
                 usage.emit()
             query = cache.vector(observation) if cache is not None else vector(observation)
-            matched = {group.identifier for group, mean, low in contributions(groups, query, frozen, len(groups),
+            matched = {group.identifier for group, mean, low in contributions(scoring_groups, query, frozen, len(scoring_groups),
                 settings['match_threshold'], config.data['clustering']['cohesion_threshold'],
                 exact=(lambda g,q: cache.scores(g,q,observation['id'])) if cache is not None else None)
                 if mean >= settings['match_threshold'] and low >= config.data['clustering']['cohesion_threshold']}
             eligible = []
             for root, component in components.items():
+                if local_state is not None and root not in local_groups:
+                    continue
                 if all(group.identifier in matched for group in component):
                     eligible.append(root)
             if local_state is not None:
