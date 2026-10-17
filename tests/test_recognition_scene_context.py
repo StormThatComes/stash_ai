@@ -50,9 +50,9 @@ def test_same_scene_borderline_face_attaches_but_another_scene_does_not(tmp_path
 
 
 @pytest.mark.parametrize('clustering', [
-    {'same_scene_match_bonus': 0}, {'same_scene_min_support': 4}, {'cohesion_threshold': .64},
+    {'same_scene_match_bonus': 0}, {'same_scene_min_support': 4},
 ])
-def test_context_respects_disable_support_and_original_cohesion(tmp_path, clustering):
+def test_context_respects_disable_and_local_support(tmp_path, clustering):
     config = setup(tmp_path, clustering)
     with FaceDatabase(config.database) as db:
         selected = replay(db, config, {'1': [A]*3 + [B]})
@@ -153,3 +153,66 @@ def test_invalid_context_settings_fail_before_creating_state(tmp_path, text):
     with pytest.raises(ValueError, match='clustering.same_scene'):
         load(path)
     assert not (tmp_path / 'faces_state.sqlite3').exists()
+
+
+def _fragmented_vectors():
+    # The first pose is too dissimilar to seed A (0.54 < the strict near
+    # boundary of 0.55), while two later poses become a coherent B group.
+    # Cross-group mean is ~0.70 but the minimum is 0.54.
+    def face(score):
+        return np.array([score, math.sqrt(1 - score * score), 0., 0.])
+    return [A] * 3 + [face(.54), face(.78), face(.78)]
+
+
+def test_same_scene_merge_requires_both_local_thresholds(tmp_path):
+    config = changed(setup(tmp_path), clustering={'same_scene_match_bonus': .10})
+    with FaceDatabase(config.database) as db:
+        selected = replay(db, config, {'1': _fragmented_vectors()})
+        rows = candidates(db, selected[0]['scan'], config)
+        assert all(status == 'accepted' for status, _, _ in rows)
+        assert len({person for _, person, _ in rows}) == 1
+        proofs = [payload['same_scene_merge'] for _, _, payload in rows
+                  if 'same_scene_merge' in payload]
+        assert proofs
+        assert proofs[0]['same_scene_local'] is True
+        assert proofs[0]['effective_match_threshold'] == pytest.approx(.55)
+        assert proofs[0]['effective_cohesion_threshold'] == pytest.approx(.50)
+        assert len(proofs[0]['support_cues']) >= 3
+
+
+def test_same_scene_merges_do_not_use_strict_thresholds_or_link_distant_scenes(tmp_path):
+    config = changed(setup(tmp_path), clustering={'same_scene_match_bonus': .10})
+    with FaceDatabase(config.database) as db:
+        selected = replay(db, config, {'1': [A] * 3, '2': _fragmented_vectors()[3:]})
+        # Group B exists in scene 2, but A only appeared in scene 1.
+        assert len({person for scan in selected for status, person, _ in
+                    candidates(db, scan['scan'], config) if status == 'accepted'}) == 2
+        assert db.connection.execute('SELECT COUNT(*) FROM identity_merges').fetchone()[0] == 0
+
+
+def test_same_scene_merge_never_weakens_copresence(tmp_path):
+    config = changed(setup(tmp_path), clustering={'same_scene_match_bonus': .10})
+    with FaceDatabase(config.database) as db:
+        identifier, _ = scan(db, config, '1', _fragmented_vectors(), count=6)
+        # A and B are different detections in the same VTT cue.
+        db.connection.execute('UPDATE observations SET cue=2,seconds=2 WHERE scan=? AND cue=3',
+                              (identifier,))
+        db.connection.commit()
+        rebuild_selected(db, [{'scene': '1', 'scan': identifier}], config)
+        accepted = [person for status, person, _ in candidates(db, identifier, config)
+                    if status == 'accepted']
+        assert len(set(accepted)) == 2
+        assert db.connection.execute('SELECT COUNT(*) FROM identity_merges').fetchone()[0] == 0
+
+
+def test_local_cohesion_applies_to_each_representative(tmp_path):
+    from stash_ai.recognition.clustering import Group
+    from stash_ai.recognition.scene_context import _rank
+    config = setup(tmp_path)
+    query = np.array([1., 0., 0., 0.])
+    vectors = [np.array([x, math.sqrt(1-x*x), 0., 0.]) for x in (.56, .70)]
+    group = Group('one', vectors, True)
+    assert _rank([group], query, config) == []
+    ranked = _rank([group], query, config, cohesion=.55)
+    assert len(ranked) == 1
+    assert ranked[0][0] == pytest.approx(.63)
