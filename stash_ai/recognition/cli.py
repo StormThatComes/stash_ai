@@ -55,6 +55,7 @@ def parser():
     report.add_argument('--scene-id', required=True, type=stash_id)
     report.add_argument('--face-config', type=Path, help='Recognition YAML used for the selected run.')
     report.add_argument('--faces-db', type=Path, help='Existing face SQLite database.')
+    report.add_argument('--scope', help='Stash scope, required only when the same scene ID occurs in multiple scopes.')
     report.add_argument('--output', type=Path, help='New JSON report path; stdout if omitted.')
     report.add_argument('--limit', type=int, default=20, help='Maximum suspect pairs to include (1..500).')
     report.add_argument('--min-mean', type=float,
@@ -64,7 +65,7 @@ def parser():
 
 def main(argv=None, *, services=None):
     args = parser().parse_args(argv)
-    config = load(args.face_config, database=args.faces_db, device=args.device)
+    config = load(args.face_config, database=args.faces_db, device=getattr(args, 'device', None))
     if args.command == 'report':
         from .fragmentation_report import execute
         return execute(args, config)
