@@ -48,6 +48,7 @@ def _prepared(groups, query):
         value = state['entries'].pop(key)
         if len(value[4]) == len(arrays) and all(ref() is sample for ref, sample in zip(value[4], arrays)):
             state['entries'][key] = value
+            count('reused_packed_bytes', value[0].nbytes)
             return value[:4]
         state['size'] -= value[-1]
 
@@ -56,6 +57,7 @@ def _prepared(groups, query):
             or any(not group.samples for group in groups)):
         return None
     matrix = np.stack(arrays)
+    count('repacked_bytes', matrix.nbytes)
     lengths = np.asarray([len(group.samples) for group in groups], dtype=np.int64)
     starts = np.concatenate(([0], lengths.cumsum()[:-1]))
     norms = np.linalg.norm(matrix.astype(np.float64), axis=1)

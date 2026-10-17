@@ -1082,6 +1082,9 @@ budget and recomputes evicted data instead of spilling to disk.
 
 ### CPU workers during identity rebuild
 
+See [the retained-evidence benchmark and CPU diagnostics guide](recognition-parallel-benchmark.md)
+for read-only local baseline collection and computed-versus-applied progress.
+
 `execution.rebuild_workers` controls the rebuild compute pool independently of
 `portrait_cpu_threads` and the optional one-reader `rebuild_prefetch_scenes`.
 The default `1` keeps serial execution. `0` chooses up to sixteen workers,

@@ -87,6 +87,10 @@ class FrozenScores:
     def score(self, queries, threshold, cohesion=float('-inf')):
         """Return sparse exact contributions, or None for the serial fallback."""
         if not queries or not self.eligible():
+            pool = current()
+            if pool is not None:
+                pool.fallback('disabled' if pool.workers == 1 else
+                              'small_catalogue' if len(self.groups) < 16 else 'unsupported_layout')
             return None
         import numpy as np
         from .scoring import _prepared
@@ -96,6 +100,7 @@ class FrozenScores:
         # Aggregated sparse Python results are bounded even when every group is
         # a finalist. The caller also caps query count before preparing inputs.
         if len(queries)*len(self.groups)*192 > pool.limit//4:
+            pool.fallback('result_admission')
             return None
         target = max(1024, min(524288, pool.limit//(max(2, pool.workers)*12)))
         blocks, block, size = [], [], 0
@@ -108,19 +113,23 @@ class FrozenScores:
             blocks.append(tuple(block))
         # Avoid starting a compute pool for one small shard.
         if len(blocks) < 2:
+            pool.fallback('single_shard')
             return None
         dimension = queries[0].shape
         if any(q.shape != dimension for q in queries):
+            pool.fallback('mixed_dimensions')
             return None
         for block in blocks:
             sample_count = sum(len(g.samples) for g in block)
             raw = sum(a.nbytes for g in block for a in g.samples)
             if (any(not g.samples or any(a.shape != dimension for a in g.samples) for g in block)
                     or 6*raw + sample_count*len(queries)*32 + len(block)*len(queries)*192 + 4096 > pool.limit):
+                pool.fallback('layout_or_admission')
                 return None
         def jobs():
             for ordinal, block in enumerate(blocks):
-                prepared = _prepared(block, queries[0])
+                with pool.preparing('packing'):
+                    prepared = _prepared(block, queries[0])
                 if prepared is None:
                     raise RuntimeError('Invalid immutable recognition score shard.')
                 matrix, lengths, starts, norms = prepared
@@ -157,11 +166,14 @@ def scored_rows(rows, groups, threshold, cohesion=float('-inf')):
     from .clustering import vector
     pool = current()
     if pool is None or pool.workers == 1 or len(groups) < 16:
+        if pool is not None:
+            pool.fallback('disabled' if pool.workers == 1 else 'small_catalogue')
         for row in rows:
             yield row, None
         return
     plan = FrozenScores(groups)
     if not plan.eligible():
+        pool.fallback('unsupported_layout')
         for row in rows:
             yield row, None
         return
@@ -169,22 +181,31 @@ def scored_rows(rows, groups, threshold, cohesion=float('-inf')):
     iterator = iter(rows)
     while batch := list(islice(iterator, batch_size)):
         queries, indices = [], []
-        for index, row in enumerate(batch):
-            try:
-                query = vector(row)
-            except ValueError:
-                continue  # Raised only when this row is consumed by the caller.
-            indices.append(index); queries.append(query)
+        with pool.preparing('vectors'):
+            for index, row in enumerate(batch):
+                try:
+                    query = vector(row)
+                except ValueError:
+                    continue  # Raised only when this row is consumed by the caller.
+                indices.append(index); queries.append(query)
         values = plan.score(tuple(queries), threshold, cohesion)
         mapped = dict(zip(indices, values)) if values is not None else {}
         from .evidence_cache import current as current_evidence
         cache = current_evidence()
-        for index, row in enumerate(batch):
-            frozen = mapped.get(index)
-            if cache is not None and frozen is not None:
-                for position, mean, low in frozen:
-                    cache.remember_scores(plan.groups[position], row['id'], (mean, low))
-            yield row, frozen
+        pool.record('score_rows', computed=len(mapped))
+        consumed = 0
+        try:
+            for index, row in enumerate(batch):
+                frozen = mapped.get(index)
+                if cache is not None and frozen is not None:
+                    for position, mean, low in frozen:
+                        cache.remember_scores(plan.groups[position], row['id'], (mean, low))
+                if frozen is not None:
+                    consumed += 1
+                    pool.record('score_rows', consumed=1)
+                yield row, frozen
+        finally:
+            pool.record('score_rows', discarded=len(mapped)-consumed)
 
 
 def contributions(groups, query, frozen, fixed_count, threshold, cohesion=float('-inf'), *, exact=None):

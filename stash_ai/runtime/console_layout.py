@@ -34,6 +34,7 @@ def status_lines(row, fields, width, *, max_rows=12):
     sections.append(('Time', timing))
     take('Progress', lambda key: key in ('scenes', 'frames', 'people', 'work', 'detail', 'progress', 'frame_cache', 'checkpoint'))
     take('Rates', lambda key: key.endswith(('_eta', '_rate')))
+    take('CPU', lambda key: key.startswith('cpu_'))
     take('References', lambda key: key.startswith('reference'))
     take('Details', lambda key: True)
 
