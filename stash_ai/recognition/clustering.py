@@ -102,7 +102,7 @@ def _similarities(group, query):
 
 
 @measured('cue_context')
-def co_presence_allows(db, observation, group, groups, query, config, *, peer_threshold=None):
+def co_presence_allows(db, observation, group, groups, query, config, *, peer_threshold=None, cohesion_threshold=None):
     """A distinct cue peer competing for this identity needs stronger evidence.
 
     Inspect the entire cue, including observations not assigned yet, so reader
@@ -113,6 +113,8 @@ def co_presence_allows(db, observation, group, groups, query, config, *, peer_th
     import numpy as np
     settings = config.data['recognition']
     peer_threshold = settings['match_threshold'] if peer_threshold is None else peer_threshold
+    cohesion_threshold = (config.data['clustering']['cohesion_threshold']
+                          if cohesion_threshold is None else cohesion_threshold)
     stronger = max(settings['match_threshold'], settings['cooccurrence_merge_threshold'])
     cache = evidence(db)
     peers = (cache.peers(observation['scan'], observation['cue']) if cache is not None else
@@ -125,13 +127,13 @@ def co_presence_allows(db, observation, group, groups, query, config, *, peer_th
             continue
         other = cache.vector(peer) if cache is not None else vector(peer)
         mean, minimum = cache.scores(group, other, peer['id']) if cache is not None else _similarities(group, other)
-        if mean < peer_threshold or minimum < config.data['clustering']['cohesion_threshold']:
+        if mean < peer_threshold or minimum < cohesion_threshold:
             continue
         best = mean
         for rival in groups:
             rival_mean, rival_minimum = (cache.scores(rival, other, peer['id']) if cache is not None
                                           else _similarities(rival, other))
-            if rival_minimum >= config.data['clustering']['cohesion_threshold']:
+            if rival_minimum >= cohesion_threshold:
                 best = max(best, rival_mean)
         if best - mean >= settings['ambiguity_margin'] and best > mean:
             continue
