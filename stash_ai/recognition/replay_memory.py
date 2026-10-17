@@ -39,16 +39,13 @@ class Lookahead:
     """One immutable next scene on an isolated reader, without fixed scene caps.
 
     Once enabled, each selected scene must be prepared successfully or the
-    rebuild fails. A slice of the configured rebuild RAM budget bounds retained
-    lookahead vectors; exhaustion is an error, not a silent serial fallback.
+    rebuild fails. No extra per-scene RAM fraction or observation cap applies;
+    each scene is prepared in full and memory allocation failures propagate.
     The coordinator never consumes prepared membership or decisions from a worker.
     """
     def __init__(self, uri, config):
         self.uri = uri
         self.enabled = config.data['execution'].get('rebuild_prefetch_scenes',False)
-        # No fixed per-scene row/byte limit. Enabled lookahead is required to
-        # fit this configurable budget; otherwise explicitly fail the rebuild.
-        self.budget_bytes = config.data['execution']['rebuild_memory_bytes']//16
         self.executor = self.pending = self.scan = None
         self.prepared = {}
         self.cancel = Cancellation()
@@ -63,7 +60,6 @@ class Lookahead:
             db.row_factory=sqlite3.Row
             db.execute('PRAGMA query_only=ON')
             values={}
-            retained_bytes=0
             # This is a keyed cache, so matching-order sort keys are unnecessary.
             # ORDER BY cue,id uses observations_scan, avoiding an unbounded
             # temporary SQLite sort for large scenes.
@@ -71,22 +67,11 @@ class Lookahead:
                                   'AND rejected IS NULL ORDER BY cue,id',(scan,)):
                 self.cancel.check()
                 blob=row['embedding']
-                # Approximate Python ownership and a NumPy view alongside the
-                # retained embedding; avoid retaining the entire scene in RAM.
-                charge=2*len(blob)+1024 if isinstance(blob,bytes) else 1024
-                if charge>self.budget_bytes-retained_bytes:
-                    raise RuntimeError(
-                        'Recognition rebuild prefetch memory budget exceeded for '
-                        f'scan {scan}: {retained_bytes + charge} bytes required, '
-                        f'{self.budget_bytes} bytes allowed. Increase '
-                        'execution.rebuild_memory_bytes or disable '
-                        'execution.rebuild_prefetch_scenes.')
                 try:
                     value=vector(row)
                 except ValueError as error:
                     value=error  # Expose malformed evidence only at its original use.
                 values[row['id']]=(row['dimensions'],blob,value)
-                retained_bytes+=charge
             return values
 
     def submit(self, scan):
@@ -111,7 +96,7 @@ class Lookahead:
             self.prepared=self.pending.result()
         except Exception as error:
             # Enabled lookahead is an explicit execution contract. Report
-            # SQLite lock/IO errors, worker failures and RAM exhaustion rather
+            # SQLite lock/IO errors, worker failures and MemoryError rather
             # than silently replacing this mode with serial vector decoding.
             raise RuntimeError(f'Recognition rebuild prefetch failed for scan {scan}: {error}') from error
         finally:

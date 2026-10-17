@@ -1420,13 +1420,13 @@ to disk. Durable FaceDatabase transactions retain their existing guarantees.
 uses one isolated read-only reader to validate at most one upcoming scene.
 There are no fixed 256-observation or 8 MiB scene eligibility limits. Once
 `execution.rebuild_prefetch_scenes: true` is selected, prefetch is mandatory for
-each selected scene, including the first scene in a cold replay. It must retain
-all eligible vectors using up to one sixteenth of
-`execution.rebuild_memory_bytes` (512 MiB by default); exceeding this
-configurable RAM allowance fails the entire rebuild with an actionable error.
-SQLite lock/read failures and worker errors also fail the rebuild instead of
-silently falling back to serial decoding. Disable the option explicitly to use
-serial input handling. The read-only worker traverses indexed observation order
+each selected scene, including the first scene in a cold replay. It prepares
+all eligible vectors without a separate per-scene prefetch RAM fraction or
+observation limit. Actual allocation failures, SQLite lock/read failures and
+worker errors fail the rebuild instead of silently falling back to serial
+decoding. `execution.rebuild_memory_bytes` still governs other rebuild caches
+and the in-memory replay database, not the prefetch's own ceiling. Disable the
+option explicitly to use serial input handling. The read-only worker traverses indexed observation order
 without a large SQLite sort. Only immutable vectors are prepared; assignments
 and SQLite writes stay ordered on the coordinator. Invalid vectors are reported
 when originally consumed, and cancellation closes the reader/worker.

@@ -94,9 +94,9 @@ def test_prefetch_handles_more_than_eight_mib_of_embeddings(tmp_path):
             assert prepared_vector(dict(id=str(total-1),dimensions=1024,embedding=blob))[0]==1.
 
 
-def test_prefetch_memory_budget_exhaustion_fails_when_enabled(tmp_path):
-    # No fixed 256/8 MiB admission cap, but an explicit RAM budget failure
-    # cannot silently degrade a requested lookahead into serial matching.
+def test_prefetch_does_not_cap_scene_to_sixteenth_of_rebuild_budget(tmp_path):
+    # A large enough scene exceeds the former /16 lookahead budget, but fits
+    # the actual in-memory replay. Every observation must still be prefetched.
     config=enabled(setup(tmp_path),rebuild_prefetch_scenes=True,rebuild_memory_bytes=4*1024*1024)
     blob=np.array([1.]+[0.]*1023,dtype='<f4').tobytes()
     with memory_replay(config) as (db,uri):
@@ -105,11 +105,10 @@ def test_prefetch_memory_budget_exhaustion_fails_when_enabled(tmp_path):
                        ((str(i),blob) for i in range(120)))
         db.commit()
         with Lookahead(uri,config) as ahead:
-            ahead.submit('large')
-            with pytest.raises(RuntimeError,match='prefetch failed for scan large') as failure:
-                ahead.take('large')
-            assert 'prefetch memory budget exceeded' in str(failure.value)
-            assert ahead.prepared=={}
+            ahead.submit('large');ahead.take('large')
+            assert len(ahead.prepared)==120
+            assert all(prepared_vector(dict(id=str(i),dimensions=1024,embedding=blob))[0]==1.
+                       for i in range(120))
             assert ahead.pending is None and ahead.scan is None
 
 
@@ -184,3 +183,23 @@ def test_prefetch_worker_failure_keeps_durable_assignments_unchanged(tmp_path,mo
             'SELECT * FROM members ORDER BY observation')]
         assert expected_candidates==[tuple(row) for row in state.connection.execute(
             'SELECT * FROM candidates ORDER BY id')]
+
+
+
+def test_enabled_prefetch_propagates_actual_memory_failure(tmp_path,monkeypatch):
+    from stash_ai.recognition import clustering
+    config=enabled(setup(tmp_path),rebuild_prefetch_scenes=True)
+    blob=np.array([1.,0.,0.,0.],dtype='<f4').tobytes()
+    with memory_replay(config) as (db,uri):
+        db.execute('CREATE TABLE observations(id TEXT,scan TEXT,dimensions INTEGER,embedding BLOB,rejected TEXT,cue INTEGER,geometry TEXT)')
+        db.execute("INSERT INTO observations VALUES ('one','s',4,?,NULL,0,'{}')",(blob,))
+        db.commit()
+        def fail_vector(row):
+            raise MemoryError('injected allocation failure')
+        monkeypatch.setattr(clustering,'vector',fail_vector)
+        with Lookahead(uri,config) as ahead:
+            ahead.submit('s')
+            with pytest.raises(RuntimeError,match='prefetch failed for scan s') as failure:
+                ahead.take('s')
+            assert isinstance(failure.value.__cause__,MemoryError)
+            assert ahead.pending is None and ahead.scan is None
