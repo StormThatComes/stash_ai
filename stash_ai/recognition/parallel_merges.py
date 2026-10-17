@@ -54,11 +54,14 @@ def cross_pairs(first, second, config, serial):
     """
     pool = current()
     if pool is None or pool.workers == 1 or len(first)*len(second) < 2:
+        if pool is not None:
+            pool.fallback('disabled' if pool.workers == 1 else 'small_pair_demand')
         for left, right in product(first, second):
             yield cached_cross(left, right, config, serial)
         return
     plan = FrozenScores(tuple(first) + tuple(second))
     if not _immutable(plan):
+        pool.fallback('unsupported_layout')
         for left, right in product(first, second):
             yield cached_cross(left, right, config, serial)
         return
@@ -82,6 +85,7 @@ def cross_pairs(first, second, config, serial):
                 a, b = references[id(left)], references[id(right)]
                 size = 4096 + sum(s.nbytes+128 for g in (a, b) for s in g.samples)
                 if size > pool.limit:
+                    pool.fallback('pair_admission')
                     values.append((False, cached_cross(left, right, config, serial)))
                     continue
                 ordinal = len(jobs)
@@ -105,7 +109,16 @@ def cross_pairs(first, second, config, serial):
                 value = completed[value]
                 save_cross(cache, identity, value)
             resolved.append(value)
-        yield from resolved
+        pool.record('pair_proofs', computed=len(jobs))
+        used = set()
+        try:
+            for (pending, ordinal), value in zip(values, resolved):
+                if pending and ordinal not in used:
+                    used.add(ordinal)
+                    pool.record('pair_proofs', consumed=1)
+                yield value
+        finally:
+            pool.record('pair_proofs', discarded=len(jobs)-len(used))
 
 
 def _matches(payload):
@@ -144,11 +157,14 @@ def matching_rows(rows, components, config):
     """
     pool = current()
     if pool is None or pool.workers == 1:
+        if pool is not None:
+            pool.fallback('disabled')
         for row in rows:
             yield row, None
         return
     plan = FrozenScores(tuple(group for component in components for group in component))
     if not _immutable(plan):
+        pool.fallback('unsupported_layout')
         for row in rows:
             yield row, None
         return
@@ -167,6 +183,7 @@ def matching_rows(rows, components, config):
     # Leave room for at least two concurrent blocks under byte admission.
     block_size = min(8, (pool.limit//2-raw-scratch)//per_query)
     if block_size < 1:
+        pool.fallback('evidence_admission')
         for row in rows:
             yield row, None
         return
@@ -202,5 +219,15 @@ def matching_rows(rows, components, config):
             if not plan.valid():
                 raise RuntimeError('Recognition constituent references changed during scoring.')
             mapped = dict(zip(indices, masks))
-        for index, row in enumerate(batch):
-            yield row, mapped.get(index)
+        else:
+            pool.fallback('small_evidence_demand')
+        pool.record('evidence_rows', computed=len(mapped))
+        consumed = 0
+        try:
+            for index, row in enumerate(batch):
+                if index in mapped:
+                    consumed += 1
+                    pool.record('evidence_rows', consumed=1)
+                yield row, mapped.get(index)
+        finally:
+            pool.record('evidence_rows', discarded=len(mapped)-consumed)

@@ -1,6 +1,6 @@
 """Coordinator-owned, bounded CPU work; workers never inherit replay state."""
-from collections import deque
-from concurrent.futures import ThreadPoolExecutor
+from collections import Counter, deque
+from concurrent.futures import ThreadPoolExecutor, wait
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -56,16 +56,64 @@ class Compute:
         self.bytes = self.peak_bytes = 0
         self.submitted = self.applied = 0
         self.worker_seconds = self.worker_cpu_seconds = self.wait_seconds = 0.
+        self.lock = threading.Lock()
+        self.running = self.completed = self.failed = 0
+        self.fallbacks, self.records, self.preparation = Counter(), {}, Counter()
+        self.scenes_applied = 0
+        self.last_status = 0.
+
+    def fallback(self, reason):
+        self.fallbacks[reason] += 1
+        self.publish('serial: ' + reason.replace('_', ' '))
+
+    def record(self, kind, *, computed=0, consumed=0, discarded=0):
+        row = self.records.setdefault(kind, dict(computed=0, consumed=0, discarded=0))
+        for key, value in (('computed', computed), ('consumed', consumed), ('discarded', discarded)):
+            row[key] += value
+        self.publish()
+
+    @contextmanager
+    def preparing(self, kind):
+        started = time.perf_counter()
+        self.publish('prepare ' + kind)
+        try:
+            yield
+        finally:
+            self.preparation[kind + '_seconds'] += time.perf_counter()-started
+
+    def publish(self, reason='coordinator', *, clear=False):
+        """Only the coordinator updates UI; worker counters are lock-protected."""
+        if threading.get_ident() != self.owner:
+            raise RuntimeError('Only the recognition coordinator may publish CPU progress.')
+        now = time.monotonic()
+        if not clear and now-self.last_status < .25:
+            return
+        self.last_status = now
+        from stash_ai.runtime.console import current_report, status
+        with self.lock:
+            running, completed = self.running, self.completed
+        fields = dict(cpu_workers=f'{running}/{self.workers}',
+                      cpu_blocks=f'{completed} computed/{self.applied} retired',
+                      cpu_queue=f'{self.bytes}/{self.limit} B', cpu_wait=reason,
+                      cpu_scenes=self.scenes_applied)
+        status(current_report(), **{k: None if clear else v for k, v in fields.items()})
 
     def summary(self):
-        return dict(format=1, requested_workers=self.requested_workers,
+        with self.lock:
+            running, completed, failed = self.running, self.completed, self.failed
+        return dict(format=2, requested_workers=self.requested_workers,
                     effective_workers=self.workers, available_cpus=self.available,
                     native_threads=self.native_threads, backend='threads',
                     queue_limit_bytes=self.limit, peak_queued_bytes=self.peak_bytes,
                     submitted_blocks=self.submitted, applied_blocks=self.applied,
                     successful_worker_wall_seconds=self.worker_seconds,
                     successful_worker_thread_cpu_seconds=self.worker_cpu_seconds,
-                    ordered_wait_seconds=self.wait_seconds)
+                    ordered_wait_seconds=self.wait_seconds,
+                    completed_blocks=completed, failed_blocks=failed, active_workers=running,
+                    retired_blocks=self.applied, pending_blocks=len(self.pending),
+                    strict_scenes_applied=self.scenes_applied,
+                    fallbacks=dict(self.fallbacks), records={k: dict(v) for k,v in self.records.items()},
+                    preparation=dict(self.preparation))
 
     def _owned(self):
         if threading.get_ident() != self.owner:
@@ -89,17 +137,30 @@ class Compute:
             raise
 
     def _invoke(self, function, job):
-        with use(self.cancel):
-            start, cpu = time.perf_counter(), time.thread_time()
-            value = function(job.payload)
-            self.cancel.check()
-            return Result(job.ordinal, job.generation, value,
-                          time.perf_counter()-start, time.thread_time()-cpu)
+        with self.lock:
+            self.running += 1
+        success = False
+        try:
+            with use(self.cancel):
+                start, cpu = time.perf_counter(), time.thread_time()
+                value = function(job.payload)
+                self.cancel.check()
+                success = True
+                return Result(job.ordinal, job.generation, value,
+                              time.perf_counter()-start, time.thread_time()-cpu)
+        finally:
+            with self.lock:
+                self.running -= 1
+                self.completed += int(success)
+                self.failed += int(not success)
 
     def _take(self):
         future, job = self.pending[0]
         start = time.perf_counter()
         try:
+            while not future.done():
+                self.publish('ordered CPU result')
+                wait((future,), timeout=.25)
             result = future.result()
         finally:
             self.wait_seconds += time.perf_counter()-start
@@ -148,6 +209,7 @@ class Compute:
                 self.cancel.cancel()
                 for future, _ in self.pending:
                     future.cancel()
+            self.publish('stopping' if self.pending else 'coordinator')
 
     def _release(self):
         if self.native is not None:
@@ -184,5 +246,6 @@ def compute_scope(config):
     finally:
         _active.reset(token)
         from .profiling import compute_summary
-        cleanup([('record recognition CPU work', lambda: compute_summary(value.summary())),
-                 ('close recognition CPU owner', value.close)])
+        cleanup([('close recognition CPU owner', value.close),
+                 ('record recognition CPU work', lambda: compute_summary(value.summary())),
+                 ('clear recognition CPU status', lambda: value.publish(clear=True))])

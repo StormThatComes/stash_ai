@@ -27,7 +27,7 @@ from .replay_addresses import addresses
 from .replay_memory import memory_replay, Lookahead, report_pages
 from . import rebuild_cache
 from .replay_checkpoint import Checkpoints, ReplayClock
-from .compute import compute_scope
+from .compute import compute_scope, current as compute_current
 from .parallel_scores import FrozenScores
 
 
@@ -406,6 +406,8 @@ def _rebuild_selected(database, selected, config, *, progress=None):
                         lookahead.take(item['scan'])
                         lookahead.submit(selected[index+1]['scan'] if index+1<len(selected) else None)
                         cluster_scene(temporary, item['scan'], config, progress=progress, _cold_replay=True)
+                        compute_current().scenes_applied += 1
+                        compute_current().publish()
                         checkpoints.save(replay, index+1, clock.value)
             # Freeze strict references after every selected scene has matched and
             # merged. Contextual attachments cannot become another scene's anchors
