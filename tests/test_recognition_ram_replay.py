@@ -64,7 +64,8 @@ def test_prefetch_defers_bad_vectors_and_accepts_large_scene(tmp_path):
             ahead.submit('s'); ahead.take('s')
             with pytest.raises(ValueError,match='embedding'):
                 prepared_vector(dict(id='bad',dimensions=4,embedding=b'bad'))
-            assert prepared_vector(dict(id='bad',dimensions=4,embedding=b'changed')) is MISSING
+            with pytest.raises(RuntimeError,match='prefetched evidence changed'):
+                prepared_vector(dict(id='bad',dimensions=4,embedding=b'changed'))
         embedding=np.array([1.,0.,0.,0.],dtype='<f4').tobytes()
         db.executemany("INSERT INTO observations VALUES (?,'large',4,?,NULL,0,'{}')",
                        [(str(i),embedding) for i in range(257)])
@@ -93,9 +94,9 @@ def test_prefetch_handles_more_than_eight_mib_of_embeddings(tmp_path):
             assert prepared_vector(dict(id=str(total-1),dimensions=1024,embedding=blob))[0]==1.
 
 
-def test_prefetch_memory_budget_keeps_large_scene_eligible(tmp_path):
-    # Even after the configurable cache fills, matching can decode unprepared
-    # observations on demand rather than discarding the whole scene's prefetch.
+def test_prefetch_memory_budget_exhaustion_fails_when_enabled(tmp_path):
+    # No fixed 256/8 MiB admission cap, but an explicit RAM budget failure
+    # cannot silently degrade a requested lookahead into serial matching.
     config=enabled(setup(tmp_path),rebuild_prefetch_scenes=True,rebuild_memory_bytes=4*1024*1024)
     blob=np.array([1.]+[0.]*1023,dtype='<f4').tobytes()
     with memory_replay(config) as (db,uri):
@@ -104,27 +105,30 @@ def test_prefetch_memory_budget_keeps_large_scene_eligible(tmp_path):
                        ((str(i),blob) for i in range(120)))
         db.commit()
         with Lookahead(uri,config) as ahead:
-            ahead.submit('large');ahead.take('large')
-            assert 0<len(ahead.prepared)<120
-            first=next(iter(ahead.prepared))
-            assert prepared_vector(dict(id=first,dimensions=1024,embedding=blob))[0]==1.
-            missing=next(str(i) for i in range(120) if str(i) not in ahead.prepared)
-            assert prepared_vector(dict(id=missing,dimensions=1024,embedding=blob)) is MISSING
+            ahead.submit('large')
+            with pytest.raises(RuntimeError,match='prefetch failed for scan large') as failure:
+                ahead.take('large')
+            assert 'prefetch memory budget exceeded' in str(failure.value)
+            assert ahead.prepared=={}
+            assert ahead.pending is None and ahead.scan is None
 
 
 
-def test_prefetch_is_opportunistic_when_sqlite_table_is_locked(tmp_path):
+def test_enabled_prefetch_fails_on_sqlite_table_lock(tmp_path):
     config=enabled(setup(tmp_path),rebuild_prefetch_scenes=True)
     blob=np.array([1.,0.,0.,0.],dtype='<f4').tobytes()
     with memory_replay(config) as (db,uri):
         db.execute('CREATE TABLE observations(id TEXT,scan TEXT,dimensions INTEGER,embedding BLOB,rejected TEXT,cue INTEGER,geometry TEXT)')
         db.execute("INSERT INTO observations VALUES ('one','s',4,?,NULL,0,'{}')",(blob,))
         db.commit()
-        # Shared-cache memory databases reject speculative reads of a table
-        # currently owned by a writer. Matching remains responsible for errors.
+        # Shared-cache memory databases reject reads while the writer holds
+        # this table. With enabled lookahead the error must be visible.
         db.execute("UPDATE observations SET dimensions=dimensions WHERE id='one'")
         with Lookahead(uri,config) as ahead:
-            ahead.submit('s');ahead.take('s')
+            ahead.submit('s')
+            with pytest.raises(RuntimeError,match='prefetch failed for scan s') as failure:
+                ahead.take('s')
+            assert isinstance(failure.value.__cause__,sqlite3.OperationalError)
             assert ahead.prepared=={}
             assert ahead.pending is None and ahead.scan is None
         db.rollback()
@@ -143,3 +147,40 @@ def test_prefetch_uses_scan_index_without_temp_sort(tmp_path):
             "AND rejected IS NULL ORDER BY cue,id",('s',))]
         assert any('USING INDEX observations_scan' in part for part in plan)
         assert not any('TEMP B-TREE' in part for part in plan)
+
+
+
+def test_enabled_prefetch_requires_submitted_scene(tmp_path):
+    config=enabled(setup(tmp_path),rebuild_prefetch_scenes=True)
+    with memory_replay(config) as (_,uri):
+        with Lookahead(uri,config) as ahead:
+            with pytest.raises(RuntimeError,match='was not scheduled'):
+                ahead.take('missing')
+
+
+def test_prefetch_worker_failure_keeps_durable_assignments_unchanged(tmp_path,monkeypatch):
+    from stash_ai.recognition import replay_memory
+    config=enabled(setup(tmp_path),rebuild_prefetch_scenes=True)
+    with FaceDatabase(config.database) as state:
+        selected=[]
+        for index in range(3):
+            identifier,_=scan(state,config,str(index+1),
+                              [np.array([1.,0.,0.,0.],dtype='<f4')]*2)
+            selected.append(dict(scene=str(index+1),scan=identifier))
+        expected_members=[tuple(row) for row in state.connection.execute(
+            'SELECT * FROM members ORDER BY observation')]
+        expected_candidates=[tuple(row) for row in state.connection.execute(
+            'SELECT * FROM candidates ORDER BY id')]
+        calls=[]
+        def broken(self,scan_id):
+            calls.append(scan_id)
+            raise sqlite3.OperationalError('injected prefetch read failure')
+        monkeypatch.setattr(replay_memory.Lookahead,'_prepare',broken)
+        with pytest.raises(RuntimeError,match='prefetch failed for scan') as failure:
+            rebuild_selected(state,selected,config)
+        assert isinstance(failure.value.__cause__,sqlite3.OperationalError)
+        assert calls==[selected[0]['scan']]
+        assert expected_members==[tuple(row) for row in state.connection.execute(
+            'SELECT * FROM members ORDER BY observation')]
+        assert expected_candidates==[tuple(row) for row in state.connection.execute(
+            'SELECT * FROM candidates ORDER BY id')]

@@ -1,4 +1,4 @@
-"""Disposable RAM replay and optional immutable next-scene validation lookahead."""
+"""Disposable RAM replay and explicitly enabled, fail-fast next-scene lookahead."""
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -38,15 +38,16 @@ def report_pages(db):
 class Lookahead:
     """One immutable next scene on an isolated reader, without fixed scene caps.
 
-    A slice of the configured rebuild RAM budget bounds retained lookahead
-    vectors. When it fills, remaining observations use ordinary lazy decoding.
+    Once enabled, each selected scene must be prepared successfully or the
+    rebuild fails. A slice of the configured rebuild RAM budget bounds retained
+    lookahead vectors; exhaustion is an error, not a silent serial fallback.
     The coordinator never consumes prepared membership or decisions from a worker.
     """
     def __init__(self, uri, config):
         self.uri = uri
         self.enabled = config.data['execution'].get('rebuild_prefetch_scenes',False)
-        # The prefetch is opportunistic: a large scene must never be rejected
-        # outright because of its observation count or embedding bytes.
+        # No fixed per-scene row/byte limit. Enabled lookahead is required to
+        # fit this configurable budget; otherwise explicitly fail the rebuild.
         self.budget_bytes = config.data['execution']['rebuild_memory_bytes']//16
         self.executor = self.pending = self.scan = None
         self.prepared = {}
@@ -74,7 +75,12 @@ class Lookahead:
                 # retained embedding; avoid retaining the entire scene in RAM.
                 charge=2*len(blob)+1024 if isinstance(blob,bytes) else 1024
                 if charge>self.budget_bytes-retained_bytes:
-                    break  # Decode this and all subsequent observations on demand.
+                    raise RuntimeError(
+                        'Recognition rebuild prefetch memory budget exceeded for '
+                        f'scan {scan}: {retained_bytes + charge} bytes required, '
+                        f'{self.budget_bytes} bytes allowed. Increase '
+                        'execution.rebuild_memory_bytes or disable '
+                        'execution.rebuild_prefetch_scenes.')
                 try:
                     value=vector(row)
                 except ValueError as error:
@@ -95,19 +101,19 @@ class Lookahead:
 
     def take(self, scan):
         self.prepared.clear()
-        if self.pending is None:
+        if not self.enabled:
             return
+        if self.pending is None:
+            raise RuntimeError(f'Recognition rebuild prefetch was not scheduled for scan {scan}.')
         if self.scan!=scan:
             raise RuntimeError('Replay lookahead order changed.')
         try:
             self.prepared=self.pending.result()
-        except sqlite3.OperationalError as error:
-            # A speculative reader can collide with SQLite shared-cache
-            # writers. Never turn an optional prefetch lock into a failed rebuild.
-            code=getattr(error,'sqlite_errorcode',None)
-            if code is None or code & 255 not in (sqlite3.SQLITE_BUSY,sqlite3.SQLITE_LOCKED):
-                raise
-            self.prepared={}
+        except Exception as error:
+            # Enabled lookahead is an explicit execution contract. Report
+            # SQLite lock/IO errors, worker failures and RAM exhaustion rather
+            # than silently replacing this mode with serial vector decoding.
+            raise RuntimeError(f'Recognition rebuild prefetch failed for scan {scan}: {error}') from error
         finally:
             self.pending=self.scan=None
 
@@ -122,8 +128,10 @@ class Lookahead:
 def prepared_vector(row):
     active=_active.get()
     found=active.prepared.get(row['id']) if active is not None else None
-    if found is None or found[:2]!=(row['dimensions'],row['embedding']):
-        return MISSING
+    if found is None:
+        return MISSING  # Reference from another scene or already released.
+    if found[:2]!=(row['dimensions'],row['embedding']):
+        raise RuntimeError('Recognition rebuild prefetched evidence changed during matching.')
     count('prefetched_replay_vectors')
     count('validated_vectors')
     if isinstance(found[2],ValueError):

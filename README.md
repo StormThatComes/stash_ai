@@ -1418,15 +1418,18 @@ to disk. Durable FaceDatabase transactions retain their existing guarantees.
 
 `execution.rebuild_prefetch_scenes` defaults to false. This experimental option
 uses one isolated read-only reader to validate at most one upcoming scene.
-There are no fixed 256-observation or 8 MiB scene eligibility limits. Instead,
-lookahead retains validated vectors up to one sixteenth of
-`execution.rebuild_memory_bytes` (512 MiB by default). Larger scenes still
-benefit from bounded-prefix prefetch; remaining observations are decoded on demand.
-The read-only worker traverses the indexed observation order without a large
-SQLite sort; transient SQLite lock contention falls back to serial decoding.
-Only immutable vectors are prepared; assignments and SQLite writes stay ordered
-on the coordinator. Invalid vectors are reported when originally consumed,
-and cancellation closes the reader/worker.
+There are no fixed 256-observation or 8 MiB scene eligibility limits. Once
+`execution.rebuild_prefetch_scenes: true` is selected, prefetch is mandatory for
+each selected scene, including the first scene in a cold replay. It must retain
+all eligible vectors using up to one sixteenth of
+`execution.rebuild_memory_bytes` (512 MiB by default); exceeding this
+configurable RAM allowance fails the entire rebuild with an actionable error.
+SQLite lock/read failures and worker errors also fail the rebuild instead of
+silently falling back to serial decoding. Disable the option explicitly to use
+serial input handling. The read-only worker traverses indexed observation order
+without a large SQLite sort. Only immutable vectors are prepared; assignments
+and SQLite writes stay ordered on the coordinator. Invalid vectors are reported
+when originally consumed, and cancellation closes the reader/worker.
 
 Run `python -m benchmarks.benchmark_recognition_replay --scenes 960 --repeats 2`
 for an offline comparison with the former temporary-file path. One Linux run
