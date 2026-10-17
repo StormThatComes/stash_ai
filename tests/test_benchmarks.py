@@ -20,6 +20,8 @@ import pytest
     ('pinned_proofs', ['--frames', '4', '--labels', '2', '--repeats', '1']),
     ('scoped_reports', ['--scenes', '20', '--selected', '2', '--repeats', '2']),
     ('state_compression', ['--frames', '4', '--labels', '2', '--repeats', '2']),
+    ('recognition_parallel', ['--scenes', '20', '--people', '16', '--workers', '1', '2',
+                              '--queue-bytes', '65536', '--repeats', '1']),
 ])
 def test_offline_entry_point(name, arguments):
     result = subprocess.run([sys.executable, '-m', 'benchmarks.benchmark_' + name, *arguments],
@@ -28,6 +30,11 @@ def test_offline_entry_point(name, arguments):
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
     assert payload
+    if name == 'recognition_parallel':
+        assert payload['identical_semantics']
+        assert {row['mode'] for row in payload['trials']} == {'cold', 'cached'}
+        assert all(row['profile']['cpu']['submitted_blocks'] == 0
+                   for row in payload['trials'] if row['mode'] == 'cached')
     if name == 'pinned_proofs':
         assert payload['identical_state']
         assert all(row['proofs_unchanged'] and row['archived_records'] == 8 for row in payload['trials'])

@@ -235,3 +235,18 @@ can dominate these tiny payloads, so smaller transport is not a guaranteed
 end-to-end speedup. This is a controlled synthetic merge, not the deferred
 retention stress benchmark. Model-report counters aggregate per chunk; merge
 diagnostics stay per scene to preserve publication-failure accounting.
+
+## Parallel recognition rebuild
+
+`python -m benchmarks.benchmark_recognition_parallel --scenes 480 --people 96 --dimensions 512 --workers 1 8 16 20 --repeats 3`
+compares cold and valid-cache rebuilds on disposable synthetic retained evidence.
+All working replay data stays in RAM; temporary durable input databases belong
+only to the benchmark. No models, private library, FFmpeg or Stash service are
+used. The report checks semantic hashes across modes/worker counts and records
+effective CPU/native limits, per-stage wall time, process CPU, queue estimates
+and RSS after each trial (not peak RSS). Use `--dimensions 128` for SFace-sized
+vectors, and `--queue-bytes` to compare admission overhead.
+
+This orthogonal-identity fixture is a correctness/scaling probe, not a realistic
+merge or face-accuracy benchmark. It does not choose a new application default.
+Representative 24-core measurements remain necessary for that decision.

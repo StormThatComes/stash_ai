@@ -155,12 +155,16 @@ def scored_rows(rows, groups, threshold, cohesion=float('-inf')):
     Only cold-replay numerical work uses this helper; it does not read SQLite.
     """
     from .clustering import vector
+    pool = current()
+    if pool is None or pool.workers == 1 or len(groups) < 16:
+        for row in rows:
+            yield row, None
+        return
     plan = FrozenScores(groups)
     if not plan.eligible():
         for row in rows:
             yield row, None
         return
-    pool = current()
     batch_size = max(1, min(16, pool.limit//max(1, len(groups)*192*8)))
     iterator = iter(rows)
     while batch := list(islice(iterator, batch_size)):
