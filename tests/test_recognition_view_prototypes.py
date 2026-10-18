@@ -6,7 +6,9 @@ import numpy as np
 import pytest
 
 from stash_ai.recognition.clustering import _groups, matching_policy
-from stash_ai.recognition.config import load
+from stash_ai.recognition.config import load, plain
+from dataclasses import replace
+from stash_ai.recognition.rebuild import rebuild_selected
 from stash_ai.recognition.database import FaceDatabase
 from stash_ai.recognition.scanning import scan_identity
 from stash_ai.recognition.view_prototypes import pose_view, confirmed_views
@@ -165,6 +167,31 @@ def test_views_require_anchor_policy_and_auxiliary_matching(tmp_path, options):
     path.write_text('version: 1\nclustering: '+json.dumps(options)+'\n')
     with pytest.raises(ValueError, match='view_prototypes_enabled'):
         load(path)
+
+
+
+def test_loose_tight_loose_replay_reuses_embeddings_and_reproduces_views(tmp_path):
+    config = multiview(tmp_path)
+    with FaceDatabase(config.database) as db:
+        selected = run_example(db, config)
+        accepted = [row['status'] for row in membership(db, selected[1]['scan'])]
+        assert accepted == ['accepted', 'accepted']
+        data = plain(config.data)
+        data['clustering']['view_prototypes_enabled'] = False
+        disabled = replace(config, data=data)
+        rebuild_selected(db, selected, disabled)
+        assert [row['status'] for row in membership(db, selected[1]['scan'])] == ['withheld']*2
+        rebuild_selected(db, selected, config)
+        assert [row['status'] for row in membership(db, selected[1]['scan'])] == accepted
+
+
+def test_view_reference_budget_fails_instead_of_silently_dropping_views(tmp_path):
+    config = multiview(tmp_path)
+    with FaceDatabase(config.database) as db:
+        run_example(db, config)
+        with pytest.raises(ValueError, match='max_reference_bytes'):
+            confirmed_views(db.connection, matching_policy(config), config.data['clustering'],
+                            remaining_bytes=1)
 
 
 def test_pose_hint_keeps_signed_direction_and_does_not_claim_yaw_degrees():
