@@ -26,6 +26,10 @@ def defaults():
         'clustering': {'cohesion_threshold': .60, 'same_scene_match_bonus': .03,
                        'same_scene_min_support': 3, 'max_anchor_pose_deviation': None,
                        'auxiliary_matching': True, 'auxiliary_min_support': 1,
+                       'view_prototypes_enabled': False, 'view_min_support': 3,
+                       'view_cohesion_threshold': .80, 'view_match_threshold': .82,
+                       'view_ambiguity_margin': .12, 'view_attach_min_support': 2,
+                       'max_view_prototypes_per_person': 4,
                        'max_samples_per_person': 32,
                        'max_people_per_lookup': 20000, 'max_reference_bytes': 134217728},
         'portraits': {'enabled': True, 'source': 'vtt', 'min_face_pixels': 96, 'min_sharpness': 25.,
@@ -135,6 +139,13 @@ def validate(data):
     detection_pose = data['detection']['max_pose_deviation']
     if anchor is not None and detection_pose is not None and anchor > detection_pose:
         raise ValueError('clustering.max_anchor_pose_deviation must not exceed detection.max_pose_deviation.')
+    if type(data['clustering']['view_prototypes_enabled']) is not bool:
+        raise ValueError('clustering.view_prototypes_enabled must be boolean.')
+    if (data['clustering']['view_prototypes_enabled'] and
+            (anchor is None or not data['clustering']['auxiliary_matching'])):
+        raise ValueError('clustering.view_prototypes_enabled requires an anchor pose limit and auxiliary_matching.')
+    for name in ('view_cohesion_threshold', 'view_match_threshold', 'view_ambiguity_margin'):
+        _number(data['clustering'][name], 'clustering.' + name, 0, 1)
     if type(data['clustering']['auxiliary_matching']) is not bool:
         raise ValueError('clustering.auxiliary_matching must be boolean.')
     if type(data['execution']['profile_rebuild']) is not bool:
@@ -150,6 +161,8 @@ def validate(data):
         'detection': {'min_face_pixels': (8, 4096), 'max_faces_per_frame': (1, 1000)},
         'recognition': {'min_identity_support': (1, 1000), 'min_merge_support': (1, 1000)},
         'clustering': {'same_scene_min_support': (1, 1000), 'auxiliary_min_support': (1, 1000),
+                       'view_min_support': (2, 1000), 'view_attach_min_support': (1, 1000),
+                       'max_view_prototypes_per_person': (1, 8),
                        'max_samples_per_person': (2, 128), 'max_people_per_lookup': (1, 100000),
                        'max_reference_bytes': (1048576, 1073741824)},
         'portraits': {'min_face_pixels': (0, 4096), 'max_candidates': (1, 64), 'jpeg_quality': (1, 100),

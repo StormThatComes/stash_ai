@@ -31,6 +31,13 @@ clustering:
   max_anchor_pose_deviation: 0.20 # Higher-pose faces may match anchors but never seed identities.
   auxiliary_matching: true    # Attach profiles after strict groups are established.
   auxiliary_min_support: 1    # Distinct scene/time observations required to accept attachments.
+  view_prototypes_enabled: true # Opt in to multi-view identity reference prototypes.
+  view_min_support: 3          # Independent anchor-confirmed cues needed to promote a view.
+  view_cohesion_threshold: 0.80 # All retained exemplars must agree; no single-link chaining.
+  view_match_threshold: 0.82   # Stronger cosine gate for matching via a view prototype.
+  view_ambiguity_margin: 0.12 # Rival identities remain independently checked.
+  view_attach_min_support: 2  # New view-only attachments need independent cues.
+  max_view_prototypes_per_person: 4 # Bounded confirmed view reference medoids.
   max_samples_per_person: 32
   max_people_per_lookup: 20000
   max_reference_bytes: 134217728 # 128 MiB of float32 references; run reports usage/peak. Not total RAM/VRAM.

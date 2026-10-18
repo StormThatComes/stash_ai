@@ -584,6 +584,42 @@ AuraFace on scans whose detection policy and media have not changed. Profile-onl
 people may remain deliberately unpublished. Portrait ranking is independent of
 this identity-evidence policy.
 
+### Confirmed multi-view identity prototypes
+
+Opt in with `clustering.view_prototypes_enabled: true` and a configured
+`clustering.max_anchor_pose_deviation`. This adds **several independently
+confirmed appearance subclusters per identity**, not several identities.
+
+After strict anchor replay and the existing auxiliary pass, the matcher derives
+bounded per-view medoids from auxiliary faces **already matched to an anchor
+identity**. Each view requires `view_min_support` distinct scan/timestamp
+observations and pairwise exemplar agreement at
+`view_cohesion_threshold`. A rough signed yaw signal from retained YuNet
+landmarks divides left/right/other orientations before similarity grouping;
+it is not a head-angle estimate, and embedding similarity still determines
+the appearance subcluster. Up to `max_view_prototypes_per_person` strongest
+views are kept, within `max_reference_bytes`.
+
+In a second frozen pass, previously unmatched auxiliary faces may match these
+confirmed views. Match strength must reach at least the higher of `view_match_threshold` and
+`recognition.match_threshold`; increasing the global match threshold can
+never inadvertently weaken view matching. Best and
+runner-up scores are aggregated **per identity**, not per view, and must have
+at least `view_ambiguity_margin` separation. Same-cue co-presence remains
+strict; view-only attachments need `view_attach_min_support` independent
+cues. New view-only attachments are **never used to bootstrap additional
+prototypes within that replay**. The view prototypes never create people,
+enter strict anchor reference snapshots, or contribute to identity mergers.
+
+The view prototypes are derived deterministically during selected replay from
+retained embeddings and candidate proof; no extra persistent schema,
+model execution, or rescanning is required when adjusting matching settings.
+The bundled YAML opts in, but configurations omitting the setting retain the
+previous behavior. This deliberately cannot recover a completely side-profile
+person without some initial anchor-confirmed observations. Tune the thresholds
+on labelled examples before broad publishing: multi-view max similarity
+increases false-positive exposure and is not a calibrated probability.
+
 ### Reference budget
 
 `clustering.max_reference_bytes` caps the sum of the float32 embedding array
