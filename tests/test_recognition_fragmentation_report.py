@@ -16,8 +16,7 @@ from stash_ai.recognition.models import namespace
 
 
 def seeded(tmp_path, settings=''):
-    if settings:
-        (tmp_path / 'facial_recognition.yml').write_text('version: 1\n' + settings)
+    (tmp_path / 'facial_recognition.yml').write_text('version: 1\n' + settings)
     config = load(root=tmp_path)
     scan = str(uuid.uuid4())
     policy, ns = matching_policy(config), namespace(config)
@@ -116,7 +115,9 @@ def test_cli_writes_json_without_modifying_database_and_does_not_call_run(tmp_pa
     import stash_ai.recognition.run as run_module
     monkeypatch.setattr(run_module, 'execute', lambda *args, **kwargs:
                         pytest.fail('Report must not enter recognition run'))
-    assert main(['report', '--scene-id', '123', '--faces-db', str(config.database),
+    assert main(['report', '--scene-id', '123',
+                  '--face-config', str(tmp_path / 'facial_recognition.yml'),
+                  '--faces-db', str(config.database),
                  '--output', str(output)]) == 0
     data = json.loads(output.read_text())
     assert data['scene_id'] == '123'
@@ -125,7 +126,9 @@ def test_cli_writes_json_without_modifying_database_and_does_not_call_run(tmp_pa
                       for table in ('members', 'candidates', 'runs', 'identity_merges'))
     assert before == after
     with pytest.raises(FileExistsError):
-        main(['report', '--scene-id', '123', '--faces-db', str(config.database),
+        main(['report', '--scene-id', '123',
+                  '--face-config', str(tmp_path / 'facial_recognition.yml'),
+                  '--faces-db', str(config.database),
               '--output', str(output)])
 
 

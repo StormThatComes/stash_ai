@@ -31,6 +31,20 @@ def test_scratch_drops_unused_quality_and_pixels_without_changing_sample_identit
         assert payloads and all(payload['reference_context'] for payload in payloads)
 
 
+def test_pose_aware_replay_retains_only_pose_not_full_quality(tmp_path):
+    config = setup(tmp_path, {'max_anchor_pose_deviation': 0.2})
+    with FaceDatabase(config.database) as database:
+        identifier, _ = scan(database, config, '1')
+        selected = [{'scene': '1', 'scan': identifier}]
+        with sqlite3.connect(':memory:') as replay:
+            replay.row_factory = sqlite3.Row
+            _copy_selection(database, replay, selected, 'scope', 'ns', retain_pose=True)
+            rows = replay.execute('SELECT quality,crop FROM observations').fetchall()
+            assert rows
+            assert all(json.loads(row['quality']) == {'pose_deviation': 0.0}
+                       and row['crop'] is None for row in rows)
+
+
 def test_normal_incremental_matching_still_records_reusable_context(tmp_path):
     config = setup(tmp_path)
     with FaceDatabase(config.database) as database:

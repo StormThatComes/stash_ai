@@ -112,6 +112,16 @@ def test_invalid_anchor_threshold_rejected(tmp_path, value):
         load(path)
 
 
+@pytest.mark.parametrize('detection,anchor', [(0.2, 0.3), (0.0, 0.1)])
+def test_anchor_gate_cannot_exceed_detection_pose_gate(tmp_path, detection, anchor):
+    path = tmp_path / 'thresholds.yml'
+    path.write_text('version: 1\n'
+                    f'detection: {{max_pose_deviation: {detection}}}\n'
+                    f'clustering: {{max_anchor_pose_deviation: {anchor}}}\n')
+    with pytest.raises(ValueError, match='must not exceed detection.max_pose_deviation'):
+        load(path)
+
+
 def test_missing_pose_cannot_seed_when_enabled():
     assert not is_anchor('{}', {'max_anchor_pose_deviation': .2})
     assert is_anchor('{}', {'max_anchor_pose_deviation': None})

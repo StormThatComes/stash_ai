@@ -23,6 +23,7 @@ from .scoring import score_scope
 from .evidence_cache import evidence_scope
 from .scene_context import apply_scene_context
 from .auxiliary import apply_auxiliary
+from .pose_policy import compact_quality
 from .sample_keys import sample_key, physical_keys
 from .replay_addresses import addresses
 from .replay_memory import memory_replay, Lookahead, report_pages
@@ -51,13 +52,14 @@ def _inserted(db, sql, rows):
         yield from batch
 
 
-def _copy_observations(db, replay, scan):
+def _copy_observations(db, replay, scan, *, retain_pose=False):
     for batch in _batches(_observations(db, scan)):
         # Source/rect are consumed by sample_key on the authoritative row.
-        # Grouping needs geometry, time, pose quality and embeddings, never JPEGs.
+        # Only the pose measurement is needed by opt-in pose-aware matching; never copy JPEGs.
         replay.executemany('INSERT INTO observations VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
                            ((row['id'], row['scan'], row['cue'], row['seconds'], '', '[]',
-                             row['geometry'], row['quality'], row['rejected'], row['dimensions'],
+                             row['geometry'], compact_quality(row['quality']) if retain_pose else '{}',
+                              row['rejected'], row['dimensions'],
                              row['embedding'], None) for row in batch))
         replay.executemany('INSERT INTO sample_keys VALUES (?,?)',
                            ((row['id'], sample_key(row)) for row in batch))
@@ -93,7 +95,7 @@ def _mapped_candidates(replay, mapping, policy, context):
 
 
 @measured('copy')
-def _copy_selection(database, replay, selected, scope, namespace):
+def _copy_selection(database, replay, selected, scope, namespace, *, retain_pose=False):
     db = database.connection
     replay.executescript(SCHEMA + '''
       CREATE TABLE sample_keys(observation TEXT PRIMARY KEY, sample_key TEXT NOT NULL);
@@ -129,7 +131,7 @@ def _copy_selection(database, replay, selected, scope, namespace):
                 raise ValueError('Identity rebuild requires complete compatible selected scans.')
             replay.execute('INSERT INTO scans VALUES (?,?,?,?,?,?,?,?,?,?,?)', tuple(record))
             with tracking(
-                _copy_observations(db, replay, item['scan']),
+                _copy_observations(db, replay, item['scan'], retain_pose=retain_pose),
                 'Copy face observations',
                 unit='observation',
                 total=lambda: db.execute(
@@ -382,7 +384,8 @@ def _rebuild_selected(database, selected, config, *, progress=None):
     with memory_replay(config) as (replay, replay_uri):
         replay.row_factory = sqlite3.Row
         replay = connection(replay)
-        _copy_selection(database, replay, selected, scope, namespace)
+        _copy_selection(database, replay, selected, scope, namespace,
+                        retain_pose=config.data['clustering']['max_anchor_pose_deviation'] is not None)
         checkpoints = Checkpoints(database, selected, config, scope, namespace)
         cursor, next_clock = checkpoints.restore(replay)
         clock = ReplayClock(next_clock)

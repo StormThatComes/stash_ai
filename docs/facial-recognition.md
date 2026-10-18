@@ -561,6 +561,12 @@ YAML opts in at `0.20`; this is **not a yaw angle** or a calibrated reliability
 threshold. It is the existing normalized five-landmark `pose_deviation` score.
 Measure rejections and fragmentation on real VTT observations before tuning.
 
+When both limits are enabled, `clustering.max_anchor_pose_deviation` must be at
+most `detection.max_pose_deviation`: the detection limit is the outer hard gate.
+For example, 0.20/0.50 admits quality-qualified samples through 0.50 while only
+those through 0.20 become anchors; values between are auxiliary. Equal limits
+are valid but leave no pose-based auxiliary interval.
+
 With the gate enabled, retained non-rejected observations at or below the configured
 anchor limit are eligible to create identities, serve as bounded reference samples,
 and support strict or same-scene identity merges. Higher-pose observations remain

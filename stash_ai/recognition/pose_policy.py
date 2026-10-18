@@ -6,6 +6,17 @@ import json
 import math
 
 
+def compact_quality(raw):
+    """Copy only a validated pose number into bounded RAM replay evidence."""
+    try:
+        value = json.loads(raw).get('pose_deviation')
+        if type(value) in (int, float) and math.isfinite(value) and 0 <= value <= 1:
+            return json.dumps({'pose_deviation': value}, separators=(',', ':'))
+    except (TypeError, ValueError, AttributeError):
+        pass
+    return '{}'
+
+
 def is_anchor(quality, grouping):
     maximum = grouping['max_anchor_pose_deviation']
     if maximum is None:

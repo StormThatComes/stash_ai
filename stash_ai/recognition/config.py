@@ -132,6 +132,9 @@ def validate(data):
     anchor = data['clustering']['max_anchor_pose_deviation']
     if anchor is not None:
         _number(anchor, 'clustering.max_anchor_pose_deviation', 0, 1)
+    detection_pose = data['detection']['max_pose_deviation']
+    if anchor is not None and detection_pose is not None and anchor > detection_pose:
+        raise ValueError('clustering.max_anchor_pose_deviation must not exceed detection.max_pose_deviation.')
     if type(data['clustering']['auxiliary_matching']) is not bool:
         raise ValueError('clustering.auxiliary_matching must be boolean.')
     if type(data['execution']['profile_rebuild']) is not bool:
