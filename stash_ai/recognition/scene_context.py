@@ -16,6 +16,7 @@ from .scoring import comparisons
 from .replay_addresses import address
 from .evidence_cache import current as evidence_for
 from .parallel_scores import scored_rows, contributions
+from .pose_policy import anchor_sql
 
 
 def _rank(groups, query, config, *, cache=None, observation=None, frozen=None, cohesion=None):
@@ -38,11 +39,12 @@ def _cores(db, scan, policy, groups, config):
     """Revalidate strong accepted members against the final strict references."""
     cache = evidence_for(db)
     settings = config.data['recognition']
+    anchor = anchor_sql('o', config.data['clustering'])
     minimum = config.data['clustering']['same_scene_min_support']
     support = {}
     source = (f"FROM candidates c JOIN observations o ON o.id={address(db, 'c')} "
         "JOIN members m ON m.observation=o.id AND c.person=m.person "
-        "WHERE c.policy=? AND c.scan=o.scan AND o.scan=? AND o.rejected IS NULL AND c.status='accepted'")
+        f"WHERE c.policy=? AND c.scan=o.scan AND o.scan=? AND o.rejected IS NULL AND c.status='accepted' AND {anchor}")
     rows = db.execute("SELECT o.id,o.seconds,o.dimensions,o.embedding,m.person " + source +
         " ORDER BY o.cue,o.geometry,o.embedding,o.id", (policy, scan))
     with tracking(scored_rows(rows, groups, float('-inf'), config.data['clustering']['cohesion_threshold']),
@@ -69,6 +71,7 @@ def apply_scene_context(database, selected, config, *, progress=None):
     """
     grouping, settings = config.data['clustering'], config.data['recognition']
     bonus = grouping['same_scene_match_bonus']
+    anchor = anchor_sql('o', grouping)
     if not bonus or not selected:
         return
     db, policy = database.connection, matching_policy(config)
@@ -100,7 +103,7 @@ def apply_scene_context(database, selected, config, *, progress=None):
                 if not cores:
                     continue
                 source = (f"FROM candidates c JOIN observations o ON o.id={address(db, 'c')} "
-                    "WHERE c.policy=? AND c.scan=o.scan AND o.scan=? AND o.rejected IS NULL AND c.status='withheld'")
+                    f"WHERE c.policy=? AND c.scan=o.scan AND o.scan=? AND o.rejected IS NULL AND c.status='withheld' AND {anchor}")
                 rows = db.execute("SELECT o.*,c.id AS candidate " + source +
                     " ORDER BY o.cue,o.geometry,o.embedding,o.id", (policy, scan))
                 with tracking(scored_rows(rows, groups, float('-inf'), local_cohesion),
@@ -146,7 +149,7 @@ def apply_scene_context(database, selected, config, *, progress=None):
                 f"JOIN observations o ON o.id={address(db, 'c')} "
                 "WHERE c.scan=? AND c.policy=? AND c.status='accepted' "
                 "AND json_extract(c.payload,'$.reason')<>'same_scene_identity' "
-                "GROUP BY c.person ORDER BY c.person", (scan, policy)))
+                f"AND {anchor} GROUP BY c.person ORDER BY c.person", (scan, policy)))
             if len(strict) < 2:
                 continue
             cores = {row['person'] for row in strict if row['cues'] >= grouping['same_scene_min_support']}
