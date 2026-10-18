@@ -600,10 +600,10 @@ Previously withheld *anchor* observations with reason
 `insufficient_match_or_cohesion` may attach to one confirmed same-scene view
 when matching exceeds both `recognition.match_threshold` and
 `view_match_threshold`, identity-level ambiguity meets the stronger margin,
-the pose hint agrees, and the observation is within
-`anchor_view_max_gap_seconds` (default 180s) of a confirmed core cue.
-Independently accepted faces of other identities in that very cue veto the
-attachment; same-cue embedding conflicts are also checked. At least
+the pose hint agrees. Confirmed views can match observations anywhere
+within the same selected scene, regardless of elapsed time. Independent
+faces of other identities in the same cue veto the attachment; same-cue
+embedding conflicts are also checked. At least
 `view_attach_min_support` separate cues must agree on the **same
 identity and exact prototype**. A successful attachment never becomes
 another prototype in this rebuild, and cannot become historical merge support.
@@ -616,7 +616,9 @@ temporal proximity or one favourable prototype. Fragment pairs with mean
 similarity near 0.45 and no independent cross-identity evidence (such as
 the supplied scene 2 diagnosis) remain subject to the existing strict
 merger rules. Lowering global cosine thresholds to force a merge is unsafe.
-Time in this feature is corroboration only, not identity evidence.
+Temporal proximity is neither required nor evidence of identity. Independent
+(scan, seconds) cues still prevent repeated detections at one timestamp from
+artificially satisfying support requirements.
 
 Omitting `anchor_view_matching` preserves the previous behaviour; the
 bundled YAML opts in.

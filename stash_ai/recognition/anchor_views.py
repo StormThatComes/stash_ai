@@ -2,7 +2,7 @@
 
 Strict core members seed immutable local appearance medoids. A second pass may
 attach previously withheld anchors only; it never creates or merges identities
-or trains on its own attachments. Time is corroboration, not an identity signal.
+or trains on its own attachments. Time never limits matches within a scene.
 """
 from dataclasses import dataclass
 
@@ -24,7 +24,7 @@ class AnchorView:
     pose: str
     medoid: str
     support_ids: tuple
-    seconds: tuple
+    support_count: int
 
 
 def _confirmed(db, policy, grouping, usage):
@@ -59,8 +59,7 @@ def _confirmed(db, policy, grouping, usage):
             usage.add((sample,), kind='Anchor view')
             result.append(AnchorView(
                 key[0], Group(key[1], (sample,), True), slot.pose,
-                medoid, tuple(slot.observations),
-                tuple(sorted(seconds for scan, seconds in slot.cues))))
+                medoid, tuple(slot.observations), len(slot.cues)))
     with tracking(rows, 'Build anchor view subclusters', unit='observation') as tracked:
         for row in tracked:
             rowkey = row['scan'], row['person']
@@ -129,7 +128,6 @@ def apply_anchor_views(database, selected, config, *, progress=None):
         views_by_scan.setdefault(v.scene_scan, []).append(v)
     threshold = max(settings['match_threshold'], grouping['view_match_threshold'])
     margin = max(settings['ambiguity_margin'], grouping['view_ambiguity_margin'])
-    max_gap = grouping['anchor_view_max_gap_seconds']
     # Freeze views for the entire matching pass. Attachments never train views.
     for item in selected:
         scan = item['scan']
@@ -165,8 +163,6 @@ def apply_anchor_views(database, selected, config, *, progress=None):
                     view = by_group[id(group)]
                     if pose_view(row['geometry']) != view.pose:
                         continue
-                    if not any(abs(row['seconds']-seconds) <= max_gap for seconds in view.seconds):
-                        continue
                     old = by_person.get(group.identifier)
                     if old is None or score > old[0]:
                         by_person[group.identifier] = (score, group, view)
@@ -187,9 +183,9 @@ def apply_anchor_views(database, selected, config, *, progress=None):
                     continue
                 proof = {
                     'format': 1, 'scene_scan': scan, 'medoid': view.medoid,
-                    'anchor_support': len(view.seconds), 'support_ids': view.support_ids,
+                    'anchor_support': view.support_count, 'support_ids': view.support_ids,
                     'match_score': score, 'threshold': threshold,
-                    'ambiguity_margin': margin, 'max_gap_seconds': max_gap}
+                    'ambiguity_margin': margin}
                 db.execute("UPDATE candidates SET person=?,status='pending',"
                            "payload=json_set(payload,'$.reason','anchor_view_pending',"
                            "'$.anchor_view',json(?)) WHERE id=?",

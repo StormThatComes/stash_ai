@@ -27,7 +27,7 @@ def defaults():
                        'same_scene_min_support': 3, 'max_anchor_pose_deviation': None,
                        'auxiliary_matching': True, 'auxiliary_min_support': 1,
                        'view_prototypes_enabled': False, 'anchor_view_matching': False,
-                       'anchor_view_max_gap_seconds': 180., 'view_min_support': 3,
+                       'view_min_support': 3,
                        'view_cohesion_threshold': .80, 'view_match_threshold': .82,
                        'view_ambiguity_margin': .12, 'view_attach_min_support': 2,
                        'max_view_prototypes_per_person': 4,
@@ -144,8 +144,6 @@ def validate(data):
         raise ValueError('clustering.anchor_view_matching must be boolean.')
     if data['clustering']['anchor_view_matching'] and data['clustering']['max_anchor_pose_deviation'] is None:
         raise ValueError('clustering.anchor_view_matching requires max_anchor_pose_deviation.')
-    _number(data['clustering']['anchor_view_max_gap_seconds'],
-            'clustering.anchor_view_max_gap_seconds', 1, 3600)
     if type(data['clustering']['view_prototypes_enabled']) is not bool:
         raise ValueError('clustering.view_prototypes_enabled must be boolean.')
     if (data['clustering']['view_prototypes_enabled'] and

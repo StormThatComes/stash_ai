@@ -89,11 +89,24 @@ def test_independent_timestamps_required_for_anchor_view(tmp_path):
         assert [r[0] for r in statuses(db, identifier, config)[-2:]] == ['withheld']*2
 
 
-def test_anchor_view_fails_closed_outside_local_time_window(tmp_path):
-    config = config_for(tmp_path, anchor_view_max_gap_seconds=1.)
+def test_anchor_view_matches_distant_timestamps_across_same_scene(tmp_path):
+    config = config_for(tmp_path)
     with FaceDatabase(config.database) as db:
-        identifier, _ = run(db, config, [A]*3 + [X]*3 + [C]*2)
-        assert [r[0] for r in statuses(db, identifier, config)[-2:]] == ['withheld']*2
+        identifier, _ = scan(db, config, '1', [A]*3 + [X]*3 + [C]*2, count=8)
+        # Valid supporting cues appear near the beginning of the scene,
+        # whereas the matching views are more than an hour later.
+        db.connection.execute(
+            'UPDATE observations SET seconds=3600 WHERE scan=? AND cue=6',
+            (identifier,))
+        db.connection.execute(
+            'UPDATE observations SET seconds=3620 WHERE scan=? AND cue=7',
+            (identifier,))
+        db.connection.commit()
+        rebuild_selected(db, [{'scene': '1', 'scan': identifier}], config)
+        assert [r[2]['reason'] for r in statuses(db, identifier, config)[-2:]] == [
+            'anchor_view_identity', 'anchor_view_identity']
+        assert all('max_gap_seconds' not in r[2]['anchor_view']
+                   for r in statuses(db, identifier, config)[-2:])
 
 
 def test_anchor_view_never_uses_cross_scene_only_core(tmp_path):
@@ -132,12 +145,11 @@ def test_sparse_rival_with_no_own_prototype_still_vetoes_match():
 
 
 def test_anchor_view_rejects_invalid_configuration(tmp_path):
-    for value in (True, '120', 0, 4000, float('nan')):
-        p = tmp_path/'invalid.yml'
-        p.write_text('version: 1\nclustering: ' +
-                     __import__('json').dumps({'anchor_view_max_gap_seconds': value})+'\n')
-        with pytest.raises(ValueError, match='anchor_view_max_gap_seconds'):
-            load(p)
+    # The obsolete temporal gate must not reappear as a configurable knob.
+    p = tmp_path/'obsolete.yml'
+    p.write_text('version: 1\nclustering: {anchor_view_max_gap_seconds: 180}\n')
+    with pytest.raises(ValueError, match='anchor_view_max_gap_seconds'):
+        load(p)
     path = tmp_path/'off.yml'
     path.write_text('version: 1\nclustering: {anchor_view_matching: true}\n')
     with pytest.raises(ValueError, match='anchor_view_matching'):
