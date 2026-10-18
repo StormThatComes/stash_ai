@@ -15,7 +15,9 @@ from stash_ai.recognition.fragmentation_report import build
 from stash_ai.recognition.models import namespace
 
 
-def seeded(tmp_path):
+def seeded(tmp_path, settings=''):
+    if settings:
+        (tmp_path / 'facial_recognition.yml').write_text('version: 1\n' + settings)
     config = load(root=tmp_path)
     scan = str(uuid.uuid4())
     policy, ns = matching_policy(config), namespace(config)
@@ -72,6 +74,20 @@ def test_report_ranks_pairs_and_explains_cross_sample_blockers(tmp_path):
     assert result['withheld_examples'][0]['seconds'] == 3.
     assert result['withheld_examples'][0]['scores'] == [.66, .64]
     assert result['summary']['observations'] == 4
+    assert result['observation_quality']['retained']['metrics']['pixels']['missing'] == 4
+    assert result['detection_gates']['min_face_pixels'] == 32
+    assert result['detection_gates']['max_pose_deviation'] == .5
+    assert result['rejected_examples'] == {}
+    assert result['thresholds']['same_scene_min_support'] == 3
+    assert result['thresholds']['local_match_threshold'] == pytest.approx(.62)
+    assert result['thresholds']['local_cohesion_threshold'] == pytest.approx(.57)
+    assert pair['same_scene_merge']['strict_accepted_scene_cues'] == {'left': 1, 'right': 1}
+    assert 'no_possible_strict_local_core_by_cue_count' in pair['same_scene_merge']['numeric_and_count_blockers']
+    assert pair['same_scene_merge']['can_merge'] is None
+    assert pair['score_diagnostics']['selected_scene_only']['comparisons'] == 1
+    assert len(pair['score_diagnostics']['worst_pairs']) == 1
+    assert pair['recorded_merge_support']['stored_nominations'] == 0
+    assert pair['same_scene_merge']['recorded_merge_support']['stored_nominations'] == 0
 
 
 def test_report_thresholds_limits_and_config_mismatch(tmp_path):
@@ -120,3 +136,78 @@ def test_report_rejects_non_database_and_parser_requires_scene(tmp_path):
     assert not config.database.exists()
     with pytest.raises(SystemExit):
         parser().parse_args(['report'])
+
+
+def test_report_local_bonus_and_recorded_local_nominations(tmp_path):
+    config = seeded(tmp_path,
+        'recognition: {match_threshold: 0.75, min_merge_support: 1}\n'
+        'clustering: {cohesion_threshold: 0.60, same_scene_match_bonus: 0.10, '
+        'same_scene_min_support: 1}\n')
+    from dataclasses import replace
+    from stash_ai.recognition.config import plain
+    from stash_ai.recognition.identity_merges import _merge_support_policy
+    with FaceDatabase(config.database) as state:
+        db = state.connection
+        scan = db.execute("SELECT id FROM scans WHERE scene='123'").fetchone()[0]
+        people = list(db.execute('SELECT id FROM people ORDER BY created'))
+        local_data = plain(config.data)
+        local_data['recognition']['match_threshold'] -= .1
+        local_data['clustering']['cohesion_threshold'] -= .1
+        local = replace(config, data=local_data)
+        sample = db.execute('SELECT observation FROM members WHERE person=?', (people[0][0],)).fetchone()[0]
+        db.execute('INSERT INTO merge_support VALUES (?,?,?,?)',
+                   (people[0][0], people[1][0], sample, _merge_support_policy(local, scene_scan=scan)))
+        db.commit()
+    result = build(config, '123')
+    pair = result['potential_fragments'][0]
+    assert pair['blockers'] == ['cross_mean_below_match_threshold']
+    local = pair['same_scene_merge']
+    assert local['effective_match_threshold'] == pytest.approx(.65)
+    assert local['effective_cohesion_threshold'] == pytest.approx(.5)
+    assert local['numeric_and_count_blockers'] == []
+    assert local['strict_accepted_scene_cues'] == {'left': 1, 'right': 1}
+    assert local['strict_core_revalidation_complete'] is False
+    assert local['recorded_merge_support']['stored_nominations'] == 1
+    assert local['recorded_merge_support']['validated_nominations'] == 1
+    assert pair['recorded_merge_support']['stored_nominations'] == 0
+    assert pair['can_merge'] is None
+
+
+def test_report_quality_representative_provenance_and_cap(tmp_path):
+    config = seeded(tmp_path, 'clustering: {max_samples_per_person: 2}\n')
+    with FaceDatabase(config.database) as state:
+        db = state.connection
+        scan = db.execute("SELECT id FROM scans WHERE scene='123'").fetchone()[0]
+        person = db.execute("SELECT id FROM people ORDER BY created LIMIT 1").fetchone()[0]
+        sample = db.execute(
+            'SELECT o.id,o.embedding FROM observations o JOIN members m ON m.observation=o.id '
+            'WHERE m.person=?', (person,)).fetchone()
+        db.execute('UPDATE observations SET quality=? WHERE id=?',
+                   (json.dumps({'pixels': 64, 'pose_deviation': .12, 'sharpness': 30}), sample['id']))
+        for cue in (4, 5):
+            observation = str(uuid.uuid4())
+            db.execute('INSERT INTO observations VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+                       (observation, scan, cue, float(cue), 'vtt', '{}', str(cue),
+                        json.dumps({'pixels': 48, 'pose_deviation': .19, 'sharpness': 12}),
+                        None, 4, sample['embedding'], None))
+            db.execute('INSERT INTO members VALUES (?,?)', (observation, person))
+            db.execute('INSERT INTO candidates VALUES (?,?,?,?,?,?)',
+                       (str(uuid.uuid4()), scan, matching_policy(config), person, 'accepted',
+                        json.dumps({'observation': observation, 'reason': 'known_identity'})))
+        db.commit()
+    result = build(config, '123')
+    identity = next(item for item in result['identities'] if item['identity_id'] == person)
+    refs = identity['representatives']
+    assert (refs['available'], refs['selected'], refs['limit'], refs['truncated']) == (3, 2, 2, True)
+    assert len(refs['samples']) == 2
+    assert refs['samples'][0]['quality']['pixels'] == 64.
+    assert refs['quality']['pixels']['median'] == 56.
+    assert refs['quality']['visible_face_fraction']['missing'] == 2
+    assert result['observation_quality']['retained']['metrics']['pixels']['count'] == 3
+    assert identity['strict_accepted_scene_cues'] == 3
+    pair = next(p for p in result['potential_fragments']
+                if p['left']['identity_id'] == person or p['right']['identity_id'] == person)
+    assert pair['score_diagnostics']['cross_scores']['comparisons'] == 2
+    assert pair['score_diagnostics']['selected_scene_only']['comparisons'] == 2
+    assert pair['score_diagnostics']['worst_pairs'][0]['left']['quality']['pixels'] is not None or (
+        pair['score_diagnostics']['worst_pairs'][0]['right']['quality']['pixels'] is not None)
