@@ -28,6 +28,9 @@ clustering:
   cohesion_threshold: 0.60     # Minimum sample similarity for matching and group merges.
   same_scene_match_bonus: 0.03 # Lower local match AND cohesion for attachments and supported in-scene merges.
   same_scene_min_support: 3    # Strict local anchor cue times before local matching or merging.
+  max_anchor_pose_deviation: 0.20 # Higher-pose faces may match anchors but never seed identities.
+  auxiliary_matching: true    # Attach profiles after strict groups are established.
+  auxiliary_min_support: 1    # Distinct scene/time observations required to accept attachments.
   max_samples_per_person: 32
   max_people_per_lookup: 20000
   max_reference_bytes: 134217728 # 128 MiB of float32 references; run reports usage/peak. Not total RAM/VRAM.

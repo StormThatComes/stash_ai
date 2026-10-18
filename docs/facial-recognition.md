@@ -553,6 +553,37 @@ both support minimums; remove it before specifying either split key.
 | `clustering.max_people_per_lookup` | Caps active compatible identities, including provisional groups; aliases are excluded. |
 | `clustering.max_reference_bytes` | Caps the bounded reference vectors; exceeding it rolls back that scene's matching and local merges. |
 
+### Pose-aware anchor and auxiliary matching
+
+By default, older local YAML configurations omit `clustering.max_anchor_pose_deviation`
+(`null`), preserving their established matching behavior. The distributed example
+YAML opts in at `0.20`; this is **not a yaw angle** or a calibrated reliability
+threshold. It is the existing normalized five-landmark `pose_deviation` score.
+Measure rejections and fragmentation on real VTT observations before tuning.
+
+When both limits are enabled, `clustering.max_anchor_pose_deviation` must be at
+most `detection.max_pose_deviation`: the detection limit is the outer hard gate.
+For example, 0.20/0.50 admits quality-qualified samples through 0.50 while only
+those through 0.20 become anchors; values between are auxiliary. Equal limits
+are valid but leave no pose-based auxiliary interval.
+
+With the gate enabled, retained non-rejected observations at or below the configured
+anchor limit are eligible to create identities, serve as bounded reference samples,
+and support strict or same-scene identity merges. Higher-pose observations remain
+`auxiliary`: they cannot create new people, increase anchor references or nominate
+merges. After the strict cold replay and same-scene pass finish, auxiliary faces
+may attach to already established groups using unchanged cosine match, cohesion,
+ambiguity and co-presence checks. `clustering.auxiliary_matching: false` withholds
+all auxiliary observations. `clustering.auxiliary_min_support` counts independent
+(scene, timestamp) observations assigned to the same anchor identity. Observations
+with missing or invalid pose measurements are auxiliary when the gate is enabled.
+
+Rebuild copies retained pose quality alongside embeddings to its RAM database, so
+retuning this gate invalidates identity matching but does **not** re-run YuNet or
+AuraFace on scans whose detection policy and media have not changed. Profile-only
+people may remain deliberately unpublished. Portrait ranking is independent of
+this identity-evidence policy.
+
 ### Reference budget
 
 `clustering.max_reference_bytes` caps the sum of the float32 embedding array
