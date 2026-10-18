@@ -12,6 +12,7 @@ from .pose_policy import auxiliary_sql
 from .progress import tracking
 from .ranking import best_two
 from .reference_usage import ReferenceUsage
+from .view_prototypes import confirmed_views, pose_view
 from .replay_addresses import address
 
 
@@ -22,9 +23,9 @@ def apply_auxiliary(database, selected, config, *, progress=None):
     db, policy = database.connection, matching_policy(config)
     cache = evidence_for(db)
     first = db.execute('SELECT scope,namespace FROM scans WHERE id=?', (selected[0]['scan'],)).fetchone()
+    usage = ReferenceUsage(grouping['max_reference_bytes'], progress)
     groups = _groups(db, first['scope'], first['namespace'], grouping,
-                     usage=ReferenceUsage(grouping['max_reference_bytes'], progress),
-                     stage='auxiliary')
+                     usage=usage, stage='auxiliary')
     condition = auxiliary_sql('o', grouping)
     for item in selected:
         scan = item['scan']
@@ -84,3 +85,97 @@ def apply_auxiliary(database, selected, config, *, progress=None):
                    f'SELECT {address(db, "c")},c.person FROM candidates c '
                    "WHERE c.policy=? AND c.status='accepted' "
                    "AND json_extract(c.payload,'$.reason')='auxiliary_identity'", (policy,))
+    if grouping['view_prototypes_enabled'] and grouping['auxiliary_matching']:
+        _attach_confirmed_views(db, selected, config, policy, groups, usage, cache)
+
+
+def _attach_confirmed_views(db, selected, config, policy, anchors, usage, cache):
+    """A second, frozen pass: no new view evidence can promote another view.
+
+    Only independently supported *anchor-matched* profiles are prototypes.
+    Late matches are never used to train these prototypes in this replay.
+    """
+    grouping, settings = config.data['clustering'], config.data['recognition']
+    views = confirmed_views(db, policy, grouping,
+                            remaining_bytes=grouping['max_reference_bytes'] - usage.bytes)
+    if not views:
+        return
+    groups = [view.group for view in views]
+    by_group = {id(view.group): view for view in views}
+    threshold = grouping['view_match_threshold']
+    margin = max(settings['ambiguity_margin'], grouping['view_ambiguity_margin'])
+    for item in selected:
+        scan = item['scan']
+        source = (f'FROM candidates c JOIN observations o ON o.id={address(db, "c")} '
+                  "WHERE c.scan=? AND c.policy=? AND c.status='withheld' "
+                  "AND json_extract(c.payload,'$.reason')='auxiliary_unmatched'")
+        rows = db.execute('SELECT o.*,c.id AS candidate ' + source +
+                          ' ORDER BY o.cue,o.geometry,o.embedding,o.id', (scan, policy))
+        total = db.execute('SELECT COUNT(*) ' + source, (scan, policy)).fetchone()[0]
+        with tracking(scored_rows(rows, groups, threshold-margin),
+                      'Match confirmed identity views', unit='observation', total=total) as tracked:
+            for row, frozen in tracked:
+                query = cache.vector(row) if cache is not None else vector(row)
+                # Multiple prototypes of one person must *not* consume both
+                # best/second-best slots and hide another person's rival view.
+                by_person = {}
+                for group, mean, lowest in contributions(
+                        groups, query, frozen, len(groups), threshold-margin,
+                        exact=(lambda g, q: cache.scores(g, q, row['id'])) if cache is not None else None):
+                    if lowest < grouping['view_cohesion_threshold']:
+                        continue
+                    view = by_group[id(group)]
+                    previous = by_person.get(group.identifier)
+                    if previous is None or (mean, view.identifier) > (previous[0], previous[2].identifier):
+                        by_person[group.identifier] = (mean, group, view)
+                ranked = sorted(by_person.items(), key=lambda item: (-item[1][0], item[0]))
+                if not ranked or ranked[0][1][0] < threshold:
+                    continue
+                if len(ranked) > 1 and ranked[0][1][0]-ranked[1][1][0] < margin:
+                    continue
+                person, (score, group, view) = ranked[0]
+                if pose_view(row['geometry']) != view.pose:
+                    continue
+                if not co_presence_allows(db, row, group, groups, query, config,
+                                          peer_threshold=threshold,
+                                          cohesion_threshold=grouping['view_cohesion_threshold']):
+                    continue
+                proof = {'pose': view.pose, 'medoid': view.medoid,
+                         'anchor_verified_support': view.support_count,
+                         'support_examples': list(view.support),
+                         'match_score': score, 'threshold': threshold,
+                         'ambiguity_margin': margin}
+                db.execute("UPDATE candidates SET person=?,status='pending',"
+                           "payload=json_set(payload,'$.reason','view_identity_pending',"
+                           "'$.view_prototype',json(?),'$.scores',json(?)) WHERE id=?",
+                           (person, encoded(proof),
+                            encoded([item[1][0] for item in ranked[:2]]), row['candidate']))
+    # A single false near-neighbour cannot establish a new view attachment.
+    # Require independent cues for this exact identity + confirmed medoid.
+    source = (f'FROM candidates c JOIN observations o ON o.id={address(db, "c")} '
+              "WHERE c.policy=? AND c.status='pending' "
+              "AND json_extract(c.payload,'$.reason')='view_identity_pending'")
+    rows = list(db.execute(
+        'SELECT c.id,c.person,o.scan,o.seconds,'
+        "json_extract(c.payload,'$.view_prototype.medoid') AS medoid "
+        + source + ' ORDER BY c.person,o.scan,o.seconds,c.id', (policy,)))
+    votes = {}
+    for row in rows:
+        key = (row['person'], row['medoid'])
+        votes.setdefault(key, set()).add((row['scan'], row['seconds']))
+    minimum = grouping['view_attach_min_support']
+    with db:
+        for row in rows:
+            supported = len(votes[row['person'], row['medoid']]) >= minimum
+            if supported:
+                db.execute("UPDATE candidates SET status='accepted',"
+                           "payload=json_set(payload,'$.reason','view_identity') WHERE id=?", (row['id'],))
+            else:
+                db.execute("UPDATE candidates SET person=NULL,status='withheld',"
+                           "payload=json_set(payload,'$.reason','view_insufficient_support') WHERE id=?",
+                           (row['id'],))
+        db.execute(f'INSERT OR IGNORE INTO members(observation,person) '
+                   f'SELECT {address(db, "c")},c.person FROM candidates c '
+                   "WHERE c.policy=? AND c.status='accepted' "
+                   "AND json_extract(c.payload,'$.reason')='view_identity'", (policy,))
+
