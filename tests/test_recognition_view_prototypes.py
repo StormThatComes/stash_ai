@@ -23,6 +23,22 @@ def multiview(tmp_path, **changes):
     return configured(tmp_path, view_prototypes_enabled=True, **changes)
 
 
+def policy_membership(db, config, scan):
+    """Past candidate policies are historical; only current-policy decisions count."""
+    return list(db.connection.execute(
+        'SELECT o.cue,c.status,c.person,c.payload FROM candidates c '
+        "JOIN observations o ON o.id=json_extract(c.payload,'$.observation') "
+        'WHERE c.scan=? AND c.policy=? ORDER BY o.cue,o.id',
+        (scan, matching_policy(config))))
+
+
+def assigned_members(db, scan):
+    return list(db.connection.execute(
+        'SELECT m.observation,m.person FROM members m '
+        'JOIN observations o ON o.id=m.observation '
+        'WHERE o.scan=? ORDER BY o.cue,o.id', (scan,)))
+
+
 def run_example(db, config, *, seed_count=3, late_count=2):
     return replay(db, config, {
         '1': ([FRONT]*3 + [SEED]*seed_count, set(range(3,3+seed_count))),
@@ -174,15 +190,31 @@ def test_loose_tight_loose_replay_reuses_embeddings_and_reproduces_views(tmp_pat
     config = multiview(tmp_path)
     with FaceDatabase(config.database) as db:
         selected = run_example(db, config)
-        accepted = [row['status'] for row in membership(db, selected[1]['scan'])]
-        assert accepted == ['accepted', 'accepted']
+        first_scan, second_scan = (item['scan'] for item in selected)
+        original = policy_membership(db, config, second_scan)
+        assert len(original) == 2
+        assert [row['status'] for row in original] == ['accepted', 'accepted']
+        initial_members = assigned_members(db, second_scan)
+        assert len(initial_members) == 2
         data = plain(config.data)
         data['clustering']['view_prototypes_enabled'] = False
         disabled = replace(config, data=data)
+        assert matching_policy(config) != matching_policy(disabled)
         rebuild_selected(db, selected, disabled)
-        assert [row['status'] for row in membership(db, selected[1]['scan'])] == ['withheld']*2
+        # Prior candidate histories intentionally remain available by policy.
+        assert len(membership(db, second_scan)) == 4
+        current = policy_membership(db, disabled, second_scan)
+        assert len(current) == 2
+        assert [row['status'] for row in current] == ['withheld', 'withheld']
+        assert assigned_members(db, second_scan) == []
         rebuild_selected(db, selected, config)
-        assert [row['status'] for row in membership(db, selected[1]['scan'])] == accepted
+        restored = policy_membership(db, config, second_scan)
+        assert len(restored) == 2
+        assert [row['status'] for row in restored] == ['accepted', 'accepted']
+        assert [row['person'] for row in restored] == [row['person'] for row in original]
+        assert assigned_members(db, second_scan) == initial_members
+        # No additional scan or embedding inference is required for policy tuning.
+        assert len(db.connection.execute('SELECT id FROM scans').fetchall()) == 2
 
 
 def test_view_reference_budget_fails_instead_of_silently_dropping_views(tmp_path):
