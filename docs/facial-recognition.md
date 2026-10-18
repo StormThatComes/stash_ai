@@ -351,8 +351,11 @@ Additional read-only diagnostics include:
 
 - `observation_quality`: retained versus rejected counts by reason, with
   measured face pixels, pose deviation, sharpness and visible fraction (min,
-  median, p90, max and missing counts). These are actual quality measurements
-  from the recorded scan, not predictions of how a relaxed filter would perform.
+  median, p90, max and missing counts). `detection_gates` shows the active
+  size/pose/sharpness/visibility thresholds; `rejected_examples` provides up to
+  eight cue IDs/times and measured quality values per rejection reason without
+  images. These are recorded measurements, not predictions of how a relaxed
+  filter would perform.
 - `identities[].representatives`: available/selected sample counts and truncation,
   the **canonical scene/cue selection order** (not quality-ranked), counts per
   source scene, measured-quality summaries and per-sample IDs, cue timestamps,
