@@ -102,7 +102,7 @@ def _attach_confirmed_views(db, selected, config, policy, anchors, usage, cache)
         return
     groups = [view.group for view in views]
     by_group = {id(view.group): view for view in views}
-    threshold = grouping['view_match_threshold']
+    threshold = max(settings['match_threshold'], grouping['view_match_threshold'])
     margin = max(settings['ambiguity_margin'], grouping['view_ambiguity_margin'])
     for item in selected:
         scan = item['scan']

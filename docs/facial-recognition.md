@@ -601,7 +601,9 @@ the appearance subcluster. Up to `max_view_prototypes_per_person` strongest
 views are kept, within `max_reference_bytes`.
 
 In a second frozen pass, previously unmatched auxiliary faces may match these
-confirmed views. Match strength must reach `view_match_threshold`; best and
+confirmed views. Match strength must reach at least the higher of `view_match_threshold` and
+`recognition.match_threshold`; increasing the global match threshold can
+never inadvertently weaken view matching. Best and
 runner-up scores are aggregated **per identity**, not per view, and must have
 at least `view_ambiguity_margin` separation. Same-cue co-presence remains
 strict; view-only attachments need `view_attach_min_support` independent

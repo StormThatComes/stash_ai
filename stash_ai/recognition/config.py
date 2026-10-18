@@ -146,8 +146,6 @@ def validate(data):
         raise ValueError('clustering.view_prototypes_enabled requires an anchor pose limit and auxiliary_matching.')
     for name in ('view_cohesion_threshold', 'view_match_threshold', 'view_ambiguity_margin'):
         _number(data['clustering'][name], 'clustering.' + name, 0, 1)
-    if data['clustering']['view_match_threshold'] < data['recognition']['match_threshold']:
-        raise ValueError('clustering.view_match_threshold must not be below recognition.match_threshold.')
     if type(data['clustering']['auxiliary_matching']) is not bool:
         raise ValueError('clustering.auxiliary_matching must be boolean.')
     if type(data['execution']['profile_rebuild']) is not bool:
