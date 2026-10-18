@@ -13,6 +13,7 @@ from .config import plain
 from .database import APPLICATION_ID, SCHEMA_VERSION, _reject_executable_schema
 from .identity_merges import _merge_support_policy
 from .models import namespace
+from .pose_policy import anchor_sql
 
 
 def _open_readonly(path):
@@ -68,13 +69,14 @@ def _scene_identities(db, scan, policy):
         'GROUP BY m.person,p.performer ORDER BY m.person', (scan, policy))]
 
 
-def _representatives(db, scan, person, maximum):
+def _representatives(db, scan, person, maximum, grouping):
+    anchor = anchor_sql('o', grouping)
     rows = db.execute(
         'SELECT o.id,o.cue,o.seconds,o.quality,o.dimensions,o.embedding,s.scene '
         'FROM observations o JOIN members m ON m.observation=o.id '
         'JOIN scans s ON s.id=o.scan '
         'WHERE m.person=? AND s.scope=? AND s.namespace=? '
-        "AND s.status='complete' AND o.rejected IS NULL "
+        f"AND s.status='complete' AND o.rejected IS NULL AND {anchor} "
         'ORDER BY CAST(s.scene AS INTEGER),s.scene,o.cue,o.seconds,o.geometry,o.embedding,o.id LIMIT ?',
         (person, scan['scope'], scan['namespace'], maximum))
     return [(dict(id=row['id'], scene=row['scene'], cue=row['cue'],
@@ -137,11 +139,12 @@ def _rejected_examples(db, scan, per_reason=8):
     return examples
 
 
-def _reference_details(db, scan, person, representatives, limit):
+def _reference_details(db, scan, person, representatives, limit, grouping):
+    anchor = anchor_sql('o', grouping)
     total = db.execute(
         'SELECT COUNT(*) FROM observations o JOIN members m ON m.observation=o.id '
         'JOIN scans s ON s.id=o.scan WHERE m.person=? AND s.scope=? AND s.namespace=? '
-        "AND s.status='complete' AND o.rejected IS NULL",
+        f"AND s.status='complete' AND o.rejected IS NULL AND {anchor}",
         (person, scan['scope'], scan['namespace'])).fetchone()[0]
     scenes = {}
     for info, _ in representatives:
@@ -155,7 +158,8 @@ def _reference_details(db, scan, person, representatives, limit):
     }
 
 
-def _strict_scene_counts(db, scan, policy):
+def _strict_scene_counts(db, scan, policy, grouping):
+    anchor = anchor_sql('o', grouping)
     """Counts are only possible anchors; the local pass revalidates strict cores."""
     result = {}
     rows = db.execute(
@@ -165,7 +169,7 @@ def _strict_scene_counts(db, scan, policy):
         "WHERE c.scan=? AND c.policy=? AND c.status='accepted' "
         "AND o.scan=c.scan AND o.rejected IS NULL "
         "AND json_extract(c.payload,'$.reason')<>'same_scene_identity' "
-        "GROUP BY c.person", (scan, policy))
+        f"AND {anchor} GROUP BY c.person", (scan, policy))
     for row in rows:
         result[row['person']] = dict(strict_cues=row['strict_cues'],
                                       strict_observations=row['strict_observations'])
@@ -320,18 +324,25 @@ def build(config, scene_id, *, limit=20, min_mean=None, scope=None):
         scan = _selected_scan(db, str(scene_id), namespace(config), policy, scope=scope)
         identities = _scene_identities(db, scan['id'], policy)
         references = {person['identity_id']: _representatives(
-            db, scan, person['identity_id'], clustering['max_samples_per_person']) for person in identities}
+            db, scan, person['identity_id'], clustering['max_samples_per_person'], clustering) for person in identities}
         if any(not records for records in references.values()):
             raise ValueError('A scene identity has no valid retained reference embeddings.')
-        strict_counts = _strict_scene_counts(db, scan['id'], policy)
+        strict_counts = _strict_scene_counts(db, scan['id'], policy, clustering)
         for person in identities:
             identifier = person['identity_id']
             cues = strict_counts.get(identifier, {}).get('strict_cues', 0)
             person['strict_accepted_scene_cues'] = cues
             person['same_scene_anchor_possible_by_count'] = (
                 cues >= clustering['same_scene_min_support'])
+            anchor = anchor_sql('o', clustering)
+            anchored, auxiliary = db.execute(
+                f'SELECT COUNT(*) FILTER (WHERE {anchor}),COUNT(*) FILTER (WHERE NOT ({anchor})) '
+                'FROM members m JOIN observations o ON o.id=m.observation '
+                'WHERE o.scan=? AND m.person=? AND o.rejected IS NULL',
+                (scan['id'], identifier)).fetchone()
+            person['pose_roles'] = {'anchor': anchored, 'auxiliary': auxiliary}
             person['representatives'] = _reference_details(
-                db, scan, identifier, references[identifier], clustering['max_samples_per_person'])
+                db, scan, identifier, references[identifier], clustering['max_samples_per_person'], clustering)
         decisions = [dict(row) for row in db.execute(
             "SELECT json_extract(payload,'$.reason') AS reason,status,COUNT(*) AS count "
             "FROM candidates WHERE scan=? AND policy=? "
@@ -391,6 +402,11 @@ def build(config, scene_id, *, limit=20, min_mean=None, scope=None):
             pair['same_scene_merge']['recorded_merge_support'] = _recorded_support(
                 db, scan, a, b, references, config, local=True)
             pair['can_merge'] = None  # Not inferable from these diagnostics alone.
+        anchor = anchor_sql('o', clustering)
+        anchored, auxiliary = db.execute(
+            f'SELECT COUNT(*) FILTER (WHERE rejected IS NULL AND {anchor}),' 
+            f'COUNT(*) FILTER (WHERE rejected IS NULL AND NOT ({anchor})) '
+            'FROM observations o WHERE scan=?', (scan['id'],)).fetchone()
         return {
             'format': 1, 'kind': 'recognition_fragmentation',
             'scene_id': str(scene_id), 'scope': scan['scope'], 'scan_id': scan['id'],
@@ -404,11 +420,15 @@ def build(config, scene_id, *, limit=20, min_mean=None, scope=None):
                 'same_scene_match_bonus': clustering['same_scene_match_bonus'],
                 'same_scene_min_support': clustering['same_scene_min_support'],
                 'max_samples_per_person': clustering['max_samples_per_person'],
+                'max_anchor_pose_deviation': clustering['max_anchor_pose_deviation'],
+                'auxiliary_matching': clustering['auxiliary_matching'],
+                'auxiliary_min_support': clustering['auxiliary_min_support'],
                 'local_match_threshold': round(max(0., settings['match_threshold'] -
                                                   clustering['same_scene_match_bonus']), 6),
                 'local_cohesion_threshold': round(max(0., clustering['cohesion_threshold'] -
                                                      clustering['same_scene_match_bonus']), 6)},
             'summary': {'observations': total, 'rejected': rejected,
+                         'pose_roles': {'anchor': anchored, 'auxiliary': auxiliary},
                         'identities': len(identities), 'pairs_checked': len(ids)*(len(ids)-1)//2,
                         'pairs_above_min_mean': len(pairs), 'pairs_reported': len(selected_pairs)},
             'decisions': decisions, 'rejected_reasons': rejected_reasons,
@@ -428,7 +448,8 @@ def build(config, scene_id, *, limit=20, min_mean=None, scope=None):
                 'Recorded merge support is diagnostic, not a proof of future merging.',
                 'Local core counts are unvalidated upper bounds; competing identity checks '
                 'and chronological merge evidence require a full replay.',
-                'Representatives use the first retained samples in canonical scene/cue order; '
+                'Representatives use only anchor-eligible samples when pose-aware policy is enabled; '
+                'the earliest eligible samples are selected in canonical scene/cue order. '
                 'selected-scene-only comparisons may omit later samples when the cap is reached.',
                 'Missing quality metrics mean legacy/unmeasured data, not zero quality.',
             ],
