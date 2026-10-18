@@ -584,6 +584,43 @@ AuraFace on scans whose detection policy and media have not changed. Profile-onl
 people may remain deliberately unpublished. Portrait ranking is independent of
 this identity-evidence policy.
 
+### Supported anchor subclusters for same-scene context
+
+`clustering.anchor_view_matching: true` opts in to **strict-core anchor
+view matching**. This is separate from the auxiliary multi-view pass. After
+ordinary strict matching and same-scene merge handling, accepted anchor
+observations (`known_identity` or `candidate_group` only) are grouped
+into frozen, complete-link appearance subclusters, scoped to the selected
+scene and identity. Each subcluster requires at least the larger of
+`view_min_support` and `same_scene_min_support` distinct (scan, seconds)
+cues. Duplicate cue detections never manufacture support. Supported anchor
+medoids do not create identities or participate in merge nominations.
+
+Previously withheld *anchor* observations with reason
+`insufficient_match_or_cohesion` may attach to one confirmed same-scene view
+when matching exceeds both `recognition.match_threshold` and
+`view_match_threshold`, identity-level ambiguity meets the stronger margin,
+the pose hint agrees, and the observation is within
+`anchor_view_max_gap_seconds` (default 180s) of a confirmed core cue.
+Independently accepted faces of other identities in that very cue veto the
+attachment; same-cue embedding conflicts are also checked. At least
+`view_attach_min_support` separate cues must agree on the **same
+identity and exact prototype**. A successful attachment never becomes
+another prototype in this rebuild, and cannot become historical merge support.
+No extra face inference, schema change, or rescan is required to retune it.
+
+This can recover anchor observations that were withheld because a diverse
+identity's full reference collection failed the global minimum similarity.
+It **does not automatically fuse already accepted people** on the basis of
+temporal proximity or one favourable prototype. Fragment pairs with mean
+similarity near 0.45 and no independent cross-identity evidence (such as
+the supplied scene 2 diagnosis) remain subject to the existing strict
+merger rules. Lowering global cosine thresholds to force a merge is unsafe.
+Time in this feature is corroboration only, not identity evidence.
+
+Omitting `anchor_view_matching` preserves the previous behaviour; the
+bundled YAML opts in.
+
 ### Confirmed multi-view identity prototypes
 
 Opt in with `clustering.view_prototypes_enabled: true` and a configured
