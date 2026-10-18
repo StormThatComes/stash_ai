@@ -72,6 +72,24 @@ def test_single_new_view_match_cannot_attach(tmp_path):
         assert json.loads(second[0]['payload'])['reason'] == 'view_insufficient_support'
 
 
+
+def test_one_identity_can_own_two_distinct_confirmed_view_clusters(tmp_path):
+    other_view = np.array([.8, -.6, 0., 0.])
+    assert float(np.dot(SEED, other_view)) < .8
+    config = multiview(tmp_path)
+    with FaceDatabase(config.database) as db:
+        replay(db, config, {
+            '1': ([FRONT]*3 + [SEED]*3 + [other_view]*3, set(range(3, 9))),
+        })
+        views = confirmed_views(
+            db.connection, matching_policy(config), config.data['clustering'],
+            remaining_bytes=config.data['clustering']['max_reference_bytes'])
+        assert len(views) == 2
+        assert len({view.group.identifier for view in views}) == 1
+        assert all(view.support_count == 3 for view in views)
+        assert all(view.pose == 'other' for view in views)
+
+
 def test_competing_view_prototypes_respect_ambiguity_margin(tmp_path):
     a = np.array([.75, 0., math.sqrt(1-.75**2), 0.])
     b = np.array([0., .75, math.sqrt(1-.75**2), 0.])
