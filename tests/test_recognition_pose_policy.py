@@ -99,11 +99,7 @@ def test_auxiliary_matching_can_be_disabled(tmp_path):
 
 def test_pose_threshold_retunes_without_scan_identity_change(tmp_path):
     baseline = setup(tmp_path)
-    path = tmp_path / 'face.yml'
-    path.write_text(path.read_text().replace(
-        'clustering: ', 'clustering: '))  # baseline config remains valid
-    configured(tmp_path)
-    strict = load(path)
+    strict = configured(tmp_path)
     assert matching_policy(strict) != matching_policy(baseline)
     assert scan_identity(strict, 'ns') == scan_identity(baseline, 'ns')
 
@@ -111,7 +107,7 @@ def test_pose_threshold_retunes_without_scan_identity_change(tmp_path):
 @pytest.mark.parametrize('value', [-0.01, 1.1, True, float('nan'), '0.2'])
 def test_invalid_anchor_threshold_rejected(tmp_path, value):
     path = tmp_path / 'invalid.yml'
-    path.write_text('version: 1\\nclustering: ' + json.dumps({'max_anchor_pose_deviation': value}) + '\\n')
+    path.write_text('version: 1\nclustering: ' + json.dumps({'max_anchor_pose_deviation': value}) + '\n')
     with pytest.raises(ValueError, match='max_anchor_pose_deviation'):
         load(path)
 
