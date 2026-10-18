@@ -5,7 +5,6 @@ attach previously withheld anchors only; it never creates or merges identities
 or trains on its own attachments. Time is corroboration, not an identity signal.
 """
 from dataclasses import dataclass
-import math
 
 from .clustering import Group, _groups, co_presence_allows, matching_policy, vector
 from .database import encoded
@@ -39,6 +38,7 @@ def _confirmed(db, policy, grouping, usage):
     rows = db.execute(
         'SELECT c.person,o.id,o.scan,o.seconds,o.geometry,o.dimensions,o.embedding '
         f'FROM candidates c JOIN observations o ON o.id={address(db, "c")} '
+        'JOIN members m ON m.observation=o.id AND m.person=c.person '
         'JOIN scans s ON s.id=o.scan '
         "WHERE c.policy=? AND c.status='accepted' AND "
         "json_extract(c.payload,'$.reason') IN ('known_identity','candidate_group') "
@@ -91,6 +91,23 @@ def _different_accepted_face(db, row, person, policy):
         (row['scan'], policy, person, row['cue'], row['id'])).fetchone() is not None
 
 
+def _competing_anchor(groups, person, query, score, margin):
+    """A sparse rival with no promoted view must not be invisible to ranking.
+
+    Use the *maximum* scalar cosine against every retained rival anchor from
+    this scene, not its group mean/minimum: a single convincing competitor is
+    sufficient to veto an otherwise apparently unambiguous view attachment.
+    """
+    import numpy as np
+    boundary = score - margin
+    for rival in groups:
+        if rival.identifier != person and any(
+                float(np.dot(sample, query)) >= boundary
+                for sample in rival.samples):
+            return True
+    return False
+
+
 def apply_anchor_views(database, selected, config, *, progress=None):
     grouping, settings = config.data['clustering'], config.data['recognition']
     if not grouping['anchor_view_matching'] or not selected:
@@ -103,7 +120,7 @@ def apply_anchor_views(database, selected, config, *, progress=None):
     # Account existing strict references before admitting view medoids.
     anchors = _groups(db, first['scope'], first['namespace'], grouping,
                       usage=usage, stage='anchor_views')
-    anchors.clear()
+    anchor_by_id = {group.identifier: group for group in anchors}
     views = _confirmed(db, policy, grouping, usage)
     if not views:
         return
@@ -120,6 +137,13 @@ def apply_anchor_views(database, selected, config, *, progress=None):
         if not local:
             continue
         groups = [v.group for v in local]
+        # All local accepted identity rivals participate in the final margin
+        # check, even when they have too few cues to promote any own view.
+        local_people = {r[0] for r in db.execute(
+            "SELECT DISTINCT person FROM candidates WHERE scan=? AND policy=? "
+            "AND status='accepted' AND person IS NOT NULL", (scan, policy))}
+        rival_anchors = [anchor_by_id[p] for p in sorted(local_people)
+                         if p in anchor_by_id]
         by_group = {id(v.group): v for v in local}
         source = (f'FROM candidates c JOIN observations o ON o.id={address(db, "c")} '
                   "WHERE c.scan=? AND c.policy=? AND c.status='withheld' "
@@ -152,6 +176,8 @@ def apply_anchor_views(database, selected, config, *, progress=None):
                 if len(ranked)>1 and ranked[0][1][0]-ranked[1][1][0] < margin:
                     continue
                 person, (score, group, view) = ranked[0]
+                if _competing_anchor(rival_anchors, person, query, score, margin):
+                    continue
                 if _different_accepted_face(db, row, person, policy):
                     continue
                 if not co_presence_allows(
@@ -168,6 +194,7 @@ def apply_anchor_views(database, selected, config, *, progress=None):
                            "payload=json_set(payload,'$.reason','anchor_view_pending',"
                            "'$.anchor_view',json(?)) WHERE id=?",
                            (person, encoded(proof), row['candidate']))
+    anchors.clear()
     # Independent support applies to one person AND one exact frozen prototype.
     # This stage must not overwrite another stage's pending candidates.
     source = (f'FROM candidates c JOIN observations o ON o.id={address(db, "c")} '
