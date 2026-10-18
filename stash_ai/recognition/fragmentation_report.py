@@ -169,6 +169,8 @@ def _score(left, right, scene=None):
     low = np.unravel_index(int(values.argmin()), values.shape)
     # Sum converted float32 dot scores in float64, as the matching code does.
     mean = math.fsum(float(value) for value in values.flat) / values.size
+    if scene is None:
+        return mean, float(values[low]), (left[low[0]][0], right[low[1]][0]), None
     details = {
         'cross_scores': {
             'comparisons': int(values.size),
@@ -226,7 +228,7 @@ def _recorded_support(db, scan, left, right, references, config, *, local=False)
     policy = _merge_support_policy(config, scene_scan=scan['id'] if local else None)
     settings, clustering = config.data['recognition'], config.data['clustering']
     rows = db.execute(
-        'SELECT o.id,o.seconds,o.dimensions,o.embedding,s.scene FROM merge_support v '
+        'SELECT o.id,o.seconds,o.dimensions,o.embedding,s.scene,s.id AS selected_scan_id FROM merge_support v '
         'JOIN observations o ON o.id=v.observation JOIN scans s ON s.id=o.scan '
         'WHERE v.policy=? AND ((v.source=? AND v.target=?) OR (v.source=? AND v.target=?)) '
         'AND s.scope=? AND s.namespace=? AND s.policy_sha=? AND s.status=\'complete\' '
@@ -240,7 +242,7 @@ def _recorded_support(db, scan, left, right, references, config, *, local=False)
     cues = set()
     nominations = 0
     for row in rows:
-        if local and row['scene'] != scan['scene']:
+        if local and row['selected_scan_id'] != scan['id']:
             continue
         nominations += 1
         cue = (row['scene'], row['seconds'])
@@ -343,7 +345,7 @@ def build(config, scene_id, *, limit=20, min_mean=None, scope=None):
         pairs = []
         for n, left in enumerate(ids):
             for right in ids[n + 1:]:
-                mean, minimum, worst, details = _score(references[left], references[right], scan['scene'])
+                mean, minimum, worst, _ = _score(references[left], references[right])
                 if mean < min_mean:
                     continue
                 blockers = []
@@ -355,7 +357,6 @@ def build(config, scene_id, *, limit=20, min_mean=None, scope=None):
                     'left': people[left], 'right': people[right],
                     'cross_mean': round(mean, 6), 'cross_minimum': round(minimum, 6),
                     'worst_representatives': {'left': worst[0], 'right': worst[1]},
-                    'score_diagnostics': details,
                     'blockers': blockers,
                     'indicative_thresholds': {
                         'match_threshold_at_most': round(mean, 6),
@@ -366,6 +367,7 @@ def build(config, scene_id, *, limit=20, min_mean=None, scope=None):
         selected_pairs = pairs[:limit]
         for pair in selected_pairs:
             a, b = pair['left']['identity_id'], pair['right']['identity_id']
+            pair['score_diagnostics'] = _score(references[a], references[b], scan['scene'])[3]
             co_present = _co_present(db, a, b)
             if co_present and pair['cross_minimum'] < settings['cooccurrence_merge_threshold']:
                 pair['blockers'].append('co_present_requires_stronger_cross_similarity')
