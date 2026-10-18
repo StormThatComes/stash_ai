@@ -347,6 +347,33 @@ reports how many independent scene/time cues still qualify. Missing nominations
 do **not** prove that evidence is missing: there is no complete persisted log
 of every rejected or never-proposed merge.
 
+Additional read-only diagnostics include:
+
+- `observation_quality`: retained versus rejected counts by reason, with
+  measured face pixels, pose deviation, sharpness and visible fraction (min,
+  median, p90, max and missing counts). These are actual quality measurements
+  from the recorded scan, not predictions of how a relaxed filter would perform.
+- `identities[].representatives`: available/selected sample counts and truncation,
+  the **canonical scene/cue selection order** (not quality-ranked), counts per
+  source scene, measured-quality summaries and per-sample IDs, cue timestamps,
+  scenes and quality metrics. Crops and raw embeddings are not exported.
+- `potential_fragments[].score_diagnostics`: pair-score distribution (p10,
+  median and p90), three worst reference comparisons with provenance and a
+  separate cross-check using only the *selected bounded references* originating
+  from the requested scene. If the reference cap excludes those scene samples,
+  the scene-only comparison may be empty even when the identity is present.
+- `potential_fragments[].same_scene_merge`: actual effective local
+  match/cohesion thresholds, strictly accepted cue counts for each side, definite
+  numeric/count blockers and separate recorded local nominations under the
+  scene-specific evidence policy. This does **not** revalidate the strict core
+  against all identities, replay chronological nominations or prove that a pair
+  will merge. `can_merge: null` remains intentional.
+
+Both global and local support diagnostics report how many stored nominations were
+found and how many pass the **current bounded pair** checks. Missing nominations
+or a possible core by raw cue count do not prove a merge would succeed or fail.
+Legacy quality metadata that lacks a measurement is reported as missing, never 0.
+
 By default, pairs with cross mean below `match_threshold - 0.20` are excluded.
 `--min-mean` adjusts this search floor (`-1..1`), while `--limit` (1..500,
 default 20) bounds output size but **not** the number of evaluated pairs.
