@@ -24,7 +24,9 @@ def defaults():
                         'ambiguity_margin': .1, 'min_identity_support': 1, 'min_merge_support': 3,
                         'cooccurrence_merge_threshold': .90},
         'clustering': {'cohesion_threshold': .60, 'same_scene_match_bonus': .03,
-                       'same_scene_min_support': 3, 'max_samples_per_person': 32,
+                       'same_scene_min_support': 3, 'max_anchor_pose_deviation': None,
+                       'auxiliary_matching': True, 'auxiliary_min_support': 1,
+                       'max_samples_per_person': 32,
                        'max_people_per_lookup': 20000, 'max_reference_bytes': 134217728},
         'portraits': {'enabled': True, 'source': 'vtt', 'min_face_pixels': 96, 'min_sharpness': 25.,
                      'max_pose_deviation': .35, 'min_exposure': 30., 'max_exposure': 225.,
@@ -127,6 +129,11 @@ def validate(data):
             _number(data[section][key], f'{section}.{key}', 0, 1)
     if data['detection']['max_pose_deviation'] is not None:
         _number(data['detection']['max_pose_deviation'], 'detection.max_pose_deviation', 0, 1)
+    anchor = data['clustering']['max_anchor_pose_deviation']
+    if anchor is not None:
+        _number(anchor, 'clustering.max_anchor_pose_deviation', 0, 1)
+    if type(data['clustering']['auxiliary_matching']) is not bool:
+        raise ValueError('clustering.auxiliary_matching must be boolean.')
     if type(data['execution']['profile_rebuild']) is not bool:
         raise ValueError('execution.profile_rebuild must be boolean.')
     if type(data['detection']['require_complete_face']) is not bool:
@@ -139,7 +146,7 @@ def validate(data):
     integers = {
         'detection': {'min_face_pixels': (8, 4096), 'max_faces_per_frame': (1, 1000)},
         'recognition': {'min_identity_support': (1, 1000), 'min_merge_support': (1, 1000)},
-        'clustering': {'same_scene_min_support': (1, 1000),
+        'clustering': {'same_scene_min_support': (1, 1000), 'auxiliary_min_support': (1, 1000),
                        'max_samples_per_person': (2, 128), 'max_people_per_lookup': (1, 100000),
                        'max_reference_bytes': (1048576, 1073741824)},
         'portraits': {'min_face_pixels': (0, 4096), 'max_candidates': (1, 64), 'jpeg_quality': (1, 100),

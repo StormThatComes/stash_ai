@@ -41,6 +41,8 @@ class Group:
 
 @measured('references')
 def _groups(db, scope, namespace, policy, *, usage=None, stage='loading'):
+    from .pose_policy import anchor_sql
+    anchor = anchor_sql('o', policy)
     usage = usage or ReferenceUsage(policy['max_reference_bytes'])
     cache = evidence(db)
     if cache is not None:
@@ -55,7 +57,8 @@ def _groups(db, scope, namespace, policy, *, usage=None, stage='loading'):
     maximum = policy['max_people_per_lookup']
     rows = db.execute('SELECT id FROM people WHERE scope=? AND namespace=? '
                       'AND NOT EXISTS (SELECT 1 FROM identity_merges WHERE source=people.id) '
-                      'AND EXISTS (SELECT 1 FROM members WHERE person=people.id) '
+                      f'AND EXISTS (SELECT 1 FROM members m JOIN observations o ON o.id=m.observation '
+                      f'WHERE m.person=people.id AND {anchor}) '
                       'ORDER BY created,id LIMIT ?',
                       (scope, namespace, maximum + 1)).fetchall()
     if len(rows) > maximum:
@@ -76,14 +79,15 @@ def _groups(db, scope, namespace, policy, *, usage=None, stage='loading'):
             'SELECT m.person,o.dimensions,o.embedding,ROW_NUMBER() OVER (PARTITION BY m.person '
             'ORDER BY CAST(s.scene AS INTEGER),s.scene,o.cue,o.seconds,o.geometry,o.embedding,o.id) AS position '
             'FROM observations o JOIN members m ON m.observation=o.id JOIN scans s ON s.id=o.scan '
-            'WHERE m.person IN (SELECT value FROM json_each(?))) WHERE position<=? ORDER BY person,position',
+            f'WHERE m.person IN (SELECT value FROM json_each(?)) AND {anchor}) '
+            'WHERE position<=? ORDER BY person,position',
             (identifiers, policy['max_samples_per_person'])):
             samples[row['person']].append(vector(row))
         with tracking(batch, 'Load identity references', unit='person') as tracked:
             for person in tracked:
                 vectors = samples[person['id']]
                 if not vectors:
-                    raise ValueError('Accepted face identity has no retained supporting embeddings.')
+                    continue  # No eligible anchors under the current policy.
                 usage.add(vectors, people=1, kind='Retained')
                 result.append(Group(person['id'], tuple(vectors), True))
 
@@ -219,7 +223,10 @@ def cluster_scene(database, scan, config, *, progress=None, _cold_replay=False):
     if record is None or record['status'] != 'complete':
         raise ValueError('Face matching requires a complete selected-scene scan.')
     policy = matching_policy(config)
-    count = db.execute('SELECT COUNT(*) FROM observations WHERE scan=? AND rejected IS NULL', (scan,)).fetchone()[0]
+    from .pose_policy import anchor_sql
+    anchor = anchor_sql('o', config.data['clustering'])
+    count = db.execute(f'SELECT COUNT(*) FROM observations o WHERE scan=? AND rejected IS NULL AND {anchor}',
+                       (scan,)).fetchone()[0]
     usage = ReferenceUsage(config.data['clustering']['max_reference_bytes'], progress)
     if not count:
         usage.begin('no_observations')
@@ -234,7 +241,7 @@ def cluster_scene(database, scan, config, *, progress=None, _cold_replay=False):
     if existing == count and count and complete_candidates(db, scan, policy, context, count, admission=resource_limits(config)):
         with tracking(
             db.execute(
-                'SELECT dimensions,embedding FROM observations WHERE scan=? AND rejected IS NULL',
+                f'SELECT dimensions,embedding FROM observations o WHERE scan=? AND rejected IS NULL AND {anchor}',
                 (scan,),
             ),
             'Validate cached matching',
@@ -253,7 +260,8 @@ def cluster_scene(database, scan, config, *, progress=None, _cold_replay=False):
         with tracking(
             scored_rows(db.execute(
                 'SELECT o.*,m.person AS prior_person FROM observations o LEFT JOIN members m '
-                'ON m.observation=o.id WHERE o.scan=? AND o.rejected IS NULL ORDER BY o.cue,o.geometry,o.embedding,o.id',
+                f'ON m.observation=o.id WHERE o.scan=? AND o.rejected IS NULL AND {anchor} '
+                'ORDER BY o.cue,o.geometry,o.embedding,o.id',
                 (scan,),
             ), groups, settings['match_threshold'] - settings['ambiguity_margin']),
             'Match face observations',

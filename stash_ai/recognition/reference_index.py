@@ -17,6 +17,8 @@ class ReferenceIndex:
     def __init__(self, db, scope, namespace, config):
         self.db, self.scope, self.namespace = db, scope, namespace
         self.members, self.deltas, self.groups = {}, {}, {}
+        from .pose_policy import is_anchor
+        self.is_anchor = lambda q: is_anchor(q, config.data['clustering'])
         self.dirty = set()
         self.roots = None
         self.cached = None
@@ -27,10 +29,10 @@ class ReferenceIndex:
         if not self.enabled:
             count('reference_index_budget_fallbacks')
             return
-        rows = db.execute('SELECT o.id,s.scope,s.namespace,s.status,o.rejected FROM observations o '
+        rows = db.execute('SELECT o.id,o.quality,s.scope,s.namespace,s.status,o.rejected FROM observations o '
             'JOIN scans s ON s.id=o.scan ORDER BY CAST(s.scene AS INTEGER),s.scene,o.cue,'
             'o.seconds,o.geometry,o.embedding,o.id')
-        self.order, self.rank, self.allowed = [], {}, set()
+        self.order, self.rank, self.allowed, self.anchors = [], {}, set(), set()
         from .progress import tracking
         with tracking(rows, 'Index canonical replay references', unit='observation',
                       total=total, position=0) as tracked:
@@ -40,6 +42,8 @@ class ReferenceIndex:
                 if (row['scope'] == scope and row['namespace'] == namespace
                         and row['status'] == 'complete' and row['rejected'] is None):
                     self.allowed.add(row['id'])
+                    if self.is_anchor(row['quality']):
+                        self.anchors.add(row['id'])
         for row in db.execute('SELECT observation,person FROM members'):
             self.changed(row['observation'], None, row['person'])
         db.create_function('recognition_reference_member', 3, self.changed)
@@ -72,6 +76,8 @@ class ReferenceIndex:
                 continue
             if observation not in self.allowed:
                 raise ValueError('Face identity has incompatible retained membership evidence.')
+            if observation not in self.anchors:
+                continue  # Auxiliary membership cannot add a reference sample.
             rank = self.rank[observation]
             if old is not None:
                 changes.setdefault(old, (set(), set()))[0].add(rank)
