@@ -1,0 +1,158 @@
+"""One identity may own independent, verified pose/appearance view prototypes."""
+import json
+import math
+
+import numpy as np
+import pytest
+
+from stash_ai.recognition.clustering import _groups, matching_policy
+from stash_ai.recognition.config import load
+from stash_ai.recognition.database import FaceDatabase
+from stash_ai.recognition.scanning import scan_identity
+from stash_ai.recognition.view_prototypes import pose_view, confirmed_views
+from tests.test_recognition_pose_policy import configured, membership, replay, FRONT
+
+SEED = np.array([.8, .6, 0., 0.])
+LATER = np.array([.55, math.sqrt(1-.55**2), 0., 0.])
+OTHER = np.array([0., 1., 0., 0.])
+
+
+def multiview(tmp_path, **changes):
+    return configured(tmp_path, view_prototypes_enabled=True, **changes)
+
+
+def run_example(db, config, *, seed_count=3, late_count=2):
+    return replay(db, config, {
+        '1': ([FRONT]*3 + [SEED]*seed_count, set(range(3,3+seed_count))),
+        '2': ([LATER]*late_count, set(range(late_count))),
+    })
+
+
+def test_confirmed_view_recovers_profiles_which_cannot_match_frontal_anchor(tmp_path):
+    config = multiview(tmp_path)
+    assert float(np.dot(SEED, FRONT)) > config.data['recognition']['match_threshold']
+    assert float(np.dot(LATER, FRONT)) < config.data['recognition']['match_threshold']
+    assert float(np.dot(LATER, SEED)) > config.data['clustering']['view_match_threshold']
+    with FaceDatabase(config.database) as db:
+        selected = run_example(db, config)
+        first = membership(db, selected[0]['scan'])
+        second = membership(db, selected[1]['scan'])
+        assert [json.loads(row['payload'])['reason'] for row in first[3:]] == ['auxiliary_identity']*3
+        assert [row['status'] for row in second] == ['accepted', 'accepted']
+        assert {row['person'] for row in second} == {first[0]['person']}
+        assert all(json.loads(row['payload'])['reason'] == 'view_identity' for row in second)
+        proofs = [json.loads(row['payload'])['view_prototype'] for row in second]
+        assert all(p['anchor_verified_support'] >= 3 and p['pose'] == 'other' for p in proofs)
+        anchors = _groups(db.connection, 'scope', 'ns', config.data['clustering'])
+        assert len(anchors) == 1 and len(anchors[0].samples) == 3
+        assert db.connection.execute('SELECT COUNT(*) FROM identity_merges').fetchone()[0] == 0
+
+
+def test_disabled_multiview_preserves_legacy_profile_rejection(tmp_path):
+    config = configured(tmp_path, view_prototypes_enabled=False)
+    with FaceDatabase(config.database) as db:
+        selected = run_example(db, config)
+        second = membership(db, selected[1]['scan'])
+        assert all(row['status'] == 'withheld' for row in second)
+
+
+def test_one_or_two_confirmations_cannot_promote_new_view(tmp_path):
+    config = multiview(tmp_path)
+    with FaceDatabase(config.database) as db:
+        selected = run_example(db, config, seed_count=2)
+        assert all(row['status'] == 'withheld' for row in membership(db, selected[1]['scan']))
+
+
+def test_single_new_view_match_cannot_attach(tmp_path):
+    config = multiview(tmp_path)
+    with FaceDatabase(config.database) as db:
+        selected = run_example(db, config, late_count=1)
+        second = membership(db, selected[1]['scan'])
+        assert second[0]['status'] == 'withheld'
+        assert json.loads(second[0]['payload'])['reason'] == 'view_insufficient_support'
+
+
+def test_competing_view_prototypes_respect_ambiguity_margin(tmp_path):
+    a = np.array([.75, 0., math.sqrt(1-.75**2), 0.])
+    b = np.array([0., .75, math.sqrt(1-.75**2), 0.])
+    uncertain = np.array([.35, .35, math.sqrt(1-2*.35**2), 0.])
+    assert float(np.dot(a, uncertain)) > .82
+    assert float(np.dot(b, uncertain)) > .82
+    config = multiview(tmp_path)
+    with FaceDatabase(config.database) as db:
+        selected = replay(db, config, {
+            '1': ([FRONT]*3 + [a]*3, {3,4,5}),
+            '2': ([OTHER]*3 + [b]*3, {3,4,5}),
+            '3': ([uncertain]*2, {0,1}),
+        })
+        assert all(row['status'] == 'withheld' for row in membership(db, selected[2]['scan']))
+        assert db.connection.execute('SELECT COUNT(*) FROM people').fetchone()[0] == 2
+
+
+def test_views_never_seed_identity_or_merge_proofs(tmp_path):
+    config = multiview(tmp_path, auxiliary_min_support=3)
+    with FaceDatabase(config.database) as db:
+        selected = replay(db, config, {
+            '1': ([SEED]*3, {0,1,2}),
+            '2': ([LATER]*3, {0,1,2}),
+        })
+        assert db.connection.execute('SELECT COUNT(*) FROM people').fetchone()[0] == 0
+        assert all(row['status'] == 'withheld' for item in selected
+                   for row in membership(db, item['scan']))
+        assert db.connection.execute('SELECT COUNT(*) FROM merge_support').fetchone()[0] == 0
+
+
+def test_new_matching_options_change_replay_not_embedding_namespace(tmp_path):
+    off = configured(tmp_path)
+    on = multiview(tmp_path)
+    assert matching_policy(off) != matching_policy(on)
+    assert scan_identity(off, 'ns') == scan_identity(on, 'ns')
+
+
+def test_promotion_prototypes_bounded_and_nontransitive(tmp_path):
+    config = multiview(tmp_path, max_view_prototypes_per_person=1)
+    with FaceDatabase(config.database) as db:
+        selected = run_example(db, config)
+        views = confirmed_views(db.connection, matching_policy(config), config.data['clustering'],
+                                remaining_bytes=config.data['clustering']['max_reference_bytes'])
+        # The persisted view-only attachments cannot amplify the training set.
+        assert len(views) == 0  # Candidate rows are mapped after replay; no in-memory trainer leakage.
+
+
+@pytest.mark.parametrize('field,value', [
+    ('view_prototypes_enabled', 'true'), ('view_prototypes_enabled', 1),
+    ('view_min_support', 1), ('view_min_support', 0),
+    ('view_match_threshold', -0.1), ('view_match_threshold', 1.1),
+    ('view_cohesion_threshold', float('nan')),
+    ('view_ambiguity_margin', True), ('view_attach_min_support', 0),
+    ('max_view_prototypes_per_person', 0), ('max_view_prototypes_per_person', 9),
+])
+def test_view_configuration_rejects_invalid_values(tmp_path, field, value):
+    path = tmp_path/'invalid.yml'
+    path.write_text('version: 1\nclustering: '+json.dumps({field: value})+'\n')
+    with pytest.raises(ValueError, match=field):
+        load(path)
+
+
+@pytest.mark.parametrize('options', [
+    {'view_prototypes_enabled': True},
+    {'view_prototypes_enabled': True, 'max_anchor_pose_deviation': .2,
+     'auxiliary_matching': False},
+])
+def test_views_require_anchor_policy_and_auxiliary_matching(tmp_path, options):
+    path = tmp_path/'invalid.yml'
+    path.write_text('version: 1\nclustering: '+json.dumps(options)+'\n')
+    with pytest.raises(ValueError, match='view_prototypes_enabled'):
+        load(path)
+
+
+def test_pose_hint_keeps_signed_direction_and_does_not_claim_yaw_degrees():
+    neutral = [16,16,128,128,49,60,111,60,80,84,56,108,104,108,.99]
+    left = neutral.copy()
+    right = neutral.copy()
+    left[8] = 64
+    right[8] = 96
+    assert pose_view(neutral) == 'other'
+    assert pose_view(left) == 'left'
+    assert pose_view(right) == 'right'
+    assert pose_view('not-json') == 'other'
