@@ -5,7 +5,8 @@ import math
 import numpy as np
 import pytest
 
-from stash_ai.recognition.clustering import matching_policy
+from stash_ai.recognition.clustering import Group, matching_policy
+from stash_ai.recognition.anchor_views import _competing_anchor
 from stash_ai.recognition.config import load, plain
 from stash_ai.recognition.database import FaceDatabase
 from stash_ai.recognition.rebuild import rebuild_selected
@@ -116,6 +117,18 @@ def test_anchor_view_does_not_override_co_present_identity(tmp_path):
         c_rows = [payload for status, _, payload in rows if payload.get('reason', '').startswith('anchor_view')]
         assert all(payload['reason'] != 'anchor_view_identity' for payload in c_rows)
         assert db.connection.execute('SELECT COUNT(*) FROM identity_merges').fetchone()[0] == 0
+
+
+
+def test_sparse_rival_with_no_own_prototype_still_vetoes_match():
+    query = np.array([1., 0., 0., 0.])
+    favoured = Group('owner', (query,), True)
+    # This rival has just one anchor, and therefore could not have passed
+    # view_min_support, yet is strongly competitive at the person level.
+    rival = Group('other', (np.array([.91, math.sqrt(1-.91**2), 0., 0.]),), True)
+    assert _competing_anchor([favoured, rival], 'owner', query, .94, .12)
+    distant = Group('distant', (np.array([0., 1., 0., 0.]),), True)
+    assert not _competing_anchor([favoured, distant], 'owner', query, .94, .12)
 
 
 def test_anchor_view_rejects_invalid_configuration(tmp_path):
