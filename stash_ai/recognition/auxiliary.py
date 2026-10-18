@@ -155,25 +155,30 @@ def _attach_confirmed_views(db, selected, config, policy, anchors, usage, cache)
     source = (f'FROM candidates c JOIN observations o ON o.id={address(db, "c")} '
               "WHERE c.policy=? AND c.status='pending' "
               "AND json_extract(c.payload,'$.reason')='view_identity_pending'")
-    rows = list(db.execute(
-        'SELECT c.id,c.person,o.scan,o.seconds,'
-        "json_extract(c.payload,'$.view_prototype.medoid') AS medoid "
-        + source + ' ORDER BY c.person,o.scan,o.seconds,c.id', (policy,)))
-    votes = {}
-    for row in rows:
-        key = (row['person'], row['medoid'])
-        votes.setdefault(key, set()).add((row['scan'], row['seconds']))
-    minimum = grouping['view_attach_min_support']
+    # Aggregate by independent cue in SQLite; do not materialize every
+    # provisional face in Python for large selected libraries.
+    votes = db.execute(
+        'SELECT person,medoid,COUNT(*) AS independent_cues FROM ('
+        'SELECT c.person AS person,'
+        "json_extract(c.payload,'$.view_prototype.medoid') AS medoid,"
+        'o.scan,o.seconds ' + source +
+        ' GROUP BY c.person,medoid,o.scan,o.seconds) '
+        'GROUP BY person,medoid ORDER BY person,medoid',
+        (policy,))
+    eligible = [(person, medoid) for person, medoid, count in votes
+                if count >= grouping['view_attach_min_support']]
     with db:
-        for row in rows:
-            supported = len(votes[row['person'], row['medoid']]) >= minimum
-            if supported:
-                db.execute("UPDATE candidates SET status='accepted',"
-                           "payload=json_set(payload,'$.reason','view_identity') WHERE id=?", (row['id'],))
-            else:
-                db.execute("UPDATE candidates SET person=NULL,status='withheld',"
-                           "payload=json_set(payload,'$.reason','view_insufficient_support') WHERE id=?",
-                           (row['id'],))
+        for person, medoid in eligible:
+            db.execute("UPDATE candidates SET status='accepted',"
+                       "payload=json_set(payload,'$.reason','view_identity') "
+                       "WHERE policy=? AND person=? AND status='pending' "
+                       "AND json_extract(payload,'$.reason')='view_identity_pending' "
+                       "AND json_extract(payload,'$.view_prototype.medoid')=?",
+                       (policy, person, medoid))
+        db.execute("UPDATE candidates SET person=NULL,status='withheld',"
+                   "payload=json_set(payload,'$.reason','view_insufficient_support') "
+                   "WHERE policy=? AND status='pending' "
+                   "AND json_extract(payload,'$.reason')='view_identity_pending'", (policy,))
         db.execute(f'INSERT OR IGNORE INTO members(observation,person) '
                    f'SELECT {address(db, "c")},c.person FROM candidates c '
                    "WHERE c.policy=? AND c.status='accepted' "
