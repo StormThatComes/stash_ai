@@ -75,6 +75,9 @@ def test_report_ranks_pairs_and_explains_cross_sample_blockers(tmp_path):
     assert result['withheld_examples'][0]['scores'] == [.66, .64]
     assert result['summary']['observations'] == 4
     assert result['observation_quality']['retained']['metrics']['pixels']['missing'] == 4
+    assert result['detection_gates']['min_face_pixels'] == 32
+    assert result['detection_gates']['max_pose_deviation'] == .5
+    assert result['rejected_examples'] == {}
     assert result['thresholds']['same_scene_min_support'] == 3
     assert result['thresholds']['local_match_threshold'] == pytest.approx(.62)
     assert result['thresholds']['local_cohesion_threshold'] == pytest.approx(.57)
