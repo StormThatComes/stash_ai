@@ -367,20 +367,23 @@ def cluster_scene(database, scan, config, *, progress=None, _cold_replay=False):
 
 @measured('recheck')
 def _recheck_after_merge(db, scan, policy, groups, config):
-    """Resolve ambiguity against the surviving groups, preserving raw evidence."""
+    """Recheck strict anchor observations only; auxiliary views are deferred."""
+    from .pose_policy import anchor_sql
+    anchor = anchor_sql('o', config.data['clustering'])
     settings = config.data['recognition']
     cache = evidence(db)
     with tracking(
         scored_rows(db.execute(
             'SELECT o.*,m.person AS prior_person FROM observations o LEFT JOIN members m '
-            'ON m.observation=o.id WHERE o.scan=? AND o.rejected IS NULL ORDER BY o.cue,o.geometry,o.embedding,o.id',
+            f'ON m.observation=o.id WHERE o.scan=? AND o.rejected IS NULL AND {anchor} '
+            'ORDER BY o.cue,o.geometry,o.embedding,o.id',
             (scan,),
         ), groups, settings['match_threshold'] - settings['ambiguity_margin'],
             config.data['clustering']['cohesion_threshold']),
         'Recheck merged observations',
         unit='observation',
         total=lambda: db.execute(
-            'SELECT COUNT(*) FROM observations WHERE scan=? AND rejected IS NULL',
+            f'SELECT COUNT(*) FROM observations o WHERE scan=? AND rejected IS NULL AND {anchor}',
             (scan,),
         ).fetchone()[0],
     ) as tracked:
