@@ -123,6 +123,20 @@ def _scene_quality(db, scan):
             for label, qualities in sorted(buckets.items())}
 
 
+def _rejected_examples(db, scan, per_reason=8):
+    """Bounded audit pointers into the VTT without exporting original images."""
+    examples = {}
+    rows = db.execute(
+        'SELECT id,cue,seconds,rejected,quality FROM observations '
+        'WHERE scan=? AND rejected IS NOT NULL ORDER BY cue,id', (scan,))
+    for row in rows:
+        selected = examples.setdefault(row['rejected'], [])
+        if len(selected) < per_reason:
+            selected.append({'observation_id': row['id'], 'cue': row['cue'],
+                             'seconds': row['seconds'], 'quality': _quality(row['quality'])})
+    return examples
+
+
 def _reference_details(db, scan, person, representatives, limit):
     total = db.execute(
         'SELECT COUNT(*) FROM observations o JOIN members m ON m.observation=o.id '
@@ -398,7 +412,11 @@ def build(config, scene_id, *, limit=20, min_mean=None, scope=None):
                         'identities': len(identities), 'pairs_checked': len(ids)*(len(ids)-1)//2,
                         'pairs_above_min_mean': len(pairs), 'pairs_reported': len(selected_pairs)},
             'decisions': decisions, 'rejected_reasons': rejected_reasons,
+            'rejected_examples': _rejected_examples(db, scan['id']),
             'observation_quality': _scene_quality(db, scan['id']),
+            'detection_gates': {key: config.data['detection'][key] for key in (
+                'score_threshold', 'min_face_pixels', 'min_sharpness', 'max_pose_deviation',
+                'min_visible_face_fraction', 'require_complete_face')},
             'withheld_examples': withheld_examples, 'identities': identities,
             'potential_fragments': selected_pairs,
             'limitations': [
