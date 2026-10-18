@@ -10,6 +10,7 @@ from .merge_cache import support_identity, incremental_votes, save_votes
 from .scoring import comparisons
 from .parallel_scores import scored_rows, contributions
 from .parallel_merges import cross_pairs, cross_scores, matching_rows
+from .pose_policy import anchor_sql
 
 
 def canonical(db, person):
@@ -108,7 +109,8 @@ def _merge_support_policy(config, *, scene_scan=None):
     return policy_digest(config, 'merge-support-v1', lambda: dict(
         {'format': 1,
          'match_threshold': config.data['recognition']['match_threshold'],
-         'cohesion_threshold': config.data['clustering']['cohesion_threshold']},
+         'cohesion_threshold': config.data['clustering']['cohesion_threshold'],
+         'max_anchor_pose_deviation': config.data['clustering']['max_anchor_pose_deviation']},
         **({'scene_scan': scene_scan} if scene_scan is not None else {})))
 
 
@@ -124,19 +126,20 @@ def _supporting_cues(db, selected, policy, source, target, components, config, m
 
     cues, seen = [], set()
     cache = evidence_for(db)
+    anchor = anchor_sql('o', config.data['clustering'])
     identity = support_identity(cache, selected, policy, source, target, components, config, minimum) if nomination is not None else None
     reused = incremental_votes(cache, identity, selected, nomination, components, config, minimum, _matches)
     if reused is not MISSING:
         return reused
     votes = []
-    rows = latest_rows(db, '''SELECT o.id,o.seconds,o.cue,o.dimensions,o.embedding,s.scene,s.id AS scan,s.rowid AS scan_order
+    rows = latest_rows(db, f'''SELECT o.id,o.seconds,o.cue,o.dimensions,o.embedding,s.scene,s.id AS scan,s.rowid AS scan_order
       FROM merge_support m
       JOIN observations o ON o.id=m.observation
       JOIN scans s ON s.id=o.scan
       WHERE m.source=? AND m.target=? AND m.policy=?
         AND s.scope=? AND s.namespace=? AND s.policy_sha=?
-        AND s.status='complete' AND o.rejected IS NULL
-        {latest}
+        AND s.status='complete' AND o.rejected IS NULL AND {anchor}
+        {{latest}}
       ORDER BY s.rowid,o.cue,o.id''',
       (source, target, policy, selected['scope'], selected['namespace'],
        selected['policy_sha']), selected)
@@ -211,10 +214,11 @@ def supported_merges(database, scan, config, groups, policy, *, usage=None,
     settings = config.data['recognition']
     evidence_policy = _merge_support_policy(config, scene_scan=scan if local_state is not None else None)
     cache = evidence_for(db)
+    anchor = anchor_sql('o', config.data['clustering'])
     if local_state is None:
         observations = db.execute(
-            'SELECT id,cue,seconds,dimensions,embedding FROM observations WHERE scan=? AND rejected IS '
-            'NULL ORDER BY cue,id', (scan,))
+            f'SELECT o.id,o.cue,o.seconds,o.dimensions,o.embedding FROM observations o '
+            f'WHERE o.scan=? AND o.rejected IS NULL AND {anchor} ORDER BY o.cue,o.id', (scan,))
     else:
         # Contextual attachments cannot cast merger votes or seed local proof.
         from .replay_addresses import address
@@ -223,14 +227,14 @@ def supported_merges(database, scan, config, groups, policy, *, usage=None,
             f'JOIN observations o ON o.id={address(db, "c")} '
             "WHERE c.scan=? AND c.policy=? AND c.status='accepted' "
             "AND json_extract(c.payload,'$.reason')<>'same_scene_identity' "
-            'AND o.rejected IS NULL ORDER BY o.cue,o.id', (scan, policy))
+            f'AND o.rejected IS NULL AND {anchor} ORDER BY o.cue,o.id', (scan, policy))
     with tracking(
         scored_rows(observations, scoring_groups, settings['match_threshold'],
                     config.data['clustering']['cohesion_threshold']),
         'Check identity merges',
         unit='observation',
         total=lambda: db.execute(
-            'SELECT COUNT(*) FROM observations WHERE scan=? AND rejected IS NULL',
+            f'SELECT COUNT(*) FROM observations o WHERE scan=? AND rejected IS NULL AND {anchor}',
             (scan,),
         ).fetchone()[0],
     ) as tracked:
