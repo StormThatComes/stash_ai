@@ -148,7 +148,7 @@ def test_anchor_view_rejects_invalid_configuration(tmp_path):
     # The obsolete temporal gate must not reappear as a configurable knob.
     p = tmp_path/'obsolete.yml'
     p.write_text('version: 1\nclustering: {anchor_view_max_gap_seconds: 180}\n')
-    with pytest.raises(ValueError, match='anchor_view_max_gap_seconds'):
+    with pytest.raises(ValueError, match='clustering: unknown keys or expected mapping'):
         load(p)
     path = tmp_path/'off.yml'
     path.write_text('version: 1\nclustering: {anchor_view_matching: true}\n')
