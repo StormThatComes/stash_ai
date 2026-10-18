@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 from contextlib import closing
+from dataclasses import replace
 import json
 import math
 from pathlib import Path
 import sqlite3
 
 from .clustering import Group, _similarities, matching_policy, vector
+from .config import plain
 from .database import APPLICATION_ID, SCHEMA_VERSION, _reject_executable_schema
 from .identity_merges import _merge_support_policy
 from .models import namespace
@@ -68,18 +70,95 @@ def _scene_identities(db, scan, policy):
 
 def _representatives(db, scan, person, maximum):
     rows = db.execute(
-        'SELECT o.id,o.seconds,o.dimensions,o.embedding,s.scene '
+        'SELECT o.id,o.cue,o.seconds,o.quality,o.dimensions,o.embedding,s.scene '
         'FROM observations o JOIN members m ON m.observation=o.id '
         'JOIN scans s ON s.id=o.scan '
         'WHERE m.person=? AND s.scope=? AND s.namespace=? '
         "AND s.status='complete' AND o.rejected IS NULL "
         'ORDER BY CAST(s.scene AS INTEGER),s.scene,o.cue,o.seconds,o.geometry,o.embedding,o.id LIMIT ?',
         (person, scan['scope'], scan['namespace'], maximum))
-    return [(dict(id=row['id'], scene=row['scene'], seconds=row['seconds']), vector(row))
+    return [(dict(id=row['id'], scene=row['scene'], cue=row['cue'],
+                  seconds=row['seconds'], quality=_quality(row['quality'])), vector(row))
             for row in rows]
 
 
-def _score(left, right):
+QUALITY_METRICS = ('pixels', 'pose_deviation', 'sharpness', 'visible_face_fraction')
+
+
+def _quality(raw):
+    """Expose only finite measured quality signals; never dump crops or embeddings."""
+    try:
+        values = json.loads(raw) if raw else {}
+    except (ValueError, TypeError):
+        values = {}
+    if not isinstance(values, dict):
+        values = {}
+    return {name: float(value) if type(value) in (float, int) and math.isfinite(value) else None
+            for name in QUALITY_METRICS for value in (values.get(name),)}
+
+
+def _quality_summary(qualities):
+    """Missing/legacy quality fields remain visibly missing, not zero."""
+    result = {}
+    for metric in QUALITY_METRICS:
+        values = sorted(item[metric] for item in qualities if item[metric] is not None)
+        result[metric] = {
+            'count': len(values), 'missing': len(qualities) - len(values),
+            'minimum': round(values[0], 6) if values else None,
+            'median': round((values[(len(values) - 1) // 2] + values[len(values) // 2]) / 2, 6)
+            if values else None,
+            'p90': round(values[math.ceil(.9 * len(values)) - 1], 6) if values else None,
+            'maximum': round(values[-1], 6) if values else None,
+        }
+    return result
+
+
+def _scene_quality(db, scan):
+    buckets = {}
+    for row in db.execute('SELECT quality,rejected FROM observations WHERE scan=? ORDER BY cue,id',
+                          (scan,)):
+        label = row['rejected'] or 'retained'
+        buckets.setdefault(label, []).append(_quality(row['quality']))
+    return {label: {'observations': len(qualities), 'metrics': _quality_summary(qualities)}
+            for label, qualities in sorted(buckets.items())}
+
+
+def _reference_details(db, scan, person, representatives, limit):
+    total = db.execute(
+        'SELECT COUNT(*) FROM observations o JOIN members m ON m.observation=o.id '
+        'JOIN scans s ON s.id=o.scan WHERE m.person=? AND s.scope=? AND s.namespace=? '
+        "AND s.status='complete' AND o.rejected IS NULL",
+        (person, scan['scope'], scan['namespace'])).fetchone()[0]
+    scenes = {}
+    for info, _ in representatives:
+        scenes[info['scene']] = scenes.get(info['scene'], 0) + 1
+    return {
+        'available': total, 'selected': len(representatives), 'limit': limit,
+        'truncated': total > len(representatives), 'selection': 'first_by_canonical_scene_cue_order',
+        'selected_by_scene': scenes,
+        'quality': _quality_summary([info['quality'] for info, _ in representatives]),
+        'samples': [info for info, _ in representatives],
+    }
+
+
+def _strict_scene_counts(db, scan, policy):
+    """Counts are only possible anchors; the local pass revalidates strict cores."""
+    result = {}
+    rows = db.execute(
+        "SELECT c.person,COUNT(DISTINCT o.seconds) AS strict_cues,"
+        "COUNT(*) AS strict_observations FROM candidates c "
+        "JOIN observations o ON o.id=json_extract(c.payload,'$.observation') "
+        "WHERE c.scan=? AND c.policy=? AND c.status='accepted' "
+        "AND o.scan=c.scan AND o.rejected IS NULL "
+        "AND json_extract(c.payload,'$.reason')<>'same_scene_identity' "
+        "GROUP BY c.person", (scan, policy))
+    for row in rows:
+        result[row['person']] = dict(strict_cues=row['strict_cues'],
+                                      strict_observations=row['strict_observations'])
+    return result
+
+
+def _score(left, right, scene=None):
     """Equivalent to the flat-group cross mean/minimum checks; not a replay."""
     import numpy as np
     first = np.stack([sample for _, sample in left])
@@ -90,7 +169,40 @@ def _score(left, right):
     low = np.unravel_index(int(values.argmin()), values.shape)
     # Sum converted float32 dot scores in float64, as the matching code does.
     mean = math.fsum(float(value) for value in values.flat) / values.size
-    return mean, float(values[low]), (left[low[0]][0], right[low[1]][0])
+    details = {
+        'cross_scores': {
+            'comparisons': int(values.size),
+            'p10': round(float(np.quantile(values, .1)), 6),
+            'median': round(float(np.median(values)), 6),
+            'p90': round(float(np.quantile(values, .9)), 6),
+        },
+        'worst_pairs': [
+            {'similarity': round(float(values.flat[index]), 6),
+             'left': left[np.unravel_index(int(index), values.shape)[0]][0],
+             'right': right[np.unravel_index(int(index), values.shape)[1]][0]}
+            for index in np.argsort(values, axis=None)[:3]
+        ],
+    }
+    if scene is not None:
+        first_scene = [entry for entry in left if entry[0]['scene'] == scene]
+        second_scene = [entry for entry in right if entry[0]['scene'] == scene]
+        if first_scene and second_scene:
+            scene_values = np.stack([sample for _, sample in first_scene]) @ np.stack(
+                [sample for _, sample in second_scene]).T
+            details['selected_scene_only'] = {
+                'left_representatives': len(first_scene),
+                'right_representatives': len(second_scene),
+                'cross_mean': round(float(np.mean(scene_values, dtype=np.float64)), 6),
+                'cross_minimum': round(float(scene_values.min()), 6),
+                'comparisons': int(scene_values.size),
+            }
+        else:
+            details['selected_scene_only'] = {
+                'left_representatives': len(first_scene),
+                'right_representatives': len(second_scene),
+                'cross_mean': None, 'cross_minimum': None, 'comparisons': 0,
+            }
+    return mean, float(values[low]), (left[low[0]][0], right[low[1]][0]), details
 
 
 def _co_present(db, left, right):
@@ -103,9 +215,15 @@ def _co_present(db, left, right):
         (left, right)).fetchone() is not None
 
 
-def _recorded_support(db, scan, left, right, references, config):
-    """Recheck recorded nominations; missing nominations are not proof of a failed merge."""
-    policy = _merge_support_policy(config)
+def _recorded_support(db, scan, left, right, references, config, *, local=False):
+    """Recheck stored nominations; absence is not evidence of failed proposals."""
+    if local:
+        local_data = plain(config.data)
+        bonus = local_data['clustering']['same_scene_match_bonus']
+        local_data['recognition']['match_threshold'] = max(0., local_data['recognition']['match_threshold'] - bonus)
+        local_data['clustering']['cohesion_threshold'] = max(0., local_data['clustering']['cohesion_threshold'] - bonus)
+        config = replace(config, data=local_data)
+    policy = _merge_support_policy(config, scene_scan=scan['id'] if local else None)
     settings, clustering = config.data['recognition'], config.data['clustering']
     rows = db.execute(
         'SELECT o.id,o.seconds,o.dimensions,o.embedding,s.scene FROM merge_support v '
@@ -120,7 +238,11 @@ def _recorded_support(db, scan, left, right, references, config):
     groups = [Group(person, [sample for _, sample in references[person]], True)
               for person in (left, right)]
     cues = set()
+    nominations = 0
     for row in rows:
+        if local and row['scene'] != scan['scene']:
+            continue
+        nominations += 1
         cue = (row['scene'], row['seconds'])
         if cue in cues:
             continue
@@ -128,7 +250,44 @@ def _recorded_support(db, scan, left, right, references, config):
         if all((mean >= settings['match_threshold'] and low >= clustering['cohesion_threshold'])
                for mean, low in (_similarities(group, face) for group in groups)):
             cues.add(cue)
-    return len(cues)
+    return {'stored_nominations': nominations, 'validated_nominations': len(cues),
+            'required': settings['min_merge_support'], 'complete_replay_proof': False,
+            'note': 'Only stored nominations surviving a bounded representative check; '
+                    'missing nominations are not proof that a merge would fail.'}
+
+
+def _local_pair(pair, first, second, config, strict_counts):
+    settings, clustering = config.data['recognition'], config.data['clustering']
+    bonus = clustering['same_scene_match_bonus']
+    match = max(0., settings['match_threshold'] - bonus)
+    cohesion = max(0., clustering['cohesion_threshold'] - bonus)
+    minimum = clustering['same_scene_min_support']
+    left, right = strict_counts.get(first, {}), strict_counts.get(second, {})
+    left_cues, right_cues = left.get('strict_cues', 0), right.get('strict_cues', 0)
+    blockers = []
+    if bonus <= 0:
+        blockers.append('same_scene_context_disabled')
+    if left_cues == 0 or right_cues == 0:
+        blockers.append('both_identities_need_strict_accepted_scene_observations')
+    if max(left_cues, right_cues) < minimum:
+        blockers.append('no_possible_strict_local_core_by_cue_count')
+    if pair['cross_mean'] < match:
+        blockers.append('local_cross_mean_below_match_threshold')
+    if pair['cross_minimum'] < cohesion:
+        blockers.append('local_cross_sample_below_cohesion_threshold')
+    if pair['co_present_observed'] and pair['cross_minimum'] < settings['cooccurrence_merge_threshold']:
+        blockers.append('local_co_present_requires_stronger_cross_similarity')
+    return {'effective_match_threshold': round(match, 6),
+            'effective_cohesion_threshold': round(cohesion, 6),
+            'required_strict_core_cues': minimum,
+            'strict_accepted_scene_cues': {'left': left_cues, 'right': right_cues},
+            'possible_core_by_count': max(left_cues, right_cues) >= minimum,
+            'numeric_and_count_blockers': blockers,
+            'strict_core_revalidation_complete': False,
+            'can_merge': None,
+            'note': 'Only necessary numeric and raw cue-count tests. Strict cores are '
+                    'revalidated against all identities in a cold replay; nominations, '
+                    'constituents, co-presence and replay ordering may still prevent merging.'}
 
 
 def build(config, scene_id, *, limit=20, min_mean=None, scope=None):
@@ -148,6 +307,15 @@ def build(config, scene_id, *, limit=20, min_mean=None, scope=None):
             db, scan, person['identity_id'], clustering['max_samples_per_person']) for person in identities}
         if any(not records for records in references.values()):
             raise ValueError('A scene identity has no valid retained reference embeddings.')
+        strict_counts = _strict_scene_counts(db, scan['id'], policy)
+        for person in identities:
+            identifier = person['identity_id']
+            cues = strict_counts.get(identifier, {}).get('strict_cues', 0)
+            person['strict_accepted_scene_cues'] = cues
+            person['same_scene_anchor_possible_by_count'] = (
+                cues >= clustering['same_scene_min_support'])
+            person['representatives'] = _reference_details(
+                db, scan, identifier, references[identifier], clustering['max_samples_per_person'])
         decisions = [dict(row) for row in db.execute(
             "SELECT json_extract(payload,'$.reason') AS reason,status,COUNT(*) AS count "
             "FROM candidates WHERE scan=? AND policy=? "
@@ -175,7 +343,7 @@ def build(config, scene_id, *, limit=20, min_mean=None, scope=None):
         pairs = []
         for n, left in enumerate(ids):
             for right in ids[n + 1:]:
-                mean, minimum, worst = _score(references[left], references[right])
+                mean, minimum, worst, details = _score(references[left], references[right], scan['scene'])
                 if mean < min_mean:
                     continue
                 blockers = []
@@ -187,6 +355,7 @@ def build(config, scene_id, *, limit=20, min_mean=None, scope=None):
                     'left': people[left], 'right': people[right],
                     'cross_mean': round(mean, 6), 'cross_minimum': round(minimum, 6),
                     'worst_representatives': {'left': worst[0], 'right': worst[1]},
+                    'score_diagnostics': details,
                     'blockers': blockers,
                     'indicative_thresholds': {
                         'match_threshold_at_most': round(mean, 6),
@@ -201,12 +370,10 @@ def build(config, scene_id, *, limit=20, min_mean=None, scope=None):
             if co_present and pair['cross_minimum'] < settings['cooccurrence_merge_threshold']:
                 pair['blockers'].append('co_present_requires_stronger_cross_similarity')
             pair['co_present_observed'] = co_present
-            votes = _recorded_support(db, scan, a, b, references, config)
-            pair['recorded_merge_support'] = {
-                'validated_nominations': votes, 'required': settings['min_merge_support'],
-                'complete_replay_proof': False,
-                'note': 'Only stored nominations surviving current checks; missing votes do not '
-                        'establish why a cold replay would reject this pair.'}
+            pair['recorded_merge_support'] = _recorded_support(db, scan, a, b, references, config)
+            pair['same_scene_merge'] = _local_pair(pair, a, b, config, strict_counts)
+            pair['same_scene_merge']['recorded_merge_support'] = _recorded_support(
+                db, scan, a, b, references, config, local=True)
             pair['can_merge'] = None  # Not inferable from these diagnostics alone.
         return {
             'format': 1, 'kind': 'recognition_fragmentation',
@@ -218,11 +385,18 @@ def build(config, scene_id, *, limit=20, min_mean=None, scope=None):
                 'ambiguity_margin': settings['ambiguity_margin'],
                 'cooccurrence_merge_threshold': settings['cooccurrence_merge_threshold'],
                 'min_merge_support': settings['min_merge_support'],
-                'same_scene_match_bonus': clustering['same_scene_match_bonus']},
+                'same_scene_match_bonus': clustering['same_scene_match_bonus'],
+                'same_scene_min_support': clustering['same_scene_min_support'],
+                'max_samples_per_person': clustering['max_samples_per_person'],
+                'local_match_threshold': round(max(0., settings['match_threshold'] -
+                                                  clustering['same_scene_match_bonus']), 6),
+                'local_cohesion_threshold': round(max(0., clustering['cohesion_threshold'] -
+                                                     clustering['same_scene_match_bonus']), 6)},
             'summary': {'observations': total, 'rejected': rejected,
                         'identities': len(identities), 'pairs_checked': len(ids)*(len(ids)-1)//2,
                         'pairs_above_min_mean': len(pairs), 'pairs_reported': len(selected_pairs)},
             'decisions': decisions, 'rejected_reasons': rejected_reasons,
+            'observation_quality': _scene_quality(db, scan['id']),
             'withheld_examples': withheld_examples, 'identities': identities,
             'potential_fragments': selected_pairs,
             'limitations': [
@@ -232,6 +406,11 @@ def build(config, scene_id, *, limit=20, min_mean=None, scope=None):
                 'Only identities assigned to the selected scene are compared; withheld '
                 'observations appear in the decisions summary, not as separate identities.',
                 'Recorded merge support is diagnostic, not a proof of future merging.',
+                'Local core counts are unvalidated upper bounds; competing identity checks '
+                'and chronological merge evidence require a full replay.',
+                'Representatives use the first retained samples in canonical scene/cue order; '
+                'selected-scene-only comparisons may omit later samples when the cap is reached.',
+                'Missing quality metrics mean legacy/unmeasured data, not zero quality.',
             ],
         }
 
