@@ -115,8 +115,11 @@ def test_promotion_prototypes_bounded_and_nontransitive(tmp_path):
         selected = run_example(db, config)
         views = confirmed_views(db.connection, matching_policy(config), config.data['clustering'],
                                 remaining_bytes=config.data['clustering']['max_reference_bytes'])
-        # The persisted view-only attachments cannot amplify the training set.
-        assert len(views) == 0  # Candidate rows are mapped after replay; no in-memory trainer leakage.
+        # Only the three anchor-confirmed SEED observations are training votes.
+        # The two second-pass matches cannot increase promotion support.
+        assert len(views) == 1
+        assert views[0].support_count == 3
+        assert views[0].pose == 'other'
 
 
 @pytest.mark.parametrize('field,value', [
