@@ -90,7 +90,8 @@ def parser():
 
 def main(argv=None, *, services=None):
     args = parser().parse_args(argv)
-    config = load(args.face_config, database=args.faces_db, device=getattr(args, 'device', None))
+    config = load(args.face_config, database=getattr(args, 'faces_db', None),
+                  device=getattr(args, 'device', None))
     if args.command == 'audit-alignment':
         from .alignment_audit import execute as audit
         return audit(args, config, services=services)
