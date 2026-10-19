@@ -43,6 +43,19 @@ def parser():
     commands = root.add_subparsers(dest='command', required=True)
     run = commands.add_parser('run', allow_abbrev=False, help='Recognize selected scenes and publish eligible people.')
     _arguments(run)
+    audit = commands.add_parser('audit-alignment', allow_abbrev=False,
+        help='Read-only YuNet landmark and aligned 112px crop audit; local biometric images, explicit scenes only.')
+    audit.add_argument('--scene-id', action='append', type=stash_id, required=True,
+        help='Scene to inspect; repeat for at most 16 explicit IDs.')
+    audit.add_argument('--output-dir', type=Path, required=True,
+        help='Nonexistent private local directory for sensitive PNGs and manifest.json.')
+    audit.add_argument('--max-samples-per-scene', type=int, default=32,
+        help='Maximum saved faces per scene (1..128); automatic even cue coverage.')
+    audit.add_argument('--cue-index', action='append', type=int,
+        help='0-based index in selected VTT cues to inspect; repeat to target specific frames.')
+    audit.add_argument('--face-config', type=Path, help='Recognition YAML used for detector and quality gates.')
+    audit.add_argument('--device', choices=('cuda','cpu','auto'),
+        help='YuNet detector execution device; recognizer weights are not loaded.')
     portraits = commands.add_parser('portraits', allow_abbrev=False,
         help="Refresh existing identities' portraits without scanning or rebuilding identities.",
         description='Refresh portraits from retained identity memberships and current portrait settings. '
@@ -78,6 +91,9 @@ def parser():
 def main(argv=None, *, services=None):
     args = parser().parse_args(argv)
     config = load(args.face_config, database=args.faces_db, device=getattr(args, 'device', None))
+    if args.command == 'audit-alignment':
+        from .alignment_audit import execute as audit
+        return audit(args, config, services=services)
     if args.command == 'report':
         from .fragmentation_report import execute
         return execute(args, config)
