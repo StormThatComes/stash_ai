@@ -29,6 +29,11 @@ manifest includes source face size, eye distance in source pixels, affine
 matrix, inverse scale, pose proxy, source coverage, face-region coverage and
 non-visibility gate outcomes for both accepted and rejected detections.
 Summary counters cover **all detected faces**, not only saved previews.
+Each scene also records the `vtt_source_fingerprint` and deterministic
+`expected_recognition_scan_id`. Compare the latter with `scan_id` from
+`recognition report`; if they differ, the audit inspected different source
+media, recognition-model namespace, scene scope, or scan policy from the
+original embedding run. Neither identifier needs a SQLite read.
 
 The face-region and full-crop coverage use exactly the same inverse-warp
 geometry and thresholds as `quality.alignable`. The action deliberately

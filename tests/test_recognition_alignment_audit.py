@@ -112,10 +112,15 @@ def test_private_exact_source_aligned_mask_and_manifest(tmp_path, monkeypatch):
     manifest=json.loads((dst/'manifest.json').read_text())
     assert manifest['kind']=='recognition_alignment_audit'
     assert manifest['recognizer_selected_but_not_loaded']=='lvface_b'
+    assert len(manifest['embedding_namespace'])==64
+    assert len(manifest['expected_scan_policy'])==64
     scene=manifest['scenes'][0]
     assert scene['counters']=={'cues_examined':3,'faces_detected':3}
     assert scene['sampled_faces']==2
     assert scene['requested_sample_indices']==[0,2]
+    assert len(scene['vtt_source_fingerprint'])==64
+    assert len(scene['expected_recognition_scan_id'])==36
+    assert scene['vtt_coverage']['selected_cues']==3
     assert scene['nonvisibility_rejections']=={'passed_nonvisibility_gates':3}
     assert [sample['cue_index'] for sample in scene['samples']]==[0,2]
     with textured_image() as image:
