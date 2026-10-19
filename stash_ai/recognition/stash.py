@@ -172,6 +172,40 @@ class RecognitionStash(StashTransport):
                                     'values': {'id': destination, 'details': details}}})['performerMerge']
         return checked_id(value, destination)
 
+    def recognition_performers(self, *, maximum=100000):
+        """Enumerate token-bearing Stash profiles without treating names as ownership."""
+        page, total, seen = 1, 0, set()
+        while True:
+            payload = self.gql(
+                'query StashAIRecognitionOwnedProfiles($filter:FindFilterType!,$needle:String!) {'
+                'findPerformers(performer_filter:{details:{value:$needle,modifier:INCLUDES}},'
+                'filter:$filter) { performers { ' + PERFORMER_FIELDS + ' } }}',
+                {'needle': 'stash-ai-recognition:',
+                 'filter': {'page': page, 'per_page': 100, 'sort': 'id', 'direction': 'ASC'}})
+            rows = payload['findPerformers']['performers']
+            if not isinstance(rows, list) or len(rows) > 100:
+                raise RuntimeError('Invalid recognition performer inventory page.')
+            for row in rows:
+                checked_id(row)
+                if row['id'] in seen:
+                    raise RuntimeError('Recognition performer inventory repeated a performer.')
+                seen.add(row['id'])
+                total += 1
+                if total > maximum:
+                    raise ValueError('Recognition performer inventory exceeds the supported limit.')
+                yield row
+            if len(rows) < 100:
+                return
+            page += 1
+
+    def delete_person(self, performer):
+        checked_id({'id': str(performer)})
+        result = self.gql('mutation StashAIRecognitionDelete($input:PerformerDestroyInput!) {'
+                          'performerDestroy(input:$input) }', {'input': {'id': str(performer)}})
+        if result.get('performerDestroy') is not True:
+            raise RuntimeError('Stash did not acknowledge recognition performer deletion.')
+        return True
+
 
 class RecognitionReader(StashTransport):
     """Isolated read-only HTTP sessions with the same validated scene query."""

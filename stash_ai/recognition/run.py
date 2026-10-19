@@ -18,9 +18,9 @@ from .media import SpriteInput
 from .scanning import scan_scene
 from .clustering import matching_policy
 from .rebuild import rebuild_selected
-from .scene_sync import reconcile_unlinks, remove_stale_links, reconcile_legacy_merges
+from .scene_sync import reconcile_unlinks, remove_stale_links, remove_other_model_links, reconcile_legacy_merges
 from .reference_usage import usage_line
-from .publication import publish_person, save_operation, ensure_person
+from .publication import publish_person, ensure_person
 from .merge_publication import canonical_targets
 from .stash import RecognitionStash
 from .names import load_names, plan_names, starter
@@ -59,8 +59,6 @@ class Services:
 
 def _publish_selection(database, client, report, config, scope, namespace, selected, rebuilt, ready, counts, key, run, progress):
     db = database.connection
-    incompatible = db.execute('SELECT namespace FROM people WHERE scope=? AND namespace<>? '
-                               'AND performer IS NOT NULL LIMIT 1', (scope, namespace)).fetchone()
     for item in selected:
         scene, scan = item['scene'], item['scan']
         groups = rebuilt[scan]
@@ -69,26 +67,13 @@ def _publish_selection(database, client, report, config, scope, namespace, selec
         counts['observations_withheld'] += sum(g['observations'] for g in groups if g['status'] == 'withheld')
         try:
             targets = {}
-            blocked = False
-            # Resolve every desired identity before replacing this scene's links.
+            # Resolve all desired identities before unlinking old model profiles.
             with tracking(
                 accepted,
                 'Prepare scene identities',
                 unit='person',
             ) as tracked:
                 for person in tracked:
-                    binding = db.execute('SELECT performer FROM people WHERE id=?', (person,)).fetchone()
-                    if incompatible and not binding['performer']:
-                        blocked = True
-                        counts['namespace_groups_withheld'] += 1
-                        counts['groups_withheld'] += 1
-                        counts['observations_withheld'] += sum(g['observations'] for g in groups if g['person'] == person)
-                        report.optional('recognition_namespace', report.write,
-                            f'Recognition scene {scene}: publication withheld because a different model namespace already owns published profiles.')
-                        save_operation(database, scope=scope, scene=scene, person=person, kind='namespace', target=None,
-                            payload={'namespace': namespace}, precondition={'published_namespace': incompatible['namespace']},
-                            status='withheld')
-                        continue
                     targets[person] = ensure_person(database, client, report, scope, scene, person)
             with tracking(
                 targets.items(),
@@ -107,9 +92,10 @@ def _publish_selection(database, client, report, config, scope, namespace, selec
                     if evidence:
                         target.setdefault('matching', {})[scan] = {'policy': matching_policy(config),
                                                                   'reference_context': evidence[0], 'person': person}
-            if not blocked:
-                counts['scene_links_removed'] += remove_stale_links(database, client, report, scope, scene,
-                                                                     set(targets.values()), namespace)
+            counts['scene_links_removed'] += remove_stale_links(database, client, report, scope, scene,
+                                                                 set(targets.values()), namespace)
+            counts['other_model_links_removed'] += remove_other_model_links(
+                database, client, report, scope, scene, set(targets.values()), namespace)
             counts['scenes_processed'] += 1
             database.progress(run, 'matching',
                               {'scene': scene, 'groups': groups, 'policy': 'cold_selected_replay'})

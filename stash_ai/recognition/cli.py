@@ -50,6 +50,16 @@ def parser():
     portraits.add_argument('--performer-id', action='append', type=stash_id,
         help='Only this Stash performer ID; repeat for multiple people. Uses all their retained scenes unless --scene-id limits the evidence.')
     _arguments(portraits, retained=True)
+    cleanup = commands.add_parser('cleanup', allow_abbrev=False,
+        help='Find recognition-owned Stash performers missing from the face database; deletion requires --apply.',
+        description='Compare Stash recognition-owned performers with the face SQLite. '
+                    'Report orphan candidates by default; --apply deletes only verified orphans. '
+                    'Never delete unmarked/manual performers.')
+    cleanup.add_argument('--apply', action='store_true',
+        help='Explicitly destroy verified orphan performer profiles in Stash (default is read-only).')
+    cleanup.add_argument('--face-config', type=Path, help='Face-only YAML; default facial_recognition.yml.')
+    cleanup.add_argument('--faces-db', type=Path, help='Existing face SQLite to compare with Stash; must exist.')
+    cleanup.add_argument('--progress-style', choices=('auto', 'compact', 'verbose', 'off'), default='auto')
     report = commands.add_parser('report', allow_abbrev=False,
         help='Explain suspected identity fragmentation in one retained scene (offline, read-only).')
     report.add_argument('--scene-id', required=True, type=stash_id)
@@ -71,5 +81,8 @@ def main(argv=None, *, services=None):
     if args.command == 'report':
         from .fragmentation_report import execute
         return execute(args, config)
+    if args.command == 'cleanup':
+        from .cleanup_orphans import execute
+        return execute(args, config, services=services)
     from .run import execute
     return execute(args, config, services=services)

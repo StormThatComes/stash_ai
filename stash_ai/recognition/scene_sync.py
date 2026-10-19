@@ -123,3 +123,65 @@ def reconcile_legacy_merges(database, client, scope, scenes):
             _reconcile(database, client, row)
             with database.connection:
                 database.connection.execute("UPDATE identity_merges SET status='observed' WHERE source=?", (row['person'],))
+
+
+
+def remove_other_model_links(database, client, report, scope, scene, wanted, namespace):
+    """Remove only verified recognition profiles of other models in this scene.
+
+    Unlike same-model stale-link cleanup, an old-model association is removed
+    even if it was attached manually: the selected scene must show at most the
+    active model's recognition identities. Ordinary, unowned performers survive.
+    """
+    db = database.connection
+    live = {checked_id(p)['id'] for p in client.scene(scene)['performers']}
+    if not live:
+        return 0
+    rows = db.execute(
+        'SELECT id,performer,token,namespace FROM people '
+        'WHERE scope=? AND namespace<>? AND performer IN '
+        '(SELECT value FROM json_each(?)) ORDER BY created,id',
+        (scope, namespace, encoded(sorted(live)))).fetchall()
+    groups = {}
+    for row in rows:
+        groups.setdefault(row['performer'], []).append(row)
+    removed = 0
+    with tracking(groups.items(), 'Detach identities from other face models', unit='performer') as tracked:
+        for performer, bindings in tracked:
+            if performer in wanted:
+                raise PendingRecognition('Different recognition models are bound to the same Stash performer.')
+            for row in bindings:
+                checked_token(database, row['id'], row['token'])
+            current = client.performer(performer)
+            if any(not owns(current, row['token']) for row in bindings):
+                raise PendingRecognition('Other-model performer ownership changed; scene preserved.')
+            first = bindings[0]
+            identifier = operation_id(scope, scene, first['id'], 'unlink')
+            previous = db.execute('SELECT status FROM publications WHERE id=?', (identifier,)).fetchone()
+            if previous and previous['status'] in ('pending', 'unknown'):
+                raise PendingRecognition('Earlier other-model unlink is unresolved; no blind retry.')
+
+            def remove():
+                refreshed = client.performer(performer)
+                if any(not owns(refreshed, row['token']) for row in bindings):
+                    raise PendingRecognition('Other-model performer ownership changed before unlink.')
+                associated = {checked_id(p)['id'] for p in client.scene(scene)['performers']}
+                if performer not in associated:
+                    raise PendingRecognition('Other-model link changed before unlink; retry with a fresh run.')
+                acknowledged = client.remove_scene_person(scene, performer)
+                checked_id(acknowledged, scene)
+                if performer in {checked_id(p)['id'] for p in acknowledged['performers']}:
+                    raise PendingRecognition('Stash did not acknowledge other-model disassociation.')
+                if performer in {checked_id(p)['id'] for p in client.scene(scene)['performers']}:
+                    raise PendingRecognition('Other-model disassociation was not confirmed by a fresh read.')
+            perform(database, client, report, scope=scope, scene=scene, person=first['id'],
+                    kind='unlink', target=performer,
+                    payload={'performer': performer, 'input_contract': 'bulk-scene-remove-ids-v1',
+                             'reason': 'other_recognition_model'},
+                    precondition={'tokens': [row['token'] for row in bindings],
+                                  'namespace': namespace, 'performers': sorted(live)}, callback=remove)
+            with db:
+                for row in bindings:
+                    _inactive(db, scope, scene, row['id'])
+            removed += 1
+    return removed
