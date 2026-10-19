@@ -195,13 +195,22 @@ def apply_cross_scene_support(database, selected, config, *, progress=None):
         raise ValueError('Cross-scene provisional group has mixed embedding dimensions.')
     first_vectors = (np.stack([g.samples[0] for g in pool]).astype('float32')
                      if pool else np.empty((0,0),dtype='float32'))
+    # Never allow f32 BLAS rounding to screen a pair that exact np.dot
+    # would accept. The upper error bound follows the native scorer's
+    # gamma_d rule; all retained pairs receive exact scalar rescoring.
+    dimension=first_vectors.shape[1] if n else 0
+    unit=np.finfo(np.float32).eps/2
+    gamma=dimension*unit/(1-dimension*unit) if dimension else 0.
+    multiplier=4*gamma+16*np.finfo(np.float64).eps
+    norms=np.linalg.norm(first_vectors.astype(np.float64),axis=1)
     for offset in range(0, n, 128):
         block = first_vectors[offset:offset+128] @ first_vectors.T
         for local, scores in enumerate(block):
             i = offset+local
             if i in barred:
                 continue
-            for j in np.flatnonzero(scores[i+1:] >= cohesion) + i+1:
+            errors=multiplier*norms[i]*norms + dimension*np.finfo(np.float32).tiny
+            for j in np.flatnonzero(scores[i+1:] + errors[i+1:] >= cohesion) + i+1:
                 if j in barred or not pool[i].scenes.isdisjoint(pool[j].scenes):
                     continue
                 mean, low = _cross_score(pool[i].samples, pool[j].samples)
