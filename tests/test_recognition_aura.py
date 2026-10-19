@@ -72,23 +72,23 @@ def test_runtime_rejects_duplicate_packages_and_missing_cuda(tmp_path, monkeypat
         runtime(load(path))
 
 
-def test_model_switch_retains_evidence_and_profiles_without_duplicate_publication(tmp_path, monkeypatch):
+def test_model_switch_retains_evidence_and_profiles_and_updates_scene_associations(tmp_path, monkeypatch):
     config, client, services, _ = setup(tmp_path, monkeypatch)
     assert run(config, services, '1') == 0
-    writes = list(client.writes)
+    old = client.links['1'][-1]
     path = tmp_path / 'aura.yml'
     path.write_text('version: 1\nmodels: {recognizer: auraface, device: cpu}\n'
                     'detection: {min_sharpness: 0, max_pose_deviation: null, min_visible_face_fraction: 0, require_complete_face: false}\nportraits: {enabled: false}\n')
     aura = replace(load(path), database=config.database)
     assert namespace(config) != namespace(aura)
     assert run(aura, services, '1') == 0
-    assert client.writes == writes
+    assert client.links['1'][0] == '77' and old not in client.links['1']
+    assert len(client.links['1']) == 2 and old in client.profiles
     with FaceDatabase(config.database) as db:
         assert db.connection.execute('SELECT COUNT(*) FROM scans').fetchone()[0] == 2
         assert db.connection.execute('SELECT COUNT(DISTINCT namespace) FROM models').fetchone()[0] == 2
-        assert db.connection.execute('SELECT COUNT(*) FROM people WHERE performer IS NOT NULL').fetchone()[0] == 1
-        row = db.connection.execute("SELECT payload,status FROM publications WHERE kind='namespace'").fetchone()
-        assert row['status'] == 'withheld' and json.loads(row['payload'])['namespace'] == namespace(aura)
+        assert db.connection.execute('SELECT COUNT(*) FROM people WHERE performer IS NOT NULL').fetchone()[0] == 2
+        assert not db.connection.execute("SELECT 1 FROM publications WHERE kind='namespace'").fetchone()
         assert all('/1.' in url for url in client.media_calls)
 
 
