@@ -89,6 +89,12 @@ def apply_auxiliary(database, selected, config, *, progress=None):
         _attach_confirmed_views(db, selected, config, policy, groups, usage, cache)
 
 
+def _view_probe(db, candidate, reason):
+    db.execute(
+        "UPDATE candidates SET payload=json_set(payload,'$.auxiliary_view_probe',?) "
+        'WHERE id=?', (reason, candidate))
+
+
 def _attach_confirmed_views(db, selected, config, policy, anchors, usage, cache):
     """A second, frozen pass: no new view evidence can promote another view.
 
@@ -98,6 +104,17 @@ def _attach_confirmed_views(db, selected, config, policy, anchors, usage, cache)
     grouping, settings = config.data['clustering'], config.data['recognition']
     views = confirmed_views(db, policy, grouping,
                             remaining_bytes=grouping['max_reference_bytes'] - usage.bytes)
+    for view in views:
+        db.execute(
+            "UPDATE candidates SET payload=json_set(payload,"
+            "'$.auxiliary_view_seeded',coalesce(json_extract(payload,'$.auxiliary_view_seeded'),0)+1) "
+            f'WHERE policy=? AND {address(db, "candidates")}=?',
+            (policy, view.medoid))
+    db.execute(
+        "UPDATE candidates SET payload=json_set(payload,'$.auxiliary_view_probe',"
+        "'no_confirmed_prototype') WHERE policy=? AND status='withheld' "
+        "AND json_extract(payload,'$.reason')='auxiliary_unmatched'",
+        (policy,))
     if not views:
         return
     groups = [view.group for view in views]
@@ -115,30 +132,41 @@ def _attach_confirmed_views(db, selected, config, policy, anchors, usage, cache)
         with tracking(scored_rows(rows, groups, threshold-margin),
                       'Match confirmed identity views', unit='observation', total=total) as tracked:
             for row, frozen in tracked:
+                _view_probe(db, row['candidate'], 'below_match_or_cohesion')
                 query = cache.vector(row) if cache is not None else vector(row)
                 # Multiple prototypes of one person must *not* consume both
                 # best/second-best slots and hide another person's rival view.
                 by_person = {}
+                saw_cohesion = False
                 for group, mean, lowest in contributions(
                         groups, query, frozen, len(groups), threshold-margin,
                         exact=(lambda g, q: cache.scores(g, q, row['id'])) if cache is not None else None):
                     if lowest < grouping['view_cohesion_threshold']:
+                        saw_cohesion = True
                         continue
                     view = by_group[id(group)]
                     previous = by_person.get(group.identifier)
                     if previous is None or (mean, view.identifier) > (previous[0], previous[2].identifier):
                         by_person[group.identifier] = (mean, group, view)
                 ranked = sorted(by_person.items(), key=lambda item: (-item[1][0], item[0]))
-                if not ranked or ranked[0][1][0] < threshold:
+                if not ranked:
+                    if saw_cohesion:
+                        _view_probe(db, row['candidate'], 'below_cohesion_threshold')
                     continue
+                if ranked[0][1][0] < threshold:
+                    _view_probe(db, row['candidate'], 'below_match_threshold')
+                    continue
+                _view_probe(db, row['candidate'], 'ambiguous_identity')
                 if len(ranked) > 1 and ranked[0][1][0]-ranked[1][1][0] < margin:
                     continue
                 person, (score, group, view) = ranked[0]
                 if pose_view(row['geometry']) != view.pose:
+                    _view_probe(db, row['candidate'], 'pose_mismatch')
                     continue
                 if not co_presence_allows(db, row, group, groups, query, config,
                                           peer_threshold=threshold,
                                           cohesion_threshold=grouping['view_cohesion_threshold']):
+                    _view_probe(db, row['candidate'], 'co_presence')
                     continue
                 proof = {'pose': view.pose, 'medoid': view.medoid,
                          'anchor_verified_support': view.support_count,
@@ -147,7 +175,9 @@ def _attach_confirmed_views(db, selected, config, policy, anchors, usage, cache)
                          'ambiguity_margin': margin}
                 db.execute("UPDATE candidates SET person=?,status='pending',"
                            "payload=json_set(payload,'$.reason','view_identity_pending',"
-                           "'$.view_prototype',json(?),'$.scores',json(?)) WHERE id=?",
+                           "'$.view_prototype',json(?),'$.scores',json(?),"
+                           "'$.auxiliary_view_probe','pending_support') WHERE id=?",
+
                            (person, encoded(proof),
                             encoded([item[1][0] for item in ranked[:2]]), row['candidate']))
     # A single false near-neighbour cannot establish a new view attachment.
@@ -179,6 +209,14 @@ def _attach_confirmed_views(db, selected, config, policy, anchors, usage, cache)
                    "payload=json_set(payload,'$.reason','view_insufficient_support') "
                    "WHERE policy=? AND status='pending' "
                    "AND json_extract(payload,'$.reason')='view_identity_pending'", (policy,))
+        db.execute(
+            "UPDATE candidates SET payload=json_set(payload,'$.auxiliary_view_probe','accepted') "
+            "WHERE policy=? AND json_extract(payload,'$.reason')='view_identity'",
+            (policy,))
+        db.execute(
+            "UPDATE candidates SET payload=json_set(payload,'$.auxiliary_view_probe','insufficient_support') "
+            "WHERE policy=? AND json_extract(payload,'$.reason')='view_insufficient_support'",
+            (policy,))
         db.execute(f'INSERT OR IGNORE INTO members(observation,person) '
                    f'SELECT {address(db, "c")},c.person FROM candidates c '
                    "WHERE c.policy=? AND c.status='accepted' "

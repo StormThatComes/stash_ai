@@ -22,7 +22,8 @@ recognition:
   match_threshold: 0.65        # Higher means more similar. Model-specific.
   ambiguity_margin: 0.10
   cooccurrence_merge_threshold: 0.90 # Stronger cross-sample evidence for possible reflections.
-  min_identity_support: 1      # Independent cue times for a new person.
+  cross_scene_provisional: true # Accumulate independent withheld anchor support across selected scenes.
+  min_identity_support: 2      # Require two independent cues; cross-scene provisional can supply both.
   min_merge_support: 3         # Distinct scene/time observations before merging identities.
 clustering:
   cohesion_threshold: 0.60     # Minimum sample similarity for matching and group merges.
@@ -32,6 +33,7 @@ clustering:
   auxiliary_matching: true    # Attach profiles after strict groups are established.
   auxiliary_min_support: 1    # Distinct scene/time observations required to accept attachments.
   view_prototypes_enabled: true # Opt in to multi-view identity reference prototypes.
+  context_view_enrichment: true # Additional views only after strict-core revalidation of 2+ contextual cues.
   anchor_view_matching: true    # Additional frozen subcluster matching for withheld anchor observations.
   view_min_support: 3          # Independent anchor-confirmed cues needed to promote a view.
   view_cohesion_threshold: 0.80 # All retained exemplars must agree; no single-link chaining.

@@ -417,6 +417,8 @@ def _rebuild_selected(database, selected, config, *, progress=None):
             # merged. Contextual attachments cannot become another scene's anchors
             # or bridge identities during the replay.
             checkpoints.save(replay, len(selected), clock.value, final=True)
+            from .cross_scene import apply_cross_scene_support
+            apply_cross_scene_support(temporary, selected, config, progress=progress)
             apply_scene_context(temporary, selected, config, progress=progress)
             from .anchor_views import apply_anchor_views
             apply_anchor_views(temporary, selected, config, progress=progress)

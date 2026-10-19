@@ -22,11 +22,13 @@ def defaults():
                       'require_complete_face': True},
         'recognition': {'metric': 'cosine', 'match_threshold': .65,
                         'ambiguity_margin': .1, 'min_identity_support': 1, 'min_merge_support': 3,
+                        'cross_scene_provisional': False,
                         'cooccurrence_merge_threshold': .90},
         'clustering': {'cohesion_threshold': .60, 'same_scene_match_bonus': .03,
                        'same_scene_min_support': 3, 'max_anchor_pose_deviation': None,
                        'auxiliary_matching': True, 'auxiliary_min_support': 1,
                        'view_prototypes_enabled': False, 'anchor_view_matching': False,
+                       'context_view_enrichment': False,
                        'view_min_support': 3,
                        'view_cohesion_threshold': .80, 'view_match_threshold': .82,
                        'view_ambiguity_margin': .12, 'view_attach_min_support': 2,
@@ -140,6 +142,12 @@ def validate(data):
     detection_pose = data['detection']['max_pose_deviation']
     if anchor is not None and detection_pose is not None and anchor > detection_pose:
         raise ValueError('clustering.max_anchor_pose_deviation must not exceed detection.max_pose_deviation.')
+    if type(data['recognition']['cross_scene_provisional']) is not bool:
+        raise ValueError('recognition.cross_scene_provisional must be boolean.')
+    if type(data['clustering']['context_view_enrichment']) is not bool:
+        raise ValueError('clustering.context_view_enrichment must be boolean.')
+    if data['clustering']['context_view_enrichment'] and not data['clustering']['anchor_view_matching']:
+        raise ValueError('clustering.context_view_enrichment requires anchor_view_matching.')
     if type(data['clustering']['anchor_view_matching']) is not bool:
         raise ValueError('clustering.anchor_view_matching must be boolean.')
     if data['clustering']['anchor_view_matching'] and data['clustering']['max_anchor_pose_deviation'] is None:

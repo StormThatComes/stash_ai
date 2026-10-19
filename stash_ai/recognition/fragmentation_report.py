@@ -310,7 +310,7 @@ def _local_pair(pair, first, second, config, strict_counts):
                     'constituents, co-presence and replay ordering may still prevent merging.'}
 
 
-def build(config, scene_id, *, limit=20, min_mean=None, scope=None):
+def build(config, scene_id, *, limit=20, min_mean=None, scope=None, compare_scene_ids=None):
     """Read only committed state; returned suggestions do not promise a cold-replay merge."""
     if not 1 <= limit <= 500:
         raise ValueError('Report limit must be 1..500.')
@@ -407,7 +407,13 @@ def build(config, scene_id, *, limit=20, min_mean=None, scope=None):
             f'SELECT COUNT(*) FILTER (WHERE rejected IS NULL AND {anchor}),' 
             f'COUNT(*) FILTER (WHERE rejected IS NULL AND NOT ({anchor})) '
             'FROM observations o WHERE scan=?', (scan['id'],)).fetchone()
+        from .cross_scene_report import compare
+        comparisons = (compare(db, scan, compare_scene_ids, policy, config, limit=limit)
+                       if compare_scene_ids else [])
+        multiview = _view_attempt_summary(db, scan['id'], policy, scan['scope'], scan['namespace'])
         return {
+            'cross_scene_comparisons':comparisons,
+            'multi_view_diagnostics':multiview,
             'format': 1, 'kind': 'recognition_fragmentation',
             'scene_id': str(scene_id), 'scope': scan['scope'], 'scan_id': scan['id'],
             'namespace': scan['namespace'], 'matching_policy': policy,
@@ -456,8 +462,35 @@ def build(config, scene_id, *, limit=20, min_mean=None, scope=None):
         }
 
 
+def _view_attempt_summary(db, scan, policy, scope, namespace):
+    """Persisted per-observation vetoes, not inferred from successful identities."""
+    result={}
+    for stage in ('anchor_view','auxiliary_view'):
+        rows=db.execute(
+            "SELECT COALESCE(json_extract(payload,?), 'not_evaluated') reason,COUNT(*) "
+            'FROM candidates WHERE scan=? AND policy=? GROUP BY reason ORDER BY reason',
+            (f'$.{stage}_probe',scan,policy))
+        result[stage]={reason:count for reason,count in rows}
+        column='anchor_view_seeded' if stage=='anchor_view' else 'auxiliary_view_seeded'
+        seeded=db.execute(
+            "SELECT COALESCE(SUM(json_extract(payload,?)),0) FROM candidates "
+            'WHERE scan=? AND policy=?',
+            (f'$.{column}',scan,policy)).fetchone()[0]
+        result[stage]['prototypes_seeded_in_scene']=int(seeded)
+        if stage=='auxiliary_view':
+            # Confirmed auxiliary views are global within the selected replay;
+            # prototypes created in other scenes may also serve this scene.
+            global_count=db.execute(
+                "SELECT COALESCE(SUM(json_extract(c.payload,?)),0) FROM candidates c "
+                'JOIN scans s ON s.id=c.scan WHERE c.policy=? AND s.scope=? AND s.namespace=?',
+                (f'$.{column}',policy,scope,namespace)).fetchone()[0]
+            result[stage]['prototypes_seeded_in_scope']=int(global_count)
+    return result
+
+
 def execute(args, config):
-    result = build(config, args.scene_id, limit=args.limit, min_mean=args.min_mean, scope=args.scope)
+    result = build(config, args.scene_id, limit=args.limit, min_mean=args.min_mean, scope=args.scope,
+                   compare_scene_ids=getattr(args,'compare_scene_id',None))
     output = json.dumps(result, indent=2, ensure_ascii=False, allow_nan=False) + '\n'
     if args.output is None:
         print(output, end='')
