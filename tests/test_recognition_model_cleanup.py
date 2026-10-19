@@ -165,3 +165,34 @@ def test_recognition_inventory_and_deletion_use_supported_graphql_shapes():
     assert [p['id'] for p in client.recognition_performers()] == ['42']
     assert client.delete_person('42') is True
     assert len(calls) == 2
+
+
+
+def test_orphan_cleanup_snapshots_all_pages_before_mutating_stash(tmp_path, monkeypatch):
+    config, client, services, _ = setup(tmp_path, monkeypatch)
+    assert run(config, services, '1') == 0
+    with FaceDatabase(config.database) as db:
+        prefix = f'stash-ai-recognition:{db.installation}:'
+    expected = {str(800 + i) for i in range(7)}
+    for number, performer in enumerate(sorted(expected)):
+        client.profiles[performer] = {
+            'id': performer, 'name': 'Orphan', 'details': prefix + str(uuid.uuid4()), 'image_path': ''}
+    inventory(client)
+
+    def offset_pages():
+        # Deleting while this iterator is active would shift pages and skip
+        # an orphan. Production Stash also uses page/per_page offsets.
+        page = 0
+        while True:
+            candidates = sorted((dict(p) for p in client.profiles.values()
+                                  if 'stash-ai-recognition:' in p['details']),
+                                key=lambda p: int(p['id']))
+            batch = candidates[page * 2:(page + 1) * 2]
+            yield from batch
+            if len(batch) < 2:
+                return
+            page += 1
+    client.recognition_performers = offset_pages
+    assert cleanup(cleanup_args(apply=True), config, services=services) == 0
+    assert all(p not in client.profiles for p in expected)
+    assert {p for action, p in client.writes if action == 'delete'} == expected
