@@ -138,6 +138,40 @@ def test_concurrent_initializers_serialize_before_inspection_and_preserve_rows(t
         assert store.connection.execute('PRAGMA application_id').fetchone()[0]==APPLICATION_ID
 
 
+def test_concurrent_history_initializer_waits_beyond_one_second(tmp_path):
+    """Short competing migrations must serialize, not time out under load."""
+    import threading
+    import time
+
+    path = tmp_path / 'history.sqlite'
+    with HistoryStore(path):
+        pass
+    owner = sqlite3.connect(path)
+    try:
+        owner.execute('BEGIN IMMEDIATE')
+        entered = threading.Event()
+
+        def contender():
+            entered.set()
+            with HistoryStore(path) as store:
+                assert store.connection.execute('PRAGMA busy_timeout').fetchone()[0] >= 5000
+                store.start('waiting', 'scope', 'inference', 'now', {})
+
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            pending = pool.submit(contender)
+            try:
+                assert entered.wait(timeout=5)
+                time.sleep(1.2)
+                assert not pending.done()
+            finally:
+                owner.rollback()
+            pending.result(timeout=15)
+    finally:
+        owner.close()
+    with HistoryStore(path, readonly=True) as store:
+        assert [row['id'] for row in store.rows('scope')] == ['waiting']
+
+
 def test_process_exit_before_schema_commit_never_publishes_current_version(tmp_path):
     path=tmp_path/'history.sqlite'
     script='''import os,sqlite3,sys
