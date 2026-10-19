@@ -1,5 +1,49 @@
 # Facial recognition
 
+## Read-only five-landmark alignment audit
+
+Use the opt-in `recognition audit-alignment` action to investigate whether
+the **shared YuNet detection and ArcFace 112 × 112 alignment** are causing
+AuraFace, LVFace-B, and AdaFace to fragment the same person. The command
+rescans the selected VTT sheets with **YuNet only**. It never loads face
+recognizer weights, produces embeddings, modifies SQLite, or publishes to
+Stash. Previously completed recognition scans are not a problem.
+
+```powershell
+python stash_ai.py recognition audit-alignment --scene-id 1 --scene-id 2 --scene-id 4 --face-config facial_recognition.yml --output-dir recognition_alignment_audit/run01 --max-samples-per-scene 64
+```
+
+For an exact problematic cue (index 135 *in the selected VTT*, zero-based),
+use `--cue-index 135`. The flag is repeatable; all chosen indices must exist
+in every selected scene. The command visits all VTT cues but saves a bounded
+number of **evenly distributed** samples unless an explicit cue is requested.
+`execution.max_cues` in YAML still limits the VTT selection.
+
+The created folder contains a `manifest.json` and three PNGs per
+successfully aligned detection: `*-source.png` (original detected image
+with YuNet landmarks and face rectangle), `*-aligned.png` (exact 112 × 112
+pre-normalization, black-padded alignment), and `*-source-mask.png`
+(white = real source pixels, black = synthetic padding). An invalid five-point
+transform produces the source PNG plus a recorded invalidity reason. The
+manifest includes source face size, eye distance in source pixels, affine
+matrix, inverse scale, pose proxy, source coverage, face-region coverage and
+non-visibility gate outcomes for both accepted and rejected detections.
+Summary counters cover **all detected faces**, not only saved previews.
+
+The face-region and full-crop coverage use exactly the same inverse-warp
+geometry and thresholds as `quality.alignable`. The action deliberately
+does **not** evaluate FaceOcc, so `passed_nonvisibility_gates` is not a claim
+that recognition would have accepted a face. It audits YuNet + alignment,
+not model similarity, clustering, or recognition accuracy.
+
+**Privacy:** local screenshots are sensitive biometric data. Explicit scene
+selection and a *new, non-existing* output folder are required. The command
+creates private (0700) directories and restrictive (0600) files on POSIX.
+Never commit or share this folder without reviewing its contents; its
+suggested parent `recognition_alignment_audit/` is gitignored. There is no
+automatic upload, and disabling the command leaves normal recognition
+unchanged.
+
 ## Orphan cleanup and switching recognition models
 
 `recognition run` now permits other recognizer namespaces to have published
