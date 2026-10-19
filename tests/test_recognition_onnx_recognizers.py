@@ -56,7 +56,7 @@ def test_model_namespace_is_unique_even_for_identical_embedding_dimension(tmp_pa
     # Device, model directory and similarity tuning change neither identity
     # nor the model's embedding namespace.
     alt=tmp_path/'alt.yml'
-    alt.write_text('version: 1\nmodels: {recognizer: lvface_b, device: cuda, directory: other}\n'
+    alt.write_text('version: 1\nmodels: {detector: yunet, recognizer: lvface_b, device: cuda, directory: other}\n'
                    'recognition: {match_threshold: 0.81}')
     assert namespace(load(alt))==values[2]
 
