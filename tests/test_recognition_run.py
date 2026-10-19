@@ -258,11 +258,11 @@ def test_rebuild_does_not_dispatch_destructive_performer_merge(tmp_path, monkeyp
     assert client.links['2'] == [client.links['1'][-1]]
 
 
-def test_local_merge_does_not_bypass_incompatible_published_namespace(tmp_path, monkeypatch):
+def test_local_merge_publishes_independently_of_other_model_namespace(tmp_path, monkeypatch):
     import math
     config, client, services, _ = setup(tmp_path, monkeypatch)
     assert run(config, services, '99') == 0
-    writes = list(client.writes)
+    old = client.links['99'][-1]
     other = replace(config, data=plain(config.data))
     other.data['models']['recognizer'] = 'auraface'
     strict = replace(other, data=plain(other.data))
@@ -272,11 +272,14 @@ def test_local_merge_does_not_bypass_incompatible_published_namespace(tmp_path, 
     assert run(strict, services, '2') == 0
     services.backend = lambda *args: Backend(vector=[1.8 / math.sqrt(3.6), .6 / math.sqrt(3.6), 0, 0])
     assert run(other, services, '1', '2', '10') == 0
-    assert client.writes == writes
-    assert client.links['1'] == ['77'] and client.links['2'] == [] and client.links['10'] == []
+    assert client.links['99'] == [old] and old in client.profiles
+    assert len(client.links['1']) > 1 and client.links['1'][0] == '77'
+    assert client.links['2'] and client.links['10']
+    assert all(p != old for scene in ('1', '2', '10') for p in client.links[scene])
     with FaceDatabase(config.database) as db:
         assert db.connection.execute('SELECT COUNT(*) FROM identity_merges').fetchone()[0] == 0
-        assert db.connection.execute("SELECT COUNT(*) FROM publications WHERE kind='namespace' AND status='withheld'").fetchone()[0] > 0
+        assert not db.connection.execute(
+            "SELECT 1 FROM publications WHERE kind='namespace' AND status='withheld'").fetchone()
 
 
 import json
@@ -289,21 +292,23 @@ import numpy as np
 import pytest
 
 
-def test_namespace_withholding_is_visible_in_console_and_summary(tmp_path,monkeypatch,capsys):
+def test_model_switch_unlinks_old_namespace_and_reports_count(tmp_path,monkeypatch,capsys):
     from tests.test_recognition_run import setup,run
     from tests.test_recognition_rebuild import changed
     from stash_ai.recognition.database import FaceDatabase
     config,client,services,_ = setup(tmp_path,monkeypatch)
     assert run(config,services,'1') == 0
+    old = client.links['1'][-1]
     capsys.readouterr()
     alternate = changed(config,models={'recognizer':'auraface'})
     assert run(alternate,services,'1') == 0
     output = capsys.readouterr().out
-    assert 'Recognition success' in output and 'groups_withheld=1' in output
-    assert 'namespace' in output.lower()
+    assert 'Recognition success' in output and 'other_model_links_removed=1' in output
+    assert old not in client.links['1'] and old in client.profiles
     with FaceDatabase(config.database) as db:
-        assert db.connection.execute("SELECT COUNT(*) FROM publications WHERE kind='namespace' AND status='withheld'").fetchone()[0] == 1
+        assert not db.connection.execute(
+            "SELECT 1 FROM publications WHERE kind='namespace' AND status='withheld'").fetchone()
         summary = json.loads(db.connection.execute('SELECT summary FROM runs ORDER BY started DESC LIMIT 1').fetchone()[0])
-        assert summary['counts']['namespace_groups_withheld'] == 1
-        assert summary['counts']['groups_withheld'] == 1
+        assert summary['counts']['other_model_links_removed'] == 1
+        assert summary['counts']['groups_withheld'] == 0
 

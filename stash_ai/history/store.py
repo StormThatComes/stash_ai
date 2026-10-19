@@ -24,7 +24,10 @@ class HistoryStore:
                 self.connection = sqlite3.connect(self.path.as_uri() + '?mode=ro', uri=True, timeout=1)
             else:
                 self.path.parent.mkdir(parents=True, exist_ok=True)
-                self.connection = sqlite3.connect(self.path, timeout=1)
+                # Writers serialize schema inspection and migration under BEGIN IMMEDIATE.
+                # On a busy Windows CI host, another short initializer can hold
+                # that lock for longer than one second.
+                self.connection = sqlite3.connect(self.path, timeout=30)
             db = self.connection
             if not readonly:
                 db.execute('BEGIN IMMEDIATE')
