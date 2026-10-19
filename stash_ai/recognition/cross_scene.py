@@ -7,7 +7,7 @@ independent support is met across at least two different selected scenes.
 """
 from collections import defaultdict
 from dataclasses import dataclass
-import uuid
+import time
 
 from .clustering import _groups, _similarities, co_presence_allows, matching_policy, vector
 from .database import encoded
@@ -65,7 +65,11 @@ def _same_cue_rival(db, row, person, policy):
         (policy, row['scan'], person, row['cue'])).fetchone() is not None
 
 
-def _commit(db, policy, sources, person, reason, proof):
+def _commit(db, policy, sources, person, reason, proof, *, created):
+    # Ensure FK constraints before adding the first member.
+    db.execute('INSERT OR IGNORE INTO people VALUES (?,?,?,?,?,?)',
+               (person, proof['scope'], proof['namespace'], created, None,
+                'stash-ai-provisional:' + person))
     for source in sources:
         for row, _ in source.rows:
             db.execute(
@@ -74,11 +78,6 @@ def _commit(db, policy, sources, person, reason, proof):
                 "WHERE policy=? AND id=? AND status='withheld'",
                 (person, reason, encoded(proof), policy, row['candidate']))
             db.execute('INSERT OR IGNORE INTO members VALUES (?,?)', (row['id'], person))
-    # Explicitly establish the new person only *after* independent support.
-    db.execute('INSERT OR IGNORE INTO people VALUES (?,?,?,?,?,?)',
-               (person, proof['scope'], proof['namespace'], 0., None,
-                'stash-ai-provisional:' + person))
-
 
 def apply_cross_scene_support(database, selected, config, *, progress=None):
     settings, clustering = config.data['recognition'], config.data['clustering']
@@ -237,4 +236,5 @@ def apply_cross_scene_support(database, selected, config, *, progress=None):
                 continue
             break
         else:
-            _commit(db, policy, group, leader, 'cross_scene_provisional', proof)
+            _commit(db, policy, group, leader, 'cross_scene_provisional', proof,
+                    created=getattr(database, 'identity_clock', time.time)())
