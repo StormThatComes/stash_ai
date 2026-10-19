@@ -117,7 +117,9 @@ def _enrich_from_validated_context(db, policy, grouping, usage, confirmed):
                    for _,other in bucket):
                 bucket.append((row, sample))
             break
-    minimum = max(2, grouping['view_min_support'])
+    # Two separately vetted contextual cues corroborate an already confirmed
+    # strict core (whose own view_min_support was applied earlier).
+    minimum = 2
     counts = {}
     for view in confirmed:
         key = (view.scene_scan, view.group.identifier)
