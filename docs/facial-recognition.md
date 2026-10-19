@@ -610,6 +610,18 @@ inference, and the report never modifies SQLite. High scores are hypotheses,
 not automatic merge authorization. `multi_view_diagnostics` groups stored
 view-stage exclusion reasons by scene; `not_evaluated` is reported separately.
 
+### Verified contextual view enrichment
+
+`clustering.context_view_enrichment: true` is optional (off by default,
+enabled in the bundled YAML). A `same_scene_identity` observation may
+enrich a confirmed anchor's view collection **only** if its similarity to
+an already frozen strict view medoid is at least `view_match_threshold`,
+its pose hint agrees, and at least two independent contextual cues pass
+complete-link `view_cohesion_threshold`. It cannot create a core, change
+strict references or be used as a merge nomination. The augmented prototype
+is frozen before withheld observations are retried, so matches cannot
+bootstrap further matches in the same rebuild.
+
 ### Supported anchor subclusters for same-scene context
 
 `clustering.anchor_view_matching: true` opts in to **strict-core anchor
