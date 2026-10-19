@@ -112,8 +112,10 @@ def test_adapter_runs_five_point_alignment_and_normalized_512d_output(tmp_path,m
         def warpAffine(self,image,transform,size,borderValue):
             assert size==(112,112) and transform.shape==(2,3)
             return np.tile(np.array([0,127,255],dtype=np.uint8),(112,112,1))
-    monkeypatch.setattr(YuNetDetector,'__init__',
-        lambda self,cfg,paths,**kw: (setattr(self,'cv',CV()),setattr(self,'provenance',{})))
+    def fake_init(self,cfg,paths,**kwargs):
+        self.cv=CV()
+        self.provenance={}
+    monkeypatch.setattr(YuNetDetector,'__init__',fake_init)
     monkeypatch.setattr(YuNetDetector,'close',lambda self: None)
     monkeypatch.setattr(YuNetDetector,'_bgr',lambda self,image: image)
     monkeypatch.setattr(adapter,'runtime',lambda config:(SimpleNamespace(__version__='test'),['CPUExecutionProvider']))
