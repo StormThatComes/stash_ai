@@ -1,5 +1,49 @@
 # Facial recognition
 
+## Alternative ONNX face recognizers (research weights)
+
+The `models.recognizer` setting supports `sface`, `auraface`,
+`lvface_b` (ByteDance LVFace-B Glint360K, 512D, ~456 MB) and
+`adaface_ir50` (AdaFace IR50 MS1MV2, 512D, ~174 MB). All share the
+YuNet detector and use ONNX Runtime with the existing `models.device`
+CPU/CUDA policy. No extra PyTorch/InsightFace inference dependencies.
+
+```yaml
+models:
+  detector: yunet
+  recognizer: lvface_b      # or adaface_ir50
+  device: cuda
+  download_missing: true
+```
+
+These models are fetched **only when explicitly selected**, from immutable
+Hugging Face revisions and checked by SHA-256 plus exact byte count. Both
+use an ArcFace 112×112 five-landmark similarity-aligned crop:
+LVFace-B uses **RGB** and AdaFace IR50 uses **BGR**; each normalizes
+`(pixel - 127.5) / 127.5` and returns L2-normalized 512D embeddings.
+The separate embedding namespace prevents mixing any embeddings or identity
+evidence between the models, even when both produce 512D vectors. Switching
+models triggers a new scan; cached embeddings cannot be converted.
+
+**Weights licensing matters:** LVFace code is MIT, but the upstream model
+README explicitly restricts its **pretrained weights** to *non-commercial
+research*. The independent AdaFace ONNX exporter notes that its MS1MV2
+checkpoint carries dataset/research-use restrictions distinct from the
+MIT-licensed AdaFace code. Neither source grants unambiguous permission
+for commercial production. Check permissions before using either outside
+research, and do not redistribute weights in this repository.
+
+**Calibration:** the example recognition/clustering cosine thresholds
+are *not* validated for LVFace or AdaFace. Compare labeled same-person
+and different-person samples with `recognition pilot`/offline diagnostics,
+then tune independently. Do not carry AuraFace thresholds over as a
+measured recommendation. Larger weights and new recognizers do not
+automatically recover detail lost in small VTT thumbnails.
+
+Source: https://huggingface.co/bytedance-research/LVFace
+and https://huggingface.co/globalnebula/adaface-ir50-ms1mv2-onnx
+
+
 The recognition package is independent of the tag model registry and configuration.
 The internal layers provide configuration, verified pinned HF assets,
 CPU/GPU YuNet/SFace adapters, bounded VTT extraction and checkpointed face SQLite.

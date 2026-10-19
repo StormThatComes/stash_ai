@@ -4,7 +4,7 @@
 version: 1
 models:
   detector: yunet
-  recognizer: sface             # Optional auraface uses the same application dependencies.
+  recognizer: sface             # Options: sface, auraface, lvface_b, adaface_ir50; ONNX Runtime for all.
   device: cuda                 # GPU by default. CPU profile: explicitly choose cpu.
   directory: recognition_models
   download_missing: true       # Only inside the explicit recognition invocation.
@@ -19,7 +19,7 @@ detection:
   require_complete_face: true # Reject face boxes cut off by the thumbnail boundary.
 recognition:
   metric: cosine
-  match_threshold: 0.65        # Higher means more similar. Model-specific.
+  match_threshold: 0.65        # Higher means more similar. Calibrate independently per model.
   ambiguity_margin: 0.10
   cooccurrence_merge_threshold: 0.90 # Stronger cross-sample evidence for possible reflections.
   cross_scene_provisional: true # Accumulate independent withheld anchor support across selected scenes.
