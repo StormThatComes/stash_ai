@@ -256,6 +256,7 @@ def test_cross_scene_report_includes_withheld_to_confirmed_and_withheld_pairs(tm
                for match in compare['per_observation'])
     reverse=build(config,'456',compare_scene_ids=['123'])
     assert reverse['multi_view_diagnostics']['anchor_view']['below_match_threshold']==1
+    assert reverse['multi_view_diagnostics']['anchor_view']['prototypes_seeded_in_scene']==0
     assert len(reverse['cross_scene_comparisons'][0]['per_observation'])==2
     assert any(x['verdict']=='numeric_match_only'
                for x in reverse['cross_scene_comparisons'][0]['per_observation'])

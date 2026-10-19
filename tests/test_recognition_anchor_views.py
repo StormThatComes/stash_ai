@@ -162,6 +162,10 @@ def test_validated_same_scene_cues_can_enrich_but_not_seed_a_view(tmp_path):
     config = config_for(tmp_path, context_view_enrichment=True)
     with FaceDatabase(config.database) as db:
         identifier, _ = run(db, config, [A]*5)
+        count = db.connection.execute(
+            "SELECT COALESCE(SUM(json_extract(payload,'$.anchor_view_seeded')),0) "
+            "FROM candidates WHERE scan=?", (identifier,)).fetchone()[0]
+        assert count >= 1
         rows = list(db.connection.execute(
             'SELECT c.id FROM candidates c JOIN observations o '
             "ON o.id=json_extract(c.payload,'$.observation') "
