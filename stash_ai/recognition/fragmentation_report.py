@@ -471,6 +471,19 @@ def _view_attempt_summary(db, scan, policy):
             'FROM candidates WHERE scan=? AND policy=? GROUP BY reason ORDER BY reason',
             (f'$.{stage}_probe',scan,policy))
         result[stage]={reason:count for reason,count in rows}
+        column='anchor_view_seeded' if stage=='anchor_view' else 'auxiliary_view_seeded'
+        seeded=db.execute(
+            "SELECT COALESCE(SUM(json_extract(payload,?)),0) FROM candidates "
+            'WHERE scan=? AND policy=?',
+            (f'$.{column}',scan,policy)).fetchone()[0]
+        result[stage]['prototypes_seeded_in_scene']=int(seeded)
+        if stage=='auxiliary_view':
+            # Confirmed auxiliary views are global within the selected replay;
+            # prototypes created in other scenes may also serve this scene.
+            global_count=db.execute(
+                "SELECT COALESCE(SUM(json_extract(payload,?)),0) FROM candidates "
+                'WHERE policy=?', (f'$.{column}',policy)).fetchone()[0]
+            result[stage]['prototypes_seeded_across_selected_scenes']=int(global_count)
     return result
 
 
