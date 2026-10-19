@@ -131,17 +131,24 @@ def _attach_confirmed_views(db, selected, config, policy, anchors, usage, cache)
                 # Multiple prototypes of one person must *not* consume both
                 # best/second-best slots and hide another person's rival view.
                 by_person = {}
+                saw_cohesion = False
                 for group, mean, lowest in contributions(
                         groups, query, frozen, len(groups), threshold-margin,
                         exact=(lambda g, q: cache.scores(g, q, row['id'])) if cache is not None else None):
                     if lowest < grouping['view_cohesion_threshold']:
+                        saw_cohesion = True
                         continue
                     view = by_group[id(group)]
                     previous = by_person.get(group.identifier)
                     if previous is None or (mean, view.identifier) > (previous[0], previous[2].identifier):
                         by_person[group.identifier] = (mean, group, view)
                 ranked = sorted(by_person.items(), key=lambda item: (-item[1][0], item[0]))
-                if not ranked or ranked[0][1][0] < threshold:
+                if not ranked:
+                    if saw_cohesion:
+                        _view_probe(db, row['candidate'], 'below_cohesion_threshold')
+                    continue
+                if ranked[0][1][0] < threshold:
+                    _view_probe(db, row['candidate'], 'below_match_threshold')
                     continue
                 _view_probe(db, row['candidate'], 'ambiguous_identity')
                 if len(ranked) > 1 and ranked[0][1][0]-ranked[1][1][0] < margin:
