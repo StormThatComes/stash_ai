@@ -41,7 +41,7 @@ def test_only_selected_recognition_and_enabled_visibility_assets_are_downloaded(
     import stash_ai.recognition.runtime as face_runtime
     import stash_ai.recognition.models as models
     path = tmp_path / 'face.yml'
-    path.write_text(f'version: 1\nmodels: {{recognizer: auraface}}\ndetection: {{min_visible_face_fraction: 0}}\nportraits: {{enabled: {str(portraits).lower()}}}\n')
+    path.write_text(f'version: 1\nmodels: {{detector: yunet, recognizer: auraface}}\ndetection: {{min_visible_face_fraction: 0}}\nportraits: {{enabled: {str(portraits).lower()}}}\n')
     calls = []
     monkeypatch.setattr(face_runtime, 'runtime', lambda config: None)
     monkeypatch.setattr(models, 'verify', lambda *args: None)
