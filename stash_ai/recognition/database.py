@@ -201,6 +201,9 @@ class FaceDatabase(AbstractContextManager):
         with db:
             db.execute('CREATE INDEX IF NOT EXISTS candidates_scan_policy ON candidates(scan,policy,person,status)')
             db.execute('CREATE INDEX IF NOT EXISTS candidates_person ON candidates(person)')
+            # Scoped model-link isolation resolves performer IDs for each selected
+            # scene; avoid rescanning the entire identity catalog every time.
+            db.execute('CREATE INDEX IF NOT EXISTS people_scope_performer ON people(scope,performer)')
             db.execute("CREATE INDEX IF NOT EXISTS portraits_observation ON portraits(scope,person,"
                        "json_extract(metadata,'$.observation')) WHERE json_valid(metadata)")
 
