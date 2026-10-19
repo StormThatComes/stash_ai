@@ -97,7 +97,7 @@ def test_alignment_coverage_matches_quality_gate_exactly():
         assert info['alignment_valid']==(info['source_coverage']>=MIN_ALIGNMENT_SOURCE_COVERAGE
                                          and info['face_region_coverage']>=MIN_ALIGNMENT_FACE_COVERAGE)
         assert info['source_eye_distance_pixels'] == pytest.approx(
-            np.linalg.norm(FACE.landmarks[0]-FACE.landmarks[1]))
+            np.linalg.norm(np.asarray(FACE.landmarks[0])-np.asarray(FACE.landmarks[1])))
         assert np.allclose(matrix,similarity_matrix(FACE.landmarks),atol=0,rtol=0)
 
 

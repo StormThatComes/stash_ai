@@ -5,7 +5,6 @@ sensitive biometric data and are written only in a newly created private folder.
 """
 from collections import Counter
 from contextlib import closing
-from io import BytesIO
 import json
 import math
 import os
@@ -105,8 +104,9 @@ def _images(image, detection, matrix, mask, path):
         return ['-source.png']
     # The ONNX recognizers call warpAffine on BGR pixels and later reorder to
     # their respective input channels. RGB serialization is visual only.
-    pixels = np.asarray(image.convert('RGB'), dtype=np.uint8)
-    bgr = np.ascontiguousarray(pixels[:, :, ::-1])
+    with image.convert('RGB') as converted:
+        pixels = np.asarray(converted, dtype=np.uint8)
+        bgr = np.ascontiguousarray(pixels[:, :, ::-1])
     aligned = cv2.warpAffine(bgr, matrix, (112, 112), borderValue=0.)
     output = Image.fromarray(cv2.cvtColor(aligned, cv2.COLOR_BGR2RGB))
     coverage = Image.fromarray((mask.astype('uint8') * 255), mode='L')
