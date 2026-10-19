@@ -62,7 +62,7 @@ def test_swap_after_path_verification_cannot_reach_cpu_loader(tmp_path, monkeypa
     monkeypatch.setitem(sys.modules, 'cv2', SimpleNamespace(
         FaceDetectorYN=SimpleNamespace(create=lambda *args: pytest.fail('unverified bytes reached loader'))))
     with pytest.raises(ValueError, match='checksum'):
-        models.YuNetDetector(load(root=tmp_path, device='cpu'), {'yunet':path})
+        models.YuNetDetector(explicit_yunet(tmp_path), {'yunet':path})
 
 
 def test_onnx_declaration_adaptation_parses_exact_verified_bytes(tmp_path, monkeypatch):
