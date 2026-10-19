@@ -227,7 +227,7 @@ def test_pilot_missing_optional_asset_retains_comparison(tmp_path, monkeypatch):
 
 
 
-@pytest.mark.parametrize('asset', ['faceocc', 'expression_mesh', 'expression_blendshapes', 'yunet'])
+@pytest.mark.parametrize('asset', ['faceocc', 'expression_mesh', 'expression_blendshapes', 'scrfd_10g'])
 @pytest.mark.parametrize('present', [False, True])
 def test_pilot_accounts_for_unavailable_optional_and_fatal_required_assets(tmp_path, monkeypatch, asset, present):
     from tests.test_recognition_run import setup, run
@@ -242,11 +242,11 @@ def test_pilot_accounts_for_unavailable_optional_and_fatal_required_assets(tmp_p
     with FaceDatabase(config.database) as db:
         run_id = db.connection.execute('SELECT id FROM runs').fetchone()[0]
         labels = {r[0]: 'A' for r in db.connection.execute('SELECT id FROM observations')}
-        if asset == 'yunet':
+        if asset == 'scrfd_10g':
             with pytest.raises((FileNotFoundError, ValueError)):
                 evaluate_observations(db, run_id, {'sface': config}, labels,
                                       assets=lambda c: {asset: path}, backend=lambda *a: Backend())
-        elif asset != 'yunet':
+        elif asset != 'scrfd_10g':
             configs = {'sface': config, 'auraface': changed(config, models={'recognizer': 'auraface'})}
             results = evaluate_observations(db, run_id, configs, labels,
                                            assets=lambda c: {asset: path}, backend=lambda *a: Backend())
