@@ -46,6 +46,19 @@ ASSETS = {
                      'glintr100.onnx',
                      'a7933ea5330113b01c9b60351d8f4c33003f145d8470ac5f0e52ee2effe25c60',
                      260694151, 'Apache-2.0', 512),
+    # ByteDance explicitly limits pretrained LVFace weights to noncommercial research,
+    # notwithstanding the model card's MIT identifier for *code*.
+    'lvface_b': Asset('bytedance-research/LVFace',
+                      '48fb6c10b26367f82cd39704874f45413bdf092b',
+                      'LVFace-B_Glint360K/LVFace-B_Glint360K.onnx',
+                      '9d834ed8e927fd35b9123b2bf97c40aad05785b1f9ecfb1c4c1f6242d38d1382',
+                      455533594, 'research-noncommercial', 512),
+    # Unofficial ONNX export; MS1MV2 weights have independent use restrictions.
+    'adaface_ir50': Asset('globalnebula/adaface-ir50-ms1mv2-onnx',
+                          '8633420cb7cd705ea1c5b4ae2f7f9964363a8cd1',
+                          'adaface_ir50_ms1mv2.onnx',
+                          'a3c1b24e4271c98526d7b840c9d18e57ee281c6782675ace3e09e79dcedd98e8',
+                          174398313, 'adaface-ms1mv2-research-restrictions', 512),
 }
 
 
@@ -145,8 +158,13 @@ def ensure_assets(config, *, write=print, keys=None):
 def namespace(config):
     from dataclasses import asdict
     from .context import policy_digest
-    alignment = ('arcface-112-similarity-rgb-127.5-v1' if config.data['models']['recognizer'] == 'auraface'
-                 else 'opencv-five-landmarks-v1')
+    recognizer = config.data['models']['recognizer']
+    alignment = {
+        'auraface': 'arcface-112-similarity-rgb-127.5-v1',
+        'lvface_b': 'lvface-b-arcface-112-similarity-rgb-127.5-v1',
+        'adaface_ir50': 'adaface-ir50-arcface-112-similarity-bgr-127.5-v1',
+        'sface': 'opencv-five-landmarks-v1',
+    }[recognizer]
     return policy_digest(config, ('namespace', alignment, ASSETS[config.data['models']['detector']],
                                  ASSETS[config.data['models']['recognizer']]), lambda: {
                    'format': 1, 'alignment': alignment,
@@ -317,7 +335,11 @@ class OpenCVFaces(YuNetDetector):
 def load_backend(config, paths):
     from stash_ai.runtime.shutdown import require_idle
     require_idle()
-    if config.data['models']['recognizer'] == 'auraface':
+    recognizer = config.data['models']['recognizer']
+    if recognizer == 'auraface':
         from .aura import AuraFaces
         return AuraFaces(config, paths)
+    if recognizer in ('lvface_b', 'adaface_ir50'):
+        from .onnx_recognizers import OnnxEmbeddingFaces
+        return OnnxEmbeddingFaces(config, paths)
     return OpenCVFaces(config, paths)
