@@ -7,6 +7,15 @@ class PortraitFramingError(ValueError):
     """The available pixels cannot produce a bounded portrait image."""
 
 
+# AuraFace/SFace alignment uses the same canonical 112x112 five-point template.
+# Full-frame coverage alone is too strict for a legitimate face near a crop
+# boundary: require useful real pixels around its eyes, nose and mouth too.
+MIN_ALIGNMENT_SOURCE_COVERAGE = .50
+MIN_ALIGNMENT_FACE_COVERAGE = .85
+ALIGNMENT_FACE_ROWS = slice(36, 105)
+ALIGNMENT_FACE_COLUMNS = slice(24, 88)
+
+
 def alignable(detection, image=None):
     """Basic recognizer alignment validity, independent of optional pose gates."""
     from .aura import similarity_matrix
@@ -19,12 +28,15 @@ def alignable(detection, image=None):
     import cv2
     import numpy as np
     inverse = cv2.invertAffineTransform(matrix)
-    # The actual 112x112 alignment samples must overlap real source pixels.
-    # Do not infer this from a finite transform or the detector's box alone.
+    # A finite affine transform (or even a single surviving pixel) is not
+    # sufficient. Measure source-pixel coverage in the full aligned crop and
+    # in its canonical facial landmark region, excluding synthetic padding.
     rows, columns = np.ogrid[:112, :112]
     x = inverse[0, 0] * columns + inverse[0, 1] * rows + inverse[0, 2]
     y = inverse[1, 0] * columns + inverse[1, 1] * rows + inverse[1, 2]
-    return bool(((x >= 0) & (x < image.width) & (y >= 0) & (y < image.height)).any())
+    real = (x >= 0) & (x < image.width) & (y >= 0) & (y < image.height)
+    return bool(real.mean() >= MIN_ALIGNMENT_SOURCE_COVERAGE and
+                real[ALIGNMENT_FACE_ROWS, ALIGNMENT_FACE_COLUMNS].mean() >= MIN_ALIGNMENT_FACE_COVERAGE)
 
 
 def assess(image, detection):
