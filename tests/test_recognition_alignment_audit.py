@@ -193,3 +193,51 @@ def test_invalid_geometry_is_reported_without_a_fake_aligned_image():
     assert value['alignment_valid'] is False
     assert value['alignment_error']=='invalid_five_point_geometry'
     assert matrix is None and mask is None
+
+
+def test_cli_main_audit_alignment_handles_missing_faces_db(tmp_path, monkeypatch):
+    """Exercise public CLI dispatch, not execute() alone: audit has no --faces-db."""
+    from stash_ai.recognition import cli, alignment_audit
+
+    cfg_path = tmp_path / 'face.yml'
+    cfg_path.write_text('version: 1\nmodels: {device: cpu}\n')
+    output = tmp_path / 'private-audit'
+    seen = []
+
+    def fake_audit(args, settings, *, services):
+        seen.append((args, settings, services))
+        return 0
+
+    marker = object()
+    monkeypatch.setattr(alignment_audit, 'execute', fake_audit)
+    code = cli.main(['audit-alignment', '--scene-id', '1',
+                     '--face-config', str(cfg_path),
+                     '--output-dir', str(output), '--device', 'cpu'],
+                    services=marker)
+    assert code == 0
+    assert len(seen) == 1
+    args, settings, services = seen[0]
+    assert not hasattr(args, 'faces_db')
+    assert args.scene_id == ['1']
+    assert args.output_dir == output
+    assert settings.source_path == cfg_path.resolve()
+    assert settings.data['models']['device'] == 'cpu'
+    assert services is marker
+    assert not settings.database.exists()  # Audit dispatch creates no SQLite.
+
+
+def test_cli_main_report_preserves_explicit_faces_db(tmp_path, monkeypatch):
+    """The shared getter must still forward the existing DB override."""
+    from stash_ai.recognition import cli, fragmentation_report
+
+    file = tmp_path / 'custom.sqlite3'
+    received = []
+
+    def fake_report(args, settings):
+        received.append(settings.database)
+        return 0
+
+    monkeypatch.setattr(fragmentation_report, 'execute', fake_report)
+    assert cli.main(['report', '--scene-id', '1', '--faces-db', str(file)]) == 0
+    assert received == [file.resolve()]
+    assert not file.exists()
