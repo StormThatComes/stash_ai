@@ -410,7 +410,7 @@ def build(config, scene_id, *, limit=20, min_mean=None, scope=None, compare_scen
         from .cross_scene_report import compare
         comparisons = (compare(db, scan, compare_scene_ids, policy, config, limit=limit)
                        if compare_scene_ids else [])
-        multiview = _view_attempt_summary(db, scan['id'], policy)
+        multiview = _view_attempt_summary(db, scan['id'], policy, scan['scope'], scan['namespace'])
         return {
             'cross_scene_comparisons':comparisons,
             'multi_view_diagnostics':multiview,
@@ -462,7 +462,7 @@ def build(config, scene_id, *, limit=20, min_mean=None, scope=None, compare_scen
         }
 
 
-def _view_attempt_summary(db, scan, policy):
+def _view_attempt_summary(db, scan, policy, scope, namespace):
     """Persisted per-observation vetoes, not inferred from successful identities."""
     result={}
     for stage in ('anchor_view','auxiliary_view'):
@@ -481,9 +481,10 @@ def _view_attempt_summary(db, scan, policy):
             # Confirmed auxiliary views are global within the selected replay;
             # prototypes created in other scenes may also serve this scene.
             global_count=db.execute(
-                "SELECT COALESCE(SUM(json_extract(payload,?)),0) FROM candidates "
-                'WHERE policy=?', (f'$.{column}',policy)).fetchone()[0]
-            result[stage]['prototypes_seeded_across_selected_scenes']=int(global_count)
+                "SELECT COALESCE(SUM(json_extract(c.payload,?)),0) FROM candidates c "
+                'JOIN scans s ON s.id=c.scan WHERE c.policy=? AND s.scope=? AND s.namespace=?',
+                (f'$.{column}',policy,scope,namespace)).fetchone()[0]
+            result[stage]['prototypes_seeded_in_scope']=int(global_count)
     return result
 
 
