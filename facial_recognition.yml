@@ -23,7 +23,7 @@ recognition:
   ambiguity_margin: 0.10
   cooccurrence_merge_threshold: 0.90 # Stronger cross-sample evidence for possible reflections.
   cross_scene_provisional: true # Accumulate independent withheld anchor support across selected scenes.
-  min_identity_support: 1      # Independent cue times for a new person.
+  min_identity_support: 2      # Require two independent cues; cross-scene provisional can supply both.
   min_merge_support: 3         # Distinct scene/time observations before merging identities.
 clustering:
   cohesion_threshold: 0.60     # Minimum sample similarity for matching and group merges.
