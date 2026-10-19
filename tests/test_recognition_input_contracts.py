@@ -24,6 +24,31 @@ def test_alignment_requires_real_source_pixels_with_pose_disabled(tmp_path):
         assert not aligned.any() and not quality['alignment_valid']
 
 
+
+@pytest.mark.parametrize('shift,expected', [
+    (0, True), (45, True), (60, False), (150, False),
+])
+def test_alignment_requires_sufficient_real_face_pixels_even_with_pose_gate_disabled(tmp_path, shift, expected):
+    import cv2
+    from stash_ai.recognition.quality import assess, rejection
+    from stash_ai.recognition.models import checked_detection
+    from stash_ai.recognition.aura import similarity_matrix
+    from tests.helpers.recognition import FACE, textured_image
+    geometry = list(FACE.row)
+    for index in range(4, 14, 2):
+        geometry[index] += shift
+    face = checked_detection(geometry)
+    config = cluster_config(tmp_path)
+    policy = dict(config.data['detection'], max_pose_deviation=None, min_sharpness=0)
+    with textured_image() as image:
+        quality = assess(image, face)
+        aligned = cv2.warpAffine(np.asarray(image), similarity_matrix(face.landmarks), (112, 112))
+        # The original any()-based check would accept every one of these.
+        assert aligned.any()
+        assert quality['alignment_valid'] is expected
+        assert (rejection(quality, policy) == 'face_landmarks_invalid') is not expected
+
+
 def test_video_portrait_skips_unalignable_geometry_before_embedding(tmp_path,monkeypatch):
     from tests.test_recognition_metadata import setup
     from tests.helpers.recognition import FACE
