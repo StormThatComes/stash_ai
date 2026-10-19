@@ -134,3 +134,31 @@ def test_pinned_expression_task_associates_mesh_and_scores_public_domain_portrai
         assert result['open_mouth'] + result['closed_mouth'] == pytest.approx(1)
     finally:
         model.close()
+
+
+@pytest.mark.skipif(os.getenv('STASH_AI_RECOGNITION_SMOKE') != '1', reason='explicit pinned SCRFD ONNX model smoke')
+@pytest.mark.parametrize('detector_key', ['scrfd_10g', 'scrfd_2_5g'])
+def test_pinned_scrfd_onnx_kps_cpu_smoke(tmp_path, detector_key):
+    """Run the actual pinned 640px model, not just synthetic decoder fixtures."""
+    import numpy as np
+    from PIL import Image
+    from stash_ai.recognition.config import load
+    from stash_ai.recognition.models import ensure_assets, YuNetDetector
+
+    yaml = tmp_path / 'scrfd-smoke.yml'
+    yaml.write_text(f'version: 1\nmodels: {{detector: {detector_key}, device: cpu}}\n')
+    config = load(yaml)
+    assets = ensure_assets(config, keys=[detector_key])
+    backend = YuNetDetector(config, assets)
+    try:
+        assert backend.detector_device == 'cpu'
+        assert backend.provenance['detector']['detector'] == detector_key
+        for width, height in ((160, 160), (160, 90)):
+            with Image.new('RGB', (width, height), (110, 100, 90)) as image:
+                with backend.prepared_frame(image):
+                    detections = backend.detect(image)
+                    assert isinstance(detections, list)
+                    assert all(len(detection.row) == 15 and np.isfinite(detection.row).all()
+                               for detection in detections)
+    finally:
+        backend.close()
