@@ -100,7 +100,12 @@ def test_lower_budget_preserves_manual_replacement(tmp_path,monkeypatch):
 @pytest.mark.parametrize('corrupt',[False,True])
 def test_actual_identity_loader_ignores_unavailable_optional_quality_paths(tmp_path,monkeypatch,key,feature,corrupt):
     import stash_ai.recognition.runtime as runtime
-    config=load(root=tmp_path,device='cpu')
+    from dataclasses import replace
+    from stash_ai.recognition.config import plain
+    original=load(root=tmp_path,device='cpu')
+    data=plain(original.data)
+    data['models']['detector']='yunet'
+    config=replace(original,data=data)
     paths={}
     for name in ('yunet','sface'):
         path=tmp_path/name

@@ -56,6 +56,7 @@ def test_semantic_cache_identity_ignores_filename_and_names(tmp_path):
 
 def test_shipped_template_matches_default_schema():
     config = load(Path(__file__).resolve().parents[1] / 'facial_recognition.yml')
+    assert config.data['models']['detector'] == 'scrfd_10g'
     assert config.data['recognition']['min_identity_support'] == 2
     assert config.data['recognition']['cross_scene_provisional'] is True
     assert config.data['clustering']['context_view_enrichment'] is True

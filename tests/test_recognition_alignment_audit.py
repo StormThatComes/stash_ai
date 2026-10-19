@@ -25,7 +25,7 @@ def config(tmp_path):
     path=tmp_path/'face.yml'
     path.write_text(
         'version: 1\n'
-        'models: {recognizer: lvface_b, device: cpu, download_missing: false}\n'
+        'models: {detector: yunet, recognizer: lvface_b, device: cpu, download_missing: false}\n'
         'detection: {min_sharpness: 0, max_pose_deviation: null, '
         'min_visible_face_fraction: 0, require_complete_face: false}\n'
         'execution: {prefetch_frames: 0}\n')

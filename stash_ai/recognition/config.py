@@ -14,7 +14,7 @@ def defaults():
     # claims about accuracy on an operator's VTT thumbnails.
     return {
         'version': 1,
-        'models': {'detector': 'yunet', 'recognizer': 'sface', 'device': 'cuda',
+        'models': {'detector': 'scrfd_10g', 'recognizer': 'sface', 'device': 'cuda',
                    'directory': 'recognition_models', 'download_missing': True},
         'detection': {'score_threshold': .9, 'nms_threshold': .3,
                       'min_face_pixels': 32, 'min_sharpness': 10., 'max_faces_per_frame': 100,
@@ -122,9 +122,10 @@ def validate(data):
     if type(data['version']) is not int or data['version'] != 1:
         raise ValueError('facial_recognition.yml version must be 1.')
     models = data['models']
-    if models['detector'] != 'yunet' or models['recognizer'] not in (
+    if models['detector'] not in ('yunet', 'scrfd_10g', 'scrfd_2_5g') or models['recognizer'] not in (
             'sface', 'auraface', 'lvface_b', 'adaface_ir50'):
-        raise ValueError('Supported detector: yunet; recognizers: sface, auraface, lvface_b, adaface_ir50.')
+        raise ValueError('Supported detectors: scrfd_10g, scrfd_2_5g, yunet; '
+                         'recognizers: sface, auraface, lvface_b, adaface_ir50.')
     if models['device'] not in ('auto', 'cpu', 'cuda') or type(models['download_missing']) is not bool:
         raise ValueError('Invalid face device/download policy.')
     for section, names in {

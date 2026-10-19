@@ -28,6 +28,13 @@ def test_verified_bytes_are_immutable_after_same_size_path_replacement(tmp_path)
     assert path.read_bytes() == b'custom weights'
 
 
+def explicit_yunet(tmp_path):
+    from stash_ai.recognition.config import load
+    yaml = tmp_path / 'yunet.yml'
+    yaml.write_text('version: 1\nmodels: {detector: yunet, device: cpu}\n')
+    return load(yaml)
+
+
 def test_cpu_loader_consumes_verified_buffer_and_not_the_replaced_path(tmp_path, monkeypatch):
     path = tmp_path/'yunet'
     monkeypatch.setitem(models.ASSETS, 'yunet', asset(path, b'pinned'))
@@ -38,7 +45,7 @@ def test_cpu_loader_consumes_verified_buffer_and_not_the_replaced_path(tmp_path,
         return SimpleNamespace()
     cv = SimpleNamespace(__version__='fixture', FaceDetectorYN=SimpleNamespace(create=create))
     monkeypatch.setitem(sys.modules, 'cv2', cv)
-    backend = models.YuNetDetector(load(root=tmp_path, device='cpu'), {'yunet':path})
+    backend = models.YuNetDetector(explicit_yunet(tmp_path), {'yunet':path})
     backend.close()
     assert inputs == [('onnx', b'pinned')] and path.read_bytes() == b'custom'
 
@@ -55,7 +62,7 @@ def test_swap_after_path_verification_cannot_reach_cpu_loader(tmp_path, monkeypa
     monkeypatch.setitem(sys.modules, 'cv2', SimpleNamespace(
         FaceDetectorYN=SimpleNamespace(create=lambda *args: pytest.fail('unverified bytes reached loader'))))
     with pytest.raises(ValueError, match='checksum'):
-        models.YuNetDetector(load(root=tmp_path, device='cpu'), {'yunet':path})
+        models.YuNetDetector(explicit_yunet(tmp_path), {'yunet':path})
 
 
 def test_onnx_declaration_adaptation_parses_exact_verified_bytes(tmp_path, monkeypatch):

@@ -1,5 +1,44 @@
 # Facial recognition
 
+## SCRFD five-landmark detector choices
+
+The default detector for new configurations is **SCRFD-10G KPS**. This release
+also supports SCRFD-2.5G KPS and the explicitly selected legacy YuNet.
+Switching detectors changes the recognition namespace, prevents reuse of
+old scan/embedding evidence for that detector, and triggers a new scan;
+it does **not** delete historical embeddings or identities.
+
+```yaml
+models:
+  detector: scrfd_10g       # default; alternatives: scrfd_2_5g, yunet
+  recognizer: lvface_b     # or adaface_ir50, auraface, sface
+  device: cuda
+```
+
+SCRFD runs in ONNX Runtime on CPU or CUDA with a 640 × 640 letterboxed,
+BGR-to-RGB detector input normalized by `(pixel-127.5)/128`. The
+nine-output ONNX models use strides 8/16/32, two anchors per location,
+five landmarks and per-image NMS. Bounding boxes and landmarks are
+converted back into original VTT coordinates; recognizers still receive
+the unchanged 112 × 112 ArcFace aligned input. `10G` and `2.5G` are
+compute tiers, **not** gigabytes of downloaded data.
+
+The SCRFD artifacts are pinned to Hugging Face commit
+`d168e9d89c1687119307f528cbc67eb257cf0021`; 10G weights are
+16,923,827 bytes, and 2.5G weights are 3,291,737 bytes. Both have strict
+size/SHA-256 integrity checks; only the selected weights are downloaded.
+
+**Licensing:** the HF wrapper advertises Apache-2.0, whereas upstream
+InsightFace pretrained model weights have noncommercial research-use
+restrictions. Confirm licensing for your intended usage before a
+commercial deployment; wrapper metadata does not supersede upstream terms.
+
+The `recognition audit-alignment` command now uses the detector named in
+`models.detector`. To compare two variants, run the audit with separate
+YAML configurations and **different new output directories**. Compare
+actual landmark positions and 112px aligned crops on same-person and
+different-person cues, not only face detection benchmark scores.
+
 ## Read-only five-landmark alignment audit
 
 Use the opt-in `recognition audit-alignment` action to investigate whether

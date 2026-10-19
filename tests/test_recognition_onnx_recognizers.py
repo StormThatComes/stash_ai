@@ -42,7 +42,7 @@ def test_selected_hf_weights_are_fully_pinned_and_licensed(recognizer,sha,size):
 
 def config(tmp_path,recognizer,device='cpu'):
     path=tmp_path/(recognizer+'.yml')
-    path.write_text(f'version: 1\nmodels: {{recognizer: {recognizer}, device: {device}}}\n'
+    path.write_text(f'version: 1\nmodels: {{detector: yunet, recognizer: {recognizer}, device: {device}}}\n'
                     'detection: {min_visible_face_fraction: 0}\nportraits: {enabled: false}\n')
     return load(path)
 
@@ -56,7 +56,7 @@ def test_model_namespace_is_unique_even_for_identical_embedding_dimension(tmp_pa
     # Device, model directory and similarity tuning change neither identity
     # nor the model's embedding namespace.
     alt=tmp_path/'alt.yml'
-    alt.write_text('version: 1\nmodels: {recognizer: lvface_b, device: cuda, directory: other}\n'
+    alt.write_text('version: 1\nmodels: {detector: yunet, recognizer: lvface_b, device: cuda, directory: other}\n'
                    'recognition: {match_threshold: 0.81}')
     assert namespace(load(alt))==values[2]
 

@@ -210,7 +210,7 @@ def test_disabled_visibility_does_not_download_faceocc(tmp_path, monkeypatch):
     monkeypatch.setattr(runtime, 'runtime', lambda *args: None)
     monkeypatch.setattr(models, 'verify', lambda *args: None)
     monkeypatch.setattr(downloads, 'install_hf_asset', lambda repo, filename, *args, **kwargs: downloaded.append(filename))
-    assert set(models.ensure_assets(config)) == {'yunet', 'sface'}
+    assert set(models.ensure_assets(config)) == {'scrfd_10g', 'sface'}
     assert 'model.safetensors' not in downloaded
 
 
