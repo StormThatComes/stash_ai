@@ -80,9 +80,9 @@ def test_scrfd_decode_landmarks_two_anchors_scales_and_nms():
     assert len(faces)==1
     assert faces[0].score==pytest.approx(.95)
     assert faces[0].box==pytest.approx((28,32,16,24))
-    assert np.asarray(faces[0].landmarks)==pytest.approx([
+    np.testing.assert_allclose(np.asarray(faces[0].landmarks), [
         [28,40], [36,40], [32,44], [28,48], [36,48]
-    ])
+    ], rtol=0, atol=1e-6)
     # A duplicate detection from the same cell must be suppressed by NMS.
     output[0][0,index-1,0] = .94
     output[3][0,index-1,:] = output[3][0,index,:]
