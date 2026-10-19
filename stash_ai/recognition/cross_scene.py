@@ -151,8 +151,24 @@ def apply_cross_scene_support(database, selected, config, *, progress=None):
     # allowing input-order-dependent greedy pair formation.
     pool = [g for g in provisional if g.person not in attached]
     n = len(pool)
-    near = [set() for _ in pool]
-    strong = [set() for _ in pool]
+    # Union-find stores O(n) component membership; clique checks need only
+    # each node's number of strong edges, never an O(n^2) edge table.
+    parents=list(range(n))
+    sizes=[1]*n
+    strong_counts=[0]*n
+    def find(i):
+        while parents[i]!=i:
+            parents[i]=parents[parents[i]]
+            i=parents[i]
+        return i
+    def join(i,j):
+        a,b=find(i),find(j)
+        if a==b:
+            return
+        if sizes[a]<sizes[b]:
+            a,b=b,a
+        parents[b]=a
+        sizes[a]+=sizes[b]
     barred = set()
     for i, group in enumerate(pool):
         ranked = _rank_reference(group.samples, references, match, cohesion)
@@ -179,30 +195,23 @@ def apply_cross_scene_support(database, selected, config, *, progress=None):
                 mean, low = _cross_score(pool[i].samples, pool[j].samples)
                 if low < cohesion or mean < match-margin:
                     continue
-                near[i].add(int(j)); near[j].add(i)
+                join(i,int(j))
                 if mean >= match:
-                    strong[i].add(int(j)); strong[j].add(i)
-    visited=set()
+                    strong_counts[i]+=1
+                    strong_counts[j]+=1
+    components=defaultdict(list)
+    for i in range(n):
+        if i not in barred:
+            components[find(i)].append(i)
     clusters=[]
-    with tracking(range(n), 'Confirm cross-scene provisional groups',
-                  unit='group') as tracked:
-        for seed in tracked:
-            if seed in visited or seed in barred:
-                continue
-            component=[]
-            stack=[seed]
-            while stack:
-                node=stack.pop()
-                if node in visited:
-                    continue
-                visited.add(node)
-                component.append(node)
-                stack.extend(near[node]-visited)
-            component.sort()
+    with tracking(sorted(components.items()), 'Confirm cross-scene provisional groups',
+                  unit='component') as tracked:
+        for _,component in tracked:
             if len(component)<2:
                 continue
-            if any(len(strong[i].intersection(component)) != len(component)-1
-                   for i in component):
+            # Every member must have strict evidence to every other member:
+            # no transitive "A matches B, B matches C" membership.
+            if any(strong_counts[i] != len(component)-1 for i in component):
                 continue
             if len(set().union(*(pool[i].scenes for i in component))) != sum(
                     len(pool[i].scenes) for i in component):
