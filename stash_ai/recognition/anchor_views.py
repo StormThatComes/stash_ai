@@ -77,7 +77,67 @@ def _confirmed(db, policy, grouping, usage):
                 slots.append(slot)
             slot.add(row, query)
     emit()
+    if grouping['context_view_enrichment']:
+        _enrich_from_validated_context(db, policy, grouping, usage, result)
     return result
+
+
+def _enrich_from_validated_context(db, policy, grouping, usage, confirmed):
+    """Frozen strict medoids validate contextual cues; only corroborated cohorts
+    can add *additional* view medoids. Context samples never seed one another.
+    """
+    import numpy as np
+    strict = {}
+    for view in tuple(confirmed):
+        strict.setdefault((view.scene_scan, view.group.identifier, view.pose), []).append(view)
+    if not strict:
+        return
+    accepted = db.execute(
+        'SELECT c.person,o.* FROM candidates c '
+        f'JOIN observations o ON o.id={address(db, "c")} '
+        'JOIN members m ON m.observation=o.id AND m.person=c.person '
+        "WHERE c.policy=? AND c.status='accepted' "
+        "AND json_extract(c.payload,'$.reason')='same_scene_identity' "
+        'AND o.rejected IS NULL '
+        'ORDER BY o.scan,c.person,o.cue,o.seconds,o.id', (policy,))
+    additions = {}
+    for row in accepted:
+        pose = pose_view(row['geometry'])
+        key = (row['scan'], row['person'], pose)
+        if key not in strict:
+            continue
+        sample = vector(row)
+        for core in strict[key]:
+            if float(np.dot(sample, core.group.samples[0])) < grouping['view_match_threshold']:
+                continue
+            bucket = additions.setdefault((key, core.medoid), [])
+            if (row['scan'], row['seconds']) in {(r['scan'], r['seconds']) for r,_ in bucket}:
+                continue
+            if all(float(np.dot(sample, other)) >= grouping['view_cohesion_threshold']
+                   for _,other in bucket):
+                bucket.append((row, sample))
+            break
+    minimum = max(2, grouping['view_min_support'])
+    counts = {}
+    for view in confirmed:
+        key = (view.scene_scan, view.group.identifier)
+        counts[key] = counts.get(key, 0) + 1
+    for (key, parent_medoid), bucket in sorted(additions.items(), key=lambda item: item[0]):
+        scene, person, pose = key
+        family = (scene,person)
+        if len(bucket) < minimum or counts.get(family,0) >= grouping['max_view_prototypes_per_person']:
+            continue
+        # Context medoids require at least two independently accepted cues;
+        # their only authority is the immutable, strictly confirmed core.
+        scores = [sum(float(np.dot(a,b)) for _,b in bucket) for _,a in bucket]
+        selected = max(range(len(bucket)), key=lambda i:scores[i])
+        row, medoid = bucket[selected]
+        origin = next(v for v in strict[key] if v.medoid==parent_medoid)
+        usage.add((medoid,), kind='Context corroborated view')
+        confirmed.append(AnchorView(scene,Group(person,(medoid,),True),pose,
+                         row['id'],tuple(r['id'] for r,_ in bucket),
+                         origin.support_count + len(bucket)))
+        counts[family] = counts.get(family,0)+1
 
 
 def _different_accepted_face(db, row, person, policy):
@@ -107,6 +167,12 @@ def _competing_anchor(groups, person, query, score, margin):
     return False
 
 
+def _probe(db, candidate, reason):
+    db.execute(
+        "UPDATE candidates SET payload=json_set(payload,'$.anchor_view_probe',?) "
+        'WHERE id=?', (reason, candidate))
+
+
 def apply_anchor_views(database, selected, config, *, progress=None):
     grouping, settings = config.data['clustering'], config.data['recognition']
     if not grouping['anchor_view_matching'] or not selected:
@@ -121,6 +187,12 @@ def apply_anchor_views(database, selected, config, *, progress=None):
                       usage=usage, stage='anchor_views')
     anchor_by_id = {group.identifier: group for group in anchors}
     views = _confirmed(db, policy, grouping, usage)
+    # Record why this conservative stage could not recover a withheld anchor.
+    db.execute(
+        "UPDATE candidates SET payload=json_set(payload,'$.anchor_view_probe',"
+        "'no_confirmed_prototype') WHERE policy=? AND status='withheld' "
+        "AND json_extract(payload,'$.reason')='insufficient_match_or_cohesion'",
+        (policy,))
     if not views:
         return
     views_by_scan = {}
@@ -153,6 +225,7 @@ def apply_anchor_views(database, selected, config, *, progress=None):
         with tracking(scored_rows(rows, groups, threshold-margin),
                       'Match withheld anchor views', unit='observation', total=total) as tracked:
             for row, frozen in tracked:
+                _probe(db, row['candidate'], 'below_match_or_cohesion')
                 query = cache.vector(row) if cache is not None else vector(row)
                 by_person = {}
                 for group, score, lowest in contributions(
@@ -169,17 +242,21 @@ def apply_anchor_views(database, selected, config, *, progress=None):
                 ranked = sorted(by_person.items(), key=lambda item: (-item[1][0], item[0]))
                 if not ranked or ranked[0][1][0] < threshold:
                     continue
+                _probe(db, row['candidate'], 'ambiguous_identity')
                 if len(ranked)>1 and ranked[0][1][0]-ranked[1][1][0] < margin:
                     continue
                 person, (score, group, view) = ranked[0]
                 if _competing_anchor(rival_anchors, person, query, score, margin):
+                    _probe(db, row['candidate'], 'competing_identity')
                     continue
                 if _different_accepted_face(db, row, person, policy):
+                    _probe(db, row['candidate'], 'co_present_identity')
                     continue
                 if not co_presence_allows(
                         db, row, group, groups, query, config,
                         peer_threshold=threshold,
                         cohesion_threshold=grouping['view_cohesion_threshold']):
+                    _probe(db, row['candidate'], 'co_presence')
                     continue
                 proof = {
                     'format': 1, 'scene_scan': scan, 'medoid': view.medoid,
@@ -188,7 +265,7 @@ def apply_anchor_views(database, selected, config, *, progress=None):
                     'ambiguity_margin': margin}
                 db.execute("UPDATE candidates SET person=?,status='pending',"
                            "payload=json_set(payload,'$.reason','anchor_view_pending',"
-                           "'$.anchor_view',json(?)) WHERE id=?",
+                           "'$.anchor_view',json(?),'$.anchor_view_probe','pending_support') WHERE id=?",
                            (person, encoded(proof), row['candidate']))
     anchors.clear()
     # Independent support applies to one person AND one exact frozen prototype.
@@ -218,6 +295,14 @@ def apply_anchor_views(database, selected, config, *, progress=None):
             "payload=json_set(payload,'$.reason','anchor_view_insufficient_support') "
             "WHERE policy=? AND status='pending' "
             "AND json_extract(payload,'$.reason')='anchor_view_pending'", (policy,))
+        db.execute(
+            "UPDATE candidates SET payload=json_set(payload,'$.anchor_view_probe','accepted') "
+            "WHERE policy=? AND json_extract(payload,'$.reason')='anchor_view_identity'",
+            (policy,))
+        db.execute(
+            "UPDATE candidates SET payload=json_set(payload,'$.anchor_view_probe','insufficient_support') "
+            "WHERE policy=? AND json_extract(payload,'$.reason')='anchor_view_insufficient_support'",
+            (policy,))
         db.execute(f'INSERT OR IGNORE INTO members(observation,person) '
                    f'SELECT {address(db, "c")},c.person FROM candidates c '
                    "WHERE c.policy=? AND c.status='accepted' "
