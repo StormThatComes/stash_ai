@@ -86,7 +86,24 @@ def execute(args, config, *, services=None):
                     'SELECT token,performer FROM people WHERE scope=?', (scope,)).fetchall()
                 known_tokens = {row['token'] for row in local}
                 bound_ids = {row['performer'] for row in local if row['performer']}
+                # Resolve previous uncertain deletions by observation, never dispatch
+                # a second DELETE while the profile is still present.
+                unresolved = database.connection.execute(
+                    "SELECT id,target FROM publications WHERE scope=? AND kind='delete' "
+                    "AND status IN ('pending','unknown')", (scope,)).fetchall()
+                for previous in unresolved:
+                    if client.lookup_performer(previous['target']) is None:
+                        with database.connection:
+                            database.connection.execute(
+                                "UPDATE publications SET status='observed',error=NULL WHERE id=?",
+                                (previous['id'],))
+                        counts['deletions_observed'] += 1
+
+                candidates = []
                 with phase(report, 'Recognition orphan inventory'):
+                    # Finish the complete paginated inventory before deleting
+                    # anything. Offset-based Stash pagination otherwise skips
+                    # profiles as deletion shifts subsequent page boundaries.
                     with tracking(client.recognition_performers(), 'Inspect Stash recognition performers',
                                   unit='performer') as tracked:
                         for row in tracked:
@@ -100,12 +117,15 @@ def execute(args, config, *, services=None):
                                 counts['protected'] += 1
                                 continue
                             counts['orphans'] += 1
+                            candidates.append((performer, original))
+                    with tracking(candidates, 'Process recognition orphans', unit='performer') as tracked:
+                        for performer, original in tracked:
                             if not apply:
                                 report.optional('recognition_orphan', report.detail,
                                                 'Orphan recognition performer candidate: ' + performer)
                                 continue
                             try:
-                                result = _delete_orphan(database, client, report, scope, row, original)
+                                result = _delete_orphan(database, client, report, scope, {'id': performer}, original)
                                 counts['deleted' if result == 'deleted' else 'already_absent'] += 1
                             except KeyboardInterrupt:
                                 raise
