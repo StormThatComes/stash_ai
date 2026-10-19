@@ -28,7 +28,11 @@ def test_default_is_gpu_and_cpu_override_keeps_existing_namespace(tmp_path):
     assert gpu.data['models']['device'] == 'cuda'
     assert cpu.data['models']['device'] == 'cpu'
     assert namespace(cpu) == namespace(gpu)
-    assert namespace(cpu) == 'b035e353b98c2b02a42e61e7cacd9244a0a25b228828116a83554723e7366ab0'
+    assert gpu.data['models']['detector'] == 'scrfd_10g'
+    legacy = tmp_path / 'legacy.yml'
+    legacy.write_text('version: 1\\nmodels: {detector: yunet}\\n')
+    assert namespace(load(legacy)) == 'b035e353b98c2b02a42e61e7cacd9244a0a25b228828116a83554723e7366ab0'
+    assert namespace(cpu) != namespace(load(legacy))
     shipped = load(Path(__file__).resolve().parents[1] / 'facial_recognition.yml')
     assert shipped.data['models']['device'] == 'cuda'
     from stash_ai.recognition.cli import parser
@@ -142,7 +146,12 @@ def test_default_sface_routes_both_neural_models_through_cuda_not_opencv(tmp_pat
     monkeypatch.setattr(models, 'verify', lambda *args: None)
     monkeypatch.setattr(models, 'verified_bytes', lambda *args: b'weights')
     monkeypatch.setattr(onnx_models, 'prepared_model', lambda path, **kwargs: (str(path).encode(), 'sha'))
-    backend = load_backend(load(root=tmp_path), {'yunet': 'yunet', 'sface': 'sface'})
+    from dataclasses import replace
+    from stash_ai.recognition.config import plain
+    legacy_config = load(root=tmp_path)
+    legacy_data = plain(legacy_config.data)
+    legacy_data['models']['detector'] = 'yunet'
+    backend = load_backend(replace(legacy_config, data=legacy_data), {'yunet': 'yunet', 'sface': 'sface'})
     try:
         with Image.new('RGB',(128,128)) as image:
             assert backend.detect(image) == []

@@ -11,7 +11,7 @@ def test_pinned_face_models_on_cpu(tmp_path, recognizer, dimensions):
     from stash_ai.recognition.config import load
     from stash_ai.recognition.models import ensure_assets, load_backend, checked_detection
     path = tmp_path / 'facial_recognition.yml'
-    path.write_text(f'version: 1\nmodels: {{recognizer: {recognizer}, device: cpu}}\n', encoding='utf-8')
+    path.write_text(f'version: 1\nmodels: {{detector: yunet, recognizer: {recognizer}, device: cpu}}\n', encoding='utf-8')
     config = load(path)
     backend = load_backend(config, ensure_assets(config))
     try:
@@ -40,7 +40,12 @@ def test_ort_contract_matches_cpu_sface_and_handles_non_square_yunet(tmp_path):
     from stash_ai.recognition.runtime import runtime
     from stash_ai.recognition.onnx_models import OnnxYuNet, OnnxSFace
     from tests.helpers.recognition import textured_image
-    config = load(root=tmp_path, device='cpu')
+    from dataclasses import replace
+    from stash_ai.recognition.config import plain
+    original = load(root=tmp_path, device='cpu')
+    data = plain(original.data)
+    data['models']['detector'] = 'yunet'
+    config = replace(original, data=data)
     paths = ensure_assets(config)
     cpu = load_backend(config, paths)
     detector = OnnxYuNet(config, paths['yunet'], cv2, runtime(config))
