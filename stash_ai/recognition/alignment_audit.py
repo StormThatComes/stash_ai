@@ -204,7 +204,11 @@ def audit_scene(source, detector, config, scene_id, directory, *, maximum=32, cu
 
 def execute(args, config, *, services=None, detector_factory=YuNetDetector):
     """Read-only: no FaceDatabase, no recognition run, no publication calls."""
-    from .run import Services
+    from .run import Services, instance_scope
+    from .models import namespace
+    from .scanning import scan_identity
+    from .database import encoded
+    from uuid import NAMESPACE_URL, uuid5
     from stash_ai.runtime.cleanup import closing
 
     services = services or Services()
@@ -229,15 +233,26 @@ def execute(args, config, *, services=None, detector_factory=YuNetDetector):
         with closing(detector_factory(config, paths)) as detector:
             directory = _private_directory(directory)
             results = []
+            model_namespace = namespace(config)
+            scan_policy = scan_identity(config, model_namespace)
+            scope = instance_scope(url)
             for scene_id in scenes:
                 scene = client.scene(scene_id)
                 with services.source(client, scene, config) as source:
-                    results.append(audit_scene(source, detector, config, scene_id, directory,
-                                               maximum=maximum, cue_indices=indices))
+                    result = audit_scene(source, detector, config, scene_id, directory,
+                                         maximum=maximum, cue_indices=indices)
+                    result['vtt_source_fingerprint'] = source.fingerprint
+                    result['vtt_coverage'] = dict(source.coverage)
+                    result['expected_recognition_scan_id'] = str(uuid5(
+                        NAMESPACE_URL, encoded([scope, scene_id, model_namespace,
+                                                 source.fingerprint, scan_policy])))
+                    results.append(result)
             manifest = {
                 'format': 1, 'kind': 'recognition_alignment_audit',
                 'detector': 'yunet',
                 'recognizer_selected_but_not_loaded': config.data['models']['recognizer'],
+                'embedding_namespace': model_namespace,
+                'expected_scan_policy': scan_policy,
                 'input_alignment': 'five-point ArcFace 112x112 shared by AuraFace, LVFace-B, AdaFace IR50',
                 'detection_policy': dict(config.data['detection']),
                 'limits': {'max_samples_per_scene': maximum, 'max_scenes': 16},
