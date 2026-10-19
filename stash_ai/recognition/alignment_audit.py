@@ -229,7 +229,8 @@ def execute(args, config, *, services=None, detector_factory=YuNetDetector):
     key = os.getenv('STASH_API_KEY', '')
     with closing(services.client(url=url, api_key=key,
                                  timeout=config.data['execution']['timeout_seconds'])) as client:
-        paths = services.assets(config, keys=['yunet'], write=lambda line: print(line))
+        detector_key = config.data['models']['detector']
+        paths = services.assets(config, keys=[detector_key], write=lambda line: print(line))
         with closing(detector_factory(config, paths)) as detector:
             directory = _private_directory(directory)
             results = []
@@ -249,7 +250,7 @@ def execute(args, config, *, services=None, detector_factory=YuNetDetector):
                     results.append(result)
             manifest = {
                 'format': 1, 'kind': 'recognition_alignment_audit',
-                'detector': 'yunet',
+                'detector': config.data['models']['detector'],
                 'recognizer_selected_but_not_loaded': config.data['models']['recognizer'],
                 'embedding_namespace': model_namespace,
                 'expected_scan_policy': scan_policy,
@@ -257,7 +258,7 @@ def execute(args, config, *, services=None, detector_factory=YuNetDetector):
                 'detection_policy': dict(config.data['detection']),
                 'limits': {'max_samples_per_scene': maximum, 'max_scenes': 16},
                 'limitations': [
-                    'YuNet face detection is executed again; no recognizer embeddings are generated.',
+                    'The selected detector is executed again; no recognizer embeddings are generated.',
                     'The visibility model is not run: passed_nonvisibility_gates is not an accepted recognition sample.',
                     'Images show the exact pre-normalization aligned BGR crop converted to RGB for inspection.',
                     'The inverse-mapped source mask follows quality.alignable; black pixels may also occur naturally.',

@@ -35,6 +35,19 @@ ASSETS = {
     'faceocc': Asset('mertakin/FaceOcc', '03f229dc75fa14ae480cca9810f983912c2730ad',
                      'model.safetensors', '5d6d27a9cb221692425840a80eb4efc07e6245670b233e2eb618e83fd9b7caf6',
                      57377516, 'MIT'),
+    # SCRFD KPS assets from the upstream InsightFace model family. The HF card
+    # declares Apache-2.0 but InsightFace restricts pretrained weights to
+    # noncommercial research; these terms must be reviewed before deployment.
+    'scrfd_10g': Asset('RuteNL/SCRFD-face-detection-ONNX',
+                       'd168e9d89c1687119307f528cbc67eb257cf0021',
+                       '10g_bnkps.onnx',
+                       '5838f7fe053675b1c7a08b633df49e7af5495cee0493c7dcf6697200b85b5b91',
+                       16923827, 'insightface-pretrained-research-noncommercial'),
+    'scrfd_2_5g': Asset('RuteNL/SCRFD-face-detection-ONNX',
+                        'd168e9d89c1687119307f528cbc67eb257cf0021',
+                        '2.5g_bnkps.onnx',
+                        '3f1ac54e769cb5fd76eda11ac3c088eed78d1f51a935a839d04d49b0e770219e',
+                        3291737, 'insightface-pretrained-research-noncommercial'),
     'yunet': Asset('opencv/face_detection_yunet', '3cc26e7f1014a5ee5d74a42acee58bafc9d0a310',
                    'face_detection_yunet_2023mar.onnx',
                    '8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4', 232589, 'MIT'),
@@ -224,6 +237,17 @@ class YuNetDetector:
         self.config = config
         self.device = 'cpu'
         settings = config.data['detection']
+        # Preserve the legacy YuNet interface used by all four recognizers.
+        # SCRFD uses a separate nine-output adapter without OpenCV DNN inference.
+        key = config.data['models']['detector']
+        if key != 'yunet':
+            from .scrfd import ScrfdDetector
+            self.ort_detector = ScrfdDetector(config, paths, runtime_info=runtime_info)
+            self.detector = None
+            self.detector_device = self.ort_detector.device
+            self.provenance = {'opencv': cv2.__version__, 'detector_device': self.detector_device,
+                               'detector': self.ort_detector.provenance}
+            return
         # Identity construction owns only its detector. Optional quality
         # models verify their own bytes during lazy initialization.
         verify(paths['yunet'], ASSETS['yunet'])

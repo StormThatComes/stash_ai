@@ -3,7 +3,7 @@
 # starting defaults have no claimed accuracy calibration for your VTT library.
 version: 1
 models:
-  detector: yunet
+  detector: scrfd_10g        # Default: SCRFD 10G KPS; options scrfd_2_5g, yunet.
   recognizer: sface             # Options: sface, auraface, lvface_b, adaface_ir50; ONNX Runtime for all.
   device: cuda                 # GPU by default. CPU profile: explicitly choose cpu.
   directory: recognition_models
