@@ -9,7 +9,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 import time
 
-from .clustering import _groups, _similarities, co_presence_allows, matching_policy, vector
+from .clustering import _groups, co_presence_allows, matching_policy, vector
 from .database import encoded
 from .pose_policy import anchor_sql
 from .progress import tracking
@@ -40,13 +40,25 @@ def _cross_score(left, right):
 
 
 def _rank_reference(samples, references, match, cohesion):
-    ranked = []
-    for reference in references:
-        means, lows = zip(*(_similarities(reference, query) for query in samples))
-        mean, minimum = sum(means) / len(means), min(lows)
-        if minimum >= cohesion and mean >= match - 0.15:
-            ranked.append((mean, reference.identifier, reference))
-    ranked.sort(key=lambda v: (-v[0], v[1]))
+    # Reuse the coordinator's native BLAS screening of immutable reference
+    # blocks, while retaining the exact scalar comparisons for every finalist.
+    # Every source sample must satisfy full-reference cohesion.
+    from .scoring import comparisons
+    by_person = {}
+    for query in samples:
+        for reference, mean, minimum in comparisons(
+                references, query, float('-inf'), cohesion):
+            if minimum >= cohesion:
+                by_person.setdefault(reference.identifier, []).append(
+                    (mean, minimum, reference))
+    ranked=[]
+    for _, evidence in by_person.items():
+        if len(evidence)!=len(samples):
+            continue
+        mean=sum(item[0] for item in evidence)/len(evidence)
+        if mean >= match-0.15:
+            ranked.append((mean,evidence[0][2].identifier,evidence[0][2]))
+    ranked.sort(key=lambda v:(-v[0],v[1]))
     return ranked
 
 
