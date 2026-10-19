@@ -22,7 +22,7 @@ def scan_identity(config, namespace):
 
 
 def geometry_contract(face, cue):
-    return digest(['real-source-alignment-v2', list(face.row), list(cue.rect)])
+    return digest(['real-source-alignment-coverage-v3', list(face.row), list(cue.rect)])
 
 
 def scan_scene(database, scope, scene, config, namespace, source, backend_factory, *,

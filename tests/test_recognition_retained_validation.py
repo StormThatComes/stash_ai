@@ -32,6 +32,49 @@ def test_boundary_observation_cache_retires_legacy_acceptance(tmp_path):
         assert db.connection.execute('SELECT COUNT(*) FROM observations WHERE rejected IS NULL').fetchone()[0] == 0
 
 
+
+def test_retained_padding_is_rechecked_under_new_geometry_contract_without_inference(tmp_path):
+    from stash_ai.recognition.config import digest
+    from stash_ai.recognition.media import SpriteInput
+    from stash_ai.recognition.scanning import scan_scene, geometry_contract
+    from stash_ai.recognition.models import checked_detection
+    from tests.helpers.recognition import FACE, Backend, MediaClient
+
+    config = cluster_config(tmp_path)
+    client = MediaClient()
+    with FaceDatabase(config.database) as db, SpriteInput(client, client.scene, config) as source:
+        identifier, reused = scan_scene(db, 'scope', client.scene, config, 'ns', source, Backend)
+        assert not reused
+        selection = [{'scene': '1', 'scan': identifier}]
+        assert sum(r['observations'] for r in rebuild_selected(db, selection, config)[identifier]
+                   if r['status'] == 'accepted') == 3
+        rows = db.connection.execute('SELECT id,cue,geometry,quality FROM observations ORDER BY cue').fetchall()
+        old_quality = json.loads(rows[0]['quality'])
+        changed_geometry = list(FACE.row)
+        for index in range(4, 14, 2):
+            changed_geometry[index] += 90  # Still overlaps source, mostly padding.
+        face = checked_detection(changed_geometry)
+        old_quality['alignment_valid'] = True
+        old_quality['geometry_contract'] = digest([
+            'real-source-alignment-v2', changed_geometry, list(source.cues[rows[0]['cue']].rect)])
+        db.connection.execute('UPDATE observations SET geometry=?,quality=? WHERE id=?', (
+            json.dumps(changed_geometry), json.dumps(old_quality), rows[0]['id']))
+        db.connection.commit()
+
+        assert scan_scene(db, 'scope', client.scene, config, 'ns', source,
+                          lambda: pytest.fail('retained scan must not load models')) == (identifier, True)
+        bad = db.connection.execute('SELECT rejected,embedding,crop,quality FROM observations WHERE id=?',
+                                    (rows[0]['id'],)).fetchone()
+        assert bad['rejected'] == 'face_landmarks_invalid'
+        assert bad['embedding'] is None and bad['crop'] is None
+        new_quality = json.loads(bad['quality'])
+        assert new_quality['alignment_valid'] is False
+        assert new_quality['geometry_contract'] == geometry_contract(face, source.cues[rows[0]['cue']])
+        assert db.connection.execute('SELECT COUNT(*) FROM members WHERE observation=?',
+                                     (rows[0]['id'],)).fetchone()[0] == 0
+        assert db.connection.execute('SELECT COUNT(*) FROM observations WHERE rejected IS NULL').fetchone()[0] == 2
+
+
 def test_incomplete_candidate_cache_rebuilds_without_removing_valid_link(tmp_path, monkeypatch):
     config, client, services, _ = run_setup(tmp_path, monkeypatch)
     assert run(config, services, '1') == 0

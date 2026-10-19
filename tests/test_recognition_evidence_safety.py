@@ -63,8 +63,10 @@ def test_unmeasurable_partial_face_is_rejected_without_losing_other_valid_cues(t
                     'execution: {checkpoint_cues: 1}\n')
     config, client, backend = load(path), MediaClient(count=4), Backend()
     row = list(FACE.row)
+    # Keep enough real source pixels for embedding alignment, but let the
+    # FaceOcc visibility ellipse still cross the left image boundary.
     for index in (0, 4, 6, 8, 10, 12):
-        row[index] -= 96
+        row[index] -= 40
     detections = iter([FACE, replace(FACE, row=tuple(row)), FACE, FACE])
     backend.detect = lambda image: [next(detections)]
     class Visibility:
@@ -82,6 +84,7 @@ def test_unmeasurable_partial_face_is_rejected_without_losing_other_valid_cues(t
             rows = db.connection.execute('SELECT * FROM observations ORDER BY cue').fetchall()
             assert backend.calls == 3 and len(rows) == 4
             assert rows[1]['rejected'] == 'face_visibility_unmeasurable'
+            assert json.loads(rows[1]['quality'])['alignment_valid'] is True
             assert rows[1]['embedding'] is rows[1]['crop'] is None
             assert not json.loads(rows[1]['quality'])['complete']
             assert all(rows[i]['rejected'] is None for i in (0, 2, 3))

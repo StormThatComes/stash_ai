@@ -85,13 +85,28 @@ def test_disabled_filters_preserve_difficult_observations_without_segmentation(t
     config = settings(tmp_path, max_pose_deviation=None, min_visible_face_fraction=0, require_complete_face=False)
     backend, client = Backend(), MediaClient()
     geometry = list(FACE.row)
-    geometry[0], geometry[8] = -4, 159
+    # Exercise optional pose/framing gates without creating a mostly padded
+    # alignment, which remains invalid even when those gates are disabled.
+    geometry[0], geometry[8] = -4, 120
     backend.detect = lambda image: [checked_detection(geometry)]
     with FaceDatabase(config.database) as db, SpriteInput(client, client.scene, config) as source:
         scan, _ = scan_scene(db, 'scope', client.scene, config, 'ns', source, lambda: backend)
         assert backend.calls == 3
         assert cluster_scene(db, scan, config)[0]['status'] == 'accepted'
         assert all('visibility' not in json.loads(r[0]) for r in db.connection.execute('SELECT quality FROM observations'))
+
+
+def test_disabled_optional_filters_cannot_admit_mostly_padded_alignment(tmp_path):
+    config = settings(tmp_path, max_pose_deviation=None, min_visible_face_fraction=0, require_complete_face=False)
+    client, backend = MediaClient(), Backend()
+    geometry = list(FACE.row)
+    geometry[0], geometry[8] = -4, 159
+    backend.detect = lambda image: [checked_detection(geometry)]
+    with FaceDatabase(config.database) as db, SpriteInput(client, client.scene, config) as source:
+        identifier, _ = scan_scene(db, 'scope', client.scene, config, 'ns', source, lambda: backend)
+        assert backend.calls == 0
+        assert db.connection.execute('SELECT COUNT(*) FROM observations WHERE scan=? AND rejected=?',
+                                     (identifier, 'face_landmarks_invalid')).fetchone()[0] == 3
 
 
 def test_pose_gate_includes_boundary_and_requires_valid_landmarks():
