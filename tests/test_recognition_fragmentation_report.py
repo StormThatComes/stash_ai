@@ -214,3 +214,56 @@ def test_report_quality_representative_provenance_and_cap(tmp_path):
     assert pair['score_diagnostics']['selected_scene_only']['comparisons'] == 2
     assert pair['score_diagnostics']['worst_pairs'][0]['left']['quality']['pixels'] is not None or (
         pair['score_diagnostics']['worst_pairs'][0]['right']['quality']['pixels'] is not None)
+
+
+def test_cross_scene_report_includes_withheld_to_confirmed_and_withheld_pairs(tmp_path):
+    config=seeded(tmp_path)
+    from stash_ai.recognition.models import namespace
+    with FaceDatabase(config.database) as state:
+        db=state.connection
+        other=str(uuid.uuid4())
+        policy=matching_policy(config)
+        db.execute('INSERT INTO scans VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+                   (other,'scope','456',namespace(config),'input','detection','{}','{}',2,2,'complete'))
+        person=db.execute("SELECT id FROM people WHERE performer='900'").fetchone()[0]
+        src=db.execute('SELECT embedding FROM observations o JOIN members m ON m.observation=o.id '
+                       'WHERE m.person=? LIMIT 1',(person,)).fetchone()[0]
+        match_id=str(uuid.uuid4())
+        pending_id=str(uuid.uuid4())
+        for cue,(observation,status,linked) in enumerate([
+            (match_id,'accepted',person),(pending_id,'withheld',None)]):
+            db.execute('INSERT INTO observations VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+                       (observation,other,cue,float(cue),'vtt','{}','geometry-'+str(cue),
+                        '{}',None,4,src,None))
+            if linked:
+                db.execute('INSERT INTO members VALUES (?,?)',(observation,linked))
+            db.execute('INSERT INTO candidates VALUES (?,?,?,?,?,?)',
+                       (str(uuid.uuid4()),other,policy,linked,status,
+                        json.dumps({'observation':observation,
+                                    'reason':'candidate_group' if linked else 'insufficient_match_or_cohesion'})))
+        db.execute(
+            "UPDATE candidates SET payload=json_set(payload,'$.anchor_view_probe','below_match_threshold') "
+            "WHERE status='withheld' AND scan=?",(other,))
+        db.commit()
+    result=build(config,'123',compare_scene_ids=['456'])
+    compare=result['cross_scene_comparisons'][0]
+    assert compare['scene_id']=='456'
+    assert compare['reference_identities']==1
+    assert compare['total_anchor_pairs']==8
+    assert compare['pairs_above_global_match']>=4
+    assert any(pair['target']['status']=='withheld' for pair in compare['nearest_anchor_pairs'])
+    assert any(match['status']=='withheld' and match['best_performer']=='900'
+               for match in compare['per_observation'])
+    reverse=build(config,'456',compare_scene_ids=['123'])
+    assert reverse['multi_view_diagnostics']['anchor_view']['below_match_threshold']==1
+    assert len(reverse['cross_scene_comparisons'][0]['per_observation'])==2
+    assert any(x['verdict']=='numeric_match_only'
+               for x in reverse['cross_scene_comparisons'][0]['per_observation'])
+
+
+def test_cross_scene_report_rejects_missing_selected_scene_without_db_writes(tmp_path):
+    config=seeded(tmp_path)
+    with pytest.raises(ValueError,match='No completed recognition scan'):
+        build(config,'123',compare_scene_ids=['456'])
+    with pytest.raises(ValueError,match='different scene'):
+        build(config,'123',compare_scene_ids=['123'])
