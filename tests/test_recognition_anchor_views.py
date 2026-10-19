@@ -154,3 +154,34 @@ def test_anchor_view_rejects_invalid_configuration(tmp_path):
     path.write_text('version: 1\nclustering: {anchor_view_matching: true}\n')
     with pytest.raises(ValueError, match='anchor_view_matching'):
         load(path)
+
+
+def test_validated_same_scene_cues_can_enrich_but_not_seed_a_view(tmp_path):
+    from stash_ai.recognition.anchor_views import _confirmed
+    from stash_ai.recognition.reference_usage import ReferenceUsage
+    config = config_for(tmp_path, context_view_enrichment=True)
+    with FaceDatabase(config.database) as db:
+        identifier, _ = run(db, config, [A]*5)
+        rows = list(db.connection.execute(
+            'SELECT c.id FROM candidates c JOIN observations o '
+            "ON o.id=json_extract(c.payload,'$.observation') "
+            'WHERE c.scan=? ORDER BY o.cue', (identifier,)))
+        for candidate in rows[-2:]:
+            db.connection.execute(
+                "UPDATE candidates SET payload=json_set(payload,'$.reason','same_scene_identity') "
+                'WHERE id=?', (candidate['id'],))
+        db.connection.commit()
+        policy=matching_policy(config)
+        enriched=_confirmed(db.connection,policy,config.data['clustering'],
+                            ReferenceUsage(config.data['clustering']['max_reference_bytes']))
+        assert len(enriched)==2
+        assert all(v.support_count>=3 for v in enriched)
+        # The strict seed was not promoted from contextual evidence alone.
+        for candidate in rows[:3]:
+            db.connection.execute(
+                "UPDATE candidates SET payload=json_set(payload,'$.reason','same_scene_identity') "
+                'WHERE id=?', (candidate['id'],))
+        db.connection.commit()
+        unsafe=_confirmed(db.connection,policy,config.data['clustering'],
+                          ReferenceUsage(config.data['clustering']['max_reference_bytes']))
+        assert unsafe==[]
