@@ -31,7 +31,7 @@ def test_verified_bytes_are_immutable_after_same_size_path_replacement(tmp_path)
 def explicit_yunet(tmp_path):
     from stash_ai.recognition.config import load
     yaml = tmp_path / 'yunet.yml'
-    yaml.write_text('version: 1\\nmodels: {detector: yunet, device: cpu}\\n')
+    yaml.write_text('version: 1\nmodels: {detector: yunet, device: cpu}\n')
     return load(yaml)
 
 
