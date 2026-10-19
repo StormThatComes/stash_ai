@@ -187,6 +187,14 @@ def apply_anchor_views(database, selected, config, *, progress=None):
                       usage=usage, stage='anchor_views')
     anchor_by_id = {group.identifier: group for group in anchors}
     views = _confirmed(db, policy, grouping, usage)
+    # Per-medoid provenance is stored with its own accepted observation;
+    # the read-only report can count *actual* promoted local prototypes.
+    for view in views:
+        db.execute(
+            "UPDATE candidates SET payload=json_set(payload,"
+            "'$.anchor_view_seeded',coalesce(json_extract(payload,'$.anchor_view_seeded'),0)+1) "
+            f'WHERE policy=? AND {address(db, "candidates")}=?',
+            (policy, view.medoid))
     # Record why this conservative stage could not recover a withheld anchor.
     db.execute(
         "UPDATE candidates SET payload=json_set(payload,'$.anchor_view_probe',"
