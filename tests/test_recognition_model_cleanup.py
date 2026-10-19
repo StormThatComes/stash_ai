@@ -195,4 +195,4 @@ def test_orphan_cleanup_snapshots_all_pages_before_mutating_stash(tmp_path, monk
     client.recognition_performers = offset_pages
     assert cleanup(cleanup_args(apply=True), config, services=services) == 0
     assert all(p not in client.profiles for p in expected)
-    assert {p for action, p in client.writes if action == 'delete'} == expected
+    assert {write[1] for write in client.writes if write[0] == 'delete'} == expected
