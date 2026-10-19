@@ -71,10 +71,6 @@ def _commit(db, policy, sources, person, reason, proof):
             db.execute(
                 "UPDATE candidates SET person=?,status='accepted',"
                 "payload=json_set(payload,'$.reason',?,'$.cross_scene',json(?)) "
-                f'WHERE policy=? AND {address(db, "candidates") }=?'
-                if False else
-                "UPDATE candidates SET person=?,status='accepted',"
-                "payload=json_set(payload,'$.reason',?,'$.cross_scene',json(?)) "
                 "WHERE policy=? AND id=? AND status='withheld'",
                 (person, reason, encoded(proof), policy, row['candidate']))
             db.execute('INSERT OR IGNORE INTO members VALUES (?,?)', (row['id'], person))
@@ -150,53 +146,72 @@ def apply_cross_scene_support(database, selected, config, *, progress=None):
                            (row['id'], target.identifier))
             attached.add(group.person)
 
-    # Other provisional sources can corroborate each other, but never through
-    # transitive single-link: every cluster merger rechecks *every* cross pair.
+    # Build a frozen compatibility graph. All nodes in a component must form
+    # a *complete clique*, not merely be connected by a near-neighbour chain.
+    # A marginal third candidate makes the whole component unsafe, rather than
+    # allowing input-order-dependent greedy pair formation.
     pool = [g for g in provisional if g.person not in attached]
-    # Explicitly separate multi-scene evidence from individual same-scene cues.
-    clusters = [[g] for g in pool]
-    frozen = [(g, _rank_reference(g.samples, references, match, cohesion)) for g in pool]
-    barred = {g.person for g, ranked in frozen if ranked and ranked[0][0] >= match-margin}
-    def score(left, right):
-        a = [v for g in left for v in g.samples]
-        b = [v for g in right for v in g.samples]
-        return _cross_score(a, b)
-    def scenes_of(items):
-        return set().union(*(g.scenes for g in items))
-    with tracking(range(len(clusters)), 'Confirm cross-scene provisional groups',
-                  unit='group') as tracked:
-        for _ in tracked:
-            # Pair only mutually unambiguous closest groups. Re-evaluate
-            # prototypes after every accepted pair; an existing identity rival
-            # vetoes any would-be provisional match.
-            pairs = {}
-            for i, left in enumerate(clusters):
-                if not left or any(g.person in barred for g in left):
+    n = len(pool)
+    near = [set() for _ in pool]
+    strong = [set() for _ in pool]
+    barred = set()
+    for i, group in enumerate(pool):
+        ranked = _rank_reference(group.samples, references, match, cohesion)
+        if ranked and ranked[0][0] >= match-margin:
+            barred.add(i)
+    # Native BLAS prefilter on the first sample is *exactly safe* for the
+    # complete-link cohesion bound: if it falls below cohesion, the pair
+    # cannot be joined, regardless of the other members.
+    import numpy as np
+    dims = {v.shape[0] for g in pool for v in g.samples}
+    if len(dims)>1:
+        raise ValueError('Cross-scene provisional group has mixed embedding dimensions.')
+    first_vectors = (np.stack([g.samples[0] for g in pool]).astype('float32')
+                     if pool else np.empty((0,0),dtype='float32'))
+    for offset in range(0, n, 128):
+        block = first_vectors[offset:offset+128] @ first_vectors.T
+        for local, scores in enumerate(block):
+            i = offset+local
+            if i in barred:
+                continue
+            for j in np.flatnonzero(scores[i+1:] >= cohesion) + i+1:
+                if j in barred or not pool[i].scenes.isdisjoint(pool[j].scenes):
                     continue
-                options = []
-                for j, right in enumerate(clusters):
-                    if i == j or not right or any(g.person in barred for g in right):
-                        continue
-                    if not scenes_of(left).isdisjoint(scenes_of(right)):
-                        continue
-                    mean, low = score(left, right)
-                    if low >= cohesion and mean >= match-margin:
-                        options.append((mean, j))
-                options.sort(key=lambda item:(-item[0],item[1]))
-                if options and options[0][0] >= match and (
-                        len(options)==1 or options[0][0]-options[1][0] >= margin):
-                    pairs[i] = options[0]
-            matched = False
-            for i, (mean,j) in sorted(pairs.items()):
-                if j in pairs and pairs[j][1] == i and i < j:
-                    clusters[i].extend(clusters[j])
-                    clusters[j] = []
-                    matched = True
-            if not matched:
-                break
+                mean, low = _cross_score(pool[i].samples, pool[j].samples)
+                if low < cohesion or mean < match-margin:
+                    continue
+                near[i].add(int(j)); near[j].add(i)
+                if mean >= match:
+                    strong[i].add(int(j)); strong[j].add(i)
+    visited=set()
+    clusters=[]
+    with tracking(range(n), 'Confirm cross-scene provisional groups',
+                  unit='group') as tracked:
+        for seed in tracked:
+            if seed in visited or seed in barred:
+                continue
+            component=[]
+            stack=[seed]
+            while stack:
+                node=stack.pop()
+                if node in visited:
+                    continue
+                visited.add(node)
+                component.append(node)
+                stack.extend(near[node]-visited)
+            component.sort()
+            if len(component)<2:
+                continue
+            if any(len(strong[i].intersection(component)) != len(component)-1
+                   for i in component):
+                continue
+            if len(set().union(*(pool[i].scenes for i in component))) != sum(
+                    len(pool[i].scenes) for i in component):
+                continue
+            clusters.append([pool[i] for i in component])
     # Never commit partial provisional clusters, nor two cues from one scene.
     for group in clusters:
-        if not group or len(scenes_of(group)) < 2:
+        if len(set().union(*(g.scenes for g in group))) < 2:
             continue
         independent = {(row['scan'], row['seconds']) for g in group for row,_ in g.rows}
         if len(independent) < settings['min_identity_support']:
@@ -210,7 +225,7 @@ def apply_cross_scene_support(database, selected, config, *, progress=None):
         leader = min(group, key=lambda g:(min(g.scenes),g.person)).person
         proof = {'format':1,'scope':scopes['scope'],'namespace':scopes['namespace'],
                  'sources':sorted(g.person for g in group),
-                 'scenes':sorted(scenes_of(group)),
+                 'scenes':sorted(set().union(*(g.scenes for g in group))),
                  'support':len(independent),'frozen':True}
         # Do not borrow the relaxed same-scene threshold. New provisional
         # people have no pre-existing members and cannot act as merge votes.
