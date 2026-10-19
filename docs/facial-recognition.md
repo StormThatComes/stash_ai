@@ -584,6 +584,32 @@ AuraFace on scans whose detection policy and media have not changed. Profile-onl
 people may remain deliberately unpublished. Portrait ranking is independent of
 this identity-evidence policy.
 
+### Cross-scene provisional identity confirmation
+
+`recognition.cross_scene_provisional: true` opts into a post-strict-replay
+pass. It can attach a withheld `candidate_group` to an existing, strictly
+confirmed identity from **another** selected scene if all samples meet the
+normal (not discounted) match, cohesion and ambiguity thresholds, with
+co-presence protection. It can also combine unconfirmed anchors from different
+scenes only with mutually unambiguous, complete-link pairwise agreement and
+at least `min_identity_support` distinct (scan, time) cues. Same-scene-only
+singletons remain withheld. A new provisional match cannot train further
+matches or merge any existing published identities in that replay. The
+bundled YAML opts in; the default for custom configurations is off.
+
+For targeted offline diagnostics:
+
+```bash
+python stash_ai.py recognition report --scene-id 1 --compare-scene-id 2 --face-config facial_recognition.yml --output comparison.json
+```
+
+The `cross_scene_comparisons` section includes numeric scores against confirmed
+performers as well as the highest-scoring **withheld-to-withheld anchor pairs**
+across the two scenes. All data comes from retained embeddings, no rescan or
+inference, and the report never modifies SQLite. High scores are hypotheses,
+not automatic merge authorization. `multi_view_diagnostics` groups stored
+view-stage exclusion reasons by scene; `not_evaluated` is reported separately.
+
 ### Supported anchor subclusters for same-scene context
 
 `clustering.anchor_view_matching: true` opts in to **strict-core anchor

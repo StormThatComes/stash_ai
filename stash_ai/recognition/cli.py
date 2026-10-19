@@ -55,6 +55,8 @@ def parser():
     report.add_argument('--scene-id', required=True, type=stash_id)
     report.add_argument('--face-config', type=Path, help='Recognition YAML used for the selected run.')
     report.add_argument('--faces-db', type=Path, help='Existing face SQLite database.')
+    report.add_argument('--compare-scene-id', action='append', type=stash_id,
+        help='Compare all retained anchor samples with another scene, including withheld observations; repeatable.')
     report.add_argument('--scope', help='Stash scope, required only when the same scene ID occurs in multiple scopes.')
     report.add_argument('--output', type=Path, help='New JSON report path; stdout if omitted.')
     report.add_argument('--limit', type=int, default=20, help='Maximum suspect pairs to include (1..500).')
