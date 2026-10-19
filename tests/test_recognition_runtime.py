@@ -30,7 +30,7 @@ def test_default_is_gpu_and_cpu_override_keeps_existing_namespace(tmp_path):
     assert namespace(cpu) == namespace(gpu)
     assert gpu.data['models']['detector'] == 'scrfd_10g'
     legacy = tmp_path / 'legacy.yml'
-    legacy.write_text('version: 1\\nmodels: {detector: yunet}\\n')
+    legacy.write_text('version: 1\nmodels: {detector: yunet}\n')
     assert namespace(load(legacy)) == 'b035e353b98c2b02a42e61e7cacd9244a0a25b228828116a83554723e7366ab0'
     assert namespace(cpu) != namespace(load(legacy))
     shipped = load(Path(__file__).resolve().parents[1] / 'facial_recognition.yml')
