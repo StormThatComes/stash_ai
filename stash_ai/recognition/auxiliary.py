@@ -104,6 +104,12 @@ def _attach_confirmed_views(db, selected, config, policy, anchors, usage, cache)
     grouping, settings = config.data['clustering'], config.data['recognition']
     views = confirmed_views(db, policy, grouping,
                             remaining_bytes=grouping['max_reference_bytes'] - usage.bytes)
+    for view in views:
+        db.execute(
+            "UPDATE candidates SET payload=json_set(payload,"
+            "'$.auxiliary_view_seeded',coalesce(json_extract(payload,'$.auxiliary_view_seeded'),0)+1) "
+            f'WHERE policy=? AND {address(db, "candidates")}=?',
+            (policy, view.medoid))
     db.execute(
         "UPDATE candidates SET payload=json_set(payload,'$.auxiliary_view_probe',"
         "'no_confirmed_prototype') WHERE policy=? AND status='withheld' "
