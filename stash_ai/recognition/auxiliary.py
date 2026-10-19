@@ -81,14 +81,6 @@ def apply_auxiliary(database, selected, config, *, progress=None):
                            "payload=json_set(payload,'$.reason','auxiliary_insufficient_support') "
                            "WHERE person=? AND policy=? AND json_extract(payload,'$.reason')='auxiliary_identity'",
                            (person, policy))
-        db.execute(
-            "UPDATE candidates SET payload=json_set(payload,'$.auxiliary_view_probe','accepted') "
-            "WHERE policy=? AND json_extract(payload,'$.reason')='view_identity'",
-            (policy,))
-        db.execute(
-            "UPDATE candidates SET payload=json_set(payload,'$.auxiliary_view_probe','insufficient_support') "
-            "WHERE policy=? AND json_extract(payload,'$.reason')='view_insufficient_support'",
-            (policy,))
         db.execute(f'INSERT OR IGNORE INTO members(observation,person) '
                    f'SELECT {address(db, "c")},c.person FROM candidates c '
                    "WHERE c.policy=? AND c.status='accepted' "
@@ -204,6 +196,14 @@ def _attach_confirmed_views(db, selected, config, policy, anchors, usage, cache)
                    "payload=json_set(payload,'$.reason','view_insufficient_support') "
                    "WHERE policy=? AND status='pending' "
                    "AND json_extract(payload,'$.reason')='view_identity_pending'", (policy,))
+        db.execute(
+            "UPDATE candidates SET payload=json_set(payload,'$.auxiliary_view_probe','accepted') "
+            "WHERE policy=? AND json_extract(payload,'$.reason')='view_identity'",
+            (policy,))
+        db.execute(
+            "UPDATE candidates SET payload=json_set(payload,'$.auxiliary_view_probe','insufficient_support') "
+            "WHERE policy=? AND json_extract(payload,'$.reason')='view_insufficient_support'",
+            (policy,))
         db.execute(f'INSERT OR IGNORE INTO members(observation,person) '
                    f'SELECT {address(db, "c")},c.person FROM candidates c '
                    "WHERE c.policy=? AND c.status='accepted' "
