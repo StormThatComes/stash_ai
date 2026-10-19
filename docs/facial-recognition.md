@@ -35,8 +35,8 @@ research, and do not redistribute weights in this repository.
 
 **Calibration:** the example recognition/clustering cosine thresholds
 are *not* validated for LVFace or AdaFace. Compare labeled same-person
-and different-person samples with `recognition pilot`/offline diagnostics,
-then tune independently. Do not carry AuraFace thresholds over as a
+and different-person samples with the existing internal offline pilot
+and `recognition report` diagnostics, then tune independently. Do not carry AuraFace thresholds over as a
 measured recommendation. Larger weights and new recognizers do not
 automatically recover detail lost in small VTT thumbnails.
 
