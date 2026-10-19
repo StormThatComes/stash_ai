@@ -2,7 +2,7 @@
 
 ## Orphan cleanup and switching recognition models
 
-\`recognition run\` now permits other recognizer namespaces to have published
+`recognition run` now permits other recognizer namespaces to have published
 profiles. For **successfully rebuilt, selected scenes only**, publication attaches
 the current recognizer's identities and detaches verified recognition-owned
 performer links from *other* model namespaces. Old performer profiles, portraits,
@@ -11,24 +11,24 @@ manual (non-recognition-owned) performers remain attached. Unlike ordinary
 same-model stale-link cleanup, even a manually added association to an owned
 **other-model** performer is detached for selected scenes. Ambiguous ownership or
 uncertain unlink results fail the selected scene's publication rather than blindly
-removing unrelated links. \`recognition portraits\` does not change scene links.
+removing unrelated links. `recognition portraits` does not change scene links.
 
 To inventory Stash profiles carrying recognition ownership tokens that have
 **no matching identity in the selected face database**:
 
-\`\`\`powershell
+```powershell
 python stash_ai.py recognition cleanup --faces-db faces_state.sqlite3
-\`\`\`
+```
 
 The default is read-only; an explicit apply deletes the verified orphan
 **performer profiles** (which also removes their Stash associations):
 
-\`\`\`powershell
+```powershell
 python stash_ai.py recognition cleanup --faces-db faces_state.sqlite3 --apply
-\`\`\`
+```
 
 This separate command never loads recognizer models, never scans scenes and
-never runs implicitly on \`recognition run\`. The existing SQLite file is required:
+never runs implicitly on `recognition run`. The existing SQLite file is required:
 a missing path does **not** create an empty database that might make every
 profile appear orphaned. The inventory includes recognizer-owned profiles from
 any installation represented by a valid recognition ownership token on this
