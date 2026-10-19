@@ -205,6 +205,11 @@ def apply_anchor_views(database, selected, config, *, progress=None):
         scan = item['scan']
         local = views_by_scan.get(scan, [])
         if not local:
+            db.execute(
+                "UPDATE candidates SET payload=json_set(payload,'$.anchor_view_probe','no_scene_prototype') "
+                "WHERE scan=? AND policy=? AND status='withheld' "
+                "AND json_extract(payload,'$.reason')='insufficient_match_or_cohesion'",
+                (scan,policy))
             continue
         groups = [v.group for v in local]
         # All local accepted identity rivals participate in the final margin
@@ -228,19 +233,29 @@ def apply_anchor_views(database, selected, config, *, progress=None):
                 _probe(db, row['candidate'], 'below_match_or_cohesion')
                 query = cache.vector(row) if cache is not None else vector(row)
                 by_person = {}
+                saw_cohesion, saw_pose = False, False
                 for group, score, lowest in contributions(
                         groups, query, frozen, len(groups), threshold-margin,
                         exact=(lambda g, q: cache.scores(g, q, row['id'])) if cache is not None else None):
                     if lowest < grouping['view_cohesion_threshold']:
+                        saw_cohesion = True
                         continue
                     view = by_group[id(group)]
                     if pose_view(row['geometry']) != view.pose:
+                        saw_pose = True
                         continue
                     old = by_person.get(group.identifier)
                     if old is None or score > old[0]:
                         by_person[group.identifier] = (score, group, view)
                 ranked = sorted(by_person.items(), key=lambda item: (-item[1][0], item[0]))
-                if not ranked or ranked[0][1][0] < threshold:
+                if not ranked:
+                    if saw_pose:
+                        _probe(db, row['candidate'], 'pose_mismatch')
+                    elif saw_cohesion:
+                        _probe(db, row['candidate'], 'below_cohesion_threshold')
+                    continue
+                if ranked[0][1][0] < threshold:
+                    _probe(db, row['candidate'], 'below_match_threshold')
                     continue
                 _probe(db, row['candidate'], 'ambiguous_identity')
                 if len(ranked)>1 and ranked[0][1][0]-ranked[1][1][0] < margin:
