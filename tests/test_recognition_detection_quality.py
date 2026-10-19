@@ -263,7 +263,7 @@ def test_detection_visibility_asset_is_required_independently_of_portraits(tmp_p
         with pytest.raises(OSError, match='required visibility asset unavailable'):
             models.ensure_assets(config)
     else:
-        assert set(models.ensure_assets(config)) == {'yunet', 'sface', 'faceocc'}
+        assert set(models.ensure_assets(config)) == {'scrfd_10g', 'sface', 'faceocc'}
     assert downloaded.count(models.ASSETS['faceocc'].filename) == 1
 
 
