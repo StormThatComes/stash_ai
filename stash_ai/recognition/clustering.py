@@ -19,15 +19,18 @@ from .evidence_cache import current as evidence, scoped as evidence_owned
 from .parallel_scores import scored_rows, contributions
 
 
+MAX_EMBEDDING_DIMENSIONS = 4096  # SapiensID v1 outputs 4096D; enforce a bounded DB contract.
+
+
 def vector(row):
     import numpy as np
     count('validated_vectors')
     dimensions, blob = row['dimensions'], row['embedding']
-    if (type(dimensions) is not int or not 1 <= dimensions <= 1024 or
+    if (type(dimensions) is not int or not 1 <= dimensions <= MAX_EMBEDDING_DIMENSIONS or
             not isinstance(blob, bytes) or len(blob) != 4 * dimensions):
         raise ValueError('Invalid retained face embedding shape/length.')
     result = np.frombuffer(blob, dtype='<f4')
-    if not np.isfinite(result).all() or abs(float(np.linalg.norm(result)) - 1) > .001:
+    if not np.isfinite(result).all() or abs(float(np.linalg.norm(result.astype(np.float64))) - 1) > .001:
         raise ValueError('Invalid retained face embedding values/normalization.')
     return result
 
