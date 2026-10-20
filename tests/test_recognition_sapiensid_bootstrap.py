@@ -182,8 +182,12 @@ def test_source_provenance_must_be_pinned_and_clean(tmp_path, monkeypatch):
 
     def process(head, status):
         def run(args, **kwargs):
+            if '--show-toplevel' in args:
+                return SimpleNamespace(stdout=str(root) + '\n')
             if 'rev-parse' in args:
                 return SimpleNamespace(stdout=head + '\n')
+            if 'ls-files' in args:
+                return SimpleNamespace(stdout='tracked source\n')
             return SimpleNamespace(stdout=status)
         return run
 
