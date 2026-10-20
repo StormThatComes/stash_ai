@@ -58,7 +58,7 @@ def _copy_observations(db, replay, scan, *, retain_pose=False):
         # Only the pose measurement is needed by opt-in pose-aware matching; never copy JPEGs.
         replay.executemany('INSERT INTO observations VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
                            ((row['id'], row['scan'], row['cue'], row['seconds'], '', '[]',
-                             row['geometry'], compact_quality(row['quality']) if retain_pose else '{}',
+                             row['geometry'], compact_quality(row['quality']),
                               row['rejected'], row['dimensions'],
                              row['embedding'], None) for row in batch))
         replay.executemany('INSERT INTO sample_keys VALUES (?,?)',
@@ -86,10 +86,11 @@ def _apply_members(db, replay, mapping):
         yield from batch
 
 
-def _mapped_candidates(replay, mapping, policy, context):
+def _mapped_candidates(replay, mapping, policy, context, representative_ids=()):
     for row in replay.execute('SELECT * FROM candidates WHERE policy=?', (policy,)):
         payload = json.loads(row['payload'])
         from .reference_roles import STRICT_REASONS
+        payload['reference_selected'] = payload.get('observation') in representative_ids
         payload['reference_role'] = ('strict' if row['status'] == 'accepted' and payload.get('reason') in STRICT_REASONS else 'attachment')
         payload['identity_basis'] = 'cold_selected_replay'
         payload['reference_context'] = context
@@ -218,11 +219,15 @@ def _bind(database, replay, config, scope, namespace, *, usage=None):
     ) as tracked:
         for cluster in tracked:
             ranked = []
-            samples = ([vector(row) for row in replay.execute(
-                'SELECT o.dimensions,o.embedding FROM observations o JOIN members m '
-                'ON m.observation=o.id JOIN scans s ON s.id=o.scan WHERE m.person=? '
-                'ORDER BY CAST(s.scene AS INTEGER),s.scene,o.cue,o.seconds,o.geometry,o.embedding,o.id LIMIT ?',
-                (cluster, config.data['clustering']['max_samples_per_person']))] if old_groups else [])
+            from .reference_selection import select
+            from .reference_roles import strict_sql
+            from .pose_policy import anchor_sql
+            samples = ([sample for _, sample in select(replay.execute(
+                'SELECT o.id,o.dimensions,o.embedding,o.quality,o.geometry,o.seconds,s.scene FROM observations o JOIN members m ON m.observation=o.id '
+                'JOIN scans s ON s.id=o.scan WHERE m.person=? AND ' +
+                anchor_sql('o', config.data['clustering']) + ' AND ' + strict_sql() +
+                ' ORDER BY CAST(s.scene AS INTEGER),s.scene,o.cue,o.seconds,o.geometry,o.embedding,o.id',
+                (cluster,)), config.data['clustering']['max_samples_per_person'])] if old_groups else [])
             parallel = historical_scores.score(tuple(samples), float('-inf'),
                                                 config.data['clustering']['cohesion_threshold'])
             contributions = None
@@ -321,10 +326,11 @@ def _apply(database, replay, selected, config, scope, namespace, mapping, finger
                     pass
             references = _groups(db, scope, namespace, config.data['clustering'], usage=usage, stage='retained')
             context = reference_context(references)
+            representative_ids = {identifier for group in references for identifier in group.sample_ids}
             references.clear()
             with tracking(
                 _inserted(db, 'INSERT INTO candidates VALUES (?,?,?,?,?,?)',
-                          _mapped_candidates(replay, mapping, policy, context)),
+                          _mapped_candidates(replay, mapping, policy, context, representative_ids)),
                 'Save rebuilt candidates',
                 unit='candidate',
                 total=lambda: replay.execute(

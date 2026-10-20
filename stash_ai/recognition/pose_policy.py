@@ -11,7 +11,13 @@ def compact_quality(raw):
     try:
         value = json.loads(raw).get('pose_deviation')
         if type(value) in (int, float) and math.isfinite(value) and 0 <= value <= 1:
-            return json.dumps({'pose_deviation': value}, separators=(',', ':'))
+            record = json.loads(raw)
+            selected = {'pose_deviation': value}
+            for key in ('pixels', 'sharpness', 'roll_deviation'):
+                number = record.get(key)
+                if type(number) in (int, float) and math.isfinite(number) and number >= 0:
+                    selected[key] = number
+            return json.dumps(selected, separators=(',', ':'))
     except (TypeError, ValueError, AttributeError):
         pass
     return '{}'

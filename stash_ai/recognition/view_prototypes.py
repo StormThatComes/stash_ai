@@ -27,7 +27,8 @@ def pose_view(geometry, *, neutral=.12):
         distance = math.hypot(values[4] - values[6], values[5] - values[7])
         if distance <= 1:
             return 'other'
-        signed = (values[8] - eye[0]) / distance
+        horizontal = ((values[6]-values[4])/distance, (values[7]-values[5])/distance)
+        signed = ((values[8]-eye[0])*horizontal[0] + (values[9]-eye[1])*horizontal[1]) / distance
         return 'left' if signed < -neutral else 'right' if signed > neutral else 'other'
     except (ValueError, TypeError, OverflowError):
         return 'other'

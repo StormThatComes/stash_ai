@@ -17,7 +17,7 @@ from .visibility import CONTRACT_ID, VisibilityError, VisibilityGeometryError, c
 def scan_identity(config, namespace):
     visibility_contract = CONTRACT_ID if config.data['detection']['min_visible_face_fraction'] > 0 else None
     return digest({'namespace': namespace, 'detection': config.data['detection'],
-                   'max_cues': config.data['execution']['max_cues'], 'quality_format': 1,
+                   'max_cues': config.data['execution']['max_cues'], 'quality_format': 2,
                    'visibility_contract': visibility_contract})
 
 

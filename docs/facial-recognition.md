@@ -1582,3 +1582,19 @@ Identity reports record `reference_role` for rebuilt assignments. Additional peo
 in a cue do not themselves veto recovery: destination occupancy and competing
 embeddings still protect against confusing two people or reflections. Auxiliary
 view matching chooses a pose-compatible prototype before ranking each identity.
+
+### Representative strict anchors
+
+The bounded reference bank selects quality and appearance/scene coverage from
+all strict members, using at most twice `max_samples_per_person` in selection
+scratch. Later scenes can replace redundant early cues. Duplicate scene/time
+measurements do not fill the bank. Canonical output ordering and the same selector
+are used for SQL loading, RAM snapshots and historical label comparisons.
+`reference_selected` in identity reports describes the bank after that rebuild;
+it is distinct from eligibility (`reference_role`).
+
+Pose quality now measures yaw/pitch in the eye coordinate frame. Roll remains a
+reported measurement but does not by itself disqualify an anchor after alignment.
+The scanning quality contract is versioned: older scans remain retained history,
+and a new invocation measures the updated contract rather than reusing stale
+pose admissions. This may require a new scan on the first run after upgrading.

@@ -38,6 +38,7 @@ class Group:
     identifier: str
     samples: list
     known: bool
+    sample_ids: tuple = ()
 
 
 @measured('references')
@@ -76,22 +77,20 @@ def _groups(db, scope, namespace, policy, *, usage=None, stage='loading'):
             (identifiers, scope, namespace)).fetchone()
         if invalid:
             raise ValueError('Face identity has incompatible retained membership evidence.')
-        samples = {person['id']: [] for person in batch}
-        for row in db.execute('SELECT person,dimensions,embedding FROM ('
-            'SELECT m.person,o.dimensions,o.embedding,ROW_NUMBER() OVER (PARTITION BY m.person '
-            'ORDER BY CAST(s.scene AS INTEGER),s.scene,o.cue,o.seconds,o.geometry,o.embedding,o.id) AS position '
-            'FROM observations o JOIN members m ON m.observation=o.id JOIN scans s ON s.id=o.scan '
-            f'WHERE m.person IN (SELECT value FROM json_each(?)) AND {anchor} AND {strict}) '
-            'WHERE position<=? ORDER BY person,position',
-            (identifiers, policy['max_samples_per_person'])):
-            samples[row['person']].append(vector(row))
+        from .reference_selection import select
         with tracking(batch, 'Load identity references', unit='person') as tracked:
             for person in tracked:
-                vectors = samples[person['id']]
-                if not vectors:
-                    continue  # No eligible anchors under the current policy.
+                rows = db.execute('SELECT o.id,o.dimensions,o.embedding,o.quality,o.geometry,o.seconds,s.scene FROM observations o '
+                    'JOIN members m ON m.observation=o.id JOIN scans s ON s.id=o.scan '
+                    f'WHERE m.person=? AND {anchor} AND {strict} '
+                    'ORDER BY CAST(s.scene AS INTEGER),s.scene,o.cue,o.seconds,o.geometry,o.embedding,o.id',
+                    (person['id'],))
+                selected = select(rows, policy['max_samples_per_person'])
+                if not selected:
+                    continue
+                ids, vectors = zip(*selected)
                 usage.add(vectors, people=1, kind='Retained')
-                result.append(Group(person['id'], tuple(vectors), True))
+                result.append(Group(person['id'], tuple(vectors), True, tuple(ids)))
 
     usage.emit(force=True)
     return result
@@ -203,8 +202,8 @@ def complete_candidates(db, scan, policy, context, count, *, exact_memberships=F
 
 def matching_policy(config):
     from .context import policy_digest
-    return policy_digest(config, 'matching-v9', lambda: {
-        'format': 9, 'recognition': config.data['recognition'],
+    return policy_digest(config, 'matching-v10', lambda: {
+        'format': 10, 'recognition': config.data['recognition'],
         'clustering': {key:value for key,value in config.data['clustering'].items()
                        if key not in ('max_reference_bytes','max_people_per_lookup')}})
 
