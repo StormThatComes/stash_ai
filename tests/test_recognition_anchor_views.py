@@ -68,7 +68,7 @@ def test_one_unsupported_candidate_must_remain_withheld(tmp_path):
         identifier, _ = run(db, config, [A]*3 + [X]*3 + [C])
         last = statuses(db, identifier, config)[-1]
         assert last[0] == 'withheld'
-        assert last[2]['reason'] == 'anchor_view_insufficient_support'
+        assert last[2]['reason'] == 'global_view_insufficient_support'
 
 
 def test_incomplete_view_cannot_bootstrap_attachment(tmp_path):
@@ -109,13 +109,13 @@ def test_anchor_view_matches_distant_timestamps_across_same_scene(tmp_path):
                    for r in statuses(db, identifier, config)[-2:])
 
 
-def test_anchor_view_never_uses_cross_scene_only_core(tmp_path):
+def test_global_anchor_view_uses_confirmed_core_from_other_scene(tmp_path):
     config = config_for(tmp_path)
     with FaceDatabase(config.database) as db:
         one, _ = scan(db, config, '1', [A]*3 + [X]*3, count=6)
         two, _ = scan(db, config, '2', [C]*2, count=2)
         rebuild_selected(db, [{'scene':'1','scan':one},{'scene':'2','scan':two}], config)
-        assert [r[0] for r in statuses(db, two, config)] == ['withheld']*2
+        assert [r[2]['reason'] for r in statuses(db, two, config)] == ['global_view_identity']*2
 
 
 def test_unrelated_co_present_identity_does_not_block_anchor_view(tmp_path):
