@@ -362,10 +362,10 @@ def test_binding_keeps_a_better_historical_rival_when_its_label_is_used(tmp_path
     from stash_ai.recognition.database import FaceDatabase
     from stash_ai.recognition.clustering import cluster_scene, _groups, _similarities
     from stash_ai.recognition.rebuild import rebuild_selected
-    config = changed(setup(tmp_path),clustering={'max_samples_per_person':2})
+    config = changed(setup(tmp_path),clustering={'max_samples_per_person':2,'cohesion_threshold':.35})
     strict = changed(config,recognition={'match_threshold':.98,'ambiguity_margin':.01})
     loose = changed(config,recognition={'match_threshold':.35,'ambiguity_margin':.01},clustering={'cohesion_threshold':.3})
-    a,b,c = np.array([1.,0,0,0]),np.array([.8,.6,0,0]),np.array([.4,0,np.sqrt(.84),0])
+    a,b,c = np.array([1.,0,0,0]),np.array([.65,np.sqrt(1-.65**2),0,0]),np.array([.4,0,np.sqrt(.84),0])
     with FaceDatabase(config.database) as db:
         def fixed_scan(scene, vector, base):
             identifier,_ = scan(db,config,scene,[vector]*3)

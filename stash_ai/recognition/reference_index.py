@@ -133,20 +133,30 @@ class ReferenceIndex:
             raise ValueError('Face identity lookup exceeds configured person budget.')
         identity = tuple(people), policy['max_samples_per_person']
         if self.cached is not None and self.cached[0] == identity:
-            changed = any(tuple(self.order[rank] for rank in self.members.get(person, [])[
-                                :policy['max_samples_per_person']]) != self.groups.get(person, ((),))[0]
-                          for person in self.dirty)
-            if not changed:
+            if not self.dirty:
                 _, groups, size, samples = self.cached
                 usage.add_counts(size, samples, people=len(groups), kind='Retained')
                 self.dirty.clear()
                 count('reference_snapshot_reuses')
                 return list(groups)
+        same_cap = self.cached is not None and self.cached[0][1] == policy['max_samples_per_person']
         self.cached = None
         wanted = {}
         refreshed = 0
         for person in people:
-            ids = tuple(self.order[rank] for rank in self.members[person][:policy['max_samples_per_person']])
+            previous = self.groups.get(person)
+            if previous is not None and person not in self.dirty and same_cap:
+                ids = previous[0]
+            else:
+                from .reference_selection import select
+                from .pose_policy import anchor_sql
+                from .reference_roles import strict_sql
+                rows = self.db.execute('SELECT o.*,s.scene FROM observations o '
+                    'JOIN members m ON m.observation=o.id JOIN scans s ON s.id=o.scan '
+                    'WHERE m.person=? AND ' + anchor_sql('o', policy) + ' AND ' + strict_sql() +
+                    ' ORDER BY CAST(s.scene AS INTEGER),s.scene,o.cue,o.seconds,o.geometry,o.embedding,o.id',
+                    (person,))
+                ids = tuple(identifier for identifier, _ in select(rows, policy['max_samples_per_person']))
             previous = self.groups.get(person)
             if previous is None or previous[0] != ids:
                 refreshed += 1
@@ -177,7 +187,7 @@ class ReferenceIndex:
         for person in people:
             samples = self.groups[person][1]
             usage.add([], people=1, kind='Retained')
-            result.append(Group(person, samples, True))
+            result.append(Group(person, samples, True, self.groups[person][0]))
         count('reference_snapshot_reuses')
         count('reference_people_refreshed', refreshed)
         self.cached = identity, tuple(result), usage.bytes, usage.samples

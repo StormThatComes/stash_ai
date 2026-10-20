@@ -39,6 +39,26 @@ def alignable(detection, image=None):
                 real[ALIGNMENT_FACE_ROWS, ALIGNMENT_FACE_COLUMNS].mean() >= MIN_ALIGNMENT_FACE_COVERAGE)
 
 
+def pose_measurements(landmarks):
+    """Yaw/pitch proxies in the eye coordinate frame; roll is aligned away."""
+    import numpy as np
+    points = np.asarray(landmarks, dtype=np.float64)
+    eye = points[1] - points[0]
+    distance = float(np.linalg.norm(eye))
+    if distance <= 1:
+        return dict(pose_deviation=1., roll_deviation=1., pose_contract='eye-frame-v2')
+    horizontal = eye / distance
+    vertical = np.array([-horizontal[1], horizontal[0]])
+    origin = (points[0] + points[1]) / 2
+    nose = points[2] - origin
+    mouth = (points[3] + points[4]) / 2 - origin
+    yaw = abs(float(nose @ horizontal)) / distance
+    mouth_height = float(mouth @ vertical)
+    pitch = abs(float(nose @ vertical) / max(mouth_height, 1.) - .5)
+    return dict(pose_deviation=max(yaw, pitch),
+                roll_deviation=abs(float(eye[1])) / distance, pose_contract='eye-frame-v2')
+
+
 def assess(image, detection):
     import numpy as np
     x, y, width, height = detection.box
@@ -62,12 +82,10 @@ def assess(image, detection):
     eye_mid, mouth_mid = (points[0] + points[1]) / 2, (points[3] + points[4]) / 2
     ordered = bool(eye_distance > 1 and mouth_mid[1] > eye_mid[1] and
                    eye_mid[1] < points[2, 1] < mouth_mid[1])
-    yaw = abs(float(points[2, 0] - eye_mid[0])) / max(eye_distance, 1)
-    roll = abs(float(points[0, 1] - points[1, 1])) / max(eye_distance, 1)
-    pitch = abs(float((points[2, 1] - eye_mid[1]) / max(float(mouth_mid[1] - eye_mid[1]), 1)) - .5)
+    pose = pose_measurements(points)
     return dict(complete=complete, landmarks_inside=inside and ordered, alignment_valid=alignable(detection, image),
                 pixels=float(min(width, height)), sharpness=sharpness, exposure=exposure,
-                clipped_fraction=clipped, pose_deviation=max(yaw, roll, pitch),
+                clipped_fraction=clipped, **pose,
                 visibility_method='five-landmark-geometry-estimate-v1')
 
 
