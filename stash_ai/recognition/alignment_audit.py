@@ -171,8 +171,11 @@ def audit_scene(source, detector, config, scene_id, directory, *, maximum=None, 
                 for face_index, face in enumerate(faces):
                     stats['faces_detected'] += 1
                     quality = assess(image, face)
+                    detail = getattr(detector, 'observation_quality', None)
+                    if detail is not None:
+                        quality.update(detail(image, face))
                     reason = ('face_detection_score' if face.score <= policy['score_threshold']
-                              else rejection(quality, policy))
+                              else rejection(quality, policy) or quality.get('identity_rejection'))
                     if reason is None and policy['min_visible_face_fraction'] > 0:
                         try:
                             measurement = visibility.measure(image, face)
@@ -198,13 +201,18 @@ def audit_scene(source, detector, config, scene_id, directory, *, maximum=None, 
                         coverages.append(measures['source_coverage'])
                     name = f'cue-{index:05d}-face-{face_index:03d}'
                     suffixes = _images(image, face, matrix, mask, subdir / name)
+                    model_input = None
+                    if config.data['models']['recognizer'] == 'sapiensid_v1':
+                        extra, model_input = _person_input_images(detector, image, face, subdir / name)
+                        suffixes.extend(extra)
                     samples.append({
                         'cue_index': index, 'seconds': float(cue.start),
                         'face_index': face_index, 'detection_score': float(face.score),
                         'quality': {key: value for key, value in quality.items()
                                     if key in ('pixels', 'pose_deviation', 'sharpness', 'exposure',
                                                'clipped_fraction', 'visible_face_fraction',
-                                               'landmarks_inside', 'complete', 'alignment_valid')},
+                                               'landmarks_inside', 'complete', 'alignment_valid', 'identity_input', 'person')},
+                        **({'model_input': model_input} if model_input is not None else {}),
                         'detection_rejection': None,
                         'geometry': measures,
                         'images': [f'scene-{scene_id}/{name}{suffix}' for suffix in suffixes],
@@ -223,16 +231,17 @@ def audit_scene(source, detector, config, scene_id, directory, *, maximum=None, 
     }
 
 
-def execute(args, config, *, services=None, detector_factory=YuNetDetector):
+def execute(args, config, *, services=None, detector_factory=None):
     """Read-only: no FaceDatabase, no recognition run, no publication calls."""
     from .run import Services, instance_scope
-    from .models import namespace
+    from .models import namespace, model_provenance
     from .scanning import scan_identity
     from .database import encoded
     from uuid import NAMESPACE_URL, uuid5
     from stash_ai.runtime.cleanup import closing
 
     services = services or Services()
+    detector_factory = detector_factory or audit_detector
     maximum = args.max_samples_per_scene
     if maximum is not None and maximum < 1:
         raise ValueError('--max-samples-per-scene must be a positive integer.')
@@ -279,14 +288,20 @@ def execute(args, config, *, services=None, detector_factory=YuNetDetector):
                 'recognizer_selected_but_not_loaded': config.data['models']['recognizer'],
                 'embedding_namespace': model_namespace,
                 'expected_scan_policy': scan_policy,
-                'input_alignment': 'five-point ArcFace 112x112 shared by AuraFace, LVFace-B, AdaFace IR50',
+                'input_alignment': ('person square-padded RGB 384x384 with 22 keypoints and foreground mask'
+                                    if config.data['models']['recognizer'] == 'sapiensid_v1' else
+                                    'five-point ArcFace 112x112 shared by AuraFace, LVFace-B, AdaFace IR50'),
+                **({'face_alignment_preview': 'ArcFace 112x112 diagnostic; not the SapiensID encoder input'}
+                   if config.data['models']['recognizer'] == 'sapiensid_v1' else {}),
+                'model_provenance': model_provenance(config),
                 'detection_policy': dict(config.data['detection']),
                 'limits': {'max_samples_per_scene': maximum, 'max_scenes': 16},
                 'sample_filter': 'same detection score, quality and optional FaceOcc gates as recognition scan',
                 'limitations': [
                     'The selected detector is executed again; no recognizer embeddings are generated.',
                     'FaceOcc is run when detection.min_visible_face_fraction is positive; no embedding or identity matching is run.',
-                    'Images show the exact pre-normalization aligned BGR crop converted to RGB for inspection.',
+                    'Face previews show ArcFace alignment; SapiensID also exports the actual 384x384 person input, 22 keypoints and foreground mask.',
+                    'For SapiensID, YOLO pose and unique face/person association gates are applied; identity weights are not loaded.',
                     'The inverse-mapped source mask follows quality.alignable; black pixels may also occur naturally.',
                     'The source landmarks, pose proxy and pixel sizes do not establish whether a face identity is correct.',
                     'Local PNGs are biometric material; keep the private folder out of source control and shared storage.',
@@ -297,3 +312,37 @@ def execute(args, config, *, services=None, detector_factory=YuNetDetector):
             print(f'Alignment audit: {directory} | ' +
                   ' '.join(f"scene {r['scene_id']} saved={r['sampled_faces']}" for r in results))
             return 0
+
+
+def _person_input_images(detector, image, face, path):
+    """Inspect actual SapiensID tensors without loading identity weights."""
+    import numpy as np
+    from PIL import Image, ImageDraw
+    from .sapiensid_backend import CONTRACT
+    batch, points, foreground = detector.audit_input(image, face)
+    rgb = ((batch[0].permute(1, 2, 0).numpy() + 1) * 127.5).round().clip(0, 255).astype('uint8')
+    suffixes = ['-person-input.png', '-person-landmarks.png', '-person-mask.png']
+    with Image.fromarray(rgb) as preview:
+        _png(preview, Path(str(path) + suffixes[0]))
+        with preview.copy() as overlay:
+            draw = ImageDraw.Draw(overlay)
+            for index, (x, y) in enumerate(points[0].tolist()):
+                if x < 0 or y < 0:
+                    continue
+                x, y = x * 384, y * 384
+                color = (0, 200, 255) if index < 17 else (255, 80, 0)
+                draw.ellipse((x-2, y-2, x+2, y+2), fill=color)
+                draw.text((x+3,y), str(index), fill=color)
+            _png(overlay, Path(str(path) + suffixes[1]))
+    with Image.fromarray(foreground[0].numpy().astype('uint8') * 255) as mask:
+        _png(mask, Path(str(path) + suffixes[2]))
+    return suffixes, {'contract': CONTRACT, 'size': [384, 384], 'normalization': '(RGB/255 - .5)/.5',
+                      'keypoints22_normalized': points[0].tolist(),
+                      'foreground_fraction': float(foreground.float().mean())}
+
+
+def audit_detector(config, paths):
+    if config.data['models']['recognizer'] == 'sapiensid_v1':
+        from .sapiensid_backend import SapiensIDFaces
+        return SapiensIDFaces(config, paths, load_identity=False)
+    return YuNetDetector(config, paths)

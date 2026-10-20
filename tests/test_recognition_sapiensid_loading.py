@@ -42,8 +42,8 @@ def test_pose_loader_receives_verified_private_bytes_and_no_download_name(tmp_pa
     c = settings(tmp_path)
     pose = tmp_path/'pose.pt';pose.write_bytes(b'local pose')
     data = plain(c.data)
-    data['sapiensid']['pose_path'] = str(pose)
-    data['sapiensid']['pose_sha256'] = hashlib.sha256(pose.read_bytes()).hexdigest()
+    data['sapiensid']['pose']['path'] = str(pose)
+    data['sapiensid']['pose']['sha256'] = hashlib.sha256(pose.read_bytes()).hexdigest()
     c = replace(c,data=_freeze(data))
     observed = []
     def yolo(path,**kwargs):

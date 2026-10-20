@@ -77,3 +77,36 @@ def verify_wb4m_checkpoint(path, *, expected_size=WB4M_BYTES, expected_sha256=WB
                 or digest.hexdigest() != expected_sha256):
             raise ValueError('SapiensID checkpoint SHA256/size mismatch.')
     return source
+
+
+def prepare_person_input(image, points, *, device="cpu"):
+    """Build the exact model tensors shared by inference and alignment audit."""
+    import torch
+    import numpy as np
+    raw = np.asarray(points, dtype=np.float32)
+    if raw.shape != (22, 2) or not np.isfinite(raw).all():
+        raise ValueError('SapiensID requires 22 finite pixel landmark pairs.')
+    side = max(image.size)
+    padding = np.array([(side-image.width)//2, (side-image.height)//2], dtype=np.float32)
+    missing = (raw == -1).all(axis=1)
+    if not np.all(missing | ((raw >= 0).all(axis=1) &
+                             (raw < np.array(image.size)).all(axis=1))):
+        raise ValueError('SapiensID pixel landmarks must be inside the crop or (-1,-1).')
+    normalized = (raw + padding) / side
+    normalized[missing] = -1
+    batch = preprocess(image).to(device)
+    keypoints = torch.from_numpy(normalized[None]).to(device)
+    # Official whitespace mask: exclude square white padding and contiguous
+    # white border rows/columns, retaining the content rectangle.
+    unnormalized = (batch + 1) / 2
+    summed = unnormalized.sum(dim=1)
+    rows, cols = summed.mean(dim=2) < 2.97, summed.mean(dim=1) < 2.97
+    def bounds(mask):
+        first = mask.float().argmax(dim=1)
+        last = 383 - mask.flip(1).float().argmax(dim=1)
+        return torch.where(mask.any(1), first, 0), torch.where(mask.any(1), last, 383)
+    top, bottom = bounds(rows)
+    left, right = bounds(cols)
+    y, x = torch.arange(384, device=device)[None, :, None], torch.arange(384, device=device)[None, None, :]
+    masks = (y >= top[:,None,None]) & (y <= bottom[:,None,None]) & (x >= left[:,None,None]) & (x <= right[:,None,None])
+    return batch, keypoints, masks

@@ -69,6 +69,16 @@ def load_verified_weights(model, path, *, expected_size=WB4M_BYTES,
     return model
 
 
+def resolve_device(device):
+    import torch
+    if device not in ('auto', 'cpu', 'cuda'):
+        raise ValueError('SapiensID device must be auto, cpu, or cuda.')
+    if device == 'cuda' and not torch.cuda.is_available():
+        raise RuntimeError('SapiensID CUDA was requested but is unavailable.')
+    resolved = ('cuda' if torch.cuda.is_available() else 'cpu') if device == 'auto' else device
+    return torch.device('cuda:0' if resolved == 'cuda' else resolved)
+
+
 class SapiensIDV1Encoder:
     """Synchronous, one-owner GPU/CPU bridge for fully constructed v1 modules.
 
@@ -84,15 +94,10 @@ class SapiensIDV1Encoder:
 
         if not isinstance(model, torch.nn.Module) or (aligner is not None and not isinstance(aligner, torch.nn.Module)):
             raise TypeError('SapiensID model and aligner must be torch.nn.Module objects.')
-        if device not in ('auto', 'cpu', 'cuda'):
-            raise ValueError('SapiensID device must be auto, cpu, or cuda.')
         if type(max_batch_size) is not int or not 1 <= max_batch_size <= 16:
             raise ValueError('SapiensID max_batch_size must be in [1,16].')
-        if device == 'cuda' and not torch.cuda.is_available():
-            raise RuntimeError('SapiensID CUDA was requested but is unavailable.')
-        resolved = ('cuda' if torch.cuda.is_available() else 'cpu') if device == 'auto' else device
         self.torch = torch
-        self.device = torch.device('cuda:0' if resolved == 'cuda' else resolved)
+        self.device = resolve_device(device)
         self.max_batch_size = max_batch_size
         self.owner = get_ident()
         # Do not assign `aligner.eval()`: upstream KeypointPredictor.eval()
@@ -113,36 +118,9 @@ class SapiensIDV1Encoder:
         Geometry follows the same square padding as the image. Missing body
         points stay (-1,-1); the model performs its own 22 -> 19 selection.
         """
-        torch = self.torch
-        import numpy as np
+        from .sapiensid_v1 import prepare_person_input
         self._check_owner()
-        raw = np.asarray(points, dtype=np.float32)
-        if raw.shape != (22, 2) or not np.isfinite(raw).all():
-            raise ValueError('SapiensID requires 22 finite pixel landmark pairs.')
-        side = max(image.size)
-        padding = np.array([(side-image.width)//2, (side-image.height)//2], dtype=np.float32)
-        missing = (raw == -1).all(axis=1)
-        if not np.all(missing | ((raw >= 0).all(axis=1) &
-                                 (raw < np.array(image.size)).all(axis=1))):
-            raise ValueError('SapiensID pixel landmarks must be inside the crop or (-1,-1).')
-        normalized = (raw + padding) / side
-        normalized[missing] = -1
-        batch = preprocess(image).to(self.device)
-        keypoints = torch.from_numpy(normalized[None]).to(self.device)
-        # Official whitespace mask: exclude square white padding and contiguous
-        # white border rows/columns, retaining the content rectangle.
-        unnormalized = (batch + 1) / 2
-        summed = unnormalized.sum(dim=1)
-        rows, cols = summed.mean(dim=2) < 2.97, summed.mean(dim=1) < 2.97
-        def bounds(mask):
-            first = mask.float().argmax(dim=1)
-            last = 383 - mask.flip(1).float().argmax(dim=1)
-            return torch.where(mask.any(1), first, 0), torch.where(mask.any(1), last, 383)
-        top, bottom = bounds(rows)
-        left, right = bounds(cols)
-        y, x = torch.arange(384, device=self.device)[None, :, None], torch.arange(384, device=self.device)[None, None, :]
-        masks = (y >= top[:,None,None]) & (y <= bottom[:,None,None]) & (x >= left[:,None,None]) & (x <= right[:,None,None])
-        return self._encode(batch, keypoints, masks)[0]
+        return self._encode(*prepare_person_input(image, points, device=self.device))[0]
 
     def _check_owner(self):
         if get_ident() != self.owner:

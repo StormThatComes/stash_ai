@@ -72,7 +72,7 @@ def source_imports(root):
 
 
 def load_encoder(config):
-    settings = config.data['sapiensid']
+    settings = config.data['sapiensid']['model']
     root = trusted_checkout(local_path(config, settings['source_directory']))
     directory = local_path(config, settings['checkpoint_directory'])
     raw = checked_bytes(directory / 'model.yaml', settings['model_yaml_sha256'], limit=131072)
@@ -98,8 +98,8 @@ def load_encoder(config):
 
 
 def load_pose(config):
-    settings = config.data['sapiensid']
-    data = checked_bytes(local_path(config, settings['pose_path']), settings['pose_sha256'], limit=134217728)
+    settings = config.data['sapiensid']['pose']
+    data = checked_bytes(local_path(config, settings['path']), settings['sha256'], limit=134217728)
     # Ultralytics accepts a filename and may unpickle it. Load only the exact
     # operator-verified local bytes, with no path-to-download fallback.
     from ultralytics import YOLO

@@ -9,7 +9,8 @@ models:
   directory: recognition_models
   download_missing: true       # Only inside the explicit recognition invocation.
 # For sapiensid_v1, add the local source/checkpoint/pose paths and SHA256 hashes
-# described in docs/sapiensid-v1.md under a top-level sapiensid: section.
+# described in docs/sapiensid-v1.md under sapiensid.model: and sapiensid.pose:.
+# detection.* below always configures face admission; person NMS/count are in sapiensid.pose.
 detection:
   score_threshold: 0.90
   nms_threshold: 0.30

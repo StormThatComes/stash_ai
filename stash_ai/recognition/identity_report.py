@@ -44,7 +44,7 @@ DECISION_FIELDS = (
 QUALITY_FIELDS = (
     'pixels', 'pose_deviation', 'sharpness', 'exposure', 'clipped_fraction',
     'visible_face_fraction', 'landmarks_inside', 'complete', 'alignment_valid',
-    'crop_bounds', 'crop_encoding',
+    'crop_bounds', 'crop_encoding', 'identity_input', 'person',
 )
 
 
@@ -179,9 +179,15 @@ def export(config, output_dir, *, identity_id=None, performer_id=None, scope=Non
                               'JOIN members m ON m.observation=i.observation WHERE m.person=? '
                               'ORDER BY i.observation,i.person', (person['id'],)):
             origins[row['observation']].append(row['person'])
+        retained_model = db.execute('SELECT provenance FROM models WHERE namespace=?', (model_namespace,)).fetchone()
         report = {
             'format': 1, 'kind': 'recognition_identity',
             'requested_identity': requested, 'identity': person,
+            'embedding_model': {'namespace': model_namespace,
+                                'retained_provenance': _object(retained_model[0]) if retained_model else None,
+                                'dimensions': sorted({row[0] for row in db.execute(
+                                    'SELECT DISTINCT o.dimensions FROM observations o JOIN members m ON m.observation=o.id '
+                                    'WHERE m.person=?', (person['id'],))})},
             'current_configuration': {
                 'recognizer': config.data['models']['recognizer'], 'matching_policy': policy,
                 **{key: plain(config.data[key]) for key in ('detection', 'recognition', 'clustering')},
@@ -194,6 +200,7 @@ def export(config, output_dir, *, identity_id=None, performer_id=None, scope=Non
                 'Recorded decisions may be absent, from other policies, or overwritten by later rechecks/rebuilds.',
                 'Scores are cosine similarities, not probabilities. Historical reference members, individual cohesion '
                 'scores and runner-up identity IDs are not always retained; none are inferred here.',
+                'For SapiensID, PNGs still contain retained face crops; person geometry/keypoints are metadata, not retained body pixels.',
                 'Current anchor/reference eligibility describes this snapshot under the supplied configuration, '
                 'not the original matching run. Original identity IDs are historical labels, not matching proof.',
             ],

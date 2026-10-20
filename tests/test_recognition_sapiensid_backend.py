@@ -17,8 +17,9 @@ from tests.helpers.recognition import FACE, Backend, MediaClient
 def settings(tmp_path):
     data = defaults()
     data['models'].update(recognizer='sapiensid_v1', device='cpu')
-    data['sapiensid'].update(source_directory='upstream', checkpoint_directory='wb4m',
-                            model_yaml_sha256='a'*64, pose_path='pose.pt', pose_sha256='b'*64)
+    data['sapiensid']['model'].update(source_directory='upstream', checkpoint_directory='wb4m',
+                                     model_yaml_sha256='a'*64)
+    data['sapiensid']['pose'].update(path='pose.pt',sha256='b'*64)
     data['detection'].update(min_sharpness=0, max_pose_deviation=None,
                              min_visible_face_fraction=0, require_complete_face=False)
     config = load(root=tmp_path)
@@ -72,20 +73,20 @@ def test_selectable_with_required_local_assets_and_no_extra_face_asset(tmp_path)
     assert 'sapiensid_v1' not in asset_selection(c)[0]
     assert model_provenance(c)['sapiensid_v1']['contract'] == CONTRACT
     assert namespace(c) != namespace(load(root=tmp_path))
-    modified = defaults()
-    modified.update({k:dict(v) for k,v in c.data.items() if k in ('models','sapiensid')})
-    modified['sapiensid']['pose_sha256'] = 'c'*64
+    modified = plain(c.data)
+    modified['sapiensid']['pose']['sha256'] = 'c'*64
     assert namespace(replace(c,data=_freeze(modified))) != namespace(c)
-    modified['sapiensid']['person_score_threshold'] = .7
+    modified['sapiensid']['pose']['score_threshold'] = .7
     assert namespace(replace(c,data=_freeze(modified))) != namespace(c)
 
 
-@pytest.mark.parametrize('field,value', [('source_directory',None),('pose_path',''),('pose_sha256','bad'),
-                                         ('person_score_threshold',float('nan')),('keypoint_score_threshold',True)])
+@pytest.mark.parametrize('field,value', [('model.source_directory',None),('pose.path',''),('pose.sha256','bad'),
+                                         ('pose.score_threshold',float('nan')),('pose.keypoint_score_threshold',True)])
 def test_bad_configuration_fails_before_model_loading(tmp_path,field,value):
     from stash_ai.recognition.config import plain
     data = plain(settings(tmp_path).data)
-    data['sapiensid'][field] = value
+    section,name = field.split('.')
+    data['sapiensid'][section][name] = value
     with pytest.raises(ValueError,match='sapiensid'):
         validate(data)
 
@@ -223,3 +224,136 @@ def test_no_pose_detections_are_retained_as_ineligible_faces(tmp_path):
         assert adapter.detect(image) == [FACE]
         assert adapter.observation_quality(image,FACE)['identity_rejection'] is not None
     adapter.close()
+
+
+def test_nested_yaml_is_valid_and_person_controls_change_namespace(tmp_path):
+    import yaml
+    from stash_ai.recognition.config import plain
+    data = plain(settings(tmp_path).data)
+    path = tmp_path / 'nested.yml'
+    path.write_text(yaml.safe_dump(data))
+    parsed = load(path)
+    assert parsed.data['sapiensid']['pose']['max_people_per_frame'] == 100
+    for key,value in [('nms_threshold',.4),('max_people_per_frame',30)]:
+        modified = plain(parsed.data)
+        modified['sapiensid']['pose'][key] = value
+        assert namespace(replace(parsed,data=_freeze(modified))) != namespace(parsed)
+
+
+def test_person_nms_and_count_are_separate_from_face_detector_settings(tmp_path):
+    from stash_ai.recognition.config import plain
+    data = plain(settings(tmp_path).data)
+    data['detection'].update(nms_threshold=.25,max_faces_per_frame=20)
+    data['sapiensid']['pose'].update(nms_threshold=.6,max_people_per_frame=15)
+    adapter,_,_ = backend(replace(settings(tmp_path),data=_freeze(data)),[FACE],[person()])
+    seen = []
+    original = adapter.pose.predict
+    def predict(**kwargs):
+        seen.append(kwargs)
+        return original(**kwargs)
+    adapter.pose.predict = predict
+    with Image.new('RGB',(160,160),(50,80,120)) as image:
+        adapter.detect(image)
+    assert seen[0]['iou'] == .6 and seen[0]['max_det'] == 15
+    adapter.close()
+
+
+@pytest.mark.parametrize('auxiliary_enabled,expected', [(True,'accepted'),(False,'withheld')])
+def test_4096d_anchor_auxiliary_rebuild_and_identity_report(tmp_path,auxiliary_enabled,expected):
+    from stash_ai.recognition.config import plain
+    from stash_ai.recognition.database import FaceDatabase
+    from stash_ai.recognition.models import model_provenance
+    from stash_ai.recognition.rebuild import rebuild_selected
+    from stash_ai.recognition.identity_report import export
+    from stash_ai.recognition.clustering import _groups
+    from tests.test_recognition_pose_policy import replay,membership
+    data = plain(settings(tmp_path).data)
+    data['clustering'].update(max_anchor_pose_deviation=.2,auxiliary_matching=auxiliary_enabled)
+    c = replace(settings(tmp_path),data=_freeze(data))
+    front = np.zeros(4096,dtype=np.float32); front[0] = 1
+    profile = np.zeros(4096,dtype=np.float32); profile[:2] = [.8,.6]
+    with FaceDatabase(c.database) as db:
+        # Use the normal cold replay with real 4096D observations and measured
+        # face pose metadata; the last profile is not allowed to seed a person.
+        selected = replay(db,c,{'1':([front]*3+[profile],{3})})
+        rows = membership(db,selected[0]['scan'])
+        assert rows[-1]['status'] == expected
+        assert json.loads(rows[-1]['payload'])['reason'] == ('auxiliary_identity' if auxiliary_enabled else 'auxiliary_disabled')
+        groups = _groups(db.connection,'scope','ns',c.data['clustering'])
+        assert len(groups) == 1 and len(groups[0].samples) == 3
+        for scan in selected:
+            db.connection.execute('UPDATE scans SET namespace=? WHERE id=?',(namespace(c),scan['scan']))
+        db.connection.execute('UPDATE people SET namespace=?',(namespace(c),))
+        db.connection.execute('INSERT INTO models VALUES (?,?)',(namespace(c),json.dumps(model_provenance(c))))
+        db.connection.execute("UPDATE observations SET quality=json_set(quality,'$.identity_input',?,'$.person',json(?))",
+                              (CONTRACT,json.dumps(person())))
+        db.connection.commit()
+        identifier = groups[0].identifier
+    report = export(c,tmp_path/'identity-export',identity_id=identifier)
+    assert report['embedding_model']['dimensions'] == [4096]
+    assert report['embedding_model']['retained_provenance']['sapiensid_v1']['contract'] == CONTRACT
+    assert report['summary']['roles']['anchor'] == 3
+    assert report['summary']['roles']['auxiliary'] == int(auxiliary_enabled)
+    assert report['samples'][0]['quality']['person']['bounds'] == [0,0,160,160]
+    if auxiliary_enabled:
+        auxiliary = next(s for s in report['samples'] if s['assignment']['role']=='auxiliary')
+        assert not auxiliary['current_anchor_eligible'] and not auxiliary['current_reference_selected']
+
+
+@pytest.mark.parametrize('ambiguous', [False,True])
+def test_sapiens_alignment_exports_actual_model_input_and_uses_scan_association_gates(tmp_path,ambiguous):
+    from stash_ai.recognition.alignment_audit import audit_scene
+    from stash_ai.recognition.media import SpriteInput
+    from stash_ai.recognition.sapiensid_v1 import prepare_person_input
+    c = settings(tmp_path)
+    client = MediaClient(count=1)
+    adapter,model,_ = backend(c,[FACE],[person()]*(2 if ambiguous else 1))
+    with SpriteInput(client,client.scene,c) as source:
+        result = audit_scene(source,adapter,c,'1',tmp_path)
+    assert result['sampled_faces'] == (0 if ambiguous else 1)
+    assert not hasattr(model,'seen')
+    if ambiguous:
+        assert result['detection_rejections'] == {'person_face_association_unavailable':1}
+    else:
+        item = result['samples'][0]
+        assert item['model_input']['size'] == [384,384]
+        assert len(item['model_input']['keypoints22_normalized']) == 22
+        assert item['quality']['person']['bounds'] == [0,0,160,160]
+        from tests.helpers.recognition import textured_image
+        with textured_image() as image:
+            tensors = adapter.audit_input(image,FACE)
+            expected = ((tensors[0][0].permute(1,2,0).numpy()+1)*127.5).round().clip(0,255).astype('uint8')
+        name = next(path for path in item['images'] if path.endswith('-person-input.png'))
+        with Image.open(tmp_path/name) as actual:
+            np.testing.assert_array_equal(np.asarray(actual),expected)
+    adapter.close()
+
+
+def test_alignment_factory_does_not_load_encoder_weights(tmp_path,monkeypatch):
+    from stash_ai.recognition import sapiensid_backend as module
+    from stash_ai.recognition.alignment_audit import audit_detector
+    def init(self,config,paths):
+        self.config=config;self.provenance={};self.detector=None;self.ort_detector=None
+    monkeypatch.setattr(module.YuNetDetector,'__init__',init)
+    monkeypatch.setattr(module,'load_encoder',lambda *a:pytest.fail('alignment loaded identity checkpoint'))
+    monkeypatch.setattr(module,'load_pose',lambda *a:object())
+    instance = audit_detector(settings(tmp_path),{})
+    assert instance.encoder is None and instance.pose is not None
+    instance.close()
+
+
+def test_alignment_command_records_person_contract_without_identity_inference(tmp_path,monkeypatch):
+    from stash_ai.recognition import alignment_audit as audit
+    from stash_ai.recognition.cli import parser
+    from tests.test_recognition_alignment_audit import fake_services
+    adapter,model,_ = backend(settings(tmp_path),[FACE],[person()])
+    services,_,_ = fake_services(adapter)
+    monkeypatch.setattr(audit,'audit_detector',lambda *args:adapter)
+    args = parser().parse_args(['audit-alignment','--scene-id','1','--output-dir',str(tmp_path/'audit')])
+    assert audit.execute(args,settings(tmp_path),services=services) == 0
+    manifest = json.loads((tmp_path/'audit'/'manifest.json').read_text())
+    assert '384x384' in manifest['input_alignment']
+    assert manifest['recognizer_selected_but_not_loaded'] == 'sapiensid_v1'
+    assert manifest['model_provenance']['sapiensid_v1']['person_nms_threshold'] == .7
+    assert len(manifest['scenes'][0]['samples'][0]['model_input']['keypoints22_normalized']) == 22
+    assert not hasattr(model,'seen')

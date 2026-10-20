@@ -13,10 +13,12 @@ CONTRACT = 'sapiensid-v1-yolov8-pose-face-anchor-square384-v1'
 def identity_contract(config):
     settings = config.data['sapiensid']
     return {'contract': CONTRACT, 'source_revision': UPSTREAM_COMMIT,
-            'model_sha256': WB4M_SHA256, 'model_yaml_sha256': settings['model_yaml_sha256'],
-            'pose_sha256': settings['pose_sha256'], 'preprocessing': PREPROCESSING,
-            'person_score_threshold': settings['person_score_threshold'],
-            'keypoint_score_threshold': settings['keypoint_score_threshold']}
+            'model_sha256': WB4M_SHA256, 'model_yaml_sha256': settings['model']['model_yaml_sha256'],
+            'pose_sha256': settings['pose']['sha256'], 'preprocessing': PREPROCESSING,
+            'person_score_threshold': settings['pose']['score_threshold'],
+            'keypoint_score_threshold': settings['pose']['keypoint_score_threshold'],
+            'person_nms_threshold': settings['pose']['nms_threshold'],
+            'max_people_per_frame': settings['pose']['max_people_per_frame']}
 
 
 def associate(faces, people):
@@ -62,15 +64,17 @@ def adjust_pose(points):
 class SapiensIDFaces(YuNetDetector):
     dimensions = EMBEDDING_DIMENSIONS
 
-    def __init__(self, config, paths):
+    def __init__(self, config, paths, *, load_identity=True):
         self.encoder = self.pose = None
         self._person_frame = None
         self.owner = get_ident()
         try:
             super().__init__(config, paths)
-            self.encoder = load_encoder(config)
+            from .sapiensid_inference import resolve_device
+            if load_identity:
+                self.encoder = load_encoder(config)
+            self.device = str(self.encoder.device if self.encoder else resolve_device(config.data['models']['device']))
             self.pose = load_pose(config)
-            self.device = str(self.encoder.device)
             self.provenance['recognizer'] = identity_contract(config)
         except BaseException:
             self.close()
@@ -87,8 +91,9 @@ class SapiensIDFaces(YuNetDetector):
         if faces:
             settings = self.config.data['sapiensid']
             results = self.pose.predict(source=image, device=self.device, verbose=False,
-                                        conf=max(settings['person_score_threshold'], .001),
-                                        max_det=self.config.data['detection']['max_faces_per_frame'])
+                                        conf=settings['pose']['score_threshold'],
+                                        iou=settings['pose']['nms_threshold'],
+                                        max_det=settings['pose']['max_people_per_frame'])
             if len(results) != 1:
                 raise ValueError('SapiensID pose detector returned an invalid frame count.')
             result = results[0]
@@ -101,16 +106,16 @@ class SapiensIDFaces(YuNetDetector):
                     confidences.shape != (len(scores), 17) or any(not np.isfinite(a).all() for a in (boxes,scores,points,confidences)) or
                     np.any((scores < 0) | (scores > 1)) or np.any((confidences < 0) | (confidences > 1))):
                 raise ValueError('SapiensID pose detector returned malformed/non-finite geometry.')
-            if len(boxes) > self.config.data['detection']['max_faces_per_frame']:
+            if len(boxes) > settings['pose']['max_people_per_frame']:
                 raise ValueError('SapiensID pose detector exceeded the configured result count.')
             for box, score, kps, confidence in zip(boxes, scores, points, confidences):
-                if score <= settings['person_score_threshold']:
+                if score <= settings['pose']['score_threshold']:
                     continue
                 left, top = max(0, math.floor(box[0])), max(0, math.floor(box[1]))
                 right, bottom = min(image.width, math.ceil(box[2])), min(image.height, math.ceil(box[3]))
                 if left >= right or top >= bottom:
                     raise ValueError('SapiensID pose detector returned an empty person box.')
-                usable = (confidence > settings['keypoint_score_threshold']) & (kps > 0).all(axis=1)
+                usable = (confidence > settings['pose']['keypoint_score_threshold']) & (kps > 0).all(axis=1)
                 usable &= (kps[:,0] >= left) & (kps[:,0] < right) & (kps[:,1] >= top) & (kps[:,1] < bottom)
                 kps[~usable] = -1
                 people.append({'bounds': [left,top,right,bottom], 'keypoints': kps.tolist(), 'score': float(score)})
@@ -130,7 +135,7 @@ class SapiensIDFaces(YuNetDetector):
         return {'identity_input': CONTRACT, 'person': person,
                 'identity_rejection': None if person else 'person_face_association_unavailable'}
 
-    def embed(self, image, face):
+    def _person_geometry(self, image, face):
         self._owner()
         person = self._person(image, face)
         if person is None:
@@ -144,8 +149,22 @@ class SapiensIDFaces(YuNetDetector):
         body = adjust_pose(normalized)
         points = [[x*side-padx, y*side-pady] if x >= 0 else [-1.,-1.] for x,y in body]
         points.extend([[x-left, y-top] for x,y in face.landmarks])
-        with image.crop(person['bounds']) as crop:
+        return person['bounds'], points
+
+    def embed(self, image, face):
+        self._owner()
+        if self.encoder is None:
+            raise RuntimeError('The alignment audit does not load a recognition encoder.')
+        bounds, points = self._person_geometry(image, face)
+        with image.crop(bounds) as crop:
             return self.encoder.embed_person(crop, points)
+
+    def audit_input(self, image, face):
+        from .sapiensid_v1 import prepare_person_input
+        bounds, points = self._person_geometry(image, face)
+        with image.crop(bounds) as crop:
+            return prepare_person_input(crop, points)
+
 
     def release_frame(self, previous):
         super().release_frame(previous)
