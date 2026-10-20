@@ -41,52 +41,54 @@ different-person cues, not only face detection benchmark scores.
 
 ## Read-only five-landmark alignment audit
 
-Use the opt-in `recognition audit-alignment` action to investigate whether
-the **shared YuNet detection and ArcFace 112 × 112 alignment** are causing
-AuraFace, LVFace-B, and AdaFace to fragment the same person. The command
-rescans the selected VTT sheets with **YuNet only**. It never loads face
-recognizer weights, produces embeddings, modifies SQLite, or publishes to
-Stash. Previously completed recognition scans are not a problem.
+Use the opt-in `recognition audit-alignment` action to inspect detector landmarks
+and the shared ArcFace 112 × 112 crop for the detector selected in
+`models.detector` (YuNet or SCRFD). It never loads face recognizer weights,
+produces embeddings, modifies SQLite, or publishes to Stash.
 
 ```powershell
-python stash_ai.py recognition audit-alignment --scene-id 1 --scene-id 2 --scene-id 4 --face-config facial_recognition.yml --output-dir recognition_alignment_audit/run01 --max-samples-per-scene 64
+python stash_ai.py recognition audit-alignment --scene-id 1 --scene-id 2 --face-config facial_recognition.yml --output-dir recognition_alignment_audit/run01
 ```
 
-For an exact problematic cue (index 135 *in the selected VTT*, zero-based),
-use `--cue-index 135`. The flag is repeatable; all chosen indices must exist
-in every selected scene. The command visits all VTT cues but saves a bounded
-number of **evenly distributed** samples unless an explicit cue is requested.
-`execution.max_cues` in YAML still limits the VTT selection.
+**By default all detected faces that pass the configured detection gates are
+saved**; there is no audit face-count limit. `--max-samples-per-scene 64`
+optionally bounds PNG exports to 64 accepted faces per scene (with evenly
+spaced VTT cue selection), without a hard upper bound on the argument.
+`--cue-index 135` is a repeatable zero-based VTT cue filter, and has no
+128-index limit. With no sample cap and no cue filter, all selected VTT cues
+are eligible. `execution.max_cues` still limits source cue selection, while
+`detection.max_faces_per_frame` remains a detector-level limit.
 
-The created folder contains a `manifest.json` and three PNGs per
-successfully aligned detection: `*-source.png` (original detected image
-with YuNet landmarks and face rectangle), `*-aligned.png` (exact 112 × 112
-pre-normalization, black-padded alignment), and `*-source-mask.png`
-(white = real source pixels, black = synthetic padding). An invalid five-point
-transform produces the source PNG plus a recorded invalidity reason. The
-manifest includes source face size, eye distance in source pixels, affine
-matrix, inverse scale, pose proxy, source coverage, face-region coverage and
-non-visibility gate outcomes for both accepted and rejected detections.
-Summary counters cover **all detected faces**, not only saved previews.
-Each scene also records the `vtt_source_fingerprint` and deterministic
+The audit applies the same hard detection gates as `recognition run`:
+detector score, minimum source face pixels, `detection.min_sharpness`,
+alignment validity, complete-face and pose restrictions. When
+`detection.min_visible_face_fraction > 0`, it additionally loads **FaceOcc**
+and checks the visibility threshold, just as recognition scanning does.
+With visibility disabled (`0`), no FaceOcc asset is loaded. Rejected faces
+are **counted with their rejection reason but not exported as PNGs**.
+The manifest (format 2) includes `detection_rejections`, counters for
+detected/rejected/passing faces, exact applied `detection_policy`, saved
+face quality including optional visibility, and each image's geometry.
+This audit validates detection acceptance, **not** embedding, clustering,
+or the accuracy of identity matching.
+
+The created folder contains a `manifest.json` and three PNGs per passing
+face: `*-source.png` (VTT image with face box and five landmarks),
+`*-aligned.png` (112 × 112 pre-normalization crop), and
+`*-source-mask.png` (white = real source pixels, black = synthetic padding).
+Each scene records its `vtt_source_fingerprint` and deterministic
 `expected_recognition_scan_id`. Compare the latter with `scan_id` from
-`recognition report`; if they differ, the audit inspected different source
-media, recognition-model namespace, scene scope, or scan policy from the
-original embedding run. Neither identifier needs a SQLite read.
+`recognition report` to verify that source, recognition-model namespace,
+scope and scan policy match the embedding run. Alignment source/face-region
+coverage uses the same inverse-warp geometry as `quality.alignable`.
 
-The face-region and full-crop coverage use exactly the same inverse-warp
-geometry and thresholds as `quality.alignable`. The action deliberately
-does **not** evaluate FaceOcc, so `passed_nonvisibility_gates` is not a claim
-that recognition would have accepted a face. It audits YuNet + alignment,
-not model similarity, clustering, or recognition accuracy.
-
-**Privacy:** local screenshots are sensitive biometric data. Explicit scene
-selection and a *new, non-existing* output folder are required. The command
-creates private (0700) directories and restrictive (0600) files on POSIX.
-Never commit or share this folder without reviewing its contents; its
-suggested parent `recognition_alignment_audit/` is gitignored. There is no
-automatic upload, and disabling the command leaves normal recognition
-unchanged.
+**Privacy and disk space:** local screenshots are sensitive biometric data.
+Explicit scene selection and a *new, non-existing* output folder are required;
+POSIX permissions are 0700 for directories and 0600 for files. Exporting all
+faces can create **many PNG files and substantial disk usage**. Never commit
+or share the folder without inspecting it; the suggested
+`recognition_alignment_audit/` parent is gitignored. No automatic upload
+occurs and normal recognition is unchanged.
 
 ## Orphan cleanup and switching recognition models
 

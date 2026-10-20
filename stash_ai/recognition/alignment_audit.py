@@ -17,6 +17,7 @@ from .quality import (
     ALIGNMENT_FACE_COLUMNS, ALIGNMENT_FACE_ROWS, MIN_ALIGNMENT_FACE_COVERAGE,
     MIN_ALIGNMENT_SOURCE_COVERAGE, assess, rejection,
 )
+from .visibility import LazyVisibility, VisibilityError, VisibilityGeometryError, cached as visibility_cached
 
 
 def _coverage(width, height, matrix):
@@ -145,8 +146,8 @@ def _write_json(path, data):
         path.chmod(0o600)
 
 
-def audit_scene(source, detector, config, scene_id, directory, *, maximum=32, cue_indices=None):
-    """Scan all VTT cues but serialize only evenly spaced (or explicit) cues."""
+def audit_scene(source, detector, config, scene_id, directory, *, maximum=None, cue_indices=None, visibility=None):
+    """Export all passing VTT detections by default; optional cue/face caps are explicit."""
     from stash_ai.runtime.cleanup import closing
 
     total = len(source.cues)
@@ -154,7 +155,11 @@ def audit_scene(source, detector, config, scene_id, directory, *, maximum=32, cu
         invalid = sorted(index for index in cue_indices if index >= total or index < 0)
         if invalid:
             raise ValueError(f'Scene {scene_id} has no selected cue index {invalid[0]}; valid range is 0..{total-1}.')
-    selected = set(cue_indices) if cue_indices is not None else _sampled_indices(total, maximum)
+    selected = (set(cue_indices) if cue_indices is not None else
+                None if maximum is None else _sampled_indices(total, maximum))
+    policy = config.data['detection']
+    if policy['min_visible_face_fraction'] > 0 and visibility is None:
+        raise VisibilityError('Alignment audit requires FaceOcc for detection.min_visible_face_fraction.')
     stats, reasons, samples, sizes, coverages = Counter(), Counter(), [], [], []
     subdir = directory / ('scene-' + scene_id)
     subdir.mkdir(mode=0o700, exist_ok=False)
@@ -166,14 +171,27 @@ def audit_scene(source, detector, config, scene_id, directory, *, maximum=32, cu
                 for face_index, face in enumerate(faces):
                     stats['faces_detected'] += 1
                     quality = assess(image, face)
-                    reason = ('face_detection_score' if face.score <= config.data['detection']['score_threshold']
-                              else rejection(quality, config.data['detection']))
-                    reasons[reason or 'passed_nonvisibility_gates'] += 1
+                    reason = ('face_detection_score' if face.score <= policy['score_threshold']
+                              else rejection(quality, policy))
+                    if reason is None and policy['min_visible_face_fraction'] > 0:
+                        try:
+                            measurement = visibility.measure(image, face)
+                        except VisibilityGeometryError:
+                            reason = 'face_visibility_unmeasurable'
+                        else:
+                            if not visibility_cached(measurement):
+                                raise VisibilityError('Alignment audit received invalid FaceOcc measurements.')
+                            quality.update(measurement)
+                            if quality['visible_face_fraction'] < policy['min_visible_face_fraction']:
+                                reason = 'face_occluded'
+                    reasons[reason or 'passed_detection_gates'] += 1
                     sizes.append(quality['pixels'])
-                    # Preserve the actual detector result, including rejected
-                    # faces, so alignment can be investigated independently
-                    # from the inference and visibility gates.
-                    if index not in selected or len(samples) >= maximum:
+                    if reason is not None:
+                        stats['faces_rejected'] += 1
+                        continue
+                    stats['faces_passed_detection'] += 1
+                    if ((selected is not None and index not in selected) or
+                            (maximum is not None and len(samples) >= maximum)):
                         continue
                     measures, matrix, mask = _diagnostics(image, face)
                     if measures.get('source_coverage') is not None:
@@ -184,17 +202,20 @@ def audit_scene(source, detector, config, scene_id, directory, *, maximum=32, cu
                         'cue_index': index, 'seconds': float(cue.start),
                         'face_index': face_index, 'detection_score': float(face.score),
                         'quality': {key: value for key, value in quality.items()
-                                    if key in ('pixels','pose_deviation','sharpness',
-                                               'landmarks_inside','complete','alignment_valid')},
-                        'nonvisibility_rejection': reason,
+                                    if key in ('pixels', 'pose_deviation', 'sharpness', 'exposure',
+                                               'clipped_fraction', 'visible_face_fraction',
+                                               'landmarks_inside', 'complete', 'alignment_valid')},
+                        'detection_rejection': None,
                         'geometry': measures,
                         'images': [f'scene-{scene_id}/{name}{suffix}' for suffix in suffixes],
                     })
     return {
         'scene_id': scene_id, 'total_selected_vtt_cues': total,
-        'sampling': 'explicit_indices' if cue_indices is not None else 'evenly_spaced_indices',
-        'requested_sample_indices': sorted(selected), 'max_saved_faces': maximum,
-        'counters': dict(stats), 'nonvisibility_rejections': dict(reasons),
+        'sampling': ('explicit_indices' if cue_indices is not None else
+                     'all_cues' if selected is None else 'evenly_spaced_indices'),
+        'requested_sample_indices': None if selected is None else sorted(selected),
+        'max_saved_faces': maximum,
+        'counters': dict(stats), 'detection_rejections': dict(reasons),
         'sampled_faces': len(samples),
         'median_source_face_pixels_all_detections': statistics.median(sizes) if sizes else None,
         'median_alignment_source_coverage_saved': statistics.median(coverages) if coverages else None,
@@ -213,14 +234,14 @@ def execute(args, config, *, services=None, detector_factory=YuNetDetector):
 
     services = services or Services()
     maximum = args.max_samples_per_scene
-    if not 1 <= maximum <= 128:
-        raise ValueError('--max-samples-per-scene must be between 1 and 128.')
+    if maximum is not None and maximum < 1:
+        raise ValueError('--max-samples-per-scene must be a positive integer.')
     scenes = list(dict.fromkeys(args.scene_id or []))
     if not scenes or len(scenes) > 16:
         raise ValueError('Audit requires 1..16 explicit --scene-id arguments.')
     indices = None if not args.cue_index else sorted(set(args.cue_index))
-    if indices is not None and (len(indices) > 128 or any(i < 0 for i in indices)):
-        raise ValueError('At most 128 nonnegative --cue-index values are allowed.')
+    if indices is not None and any(i < 0 for i in indices):
+        raise ValueError('--cue-index values must be nonnegative.')
     # Check selection before making even the output folder.
     directory = Path(args.output_dir).expanduser()
     if directory.exists():
@@ -230,8 +251,12 @@ def execute(args, config, *, services=None, detector_factory=YuNetDetector):
     with closing(services.client(url=url, api_key=key,
                                  timeout=config.data['execution']['timeout_seconds'])) as client:
         detector_key = config.data['models']['detector']
-        paths = services.assets(config, keys=[detector_key], write=lambda line: print(line))
-        with closing(detector_factory(config, paths)) as detector:
+        needs_visibility = config.data['detection']['min_visible_face_fraction'] > 0
+        keys = [detector_key] + (['faceocc'] if needs_visibility else [])
+        paths = services.assets(config, keys=keys, write=lambda line: print(line))
+        with closing(detector_factory(config, paths)) as detector, closing(
+                LazyVisibility(config, paths, getattr(services, 'visibility', None)),
+                name='close alignment audit visibility') as visibility:
             directory = _private_directory(directory)
             results = []
             model_namespace = namespace(config)
@@ -241,7 +266,7 @@ def execute(args, config, *, services=None, detector_factory=YuNetDetector):
                 scene = client.scene(scene_id)
                 with services.source(client, scene, config) as source:
                     result = audit_scene(source, detector, config, scene_id, directory,
-                                         maximum=maximum, cue_indices=indices)
+                                         maximum=maximum, cue_indices=indices, visibility=visibility)
                     result['vtt_source_fingerprint'] = source.fingerprint
                     result['vtt_coverage'] = dict(source.coverage)
                     result['expected_recognition_scan_id'] = str(uuid5(
@@ -249,7 +274,7 @@ def execute(args, config, *, services=None, detector_factory=YuNetDetector):
                                                  source.fingerprint, scan_policy])))
                     results.append(result)
             manifest = {
-                'format': 1, 'kind': 'recognition_alignment_audit',
+                'format': 2, 'kind': 'recognition_alignment_audit',
                 'detector': config.data['models']['detector'],
                 'recognizer_selected_but_not_loaded': config.data['models']['recognizer'],
                 'embedding_namespace': model_namespace,
@@ -257,9 +282,10 @@ def execute(args, config, *, services=None, detector_factory=YuNetDetector):
                 'input_alignment': 'five-point ArcFace 112x112 shared by AuraFace, LVFace-B, AdaFace IR50',
                 'detection_policy': dict(config.data['detection']),
                 'limits': {'max_samples_per_scene': maximum, 'max_scenes': 16},
+                'sample_filter': 'same detection score, quality and optional FaceOcc gates as recognition scan',
                 'limitations': [
                     'The selected detector is executed again; no recognizer embeddings are generated.',
-                    'The visibility model is not run: passed_nonvisibility_gates is not an accepted recognition sample.',
+                    'FaceOcc is run when detection.min_visible_face_fraction is positive; no embedding or identity matching is run.',
                     'Images show the exact pre-normalization aligned BGR crop converted to RGB for inspection.',
                     'The inverse-mapped source mask follows quality.alignable; black pixels may also occur naturally.',
                     'The source landmarks, pose proxy and pixel sizes do not establish whether a face identity is correct.',

@@ -9,7 +9,7 @@ import pytest
 from PIL import Image
 
 from stash_ai.recognition.alignment_audit import (
-    _coverage, _diagnostics, _sampled_indices, execute,
+    _coverage, _diagnostics, _sampled_indices, audit_scene, execute,
 )
 from stash_ai.recognition.aura import similarity_matrix
 from stash_ai.recognition.cli import parser
@@ -111,17 +111,18 @@ def test_private_exact_source_aligned_mask_and_manifest(tmp_path, monkeypatch):
     assert not cfg.database.exists()  # No SQLite ever created.
     manifest=json.loads((dst/'manifest.json').read_text())
     assert manifest['kind']=='recognition_alignment_audit'
+    assert manifest['format']==2
     assert manifest['recognizer_selected_but_not_loaded']=='lvface_b'
     assert len(manifest['embedding_namespace'])==64
     assert len(manifest['expected_scan_policy'])==64
     scene=manifest['scenes'][0]
-    assert scene['counters']=={'cues_examined':3,'faces_detected':3}
+    assert scene['counters']=={'cues_examined':3,'faces_detected':3,'faces_passed_detection':3}
     assert scene['sampled_faces']==2
     assert scene['requested_sample_indices']==[0,2]
     assert len(scene['vtt_source_fingerprint'])==64
     assert len(scene['expected_recognition_scan_id'])==36
     assert scene['vtt_coverage']['selected_cues']==3
-    assert scene['nonvisibility_rejections']=={'passed_nonvisibility_gates':3}
+    assert scene['detection_rejections']=={'passed_detection_gates':3}
     assert [sample['cue_index'] for sample in scene['samples']]==[0,2]
     with textured_image() as image:
         import cv2
@@ -173,12 +174,17 @@ def test_rejects_existing_output_without_scanning_or_loading_models(tmp_path,mon
     assert detector.calls==0 and assets==[]
 
 
-def test_caps_and_even_sampling():
+def test_optional_cap_and_even_sampling():
     assert _sampled_indices(3,8)=={0,1,2}
     assert _sampled_indices(11,3)=={0,5,10}
     assert _sampled_indices(11,1)=={5}
+    default=parser().parse_args(['audit-alignment','--scene-id','1','--output-dir','unused'])
+    assert default.max_samples_per_scene is None
+    large=parser().parse_args(['audit-alignment','--scene-id','1','--output-dir','unused',
+                               '--max-samples-per-scene','129'])
+    assert large.max_samples_per_scene == 129
     cfg=SimpleNamespace()
-    for count in (0,129):
+    for count in (0,-1):
         with pytest.raises(ValueError,match='max-samples'):
             execute(SimpleNamespace(scene_id=['1'],max_samples_per_scene=count,
                                     cue_index=None, output_dir='unused'),cfg)
@@ -241,3 +247,95 @@ def test_cli_main_report_preserves_explicit_faces_db(tmp_path, monkeypatch):
     assert cli.main(['report', '--scene-id', '1', '--faces-db', str(file)]) == 0
     assert received == [file.resolve()]
     assert not file.exists()
+
+
+class _AuditFrames:
+    def __init__(self, size):
+        self.cues=[SimpleNamespace(start=float(i)) for i in range(size)]
+
+    def frames(self):
+        for index, cue in enumerate(self.cues):
+            yield index, cue, textured_image()
+
+
+def test_default_audit_writes_all_129_eligible_faces_as_pngs(tmp_path):
+    cfg=config(tmp_path)
+    scene=audit_scene(_AuditFrames(129),Detector(),cfg,'1',tmp_path)
+    assert scene['sampling']=='all_cues'
+    assert scene['requested_sample_indices'] is None
+    assert scene['max_saved_faces'] is None
+    assert scene['counters']['faces_passed_detection']==129
+    assert scene['sampled_faces']==129
+    assert len(list((tmp_path/'scene-1').glob('*.png')))==129*3
+    assert len(scene['samples'][128]['images'])==3
+
+
+def test_audit_omits_blurry_and_low_confidence_faces_from_pngs(tmp_path):
+    from stash_ai.recognition.models import checked_detection
+
+    cfg=config(tmp_path)
+    cfg.source_path.write_text(cfg.source_path.read_text().replace('min_sharpness: 0',
+                                                                   'min_sharpness: 1'))
+    cfg=load(cfg.source_path)
+
+    class Frames(_AuditFrames):
+        def frames(self):
+            for i, cue in enumerate(self.cues):
+                image=Image.new('RGB',(160,160),(128,128,128)) if i==0 else textured_image()
+                yield i, cue, image
+
+    class ScoreDetector(Detector):
+        def detect(self, image):
+            self.calls+=1
+            if self.calls==3:
+                return [checked_detection((*FACE.row[:-1],0.5))]
+            return [FACE]
+
+    scene=audit_scene(Frames(3),ScoreDetector(),cfg,'1',tmp_path)
+    assert scene['counters']=={'cues_examined':3,'faces_detected':3,
+                               'faces_rejected':2,'faces_passed_detection':1}
+    assert scene['detection_rejections']=={'face_blurred':1,
+                                           'passed_detection_gates':1,
+                                           'face_detection_score':1}
+    assert scene['sampled_faces']==1
+    assert [sample['cue_index'] for sample in scene['samples']]==[1]
+    assert len(list((tmp_path/'scene-1').glob('*.png')))==3
+
+
+def test_visibility_gate_uses_faceocc_and_excludes_occluded_samples(tmp_path,monkeypatch):
+    from stash_ai.recognition.visibility import CONTRACT_ID
+
+    monkeypatch.setenv('STASH_URL','http://stash/')
+    cfg,dst,args,detector,services,assets,_=invoke(tmp_path)
+    cfg.source_path.write_text(cfg.source_path.read_text().replace(
+        'min_visible_face_fraction: 0','min_visible_face_fraction: 0.8'))
+    cfg=load(cfg.source_path)
+    args.max_samples_per_scene=None
+    observed=[]
+
+    class Visibility:
+        def __init__(self, settings, paths):
+            assert 'faceocc' in paths
+            self.calls=0
+            observed.append(self)
+
+        def measure(self, image, face):
+            self.calls+=1
+            return {'visible_face_fraction': 0.4 if self.calls==1 else 0.95,
+                    'visibility': {'contract':CONTRACT_ID}}
+
+        def close(self):
+            self.closed=True
+
+    services.visibility=Visibility
+    services.assets=lambda settings, *, keys, write: (
+        assets.extend(keys) or {'yunet':'verified-yunet-only','faceocc':'verified-faceocc-only'})
+    assert execute(args,cfg,services=services,detector_factory=lambda *_:detector)==0
+    scene=json.loads((dst/'manifest.json').read_text())['scenes'][0]
+    assert assets==['yunet','faceocc']
+    assert observed[0].calls==3 and observed[0].closed
+    assert scene['detection_rejections']=={'face_occluded':1,'passed_detection_gates':2}
+    assert scene['sampled_faces']==2
+    assert [sample['cue_index'] for sample in scene['samples']]==[1,2]
+    assert all(s['quality']['visible_face_fraction']>=0.8 for s in scene['samples'])
+    assert len(list((dst/'scene-1').glob('*.png')))==6
