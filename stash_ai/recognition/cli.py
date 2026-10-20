@@ -49,8 +49,8 @@ def parser():
         help='Scene to inspect; repeat for at most 16 explicit IDs.')
     audit.add_argument('--output-dir', type=Path, required=True,
         help='Nonexistent private local directory for sensitive PNGs and manifest.json.')
-    audit.add_argument('--max-samples-per-scene', type=int, default=32,
-        help='Maximum saved faces per scene (1..128); automatic even cue coverage.')
+    audit.add_argument('--max-samples-per-scene', type=int,
+        help='Optional positive limit on saved passing faces per scene; omitted exports all passing faces.')
     audit.add_argument('--cue-index', action='append', type=int,
         help='0-based index in selected VTT cues to inspect; repeat to target specific frames.')
     audit.add_argument('--face-config', type=Path, help='Recognition YAML used for detector and quality gates.')
