@@ -123,3 +123,67 @@ profile), provide a real person detector and multi-person crop workflow,
 and connect the person-specific geometry and evidence lifecycle before
 introducing safe publication. A synthetic CPU adapter test is not a real
 recognition-accuracy or GPU-memory benchmark.
+
+
+## PR 3: Offline initialization from a pinned upstream checkout
+
+The optional bootstrap in `stash_ai.recognition.sapiensid_bootstrap` now
+constructs the upstream `SapiensModel` and `KeypointPredictor` automatically,
+provided their compatible **local** dependencies and weights are already
+installed. It builds the official YOLO-pose + DFA aligner, without invoking
+upstream's unsafe `get_face_kp_predictor(...)` loader:
+
+- The SapiensID Python source must be the exact clean revision
+  `a8d8011117db23f20c7ade3bc38e8075810ac886` from
+  [mk-minchul/sapiensid](https://github.com/mk-minchul/sapiensid).
+  There is no network fetch, dynamic GitHub code download, or auto-install.
+- Local `model.pth` and `model.yaml` must match the `wb4m` architecture;
+  model checkpoint hash+length are checked before loading through
+  `torch.load(weights_only=True)` and strict state-dict loading. The model
+  YAML and separate YOLO-pose/DFA checkpoint files require operator-supplied,
+  independent SHA256 hashes.
+- The YOLO pose file is copied to a private temporary verified path and loaded
+  by the official Ultralytics constructor. **Ultralytics may use pickle-based
+  deserialization internally:** verify upstream trust and the pinned checksum
+  before invoking this opt-in bootstrap. Never accept arbitrary user-supplied
+  `.pt` files.
+- DFA is assembled with upstream's `get_landmark_predictor`, then its
+  weights are read from the verified file descriptor using
+  `torch.load(weights_only=True)` and loaded strictly. This avoids the
+  ordinary upstream `get_face_kp_predictor` that calls unsafe `torch.load`.
+- The `KeypointPredictor` is first instantiated with
+  `use_yolo=False, face_detector=None` to prevent implicit downloads and
+  unsafe weight loads, and then receives the validated YOLO and DFA objects.
+- The returned encoder is bound to the calling thread. The existing JoyTag
+  torch and torchvision wheels are reused. Extra upstream packages (for
+  example `ultralytics`, `omegaconf`, `pyrootutils`, `timm` and their
+  dependencies) are **optional**, and must be installed explicitly in a
+  compatible environment. Upstream pins are old; do not install their entire
+  legacy `requirements.txt` over the main application blindly.
+
+**Offline smoke test on one previously isolated person crop:**
+
+```powershell
+python -m stash_ai.recognition.sapiensid_bootstrap `
+  --checkout C:\\models\\sapiensid-source `
+  --checkpoint-dir C:\\models\\sapiensid-wb4m `
+  --model-yaml-sha256 YOUR_64_CHARACTER_SHA256 `
+  --yolo-pose-path C:\\models\\yolov8n-pose.pt `
+  --yolo-pose-sha256 YOUR_64_CHARACTER_SHA256 `
+  --dfa-path C:\\models\\mobilenetv4_Final.pth `
+  --dfa-sha256 YOUR_64_CHARACTER_SHA256 `
+  --image C:\\models\\one-person-example.jpg --device cuda
+```
+
+Hashes for the independently sourced weights can be computed with
+`Get-FileHash -Algorithm SHA256 C:\\models\\yolov8n-pose.pt`. Make sure the sources are
+trustworthy **before** hashing. The successful smoke test prints only vector
+dimensionality, normalized status and execution device; never the biometric
+embedding itself. It does not detect multiple people and **does not** change
+recognition YAML, SQLite or any Stash scene assignments.
+
+Real-checkpoint/GPU smoke tests are still needed on the intended platform.
+The CI tests use synthetic local checkpoints and mocked upstream constructors:
+they verify bootstrap lifecycle and rejection behavior, not recognition
+accuracy. The next stage is multi-person VTT cropping and a separate
+person-observation namespace with a no-publish evaluation.
