@@ -36,7 +36,7 @@ MAX_FILE_BYTES = 16 * 1024 * 1024
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 REQUIREMENT_PROFILES = frozenset({'requirements.txt', 'requirements-cpu.txt', 'requirements-gpu.txt'})
 DEPENDENCY_FILES = REQUIREMENT_PROFILES | frozenset({
-    'requirements-dev.txt', 'constraints/cpu-py314.txt', 'constraints/gpu-py314.txt',
+    'requirements-dev.txt', 'requirements-sapiensid.txt', 'constraints/cpu-py314.txt', 'constraints/gpu-py314.txt',
     'constraints/README.md',
 })
 PREPARING = 'preparing.json'
