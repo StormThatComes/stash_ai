@@ -250,3 +250,54 @@ def load_local_encoder(*, checkout, checkpoint_dir, model_yaml_sha256,
         aligner.config.use_yolo = True
         aligner.eval()
         return SapiensIDV1Encoder(model, aligner, device=device, max_batch_size=max_batch_size)
+
+
+def main(argv=None):
+    """Explicit local one-person smoke test; never invokes Stash APIs."""
+    import argparse
+    import json
+    from PIL import Image
+
+    parser = argparse.ArgumentParser(
+        description='Run SapiensID v1 on a single already-cropped person image (offline).')
+    parser.add_argument('--checkout', required=True,
+                        help='Clean official source checkout at the audited commit.')
+    parser.add_argument('--checkpoint-dir', required=True,
+                        help='Directory containing wb4m model.yaml and model.pth.')
+    parser.add_argument('--model-yaml-sha256', required=True)
+    parser.add_argument('--yolo-pose-path', required=True)
+    parser.add_argument('--yolo-pose-sha256', required=True)
+    parser.add_argument('--dfa-path', required=True)
+    parser.add_argument('--dfa-sha256', required=True)
+    parser.add_argument('--image', required=True,
+                        help='Local RGB image containing a single person (no detection done).')
+    parser.add_argument('--device', choices=('auto','cpu','cuda'), default='auto')
+    parser.add_argument('--batch-size', type=int, default=1)
+    args = parser.parse_args(argv)
+
+    path = Path(args.image)
+    if not path.is_file() or path.is_symlink() or path.stat().st_size > 50 * 1024 * 1024:
+        parser.error('Image must be a local regular file of at most 50 MiB.')
+    encoder = load_local_encoder(
+        checkout=args.checkout, checkpoint_dir=args.checkpoint_dir,
+        model_yaml_sha256=args.model_yaml_sha256,
+        yolo_pose_path=args.yolo_pose_path, yolo_pose_sha256=args.yolo_pose_sha256,
+        dfa_path=args.dfa_path, dfa_sha256=args.dfa_sha256,
+        device=args.device, max_batch_size=args.batch_size)
+    try:
+        with Image.open(path) as source:
+            if source.width * source.height > 16 * 1024 * 1024:
+                raise ValueError('SapiensID smoke test image exceeds 16 megapixels.')
+            feature = encoder.embed(source)
+        import numpy as np
+        print(json.dumps({
+            'model': 'sapiensid_v1', 'embedding_dimensions': int(feature.shape[0]),
+            'unit_norm': bool(abs(float(np.linalg.norm(feature.astype(np.float64))) - 1.) < 0.001),
+            'device': str(encoder.device), 'published_to_stash': False,
+        }, sort_keys=True))
+    finally:
+        encoder.close()
+
+
+if __name__ == '__main__':
+    main()
