@@ -21,7 +21,7 @@ incorrect person-to-scene assignments.
   L2 normalization and cosine similarity must be calibrated per model.
 - Upstream `yolo_dfa.yaml` aligner uses YOLO pose plus DFA face keypoints.
   The model needs a crop for each detected person (not an ArcFace-aligned
-  112x112 face), **19 keypoints**, and body/face geometry. Optional
+  112x112 face), **22 raw keypoints** (17 YOLO pose + 5 face), which the upstream\n  `KP19Preprocessor` reduces to **19 model keypoints**, plus body/face geometry. Optional
   foreground masking/dynamic patching is model-specific; do not fabricate
   landmarks or pass five face points as the expected body landmarks.
 - Confirm the upstream checkpoint's provenance before loading executable
@@ -71,3 +71,53 @@ We do not require or install JAX.
 
 **Safety:** Until those steps are complete, the SapiensID code is not a
 recognition backend. This is an independently mergeable compatibility PR.
+
+## Next stacked PR: reusable PyTorch inference boundary
+
+`stash_ai.recognition.sapiensid_inference.SapiensIDV1Encoder` now accepts
+**already constructed** upstream-compatible PyTorch `model` and `aligner`
+objects. The bridge runs CPU or GPU inference synchronously on its owning
+thread, preserving the existing 384x384 preprocessing and the official
+`aligner(batch) -> (keypoints, masks)` and
+`model(batch, foreground_masks=masks, ldmks=keypoints)` contracts.
+Outputs are required to be finite 4096D vectors and normalized independently.
+
+The official `KeypointPredictor` returns **22 raw keypoints**: 17 YOLO
+body/face pose keypoints and five independently detected face landmarks.
+The model's `KP19Preprocessor` then selects **19** of these and derives
+body/face regions. Do not pass only five ArcFace/SCRFD face landmarks or
+pre-reduce the 22-vector externally. Foreground mask shape is
+`N x 384 x 384` with boolean values.
+
+A separate `load_verified_weights(model, path)` uses
+`torch.load(weights_only=True)` on the **same file descriptor** that
+passed strict size+SHA256 verification. It only accepts tensor state
+dictionaries and uses `strict=True` for loading; it does not use the
+upstream permissive `strict=False` method or execute arbitrary pickle
+classes. Checkpoint/source provenance remains the operator's responsibility.
+
+Example **after** creating official compatible modules in a controlled
+environment and obtaining approved weights:
+
+```python
+from stash_ai.recognition.sapiensid_inference import (
+    SapiensIDV1Encoder, load_verified_weights,
+)
+# Construct upstream_model and upstream_aligner separately from a trusted
+# upstream checkout using the matching model.yaml and yolo_dfa.yaml.
+load_verified_weights(upstream_model, "/path/to/model.pth")
+encoder = SapiensIDV1Encoder(upstream_model, upstream_aligner, device="cuda")
+try:
+    feature = encoder.embed(one_person_rgb_pil_crop)  # numpy float32 (4096,)
+finally:
+    encoder.close()
+```
+
+The bridge intentionally does **not** import the upstream project,
+register a YAML recognizer, download YOLO/DFA/checkpoints, or modify Stash.
+The remaining implementation work is to bootstrap matching pinned upstream
+model + aligner classes (their legacy dependencies are not in the JoyTag
+profile), provide a real person detector and multi-person crop workflow,
+and connect the person-specific geometry and evidence lifecycle before
+introducing safe publication. A synthetic CPU adapter test is not a real
+recognition-accuracy or GPU-memory benchmark.
