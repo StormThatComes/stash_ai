@@ -96,12 +96,20 @@ def _trusted_checkout(checkout):
         head = subprocess.run(
             ['git', '-C', str(root), 'rev-parse', 'HEAD'], timeout=10,
             capture_output=True, text=True, check=True).stdout.strip()
+        git_root = subprocess.run(
+            ['git', '-C', str(root), 'rev-parse', '--show-toplevel'],
+            timeout=10, capture_output=True, text=True, check=True).stdout.strip()
+        # A pinned parent Git repository is not enough: the exact upstream
+        # files must actually be tracked in that checkout, not ignored copies.
+        subprocess.run(
+            ['git', '-C', str(root), 'ls-files', '--error-unmatch', '--', *required],
+            timeout=10, capture_output=True, text=True, check=True)
         status = subprocess.run(
             ['git', '-C', str(root), 'status', '--porcelain', '--untracked-files=all'],
             timeout=10, capture_output=True, text=True, check=True).stdout
     except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
         raise ValueError('Cannot verify local SapiensID source revision/cleanliness.') from error
-    if head != UPSTREAM_COMMIT or status.strip():
+    if head != UPSTREAM_COMMIT or Path(git_root).resolve() != root or status.strip():
         raise ValueError('SapiensID source checkout must be pinned to the audited commit and clean.')
     return root
 
