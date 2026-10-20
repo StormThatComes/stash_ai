@@ -484,6 +484,60 @@ detection:
   require_complete_face: false
 ```
 
+## Offline identity face export
+
+Export **every current member observation** of one retained identity, including
+auxiliary/view attachments and faces beyond `clustering.max_samples_per_person`.
+Use the internal identity ID from `recognition report`, or the linked numeric
+Stash performer ID:
+
+```sh
+python stash_ai.py recognition report-identity --performer-id 123 --output-dir identity-123
+python stash_ai.py recognition report-identity --identity-id <identity-uuid> --face-config facial_recognition.yml --faces-db faces_state.sqlite3 --output-dir identity-faces
+```
+
+The selected YAML determines the recognizer namespace. If a performer ID is
+ambiguous across Stash instances, add `--scope <scope>` or select an internal
+`--identity-id`. A retired identity/performer resolves through its recorded merge
+chain to the surviving identity; the JSON preserves both requested and resolved
+IDs and the merge evidence. Scope/model boundaries are validated before export.
+
+The output directory must be new. It contains PNG files such as
+`scene-6306_cue-000080_anchor-same-scene_face-000001.png` and a `manifest.json`.
+Cue indices are **0-based**, matching `audit-alignment --cue-index`; the final
+face ordinal makes names unique even for several faces in the same cue or
+multiple retained scans. Categories include `anchor`, `anchor-same-scene`,
+`anchor-view`, `anchor-cross-scene`, `auxiliary`, `auxiliary-view`, and `unknown`.
+They describe the recorded assignment path. A separate JSON field describes
+anchor eligibility and reference selection under the **current** configuration;
+neither category nor current reference selection reconstructs the historical
+reference set used to make the assignment.
+
+Each manifest sample links its image to the scene, scan, cue, timestamp, geometry,
+quality measurements and recorded candidate decisions. Decisions expose their
+status, policy hash, reason, cosine scores, representative limit and any retained
+same-scene, cross-scene, view-prototype or merge proof. Current-policy evidence is
+distinguished from historical policies; missing accepted evidence remains
+`membership_only` with an unknown role. Scores are not probabilities. Missing
+cohesion values, runner-up identity IDs and overwritten decisions are not invented.
+Original identity labels and recorded merge evidence are included for context.
+
+This command is offline and reads a single consistent SQLite snapshot without
+the recognition writer lock. It never fetches scenes, loads weights, reruns
+detection/matching, or changes SQLite/Stash. Every linked observation is included,
+even if it falls below today's detection gates: filtering would hide part of the
+identity being audited. There is no export sample cap. PNGs preserve the decoded
+pixels of retained recognition crops (normally JPEG), including any compression
+or downscaling already applied during scanning; they are not newly extracted
+original thumbnails or aligned model inputs. Missing/unreadable crops remain
+explicit manifest entries. The summary counts them and the command returns exit
+code **1** for an incomplete image export (**0** when all members were exported).
+Filesystem write failures abort instead of being reported as missing crops.
+
+Images and JSON are sensitive local biometric artifacts. On POSIX the new output
+directory has mode `0700` and its files `0600`; raw embeddings, installation
+tokens, source URLs and complete run configurations are not exported.
+
 ## Offline scene fragmentation report
 
 To inspect suspected splits between recognized identities without Stash, model loading,

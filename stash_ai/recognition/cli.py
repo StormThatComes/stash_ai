@@ -73,6 +73,16 @@ def parser():
     cleanup.add_argument('--face-config', type=Path, help='Face-only YAML; default facial_recognition.yml.')
     cleanup.add_argument('--faces-db', type=Path, help='Existing face SQLite to compare with Stash; must exist.')
     cleanup.add_argument('--progress-style', choices=('auto', 'compact', 'verbose', 'off'), default='auto')
+    identity = commands.add_parser('report-identity', allow_abbrev=False,
+        help='Export every retained member face of one identity as PNG with recorded assignment evidence (offline, read-only).')
+    selector = identity.add_mutually_exclusive_group(required=True)
+    selector.add_argument('--identity-id', help='Internal face identity ID, as shown by recognition report.')
+    selector.add_argument('--performer-id', type=stash_id, help='Stash performer ID linked to the identity.')
+    identity.add_argument('--output-dir', type=Path, required=True,
+        help='New local directory for all retained face PNGs and manifest.json.')
+    identity.add_argument('--face-config', type=Path, help='Recognition YAML selecting the recognizer namespace.')
+    identity.add_argument('--faces-db', type=Path, help='Existing face SQLite database.')
+    identity.add_argument('--scope', help='Stash scope; required if the performer ID occurs in multiple scopes.')
     report = commands.add_parser('report', allow_abbrev=False,
         help='Explain suspected identity fragmentation in one retained scene (offline, read-only).')
     report.add_argument('--scene-id', required=True, type=stash_id)
@@ -97,6 +107,9 @@ def main(argv=None, *, services=None):
         return audit(args, config, services=services)
     if args.command == 'report':
         from .fragmentation_report import execute
+        return execute(args, config)
+    if args.command == 'report-identity':
+        from .identity_report import execute
         return execute(args, config)
     if args.command == 'cleanup':
         from .cleanup_orphans import execute
