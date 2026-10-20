@@ -113,9 +113,24 @@ def verified_bytes(path, asset):
     return _asset_bytes(path, asset, materialize=True)
 
 
+def identity_asset_keys(config):
+    models = config.data['models']
+    return ((models['detector'],) if models['recognizer'] == 'sapiensid_v1'
+            else (models['detector'], models['recognizer']))
+
+
+def model_provenance(config):
+    from dataclasses import asdict
+    result = {key: asdict(ASSETS[key]) for key in identity_asset_keys(config)}
+    if config.data['models']['recognizer'] == 'sapiensid_v1':
+        from .sapiensid_backend import identity_contract
+        result['sapiensid_v1'] = identity_contract(config)
+    return result
+
+
 def asset_selection(config):
     from .visibility import required
-    selected = [config.data['models']['detector'], config.data['models']['recognizer']]
+    selected = list(identity_asset_keys(config))
     identity_assets = set(selected)
     detection_visibility = config.data['detection']['min_visible_face_fraction'] > 0
     if detection_visibility or (config.data['portraits']['enabled'] and required(config.data['portraits'])):
@@ -172,6 +187,8 @@ def namespace(config):
     from dataclasses import asdict
     from .context import policy_digest
     recognizer = config.data['models']['recognizer']
+    if recognizer == 'sapiensid_v1':
+        return digest({'format': 1, 'assets': model_provenance(config)})
     alignment = {
         'auraface': 'arcface-112-similarity-rgb-127.5-v1',
         'lvface_b': 'lvface-b-arcface-112-similarity-rgb-127.5-v1',
@@ -360,6 +377,9 @@ def load_backend(config, paths):
     from stash_ai.runtime.shutdown import require_idle
     require_idle()
     recognizer = config.data['models']['recognizer']
+    if recognizer == 'sapiensid_v1':
+        from .sapiensid_backend import SapiensIDFaces
+        return SapiensIDFaces(config, paths)
     if recognizer == 'auraface':
         from .aura import AuraFaces
         return AuraFaces(config, paths)

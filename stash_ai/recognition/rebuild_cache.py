@@ -110,13 +110,16 @@ def validate_vectors(rows):
     if not rows:
         return
     dimension=rows[0]['dimensions']
-    shape_ok=(type(dimension) is int and 1<=dimension<=1024 and all(
+    shape_ok=(type(dimension) is int and 1<=dimension<=4096 and all(
         type(r['dimensions']) is int and r['dimensions']==dimension
         and isinstance(r['embedding'],bytes) and len(r['embedding'])==4*dimension for r in rows))
     if shape_ok:
         matrix=np.stack([np.frombuffer(r['embedding'],dtype='<f4') for r in rows])
-        norms=np.linalg.norm(matrix,axis=1)
-        margin=4*dimension*np.finfo(np.float32).eps
+        norms=np.linalg.norm(matrix.astype(np.float64),axis=1)
+        # For 4096D vectors a float32 guard band exceeds the 0.001 scalar
+        # tolerance, disabling the native validation fast path. Match scalar
+        # float64 norm evaluation, with only a float64 rounding guard.
+        margin=4*dimension*np.finfo(np.float64).eps
         if np.isfinite(matrix).all() and np.isfinite(norms).all() and (np.abs(norms-1)<=.001-margin).all():
             count('validated_vectors',len(rows));count('batch_validated_vectors',len(rows))
             return

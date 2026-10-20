@@ -21,6 +21,8 @@ def evaluate_observations(database, run, configurations, labels, *, assets=ensur
     automatically. Peak/model loading performance belongs to the isolated smoke
     benchmark rather than being misattributed across models in this process.
     """
+    if any(c.data['models']['recognizer'] == 'sapiensid_v1' for c in configurations.values()):
+        raise ValueError('SapiensID pilot requires original person frames; retained face crops are insufficient.')
     if not isinstance(labels, dict) or not 1 <= len(labels) <= 128:
         raise ValueError('Pilot requires 1..128 explicitly labeled observation IDs.')
     if any(not isinstance(k, str) or not isinstance(v, str) or not v.strip() or len(v) > 100 for k,v in labels.items()):

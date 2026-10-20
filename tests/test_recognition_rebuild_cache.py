@@ -86,7 +86,7 @@ def test_bad_derived_cache_or_repaired_inputs_force_retained_evidence_replay(tmp
         assert calls==[1]
 
 
-@pytest.mark.parametrize('dimensions',[4,128,512,1024])
+@pytest.mark.parametrize('dimensions',[4,128,512,1024,4096])
 def test_batched_validation_matches_scalar_at_norm_and_finite_boundaries(dimensions):
     from stash_ai.recognition.clustering import vector
     for length in [1.,.999,1.001,1.002,float('nan'),float('inf')]:
@@ -138,3 +138,19 @@ def test_completed_descriptor_catalog_is_bounded_and_corruption_recoverable(tmp_
         assert rebuild_cache.lookup(state.connection,'scope','ns','4')['fingerprint']=='4'
         state.connection.execute("UPDATE metadata SET value='corrupt' WHERE key LIKE 'identity-rebuild-cache:%'")
         assert rebuild_cache.lookup(state.connection,'scope','ns','4') is None
+
+
+def test_retained_vector_accepts_4096d_and_rejects_unbounded_vectors():
+    from stash_ai.recognition.clustering import vector
+    large = np.zeros(4096, dtype='<f4')
+    large[0] = 1.
+    row = {'dimensions': 4096, 'embedding': large.tobytes()}
+    assert vector(row).shape == (4096,)
+    validate_vectors([row] * 3)
+    excessive = np.zeros(4097, dtype='<f4')
+    excessive[0] = 1.
+    invalid = {'dimensions': 4097, 'embedding': excessive.tobytes()}
+    with pytest.raises(ValueError, match='embedding shape'):
+        vector(invalid)
+    with pytest.raises(ValueError, match='embedding shape'):
+        validate_vectors([invalid])

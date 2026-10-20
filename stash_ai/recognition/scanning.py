@@ -95,9 +95,12 @@ def scan_scene(database, scope, scene, config, namespace, source, backend_factor
                     faces = sorted(backend.detect(image), key=lambda f: tuple(f.row))
                     for face_index, face in enumerate(faces):
                         quality = assess(image, face)
+                        detail = getattr(backend, 'observation_quality', None)
+                        if detail is not None:
+                            quality.update(detail(image, face))
                         quality['geometry_contract'] = geometry_contract(face, cue)
                         reason = ('face_detection_score' if face.score <= config.data['detection']['score_threshold']
-                                  else rejection(quality, config.data['detection']))
+                                  else rejection(quality, config.data['detection']) or quality.get('identity_rejection'))
                         if reason is None and config.data['detection']['min_visible_face_fraction'] > 0:
                             if visibility is None:
                                 raise VisibilityError('Recognition visibility gate requires a visibility model.')

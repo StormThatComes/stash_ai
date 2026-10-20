@@ -1,5 +1,9 @@
 # Facial recognition
 
+For the optional `models.recognizer: sapiensid_v1` PyTorch backend, see
+[SapiensID v1 setup and input contract](sapiensid-v1.md). It uses face-anchored
+person crops with 4096D embeddings.
+
 ## SCRFD five-landmark detector choices
 
 The default detector for new configurations is **SCRFD-10G KPS**. This release
@@ -1571,3 +1575,4 @@ media, API latency and realistic face/merge distributions. Its timings are not a
 forecast for a 9,000-scene library. The JSON includes semantic hashes, effective
 budgets, stage profiles, process CPU and RSS after each trial. Use representative
 retained evidence and inspect the limiting stage before promoting a default.
+

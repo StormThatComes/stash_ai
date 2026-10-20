@@ -3,7 +3,7 @@ from collections.abc import Mapping
 
 from stash_ai.runtime.console import activity
 from .database import encoded
-from .models import namespace, ensure_assets, asset_selection
+from .models import namespace, ensure_assets, asset_selection, identity_asset_keys
 from .progress import tracking
 
 
@@ -35,14 +35,14 @@ class LazyAssets(Mapping):
 
     def prepare_identity(self):
         models = self.config.data['models']
-        return self._load((models['detector'], models['recognizer']))
+        return self._load(identity_asset_keys(self.config))
 
     def __getitem__(self, key):
         if key in ('expression_mesh', 'expression_blendshapes'):
             keys = ('expression_mesh', 'expression_blendshapes')
         elif key in (self.config.data['models']['detector'], self.config.data['models']['recognizer']):
             models = self.config.data['models']
-            keys = (models['detector'], models['recognizer'])
+            keys = identity_asset_keys(self.config)
         else:
             keys = (key,)
         return self._load(keys)[key]
