@@ -223,7 +223,7 @@ def _bind(database, replay, config, scope, namespace, *, usage=None):
             from .reference_roles import strict_sql
             from .pose_policy import anchor_sql
             samples = ([sample for _, sample in select(replay.execute(
-                'SELECT o.*,s.scene FROM observations o JOIN members m ON m.observation=o.id '
+                'SELECT o.id,o.dimensions,o.embedding,o.quality,o.geometry,o.seconds,s.scene FROM observations o JOIN members m ON m.observation=o.id '
                 'JOIN scans s ON s.id=o.scan WHERE m.person=? AND ' +
                 anchor_sql('o', config.data['clustering']) + ' AND ' + strict_sql() +
                 ' ORDER BY CAST(s.scene AS INTEGER),s.scene,o.cue,o.seconds,o.geometry,o.embedding,o.id',

@@ -18,6 +18,7 @@ class ReferenceIndex:
         self.db, self.scope, self.namespace = db, scope, namespace
         self.members, self.deltas, self.groups = {}, {}, {}
         self.role_dirty, self.owners = set(), {}
+        self.incremental, self.scene_by_id = {}, {}
         from .reference_roles import index
         index(db)
         from .pose_policy import is_anchor
@@ -32,7 +33,7 @@ class ReferenceIndex:
         if not self.enabled:
             count('reference_index_budget_fallbacks')
             return
-        rows = db.execute('SELECT o.id,o.quality,s.scope,s.namespace,s.status,o.rejected FROM observations o '
+        rows = db.execute('SELECT o.id,o.quality,s.scope,s.namespace,s.scene,s.status,o.rejected FROM observations o '
             'JOIN scans s ON s.id=o.scan ORDER BY CAST(s.scene AS INTEGER),s.scene,o.cue,'
             'o.seconds,o.geometry,o.embedding,o.id')
         self.order, self.rank, self.allowed, self.anchors = [], {}, set(), set()
@@ -42,6 +43,7 @@ class ReferenceIndex:
             for row in tracked:
                 self.rank[row['id']] = len(self.order)
                 self.order.append(row['id'])
+                self.scene_by_id[row['id']] = row['scene']
                 if (row['scope'] == scope and row['namespace'] == namespace
                         and row['status'] == 'complete' and row['rejected'] is None):
                     self.allowed.add(row['id'])
@@ -109,6 +111,12 @@ class ReferenceIndex:
         self.deltas.clear()
         for person, (removed, added) in changes.items():
             retained = self.members.get(person, [])
+            append_only = (not removed and retained and added and retained[-1] < min(added)
+                and self.scene_by_id[self.order[retained[-1]]] != self.scene_by_id[self.order[min(added)]])
+            if append_only and self.incremental.get(person, []) is not None:
+                self.incremental.setdefault(person, []).extend(sorted(added))
+            else:
+                self.incremental[person] = None
             # New scenes usually append in canonical order. Merge/retraction
             # batches preserve exact order without sorting their full history.
             if not removed and (not retained or not added or retained[-1] < min(added)):
@@ -151,11 +159,16 @@ class ReferenceIndex:
                 from .reference_selection import select
                 from .pose_policy import anchor_sql
                 from .reference_roles import strict_sql
-                rows = self.db.execute('SELECT o.*,s.scene FROM observations o '
+                added = self.incremental.get(person)
+                subset = previous is not None and same_cap and added is not None
+                selected_ids = list(previous[0]) + [self.order[rank] for rank in added] if subset else []
+                condition = 'o.id IN (SELECT value FROM json_each(?))' if subset else 'm.person=?'
+                argument = encoded(selected_ids) if subset else person
+                rows = self.db.execute('SELECT o.id,o.dimensions,o.embedding,o.quality,o.geometry,o.seconds,s.scene FROM observations o '
                     'JOIN members m ON m.observation=o.id JOIN scans s ON s.id=o.scan '
-                    'WHERE m.person=? AND ' + anchor_sql('o', policy) + ' AND ' + strict_sql() +
+                    'WHERE ' + condition + ' AND ' + anchor_sql('o', policy) + ' AND ' + strict_sql() +
                     ' ORDER BY CAST(s.scene AS INTEGER),s.scene,o.cue,o.seconds,o.geometry,o.embedding,o.id',
-                    (person,))
+                    (argument,))
                 ids = tuple(identifier for identifier, _ in select(rows, policy['max_samples_per_person']))
             previous = self.groups.get(person)
             if previous is None or previous[0] != ids:
@@ -183,6 +196,7 @@ class ReferenceIndex:
             self.groups[person] = unchanged.get(person) or (ids, tuple(values[identifier] for identifier in ids))
         self.groups = {person: self.groups[person] for person in people}
         self.dirty.clear()
+        self.incremental.clear()
         result = []
         for person in people:
             samples = self.groups[person][1]

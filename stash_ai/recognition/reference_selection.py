@@ -26,7 +26,7 @@ def select(rows, maximum):
     import numpy as np
     from .clustering import vector
     from .view_prototypes import pose_view
-    pool = []
+    pool, scene = [], None
 
     def reduce():
         nonlocal pool
@@ -51,6 +51,9 @@ def select(rows, maximum):
         pool = [pool[i] for i in sorted(chosen, key=lambda i: pool[i][0])]
 
     for order, row in enumerate(rows):
+        if scene is not None and scene != row['scene']:
+            reduce()
+        scene = row['scene']
         sample = vector(row)
         entry = (order, row, sample, quality(row['quality']), pose_view(row['geometry']))
         # A duplicated cue time cannot fill the bounded reference bank.

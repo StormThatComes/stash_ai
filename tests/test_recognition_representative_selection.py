@@ -51,3 +51,31 @@ def test_roll_does_not_turn_a_frontal_face_into_auxiliary(degrees):
     actual = pose_measurements(rotated)
     assert actual['pose_deviation'] == pytest.approx(baseline['pose_deviation'])
     assert actual['roll_deviation'] > .2
+
+
+def test_incremental_scene_append_matches_full_selector_without_reading_crops(tmp_path):
+    from stash_ai.recognition.reference_index import _active
+    config = setup(tmp_path, {'max_samples_per_person': 2})
+    front, other = np.array([1.,0.,0.,0.]), np.array([.8,.6,0.,0.])
+    with FaceDatabase(config.database) as db:
+        first, _ = scan(db,config,'1',[front]*40,count=40)
+        second, _ = scan(db,config,'2',[other]*3)
+        cluster_scene(db,first,config)
+        reads=[]
+        import sqlite3
+        def authorize(action,table,column,*_):
+            if action == sqlite3.SQLITE_READ and table == 'observations' and column == 'crop':
+                return sqlite3.SQLITE_DENY
+            return sqlite3.SQLITE_OK
+        with references(db.connection,'scope','ns',config):
+            _groups(db.connection,'scope','ns',config.data['clustering'])
+            cluster_scene(db,second,config)
+            db.connection.set_authorizer(authorize)
+            indexed=_groups(db.connection,'scope','ns',config.data['clustering'])
+            token=_active.set(None)
+            try:
+                full=_groups(db.connection,'scope','ns',config.data['clustering'])
+            finally:
+                _active.reset(token)
+                db.connection.set_authorizer(None)
+            assert reference_context(indexed)==reference_context(full)

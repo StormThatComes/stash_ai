@@ -80,7 +80,7 @@ def _groups(db, scope, namespace, policy, *, usage=None, stage='loading'):
         from .reference_selection import select
         with tracking(batch, 'Load identity references', unit='person') as tracked:
             for person in tracked:
-                rows = db.execute('SELECT o.*,s.scene FROM observations o '
+                rows = db.execute('SELECT o.id,o.dimensions,o.embedding,o.quality,o.geometry,o.seconds,s.scene FROM observations o '
                     'JOIN members m ON m.observation=o.id JOIN scans s ON s.id=o.scan '
                     f'WHERE m.person=? AND {anchor} AND {strict} '
                     'ORDER BY CAST(s.scene AS INTEGER),s.scene,o.cue,o.seconds,o.geometry,o.embedding,o.id',
