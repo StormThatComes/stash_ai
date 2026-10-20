@@ -143,12 +143,12 @@ def _enrich_from_validated_context(db, policy, grouping, usage, confirmed):
 
 
 def _different_accepted_face(db, row, person, policy):
-    """Any accepted second identity in the same VTT cue vetoes attachment."""
+    """A second detection already assigned to the destination needs review."""
     return db.execute(
         'SELECT 1 FROM candidates c JOIN observations o '
         f'ON o.id={address(db, "c")} '
         "WHERE c.scan=? AND c.policy=? AND c.status='accepted' "
-        'AND c.person<>? AND o.cue=? AND o.id<>? LIMIT 1',
+        'AND c.person=? AND o.cue=? AND o.id<>? LIMIT 1',
         (row['scan'], policy, person, row['cue'], row['id'])).fetchone() is not None
 
 

@@ -1571,3 +1571,14 @@ media, API latency and realistic face/merge distributions. Its timings are not a
 forecast for a 9,000-scene library. The JSON includes semantic hashes, effective
 budgets, stage profiles, process CPU and RSS after each trial. Use representative
 retained evidence and inspect the limiting stage before promoting a default.
+
+### Strict reference authority
+
+Membership and reference authority are separate. Strict matching and independently
+confirmed cross-scene anchors may supply references; same-scene bonus and view-only
+attachments may not. The latest retained candidate decision controls authority,
+including after retuning. Membership-only legacy anchors retain their former role.
+Identity reports record `reference_role` for rebuilt assignments. Additional people
+in a cue do not themselves veto recovery: destination occupancy and competing
+embeddings still protect against confusing two people or reflections. Auxiliary
+view matching chooses a pose-compatible prototype before ranking each identity.

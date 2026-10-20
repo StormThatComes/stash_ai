@@ -35,7 +35,7 @@ REASONS = {
 # Retain numeric evidence and observation pointers, excluding arbitrary future
 # payloads, URLs, image data, vectors, installation tokens and run configuration.
 DECISION_FIELDS = (
-    'observation', 'reason', 'scores', 'policy', 'representative_limit',
+    'observation', 'reason', 'scores', 'policy', 'representative_limit', 'reference_role',
     'resource_limits', 'reference_context', 'identity_basis', 'merged_from',
     'same_scene_merge', 'same_scene_context', 'cross_scene', 'view_prototype',
     'anchor_view', 'anchor_view_probe', 'anchor_view_seeded',

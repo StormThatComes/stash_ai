@@ -8,6 +8,7 @@ import uuid
 from .config import digest
 from .database import encoded
 from .reference_usage import ReferenceUsage
+from .reference_roles import strict_sql
 from .identity_merges import supported_merges
 from .progress import tracking
 from .ranking import best_two
@@ -43,6 +44,7 @@ class Group:
 def _groups(db, scope, namespace, policy, *, usage=None, stage='loading'):
     from .pose_policy import anchor_sql
     anchor = anchor_sql('o', policy)
+    strict = strict_sql()
     usage = usage or ReferenceUsage(policy['max_reference_bytes'])
     cache = evidence(db)
     if cache is not None:
@@ -58,7 +60,7 @@ def _groups(db, scope, namespace, policy, *, usage=None, stage='loading'):
     rows = db.execute('SELECT id FROM people WHERE scope=? AND namespace=? '
                       'AND NOT EXISTS (SELECT 1 FROM identity_merges WHERE source=people.id) '
                       f'AND EXISTS (SELECT 1 FROM members m JOIN observations o ON o.id=m.observation '
-                      f'WHERE m.person=people.id AND {anchor}) '
+                      f'WHERE m.person=people.id AND {anchor} AND {strict}) '
                       'ORDER BY created,id LIMIT ?',
                       (scope, namespace, maximum + 1)).fetchall()
     if len(rows) > maximum:
@@ -79,7 +81,7 @@ def _groups(db, scope, namespace, policy, *, usage=None, stage='loading'):
             'SELECT m.person,o.dimensions,o.embedding,ROW_NUMBER() OVER (PARTITION BY m.person '
             'ORDER BY CAST(s.scene AS INTEGER),s.scene,o.cue,o.seconds,o.geometry,o.embedding,o.id) AS position '
             'FROM observations o JOIN members m ON m.observation=o.id JOIN scans s ON s.id=o.scan '
-            f'WHERE m.person IN (SELECT value FROM json_each(?)) AND {anchor}) '
+            f'WHERE m.person IN (SELECT value FROM json_each(?)) AND {anchor} AND {strict}) '
             'WHERE position<=? ORDER BY person,position',
             (identifiers, policy['max_samples_per_person'])):
             samples[row['person']].append(vector(row))
@@ -201,8 +203,8 @@ def complete_candidates(db, scan, policy, context, count, *, exact_memberships=F
 
 def matching_policy(config):
     from .context import policy_digest
-    return policy_digest(config, 'matching-v8', lambda: {
-        'format': 8, 'recognition': config.data['recognition'],
+    return policy_digest(config, 'matching-v9', lambda: {
+        'format': 9, 'recognition': config.data['recognition'],
         'clustering': {key:value for key,value in config.data['clustering'].items()
                        if key not in ('max_reference_bytes','max_people_per_lookup')}})
 

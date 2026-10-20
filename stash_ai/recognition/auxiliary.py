@@ -145,6 +145,8 @@ def _attach_confirmed_views(db, selected, config, policy, anchors, usage, cache)
                         saw_cohesion = True
                         continue
                     view = by_group[id(group)]
+                    if pose_view(row['geometry']) != view.pose:
+                        continue
                     previous = by_person.get(group.identifier)
                     if previous is None or (mean, view.identifier) > (previous[0], previous[2].identifier):
                         by_person[group.identifier] = (mean, group, view)

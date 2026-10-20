@@ -89,6 +89,8 @@ def _apply_members(db, replay, mapping):
 def _mapped_candidates(replay, mapping, policy, context):
     for row in replay.execute('SELECT * FROM candidates WHERE policy=?', (policy,)):
         payload = json.loads(row['payload'])
+        from .reference_roles import STRICT_REASONS
+        payload['reference_role'] = ('strict' if row['status'] == 'accepted' and payload.get('reason') in STRICT_REASONS else 'attachment')
         payload['identity_basis'] = 'cold_selected_replay'
         payload['reference_context'] = context
         yield (row['id'], row['scan'], policy, mapping.get(row['person']), row['status'], encoded(payload))

@@ -17,6 +17,9 @@ class ReferenceIndex:
     def __init__(self, db, scope, namespace, config):
         self.db, self.scope, self.namespace = db, scope, namespace
         self.members, self.deltas, self.groups = {}, {}, {}
+        self.role_dirty, self.owners = set(), {}
+        from .reference_roles import index
+        index(db)
         from .pose_policy import is_anchor
         self.is_anchor = lambda q: is_anchor(q, config.data['clustering'])
         self.dirty = set()
@@ -48,6 +51,7 @@ class ReferenceIndex:
             self.changed(row['observation'], None, row['person'])
         db.create_function('recognition_reference_member', 3, self.changed)
         db.create_function('recognition_reference_roots', 0, self.changed_roots)
+        db.create_function('recognition_reference_role', 1, self.role_dirty.add)
         db.executescript('''
           CREATE TEMP TRIGGER recognition_reference_insert AFTER INSERT ON members BEGIN
             SELECT recognition_reference_member(new.observation,NULL,new.person); END;
@@ -56,6 +60,12 @@ class ReferenceIndex:
           CREATE TEMP TRIGGER recognition_reference_update AFTER UPDATE ON members BEGIN
             SELECT recognition_reference_member(old.observation,old.person,NULL);
             SELECT recognition_reference_member(new.observation,NULL,new.person); END;
+          CREATE TEMP TRIGGER recognition_reference_candidate_insert AFTER INSERT ON candidates BEGIN
+            SELECT recognition_reference_role(CASE WHEN json_valid(new.payload) THEN json_extract(new.payload,'$.observation') END); END;
+          CREATE TEMP TRIGGER recognition_reference_candidate_update AFTER UPDATE ON candidates BEGIN
+            SELECT recognition_reference_role(CASE WHEN json_valid(new.payload) THEN json_extract(new.payload,'$.observation') END); END;
+          CREATE TEMP TRIGGER recognition_reference_candidate_delete AFTER DELETE ON candidates BEGIN
+            SELECT recognition_reference_role(CASE WHEN json_valid(old.payload) THEN json_extract(old.payload,'$.observation') END); END;
           CREATE TEMP TRIGGER recognition_reference_people AFTER INSERT ON people BEGIN
             SELECT recognition_reference_roots(); END;
           CREATE TEMP TRIGGER recognition_reference_alias AFTER INSERT ON identity_merges BEGIN
@@ -71,18 +81,31 @@ class ReferenceIndex:
 
     def flush(self):
         changes = {}
-        for observation, (old, new) in self.deltas.items():
+        from .reference_roles import strict_sql
+        affected = sorted((set(self.deltas) | self.role_dirty) - {None})
+        actual = {}
+        for offset in range(0, len(affected), 256):
+            for row in self.db.execute('SELECT o.id,m.person,' + strict_sql() + ' AS strict '
+                    'FROM observations o JOIN members m ON m.observation=o.id '
+                    'WHERE o.id IN (SELECT value FROM json_each(?))',
+                    (encoded(affected[offset:offset+256]),)):
+                if row['id'] not in self.allowed:
+                    raise ValueError('Face identity has incompatible retained membership evidence.')
+                if row['id'] in self.anchors and row['strict']:
+                    actual[row['id']] = row['person']
+        for observation in affected:
+            old, new = self.owners.get(observation), actual.get(observation)
             if old == new:
                 continue
-            if observation not in self.allowed:
-                raise ValueError('Face identity has incompatible retained membership evidence.')
-            if observation not in self.anchors:
-                continue  # Auxiliary membership cannot add a reference sample.
             rank = self.rank[observation]
             if old is not None:
                 changes.setdefault(old, (set(), set()))[0].add(rank)
             if new is not None:
                 changes.setdefault(new, (set(), set()))[1].add(rank)
+                self.owners[observation] = new
+            else:
+                self.owners.pop(observation, None)
+        self.role_dirty.clear()
         self.deltas.clear()
         for person, (removed, added) in changes.items():
             retained = self.members.get(person, [])
@@ -163,10 +186,12 @@ class ReferenceIndex:
     def close(self):
         if not self.enabled:
             return
-        for name in ('insert', 'delete', 'update', 'people', 'alias'):
+        for name in ('insert', 'delete', 'update', 'people', 'alias',
+                     'candidate_insert', 'candidate_update', 'candidate_delete'):
             self.db.execute('DROP TRIGGER IF EXISTS temp.recognition_reference_' + name)
         self.db.create_function('recognition_reference_member', 3, None)
         self.db.create_function('recognition_reference_roots', 0, None)
+        self.db.create_function('recognition_reference_role', 1, None)
 
 
 def current(db):

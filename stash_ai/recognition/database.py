@@ -155,6 +155,8 @@ class FaceDatabase(AbstractContextManager):
             self._initialize()
             # Validate ownership identity before orphan recovery changes history.
             self.installation
+            from .reference_roles import index
+            index(self.connection)
             # Exclusive file ownership proves that every prior writer ended.
             # Runs created later by this owner are never classified as orphans.
             with self.connection:
