@@ -1,5 +1,9 @@
 # Facial recognition
 
+For future whole-person SapiensID v1 support, see the
+[SapiensID v1 integration groundwork](sapiensid-v1.md). The upstream model is
+not yet available as a `models.recognizer` choice.
+
 ## SCRFD five-landmark detector choices
 
 The default detector for new configurations is **SCRFD-10G KPS**. This release
