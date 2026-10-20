@@ -1,7 +1,6 @@
 """Contracts for SapiensID v1 readiness; no checkpoint/model inference."""
 import hashlib
 
-import numpy as np
 import pytest
 
 from stash_ai.recognition.sapiensid_v1 import (
@@ -13,7 +12,7 @@ from stash_ai.recognition.sapiensid_v1 import (
 @pytest.mark.parametrize('size', [(384, 384), (120, 240), (241, 120), (1, 3), (63, 64)])
 def test_preprocess_matches_upstream_tensor_squarepad_pipeline(size):
     torch = pytest.importorskip('torch')
-    torchvision = pytest.importorskip('torchvision')
+    pytest.importorskip('torchvision')
     from PIL import Image
     from torchvision.transforms import functional as F, InterpolationMode
     image = Image.new('RGB', size, color=(16, 128, 241))
