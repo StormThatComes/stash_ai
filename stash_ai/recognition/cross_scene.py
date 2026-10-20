@@ -73,8 +73,8 @@ def _same_cue_rival(db, row, person, policy):
     return db.execute(
         f'SELECT 1 FROM candidates c JOIN observations o ON o.id={address(db, "c")} '
         "WHERE c.policy=? AND c.scan=? AND c.status='accepted' "
-        'AND c.person<>? AND o.cue=? LIMIT 1',
-        (policy, row['scan'], person, row['cue'])).fetchone() is not None
+        'AND c.person=? AND o.cue=? AND o.id<>? LIMIT 1',
+        (policy, row['scan'], person, row['cue'], row['id'])).fetchone() is not None
 
 
 def _commit(db, policy, sources, person, reason, proof, *, created):

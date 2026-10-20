@@ -118,7 +118,7 @@ def test_anchor_view_never_uses_cross_scene_only_core(tmp_path):
         assert [r[0] for r in statuses(db, two, config)] == ['withheld']*2
 
 
-def test_anchor_view_does_not_override_co_present_identity(tmp_path):
+def test_unrelated_co_present_identity_does_not_block_anchor_view(tmp_path):
     config = config_for(tmp_path)
     with FaceDatabase(config.database) as db:
         identifier, _ = scan(db, config, '1', [A]*3 + [X]*3 + [RIVAL]*3 + [C]*2, count=11)
@@ -128,7 +128,7 @@ def test_anchor_view_does_not_override_co_present_identity(tmp_path):
         rebuild_selected(db, [{'scene':'1','scan':identifier}], config)
         rows = statuses(db, identifier, config)
         c_rows = [payload for status, _, payload in rows if payload.get('reason', '').startswith('anchor_view')]
-        assert all(payload['reason'] != 'anchor_view_identity' for payload in c_rows)
+        assert any(payload['reason'] == 'anchor_view_identity' for payload in c_rows)
         assert db.connection.execute('SELECT COUNT(*) FROM identity_merges').fetchone()[0] == 0
 
 
@@ -189,3 +189,15 @@ def test_validated_same_scene_cues_can_enrich_but_not_seed_a_view(tmp_path):
         unsafe=_confirmed(db.connection,policy,config.data['clustering'],
                           ReferenceUsage(config.data['clustering']['max_reference_bytes']))
         assert unsafe==[]
+
+
+def test_anchor_view_does_not_assign_two_distinct_faces_to_same_person(tmp_path):
+    config = config_for(tmp_path)
+    with FaceDatabase(config.database) as db:
+        identifier, _ = scan(db, config, '1', [A]*3 + [X]*3 + [C]*2 + [X]*2, count=10)
+        db.connection.execute('UPDATE observations SET cue=cue-2,seconds=seconds-2 WHERE cue>=8')
+        db.connection.commit()
+        rebuild_selected(db, [{'scene':'1','scan':identifier}], config)
+        rows = statuses(db, identifier, config)
+        assert sum(status == 'accepted' for status, _, _ in rows) == 8
+        assert sum(status == 'withheld' for status, _, _ in rows) == 2
