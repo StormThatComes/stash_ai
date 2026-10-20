@@ -430,6 +430,8 @@ def _rebuild_selected(database, selected, config, *, progress=None):
             apply_scene_context(temporary, selected, config, progress=progress)
             from .anchor_views import apply_anchor_views
             apply_anchor_views(temporary, selected, config, progress=progress)
+            from .global_views import apply_global_views
+            apply_global_views(temporary, selected, config, progress=progress)
         mapping = _bind(database, replay, config, scope, namespace, usage=usage)
         apply_auxiliary(temporary, selected, config, progress=progress)
         report_pages(replay)

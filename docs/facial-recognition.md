@@ -1598,3 +1598,23 @@ reported measurement but does not by itself disqualify an anchor after alignment
 The scanning quality contract is versioned: older scans remain retained history,
 and a new invocation measures the updated contract rather than reusing stale
 pose admissions. This may require a new scan on the first run after upgrading.
+
+### Global confirmed anchor views
+
+With `clustering.anchor_view_matching`, a final frozen catalogue shares strict
+appearance cohorts across selected scenes. `view_min_support`,
+`view_cohesion_threshold`, `view_match_threshold`, `view_ambiguity_margin`,
+`view_attach_min_support` and `max_view_prototypes_per_person` control these
+cohorts too. Contextual and recovered members cannot train this catalogue.
+Independent attachment support can come from different scenes; singletons and
+competing identities remain withheld. Reports include the medoid, support IDs,
+score and thresholds in `global_view` and mark these members as attachments.
+
+Two established fragments can consolidate through independently supported strict
+cohorts even when other appearances fail whole-bank cohesion. Both identities
+must nominate one another unambiguously; retained cohort examples must agree,
+and co-present faces require the stronger reflection threshold. Nominations are
+frozen before any consolidation and never recomputed from merged output, so a
+neighbour chain cannot merge incompatible endpoints. `global_view_merge` records
+this proof. The consolidation is part of reversible replay, not a destructive
+Stash performer merge.
