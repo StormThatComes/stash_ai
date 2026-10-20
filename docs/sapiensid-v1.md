@@ -21,7 +21,9 @@ incorrect person-to-scene assignments.
   L2 normalization and cosine similarity must be calibrated per model.
 - Upstream `yolo_dfa.yaml` aligner uses YOLO pose plus DFA face keypoints.
   The model needs a crop for each detected person (not an ArcFace-aligned
-  112x112 face), **22 raw keypoints** (17 YOLO pose + 5 face), which the upstream\n  `KP19Preprocessor` reduces to **19 model keypoints**, plus body/face geometry. Optional
+  112x112 face), **22 raw keypoints** (17 YOLO pose + 5 face), which the upstream
+  `KP19Preprocessor` reduces to **19 model keypoints**, plus body/face
+  geometry. Optional
   foreground masking/dynamic patching is model-specific; do not fabricate
   landmarks or pass five face points as the expected body landmarks.
 - Confirm the upstream checkpoint's provenance before loading executable
