@@ -167,16 +167,16 @@ upstream's unsafe `get_face_kp_predictor(...)` loader:
 python -m stash_ai.recognition.sapiensid_bootstrap `
   --checkout C:\\models\\sapiensid-source `
   --checkpoint-dir C:\\models\\sapiensid-wb4m `
-  --model-yaml-sha256 <64_hex_checksum> `
+  --model-yaml-sha256 YOUR_64_CHARACTER_SHA256 `
   --yolo-pose-path C:\\models\\yolov8n-pose.pt `
-  --yolo-pose-sha256 <64_hex_checksum> `
+  --yolo-pose-sha256 YOUR_64_CHARACTER_SHA256 `
   --dfa-path C:\\models\\mobilenetv4_Final.pth `
-  --dfa-sha256 <64_hex_checksum> `
+  --dfa-sha256 YOUR_64_CHARACTER_SHA256 `
   --image C:\\models\\one-person-example.jpg --device cuda
 ```
 
 Hashes for the independently sourced weights can be computed with
-`Get-FileHash -Algorithm SHA256 <file>`. Make sure the sources are
+`Get-FileHash -Algorithm SHA256 C:\\models\\yolov8n-pose.pt`. Make sure the sources are
 trustworthy **before** hashing. The successful smoke test prints only vector
 dimensionality, normalized status and execution device; never the biometric
 embedding itself. It does not detect multiple people and **does not** change
