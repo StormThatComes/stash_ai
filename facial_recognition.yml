@@ -4,10 +4,13 @@
 version: 1
 models:
   detector: scrfd_10g        # Default: SCRFD 10G KPS; options scrfd_2_5g, yunet.
-  recognizer: sface             # Options: sface, auraface, lvface_b, adaface_ir50; ONNX Runtime for all.
+  recognizer: sface             # Options: sface, auraface, lvface_b, adaface_ir50 (ONNX), sapiensid_v1 (PyTorch).
   device: cuda                 # GPU by default. CPU profile: explicitly choose cpu.
   directory: recognition_models
   download_missing: true       # Only inside the explicit recognition invocation.
+# For sapiensid_v1, add the local source/checkpoint/pose paths and SHA256 hashes
+# described in docs/sapiensid-v1.md under sapiensid.model: and sapiensid.pose:.
+# detection.* below always configures face admission; person NMS/count are in sapiensid.pose.
 detection:
   score_threshold: 0.90
   nms_threshold: 0.30

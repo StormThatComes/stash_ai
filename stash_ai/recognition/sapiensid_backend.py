@@ -1,0 +1,182 @@
+"""SapiensID v1 person embeddings anchored to real detected face observations."""
+from collections import Counter
+import math
+from threading import get_ident
+
+from .models import YuNetDetector
+from .sapiensid_v1 import EMBEDDING_DIMENSIONS, PREPROCESSING, WB4M_SHA256
+from .sapiensid_loading import UPSTREAM_COMMIT, load_encoder, load_pose
+
+CONTRACT = 'sapiensid-v1-yolov8-pose-face-anchor-square384-v1'
+
+
+def identity_contract(config):
+    settings = config.data['sapiensid']
+    return {'contract': CONTRACT, 'source_revision': UPSTREAM_COMMIT,
+            'model_sha256': WB4M_SHA256, 'model_yaml_sha256': settings['model']['model_yaml_sha256'],
+            'pose_sha256': settings['pose']['sha256'], 'preprocessing': PREPROCESSING,
+            'person_score_threshold': settings['pose']['score_threshold'],
+            'keypoint_score_threshold': settings['pose']['keypoint_score_threshold'],
+            'person_nms_threshold': settings['pose']['nms_threshold'],
+            'max_people_per_frame': settings['pose']['max_people_per_frame']}
+
+
+def associate(faces, people):
+    """Require unique face -> person and person -> face head-region membership.
+
+    Person boxes alone overlap too often to establish ownership. At least one
+    measured YOLO nose/eye must fall inside the face box. Ambiguity is withheld;
+    neither detector confidence nor ordering breaks a cross-person tie.
+    """
+    choices = []
+    for face in faces:
+        x, y, w, h = face.box
+        indices = []
+        for index, person in enumerate(people):
+            left, top, right, bottom = person['bounds']
+            if not (left <= x and top <= y and right >= x+w and bottom >= y+h):
+                continue
+            head = person['keypoints'][:3]
+            if any(x <= px <= x+w and y <= py <= y+h for px, py in head):
+                indices.append(index)
+        choices.append(indices)
+    usage = Counter(index for indices in choices for index in indices)
+    return [indices[0] if len(indices) == 1 and usage[indices[0]] == 1 else None for indices in choices]
+
+
+def adjust_pose(points):
+    """Match upstream image-left/right canonicalization; keep missing pairs."""
+    points = [list(p) for p in points]
+    for left, right in zip((1,3,5,7,9,11,13,15), (2,4,6,8,10,12,14,16)):
+        a, b = points[left], points[right]
+        av, bv = a != [-1., -1.], b != [-1., -1.]
+        if (av and bv and a[0] < b[0]) or (av and not bv and a[0] < .5) or (bv and not av and b[0] > .5):
+            points[left], points[right] = b, a
+    # Upstream drops nose/eye outliers when both ears and shoulders are known.
+    if all(points[i] != [-1., -1.] for i in (3,4,5,6)):
+        lo, hi = min(points[i][0] for i in (3,4,5,6)), max(points[i][0] for i in (3,4,5,6))
+        for i in (0,1,2):
+            if points[i] != [-1., -1.] and not lo <= points[i][0] <= hi:
+                points[i] = [-1., -1.]
+    return points
+
+
+class SapiensIDFaces(YuNetDetector):
+    dimensions = EMBEDDING_DIMENSIONS
+
+    def __init__(self, config, paths, *, load_identity=True):
+        self.encoder = self.pose = None
+        self._person_frame = None
+        self.owner = get_ident()
+        try:
+            super().__init__(config, paths)
+            from .sapiensid_inference import resolve_device
+            if load_identity:
+                self.encoder = load_encoder(config)
+            self.device = str(self.encoder.device if self.encoder else resolve_device(config.data['models']['device']))
+            self.pose = load_pose(config)
+            self.provenance['recognizer'] = identity_contract(config)
+        except BaseException:
+            self.close()
+            raise
+
+    def _owner(self):
+        if get_ident() != self.owner:
+            raise RuntimeError('SapiensID inference must remain on its owning thread.')
+
+    def detect(self, image):
+        self._owner()
+        faces = super().detect(image)
+        people = []
+        if faces:
+            settings = self.config.data['sapiensid']
+            results = self.pose.predict(source=image, device=self.device, verbose=False,
+                                        conf=settings['pose']['score_threshold'],
+                                        iou=settings['pose']['nms_threshold'],
+                                        max_det=settings['pose']['max_people_per_frame'])
+            if len(results) != 1:
+                raise ValueError('SapiensID pose detector returned an invalid frame count.')
+            result = results[0]
+            import numpy as np
+            boxes = result.boxes.xyxy.detach().cpu().numpy()
+            scores = result.boxes.conf.detach().cpu().numpy()
+            points = result.keypoints.xy.detach().cpu().numpy()
+            confidences = result.keypoints.conf.detach().cpu().numpy()
+            if (boxes.shape != (len(scores), 4) or points.shape != (len(scores), 17, 2) or
+                    confidences.shape != (len(scores), 17) or any(not np.isfinite(a).all() for a in (boxes,scores,points,confidences)) or
+                    np.any((scores < 0) | (scores > 1)) or np.any((confidences < 0) | (confidences > 1))):
+                raise ValueError('SapiensID pose detector returned malformed/non-finite geometry.')
+            if len(boxes) > settings['pose']['max_people_per_frame']:
+                raise ValueError('SapiensID pose detector exceeded the configured result count.')
+            for box, score, kps, confidence in zip(boxes, scores, points, confidences):
+                if score <= settings['pose']['score_threshold']:
+                    continue
+                left, top = max(0, math.floor(box[0])), max(0, math.floor(box[1]))
+                right, bottom = min(image.width, math.ceil(box[2])), min(image.height, math.ceil(box[3]))
+                if left >= right or top >= bottom:
+                    raise ValueError('SapiensID pose detector returned an empty person box.')
+                usable = (confidence > settings['pose']['keypoint_score_threshold']) & (kps > 0).all(axis=1)
+                usable &= (kps[:,0] >= left) & (kps[:,0] < right) & (kps[:,1] >= top) & (kps[:,1] < bottom)
+                kps[~usable] = -1
+                people.append({'bounds': [left,top,right,bottom], 'keypoints': kps.tolist(), 'score': float(score)})
+        matches = associate(faces, people)
+        self._person_frame = image, {tuple(face.row): people[index] if index is not None else None
+                                     for face, index in zip(faces, matches)}
+        return faces
+
+    def _person(self, image, face):
+        if self._person_frame is None or self._person_frame[0] is not image:
+            self.detect(image)
+        return self._person_frame[1].get(tuple(face.row))
+
+    def observation_quality(self, image, face):
+        self._owner()
+        person = self._person(image, face)
+        return {'identity_input': CONTRACT, 'person': person,
+                'identity_rejection': None if person else 'person_face_association_unavailable'}
+
+    def _person_geometry(self, image, face):
+        self._owner()
+        person = self._person(image, face)
+        if person is None:
+            raise ValueError('SapiensID requires an unambiguous measured face/person association.')
+        left, top, right, bottom = person['bounds']
+        side = max(right-left, bottom-top)
+        padx, pady = (side-(right-left))//2, (side-(bottom-top))//2
+        # Canonicalization uses the normalized square coordinate system.
+        normalized = [[(x-left+padx)/side, (y-top+pady)/side] if x >= 0 else [-1.,-1.]
+                      for x,y in person['keypoints']]
+        body = adjust_pose(normalized)
+        points = [[x*side-padx, y*side-pady] if x >= 0 else [-1.,-1.] for x,y in body]
+        points.extend([[x-left, y-top] for x,y in face.landmarks])
+        return person['bounds'], points
+
+    def embed(self, image, face):
+        self._owner()
+        if self.encoder is None:
+            raise RuntimeError('The alignment audit does not load a recognition encoder.')
+        bounds, points = self._person_geometry(image, face)
+        with image.crop(bounds) as crop:
+            return self.encoder.embed_person(crop, points)
+
+    def audit_input(self, image, face):
+        from .sapiensid_v1 import prepare_person_input
+        bounds, points = self._person_geometry(image, face)
+        with image.crop(bounds) as crop:
+            return prepare_person_input(crop, points)
+
+
+    def release_frame(self, previous):
+        super().release_frame(previous)
+        self._person_frame = None
+
+    def close(self):
+        self._owner()
+        self._person_frame = None
+        self.pose = None
+        try:
+            if self.encoder is not None:
+                self.encoder.close()
+        finally:
+            self.encoder = None
+            super().close()

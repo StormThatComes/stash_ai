@@ -34,6 +34,7 @@ class Remote(updater.GitHub):
             "requirements-cpu.txt": b"package==1\n",
             "requirements-gpu.txt": b"package==2\n",
             "requirements-dev.txt": b"pytest>=8\n",
+            "requirements-sapiensid.txt": b"ultralytics>=8.3,<9\n",
             "constraints/cpu-py314.txt": b"package==1\n",
             "constraints/gpu-py314.txt": b"package==2\n",
             "constraints/README.md": b"Install requirements with the matching constraints.\n",
@@ -101,7 +102,7 @@ def test_dependency_profile_changes_are_planned_without_preview_downloads(tmp_pa
 
 DEPENDENCY_FILES = (
     'requirements.txt', 'requirements-cpu.txt', 'requirements-gpu.txt',
-    'requirements-dev.txt', 'constraints/cpu-py314.txt',
+    'requirements-dev.txt', 'requirements-sapiensid.txt', 'constraints/cpu-py314.txt',
     'constraints/gpu-py314.txt', 'constraints/README.md',
 )
 

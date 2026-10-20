@@ -1,6 +1,6 @@
 """Finite recognition and retained-portrait orchestration; no tag runtime or hook."""
 from collections import Counter
-from dataclasses import asdict, dataclass, replace
+from dataclasses import dataclass, replace
 import os
 from urllib.parse import urlsplit
 
@@ -9,7 +9,7 @@ from stash_ai.runtime.console import present, phase, status, activity
 from stash_ai.runtime.report import RunReport
 from .config import digest
 from .database import FaceDatabase, encoded
-from .models import ASSETS, ensure_assets, load_backend, namespace
+from .models import ensure_assets, load_backend, namespace, model_provenance
 from .backend import LazyBackend
 from .context import policy_scope, portrait_reference_scope
 from .portrait_refresh import LazyAssets, retained_targets
@@ -166,8 +166,7 @@ def execute(args, config, *, services=None):
                     visibility = LazyVisibility(config, paths, services.visibility)
                     expression = LazyExpression(config, paths, services.expression)
                     model_namespace = namespace(config)
-                    provenance = {name: asdict(ASSETS[name]) for name in
-                                  (config.data['models']['detector'], config.data['models']['recognizer'])}
+                    provenance = model_provenance(config)
                     if config.data['models']['recognizer'] == 'auraface':
                         from .aura import CONTRACT
                         provenance['preprocessing'] = CONTRACT

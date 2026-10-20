@@ -16,6 +16,11 @@ def defaults():
         'version': 1,
         'models': {'detector': 'scrfd_10g', 'recognizer': 'sface', 'device': 'cuda',
                    'directory': 'recognition_models', 'download_missing': True},
+        'sapiensid': {'model': {'source_directory': None, 'checkpoint_directory': None,
+                                'model_yaml_sha256': None},
+                      'pose': {'path': None, 'sha256': None, 'score_threshold': .5,
+                               'keypoint_score_threshold': .5, 'nms_threshold': .7,
+                               'max_people_per_frame': 100}},
         'detection': {'score_threshold': .9, 'nms_threshold': .3,
                       'min_face_pixels': 32, 'min_sharpness': 10., 'max_faces_per_frame': 100,
                       'max_pose_deviation': .5, 'min_visible_face_fraction': .8,
@@ -123,11 +128,29 @@ def validate(data):
         raise ValueError('facial_recognition.yml version must be 1.')
     models = data['models']
     if models['detector'] not in ('yunet', 'scrfd_10g', 'scrfd_2_5g') or models['recognizer'] not in (
-            'sface', 'auraface', 'lvface_b', 'adaface_ir50'):
+            'sface', 'auraface', 'lvface_b', 'adaface_ir50', 'sapiensid_v1'):
         raise ValueError('Supported detectors: scrfd_10g, scrfd_2_5g, yunet; '
-                         'recognizers: sface, auraface, lvface_b, adaface_ir50.')
+                         'recognizers: sface, auraface, lvface_b, adaface_ir50, sapiensid_v1.')
     if models['device'] not in ('auto', 'cpu', 'cuda') or type(models['download_missing']) is not bool:
         raise ValueError('Invalid face device/download policy.')
+    sapiens = data['sapiensid']
+    for name in ('score_threshold', 'keypoint_score_threshold', 'nms_threshold'):
+        _number(sapiens['pose'][name], 'sapiensid.pose.' + name, 0, 1)
+    _number(sapiens['pose']['max_people_per_frame'], 'sapiensid.pose.max_people_per_frame', 1, 1000, integer=True)
+    required = (('model', 'source_directory'), ('model', 'checkpoint_directory'),
+                ('model', 'model_yaml_sha256'), ('pose', 'path'), ('pose', 'sha256'))
+    for section, name in required:
+        value = sapiens[section][name]
+        label = 'sapiensid.' + section + '.' + name
+        if value is None:
+            if models['recognizer'] == 'sapiensid_v1':
+                raise ValueError(label + ' is required for sapiensid_v1.')
+        elif name.endswith('sha256'):
+            if (type(value) is not str or len(value) != 64 or
+                    any(c not in '0123456789abcdef' for c in value)):
+                raise ValueError(label + ' must be a lowercase SHA256 or null.')
+        elif not isinstance(value, str) or not value.strip() or '\x00' in value:
+            raise ValueError(label + ' must be a nonempty path or null.')
     for section, names in {
         'detection': ('score_threshold', 'nms_threshold', 'min_visible_face_fraction'),
         'recognition': ('match_threshold', 'ambiguity_margin', 'cooccurrence_merge_threshold'),
