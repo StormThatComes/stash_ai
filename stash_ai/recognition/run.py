@@ -57,7 +57,7 @@ class Services:
     expression: object = FaceExpression
 
 
-def _publish_selection(database, client, report, config, scope, namespace, selected, rebuilt, ready, counts, key, run, progress):
+def _publish_selection(database, client, report, config, scope, namespace, selected, rebuilt, ready, counts, key, run, progress,*,guard=None):
     db = database.connection
     for item in selected:
         scene, scan = item['scene'], item['scan']
@@ -66,6 +66,11 @@ def _publish_selection(database, client, report, config, scope, namespace, selec
         counts['groups_withheld'] += sum(g['status'] == 'withheld' for g in groups)
         counts['observations_withheld'] += sum(g['observations'] for g in groups if g['status'] == 'withheld')
         try:
+            from .publication_queue import current,acknowledge
+            queued=current(db,scope,namespace,scene)
+            revision=queued['revision'] if queued and queued['scan']==scan else None
+            check=(lambda:guard(item)) if guard is not None else None
+            if check:check()
             targets = {}
             # Resolve all desired identities before unlinking old model profiles.
             with tracking(
@@ -74,7 +79,7 @@ def _publish_selection(database, client, report, config, scope, namespace, selec
                 unit='person',
             ) as tracked:
                 for person in tracked:
-                    targets[person] = ensure_person(database, client, report, scope, scene, person)
+                    targets[person] = ensure_person(database, client, report, scope, scene, person,guard=check)
             with tracking(
                 targets.items(),
                 'Link scene identities',
@@ -82,7 +87,7 @@ def _publish_selection(database, client, report, config, scope, namespace, selec
             ) as tracked:
                 for person, performer in tracked:
                     with activity(report, 'publish identity', scene=scene, person=performer):
-                        publish_person(database, client, report, scope, scene, person, reconcile_merges=False)
+                        publish_person(database, client, report, scope, scene, person, reconcile_merges=False,guard=check)
                     counts['people_linked_or_observed'] += 1
                     target = ready.setdefault(person, {'person': person, 'performer': performer, 'scans': []})
                     target['scans'].append(item)
@@ -93,9 +98,11 @@ def _publish_selection(database, client, report, config, scope, namespace, selec
                         target.setdefault('matching', {})[scan] = {'policy': matching_policy(config),
                                                                   'reference_context': evidence[0], 'person': person}
             counts['scene_links_removed'] += remove_stale_links(database, client, report, scope, scene,
-                                                                 set(targets.values()), namespace)
+                                                                 set(targets.values()), namespace,guard=check)
             counts['other_model_links_removed'] += remove_other_model_links(
-                database, client, report, scope, scene, set(targets.values()), namespace)
+                database, client, report, scope, scene, set(targets.values()), namespace,guard=check)
+            if check:check()
+            with db:acknowledge(db,scope,namespace,scene,revision)
             counts['scenes_processed'] += 1
             database.progress(run, 'matching',
                               {'scene': scene, 'groups': groups, 'policy': 'cold_selected_replay'})

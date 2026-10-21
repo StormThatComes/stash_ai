@@ -50,6 +50,39 @@ remain attachments and never train this pass. Source witness ownership is
 checked again in the final transaction; backfill and selected membership changes
 roll back together. Stash publication still follows the explicit selection.
 
+Historical core demotions also require the final owners of their selected
+source witnesses. If a source changes owner, its private plan is discarded and
+matching is retried once without the invalidated source views. The first RAM
+replay closes before retrying; raw scans and embeddings are reused. A second
+unstable attempt fails before rebuilt memberships are committed.
+
+Global reference repairs and unresolved-pool backfills enqueue affected scenes
+in the face database, atomically with their derived memberships. A normal run
+publishes only its selected scenes and acknowledges only successful publication.
+To inspect or publish the remaining debt without scanning, loading models,
+refreshing portraits or writing names, use:
+
+```bash
+python stash_ai.py recognition sync-identities
+python stash_ai.py recognition sync-identities --scene-id 123 --apply
+python stash_ai.py recognition sync-identities --apply
+```
+
+The default action is an offline read-only JSON plan for the configured model
+and Stash scope. It separates identities with current memberships, retained
+profiles without latest memberships, and queued scene-link repairs. The ordinary
+fragmentation report exposes the same publication state. Missing publication
+journals and mismatched managed links also reveal debt from before this queue
+existed; only `--apply` adopts those inspected repairs into durable requests.
+`--apply` reuses the
+existing ownership checks and journaled ADD/REMOVE recovery. It requires the
+queued policy, latest complete scan, queue revision and current assignments to
+remain valid before writes. Successful scenes are acknowledged; blocked or
+uncertain scenes remain queued. New queue revisions cannot be erased by an older
+publication. App-managed stale links can be replaced, manual same-model links
+and profile metadata survive, and profiles are never merged or deleted by this
+action. Retained empty profiles remain available for reversible identity splits.
+
 ## SCRFD five-landmark detector choices
 
 The default detector for new configurations is **SCRFD-10G KPS**. This release
@@ -1929,10 +1962,3 @@ policy v23 invalidates older derived decisions without changing scan/model keys.
 Recovered membership-only or damaged legacy decisions receive explicit attachment
 authority, so the legacy strict fallback cannot silently promote their evidence.
 Strict-core summary vectors remain immutable for reuse by the packed score cache.
-
-Historical core demotions also require the final owners of their selected
-source witnesses. If a source changes owner, its private plan is discarded and
-matching is retried once without the invalidated source views. The first RAM
-replay closes before retrying; raw scans and embeddings are reused. A second
-unstable attempt fails before rebuilt memberships are committed.
-

@@ -69,7 +69,8 @@ def perform(database, client, report, *, scope, scene, person, kind, target, pay
     return result
 
 
-def ensure_person(database, client, report, scope, scene, person):
+def ensure_person(database, client, report, scope, scene, person,*,guard=None):
+    if guard:guard()
     from .identity_merges import canonical
     if canonical(database.connection, person) != person:
         raise PendingRecognition('Merged identity cannot recreate its former Stash profile.')
@@ -96,6 +97,7 @@ def ensure_person(database, client, report, scope, scene, person):
             raise PendingRecognition('Earlier performer creation is unresolved; no blind create retry.')
         name = 'AI Person ' + person.replace('-', '')[:12]
         def create():
+            if guard:guard()
             acknowledgement = checked_id(client.create_person(name, row['token']))
             confirmed = checked_id(client.performer(acknowledgement['id']), acknowledgement['id'])
             if not owns(confirmed, row['token']):
@@ -115,8 +117,8 @@ def ensure_person(database, client, report, scope, scene, person):
     return value['id']
 
 
-def publish_person(database, client, report, scope, scene, person, *, merge_counts=None, reconcile_merges=True):
-    performer = ensure_person(database, client, report, scope, scene, person)
+def publish_person(database, client, report, scope, scene, person, *, merge_counts=None, reconcile_merges=True,guard=None):
+    performer = ensure_person(database, client, report, scope, scene, person,guard=guard)
     if reconcile_merges:
         from .merge_publication import sync_merges
         sync_merges(database, client, report, scope, person, performer, counts=merge_counts)
@@ -139,9 +141,12 @@ def publish_person(database, client, report, scope, scene, person, *, merge_coun
         if not legacy_rejected_link(pending, client, performer):
             raise PendingRecognition('Earlier additive scene link is unresolved; no blind retry.')
         precondition['legacy_validation_failure'] = 'BulkUpdateIds.values rejected with HTTP 400'
+    def link():
+        if guard:guard()
+        return client.add_scene_person(scene,performer)
     perform(database, client, report, scope=scope, scene=scene, person=person, kind='link', target=performer,
             payload={'performer': performer, 'input_contract': LINK_INPUT_CONTRACT, 'managed': True, 'active': True}, precondition=precondition,
-            callback=lambda: client.add_scene_person(scene, performer))
+            callback=link)
     # Refresh after acknowledgement; unrelated concurrently added performers
     # are preserved by ADD, not rewritten from a stale full list.
     confirmed = client.scene(scene)

@@ -455,16 +455,23 @@ def build(config, scene_id, *, limit=20, min_mean=None, scope=None, compare_scen
                 dict(outcome='blocked',blocker='different_strong_components'))
             pair['can_merge'] = None  # Full frozen-component proof still requires replay.
         anchor = anchor_sql('o', clustering)
-        anchored, auxiliary = db.execute(
+        from .pose_policy import auxiliary_sql
+        auxiliary_gate=auxiliary_sql('o',clustering)
+        anchored, auxiliary, admitted_auxiliary = db.execute(
             f'SELECT COUNT(*) FILTER (WHERE rejected IS NULL AND {anchor}),' 
-            f'COUNT(*) FILTER (WHERE rejected IS NULL AND NOT ({anchor})) '
+            f'COUNT(*) FILTER (WHERE rejected IS NULL AND NOT ({anchor})),'
+            f'COUNT(*) FILTER (WHERE rejected IS NULL AND {auxiliary_gate}) '
             'FROM observations o WHERE scan=?', (scan['id'],)).fetchone()
         from .cross_scene_report import compare
         comparisons = (compare(db, scan, compare_scene_ids, policy, config, limit=limit)
                        if compare_scene_ids else [])
         multiview = _view_attempt_summary(db, scan['id'], policy, scan['scope'], scan['namespace'])
+        from .publication_queue import inventory,plan
+        publication_state=dict(inventory(db,scan['scope'],scan['namespace']),
+                               queued_scenes=plan(db,scan['scope'],scan['namespace'],config))
         return {
             'reference_registry':dict(format=1,frozen=True,aliases=registry.aliases,proposed_updates=registry.actions),
+            'publication_state':publication_state,
             'reference_context':reference_context(bank),
             'reference_selection':'production_quality_diversity_v1',
             'cross_scene_comparisons':comparisons,
@@ -482,6 +489,8 @@ def build(config, scene_id, *, limit=20, min_mean=None, scope=None, compare_scen
                 'same_scene_min_support': clustering['same_scene_min_support'],
                 'max_samples_per_person': clustering['max_samples_per_person'],
                 'max_anchor_pose_deviation': clustering['max_anchor_pose_deviation'],
+                'min_anchor_visible_face_fraction':clustering['min_anchor_visible_face_fraction'],
+                'min_auxiliary_visible_face_fraction':clustering['min_auxiliary_visible_face_fraction'],
                 'auxiliary_matching': clustering['auxiliary_matching'],
                 'auxiliary_min_support': clustering['auxiliary_min_support'],
                 'local_match_threshold': round(max(0., settings['match_threshold'] -
@@ -490,6 +499,8 @@ def build(config, scene_id, *, limit=20, min_mean=None, scope=None, compare_scen
                                                      clustering['same_scene_match_bonus']), 6)},
             'summary': {'observations': total, 'rejected': rejected,
                          'pose_roles': {'anchor': anchored, 'auxiliary': auxiliary},
+                         'admission_roles': {'anchor':anchored,'auxiliary':admitted_auxiliary,
+                                             'below_auxiliary_visibility':auxiliary-admitted_auxiliary},
                         'identities': len(identities), 'pairs_checked': len(ids)*(len(ids)-1)//2,
                         'pairs_above_min_mean': len(pairs), 'pairs_reported': len(selected_pairs)},
             'decisions': decisions, 'rejected_reasons': rejected_reasons,
