@@ -47,15 +47,17 @@ def prepare(db,selected,config):
                 centres=[s.medoid()[0] for s in slots]
                 centre=np.mean(centres,axis=0,dtype='float64')
                 remaining=set(range(len(slots)));placed=[]
+                connected=[False]*len(slots)
+                priorities=[(len(anchors[i])>=minimum,max(slots[i].qualities,default=0.),
+                             -float(np.dot(c,centre)),tuple(float(x) for x in c),slots[i].pose)
+                            for i,c in enumerate(centres)]
                 while remaining:
-                    def priority(i):
-                        connected=any(float(np.dot(centres[i],centres[j]))>=config.data['recognition']['match_threshold']
-                                      for j in placed)
-                        return (connected,len(anchors[i])>=minimum,max(slots[i].qualities,default=0.),
-                                -float(np.dot(centres[i],centre)),tuple(float(x) for x in centres[i]),slots[i].pose)
-                    winner=max(remaining,key=priority)
+                    winner=max(remaining,key=lambda i:(connected[i],)+priorities[i])
                     db.execute('INSERT INTO local_core_order SELECT observation,? FROM local_appearance_rows WHERE cohort=?',
                                (len(placed),winner))
                     placed.append(winner);remaining.remove(winner)
+                    for i in remaining:
+                        if not connected[i] and float(np.dot(centres[i],centres[winner]))>=config.data['recognition']['match_threshold']:
+                            connected[i]=True
             db.execute('DELETE FROM local_appearance_rows')
     db.execute('DROP TABLE local_appearance_rows')
