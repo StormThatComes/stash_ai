@@ -370,6 +370,7 @@ def build(config, scene_id, *, limit=20, min_mean=None, scope=None, compare_scen
             "json_extract(c.payload,'$.global_identity_decision') AS global_identity_decision, "
             "json_extract(c.payload,'$.decision_conflict') AS decision_conflict, "
             "json_extract(c.payload,'$.cohort_resolution') AS cohort_resolution, "
+            "json_extract(c.payload,'$.provisional_pool') AS provisional_pool, "
             "json_extract(c.payload,'$.global_view_consolidation') AS global_view_consolidation "
             "FROM candidates c JOIN observations o ON o.id=json_extract(c.payload,'$.observation') "
             "WHERE c.scan=? AND c.policy=? AND c.status='withheld' "
@@ -377,7 +378,7 @@ def build(config, scene_id, *, limit=20, min_mean=None, scope=None, compare_scen
             (scan['id'], policy))]
         for example in withheld_examples:
             example['scores'] = json.loads(example.pop('score_json') or '[]')
-            for field in ('global_identity_decision','decision_conflict','cohort_resolution','global_view_consolidation'):
+            for field in ('global_identity_decision','decision_conflict','cohort_resolution','provisional_pool','global_view_consolidation'):
                 example[field]=json.loads(example[field]) if example[field] else None
         people = {item['identity_id']: item for item in identities}
         ids = list(people)

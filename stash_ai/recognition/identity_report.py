@@ -24,6 +24,8 @@ REASONS = {
     'selected_cohort_identity': ('anchor-view', 'A supported majority cohort matched the frozen selected bank; unmatched outliers remain withheld.'),
     'selected_view_identity': ('anchor-view', 'A complete local core matched a frozen confirmed view without training another view.'),
     'global_reference_attachment': ('anchor-historical-view', 'A historical fragment matched a frozen source-confirmed view and no longer trains strict references.'),
+    'pooled_view_identity': ('anchor-historical-view', 'Independent unresolved anchors jointly matched one frozen historical view bank; recovered evidence remains attachment-only.'),
+    'provisional_pool_source_invalidated': ('withheld', 'The final auxiliary decision revoked the frozen pool source owner; its claims remain withheld.'),
     'reference_bank_unavailable': ('withheld', 'A superseded identity reference is temporarily unavailable; a possible duplicate birth was deferred.'),
     'historical_cohort_identity': ('anchor-historical-view', 'An independently supported cohort matched the frozen historical bank; unmatched outliers remain withheld.'),
     'late_strict_identity': ('anchor-recovered', 'Matched the final frozen strict catalogue after all selected scenes were replayed.'),
@@ -46,7 +48,7 @@ REASONS = {
 # Retain numeric evidence and observation pointers, excluding arbitrary future
 # payloads, URLs, image data, vectors, installation tokens and run configuration.
 DECISION_FIELDS = (
-    'shared_reference', 'cohort_resolution', 'strict_partition', 'strict_confirmation', 'reference_registry',
+    'shared_reference', 'cohort_resolution', 'strict_partition', 'strict_confirmation', 'reference_registry', 'provisional_pool',
     'global_identity_decision', 'decision_conflict',
     'observation', 'reason', 'scores', 'policy', 'representative_limit', 'reference_role', 'reference_selected',
     'resource_limits', 'reference_context', 'identity_basis', 'merged_from',

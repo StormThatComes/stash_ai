@@ -96,6 +96,9 @@ def _mapped_candidates(replay, mapping, policy, context, representative_ids=()):
         payload['reference_role'] = ('strict' if row['status'] == 'accepted' and payload.get('reason') in STRICT_REASONS else 'attachment')
         payload['identity_basis'] = ('selected_replay_with_frozen_external_references'
                                      if payload.get('historical_reference') else 'cold_selected_replay')
+        if payload.get('provisional_pool'):
+            payload['identity_basis']='frozen_unresolved_pool'
+            payload['provisional_pool']['identity']=mapping.get(row['person'])
         payload['reference_context'] = context
         yield (row['id'], row['scan'], policy, mapping.get(row['person']), row['status'], encoded(payload))
 
@@ -345,6 +348,8 @@ def _apply(database, replay, selected, config, scope, namespace, mapping, finger
             ) as tracked:
                 for row in tracked:
                     pass
+            from .unresolved_pool import apply as apply_pool
+            pooled=apply_pool(database,replay,config,mapping)
             references = _groups(db, scope, namespace, config.data['clustering'], usage=usage, stage='retained',scan_policy=scan_identity(config,namespace),compatibility=fallback_sql(db,config,namespace),
                 label_scenes=[item['scene'] for item in selected])
             context = reference_context(references)
@@ -357,12 +362,17 @@ def _apply(database, replay, selected, config, scope, namespace, mapping, finger
                 "(SELECT value FROM json_each(?)) THEN 'true' ELSE 'false' END)) WHERE policy=? "
                 'AND scan IN (SELECT value FROM json_each(?))',
                 (context,encoded(sorted(representative_ids)),policy,encoded([item['scan'] for item in selected])))
+            if pooled:
+                db.execute("UPDATE candidates SET payload=json_set(payload,'$.reference_context',?,"
+                    "'$.reference_selected',json(CASE WHEN json_extract(payload,'$.observation') IN "
+                    "(SELECT value FROM json_each(?)) THEN 'true' ELSE 'false' END)) WHERE id IN "
+                    '(SELECT value FROM json_each(?))',(context,encoded(sorted(representative_ids)),encoded(pooled)))
             state = dict(format=2, fingerprint=fingerprint, context=context,
                 inputs=rebuild_cache.input_context(db,selected,scope,namespace),
                 bindings=rebuild_cache.binding_context(db,scope,namespace),
                 limits=rebuild_cache.resource_limits(config),
                 resource_reuse=not getattr(database,'_rebuild_optional_budget_fallback',False))
-            if registry_changed:
+            if registry_changed or pooled:
                 from .historical_references import context as external_context
                 state['fingerprint']=digest(dict(format=2,scans=selected,policy=policy,
                     external_references=external_context(db,selected,config,scope,namespace)))
@@ -471,12 +481,16 @@ def _rebuild_selected(database, selected, config, *, progress=None):
         history = historical_references.capture(db,selected,config,scope,namespace,external_context,resolve_aliases=False)
         external_bindings = historical_references.reconcile(database,replay,selected,config,scope,namespace,external_context,
             progress=progress,history=history,early=early)
+        from .unresolved_pool import resolve as resolve_pool
+        resolve_pool(database,replay,selected,config,history,external_bindings,early)
         mapping = _bind(database, replay, config, scope, namespace, usage=usage,external_bindings=external_bindings,
                         selected_scenes=[item['scene'] for item in selected])
         from .shared_references import auxiliary_bank
         shared_groups, shared_views, confirmations = auxiliary_bank(replay,config,scope,namespace,history,mapping,early)
         apply_auxiliary(temporary, selected, config, progress=progress,reference_groups=shared_groups,
                         reference_views=shared_views,reference_confirmations=confirmations)
+        from .pooled_views import finalize as finalize_pool
+        finalize_pool(replay,config,mapping)
         for row in replay.execute('SELECT DISTINCT person FROM members'):
             mapping.setdefault(row[0],row[0])
         report_pages(replay)

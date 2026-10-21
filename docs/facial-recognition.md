@@ -1844,3 +1844,34 @@ duplicate as `reference_bank_unavailable`; they cannot positively assign a perso
 Unrelated new identities remain eligible. Latest scan state and gap evidence are
 cache dependencies, so completing/restoring the source lets the next selected
 replay resolve the deferred observations. Matching policy v22 records this flow.
+
+### Unresolved support across runs
+
+With `recognition.cross_scene_provisional: true`, the latest unresolved anchor
+observations are a durable support pool. A later selected cohort revalidates their
+current quality/model compatibility and complete-scan status. Superseded, rejected,
+other-namespace and auxiliary observations cannot establish a person. Independent
+support counts `(scan, seconds)`, so repeated detections at one cue do not supply
+additional votes. Candidate exemplars use the bounded quality/diversity selector;
+new identities require a coherent frozen union rather than a weak bridge chain.
+
+Views frozen from independent current strict cores or source-confirmed auxiliary
+evidence can also recover older pending queries. Reference training cues never
+count as query votes. Exact-medoid query support, global rivals, known membership
+and simultaneous cross-view claims are checked before acceptance. New pool results
+never train another view in the same pass. A final auxiliary reassignment that
+revokes the frozen source owner invalidates its pool claims before commit.
+
+Confirmed derived assignments, including still-unresolved older witnesses, commit
+atomically with the selected replay and preserve original physical ownership.
+Strict births use `cross_scene_provisional`; recovery through a view uses
+`pooled_view_identity` and remains attachment-only. Late direct matches to an already
+confirmed strict core also remain attachments. Raw scans/images are not changed or
+reinferred. Stash links and portraits are still published only for selected scenes;
+select an older backfilled scene to publish its existing identity association.
+
+Pool input changes participate in external cache dependencies, and the committed
+fingerprint includes successful backfills. Reports/exported decisions include
+`provisional_pool` support, thresholds, witnesses, authority and deferral evidence.
+The feature remains disabled when `cross_scene_provisional` is false. Matching
+policy v23 invalidates older derived decisions without changing scan/model keys.
