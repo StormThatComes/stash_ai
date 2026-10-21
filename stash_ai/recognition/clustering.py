@@ -41,8 +41,7 @@ class Group:
     sample_ids: tuple = ()
 
 
-@measured('references')
-def _groups(db, scope, namespace, policy, *, usage=None, stage='loading', scan_policy=None, label_scenes=()):
+def reference_admission(policy, *, scan_policy=None, label_scenes=()):
     from .pose_policy import anchor_sql
     anchor = anchor_sql('o', policy)
     if scan_policy is not None:
@@ -53,6 +52,12 @@ def _groups(db, scope, namespace, policy, *, usage=None, stage='loading', scan_p
             literal = "'" + encoded(list(label_scenes)).replace("'", "''") + "'"
             compatible += ' OR o.scan IN (SELECT id FROM scans WHERE scene IN (SELECT value FROM json_each(' + literal + ')))'
         anchor += ' AND (' + compatible + ')'
+    return anchor
+
+
+@measured('references')
+def _groups(db, scope, namespace, policy, *, usage=None, stage='loading', scan_policy=None, label_scenes=()):
+    anchor = reference_admission(policy,scan_policy=scan_policy,label_scenes=label_scenes)
     strict = strict_sql()
     usage = usage or ReferenceUsage(policy['max_reference_bytes'])
     cache = evidence(db)

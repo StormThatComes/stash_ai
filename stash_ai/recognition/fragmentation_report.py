@@ -8,12 +8,17 @@ import math
 from pathlib import Path
 import sqlite3
 
-from .clustering import Group, _similarities, matching_policy, vector
+from .clustering import Group, _similarities, matching_policy, vector, _groups, reference_admission, reference_context
 from .config import plain
 from .database import APPLICATION_ID, SCHEMA_VERSION, _reject_executable_schema
 from .identity_merges import _merge_support_policy
 from .models import namespace
 from .pose_policy import anchor_sql
+from .reference_roles import strict_sql
+from .reference_usage import ReferenceUsage
+from .reference_selection import select
+from .scanning import scan_identity
+from .database import encoded
 
 
 def _open_readonly(path):
@@ -69,19 +74,20 @@ def _scene_identities(db, scan, policy):
         'GROUP BY m.person,p.performer ORDER BY m.person', (scan, policy))]
 
 
-def _representatives(db, scan, person, maximum, grouping):
-    anchor = anchor_sql('o', grouping)
-    rows = db.execute(
-        'SELECT o.id,o.cue,o.seconds,o.quality,o.dimensions,o.embedding,s.scene '
-        'FROM observations o JOIN members m ON m.observation=o.id '
-        'JOIN scans s ON s.id=o.scan '
-        'WHERE m.person=? AND s.scope=? AND s.namespace=? '
-        f"AND s.status='complete' AND o.rejected IS NULL AND {anchor} "
-        'ORDER BY CAST(s.scene AS INTEGER),s.scene,o.cue,o.seconds,o.geometry,o.embedding,o.id LIMIT ?',
-        (person, scan['scope'], scan['namespace'], maximum))
-    return [(dict(id=row['id'], scene=row['scene'], cue=row['cue'],
-                  seconds=row['seconds'], quality=_quality(row['quality'])), vector(row))
-            for row in rows]
+def _representatives(db, scan, person, maximum, grouping, *, bank=None, config=None):
+    if bank is None:
+        bank=_groups(db,scan['scope'],scan['namespace'],grouping,
+            scan_policy=scan_identity(config,scan['namespace']) if config is not None else None,
+            label_scenes=(scan['scene'],))
+    group=next((group for group in bank if group.identifier==person),None)
+    if group is None:
+        return []
+    rows={row['id']:row for row in db.execute('SELECT o.id,o.cue,o.seconds,o.quality,s.scene '
+        'FROM observations o JOIN scans s ON s.id=o.scan WHERE o.id IN '
+        '(SELECT value FROM json_each(?))',(encoded(group.sample_ids),))}
+    return [(dict(id=identifier,scene=rows[identifier]['scene'],cue=rows[identifier]['cue'],
+        seconds=rows[identifier]['seconds'],quality=_quality(rows[identifier]['quality']),
+        reference_role='strict'),sample) for identifier,sample in zip(group.sample_ids,group.samples)]
 
 
 QUALITY_METRICS = ('pixels', 'pose_deviation', 'sharpness', 'visible_face_fraction')
@@ -139,8 +145,8 @@ def _rejected_examples(db, scan, per_reason=8):
     return examples
 
 
-def _reference_details(db, scan, person, representatives, limit, grouping):
-    anchor = anchor_sql('o', grouping)
+def _reference_details(db, scan, person, representatives, limit, grouping, config):
+    anchor=reference_admission(grouping,scan_policy=scan_identity(config,scan['namespace']),label_scenes=(scan['scene'],))+' AND '+strict_sql()
     total = db.execute(
         'SELECT COUNT(*) FROM observations o JOIN members m ON m.observation=o.id '
         'JOIN scans s ON s.id=o.scan WHERE m.person=? AND s.scope=? AND s.namespace=? '
@@ -151,7 +157,7 @@ def _reference_details(db, scan, person, representatives, limit, grouping):
         scenes[info['scene']] = scenes.get(info['scene'], 0) + 1
     return {
         'available': total, 'selected': len(representatives), 'limit': limit,
-        'truncated': total > len(representatives), 'selection': 'first_by_canonical_scene_cue_order',
+        'truncated': total > len(representatives), 'selection': 'production_quality_diversity_v1',
         'selected_by_scene': scenes,
         'quality': _quality_summary([info['quality'] for info, _ in representatives]),
         'samples': [info for info, _ in representatives],
@@ -169,7 +175,7 @@ def _strict_scene_counts(db, scan, policy, grouping):
         "WHERE c.scan=? AND c.policy=? AND c.status='accepted' "
         "AND o.scan=c.scan AND o.rejected IS NULL "
         "AND json_extract(c.payload,'$.reason')<>'same_scene_identity' "
-        f"AND {anchor} GROUP BY c.person", (scan, policy))
+        f"AND {anchor} AND EXISTS (SELECT 1 FROM members m WHERE m.observation=o.id AND m.person=c.person AND {strict_sql()}) GROUP BY c.person", (scan, policy))
     for row in rows:
         result[row['person']] = dict(strict_cues=row['strict_cues'],
                                       strict_observations=row['strict_observations'])
@@ -183,7 +189,7 @@ def _score(left, right, scene=None):
     second = np.stack([sample for _, sample in right])
     if first.shape[1] != second.shape[1]:
         raise ValueError('Incompatible recognition embedding dimensions.')
-    values = first @ second.T
+    values = np.asarray([[float(np.dot(a,b)) for b in second] for a in first])
     low = np.unravel_index(int(values.argmin()), values.shape)
     # Sum converted float32 dot scores in float64, as the matching code does.
     mean = math.fsum(float(value) for value in values.flat) / values.size
@@ -323,15 +329,16 @@ def build(config, scene_id, *, limit=20, min_mean=None, scope=None, compare_scen
     with closing(_open_readonly(config.database)) as db:
         scan = _selected_scan(db, str(scene_id), namespace(config), policy, scope=scope)
         identities = _scene_identities(db, scan['id'], policy)
+        bank=_groups(db,scan['scope'],scan['namespace'],clustering,
+            scan_policy=scan_identity(config,scan['namespace']),label_scenes=(scan['scene'],))
         references = {person['identity_id']: _representatives(
-            db, scan, person['identity_id'], clustering['max_samples_per_person'], clustering) for person in identities}
-        if any(not records for records in references.values()):
-            raise ValueError('A scene identity has no valid retained reference embeddings.')
+            db, scan, person['identity_id'], clustering['max_samples_per_person'], clustering,bank=bank) for person in identities}
         strict_counts = _strict_scene_counts(db, scan['id'], policy, clustering)
         for person in identities:
             identifier = person['identity_id']
             cues = strict_counts.get(identifier, {}).get('strict_cues', 0)
             person['strict_accepted_scene_cues'] = cues
+            person['reference_status']='available' if references[identifier] else 'no_strict_references'
             person['same_scene_anchor_possible_by_count'] = (
                 cues >= clustering['same_scene_min_support'])
             anchor = anchor_sql('o', clustering)
@@ -342,7 +349,7 @@ def build(config, scene_id, *, limit=20, min_mean=None, scope=None, compare_scen
                 (scan['id'], identifier)).fetchone()
             person['pose_roles'] = {'anchor': anchored, 'auxiliary': auxiliary}
             person['representatives'] = _reference_details(
-                db, scan, identifier, references[identifier], clustering['max_samples_per_person'], clustering)
+                db, scan, identifier, references[identifier], clustering['max_samples_per_person'], clustering,config)
         decisions = [dict(row) for row in db.execute(
             "SELECT json_extract(payload,'$.reason') AS reason,status,COUNT(*) AS count "
             "FROM candidates WHERE scan=? AND policy=? "
@@ -358,18 +365,24 @@ def build(config, scene_id, *, limit=20, min_mean=None, scope=None, compare_scen
         withheld_examples = [dict(row) for row in db.execute(
             "SELECT o.id AS observation_id,o.cue,o.seconds,"
             "json_extract(c.payload,'$.reason') AS reason,"
-            "json_extract(c.payload,'$.scores') AS score_json "
+            "json_extract(c.payload,'$.scores') AS score_json, "
+            "json_extract(c.payload,'$.global_identity_decision') AS global_identity_decision, "
+            "json_extract(c.payload,'$.decision_conflict') AS decision_conflict "
             "FROM candidates c JOIN observations o ON o.id=json_extract(c.payload,'$.observation') "
             "WHERE c.scan=? AND c.policy=? AND c.status='withheld' "
             "AND o.scan=c.scan ORDER BY o.cue,o.seconds,o.id LIMIT 50",
             (scan['id'], policy))]
         for example in withheld_examples:
             example['scores'] = json.loads(example.pop('score_json') or '[]')
+            for field in ('global_identity_decision','decision_conflict'):
+                example[field]=json.loads(example[field]) if example[field] else None
         people = {item['identity_id']: item for item in identities}
         ids = list(people)
         pairs = []
         for n, left in enumerate(ids):
             for right in ids[n + 1:]:
+                if not references[left] or not references[right]:
+                    continue
                 mean, minimum, worst, _ = _score(references[left], references[right])
                 if mean < min_mean:
                     continue
@@ -389,7 +402,18 @@ def build(config, scene_id, *, limit=20, min_mean=None, scope=None, compare_scen
                 })
         pairs.sort(key=lambda pair: (-pair['cross_mean'], -pair['cross_minimum'],
                                      pair['left']['identity_id'], pair['right']['identity_id']))
+        views=()
+        if clustering['anchor_view_matching']:
+            from .global_views import catalogue
+            usage=ReferenceUsage(clustering['max_reference_bytes'])
+            for group in bank:
+                usage.add(group.samples,people=1,kind='Report strict')
+            views=catalogue(db,config,scan['scope'],scan['namespace'],usage=usage,
+                scan_policy=scan_identity(config,scan['namespace']))
         selected_pairs = pairs[:limit]
+        view_owners={}
+        for view in views:
+            view_owners.setdefault(view.group.identifier,[]).append(view)
         for pair in selected_pairs:
             a, b = pair['left']['identity_id'], pair['right']['identity_id']
             pair['score_diagnostics'] = _score(references[a], references[b], scan['scene'])[3]
@@ -401,7 +425,12 @@ def build(config, scene_id, *, limit=20, min_mean=None, scope=None, compare_scen
             pair['same_scene_merge'] = _local_pair(pair, a, b, config, strict_counts)
             pair['same_scene_merge']['recorded_merge_support'] = _recorded_support(
                 db, scan, a, b, references, config, local=True)
-            pair['can_merge'] = None  # Not inferable from these diagnostics alone.
+            from .global_views import cohort_evidence
+            evidence=[cohort_evidence(db,left,right,config)
+                for left in view_owners.get(a,()) for right in view_owners.get(b,())]
+            pair['confirmed_view_evidence']=(max(evidence,key=lambda p:(not p['blockers'],p['mean_cross_similarity']))
+                if evidence else None)
+            pair['can_merge'] = None  # Full frozen-component proof still requires replay.
         anchor = anchor_sql('o', clustering)
         anchored, auxiliary = db.execute(
             f'SELECT COUNT(*) FILTER (WHERE rejected IS NULL AND {anchor}),' 
@@ -412,6 +441,8 @@ def build(config, scene_id, *, limit=20, min_mean=None, scope=None, compare_scen
                        if compare_scene_ids else [])
         multiview = _view_attempt_summary(db, scan['id'], policy, scan['scope'], scan['namespace'])
         return {
+            'reference_context':reference_context(bank),
+            'reference_selection':'production_quality_diversity_v1',
             'cross_scene_comparisons':comparisons,
             'multi_view_diagnostics':multiview,
             'format': 1, 'kind': 'recognition_fragmentation',
@@ -454,9 +485,8 @@ def build(config, scene_id, *, limit=20, min_mean=None, scope=None, compare_scen
                 'Recorded merge support is diagnostic, not a proof of future merging.',
                 'Local core counts are unvalidated upper bounds; competing identity checks '
                 'and chronological merge evidence require a full replay.',
-                'Representatives use only anchor-eligible samples when pose-aware policy is enabled; '
-                'the earliest eligible samples are selected in canonical scene/cue order. '
-                'selected-scene-only comparisons may omit later samples when the cap is reached.',
+                'Representatives use production strict authority, compatibility and quality/diversity selection. '
+                'Attachments remain visible as memberships, but do not train strict reference scores.',
                 'Missing quality metrics mean legacy/unmeasured data, not zero quality.',
             ],
         }

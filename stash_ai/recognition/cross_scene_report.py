@@ -11,7 +11,7 @@ from .replay_addresses import address
 def _rows(db, scan, policy, clustering, limit=256):
     anchor = anchor_sql('o', clustering)
     rows = db.execute(
-        f'SELECT o.id,o.scan,o.cue,o.seconds,o.dimensions,o.embedding,'
+        f'SELECT o.id,o.scan,o.cue,o.seconds,o.geometry,o.dimensions,o.embedding,'
         'c.status,c.person,'
         "json_extract(c.payload,'$.reason') AS reason "
         f'FROM observations o JOIN candidates c ON '
@@ -44,8 +44,21 @@ def compare(db, origin, others, policy, config, *, limit=20):
         target_vectors = [(row, vector(row)) for row in target_rows]
         people = _scene_identities(db, other['id'], policy)
         known = [(p, Group(p['identity_id'], tuple(v for _,v in _representatives(
-            db,other,p['identity_id'],grouping['max_samples_per_person'],grouping)), True))
+            db,other,p['identity_id'],grouping['max_samples_per_person'],grouping,config=config)), True))
             for p in people]
+        from .historical_references import History,rank
+        from .global_views import catalogue
+        from .reference_usage import ReferenceUsage
+        from .scanning import scan_identity
+        frozen=tuple(group for _,group in known if group.samples)
+        usage=ReferenceUsage(grouping['max_reference_bytes'])
+        for group in frozen:
+            usage.add(group.samples,people=1,kind='Report strict')
+        views=(catalogue(db,config,origin['scope'],origin['namespace'],usage=usage,
+            scan_policy=scan_identity(config,origin['namespace'])) if grouping['anchor_view_matching'] else ())
+        owners={group.identifier for group in frozen}
+        views=tuple(view for view in views if view.group.identifier in owners)
+        history=History(frozen,views,{},'read-only-report')
         matches = []
         evidence = []
         threshold = settings['match_threshold']
@@ -58,6 +71,7 @@ def compare(db, origin, others, policy, config, *, limit=20):
                     continue
                 mean, low = _similarities(group, query)
                 ranked.append((mean, low, person['identity_id'], person['performer_id']))
+            ranked=[item for item in ranked if item[1]>=cohesion]
             ranked.sort(key=lambda row:(-row[0], row[2]))
             winner = ranked[0] if ranked else None
             runner = ranked[1] if len(ranked)>1 else None
@@ -66,7 +80,11 @@ def compare(db, origin, others, policy, config, *, limit=20):
                       else 'below_cohesion_threshold' if winner[1]<cohesion
                       else 'ambiguous_identity' if runner and winner[0]-runner[0]<margin
                       else 'numeric_match_only')
-            matches.append(dict(observation_id=src['id'],cue=src['cue'],
+            decision=[]
+            matched=rank([src],history,config,decisions=decision)
+            production=(dict(matched[1],identity=matched[0]) if matched else
+                        dict(outcome=decision[0]['outcome']) if decision else dict(outcome='no_eligible_match'))
+            matches.append(dict(production_match=production,observation_id=src['id'],cue=src['cue'],
                 status=src['status'],reason=src['reason'],best_person=winner[2] if winner else None,
                 best_performer=winner[3] if winner else None,
                 mean=round(winner[0],6) if winner else None,
@@ -95,6 +113,7 @@ def compare(db, origin, others, policy, config, *, limit=20):
             nearest_anchor_pairs=hits, total_anchor_pairs=len(evidence),
             pairs_above_global_match=sum(item[0]>=threshold for item in evidence),
             limitations=[
+                'production_match uses the production matcher restricted to target-scene identities; global competition may differ.',
                 'Numeric scores do not establish identity or authorize automatic merging.',
                 'Only the first 256 anchor observations per scene are compared in canonical cue order.',
                 'Nearest anchor pairs include withheld candidates but do not imply confirmed identities.',

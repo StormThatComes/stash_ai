@@ -104,6 +104,32 @@ def _cooccurs(db, left, right):
         (left, right)).fetchone() is not None
 
 
+def cohort_evidence(db, left, right, config):
+    """The same frozen cohort checks serve consolidation and read-only reports."""
+    import numpy as np
+    grouping,settings=config.data['clustering'],config.data['recognition']
+    threshold=max(settings['match_threshold'],grouping['view_match_threshold'])
+    score=float(np.dot(left.group.samples[0],right.group.samples[0]))
+    cross=[float(np.dot(a,b)) for a in left.examples for b in right.examples]
+    low,mean=min(cross),sum(cross)/len(cross)
+    copresent=_cooccurs(db,left.group.identifier,right.group.identifier)
+    blockers=[]
+    if score<threshold:
+        blockers.append('view_medoid_below_match_threshold')
+    if min(left.support_count,right.support_count)<settings['min_merge_support']:
+        blockers.append('view_independent_merge_support_insufficient')
+    if low<grouping['view_cohesion_threshold']:
+        blockers.append('view_cross_sample_below_cohesion_threshold')
+    if mean<threshold:
+        blockers.append('view_cross_mean_below_match_threshold')
+    if copresent and low<max(threshold,settings['cooccurrence_merge_threshold']):
+        blockers.append('view_copresence_requires_reflection_strength')
+    return dict(cooccurring=copresent,medoids=[left.medoid,right.medoid],
+        support=[left.support_count,right.support_count],support_ids=[left.support,right.support],
+        minimum_cross_similarity=low,mean_cross_similarity=mean,match_score=score,
+        threshold=threshold,blockers=blockers)
+
+
 def merge_views(database, views, config, policy):
     """Consolidate complete frozen components, never neighbour chains.
 
@@ -136,16 +162,8 @@ def merge_views(database, views, config, policy):
     def witness(left,right,score):
         if score<threshold or min(left.support_count,right.support_count)<settings['min_merge_support']:
             return None
-        cross=[float(np.dot(a,b)) for a in left.examples for b in right.examples]
-        low,mean=min(cross),sum(cross)/len(cross)
-        if low<grouping['view_cohesion_threshold'] or mean<threshold:
-            return None
-        copresent=_cooccurs(db,left.group.identifier,right.group.identifier)
-        if copresent and low<max(threshold,settings['cooccurrence_merge_threshold']):
-            return None
-        return dict(cooccurring=copresent,medoids=[left.medoid,right.medoid],
-            support=[left.support_count,right.support_count],support_ids=[left.support,right.support],
-            minimum_cross_similarity=low,mean_cross_similarity=mean)
+        proof=cohort_evidence(db,left,right,config)
+        return proof if not proof['blockers'] else None
     with tracking(sorted(owned),'Validate frozen identity components',unit='person') as tracked:
         for person in tracked:
             candidates={}
