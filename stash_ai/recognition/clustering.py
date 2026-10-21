@@ -216,8 +216,8 @@ def complete_candidates(db, scan, policy, context, count, *, exact_memberships=F
 
 def matching_policy(config):
     from .context import policy_digest
-    return policy_digest(config, 'matching-v31', lambda: {
-        'format': 31, 'recognition': config.data['recognition'],
+    return policy_digest(config, 'matching-v32', lambda: {
+        'format': 32, 'recognition': config.data['recognition'],
         'clustering': {key:value for key,value in config.data['clustering'].items()
                        if key not in ('max_reference_bytes','max_people_per_lookup')}})
 
@@ -277,9 +277,11 @@ def cluster_scene(database, scan, config, *, progress=None, _cold_replay=False):
         db.execute('DELETE FROM candidates WHERE scan=? AND policy=?', (scan, policy))
         from .local_cohorts import ordering
         query_order=ordering(db) if independent else 'o.cue'
+        previous=("EXISTS (SELECT 1 FROM prior_attachment_queries q WHERE q.id=o.id)" if _cold_replay and
+                  db.execute("SELECT 1 FROM sqlite_temp_master WHERE name='prior_attachment_queries'").fetchone() else '0')
         with tracking(
             scored_rows(db.execute(
-                'SELECT o.*,m.person AS prior_person FROM observations o LEFT JOIN members m '
+                'SELECT o.*,m.person AS prior_person,'+previous+' AS prior_query FROM observations o LEFT JOIN members m '
                 f'ON m.observation=o.id WHERE o.scan=? AND o.rejected IS NULL AND {anchor} '
                 'ORDER BY '+query_order+',o.geometry,o.embedding,o.cue,o.id',
                 (scan,),
@@ -302,7 +304,9 @@ def cluster_scene(database, scan, config, *, progress=None, _cold_replay=False):
                         best_two(ranked, (score, group.identifier, group))
                 scores = [item[0] for item in ranked[:2]]
                 eligible = bool(ranked and ranked[0][0] >= settings['match_threshold'])
-                if eligible and len(ranked) > 1 and ranked[0][0] - ranked[1][0] < settings['ambiguity_margin']:
+                if observation['prior_query']:
+                    person, status, reason = None, 'withheld', 'prior_attachment_query'
+                elif eligible and len(ranked) > 1 and ranked[0][0] - ranked[1][0] < settings['ambiguity_margin']:
                     person, status, reason = None, 'withheld', 'ambiguous_identity'
                 elif eligible:
                     group = ranked[0][2]
@@ -332,6 +336,7 @@ def cluster_scene(database, scan, config, *, progress=None, _cold_replay=False):
                 db.execute('INSERT INTO candidates VALUES (?,?,?,?,?,?)',
                            (candidate, scan, policy, person, status,
                             encoded({'observation': observation['id'], 'reason': reason, 'scores': scores,
+                                     'prior_attachment_query':bool(observation['prior_query']),
                                      'policy': policy, 'representative_limit': grouping['max_samples_per_person'],
                                      'resource_limits': resource_limits(config)})))
         usage.emit(force=True)

@@ -29,10 +29,94 @@ def _independent(roots):
     return None
 
 
-def enrich(db,config,scope,namespace,selected,history,usage):
+def enabled(config):
+    grouping=config.data['clustering']
+    return grouping['corroborated_view_enrichment'] and (grouping['anchor_view_matching'] or grouping['view_prototypes_enabled'])
+
+
+def previous_queries(db,selected,config,scope,namespace):
+    """Freeze eligibility only; previous labels never supply positive evidence."""
+    if not enabled(config):return ()
+    from .historical_references import _source,parameters
+    from .reference_compatibility import fallback_sql
+    rows=db.execute('SELECT o.id '+_source(config,fallback_sql(db,config,namespace),attachment=True)+
+        ' AND s.id IN (SELECT value FROM json_each(?)) ORDER BY o.id',
+        parameters([],config,scope,namespace)+(encoded([s['scan'] for s in selected]),))
+    return tuple(r['id'] for r in rows)
+
+
+def previous_strict(db,selected,config,scope,namespace):
+    if not enabled(config):return ()
+    from .historical_references import _source,parameters
+    from .reference_compatibility import fallback_sql
+    return tuple(r['id'] for r in db.execute('SELECT o.id '+_source(config,fallback_sql(db,config,namespace))+
+        ' AND s.id IN (SELECT value FROM json_each(?)) ORDER BY o.id',
+        parameters([],config,scope,namespace)+(encoded([s['scan'] for s in selected]),)))
+
+
+def previous_hints(db,config,scope,namespace,previous):
+    """A previous plan can defer a birth, never authorize an assignment."""
+    if not enabled(config):return ()
+    import json
+    from .config import digest
+    row=db.execute('SELECT value FROM metadata WHERE key=?',('identity-rebuild:'+digest([scope,namespace]),)).fetchone()
+    try:state=json.loads(row[0]) if row else {}
+    except (ValueError,TypeError):state={}
+    if not isinstance(state,dict):state={}
+    ids=state.get('corroborated_plan')
+    if ids is None and previous:
+        # Bootstrap an existing library once. Later plans are persisted with the
+        # completed rebuild, avoiding another whole-bank capture on warm runs.
+        from .historical_references import capture,refresh_verified
+        from .reference_usage import ReferenceUsage
+        usage=ReferenceUsage(config.data['clustering']['max_reference_bytes'])
+        history=capture(db,[],config,scope,namespace,'prior-corroboration-plan',resolve_aliases=False)
+        for g in history.groups:usage.add(g.samples,kind='Prior plan strict')
+        for v in history.views:usage.add(v.examples,kind='Prior plan views')
+        refresh_verified(db,[],config,scope,namespace,history,usage)
+        ids=[v.medoid for v in history.views if v.authority=='corroborated_view']
+    if not isinstance(ids,(list,tuple)) or any(not isinstance(i,str) for i in ids):return ()
+    from .historical_references import _source,parameters
+    from .reference_compatibility import fallback_sql
+    return tuple(db.execute('SELECT o.id,o.geometry,o.dimensions,o.embedding '+_source(config,fallback_sql(db,config,namespace),attachment=True)+
+        ' AND o.id IN (SELECT value FROM json_each(?)) ORDER BY o.id',
+        parameters([],config,scope,namespace)+(encoded(ids),)))
+
+
+def defer_new_groups(db,config,hints,established):
+    if not hints:return ()
+    from .clustering import _groups,matching_policy
+    from .pose_policy import anchor_sql
+    from .view_prototypes import pose_view
+    scope,namespace=db.execute('SELECT scope,namespace FROM scans LIMIT 1').fetchone()
+    grouping,settings=config.data['clustering'],config.data['recognition']
+    threshold=max(settings['match_threshold'],grouping['view_match_threshold'])-max(settings['ambiguity_margin'],grouping['view_ambiguity_margin'])
+    import numpy as np
+    frozen=[(r['id'],vector(r),pose_view(r['geometry'])) for r in hints]
+    used=set()
+    for group in _groups(db,scope,namespace,grouping):
+        if set(group.sample_ids).intersection(established):continue
+        rows=db.execute('SELECT o.id,o.geometry,o.dimensions,o.embedding FROM members m JOIN observations o ON o.id=m.observation WHERE m.person=?',
+                        (group.identifier,))
+        common=None
+        for row in rows:
+            q=vector(row)
+            matches={i for i,v,p in frozen if float(np.dot(q,v))>=threshold and pose_matches(row['geometry'],p)}
+            common=matches if common is None else common.intersection(matches)
+            if not common:break
+        if not common:continue
+        used.update(common)
+        db.execute("UPDATE candidates SET person=NULL,status='withheld',payload=json_set(payload,'$.prior_reason',"
+            "json_extract(payload,'$.reason'),'$.reason','prior_appearance_pending','$.prior_appearance_hints',json(?)) "
+            'WHERE policy=? AND person=?',(encoded(sorted(common)),matching_policy(config),group.identifier))
+        db.execute('DELETE FROM members WHERE person=?',(group.identifier,))
+    return tuple(sorted(used))
+
+
+def enrich(db,config,scope,namespace,selected,history,usage,*,eligible_ids=None,query_rows=None):
     """Freeze extra query-only views; no membership or reference-role writes."""
     grouping,settings=config.data['clustering'],config.data['recognition']
-    if not grouping['corroborated_view_enrichment'] or not history.groups or not history.views:
+    if not enabled(config) or not history.groups or not history.views:
         return ()
     from .historical_references import History,rank,_source,parameters
     from .reference_compatibility import fallback_sql
@@ -52,9 +136,9 @@ def enrich(db,config,scope,namespace,selected,history,usage):
     threshold=max(settings['match_threshold'],grouping['view_match_threshold'])
     margin=max(settings['ambiguity_margin'],grouping['view_ambiguity_margin'])
     radius=max(coverage_threshold(grouping),math.sqrt((1+grouping['view_cohesion_threshold'])/2))
-    rows=db.execute('SELECT m.person,o.*,s.scene '+
+    rows=(query_rows() if query_rows is not None else db.execute('SELECT m.person,o.*,s.scene '+
         _source(config,fallback_sql(db,config,namespace),attachment=True)+
-        ' ORDER BY m.person,o.embedding,o.geometry,o.id',parameters(selected,config,scope,namespace))
+        ' ORDER BY m.person,o.embedding,o.geometry,o.id',parameters(selected,config,scope,namespace)))
     output,owner,slots,scratch=[],None,[],0
 
     def emit():
@@ -80,6 +164,7 @@ def enrich(db,config,scope,namespace,selected,history,usage):
                 queries,len(cluster.cues),tuple(cluster.examples),'corroborated_view',proof))
 
     for raw in rows:
+        if eligible_ids is not None and raw['id'] not in eligible_ids:continue
         row=dict(raw);row['person']=history.aliases.get(row['person'],row['person'])
         if owner!=row['person']:
             emit();owner,slots,scratch=row['person'],[],0
@@ -98,7 +183,7 @@ def enrich(db,config,scope,namespace,selected,history,usage):
             if rival is not None and score-rival<margin:continue
             from .anchor_views import _competing_anchor
             if _competing_anchor(bank.groups,owner,query,score,margin):continue
-            if not co_presence_allows(db,row,parent.group,references,query,config):continue
+            if not co_presence_allows(row.get('_database',db),row,parent.group,references,query,config):continue
             qualified.append(medoid)
         if _independent([roots[i] for i in qualified]) is None:continue
         item=next((s for s in slots if float(np.dot(s.pivot,query))>=radius and

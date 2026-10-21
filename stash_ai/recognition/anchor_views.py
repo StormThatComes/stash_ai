@@ -189,7 +189,7 @@ def apply_anchor_views(database, selected, config, *, progress=None):
     db.execute(
         "UPDATE candidates SET payload=json_set(payload,'$.anchor_view_probe',"
         "'no_confirmed_prototype') WHERE policy=? AND status='withheld' "
-        "AND json_extract(payload,'$.reason')='insufficient_match_or_cohesion'",
+        "AND json_extract(payload,'$.reason') IN ('insufficient_match_or_cohesion','prior_attachment_query')",
         (policy,))
     if not views:
         return
@@ -206,7 +206,7 @@ def apply_anchor_views(database, selected, config, *, progress=None):
             db.execute(
                 "UPDATE candidates SET payload=json_set(payload,'$.anchor_view_probe','no_scene_prototype') "
                 "WHERE scan=? AND policy=? AND status='withheld' "
-                "AND json_extract(payload,'$.reason')='insufficient_match_or_cohesion'",
+                "AND json_extract(payload,'$.reason') IN ('insufficient_match_or_cohesion','prior_attachment_query')",
                 (scan,policy))
             continue
         groups = [v.group for v in local]
@@ -220,7 +220,7 @@ def apply_anchor_views(database, selected, config, *, progress=None):
         by_group = {id(v.group): v for v in local}
         source = (f'FROM candidates c JOIN observations o ON o.id={address(db, "c")} '
                   "WHERE c.scan=? AND c.policy=? AND c.status='withheld' "
-                  "AND json_extract(c.payload,'$.reason')='insufficient_match_or_cohesion' "
+                  "AND json_extract(c.payload,'$.reason') IN ('insufficient_match_or_cohesion','prior_attachment_query') "
                   f'AND o.rejected IS NULL AND {anchor_sql("o", grouping)}')
         rows = db.execute('SELECT o.*,c.id AS candidate ' + source +
                           ' ORDER BY o.cue,o.geometry,o.embedding,o.id', (scan, policy))

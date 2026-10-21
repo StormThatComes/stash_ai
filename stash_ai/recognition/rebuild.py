@@ -371,6 +371,8 @@ def _apply(database, replay, selected, config, scope, namespace, mapping, finger
                     "(SELECT value FROM json_each(?)) THEN 'true' ELSE 'false' END)) WHERE id IN "
                     '(SELECT value FROM json_each(?))',(context,encoded(sorted(representative_ids)),encoded(pooled)))
             state = dict(format=2, fingerprint=fingerprint, context=context,
+                corroboration_pending=getattr(database,'_rebuild_corroboration_pending',False),
+                corroborated_plan=sorted(getattr(database,'_rebuild_corroborated_plan',())),
                 inputs=rebuild_cache.input_context(db,selected,scope,namespace,config),
                 bindings=rebuild_cache.binding_context(db,scope,namespace),
                 limits=rebuild_cache.resource_limits(config),
@@ -434,11 +436,22 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
             if complete:
                 usage.begin('cached')
                 return _results(db,selected,config)
+    from .corroborated_views import previous_queries,previous_strict,previous_hints,defer_new_groups
+    previous=previous_queries(db,selected,config,scope,namespace)
+    prior_strict=set(previous_strict(db,selected,config,scope,namespace))
+    hints=previous_hints(db,config,scope,namespace,previous)
+    database._rebuild_corroboration_pending=False
+    database._rebuild_corroborated_plan={row['id'] for row in hints}
+    database._rebuild_revalidated_medoids=set()
     with memory_replay(config) as (replay, replay_uri):
         replay.row_factory = sqlite3.Row
         replay = connection(replay)
         _copy_selection(database, replay, selected, scope, namespace,
                         retain_pose=config.data['clustering']['max_anchor_pose_deviation'] is not None)
+        if previous:
+            replay.execute('CREATE TEMP TABLE prior_attachment_queries(id TEXT PRIMARY KEY)')
+            replay.executemany('INSERT INTO prior_attachment_queries VALUES (?)',((i,) for i in previous))
+            replay.commit()
         checkpoints = Checkpoints(database, selected, config, scope, namespace)
         cursor, next_clock = checkpoints.restore(replay)
         clock = ReplayClock(next_clock)
@@ -476,6 +489,7 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
             resolve_strict_partition(temporary, selected, config, progress=progress)
             from .cross_scene import apply_cross_scene_support
             apply_cross_scene_support(temporary, selected, config, progress=progress)
+            deferred_hints=defer_new_groups(replay,config,hints,prior_strict)
             from .shared_references import retry_strict, early_views
             retry_strict(temporary, selected, config)
             early = early_views(temporary, selected, config,excluded_views=excluded_views)
@@ -505,6 +519,11 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
         finalize_early(replay,config,mapping)
         from .pooled_views import finalize as finalize_pool
         finalize_pool(replay,config,mapping)
+        from .selected_corroboration import resolve as restore_corroboration
+        database._rebuild_corroboration_pending=restore_corroboration(
+            database,temporary,selected,config,history,previous)
+        if set(deferred_hints)-database._rebuild_revalidated_medoids:
+            database._rebuild_corroboration_pending=True
         for row in replay.execute('SELECT DISTINCT person FROM members'):
             mapping.setdefault(row[0],row[0])
         from .reference_registry import invalidated_sources,InvalidatedSourceViews

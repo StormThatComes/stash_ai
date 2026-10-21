@@ -3,20 +3,31 @@
 `clustering.corroborated_view_enrichment` (default true) can extend the frozen
 historical query bank with a `corroborated_view`. Its accepted attachment cohort
 needs at least `max(view_min_support, min_merge_support)` independent cues from
-two unselected scenes. Every query must independently match two strict-rooted
+two distinct scenes. Every query must independently match two strict-rooted
 views whose support sets are disjoint, pass all mixed rivals/co-presence checks,
 and remain inside an immutable, non-transitive appearance radius. One parent
 with overlapping prototype aliases cannot supply two confirmations.
 
-Promotion is derived read-only from latest complete, currently eligible durable
-memberships. The proof records both parents, original strict witnesses, bounded
-query witnesses, scene count and thresholds. Losing support, ownership, quality
-or a current scan revokes the next capture and invalidates its matching cache.
-Promoted views recognize queries as attachments; they never vote for strict
-identity merges or become parents of another promoted view. Selected queries
-cannot train the bank in their own replay. This is one generation of corroborated
-views, not recursive training. Disabling enrichment changes matching policy only;
-scans and embeddings are retained. Matching policy advances to v31.
+Promotion is derived from latest complete, currently eligible durable memberships.
+The proof records both parents, original strict witnesses, bounded query witnesses,
+scene count and thresholds. Losing support, ownership, quality or a current scan
+revokes the next capture and invalidates its matching cache. Promoted views remain
+query-only and never parent another promotion or vote for strict identity merges.
+
+Full and mixed selections also preserve this previous-generation authority. Before
+replay, accepted attachment observation IDs freeze query eligibility, without using
+old labels as positive evidence. They cannot seed new cores or supply birth votes.
+After final auxiliary source ownership, those queries are revalidated against the
+complete current rooted bank, combining selected and unselected scenes. Newly
+accepted output waits for a later replay. A pending generation prevents a warm
+cache from concealing that next step; stable completed generations reuse the cache.
+Checkpoints include the query-admission dependencies and retain prefix recovery.
+
+A previous promotion plan can only defer a new near-appearance birth. It cannot
+assign an owner, override previously established strict witnesses, or authorize a
+match after its parents fail fresh validation. Deferred queries are resolved only
+against the final current bank; obsolete hints are cleared with the completed
+plan. Scans and embeddings are retained. Matching policy advances to v32.
 
 The local anchor bank uses the same broad/narrow cohort builder as the global
 bank. Independently supported reserve centres remain available beyond the primary
