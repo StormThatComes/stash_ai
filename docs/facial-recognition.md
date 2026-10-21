@@ -1,5 +1,12 @@
 # Facial recognition
 
+The local anchor bank uses the same broad/narrow cohort builder as the global
+bank. Independently supported reserve centres remain available beyond the primary
+`max_view_prototypes_per_person` priority, including context-validated additions.
+There is no silent 32-cohort discovery cutoff. Scratch exemplars and emitted
+medoids are checked against `clustering.max_reference_bytes`; insufficient memory
+fails explicitly. Matching policy v30 rebuilds decisions from retained embeddings.
+
 Frozen view-query support can cross prototype boundaries of the same identity
 when the queries form a tight cohort. Its immutable first query defines half
 the angular cohesion radius, preventing transitive query chains. Distinct

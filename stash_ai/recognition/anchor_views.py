@@ -14,7 +14,7 @@ from .pose_policy import anchor_sql
 from .progress import tracking
 from .reference_usage import ReferenceUsage
 from .replay_addresses import address
-from .view_prototypes import _Cluster, pose_view, pose_matches
+from .view_prototypes import pose_view, pose_matches, add_cohort, coverage_threshold, supported_cohorts
 
 
 @dataclass(frozen=True)
@@ -30,9 +30,10 @@ class AnchorView:
 def _confirmed(db, policy, grouping, usage):
     """Build local complete-link subclusters from *strict accepted* anchors.
 
-    One scene/person at a time bounds scratch memory. At most eight exemplars
-    per candidate and 32 candidates per local identity; duplicate cue times
-    never vote twice. No weak 'same_scene_identity' attachments may seed views.
+    One scene/person at a time bounds scratch memory. Broad and narrow cohorts
+    share the global bank's admission and priority rules. All supported reserve
+    centres remain usable within the explicit memory budget. Duplicate cue times
+    never vote twice; contextual attachments cannot seed strict views.
     """
     anchor = anchor_sql('o', grouping)
     rows = db.execute(
@@ -45,37 +46,30 @@ def _confirmed(db, policy, grouping, usage):
         f'AND c.person IS NOT NULL AND o.rejected IS NULL AND {anchor} '
         'ORDER BY CAST(s.scene AS INTEGER),s.scene,c.person,o.cue,o.seconds,o.geometry,o.embedding,o.id',
         (policy,))
-    result, key, slots = [], None, []
+    result, key, slots, cover, scratch = [], None, [], [], 0
     minimum = max(grouping['view_min_support'], grouping['same_scene_min_support'])
     cohesion = grouping['view_cohesion_threshold']
 
     def emit():
         if key is None:
             return
-        eligible = [s for s in slots if len(s.cues) >= minimum]
-        eligible.sort(key=lambda s: (-len(s.cues), s.pose, s.first))
-        for slot in eligible[:grouping['max_view_prototypes_per_person']]:
+        for slot in supported_cohorts(slots,cover,minimum,grouping['max_view_prototypes_per_person'],complete=True):
             sample, medoid = slot.medoid()
             usage.add((sample,), kind='Anchor view')
             result.append(AnchorView(
-                key[0], Group(key[1], (sample,), True), slot.pose,
+                key[0], Group(key[1], (sample,), True, (medoid,)), slot.pose,
                 medoid, tuple(slot.observations), len(slot.cues)))
     with tracking(rows, 'Build anchor view subclusters', unit='observation') as tracked:
         for row in tracked:
             rowkey = row['scan'], row['person']
             if rowkey != key:
                 emit()
-                key, slots = rowkey, []
+                key, slots, cover, scratch = rowkey, [], [], 0
             query = vector(row)
-            pose = pose_view(row['geometry'])
-            slot = next((s for s in slots
-                         if s.accepts_pose(row['geometry']) and s.accepts(query, cohesion)), None)
-            if slot is None:
-                if len(slots) >= 32:
-                    continue
-                slot = _Cluster(pose, row['id'])
-                slots.append(slot)
-            slot.add(row, query)
+            scratch+=add_cohort(slots,row,query,cohesion,complete=True)
+            scratch+=add_cohort(cover,row,query,coverage_threshold(grouping),complete=True)
+            if usage.bytes+scratch>usage.limit:
+                raise ValueError('Local anchor view evidence exceeds clustering.max_reference_bytes.')
     emit()
     if grouping['context_view_enrichment']:
         _enrich_from_validated_context(db, policy, grouping, usage, result)
@@ -120,14 +114,9 @@ def _enrich_from_validated_context(db, policy, grouping, usage, confirmed):
     # Two separately vetted contextual cues corroborate an already confirmed
     # strict core (whose own view_min_support was applied earlier).
     minimum = 2
-    counts = {}
-    for view in confirmed:
-        key = (view.scene_scan, view.group.identifier)
-        counts[key] = counts.get(key, 0) + 1
     for (key, parent_medoid), bucket in sorted(additions.items(), key=lambda item: item[0]):
         scene, person, pose = key
-        family = (scene,person)
-        if len(bucket) < minimum or counts.get(family,0) >= grouping['max_view_prototypes_per_person']:
+        if len(bucket) < minimum:
             continue
         # Context medoids require at least two independently accepted cues;
         # their only authority is the immutable, strictly confirmed core.
@@ -139,7 +128,6 @@ def _enrich_from_validated_context(db, policy, grouping, usage, confirmed):
         confirmed.append(AnchorView(scene,Group(person,(medoid,),True),pose,
                          row['id'],tuple(r['id'] for r,_ in bucket),
                          origin.support_count + len(bucket)))
-        counts[family] = counts.get(family,0)+1
 
 
 def _different_accepted_face(db, row, person, policy):
