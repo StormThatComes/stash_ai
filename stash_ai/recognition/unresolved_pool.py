@@ -284,6 +284,7 @@ def apply(database,replay,config,mapping):
     db=database.connection
     policy=matching_policy(config)
     applied=[]
+    dirty=set()
     for promotion in replay.execute('SELECT * FROM pool_promotions ORDER BY source'):
         ids=json.loads(promotion['selected_ids']);proof=json.loads(promotion['proof'])
         if proof.get('external_reference'):
@@ -311,6 +312,7 @@ def apply(database,replay,config,mapping):
                 continue
             row=db.execute('SELECT o.id,o.cue,o.seconds,o.source,o.rect,o.geometry,s.scope,s.namespace,s.scene,s.input_sha '
                 'FROM observations o JOIN scans s ON s.id=o.scan WHERE o.id=?',(observation,)).fetchone()
+            dirty.add((row['scope'],row['namespace'],row['scene']))
             db.execute('INSERT OR IGNORE INTO identity_origins VALUES (?,?,?)',(sample_key(row),target,observation))
             payload=json.loads(old['payload'])
             payload.update(reason=reason,prior_reason=payload.get('reason'),provisional_pool=json.loads(promotion['proof']),
@@ -321,4 +323,7 @@ def apply(database,replay,config,mapping):
             db.execute('DELETE FROM candidates WHERE id=?',(candidate,))
             db.execute('INSERT INTO candidates VALUES (?,?,?,?,?,?)',(candidate,old['scan'],policy,target,'accepted',encoded(payload)))
             db.execute('INSERT INTO members VALUES (?,?)',(observation,target));applied.append(candidate)
+    from .publication_queue import enqueue
+    for scope,namespace,scene in sorted(dirty):
+        enqueue(db,scope,namespace,scene,config,'unresolved_pool_backfill')
     return applied

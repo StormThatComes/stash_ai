@@ -350,6 +350,9 @@ def _apply(database, replay, selected, config, scope, namespace, mapping, finger
                     pass
             from .unresolved_pool import apply as apply_pool
             pooled=apply_pool(database,replay,config,mapping)
+            from .publication_queue import enqueue
+            for item in selected:
+                enqueue(db,scope,namespace,item['scene'],config,'selected_identity_rebuild')
             references = _groups(db, scope, namespace, config.data['clustering'], usage=usage, stage='retained',scan_policy=scan_identity(config,namespace),compatibility=fallback_sql(db,config,namespace),
                 label_scenes=[item['scene'] for item in selected])
             context = reference_context(references)

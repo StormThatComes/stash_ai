@@ -43,6 +43,13 @@ def parser():
     commands = root.add_subparsers(dest='command', required=True)
     run = commands.add_parser('run', allow_abbrev=False, help='Recognize selected scenes and publish eligible people.')
     _arguments(run)
+    sync=commands.add_parser('sync-identities',allow_abbrev=False,
+        help='Inspect queued recognition scene-link repairs; --apply publishes current retained assignments without inference.')
+    sync.add_argument('--apply',action='store_true',help='Publish queued current assignments and acknowledge successful scenes.')
+    sync.add_argument('--scene-id',action='append',type=stash_id,help='Only these queued scene IDs; omitted selects the current model queue.')
+    sync.add_argument('--face-config',type=Path,help='Current recognition YAML; must match the queued matching policy.')
+    sync.add_argument('--faces-db',type=Path,help='Existing face SQLite database.')
+    sync.add_argument('--progress-style',choices=('auto','compact','verbose','off'),default='auto')
     audit = commands.add_parser('audit-alignment', allow_abbrev=False,
         help='Read-only YuNet landmark and aligned 112px crop audit; local biometric images, explicit scenes only.')
     audit.add_argument('--scene-id', action='append', type=stash_id, required=True,
@@ -114,5 +121,8 @@ def main(argv=None, *, services=None):
     if args.command == 'cleanup':
         from .cleanup_orphans import execute
         return execute(args, config, services=services)
+    if args.command == 'sync-identities':
+        from .sync_publications import execute
+        return execute(args,config,services=services)
     from .run import execute
     return execute(args, config, services=services)

@@ -167,6 +167,7 @@ def apply(database,history,config):
     from .clustering import matching_policy
     import uuid
     db=database.connection
+    dirty=set()
     for action in history.actions:
         source,target=action['source'],action['target']
         # Preserve original ownership before changing derived memberships.
@@ -174,6 +175,7 @@ def apply(database,history,config):
             's.scope,s.namespace,s.scene,s.input_sha FROM members m '
             'JOIN observations o ON o.id=m.observation JOIN scans s ON s.id=o.scan WHERE m.person=?',(source,))
         for row in rows:
+            dirty.add((row['scope'],row['namespace'],row['scene']))
             db.execute('INSERT OR IGNORE INTO identity_origins VALUES (?,?,?)',(sample_key(row),source,row['id']))
             if action['kind']=='verified_attachment' and not db.execute('SELECT 1 FROM candidates c WHERE '+
                 observation_sql('c')+'=? LIMIT 1',(row['id'],)).fetchone():
@@ -199,4 +201,7 @@ def apply(database,history,config):
             "json(CASE WHEN ? THEN 'false' WHEN json_extract(payload,'$.reference_selected') THEN 'true' ELSE 'false' END)) "
             "WHERE person=? AND status='accepted' AND json_valid(payload)",
             (target,encoded(action),target,demote,encoded(STRICT_REASONS),demote,demote,source))
+    from .publication_queue import enqueue
+    for scope,namespace,scene in sorted(dirty):
+        enqueue(db,scope,namespace,scene,config,'global_reference_repair')
     return bool(history.actions)

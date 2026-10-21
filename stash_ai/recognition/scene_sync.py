@@ -36,7 +36,7 @@ def reconcile_unlinks(database, client, scope, scene):
                 _inactive(database.connection, scope, scene, row['person'])
 
 
-def remove_stale_links(database, client, report, scope, scene, wanted, namespace):
+def remove_stale_links(database, client, report, scope, scene, wanted, namespace,*,guard=None):
     """REMOVE only journaled application links to freshly verified owned profiles."""
     db, removed = database.connection, 0
     rows = db.execute("SELECT w.*,p.token FROM publications w JOIN people p ON p.id=w.person "
@@ -48,6 +48,7 @@ def remove_stale_links(database, client, report, scope, scene, wanted, namespace
         unit='link',
     ) as tracked:
         for row in tracked:
+            if guard:guard()
             payload = json.loads(row['payload'])
             if row['target'] in wanted or not payload.get('managed', True):
                 continue
@@ -79,6 +80,7 @@ def remove_stale_links(database, client, report, scope, scene, wanted, namespace
             if previous and previous['status'] in ('pending', 'unknown'):
                 raise PendingRecognition('Earlier scene unlink is unresolved; no blind retry.')
             def remove():
+                if guard:guard()
                 # Refresh both ownership and association immediately before dispatch.
                 if not owns(client.performer(row['target']), row['token']):
                     raise PendingRecognition('Concurrent performer ownership edit preserved.')
@@ -126,7 +128,7 @@ def reconcile_legacy_merges(database, client, scope, scenes):
 
 
 
-def remove_other_model_links(database, client, report, scope, scene, wanted, namespace):
+def remove_other_model_links(database, client, report, scope, scene, wanted, namespace,*,guard=None):
     """Remove only verified recognition profiles of other models in this scene.
 
     Unlike same-model stale-link cleanup, an old-model association is removed
@@ -148,6 +150,7 @@ def remove_other_model_links(database, client, report, scope, scene, wanted, nam
     removed = 0
     with tracking(groups.items(), 'Detach identities from other face models', unit='performer') as tracked:
         for performer, bindings in tracked:
+            if guard:guard()
             if performer in wanted:
                 raise PendingRecognition('Different recognition models are bound to the same Stash performer.')
             for row in bindings:
@@ -162,6 +165,7 @@ def remove_other_model_links(database, client, report, scope, scene, wanted, nam
                 raise PendingRecognition('Earlier other-model unlink is unresolved; no blind retry.')
 
             def remove():
+                if guard:guard()
                 refreshed = client.performer(performer)
                 if any(not owns(refreshed, row['token']) for row in bindings):
                     raise PendingRecognition('Other-model performer ownership changed before unlink.')
