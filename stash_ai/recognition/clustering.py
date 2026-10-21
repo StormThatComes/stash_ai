@@ -210,8 +210,8 @@ def complete_candidates(db, scan, policy, context, count, *, exact_memberships=F
 
 def matching_policy(config):
     from .context import policy_digest
-    return policy_digest(config, 'matching-v14', lambda: {
-        'format': 14, 'recognition': config.data['recognition'],
+    return policy_digest(config, 'matching-v15', lambda: {
+        'format': 15, 'recognition': config.data['recognition'],
         'clustering': {key:value for key,value in config.data['clustering'].items()
                        if key not in ('max_reference_bytes','max_people_per_lookup')}})
 

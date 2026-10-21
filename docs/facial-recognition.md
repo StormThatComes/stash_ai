@@ -1610,14 +1610,20 @@ Independent attachment support can come from different scenes; singletons and
 competing identities remain withheld. Reports include the medoid, support IDs,
 score and thresholds in `global_view` and mark these members as attachments.
 
-Two established fragments can consolidate through independently supported strict
-cohorts even when other appearances fail whole-bank cohesion. Both identities
-must nominate one another unambiguously; retained cohort examples must agree,
-and co-present faces require the stronger reflection threshold. Nominations are
-frozen before any consolidation and never recomputed from merged output, so a
-neighbour chain cannot merge incompatible endpoints. `global_view_merge` records
-this proof. The consolidation is part of reversible replay, not a destructive
-Stash performer merge.
+Established fragments can consolidate through independently supported strict
+cohorts even when other appearances fail whole-bank cohesion. The frozen graph
+includes weak neighbours as ambiguity evidence. Every identity pair in a
+component must have strong independent cohort evidence before any member moves;
+a weak or incompatible endpoint blocks the component. Co-present faces require
+the stronger reflection threshold. No graph is recomputed from merged output.
+`global_view_merge` records complete-component size, context and pair witnesses.
+This consolidation is reversible replay, not a destructive Stash performer merge.
+
+View exemplars use a bounded quality/diversity pool rather than the first eight
+confirmations. Every independent confirmed cue contributes to medoid selection;
+later evidence can replace redundant early samples. Pose hints admit neighbouring
+neutral/side categories only within 0.02 of the 0.12 signed-eye-distance boundary.
+Embedding, support, ambiguity and co-presence requirements remain in force.
 
 ### Selected runs and frozen global identities
 

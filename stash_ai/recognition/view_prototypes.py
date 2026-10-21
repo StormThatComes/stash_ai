@@ -14,24 +14,39 @@ from .progress import tracking
 from .replay_addresses import address
 
 
-def pose_view(geometry, *, neutral=.12):
+def _signed_pose(geometry):
     """Coarse left/right/other hint; embed similarity determines subclusters."""
     try:
         row = json.loads(geometry) if isinstance(geometry, str) else geometry
         if len(row) != 15:
-            return 'other'
+            return None
         values = [float(x) for x in row]
         if not all(math.isfinite(x) for x in values):
-            return 'other'
+            return None
         eye = ((values[4] + values[6]) / 2, (values[5] + values[7]) / 2)
         distance = math.hypot(values[4] - values[6], values[5] - values[7])
         if distance <= 1:
-            return 'other'
+            return None
         horizontal = ((values[6]-values[4])/distance, (values[7]-values[5])/distance)
         signed = ((values[8]-eye[0])*horizontal[0] + (values[9]-eye[1])*horizontal[1]) / distance
-        return 'left' if signed < -neutral else 'right' if signed > neutral else 'other'
+        return signed
     except (ValueError, TypeError, OverflowError):
-        return 'other'
+        return None
+
+
+def pose_view(geometry, *, neutral=.12):
+    signed=_signed_pose(geometry)
+    return ('other' if signed is None else 'left' if signed < -neutral else
+            'right' if signed > neutral else 'other')
+
+
+def pose_matches(geometry, pose, *, neutral=.12, uncertainty=.02):
+    hint=pose_view(geometry,neutral=neutral)
+    if hint==pose:
+        return True
+    signed=_signed_pose(geometry)
+    return bool(signed is not None and abs(abs(signed)-neutral)<=uncertainty and
+                (hint=='other' or pose=='other'))
 
 
 @dataclass
@@ -41,6 +56,8 @@ class _Cluster:
     examples: list = field(default_factory=list)
     observations: list = field(default_factory=list)
     cues: set = field(default_factory=set)
+    qualities: list = field(default_factory=list)
+    total: object = field(default=None,repr=False)
 
     def accepts(self, query, threshold):
         import numpy as np
@@ -51,17 +68,31 @@ class _Cluster:
         if cue in self.cues:
             return
         self.cues.add(cue)
-        if len(self.examples) < maximum:
-            self.examples.append(query)
-            self.observations.append(row['id'])
+        import numpy as np
+        from .reference_selection import quality
+        self.total = query.astype('float64').copy() if self.total is None else self.total + query
+        self.examples.append(query)
+        self.observations.append(row['id'])
+        self.qualities.append(quality(row['quality']) if 'quality' in row.keys() else 0.)
+        if len(self.examples)>maximum:
+            centre=self.total/len(self.cues)
+            first=max(range(len(self.examples)),key=lambda i:(float(np.dot(self.examples[i],centre))+.01*self.qualities[i],-i))
+            chosen=[first]
+            while len(chosen)<maximum:
+                chosen.append(max((i for i in range(len(self.examples)) if i not in chosen),
+                    key=lambda i:(1.-max(float(np.dot(self.examples[i],self.examples[j])) for j in chosen)+.03*self.qualities[i],-i)))
+            chosen.sort()
+            self.examples=[self.examples[i] for i in chosen]
+            self.observations=[self.observations[i] for i in chosen]
+            self.qualities=[self.qualities[i] for i in chosen]
 
     def medoid(self):
         import numpy as np
-        # Stable tie preference is the first canonical observation.
-        scores = [sum(float(np.dot(x, y)) for y in self.examples)
-                  for x in self.examples]
-        index = max(range(len(scores)), key=lambda i: scores[i])
-        return self.examples[index], self.observations[index]
+        # Every independent confirmed cue contributes, including later evidence.
+        scores=[float(np.dot(sample,self.total/len(self.cues)))+.01*self.qualities[i]
+                for i,sample in enumerate(self.examples)]
+        index=max(range(len(scores)),key=lambda i:scores[i])
+        return self.examples[index],self.observations[index]
 
 
 @dataclass(frozen=True)
@@ -89,7 +120,7 @@ def confirmed_views(db, policy, grouping, *, remaining_bytes, rows=None):
     cohesion = grouping['view_cohesion_threshold']
     if rows is None:
         rows = db.execute(
-            f'SELECT c.person,o.id,o.scan,o.seconds,o.geometry,o.dimensions,o.embedding '
+            f'SELECT c.person,o.id,o.scan,o.seconds,o.geometry,o.dimensions,o.embedding,o.quality '
             f'FROM candidates c JOIN observations o ON o.id={address(db, "c")} '
             'JOIN scans s ON s.id=o.scan '
             "WHERE c.policy=? AND c.status='accepted' "

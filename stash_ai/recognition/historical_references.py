@@ -16,7 +16,7 @@ from .reference_selection import select
 from .reference_usage import ReferenceUsage
 from .scanning import scan_identity
 from .scoring import comparisons
-from .view_prototypes import pose_view
+from .view_prototypes import pose_view, pose_matches
 from .rebuild_cache import _hash_row
 
 
@@ -96,7 +96,7 @@ def rank(rows,history,config,*,decisions=None):
                 choices[group.identifier]=(score,'strict',None,score>=threshold)
         for group,score,low in comparisons(views,query,view_threshold-margin,grouping['view_cohesion_threshold']):
             view=by_group[id(group)]
-            if low<grouping['view_cohesion_threshold'] or view.pose!=pose_view(row['geometry']):
+            if low<grouping['view_cohesion_threshold'] or not pose_matches(row['geometry'],view.pose):
                 continue
             previous=choices.get(group.identifier)
             if previous is not None and previous[1]=='strict' and previous[3]:

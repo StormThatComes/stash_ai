@@ -89,7 +89,7 @@ def early_views(database, selected, config):
     usage=ReferenceUsage(grouping['max_reference_bytes'])
     for group in groups:
         usage.add(group.samples,people=1,kind='Strict')
-    source=db.execute('SELECT e.person,o.id,o.scan,o.seconds,o.geometry,o.dimensions,o.embedding '
+    source=db.execute('SELECT e.person,o.id,o.scan,o.seconds,o.geometry,o.dimensions,o.embedding,o.quality '
         'FROM early_view_support e JOIN observations o ON o.id=e.observation JOIN scans s ON s.id=o.scan '
         'ORDER BY e.person,CAST(s.scene AS INTEGER),s.scene,o.cue,o.seconds,o.id')
     promotion=dict(grouping,view_min_support=max(grouping['view_min_support'],grouping['auxiliary_min_support']))
