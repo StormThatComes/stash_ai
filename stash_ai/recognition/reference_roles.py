@@ -26,6 +26,9 @@ def index(db):
     # Disposable malformed candidate JSON must not prevent evidence recovery.
     db.execute('CREATE INDEX IF NOT EXISTS candidates_reference_observation '
                'ON candidates(' + observation_sql('candidates').replace('candidates.', '') + ')')
+    db.execute("CREATE INDEX IF NOT EXISTS candidates_unresolved_pool ON candidates("
+               "CASE WHEN json_valid(payload) THEN json_extract(payload,'$.reason') END,scan) "
+               "WHERE status='withheld'")
 
 
 def verified_sql(observation='o',member='m'):

@@ -53,7 +53,7 @@ def parameters(selected,config,scope,namespace):
 
 
 def context(db,selected,config,scope,namespace):
-    hasher=hashlib.sha256(b'frozen-external-references-v4')
+    hasher=hashlib.sha256(b'frozen-external-references-v5')
     compatibility=fallback_sql(db,config,namespace)
     rows=db.execute("SELECT p.id,p.created,o.id,o.scan,o.cue,o.seconds,o.geometry,o.dimensions,o.embedding,"
         "CASE WHEN json_valid(o.quality) THEN json_extract(o.quality,'$.pixels','$.sharpness',"
@@ -77,6 +77,8 @@ def context(db,selected,config,scope,namespace):
                 _source(config,compatibility,verified=True)+' ORDER BY p.id,s.scene,o.cue,o.id',
                 parameters(selected,config,scope,namespace)):
             _hash_row(hasher,row)
+    from .unresolved_pool import hash_context
+    hash_context(db,selected,config,scope,namespace,hasher)
     return hasher.hexdigest()
 
 
