@@ -80,7 +80,7 @@ def capture(db,selected,config,scope,namespace,fingerprint):
     return History(tuple(groups),views,people,fingerprint)
 
 
-def rank(rows,history,config):
+def rank(rows,history,config,*,decisions=None):
     settings,grouping=config.data['recognition'],config.data['clustering']
     threshold=settings['match_threshold']
     view_threshold=max(threshold,grouping['view_match_threshold'])
@@ -112,11 +112,20 @@ def rank(rows,history,config):
     decision_margin = (margin if ranked and any(v[1]=='view' for v in ranked[0][2])
                        else settings['ambiguity_margin'])
     if not unambiguous(ranked,threshold,decision_margin) or not all(v[3] for v in ranked[0][2]):
+        if (decisions is not None and ranked and ranked[0][0]>=threshold
+                and all(v[3] for v in ranked[0][2])):
+            decisions.append(dict(outcome='ambiguous', context=history.context,
+                rivals=[dict(identity=r[1],score=r[0]) for r in ranked],
+                ambiguity_margin=decision_margin))
         return None
     score,person,values=ranked[0]
     from .anchor_views import _competing_anchor
     if any(_competing_anchor(history.groups,person,vector(row),value[0],decision_margin)
            for row,value in zip(rows,values)):
+        if decisions is not None:
+            decisions.append(dict(outcome='competing_anchor',context=history.context,
+                rivals=[dict(identity=r[1],score=r[0]) for r in ranked],
+                ambiguity_margin=decision_margin))
         return None
     return person,dict(format=1,frozen=True,context=history.context,identity=person,
         mode='view' if any(v[1]=='view' for v in values) else 'strict',mean_score=score,
@@ -140,10 +149,24 @@ def reconcile(database,replay,selected,config,scope,namespace,fingerprint,*,prog
     if len(history.groups)+len(groups)>grouping['max_people_per_lookup']:
         raise ValueError('Selected and historical identities exceed configured person budget.')
     proposals={}
+    deferred=set()
     for group in groups:
         rows=replay.execute('SELECT id,geometry,dimensions,embedding FROM observations '
             'WHERE id IN (SELECT value FROM json_each(?)) ORDER BY id',(encoded(group.sample_ids),)).fetchall()
-        result=rank(rows,history,config) if rows else None
+        decisions=[]
+        result=rank(rows,history,config,decisions=decisions) if rows else None
+        # Existing selected labels can still be restored from ownership votes.
+        # New local clusters with global rivals must not publish another person.
+        owned=replay.execute('SELECT 1 FROM members m JOIN sample_keys k ON k.observation=m.observation '
+            'JOIN origins o ON o.sample_key=k.sample_key JOIN old_people p ON p.id=o.person '
+            'WHERE m.person=? AND p.retired=0 LIMIT 1',(group.identifier,)).fetchone()
+        if result is None and decisions and not owned:
+            deferred.add(group.identifier)
+            replay.execute("UPDATE candidates SET person=NULL,status='withheld',payload=json_set(payload,"
+                "'$.prior_reason',json_extract(payload,'$.reason'),'$.reason','historical_ambiguous_identity',"
+                "'$.global_identity_decision',json(?)) WHERE person=?",
+                (encoded(decisions[0]),group.identifier))
+            replay.execute('DELETE FROM members WHERE person=?',(group.identifier,))
         if result is not None:
             if result[1]['mode']=='view':
                 support=replay.execute('SELECT COUNT(*) FROM (SELECT o.scan,o.seconds FROM members m '
@@ -152,6 +175,7 @@ def reconcile(database,replay,selected,config,scope,namespace,fingerprint,*,prog
                 if support<grouping['view_attach_min_support']:
                     continue
             proposals[group.identifier]=result
+    groups=[group for group in groups if group.identifier not in deferred]
     # Two distinct co-present faces cannot both adopt the same historical label.
     blocked=set()
     by_target={}

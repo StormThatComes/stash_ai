@@ -1641,3 +1641,17 @@ reference repairs or superseding scans invalidate stale label proposals. Strict
 replay checkpoints remain selected-only; the external binding stage is recomputed
 after restore. Stash publication continues to update only selected scene links
 and reuses verified owned performers, preserving manual names and associations.
+
+### Simultaneous claims and deferred global identities
+
+All matching passes resolve simultaneous pending claims before counting support.
+Distinct detections claiming one person in the same cue must satisfy the stronger
+reflection similarity threshold; exact duplicate detections remain one sample.
+Conflict details are retained as `decision_conflict` in the identity report.
+
+A coherent new local group is not sufficient evidence for a new global person
+when compatible historical references provide ambiguous competing identities.
+Such groups remain withheld with `historical_ambiguous_identity` and a
+`global_identity_decision` describing the rivals and dependency context. Existing
+selected ownership remains eligible for stable label reuse. These decisions are
+reversible and do not rewrite unselected scene memberships or Stash profiles.

@@ -292,6 +292,8 @@ def apply_anchor_views(database, selected, config, *, progress=None):
                            "payload=json_set(payload,'$.reason','anchor_view_pending',"
                            "'$.anchor_view',json(?),'$.anchor_view_probe','pending_support') WHERE id=?",
                            (person, encoded(proof), row['candidate']))
+    from .decision_resolution import resolve_pending
+    resolve_pending(db, policy, config)
     anchors.clear()
     # Independent support applies to one person AND one exact frozen prototype.
     # This stage must not overwrite another stage's pending candidates.
