@@ -1677,3 +1677,29 @@ before receiving a global identity. Existing ownership, distinct-cue support,
 competing anchors and co-presence remain checked. Such attachments cannot train
 strict references, promote further views or form transitive merge chains. This
 separates the geometry admission role from permission to train references.
+
+### Production evidence and whole-flow evaluation
+
+The fragmentation report uses the production strict reference admission and
+quality/diversity selector, including compatible historical scans and current
+reference authority. `reference_context` fingerprints that bank. Memberships
+without strict references remain visible as `no_strict_references`; attachment
+samples cannot distort strict similarity or local-core counts. Deferred global
+rivals and simultaneous claim conflicts are included in withheld examples.
+`confirmed_view_evidence` uses the same cohort checks as global consolidation;
+pair evidence alone still does not establish complete-component merge safety.
+Cross-scene comparisons include `production_match` from the frozen matcher.
+
+For labelled local evaluation, `stash_ai.recognition.evaluation.evaluate_identities`
+accepts records with `observation`, `scene`, explicit `truth` and `predicted`
+(identity ID or `None`). It reports global and within-scene fragmentation, extra
+fragments, mixed-identity merges, false split/merge observation pairs, coverage,
+and pair precision/recall. Withheld samples lower coverage/recall and never form
+one artificial identity. These metrics describe only the supplied ground truth.
+
+`compare_identity_runs(records, predictions)` compares named observation-to-ID
+maps from joint, separate, reordered or retuned runs. Comparisons use partitions
+on common observations, so UUID renaming alone is equivalent. Missing keys mean
+unprocessed observations; explicit `None` means withheld. Coverage changes and
+partition changes are reported separately. Synthetic regression vectors verify
+policy logic and do not establish accuracy on real video media.

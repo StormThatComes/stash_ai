@@ -268,3 +268,47 @@ def test_cross_scene_report_rejects_missing_selected_scene_without_db_writes(tmp
         build(config,'123',compare_scene_ids=['456'])
     with pytest.raises(ValueError,match='different scene'):
         build(config,'123',compare_scene_ids=['123'])
+
+
+def test_report_uses_production_reference_selection_and_strict_authority(tmp_path):
+    from stash_ai.recognition.clustering import _groups
+    from stash_ai.recognition.scanning import scan_identity
+    config=seeded(tmp_path,'clustering: {max_samples_per_person: 2}\n')
+    with FaceDatabase(config.database) as state:
+        db=state.connection
+        sid=db.execute("SELECT id FROM scans WHERE scene='123'").fetchone()[0]
+        person=db.execute('SELECT id FROM people ORDER BY created LIMIT 1').fetchone()[0]
+        for cue,sample in [(4,[1.,0.,0.,0.]),(5,[0.,1.,0.,0.])]:
+            observation=str(uuid.uuid4())
+            db.execute('INSERT INTO observations VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+                (observation,sid,cue,float(cue),'vtt','{}',str(cue),'{}',None,4,np.asarray(sample,dtype='<f4').tobytes(),None))
+            db.execute('INSERT INTO members VALUES (?,?)',(observation,person))
+            db.execute('INSERT INTO candidates VALUES (?,?,?,?,?,?)',(str(uuid.uuid4()),sid,matching_policy(config),person,
+                'accepted',json.dumps(dict(observation=observation,reason='known_identity'))))
+        group=next(g for g in _groups(db,'scope',namespace(config),config.data['clustering'],
+            scan_policy=scan_identity(config,namespace(config)),label_scenes=('123',)) if g.identifier==person)
+        expected=list(group.sample_ids)
+        late=db.execute('SELECT id FROM observations WHERE scan=? AND cue=5',(sid,)).fetchone()[0]
+        assert late in expected
+        db.commit()
+    result=build(config,'123')
+    refs=next(p['representatives'] for p in result['identities'] if p['identity_id']==person)
+    assert [sample['id'] for sample in refs['samples']]==expected
+    assert refs['selection']=='production_quality_diversity_v1'
+    with FaceDatabase(config.database) as state:
+        state.connection.execute("UPDATE candidates SET payload=json_set(payload,'$.reason','shared_view_identity') WHERE person=?",(person,))
+        state.connection.commit()
+    result=build(config,'123')
+    identity=next(p for p in result['identities'] if p['identity_id']==person)
+    assert identity['reference_status']=='no_strict_references'
+    assert identity['representatives']['available']==0
+    assert identity['strict_accepted_scene_cues']==0
+
+
+def test_report_preserves_pending_decision_explanations(tmp_path):
+    config=seeded(tmp_path)
+    proof=dict(outcome='ambiguous',rivals=[dict(identity='one',score=.9),dict(identity='two',score=.89)])
+    with FaceDatabase(config.database) as state:
+        state.connection.execute("UPDATE candidates SET payload=json_set(payload,'$.global_identity_decision',json(?)) WHERE status='withheld'",(json.dumps(proof),))
+        state.connection.commit()
+    assert build(config,'123')['withheld_examples'][0]['global_identity_decision']==proof
