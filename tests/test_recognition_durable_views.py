@@ -5,6 +5,7 @@ import pytest
 
 from stash_ai.recognition.database import FaceDatabase
 from stash_ai.recognition.historical_references import capture
+from stash_ai.recognition.historical_references import context
 from stash_ai.recognition.rebuild import rebuild_selected
 from tests.test_recognition_anchor_views import config_for,A,X,C
 from tests.test_recognition_frozen_partition import fixture
@@ -53,3 +54,15 @@ def test_rare_confirmed_cohort_survives_primary_and_discovery_limits(tmp_path,jo
         rows=[r for item in (source,second) for r in candidates(db,item['scan'],config)]
         assert all(r[0]=='accepted' for r in rows)
         assert len({r[1] for r in rows})==1
+
+
+def test_changed_confirmation_proof_invalidates_external_context(tmp_path):
+    config=config_for(tmp_path,view_prototypes_enabled=True)
+    with FaceDatabase(config.database) as db:
+        first=fixture(db,config,'1',[A]*3+[X]*3,range(3,6));rebuild_selected(db,[first],config)
+        before=context(db.connection,[],config,'scope','ns')
+        db.connection.execute("UPDATE candidates SET payload=json_set(payload,'$.strict_confirmation.support_ids',json('[\"missing\"]')) "
+            "WHERE scan=? AND json_extract(payload,'$.reason')='auxiliary_identity'",(first['scan'],))
+        db.connection.commit()
+        assert context(db.connection,[],config,'scope','ns')!=before
+        assert not any(v.authority=='verified_view' for v in capture(db.connection,[],config,'scope','ns','changed').views)

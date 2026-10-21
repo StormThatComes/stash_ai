@@ -47,7 +47,7 @@ def parameters(selected,config,scope,namespace):
 
 
 def context(db,selected,config,scope,namespace):
-    hasher=hashlib.sha256(b'frozen-external-references-v2')
+    hasher=hashlib.sha256(b'frozen-external-references-v3')
     compatibility=fallback_sql(db,config,namespace)
     rows=db.execute("SELECT p.id,p.created,o.id,o.scan,o.cue,o.seconds,o.geometry,o.dimensions,o.embedding,"
         "CASE WHEN json_valid(o.quality) THEN json_extract(o.quality,'$.pixels','$.sharpness',"
@@ -56,7 +56,9 @@ def context(db,selected,config,scope,namespace):
     for row in rows:
         _hash_row(hasher,row)
     if config.data['clustering']['view_prototypes_enabled']:
-        for row in db.execute('SELECT p.id,o.id,o.scan,o.cue,o.seconds,o.geometry,o.quality,o.dimensions,o.embedding '+
+        for row in db.execute('SELECT p.id,o.id,o.scan,o.cue,o.seconds,o.geometry,o.quality,o.dimensions,o.embedding,'
+                '(SELECT json_extract(c.payload,\'$.strict_confirmation\') FROM candidates c '
+                'WHERE json_extract(c.payload,\'$.observation\')=o.id ORDER BY c.rowid DESC LIMIT 1) '+
                 _source(config,compatibility,verified=True)+' ORDER BY p.id,s.scene,o.cue,o.id',
                 parameters(selected,config,scope,namespace)):
             _hash_row(hasher,row)
