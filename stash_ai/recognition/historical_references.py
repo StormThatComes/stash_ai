@@ -91,7 +91,7 @@ def capture(db,selected,config,scope,namespace,fingerprint):
     return History(tuple(groups),views,people,fingerprint)
 
 
-def rank(rows,history,config,*,decisions=None):
+def rank(rows,history,config,*,decisions=None,potential=None):
     settings,grouping=config.data['recognition'],config.data['clustering']
     threshold=settings['match_threshold']
     view_threshold=max(threshold,grouping['view_match_threshold'])
@@ -114,6 +114,8 @@ def rank(rows,history,config,*,decisions=None):
                 continue
             if previous is None or score>previous[0]:
                 choices[group.identifier]=(score,'view',view.medoid,score>=view_threshold)
+        if potential is not None and not potential and any(value[3] for value in choices.values()):
+            potential.append(True)
         for person,value in choices.items():
             aggregate.setdefault(person,[]).append(value)
     ranked=[]
@@ -163,11 +165,15 @@ def reconcile(database,replay,selected,config,scope,namespace,fingerprint,*,prog
         raise ValueError('Selected and historical identities exceed configured person budget.')
     proposals={}
     deferred=set()
+    partial_sources=set()
     for group in groups:
         rows=replay.execute('SELECT id,geometry,dimensions,embedding FROM observations '
             'WHERE id IN (SELECT value FROM json_each(?)) ORDER BY id',(encoded(group.sample_ids),)).fetchall()
         decisions=[]
-        result=rank(rows,history,config,decisions=decisions) if rows else None
+        potential=[]
+        result=rank(rows,history,config,decisions=decisions,potential=potential) if rows else None
+        if potential:
+            partial_sources.add(group.identifier)
         # Existing selected labels can still be restored from ownership votes.
         # New local clusters with global rivals must not publish another person.
         owned=replay.execute('SELECT 1 FROM members m JOIN sample_keys k ON k.observation=m.observation '
@@ -267,4 +273,6 @@ def reconcile(database,replay,selected,config,scope,namespace,fingerprint,*,prog
         replay.execute("UPDATE candidates SET person=?,status='accepted',payload=json_set(payload,"
             "'$.reason',?,'$.historical_reference',json(?)) WHERE id=?",(target,reason,encoded(proof),row['candidate']))
         bindings[target]=target
+    from .cohort_resolution import recover
+    recover(replay,groups,history,config,bindings,source_ids=partial_sources)
     return bindings

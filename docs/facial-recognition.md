@@ -1734,3 +1734,27 @@ contracts, detector score and measured quality satisfy the current gates. Missin
 visibility measurements or old geometry/pose contracts exclude that fallback.
 Rejected observations are never resurrected. No extra inference or schema
 migration is required; raw observations and decisions remain the source of truth.
+
+
+### Supported cohorts and unresolved outliers
+
+A failed whole-group historical match can now recover independently matched
+cohorts without publishing another identity for their unmatched observations.
+All queries use the original frozen bank, preserve identity-level competition
+and co-presence checks, and repeat exact-medoid support checks after resolving
+simultaneous claims. Recovered members are attachments. Unmatched observations
+remain `cohort_unresolved`; reports include the frozen source, proposed independent
+support and total support in `cohort_resolution`.
+
+Selected-fragment repairs use the existing global-view neighbour shortlist;
+small groups without a confirmed view are considered separately. A selected
+repair requires a strict majority of independent cue times, an unresolved
+remainder, and no target that is itself being repaired. Higher coverage resolves
+unequal proposals; equal cycles remain unchanged. This avoids replay-order chains
+and avoids another exhaustive all-identity scan for unrelated selected people.
+
+View training now accepts adjacent pose categories near the same uncertainty
+boundary used by matching. Every observed direction must remain compatible;
+neutral evidence cannot bridge opposite left/right directions. Independent
+support is pooled before promotion instead of being split across a hard bucket
+boundary. Embedding cohesion and promotion thresholds remain unchanged.

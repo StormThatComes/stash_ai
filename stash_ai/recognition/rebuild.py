@@ -11,7 +11,7 @@ import time
 from types import SimpleNamespace
 import uuid
 
-from .clustering import _groups, _result, _similarities, cluster_scene, matching_policy, reference_context, vector, complete_candidates
+from .clustering import Group, _groups, _result, _similarities, cluster_scene, matching_policy, reference_context, vector, complete_candidates
 from .config import digest
 from .database import SCHEMA, encoded
 from .reference_usage import ReferenceUsage
@@ -453,7 +453,12 @@ def _rebuild_selected(database, selected, config, *, progress=None):
             from .anchor_views import apply_anchor_views
             apply_anchor_views(temporary, selected, config, progress=progress)
             from .global_views import apply_global_views
-            apply_global_views(temporary, selected, config, progress=progress)
+            global_state=apply_global_views(temporary, selected, config, progress=progress)
+            from .cohort_resolution import selected as resolve_selected_cohorts
+            from dataclasses import replace
+            from .identity_merges import canonical
+            early=tuple(replace(v,group=Group(canonical(replay,v.group.identifier),v.group.samples,True)) for v in early)
+            resolve_selected_cohorts(temporary,config,early,global_state)
         history = historical_references.capture(db,selected,config,scope,namespace,external_context)
         external_bindings = historical_references.reconcile(database,replay,selected,config,scope,namespace,external_context,progress=progress,history=history)
         mapping = _bind(database, replay, config, scope, namespace, usage=usage,external_bindings=external_bindings,
