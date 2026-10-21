@@ -1703,3 +1703,13 @@ on common observations, so UUID renaming alone is equivalent. Missing keys mean
 unprocessed observations; explicit `None` means withheld. Coverage changes and
 partition changes are reported separately. Synthetic regression vectors verify
 policy logic and do not establish accuracy on real video media.
+
+### Global view resolution before label binding
+
+Scene-local strict confirmations are frozen before auxiliary views propose
+repairs of selected anchor hypotheses. Only an established core in the source
+scene can train such a view; numeric scene IDs do not define a cross-scene
+chronology. Old automatic ownership does not veto the repair. Historical label
+votes are applied afterwards, preserving owned performer records. Co-presence,
+independent support, competing strict anchors and frozen no-chain checks still
+apply. Recovered observations remain attachments and cannot train another view.

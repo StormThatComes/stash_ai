@@ -46,10 +46,12 @@ def retry_strict(database, selected, config):
 
 
 def early_views(database, selected, config):
-    """Corroborate views only against cores established before each source cue.
+    """Freeze scene-local confirmations before resolving global hypotheses.
 
-    Later provisional anchor clusters cannot steal the earlier auxiliary evidence
-    needed to recognize them. No recovered membership trains this frozen bank.
+    A scene ID is not a timeline. Only strict cores established earlier in the
+    *source scene* can confirm its auxiliary evidence. Other scenes' provisional
+    cores cannot steal that evidence before their identity has been resolved.
+    Old automatic ownership participates in label binding, never this partition.
     """
     grouping=config.data['clustering']
     if not grouping['view_prototypes_enabled'] or not grouping['auxiliary_matching'] or not selected:
@@ -65,20 +67,20 @@ def early_views(database, selected, config):
         'JOIN scans s ON s.id=o.scan WHERE '+strict_sql()+' AND '+anchor_sql('o',grouping)+
         ' ORDER BY CAST(s.scene AS INTEGER),s.scene,o.cue,o.id')
     for row in rows:
-        person=row['person']
-        if person in horizons:
+        key=(row['person'],row['scene'])
+        if key in horizons:
             continue
-        cues=seen.setdefault(person,set());cues.add((row['scene'],row['seconds']))
+        cues=seen.setdefault(key,set());cues.add(row['seconds'])
         if len(cues)>=minimum:
-            horizons[person]=(int(row['scene']),row['cue'])
+            horizons[key]=row['cue']
     db.execute('CREATE TEMP TABLE early_view_support(observation TEXT PRIMARY KEY,person TEXT)')
     rows=db.execute('SELECT o.id,o.scan,o.cue,o.seconds,o.geometry,o.dimensions,o.embedding,s.scene FROM observations o '
         'JOIN scans s ON s.id=o.scan WHERE o.rejected IS NULL AND '+auxiliary_sql('o',grouping)+
         ' ORDER BY CAST(s.scene AS INTEGER),s.scene,o.cue,o.id')
     for row in rows:
-        key=(int(row['scene']),row['cue'])
-        eligible=tuple(g for g in groups if g.identifier in horizons and horizons[g.identifier]<key)
-        result=rank([row],History(eligible,(),{},'earlier-strict-cores'),config)
+        eligible=tuple(g for g in groups
+            if horizons.get((g.identifier,row['scene']),float('inf'))<row['cue'])
+        result=rank([row],History(eligible,(),{},'frozen-scene-local-strict-cores'),config)
         if result is None:
             continue
         person,_=result
@@ -95,24 +97,18 @@ def early_views(database, selected, config):
     promotion=dict(grouping,view_min_support=max(grouping['view_min_support'],grouping['auxiliary_min_support']))
     views=confirmed_views(db,policy,promotion,remaining_bytes=grouping['max_reference_bytes']-usage.bytes,rows=source)
     db.execute('DROP TABLE early_view_support')
-    # Reconcile only new local hypotheses, never existing owned global people.
-    history=History((),views,{},'frozen-earlier-auxiliary-views')
+    # Resolve the observation partition before considering historical labels.
+    # A prior automatic label is not independent evidence against a repair.
+    history=History((),views,{},'frozen-scene-local-auxiliary-views')
     proposals=[]
-    owners={}
-    for row in db.execute('SELECT DISTINCT m.person,o.person FROM members m JOIN sample_keys k ON k.observation=m.observation '
-        'JOIN origins o ON o.sample_key=k.sample_key JOIN old_people p ON p.id=o.person WHERE p.retired=0'):
-        owners.setdefault(row[0],set()).add(row[1])
     for group in groups:
         rows=db.execute('SELECT id,geometry,dimensions,embedding FROM observations WHERE id IN '
             '(SELECT value FROM json_each(?)) ORDER BY id',(encoded(group.sample_ids),)).fetchall()
-        eligible=tuple(v for v in views if v.group.identifier!=group.identifier
-            and horizons.get(v.group.identifier,(float('inf'),0))<horizons.get(group.identifier,(0,0)))
+        eligible=tuple(v for v in views if v.group.identifier!=group.identifier)
         result=rank(rows,replace(history,views=eligible),config) if rows else None
         if result is None:
             continue
         target,proof=result
-        if owners.get(group.identifier) and not owners[group.identifier].intersection(owners.get(target,set())):
-            continue
         from .global_views import _cooccurs
         from .anchor_views import _competing_anchor
         from .clustering import vector
