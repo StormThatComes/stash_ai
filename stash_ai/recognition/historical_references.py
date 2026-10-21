@@ -229,6 +229,11 @@ def reconcile(database,replay,selected,config,scope,namespace,fingerprint,*,prog
             from .reference_gaps import defer
             if defer(replay,group,history,config):
                 deferred.add(group.identifier)
+        if result is None and not owned and group.identifier not in deferred:
+            from .identity_birth import potential as plausible,defer as defer_birth
+            proof=plausible(rows,history,config)
+            if proof is not None:
+                defer_birth(replay,group.identifier,proof);deferred.add(group.identifier)
         if result is not None:
             if result[1]['mode']=='view':
                 support=replay.execute('SELECT COUNT(*) FROM (SELECT o.scan,o.seconds FROM members m '

@@ -432,6 +432,8 @@ def _rebuild_selected(database, selected, config, *, progress=None):
         checkpoints = Checkpoints(database, selected, config, scope, namespace)
         cursor, next_clock = checkpoints.restore(replay)
         clock = ReplayClock(next_clock)
+        from .local_cohorts import prepare as prepare_local_cohorts
+        prepare_local_cohorts(replay,selected,config)
         # Stable replay identity removes installation-dependent UUID tie order.
         temporary = SimpleNamespace(connection=replay,
             installation=str(uuid.uuid5(uuid.NAMESPACE_URL, encoded([scope, namespace, 'cold-replay']))),
@@ -489,6 +491,8 @@ def _rebuild_selected(database, selected, config, *, progress=None):
         shared_groups, shared_views, confirmations = auxiliary_bank(replay,config,scope,namespace,history,mapping,early)
         apply_auxiliary(temporary, selected, config, progress=progress,reference_groups=shared_groups,
                         reference_views=shared_views,reference_confirmations=confirmations)
+        from .shared_references import finalize_early
+        finalize_early(replay,config,mapping)
         from .pooled_views import finalize as finalize_pool
         finalize_pool(replay,config,mapping)
         for row in replay.execute('SELECT DISTINCT person FROM members'):

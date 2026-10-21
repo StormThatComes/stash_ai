@@ -21,6 +21,11 @@ def test_supported_endpoint_is_not_lost_inside_broad_cohort(tmp_path,frequent,ra
         appearance=fixture(db,config,'2',[C]*rare)
         rebuild_selected(db,[source,appearance],config)
         owner=candidates(db,source['scan'],config)[0][1]
+        # Exercise a retained independently confirmed appearance. Joint view-only
+        # queries now remain attachments, so explicitly seed this legacy strict
+        # input rather than using a recovered query to train a coverage centre.
+        db.connection.execute("UPDATE candidates SET payload=json_set(payload,'$.reason','candidate_group',"
+            "'$.reference_role','strict') WHERE scan=?",(appearance['scan'],));db.connection.commit()
         bank=catalogue(db.connection,config,'scope','ns',complete=True,
             usage=ReferenceUsage(config.data['clustering']['max_reference_bytes']))
         assert any(v.support_count>=3 and np.dot(v.group.samples[0],C)>.999 for v in bank)
