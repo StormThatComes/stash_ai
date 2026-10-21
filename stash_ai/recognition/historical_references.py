@@ -145,7 +145,7 @@ def rank(rows,history,config,*,decisions=None,potential=None):
             if low<grouping['view_cohesion_threshold'] or not pose_matches(row['geometry'],view.pose):
                 continue
             previous=choices.get(group.identifier)
-            if previous is not None and previous[1]=='strict' and previous[3]:
+            if previous is not None and previous[1]=='strict' and previous[3] and previous[0]>=score:
                 continue
             if previous is None or score>previous[0]:
                 choices[group.identifier]=(score,'view',view.medoid,score>=view_threshold)

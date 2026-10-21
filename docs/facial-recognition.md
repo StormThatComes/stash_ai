@@ -1,5 +1,13 @@
 # Facial recognition
 
+The complete appearance bank preserves independently supported narrow looks
+inside broader coherent cohorts. Narrow looks use half the angular view-match
+radius and must satisfy the usual independent support minimum themselves.
+Broad cohorts remain available when their individual variants are too sparse.
+Every retained centre participates in both matching and rival competition, within
+the explicit reference memory budget. Identity ranking uses the strongest valid
+strict or view evidence per person; a winning view remains attachment authority.
+
 ## SCRFD five-landmark detector choices
 
 The default detector for new configurations is **SCRFD-10G KPS**. This release
