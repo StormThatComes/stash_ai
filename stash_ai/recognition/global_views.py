@@ -115,6 +115,9 @@ def cohort_evidence(db, left, right, config):
     score=float(np.dot(left.group.samples[0],right.group.samples[0]))
     cross=[float(np.dot(a,b)) for a in left.examples for b in right.examples]
     low,mean=min(cross),sum(cross)/len(cross)
+    strict=left.authority==right.authority=='strict_core'
+    if strict:
+        score=mean # Normalized centroids only shortlist; original vectors decide.
     copresent=_cooccurs(db,left.group.identifier,right.group.identifier)
     blockers=[]
     if score<threshold:
@@ -128,6 +131,7 @@ def cohort_evidence(db, left, right, config):
     if copresent and low<max(threshold,settings['cooccurrence_merge_threshold']):
         blockers.append('view_copresence_requires_reflection_strength')
     return dict(cooccurring=copresent,medoids=[left.medoid,right.medoid],
+        authority='strict_core' if strict else 'strict_view',
         support=[left.support_count,right.support_count],support_ids=[left.support,right.support],
         minimum_cross_similarity=low,mean_cross_similarity=mean,match_score=score,
         threshold=threshold,blockers=blockers)
@@ -196,6 +200,12 @@ def consolidation_plan(db,views,config,*,neighbours=None):
                     for other,score,_ in comparisons(groups,view.group.samples[0],threshold-margin):
                         if root(other.identifier)==root(person):
                             continue
+                        if view.authority==by_group[id(other)].authority=='strict_core':
+                            from .clustering import _similarities
+                            raw=Group(other.identifier,by_group[id(other)].examples,True)
+                            score=sum(_similarities(raw,q)[0] for q in view.examples)/len(view.examples)
+                            if score<threshold-margin:
+                                continue
                         entry=dict(identity=person,rival=other.identifier,score=score,
                                    internal_score=floors[person],gap=floors[person]-score)
                         if rival is None or (entry['gap'],person,other.identifier)<(rival['gap'],rival['identity'],rival['rival']):
@@ -210,7 +220,7 @@ def consolidation_plan(db,views,config,*,neighbours=None):
     return tuple(result)
 
 
-def merge_views(database,views,config,policy,*,neighbours=None):
+def merge_views(database,views,config,policy,*,neighbours=None,evidence_field='global_view_merge'):
     """Apply a plan computed entirely from the original frozen catalogue."""
     db=database.connection
     owned={}
@@ -242,7 +252,7 @@ def merge_views(database,views,config,policy,*,neighbours=None):
             db.execute('INSERT INTO identity_merges VALUES (?,?,?,?,?)',(source,target,time.time(),encoded(proof),'local'))
             db.execute('UPDATE members SET person=? WHERE person=?',(target,source))
             db.execute("UPDATE candidates SET payload=json_set(payload,'$.merged_from',person,"
-                "'$.global_view_merge',json(?)),person=? WHERE person=?",(encoded(proof),target,source))
+                "'$."+evidence_field+"',json(?)),person=? WHERE person=?",(encoded(proof),target,source))
     return tuple(replace(view,group=Group(canonical(db,view.group.identifier),view.group.samples,True,
         view.group.sample_ids)) for view in views)
 

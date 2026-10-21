@@ -216,8 +216,8 @@ def complete_candidates(db, scan, policy, context, count, *, exact_memberships=F
 
 def matching_policy(config):
     from .context import policy_digest
-    return policy_digest(config, 'matching-v19', lambda: {
-        'format': 19, 'recognition': config.data['recognition'],
+    return policy_digest(config, 'matching-v20', lambda: {
+        'format': 20, 'recognition': config.data['recognition'],
         'clustering': {key:value for key,value in config.data['clustering'].items()
                        if key not in ('max_reference_bytes','max_people_per_lookup')}})
 
@@ -247,7 +247,10 @@ def cluster_scene(database, scan, config, *, progress=None, _cold_replay=False):
         usage.begin('no_observations')
         return []
     settings, grouping = config.data['recognition'], config.data['clustering']
-    groups = _groups(db, record['scope'], record['namespace'], grouping, usage=usage)
+    independent = _cold_replay and grouping['anchor_view_matching']
+    # Scene hypotheses must not borrow an earlier scene's provisional labels.
+    # Global resolution sees every independently established local core later.
+    groups = [] if independent else _groups(db, record['scope'], record['namespace'], grouping, usage=usage)
     existing = 0
     if not _cold_replay:
         context = reference_context(groups)
@@ -369,7 +372,7 @@ def cluster_scene(database, scan, config, *, progress=None, _cold_replay=False):
         ranked.clear()
         group = query = observation = None
         retained = _groups(db, record['scope'], record['namespace'], grouping, usage=usage, stage='retained')
-        if supported_merges(database, scan, config, retained, policy, usage=usage):
+        if not independent and supported_merges(database, scan, config, retained, policy, usage=usage):
             retained.clear()
             retained = _groups(db, record['scope'], record['namespace'], grouping, usage=usage, stage='retained')
             _recheck_after_merge(db, scan, policy, retained, config)

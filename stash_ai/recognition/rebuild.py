@@ -444,6 +444,8 @@ def _rebuild_selected(database, selected, config, *, progress=None):
             # merged. Contextual attachments cannot become another scene's anchors
             # or bridge identities during the replay.
             checkpoints.save(replay, len(selected), clock.value, final=True)
+            from .strict_partition import resolve as resolve_strict_partition
+            resolve_strict_partition(temporary, selected, config, progress=progress)
             from .cross_scene import apply_cross_scene_support
             apply_cross_scene_support(temporary, selected, config, progress=progress)
             from .shared_references import retry_strict, early_views
