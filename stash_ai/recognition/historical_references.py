@@ -11,7 +11,8 @@ from .clustering import Group, _groups, matching_policy, vector
 from .database import encoded
 from .global_views import catalogue, rank_person, unambiguous, _cooccurs
 from .pose_policy import anchor_sql
-from .reference_roles import strict_sql
+from .reference_roles import strict_sql, verified_sql
+from .reference_compatibility import fallback_sql
 from .reference_selection import select
 from .reference_usage import ReferenceUsage
 from .scanning import scan_identity
@@ -28,15 +29,16 @@ class History:
     context: str
 
 
-def _source(config):
+def _source(config,compatibility,*,verified=False):
     return ('FROM members m JOIN people p ON p.id=m.person JOIN observations o ON o.id=m.observation '
         'JOIN scans s ON s.id=o.scan WHERE p.scope=? AND p.namespace=? '
-        'AND s.scene NOT IN (SELECT value FROM json_each(?)) AND s.policy_sha=? '
+        'AND s.scene NOT IN (SELECT value FROM json_each(?)) AND (s.policy_sha=? OR '+compatibility+') '
         "AND s.scope=p.scope AND s.namespace=p.namespace AND s.status='complete' AND o.rejected IS NULL "
         'AND NOT EXISTS (SELECT 1 FROM identity_merges WHERE source=p.id) '
         'AND NOT EXISTS (SELECT 1 FROM scans newer WHERE newer.scope=s.scope AND newer.namespace=s.namespace '
         'AND newer.scene=s.scene AND newer.rowid>s.rowid) AND ' +
-        anchor_sql('o',config.data['clustering']) + ' AND ' + strict_sql())
+        ('1=1' if verified else anchor_sql('o',config.data['clustering'])) + ' AND ' +
+        (verified_sql() if verified else strict_sql()))
 
 
 def parameters(selected,config,scope,namespace):
@@ -44,20 +46,26 @@ def parameters(selected,config,scope,namespace):
 
 
 def context(db,selected,config,scope,namespace):
-    hasher=hashlib.sha256(b'frozen-external-references-v1')
+    hasher=hashlib.sha256(b'frozen-external-references-v2')
+    compatibility=fallback_sql(db,config,namespace)
     rows=db.execute("SELECT p.id,p.created,o.id,o.scan,o.cue,o.seconds,o.geometry,o.dimensions,o.embedding,"
         "CASE WHEN json_valid(o.quality) THEN json_extract(o.quality,'$.pixels','$.sharpness',"
-        "'$.pose_deviation','$.roll_deviation') END " + _source(config) +
+        "'$.pose_deviation','$.roll_deviation') END " + _source(config,compatibility) +
         ' ORDER BY p.id,CAST(s.scene AS INTEGER),s.scene,o.cue,o.id',parameters(selected,config,scope,namespace))
     for row in rows:
         _hash_row(hasher,row)
+    if config.data['clustering']['view_prototypes_enabled']:
+        for row in db.execute('SELECT p.id,o.id,o.scan,o.cue,o.seconds,o.geometry,o.quality,o.dimensions,o.embedding '+
+                _source(config,compatibility,verified=True)+' ORDER BY p.id,s.scene,o.cue,o.id',
+                parameters(selected,config,scope,namespace)):
+            _hash_row(hasher,row)
     return hasher.hexdigest()
 
 
 def capture(db,selected,config,scope,namespace,fingerprint):
     usage=ReferenceUsage(config.data['clustering']['max_reference_bytes'])
     usage.begin('historical_references')
-    source=_source(config)
+    source=_source(config,fallback_sql(db,config,namespace))
     args=parameters(selected,config,scope,namespace)
     people={}
     groups=[]
@@ -77,6 +85,9 @@ def capture(db,selected,config,scope,namespace,fingerprint):
     if config.data['clustering']['anchor_view_matching']:
         views=catalogue(db,config,scope,namespace,usage=usage,
             excluded_scenes=[item['scene'] for item in selected],scan_policy=scan_identity(config,namespace))
+    if config.data['clustering']['view_prototypes_enabled'] and config.data['clustering']['auxiliary_matching']:
+        from .verified_views import historical_views
+        views=tuple(views)+historical_views(db,config,scope,namespace,selected,tuple(groups),usage)
     return History(tuple(groups),views,people,fingerprint)
 
 
@@ -127,7 +138,9 @@ def rank(rows,history,config,*,decisions=None):
                 rivals=[dict(identity=r[1],score=r[0]) for r in ranked],
                 ambiguity_margin=decision_margin))
         return None
-    return person,dict(format=1,frozen=True,context=history.context,identity=person,
+    return person,dict(format=2,frozen=True,context=history.context,identity=person,
+        view_evidence=[dict(medoid=v.medoid,authority=v.authority,support=v.support_count,support_ids=v.support)
+            for v in history.views if v.medoid in {value[2] for value in values}],
         mode='view' if any(v[1]=='view' for v in values) else 'strict',mean_score=score,
         medoids=sorted({v[2] for v in values if v[2] is not None}),ambiguity_margin=decision_margin)
 
