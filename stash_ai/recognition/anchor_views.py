@@ -69,7 +69,7 @@ def _confirmed(db, policy, grouping, usage):
             query = vector(row)
             pose = pose_view(row['geometry'])
             slot = next((s for s in slots
-                         if s.pose == pose and s.accepts(query, cohesion)), None)
+                         if s.accepts_pose(row['geometry']) and s.accepts(query, cohesion)), None)
             if slot is None:
                 if len(slots) >= 32:
                     continue

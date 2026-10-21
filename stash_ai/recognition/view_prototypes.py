@@ -58,6 +58,10 @@ class _Cluster:
     cues: set = field(default_factory=set)
     qualities: list = field(default_factory=list)
     total: object = field(default=None,repr=False)
+    pose_hints: set = field(default_factory=set)
+
+    def accepts_pose(self,geometry):
+        return all(pose_matches(geometry,hint) for hint in (self.pose_hints or {self.pose}))
 
     def accepts(self, query, threshold):
         import numpy as np
@@ -68,6 +72,10 @@ class _Cluster:
         if cue in self.cues:
             return
         self.cues.add(cue)
+        if 'geometry' in row.keys():
+            self.pose_hints.add(pose_view(row['geometry']))
+            if 'other' in self.pose_hints:
+                self.pose='other'
         import numpy as np
         from .reference_selection import quality
         self.total = query.astype('float64').copy() if self.total is None else self.total + query
@@ -157,7 +165,7 @@ def confirmed_views(db, policy, grouping, *, remaining_bytes, rows=None):
             query = vector(row)
             pose = pose_view(row['geometry'])
             chosen = next((slot for slot in slots
-                           if slot.pose == pose and slot.accepts(query, cohesion)), None)
+                           if slot.accepts_pose(row['geometry']) and slot.accepts(query, cohesion)), None)
             if chosen is None:
                 # Bound quality evidence for a single person without silently
                 # allowing new identities or ever-growing reference groups.

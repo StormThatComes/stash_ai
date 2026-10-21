@@ -71,7 +71,7 @@ def catalogue(db, config, scope, namespace, *, usage, policy=None, excluded_scen
                 emit()
                 owner, slots = row['person'], []
             sample, pose = vector(row), pose_view(row['geometry'])
-            slot = next((slot for slot in slots if slot.pose == pose and
+            slot = next((slot for slot in slots if slot.accepts_pose(row['geometry']) and
                          slot.accepts(sample, grouping['view_cohesion_threshold'])), None)
             if slot is None:
                 if len(slots) >= 32:
@@ -133,7 +133,7 @@ def cohort_evidence(db, left, right, config):
         threshold=threshold,blockers=blockers)
 
 
-def merge_views(database, views, config, policy):
+def merge_views(database, views, config, policy, *, neighbours=None):
     """Consolidate complete frozen components, never neighbour chains.
 
     Weak neighbours join the ambiguity component too. Every identity pair must
@@ -180,6 +180,8 @@ def merge_views(database, views, config, policy):
                     if candidates[other.identifier] is None:
                         candidates[other.identifier]=witness(view,by_group[id(other)],score)
             for other,proof in candidates.items():
+                if neighbours is not None:
+                    neighbours.update((person,other))
                 join(person,other)
                 if proof is not None:
                     degrees[person]+=1;degrees[other]+=1
@@ -281,7 +283,9 @@ def apply_global_views(database, selected, config, *, progress=None):
     views = catalogue(db,config,first['scope'],first['namespace'],usage=usage,policy=policy)
     if not views:
         return
-    views = merge_views(database,views,config,policy)
+    neighbours=set()
+    views = merge_views(database,views,config,policy,neighbours=neighbours)
     anchors = [Group(canonical(db,group.identifier),group.samples,True,group.sample_ids) for group in anchors]
     recover(database,selected,config,views,anchors,policy)
     usage.emit(force=True)
+    return views,{canonical(db,person) for person in neighbours}
