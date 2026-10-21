@@ -1,7 +1,7 @@
 """Frozen strict appearance cohorts shared across selected scenes.
 
 View-only members never train the catalogue. Identity consolidation requires
-reciprocal, unambiguous nominations from independently supported cohorts; the
+complete frozen ambiguity components from independently supported cohorts; the
 frozen nomination graph is not recomputed after a merge, preventing chaining.
 """
 from dataclasses import dataclass, replace
@@ -16,7 +16,7 @@ from .reference_usage import ReferenceUsage
 from .replay_addresses import address
 from .progress import tracking
 from .scoring import comparisons
-from .view_prototypes import _Cluster, pose_view
+from .view_prototypes import _Cluster, pose_view, pose_matches
 
 
 @dataclass(frozen=True)
@@ -40,7 +40,7 @@ def catalogue(db, config, scope, namespace, *, usage, policy=None, excluded_scen
     if scan_policy is not None:
         parameters.append(scan_policy)
     rows = db.execute(
-        'SELECT m.person,o.id,o.scan,o.seconds,o.geometry,o.dimensions,o.embedding '
+        'SELECT m.person,o.id,o.scan,o.seconds,o.geometry,o.dimensions,o.embedding,o.quality '
         'FROM members m JOIN people p ON p.id=m.person JOIN observations o ON o.id=m.observation '
         'JOIN scans s ON s.id=o.scan ' + join +
         "WHERE p.scope=? AND p.namespace=? AND s.scene NOT IN (SELECT value FROM json_each(?)) "
@@ -105,54 +105,91 @@ def _cooccurs(db, left, right):
 
 
 def merge_views(database, views, config, policy):
-    """Only mutual best pairs from the original catalogue can consolidate."""
+    """Consolidate complete frozen components, never neighbour chains.
+
+    Weak neighbours join the ambiguity component too. Every identity pair must
+    have independently supported strong cohort evidence before any member moves.
+    Union-find and strong degrees use O(people) memory, without an edge table.
+    """
     import numpy as np
-    db = database.connection
-    grouping, settings = config.data['clustering'], config.data['recognition']
-    threshold = max(settings['match_threshold'], grouping['view_match_threshold'])
-    margin = max(settings['ambiguity_margin'], grouping['view_ambiguity_margin'])
-    groups = [view.group for view in views]
-    by_group = {id(view.group): view for view in views}
-    nominations = {}
-    with tracking(views, 'Nominate global identity view merges', unit='view') as tracked:
-        for view in tracked:
-            ranked = nominations.setdefault(view.group.identifier, [])
-            for other, score, _ in comparisons(groups, view.group.samples[0], threshold-margin):
-                if other.identifier == view.group.identifier:
-                    continue
-                rank_person(ranked, (score, other.identifier, view, by_group[id(other)]))
-    order = {row['id']: (row['created'],row['id']) for row in db.execute('SELECT id,created FROM people')}
-    consumed = set()
-    for person in sorted(nominations, key=lambda person: order[person]):
-        ranked = nominations[person]
-        if person in consumed or not unambiguous(ranked, threshold, margin):
+    from .config import digest
+    db=database.connection
+    grouping,settings=config.data['clustering'],config.data['recognition']
+    threshold=max(settings['match_threshold'],grouping['view_match_threshold'])
+    margin=max(settings['ambiguity_margin'],grouping['view_ambiguity_margin'])
+    groups=[v.group for v in views]
+    by_group={id(v.group):v for v in views}
+    owned={}
+    for view in views:
+        owned.setdefault(view.group.identifier,[]).append(view)
+    parents={person:person for person in owned}
+    degrees={person:0 for person in owned}
+    def root(person):
+        while parents[person]!=person:
+            parents[person]=parents[parents[person]]
+            person=parents[person]
+        return person
+    def join(left,right):
+        a,b=root(left),root(right)
+        if a!=b:
+            parents[max(a,b)]=min(a,b)
+    def witness(left,right,score):
+        if score<threshold or min(left.support_count,right.support_count)<settings['min_merge_support']:
+            return None
+        cross=[float(np.dot(a,b)) for a in left.examples for b in right.examples]
+        low,mean=min(cross),sum(cross)/len(cross)
+        if low<grouping['view_cohesion_threshold'] or mean<threshold:
+            return None
+        copresent=_cooccurs(db,left.group.identifier,right.group.identifier)
+        if copresent and low<max(threshold,settings['cooccurrence_merge_threshold']):
+            return None
+        return dict(cooccurring=copresent,medoids=[left.medoid,right.medoid],
+            support=[left.support_count,right.support_count],support_ids=[left.support,right.support],
+            minimum_cross_similarity=low,mean_cross_similarity=mean)
+    with tracking(sorted(owned),'Validate frozen identity components',unit='person') as tracked:
+        for person in tracked:
+            candidates={}
+            for view in owned[person]:
+                for other,score,_ in comparisons(groups,view.group.samples[0],threshold-margin):
+                    if other.identifier<=person:
+                        continue
+                    # One bounded row per other identity, irrespective of views.
+                    if other.identifier not in candidates:
+                        candidates[other.identifier]=None
+                    if candidates[other.identifier] is None:
+                        candidates[other.identifier]=witness(view,by_group[id(other)],score)
+            for other,proof in candidates.items():
+                join(person,other)
+                if proof is not None:
+                    degrees[person]+=1;degrees[other]+=1
+    components={}
+    for person in owned:
+        components.setdefault(root(person),[]).append(person)
+    order={r['id']:(r['created'],r['id']) for r in db.execute('SELECT id,created FROM people')}
+    for people in components.values():
+        if len(people)<2 or any(degrees[p]!=len(people)-1 for p in people):
             continue
-        score, other, left, right = ranked[0]
-        rival = nominations.get(other, [])
-        if (other in consumed or not unambiguous(rival, threshold, margin) or rival[0][1] != person):
+        target,*sources=sorted(people,key=lambda p:order[p])
+        context=digest(sorted(people))
+        # Obtain all proofs from the original catalogue before membership moves.
+        proofs=[]
+        for source in sources:
+            proof=next((proof for left in owned[target] for right in owned[source]
+                if (proof:=witness(left,right,float(np.dot(left.group.samples[0],right.group.samples[0])))) is not None),None)
+            if proof is None:
+                break
+            proofs.append((source,dict(proof,format=2,frozen=True,reciprocal=True,complete_component=True,
+                component_size=len(people),component_context=context,scan=None,policy=policy,
+                threshold=threshold,ambiguity_margin=margin)))
+        if len(proofs)!=len(sources):
             continue
-        if min(left.support_count, right.support_count) < settings['min_merge_support']:
-            continue
-        cross = [float(np.dot(a,b)) for a in left.examples for b in right.examples]
-        if min(cross) < grouping['view_cohesion_threshold'] or sum(cross)/len(cross) < threshold:
-            continue
-        cooccurring = _cooccurs(db, person, other)
-        if cooccurring and min(cross) < max(threshold, settings['cooccurrence_merge_threshold']):
-            continue
-        target, source = sorted((person,other), key=lambda person: order[person])
-        proof = dict(format=1, frozen=True, reciprocal=True, scan=None, policy=policy,
-            cooccurring=cooccurring, medoids=[left.medoid,right.medoid],
-            support=[left.support_count,right.support_count], support_ids=[left.support,right.support],
-            minimum_cross_similarity=min(cross), mean_cross_similarity=sum(cross)/len(cross),
-            threshold=threshold, ambiguity_margin=margin)
-        db.execute('INSERT INTO identity_merges VALUES (?,?,?,?,?)',
-                   (source,target,time.time(),encoded(proof),'local'))
-        db.execute('UPDATE members SET person=? WHERE person=?',(target,source))
-        db.execute("UPDATE candidates SET payload=json_set(payload,'$.merged_from',person,"
-                   "'$.global_view_merge',json(?)),person=? WHERE person=?",(encoded(proof),target,source))
-        consumed.update((person,other))
+        for source,proof in proofs:
+            db.execute('INSERT INTO identity_merges VALUES (?,?,?,?,?)',(source,target,time.time(),encoded(proof),'local'))
+            db.execute('UPDATE members SET person=? WHERE person=?',(target,source))
+            db.execute("UPDATE candidates SET payload=json_set(payload,'$.merged_from',person,"
+                "'$.global_view_merge',json(?)),person=? WHERE person=?",(encoded(proof),target,source))
     return tuple(replace(view,group=Group(canonical(db,view.group.identifier),view.group.samples,True,
-                                         view.group.sample_ids)) for view in views)
+        view.group.sample_ids)) for view in views)
 
 
 def recover(database, selected, config, views, anchors, policy):
@@ -174,7 +211,7 @@ def recover(database, selected, config, views, anchors, policy):
                 query, ranked = vector(row), []
                 for group, score, low in comparisons(groups,query,threshold-margin):
                     view = by_group[id(group)]
-                    if low < grouping['view_cohesion_threshold'] or view.pose != pose_view(row['geometry']):
+                    if low < grouping['view_cohesion_threshold'] or not pose_matches(row['geometry'],view.pose):
                         continue
                     rank_person(ranked,(score,group.identifier,view))
                 if not unambiguous(ranked,threshold,margin):

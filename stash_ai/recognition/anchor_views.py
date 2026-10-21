@@ -14,7 +14,7 @@ from .pose_policy import anchor_sql
 from .progress import tracking
 from .reference_usage import ReferenceUsage
 from .replay_addresses import address
-from .view_prototypes import _Cluster, pose_view
+from .view_prototypes import _Cluster, pose_view, pose_matches
 
 
 @dataclass(frozen=True)
@@ -36,7 +36,7 @@ def _confirmed(db, policy, grouping, usage):
     """
     anchor = anchor_sql('o', grouping)
     rows = db.execute(
-        'SELECT c.person,o.id,o.scan,o.seconds,o.geometry,o.dimensions,o.embedding '
+        'SELECT c.person,o.id,o.scan,o.seconds,o.geometry,o.dimensions,o.embedding,o.quality '
         f'FROM candidates c JOIN observations o ON o.id={address(db, "c")} '
         'JOIN members m ON m.observation=o.id AND m.person=c.person '
         'JOIN scans s ON s.id=o.scan '
@@ -251,7 +251,7 @@ def apply_anchor_views(database, selected, config, *, progress=None):
                         saw_cohesion = True
                         continue
                     view = by_group[id(group)]
-                    if pose_view(row['geometry']) != view.pose:
+                    if not pose_matches(row['geometry'],view.pose):
                         saw_pose = True
                         continue
                     old = by_person.get(group.identifier)
