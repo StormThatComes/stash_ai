@@ -12,10 +12,11 @@ from .quality import assess, rejection, crop_bytes, alignable
 from .models import normalized_embedding, checked_detection
 from .prefetch import frames as frame_inputs
 from .visibility import CONTRACT_ID, VisibilityError, VisibilityGeometryError, cached as visibility_cached
+from .pose_policy import measurement_required
 
 
 def scan_identity(config, namespace):
-    visibility_contract = CONTRACT_ID if config.data['detection']['min_visible_face_fraction'] > 0 else None
+    visibility_contract = CONTRACT_ID if measurement_required(config) else None
     return digest({'namespace': namespace, 'detection': config.data['detection'],
                    'max_cues': config.data['execution']['max_cues'], 'quality_format': 2,
                    'visibility_contract': visibility_contract})
@@ -98,7 +99,7 @@ def scan_scene(database, scope, scene, config, namespace, source, backend_factor
                         quality['geometry_contract'] = geometry_contract(face, cue)
                         reason = ('face_detection_score' if face.score <= config.data['detection']['score_threshold']
                                   else rejection(quality, config.data['detection']))
-                        if reason is None and config.data['detection']['min_visible_face_fraction'] > 0:
+                        if reason is None and measurement_required(config):
                             if visibility is None:
                                 raise VisibilityError('Recognition visibility gate requires a visibility model.')
                             try:

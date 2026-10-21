@@ -10,7 +10,7 @@ import hashlib
 from .clustering import Group, _groups, matching_policy, vector
 from .database import encoded
 from .global_views import catalogue, rank_person, unambiguous, _cooccurs
-from .pose_policy import anchor_sql
+from .pose_policy import anchor_sql,visibility_sql,restricted
 from .reference_roles import strict_sql, verified_sql
 from .reference_compatibility import fallback_sql
 from .reference_selection import select
@@ -44,7 +44,7 @@ def _source(config,compatibility,*,verified=False,gaps=False):
         "AND s.scope=p.scope AND s.namespace=p.namespace AND s.status='complete' AND o.rejected IS NULL "
         'AND NOT EXISTS (SELECT 1 FROM identity_merges WHERE source=p.id) '
         'AND '+latest+' AND ' +
-        ('1=1' if verified else anchor_sql('o',config.data['clustering'])) + ' AND ' +
+        (visibility_sql('o',config.data['clustering'].get('min_auxiliary_visible_face_fraction')) if verified else anchor_sql('o',config.data['clustering'])) + ' AND ' +
         (verified_sql() if verified else strict_sql()))
 
 
@@ -57,7 +57,7 @@ def context(db,selected,config,scope,namespace):
     compatibility=fallback_sql(db,config,namespace)
     rows=db.execute("SELECT p.id,p.created,o.id,o.scan,o.cue,o.seconds,o.geometry,o.dimensions,o.embedding,"
         "CASE WHEN json_valid(o.quality) THEN json_extract(o.quality,'$.pixels','$.sharpness',"
-        "'$.pose_deviation','$.roll_deviation') END " + _source(config,compatibility) +
+        "'$.pose_deviation','$.roll_deviation','$.visible_face_fraction','$.visibility.contract') END " + _source(config,compatibility) +
         ' ORDER BY p.id,CAST(s.scene AS INTEGER),s.scene,o.cue,o.id',parameters(selected,config,scope,namespace))
     for row in rows:
         _hash_row(hasher,row)
@@ -103,7 +103,7 @@ def capture(db,selected,config,scope,namespace,fingerprint,*,resolve_aliases=Tru
             people[person['id']]=tuple(person)
     views=confirmations=()
     grouping=config.data['clustering']
-    if grouping['anchor_view_matching'] or (grouping['max_anchor_pose_deviation'] is not None and grouping['auxiliary_matching']):
+    if grouping['anchor_view_matching'] or (restricted(grouping) and grouping['auxiliary_matching']):
         confirmations=catalogue(db,config,scope,namespace,usage=usage,complete=True,minimum=1,
             excluded_scenes=[item['scene'] for item in selected],scan_policy=scan_identity(config,namespace))
         if grouping['anchor_view_matching']:

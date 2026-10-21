@@ -8,6 +8,20 @@ Every retained centre participates in both matching and rival competition, withi
 the explicit reference memory budget. Identity ranking uses the strongest valid
 strict or view evidence per person; a winning view remains attachment authority.
 
+`clustering.min_anchor_visible_face_fraction` and
+`clustering.min_auxiliary_visible_face_fraction` optionally qualify retained
+FaceOcc measurements for their respective roles. Anchor admission requires both
+the anchor pose and visibility limits; a frontal but occluded face may instead
+query as auxiliary. Faces below the auxiliary limit remain explicitly withheld.
+The auxiliary limit must not exceed the anchor limit. Both explicit limits must
+be at least `detection.min_visible_face_fraction`, the hard scan floor: lower
+that floor first to retain more occluded queries. Null role limits preserve the
+previous admission rules. Positive role limits request FaceOcc even with a zero
+scan floor. Changing positive role thresholds reuses scans and embeddings;
+enabling previously unmeasured visibility requires new measurements. Missing or
+obsolete measurements never seed a visibility-restricted core. Portrait visibility
+preferences remain independent of these identity roles.
+
 ## SCRFD five-landmark detector choices
 
 The default detector for new configurations is **SCRFD-10G KPS**. This release

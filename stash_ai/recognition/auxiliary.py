@@ -8,7 +8,7 @@ from .clustering import _groups, vector, co_presence_allows, matching_policy
 from .database import encoded
 from .evidence_cache import current as evidence_for
 from .parallel_scores import scored_rows, contributions
-from .pose_policy import auxiliary_sql
+from .pose_policy import anchor_sql,restricted,visibility_allows
 from .progress import tracking
 from .ranking import best_two
 from .reference_usage import ReferenceUsage
@@ -19,7 +19,7 @@ from .replay_addresses import address
 def apply_auxiliary(database, selected, config, *, progress=None, reference_groups=None, reference_views=(),
                     reference_confirmations=()):
     grouping, settings = config.data['clustering'], config.data['recognition']
-    if grouping['max_anchor_pose_deviation'] is None or not selected:
+    if not restricted(grouping) or not selected:
         return
     db, policy = database.connection, matching_policy(config)
     cache = evidence_for(db)
@@ -42,7 +42,7 @@ def apply_auxiliary(database, selected, config, *, progress=None, reference_grou
             usage.add(view.examples,kind='Historical confirmation evidence')
         groups=list(groups)+[Group(v.group.identifier,v.examples,True,v.support)
                             for v in tuple(cohorts)+tuple(reference_confirmations)]
-    condition = auxiliary_sql('o', grouping)
+    condition = 'NOT ('+anchor_sql('o',grouping)+')'
     for item in selected:
         scan = item['scan']
         rows = db.execute(
@@ -56,7 +56,9 @@ def apply_auxiliary(database, selected, config, *, progress=None, reference_grou
             for row, frozen in tracked:
                 person, status, reason, scores = None, 'withheld', 'auxiliary_unmatched', []
                 confirmation=None
-                if grouping['auxiliary_matching'] and groups:
+                if not visibility_allows(row['quality'],grouping.get('min_auxiliary_visible_face_fraction')):
+                    reason='auxiliary_visibility_insufficient'
+                elif grouping['auxiliary_matching'] and groups:
                     query = cache.vector(row) if cache is not None else vector(row)
                     ranked = []
                     for group, mean, low in contributions(
