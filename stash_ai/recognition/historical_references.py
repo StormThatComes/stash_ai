@@ -134,7 +134,7 @@ def rank(rows,history,config,*,decisions=None,potential=None):
     margin=max(settings['ambiguity_margin'],grouping['view_ambiguity_margin'])
     views=[view.group for view in history.views]
     by_group={id(view.group):view for view in history.views}
-    aggregate={}
+    aggregate={};strict_rows=[];mixed_rows=[]
     for row in rows:
         query=vector(row)
         choices={}
@@ -142,15 +142,19 @@ def rank(rows,history,config,*,decisions=None,potential=None):
             if low>=grouping['cohesion_threshold']:
                 if group.identifier not in choices or score>choices[group.identifier][0]:
                     choices[group.identifier]=(score,'strict',None,score>=threshold)
+        strict_rows.append(dict(choices))
         for group,score,low in comparisons(views,query,view_threshold-margin,grouping['view_cohesion_threshold']):
             view=by_group[id(group)]
             if low<grouping['view_cohesion_threshold'] or not pose_matches(row['geometry'],view.pose):
                 continue
             previous=choices.get(group.identifier)
+            if previous is not None and previous[3] and score<view_threshold:
+                continue
             if previous is not None and previous[1]=='strict' and previous[3] and previous[0]>=score:
                 continue
             if previous is None or score>previous[0]:
                 choices[group.identifier]=(score,'view',view.medoid,score>=view_threshold)
+        mixed_rows.append(choices)
         if potential is not None and not potential and any(value[3] for value in choices.values()):
             potential.append(True)
         for person,value in choices.items():
@@ -159,6 +163,20 @@ def rank(rows,history,config,*,decisions=None,potential=None):
     for person,values in aggregate.items():
         if len(values)==len(rows):
             rank_person(ranked,(sum(v[0] for v in values)/len(values),person,values))
+    from .anchor_views import _competing_anchor
+    strict_checked=False
+    ranking_score=ranked[0][0] if ranked else None
+    if ranked and any(v[1]=='view' for v in ranked[0][2]):
+        person=ranked[0][1];direct=[choices.get(person) for choices in strict_rows]
+        # A stronger own view improves ranking, but cannot revoke an already
+        # independent strict proof. Check that proof against every mixed rival
+        # and the original raw-anchor competition using its own score/margin.
+        if all(value is not None and value[3] for value in direct) and all(
+            all(other==person or value[0]-rival[0]>=settings['ambiguity_margin']
+                for other,rival in choices.items()) for value,choices in zip(direct,mixed_rows)):
+            strict_checked=not any(_competing_anchor(history.groups,person,vector(row),value[0],settings['ambiguity_margin'])
+                                   for row,value in zip(rows,direct))
+            if strict_checked:ranked[0]=(sum(v[0] for v in direct)/len(direct),person,direct)
     decision_margin = (margin if ranked and any(v[1]=='view' for v in ranked[0][2])
                        else settings['ambiguity_margin'])
     if not unambiguous(ranked,threshold,decision_margin) or not all(v[3] for v in ranked[0][2]):
@@ -169,8 +187,7 @@ def rank(rows,history,config,*,decisions=None,potential=None):
                 ambiguity_margin=decision_margin))
         return None
     score,person,values=ranked[0]
-    from .anchor_views import _competing_anchor
-    if any(_competing_anchor(history.groups,person,vector(row),value[0],decision_margin)
+    if not strict_checked and any(_competing_anchor(history.groups,person,vector(row),value[0],decision_margin)
            for row,value in zip(rows,values)):
         if decisions is not None:
             decisions.append(dict(outcome='competing_anchor',context=history.context,
@@ -180,11 +197,11 @@ def rank(rows,history,config,*,decisions=None,potential=None):
     return person,dict(format=2,frozen=True,context=history.context,identity=person,
         view_evidence=[dict(medoid=v.medoid,authority=v.authority,support=v.support_count,support_ids=v.support)
             for v in history.views if v.medoid in {value[2] for value in values}],
-        mode='view' if any(v[1]=='view' for v in values) else 'strict',mean_score=score,
+        mode='view' if any(v[1]=='view' for v in values) else 'strict',mean_score=score,ranking_score=ranking_score,
         medoids=sorted({v[2] for v in values if v[2] is not None}),ambiguity_margin=decision_margin)
 
 
-def reconcile(database,replay,selected,config,scope,namespace,fingerprint,*,progress=None,history=None,early=()):
+def reconcile(database,replay,selected,config,scope,namespace,fingerprint,*,progress=None,history=None,early=(),excluded_views=()):
     """Freeze global proposals; durable changes wait for the final transaction."""
     history=history or capture(database.connection,selected,config,scope,namespace,fingerprint,resolve_aliases=False)
     grouping=config.data['clustering']
@@ -199,7 +216,7 @@ def reconcile(database,replay,selected,config,scope,namespace,fingerprint,*,prog
     if len(history.groups)+len(groups)>grouping['max_people_per_lookup']:
         raise ValueError('Selected and historical identities exceed configured person budget.')
     from .reference_registry import resolve
-    proposals=resolve(database.connection,history,config,usage,replay=replay,groups=groups,early=early)
+    proposals=resolve(database.connection,history,config,usage,replay=replay,groups=groups,early=early,excluded_views=excluded_views)
     refresh_verified(database.connection,selected,config,scope,namespace,history,usage)
     deferred=set()
     partial_sources=set()
@@ -229,6 +246,11 @@ def reconcile(database,replay,selected,config,scope,namespace,fingerprint,*,prog
             from .reference_gaps import defer
             if defer(replay,group,history,config):
                 deferred.add(group.identifier)
+        if result is None and not owned and group.identifier not in deferred:
+            from .identity_birth import potential as plausible,defer as defer_birth
+            proof=plausible(rows,history,config)
+            if proof is not None:
+                defer_birth(replay,group.identifier,proof);deferred.add(group.identifier)
         if result is not None:
             if result[1]['mode']=='view':
                 support=replay.execute('SELECT COUNT(*) FROM (SELECT o.scan,o.seconds FROM members m '

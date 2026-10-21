@@ -15,7 +15,8 @@ from .reference_roles import observation_sql
 from .progress import tracking
 
 QUERY_REASONS=('candidate_group','reference_bank_unavailable','anchor_view_insufficient_support',
-               'global_view_insufficient_support','view_insufficient_support','provisional_pool_source_invalidated')
+               'global_view_insufficient_support','view_insufficient_support','provisional_pool_source_invalidated',
+               'historical_potential_identity','shared_view_source_invalidated')
 
 
 def query_reasons_sql():
@@ -143,8 +144,6 @@ def resolve(database,replay,selected,config,history,bindings,early=()):
             ids,samples=zip(*chosen);usage.add(samples,kind='Selected unresolved')
             pending.append(Group(person,tuple(samples),False,tuple(ids)))
     groups=tuple(confirmed)+tuple(pending)
-    if not groups:
-        return
     if len(groups)>grouping['max_people_per_lookup']:
         raise ValueError('Unresolved cohort lookup exceeds configured person budget.')
     for group in history.groups:
@@ -157,6 +156,8 @@ def resolve(database,replay,selected,config,history,bindings,early=()):
         usage.add(view.examples,kind='Pool historical view')
     replay.execute('CREATE TEMP TABLE pool_claims(observation TEXT PRIMARY KEY,source TEXT,scan TEXT,cue INTEGER,seconds REAL)')
     replay.execute('CREATE TEMP TABLE pool_promotions(source TEXT PRIMARY KEY,mode TEXT,selected_ids TEXT,proof TEXT)')
+    from .historical_pool import resolve as resolve_history
+    resolve_history(database,replay,selected,config,history,bindings,confirmed)
     from .pooled_views import resolve as resolve_views
     resolve_views(database,replay,selected,config,history,bindings,confirmed,early,usage)
     pending=[g for g in pending if replay.execute("SELECT 1 FROM candidates WHERE person=? AND status='withheld' "
@@ -231,6 +232,10 @@ def resolve(database,replay,selected,config,history,bindings,early=()):
                     bindings[group.identifier]=match[0]
                     mode='known_view' if match[1]['mode']=='view' else 'known_strict'
                 else:
+                    from .identity_birth import potential as plausible
+                    if plausible(pool.rows,history,config) is not None:
+                        _deferred(replay,policy,group.identifier,'plausible_existing_identity',independent_support=support)
+                        continue
                     if support<settings['min_identity_support'] or potential or group.identifier in support_only:
                         _deferred(replay,policy,group.identifier,'insufficient_or_known_view_support',
                             independent_support=support,required_support=settings['min_identity_support'],
@@ -280,15 +285,23 @@ def apply(database,replay,config,mapping):
     policy=matching_policy(config)
     applied=[]
     for promotion in replay.execute('SELECT * FROM pool_promotions ORDER BY source'):
-        ids=json.loads(promotion['selected_ids'])
-        members=replay.execute('SELECT observation,person FROM members WHERE observation IN '
-            '(SELECT value FROM json_each(?))',(encoded(ids),)).fetchall()
-        targets={mapping.get(r['person'],r['person']) for r in members}
-        if len(members)!=len(ids) or len(targets)!=1:
-            continue
-        target=targets.pop()
+        ids=json.loads(promotion['selected_ids']);proof=json.loads(promotion['proof'])
+        if proof.get('external_reference'):
+            witnesses=proof['source_reference_ids']
+            members=db.execute('SELECT observation,person FROM members WHERE observation IN '
+                '(SELECT value FROM json_each(?))',(encoded(witnesses),)).fetchall()
+            if len(members)!=len(witnesses) or {r['person'] for r in members}!={proof['identity']}:
+                continue
+            target=proof['identity']
+        else:
+            members=replay.execute('SELECT observation,person FROM members WHERE observation IN '
+                '(SELECT value FROM json_each(?))',(encoded(ids),)).fetchall()
+            targets={mapping.get(r['person'],r['person']) for r in members}
+            if len(members)!=len(ids) or len(targets)!=1:
+                continue
+            target=targets.pop()
         reason=('cross_scene_provisional' if promotion['mode']=='birth' else
-                'pooled_view_identity' if promotion['mode']=='known_view' else 'late_strict_identity')
+                'pooled_view_identity' if promotion['mode'] in ('known_view','historical_view') else 'late_strict_identity')
         for observation, in replay.execute('SELECT observation FROM pool_claims WHERE source=? ORDER BY observation',(promotion['source'],)):
             if db.execute('SELECT 1 FROM members WHERE observation=?',(observation,)).fetchone():
                 continue

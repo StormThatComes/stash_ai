@@ -382,11 +382,18 @@ def _apply(database, replay, selected, config, scope, namespace, mapping, finger
 
 def rebuild_selected(database, selected, config, *, progress=None):
     with profile(database, config.data['execution'].get('profile_rebuild', False)), compute_scope(config), score_scope(), physical_keys(database, config):
-        return _rebuild_selected(database, selected, config, progress=progress)
+        from .reference_registry import InvalidatedSourceViews
+        excluded=set()
+        for attempt in range(2):
+            try:
+                return _rebuild_selected(database,selected,config,progress=progress,excluded_views=excluded)
+            except InvalidatedSourceViews as error:
+                if attempt or not error.medoids-excluded:raise
+                excluded.update(error.medoids)
 
 
 @measured('rebuild')
-def _rebuild_selected(database, selected, config, *, progress=None):
+def _rebuild_selected(database, selected, config, *, progress=None,excluded_views=()):
     """Replay selected scans, then reconcile against frozen external references.
 
     The private SQLite stays in RAM, streaming vectors without
@@ -432,6 +439,8 @@ def _rebuild_selected(database, selected, config, *, progress=None):
         checkpoints = Checkpoints(database, selected, config, scope, namespace)
         cursor, next_clock = checkpoints.restore(replay)
         clock = ReplayClock(next_clock)
+        from .local_cohorts import prepare as prepare_local_cohorts
+        prepare_local_cohorts(replay,selected,config)
         # Stable replay identity removes installation-dependent UUID tie order.
         temporary = SimpleNamespace(connection=replay,
             installation=str(uuid.uuid5(uuid.NAMESPACE_URL, encoded([scope, namespace, 'cold-replay']))),
@@ -466,7 +475,7 @@ def _rebuild_selected(database, selected, config, *, progress=None):
             apply_cross_scene_support(temporary, selected, config, progress=progress)
             from .shared_references import retry_strict, early_views
             retry_strict(temporary, selected, config)
-            early = early_views(temporary, selected, config)
+            early = early_views(temporary, selected, config,excluded_views=excluded_views)
             apply_scene_context(temporary, selected, config, progress=progress)
             from .anchor_views import apply_anchor_views
             apply_anchor_views(temporary, selected, config, progress=progress)
@@ -480,7 +489,7 @@ def _rebuild_selected(database, selected, config, *, progress=None):
             global_state=None  # Release frozen exemplars before the historical bank.
         history = historical_references.capture(db,selected,config,scope,namespace,external_context,resolve_aliases=False)
         external_bindings = historical_references.reconcile(database,replay,selected,config,scope,namespace,external_context,
-            progress=progress,history=history,early=early)
+            progress=progress,history=history,early=early,excluded_views=excluded_views)
         from .unresolved_pool import resolve as resolve_pool
         resolve_pool(database,replay,selected,config,history,external_bindings,early)
         mapping = _bind(database, replay, config, scope, namespace, usage=usage,external_bindings=external_bindings,
@@ -489,10 +498,15 @@ def _rebuild_selected(database, selected, config, *, progress=None):
         shared_groups, shared_views, confirmations = auxiliary_bank(replay,config,scope,namespace,history,mapping,early)
         apply_auxiliary(temporary, selected, config, progress=progress,reference_groups=shared_groups,
                         reference_views=shared_views,reference_confirmations=confirmations)
+        from .shared_references import finalize_early
+        finalize_early(replay,config,mapping)
         from .pooled_views import finalize as finalize_pool
         finalize_pool(replay,config,mapping)
         for row in replay.execute('SELECT DISTINCT person FROM members'):
             mapping.setdefault(row[0],row[0])
+        from .reference_registry import invalidated_sources,InvalidatedSourceViews
+        invalid=invalidated_sources(history,replay,config,mapping)
+        if invalid:raise InvalidatedSourceViews(invalid)
         report_pages(replay)
         _apply(database, replay, selected, config, scope, namespace, mapping, fingerprint, progress, usage=usage,history=history)
     return _results(db, selected, config)

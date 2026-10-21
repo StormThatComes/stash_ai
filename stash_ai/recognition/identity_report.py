@@ -21,6 +21,8 @@ from .scanning import scan_identity
 # Categories describe the recorded assignment path, not whether the face was
 # actually used as a reference at the time. That historical sample set is absent.
 REASONS = {
+    'historical_potential_identity': ('anchor-deferred', 'A whole local cohort is close to an existing frozen appearance; publication of a new identity was deferred.'),
+    'shared_view_source_invalidated': ('withheld', 'The final direct auxiliary assignment revoked the owner of the selected source view.'),
     'selected_cohort_identity': ('anchor-view', 'A supported majority cohort matched the frozen selected bank; unmatched outliers remain withheld.'),
     'selected_view_identity': ('anchor-view', 'A complete local core matched a frozen confirmed view without training another view.'),
     'global_reference_attachment': ('anchor-historical-view', 'A historical fragment matched a frozen source-confirmed view and no longer trains strict references.'),

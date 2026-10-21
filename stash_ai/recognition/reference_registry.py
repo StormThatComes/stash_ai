@@ -13,6 +13,12 @@ from .global_views import catalogue,consolidation_plan,_cooccurs
 from .strict_partition import summary_views
 
 
+class InvalidatedSourceViews(RuntimeError):
+    def __init__(self,medoids):
+        self.medoids=frozenset(medoids)
+        super().__init__('Source-view ownership is unstable; no rebuilt memberships were committed.')
+
+
 def _copresence(db,replay=None):
     origins={}
     if replay is not None:
@@ -31,7 +37,7 @@ def _copresence(db,replay=None):
     return check
 
 
-def resolve(db,history,config,usage,*,replay=None,groups=(),early=()):
+def resolve(db,history,config,usage,*,replay=None,groups=(),early=(),excluded_views=()):
     """Return selected bindings and remap the read-only historical bank in place."""
     if replay is not None and history.groups:
         from .historical_references import rank
@@ -78,6 +84,7 @@ def resolve(db,history,config,usage,*,replay=None,groups=(),early=()):
     # appearing before that source scene was ever selected. This is attachment,
     # not a new strict merger nomination; its old core cannot train afterwards.
     reverse_views=tuple(v for v in views if v.group.identifier in selected)+tuple(early)
+    reverse_views=tuple(v for v in reverse_views if v.medoid not in excluded_views)
     if replay is not None and reverse_views:
         from .historical_references import History,rank
         from .anchor_views import _competing_anchor
@@ -116,7 +123,8 @@ def resolve(db,history,config,usage,*,replay=None,groups=(),early=()):
             for source,claim in claims:
                 aliases[source]=target
                 actions.append(dict(source=source,target=target,kind='verified_attachment',
-                    proof=dict(claim,identity=target,source_core=source_core)))
+                    proof=dict(claim,identity=target,source_core=source_core,
+                        source_view_medoids=[v.medoid for v in reverse_views if v.group.identifier==source_core])))
     demoted={a['source'] for a in actions if a['kind']=='verified_attachment'}
     def remap(group):
         return Group(aliases.get(group.identifier,group.identifier),group.samples,True,group.sample_ids)
@@ -126,6 +134,29 @@ def resolve(db,history,config,usage,*,replay=None,groups=(),early=()):
     history.aliases=aliases
     history.actions=tuple(actions)
     return proposals
+
+
+def invalidated_sources(history,replay,config,mapping):
+    """Historical demotions need the final owners of their selected witnesses."""
+    from .clustering import matching_policy
+    from .reference_roles import observation_sql
+    policy=matching_policy(config);invalid=set()
+    for action in history.actions:
+        if action['kind']!='verified_attachment':continue
+        expected=mapping.get(action['target'],action['target'])
+        for view in action['proof'].get('view_evidence',()):
+            ids=view['support_ids']
+            members=replay.execute('SELECT observation,person FROM members WHERE observation IN '
+                '(SELECT value FROM json_each(?))',(encoded(ids),)).fetchall()
+            valid=len(members)==len(ids) and all(mapping.get(r['person'],r['person'])==expected for r in members)
+            if valid and view['authority']=='verified_view':
+                count=replay.execute('SELECT COUNT(*) FROM candidates c WHERE '+observation_sql('c')+
+                    " IN (SELECT value FROM json_each(?)) AND c.policy=? AND c.status='accepted' "
+                    "AND json_extract(c.payload,'$.reason')='auxiliary_identity'",(encoded(ids),policy)).fetchone()[0]
+                valid=count==len(ids)
+            if not valid:
+                invalid.update(action['proof'].get('source_view_medoids',()) or (view['medoid'],))
+    return invalid
 
 
 def apply(database,history,config):

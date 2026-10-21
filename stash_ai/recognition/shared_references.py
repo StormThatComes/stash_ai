@@ -45,12 +45,13 @@ def retry_strict(database, selected, config):
                "AND json_extract(payload,'$.reason')='late_strict_identity'",(policy,))
 
 
-def early_views(database, selected, config):
+def early_views(database, selected, config,*,excluded_views=()):
     """Freeze scene-local confirmations before resolving global hypotheses.
 
-    A scene ID is not a timeline. A source profile before the first strict core
-    can use its whole source scene. Already established source cores retain
-    precedence over later provisional fragments. Other scenes' provisional
+    A scene ID is not a timeline. Cold replay uses the independently frozen
+    appearance priority for both core establishment and auxiliary confirmation.
+    Already established source cores retain precedence over later fragments.
+    Other scenes' provisional
     cores cannot steal that evidence before their identity has been resolved.
     Old automatic ownership participates in label binding, never this partition.
     """
@@ -64,22 +65,24 @@ def early_views(database, selected, config):
     minimum=config.data['recognition']['min_identity_support']
     horizons={}
     seen={}
-    rows=db.execute('SELECT m.person,s.scene,o.cue,o.seconds FROM members m JOIN observations o ON o.id=m.observation '
+    from .local_cohorts import ordering
+    position=ordering(db)
+    rows=db.execute('SELECT m.person,s.scene,o.cue,o.seconds,'+position+' AS appearance_order FROM members m JOIN observations o ON o.id=m.observation '
         'JOIN scans s ON s.id=o.scan WHERE '+strict_sql()+' AND '+anchor_sql('o',grouping)+
-        ' ORDER BY CAST(s.scene AS INTEGER),s.scene,o.cue,o.id')
+        ' ORDER BY CAST(s.scene AS INTEGER),s.scene,appearance_order,o.cue,o.id')
     for row in rows:
         key=(row['person'],row['scene'])
         cues=seen.setdefault(key,set());cues.add(row['seconds'])
         if len(cues)>=minimum:
-            horizons.setdefault(key,row['cue'])
+            horizons.setdefault(key,row['appearance_order'])
     db.execute('CREATE TEMP TABLE early_view_support(observation TEXT PRIMARY KEY,person TEXT)')
-    rows=db.execute('SELECT o.id,o.scan,o.cue,o.seconds,o.geometry,o.dimensions,o.embedding,s.scene FROM observations o '
+    rows=db.execute('SELECT o.id,o.scan,o.cue,o.seconds,o.geometry,o.dimensions,o.embedding,s.scene,'+position+' AS appearance_order FROM observations o '
         'JOIN scans s ON s.id=o.scan WHERE o.rejected IS NULL AND '+auxiliary_sql('o',grouping)+
         ' ORDER BY CAST(s.scene AS INTEGER),s.scene,o.cue,o.id')
     for row in rows:
         eligible=tuple(g for g in groups
             if len(seen.get((g.identifier,row['scene']),()))>=minimum)
-        earlier=tuple(g for g in eligible if horizons[(g.identifier,row['scene'])]<row['cue'])
+        earlier=tuple(g for g in eligible if horizons[(g.identifier,row['scene'])]<row['appearance_order'])
         eligible=earlier or eligible
         result=rank([row],History(eligible,(),{},'frozen-scene-local-strict-cores'),config)
         if result is None:
@@ -97,6 +100,7 @@ def early_views(database, selected, config):
         'ORDER BY e.person,CAST(s.scene AS INTEGER),s.scene,o.cue,o.seconds,o.id')
     promotion=dict(grouping,view_min_support=max(grouping['view_min_support'],grouping['auxiliary_min_support']))
     views=confirmed_views(db,policy,promotion,remaining_bytes=grouping['max_reference_bytes']-usage.bytes,rows=source,complete=True)
+    views=tuple(v for v in views if v.medoid not in excluded_views)
     db.execute('DROP TABLE early_view_support')
     # Resolve the observation partition before considering historical labels.
     # A prior automatic label is not independent evidence against a repair.
@@ -162,3 +166,31 @@ def auxiliary_bank(db, config, scope, namespace, history, mapping, early):
     if len({g.identifier for g in groups})>grouping['max_people_per_lookup']:
         raise ValueError('Shared identity catalogue exceeds configured person budget.')
     return groups,tuple(views),history.confirmations
+
+
+def finalize_early(db,config,mapping):
+    """A source-confirmed selected query needs its final direct auxiliary owner."""
+    import json
+    from .reference_roles import observation_sql
+    policy=matching_policy(config)
+    rows=db.execute("SELECT id,person,payload FROM candidates WHERE policy=? AND status='accepted' "
+        "AND json_type(payload,'$.shared_reference.view_evidence')='array'",(policy,)).fetchall()
+    for row in rows:
+        payload=json.loads(row['payload'])
+        views=[v for v in payload['shared_reference']['view_evidence'] if v['authority']=='verified_view']
+        if not views:continue
+        expected=mapping.get(row['person'],row['person'])
+        valid=True
+        for view in views:
+            ids=view['support_ids']
+            witnesses=db.execute('SELECT m.observation,m.person FROM members m JOIN candidates c ON '+
+                observation_sql('c')+"=m.observation WHERE m.observation IN (SELECT value FROM json_each(?)) "
+                "AND c.policy=? AND c.status='accepted' AND c.person=m.person AND "
+                "json_extract(c.payload,'$.reason')='auxiliary_identity'",(encoded(ids),policy)).fetchall()
+            if len(witnesses)!=len(ids) or any(mapping.get(w['person'],w['person'])!=expected for w in witnesses):
+                valid=False;break
+        if valid:continue
+        db.execute('DELETE FROM members WHERE observation=?',(payload['observation'],))
+        db.execute("UPDATE candidates SET person=NULL,status='withheld',payload=json_set(payload,"
+            "'$.prior_reason',json_extract(payload,'$.reason'),'$.reason','shared_view_source_invalidated',"
+            "'$.shared_reference.source_validation','invalidated_after_auxiliary') WHERE id=?",(row['id'],))

@@ -7,6 +7,10 @@ Broad cohorts remain available when their individual variants are too sparse.
 Every retained centre participates in both matching and rival competition, within
 the explicit reference memory budget. Identity ranking uses the strongest valid
 strict or view evidence per person; a winning view remains attachment authority.
+An independently unambiguous strict proof keeps strict authority even when a
+stronger own view improves ranking. Its original strict score, cohesion and
+margin must still beat all mixed rivals and raw-anchor competition. An own view
+below its match threshold cannot hide a valid strict match.
 
 `clustering.min_anchor_visible_face_fraction` and
 `clustering.min_auxiliary_visible_face_fraction` optionally qualify retained
@@ -21,6 +25,30 @@ scan floor. Changing positive role thresholds reuses scans and embeddings;
 enabling previously unmeasured visibility requires new measurements. Missing or
 obsolete measurements never seed a visibility-restricted core. Portrait visibility
 preferences remain independent of these identity roles.
+
+Cold replay freezes bounded appearance cohorts for each selected scene before
+creating identity labels. Quality, independent anchor support, appearance
+diversity and frozen compatible looks determine their priority; physical cue
+times still determine support and co-presence. Source auxiliary confirmation
+uses that same frozen appearance order, so moving an otherwise identical shot
+earlier or later cannot change which source core was already established.
+The order metadata is rebuilt independently of replay checkpoint restoration.
+
+A wholly contained view query remains attachment-only in a joint replay too.
+All strict merger nominations and their rivals are frozen before those
+attachments, and affected components cannot nominate a new merger afterwards.
+Final direct auxiliary ownership revalidates selected source-view attachments.
+Near-existing coherent queries can be withheld as
+`historical_potential_identity` rather than immediately publishing another
+person; normal match/cohesion thresholds and rival margins are unchanged.
+
+With `cross_scene_provisional`, durable withheld queries are also reconsidered
+against the entire frozen external bank, including when only an unrelated scene
+is selected. Query votes are independent of reference-training votes. External
+and current queries can jointly reach view support, but recovered observations
+remain attachments and never train this pass. Source witness ownership is
+checked again in the final transaction; backfill and selected membership changes
+roll back together. Stash publication still follows the explicit selection.
 
 ## SCRFD five-landmark detector choices
 
@@ -1901,3 +1929,10 @@ policy v23 invalidates older derived decisions without changing scan/model keys.
 Recovered membership-only or damaged legacy decisions receive explicit attachment
 authority, so the legacy strict fallback cannot silently promote their evidence.
 Strict-core summary vectors remain immutable for reuse by the packed score cache.
+
+Historical core demotions also require the final owners of their selected
+source witnesses. If a source changes owner, its private plan is discarded and
+matching is retried once without the invalidated source views. The first RAM
+replay closes before retrying; raw scans and embeddings are reused. A second
+unstable attempt fails before rebuilt memberships are committed.
+

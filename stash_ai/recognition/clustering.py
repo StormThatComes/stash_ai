@@ -216,8 +216,8 @@ def complete_candidates(db, scan, policy, context, count, *, exact_memberships=F
 
 def matching_policy(config):
     from .context import policy_digest
-    return policy_digest(config, 'matching-v25', lambda: {
-        'format': 25, 'recognition': config.data['recognition'],
+    return policy_digest(config, 'matching-v28', lambda: {
+        'format': 28, 'recognition': config.data['recognition'],
         'clustering': {key:value for key,value in config.data['clustering'].items()
                        if key not in ('max_reference_bytes','max_people_per_lookup')}})
 
@@ -275,11 +275,13 @@ def cluster_scene(database, scan, config, *, progress=None, _cold_replay=False):
         fixed_count = len(groups)
         by_id = {g.identifier: g for g in groups}
         db.execute('DELETE FROM candidates WHERE scan=? AND policy=?', (scan, policy))
+        from .local_cohorts import ordering
+        query_order=ordering(db) if independent else 'o.cue'
         with tracking(
             scored_rows(db.execute(
                 'SELECT o.*,m.person AS prior_person FROM observations o LEFT JOIN members m '
                 f'ON m.observation=o.id WHERE o.scan=? AND o.rejected IS NULL AND {anchor} '
-                'ORDER BY o.cue,o.geometry,o.embedding,o.id',
+                'ORDER BY '+query_order+',o.geometry,o.embedding,o.cue,o.id',
                 (scan,),
             ), groups, settings['match_threshold'] - settings['ambiguity_margin']),
             'Match face observations',

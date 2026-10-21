@@ -202,3 +202,46 @@ def selected(database,config,early,global_state):
     people={row['id']:tuple(row) for row in db.execute('SELECT * FROM people')}
     recover(db,groups,History(tuple(groups),tuple(views)+tuple(early),people,'frozen-selected-cohorts'),
             config,{},selected_only=True,source_ids=source_ids)
+
+
+def whole_views(db,config,groups,views):
+    """A wholly contained query stays attachment-only in a joint replay too.
+
+    Reciprocal proposals and competing/co-present sources stay unresolved here;
+    the independently frozen merger plan handles compatible strict components.
+    """
+    from .historical_references import History,rank
+    from .anchor_views import _competing_anchor
+    proposals=[]
+    for group in groups:
+        frozen=History((),tuple(v for v in views if v.group.identifier!=group.identifier),{},'frozen-selected-whole-views')
+        samples=db.execute('SELECT id,geometry,dimensions,embedding FROM observations WHERE id IN '
+            '(SELECT value FROM json_each(?))',(encoded(group.sample_ids),)).fetchall()
+        match=rank(samples,frozen,config) if samples else None
+        if match is None:continue
+        target,proof=match
+        if _cooccurs(db,group.identifier,target):continue
+        support=db.execute('SELECT COUNT(*) FROM (SELECT o.scan,o.seconds FROM members m JOIN observations o ON o.id=m.observation '
+            'WHERE m.person=? GROUP BY o.scan,o.seconds)',(group.identifier,)).fetchone()[0]
+        if support<config.data['clustering']['view_attach_min_support']:continue
+        rivals=[g for g in groups if g.identifier!=group.identifier]
+        valid=True
+        for row in db.execute('SELECT o.* FROM members m JOIN observations o ON o.id=m.observation WHERE m.person=? ORDER BY o.id',
+                              (group.identifier,)):
+            result=rank([row],frozen,config)
+            if result is None or result[0]!=target or _competing_anchor(rivals,target,vector(row),
+                result[1]['mean_score'],result[1]['ambiguity_margin']):
+                valid=False;break
+        if valid:proposals.append((group.identifier,target,proof))
+    sources={s for s,_,_ in proposals};blocked=set()
+    for i,(left,target,_) in enumerate(proposals):
+        for right,other,_ in proposals[i+1:]:
+            if target==other and _cooccurs(db,left,right):blocked.update((left,right))
+    attached=set()
+    for source,target,proof in proposals:
+        if source in blocked or target in sources:continue
+        db.execute('UPDATE members SET person=? WHERE person=?',(target,source))
+        db.execute("UPDATE candidates SET person=?,payload=json_set(payload,'$.prior_reason',json_extract(payload,'$.reason'),"
+            "'$.reason','selected_view_identity','$.shared_reference',json(?)) WHERE person=?",
+            (target,encoded(proof),source));attached.add(source)
+    return attached

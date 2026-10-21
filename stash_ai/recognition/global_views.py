@@ -228,7 +228,7 @@ def consolidation_plan(db,views,config,*,neighbours=None,mixed=False,cooccurs=No
     return tuple(result)
 
 
-def merge_views(database,views,config,policy,*,neighbours=None,evidence_field='global_view_merge'):
+def merge_views(database,views,config,policy,*,neighbours=None,evidence_field='global_view_merge',plan=None):
     """Apply a plan computed entirely from the original frozen catalogue."""
     db=database.connection
     owned={}
@@ -236,7 +236,7 @@ def merge_views(database,views,config,policy,*,neighbours=None,evidence_field='g
         owned.setdefault(view.group.identifier,[]).append(view)
     order={r['id']:(r['created'],r['id']) for r in db.execute('SELECT id,created FROM people')}
     related=neighbours if neighbours is not None else set()
-    for decision in consolidation_plan(db,views,config,neighbours=related):
+    for decision in (consolidation_plan(db,views,config,neighbours=related) if plan is None else plan):
         people=decision['people']
         summary={k:v for k,v in decision.items() if k!='people'}
         if any(person in related for person in people):
@@ -334,8 +334,15 @@ def apply_global_views(database, selected, config, *, progress=None):
     if not views:
         return
     neighbours=set()
-    views = merge_views(database,views,config,policy,neighbours=neighbours)
-    anchors = [Group(canonical(db,group.identifier),group.samples,True,group.sample_ids) for group in anchors]
+    # Freeze all merger nominations and competition before any attachment.
+    plan=consolidation_plan(db,views,config,neighbours=neighbours)
+    from .cohort_resolution import whole_views
+    attached=whole_views(db,config,anchors,views)
+    views=tuple(v for v in views if v.group.identifier not in attached)
+    plan=tuple(d for d in plan if not attached.intersection(d['people']))
+    views = merge_views(database,views,config,policy,neighbours=neighbours,plan=plan)
+    anchors = [Group(canonical(db,group.identifier),group.samples,True,group.sample_ids) for group in anchors
+               if group.identifier not in attached]
     recover(database,selected,config,views,anchors,policy)
     usage.emit(force=True)
     return views,{canonical(db,person) for person in neighbours}
