@@ -11,7 +11,7 @@ from .clustering import Group, _groups, matching_policy, vector
 from .database import encoded
 from .global_views import catalogue, rank_person, unambiguous, _cooccurs
 from .pose_policy import anchor_sql,visibility_sql,restricted
-from .reference_roles import strict_sql, verified_sql
+from .reference_roles import strict_sql, verified_sql, attachment_sql
 from .reference_compatibility import fallback_sql
 from .reference_selection import select
 from .reference_usage import ReferenceUsage
@@ -33,7 +33,7 @@ class History:
     actions: tuple = ()
 
 
-def _source(config,compatibility,*,verified=False,gaps=False):
+def _source(config,compatibility,*,verified=False,gaps=False,attachment=False):
     from .reference_gaps import latest_clause
     latest=(latest_clause() if gaps else
         'NOT EXISTS (SELECT 1 FROM scans newer WHERE newer.scope=s.scope AND newer.namespace=s.namespace '
@@ -44,8 +44,9 @@ def _source(config,compatibility,*,verified=False,gaps=False):
         "AND s.scope=p.scope AND s.namespace=p.namespace AND s.status='complete' AND o.rejected IS NULL "
         'AND NOT EXISTS (SELECT 1 FROM identity_merges WHERE source=p.id) '
         'AND '+latest+' AND ' +
-        (visibility_sql('o',config.data['clustering'].get('min_auxiliary_visible_face_fraction')) if verified else anchor_sql('o',config.data['clustering'])) + ' AND ' +
-        (verified_sql() if verified else strict_sql()))
+        (visibility_sql('o',config.data['clustering'].get('min_auxiliary_visible_face_fraction')) if verified or attachment else anchor_sql('o',config.data['clustering'])) + ' AND ' +
+        (attachment_sql() if attachment else
+         verified_sql() if verified else strict_sql()))
 
 
 def parameters(selected,config,scope,namespace):
@@ -80,6 +81,13 @@ def context(db,selected,config,scope,namespace):
                 parameters(selected,config,scope,namespace)):
             _hash_row(hasher,row)
     from .unresolved_pool import hash_context
+    if config.data['clustering']['corroborated_view_enrichment']:
+        for row in db.execute("SELECT p.id,o.id,o.scan,o.seconds,o.geometry,o.dimensions,o.embedding,"
+                "CASE WHEN json_valid(o.quality) THEN json_extract(o.quality,'$.pixels','$.sharpness',"
+                "'$.pose_deviation','$.roll_deviation'"+visibility_fields+") END "+
+                _source(config,compatibility,attachment=True)+' ORDER BY p.id,o.id',
+                parameters(selected,config,scope,namespace)):
+            _hash_row(hasher,row)
     hash_context(db,selected,config,scope,namespace,hasher)
     return hasher.hexdigest()
 
@@ -121,10 +129,13 @@ def capture(db,selected,config,scope,namespace,fingerprint,*,resolve_aliases=Tru
 
 
 def refresh_verified(db,selected,config,scope,namespace,history,usage):
+    history.views=tuple(v for v in history.views if v.authority!='corroborated_view')
     if config.data['clustering']['view_prototypes_enabled'] and config.data['clustering']['auxiliary_matching']:
         from .verified_views import historical_views
         history.views=tuple(v for v in history.views if v.authority=='strict')+historical_views(
             db,config,scope,namespace,selected,history.groups,usage,history.confirmations,history.aliases)
+    from .corroborated_views import enrich
+    history.views+=enrich(db,config,scope,namespace,selected,history,usage)
 
 
 def rank(rows,history,config,*,decisions=None,potential=None):
@@ -204,9 +215,12 @@ def rank(rows,history,config,*,decisions=None,potential=None):
                 ambiguity_margin=decision_margin))
         return None
     return person,dict(format=2,frozen=True,context=history.context,identity=person,
-        view_evidence=[dict(medoid=v.medoid,authority=v.authority,support=v.support_count,support_ids=v.support)
+        view_evidence=[dict(medoid=v.medoid,authority=v.authority,support=v.support_count,
+                           support_ids=getattr(v,'source_ids',v.support),
+                           **({'promotion':v.promotion} if getattr(v,'promotion',None) else {}))
             for v in history.views if v.medoid in {value[2] for value in values}],
         mode='view' if any(v[1]=='view' for v in values) else 'strict',mean_score=score,ranking_score=ranking_score,
+        rival_score=ranked[1][0] if len(ranked)>1 else None,
         medoids=sorted({v[2] for v in values if v[2] is not None}),ambiguity_margin=decision_margin)
 
 

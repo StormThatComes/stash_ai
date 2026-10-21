@@ -1,5 +1,23 @@
 # Facial recognition
 
+`clustering.corroborated_view_enrichment` (default true) can extend the frozen
+historical query bank with a `corroborated_view`. Its accepted attachment cohort
+needs at least `max(view_min_support, min_merge_support)` independent cues from
+two unselected scenes. Every query must independently match two strict-rooted
+views whose support sets are disjoint, pass all mixed rivals/co-presence checks,
+and remain inside an immutable, non-transitive appearance radius. One parent
+with overlapping prototype aliases cannot supply two confirmations.
+
+Promotion is derived read-only from latest complete, currently eligible durable
+memberships. The proof records both parents, original strict witnesses, bounded
+query witnesses, scene count and thresholds. Losing support, ownership, quality
+or a current scan revokes the next capture and invalidates its matching cache.
+Promoted views recognize queries as attachments; they never vote for strict
+identity merges or become parents of another promoted view. Selected queries
+cannot train the bank in their own replay. This is one generation of corroborated
+views, not recursive training. Disabling enrichment changes matching policy only;
+scans and embeddings are retained. Matching policy advances to v31.
+
 The local anchor bank uses the same broad/narrow cohort builder as the global
 bank. Independently supported reserve centres remain available beyond the primary
 `max_view_prototypes_per_person` priority, including context-validated additions.

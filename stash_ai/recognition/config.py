@@ -30,6 +30,7 @@ def defaults():
                        'auxiliary_matching': True, 'auxiliary_min_support': 1,
                        'view_prototypes_enabled': False, 'anchor_view_matching': False,
                        'context_view_enrichment': False,
+                       'corroborated_view_enrichment': True,
                        'view_min_support': 3,
                        'view_cohesion_threshold': .80, 'view_match_threshold': .82,
                        'view_ambiguity_margin': .12, 'view_attach_min_support': 2,
@@ -159,6 +160,8 @@ def validate(data):
         raise ValueError('recognition.cross_scene_provisional must be boolean.')
     if type(data['clustering']['context_view_enrichment']) is not bool:
         raise ValueError('clustering.context_view_enrichment must be boolean.')
+    if type(data['clustering']['corroborated_view_enrichment']) is not bool:
+        raise ValueError('clustering.corroborated_view_enrichment must be boolean.')
     if data['clustering']['context_view_enrichment'] and not data['clustering']['anchor_view_matching']:
         raise ValueError('clustering.context_view_enrichment requires anchor_view_matching.')
     if type(data['clustering']['anchor_view_matching']) is not bool:
