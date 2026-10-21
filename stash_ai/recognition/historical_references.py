@@ -184,7 +184,7 @@ def rank(rows,history,config,*,decisions=None,potential=None):
         medoids=sorted({v[2] for v in values if v[2] is not None}),ambiguity_margin=decision_margin)
 
 
-def reconcile(database,replay,selected,config,scope,namespace,fingerprint,*,progress=None,history=None,early=()):
+def reconcile(database,replay,selected,config,scope,namespace,fingerprint,*,progress=None,history=None,early=(),excluded_views=()):
     """Freeze global proposals; durable changes wait for the final transaction."""
     history=history or capture(database.connection,selected,config,scope,namespace,fingerprint,resolve_aliases=False)
     grouping=config.data['clustering']
@@ -199,7 +199,7 @@ def reconcile(database,replay,selected,config,scope,namespace,fingerprint,*,prog
     if len(history.groups)+len(groups)>grouping['max_people_per_lookup']:
         raise ValueError('Selected and historical identities exceed configured person budget.')
     from .reference_registry import resolve
-    proposals=resolve(database.connection,history,config,usage,replay=replay,groups=groups,early=early)
+    proposals=resolve(database.connection,history,config,usage,replay=replay,groups=groups,early=early,excluded_views=excluded_views)
     refresh_verified(database.connection,selected,config,scope,namespace,history,usage)
     deferred=set()
     partial_sources=set()

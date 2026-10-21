@@ -1925,3 +1925,10 @@ policy v23 invalidates older derived decisions without changing scan/model keys.
 Recovered membership-only or damaged legacy decisions receive explicit attachment
 authority, so the legacy strict fallback cannot silently promote their evidence.
 Strict-core summary vectors remain immutable for reuse by the packed score cache.
+
+Historical core demotions also require the final owners of their selected
+source witnesses. If a source changes owner, its private plan is discarded and
+matching is retried once without the invalidated source views. The first RAM
+replay closes before retrying; raw scans and embeddings are reused. A second
+unstable attempt fails before rebuilt memberships are committed.
+

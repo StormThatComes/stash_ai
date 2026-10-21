@@ -45,7 +45,7 @@ def retry_strict(database, selected, config):
                "AND json_extract(payload,'$.reason')='late_strict_identity'",(policy,))
 
 
-def early_views(database, selected, config):
+def early_views(database, selected, config,*,excluded_views=()):
     """Freeze scene-local confirmations before resolving global hypotheses.
 
     A scene ID is not a timeline. Cold replay uses the independently frozen
@@ -100,6 +100,7 @@ def early_views(database, selected, config):
         'ORDER BY e.person,CAST(s.scene AS INTEGER),s.scene,o.cue,o.seconds,o.id')
     promotion=dict(grouping,view_min_support=max(grouping['view_min_support'],grouping['auxiliary_min_support']))
     views=confirmed_views(db,policy,promotion,remaining_bytes=grouping['max_reference_bytes']-usage.bytes,rows=source,complete=True)
+    views=tuple(v for v in views if v.medoid not in excluded_views)
     db.execute('DROP TABLE early_view_support')
     # Resolve the observation partition before considering historical labels.
     # A prior automatic label is not independent evidence against a repair.

@@ -126,3 +126,36 @@ def test_historical_pool_backfill_rolls_back_with_selected_rebuild(tmp_path,monk
         monkeypatch.setattr(unresolved_pool,'apply',original)
         rebuild_selected(db,[query],config)
         assert all(r[0]=='accepted' and r[2]['reason']=='late_strict_identity' for r in candidates(db,old['scan'],config))
+
+
+@pytest.mark.parametrize('current_query',[False,True])
+def test_final_source_reassignment_cannot_demote_a_valid_historical_core(tmp_path,current_query):
+    config=configured(tmp_path)
+    x=np.array([1.,0.,0.,0.]);a=np.array([.7,np.sqrt(.51),0.,0.])
+    c=np.array([.914,0.,np.sqrt(1-.914**2),0.]);r=np.array([.81,-.3,-np.sqrt(1-.81**2-.3**2),0.])
+    with FaceDatabase(config.database) as db:
+        old=fixture(db,config,'1',[c]*3);rebuild_selected(db,[old],config)
+        owner=candidates(db,old['scan'],config)[0][1]
+        rival=fixture(db,config,'2',[r]*3);rebuild_selected(db,[rival],config)
+        source=fixture(db,config,'3',[a]*3+[x]*3,range(3,6));selected=[source]
+        if current_query:selected.append(fixture(db,config,'4',[c]*3))
+        rebuild_selected(db,selected,config)
+        assert all(row[0]=='accepted' and row[1]==owner and row[2]['reference_role']=='strict'
+                   for row in candidates(db,old['scan'],config))
+        rows=candidates(db,source['scan'],config)
+        assert all(row[0]=='withheld' for row in rows[:3])
+        assert all(row[0]=='accepted' and row[1]==owner for row in rows[3:])
+        assert db.connection.execute('SELECT COUNT(*) FROM people').fetchone()[0]==2
+
+
+def test_persistently_unstable_sources_never_commit_rebuilt_memberships(tmp_path,monkeypatch):
+    from stash_ai.recognition import reference_registry
+    config=configured(tmp_path)
+    with FaceDatabase(config.database) as db:
+        item=fixture(db,config,'1',[A]*3)
+        monkeypatch.setattr(reference_registry,'invalidated_sources',lambda *a:{'unstable-source'})
+        with pytest.raises(reference_registry.InvalidatedSourceViews,match='no rebuilt memberships'):
+            rebuild_selected(db,[item],config)
+        assert not db.connection.execute('SELECT 1 FROM members').fetchone()
+        assert not db.connection.execute('SELECT 1 FROM people').fetchone()
+        assert not db.connection.execute('SELECT 1 FROM candidates').fetchone()

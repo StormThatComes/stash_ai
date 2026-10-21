@@ -382,11 +382,18 @@ def _apply(database, replay, selected, config, scope, namespace, mapping, finger
 
 def rebuild_selected(database, selected, config, *, progress=None):
     with profile(database, config.data['execution'].get('profile_rebuild', False)), compute_scope(config), score_scope(), physical_keys(database, config):
-        return _rebuild_selected(database, selected, config, progress=progress)
+        from .reference_registry import InvalidatedSourceViews
+        excluded=set()
+        for attempt in range(2):
+            try:
+                return _rebuild_selected(database,selected,config,progress=progress,excluded_views=excluded)
+            except InvalidatedSourceViews as error:
+                if attempt or not error.medoids-excluded:raise
+                excluded.update(error.medoids)
 
 
 @measured('rebuild')
-def _rebuild_selected(database, selected, config, *, progress=None):
+def _rebuild_selected(database, selected, config, *, progress=None,excluded_views=()):
     """Replay selected scans, then reconcile against frozen external references.
 
     The private SQLite stays in RAM, streaming vectors without
@@ -468,7 +475,7 @@ def _rebuild_selected(database, selected, config, *, progress=None):
             apply_cross_scene_support(temporary, selected, config, progress=progress)
             from .shared_references import retry_strict, early_views
             retry_strict(temporary, selected, config)
-            early = early_views(temporary, selected, config)
+            early = early_views(temporary, selected, config,excluded_views=excluded_views)
             apply_scene_context(temporary, selected, config, progress=progress)
             from .anchor_views import apply_anchor_views
             apply_anchor_views(temporary, selected, config, progress=progress)
@@ -482,7 +489,7 @@ def _rebuild_selected(database, selected, config, *, progress=None):
             global_state=None  # Release frozen exemplars before the historical bank.
         history = historical_references.capture(db,selected,config,scope,namespace,external_context,resolve_aliases=False)
         external_bindings = historical_references.reconcile(database,replay,selected,config,scope,namespace,external_context,
-            progress=progress,history=history,early=early)
+            progress=progress,history=history,early=early,excluded_views=excluded_views)
         from .unresolved_pool import resolve as resolve_pool
         resolve_pool(database,replay,selected,config,history,external_bindings,early)
         mapping = _bind(database, replay, config, scope, namespace, usage=usage,external_bindings=external_bindings,
@@ -497,6 +504,9 @@ def _rebuild_selected(database, selected, config, *, progress=None):
         finalize_pool(replay,config,mapping)
         for row in replay.execute('SELECT DISTINCT person FROM members'):
             mapping.setdefault(row[0],row[0])
+        from .reference_registry import invalidated_sources,InvalidatedSourceViews
+        invalid=invalidated_sources(history,replay,config,mapping)
+        if invalid:raise InvalidatedSourceViews(invalid)
         report_pages(replay)
         _apply(database, replay, selected, config, scope, namespace, mapping, fingerprint, progress, usage=usage,history=history)
     return _results(db, selected, config)
