@@ -412,7 +412,7 @@ def build(config, scene_id, *, limit=20, min_mean=None, scope=None, compare_scen
             for group in bank:
                 usage.add(group.samples,people=1,kind='Report strict')
             views=catalogue(db,config,scan['scope'],scan['namespace'],usage=usage,
-                scan_policy=scan_identity(config,scan['namespace']))
+                scan_policy=scan_identity(config,scan['namespace']),complete=True)
         from .global_views import consolidation_plan
         consolidation_decisions=consolidation_plan(db,views,config)
         component_by_person={person:decision for decision in consolidation_decisions for person in decision['people']}

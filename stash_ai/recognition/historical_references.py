@@ -27,6 +27,7 @@ class History:
     views: tuple
     people: dict
     context: str
+    confirmations: tuple = ()
 
 
 def _source(config,compatibility,*,verified=False):
@@ -46,7 +47,7 @@ def parameters(selected,config,scope,namespace):
 
 
 def context(db,selected,config,scope,namespace):
-    hasher=hashlib.sha256(b'frozen-external-references-v2')
+    hasher=hashlib.sha256(b'frozen-external-references-v3')
     compatibility=fallback_sql(db,config,namespace)
     rows=db.execute("SELECT p.id,p.created,o.id,o.scan,o.cue,o.seconds,o.geometry,o.dimensions,o.embedding,"
         "CASE WHEN json_valid(o.quality) THEN json_extract(o.quality,'$.pixels','$.sharpness',"
@@ -55,7 +56,9 @@ def context(db,selected,config,scope,namespace):
     for row in rows:
         _hash_row(hasher,row)
     if config.data['clustering']['view_prototypes_enabled']:
-        for row in db.execute('SELECT p.id,o.id,o.scan,o.cue,o.seconds,o.geometry,o.quality,o.dimensions,o.embedding '+
+        for row in db.execute('SELECT p.id,o.id,o.scan,o.cue,o.seconds,o.geometry,o.quality,o.dimensions,o.embedding,'
+                '(SELECT json_extract(c.payload,\'$.strict_confirmation\') FROM candidates c '
+                'WHERE json_extract(c.payload,\'$.observation\')=o.id ORDER BY c.rowid DESC LIMIT 1) '+
                 _source(config,compatibility,verified=True)+' ORDER BY p.id,s.scene,o.cue,o.id',
                 parameters(selected,config,scope,namespace)):
             _hash_row(hasher,row)
@@ -81,14 +84,17 @@ def capture(db,selected,config,scope,namespace,fingerprint):
             usage.add(samples,people=1,kind='Historical strict')
             groups.append(Group(person['id'],tuple(samples),True,tuple(ids)))
             people[person['id']]=tuple(person)
-    views=()
-    if config.data['clustering']['anchor_view_matching']:
-        views=catalogue(db,config,scope,namespace,usage=usage,
+    views=confirmations=()
+    grouping=config.data['clustering']
+    if grouping['anchor_view_matching'] or (grouping['max_anchor_pose_deviation'] is not None and grouping['auxiliary_matching']):
+        confirmations=catalogue(db,config,scope,namespace,usage=usage,complete=True,minimum=1,
             excluded_scenes=[item['scene'] for item in selected],scan_policy=scan_identity(config,namespace))
+        if grouping['anchor_view_matching']:
+            views=tuple(v for v in confirmations if v.support_count>=grouping['view_min_support'])
     if config.data['clustering']['view_prototypes_enabled'] and config.data['clustering']['auxiliary_matching']:
         from .verified_views import historical_views
-        views=tuple(views)+historical_views(db,config,scope,namespace,selected,tuple(groups),usage)
-    return History(tuple(groups),views,people,fingerprint)
+        views=tuple(views)+historical_views(db,config,scope,namespace,selected,tuple(groups),usage,confirmations)
+    return History(tuple(groups),views,people,fingerprint,confirmations)
 
 
 def rank(rows,history,config,*,decisions=None,potential=None):

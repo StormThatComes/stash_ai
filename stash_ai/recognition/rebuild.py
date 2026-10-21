@@ -467,8 +467,9 @@ def _rebuild_selected(database, selected, config, *, progress=None):
         mapping = _bind(database, replay, config, scope, namespace, usage=usage,external_bindings=external_bindings,
                         selected_scenes=[item['scene'] for item in selected])
         from .shared_references import auxiliary_bank
-        shared_groups, shared_views = auxiliary_bank(replay,config,scope,namespace,history,mapping,early)
-        apply_auxiliary(temporary, selected, config, progress=progress,reference_groups=shared_groups,reference_views=shared_views)
+        shared_groups, shared_views, confirmations = auxiliary_bank(replay,config,scope,namespace,history,mapping,early)
+        apply_auxiliary(temporary, selected, config, progress=progress,reference_groups=shared_groups,
+                        reference_views=shared_views,reference_confirmations=confirmations)
         for row in replay.execute('SELECT DISTINCT person FROM members'):
             mapping.setdefault(row[0],row[0])
         report_pages(replay)

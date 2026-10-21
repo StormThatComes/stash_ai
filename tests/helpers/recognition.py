@@ -51,8 +51,10 @@ class MediaClient:
             output = BytesIO()
             image.save(output, format='PNG')
             sprite = output.getvalue()
+        def timestamp(i):
+            return f'{i//3600:02d}:{i//60%60:02d}:{i%60:02d}.000'
         vtt = 'WEBVTT\n\n' + '\n\n'.join(
-            f'00:00:{i:02d}.000 --> 00:00:{i+1:02d}.000\nsprite.jpg#xywh=0,0,160,160' for i in range(count))
+            f'{timestamp(i)} --> {timestamp(i+1)}\nsprite.jpg#xywh=0,0,160,160' for i in range(count))
         self.data = {self.url + f'vtt/{scene_id}.vtt': vtt.encode(),
                      self.url + f'sprite/{scene_id}.jpg': sprite}
         self.media = SimpleNamespace(get=self.get)

@@ -16,7 +16,7 @@ from .reference_usage import ReferenceUsage
 from .replay_addresses import address
 from .progress import tracking
 from .scoring import comparisons,scoped
-from .view_prototypes import _Cluster, pose_view, pose_matches
+from .view_prototypes import _Cluster, pose_view, pose_matches, prioritized
 
 
 @dataclass(frozen=True)
@@ -30,7 +30,8 @@ class IdentityView:
     authority: str = 'strict'
 
 
-def catalogue(db, config, scope, namespace, *, usage, policy=None, excluded_scenes=(), scan_policy=None):
+def catalogue(db, config, scope, namespace, *, usage, policy=None, excluded_scenes=(), scan_policy=None,
+              complete=False, minimum=None):
     grouping = config.data['clustering']
     condition = '' if policy is None else 'AND c.policy=? AND c.status=\'accepted\' AND c.person=m.person '
     from .reference_compatibility import fallback_sql
@@ -53,14 +54,15 @@ def catalogue(db, config, scope, namespace, *, usage, policy=None, excluded_scen
         'AND newer.scene=s.scene AND newer.rowid>s.rowid) AND ' + anchor_sql('o', grouping) +
         ' AND ' + strict_sql() + ' ' + condition + scan_condition +
         'ORDER BY m.person,CAST(s.scene AS INTEGER),s.scene,o.cue,o.seconds,o.geometry,o.embedding,o.id', parameters)
-    result, owner, slots = [], None, []
+    result, owner, slots, scratch = [], None, [], 0
 
     def emit():
         if owner is None:
             return
-        eligible = [slot for slot in slots if len(slot.cues) >= grouping['view_min_support']]
-        eligible.sort(key=lambda slot: (-len(slot.cues), slot.pose, slot.first))
-        for slot in eligible[:grouping['max_view_prototypes_per_person']]:
+        eligible = [slot for slot in slots if len(slot.cues) >= (minimum or grouping['view_min_support'])]
+        maximum=grouping['max_view_prototypes_per_person']
+        eligible=prioritized(eligible,maximum)
+        for slot in eligible if complete else eligible[:maximum]:
             sample, medoid = slot.medoid()
             usage.add(slot.examples, kind='Global view evidence')
             result.append(IdentityView(Group(owner, (sample,), True, (medoid,)), slot.pose,
@@ -69,16 +71,20 @@ def catalogue(db, config, scope, namespace, *, usage, policy=None, excluded_scen
         for row in tracked:
             if owner != row['person']:
                 emit()
-                owner, slots = row['person'], []
+                owner, slots, scratch = row['person'], [], 0
             sample, pose = vector(row), pose_view(row['geometry'])
             slot = next((slot for slot in slots if slot.accepts_pose(row['geometry']) and
                          slot.accepts(sample, grouping['view_cohesion_threshold'])), None)
             if slot is None:
-                if len(slots) >= 32:
+                if not complete and len(slots) >= 32:
                     continue
                 slot = _Cluster(pose, row['id'])
                 slots.append(slot)
+            before=len(slot.examples)
             slot.add(row, sample)
+            scratch+=(len(slot.examples)-before)*sample.nbytes
+            if complete and usage.bytes+scratch>usage.limit:
+                raise ValueError('Global view evidence exceeds clustering.max_reference_bytes.')
     emit()
     return tuple(result)
 
@@ -322,7 +328,7 @@ def apply_global_views(database, selected, config, *, progress=None):
     first = db.execute('SELECT scope,namespace FROM scans WHERE id=?',(selected[0]['scan'],)).fetchone()
     usage = ReferenceUsage(config.data['clustering']['max_reference_bytes'],progress)
     anchors = _groups(db,first['scope'],first['namespace'],config.data['clustering'],usage=usage,stage='global_views')
-    views = catalogue(db,config,first['scope'],first['namespace'],usage=usage,policy=policy)
+    views = catalogue(db,config,first['scope'],first['namespace'],usage=usage,policy=policy,complete=True)
     if not views:
         return
     neighbours=set()

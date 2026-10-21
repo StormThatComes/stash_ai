@@ -117,7 +117,19 @@ class ViewPrototype:
         return self.pose + ':' + self.medoid
 
 
-def confirmed_views(db, policy, grouping, *, remaining_bytes, rows=None):
+def prioritized(slots,maximum):
+    """Frequent first, then appearance diversity; reserve cohorts remain usable."""
+    import numpy as np
+    remaining=sorted(slots,key=lambda s:(-len(s.cues),s.pose,s.first))
+    chosen=[]
+    while remaining and len(chosen)<maximum:
+        winner=(remaining[0] if not chosen else max(remaining,key=lambda s:
+            (1.-max(float(np.dot(s.medoid()[0],c.medoid()[0])) for c in chosen),len(s.cues),s.first)))
+        chosen.append(winner);remaining.remove(winner)
+    return chosen+remaining
+
+
+def confirmed_views(db, policy, grouping, *, remaining_bytes, rows=None, complete=False):
     """Return bounded frozen per-view medoids from first-pass anchor confirmations.
 
     One SQL stream ordered by person/canonical sample key. Limited exemplars
@@ -139,15 +151,15 @@ def confirmed_views(db, policy, grouping, *, remaining_bytes, rows=None):
             (policy,))
     output = []
     person, slots = None, []
-    used = 0
+    used = scratch = 0
 
     def emit(owner):
         nonlocal used
         if owner is None:
             return
         eligible = [s for s in slots if len(s.cues) >= minimum]
-        eligible.sort(key=lambda s: (-len(s.cues), s.pose, s.first))
-        for slot in eligible[:maximum]:
+        eligible=prioritized(eligible,maximum)
+        for slot in eligible if complete else eligible[:maximum]:
             sample, identifier = slot.medoid()
             if used + sample.nbytes > remaining_bytes:
                 raise ValueError('Confirmed view prototypes exceed clustering.max_reference_bytes; '
@@ -161,7 +173,7 @@ def confirmed_views(db, policy, grouping, *, remaining_bytes, rows=None):
         for row in tracked:
             if person != row['person']:
                 emit(person)
-                person, slots = row['person'], []
+                person, slots, scratch = row['person'], [], 0
             query = vector(row)
             pose = pose_view(row['geometry'])
             chosen = next((slot for slot in slots
@@ -169,10 +181,14 @@ def confirmed_views(db, policy, grouping, *, remaining_bytes, rows=None):
             if chosen is None:
                 # Bound quality evidence for a single person without silently
                 # allowing new identities or ever-growing reference groups.
-                if len(slots) >= 32:
+                if not complete and len(slots) >= 32:
                     continue
                 chosen = _Cluster(pose, row['id'])
                 slots.append(chosen)
+            before=len(chosen.examples)
             chosen.add(row, query)
+            scratch+=(len(chosen.examples)-before)*query.nbytes
+            if complete and used+scratch>remaining_bytes:
+                raise ValueError('Confirmed view evidence exceeds clustering.max_reference_bytes.')
     emit(person)
     return tuple(output)

@@ -96,7 +96,7 @@ def early_views(database, selected, config):
         'FROM early_view_support e JOIN observations o ON o.id=e.observation JOIN scans s ON s.id=o.scan '
         'ORDER BY e.person,CAST(s.scene AS INTEGER),s.scene,o.cue,o.seconds,o.id')
     promotion=dict(grouping,view_min_support=max(grouping['view_min_support'],grouping['auxiliary_min_support']))
-    views=confirmed_views(db,policy,promotion,remaining_bytes=grouping['max_reference_bytes']-usage.bytes,rows=source)
+    views=confirmed_views(db,policy,promotion,remaining_bytes=grouping['max_reference_bytes']-usage.bytes,rows=source,complete=True)
     db.execute('DROP TABLE early_view_support')
     # Resolve the observation partition before considering historical labels.
     # A prior automatic label is not independent evidence against a repair.
@@ -161,4 +161,4 @@ def auxiliary_bank(db, config, scope, namespace, history, mapping, early):
         usage.add(view.group.samples,kind='Shared view')
     if len({g.identifier for g in groups})>grouping['max_people_per_lookup']:
         raise ValueError('Shared identity catalogue exceeds configured person budget.')
-    return groups,tuple(views)
+    return groups,tuple(views),history.confirmations

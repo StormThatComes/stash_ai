@@ -1796,3 +1796,24 @@ view may also attach as a whole to the independently frozen view bank. These
 `selected_view_identity` attachments never train another view. Stable labels are
 bound only after this partition is resolved; scan inputs and model inference are
 unchanged. Matching policy v20 invalidates earlier derived decisions/checkpoints.
+
+### Durable strict confirmations and reserve appearances
+
+Direct auxiliary decisions record `strict_confirmation`: the frozen strict
+witness observation IDs, owner and effective thresholds. Historical promotion
+revalidates those exact witnesses under current quality, membership, latest-scan
+and rival checks. Adding a different correct appearance of the same owner cannot
+invalidate the original proof through a diluted global mean. Removed or reassigned
+witnesses revoke the proof. Older decisions without this field are independently
+revalidated against current strict appearance cohorts; recovered attachments never
+become witnesses.
+
+Production matching and fragmentation reports retain reserve confirmed cohorts.
+`max_view_prototypes_per_person` controls the priority set: frequent and diverse
+appearances are examined first, with the remaining confirmed appearances available
+to matching and competition. It is not a semantic cutoff that can create a new
+identity merely because its matching appearance ranked fifth. The former first-32
+discovery cutoff is also removed in this complete mode. Candidate and retained
+evidence are checked against `max_reference_bytes`; exceeding the budget fails
+explicitly instead of silently dropping a rare view. Matching policy v21 records
+these changes; the scan and model caches remain reusable.

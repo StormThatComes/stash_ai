@@ -10,14 +10,20 @@ from .global_views import IdentityView
 from .view_prototypes import confirmed_views
 
 
-def historical_views(db,config,scope,namespace,selected,groups,usage):
-    from .historical_references import History,rank,_source,parameters
+def historical_views(db,config,scope,namespace,selected,groups,usage,cohorts=()):
+    from .historical_references import _source,parameters
     from .reference_compatibility import fallback_sql
     if not groups:
         return ()
-    history=History(groups,(),{},'revalidated-historical-strict-cores')
     by_person={g.identifier:g for g in groups}
-    rows=db.execute('SELECT m.person,o.id,o.scan,o.cue,o.seconds,o.geometry,o.dimensions,o.embedding,o.quality '+
+    if not cohorts:
+        from .global_views import catalogue
+        from .scanning import scan_identity
+        cohorts=catalogue(db,config,scope,namespace,usage=usage,minimum=1,complete=True,
+            excluded_scenes=[item['scene'] for item in selected],scan_policy=scan_identity(config,namespace))
+    rows=db.execute('SELECT m.person,o.id,o.scan,o.cue,o.seconds,o.geometry,o.dimensions,o.embedding,o.quality,'
+        '(SELECT c.payload FROM candidates c WHERE json_extract(c.payload,\'$.observation\')=o.id '
+        'ORDER BY c.rowid DESC LIMIT 1) AS decision '+
         _source(config,fallback_sql(db,config,namespace),verified=True)+
         ' ORDER BY m.person,CAST(s.scene AS INTEGER),s.scene,o.cue,o.seconds,o.id',
         parameters(selected,config,scope,namespace))
@@ -25,14 +31,15 @@ def historical_views(db,config,scope,namespace,selected,groups,usage):
         for row in rows:
             if row['person'] not in by_person:
                 continue
-            result=rank([row],history,config)
-            if result is not None and result[0]==row['person'] and co_presence_allows(
-                    db,row,by_person[row['person']],groups,vector(row),config):
+            from .strict_confirmations import revalidate
+            reference=revalidate(db,row,config,scope,namespace,selected,groups,cohorts)
+            if reference is not None and co_presence_allows(
+                    db,row,reference,groups,vector(row),config):
                 yield row
     grouping=config.data['clustering']
     promotion=dict(grouping,view_min_support=max(grouping['view_min_support'],grouping['auxiliary_min_support']))
     prototypes=confirmed_views(db,None,promotion,remaining_bytes=grouping['max_reference_bytes']-usage.bytes,
-                               rows=validated())
+                               rows=validated(),complete=True)
     output=[]
     for view in prototypes:
         samples={row['id']:vector(row) for row in db.execute('SELECT id,dimensions,embedding FROM observations '
