@@ -129,6 +129,34 @@ def prioritized(slots,maximum):
     return chosen+remaining
 
 
+def coverage_threshold(grouping):
+    """Half the angular match radius separates independently supported looks."""
+    return max(grouping['view_cohesion_threshold'],
+               math.sqrt((1 + grouping['view_match_threshold']) / 2))
+
+
+def add_cohort(slots,row,sample,threshold,*,complete):
+    slot=next((s for s in slots if s.accepts_pose(row['geometry']) and s.accepts(sample,threshold)),None)
+    if slot is None:
+        if not complete and len(slots)>=32:
+            return 0
+        slot=_Cluster(pose_view(row['geometry']),row['id']);slots.append(slot)
+    before=len(slot.examples)
+    slot.add(row,sample)
+    return (len(slot.examples)-before)*sample.nbytes
+
+
+def supported_cohorts(slots,cover,minimum,maximum,*,complete):
+    # Narrow cohorts need their own independent support. A singleton endpoint
+    # cannot borrow the broad cohort's votes to become a new reference centre.
+    eligible={}
+    for slot in list(cover)+list(slots):
+        if len(slot.cues)>=minimum:
+            eligible.setdefault(slot.medoid()[1],slot)
+    ordered=prioritized(list(eligible.values()),maximum)
+    return ordered if complete else ordered[:maximum]
+
+
 def confirmed_views(db, policy, grouping, *, remaining_bytes, rows=None, complete=False):
     """Return bounded frozen per-view medoids from first-pass anchor confirmations.
 
@@ -150,16 +178,14 @@ def confirmed_views(db, policy, grouping, *, remaining_bytes, rows=None, complet
             'ORDER BY c.person,CAST(s.scene AS INTEGER),s.scene,o.cue,o.seconds,o.geometry,o.embedding,o.id',
             (policy,))
     output = []
-    person, slots = None, []
+    person, slots, cover = None, [], []
     used = scratch = 0
 
     def emit(owner):
         nonlocal used
         if owner is None:
             return
-        eligible = [s for s in slots if len(s.cues) >= minimum]
-        eligible=prioritized(eligible,maximum)
-        for slot in eligible if complete else eligible[:maximum]:
+        for slot in supported_cohorts(slots,cover,minimum,maximum,complete=complete):
             sample, identifier = slot.medoid()
             if used + sample.nbytes > remaining_bytes:
                 raise ValueError('Confirmed view prototypes exceed clustering.max_reference_bytes; '
@@ -173,21 +199,11 @@ def confirmed_views(db, policy, grouping, *, remaining_bytes, rows=None, complet
         for row in tracked:
             if person != row['person']:
                 emit(person)
-                person, slots, scratch = row['person'], [], 0
+                person, slots, cover, scratch = row['person'], [], [], 0
             query = vector(row)
-            pose = pose_view(row['geometry'])
-            chosen = next((slot for slot in slots
-                           if slot.accepts_pose(row['geometry']) and slot.accepts(query, cohesion)), None)
-            if chosen is None:
-                # Bound quality evidence for a single person without silently
-                # allowing new identities or ever-growing reference groups.
-                if not complete and len(slots) >= 32:
-                    continue
-                chosen = _Cluster(pose, row['id'])
-                slots.append(chosen)
-            before=len(chosen.examples)
-            chosen.add(row, query)
-            scratch+=(len(chosen.examples)-before)*query.nbytes
+            scratch+=add_cohort(slots,row,query,cohesion,complete=complete)
+            if complete:
+                scratch+=add_cohort(cover,row,query,coverage_threshold(grouping),complete=True)
             if complete and used+scratch>remaining_bytes:
                 raise ValueError('Confirmed view evidence exceeds clustering.max_reference_bytes.')
     emit(person)
