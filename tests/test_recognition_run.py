@@ -178,7 +178,7 @@ def test_reference_history_write_cannot_commit_failed_matching(tmp_path, monkeyp
     assert run(config, services, '2') == 1
     output = capsys.readouterr().out
     assert 'required=96 bytes, limit=64 bytes' in output
-    assert 'samples=6 stage=retained' in output
+    assert 'samples=6 stage=selected_and_historical' in output
     assert client.writes == writes
     with FaceDatabase(config.database) as state:
         summary = json.loads(state.connection.execute('SELECT summary FROM runs ORDER BY started DESC').fetchone()[0])

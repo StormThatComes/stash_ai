@@ -36,7 +36,7 @@ def test_sample_keys_reuse_all_dependencies_across_rebuilds(tmp_path,monkeypatch
             assert sample_key(row)==first
 
 
-def test_historical_reads_are_batched_and_candidate_context_is_serialized_once(tmp_path):
+def test_historical_reads_and_final_reference_context_are_batched(tmp_path):
     config=setup(tmp_path)
     with FaceDatabase(config.database) as state:
         selected=[]
@@ -52,7 +52,9 @@ def test_historical_reads_are_batched_and_candidate_context_is_serialized_once(t
         assert len(historical)==2
         statements.clear()
         rebuild_selected(state,selected[:2],config)
-        assert not any(sql.startswith('UPDATE candidates') for sql in statements)
+        # One set-based finalization after current roles have been inserted;
+        # no per-observation or per-scene context rewrites.
+        assert sum(sql.startswith('UPDATE candidates') for sql in statements) == 1
         assert all(json.loads(r[0])['reference_context'] for r in state.connection.execute('SELECT payload FROM candidates'))
         state.connection.set_trace_callback(None)
 

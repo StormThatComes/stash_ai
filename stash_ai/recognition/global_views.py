@@ -29,13 +29,16 @@ class IdentityView:
     examples: tuple
 
 
-def catalogue(db, config, scope, namespace, *, usage, policy=None, excluded_scenes=()):
+def catalogue(db, config, scope, namespace, *, usage, policy=None, excluded_scenes=(), scan_policy=None):
     grouping = config.data['clustering']
     condition = '' if policy is None else 'AND c.policy=? AND c.status=\'accepted\' AND c.person=m.person '
+    scan_condition = '' if scan_policy is None else 'AND s.policy_sha=? '
     join = '' if policy is None else f'JOIN candidates c ON {address(db, "c")}=o.id '
     parameters = [scope, namespace, encoded(list(excluded_scenes))]
     if policy is not None:
         parameters.append(policy)
+    if scan_policy is not None:
+        parameters.append(scan_policy)
     rows = db.execute(
         'SELECT m.person,o.id,o.scan,o.seconds,o.geometry,o.dimensions,o.embedding '
         'FROM members m JOIN people p ON p.id=m.person JOIN observations o ON o.id=m.observation '
@@ -45,7 +48,7 @@ def catalogue(db, config, scope, namespace, *, usage, policy=None, excluded_scen
         'AND NOT EXISTS (SELECT 1 FROM identity_merges WHERE source=p.id) '
         'AND NOT EXISTS (SELECT 1 FROM scans newer WHERE newer.scope=s.scope AND newer.namespace=s.namespace '
         'AND newer.scene=s.scene AND newer.rowid>s.rowid) AND ' + anchor_sql('o', grouping) +
-        ' AND ' + strict_sql() + ' ' + condition +
+        ' AND ' + strict_sql() + ' ' + condition + scan_condition +
         'ORDER BY m.person,CAST(s.scene AS INTEGER),s.scene,o.cue,o.seconds,o.geometry,o.embedding,o.id', parameters)
     result, owner, slots = [], None, []
 
