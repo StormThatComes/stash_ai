@@ -44,7 +44,7 @@ REASONS = {
 # Retain numeric evidence and observation pointers, excluding arbitrary future
 # payloads, URLs, image data, vectors, installation tokens and run configuration.
 DECISION_FIELDS = (
-    'shared_reference', 'cohort_resolution', 'strict_partition',
+    'shared_reference', 'cohort_resolution', 'strict_partition', 'strict_confirmation',
     'global_identity_decision', 'decision_conflict',
     'observation', 'reason', 'scores', 'policy', 'representative_limit', 'reference_role', 'reference_selected',
     'resource_limits', 'reference_context', 'identity_basis', 'merged_from',

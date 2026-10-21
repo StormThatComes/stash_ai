@@ -16,7 +16,8 @@ from .view_prototypes import confirmed_views, pose_view, pose_matches
 from .replay_addresses import address
 
 
-def apply_auxiliary(database, selected, config, *, progress=None, reference_groups=None, reference_views=()):
+def apply_auxiliary(database, selected, config, *, progress=None, reference_groups=None, reference_views=(),
+                    reference_confirmations=()):
     grouping, settings = config.data['clustering'], config.data['recognition']
     if grouping['max_anchor_pose_deviation'] is None or not selected:
         return
@@ -33,6 +34,14 @@ def apply_auxiliary(database, selected, config, *, progress=None, reference_grou
             usage.add(group.samples,people=1,kind='Shared strict')
     for view in reference_views:
         usage.add(view.group.samples,kind='Shared view')
+    if grouping['view_prototypes_enabled'] and grouping['auxiliary_matching']:
+        from .global_views import catalogue
+        from .clustering import Group
+        cohorts=catalogue(db,config,*first,usage=usage,policy=policy,minimum=1,complete=True)
+        for view in reference_confirmations:
+            usage.add(view.examples,kind='Historical confirmation evidence')
+        groups=list(groups)+[Group(v.group.identifier,v.examples,True,v.support)
+                            for v in tuple(cohorts)+tuple(reference_confirmations)]
     condition = auxiliary_sql('o', grouping)
     for item in selected:
         scan = item['scan']
@@ -46,6 +55,7 @@ def apply_auxiliary(database, selected, config, *, progress=None, reference_grou
                       'Attach auxiliary face observations', unit='observation', total=total) as tracked:
             for row, frozen in tracked:
                 person, status, reason, scores = None, 'withheld', 'auxiliary_unmatched', []
+                confirmation=None
                 if grouping['auxiliary_matching'] and groups:
                     query = cache.vector(row) if cache is not None else vector(row)
                     ranked = []
@@ -61,7 +71,14 @@ def apply_auxiliary(database, selected, config, *, progress=None, reference_grou
                         if len(ranked) > 1 and ranked[0][0] - ranked[1][0] < settings['ambiguity_margin']:
                             reason = 'auxiliary_ambiguous'
                         elif co_presence_allows(db, row, ranked[0][2], groups, query, config):
-                            person, status, reason = ranked[0][1], 'pending', 'auxiliary_identity'
+                            from .anchor_views import _competing_anchor
+                            if not _competing_anchor(groups,ranked[0][1],query,ranked[0][0],settings['ambiguity_margin']):
+                                person, status, reason = ranked[0][1], 'pending', 'auxiliary_identity'
+                                confirmation=dict(format=1,frozen=True,identity=person,
+                                    support_ids=ranked[0][2].sample_ids,score=ranked[0][0],
+                                    match_threshold=settings['match_threshold'],cohesion_threshold=grouping['cohesion_threshold'])
+                            else:
+                                reason='auxiliary_ambiguous'
                         else:
                             reason = 'auxiliary_co_presence'
                 elif not grouping['auxiliary_matching']:
@@ -70,6 +87,7 @@ def apply_auxiliary(database, selected, config, *, progress=None, reference_grou
                 db.execute('INSERT INTO candidates VALUES (?,?,?,?,?,?)',
                            (candidate, scan, policy, person, status,
                             encoded({'observation': row['id'], 'reason': reason, 'scores': scores,
+                                     'strict_confirmation':confirmation,
                                      'policy': policy, 'representative_limit': grouping['max_samples_per_person']})))
     from .decision_resolution import resolve_pending
     resolve_pending(db, policy, config)
@@ -113,7 +131,7 @@ def _attach_confirmed_views(db, selected, config, policy, anchors, usage, cache,
     """
     grouping, settings = config.data['clustering'], config.data['recognition']
     views = (confirmed_views(db, policy, grouping,
-                            remaining_bytes=grouping['max_reference_bytes'] - usage.bytes)
+                            remaining_bytes=grouping['max_reference_bytes'] - usage.bytes,complete=True)
              if grouping['view_prototypes_enabled'] else ())
     views=tuple({(v.group.identifier,v.pose,v.medoid):v for v in tuple(views)+tuple(extra_views)}.values())
     for view in views:

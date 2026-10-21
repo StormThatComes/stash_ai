@@ -55,7 +55,7 @@ def compare(db, origin, others, policy, config, *, limit=20):
         for group in frozen:
             usage.add(group.samples,people=1,kind='Report strict')
         views=(catalogue(db,config,origin['scope'],origin['namespace'],usage=usage,
-            scan_policy=scan_identity(config,origin['namespace'])) if grouping['anchor_view_matching'] else ())
+            scan_policy=scan_identity(config,origin['namespace']),complete=True) if grouping['anchor_view_matching'] else ())
         if grouping['view_prototypes_enabled'] and grouping['auxiliary_matching']:
             from .verified_views import historical_views
             views=tuple(views)+historical_views(db,config,origin['scope'],origin['namespace'],[],frozen,usage)

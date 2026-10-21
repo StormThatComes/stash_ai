@@ -27,6 +27,7 @@ class History:
     views: tuple
     people: dict
     context: str
+    confirmations: tuple = ()
 
 
 def _source(config,compatibility,*,verified=False):
@@ -81,14 +82,17 @@ def capture(db,selected,config,scope,namespace,fingerprint):
             usage.add(samples,people=1,kind='Historical strict')
             groups.append(Group(person['id'],tuple(samples),True,tuple(ids)))
             people[person['id']]=tuple(person)
-    views=()
-    if config.data['clustering']['anchor_view_matching']:
-        views=catalogue(db,config,scope,namespace,usage=usage,
+    views=confirmations=()
+    grouping=config.data['clustering']
+    if grouping['anchor_view_matching'] or (grouping['max_anchor_pose_deviation'] is not None and grouping['auxiliary_matching']):
+        confirmations=catalogue(db,config,scope,namespace,usage=usage,complete=True,minimum=1,
             excluded_scenes=[item['scene'] for item in selected],scan_policy=scan_identity(config,namespace))
+        if grouping['anchor_view_matching']:
+            views=tuple(v for v in confirmations if v.support_count>=grouping['view_min_support'])
     if config.data['clustering']['view_prototypes_enabled'] and config.data['clustering']['auxiliary_matching']:
         from .verified_views import historical_views
-        views=tuple(views)+historical_views(db,config,scope,namespace,selected,tuple(groups),usage)
-    return History(tuple(groups),views,people,fingerprint)
+        views=tuple(views)+historical_views(db,config,scope,namespace,selected,tuple(groups),usage,confirmations)
+    return History(tuple(groups),views,people,fingerprint,confirmations)
 
 
 def rank(rows,history,config,*,decisions=None,potential=None):
