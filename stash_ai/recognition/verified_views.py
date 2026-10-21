@@ -10,7 +10,7 @@ from .global_views import IdentityView
 from .view_prototypes import confirmed_views
 
 
-def historical_views(db,config,scope,namespace,selected,groups,usage,cohorts=()):
+def historical_views(db,config,scope,namespace,selected,groups,usage,cohorts=(),aliases=None):
     from .historical_references import _source,parameters
     from .reference_compatibility import fallback_sql
     if not groups:
@@ -22,17 +22,19 @@ def historical_views(db,config,scope,namespace,selected,groups,usage,cohorts=())
         cohorts=catalogue(db,config,scope,namespace,usage=usage,minimum=1,complete=True,
             excluded_scenes=[item['scene'] for item in selected],scan_policy=scan_identity(config,namespace))
     rows=db.execute('SELECT m.person,o.id,o.scan,o.cue,o.seconds,o.geometry,o.dimensions,o.embedding,o.quality,'
-        '(SELECT c.payload FROM candidates c WHERE json_extract(c.payload,\'$.observation\')=o.id '
+        '(SELECT c.payload FROM candidates c WHERE CASE WHEN json_valid(c.payload) THEN json_extract(c.payload,\'$.observation\') END=o.id '
         'ORDER BY c.rowid DESC LIMIT 1) AS decision '+
         _source(config,fallback_sql(db,config,namespace),verified=True)+
         ' ORDER BY m.person,CAST(s.scene AS INTEGER),s.scene,o.cue,o.seconds,o.id',
         parameters(selected,config,scope,namespace))
     def validated():
         for row in rows:
+            row=dict(row)
+            row['person']=(aliases or {}).get(row['person'],row['person'])
             if row['person'] not in by_person:
                 continue
             from .strict_confirmations import revalidate
-            reference=revalidate(db,row,config,scope,namespace,selected,groups,cohorts)
+            reference=revalidate(db,row,config,scope,namespace,selected,groups,cohorts,aliases)
             if reference is not None and co_presence_allows(
                     db,row,reference,groups,vector(row),config):
                 yield row

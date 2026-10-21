@@ -1817,3 +1817,30 @@ discovery cutoff is also removed in this complete mode. Candidate and retained
 evidence are checked against `max_reference_bytes`; exceeding the budget fails
 explicitly instead of silently dropping a rare view. Matching policy v21 records
 these changes; the scan and model caches remain reusable.
+
+### Global reference registry and incomplete rescans
+
+Historical strict cores and current independent scene cores now share a frozen
+complete-component reconciliation plan. Ordinary strict compatibility and supported
+strict appearance witnesses may nominate a pair, but every pair in a resulting
+component must have its own valid proof. A mixed chain cannot consolidate by
+reusing an intermediate union. Historical and selected co-presence are checked
+together. Existing view-only query matches remain attachments instead of acquiring
+strict authority through a provisional local identity.
+
+The oldest historical label wins a supported component. Original physical sample
+ownership, raw observations/crops and performer records are retained. Canonical
+memberships and derived decision provenance may be repaired outside the selected
+scenes in the final SQLite transaction; publication and stale-link reconciliation
+in Stash still touch only the selected scenes. When an earlier historical core is
+recognized by a newly available frozen source view, it becomes
+`global_reference_attachment`, so its recovered appearance cannot train the next
+recovery. Reports expose read-only `reference_registry` proposals and identity
+exports retain the committed evidence.
+
+A newer partial scan, or completed replacement without resolved membership,
+temporarily hides old references. Those old observations can defer a possible
+duplicate as `reference_bank_unavailable`; they cannot positively assign a person.
+Unrelated new identities remain eligible. Latest scan state and gap evidence are
+cache dependencies, so completing/restoring the source lets the next selected
+replay resolve the deferred observations. Matching policy v22 records this flow.

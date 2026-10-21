@@ -288,11 +288,13 @@ def _bind(database, replay, config, scope, namespace, *, usage=None, external_bi
 
 
 @measured('apply')
-def _apply(database, replay, selected, config, scope, namespace, mapping, fingerprint, progress, *, usage=None):
+def _apply(database, replay, selected, config, scope, namespace, mapping, fingerprint, progress, *, usage=None,history=None):
     db, policy = database.connection, matching_policy(config)
     usage = usage or ReferenceUsage(config.data['clustering']['max_reference_bytes'], progress)
     with work('Apply rebuilt identities', 1, unit='transaction', position=0) as committed:
         with db:
+            from .reference_registry import apply as apply_registry
+            registry_changed=apply_registry(database,history) if history is not None else False
             with tracking(
                 _inserted(db, 'INSERT OR IGNORE INTO identity_origins VALUES (?,?,?)',
                           replay.execute('SELECT * FROM origins')),
@@ -360,6 +362,10 @@ def _apply(database, replay, selected, config, scope, namespace, mapping, finger
                 bindings=rebuild_cache.binding_context(db,scope,namespace),
                 limits=rebuild_cache.resource_limits(config),
                 resource_reuse=not getattr(database,'_rebuild_optional_budget_fallback',False))
+            if registry_changed:
+                from .historical_references import context as external_context
+                state['fingerprint']=digest(dict(format=2,scans=selected,policy=policy,
+                    external_references=external_context(db,selected,config,scope,namespace)))
             rebuild_cache.save(db,scope,namespace,state)
         committed.advance()
 
@@ -462,8 +468,9 @@ def _rebuild_selected(database, selected, config, *, progress=None):
             early=tuple(replace(v,group=Group(canonical(replay,v.group.identifier),v.group.samples,True)) for v in early)
             resolve_selected_cohorts(temporary,config,early,global_state)
             global_state=None  # Release frozen exemplars before the historical bank.
-        history = historical_references.capture(db,selected,config,scope,namespace,external_context)
-        external_bindings = historical_references.reconcile(database,replay,selected,config,scope,namespace,external_context,progress=progress,history=history)
+        history = historical_references.capture(db,selected,config,scope,namespace,external_context,resolve_aliases=False)
+        external_bindings = historical_references.reconcile(database,replay,selected,config,scope,namespace,external_context,
+            progress=progress,history=history,early=early)
         mapping = _bind(database, replay, config, scope, namespace, usage=usage,external_bindings=external_bindings,
                         selected_scenes=[item['scene'] for item in selected])
         from .shared_references import auxiliary_bank
@@ -473,7 +480,7 @@ def _rebuild_selected(database, selected, config, *, progress=None):
         for row in replay.execute('SELECT DISTINCT person FROM members'):
             mapping.setdefault(row[0],row[0])
         report_pages(replay)
-        _apply(database, replay, selected, config, scope, namespace, mapping, fingerprint, progress, usage=usage)
+        _apply(database, replay, selected, config, scope, namespace, mapping, fingerprint, progress, usage=usage,history=history)
     return _results(db, selected, config)
 
 

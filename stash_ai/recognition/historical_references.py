@@ -1,10 +1,10 @@
 """Read-only, frozen references outside the selected replay partition.
 
-No historical observations or candidates are copied into replay. Only verified
-label proposals and recovered selected memberships reach the final transaction.
-Strict checkpoints therefore remain independent of this late binding stage.
+No historical observations or candidates are copied into replay. Frozen global
+label/role repairs commit atomically with selected memberships. Strict checkpoints
+remain independent of this late reconciliation stage.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass,field
 import hashlib
 
 from .clustering import Group, _groups, matching_policy, vector
@@ -28,16 +28,22 @@ class History:
     people: dict
     context: str
     confirmations: tuple = ()
+    unavailable: tuple = ()
+    aliases: dict = field(default_factory=dict)
+    actions: tuple = ()
 
 
-def _source(config,compatibility,*,verified=False):
+def _source(config,compatibility,*,verified=False,gaps=False):
+    from .reference_gaps import latest_clause
+    latest=(latest_clause() if gaps else
+        'NOT EXISTS (SELECT 1 FROM scans newer WHERE newer.scope=s.scope AND newer.namespace=s.namespace '
+        'AND newer.scene=s.scene AND newer.rowid>s.rowid)')
     return ('FROM members m JOIN people p ON p.id=m.person JOIN observations o ON o.id=m.observation '
         'JOIN scans s ON s.id=o.scan WHERE p.scope=? AND p.namespace=? '
         'AND s.scene NOT IN (SELECT value FROM json_each(?)) AND (s.policy_sha=? OR '+compatibility+') '
         "AND s.scope=p.scope AND s.namespace=p.namespace AND s.status='complete' AND o.rejected IS NULL "
         'AND NOT EXISTS (SELECT 1 FROM identity_merges WHERE source=p.id) '
-        'AND NOT EXISTS (SELECT 1 FROM scans newer WHERE newer.scope=s.scope AND newer.namespace=s.namespace '
-        'AND newer.scene=s.scene AND newer.rowid>s.rowid) AND ' +
+        'AND '+latest+' AND ' +
         ('1=1' if verified else anchor_sql('o',config.data['clustering'])) + ' AND ' +
         (verified_sql() if verified else strict_sql()))
 
@@ -47,7 +53,7 @@ def parameters(selected,config,scope,namespace):
 
 
 def context(db,selected,config,scope,namespace):
-    hasher=hashlib.sha256(b'frozen-external-references-v3')
+    hasher=hashlib.sha256(b'frozen-external-references-v4')
     compatibility=fallback_sql(db,config,namespace)
     rows=db.execute("SELECT p.id,p.created,o.id,o.scan,o.cue,o.seconds,o.geometry,o.dimensions,o.embedding,"
         "CASE WHEN json_valid(o.quality) THEN json_extract(o.quality,'$.pixels','$.sharpness',"
@@ -55,17 +61,26 @@ def context(db,selected,config,scope,namespace):
         ' ORDER BY p.id,CAST(s.scene AS INTEGER),s.scene,o.cue,o.id',parameters(selected,config,scope,namespace))
     for row in rows:
         _hash_row(hasher,row)
+    for row in db.execute('SELECT s.id,s.scene,s.input_sha,s.policy_sha,s.cursor,s.status FROM scans s '
+            'WHERE s.scope=? AND s.namespace=? AND s.scene NOT IN (SELECT value FROM json_each(?)) '
+            'AND NOT EXISTS (SELECT 1 FROM scans n WHERE n.scope=s.scope AND n.namespace=s.namespace '
+            'AND n.scene=s.scene AND n.rowid>s.rowid) ORDER BY s.scene',
+            (scope,namespace,encoded([item['scene'] for item in selected]))):
+        _hash_row(hasher,row)
+    for row in db.execute('SELECT p.id,o.id,o.geometry,o.quality,o.dimensions,o.embedding '+
+            _source(config,compatibility,gaps=True)+' ORDER BY p.id,o.id',parameters(selected,config,scope,namespace)):
+        _hash_row(hasher,row)
     if config.data['clustering']['view_prototypes_enabled']:
         for row in db.execute('SELECT p.id,o.id,o.scan,o.cue,o.seconds,o.geometry,o.quality,o.dimensions,o.embedding,'
                 '(SELECT json_extract(c.payload,\'$.strict_confirmation\') FROM candidates c '
-                'WHERE json_extract(c.payload,\'$.observation\')=o.id ORDER BY c.rowid DESC LIMIT 1) '+
+                'WHERE CASE WHEN json_valid(c.payload) THEN json_extract(c.payload,\'$.observation\') END=o.id ORDER BY c.rowid DESC LIMIT 1) '+
                 _source(config,compatibility,verified=True)+' ORDER BY p.id,s.scene,o.cue,o.id',
                 parameters(selected,config,scope,namespace)):
             _hash_row(hasher,row)
     return hasher.hexdigest()
 
 
-def capture(db,selected,config,scope,namespace,fingerprint):
+def capture(db,selected,config,scope,namespace,fingerprint,*,resolve_aliases=True):
     usage=ReferenceUsage(config.data['clustering']['max_reference_bytes'])
     usage.begin('historical_references')
     source=_source(config,fallback_sql(db,config,namespace))
@@ -91,10 +106,21 @@ def capture(db,selected,config,scope,namespace,fingerprint):
             excluded_scenes=[item['scene'] for item in selected],scan_policy=scan_identity(config,namespace))
         if grouping['anchor_view_matching']:
             views=tuple(v for v in confirmations if v.support_count>=grouping['view_min_support'])
+    from .reference_gaps import capture as gaps
+    history=History(tuple(groups),views,people,fingerprint,confirmations,
+        gaps(db,selected,config,scope,namespace,usage))
+    if resolve_aliases:
+        from .reference_registry import resolve
+        resolve(db,history,config,usage)
+        refresh_verified(db,selected,config,scope,namespace,history,usage)
+    return history
+
+
+def refresh_verified(db,selected,config,scope,namespace,history,usage):
     if config.data['clustering']['view_prototypes_enabled'] and config.data['clustering']['auxiliary_matching']:
         from .verified_views import historical_views
-        views=tuple(views)+historical_views(db,config,scope,namespace,selected,tuple(groups),usage,confirmations)
-    return History(tuple(groups),views,people,fingerprint,confirmations)
+        history.views=tuple(v for v in history.views if v.authority=='strict')+historical_views(
+            db,config,scope,namespace,selected,history.groups,usage,history.confirmations,history.aliases)
 
 
 def rank(rows,history,config,*,decisions=None,potential=None):
@@ -110,7 +136,8 @@ def rank(rows,history,config,*,decisions=None,potential=None):
         choices={}
         for group,score,low in comparisons(history.groups,query,threshold-margin,grouping['cohesion_threshold']):
             if low>=grouping['cohesion_threshold']:
-                choices[group.identifier]=(score,'strict',None,score>=threshold)
+                if group.identifier not in choices or score>choices[group.identifier][0]:
+                    choices[group.identifier]=(score,'strict',None,score>=threshold)
         for group,score,low in comparisons(views,query,view_threshold-margin,grouping['view_cohesion_threshold']):
             view=by_group[id(group)]
             if low<grouping['view_cohesion_threshold'] or not pose_matches(row['geometry'],view.pose):
@@ -153,11 +180,9 @@ def rank(rows,history,config,*,decisions=None,potential=None):
         medoids=sorted({v[2] for v in values if v[2] is not None}),ambiguity_margin=decision_margin)
 
 
-def reconcile(database,replay,selected,config,scope,namespace,fingerprint,*,progress=None,history=None):
-    """Return label bindings; mutate only the private selected replay."""
-    history=history or capture(database.connection,selected,config,scope,namespace,fingerprint)
-    if not history.groups:
-        return {}
+def reconcile(database,replay,selected,config,scope,namespace,fingerprint,*,progress=None,history=None,early=()):
+    """Freeze global proposals; durable changes wait for the final transaction."""
+    history=history or capture(database.connection,selected,config,scope,namespace,fingerprint,resolve_aliases=False)
     grouping=config.data['clustering']
     groups=_groups(replay,scope,namespace,grouping)
     # Both frozen catalogues fit the same configured reference budget.
@@ -169,10 +194,14 @@ def reconcile(database,replay,selected,config,scope,namespace,fingerprint,*,prog
         usage.add(view.examples,kind='Historical view')
     if len(history.groups)+len(groups)>grouping['max_people_per_lookup']:
         raise ValueError('Selected and historical identities exceed configured person budget.')
-    proposals={}
+    from .reference_registry import resolve
+    proposals=resolve(database.connection,history,config,usage,replay=replay,groups=groups,early=early)
+    refresh_verified(database.connection,selected,config,scope,namespace,history,usage)
     deferred=set()
     partial_sources=set()
     for group in groups:
+        if group.identifier in proposals:
+            continue
         rows=replay.execute('SELECT id,geometry,dimensions,embedding FROM observations '
             'WHERE id IN (SELECT value FROM json_each(?)) ORDER BY id',(encoded(group.sample_ids),)).fetchall()
         decisions=[]
@@ -192,6 +221,10 @@ def reconcile(database,replay,selected,config,scope,namespace,fingerprint,*,prog
                 "'$.global_identity_decision',json(?)) WHERE person=?",
                 (encoded(decisions[0]),group.identifier))
             replay.execute('DELETE FROM members WHERE person=?',(group.identifier,))
+        if result is None and group.identifier not in deferred:
+            from .reference_gaps import defer
+            if defer(replay,group,history,config):
+                deferred.add(group.identifier)
         if result is not None:
             if result[1]['mode']=='view':
                 support=replay.execute('SELECT COUNT(*) FROM (SELECT o.scan,o.seconds FROM members m '
