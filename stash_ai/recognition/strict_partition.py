@@ -41,7 +41,9 @@ def summary_views(groups,usage):
         length=float(np.linalg.norm(centre))
         if not length:
             continue
-        sample=np.asarray(centre/length,dtype='float32')
+        # Packed scoring uses weak immutable owners; writable summaries would
+        # force rebuilding the entire summary matrix for every lookup.
+        sample=np.frombuffer(np.asarray(centre/length,dtype='<f4').tobytes(),dtype='<f4')
         usage.add((sample,),kind='Strict core summary')
         summaries.append(IdentityView(Group(group.identifier,(sample,),True,group.sample_ids),
             'other',group.sample_ids[0],group.sample_ids,len(group.samples),tuple(group.samples),'strict_core'))

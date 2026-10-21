@@ -128,29 +128,44 @@ def resolve(db,history,config,usage,*,replay=None,groups=(),early=()):
     return proposals
 
 
-def apply(database,history):
+def apply(database,history,config):
     """Commit derived global aliases/roles in the selected rebuild transaction."""
     from .reference_roles import STRICT_REASONS
     from .sample_keys import sample_key
+    from .reference_roles import observation_sql
+    from .clustering import matching_policy
+    import uuid
     db=database.connection
     for action in history.actions:
         source,target=action['source'],action['target']
         # Preserve original ownership before changing derived memberships.
-        rows=db.execute('SELECT o.id,o.cue,o.seconds,o.source,o.rect,o.geometry,'
+        rows=db.execute('SELECT o.id,o.scan,o.cue,o.seconds,o.source,o.rect,o.geometry,'
             's.scope,s.namespace,s.scene,s.input_sha FROM members m '
             'JOIN observations o ON o.id=m.observation JOIN scans s ON s.id=o.scan WHERE m.person=?',(source,))
         for row in rows:
             db.execute('INSERT OR IGNORE INTO identity_origins VALUES (?,?,?)',(sample_key(row),source,row['id']))
+            if action['kind']=='verified_attachment' and not db.execute('SELECT 1 FROM candidates c WHERE '+
+                observation_sql('c')+'=? LIMIT 1',(row['id'],)).fetchone():
+                # Membership-only legacy evidence has implicit strict authority.
+                # Materialize its demotion even when no valid old decision exists.
+                policy=matching_policy(config)
+                identifier=str(uuid.uuid5(uuid.UUID(row['id']),policy))
+                payload=dict(observation=row['id'],reason='global_reference_attachment',prior_reason='membership_only',
+                    reference_registry=action,reference_role='attachment',reference_selected=False,policy=policy)
+                db.execute('INSERT OR REPLACE INTO candidates VALUES (?,?,?,?,?,?)',
+                    (identifier,row['scan'],policy,source,'accepted',encoded(payload)))
         db.execute('UPDATE members SET person=? WHERE person=?',(target,source))
         demote=action['kind']=='verified_attachment'
         db.execute("UPDATE candidates SET person=?,payload=json_set(payload,'$.reference_registry',json(?),"
             "'$.strict_confirmation',CASE WHEN json_type(payload,'$.strict_confirmation')='object' THEN "
             "json_set(json_extract(payload,'$.strict_confirmation'),'$.identity',?) ELSE NULL END,"
-            "'$.prior_reason',json_extract(payload,'$.reason'),'$.reason',CASE WHEN ? AND "
+            "'$.prior_reason',CASE WHEN json_extract(payload,'$.reason')='global_reference_attachment' THEN "
+            "coalesce(json_extract(payload,'$.prior_reason'),'membership_only') ELSE json_extract(payload,'$.reason') END,"
+            "'$.reason',CASE WHEN ? AND "
             "json_extract(payload,'$.reason') IN (SELECT value FROM json_each(?)) THEN 'global_reference_attachment' "
             "ELSE json_extract(payload,'$.reason') END,'$.reference_role',CASE WHEN ? THEN 'attachment' "
             "ELSE coalesce(json_extract(payload,'$.reference_role'),'strict') END,'$.reference_selected',"
             "json(CASE WHEN ? THEN 'false' WHEN json_extract(payload,'$.reference_selected') THEN 'true' ELSE 'false' END)) "
-            "WHERE person=? AND status='accepted'",
+            "WHERE person=? AND status='accepted' AND json_valid(payload)",
             (target,encoded(action),target,demote,encoded(STRICT_REASONS),demote,demote,source))
     return bool(history.actions)

@@ -297,7 +297,7 @@ def _apply(database, replay, selected, config, scope, namespace, mapping, finger
     with work('Apply rebuilt identities', 1, unit='transaction', position=0) as committed:
         with db:
             from .reference_registry import apply as apply_registry
-            registry_changed=apply_registry(database,history) if history is not None else False
+            registry_changed=apply_registry(database,history,config) if history is not None else False
             with tracking(
                 _inserted(db, 'INSERT OR IGNORE INTO identity_origins VALUES (?,?,?)',
                           replay.execute('SELECT * FROM origins')),

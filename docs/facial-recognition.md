@@ -1875,3 +1875,7 @@ fingerprint includes successful backfills. Reports/exported decisions include
 `provisional_pool` support, thresholds, witnesses, authority and deferral evidence.
 The feature remains disabled when `cross_scene_provisional` is false. Matching
 policy v23 invalidates older derived decisions without changing scan/model keys.
+
+Recovered membership-only or damaged legacy decisions receive explicit attachment
+authority, so the legacy strict fallback cannot silently promote their evidence.
+Strict-core summary vectors remain immutable for reuse by the packed score cache.

@@ -223,3 +223,21 @@ def test_unrelated_malformed_cache_row_does_not_break_confirmation_or_pool_reads
             (str(uuid.uuid4()),source['scan'],'damaged-policy',None,'withheld','not-json'));db.connection.commit()
         assert context(db.connection,[],config,'scope','ns')==before
         assert any(v.authority=='verified_view' for v in capture(db.connection,[],config,'scope','ns','check').views)
+
+
+@pytest.mark.parametrize('legacy',['missing','malformed'])
+def test_recovered_legacy_membership_materializes_attachment_authority(tmp_path,legacy):
+    config=changed(configured(tmp_path),clustering={'view_prototypes_enabled':True})
+    with FaceDatabase(config.database) as db:
+        old=fixture(db,config,'1',[C]*3);rebuild_selected(db,[old],config)
+        if legacy=='missing':db.connection.execute('DELETE FROM candidates WHERE scan=?',(old['scan'],))
+        else:db.connection.execute("UPDATE candidates SET payload='not-json' WHERE scan=?",(old['scan'],))
+        db.connection.commit()
+        source=fixture(db,config,'2',[A]*3+[X]*3,range(3,6));rebuild_selected(db,[source],config)
+        recovered=candidates(db,old['scan'],config)
+        assert len(recovered)==3
+        assert all(r[0]=='accepted' and r[2]['reason']=='global_reference_attachment' and
+            r[2]['reference_role']=='attachment' for r in recovered)
+        owner=recovered[0][1]
+        beyond=fixture(db,config,'3',[angle(84)]*3);rebuild_selected(db,[beyond],config)
+        assert all(r[1]!=owner for r in candidates(db,beyond['scan'],config))
