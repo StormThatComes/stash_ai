@@ -49,7 +49,7 @@ DECISION_FIELDS = (
     'resource_limits', 'reference_context', 'identity_basis', 'merged_from',
     'same_scene_merge', 'same_scene_context', 'cross_scene', 'view_prototype',
     'anchor_view', 'anchor_view_probe', 'anchor_view_seeded',
-    'auxiliary_view_probe', 'auxiliary_view_seeded', 'merge_withheld_reason', 'global_view', 'global_view_merge', 'historical_reference', 'prior_reason',
+    'auxiliary_view_probe', 'auxiliary_view_seeded', 'merge_withheld_reason', 'global_view', 'global_view_merge', 'global_view_consolidation', 'historical_reference', 'prior_reason',
 )
 QUALITY_FIELDS = (
     'pixels', 'pose_deviation', 'roll_deviation', 'pose_contract', 'sharpness', 'exposure', 'clipped_fraction',

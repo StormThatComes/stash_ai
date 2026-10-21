@@ -459,6 +459,7 @@ def _rebuild_selected(database, selected, config, *, progress=None):
             from .identity_merges import canonical
             early=tuple(replace(v,group=Group(canonical(replay,v.group.identifier),v.group.samples,True)) for v in early)
             resolve_selected_cohorts(temporary,config,early,global_state)
+            global_state=None  # Release frozen exemplars before the historical bank.
         history = historical_references.capture(db,selected,config,scope,namespace,external_context)
         external_bindings = historical_references.reconcile(database,replay,selected,config,scope,namespace,external_context,progress=progress,history=history)
         mapping = _bind(database, replay, config, scope, namespace, usage=usage,external_bindings=external_bindings,
