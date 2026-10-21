@@ -11,7 +11,7 @@ from .clustering import Group, vector
 from .database import encoded
 
 
-def revalidate(db,row,config,scope,namespace,selected,groups,cohorts):
+def revalidate(db,row,config,scope,namespace,selected,groups,cohorts,aliases=None):
     from .historical_references import History,rank,_source,parameters
     from .reference_compatibility import fallback_sql
     try:
@@ -19,16 +19,18 @@ def revalidate(db,row,config,scope,namespace,selected,groups,cohorts):
     except (ValueError,TypeError,AttributeError):
         return None
     owner=row['person']
+    aliases=aliases or {}
     if proof is not None:
-        if (not isinstance(proof,dict) or proof.get('format')!=1 or proof.get('identity')!=owner
+        if (not isinstance(proof,dict) or proof.get('format')!=1 or aliases.get(proof.get('identity'),proof.get('identity'))!=owner
             or not isinstance(proof.get('support_ids'),list) or not proof['support_ids']
             or any(not isinstance(i,str) for i in proof['support_ids'])
             or len(set(proof['support_ids']))!=len(proof['support_ids'])):
             return None
         witnesses=db.execute('SELECT o.id,o.dimensions,o.embedding '+
-            _source(config,fallback_sql(db,config,namespace))+' AND p.id=? '
+            _source(config,fallback_sql(db,config,namespace))+' AND p.id IN (SELECT value FROM json_each(?)) '
             'AND o.id IN (SELECT value FROM json_each(?)) ORDER BY o.id',
-            parameters(selected,config,scope,namespace)+(owner,encoded(proof['support_ids']))).fetchall()
+            parameters(selected,config,scope,namespace)+(encoded([owner]+[s for s,t in aliases.items() if t==owner]),
+                encoded(proof['support_ids']))).fetchall()
         if len(witnesses)!=len(proof['support_ids']):
             return None
         candidates=(Group(owner,tuple(vector(w) for w in witnesses),True,tuple(w['id'] for w in witnesses)),)

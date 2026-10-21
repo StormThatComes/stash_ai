@@ -29,9 +29,11 @@ def test_distinct_simultaneous_local_views_cannot_claim_one_person(tmp_path):
 def test_ambiguous_historical_fragments_do_not_create_fourth_person(tmp_path):
     config=config_for(tmp_path)
     with FaceDatabase(config.database) as db:
-        people={seed(db,config,str(i+1),v(i*12))[1] for i in range(3)}
+        # A complete compatible component now repairs its historical labels.
+        # This incomplete strong chain must remain unresolved instead.
+        people={seed(db,config,str(i+1),v(i*26))[1] for i in range(3)}
         assert len(people)==3
-        sid,_=scan(db,config,'4',[v(12)]*3,count=3)
+        sid,_=scan(db,config,'4',[v(13)]*3,count=3)
         selection=[{'scene':'4','scan':sid}]
         rebuild_selected(db,selection,config)
         rows=candidates(db,sid,config)

@@ -415,6 +415,17 @@ def build(config, scene_id, *, limit=20, min_mean=None, scope=None, compare_scen
                 scan_policy=scan_identity(config,scan['namespace']),complete=True)
         from .global_views import consolidation_plan
         consolidation_decisions=consolidation_plan(db,views,config)
+        from .historical_references import History
+        from .reference_registry import resolve as registry_plan
+        registry_usage=ReferenceUsage(clustering['max_reference_bytes'])
+        for group in bank:
+            registry_usage.add(group.samples,kind='Report registry strict')
+        for view in views:
+            registry_usage.add(view.examples,kind='Report registry views')
+        labels={r['id']:tuple(r) for r in db.execute('SELECT * FROM people WHERE id IN '
+            '(SELECT value FROM json_each(?))',(encoded([g.identifier for g in bank]),))}
+        registry=History(tuple(bank),views,labels,reference_context(bank),views)
+        registry_plan(db,registry,config,registry_usage)
         component_by_person={person:decision for decision in consolidation_decisions for person in decision['people']}
         selected_pairs = pairs[:limit]
         view_owners={}
@@ -452,6 +463,7 @@ def build(config, scene_id, *, limit=20, min_mean=None, scope=None, compare_scen
                        if compare_scene_ids else [])
         multiview = _view_attempt_summary(db, scan['id'], policy, scan['scope'], scan['namespace'])
         return {
+            'reference_registry':dict(format=1,frozen=True,aliases=registry.aliases,proposed_updates=registry.actions),
             'reference_context':reference_context(bank),
             'reference_selection':'production_quality_diversity_v1',
             'cross_scene_comparisons':comparisons,

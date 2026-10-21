@@ -113,7 +113,7 @@ def _cooccurs(db, left, right):
         (left, right)).fetchone() is not None
 
 
-def cohort_evidence(db, left, right, config):
+def cohort_evidence(db, left, right, config, *, cooccurs=None):
     """The same frozen cohort checks serve consolidation and read-only reports."""
     import numpy as np
     grouping,settings=config.data['clustering'],config.data['recognition']
@@ -124,13 +124,16 @@ def cohort_evidence(db, left, right, config):
     strict=left.authority==right.authority=='strict_core'
     if strict:
         score=mean # Normalized centroids only shortlist; original vectors decide.
-    copresent=_cooccurs(db,left.group.identifier,right.group.identifier)
+        threshold=settings['match_threshold']
+    cohesion=grouping['cohesion_threshold'] if strict else grouping['view_cohesion_threshold']
+    minimum=1 if strict else settings['min_merge_support']
+    copresent=(cooccurs or (lambda a,b:_cooccurs(db,a,b)))(left.group.identifier,right.group.identifier)
     blockers=[]
     if score<threshold:
         blockers.append('view_medoid_below_match_threshold')
-    if min(left.support_count,right.support_count)<settings['min_merge_support']:
+    if min(left.support_count,right.support_count)<minimum:
         blockers.append('view_independent_merge_support_insufficient')
-    if low<grouping['view_cohesion_threshold']:
+    if low<cohesion:
         blockers.append('view_cross_sample_below_cohesion_threshold')
     if mean<threshold:
         blockers.append('view_cross_mean_below_match_threshold')
@@ -144,7 +147,7 @@ def cohort_evidence(db, left, right, config):
 
 
 @scoped
-def consolidation_plan(db,views,config,*,neighbours=None):
+def consolidation_plan(db,views,config,*,neighbours=None,mixed=False,cooccurs=None):
     """Strong complete components with margin checks against frozen outsiders.
 
     Weak edges are competition evidence, not transitive component membership.
@@ -176,16 +179,20 @@ def consolidation_plan(db,views,config,*,neighbours=None):
         for person in tracked:
             candidates={}
             for view in owned[person]:
-                for other,score,_ in comparisons(groups,view.group.samples[0],threshold-margin):
+                strict=view.authority=='strict_core'
+                effective=settings['match_threshold'] if strict else threshold
+                for other,score,_ in comparisons(groups,view.group.samples[0],effective-margin):
                     if other.identifier<=person:
+                        continue
+                    if mixed and view.authority!=by_group[id(other)].authority:
                         continue
                     if neighbours is not None:
                         neighbours.update((person,other.identifier))
                     previous=candidates.setdefault(other.identifier,None)
-                    if score<threshold or min(view.support_count,by_group[id(other)].support_count)<settings['min_merge_support']:
+                    if (not strict and score<effective) or min(view.support_count,by_group[id(other)].support_count)<(1 if strict else settings['min_merge_support']):
                         continue
-                    proof=cohort_evidence(db,view,by_group[id(other)],config)
-                    if not proof['blockers'] and (previous is None or score>previous['match_score']):
+                    proof=cohort_evidence(db,view,by_group[id(other)],config,cooccurs=cooccurs)
+                    if not proof['blockers'] and (previous is None or proof['match_score']>previous['match_score']):
                         candidates[other.identifier]=proof
             for other,proof in candidates.items():
                 if proof is not None:
@@ -203,14 +210,18 @@ def consolidation_plan(db,views,config,*,neighbours=None):
         if complete:
             for person in people:
                 for view in owned[person]:
-                    for other,score,_ in comparisons(groups,view.group.samples[0],threshold-margin):
+                    strict=view.authority=='strict_core'
+                    effective=settings['match_threshold'] if strict else threshold
+                    for other,score,_ in comparisons(groups,view.group.samples[0],effective-margin):
                         if root(other.identifier)==root(person):
+                            continue
+                        if mixed and view.authority!=by_group[id(other)].authority:
                             continue
                         if view.authority==by_group[id(other)].authority=='strict_core':
                             from .clustering import _similarities
                             raw=Group(other.identifier,by_group[id(other)].examples,True)
                             score=sum(_similarities(raw,q)[0] for q in view.examples)/len(view.examples)
-                            if score<threshold-margin:
+                            if score<effective-margin:
                                 continue
                         entry=dict(identity=person,rival=other.identifier,score=score,
                                    internal_score=floors[person],gap=floors[person]-score)
