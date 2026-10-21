@@ -1,7 +1,7 @@
 """Frozen strict appearance cohorts shared across selected scenes.
 
 View-only members never train the catalogue. Identity consolidation requires
-complete frozen ambiguity components from independently supported cohorts; the
+complete frozen strong components from independently supported cohorts; the
 frozen nomination graph is not recomputed after a merge, preventing chaining.
 """
 from dataclasses import dataclass, replace
@@ -15,7 +15,7 @@ from .reference_roles import strict_sql
 from .reference_usage import ReferenceUsage
 from .replay_addresses import address
 from .progress import tracking
-from .scoring import comparisons
+from .scoring import comparisons,scoped
 from .view_prototypes import _Cluster, pose_view, pose_matches
 
 
@@ -133,16 +133,15 @@ def cohort_evidence(db, left, right, config):
         threshold=threshold,blockers=blockers)
 
 
-def merge_views(database, views, config, policy, *, neighbours=None):
-    """Consolidate complete frozen components, never neighbour chains.
+@scoped
+def consolidation_plan(db,views,config,*,neighbours=None):
+    """Strong complete components with margin checks against frozen outsiders.
 
-    Weak neighbours join the ambiguity component too. Every identity pair must
-    have independently supported strong cohort evidence before any member moves.
-    Union-find and strong degrees use O(people) memory, without an edge table.
+    Weak edges are competition evidence, not transitive component membership.
+    O(people) state is retained. Only complete non-singleton components need the
+    second scoring pass; unrelated people do not incur another lookup.
     """
-    import numpy as np
     from .config import digest
-    db=database.connection
     grouping,settings=config.data['clustering'],config.data['recognition']
     threshold=max(settings['match_threshold'],grouping['view_match_threshold'])
     margin=max(settings['ambiguity_margin'],grouping['view_ambiguity_margin'])
@@ -153,6 +152,7 @@ def merge_views(database, views, config, policy, *, neighbours=None):
         owned.setdefault(view.group.identifier,[]).append(view)
     parents={person:person for person in owned}
     degrees={person:0 for person in owned}
+    floors={person:float('inf') for person in owned}
     def root(person):
         while parents[person]!=person:
             parents[person]=parents[parents[person]]
@@ -162,11 +162,6 @@ def merge_views(database, views, config, policy, *, neighbours=None):
         a,b=root(left),root(right)
         if a!=b:
             parents[max(a,b)]=min(a,b)
-    def witness(left,right,score):
-        if score<threshold or min(left.support_count,right.support_count)<settings['min_merge_support']:
-            return None
-        proof=cohort_evidence(db,left,right,config)
-        return proof if not proof['blockers'] else None
     with tracking(sorted(owned),'Validate frozen identity components',unit='person') as tracked:
         for person in tracked:
             candidates={}
@@ -174,36 +169,73 @@ def merge_views(database, views, config, policy, *, neighbours=None):
                 for other,score,_ in comparisons(groups,view.group.samples[0],threshold-margin):
                     if other.identifier<=person:
                         continue
-                    # One bounded row per other identity, irrespective of views.
-                    if other.identifier not in candidates:
-                        candidates[other.identifier]=None
-                    if candidates[other.identifier] is None:
-                        candidates[other.identifier]=witness(view,by_group[id(other)],score)
+                    if neighbours is not None:
+                        neighbours.update((person,other.identifier))
+                    previous=candidates.setdefault(other.identifier,None)
+                    if score<threshold or min(view.support_count,by_group[id(other)].support_count)<settings['min_merge_support']:
+                        continue
+                    proof=cohort_evidence(db,view,by_group[id(other)],config)
+                    if not proof['blockers'] and (previous is None or score>previous['match_score']):
+                        candidates[other.identifier]=proof
             for other,proof in candidates.items():
-                if neighbours is not None:
-                    neighbours.update((person,other))
-                join(person,other)
                 if proof is not None:
+                    join(person,other)
                     degrees[person]+=1;degrees[other]+=1
+                    floors[person]=min(floors[person],proof['match_score'])
+                    floors[other]=min(floors[other],proof['match_score'])
     components={}
     for person in owned:
         components.setdefault(root(person),[]).append(person)
-    order={r['id']:(r['created'],r['id']) for r in db.execute('SELECT id,created FROM people')}
+    result=[]
     for people in components.values():
-        if len(people)<2 or any(degrees[p]!=len(people)-1 for p in people):
+        complete=len(people)>1 and all(degrees[p]==len(people)-1 for p in people)
+        rival=None
+        if complete:
+            for person in people:
+                for view in owned[person]:
+                    for other,score,_ in comparisons(groups,view.group.samples[0],threshold-margin):
+                        if root(other.identifier)==root(person):
+                            continue
+                        entry=dict(identity=person,rival=other.identifier,score=score,
+                                   internal_score=floors[person],gap=floors[person]-score)
+                        if rival is None or (entry['gap'],person,other.identifier)<(rival['gap'],rival['identity'],rival['rival']):
+                            rival=entry
+        blocker=('no_supported_pair' if len(people)<2 else 'incomplete_strong_component' if not complete else
+                 'competing_view' if rival is not None and rival['gap']<margin else None)
+        result.append(dict(people=tuple(sorted(people)),format=3,frozen=True,
+            component_context=digest(sorted(people)),component_size=len(people),
+            complete_component=complete,minimum_supported_degree=min(degrees[p] for p in people),
+            required_degree=len(people)-1,nearest_rival=rival,ambiguity_margin=margin,
+            outcome='merge' if blocker is None else 'blocked',blocker=blocker))
+    return tuple(result)
+
+
+def merge_views(database,views,config,policy,*,neighbours=None):
+    """Apply a plan computed entirely from the original frozen catalogue."""
+    db=database.connection
+    owned={}
+    for view in views:
+        owned.setdefault(view.group.identifier,[]).append(view)
+    order={r['id']:(r['created'],r['id']) for r in db.execute('SELECT id,created FROM people')}
+    related=neighbours if neighbours is not None else set()
+    for decision in consolidation_plan(db,views,config,neighbours=related):
+        people=decision['people']
+        summary={k:v for k,v in decision.items() if k!='people'}
+        if any(person in related for person in people):
+            db.execute("UPDATE candidates SET payload=json_set(payload,'$.global_view_consolidation',json(?)) "
+                       'WHERE policy=? AND person IN (SELECT value FROM json_each(?))',
+                       (encoded(summary),policy,encoded(people)))
+        if decision['outcome']!='merge':
             continue
         target,*sources=sorted(people,key=lambda p:order[p])
-        context=digest(sorted(people))
-        # Obtain all proofs from the original catalogue before membership moves.
         proofs=[]
         for source in sources:
-            proof=next((proof for left in owned[target] for right in owned[source]
-                if (proof:=witness(left,right,float(np.dot(left.group.samples[0],right.group.samples[0])))) is not None),None)
-            if proof is None:
+            candidates=[cohort_evidence(db,left,right,config) for left in owned[target] for right in owned[source]]
+            candidates=[proof for proof in candidates if not proof['blockers']]
+            if not candidates:
                 break
-            proofs.append((source,dict(proof,format=2,frozen=True,reciprocal=True,complete_component=True,
-                component_size=len(people),component_context=context,scan=None,policy=policy,
-                threshold=threshold,ambiguity_margin=margin)))
+            proof=max(candidates,key=lambda p:p['match_score'])
+            proofs.append((source,dict(proof,**summary,reciprocal=True,scan=None,policy=policy)))
         if len(proofs)!=len(sources):
             continue
         for source,proof in proofs:

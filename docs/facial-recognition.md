@@ -1612,9 +1612,10 @@ score and thresholds in `global_view` and mark these members as attachments.
 
 Established fragments can consolidate through independently supported strict
 cohorts even when other appearances fail whole-bank cohesion. The frozen graph
-includes weak neighbours as ambiguity evidence. Every identity pair in a
-component must have strong independent cohort evidence before any member moves;
-a weak or incompatible endpoint blocks the component. Co-present faces require
+forms components from independently supported strong cohort pairs. Every pair
+in a component must have strong evidence before any member moves. Weak external
+neighbours remain competition evidence: they block a proposed component only
+when their score falls within its internal evidence ambiguity margin. Co-present faces require
 the stronger reflection threshold. No graph is recomputed from merged output.
 `global_view_merge` records complete-component size, context and pair witnesses.
 This consolidation is reversible replay, not a destructive Stash performer merge.
@@ -1758,3 +1759,22 @@ boundary used by matching. Every observed direction must remain compatible;
 neutral evidence cannot bridge opposite left/right directions. Independent
 support is pooled before promotion instead of being split across a hard bucket
 boundary. Embedding cohesion and promotion thresholds remain unchanged.
+
+
+### Consolidation competition diagnostics
+
+Global consolidation now uses one frozen plan for runtime and read-only reports.
+A strong neighbour chain with incompatible endpoints remains blocked; adding an
+uncompetitive weak outsider no longer makes a complete strong component fail.
+A near-threshold outsider or a high-scoring view with insufficient merge support
+can still veto the component through the ambiguity margin. Competition is checked
+against every member's weakest supported internal pair, including its other
+appearance views. No merged output is used to recompute the graph.
+
+`global_view_consolidation` records `incomplete_strong_component`,
+`competing_view` or `no_supported_pair`, component size/context, supported degree
+and the nearest external rival's score and gap. Isolated people with no candidate
+neighbours do not receive redundant decision payloads. `global_view_merge` format
+3 carries the same plan evidence. Scene fragmentation pairs expose this read-only
+assessment as `global_view_component`; `can_merge` remains unset because a report
+is not a selected replay or authorization to merge Stash performers.
