@@ -295,28 +295,17 @@ def apply_anchor_views(database, selected, config, *, progress=None):
     from .decision_resolution import resolve_pending
     resolve_pending(db, policy, config)
     anchors.clear()
-    # Independent support applies to one person AND one exact frozen prototype.
-    # This stage must not overwrite another stage's pending candidates.
+    from .query_support import eligible
     source = (f'FROM candidates c JOIN observations o ON o.id={address(db, "c")} '
               "WHERE c.policy=? AND c.status='pending' "
               "AND json_extract(c.payload,'$.reason')='anchor_view_pending'")
-    votes = db.execute(
-        'SELECT person,medoid,COUNT(*) FROM (SELECT c.person AS person,'
-        "json_extract(c.payload,'$.anchor_view.medoid') AS medoid,"
-        'o.scan,o.seconds ' + source +
-        ' GROUP BY c.person,medoid,o.scan,o.seconds) '
-        'GROUP BY person,medoid ORDER BY person,medoid', (policy,))
-    eligible = [(person, medoid) for person, medoid, n in votes
-                if n >= grouping['view_attach_min_support']]
+    rows=db.execute("SELECT o.*,c.person,json_extract(c.payload,'$.anchor_view.medoid') AS medoid "+source+
+                    ' ORDER BY o.embedding,o.geometry,o.id',(policy,))
+    supported=eligible(rows,config,key=lambda r:r['person'],prototype=lambda r:r['medoid'])
     with db:
-        for person, medoid in eligible:
-            db.execute(
-                "UPDATE candidates SET status='accepted',"
-                "payload=json_set(payload,'$.reason','anchor_view_identity') "
-                "WHERE policy=? AND person=? AND status='pending' "
-                "AND json_extract(payload,'$.reason')='anchor_view_pending' "
-                "AND json_extract(payload,'$.anchor_view.medoid')=?",
-                (policy, person, medoid))
+        db.execute("UPDATE candidates SET status='accepted',payload=json_set(payload,'$.reason','anchor_view_identity') "
+            "WHERE policy=? AND status='pending' AND json_extract(payload,'$.reason')='anchor_view_pending' "
+            f"AND {address(db, 'candidates')} IN (SELECT value FROM json_each(?))",(policy,encoded(sorted(supported))))
         db.execute(
             "UPDATE candidates SET person=NULL,status='withheld',"
             "payload=json_set(payload,'$.reason','anchor_view_insufficient_support') "

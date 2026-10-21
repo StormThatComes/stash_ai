@@ -48,24 +48,32 @@ def resolve(database,replay,selected,config,history,bindings,confirmed):
     stronger=max(config.data['recognition']['match_threshold'],config.data['recognition']['cooccurrence_merge_threshold'])
     for row in conflicting_claims(claims(),stronger):
         replay.execute('DELETE FROM historical_pool_claims WHERE observation=?',(row['id'],))
-    eligible=replay.execute('SELECT owner,mode,medoids,COUNT(*) FROM (SELECT owner,mode,medoids,scan,seconds '
-        'FROM historical_pool_claims GROUP BY owner,mode,medoids,scan,seconds) GROUP BY owner,mode,medoids').fetchall()
+    from .query_support import cohorts
+    from .config import digest
+    claims_by_id={r['observation']:r for r in replay.execute('SELECT * FROM historical_pool_claims')}
+    raw=database.connection.execute('SELECT o.* FROM observations o WHERE id IN (SELECT value FROM json_each(?)) '
+        'ORDER BY embedding,geometry,id',(encoded(list(claims_by_id)),))
+    eligible=cohorts(raw,config,key=lambda r:(claims_by_id[r['id']]['owner'],claims_by_id[r['id']]['mode']),
+        prototype=lambda r:claims_by_id[r['id']]['medoids'],
+        minimum=lambda family:config.data['clustering']['view_attach_min_support'] if family[1]=='view' else 1)
     import json
-    for target,mode,medoids,support in eligible:
+    for cohort in eligible:
+        target,mode=cohort.family;support=cohort.independent_support
         minimum=config.data['clustering']['view_attach_min_support'] if mode=='view' else 1
-        if support<minimum:continue
-        medoid_ids=json.loads(medoids)
+        medoid_ids=sorted({i for source in cohort.prototypes for i in json.loads(source)})
         witnesses=tuple(dict.fromkeys(i for v in history.views if v.group.identifier==target and v.medoid in medoid_ids for i in v.support))
         if mode=='strict':
             witnesses=tuple(dict.fromkeys(i for g in history.groups if g.identifier==target for i in g.sample_ids))
         if not witnesses:continue
-        source='historical:'+target+':'+mode+':'+medoids
+        source='historical:'+target+':'+mode+':'+digest(cohort.observations)
         proof=dict(format=1,frozen=True,external_reference=True,identity=target,mode='known_'+mode,
             independent_support=support,required_support=minimum,source_reference_ids=witnesses,
-            context=history.context,validation='frozen_historical_bank',medoids=medoid_ids)
+            context=history.context,validation='frozen_historical_bank',medoids=medoid_ids,
+            query_support_ids=cohort.witnesses)
         replay.execute('INSERT OR IGNORE INTO people VALUES (?,?,?,?,?,?)',history.people[target])
         bindings[target]=target
-        for row in replay.execute('SELECT * FROM historical_pool_claims WHERE owner=? AND mode=? AND medoids=?',(target,mode,medoids)):
+        for row in replay.execute('SELECT * FROM historical_pool_claims WHERE observation IN '
+                '(SELECT value FROM json_each(?))',(encoded(cohort.observations),)):
             if row['current']:
                 reason='pooled_view_identity' if mode=='view' else 'late_strict_identity'
                 replay.execute("UPDATE candidates SET person=?,status='accepted',payload=json_set(payload,'$.reason',?,"
