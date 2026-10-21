@@ -16,7 +16,7 @@ from .view_prototypes import confirmed_views, pose_view
 from .replay_addresses import address
 
 
-def apply_auxiliary(database, selected, config, *, progress=None):
+def apply_auxiliary(database, selected, config, *, progress=None, reference_groups=None, reference_views=()):
     grouping, settings = config.data['clustering'], config.data['recognition']
     if grouping['max_anchor_pose_deviation'] is None or not selected:
         return
@@ -24,8 +24,15 @@ def apply_auxiliary(database, selected, config, *, progress=None):
     cache = evidence_for(db)
     first = db.execute('SELECT scope,namespace FROM scans WHERE id=?', (selected[0]['scan'],)).fetchone()
     usage = ReferenceUsage(grouping['max_reference_bytes'], progress)
-    groups = _groups(db, first['scope'], first['namespace'], grouping,
-                     usage=usage, stage='auxiliary')
+    if reference_groups is None:
+        groups = _groups(db, first['scope'], first['namespace'], grouping, usage=usage, stage='auxiliary')
+    else:
+        groups = reference_groups
+        usage.begin('auxiliary')
+        for group in groups:
+            usage.add(group.samples,people=1,kind='Shared strict')
+    for view in reference_views:
+        usage.add(view.group.samples,kind='Shared view')
     condition = auxiliary_sql('o', grouping)
     for item in selected:
         scan = item['scan']
@@ -47,7 +54,8 @@ def apply_auxiliary(database, selected, config, *, progress=None):
                             settings['match_threshold'] - settings['ambiguity_margin'],
                             exact=(lambda g, q: cache.scores(g, q, row['id'])) if cache is not None else None):
                         if low >= grouping['cohesion_threshold']:
-                            best_two(ranked, (mean, group.identifier, group))
+                            from .global_views import rank_person
+                            rank_person(ranked, (mean, group.identifier, group))
                     scores = [entry[0] for entry in ranked[:2]]
                     if ranked and ranked[0][0] >= settings['match_threshold']:
                         if len(ranked) > 1 and ranked[0][0] - ranked[1][0] < settings['ambiguity_margin']:
@@ -87,8 +95,8 @@ def apply_auxiliary(database, selected, config, *, progress=None):
                    f'SELECT {address(db, "c")},c.person FROM candidates c '
                    "WHERE c.policy=? AND c.status='accepted' "
                    "AND json_extract(c.payload,'$.reason')='auxiliary_identity'", (policy,))
-    if grouping['view_prototypes_enabled'] and grouping['auxiliary_matching']:
-        _attach_confirmed_views(db, selected, config, policy, groups, usage, cache)
+    if (grouping['view_prototypes_enabled'] or reference_views) and grouping['auxiliary_matching']:
+        _attach_confirmed_views(db, selected, config, policy, groups, usage, cache,reference_views)
 
 
 def _view_probe(db, candidate, reason):
@@ -97,15 +105,17 @@ def _view_probe(db, candidate, reason):
         'WHERE id=?', (reason, candidate))
 
 
-def _attach_confirmed_views(db, selected, config, policy, anchors, usage, cache):
+def _attach_confirmed_views(db, selected, config, policy, anchors, usage, cache, extra_views=()):
     """A second, frozen pass: no new view evidence can promote another view.
 
     Only independently supported *anchor-matched* profiles are prototypes.
     Late matches are never used to train these prototypes in this replay.
     """
     grouping, settings = config.data['clustering'], config.data['recognition']
-    views = confirmed_views(db, policy, grouping,
+    views = (confirmed_views(db, policy, grouping,
                             remaining_bytes=grouping['max_reference_bytes'] - usage.bytes)
+             if grouping['view_prototypes_enabled'] else ())
+    views=tuple({(v.group.identifier,v.pose,v.medoid):v for v in tuple(views)+tuple(extra_views)}.values())
     for view in views:
         db.execute(
             "UPDATE candidates SET payload=json_set(payload,"
@@ -127,7 +137,8 @@ def _attach_confirmed_views(db, selected, config, policy, anchors, usage, cache)
         scan = item['scan']
         source = (f'FROM candidates c JOIN observations o ON o.id={address(db, "c")} '
                   "WHERE c.scan=? AND c.policy=? AND c.status='withheld' "
-                  "AND json_extract(c.payload,'$.reason')='auxiliary_unmatched'")
+                  "AND json_extract(c.payload,'$.reason') IN ('auxiliary_unmatched','insufficient_match_or_cohesion',"
+                  "'candidate_group','anchor_view_insufficient_support','global_view_insufficient_support')")
         rows = db.execute('SELECT o.*,c.id AS candidate ' + source +
                           ' ORDER BY o.cue,o.geometry,o.embedding,o.id', (scan, policy))
         total = db.execute('SELECT COUNT(*) ' + source, (scan, policy)).fetchone()[0]
@@ -166,6 +177,10 @@ def _attach_confirmed_views(db, selected, config, policy, anchors, usage, cache)
                 person, (score, group, view) = ranked[0]
                 if pose_view(row['geometry']) != view.pose:
                     _view_probe(db, row['candidate'], 'pose_mismatch')
+                    continue
+                from .anchor_views import _competing_anchor
+                if _competing_anchor(anchors,person,query,score,margin):
+                    _view_probe(db,row['candidate'],'competing_identity')
                     continue
                 if not co_presence_allows(db, row, group, groups, query, config,
                                           peer_threshold=threshold,

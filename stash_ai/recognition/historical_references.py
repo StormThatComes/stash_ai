@@ -132,9 +132,9 @@ def rank(rows,history,config,*,decisions=None):
         medoids=sorted({v[2] for v in values if v[2] is not None}),ambiguity_margin=decision_margin)
 
 
-def reconcile(database,replay,selected,config,scope,namespace,fingerprint,*,progress=None):
+def reconcile(database,replay,selected,config,scope,namespace,fingerprint,*,progress=None,history=None):
     """Return label bindings; mutate only the private selected replay."""
-    history=capture(database.connection,selected,config,scope,namespace,fingerprint)
+    history=history or capture(database.connection,selected,config,scope,namespace,fingerprint)
     if not history.groups:
         return {}
     grouping=config.data['clustering']
