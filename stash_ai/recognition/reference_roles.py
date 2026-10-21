@@ -26,3 +26,11 @@ def index(db):
     # Disposable malformed candidate JSON must not prevent evidence recovery.
     db.execute('CREATE INDEX IF NOT EXISTS candidates_reference_observation '
                'ON candidates(' + observation_sql('candidates').replace('candidates.', '') + ')')
+
+
+def verified_sql(observation='o',member='m'):
+    """Only direct strict-matched auxiliary confirmations can seed a view."""
+    return (f"COALESCE((SELECT c.status='accepted' AND c.person={member}.person "
+            "AND json_extract(c.payload,'$.reason')='auxiliary_identity' "
+            f"FROM candidates c WHERE {observation_sql('c')}={observation}.id "
+            "ORDER BY c.rowid DESC LIMIT 1),0)")

@@ -187,7 +187,7 @@ def _attach_confirmed_views(db, selected, config, policy, anchors, usage, cache,
                                           cohesion_threshold=grouping['view_cohesion_threshold']):
                     _view_probe(db, row['candidate'], 'co_presence')
                     continue
-                proof = {'pose': view.pose, 'medoid': view.medoid,
+                proof = {'pose': view.pose, 'medoid': view.medoid, 'authority': view.authority,
                          'anchor_verified_support': view.support_count,
                          'support_examples': list(view.support),
                          'match_score': score, 'threshold': threshold,

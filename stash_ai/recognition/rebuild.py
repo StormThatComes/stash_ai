@@ -21,6 +21,7 @@ from .profiling import measured, profile, connection
 from .reference_index import references as reference_scope
 from .scoring import score_scope
 from .scanning import scan_identity
+from .reference_compatibility import fallback_sql
 from .evidence_cache import evidence_scope
 from .scene_context import apply_scene_context
 from .auxiliary import apply_auxiliary
@@ -204,7 +205,8 @@ def _bind(database, replay, config, scope, namespace, *, usage=None, external_bi
     if unmatched:
         try:
             old_groups = _groups(database.connection, scope, namespace, config.data['clustering'],
-                                 usage=usage, stage='historical_binding',scan_policy=scan_identity(config,namespace),label_scenes=selected_scenes)
+                                 usage=usage, stage='historical_binding',scan_policy=scan_identity(config,namespace),label_scenes=selected_scenes,
+                                 compatibility=fallback_sql(database.connection,config,namespace))
         except ValueError as error:
             # Optional label reuse cannot prevent a smaller cold partition from
             # fixing a historical reference set that exceeds the new budgets.
@@ -341,7 +343,7 @@ def _apply(database, replay, selected, config, scope, namespace, mapping, finger
             ) as tracked:
                 for row in tracked:
                     pass
-            references = _groups(db, scope, namespace, config.data['clustering'], usage=usage, stage='retained',scan_policy=scan_identity(config,namespace),
+            references = _groups(db, scope, namespace, config.data['clustering'], usage=usage, stage='retained',scan_policy=scan_identity(config,namespace),compatibility=fallback_sql(db,config,namespace),
                 label_scenes=[item['scene'] for item in selected])
             context = reference_context(references)
             representative_ids = {identifier for group in references for identifier in group.sample_ids}
@@ -392,7 +394,7 @@ def _rebuild_selected(database, selected, config, *, progress=None):
     usage = ReferenceUsage(config.data['clustering']['max_reference_bytes'], progress)
     state = rebuild_cache.lookup(db,scope,namespace,fingerprint)
     if state and rebuild_cache.admissible(state,config):
-        references = _groups(db,scope,namespace,config.data['clustering'],usage=usage,scan_policy=scan_identity(config,namespace),
+        references = _groups(db,scope,namespace,config.data['clustering'],usage=usage,scan_policy=scan_identity(config,namespace),compatibility=fallback_sql(db,config,namespace),
                            label_scenes=[item['scene'] for item in selected])
         context = reference_context(references)
         references.clear()

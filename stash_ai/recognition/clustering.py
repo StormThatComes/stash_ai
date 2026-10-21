@@ -41,11 +41,12 @@ class Group:
     sample_ids: tuple = ()
 
 
-def reference_admission(policy, *, scan_policy=None, label_scenes=()):
+def reference_admission(policy, *, scan_policy=None, label_scenes=(), compatibility=None):
     from .pose_policy import anchor_sql
     anchor = anchor_sql('o', policy)
     if scan_policy is not None:
-        compatible = ('o.scan IN (SELECT current.id FROM scans current WHERE current.policy_sha=' + repr(scan_policy) +
+        compatible = ('o.scan IN (SELECT current.id FROM scans current WHERE (current.policy_sha=' + repr(scan_policy) +
+            (' OR '+compatibility if compatibility else '') + ')' +
             ' AND NOT EXISTS (SELECT 1 FROM scans newer WHERE newer.scope=current.scope AND newer.namespace=current.namespace '
             'AND newer.scene=current.scene AND newer.rowid>current.rowid))')
         if label_scenes:
@@ -56,8 +57,8 @@ def reference_admission(policy, *, scan_policy=None, label_scenes=()):
 
 
 @measured('references')
-def _groups(db, scope, namespace, policy, *, usage=None, stage='loading', scan_policy=None, label_scenes=()):
-    anchor = reference_admission(policy,scan_policy=scan_policy,label_scenes=label_scenes)
+def _groups(db, scope, namespace, policy, *, usage=None, stage='loading', scan_policy=None, label_scenes=(), compatibility=None):
+    anchor = reference_admission(policy,scan_policy=scan_policy,label_scenes=label_scenes,compatibility=compatibility)
     strict = strict_sql()
     usage = usage or ReferenceUsage(policy['max_reference_bytes'])
     cache = evidence(db)
@@ -215,8 +216,8 @@ def complete_candidates(db, scan, policy, context, count, *, exact_memberships=F
 
 def matching_policy(config):
     from .context import policy_digest
-    return policy_digest(config, 'matching-v16', lambda: {
-        'format': 16, 'recognition': config.data['recognition'],
+    return policy_digest(config, 'matching-v17', lambda: {
+        'format': 17, 'recognition': config.data['recognition'],
         'clustering': {key:value for key,value in config.data['clustering'].items()
                        if key not in ('max_reference_bytes','max_people_per_lookup')}})
 

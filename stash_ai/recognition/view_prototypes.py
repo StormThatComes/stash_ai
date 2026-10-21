@@ -102,6 +102,7 @@ class ViewPrototype:
     medoid: str
     support: tuple
     support_count: int
+    authority: str = 'verified_view'
 
     @property
     def identifier(self):

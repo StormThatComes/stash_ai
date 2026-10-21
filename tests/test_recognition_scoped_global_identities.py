@@ -53,7 +53,7 @@ def test_existing_identity_can_recover_one_strictly_matching_selected_cue(tmp_pa
         assert row[2]['reason']=='historical_identity'
 
 
-def test_incompatible_scan_policy_cannot_supply_external_reference(tmp_path):
+def test_changed_scan_quality_policy_revalidates_external_reference(tmp_path):
     config=config_for(tmp_path)
     with FaceDatabase(config.database) as db:
         first=selected(db,config,'1',[A]*3)
@@ -62,7 +62,7 @@ def test_incompatible_scan_policy_cannot_supply_external_reference(tmp_path):
         data['detection']['min_face_pixels']=64
         changed_config=replace(config,data=data)
         second=selected(db,changed_config,'2',[A]*3)
-        assert candidates(db,second,changed_config)[0][1]!=owner
+        assert candidates(db,second,changed_config)[0][1]==owner
 
 
 def test_external_reference_change_invalidates_selected_warm_cache(tmp_path,monkeypatch):

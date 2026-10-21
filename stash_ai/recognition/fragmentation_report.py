@@ -18,6 +18,7 @@ from .reference_roles import strict_sql
 from .reference_usage import ReferenceUsage
 from .reference_selection import select
 from .scanning import scan_identity
+from .reference_compatibility import fallback_sql
 from .database import encoded
 
 
@@ -78,7 +79,7 @@ def _representatives(db, scan, person, maximum, grouping, *, bank=None, config=N
     if bank is None:
         bank=_groups(db,scan['scope'],scan['namespace'],grouping,
             scan_policy=scan_identity(config,scan['namespace']) if config is not None else None,
-            label_scenes=(scan['scene'],))
+            label_scenes=(scan['scene'],),compatibility=fallback_sql(db,config,scan['namespace']) if config is not None else None)
     group=next((group for group in bank if group.identifier==person),None)
     if group is None:
         return []
@@ -146,7 +147,7 @@ def _rejected_examples(db, scan, per_reason=8):
 
 
 def _reference_details(db, scan, person, representatives, limit, grouping, config):
-    anchor=reference_admission(grouping,scan_policy=scan_identity(config,scan['namespace']),label_scenes=(scan['scene'],))+' AND '+strict_sql()
+    anchor=reference_admission(grouping,scan_policy=scan_identity(config,scan['namespace']),label_scenes=(scan['scene'],),compatibility=fallback_sql(db,config,scan['namespace']) if config is not None else None)+' AND '+strict_sql()
     total = db.execute(
         'SELECT COUNT(*) FROM observations o JOIN members m ON m.observation=o.id '
         'JOIN scans s ON s.id=o.scan WHERE m.person=? AND s.scope=? AND s.namespace=? '
@@ -330,7 +331,7 @@ def build(config, scene_id, *, limit=20, min_mean=None, scope=None, compare_scen
         scan = _selected_scan(db, str(scene_id), namespace(config), policy, scope=scope)
         identities = _scene_identities(db, scan['id'], policy)
         bank=_groups(db,scan['scope'],scan['namespace'],clustering,
-            scan_policy=scan_identity(config,scan['namespace']),label_scenes=(scan['scene'],))
+            scan_policy=scan_identity(config,scan['namespace']),label_scenes=(scan['scene'],),compatibility=fallback_sql(db,config,scan['namespace']) if config is not None else None)
         references = {person['identity_id']: _representatives(
             db, scan, person['identity_id'], clustering['max_samples_per_person'], clustering,bank=bank) for person in identities}
         strict_counts = _strict_scene_counts(db, scan['id'], policy, clustering)

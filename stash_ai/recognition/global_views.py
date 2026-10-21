@@ -27,12 +27,15 @@ class IdentityView:
     support: tuple
     support_count: int
     examples: tuple
+    authority: str = 'strict'
 
 
 def catalogue(db, config, scope, namespace, *, usage, policy=None, excluded_scenes=(), scan_policy=None):
     grouping = config.data['clustering']
     condition = '' if policy is None else 'AND c.policy=? AND c.status=\'accepted\' AND c.person=m.person '
-    scan_condition = '' if scan_policy is None else 'AND s.policy_sha=? '
+    from .reference_compatibility import fallback_sql
+    scan_condition = ('' if scan_policy is None else
+        'AND (s.policy_sha=? OR '+fallback_sql(db,config,namespace)+') ')
     join = '' if policy is None else f'JOIN candidates c ON {address(db, "c")}=o.id '
     parameters = [scope, namespace, encoded(list(excluded_scenes))]
     if policy is not None:

@@ -1630,7 +1630,7 @@ Embedding, support, ambiguity and co-presence requirements remain in force.
 A selected-scene rebuild still computes its strict partition from selected
 evidence. Before label binding it reads a frozen reference bank from unselected
 scenes, using only current members with strict authority, compatible model/scope
-and scanning policy, and latest complete scan evidence. No unselected images are
+and quality admission, and latest complete scan evidence. No unselected images are
 loaded and no unselected observations, candidates or scene links are rewritten.
 Historical labels from selected scenes remain eligible for label-only reuse
 across a rescan, preserving owned performer names and portraits.
@@ -1713,3 +1713,24 @@ chronology. Old automatic ownership does not veto the repair. Historical label
 votes are applied afterwards, preserving owned performer records. Co-presence,
 independent support, competing strict anchors and frozen no-chain checks still
 apply. Recovered observations remain attachments and cannot train another view.
+
+
+### Durable verified auxiliary views and quality retuning
+
+Selected runs also read auxiliary confirmations from unselected scenes. Each
+source must still be an accepted direct `auxiliary_identity` membership and
+must match its owner unambiguously against current frozen strict references.
+Only independently supported coherent cohorts become `verified_view` references.
+Historical/view/context attachments cannot train them. Source membership,
+latest-scan supersession, current quality and rival identity checks are repeated
+on every capture; the external cache dependency includes the durable auxiliary
+evidence. Historical assignment proofs include `view_evidence` with authority,
+medoid and support pointers. Cross-scene report matching reads this bank too.
+
+A scanning policy hash controls detection-cache reuse, not embedding compatibility.
+An unselected observation from a different detection policy may remain a reference
+when its model namespace is unchanged and its retained current pose/alignment
+contracts, detector score and measured quality satisfy the current gates. Missing
+visibility measurements or old geometry/pose contracts exclude that fallback.
+Rejected observations are never resurrected. No extra inference or schema
+migration is required; raw observations and decisions remain the source of truth.
