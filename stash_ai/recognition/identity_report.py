@@ -21,6 +21,7 @@ from .scanning import scan_identity
 # Categories describe the recorded assignment path, not whether the face was
 # actually used as a reference at the time. That historical sample set is absent.
 REASONS = {
+    'historical_ambiguous_identity': ('anchor-deferred', 'Local evidence is coherent, but global identity rivals prevent publishing a new person.'),
     'candidate_group': ('anchor', 'Accepted with a candidate group after identity support resolution; '
                         'the record does not distinguish the seed from later group members.'),
     'known_identity': ('anchor', 'Matched an established identity in the strict matching or merged-observation recheck pass.'),
@@ -38,6 +39,7 @@ REASONS = {
 # Retain numeric evidence and observation pointers, excluding arbitrary future
 # payloads, URLs, image data, vectors, installation tokens and run configuration.
 DECISION_FIELDS = (
+    'global_identity_decision', 'decision_conflict',
     'observation', 'reason', 'scores', 'policy', 'representative_limit', 'reference_role', 'reference_selected',
     'resource_limits', 'reference_context', 'identity_basis', 'merged_from',
     'same_scene_merge', 'same_scene_context', 'cross_scene', 'view_prototype',

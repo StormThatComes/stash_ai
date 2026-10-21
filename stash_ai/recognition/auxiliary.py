@@ -63,6 +63,8 @@ def apply_auxiliary(database, selected, config, *, progress=None):
                            (candidate, scan, policy, person, status,
                             encoded({'observation': row['id'], 'reason': reason, 'scores': scores,
                                      'policy': policy, 'representative_limit': grouping['max_samples_per_person']})))
+    from .decision_resolution import resolve_pending
+    resolve_pending(db, policy, config)
     # Duplicate detections at the same scene/time are only one support vote.
     source = (f'FROM candidates c JOIN observations o ON o.id={address(db, "c")} '
               "WHERE c.policy=? AND c.status='pending' "
@@ -182,6 +184,8 @@ def _attach_confirmed_views(db, selected, config, policy, anchors, usage, cache)
 
                            (person, encoded(proof),
                             encoded([item[1][0] for item in ranked[:2]]), row['candidate']))
+    from .decision_resolution import resolve_pending
+    resolve_pending(db, policy, config)
     # A single false near-neighbour cannot establish a new view attachment.
     # Require independent cues for this exact identity + confirmed medoid.
     source = (f'FROM candidates c JOIN observations o ON o.id={address(db, "c")} '

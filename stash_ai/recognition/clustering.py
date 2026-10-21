@@ -210,8 +210,8 @@ def complete_candidates(db, scan, policy, context, count, *, exact_memberships=F
 
 def matching_policy(config):
     from .context import policy_digest
-    return policy_digest(config, 'matching-v12', lambda: {
-        'format': 12, 'recognition': config.data['recognition'],
+    return policy_digest(config, 'matching-v13', lambda: {
+        'format': 13, 'recognition': config.data['recognition'],
         'clustering': {key:value for key,value in config.data['clustering'].items()
                        if key not in ('max_reference_bytes','max_people_per_lookup')}})
 
@@ -324,6 +324,8 @@ def cluster_scene(database, scan, config, *, progress=None, _cold_replay=False):
                                      'policy': policy, 'representative_limit': grouping['max_samples_per_person'],
                                      'resource_limits': resource_limits(config)})))
         usage.emit(force=True)
+        from .decision_resolution import resolve_pending
+        resolve_pending(db, policy, config, scans=(scan,))
         people = [row[0] for row in db.execute('SELECT DISTINCT person FROM candidates '
                                                 "WHERE scan=? AND policy=? AND status='pending'", (scan, policy))]
         support_counts = dict(db.execute('SELECT c.person,COUNT(DISTINCT o.seconds) FROM candidates c '

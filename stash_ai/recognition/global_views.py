@@ -194,6 +194,8 @@ def recover(database, selected, config, views, anchors, policy):
                 db.execute("UPDATE candidates SET person=?,status='pending',payload=json_set(payload,"
                     "'$.reason','global_view_pending','$.global_view',json(?)) WHERE id=?",
                     (person,encoded(proof),row['candidate']))
+    from .decision_resolution import resolve_pending
+    resolve_pending(db, policy, config)
     votes=db.execute('SELECT person,medoid,COUNT(*) FROM (SELECT c.person,'
         "json_extract(c.payload,'$.global_view.medoid') AS medoid,o.scan,o.seconds "
         f'FROM candidates c JOIN observations o ON o.id={address(db,"c")} '
