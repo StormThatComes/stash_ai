@@ -13,6 +13,7 @@ from stash_ai.runtime.cleanup import cleanup, closing
 from .media import safe_url
 from .models import checked_detection
 from .visibility import cached as visible,required as needs_visible
+from .portrait_admission import extra_measurements,pose_reason
 from .expression import cached as expressive,required as needs_expression
 
 _active=ContextVar('recognition_portrait_pipeline',default=None)
@@ -308,11 +309,13 @@ class Pipeline:
         from .database import encoded
         db=self.db.connection;policy=self.config.data['portraits'];result=[];size=0
         required={name for name,needed in [('visibility',needs_visible(policy)),('expression',needs_expression(policy))] if needed}
+        required.update(extra_measurements(self.config))
         cached={'visibility':visible,'expression':expressive}
         for visited,(scene,row,candidate) in enumerate(pairs):
             if visited>=128:break
             if self.outcome(row,context) is not None:continue
             quality=json.loads(row['quality']);bases=quality.setdefault('measurement_basis',{})
+            if pose_reason(quality,self.config):continue
             legacy=None
             for name in required:
                 if cached[name](quality) and name not in bases:
@@ -363,7 +366,7 @@ class Pipeline:
         try:
             descriptors=self._build(target,groups,context,((scene,row,candidate) for row,candidate in pairs))
             if len(descriptors)<2:return
-            if needs_visible(self.config.data['portraits']):self.visibility.prepare_assets()
+            if needs_visible(self.config.data['portraits']) or extra_measurements(self.config):self.visibility.prepare_assets()
             if needs_expression(self.config.data['portraits']):self.expression.prepare_assets()
             self.completed=0
             future=self.preparer.submit(self._prepare,descriptors)
@@ -421,7 +424,7 @@ class Pipeline:
             preflight=self.initial(target)
             if preflight is MISSING or not self._managed(target,preflight):
                 self.upcoming=[];return
-            if needs_visible(self.config.data['portraits']):self.visibility.prepare_assets()
+            if needs_visible(self.config.data['portraits']) or extra_measurements(self.config):self.visibility.prepare_assets()
             if needs_expression(self.config.data['portraits']):self.expression.prepare_assets()
             self.sources.submit(self.sources.prime,self.upcoming)
             self.completed=0;self.pending_total=len(self.upcoming)
@@ -515,7 +518,8 @@ class Pipeline:
         for row in rows[:128]:
             try:
                 quality=json.loads(row['quality'])
-                if ((needs_visible(policy) and not visible(quality)) or (needs_expression(policy) and not expressive(quality))
+                if pose_reason(quality,self.config):continue
+                if (((needs_visible(policy) or extra_measurements(self.config)) and not visible(quality)) or (needs_expression(policy) and not expressive(quality))
                         or any(v.get('source_type')=='recognition_crop' for v in quality.get('measurement_basis',{}).values())):
                     cost=2048+sum(len(v)*4 if isinstance(v,str) else len(v) if isinstance(v,bytes) else 64 for v in dict(row).values())
                     if size+cost>self.descriptor_limit:break

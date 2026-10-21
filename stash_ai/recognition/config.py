@@ -37,7 +37,7 @@ def defaults():
                        'max_view_prototypes_per_person': 4,
                        'max_samples_per_person': 32,
                        'max_people_per_lookup': 20000, 'max_reference_bytes': 134217728},
-        'portraits': {'enabled': True, 'source': 'vtt', 'min_face_pixels': 96, 'min_sharpness': 25.,
+        'portraits': {'enabled': True, 'source': 'vtt', 'anchor_only': False, 'min_face_pixels': 96, 'min_sharpness': 25.,
                      'max_pose_deviation': .35, 'min_exposure': 30., 'max_exposure': 225.,
                      'max_clipped_fraction': .15, 'margin': .35, 'aspect_ratio': None,
                      'jpeg_quality': 90, 'min_visible_face_fraction': .8, 'max_candidates': 8,
@@ -218,6 +218,8 @@ def validate(data):
     portrait = data['portraits']
     if type(portrait['enabled']) is not bool:
         raise ValueError('portraits.enabled must be boolean.')
+    if type(portrait['anchor_only']) is not bool:
+        raise ValueError('portraits.anchor_only must be boolean.')
     if portrait['source'] not in ('video', 'vtt'):
         raise ValueError('portraits.source must be video or vtt.')
     if portrait['aspect_ratio'] is not None:

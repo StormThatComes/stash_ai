@@ -1,5 +1,26 @@
 # Facial recognition
 
+Set `portraits.anchor_only: true` to require the actual portrait face to pass
+the current clustering anchor pose and visibility rules, in addition to its
+identity check. The default is false. `portraits.max_pose_deviation` and portrait
+quality weights remain ranking preferences; this opt-in gate uses
+`clustering.max_anchor_pose_deviation`, `min_anchor_visible_face_fraction` and
+the existing auxiliary admission floor. Anchor quality and strict reference
+authority are separate: an accepted attachment can illustrate its identity when
+its source face qualifies as an anchor.
+
+VTT and retained-crop selection, decoded video faces, prefetch and cached portraits
+all apply the gate. Video eligibility uses the actual decoded face, including
+when its seek hint was auxiliary. Positive anchor visibility requires a current
+FaceOcc measurement even with `portraits.weights.visibility: 0`; unavailable
+measurements cannot authorize a new anchor-only portrait. Rejected sources record
+`portrait_anchor_required` or `portrait_anchor_visibility_unavailable`. If no
+eligible anchor exists, no new image is published; an already published image
+is preserved. The option invalidates portrait eligibility/ranking caches only,
+works with `recognition portraits`, and never requires an identity rebuild or
+rescan. With no configured anchor restrictions, every otherwise eligible face
+passes the same unrestricted anchor policy.
+
 `clustering.corroborated_view_enrichment` (default true) can extend the frozen
 historical query bank with a `corroborated_view`. Its accepted attachment cohort
 needs at least `max(view_min_support, min_merge_support)` independent cues from

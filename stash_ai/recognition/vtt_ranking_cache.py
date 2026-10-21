@@ -11,6 +11,7 @@ from .clustering import matching_policy
 from .profiling import count
 from .visibility import cached as visible,required as needs_visible
 from .expression import cached as expressive,required as needs_expression
+from .portrait_admission import extra_measurements,reason as anchor_reason
 
 
 class Ranking:
@@ -52,8 +53,9 @@ class Ranking:
                     if not metadata.get('reason'):
                         quality=metadata.get('quality',{})
                         policy=self.config.data['portraits']
-                        if (needs_visible(policy) and not visible(quality)
+                        if ((needs_visible(policy) or extra_measurements(self.config)) and not visible(quality)
                                 or needs_expression(policy) and not expressive(quality)
+                                or anchor_reason(quality,self.config)
                                 or any(v.get('source_type')=='recognition_crop'
                                        for v in quality.get('measurement_basis',{}).values())):
                             return None
