@@ -156,6 +156,45 @@ def selected(database,config,early,global_state):
     for view in views:
         usage.add(view.examples,kind='Selected strict cohort')
     owned={v.group.identifier for v in views}
+    # A supported local core may be too small to train a view of its own.
+    # Resolve it before the partial-cohort rule requiring an unmatched remainder.
+    from .historical_references import rank
+    from .anchor_views import _competing_anchor
+    frozen=History((),tuple(views)+tuple(early),{},'frozen-selected-whole-views')
+    proposals=[]
+    for group in groups:
+        if group.identifier in owned:
+            continue
+        rows=db.execute('SELECT id,geometry,dimensions,embedding FROM observations WHERE id IN '
+            '(SELECT value FROM json_each(?))',(encoded(group.sample_ids),)).fetchall()
+        result=rank(rows,replace(frozen,views=tuple(v for v in frozen.views
+            if v.group.identifier!=group.identifier)),config) if rows else None
+        if result is None:
+            continue
+        target,proof=result
+        support=db.execute('SELECT COUNT(*) FROM (SELECT o.scan,o.seconds FROM members m '
+            'JOIN observations o ON o.id=m.observation WHERE m.person=? GROUP BY o.scan,o.seconds)',
+            (group.identifier,)).fetchone()[0]
+        rivals=[g for g in groups if g.identifier!=group.identifier]
+        if (support<config.data['clustering']['view_attach_min_support'] or _cooccurs(db,group.identifier,target)
+            or any(_competing_anchor(rivals,target,vector(row),proof['mean_score'],proof['ambiguity_margin']) for row in rows)):
+            continue
+        proposals.append((group.identifier,target,proof))
+    blocked=set()
+    for i,(left,target,_) in enumerate(proposals):
+        for right,other,_ in proposals[i+1:]:
+            if target==other and _cooccurs(db,left,right):
+                blocked.update((left,right))
+    sources={source for source,_,_ in proposals}
+    for source,target,proof in proposals:
+        if source in blocked or target in sources:
+            continue
+        db.execute('UPDATE members SET person=? WHERE person=?',(target,source))
+        db.execute("UPDATE candidates SET person=?,payload=json_set(payload,'$.prior_reason',"
+            "json_extract(payload,'$.reason'),'$.reason','selected_view_identity','$.shared_reference',json(?)) "
+            'WHERE person=?',(target,encoded(proof),source))
+    if proposals:
+        groups=_groups(db,*first,config.data['clustering'],usage=usage)
     source_ids={g.identifier for g in groups if g.identifier in neighbours or
         (g.identifier not in owned and len(g.samples)>max(config.data['clustering']['view_attach_min_support'],1))}
     for view in early:

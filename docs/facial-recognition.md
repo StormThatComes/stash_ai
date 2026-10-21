@@ -1778,3 +1778,21 @@ neighbours do not receive redundant decision payloads. `global_view_merge` forma
 3 carries the same plan evidence. Scene fragmentation pairs expose this read-only
 assessment as `global_view_component`; `can_merge` remains unset because a report
 is not a selected replay or authorization to merge Stash performers.
+
+### Independent scene cores
+
+With `anchor_view_matching` enabled, a cold replay first establishes each scene's
+strict cores independently. Previously replayed scenes cannot capture part of a
+later scene's local core. One frozen complete-component pass reconciles compatible
+strict cores using the ordinary strict thresholds, original cross-sample evidence,
+outsider competition and the stronger co-presence threshold. Appearance-only
+consolidation keeps its existing stronger view thresholds and support minimum.
+
+Auxiliary observations before the first supported source core can use the complete
+source scene. An already established source core retains precedence over later
+provisional fragments, preventing a later anchor hypothesis from stealing the
+auxiliary evidence that resolves it. A small accepted core without its own promoted
+view may also attach as a whole to the independently frozen view bank. These
+`selected_view_identity` attachments never train another view. Stable labels are
+bound only after this partition is resolved; scan inputs and model inference are
+unchanged. Matching policy v20 invalidates earlier derived decisions/checkpoints.

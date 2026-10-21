@@ -48,8 +48,9 @@ def retry_strict(database, selected, config):
 def early_views(database, selected, config):
     """Freeze scene-local confirmations before resolving global hypotheses.
 
-    A scene ID is not a timeline. Only strict cores established earlier in the
-    *source scene* can confirm its auxiliary evidence. Other scenes' provisional
+    A scene ID is not a timeline. A source profile before the first strict core
+    can use its whole source scene. Already established source cores retain
+    precedence over later provisional fragments. Other scenes' provisional
     cores cannot steal that evidence before their identity has been resolved.
     Old automatic ownership participates in label binding, never this partition.
     """
@@ -68,18 +69,18 @@ def early_views(database, selected, config):
         ' ORDER BY CAST(s.scene AS INTEGER),s.scene,o.cue,o.id')
     for row in rows:
         key=(row['person'],row['scene'])
-        if key in horizons:
-            continue
         cues=seen.setdefault(key,set());cues.add(row['seconds'])
         if len(cues)>=minimum:
-            horizons[key]=row['cue']
+            horizons.setdefault(key,row['cue'])
     db.execute('CREATE TEMP TABLE early_view_support(observation TEXT PRIMARY KEY,person TEXT)')
     rows=db.execute('SELECT o.id,o.scan,o.cue,o.seconds,o.geometry,o.dimensions,o.embedding,s.scene FROM observations o '
         'JOIN scans s ON s.id=o.scan WHERE o.rejected IS NULL AND '+auxiliary_sql('o',grouping)+
         ' ORDER BY CAST(s.scene AS INTEGER),s.scene,o.cue,o.id')
     for row in rows:
         eligible=tuple(g for g in groups
-            if horizons.get((g.identifier,row['scene']),float('inf'))<row['cue'])
+            if len(seen.get((g.identifier,row['scene']),()))>=minimum)
+        earlier=tuple(g for g in eligible if horizons[(g.identifier,row['scene'])]<row['cue'])
+        eligible=earlier or eligible
         result=rank([row],History(eligible,(),{},'frozen-scene-local-strict-cores'),config)
         if result is None:
             continue

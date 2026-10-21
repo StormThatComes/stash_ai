@@ -22,6 +22,7 @@ from .scanning import scan_identity
 # actually used as a reference at the time. That historical sample set is absent.
 REASONS = {
     'selected_cohort_identity': ('anchor-view', 'A supported majority cohort matched the frozen selected bank; unmatched outliers remain withheld.'),
+    'selected_view_identity': ('anchor-view', 'A complete local core matched a frozen confirmed view without training another view.'),
     'historical_cohort_identity': ('anchor-historical-view', 'An independently supported cohort matched the frozen historical bank; unmatched outliers remain withheld.'),
     'late_strict_identity': ('anchor-recovered', 'Matched the final frozen strict catalogue after all selected scenes were replayed.'),
     'shared_view_identity': ('anchor-view', 'A new local hypothesis matched an independently corroborated earlier view; it cannot train strict references.'),
@@ -43,7 +44,7 @@ REASONS = {
 # Retain numeric evidence and observation pointers, excluding arbitrary future
 # payloads, URLs, image data, vectors, installation tokens and run configuration.
 DECISION_FIELDS = (
-    'shared_reference', 'cohort_resolution',
+    'shared_reference', 'cohort_resolution', 'strict_partition',
     'global_identity_decision', 'decision_conflict',
     'observation', 'reason', 'scores', 'policy', 'representative_limit', 'reference_role', 'reference_selected',
     'resource_limits', 'reference_context', 'identity_basis', 'merged_from',
