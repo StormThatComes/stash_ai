@@ -444,15 +444,23 @@ def _rebuild_selected(database, selected, config, *, progress=None):
             checkpoints.save(replay, len(selected), clock.value, final=True)
             from .cross_scene import apply_cross_scene_support
             apply_cross_scene_support(temporary, selected, config, progress=progress)
+            from .shared_references import retry_strict, early_views
+            retry_strict(temporary, selected, config)
+            early = early_views(temporary, selected, config)
             apply_scene_context(temporary, selected, config, progress=progress)
             from .anchor_views import apply_anchor_views
             apply_anchor_views(temporary, selected, config, progress=progress)
             from .global_views import apply_global_views
             apply_global_views(temporary, selected, config, progress=progress)
-        external_bindings = historical_references.reconcile(database,replay,selected,config,scope,namespace,external_context,progress=progress)
+        history = historical_references.capture(db,selected,config,scope,namespace,external_context)
+        external_bindings = historical_references.reconcile(database,replay,selected,config,scope,namespace,external_context,progress=progress,history=history)
         mapping = _bind(database, replay, config, scope, namespace, usage=usage,external_bindings=external_bindings,
                         selected_scenes=[item['scene'] for item in selected])
-        apply_auxiliary(temporary, selected, config, progress=progress)
+        from .shared_references import auxiliary_bank
+        shared_groups, shared_views = auxiliary_bank(replay,config,scope,namespace,history,mapping,early)
+        apply_auxiliary(temporary, selected, config, progress=progress,reference_groups=shared_groups,reference_views=shared_views)
+        for row in replay.execute('SELECT DISTINCT person FROM members'):
+            mapping.setdefault(row[0],row[0])
         report_pages(replay)
         _apply(database, replay, selected, config, scope, namespace, mapping, fingerprint, progress, usage=usage)
     return _results(db, selected, config)

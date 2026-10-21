@@ -77,7 +77,7 @@ class ViewPrototype:
         return self.pose + ':' + self.medoid
 
 
-def confirmed_views(db, policy, grouping, *, remaining_bytes):
+def confirmed_views(db, policy, grouping, *, remaining_bytes, rows=None):
     """Return bounded frozen per-view medoids from first-pass anchor confirmations.
 
     One SQL stream ordered by person/canonical sample key. Limited exemplars
@@ -87,15 +87,16 @@ def confirmed_views(db, policy, grouping, *, remaining_bytes):
     maximum = grouping['max_view_prototypes_per_person']
     minimum = grouping['view_min_support']
     cohesion = grouping['view_cohesion_threshold']
-    rows = db.execute(
-        f'SELECT c.person,o.id,o.scan,o.seconds,o.geometry,o.dimensions,o.embedding '
-        f'FROM candidates c JOIN observations o ON o.id={address(db, "c")} '
-        'JOIN scans s ON s.id=o.scan '
-        "WHERE c.policy=? AND c.status='accepted' "
-        "AND json_extract(c.payload,'$.reason')='auxiliary_identity' "
-        'AND o.rejected IS NULL AND c.person IS NOT NULL '
-        'ORDER BY c.person,CAST(s.scene AS INTEGER),s.scene,o.cue,o.seconds,o.geometry,o.embedding,o.id',
-        (policy,))
+    if rows is None:
+        rows = db.execute(
+            f'SELECT c.person,o.id,o.scan,o.seconds,o.geometry,o.dimensions,o.embedding '
+            f'FROM candidates c JOIN observations o ON o.id={address(db, "c")} '
+            'JOIN scans s ON s.id=o.scan '
+            "WHERE c.policy=? AND c.status='accepted' "
+            "AND json_extract(c.payload,'$.reason')='auxiliary_identity' "
+            'AND o.rejected IS NULL AND c.person IS NOT NULL '
+            'ORDER BY c.person,CAST(s.scene AS INTEGER),s.scene,o.cue,o.seconds,o.geometry,o.embedding,o.id',
+            (policy,))
     output = []
     person, slots = None, []
     used = 0

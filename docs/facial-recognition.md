@@ -1655,3 +1655,19 @@ Such groups remain withheld with `historical_ambiguous_identity` and a
 `global_identity_decision` describing the rivals and dependency context. Existing
 selected ownership remains eligible for stable label reuse. These decisions are
 reversible and do not rewrite unselected scene memberships or Stash profiles.
+
+### Shared frozen references
+
+A final strict retry rechecks earlier withheld anchors against the completed
+selected strict catalogue. Its assignments are attachments, not new training
+samples. Auxiliary queries can also use compatible frozen external cores and
+views; reference owners are resolved to final global labels before attachment,
+including when the selection has no anchors of its own.
+
+With view prototypes enabled, auxiliary observations independently matched to a
+core established before their source cue can corroborate a frozen appearance
+view. A new, unowned local anchor hypothesis may attach to that earlier view
+before receiving a global identity. Existing ownership, distinct-cue support,
+competing anchors and co-presence remain checked. Such attachments cannot train
+strict references, promote further views or form transitive merge chains. This
+separates the geometry admission role from permission to train references.
