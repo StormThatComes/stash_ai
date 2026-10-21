@@ -38,8 +38,10 @@ def _hash_row(hasher,row):
 
 
 @measured('input_dependencies')
-def input_context(db,selected,scope,namespace):
+def input_context(db,selected,scope,namespace,config=None):
     hasher=hashlib.sha256()
+    from .pose_policy import anchor_visibility
+    visibility_fields=",'$.visible_face_fraction','$.visibility.contract'" if config is not None and anchor_visibility(config.data['clustering']) else ''
     with work('Validate rebuild input catalogue',len(selected),unit='scene',position=0) as progress:
         for start in range(0,len(selected),256):
             batch=selected[start:start+256]
@@ -53,8 +55,7 @@ def input_context(db,selected,scope,namespace):
                 _hash_row(hasher,row)
             for row in db.execute('SELECT o.id,o.scan,o.cue,o.seconds,o.source,o.rect,o.geometry,'
                 "o.rejected,o.dimensions,o.embedding,CASE WHEN json_valid(o.quality) THEN "
-                "json_extract(o.quality,'$.pixels','$.sharpness','$.pose_deviation','$.roll_deviation',"
-                "'$.visible_face_fraction','$.visibility.contract') END "
+                "json_extract(o.quality,'$.pixels','$.sharpness','$.pose_deviation','$.roll_deviation'"+visibility_fields+") END "
                 'FROM observations o JOIN scans s ON s.id=o.scan '
                 'WHERE o.scan IN (SELECT value FROM json_each(?)) '
                 'ORDER BY CAST(s.scene AS INTEGER),s.scene,o.cue,o.id',

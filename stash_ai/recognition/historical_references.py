@@ -54,10 +54,12 @@ def parameters(selected,config,scope,namespace):
 
 def context(db,selected,config,scope,namespace):
     hasher=hashlib.sha256(b'frozen-external-references-v5')
+    from .pose_policy import anchor_visibility
+    visibility_fields=",'$.visible_face_fraction','$.visibility.contract'" if anchor_visibility(config.data['clustering']) else ''
     compatibility=fallback_sql(db,config,namespace)
     rows=db.execute("SELECT p.id,p.created,o.id,o.scan,o.cue,o.seconds,o.geometry,o.dimensions,o.embedding,"
         "CASE WHEN json_valid(o.quality) THEN json_extract(o.quality,'$.pixels','$.sharpness',"
-        "'$.pose_deviation','$.roll_deviation','$.visible_face_fraction','$.visibility.contract') END " + _source(config,compatibility) +
+        "'$.pose_deviation','$.roll_deviation'"+visibility_fields+") END " + _source(config,compatibility) +
         ' ORDER BY p.id,CAST(s.scene AS INTEGER),s.scene,o.cue,o.id',parameters(selected,config,scope,namespace))
     for row in rows:
         _hash_row(hasher,row)

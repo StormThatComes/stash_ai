@@ -368,7 +368,7 @@ def _apply(database, replay, selected, config, scope, namespace, mapping, finger
                     "(SELECT value FROM json_each(?)) THEN 'true' ELSE 'false' END)) WHERE id IN "
                     '(SELECT value FROM json_each(?))',(context,encoded(sorted(representative_ids)),encoded(pooled)))
             state = dict(format=2, fingerprint=fingerprint, context=context,
-                inputs=rebuild_cache.input_context(db,selected,scope,namespace),
+                inputs=rebuild_cache.input_context(db,selected,scope,namespace,config),
                 bindings=rebuild_cache.binding_context(db,scope,namespace),
                 limits=rebuild_cache.resource_limits(config),
                 resource_reuse=not getattr(database,'_rebuild_optional_budget_fallback',False))
@@ -415,7 +415,7 @@ def _rebuild_selected(database, selected, config, *, progress=None):
         context = reference_context(references)
         references.clear()
         if (state.get('context')==context
-                and state.get('inputs')==rebuild_cache.input_context(db,selected,scope,namespace)
+                and state.get('inputs')==rebuild_cache.input_context(db,selected,scope,namespace,config)
                 and state.get('bindings')==rebuild_cache.binding_context(db,scope,namespace)):
             with work('Validate cached identity rebuild',len(selected),unit='scene',position=0) as checked:
                 complete=rebuild_cache.complete(db,selected,matching_policy(config),context)
