@@ -158,7 +158,8 @@ def audit_scene(source, detector, config, scene_id, directory, *, maximum=None, 
     selected = (set(cue_indices) if cue_indices is not None else
                 None if maximum is None else _sampled_indices(total, maximum))
     policy = config.data['detection']
-    if policy['min_visible_face_fraction'] > 0 and visibility is None:
+    from .pose_policy import measurement_required
+    if measurement_required(config) and visibility is None:
         raise VisibilityError('Alignment audit requires FaceOcc for detection.min_visible_face_fraction.')
     stats, reasons, samples, sizes, coverages = Counter(), Counter(), [], [], []
     subdir = directory / ('scene-' + scene_id)
@@ -173,7 +174,7 @@ def audit_scene(source, detector, config, scene_id, directory, *, maximum=None, 
                     quality = assess(image, face)
                     reason = ('face_detection_score' if face.score <= policy['score_threshold']
                               else rejection(quality, policy))
-                    if reason is None and policy['min_visible_face_fraction'] > 0:
+                    if reason is None and measurement_required(config):
                         try:
                             measurement = visibility.measure(image, face)
                         except VisibilityGeometryError:
@@ -251,7 +252,8 @@ def execute(args, config, *, services=None, detector_factory=YuNetDetector):
     with closing(services.client(url=url, api_key=key,
                                  timeout=config.data['execution']['timeout_seconds'])) as client:
         detector_key = config.data['models']['detector']
-        needs_visibility = config.data['detection']['min_visible_face_fraction'] > 0
+        from .pose_policy import measurement_required
+        needs_visibility = measurement_required(config)
         keys = [detector_key] + (['faceocc'] if needs_visibility else [])
         paths = services.assets(config, keys=keys, write=lambda line: print(line))
         with closing(detector_factory(config, paths)) as detector, closing(

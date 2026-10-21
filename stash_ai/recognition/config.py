@@ -26,6 +26,7 @@ def defaults():
                         'cooccurrence_merge_threshold': .90},
         'clustering': {'cohesion_threshold': .60, 'same_scene_match_bonus': .03,
                        'same_scene_min_support': 3, 'max_anchor_pose_deviation': None,
+                       'min_anchor_visible_face_fraction': None, 'min_auxiliary_visible_face_fraction': None,
                        'auxiliary_matching': True, 'auxiliary_min_support': 1,
                        'view_prototypes_enabled': False, 'anchor_view_matching': False,
                        'context_view_enrichment': False,
@@ -144,6 +145,16 @@ def validate(data):
     detection_pose = data['detection']['max_pose_deviation']
     if anchor is not None and detection_pose is not None and anchor > detection_pose:
         raise ValueError('clustering.max_anchor_pose_deviation must not exceed detection.max_pose_deviation.')
+    for key in ('min_anchor_visible_face_fraction','min_auxiliary_visible_face_fraction'):
+        value=data['clustering'][key]
+        if value is not None:
+            _number(value,'clustering.'+key,0,1)
+            if value<data['detection']['min_visible_face_fraction']:
+                raise ValueError('clustering.'+key+' must not be below detection.min_visible_face_fraction; lower the scan floor first.')
+    a=data['clustering']['min_anchor_visible_face_fraction']
+    b=data['clustering']['min_auxiliary_visible_face_fraction']
+    if a is not None and b is not None and b>a:
+        raise ValueError('min_auxiliary_visible_face_fraction must not exceed min_anchor_visible_face_fraction.')
     if type(data['recognition']['cross_scene_provisional']) is not bool:
         raise ValueError('recognition.cross_scene_provisional must be boolean.')
     if type(data['clustering']['context_view_enrichment']) is not bool:
@@ -152,12 +163,13 @@ def validate(data):
         raise ValueError('clustering.context_view_enrichment requires anchor_view_matching.')
     if type(data['clustering']['anchor_view_matching']) is not bool:
         raise ValueError('clustering.anchor_view_matching must be boolean.')
-    if data['clustering']['anchor_view_matching'] and data['clustering']['max_anchor_pose_deviation'] is None:
-        raise ValueError('clustering.anchor_view_matching requires max_anchor_pose_deviation.')
+    from .pose_policy import restricted
+    if data['clustering']['anchor_view_matching'] and not restricted(data['clustering']):
+        raise ValueError('clustering.anchor_view_matching requires max_anchor_pose_deviation or an anchor visibility limit.')
     if type(data['clustering']['view_prototypes_enabled']) is not bool:
         raise ValueError('clustering.view_prototypes_enabled must be boolean.')
     if (data['clustering']['view_prototypes_enabled'] and
-            (anchor is None or not data['clustering']['auxiliary_matching'])):
+            (not restricted(data['clustering']) or not data['clustering']['auxiliary_matching'])):
         raise ValueError('clustering.view_prototypes_enabled requires an anchor pose limit and auxiliary_matching.')
     for name in ('view_cohesion_threshold', 'view_match_threshold', 'view_ambiguity_margin'):
         _number(data['clustering'][name], 'clustering.' + name, 0, 1)

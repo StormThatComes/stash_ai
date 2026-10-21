@@ -117,7 +117,8 @@ def asset_selection(config):
     from .visibility import required
     selected = [config.data['models']['detector'], config.data['models']['recognizer']]
     identity_assets = set(selected)
-    detection_visibility = config.data['detection']['min_visible_face_fraction'] > 0
+    from .pose_policy import measurement_required
+    detection_visibility = measurement_required(config)
     if detection_visibility or (config.data['portraits']['enabled'] and required(config.data['portraits'])):
         selected.append('faceocc')
     if detection_visibility:
