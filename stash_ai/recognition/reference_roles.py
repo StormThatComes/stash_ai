@@ -6,7 +6,7 @@ contextual decision can never silently acquire strict reference authority.
 """
 
 STRICT_REASONS = ('candidate_group', 'known_identity', 'cross_scene_identity',
-                  'cross_scene_provisional')
+                  'cross_scene_provisional', 'historical_identity')
 
 
 def observation_sql(alias):

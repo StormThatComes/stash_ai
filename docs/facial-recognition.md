@@ -1618,3 +1618,26 @@ frozen before any consolidation and never recomputed from merged output, so a
 neighbour chain cannot merge incompatible endpoints. `global_view_merge` records
 this proof. The consolidation is part of reversible replay, not a destructive
 Stash performer merge.
+
+### Selected runs and frozen global identities
+
+A selected-scene rebuild still computes its strict partition from selected
+evidence. Before label binding it reads a frozen reference bank from unselected
+scenes, using only current members with strict authority, compatible model/scope
+and scanning policy, and latest complete scan evidence. No unselected images are
+loaded and no unselected observations, candidates or scene links are rewritten.
+Historical labels from selected scenes remain eligible for label-only reuse
+across a rescan, preserving owned performer names and portraits.
+
+Several independently accepted local fragments may adopt the same global label
+when every retained representative matches frozen references unambiguously.
+Co-present fragments cannot both claim that label. Withheld selected anchors can
+also reuse an established strict identity; view-only matches require independent
+attachment support and never become strict training references. Reports include
+`historical_reference`, the matching path, source medoids and dependency hash.
+
+The selected result cache includes the unselected strict reference context, so
+reference repairs or superseding scans invalidate stale label proposals. Strict
+replay checkpoints remain selected-only; the external binding stage is recomputed
+after restore. Stash publication continues to update only selected scene links
+and reuses verified owned performers, preserving manual names and associations.

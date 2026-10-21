@@ -356,7 +356,7 @@ import numpy as np
 import pytest
 
 
-def test_binding_keeps_a_better_historical_rival_when_its_label_is_used(tmp_path):
+def test_frozen_external_reference_wins_over_previous_drift_ownership(tmp_path):
     from tests.test_recognition_clustering import setup, scan
     from tests.test_recognition_identity_merges import changed
     from stash_ai.recognition.database import FaceDatabase
@@ -383,8 +383,8 @@ def test_binding_keeps_a_better_historical_rival_when_its_label_is_used(tmp_path
         groups = {g.identifier:g for g in _groups(db.connection,'scope','ns',config.data['clustering'])}
         assert _similarities(groups[first_person],a)[0] > _similarities(groups[second_person],a)[0]
         result = rebuild_selected(db,[{'scene':'2','scan':drift},{'scene':'3','scan':selected}],config)
-        assert result[drift][0]['person'] == first_person
-        assert result[selected][0]['person'] not in (first_person, second_person)
+        assert result[drift][0]['person'] not in (first_person, second_person)
+        assert result[selected][0]['person'] == first_person
         assert rebuild_selected(db,[{'scene':'3','scan':selected},{'scene':'2','scan':drift}],config) == result
 
 

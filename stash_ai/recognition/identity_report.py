@@ -29,6 +29,8 @@ REASONS = {
     'cross_scene_identity': ('anchor-cross-scene', 'Confirmed against an established identity using frozen cross-scene evidence.'),
     'cross_scene_provisional': ('anchor-cross-scene', 'Confirmed as a provisional identity using independent support across scenes.'),
     'auxiliary_identity': ('auxiliary', 'Attached a pose-limited observation to an established anchor identity after auxiliary support resolution.'),
+    'historical_identity': ('anchor-historical', 'Matched a frozen compatible strict identity outside the selected scene scope.'),
+    'historical_view_identity': ('anchor-historical-view', 'Matched an independently confirmed frozen view outside the selected scope.'),
     'global_view_identity': ('anchor-global-view', 'Attached using an independently confirmed frozen strict view from the selected library.'),
     'view_identity': ('auxiliary-view', 'Attached a pose-limited observation using a confirmed view prototype and independent support.'),
 }
@@ -40,7 +42,7 @@ DECISION_FIELDS = (
     'resource_limits', 'reference_context', 'identity_basis', 'merged_from',
     'same_scene_merge', 'same_scene_context', 'cross_scene', 'view_prototype',
     'anchor_view', 'anchor_view_probe', 'anchor_view_seeded',
-    'auxiliary_view_probe', 'auxiliary_view_seeded', 'merge_withheld_reason', 'global_view', 'global_view_merge',
+    'auxiliary_view_probe', 'auxiliary_view_seeded', 'merge_withheld_reason', 'global_view', 'global_view_merge', 'historical_reference', 'prior_reason',
 )
 QUALITY_FIELDS = (
     'pixels', 'pose_deviation', 'roll_deviation', 'pose_contract', 'sharpness', 'exposure', 'clipped_fraction',

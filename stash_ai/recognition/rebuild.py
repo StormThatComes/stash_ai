@@ -20,6 +20,7 @@ from .ranking import best_two
 from .profiling import measured, profile, connection
 from .reference_index import references as reference_scope
 from .scoring import score_scope
+from .scanning import scan_identity
 from .evidence_cache import evidence_scope
 from .scene_context import apply_scene_context
 from .auxiliary import apply_auxiliary
@@ -92,7 +93,8 @@ def _mapped_candidates(replay, mapping, policy, context, representative_ids=()):
         from .reference_roles import STRICT_REASONS
         payload['reference_selected'] = payload.get('observation') in representative_ids
         payload['reference_role'] = ('strict' if row['status'] == 'accepted' and payload.get('reason') in STRICT_REASONS else 'attachment')
-        payload['identity_basis'] = 'cold_selected_replay'
+        payload['identity_basis'] = ('selected_replay_with_frozen_external_references'
+                                     if payload.get('historical_reference') else 'cold_selected_replay')
         payload['reference_context'] = context
         yield (row['id'], row['scan'], policy, mapping.get(row['person']), row['status'], encoded(payload))
 
@@ -168,8 +170,8 @@ def _copy_selection(database, replay, selected, scope, namespace, *, retain_pose
 
 
 @measured('binding')
-def _bind(database, replay, config, scope, namespace, *, usage=None):
-    """One historical identity per new cluster; IDs cannot change the partition."""
+def _bind(database, replay, config, scope, namespace, *, usage=None, external_bindings=None, selected_scenes=()):
+    """Bind stable labels, including independently verified external consolidations."""
     database._rebuild_optional_budget_fallback = False
     with work('Compute identity votes', 1, unit='query', position=0) as votes:
         replay.execute('CREATE TABLE votes(cluster TEXT,person TEXT,total INTEGER,performer TEXT,retired INTEGER)')
@@ -179,7 +181,10 @@ def _bind(database, replay, config, scope, namespace, *, usage=None):
             'GROUP BY m.person,o.person ORDER BY p.created,p.id,COUNT(*) DESC,m.person')
         vote_count = inserted.rowcount
         votes.advance()
-    mapping, used, performers = {}, set(), set()
+    mapping = dict(external_bindings or {})
+    used = set(mapping.values())
+    performers = {row[0] for row in replay.execute('SELECT performer FROM old_people WHERE id IN '
+        '(SELECT value FROM json_each(?)) AND performer IS NOT NULL',(encoded(sorted(used)),))}
     # Oldest wins a consolidation. On a split its largest overlapping piece wins.
     with tracking(
         replay.execute('SELECT * FROM votes ORDER BY rowid'),
@@ -199,7 +204,7 @@ def _bind(database, replay, config, scope, namespace, *, usage=None):
     if unmatched:
         try:
             old_groups = _groups(database.connection, scope, namespace, config.data['clustering'],
-                                 usage=usage, stage='historical_binding')
+                                 usage=usage, stage='historical_binding',scan_policy=scan_identity(config,namespace),label_scenes=selected_scenes)
         except ValueError as error:
             # Optional label reuse cannot prevent a smaller cold partition from
             # fixing a historical reference set that exceeds the new budgets.
@@ -324,13 +329,9 @@ def _apply(database, replay, selected, config, scope, namespace, mapping, finger
             ) as tracked:
                 for row in tracked:
                     pass
-            references = _groups(db, scope, namespace, config.data['clustering'], usage=usage, stage='retained')
-            context = reference_context(references)
-            representative_ids = {identifier for group in references for identifier in group.sample_ids}
-            references.clear()
             with tracking(
                 _inserted(db, 'INSERT INTO candidates VALUES (?,?,?,?,?,?)',
-                          _mapped_candidates(replay, mapping, policy, context, representative_ids)),
+                          _mapped_candidates(replay, mapping, policy, '')),
                 'Save rebuilt candidates',
                 unit='candidate',
                 total=lambda: replay.execute(
@@ -340,6 +341,18 @@ def _apply(database, replay, selected, config, scope, namespace, mapping, finger
             ) as tracked:
                 for row in tracked:
                     pass
+            references = _groups(db, scope, namespace, config.data['clustering'], usage=usage, stage='retained',scan_policy=scan_identity(config,namespace),
+                label_scenes=[item['scene'] for item in selected])
+            context = reference_context(references)
+            representative_ids = {identifier for group in references for identifier in group.sample_ids}
+            references.clear()
+            # Current decision roles must exist before selecting references;
+            # historical policy rows cannot decide the new bank's authority.
+            db.execute("UPDATE candidates SET payload=json_set(payload,'$.reference_context',?,"
+                "'$.reference_selected',json(CASE WHEN json_extract(payload,'$.observation') IN "
+                "(SELECT value FROM json_each(?)) THEN 'true' ELSE 'false' END)) WHERE policy=? "
+                'AND scan IN (SELECT value FROM json_each(?))',
+                (context,encoded(sorted(representative_ids)),policy,encoded([item['scan'] for item in selected])))
             state = dict(format=2, fingerprint=fingerprint, context=context,
                 inputs=rebuild_cache.input_context(db,selected,scope,namespace),
                 bindings=rebuild_cache.binding_context(db,scope,namespace),
@@ -356,7 +369,7 @@ def rebuild_selected(database, selected, config, *, progress=None):
 
 @measured('rebuild')
 def _rebuild_selected(database, selected, config, *, progress=None):
-    """Replay exactly these scans; all historical membership is label-only input.
+    """Replay selected scans, then reconcile against frozen external references.
 
     The private SQLite stays in RAM, streaming vectors without
     JPEGs. Only the final assignment replacement commits to the durable DB.
@@ -372,11 +385,15 @@ def _rebuild_selected(database, selected, config, *, progress=None):
     if first is None:
         raise ValueError('Identity rebuild requires a selected scan.')
     scope, namespace = first['scope'], first['namespace']
-    fingerprint = digest({'format': 1, 'scans': selected, 'policy': matching_policy(config)})
+    from . import historical_references
+    external_context = historical_references.context(db,selected,config,scope,namespace)
+    fingerprint = digest({'format': 2, 'scans': selected, 'policy': matching_policy(config),
+                          'external_references': external_context})
     usage = ReferenceUsage(config.data['clustering']['max_reference_bytes'], progress)
     state = rebuild_cache.lookup(db,scope,namespace,fingerprint)
     if state and rebuild_cache.admissible(state,config):
-        references = _groups(db,scope,namespace,config.data['clustering'],usage=usage)
+        references = _groups(db,scope,namespace,config.data['clustering'],usage=usage,scan_policy=scan_identity(config,namespace),
+                           label_scenes=[item['scene'] for item in selected])
         context = reference_context(references)
         references.clear()
         if (state.get('context')==context
@@ -432,7 +449,9 @@ def _rebuild_selected(database, selected, config, *, progress=None):
             apply_anchor_views(temporary, selected, config, progress=progress)
             from .global_views import apply_global_views
             apply_global_views(temporary, selected, config, progress=progress)
-        mapping = _bind(database, replay, config, scope, namespace, usage=usage)
+        external_bindings = historical_references.reconcile(database,replay,selected,config,scope,namespace,external_context,progress=progress)
+        mapping = _bind(database, replay, config, scope, namespace, usage=usage,external_bindings=external_bindings,
+                        selected_scenes=[item['scene'] for item in selected])
         apply_auxiliary(temporary, selected, config, progress=progress)
         report_pages(replay)
         _apply(database, replay, selected, config, scope, namespace, mapping, fingerprint, progress, usage=usage)
