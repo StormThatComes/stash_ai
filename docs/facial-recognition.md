@@ -7,6 +7,10 @@ Broad cohorts remain available when their individual variants are too sparse.
 Every retained centre participates in both matching and rival competition, within
 the explicit reference memory budget. Identity ranking uses the strongest valid
 strict or view evidence per person; a winning view remains attachment authority.
+An independently unambiguous strict proof keeps strict authority even when a
+stronger own view improves ranking. Its original strict score, cohesion and
+margin must still beat all mixed rivals and raw-anchor competition. An own view
+below its match threshold cannot hide a valid strict match.
 
 `clustering.min_anchor_visible_face_fraction` and
 `clustering.min_auxiliary_visible_face_fraction` optionally qualify retained

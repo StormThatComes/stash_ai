@@ -12,7 +12,7 @@ from stash_ai.recognition.merge_publication import canonical_targets
 def test_policy_scope_preserves_keys_and_does_not_reuse_mutated_or_later_config(tmp_path, monkeypatch):
     from stash_ai.recognition import context
     config = load(root=tmp_path)
-    expected = digest({'format': 27, 'recognition': config.data['recognition'],
+    expected = digest({'format': 28, 'recognition': config.data['recognition'],
                        'clustering': {k:v for k,v in config.data['clustering'].items()
                                       if k not in ('max_reference_bytes','max_people_per_lookup')}})
     calls, original = [], context.digest

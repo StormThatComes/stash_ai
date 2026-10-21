@@ -159,3 +159,41 @@ def test_persistently_unstable_sources_never_commit_rebuilt_memberships(tmp_path
         assert not db.connection.execute('SELECT 1 FROM members').fetchone()
         assert not db.connection.execute('SELECT 1 FROM people').fetchone()
         assert not db.connection.execute('SELECT 1 FROM candidates').fetchone()
+
+
+def test_stronger_own_view_does_not_remove_independent_strict_authority(tmp_path):
+    config=configured(tmp_path)
+    with FaceDatabase(config.database) as db:
+        source=fixture(db,config,'1',[A]*3+[X]*3);rebuild_selected(db,[source],config)
+        owner=candidates(db,source['scan'],config)[0][1]
+        query=fixture(db,config,'2',[angle(20)]*3);rebuild_selected(db,[query],config)
+        assert all(r[0]=='accepted' and r[1]==owner and r[2]['reference_role']=='strict'
+                   for r in candidates(db,query['scan'],config))
+
+
+def test_valid_strict_margin_is_not_replaced_by_own_view_margin(tmp_path):
+    from stash_ai.recognition.clustering import Group
+    from stash_ai.recognition.historical_references import History,rank
+    from stash_ai.recognition.global_views import IdentityView
+    config=configured(tmp_path);q=angle(20)
+    rival=.8205*q+np.sqrt(1-.8205**2)*np.array([0.,0.,1.,0.])
+    view=IdentityView(Group('owner',(A,),True),'other','a',('a','b','c'),3,(A,))
+    history=History((Group('owner',(A,X),True),Group('rival',(rival,),True)),(view,),{},'independent-strict')
+    row=dict(geometry='[]',dimensions=4,embedding=q.astype('<f4').tobytes())
+    result=rank([row],history,config)
+    assert result is not None and result[0]=='owner' and result[1]['mode']=='strict'
+    assert result[1]['ranking_score']>result[1]['mean_score']
+    assert result[1]['ambiguity_margin']==config.data['recognition']['ambiguity_margin']
+
+
+def test_below_threshold_own_view_cannot_hide_a_valid_strict_match(tmp_path):
+    from stash_ai.recognition.clustering import Group
+    from stash_ai.recognition.historical_references import History,rank
+    from stash_ai.recognition.global_views import IdentityView
+    config=configured(tmp_path);q=X
+    appearance=.81*q+np.sqrt(1-.81**2)*np.array([0.,0.,1.,0.])
+    view=IdentityView(Group('owner',(appearance,),True),'other','a',('a','b','c'),3,(appearance,))
+    history=History((Group('owner',(A,appearance),True),),(view,),{},'strict-with-near-view')
+    row=dict(geometry='[]',dimensions=4,embedding=q.astype('<f4').tobytes())
+    result=rank([row],history,config)
+    assert result is not None and result[0]=='owner' and result[1]['mode']=='strict'
