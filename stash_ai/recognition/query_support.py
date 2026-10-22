@@ -1,11 +1,12 @@
 """Independent query votes across frozen views of one identity.
 
 Existing per-prototype support stays valid. Additional support may cross prototype
-boundaries only inside a tight, frozen query cohort. Its immutable first witness
-defines half the angular cohesion radius, preventing single-link chaining. Raw
-reference/training cues must never be passed as query votes.
+boundaries inside overlapping hypotheses with immutable observed centres. Each
+hypothesis uses half the angular cohesion radius; neither its accepted output nor
+another hypothesis can extend that radius. Raw training cues are never votes.
 """
 from dataclasses import dataclass, field
+import hashlib
 import math
 
 from .clustering import vector
@@ -25,9 +26,12 @@ class _Votes:
     ids: list = field(default_factory=list)
     times: set = field(default_factory=set)
     prototypes: set = field(default_factory=set)
-    pivot: object = None
+    seen: set = field(default_factory=set)
 
     def add(self, row, prototype):
+        if row['id'] in self.seen:
+            return
+        self.seen.add(row['id'])
         self.ids.append(row['id'])
         self.times.add((row['scan'], row['seconds']))
         self.prototypes.add(prototype)
@@ -36,39 +40,88 @@ class _Votes:
 def cohorts(rows, config, *, key, prototype, minimum=None):
     """Yield disjoint accepted IDs, with all original query voters in proof.
 
-    Callers stream in canonical embedding order and perform their own per-query
-    identity, ambiguity and co-presence checks before entering this function.
-    Only one immutable embedding per discovered cohort is retained.
+    Rows must be replayable, or a factory returning a fresh canonical stream.
+    Callers perform per-query identity, ambiguity and co-presence checks first.
+    Exact supported prototypes take one pass without retaining their vectors.
+    Only unsupported query vectors are kept; other witnesses are streamed when
+    needed. Freeze every result before yielding, since callers may then mutate
+    the candidate rows used by the factory.
     """
     import numpy as np
     grouping = config.data['clustering']
     required = minimum or (lambda family: grouping['view_attach_min_support'])
     boundary = math.sqrt((1 + grouping['view_cohesion_threshold']) / 2)
+    if callable(rows):
+        stream = rows
+    elif iter(rows) is not rows:
+        stream = lambda: iter(rows)
+    else:
+        raise ValueError('Frozen query support requires replayable rows or a row factory.')
     families, used = {}, 0
-    for row in rows:
-        family, source = key(row), prototype(row)
-        exact, covered = families.setdefault(family, ({}, []))
-        exact.setdefault(source, _Votes()).add(row, source)
+    for row in stream():
+        family, origin = key(row), prototype(row)
+        exact, unfinished = families.setdefault(family, ({}, {}))
+        votes = exact.setdefault(origin, _Votes())
+        votes.add(row, origin)
         query = vector(row)
-        slot = next((v for v in covered if float(np.dot(v.pivot, query)) >= boundary), None)
-        if slot is None:
+        if len(votes.times) < required(family):
+            metadata = {k: row[k] for k in ('id', 'scan', 'seconds')}
+            unfinished.setdefault(origin, []).append((metadata, origin, query))
             used += query.nbytes
             if used > grouping['max_reference_bytes']:
                 raise ValueError('Frozen query cohorts exceed clustering.max_reference_bytes.')
-            slot = _Votes(pivot=query); covered.append(slot)
-        slot.add(row, source)
-    for family, (exact, covered) in families.items():
-        accepted = set()
-        # A supported tight cohort can pool different frozen views. Remaining
-        # queries retain their original per-prototype support semantics.
-        for votes in covered + list(exact.values()):
-            if len(votes.times) < required(family):
+        else:
+            used -= sum(q.nbytes for _, _, q in unfinished.pop(origin, ()))
+    output, pending = [], {}
+    for family, (exact, unfinished) in families.items():
+        for votes in exact.values():
+            if len(votes.times) >= required(family):
+                output.append(QuerySupport(family, tuple(votes.ids), tuple(votes.ids),
+                                           tuple(sorted(votes.prototypes)), len(votes.times)))
+        if len(set().union(*(v.times for v in exact.values()))) >= required(family):
+            missing = {r['id']: (r, p, q) for values in unfinished.values() for r, p, q in values}
+            if missing:
+                pending[family] = missing
+    families.clear()
+    seen = set()
+    if pending:
+        for row in stream():
+            family = key(row)
+            missing = pending.get(family)
+            if not missing:
                 continue
-            fresh = tuple(i for i in votes.ids if i not in accepted)
-            if fresh:
-                accepted.update(fresh)
-                yield QuerySupport(family, fresh, tuple(votes.ids),
-                                   tuple(sorted(votes.prototypes)), len(votes.times))
+            signature = family, hashlib.sha256(row['embedding']).digest()
+            if signature in seen:
+                continue
+            seen.add(signature)
+            centre = vector(row)
+            targets = [(r, p) for r, p, q in missing.values() if float(np.dot(centre, q)) >= boundary]
+            if not targets:
+                continue
+            votes = _Votes()
+            votes.add(row, prototype(row))
+            for record, p in targets:
+                votes.add(record, p)
+            if len(votes.times) < required(family):
+                for witness in stream():
+                    if key(witness) != family or witness['id'] in votes.seen:
+                        continue
+                    if float(np.dot(centre, vector(witness))) < boundary:
+                        continue
+                    votes.add(witness, prototype(witness))
+                    if len(votes.times) >= required(family):
+                        break
+            if len(votes.times) >= required(family):
+                identifiers = tuple(r['id'] for r, _ in targets)
+                output.append(QuerySupport(family, identifiers, tuple(votes.ids),
+                                           tuple(sorted(votes.prototypes)), len(votes.times)))
+                for identifier in identifiers:
+                    missing.pop(identifier)
+                if not missing:
+                    pending.pop(family)
+                if not pending:
+                    break
+    yield from output
 
 
 def eligible(rows, config, *, key, prototype, minimum=None):

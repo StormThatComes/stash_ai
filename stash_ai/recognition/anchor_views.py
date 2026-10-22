@@ -287,7 +287,7 @@ def apply_anchor_views(database, selected, config, *, progress=None):
     source = (f'FROM candidates c JOIN observations o ON o.id={address(db, "c")} '
               "WHERE c.policy=? AND c.status='pending' "
               "AND json_extract(c.payload,'$.reason')='anchor_view_pending'")
-    rows=db.execute("SELECT o.*,c.person,json_extract(c.payload,'$.anchor_view.medoid') AS medoid "+source+
+    rows=lambda:db.execute("SELECT o.id,o.scan,o.seconds,o.dimensions,o.embedding,c.person,json_extract(c.payload,'$.anchor_view.medoid') AS medoid "+source+
                     ' ORDER BY o.embedding,o.geometry,o.id',(policy,))
     supported=eligible(rows,config,key=lambda r:r['person'],prototype=lambda r:r['medoid'])
     with db:

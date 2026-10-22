@@ -82,7 +82,7 @@ def resolve(database,replay,selected,config,history,bindings,confirmed,early,usa
     from .query_support import cohorts
     from .config import digest
     claims_by_id={r['observation']:r for r in replay.execute('SELECT * FROM pool_view_claims')}
-    raw=database.connection.execute('SELECT o.* FROM observations o WHERE id IN (SELECT value FROM json_each(?)) '
+    raw=lambda:database.connection.execute('SELECT o.id,o.scan,o.seconds,o.dimensions,o.embedding FROM observations o WHERE id IN (SELECT value FROM json_each(?)) '
         'ORDER BY embedding,geometry,id',(encoded(list(claims_by_id)),))
     eligible=cohorts(raw,config,key=lambda r:claims_by_id[r['id']]['owner'],
         prototype=lambda r:claims_by_id[r['id']]['medoid'])

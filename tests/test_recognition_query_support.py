@@ -45,9 +45,11 @@ def test_different_looks_people_and_duplicate_times_do_not_pool(tmp_path,rows):
     assert supported(configured(tmp_path),rows)==[]
 
 
-def test_query_cohorts_do_not_chain(tmp_path):
+def test_overlapping_hypotheses_keep_separate_frozen_proofs(tmp_path):
     groups=supported(configured(tmp_path),[row(1,0),row(2,17),row(3,34)])
-    assert {i for g in groups for i in g.observations}=={'1','2'}
+    assert {i for g in groups for i in g.observations}=={'1','2','3'}
+    assert all(len(g.witnesses)==2 for g in groups)
+    assert not any(set(g.witnesses)=={'1','2','3'} for g in groups)
 
 
 def test_existing_single_prototype_votes_are_preserved(tmp_path):

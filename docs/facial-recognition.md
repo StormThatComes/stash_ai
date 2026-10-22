@@ -58,7 +58,7 @@ A previous promotion plan can only defer a new near-appearance birth. It cannot
 assign an owner, override previously established strict witnesses, or authorize a
 match after its parents fail fresh validation. Deferred queries are resolved only
 against the final current bank; obsolete hints are cleared with the completed
-plan. Scans and embeddings are retained. Matching policy advances to v33.
+plan. Scans and embeddings are retained. Matching policy advances to v34.
 
 The local anchor bank uses the same broad/narrow cohort builder as the global
 bank. Independently supported reserve centres remain available beyond the primary
@@ -68,15 +68,20 @@ medoids are checked against `clustering.max_reference_bytes`; insufficient memor
 fails explicitly. Matching policy v30 rebuilds decisions from retained embeddings.
 
 Frozen view-query support can cross prototype boundaries of the same identity
-when the queries form a tight cohort. Its immutable first query defines half
-the angular cohesion radius, preventing transitive query chains. Distinct
-scene/time votes remain mandatory; reference-training cues never vote as queries.
-Existing support for one exact prototype remains valid. The same query-support
+through overlapping hypotheses. An observed query supplies each immutable centre;
+every witness must fit half the angular cohesion radius around that centre.
+Overlaps preserve boundary votes without combining hypotheses into a transitive
+support component. Distinct scene/time votes remain mandatory; reference-training
+cues never vote as queries. Existing support for one exact prototype remains
+valid and takes one streaming pass. Only unsupported query vectors are retained
+within the explicit reference budget; additional witnesses are streamed from
+fresh metadata/embedding row factories, without loading crops. All proofs freeze
+before callers can update those rows. The same query-support
 rules apply to local anchors, auxiliary views, historical and selected pools,
 and partial-cohort repairs. Every original source witness remains in recovery
 proofs. A rival matching only one member of a whole query cohort still vetoes
 that member: rivals cannot disappear because they do not explain its peers.
-These changes advance the matching policy to v29 and reuse retained embeddings.
+These changes advance the matching policy to v34 and reuse retained embeddings.
 
 The complete appearance bank preserves independently supported narrow looks
 inside broader coherent cohorts. Narrow looks use half the angular view-match

@@ -19,7 +19,7 @@ from .scoring import comparisons, scoped
 from .evidence_cache import current as evidence, scoped as evidence_owned
 from .parallel_scores import scored_rows, contributions
 
-MATCHING_FORMAT = 33
+MATCHING_FORMAT = 34
 
 
 def vector(row):

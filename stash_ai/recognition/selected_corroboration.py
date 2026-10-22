@@ -89,7 +89,7 @@ def resolve(durable,database,selected,config,external,previous):
     from .decision_resolution import resolve_pending
     resolve_pending(db,policy,config)
     from .query_support import eligible
-    rows=db.execute('SELECT o.*,c.person,json_extract(c.payload,\'$.historical_reference.medoids\') AS medoids,json_extract(c.payload,\'$.historical_reference.mode\') AS mode '
+    rows=lambda:db.execute('SELECT o.id,o.scan,o.seconds,o.dimensions,o.embedding,c.person,json_extract(c.payload,\'$.historical_reference.medoids\') AS medoids,json_extract(c.payload,\'$.historical_reference.mode\') AS mode '
         'FROM candidates c JOIN observations o ON o.id='+observation_sql('c')+
         " WHERE c.policy=? AND c.status='pending' AND json_extract(c.payload,'$.reason')='prior_corroborated_view_pending' "
         'ORDER BY o.embedding,o.geometry,o.id',(policy,))
