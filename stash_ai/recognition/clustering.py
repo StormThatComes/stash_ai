@@ -19,6 +19,8 @@ from .scoring import comparisons, scoped
 from .evidence_cache import current as evidence, scoped as evidence_owned
 from .parallel_scores import scored_rows, contributions
 
+MATCHING_FORMAT = 33
+
 
 def vector(row):
     import numpy as np
@@ -216,8 +218,8 @@ def complete_candidates(db, scan, policy, context, count, *, exact_memberships=F
 
 def matching_policy(config):
     from .context import policy_digest
-    return policy_digest(config, 'matching-v33', lambda: {
-        'format': 33, 'recognition': config.data['recognition'],
+    return policy_digest(config, f'matching-v{MATCHING_FORMAT}', lambda: {
+        'format': MATCHING_FORMAT, 'recognition': config.data['recognition'],
         'clustering': {key:value for key,value in config.data['clustering'].items()
                        if key not in ('max_reference_bytes','max_people_per_lookup')}})
 
