@@ -35,6 +35,16 @@ scene count and thresholds. Losing support, ownership, quality or a current scan
 revokes the next capture and invalidates its matching cache. Promoted views remain
 query-only and never parent another promotion or vote for strict identity merges.
 
+Promotion keeps separate hypotheses for disjoint rooted parent pairs. A later
+query confirmed through another pair cannot intersect away an existing valid
+proof. Each hypothesis retains its bounded appearance exemplars as candidate
+representatives, including supported edge looks beside the dominant medoid.
+Every emitted representative needs its own narrow independent-query support and
+two-scene proof. Identical vectors/pose representatives are deduplicated. Current
+source validation still revokes obsolete proofs; no old automatic label supplies
+authority. Query witness vectors, pair hypotheses and emitted exemplars share
+the explicit reference byte budget and fail rather than silently losing coverage.
+
 Full and mixed selections also preserve this previous-generation authority. Before
 replay, accepted attachment observation IDs freeze query eligibility, without using
 old labels as positive evidence. They cannot seed new cores or supply birth votes.
@@ -48,7 +58,7 @@ A previous promotion plan can only defer a new near-appearance birth. It cannot
 assign an owner, override previously established strict witnesses, or authorize a
 match after its parents fail fresh validation. Deferred queries are resolved only
 against the final current bank; obsolete hints are cleared with the completed
-plan. Scans and embeddings are retained. Matching policy advances to v32.
+plan. Scans and embeddings are retained. Matching policy advances to v33.
 
 The local anchor bank uses the same broad/narrow cohort builder as the global
 bank. Independently supported reserve centres remain available beyond the primary
