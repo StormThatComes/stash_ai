@@ -1,13 +1,127 @@
 """Recognition work rows on the tagger's single console rendering owner."""
 from contextlib import contextmanager
 from contextvars import ContextVar
+from functools import partial
 import time
 
 from tqdm import tqdm
 
-from stash_ai.runtime.console import progress as console_bar, status, activity, current_report
+from stash_ai.runtime.console import status, activity, current_report, phase, skipped
 
 _work_rows = ContextVar('recognition_work_rows', default=())
+
+
+class RunProgress:
+    """One ordered phase plan, with optional branches explicitly skipped."""
+    def __init__(self, report, *, portraits=False, metadata=True):
+        self.report = report
+        self.plan = ['Recognition selection', 'Recognition assets']
+        if not portraits:
+            self.plan += ['Recognition VTT', 'Recognition identity rebuild', 'Recognition Stash publication']
+        self.plan += ['Recognition performer selection']
+        if metadata:
+            if not portraits:
+                self.plan += ['Recognition names preflight']
+            self.plan += ['Recognition portraits' if portraits else 'Recognition metadata']
+        if not portraits:
+            self.plan += ['Recognition names starter']
+        self.cursor = 0
+        report.recognition_progress = self
+        report.console.status_layout = partial(status_lines, verbose=report.verbose)
+        report.console.heartbeat_layout = partial(heartbeat_line, verbose=report.verbose)
+        report.console.heartbeat_on_progress = True
+        report.console.heartbeat = 15.
+
+    @contextmanager
+    def phase(self, name, **values):
+        index = self.plan.index(name)
+        self._skip_until(index)
+        self.cursor = index + 1
+        with phase(self.report, name, phase_step=f'{index + 1}/{len(self.plan)}', **values):
+            # Liveness belongs to this phase, not a previous scan or replay.
+            with self.report.console.lock:
+                self.report.console.completed = None
+            yield
+
+    def _skip_until(self, index):
+        for name in self.plan[self.cursor:index]:
+            reason = ('no eligible scenes' if name in ('Recognition identity rebuild', 'Recognition Stash publication')
+                      else 'no eligible performers')
+            if name == 'Recognition Stash publication' and self.report.console.phase_outcomes.get(
+                    'Recognition identity rebuild') == 'failed':
+                reason = 'identity rebuild failed'
+            skipped(self.report, name, reason)
+        self.cursor = index
+
+    def finish(self):
+        self._skip_until(len(self.plan))
+
+
+def status_lines(row, fields, width, *, verbose=False):
+    """Bars own counts/rates; the status area explains their place and activity."""
+    from stash_ai.runtime.console_layout import status_lines as layout
+    fields = dict(fields)
+    step = fields.pop('phase_step', None)
+    row = dict(row, phase=(f'[{step}] ' if step else '') + row['phase'])
+    # The two fixed work rows already display these numbers and estimates.
+    for key in ('scenes', 'frames', 'people', 'work', 'detail'):
+        for suffix in ('', '_eta', '_rate', '_label', '_counts'):
+            fields.pop(key + suffix, None)
+    section = fields.pop('section', None)
+    if section:
+        stage = fields.get('stage')
+        fields['stage'] = section
+        if stage and stage != section and stage not in (
+                row['values'].get(key + '_label') for key in ('scenes', 'frames', 'people', 'work', 'detail')):
+            fields['activity'] = stage
+    if not verbose:
+        fields = {k: v for k, v in fields.items() if not k.startswith('reference') and
+                  k not in ('cpu_blocks', 'cpu_queue', 'cpu_scenes')}
+    return layout(row, fields, width)
+
+
+def heartbeat_line(row, fields, *, verbose=False):
+    """One periodic log line, including progress during continuously busy work."""
+    step = fields.get('phase_step')
+    parts = [(f'[{step}] ' if step else '') + row['phase'], f"elapsed={row['elapsed']:.0f}s"]
+    for key in ('section', 'stage', 'scene', 'person'):
+        if fields.get(key) and (key != 'stage' or fields[key] != fields.get('section')):
+            parts.append(f'{key}={fields[key]}')
+    for key in ('scenes', 'frames', 'people', 'work', 'detail'):
+        if key in fields:
+            text = f"{fields.get(key + '_label', key)}: {fields[key]}"
+            for suffix, label in (('_rate', 'rate'), ('_eta', 'ETA'), ('_counts', 'counts')):
+                if fields.get(key + suffix):
+                    text += f" {label}={fields[key + suffix]}"
+            parts.append(text)
+    for key in ('cpu_workers', 'cpu_wait', 'frame_cache', 'backoff remaining', 'deadline remaining'):
+        if fields.get(key):
+            parts.append(f'{key}={fields[key]}')
+    if verbose and fields.get('references'):
+        parts.append('references=' + fields['references'])
+    age = row['last_progress_age']
+    parts.append('last completed=' + ('none in this phase' if age is None else f'{age:.0f}s ago'))
+    return ' | '.join(' '.join(str(part).split()) for part in parts)
+
+
+@contextmanager
+def stage(label, **values):
+    """Name a rebuild substage even while SQL/native work has no measurable total."""
+    report = current_report()
+    console = getattr(report, 'console', None)
+    if console is None or console.style == 'off':
+        yield
+        return
+    with console.lock:
+        previous = console.state.get('section')
+    status(report, section=label)
+    if console.style == 'verbose':
+        console.message('Step: ' + label, decorative=True)
+    try:
+        with activity(report, label, **values):
+            yield
+    finally:
+        status(report, section=previous)
 
 
 class WorkProgress:
@@ -39,9 +153,11 @@ class WorkProgress:
         # Redirected runs get stage milestones and heartbeats, never a pair of
         # frame milestones for every scene. Terminal rows have fixed positions.
         if self.enabled and (console.tty or not self.transient):
-            self.bar = console_bar(tqdm, total=self.total, initial=self.n, desc=self.label,
+            self.bar = console.bar(tqdm, total=self.total, initial=self.n, desc=self.label,
                                    unit=self.unit, position=self.position,
-                                   leave=False, dynamic_ncols=True, disable=None)
+                                   leave=False, dynamic_ncols=True, disable=None,
+                                   status_key=self.key + '_counts',
+                                   milestones=not hasattr(self.report, 'recognition_progress') or console.style == 'verbose')
 
     def advance(self, amount=1, **postfix):
         self.set_completed(self.n + amount, **postfix)
@@ -65,6 +181,8 @@ class WorkProgress:
         status(self.report, completed=delta, **{
             self.key: f'{self.n}/{self.total if self.total is not None else "?"}', self.key + '_eta': eta,
             self.key + '_rate': f'{rate:.2f} {self.unit}/s' if rate else 'warming up',
+            self.key + '_label': self.label,
+            self.key + '_counts': ', '.join(f'{k}={v}' for k, v in self.postfix.items()) or None,
         })
         if self.bar is not None:
             if self.postfix:
@@ -79,7 +197,7 @@ class WorkProgress:
         finally:
             if self.bar is not None:
                 self.bar.close()
-            status(self.report, **{self.key: None, self.key + '_eta': None, self.key + '_rate': None})
+            status(self.report, **{self.key + suffix: None for suffix in ('', '_eta', '_rate', '_label', '_counts')})
             _work_rows.reset(self._row_token)
             if self.suspended is not None:
                 self.suspended._open_bar()

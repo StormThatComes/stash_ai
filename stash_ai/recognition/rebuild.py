@@ -15,7 +15,7 @@ from .clustering import Group, _groups, _result, _similarities, cluster_scene, m
 from .config import digest
 from .database import SCHEMA, encoded
 from .reference_usage import ReferenceUsage
-from .progress import tracking, work
+from .progress import tracking, work, stage
 from .ranking import best_two
 from .profiling import measured, profile, connection
 from .reference_index import references as reference_scope
@@ -104,6 +104,7 @@ def _mapped_candidates(replay, mapping, policy, context, representative_ids=()):
 
 
 @measured('copy')
+@stage('Copy selected face evidence')
 def _copy_selection(database, replay, selected, scope, namespace, *, retain_pose=False):
     db = database.connection
     replay.executescript(SCHEMA + '''
@@ -174,6 +175,7 @@ def _copy_selection(database, replay, selected, scope, namespace, *, retain_pose
 
 
 @measured('binding')
+@stage('Bind stable performer identities')
 def _bind(database, replay, config, scope, namespace, *, usage=None, external_bindings=None, selected_scenes=()):
     """Bind stable labels, including independently verified external consolidations."""
     database._rebuild_optional_budget_fallback = False
@@ -291,6 +293,7 @@ def _bind(database, replay, config, scope, namespace, *, usage=None, external_bi
 
 
 @measured('apply')
+@stage('Commit rebuilt identities')
 def _apply(database, replay, selected, config, scope, namespace, mapping, fingerprint, progress, *, usage=None,history=None):
     db, policy = database.connection, matching_policy(config)
     usage = usage or ReferenceUsage(config.data['clustering']['max_reference_bytes'], progress)
@@ -416,7 +419,8 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
         raise ValueError('Identity rebuild requires a selected scan.')
     scope, namespace = first['scope'], first['namespace']
     from . import historical_references
-    external_context = historical_references.context(db,selected,config,scope,namespace)
+    with stage('Validate external identity dependencies'):
+        external_context = historical_references.context(db,selected,config,scope,namespace)
     fingerprint = digest({'format': 2, 'scans': selected, 'policy': matching_policy(config),
                           'external_references': external_context})
     usage = ReferenceUsage(config.data['clustering']['max_reference_bytes'], progress)
@@ -430,7 +434,8 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
                 and state.get('inputs')==rebuild_cache.input_context(db,selected,scope,namespace,config)
                 and state.get('bindings')==rebuild_cache.binding_context(db,scope,namespace)):
             with work('Validate cached identity rebuild',len(selected),unit='scene',position=0) as checked:
-                complete=rebuild_cache.complete(db,selected,matching_policy(config),context)
+                with stage('Validate cached identity decisions'):
+                    complete=rebuild_cache.complete(db,selected,matching_policy(config),context)
                 if complete:
                     checked.advance(len(selected))
             if complete:
@@ -453,10 +458,12 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
             replay.executemany('INSERT INTO prior_attachment_queries VALUES (?)',((i,) for i in previous))
             replay.commit()
         checkpoints = Checkpoints(database, selected, config, scope, namespace)
-        cursor, next_clock = checkpoints.restore(replay)
+        with stage('Restore rebuild checkpoint'):
+            cursor, next_clock = checkpoints.restore(replay)
         clock = ReplayClock(next_clock)
         from .local_cohorts import prepare as prepare_local_cohorts
-        prepare_local_cohorts(replay,selected,config)
+        with stage('Prepare local face cohorts'):
+            prepare_local_cohorts(replay,selected,config)
         # Stable replay identity removes installation-dependent UUID tie order.
         temporary = SimpleNamespace(connection=replay,
             installation=str(uuid.uuid5(uuid.NAMESPACE_URL, encoded([scope, namespace, 'cold-replay']))),
@@ -475,53 +482,69 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
                     position=0,
                 ) as tracked:
                     for index, item in enumerate(tracked, start=cursor):
-                        lookahead.take(item['scan'])
-                        lookahead.submit(selected[index+1]['scan'] if index+1<len(selected) else None)
-                        cluster_scene(temporary, item['scan'], config, progress=progress, _cold_replay=True)
-                        compute_current().scenes_applied += 1
-                        compute_current().publish()
-                        checkpoints.save(replay, index+1, clock.value)
+                        with stage('Match selected scene', scene=item['scene']):
+                            lookahead.take(item['scan'])
+                            lookahead.submit(selected[index+1]['scan'] if index+1<len(selected) else None)
+                            cluster_scene(temporary, item['scan'], config, progress=progress, _cold_replay=True)
+                            compute_current().scenes_applied += 1
+                            compute_current().publish()
+                            checkpoints.save(replay, index+1, clock.value)
             # Freeze strict references after every selected scene has matched and
             # merged. Contextual attachments cannot become another scene's anchors
             # or bridge identities during the replay.
             checkpoints.save(replay, len(selected), clock.value, final=True)
             from .strict_partition import resolve as resolve_strict_partition
-            resolve_strict_partition(temporary, selected, config, progress=progress)
+            with stage('Consolidate strict identity cores'):
+                resolve_strict_partition(temporary, selected, config, progress=progress)
             from .cross_scene import apply_cross_scene_support
-            apply_cross_scene_support(temporary, selected, config, progress=progress)
-            deferred_hints=defer_new_groups(replay,config,hints,prior_strict)
+            with stage('Confirm cross-scene provisional identities'):
+                apply_cross_scene_support(temporary, selected, config, progress=progress)
+            with stage('Classify prior appearance hints'):
+                deferred_hints=defer_new_groups(replay,config,hints,prior_strict)
             from .shared_references import retry_strict, early_views
-            retry_strict(temporary, selected, config)
-            early = early_views(temporary, selected, config,excluded_views=excluded_views)
-            apply_scene_context(temporary, selected, config, progress=progress)
+            with stage('Retry strict identity assignments'):
+                retry_strict(temporary, selected, config)
+            with stage('Build early verified appearance views'):
+                early = early_views(temporary, selected, config,excluded_views=excluded_views)
+            with stage('Resolve same-scene identity context'):
+                apply_scene_context(temporary, selected, config, progress=progress)
             from .anchor_views import apply_anchor_views
-            apply_anchor_views(temporary, selected, config, progress=progress)
+            with stage('Recover anchor appearance views'):
+                apply_anchor_views(temporary, selected, config, progress=progress)
             from .global_views import apply_global_views
-            global_state=apply_global_views(temporary, selected, config, progress=progress)
+            with stage('Consolidate global appearance views'):
+                global_state=apply_global_views(temporary, selected, config, progress=progress)
             from .cohort_resolution import selected as resolve_selected_cohorts
             from dataclasses import replace
             from .identity_merges import canonical
             early=tuple(replace(v,group=Group(canonical(replay,v.group.identifier),v.group.samples,True)) for v in early)
-            resolve_selected_cohorts(temporary,config,early,global_state)
+            with stage('Resolve selected identity cohorts'):
+                resolve_selected_cohorts(temporary,config,early,global_state)
             global_state=None  # Release frozen exemplars before the historical bank.
-        history = historical_references.capture(db,selected,config,scope,namespace,external_context,resolve_aliases=False)
-        external_bindings = historical_references.reconcile(database,replay,selected,config,scope,namespace,external_context,
-            progress=progress,history=history,early=early,excluded_views=excluded_views)
+        with stage('Freeze historical identity references'):
+            history = historical_references.capture(db,selected,config,scope,namespace,external_context,resolve_aliases=False)
+        with stage('Reconcile historical identities'):
+            external_bindings = historical_references.reconcile(database,replay,selected,config,scope,namespace,external_context,
+                progress=progress,history=history,early=early,excluded_views=excluded_views)
         from .unresolved_pool import resolve as resolve_pool
-        resolve_pool(database,replay,selected,config,history,external_bindings,early)
+        with stage('Resolve retained unassigned faces'):
+            resolve_pool(database,replay,selected,config,history,external_bindings,early)
         mapping = _bind(database, replay, config, scope, namespace, usage=usage,external_bindings=external_bindings,
                         selected_scenes=[item['scene'] for item in selected])
         from .shared_references import auxiliary_bank
-        shared_groups, shared_views, confirmations = auxiliary_bank(replay,config,scope,namespace,history,mapping,early)
-        apply_auxiliary(temporary, selected, config, progress=progress,reference_groups=shared_groups,
-                        reference_views=shared_views,reference_confirmations=confirmations)
+        with stage('Build auxiliary reference bank'):
+            shared_groups, shared_views, confirmations = auxiliary_bank(replay,config,scope,namespace,history,mapping,early)
+        with stage('Assign auxiliary faces'):
+            apply_auxiliary(temporary, selected, config, progress=progress,reference_groups=shared_groups,
+                            reference_views=shared_views,reference_confirmations=confirmations)
         from .shared_references import finalize_early
         finalize_early(replay,config,mapping)
         from .pooled_views import finalize as finalize_pool
         finalize_pool(replay,config,mapping)
         from .selected_corroboration import resolve as restore_corroboration
-        database._rebuild_corroboration_pending=restore_corroboration(
-            database,temporary,selected,config,history,previous,hints=hints)
+        with stage('Revalidate corroborated identity views'):
+            database._rebuild_corroboration_pending=restore_corroboration(
+                database,temporary,selected,config,history,previous,hints=hints)
         unvalidated=set(deferred_hints)-database._rebuild_revalidated_medoids
         if unvalidated and replay.execute("SELECT 1 FROM candidates c WHERE c.status='withheld' "
                 "AND json_extract(c.payload,'$.reason')='prior_appearance_pending' AND EXISTS "
@@ -531,7 +554,8 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
         for row in replay.execute('SELECT DISTINCT person FROM members'):
             mapping.setdefault(row[0],row[0])
         from .reference_registry import invalidated_sources,InvalidatedSourceViews
-        invalid=invalidated_sources(history,replay,config,mapping)
+        with stage('Validate final reference ownership'):
+            invalid=invalidated_sources(history,replay,config,mapping)
         if invalid:raise InvalidatedSourceViews(invalid)
         report_pages(replay)
         _apply(database, replay, selected, config, scope, namespace, mapping, fingerprint, progress, usage=usage,history=history)
@@ -539,6 +563,7 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
 
 
 @measured('results')
+@stage('Collect identity results')
 def _results(db, selected, config):
     result = {}
     policy = matching_policy(config)

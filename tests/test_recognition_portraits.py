@@ -353,13 +353,16 @@ def test_interruption_closes_models_and_records_history(tmp_path, monkeypatch):
         assert state.connection.execute('SELECT status FROM runs ORDER BY started DESC LIMIT 1').fetchone()[0] == 'interrupted'
 
 
-def test_portrait_progress_has_people_counter_without_scan_or_rebuild_phases(tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize('style', ['compact', 'verbose'])
+def test_portrait_progress_has_people_counter_without_scan_or_rebuild_phases(tmp_path, monkeypatch, capsys, style):
     config, stash, services, _ = setup(tmp_path, monkeypatch)
     assert run(config, services, '1') == 0
     capsys.readouterr()
     forbid_recognition(monkeypatch, services, stash)
-    args = parser().parse_args(['portraits', '--progress-style', 'compact'])
+    args = parser().parse_args(['portraits', '--progress-style', style])
     assert execute(args, config, services=services) == 0
     output = capsys.readouterr()
-    assert 'Portraits: inspected 1/1 person' in output.err
+    assert ('Portraits: inspected 1/1 person' in output.err) == (style == 'verbose')
+    assert 'Phase: Recognition portraits complete [4/4]' in output.err
+    assert 'portrait_people_selected=1' in output.out
     assert 'Recognition VTT' not in output.err and 'identity rebuild' not in output.err

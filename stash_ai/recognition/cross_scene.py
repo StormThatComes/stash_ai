@@ -182,10 +182,11 @@ def apply_cross_scene_support(database, selected, config, *, progress=None):
         parents[b]=a
         sizes[a]+=sizes[b]
     barred = set()
-    for i, group in enumerate(pool):
-        ranked = _rank_reference(group.samples, references, match, cohesion)
-        if ranked and ranked[0][0] >= match-margin:
-            barred.add(i)
+    with tracking(pool, 'Check provisional identity competition', unit='group') as tracked:
+        for i, group in enumerate(tracked):
+            ranked = _rank_reference(group.samples, references, match, cohesion)
+            if ranked and ranked[0][0] >= match-margin:
+                barred.add(i)
     # Native BLAS prefilter on the first sample is *exactly safe* for the
     # complete-link cohesion bound: if it falls below cohesion, the pair
     # cannot be joined, regardless of the other members.
@@ -203,23 +204,25 @@ def apply_cross_scene_support(database, selected, config, *, progress=None):
     gamma=dimension*unit/(1-dimension*unit) if dimension else 0.
     multiplier=4*gamma+16*np.finfo(np.float64).eps
     norms=np.linalg.norm(first_vectors.astype(np.float64),axis=1)
-    for offset in range(0, n, 128):
-        block = first_vectors[offset:offset+128] @ first_vectors.T
-        for local, scores in enumerate(block):
-            i = offset+local
-            if i in barred:
-                continue
-            errors=multiplier*norms[i]*norms + dimension*np.finfo(np.float32).tiny
-            for j in np.flatnonzero(scores[i+1:] + errors[i+1:] >= cohesion) + i+1:
-                if j in barred or not pool[i].scenes.isdisjoint(pool[j].scenes):
-                    continue
-                mean, low = _cross_score(pool[i].samples, pool[j].samples)
-                if low < cohesion or mean < match-margin:
-                    continue
-                join(i,int(j))
-                if mean >= match:
-                    strong_counts[i]+=1
-                    strong_counts[j]+=1
+    with tracking(range(0, n, 128), 'Compare provisional identity blocks', unit='block', position=0) as tracked:
+        for offset in tracked:
+            block = first_vectors[offset:offset+128] @ first_vectors.T
+            with tracking(block, 'Compare provisional identity groups', unit='group') as groups:
+                for local, scores in enumerate(groups):
+                    i = offset+local
+                    if i in barred:
+                        continue
+                    errors=multiplier*norms[i]*norms + dimension*np.finfo(np.float32).tiny
+                    for j in np.flatnonzero(scores[i+1:] + errors[i+1:] >= cohesion) + i+1:
+                        if j in barred or not pool[i].scenes.isdisjoint(pool[j].scenes):
+                            continue
+                        mean, low = _cross_score(pool[i].samples, pool[j].samples)
+                        if low < cohesion or mean < match-margin:
+                            continue
+                        join(i,int(j))
+                        if mean >= match:
+                            strong_counts[i]+=1
+                            strong_counts[j]+=1
     components=defaultdict(list)
     for i in range(n):
         if i not in barred:
@@ -239,32 +242,33 @@ def apply_cross_scene_support(database, selected, config, *, progress=None):
                 continue
             clusters.append([pool[i] for i in component])
     # Never commit partial provisional clusters, nor two cues from one scene.
-    for group in clusters:
-        if len(set().union(*(g.scenes for g in group))) < 2:
-            continue
-        independent = {(row['scan'], row['seconds']) for g in group for row,_ in g.rows}
-        if len(independent) < settings['min_identity_support']:
-            continue
-        # Check no competition with accepted people and no co-presence
-        # conflicts; all membership changes are decided from frozen evidence.
-        queries = [v for g in group for v in g.samples]
-        ranked = _rank_reference(queries, references, match, cohesion)
-        if ranked and ranked[0][0] >= match-margin:
-            continue
-        leader = min(group, key=lambda g:(min(g.scenes),g.person)).person
-        proof = {'format':1,'scope':scopes['scope'],'namespace':scopes['namespace'],
-                 'sources':sorted(g.person for g in group),
-                 'scenes':sorted(set().union(*(g.scenes for g in group))),
-                 'support':len(independent),'frozen':True}
-        # Do not borrow the relaxed same-scene threshold. New provisional
-        # people have no pre-existing members and cannot act as merge votes.
-        for g in group:
-            for row,_ in g.rows:
-                if _same_cue_rival(db,row,leader,policy):
-                    break
-            else:
+    with tracking(clusters, 'Commit provisional identity groups', unit='group', position=1) as tracked:
+        for group in tracked:
+            if len(set().union(*(g.scenes for g in group))) < 2:
                 continue
-            break
-        else:
-            _commit(db, policy, group, leader, 'cross_scene_provisional', proof,
-                    created=getattr(database, 'identity_clock', time.time)())
+            independent = {(row['scan'], row['seconds']) for g in group for row,_ in g.rows}
+            if len(independent) < settings['min_identity_support']:
+                continue
+            # Check no competition with accepted people and no co-presence
+            # conflicts; all membership changes are decided from frozen evidence.
+            queries = [v for g in group for v in g.samples]
+            ranked = _rank_reference(queries, references, match, cohesion)
+            if ranked and ranked[0][0] >= match-margin:
+                continue
+            leader = min(group, key=lambda g:(min(g.scenes),g.person)).person
+            proof = {'format':1,'scope':scopes['scope'],'namespace':scopes['namespace'],
+                     'sources':sorted(g.person for g in group),
+                     'scenes':sorted(set().union(*(g.scenes for g in group))),
+                     'support':len(independent),'frozen':True}
+            # Do not borrow the relaxed same-scene threshold. New provisional
+            # people have no pre-existing members and cannot act as merge votes.
+            for g in group:
+                for row,_ in g.rows:
+                    if _same_cue_rival(db,row,leader,policy):
+                        break
+                else:
+                    continue
+                break
+            else:
+                _commit(db, policy, group, leader, 'cross_scene_provisional', proof,
+                        created=getattr(database, 'identity_clock', time.time)())

@@ -193,7 +193,7 @@ def test_selection_preflight_publication_and_names_starter_also_have_progress(tm
     assert execute(args('1', '2'), config, services=services) == 0
     rows = {bar.desc: bar for bar in bars}
     for label, expected in (
-        ('Read recognition scene IDs', 2), ('Prepare recognition assets', 1),
+        ('Read recognition scene IDs', 2), ('Configure lazy model loading', 1),
         ('Reconcile scene publications', 2), ('Prepare selected names', 1),
         ('Validate selected names', 1), ('Prepare scene identities', 1),
         ('Link scene identities', 1), ('Resolve metadata targets', 1), ('Read names starter', 1),
@@ -357,3 +357,78 @@ def test_lazy_asset_subphase_suspends_and_restores_detail_row(terminal):
     assert max(bar.n for bar in bars if bar.desc == 'Outer candidate phase') == 2
     assert next(bar for bar in bars if bar.desc == 'Nested asset phase').n == 1
     assert owners == {'stash-console'}
+
+
+def test_nested_work_restores_labels_and_counters_without_stale_postfix(terminal):
+    from stash_ai.recognition.progress import stage
+    report = RunReport(write=lambda _: None)
+    with present(report, 'auto'):
+        with stage('Commit identity rebuild'):
+            with work('Save assignments', 2, position=0) as outer:
+                outer.advance(saved=1)
+                assert report.console.state['work_counts'] == 'saved=1'
+                with work('Validate transaction input', 1, position=0) as inner:
+                    inner.advance(validated=1)
+                    assert report.console.state['work_label'] == 'Validate transaction input'
+                    assert report.console.state['work_counts'] == 'validated=1'
+                assert report.console.state['work'] == '1/2'
+                assert report.console.state['work_label'] == 'Save assignments'
+                assert report.console.state['work_counts'] == 'saved=1'
+                assert 'progress' not in report.console.state
+                with pytest.raises(KeyboardInterrupt):
+                    with stage('Verify source ownership'):
+                        assert report.console.state['section'] == 'Verify source ownership'
+                        raise KeyboardInterrupt()
+                assert report.console.state['section'] == 'Commit identity rebuild'
+            assert not any(k.startswith('work') for k in report.console.state)
+        assert 'section' not in report.console.state
+    assert all(bar.disable for bar in terminal[0])
+
+
+@pytest.mark.parametrize('failure', [None, RuntimeError, KeyboardInterrupt])
+def test_local_cohort_progress_advances_per_observation_and_preserves_incomplete_scene(
+        tmp_path, monkeypatch, terminal, failure):
+    from stash_ai.recognition import local_cohorts
+    from tests.test_recognition_anchor_views import config_for, A
+    from tests.test_recognition_frozen_partition import fixture
+    config = config_for(tmp_path)
+    bars, _ = terminal
+    original, seen = local_cohorts.vector, []
+    def vector(row):
+        active = next(b for b in bars if b.desc == 'Group local face observations' and not b.disable)
+        seen.append(active.n)
+        if failure and active.n == 1:
+            raise failure('stop local cohort preparation')
+        return original(row)
+    monkeypatch.setattr(local_cohorts, 'vector', vector)
+    with FaceDatabase(config.database) as db:
+        selected = [fixture(db, config, '1', [A]*3)]
+        with present(RunReport(write=lambda _: None), 'auto'):
+            if failure:
+                with pytest.raises(failure):
+                    local_cohorts.prepare(db.connection, selected, config)
+            else:
+                local_cohorts.prepare(db.connection, selected, config)
+    detail = next(b for b in bars if b.desc == 'Group local face observations')
+    scenes = next(b for b in bars if b.desc == 'Freeze local appearance cohorts')
+    assert detail.total == 3
+    assert seen == ([0, 1] if failure else [0, 1, 2])
+    assert detail.n == (1 if failure else 3)
+    assert scenes.n == (0 if failure else 1)
+    assert all(bar.disable for bar in bars)
+
+
+@pytest.mark.parametrize('style', ['off', None])
+def test_local_cohort_optional_total_is_not_queried_without_progress(tmp_path, style):
+    from contextlib import nullcontext
+    from stash_ai.recognition.local_cohorts import prepare
+    from tests.test_recognition_anchor_views import config_for, A
+    from tests.test_recognition_frozen_partition import fixture
+    config = config_for(tmp_path)
+    with FaceDatabase(config.database) as db:
+        selected = [fixture(db, config, '1', [A]*3)]
+        statements = []
+        db.connection.set_trace_callback(statements.append)
+        with present(RunReport(write=lambda _: None), style) if style else nullcontext():
+            prepare(db.connection, selected, config)
+        assert not any('COUNT(' in sql.upper() for sql in statements)

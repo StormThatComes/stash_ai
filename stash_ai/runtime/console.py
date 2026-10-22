@@ -78,6 +78,9 @@ class ConsolePresenter:
         self.coordination_timeout = coordination_timeout
         self.stopped = threading.Event()
         self.degraded = False
+        self.status_layout = None
+        self.heartbeat_layout = None
+        self.heartbeat_on_progress = False
 
     def start(self):
         self.thread = threading.Thread(target=self._run, name='stash-console', daemon=True)
@@ -121,7 +124,8 @@ class ConsolePresenter:
             self.state = {k: str(v)[:180] for k, v in values.items() if v is not None}
             if name in self.phase_outcomes or len(self.phase_outcomes) < 32:
                 self.phase_outcomes[name] = 'running'
-        self.message('Phase: ' + name, decorative=True)
+        suffix = f" [{values['phase_step']}]" if 'phase_step' in values else ''
+        self.message('Phase: ' + name + suffix, decorative=True)
         status = 'complete'
         try:
             yield
@@ -135,7 +139,7 @@ class ConsolePresenter:
         finally:
             if status == 'complete' and errors is not None and errors() > before_errors:
                 status = 'partial'
-            self.message(f'Phase: {name} {status}', decorative=True)
+            self.message(f'Phase: {name} {status}{suffix}', decorative=True)
             if status == 'partial' and self.failure_phase is None:
                 self.failure_phase = name
             with self.lock:
@@ -279,7 +283,8 @@ class ConsolePresenter:
                 f"last completed={age}" + (' | ' + values if values else ''))
         if self.tty:
             from .console_layout import status_lines, terminal_width
-            self._render_status(status_lines(row, fields, terminal_width(self.stream)))
+            layout = self.status_layout or status_lines
+            self._render_status(layout(row, fields, terminal_width(self.stream)))
             from .resources import resource_line
             # Inference already owns buffer/cache rows; no duplicate resource row.
             text = resource_line(resources) if row['phase'] != 'inference' else ''
@@ -292,9 +297,10 @@ class ConsolePresenter:
             elif self._resource_row is not None:
                 self._resource_row.close()
                 self._resource_row = None
-        elif ((row['last_progress_age'] if row['last_progress_age'] is not None else row['elapsed']) >= self.heartbeat
-              and time.monotonic()-self._last_heartbeat >= self.heartbeat):
-            self._write_status('Still working: ' + line)
+        elif (time.monotonic()-self._last_heartbeat >= self.heartbeat and
+              (self.heartbeat_on_progress or
+               (row['last_progress_age'] if row['last_progress_age'] is not None else row['elapsed']) >= self.heartbeat)):
+            self._write_status('Still working: ' + (self.heartbeat_layout(row, fields) if self.heartbeat_layout else line))
             if resources is not None:
                 from .resources import resource_line
                 self._write_status(resource_line(resources))
@@ -378,6 +384,8 @@ class ConsolePresenter:
 class OwnedBar:
     def __init__(self, owner, factory, iterable, options):
         self.owner, self.iterable, self.options = owner, iterable, dict(options)
+        self.status_key = self.options.pop('status_key', 'progress')
+        self.milestones = self.options.pop('milestones', True)
         self.n = self.options.get('initial', 0)
         self._total = self.options.get('total')
         if self.total is None and hasattr(iterable, '__len__'):
@@ -388,7 +396,7 @@ class OwnedBar:
         self.target = owner.call(lambda: factory(total=self.total, **{
             k: v for k, v in self.options.items() if k != 'total'}))
         owner._bars.append(self)
-        if not owner.tty and owner.style != 'off' and self.options.get('desc'):
+        if self.milestones and not owner.tty and owner.style != 'off' and self.options.get('desc'):
             owner.message(self.options['desc'] + ': started', decorative=True)
 
     def __iter__(self):
@@ -429,13 +437,13 @@ class OwnedBar:
             self.owner.call(lambda: setattr(self.target, 'total', value))
 
     def set_postfix(self, *args, **kwargs):
-        self.owner.update(progress=', '.join(f'{k}={v}' for k, v in kwargs.items() if k != 'refresh'))
+        self.owner.update(**{self.status_key: ', '.join(f'{k}={v}' for k, v in kwargs.items() if k != 'refresh')})
         if self.target is not None and not self.disable:
             self.owner.call(lambda: self.target.set_postfix(*args, **kwargs))
 
     def set_postfix_str(self, text, **kwargs):
-        self.owner.update(progress=text)
-        if self.disable and text != getattr(self, '_postfix', None):
+        self.owner.update(**{self.status_key: text})
+        if self.milestones and self.disable and text != getattr(self, '_postfix', None):
             self.owner.message(f"{self.options.get('desc', 'Progress')}: {text}", decorative=True)
         self._postfix = text
         if self.target is not None and not self.disable:
@@ -457,7 +465,7 @@ class OwnedBar:
                 self.owner.call(self.target.close)
             if self in self.owner._bars:
                 self.owner._bars.remove(self)
-            if not self.owner.tty and self.owner.style != 'off' and self.options.get('desc'):
+            if self.milestones and not self.owner.tty and self.owner.style != 'off' and self.options.get('desc'):
                 total = '?' if self.total is None else self.total
                 self.owner.message(f"{self.options['desc']}: inspected {self.n}/{total} {self.options.get('unit', 'item')}", decorative=True)
 
