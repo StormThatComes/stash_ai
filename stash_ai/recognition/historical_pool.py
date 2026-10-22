@@ -61,7 +61,7 @@ def resolve(database,replay,selected,config,history,bindings,confirmed):
         target,mode=cohort.family;support=cohort.independent_support
         minimum=config.data['clustering']['view_attach_min_support'] if mode=='view' else 1
         medoid_ids=sorted({i for source in cohort.prototypes for i in json.loads(source)})
-        witnesses=tuple(dict.fromkeys(i for v in history.views if v.group.identifier==target and v.medoid in medoid_ids for i in v.support))
+        witnesses=tuple(dict.fromkeys(i for v in history.views if v.group.identifier==target and v.medoid in medoid_ids for i in v.source_ids))
         if mode=='strict':
             witnesses=tuple(dict.fromkeys(i for g in history.groups if g.identifier==target for i in g.sample_ids))
         if not witnesses:continue

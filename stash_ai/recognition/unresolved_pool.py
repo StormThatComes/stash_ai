@@ -16,7 +16,7 @@ from .progress import tracking
 
 QUERY_REASONS=('candidate_group','reference_bank_unavailable','anchor_view_insufficient_support',
                'global_view_insufficient_support','view_insufficient_support','provisional_pool_source_invalidated',
-               'historical_potential_identity','shared_view_source_invalidated')
+               'historical_potential_identity','shared_view_source_invalidated','prior_attachment_query','prior_appearance_pending')
 
 
 def query_reasons_sql():

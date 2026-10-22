@@ -348,7 +348,7 @@ class Checkpoints:
                 for k, v in rebuild_cache.resource_limits(self.config).items())):
             raise ValueError('Checkpoint admission limits were reduced.')
         if header.get('inputs') != rebuild_cache.input_context(
-                self.database.connection, previous, self.scope, self.namespace):
+                self.database.connection, previous, self.scope, self.namespace,self.config):
             raise ValueError('Checkpoint raw input catalogue changed.')
         if not _single_signature_cues(self.database.connection, self.selected[len(previous):]):
             raise ValueError('Added scenes may change earlier co-presence decisions.')
@@ -422,7 +422,7 @@ class Checkpoints:
             raise ValueError('Only a committed strict prefix can be checkpointed.')
         self._owned()
         if self.input_hash is None:
-            self.input_hash = rebuild_cache.input_context(self.database.connection, self.selected,self.scope,self.namespace)
+            self.input_hash = rebuild_cache.input_context(self.database.connection, self.selected,self.scope,self.namespace,self.config)
         generation = uuid.uuid4().hex
         header = dict(format=FORMAT,engine=ENGINE,owner=self.owner,generation=generation,
             scope=self.scope,namespace=self.namespace,selected=self.selected,policy=matching_policy(self.config),

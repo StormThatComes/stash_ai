@@ -19,6 +19,7 @@ def resource_limits(config):
 def admissible(state,config):
     limits=state.get('limits')
     return (state.get('format')==2 and isinstance(limits,dict)
+            and not state.get('corroboration_pending',False)
             and all(type(limits.get(k)) is int and config.data['clustering'][k]>=limits[k]
                     for k in _RESOURCE_KEYS)
             and (limits==resource_limits(config) or state.get('resource_reuse') is True))
@@ -61,6 +62,16 @@ def input_context(db,selected,scope,namespace,config=None):
                 'ORDER BY CAST(s.scene AS INTEGER),s.scene,o.cue,o.id',
                 (encoded([item['scan'] for item in batch]),)):
                 _hash_row(hasher,row)
+            if config is not None:
+                from .corroborated_views import enabled
+                if enabled(config):
+                    for row in db.execute('SELECT o.id,c.person,c.status,CASE WHEN json_valid(c.payload) THEN '
+                            "json_extract(c.payload,'$.reason','$.strict_confirmation') END FROM observations o "
+                            'LEFT JOIN candidates c ON c.rowid=(SELECT z.rowid FROM candidates z WHERE '
+                            "CASE WHEN json_valid(z.payload) THEN json_extract(z.payload,'$.observation') END=o.id "
+                            'ORDER BY z.rowid DESC LIMIT 1) WHERE o.scan IN (SELECT value FROM json_each(?)) ORDER BY o.id',
+                            (encoded([item['scan'] for item in batch]),)):
+                        _hash_row(hasher,row)
             progress.advance(len(batch))
     return hasher.hexdigest()
 

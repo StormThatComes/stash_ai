@@ -157,7 +157,7 @@ def _attach_confirmed_views(db, selected, config, policy, anchors, usage, cache,
         scan = item['scan']
         source = (f'FROM candidates c JOIN observations o ON o.id={address(db, "c")} '
                   "WHERE c.scan=? AND c.policy=? AND c.status='withheld' "
-                  "AND json_extract(c.payload,'$.reason') IN ('auxiliary_unmatched','insufficient_match_or_cohesion',"
+                  "AND json_extract(c.payload,'$.reason') IN ('auxiliary_unmatched','prior_attachment_query','insufficient_match_or_cohesion',"
                   "'candidate_group','anchor_view_insufficient_support','global_view_insufficient_support')")
         rows = db.execute('SELECT o.*,c.id AS candidate ' + source +
                           ' ORDER BY o.cue,o.geometry,o.embedding,o.id', (scan, policy))

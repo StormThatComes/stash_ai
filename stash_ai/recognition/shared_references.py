@@ -157,7 +157,7 @@ def auxiliary_bank(db, config, scope, namespace, history, mapping, early):
     groups=[Group(mapping.get(g.identifier,g.identifier),g.samples,True,g.sample_ids) for g in groups]
     groups.extend(history.groups)
     views=[ViewPrototype(Group(mapping.get(v.group.identifier,v.group.identifier),v.group.samples,True),
-        v.pose,v.medoid,v.support,v.support_count,v.authority) for v in tuple(v for v in early if v.group.identifier in mapping)+tuple(history.views)]
+        v.pose,v.medoid,v.support,v.support_count,v.authority,getattr(v,'promotion',None)) for v in tuple(v for v in early if v.group.identifier in mapping)+tuple(history.views)]
     usage=ReferenceUsage(grouping['max_reference_bytes'])
     for group in groups:
         usage.add(group.samples,people=1,kind='Shared strict')

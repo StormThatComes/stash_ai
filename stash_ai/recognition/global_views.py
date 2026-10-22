@@ -28,6 +28,11 @@ class IdentityView:
     support_count: int
     examples: tuple
     authority: str = 'strict'
+    promotion: object = None
+
+    @property
+    def source_ids(self):
+        return tuple(dict.fromkeys(self.support+tuple((self.promotion or {}).get('source_reference_ids',()))))
 
 
 def catalogue(db, config, scope, namespace, *, usage, policy=None, excluded_scenes=(), scan_policy=None,

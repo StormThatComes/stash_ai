@@ -111,6 +111,11 @@ class ViewPrototype:
     support: tuple
     support_count: int
     authority: str = 'verified_view'
+    promotion: object = None
+
+    @property
+    def source_ids(self):
+        return tuple(dict.fromkeys(self.support+tuple((self.promotion or {}).get('source_reference_ids',()))))
 
     @property
     def identifier(self):

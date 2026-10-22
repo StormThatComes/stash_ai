@@ -37,3 +37,12 @@ def verified_sql(observation='o',member='m'):
             "AND json_extract(c.payload,'$.reason')='auxiliary_identity' "
             f"FROM candidates c WHERE {observation_sql('c')}={observation}.id "
             "ORDER BY c.rowid DESC LIMIT 1),0)")
+
+
+def attachment_sql(observation='o',member='m'):
+    """Only currently accepted non-strict, non-direct-auxiliary memberships."""
+    reasons=','.join(repr(r) for r in STRICT_REASONS+('auxiliary_identity',))
+    return (f"COALESCE((SELECT c.status='accepted' AND c.person={member}.person "
+            f"AND json_extract(c.payload,'$.reason') NOT IN ({reasons}) "
+            f"FROM candidates c WHERE {observation_sql('c')}={observation}.id "
+            "ORDER BY c.rowid DESC LIMIT 1),0)")
