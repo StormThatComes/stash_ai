@@ -39,7 +39,7 @@ def _identity(db, requested, person, group, config):
         samples = [dict(observation_id=i, scene_id=rows[i]['scene'], cue_index=rows[i]['cue'],
                         seconds=rows[i]['seconds'], quality=_quality(rows[i]['quality'])) for i in group.sample_ids]
     return dict(requested_identity_id=requested['id'], identity_id=person['id'],
-        performer_id=person['performer'], scenes=scenes, **counts,
+        requested_performer_id=requested['performer'], performer_id=person['performer'], scenes=scenes, **counts,
         selected_strict_references=len(samples), reference_limit=config.data['clustering']['max_samples_per_person'],
         reference_samples=samples, reference_quality=_quality_summary([s['quality'] for s in samples]))
 
@@ -51,18 +51,22 @@ def _usage(config, groups):
     return usage
 
 
-def build(config, left_id, right_id, *, scope=None):
-    """Preserve one read-only snapshot; a proposal never changes assignments."""
+def build(config, left_id, right_id, *, scope=None, by_performer=False):
+    """Compare UUIDs or Stash IDs in one read-only snapshot without changing assignments."""
     model_namespace = namespace(config)
     with closing(_open_readonly(config.database)) as db:
-        requested_left, left = _select(db, model_namespace, left_id, None, scope)
-        requested_right, right = _select(db, model_namespace, right_id, None, scope)
+        requested_left, left = _select(db, model_namespace,
+            None if by_performer else left_id, left_id if by_performer else None, scope)
+        requested_right, right = _select(db, model_namespace,
+            None if by_performer else right_id, right_id if by_performer else None, scope)
         if left['scope'] != right['scope']:
             raise ValueError('Identity comparison requires the same Stash scope.')
         identities = (left['id'], right['id'])
         result = dict(format=1, kind='recognition_identity_merge', scope=left['scope'],
             namespace=model_namespace, matching_policy=matching_policy(config),
-            requested_identity_ids=[str(left_id), str(right_id)], identity_ids=list(identities),
+            requested_identity_ids=[requested_left['id'], requested_right['id']], identity_ids=list(identities),
+            requested_performer_ids=[requested_left['performer'], requested_right['performer']],
+            performer_ids=[left['performer'], right['performer']],
             current_configuration={key: plain(config.data[key]) for key in ('detection', 'recognition', 'clustering')},
             paths=[], recommendations=[],
             analysis_basis='production_frozen_catalogue_counterfactual',
@@ -129,7 +133,9 @@ def build(config, left_id, right_id, *, scope=None):
 
 
 def execute(args, config):
-    result = build(config, *args.identity_id, scope=args.scope)
+    by_performer = args.performer_id is not None
+    identifiers = args.performer_id if by_performer else args.identity_id
+    result = build(config, *identifiers, scope=args.scope, by_performer=by_performer)
     output = json.dumps(result, indent=2, ensure_ascii=False, allow_nan=False) + '\n'
     if args.output is None:
         print(output, end='')
