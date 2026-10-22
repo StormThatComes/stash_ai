@@ -30,6 +30,7 @@ class Appearance:
     scenes: tuple
     scene_count: int
     parents: tuple
+    validated_ids: tuple = ()
 
 
 class PromotionCohorts:
@@ -70,7 +71,7 @@ class PromotionCohorts:
             self.scratch += (len(item.cluster.examples) - before) * query.nbytes
             self._check()
 
-    def supported(self):
+    def supported(self, *, minimum_scenes=2, track_ids=()):
         import numpy as np
         emitted = set()
         for slots in self.slots.values():
@@ -87,14 +88,16 @@ class PromotionCohorts:
                     if key in emitted:
                         continue
                     support = _Cluster(item.cluster.pose, identifier)
-                    scenes = {}
+                    scenes, validated = {}, []
                     for row, query in item.witnesses:
                         if (float(np.dot(sample, query)) < self.radius or
                                 not pose_matches(row['geometry'], item.cluster.pose)):
                             continue
                         support.add(row, query)
                         scenes.setdefault(row['scene'], row['id'])
-                    if len(support.cues) < self.minimum or len(scenes) < 2:
+                        if row['id'] in track_ids:
+                            validated.append(row['id'])
+                    if len(support.cues) < self.minimum or len(scenes) < minimum_scenes:
                         continue
                     examples = (sample,) + tuple(v for v in support.examples
                                                  if v.tobytes() != sample.tobytes())
@@ -104,4 +107,4 @@ class PromotionCohorts:
                                     tuple(scenes[s] for s in chosen_scenes)))
                     emitted.add(key)
                     yield Appearance(sample, identifier, item.cluster.pose, examples, queries,
-                                     len(support.cues), chosen_scenes, len(scenes), item.parents)
+                                     len(support.cues), chosen_scenes, len(scenes), item.parents,tuple(validated))

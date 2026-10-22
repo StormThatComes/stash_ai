@@ -32,20 +32,18 @@ def test_known_corroborated_queries_keep_owner_and_attachment_authority(tmp_path
         assert before==[tuple(r) for r in db.connection.execute('SELECT * FROM members ORDER BY observation')]
 
 
-def test_new_full_run_generation_waits_until_next_replay_then_becomes_cacheable(tmp_path,monkeypatch):
+def test_new_full_run_generation_finishes_once_then_becomes_cacheable(tmp_path,monkeypatch):
     config=configured(tmp_path)
     with FaceDatabase(config.database) as db:
         source=fixture(db,config,'1',[appearance(0)]*3+[appearance(45,15)]*3+[appearance(45,-15)]*3,range(3,9))
         queries=[fixture(db,config,str(i),[appearance(65)]*3) for i in (2,3)]
         last=fixture(db,config,'4',[appearance(88)]*3);selected=[source,*queries,last]
         rebuild_selected(db,selected,config)
-        assert all(s=='withheld' for s,_,_ in candidates(db,last['scan'],config))
-        state=json.loads(db.connection.execute("SELECT value FROM metadata WHERE key LIKE 'identity-rebuild:%'").fetchone()[0])
-        assert state['corroboration_pending'] and state['corroborated_plan']
-        rebuild_selected(db,selected,config)
         owner=candidates(db,source['scan'],config)[0][1]
         assert all(s=='accepted' and p==owner and d['reference_role']=='attachment' for s,p,d in candidates(db,last['scan'],config))
-        def forbidden(*a,**k):pytest.fail('the completed second generation should now be cached')
+        state=json.loads(db.connection.execute("SELECT value FROM metadata WHERE key LIKE 'identity-rebuild:%'").fetchone()[0])
+        assert not state['corroboration_pending'] and state['corroborated_plan']
+        def forbidden(*a,**k):pytest.fail('the completed single-run generation should now be cached')
         monkeypatch.setattr('stash_ai.recognition.rebuild.cluster_scene',forbidden)
         rebuild_selected(db,selected,config)
 

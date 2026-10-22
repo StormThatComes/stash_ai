@@ -11,6 +11,7 @@ from .database import encoded
 from .global_views import IdentityView
 from .view_prototypes import coverage_threshold,pose_matches
 from .promotion_cohorts import PromotionCohorts
+from .progress import tracking
 
 
 def _independent(roots):
@@ -46,30 +47,30 @@ def previous_strict(db,selected,config,scope,namespace):
         parameters([],config,scope,namespace)+(encoded([s['scan'] for s in selected]),)))
 
 
-def previous_hints(db,config,scope,namespace,previous):
-    """A previous plan can defer a birth, never authorize an assignment."""
+def previous_hints(db,config,scope,namespace):
+    """Fresh rooted prior looks can defer births, never authorize ownership.
+
+    One prior query scene is enough for a negative hint, provided independent
+    support and both current rooted parents still hold. Positive promotion
+    continues to require two scenes, including a freshly validated selected one.
+    """
     if not enabled(config):return ()
-    import json
-    from .config import digest
-    row=db.execute('SELECT value FROM metadata WHERE key=?',('identity-rebuild:'+digest([scope,namespace]),)).fetchone()
-    try:state=json.loads(row[0]) if row else {}
-    except (ValueError,TypeError):state={}
-    if not isinstance(state,dict):state={}
-    ids=state.get('corroborated_plan')
-    if ids is None and previous:
-        # Bootstrap an existing library once. Later plans are persisted with the
-        # completed rebuild, avoiding another whole-bank capture on warm runs.
-        from .historical_references import capture,refresh_verified
-        from .reference_usage import ReferenceUsage
-        usage=ReferenceUsage(config.data['clustering']['max_reference_bytes'])
-        history=capture(db,[],config,scope,namespace,'prior-corroboration-plan',resolve_aliases=False)
-        for g in history.groups:usage.add(g.samples,kind='Prior plan strict')
-        for v in history.views:usage.add(v.examples,kind='Prior plan views')
-        refresh_verified(db,[],config,scope,namespace,history,usage)
-        ids=[v.medoid for v in history.views if v.authority=='corroborated_view']
-    if not isinstance(ids,(list,tuple)) or any(not isinstance(i,str) for i in ids):return ()
-    from .historical_references import _source,parameters
+    from .historical_references import _source,parameters,capture
     from .reference_compatibility import fallback_sql
+    minimum=max(config.data['clustering']['view_min_support'],config.data['recognition']['min_merge_support'])
+    source=_source(config,fallback_sql(db,config,namespace),attachment=True)
+    count=db.execute('SELECT COUNT(*) FROM (SELECT o.scan,o.seconds '+source+
+        ' GROUP BY o.scan,o.seconds LIMIT ?)',parameters([],config,scope,namespace)+(minimum,)).fetchone()[0]
+    if count<minimum:return ()
+    # This read-only bank supplies only label-free negative hints. Selected
+    # sources must still obtain fresh ownership in the ordinary cold replay.
+    history=capture(db,[],config,scope,namespace,'prior-rooted-birth-hints')
+    from .reference_usage import ReferenceUsage
+    usage=ReferenceUsage(config.data['clustering']['max_reference_bytes'])
+    for g in history.groups:usage.add(g.samples,kind='Prior hint strict')
+    for v in history.views:usage.add(v.examples,kind='Prior hint views')
+    appearances=_build(db,config,scope,namespace,[],history,usage,minimum_scenes=1)
+    ids=tuple(a.medoid for a in appearances)
     return tuple(db.execute('SELECT o.id,o.geometry,o.dimensions,o.embedding '+_source(config,fallback_sql(db,config,namespace),attachment=True)+
         ' AND o.id IN (SELECT value FROM json_each(?)) ORDER BY o.id',
         parameters([],config,scope,namespace)+(encoded(ids),)))
@@ -105,8 +106,13 @@ def defer_new_groups(db,config,hints,established):
     return tuple(sorted(used))
 
 
-def enrich(db,config,scope,namespace,selected,history,usage,*,eligible_ids=None,query_rows=None):
+def enrich(db,config,scope,namespace,selected,history,usage,*,eligible_ids=None,query_rows=None,validated_hints=None,hint_ids=()):
     """Freeze extra query-only views; no membership or reference-role writes."""
+    return _build(db,config,scope,namespace,selected,history,usage,
+                  eligible_ids=eligible_ids,query_rows=query_rows,validated_hints=validated_hints,hint_ids=hint_ids)
+
+
+def _build(db,config,scope,namespace,selected,history,usage,*,eligible_ids=None,query_rows=None,minimum_scenes=2,validated_hints=None,hint_ids=()):
     grouping,settings=config.data['clustering'],config.data['recognition']
     if not enabled(config) or not history.groups or not history.views:
         return ()
@@ -128,7 +134,7 @@ def enrich(db,config,scope,namespace,selected,history,usage,*,eligible_ids=None,
     threshold=max(settings['match_threshold'],grouping['view_match_threshold'])
     margin=max(settings['ambiguity_margin'],grouping['view_ambiguity_margin'])
     radius=max(coverage_threshold(grouping),math.sqrt((1+grouping['view_cohesion_threshold'])/2))
-    rows=(query_rows() if query_rows is not None else db.execute('SELECT m.person,o.*,s.scene '+
+    rows=(query_rows() if query_rows is not None else db.execute('SELECT m.person,o.id,o.scan,o.cue,o.seconds,o.geometry,o.quality,o.dimensions,o.embedding,s.scene '+
         _source(config,fallback_sql(db,config,namespace),attachment=True)+
         ' ORDER BY m.person,o.embedding,o.geometry,o.id',parameters(selected,config,scope,namespace)))
     output,owner,cohorts=[],None,None
@@ -136,7 +142,16 @@ def enrich(db,config,scope,namespace,selected,history,usage,*,eligible_ids=None,
     def emit():
         if owner is None:return
         strict_ids=tuple(i for g in bank.groups if g.identifier==owner for i in g.sample_ids)
-        for appearance in cohorts.supported():
+        if validated_hints is not None:
+            for appearance in cohorts.supported(minimum_scenes=1,track_ids=hint_ids):
+                for identifier in (appearance.medoid,)+appearance.validated_ids:
+                    validated_hints[identifier]=owner
+        for appearance in cohorts.supported(minimum_scenes=minimum_scenes):
+            usage.add(appearance.examples,kind='Corroborated attachment view')
+            if minimum_scenes==1:
+                # Negative hints have no identity, authority, or positive view.
+                output.append(appearance)
+                continue
             parents=tuple(roots[i] for i in appearance.parents)
             sample,medoid=appearance.sample,appearance.medoid
             queries=appearance.queries
@@ -147,33 +162,33 @@ def enrich(db,config,scope,namespace,selected,history,usage,*,eligible_ids=None,
                 parents=[dict(medoid=v.medoid,authority=v.authority,support_ids=v.source_ids) for v in parents],
                 threshold=threshold,cohesion_threshold=grouping['view_cohesion_threshold'],support_radius=radius,
                 validation='two_disjoint_rooted_views_and_two_query_scenes')
-            usage.add(appearance.examples,kind='Corroborated attachment view')
             output.append(IdentityView(Group(owner,(sample,),True,(medoid,)),appearance.pose,medoid,
                 queries,appearance.support,appearance.examples,'corroborated_view',proof))
 
-    for raw in rows:
-        if eligible_ids is not None and raw['id'] not in eligible_ids:continue
-        row=dict(raw);row['person']=history.aliases.get(row['person'],row['person'])
-        if owner!=row['person']:
-            emit();owner=row['person'];cohorts=PromotionCohorts(roots,radius,minimum,usage)
-        if owner not in by_owner:continue
-        result=rank([row],bank,config)
-        if result is None or result[0]!=owner:continue
-        query=vector(row);qualified=[]
-        for parent in by_owner[owner]:
-            medoid=parent.medoid
-            if not pose_matches(row['geometry'],parent.pose):continue
-            score=float(np.dot(query,parent.group.samples[0]))
-            if score<threshold:continue
-            if any(float(np.dot(query,s))<grouping['view_cohesion_threshold'] for s in parent.examples):continue
-            # Each root must independently beat all mixed rival identities.
-            rival=result[1]['rival_score']
-            if rival is not None and score-rival<margin:continue
-            from .anchor_views import _competing_anchor
-            if _competing_anchor(bank.groups,owner,query,score,margin):continue
-            if not co_presence_allows(row.get('_database',db),row,parent.group,references,query,config):continue
-            qualified.append(medoid)
-        if _independent([roots[i] for i in qualified]) is None:continue
-        cohorts.add(row,query,qualified)
+    with tracking(rows,'Validate rooted query confirmations',unit='observation') as tracked:
+        for raw in tracked:
+            if eligible_ids is not None and raw['id'] not in eligible_ids:continue
+            row=dict(raw);row['person']=history.aliases.get(row['person'],row['person'])
+            if owner!=row['person']:
+                emit();owner=row['person'];cohorts=PromotionCohorts(roots,radius,minimum,usage)
+            if owner not in by_owner:continue
+            result=rank([row],bank,config)
+            if result is None or result[0]!=owner:continue
+            query=vector(row);qualified=[]
+            for parent in by_owner[owner]:
+                medoid=parent.medoid
+                if not pose_matches(row['geometry'],parent.pose):continue
+                score=float(np.dot(query,parent.group.samples[0]))
+                if score<threshold:continue
+                if any(float(np.dot(query,s))<grouping['view_cohesion_threshold'] for s in parent.examples):continue
+                # Each root must independently beat all mixed rival identities.
+                rival=result[1]['rival_score']
+                if rival is not None and score-rival<margin:continue
+                from .anchor_views import _competing_anchor
+                if _competing_anchor(bank.groups,owner,query,score,margin):continue
+                if not co_presence_allows(row.get('_database',db),row,parent.group,references,query,config):continue
+                qualified.append(medoid)
+            if _independent([roots[i] for i in qualified]) is None:continue
+            cohorts.add(row,query,qualified)
     emit()
     return tuple(output)
