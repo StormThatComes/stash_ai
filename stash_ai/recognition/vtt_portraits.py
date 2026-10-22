@@ -16,6 +16,7 @@ from .portraits import policy_identity
 from .quality import PortraitFramingError, portrait_bytes
 from .portrait_availability import measure_available, score_metadata, observation_identity, retained_image, retained_portrait, cached_thumbnail, fit_cached_bytes, measurement_basis
 from .visibility import cached as cached_visibility, required as visibility_required
+from .portrait_admission import reason as anchor_reason,pose_reason,extra_measurements
 from .expression import cached as cached_expression, required as expression_required
 from .progress import tracking
 from .portrait_availability import candidate_observations, crop_row
@@ -165,8 +166,10 @@ def choose_vtt(database, client, config, scope, target, source_factory, visibili
                             metadata.update(similarity=similarity, runner_up=runner, identity_basis=basis)
                         except (TypeError, ValueError):
                             reason = 'portrait_identity_unverified'
+                        reason=pose_reason(quality,config) or reason
                         required = {name for name, needed in (
                             ('visibility', visibility_required(policy)), ('expression', expression_required(policy))) if needed}
+                        required.update(extra_measurements(config))
                         cached = {'visibility': cached_visibility, 'expression': cached_expression}
                         bases = quality.setdefault('measurement_basis', {})
                         # Older fallback caches recorded provenance only on portraits.
@@ -205,7 +208,7 @@ def choose_vtt(database, client, config, scope, target, source_factory, visibili
                                 requested = missing | force
                                 with image:
                                     metadata['quality_errors'] = measure_available(client, image, face, quality, policy,
-                                        visibility, expression, force=force)
+                                        visibility, expression, force=force,extra_required=extra_measurements(config))
                                 for name in requested:
                                     if name not in metadata['quality_errors'] and cached[name](quality):
                                         bases[name] = measurement_basis(crop_row(db, row) if source_type == 'recognition_crop' else row,
@@ -216,6 +219,7 @@ def choose_vtt(database, client, config, scope, target, source_factory, visibili
                         source_types = {basis['source_type'] for name, basis in bases.items() if name in required}
                         if source_types:
                             metadata['quality_source'] = next(iter(source_types)) if len(source_types) == 1 else 'mixed'
+                        reason=reason or anchor_reason(quality,config)
                         if reason:
                             metadata['reason'] = reason
                         else:
@@ -243,6 +247,11 @@ def choose_vtt(database, client, config, scope, target, source_factory, visibili
                 existing = db.execute('SELECT * FROM portraits WHERE id=?', (identifier,)).fetchone()
                 metadata = json.loads(existing['metadata'])
                 metadata['eligible_observations'] = considered
+                rejected=anchor_reason(metadata.get('quality',{}),config)
+                if rejected:
+                    metadata['reason']=rejected
+                    store(database,identifier,scope,target,scene,metadata)
+                    continue
                 if existing['image'] is not None and metadata['source_type'] == 'vtt':
                     try:
                         data, sha = fit_cached_bytes(existing['image'], existing['digest'], config, metadata)

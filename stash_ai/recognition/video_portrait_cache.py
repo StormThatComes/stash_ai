@@ -23,7 +23,7 @@ def reuse(database, config, scope, target, observation, scene, seconds, namespac
     previous_policy = dict(metadata.get('policy', {}))
     current_policy = plain(policy)
     for field in ('weights', 'min_face_pixels', 'min_sharpness', 'max_pose_deviation',
-                  'min_exposure', 'max_exposure', 'max_clipped_fraction', 'min_visible_face_fraction'):
+                  'min_exposure', 'max_exposure', 'max_clipped_fraction', 'min_visible_face_fraction','anchor_only'):
         previous_policy.pop(field, None)
         current_policy.pop(field, None)
     if previous_policy != current_policy:

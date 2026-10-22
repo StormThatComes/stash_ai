@@ -49,6 +49,7 @@ clustering:
   max_reference_bytes: 134217728 # 128 MiB of float32 references; run reports usage/peak. Not total RAM/VRAM.
 portraits:
   enabled: true               # false removes app-owned portraits for selected accepted people.
+  anchor_only: false          # true requires the actual portrait face to pass clustering anchor pose/visibility rules.
   source: vtt                  # Default: recognition thumbnail. Optional video uses FFmpeg.
   # Quality targets are ranking preferences: imperfect faces still supply a portrait.
   # detection.* remains the separate hard gate for recognition observations.

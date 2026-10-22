@@ -25,7 +25,7 @@ from .backend import prepared_frame
 
 def policy_identity(config):
     from .context import policy_digest
-    return policy_digest(config, ('portraits-v4', CONTRACT_ID, EXPRESSION_CONTRACT_ID),
+    return policy_digest(config, ('portraits-v5', CONTRACT_ID, EXPRESSION_CONTRACT_ID),
                          lambda: _policy_value(config))
 
 
@@ -36,10 +36,11 @@ def _policy_value(config):
             policy.pop(name)
     from .visibility import required as visibility_required
     from .expression import required as expression_required
-    return {'version': 4, 'portraits': policy,
+    from .portrait_admission import extra_measurements
+    return {'version': 5, 'portraits': policy,
                    'max_crop_bytes': config.data['storage']['max_crop_bytes'],
                    'recognition': plain(config.data['recognition']), 'clustering': plain(config.data['clustering']),
-                   'visibility_contract': CONTRACT_ID if visibility_required(policy) else None,
+                   'visibility_contract': CONTRACT_ID if visibility_required(policy) or extra_measurements(config) else None,
                    'expression_contract': EXPRESSION_CONTRACT_ID if expression_required(policy) else None}
 
 
@@ -140,11 +141,15 @@ def recheck_cached(database, existing, groups, config, target, namespace, contex
             evidence = {'dimensions': dimensions, 'embedding': np.asarray(values, dtype='<f4').tobytes()}
         query = retained_vector(evidence)
         reason, similarity, runner = identity_reason(query, groups, target['person'], config)
+        from .portrait_admission import reason as anchor_reason,pose_reason,extra_measurements
+        reason=reason or pose_reason(updated.get('quality',{}),config)
         if not reason:
             if client is not None:
-                refresh_cached_quality(client, existing, updated, config.data['portraits'], visibility, expression)
+                refresh_cached_quality(client, existing, updated, config.data['portraits'], visibility, expression,
+                                       extra_required=extra_measurements(config))
             quality = metadata.get('quality', {})
             score_metadata(updated, updated.get('quality', quality), config.data['portraits'])
+            reason=anchor_reason(updated.get('quality',{}),config)
     except (KeyError, TypeError, ValueError):
         # Older video portraits lack an embedding. Preserve their bytes, but do
         # not infer from a new source or publish unverified old eligibility.
@@ -227,7 +232,13 @@ def choose(database, client, config, scope, target, paths, backend_factory, deco
                         key = (-metadata['score'], -metadata['quality_tiebreak'], scene_id, seconds, identifier)
                         if winning_key is None or key < winning_key:
                             winner, winning_key = existing, key
-                    continue
+                        continue
+                    # A previously best auxiliary face must not hide another
+                    # eligible anchor in the same decoded frame after retuning.
+                    rejected=database.connection.execute('SELECT metadata FROM portraits WHERE id=?',(identifier,)).fetchone()
+                    why=json.loads(rejected['metadata']).get('reason') if rejected is not None else None
+                    if not policy['anchor_only'] or why not in ('portrait_anchor_required','portrait_anchor_visibility_unavailable'):
+                        continue
                 metadata = {'version': 3, 'source_type': 'video', 'requested_source': 'video',
                             'selection_policy': 'best-available-video-identity-first-v3',
                             'policy_sha': policy_sha, 'policy': plain(policy), 'shortlist': selection,
@@ -257,12 +268,18 @@ def choose(database, client, config, scope, target, paths, backend_factory, deco
                                 reason, similarity, runner = identity_reason(vector, groups, target['person'], config)
                             except Exception:
                                 reason = 'portrait_identity_unverified'
+                            from .portrait_admission import pose_reason,reason as anchor_reason,extra_measurements
+                            reason=pose_reason(quality,config) or reason
                             record = {'geometry': list(face.row), 'quality': quality, 'reason': reason,
                                       'similarity': similarity, 'runner_up': runner}
                             if reason:
                                 exclusions.append(record)
                             else:
-                                record['quality_errors'] = measure_available(client, image, face, quality, policy, visibility, expression)
+                                record['quality_errors'] = measure_available(client, image, face, quality, policy, visibility, expression,
+                                                                            extra_required=extra_measurements(config))
+                                rejected=anchor_reason(quality,config)
+                                if rejected:
+                                    record['reason']=rejected;exclusions.append(record);continue
                                 record['identity_embedding'] = {'dimensions': backend.dimensions, 'values': vector.tolist()}
                                 record['reference_context'] = context
                                 score_metadata(record, quality, policy)
@@ -395,6 +412,8 @@ def _current_prior(database, prior, client, config, scope, target, visibility, e
         return None
     try:
         reason, *_ = observation_identity(database, row, groups, target, config, context)
+        from .portrait_admission import reason as anchor_reason
+        reason=reason or anchor_reason(json.loads(row['quality']),config) or anchor_reason(metadata.get('quality',{}),config)
         fit_cached_bytes(prior['image'], prior['digest'], config, dict(metadata))
     except (KeyError, TypeError, OSError, ValueError):
         return None
