@@ -724,14 +724,26 @@ tokens, source URLs and complete run configurations are not exported.
 
 ## Two-identity merge parameter report
 
-Compare two internal identity UUIDs, including identities in different scenes:
+Compare two identities by their numeric Stash performer IDs, including identities
+in different scenes:
 
 ```powershell
-python stash_ai.py recognition report-merge --identity-id <left-uuid> --identity-id <right-uuid> --face-config facial_recognition.yml --faces-db faces_state.sqlite3 --output merge-report.json
+python stash_ai.py recognition report-merge --performer-id 123 --performer-id 456 --face-config facial_recognition.yml --faces-db faces_state.sqlite3 --output merge-report.json
 # Omit --output to print JSON to stdout.
+# Internal identity UUIDs remain available, including identities without a Stash performer:
+python stash_ai.py recognition report-merge --identity-id <left-uuid> --identity-id <right-uuid> --output merge-report.json
 ```
 
-The two IDs must share the recognizer namespace and Stash scope. Predecessor IDs
+Provide exactly two `--performer-id` values or exactly two `--identity-id` values;
+the selectors cannot be mixed. Performer IDs are resolved from the retained local
+face database, without contacting Stash. If a performer ID occurs in multiple Stash
+scopes, add `--scope <scope>` or use internal identity IDs. The selected YAML
+determines the recognizer namespace. Missing identities in that namespace/scope
+are errors; IDs never fall back to another model or instance.
+
+The report includes requested and resolved identity/performer IDs, including when
+both inputs already resolve to one identity. The two IDs must share the recognizer
+namespace and Stash scope. Predecessor IDs
 follow recorded merge aliases; two aliases of one person return `already_merged`.
 The command opens one read-only SQLite snapshot and uses retained embeddings.
 It does not load models, fetch media, contact Stash, create run history or change

@@ -205,6 +205,99 @@ def test_aliases_are_resolved_and_cross_scope_or_missing_ids_fail(tmp_path):
         build(config, *people)
 
 
+def test_performer_ids_produce_the_same_analysis_as_identity_ids(tmp_path):
+    config, people = seeded(tmp_path)
+    before = config.database.read_bytes()
+    report = build(config, '900', '901', by_performer=True)
+    assert report == build(config, *people)
+    assert report['requested_identity_ids'] == report['identity_ids'] == people
+    assert report['requested_performer_ids'] == report['performer_ids'] == ['900', '901']
+    assert [p['requested_performer_id'] for p in report['identities']] == ['900', '901']
+    assert config.database.read_bytes() == before
+
+
+def test_performer_aliases_preserve_requested_and_canonical_ids(tmp_path):
+    config, people = seeded(tmp_path, [[1., 0, 0, 0], [0., 1, 0, 0], [.7, math.sqrt(1-.7**2), 0, 0]])
+    with FaceDatabase(config.database) as state:
+        state.connection.execute('INSERT INTO identity_merges VALUES (?,?,?,?,?)',
+            (people[1], people[0], 1., '{}', 'confirmed'))
+        state.connection.commit()
+    before = config.database.read_bytes()
+    report = build(config, '901', '902', by_performer=True)
+    assert report == build(config, people[1], people[2])
+    assert report['requested_identity_ids'] == people[1:]
+    assert report['identity_ids'] == [people[0], people[2]]
+    assert report['requested_performer_ids'] == ['901', '902']
+    assert report['performer_ids'] == ['900', '902']
+    assert report['identities'][0]['requested_performer_id'] == '901'
+    assert report['identities'][0]['performer_id'] == '900'
+    assert config.database.read_bytes() == before
+
+
+@pytest.mark.parametrize('identifiers', [('900', '901'), ('901', '900'), ('900', '900')])
+def test_performer_ids_already_resolving_to_one_identity_are_explicit(tmp_path, identifiers):
+    config, people = seeded(tmp_path)
+    with FaceDatabase(config.database) as state:
+        state.connection.execute('INSERT INTO identity_merges VALUES (?,?,?,?,?)',
+            (people[1], people[0], 1., '{}', 'confirmed'))
+        state.connection.commit()
+    before = config.database.read_bytes()
+    report = build(config, *identifiers, by_performer=True)
+    assert report['status'] == 'already_merged'
+    assert report['requested_performer_ids'] == list(identifiers)
+    assert report['performer_ids'] == ['900', '900']
+    assert report['identity_ids'] == [people[0], people[0]]
+    assert config.database.read_bytes() == before
+
+
+def test_performer_ids_require_scope_when_the_same_id_occurs_in_two_instances(tmp_path):
+    config, people = seeded(tmp_path)
+    with FaceDatabase(config.database) as state:
+        state.connection.execute('INSERT INTO people VALUES (?,?,?,?,?,?)',
+            (str(uuid.uuid4()), 'other', namespace(config), 0., '900', 'other-token'))
+        state.connection.commit()
+    with pytest.raises(ValueError, match='ambiguous'):
+        build(config, '900', '901', by_performer=True)
+    report = build(config, '900', '901', scope='scope', by_performer=True)
+    assert report['identity_ids'] == people
+    # UUID selection continues to work without an explicit scope.
+    assert report == build(config, *people)
+
+
+def test_performer_ids_never_fall_back_to_another_model_or_scope(tmp_path):
+    config, people = seeded(tmp_path)
+    with pytest.raises(ValueError, match='No identity'):
+        build(config, '900', '999', by_performer=True)
+    with pytest.raises(ValueError, match='No identity'):
+        build(config, '900', '901', scope='missing', by_performer=True)
+    data = plain(config.data);data['models']['recognizer'] = 'auraface'
+    with pytest.raises(ValueError, match='No identity'):
+        build(replace(config, data=data), '900', '901', by_performer=True)
+    with FaceDatabase(config.database) as state:
+        state.connection.execute('UPDATE people SET scope=? WHERE id=?', ('other', people[1]))
+        state.connection.commit()
+    with pytest.raises(ValueError, match='same Stash scope'):
+        build(config, '900', '901', by_performer=True)
+
+
+@pytest.mark.parametrize('selector', ['--performer-id', '--identity-id'])
+@pytest.mark.parametrize('count', [0, 1, 3])
+def test_merge_cli_requires_exactly_two_ids_of_one_kind(selector, count):
+    with pytest.raises(SystemExit):
+        parser().parse_args(['report-merge'] + [part for _ in range(count) for part in (selector, '900')])
+
+
+@pytest.mark.parametrize('invalid', ['0', '-1', 'abc', '1.5', '１２３'])
+def test_merge_cli_rejects_invalid_stash_performer_ids(invalid):
+    with pytest.raises(SystemExit):
+        parser().parse_args(['report-merge', '--performer-id', invalid, '--performer-id', '901'])
+
+
+def test_merge_cli_rejects_mixed_selectors():
+    with pytest.raises(SystemExit):
+        parser().parse_args(['report-merge', '--performer-id', '900', '--identity-id', str(uuid.uuid4())])
+
+
 @pytest.mark.parametrize('focus_positions', [(0, 1), (1, 2), (2, 0)])
 @pytest.mark.parametrize('outsiders', [0, 17])
 def test_focused_planner_matches_full_components_and_outsider_competition(tmp_path, focus_positions, outsiders):
@@ -220,15 +313,20 @@ def test_focused_planner_matches_full_components_and_outsider_competition(tmp_pa
         assert focused == tuple(p for p in full if set(focus).intersection(p['people']))
 
 
-def test_cli_json_export_is_offline_readonly_and_exclusive(tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize('selector', ['--identity-id', '--performer-id'])
+def test_cli_json_export_is_offline_readonly_and_exclusive(tmp_path, monkeypatch, capsys, selector):
     config, people = seeded(tmp_path)
     import stash_ai.recognition.run as run
     monkeypatch.setattr(run, 'execute', lambda *a, **k: pytest.fail('must remain offline'))
     before = config.database.read_bytes()
-    args = ['report-merge', '--identity-id', people[0], '--identity-id', people[1],
+    identifiers = people if selector == '--identity-id' else ['0900', '0901']
+    args = ['report-merge', selector, identifiers[0], selector, identifiers[1],
             '--face-config', str(tmp_path/'faces.yml'), '--faces-db', str(config.database)]
     assert main(args) == 0
-    assert json.loads(capsys.readouterr().out)['kind'] == 'recognition_identity_merge'
+    report = json.loads(capsys.readouterr().out)
+    assert report['kind'] == 'recognition_identity_merge'
+    assert report['requested_identity_ids'] == report['identity_ids'] == people
+    assert report['requested_performer_ids'] == report['performer_ids'] == ['900', '901']
     output = tmp_path/'merge.json'
     assert main(args + ['--output', str(output)]) == 0
     assert json.loads(output.read_text())['recommendations']
@@ -237,6 +335,3 @@ def test_cli_json_export_is_offline_readonly_and_exclusive(tmp_path, monkeypatch
         main(args + ['--output', str(output)])
     with pytest.raises(ValueError, match='overwrite'):
         main(args + ['--output', str(config.database)])
-    for count in (0, 1, 3):
-        with pytest.raises(SystemExit):
-            parser().parse_args(['report-merge'] + [part for _ in range(count) for part in ('--identity-id', people[0])])
