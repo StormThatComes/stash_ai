@@ -6,12 +6,30 @@ infrequent liveness messages. `compact` keeps the short layout; `verbose` permit
 additional details; `off` disables decorative progress while retaining warnings,
 errors and normal command summaries.
 
-`recognition run` shares this owner with two work rows (selected scenes and VTT
-frames in the active scene) followed by a status area. Publication
-and names/portraits replace the work rows with their own stage totals. Remaining
-time estimates cover each measured stage; redirected frame updates appear in
-throttled heartbeats rather than one log entry per frame or scene. Recognition
-quality/reference details and the names YAML starter require `verbose`.
+`recognition run` uses a numbered phase plan: selection, lazy model configuration,
+VTT scanning, identity rebuild, Stash publication, performer selection, names
+preflight, metadata and names starter (nine phases with metadata enabled).
+`recognition portraits` has its own shorter plan. Phase numbers describe the
+execution order, rather than a percentage of total runtime. Branches with no
+eligible work explicitly report why they were skipped; a failed rebuild skips
+publication with that failure reason.
+
+Two work rows show the current scene/person total and the observations, references
+or candidates inside that work. Publication and names/portraits replace these rows
+with their own totals. Each bar owns its count, throughput and remaining-time
+estimate; these metrics are not repeated in the terminal status area. The status
+instead shows the numbered phase, named rebuild step, current activity, elapsed
+phase time and time since completed work **in that phase**. Reference memory and
+detailed CPU queue counters require `verbose`. Estimates cover the active work
+row only; there is no whole-run ETA. Unknown totals remain indeterminate.
+
+Redirected recognition output prints phase start/outcome messages and one named
+work snapshot at most every 15 seconds, including during continuously busy work.
+Each snapshot gives the active row labels, counts, rates and row-local ETAs.
+Per-bar start/end milestones and rebuild-step transitions require `verbose`;
+normal runs do not log two extra milestones for every small replay operation.
+Recognition quality/reference details and the names YAML starter also require
+`verbose`. `off` retains summaries and errors without decorative output.
 
 Recognition also measures identity replay (copy, matching, historical binding,
 transactional apply and cached validation), name preflight, model assets, and
@@ -20,6 +38,14 @@ references or candidate checks use the second. UI refreshes are throttled and
 record totals use scalar counts rather than materializing embeddings/JPEGs.
 `off` and standalone calls skip optional total queries. Unknown totals remain
 indeterminate; a failed transaction never completes its apply bar.
+Local appearance grouping reports both selected scenes and successfully grouped
+observations, using an optional scalar observation count. Provisional identity
+comparisons report blocks and groups; frozen consolidation reports competition
+checks and component application separately. Rebuild dependency validation,
+checkpoint restoration, strict cores, appearance banks, historical reconciliation,
+auxiliary assignment and final reference validation retain a named step even when
+SQL/native work has no measurable total. Nested work restores its parent's labels
+and counters, and completed detail rows clear their own counters.
 `Validate rebuild input catalogue` keeps the scene total on the first row and
 shows face-observation hashing and assignment-evidence validation on the second,
 with per-batch observation totals, throughput and ETA. A scene batch completes

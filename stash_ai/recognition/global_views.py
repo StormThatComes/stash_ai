@@ -224,38 +224,39 @@ def consolidation_plan(db,views,config,*,neighbours=None,mixed=False,cooccurs=No
     for person in owned:
         components.setdefault(root(person),[]).append(person)
     result=[]
-    for people in components.values():
-        if focus is not None and not focus.intersection(people):
-            continue
-        complete=len(people)>1 and all(degrees[p]==len(people)-1 for p in people)
-        rival=None
-        if complete:
-            for person in people:
-                for view in owned[person]:
-                    strict=view.authority=='strict_core'
-                    effective=settings['match_threshold'] if strict else threshold
-                    for other,score,_ in comparisons(groups,view.group.samples[0],effective-margin):
-                        if root(other.identifier)==root(person):
-                            continue
-                        if mixed and view.authority!=by_group[id(other)].authority:
-                            continue
-                        if view.authority==by_group[id(other)].authority=='strict_core':
-                            from .clustering import _similarities
-                            raw=Group(other.identifier,by_group[id(other)].examples,True)
-                            score=sum(_similarities(raw,q)[0] for q in view.examples)/len(view.examples)
-                            if score<effective-margin:
+    with tracking(components.values(), 'Check frozen component competition', unit='component', position=1) as tracked:
+        for people in tracked:
+            if focus is not None and not focus.intersection(people):
+                continue
+            complete=len(people)>1 and all(degrees[p]==len(people)-1 for p in people)
+            rival=None
+            if complete:
+                for person in people:
+                    for view in owned[person]:
+                        strict=view.authority=='strict_core'
+                        effective=settings['match_threshold'] if strict else threshold
+                        for other,score,_ in comparisons(groups,view.group.samples[0],effective-margin):
+                            if root(other.identifier)==root(person):
                                 continue
-                        entry=dict(identity=person,rival=other.identifier,score=score,
-                                   internal_score=floors[person],gap=floors[person]-score)
-                        if rival is None or (entry['gap'],person,other.identifier)<(rival['gap'],rival['identity'],rival['rival']):
-                            rival=entry
-        blocker=('no_supported_pair' if len(people)<2 else 'incomplete_strong_component' if not complete else
-                 'competing_view' if rival is not None and rival['gap']<margin else None)
-        result.append(dict(people=tuple(sorted(people)),format=3,frozen=True,
-            component_context=digest(sorted(people)),component_size=len(people),
-            complete_component=complete,minimum_supported_degree=min(degrees[p] for p in people),
-            required_degree=len(people)-1,nearest_rival=rival,ambiguity_margin=margin,
-            outcome='merge' if blocker is None else 'blocked',blocker=blocker))
+                            if mixed and view.authority!=by_group[id(other)].authority:
+                                continue
+                            if view.authority==by_group[id(other)].authority=='strict_core':
+                                from .clustering import _similarities
+                                raw=Group(other.identifier,by_group[id(other)].examples,True)
+                                score=sum(_similarities(raw,q)[0] for q in view.examples)/len(view.examples)
+                                if score<effective-margin:
+                                    continue
+                            entry=dict(identity=person,rival=other.identifier,score=score,
+                                       internal_score=floors[person],gap=floors[person]-score)
+                            if rival is None or (entry['gap'],person,other.identifier)<(rival['gap'],rival['identity'],rival['rival']):
+                                rival=entry
+            blocker=('no_supported_pair' if len(people)<2 else 'incomplete_strong_component' if not complete else
+                     'competing_view' if rival is not None and rival['gap']<margin else None)
+            result.append(dict(people=tuple(sorted(people)),format=3,frozen=True,
+                component_context=digest(sorted(people)),component_size=len(people),
+                complete_component=complete,minimum_supported_degree=min(degrees[p] for p in people),
+                required_degree=len(people)-1,nearest_rival=rival,ambiguity_margin=margin,
+                outcome='merge' if blocker is None else 'blocked',blocker=blocker))
     return tuple(result)
 
 
@@ -267,31 +268,33 @@ def merge_views(database,views,config,policy,*,neighbours=None,evidence_field='g
         owned.setdefault(view.group.identifier,[]).append(view)
     order={r['id']:(r['created'],r['id']) for r in db.execute('SELECT id,created FROM people')}
     related=neighbours if neighbours is not None else set()
-    for decision in (consolidation_plan(db,views,config,neighbours=related) if plan is None else plan):
-        people=decision['people']
-        summary={k:v for k,v in decision.items() if k!='people'}
-        if any(person in related for person in people):
-            db.execute("UPDATE candidates SET payload=json_set(payload,'$.global_view_consolidation',json(?)) "
-                       'WHERE policy=? AND person IN (SELECT value FROM json_each(?))',
-                       (encoded(summary),policy,encoded(people)))
-        if decision['outcome']!='merge':
-            continue
-        target,*sources=sorted(people,key=lambda p:order[p])
-        proofs=[]
-        for source in sources:
-            candidates=[cohort_evidence(db,left,right,config) for left in owned[target] for right in owned[source]]
-            candidates=[proof for proof in candidates if not proof['blockers']]
-            if not candidates:
-                break
-            proof=max(candidates,key=lambda p:p['match_score'])
-            proofs.append((source,dict(proof,**summary,reciprocal=True,scan=None,policy=policy)))
-        if len(proofs)!=len(sources):
-            continue
-        for source,proof in proofs:
-            db.execute('INSERT INTO identity_merges VALUES (?,?,?,?,?)',(source,target,time.time(),encoded(proof),'local'))
-            db.execute('UPDATE members SET person=? WHERE person=?',(target,source))
-            db.execute("UPDATE candidates SET payload=json_set(payload,'$.merged_from',person,"
-                "'$."+evidence_field+"',json(?)),person=? WHERE person=?",(encoded(proof),target,source))
+    decisions = consolidation_plan(db,views,config,neighbours=related) if plan is None else plan
+    with tracking(decisions, 'Apply frozen identity components', unit='component', position=1) as tracked:
+        for decision in tracked:
+            people=decision['people']
+            summary={k:v for k,v in decision.items() if k!='people'}
+            if any(person in related for person in people):
+                db.execute("UPDATE candidates SET payload=json_set(payload,'$.global_view_consolidation',json(?)) "
+                           'WHERE policy=? AND person IN (SELECT value FROM json_each(?))',
+                           (encoded(summary),policy,encoded(people)))
+            if decision['outcome']!='merge':
+                continue
+            target,*sources=sorted(people,key=lambda p:order[p])
+            proofs=[]
+            for source in sources:
+                candidates=[cohort_evidence(db,left,right,config) for left in owned[target] for right in owned[source]]
+                candidates=[proof for proof in candidates if not proof['blockers']]
+                if not candidates:
+                    break
+                proof=max(candidates,key=lambda p:p['match_score'])
+                proofs.append((source,dict(proof,**summary,reciprocal=True,scan=None,policy=policy)))
+            if len(proofs)!=len(sources):
+                continue
+            for source,proof in proofs:
+                db.execute('INSERT INTO identity_merges VALUES (?,?,?,?,?)',(source,target,time.time(),encoded(proof),'local'))
+                db.execute('UPDATE members SET person=? WHERE person=?',(target,source))
+                db.execute("UPDATE candidates SET payload=json_set(payload,'$.merged_from',person,"
+                    "'$."+evidence_field+"',json(?)),person=? WHERE person=?",(encoded(proof),target,source))
     return tuple(replace(view,group=Group(canonical(db,view.group.identifier),view.group.samples,True,
         view.group.sample_ids)) for view in views)
 
@@ -304,37 +307,38 @@ def recover(database, selected, config, views, anchors, policy):
     margin = max(settings['ambiguity_margin'],grouping['view_ambiguity_margin'])
     groups = [view.group for view in views]
     by_group = {id(view.group):view for view in views}
-    for item in selected:
-        rows = db.execute('SELECT o.*,c.id AS candidate FROM candidates c JOIN observations o '
-            f'ON o.id={address(db,"c")} WHERE c.scan=? AND c.policy=? AND c.status=\'withheld\' '
-            "AND json_extract(c.payload,'$.reason') IN ('candidate_group','insufficient_match_or_cohesion',"
-            "'anchor_view_insufficient_support') AND o.rejected IS NULL AND " + anchor_sql('o',grouping) +
-            ' ORDER BY o.cue,o.geometry,o.embedding,o.id',(item['scan'],policy))
-        with tracking(rows,'Recover global anchor views',unit='observation') as tracked:
-            for row in tracked:
-                query, ranked = vector(row), []
-                for group, score, low in comparisons(groups,query,threshold-margin):
-                    view = by_group[id(group)]
-                    if low < grouping['view_cohesion_threshold'] or not pose_matches(row['geometry'],view.pose):
+    with tracking(selected, 'Recover global scene identities', unit='scene', position=0) as tracked:
+        for item in tracked:
+            rows = db.execute('SELECT o.*,c.id AS candidate FROM candidates c JOIN observations o '
+                f'ON o.id={address(db,"c")} WHERE c.scan=? AND c.policy=? AND c.status=\'withheld\' '
+                "AND json_extract(c.payload,'$.reason') IN ('candidate_group','insufficient_match_or_cohesion',"
+                "'anchor_view_insufficient_support') AND o.rejected IS NULL AND " + anchor_sql('o',grouping) +
+                ' ORDER BY o.cue,o.geometry,o.embedding,o.id',(item['scan'],policy))
+            with tracking(rows,'Recover global anchor views',unit='observation') as tracked:
+                for row in tracked:
+                    query, ranked = vector(row), []
+                    for group, score, low in comparisons(groups,query,threshold-margin):
+                        view = by_group[id(group)]
+                        if low < grouping['view_cohesion_threshold'] or not pose_matches(row['geometry'],view.pose):
+                            continue
+                        rank_person(ranked,(score,group.identifier,view))
+                    if not unambiguous(ranked,threshold,margin):
                         continue
-                    rank_person(ranked,(score,group.identifier,view))
-                if not unambiguous(ranked,threshold,margin):
-                    continue
-                score, person, view = ranked[0]
-                if _competing_anchor(anchors,person,query,score,margin):
-                    continue
-                if db.execute('SELECT 1 FROM members m JOIN observations o ON o.id=m.observation '
-                    'WHERE m.person=? AND o.scan=? AND o.cue=? AND o.id<>? LIMIT 1',
-                    (person,row['scan'],row['cue'],row['id'])).fetchone():
-                    continue
-                if not co_presence_allows(db,row,view.group,groups,query,config,
-                        peer_threshold=threshold,cohesion_threshold=grouping['view_cohesion_threshold']):
-                    continue
-                proof=dict(format=1,frozen=True,medoid=view.medoid,support=view.support_count,
-                           support_ids=view.support,score=score,threshold=threshold,ambiguity_margin=margin)
-                db.execute("UPDATE candidates SET person=?,status='pending',payload=json_set(payload,"
-                    "'$.reason','global_view_pending','$.global_view',json(?)) WHERE id=?",
-                    (person,encoded(proof),row['candidate']))
+                    score, person, view = ranked[0]
+                    if _competing_anchor(anchors,person,query,score,margin):
+                        continue
+                    if db.execute('SELECT 1 FROM members m JOIN observations o ON o.id=m.observation '
+                        'WHERE m.person=? AND o.scan=? AND o.cue=? AND o.id<>? LIMIT 1',
+                        (person,row['scan'],row['cue'],row['id'])).fetchone():
+                        continue
+                    if not co_presence_allows(db,row,view.group,groups,query,config,
+                            peer_threshold=threshold,cohesion_threshold=grouping['view_cohesion_threshold']):
+                        continue
+                    proof=dict(format=1,frozen=True,medoid=view.medoid,support=view.support_count,
+                               support_ids=view.support,score=score,threshold=threshold,ambiguity_margin=margin)
+                    db.execute("UPDATE candidates SET person=?,status='pending',payload=json_set(payload,"
+                        "'$.reason','global_view_pending','$.global_view',json(?)) WHERE id=?",
+                        (person,encoded(proof),row['candidate']))
     from .decision_resolution import resolve_pending
     resolve_pending(db, policy, config)
     votes=db.execute('SELECT person,medoid,COUNT(*) FROM (SELECT c.person,'

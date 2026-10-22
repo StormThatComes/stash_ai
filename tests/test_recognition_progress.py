@@ -128,8 +128,11 @@ def test_styles_preserve_summary_and_history_without_default_yaml_spam(tmp_path,
     assert 'VTT scene' not in output.err
     if style == 'off':
         assert output.err == ''
-    else:
+    elif style == 'verbose':
         assert 'Recognition scenes: inspected 2/2 scene' in output.err
+    else:
+        assert 'Recognition scenes: inspected' not in output.err
+        assert 'Phase: Recognition VTT complete [3/9]' in output.err
     with FaceDatabase(config.database) as db:
         starter = json.loads(db.connection.execute("SELECT data FROM progress WHERE phase='name_starter'").fetchone()[0])
         assert starter['yaml']
@@ -144,7 +147,8 @@ def test_failed_input_advances_inspected_scenes_and_groups_repeated_errors(tmp_p
     output = capsys.readouterr()
     assert output.out.count('ERROR recognition scan:') == 1
     assert 'Recognition partial:' in output.out and 'scenes_failed=3' in output.out
-    assert 'Recognition scenes: inspected 3/3 scene' in output.err
+    assert 'Phase: Recognition identity rebuild skipped (no eligible scenes)' in output.err
+    assert 'Phase: Recognition Stash publication skipped (no eligible scenes)' in output.err
     assert 'Phase: Recognition VTT partial' in output.err
 
 
@@ -178,3 +182,103 @@ def test_interruption_closes_live_rows_without_claiming_unfinished_scene(tmp_pat
     with FaceDatabase(config.database) as db:
         assert db.connection.execute('SELECT status FROM runs').fetchone()[0] == 'interrupted'
         assert db.connection.execute('SELECT cursor FROM scans').fetchone()[0] == 1
+
+
+@pytest.mark.parametrize('portraits,metadata,total', [(False, True, 9), (False, False, 7),
+                                                      (True, True, 4), (True, False, 3)])
+def test_run_phase_plan_matches_mode_and_resets_phase_liveness(portraits, metadata, total):
+    from stash_ai.recognition.progress import RunProgress
+    from stash_ai.runtime.console import present
+    report = RunReport(write=lambda _: None)
+    with present(report, 'off'):
+        ui = RunProgress(report, portraits=portraits, metadata=metadata)
+        assert len(ui.plan) == total
+        for index, name in enumerate(ui.plan, 1):
+            with ui.phase(name):
+                assert report.console.state['phase_step'] == f'{index}/{total}'
+                assert report.console.snapshot()['last_progress_age'] is None
+                # Simulate a previous phase's completed unit, also with UI off.
+                report.console.completed = 1.
+        ui.finish()
+        assert set(report.console.phase_outcomes.values()) == {'complete'}
+
+
+def test_redirected_heartbeat_reports_busy_work_at_bounded_intervals(monkeypatch):
+    import stash_ai.runtime.console as console
+    import stash_ai.recognition.progress as progress_ui
+    from stash_ai.recognition.progress import RunProgress
+    clock, stream = [0.], StringIO()
+    monkeypatch.setattr(console, 'time', SimpleNamespace(monotonic=lambda: clock[0]))
+    monkeypatch.setattr(progress_ui, 'time', SimpleNamespace(monotonic=lambda: clock[0]))
+    report = RunReport(write=lambda _: None)
+    report.console = ConsolePresenter(report.write, stream=stream)
+    ui = RunProgress(report)
+    with ui.phase('Recognition selection'):
+        with WorkProgress(report, 'Read recognition scene IDs', None) as progress:
+            clock[0] = 14.
+            progress.advance()
+            report.console._render()
+            assert 'Still working:' not in stream.getvalue()
+            clock[0] = 15.
+            progress.advance()
+            report.console._render()
+            report.console._render()
+            line, = [s for s in stream.getvalue().splitlines() if s.startswith('Still working:')]
+            assert '[1/9] Recognition selection' in line
+            assert 'Read recognition scene IDs: 2/?' in line
+            assert 'ETA=unknown' in line and 'last completed=0s ago' in line
+            assert 'rate=' in line and 'phase_step=' not in line
+            clock[0] = 30.
+            progress.advance()
+            report.console._render()
+    assert stream.getvalue().count('Still working:') == 2
+    assert 'inspected' not in stream.getvalue()
+
+
+@pytest.mark.parametrize('width', [60, 79, 119])
+def test_recognition_terminal_status_keeps_phase_and_step_without_duplicate_metrics(width):
+    from stash_ai.recognition.progress import status_lines
+    fields = dict(phase_step='4/9', section='Consolidate global appearance views',
+                  stage='Check frozen component competition', work='2/5', work_eta='01:00',
+                  work_rate='1.00 component/s', work_label='Apply frozen identity components',
+                  work_counts='failed=0', reference_stage='retained', references='1/128 MiB',
+                  cpu_workers='2/4', cpu_queue='100/1000 B')
+    row = dict(phase='Recognition identity rebuild', elapsed=42., last_progress_age=1., values=fields)
+    before = dict(fields)
+    text = '\n'.join(status_lines(row, fields, width))
+    assert 'Status: [4/9] Recognition identity rebuild' in text
+    assert 'Stage: Consolidate global appearance views' in text
+    assert 'work=' not in text and 'work_eta=' not in text and 'work_rate=' not in text
+    assert 'reference' not in text and 'cpu_queue' not in text
+    assert 'cpu_workers=2/4' in text
+    assert all(len(line) <= width for line in text.splitlines())
+    detailed = '\n'.join(status_lines(row, fields, width, verbose=True))
+    assert 'reference' in detailed and 'cpu_queue' in detailed
+    assert fields == before
+
+
+def test_failed_rebuild_skips_publication_with_accurate_reason(capsys):
+    from stash_ai.recognition.progress import RunProgress
+    from stash_ai.runtime.console import present
+    report = RunReport(write=lambda _: None)
+    with present(report, 'auto'):
+        ui = RunProgress(report)
+        with pytest.raises(RuntimeError):
+            with ui.phase('Recognition identity rebuild'):
+                raise RuntimeError('replay failed')
+        with ui.phase('Recognition performer selection'):
+            pass
+        assert report.console.skipped_reasons['Recognition Stash publication'] == 'identity rebuild failed'
+    assert 'Recognition identity rebuild failed [4/9]' in capsys.readouterr().err
+
+
+def test_handled_names_preflight_error_marks_phase_partial(tmp_path, monkeypatch, capsys):
+    config, _, services, _ = setup(tmp_path, monkeypatch)
+    def failed(*args):
+        raise RuntimeError('names preflight failed')
+    services.metadata_plan = failed
+    assert execute(args('1'), config, services=services) == 1
+    output = capsys.readouterr()
+    assert 'Phase: Recognition names preflight partial [7/9]' in output.err
+    assert 'Phase: Recognition names preflight complete' not in output.err
+    assert 'metadata_failed=1' in output.out

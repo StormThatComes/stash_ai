@@ -5,7 +5,7 @@ import os
 from urllib.parse import urlsplit
 
 from stash_ai.runtime.cleanup import closing, cleanup
-from stash_ai.runtime.console import present, phase, status, activity
+from stash_ai.runtime.console import present, status, activity
 from stash_ai.runtime.report import RunReport
 from .config import digest
 from .database import FaceDatabase, encoded
@@ -31,7 +31,7 @@ from .video import VideoFrames
 from .visibility import FaceVisibility, LazyVisibility
 from .expression import FaceExpression, LazyExpression, required as expression_required
 from .diagnostics import snapshot as error_snapshot, render as render_errors, message as safe_error
-from .progress import WorkProgress, frame_progress, work, tracking
+from .progress import RunProgress, WorkProgress, frame_progress, work, tracking
 
 
 def instance_scope(url):
@@ -132,7 +132,8 @@ def execute(args, config, *, services=None):
         client = services.client(url=url, api_key=key, timeout=config.data['execution']['timeout_seconds'])
         with closing(client, report=report, name='close recognition HTTP'), present(report, args.progress_style, status_position=2):
             client.report = report
-            with phase(report, 'Recognition selection'):
+            ui = RunProgress(report, portraits=portraits_only, metadata=bool(services.metadata))
+            with ui.phase('Recognition selection'):
                 ready = {}
                 if portraits_only:
                     ready = retained_targets(database, config, scope, args.scene_id or None,
@@ -166,8 +167,8 @@ def execute(args, config, *, services=None):
             backend = None
             inputs = None
             try:
-                with phase(report, 'Recognition assets'):
-                    with work('Prepare recognition assets', 1, unit='step', position=0) as assets:
+                with ui.phase('Recognition assets'):
+                    with work('Configure lazy model loading', 1, unit='step', position=0) as assets:
                         paths = LazyAssets(config, services.assets, report)
                         assets.advance()
                     visibility = LazyVisibility(config, paths, services.visibility)
@@ -198,7 +199,7 @@ def execute(args, config, *, services=None):
                     ordered = sorted(identifiers, key=int)
                     inputs = ScenePrefetch(client, config, services.source, report=report)
                     inputs.submit(ordered[0] if ordered else None)
-                    with phase(report, 'Recognition VTT', errors=lambda: counts['scenes_failed']), WorkProgress(report, 'Recognition scenes', len(ordered)) as scenes:
+                    with ui.phase('Recognition VTT', errors=lambda: counts['scenes_failed']), WorkProgress(report, 'Recognition scenes', len(ordered)) as scenes:
                         for position, identifier in enumerate(ordered):
                             following = ordered[position + 1] if position + 1 < len(ordered) else None
                             try:
@@ -244,7 +245,7 @@ def execute(args, config, *, services=None):
                             status(report, references=usage_line(references), reference_people=values['people'],
                                    reference_samples=values['samples'], reference_stage=values['stage'])
                         try:
-                            with phase(report, 'Recognition identity rebuild'):
+                            with ui.phase('Recognition identity rebuild'):
                                 with work('Reconcile previous merges', 1, unit='step', position=0) as merges:
                                     reconcile_legacy_merges(database, client, scope, [s['scene'] for s in selected])
                                     merges.advance()
@@ -259,7 +260,7 @@ def execute(args, config, *, services=None):
                                 rebuilt = rebuild_selected(database, selected, config, progress=reference_progress)
                             database.progress(run, 'rebuild', {'mode': 'cold_selected_replay', 'selection': selected,
                                                              'matching_policy': matching_policy(config)})
-                            with phase(report, 'Recognition Stash publication', errors=lambda: counts['people_failed']), WorkProgress(report, 'Publish recognition', len(selected)) as publication:
+                            with ui.phase('Recognition Stash publication', errors=lambda: counts['people_failed']), WorkProgress(report, 'Publish recognition', len(selected)) as publication:
                                 _publish_selection(database, client, report, config, scope, model_namespace,
                                                    selected, rebuilt, ready, counts, key, run, publication)
                         except KeyboardInterrupt:
@@ -273,7 +274,7 @@ def execute(args, config, *, services=None):
                                 report.optional('recognition_references', report.detail,
                                     f'Face references scene {last_scene}: ' + usage_line(references) +
                                     f" people={references['people']} samples={references['samples']} stage={references['stage']}")
-                with phase(report, 'Recognition performer selection'):
+                with ui.phase('Recognition performer selection', errors=lambda: counts['metadata_failed']):
                     def blocked_metadata(person, error):
                         counts['metadata_failed'] += 1
                         counts['metadata_withheld'] += 1
@@ -288,7 +289,7 @@ def execute(args, config, *, services=None):
                 if services.metadata:
                     plan = {}
                     if not portraits_only:
-                        with phase(report, 'Recognition names preflight'):
+                        with ui.phase('Recognition names preflight', errors=lambda: counts['metadata_failed']):
                             try:
                                 with work('Prepare selected names', 1, unit='step', position=0) as preflight:
                                     plan = services.metadata_plan(database, client, report, config, extra, scope, targets)
@@ -303,7 +304,7 @@ def execute(args, config, *, services=None):
                                                 'selected performers', error, safe_error(error, key))
                     label = 'Portraits' if portraits_only else 'Names and portraits'
                     with NativeBudget(config), portrait_reference_scope(), PortraitPipeline(database,client,config,scope,targets,services.source,visibility,expression,
-                        enabled=services.metadata is enrich) as preparation, phase(report, 'Recognition portraits' if portraits_only else 'Recognition metadata', errors=lambda: counts['metadata_failed']), WorkProgress(report, label, len(targets), unit='person', key='people') as people:
+                        enabled=services.metadata is enrich) as preparation, ui.phase('Recognition portraits' if portraits_only else 'Recognition metadata', errors=lambda: counts['metadata_failed']), WorkProgress(report, label, len(targets), unit='person', key='people') as people:
                         for target_index,target in enumerate(targets):
                             preparation.activate(target_index)
                             with activity(report, label.lower(), person=target['performer']):
@@ -321,7 +322,7 @@ def execute(args, config, *, services=None):
                                 people.advance(failed=counts['metadata_failed'])
                 if targets and not portraits_only:
                     try:
-                        with phase(report, 'Recognition names starter'):
+                        with ui.phase('Recognition names starter'):
                             output = starter(client, targets, scope)
                         database.progress(run, 'name_starter', {'yaml': output, 'truncated': len(targets) > 50})
                         report.optional('recognition_name_starter', report.detail, 'Performer names starter (selected IDs, maximum 50):\n' + output)
@@ -329,6 +330,7 @@ def execute(args, config, *, services=None):
                         report.optional('recognition_name_starter', report.write, 'Name starter unavailable: ' + safe_error(error, key))
                 if counts['scenes_failed'] or counts['people_failed'] or counts['metadata_failed']:
                     outcome = 'partial'
+                ui.finish()
                 report.console.finish_rendering()
                 report.optional('recognition_summary', report.write, f'Recognition {outcome}: ' +
                                 ' '.join(f'{name}={value}' for name, value in sorted(counts.items())) +
