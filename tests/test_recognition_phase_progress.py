@@ -92,6 +92,87 @@ def test_cached_rebuild_validates_observations_without_fabricating_replay_work(t
     assert len(models) == loaded and owners == {'stash-console'}
 
 
+@pytest.mark.parametrize('assignments', [False, True])
+def test_input_catalogue_advances_during_each_observation_pass(tmp_path, monkeypatch, terminal, assignments):
+    from benchmarks.benchmark_recognition_replay import fixture
+    from stash_ai.recognition import rebuild_cache
+    from tests.test_recognition_clustering import setup
+    config = changed(setup(tmp_path), clustering={'anchor_view_matching': assignments})
+    bars, owners = terminal
+    labels = ['Validate rebuild face observations']
+    if assignments:
+        labels.append('Validate rebuild assignment evidence')
+    seen = {label: [] for label in labels}
+    original = rebuild_cache._hash_row
+    report = RunReport(write=lambda _: None)
+    def hashed(hasher, row):
+        active = next((bar for bar in bars if bar.desc in seen and not bar.disable), None)
+        if active is not None:
+            seen[active.desc].append(active.n)
+            assert report.console.state['work'] == '0/2'
+            assert report.console.state['detail'] == f'{active.n}/6'
+            if active.n:
+                assert report.console.state['detail_eta'] != 'warming up'
+                assert report.console.state['detail_rate'].endswith('observation/s')
+        return original(hasher, row)
+    monkeypatch.setattr(rebuild_cache, '_hash_row', hashed)
+    with FaceDatabase(config.database) as db:
+        selected = fixture(db, 2, dimensions=4)
+        with present(report, 'auto', status_position=2):
+            digest = rebuild_cache.input_context(db.connection, selected, 'scope', 'ns', config)
+    # These descriptors predate progress instrumentation: warm caches must stay valid.
+    assert digest == ('fdeb1b5358b59c3331d4e7f5928e56ddcd594b9b215acaa30aefaf84c9624eaa' if assignments else
+                      '98c546f58805d3eae6b5428d1a96ff705267f31f16a2c2c9654f24787326f448')
+    for label in labels:
+        assert seen[label] == list(range(6))
+        row = next(bar for bar in bars if bar.desc == label)
+        assert row.n == row.total == 6
+    row = next(bar for bar in bars if bar.desc == 'Validate rebuild input catalogue')
+    assert row.n == row.total == 2
+    assert all(bar.disable for bar in bars) and owners == {'stash-console'}
+
+
+@pytest.mark.parametrize('failure', [RuntimeError, KeyboardInterrupt])
+@pytest.mark.parametrize('phase', ['Validate rebuild face observations', 'Validate rebuild assignment evidence'])
+def test_input_catalogue_failure_does_not_complete_active_batch(tmp_path, monkeypatch, terminal, failure, phase):
+    from benchmarks.benchmark_recognition_replay import fixture
+    from stash_ai.recognition import rebuild_cache
+    from tests.test_recognition_clustering import setup
+    config = changed(setup(tmp_path), clustering={'anchor_view_matching': True})
+    bars, _ = terminal
+    original = rebuild_cache._hash_row
+    def hashed(hasher, row):
+        active = next((bar for bar in bars if bar.desc == phase and not bar.disable), None)
+        if active is not None and active.n == 1:
+            raise failure('interrupted catalogue validation')
+        return original(hasher, row)
+    monkeypatch.setattr(rebuild_cache, '_hash_row', hashed)
+    with FaceDatabase(config.database) as db:
+        selected = fixture(db, 1, dimensions=4)
+        with present(RunReport(write=lambda _: None), 'auto', status_position=2):
+            with pytest.raises(failure, match='interrupted catalogue'):
+                rebuild_cache.input_context(db.connection, selected, 'scope', 'ns', config)
+    assert next(bar for bar in bars if bar.desc == phase).n == 1
+    assert next(bar for bar in bars if bar.desc == 'Validate rebuild input catalogue').n == 0
+    assert all(bar.disable for bar in bars)
+
+
+@pytest.mark.parametrize('style', ['off', None])
+def test_input_catalogue_without_console_skips_progress_count_queries(tmp_path, style):
+    from contextlib import nullcontext
+    from benchmarks.benchmark_recognition_replay import fixture
+    from stash_ai.recognition.rebuild_cache import input_context
+    from tests.test_recognition_clustering import setup
+    config = setup(tmp_path)
+    with FaceDatabase(config.database) as db:
+        selected = fixture(db, 2, dimensions=4)
+        statements = []
+        db.connection.set_trace_callback(statements.append)
+        with present(RunReport(write=lambda _: None), style) if style else nullcontext():
+            assert input_context(db.connection, selected, 'scope', 'ns', config)
+        assert not any('COUNT(' in sql.upper() for sql in statements)
+
+
 def test_same_scene_context_reports_scene_support_and_assignment_work(tmp_path, monkeypatch, terminal):
     import math
     from tests.test_recognition_rebuild import library

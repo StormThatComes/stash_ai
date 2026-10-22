@@ -46,32 +46,42 @@ def input_context(db,selected,scope,namespace,config=None):
     with work('Validate rebuild input catalogue',len(selected),unit='scene',position=0) as progress:
         for start in range(0,len(selected),256):
             batch=selected[start:start+256]
+            scans=encoded([item['scan'] for item in batch])
             records={r['id']:r for r in db.execute('SELECT * FROM scans WHERE id IN '
-                '(SELECT value FROM json_each(?))',(encoded([item['scan'] for item in batch]),))}
+                '(SELECT value FROM json_each(?))',(scans,))}
             for item in batch:
                 row=records.get(item['scan'])
                 if (row is None or row['scope']!=scope or row['namespace']!=namespace
                         or row['status']!='complete' or row['scene']!=item['scene']):
                     raise ValueError('Identity rebuild requires complete compatible selected scans.')
                 _hash_row(hasher,row)
-            for row in db.execute('SELECT o.id,o.scan,o.cue,o.seconds,o.source,o.rect,o.geometry,'
-                "o.rejected,o.dimensions,o.embedding,CASE WHEN json_valid(o.quality) THEN "
-                "json_extract(o.quality,'$.pixels','$.sharpness','$.pose_deviation','$.roll_deviation'"+visibility_fields+") END "
-                'FROM observations o JOIN scans s ON s.id=o.scan '
-                'WHERE o.scan IN (SELECT value FROM json_each(?)) '
-                'ORDER BY CAST(s.scene AS INTEGER),s.scene,o.cue,o.id',
-                (encoded([item['scan'] for item in batch]),)):
-                _hash_row(hasher,row)
+            # Count only indexed rows for telemetry; keep embeddings streamed in
+            # the original digest order, and skip the count when UI is disabled.
+            with work('Validate rebuild face observations',lambda: db.execute(
+                    'SELECT COUNT(*) FROM observations WHERE scan IN '
+                    '(SELECT value FROM json_each(?))',(scans,)).fetchone()[0],
+                    unit='observation') as observations:
+                for row in db.execute('SELECT o.id,o.scan,o.cue,o.seconds,o.source,o.rect,o.geometry,'
+                    "o.rejected,o.dimensions,o.embedding,CASE WHEN json_valid(o.quality) THEN "
+                    "json_extract(o.quality,'$.pixels','$.sharpness','$.pose_deviation','$.roll_deviation'"+visibility_fields+") END "
+                    'FROM observations o JOIN scans s ON s.id=o.scan '
+                    'WHERE o.scan IN (SELECT value FROM json_each(?)) '
+                    'ORDER BY CAST(s.scene AS INTEGER),s.scene,o.cue,o.id',(scans,)):
+                    _hash_row(hasher,row)
+                    observations.advance()
             if config is not None:
                 from .corroborated_views import enabled
                 if enabled(config):
-                    for row in db.execute('SELECT o.id,c.person,c.status,CASE WHEN json_valid(c.payload) THEN '
-                            "json_extract(c.payload,'$.reason','$.strict_confirmation') END FROM observations o "
-                            'LEFT JOIN candidates c ON c.rowid=(SELECT z.rowid FROM candidates z WHERE '
-                            "CASE WHEN json_valid(z.payload) THEN json_extract(z.payload,'$.observation') END=o.id "
-                            'ORDER BY z.rowid DESC LIMIT 1) WHERE o.scan IN (SELECT value FROM json_each(?)) ORDER BY o.id',
-                            (encoded([item['scan'] for item in batch]),)):
-                        _hash_row(hasher,row)
+                    with work('Validate rebuild assignment evidence',observations.total,
+                            unit='observation') as assignments:
+                        for row in db.execute('SELECT o.id,c.person,c.status,CASE WHEN json_valid(c.payload) THEN '
+                                "json_extract(c.payload,'$.reason','$.strict_confirmation') END FROM observations o "
+                                'LEFT JOIN candidates c ON c.rowid=(SELECT z.rowid FROM candidates z WHERE '
+                                "CASE WHEN json_valid(z.payload) THEN json_extract(z.payload,'$.observation') END=o.id "
+                                'ORDER BY z.rowid DESC LIMIT 1) WHERE o.scan IN (SELECT value FROM json_each(?)) ORDER BY o.id',
+                                (scans,)):
+                            _hash_row(hasher,row)
+                            assignments.advance()
             progress.advance(len(batch))
     return hasher.hexdigest()
 
