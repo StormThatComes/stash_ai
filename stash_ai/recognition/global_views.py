@@ -5,6 +5,7 @@ complete frozen strong components from independently supported cohorts; the
 frozen nomination graph is not recomputed after a merge, preventing chaining.
 """
 from dataclasses import dataclass, replace
+from collections import deque
 import time
 
 from .clustering import Group, _groups, co_presence_allows, matching_policy, vector
@@ -143,12 +144,14 @@ def cohort_evidence(db, left, right, config, *, cooccurs=None):
 
 
 @scoped
-def consolidation_plan(db,views,config,*,neighbours=None,mixed=False,cooccurs=None):
+def consolidation_plan(db,views,config,*,neighbours=None,mixed=False,cooccurs=None,focus=None):
     """Strong complete components with margin checks against frozen outsiders.
 
     Weak edges are competition evidence, not transitive component membership.
     O(people) state is retained. Only complete non-singleton components need the
     second scoring pass; unrelated people do not incur another lookup.
+    With focus, visit only components reachable from those IDs, while retaining
+    every outsider for competition. Focus requires a uniform reference authority.
     """
     from .config import digest
     grouping,settings=config.data['clustering'],config.data['recognition']
@@ -159,6 +162,22 @@ def consolidation_plan(db,views,config,*,neighbours=None,mixed=False,cooccurs=No
     owned={}
     for view in views:
         owned.setdefault(view.group.identifier,[]).append(view)
+    if focus is not None and len({v.authority for v in views})>1:
+        raise ValueError('Focused consolidation requires one reference authority.')
+    focus=None if focus is None else set(focus)
+    processed=set()
+    def focused_people():
+        pending=deque(sorted(focus.intersection(owned)))
+        scheduled=set(pending)
+        while pending:
+            person=pending.popleft()
+            yield person
+            processed.add(person)
+            # Strong neighbours extend the whole component; all frozen outsiders
+            # still participate in the unchanged competition check below.
+            for other in owned:
+                if other not in scheduled and root(other)==root(person):
+                    scheduled.add(other);pending.append(other)
     parents={person:person for person in owned}
     degrees={person:0 for person in owned}
     floors={person:float('inf') for person in owned}
@@ -171,14 +190,16 @@ def consolidation_plan(db,views,config,*,neighbours=None,mixed=False,cooccurs=No
         a,b=root(left),root(right)
         if a!=b:
             parents[max(a,b)]=min(a,b)
-    with tracking(sorted(owned),'Validate frozen identity components',unit='person') as tracked:
+    people=sorted(owned) if focus is None else focused_people()
+    with tracking(people,'Validate frozen identity components',unit='person') as tracked:
         for person in tracked:
             candidates={}
             for view in owned[person]:
                 strict=view.authority=='strict_core'
                 effective=settings['match_threshold'] if strict else threshold
                 for other,score,_ in comparisons(groups,view.group.samples[0],effective-margin):
-                    if other.identifier<=person:
+                    if (other.identifier==person or
+                            (other.identifier<=person if focus is None else other.identifier in processed)):
                         continue
                     if mixed and view.authority!=by_group[id(other)].authority:
                         continue
@@ -187,7 +208,10 @@ def consolidation_plan(db,views,config,*,neighbours=None,mixed=False,cooccurs=No
                     previous=candidates.setdefault(other.identifier,None)
                     if (not strict and score<effective) or min(view.support_count,by_group[id(other)].support_count)<(1 if strict else settings['min_merge_support']):
                         continue
-                    proof=cohort_evidence(db,view,by_group[id(other)],config,cooccurs=cooccurs)
+                    first,second=view,by_group[id(other)]
+                    if first.group.identifier>second.group.identifier:
+                        first,second=second,first
+                    proof=cohort_evidence(db,first,second,config,cooccurs=cooccurs)
                     if not proof['blockers'] and (previous is None or proof['match_score']>previous['match_score']):
                         candidates[other.identifier]=proof
             for other,proof in candidates.items():
@@ -201,6 +225,8 @@ def consolidation_plan(db,views,config,*,neighbours=None,mixed=False,cooccurs=No
         components.setdefault(root(person),[]).append(person)
     result=[]
     for people in components.values():
+        if focus is not None and not focus.intersection(people):
+            continue
         complete=len(people)>1 and all(degrees[p]==len(people)-1 for p in people)
         rival=None
         if complete:

@@ -16,6 +16,8 @@ class RecognitionParser(argparse.ArgumentParser):
         result = super().parse_args(args, namespace)
         if result.command == 'run' and not (result.scene_id or result.all_scenes):
             self.error('recognition run requires --scene-id or --all-scenes')
+        if result.command == 'report-merge' and len(result.identity_id) != 2:
+            self.error('recognition report-merge requires exactly two --identity-id values')
         return result
 
 
@@ -90,6 +92,14 @@ def parser():
     identity.add_argument('--face-config', type=Path, help='Recognition YAML selecting the recognizer namespace.')
     identity.add_argument('--faces-db', type=Path, help='Existing face SQLite database.')
     identity.add_argument('--scope', help='Stash scope; required if the performer ID occurs in multiple scopes.')
+    merge_report = commands.add_parser('report-merge', allow_abbrev=False,
+        help='Compare two internal identity IDs and propose verified YAML changes for frozen-catalogue consolidation (offline, read-only).')
+    merge_report.add_argument('--identity-id', action='append', required=True,
+        help='Internal face identity ID; provide exactly twice. Merged predecessor IDs are resolved automatically.')
+    merge_report.add_argument('--face-config', type=Path, help='Recognition YAML selecting the recognizer and current thresholds.')
+    merge_report.add_argument('--faces-db', type=Path, help='Existing face SQLite database.')
+    merge_report.add_argument('--scope', help='Restrict both identities to this Stash scope.')
+    merge_report.add_argument('--output', type=Path, help='New JSON report path; stdout if omitted. Includes copyable YAML patches.')
     report = commands.add_parser('report', allow_abbrev=False,
         help='Explain suspected identity fragmentation in one retained scene (offline, read-only).')
     report.add_argument('--scene-id', required=True, type=stash_id)
@@ -117,6 +127,9 @@ def main(argv=None, *, services=None):
         return execute(args, config)
     if args.command == 'report-identity':
         from .identity_report import execute
+        return execute(args, config)
+    if args.command == 'report-merge':
+        from .merge_report import execute
         return execute(args, config)
     if args.command == 'cleanup':
         from .cleanup_orphans import execute

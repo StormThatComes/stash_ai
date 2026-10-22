@@ -689,6 +689,61 @@ Images and JSON are sensitive local biometric artifacts. On POSIX the new output
 directory has mode `0700` and its files `0600`; raw embeddings, installation
 tokens, source URLs and complete run configurations are not exported.
 
+## Two-identity merge parameter report
+
+Compare two internal identity UUIDs, including identities in different scenes:
+
+```powershell
+python stash_ai.py recognition report-merge --identity-id <left-uuid> --identity-id <right-uuid> --face-config facial_recognition.yml --faces-db faces_state.sqlite3 --output merge-report.json
+# Omit --output to print JSON to stdout.
+```
+
+The two IDs must share the recognizer namespace and Stash scope. Predecessor IDs
+follow recorded merge aliases; two aliases of one person return `already_merged`.
+The command opens one read-only SQLite snapshot and uses retained embeddings.
+It does not load models, fetch media, contact Stash, create run history or change
+memberships. The output path must be new.
+
+`recommendations` contains the parameter name, current and proposed values,
+direction of change, and a copyable `yaml` / structured `yaml_patch`. Each proposal
+has passed the production frozen-component planner, including all compatible
+strict rivals, co-presence, complete-component checks and ambiguity margins.
+`merged_identity_ids` lists the whole component; `additional_identity_ids` makes
+any effect on a third identity explicit. Proposals with fewer additional identities
+and fewer changed parameters sort first. These are **global settings**, not rules
+limited to this pair.
+
+The strict-core route checks `recognition.match_threshold`,
+`clustering.cohesion_threshold`, `recognition.ambiguity_margin` and the co-presence
+threshold. The confirmed-view route also checks the view thresholds and margin,
+independent merge support and the minimum cues needed to form views. Joint patches
+respect YAML constraints and round threshold bounds downward before verification.
+The report tries both relaxing failed gates and tightening gates to isolate a pair;
+changed view gates rebuild the view catalogue before checking the proposal.
+
+Both routes require `clustering.anchor_view_matching` and an anchor pose/visibility
+restriction. Enabling the feature is proposed when its prerequisite already exists;
+the report does not invent an anchor restriction or simulate ordinary chronological
+nomination merges. `paths` records current blockers, measured scores, competing
+identities, attempted patches and their verification. `identities` shows member,
+strict-authority and anchor-quality counts plus the actual bounded references.
+Missing references and legally unattainable thresholds are explicit; attachment-only,
+superseded or incompatible evidence is never promoted into strict proof.
+
+`eligible_under_current_parameters` means this frozen catalogue already permits
+consolidation. `verified_parameter_changes` means at least one tested YAML patch
+permits it; `no_verified_proposal` means the bounded search found none. It is not an
+exhaustive proof that no possible configuration could work. At most four measured
+view pairs and two threshold strategies per route are searched.
+
+Verification applies to the **current frozen references**, not an entire cold
+rebuild: replay ordering, identity births, changing references, attachment decisions
+and final label reconciliation can change the result. Apply a selected patch and
+rebuild the retained scenes of both identities together; `next_action.scene_ids`
+lists them. Portrait refresh alone cannot merge identities. The report also
+preserves configured person/reference memory budgets rather than silently sampling
+away competing identities.
+
 ## Offline scene fragmentation report
 
 To inspect suspected splits between recognized identities without Stash, model loading,
