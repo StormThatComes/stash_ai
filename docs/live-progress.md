@@ -20,6 +20,10 @@ references or candidate checks use the second. UI refreshes are throttled and
 record totals use scalar counts rather than materializing embeddings/JPEGs.
 `off` and standalone calls skip optional total queries. Unknown totals remain
 indeterminate; a failed transaction never completes its apply bar.
+`Validate rebuild input catalogue` keeps the scene total on the first row and
+shows face-observation hashing and assignment-evidence validation on the second,
+with per-batch observation totals, throughput and ETA. A scene batch completes
+only after both required passes succeed.
 The final recognition error summary retains at most six groups and two examples
 per group (350 characters each), with exact counts and overflow totals. Distinct
 reasons sharing an exception type remain available in auto/compact/off output.
