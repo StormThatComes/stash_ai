@@ -226,7 +226,7 @@ def _attach_confirmed_views(db, selected, config, policy, anchors, usage, cache,
     source = (f'FROM candidates c JOIN observations o ON o.id={address(db, "c")} '
               "WHERE c.policy=? AND c.status='pending' "
               "AND json_extract(c.payload,'$.reason')='view_identity_pending'")
-    rows=db.execute("SELECT o.*,c.person,json_extract(c.payload,'$.view_prototype.medoid') AS medoid "+source+
+    rows=lambda:db.execute("SELECT o.id,o.scan,o.seconds,o.dimensions,o.embedding,c.person,json_extract(c.payload,'$.view_prototype.medoid') AS medoid "+source+
                     ' ORDER BY o.embedding,o.geometry,o.id',(policy,))
     supported=eligible(rows,config,key=lambda r:r['person'],prototype=lambda r:r['medoid'])
     with db:
