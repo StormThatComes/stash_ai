@@ -79,21 +79,30 @@ def resolve(database,replay,selected,config,history,bindings,confirmed,early,usa
     stronger=max(settings['match_threshold'],settings['cooccurrence_merge_threshold'])
     for row in conflicting_claims(claims(),stronger):
         replay.execute('DELETE FROM pool_view_claims WHERE observation=?',(row['id'],))
-    eligible=replay.execute('SELECT owner,medoid,COUNT(*) FROM (SELECT owner,medoid,scan,seconds '
-        'FROM pool_view_claims GROUP BY owner,medoid,scan,seconds) GROUP BY owner,medoid HAVING COUNT(*)>=?',
-        (grouping['view_attach_min_support'],)).fetchall()
+    from .query_support import cohorts
+    from .config import digest
+    claims_by_id={r['observation']:r for r in replay.execute('SELECT * FROM pool_view_claims')}
+    raw=database.connection.execute('SELECT o.* FROM observations o WHERE id IN (SELECT value FROM json_each(?)) '
+        'ORDER BY embedding,geometry,id',(encoded(list(claims_by_id)),))
+    eligible=cohorts(raw,config,key=lambda r:claims_by_id[r['id']]['owner'],
+        prototype=lambda r:claims_by_id[r['id']]['medoid'])
     known={(v.group.identifier,v.medoid):v for v in views}
-    for owner,medoid,support in eligible:
-        view=known[owner,medoid]
-        source='view:'+owner+':'+medoid
-        source_ids=tuple(dict.fromkeys(tuple(owners[owner].sample_ids)+tuple(view.support)))
-        proof=dict(format=1,frozen=True,mode='known_view',independent_support=support,
+    for cohort in eligible:
+        owner=cohort.family
+        selected_views=[known[owner,medoid] for medoid in cohort.prototypes]
+        view=selected_views[0]
+        source='view:'+owner+':'+digest(cohort.observations)
+        source_ids=tuple(dict.fromkeys(tuple(owners[owner].sample_ids)+tuple(i for v in selected_views for i in v.support)))
+        proof=dict(format=2,frozen=True,mode='known_view',independent_support=cohort.independent_support,
             required_support=grouping['view_attach_min_support'],identity=canonical(owner),
             source_owner=owner,owner_reference_ids=owners[owner].sample_ids,
-            source_reference_ids=source_ids,view=dict(medoid=medoid,authority=view.authority,
+            source_reference_ids=source_ids,view=dict(medoid=view.medoid,authority=view.authority,
                 support=view.support_count,support_ids=view.support),context=history.context,
+            views=[dict(medoid=v.medoid,authority=v.authority,support=v.support_count,support_ids=v.support) for v in selected_views],
+            claim_id=source,query_ids=cohort.observations,query_support_ids=cohort.witnesses,
             threshold=threshold,cohesion_threshold=grouping['view_cohesion_threshold'])
-        for row in replay.execute('SELECT * FROM pool_view_claims WHERE owner=? AND medoid=?',(owner,medoid)):
+        for row in replay.execute('SELECT * FROM pool_view_claims WHERE observation IN '
+                '(SELECT value FROM json_each(?))',(encoded(cohort.observations),)):
             if row['current']:
                 replay.execute("UPDATE candidates SET person=?,status='accepted',payload=json_set(payload,"
                     "'$.reason','pooled_view_identity','$.provisional_pool',json(?)) WHERE policy=? AND "+
@@ -120,14 +129,14 @@ def finalize(replay,config,mapping):
             '(SELECT value FROM json_each(?))',(encoded(expected),)).fetchall()
         if len(memberships)==len(expected) and len({mapping.get(r['person'],r['person']) for r in memberships})==1:
             continue
-        current=replay.execute('SELECT observation FROM pool_view_claims WHERE owner=? AND medoid=? AND current=1',
-            (proof['source_owner'],proof['view']['medoid'])).fetchall()
+        current=replay.execute('SELECT observation FROM pool_view_claims WHERE current=1 AND observation IN '
+            '(SELECT value FROM json_each(?))',(encoded(proof['query_ids']),)).fetchall()
         for observation, in current:
             replay.execute("UPDATE candidates SET person=NULL,status='withheld',payload=json_set(payload,"
                 "'$.prior_reason',json_extract(payload,'$.reason'),'$.reason','provisional_pool_source_invalidated',"
                 "'$.provisional_pool.source_validation','invalidated_after_auxiliary') WHERE policy=? AND "+
-                observation_sql('candidates')+"=? AND json_extract(payload,'$.provisional_pool.view.medoid')=?",
-                (matching_policy(config),observation,proof['view']['medoid']))
+                observation_sql('candidates')+"=? AND json_extract(payload,'$.provisional_pool.claim_id')=?",
+                (matching_policy(config),observation,proof['claim_id']))
             replay.execute('DELETE FROM members WHERE observation=?',(observation,))
         replay.execute('DELETE FROM pool_promotions WHERE source=?',(promotion['source'],))
         replay.execute('DELETE FROM pool_claims WHERE source=?',(promotion['source'],))

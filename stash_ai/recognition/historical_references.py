@@ -187,6 +187,15 @@ def rank(rows,history,config,*,decisions=None,potential=None):
                 ambiguity_margin=decision_margin))
         return None
     score,person,values=ranked[0]
+    # A rival need not explain the whole cohort to make one of its queries
+    # ambiguous. Preserve every mixed rival at its original observation.
+    if any(any(other != person and value[0]-rival[0] < decision_margin
+               for other,rival in choices.items())
+           for value,choices in zip(values,mixed_rows)):
+        if decisions is not None:
+            decisions.append(dict(outcome='per_query_competing_identity',context=history.context,
+                                  ambiguity_margin=decision_margin))
+        return None
     if not strict_checked and any(_competing_anchor(history.groups,person,vector(row),value[0],decision_margin)
            for row,value in zip(rows,values)):
         if decisions is not None:
@@ -325,12 +334,13 @@ def reconcile(database,replay,selected,config,scope,namespace,fingerprint,*,prog
             cue_claims[key]=signature
     pending=[(row,target,proof) for row,target,proof in pending
              if (target,row['scan'],row['cue']) not in blocked_cues]
-    support={}
+    from .query_support import eligible
+    claims=[dict(row,owner=target,mode=proof['mode'],medoids=encoded(proof['medoids'])) for row,target,proof in pending]
+    claims.sort(key=lambda r:(r['embedding'],r['geometry'],r['id']))
+    supported=eligible(claims,config,key=lambda r:(r['owner'],r['mode']),prototype=lambda r:r['medoids'],
+                       minimum=lambda family:grouping['view_attach_min_support'] if family[1]=='view' else 1)
     for row,target,proof in pending:
-        key=(target,tuple(proof['medoids']))
-        support.setdefault(key,set()).add((row['scan'],row['seconds']))
-    for row,target,proof in pending:
-        if proof['mode']=='view' and len(support[(target,tuple(proof['medoids']))])<grouping['view_attach_min_support']:
+        if row['id'] not in supported:
             continue
         replay.execute('INSERT OR IGNORE INTO people VALUES (?,?,?,?,?,?)',history.people[target])
         replay.execute('INSERT OR IGNORE INTO members VALUES (?,?)',(row['id'],target))

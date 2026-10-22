@@ -65,14 +65,15 @@ def recover(db,groups,history,config,bindings,*,selected_only=False,source_ids=N
                         (row['id'],row['candidate'],group.identifier,target,proof['mode'],encoded(proof['medoids']),encoded(proof)))
         def insufficient(pending=False):
             state=" AND c.status='pending' AND c.person=q.target" if pending else ''
-            return db.execute('SELECT source,target,mode,medoids,COUNT(*) FROM ('
-                'SELECT q.source,q.target,q.mode,q.medoids,o.scan,o.seconds FROM cohort_claims q '
+            from .query_support import eligible
+            query=('SELECT o.*,q.source,q.target,q.mode,q.medoids FROM cohort_claims q '
                 'JOIN observations o ON o.id=q.observation JOIN candidates c ON c.id=q.candidate WHERE 1=1'+state+
-                ' GROUP BY q.source,q.target,q.mode,q.medoids,o.scan,o.seconds) GROUP BY source,target,mode,medoids '
-                "HAVING mode='view' AND COUNT(*)<?",(minimum,)).fetchall()
-        for source,target,mode,medoids,_ in insufficient():
-            db.execute('DELETE FROM cohort_claims WHERE source=? AND target=? AND mode=? AND medoids=?',
-                       (source,target,mode,medoids))
+                ' ORDER BY o.embedding,o.geometry,o.id')
+            supported=eligible(db.execute(query),config,key=lambda r:(r['source'],r['target'],r['mode']),prototype=lambda r:r['medoids'],
+                minimum=lambda family:minimum if family[2]=='view' else 1)
+            return [r['id'] for r in db.execute(query) if r['id'] not in supported]
+        for observation in insufficient():
+            db.execute('DELETE FROM cohort_claims WHERE observation=?',(observation,))
         counts=dict(db.execute('SELECT source,COUNT(*) FROM (SELECT q.source,o.scan,o.seconds FROM cohort_claims q '
             'JOIN observations o ON o.id=q.observation GROUP BY q.source,o.scan,o.seconds) GROUP BY source'))
         coverage={source:count/totals[source] for source,count in counts.items() if totals[source]}
@@ -127,11 +128,11 @@ def recover(db,groups,history,config,bindings,*,selected_only=False,source_ids=N
                 "'$."+field+"',json(?),'$.cohort_resolution',json(?)) WHERE id=?",
                 (target,reason,row['proof'],encoded(proof),row['candidate']))
         resolve_pending(db,policy,config)
-        for source,target,mode,medoids,_ in insufficient(pending=True):
+        for observation in insufficient(pending=True):
             db.execute("UPDATE candidates SET person=NULL,status='withheld',payload=json_set(payload,"
                 "'$.reason','cohort_insufficient_support') WHERE status='pending' AND id IN "
-                '(SELECT candidate FROM cohort_claims WHERE source=? AND target=? AND mode=? AND medoids=?)',
-                (source,target,mode,medoids))
+                '(SELECT candidate FROM cohort_claims WHERE observation=?)',
+                (observation,))
         db.execute("UPDATE candidates SET status='accepted' WHERE policy=? AND status='pending' "
                    "AND json_extract(payload,'$.reason')=?",(policy,reason))
         db.execute("INSERT OR IGNORE INTO members SELECT json_extract(payload,'$.observation'),person "
