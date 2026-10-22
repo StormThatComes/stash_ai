@@ -45,20 +45,38 @@ source validation still revokes obsolete proofs; no old automatic label supplies
 authority. Query witness vectors, pair hypotheses and emitted exemplars share
 the explicit reference byte budget and fail rather than silently losing coverage.
 
-Full and mixed selections also preserve this previous-generation authority. Before
-replay, accepted attachment observation IDs freeze query eligibility, without using
-old labels as positive evidence. They cannot seed new cores or supply birth votes.
-After final auxiliary source ownership, those queries are revalidated against the
-complete current rooted bank, combining selected and unselected scenes. Newly
-accepted output waits for a later replay. A pending generation prevents a warm
-cache from concealing that next step; stable completed generations reuse the cache.
-Checkpoints include the query-admission dependencies and retain prefix recovery.
+Full and mixed selections finalize one rooted generation inside the same private
+replay. Before replay, previous attachment observation IDs freeze query eligibility,
+without using old labels as positive evidence. They cannot seed new cores or supply
+birth votes. A prior supported look from one query scene can defer a nearby new
+birth only after fresh validation against two disjoint rooted parents. Such hints
+contain no owner or positive matching authority. They prevent a new local core
+from stealing selected source views while a foreign query scene awaits its second
+scene. After final auxiliary source ownership, stage one first revalidates deferred
+queries against roots, then validates accepted attachments, combining selected and
+unselected scenes, then freezes the supported appearances. Stage two uses that bank
+to resolve remaining queries before the single durable commit and publication.
+Its output cannot supply another promotion or change a promoted bank's root owners.
+Invalidated source references remain visible as rivals but cannot authorize new
+claims. There is no second full scene replay for the new generation, no repeated
+enrichment until convergence, and no rescanning or model inference. Stable completed
+generations reuse the cache. Checkpoints retain strict-prefix recovery and the
+query-admission dependencies; an interrupted final stage resumes from retained
+evidence and performs fresh validation. Strict checkpoint coverage counts current
+anchor-admitted observations; auxiliary rows remain available for the later stages.
+Historical label binding excludes rejected observations from its reference set,
+while retaining cross-scope, model-namespace and incomplete-scan checks. A rejected
+old member cannot train a reference or block the selected repair of its identity.
 
 A previous promotion plan can only defer a new near-appearance birth. It cannot
 assign an owner, override previously established strict witnesses, or authorize a
 match after its parents fail fresh validation. Deferred queries are resolved only
 against the final current bank; obsolete hints are cleared with the completed
-plan. Scans and embeddings are retained. Matching policy advances to v34.
+plan. A freshly valid one-scene negative hint can be cached while its query remains
+withheld; it does not request another identical run or become a positive view.
+A stale hint that deferred a birth still requests a clean retry when it loses
+fresh validation; newly accepted promotion queries no longer require a later run.
+Scans and embeddings are retained. Matching policy advances to v35.
 
 The local anchor bank uses the same broad/narrow cohort builder as the global
 bank. Independently supported reserve centres remain available beyond the primary

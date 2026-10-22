@@ -19,7 +19,7 @@ from .scoring import comparisons, scoped
 from .evidence_cache import current as evidence, scoped as evidence_owned
 from .parallel_scores import scored_rows, contributions
 
-MATCHING_FORMAT = 34
+MATCHING_FORMAT = 35
 
 
 def vector(row):
@@ -60,7 +60,7 @@ def reference_admission(policy, *, scan_policy=None, label_scenes=(), compatibil
 
 @measured('references')
 def _groups(db, scope, namespace, policy, *, usage=None, stage='loading', scan_policy=None, label_scenes=(), compatibility=None):
-    anchor = reference_admission(policy,scan_policy=scan_policy,label_scenes=label_scenes,compatibility=compatibility)
+    anchor = reference_admission(policy,scan_policy=scan_policy,label_scenes=label_scenes,compatibility=compatibility) + ' AND o.rejected IS NULL'
     strict = strict_sql()
     usage = usage or ReferenceUsage(policy['max_reference_bytes'])
     cache = evidence(db)
@@ -89,7 +89,7 @@ def _groups(db, scope, namespace, policy, *, usage=None, stage='loading', scan_p
         identifiers = encoded([person['id'] for person in batch])
         invalid = db.execute('SELECT 1 FROM members m JOIN observations o ON o.id=m.observation '
             'JOIN scans s ON s.id=o.scan WHERE m.person IN (SELECT value FROM json_each(?)) AND '
-            "(s.scope<>? OR s.namespace<>? OR s.status<>'complete' OR o.rejected IS NOT NULL) LIMIT 1",
+            "(s.scope<>? OR s.namespace<>? OR s.status<>'complete') LIMIT 1",
             (identifiers, scope, namespace)).fetchone()
         if invalid:
             raise ValueError('Face identity has incompatible retained membership evidence.')

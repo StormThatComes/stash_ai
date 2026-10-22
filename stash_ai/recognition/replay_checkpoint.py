@@ -24,7 +24,7 @@ from .profiling import count, measured
 
 APPLICATION_ID = 0x52435054
 FORMAT = 1
-ENGINE = 'recognition-cold-replay-v8.1'
+ENGINE = 'recognition-cold-replay-v8.2'
 TABLES = ('people', 'members', 'candidates', 'identity_merges', 'merge_support')
 ORDER = ('id', 'observation', 'id', 'source', 'source,target,observation,policy')
 SCHEMA = '''
@@ -356,12 +356,14 @@ class Checkpoints:
 
     def _validate(self, replay, cursor, clock):
         from .rebuild import _batches
+        from .pose_policy import anchor_sql
+        anchor = anchor_sql('o', self.config.data['clustering'])
         prefix = encoded([item['scan'] for item in self.selected[:cursor]])
         replay.execute('CREATE TEMP TABLE checkpoint_prefix(scan TEXT PRIMARY KEY)')
         try:
             replay.execute('INSERT INTO checkpoint_prefix SELECT value FROM json_each(?)', (prefix,))
             eligible = replay.execute('SELECT COUNT(*) FROM observations o JOIN checkpoint_prefix p '
-                                     'ON p.scan=o.scan WHERE o.rejected IS NULL').fetchone()[0]
+                                     'ON p.scan=o.scan WHERE o.rejected IS NULL AND '+anchor).fetchone()[0]
             if clock-1 > eligible:
                 raise ValueError('Invalid checkpoint identity clock.')
             installation = str(uuid.uuid5(uuid.NAMESPACE_URL, encoded([self.scope,self.namespace,'cold-replay'])))
@@ -387,7 +389,7 @@ class Checkpoints:
                     observation = payload.get('observation') if isinstance(payload, dict) else None
                     raw = replay.execute('SELECT o.*,m.person AS member FROM observations o '
                         'LEFT JOIN members m ON m.observation=o.id JOIN checkpoint_prefix p ON p.scan=o.scan '
-                        'WHERE o.id=? AND o.rejected IS NULL', (observation,)).fetchone()
+                        'WHERE o.id=? AND o.rejected IS NULL AND '+anchor, (observation,)).fetchone()
                     if (raw is None or raw['scan'] != row['scan'] or row['policy'] != policy
                             or row['id'] != str(uuid.uuid5(uuid.UUID(observation),policy))
                             or payload.get('policy') != policy or payload.get('representative_limit') !=

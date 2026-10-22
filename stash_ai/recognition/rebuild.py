@@ -439,7 +439,7 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
     from .corroborated_views import previous_queries,previous_strict,previous_hints,defer_new_groups
     previous=previous_queries(db,selected,config,scope,namespace)
     prior_strict=set(previous_strict(db,selected,config,scope,namespace))
-    hints=previous_hints(db,config,scope,namespace,previous)
+    hints=previous_hints(db,config,scope,namespace)
     database._rebuild_corroboration_pending=False
     database._rebuild_corroborated_plan={row['id'] for row in hints}
     database._rebuild_revalidated_medoids=set()
@@ -521,8 +521,12 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
         finalize_pool(replay,config,mapping)
         from .selected_corroboration import resolve as restore_corroboration
         database._rebuild_corroboration_pending=restore_corroboration(
-            database,temporary,selected,config,history,previous)
-        if set(deferred_hints)-database._rebuild_revalidated_medoids:
+            database,temporary,selected,config,history,previous,hints=hints)
+        unvalidated=set(deferred_hints)-database._rebuild_revalidated_medoids
+        if unvalidated and replay.execute("SELECT 1 FROM candidates c WHERE c.status='withheld' "
+                "AND json_extract(c.payload,'$.reason')='prior_appearance_pending' AND EXISTS "
+                "(SELECT 1 FROM json_each(json_extract(c.payload,'$.prior_appearance_hints')) h "
+                'WHERE h.value IN (SELECT value FROM json_each(?))) LIMIT 1',(encoded(sorted(unvalidated)),)).fetchone():
             database._rebuild_corroboration_pending=True
         for row in replay.execute('SELECT DISTINCT person FROM members'):
             mapping.setdefault(row[0],row[0])
