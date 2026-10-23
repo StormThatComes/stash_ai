@@ -2222,7 +2222,9 @@ With this option, provisional local groups also refresh bounded representatives
 using quality and appearance diversity. Their original seed stays pinned, so
 replacement cannot walk away from its origin. Later accepted cues can replace
 duplicate early samples within `max_samples_per_person`; duplicate timestamps
-cannot fill that bank. The sampler reads at most the cap plus one observations.
+cannot fill that bank. Once the bank is full, refreshes batch at most eight accepted timestamps and
+flush at the end of the scene. The sampler reads at most the cap plus eight
+observations, avoiding a full selection after every subsequent face.
 No VTT rescan or model inference is needed.
 
 
