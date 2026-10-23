@@ -43,7 +43,7 @@ class PromotionCohorts:
         if self.usage.bytes + self.scratch + extra > self.usage.limit:
             raise ValueError('Corroborated view evidence exceeds clustering.max_reference_bytes.')
 
-    def add(self, row, query, qualified):
+    def add(self, row, query, qualified, *, single=()):
         import numpy as np
         raw = query.tobytes()
         if raw not in self.vectors:
@@ -52,10 +52,10 @@ class PromotionCohorts:
             self.vectors[raw] = query
         query = self.vectors[raw]
         witness = {k: row[k] for k in ('id', 'scan', 'seconds', 'scene', 'geometry', 'quality')}
-        for left, right in combinations(sorted(qualified), 2):
-            if set(self.roots[left].support).intersection(self.roots[right].support):
-                continue
-            parents = (left, right)
+        hypotheses=[pair for pair in combinations(sorted(qualified), 2)
+                    if not set(self.roots[pair[0]].source_ids).intersection(self.roots[pair[1]].source_ids)]
+        hypotheses.extend((root,) for root in sorted(single))
+        for parents in hypotheses:
             slots = self.slots.setdefault(parents, [])
             item = next((s for s in slots if float(np.dot(s.pivot, query)) >= self.radius and
                          s.cluster.accepts_pose(row['geometry']) and
@@ -97,7 +97,8 @@ class PromotionCohorts:
                         scenes.setdefault(row['scene'], row['id'])
                         if row['id'] in track_ids:
                             validated.append(row['id'])
-                    if len(support.cues) < self.minimum or len(scenes) < minimum_scenes:
+                    required_scenes=max(2,minimum_scenes) if len(item.parents)==1 else minimum_scenes
+                    if len(support.cues) < self.minimum or len(scenes) < required_scenes:
                         continue
                     examples = (sample,) + tuple(v for v in support.examples
                                                  if v.tobytes() != sample.tobytes())

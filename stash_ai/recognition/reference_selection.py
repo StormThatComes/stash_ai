@@ -75,12 +75,23 @@ def refresh_local(db, group, observation, maximum, usage):
 
     Only already admitted strict observations are eligible. Keeping the seed
     prevents a sequence of replacements from walking away from its origin.
-    SQLite supplies at most cap+1 rows; the sampler never loads a whole scene.
+    Full banks refresh in batches of at most eight accepted timestamps. SQLite
+    supplies at most cap+8 rows; the sampler never loads a whole scene.
     """
     from .database import encoded
     if maximum == 1:
         return
-    ids = tuple(dict.fromkeys(group.sample_ids + (observation['id'],)))
+    pending=getattr(group,'_appearance_pending',None)
+    if pending is None:
+        pending={};group._appearance_pending=pending
+    if observation is not None:
+        pending[(observation['scan'],observation['seconds'])]=observation['id']
+        if len(group.samples)>=maximum and len(pending)<min(8,maximum):
+            return
+    if not pending:
+        return
+    ids = tuple(dict.fromkeys(group.sample_ids + tuple(pending.values())))
+    pending.clear()
     seed = group.sample_ids[0]
     rows = list(db.execute('SELECT o.id,o.scan,o.seconds,o.geometry,o.quality,o.dimensions,o.embedding,s.scene '
         'FROM observations o JOIN scans s ON s.id=o.scan WHERE o.id IN '

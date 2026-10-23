@@ -19,7 +19,7 @@ from .scoring import comparisons, scoped
 from .evidence_cache import current as evidence, scoped as evidence_owned
 from .parallel_scores import scored_rows, contributions
 
-MATCHING_FORMAT = 38
+MATCHING_FORMAT = 40
 
 
 def vector(row):
@@ -345,6 +345,10 @@ def cluster_scene(database, scan, config, *, progress=None, _cold_replay=False):
                                      'prior_attachment_query':bool(observation['prior_query']),
                                      'policy': policy, 'representative_limit': grouping['max_samples_per_person'],
                                      'resource_limits': resource_limits(config)})))
+        if grouping['strict_appearance_matching']:
+            from .reference_selection import refresh_local
+            for group in groups[fixed_count:]:
+                refresh_local(db,group,None,grouping['max_samples_per_person'],usage)
         usage.emit(force=True)
         from .decision_resolution import resolve_pending
         resolve_pending(db, policy, config, scans=(scan,))

@@ -70,6 +70,8 @@ class _Cluster:
     qualities: list = field(default_factory=list)
     total: object = field(default=None,repr=False)
     pose_hints: set = field(default_factory=set)
+    scene_minimum: int = 0
+    scene_witnesses: dict = field(default_factory=dict)
 
     def accepts_pose(self,geometry):
         return all(pose_matches(geometry,hint) for hint in (self.pose_hints or {self.pose}))
@@ -83,6 +85,10 @@ class _Cluster:
         if cue in self.cues:
             return
         self.cues.add(cue)
+        if self.scene_minimum and 'scene' in row.keys():
+            witnesses=self.scene_witnesses.setdefault(row['scene'],[])
+            if len(witnesses)<self.scene_minimum:
+                witnesses.append(row['id'])
         if 'geometry' in row.keys():
             self.pose_hints.add(pose_view(row['geometry']))
             if 'other' in self.pose_hints:
@@ -151,12 +157,12 @@ def coverage_threshold(grouping):
                math.sqrt((1 + grouping['view_match_threshold']) / 2))
 
 
-def add_cohort(slots,row,sample,threshold,*,complete):
+def add_cohort(slots,row,sample,threshold,*,complete,scene_minimum=0):
     slot=next((s for s in slots if s.accepts_pose(row['geometry']) and s.accepts(sample,threshold)),None)
     if slot is None:
         if not complete and len(slots)>=32:
             return 0
-        slot=_Cluster(pose_view(row['geometry']),row['id']);slots.append(slot)
+        slot=_Cluster(pose_view(row['geometry']),row['id'],scene_minimum=scene_minimum);slots.append(slot)
     before=len(slot.examples)
     slot.add(row,sample)
     return (len(slot.examples)-before)*sample.nbytes

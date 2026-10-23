@@ -30,10 +30,13 @@ class IdentityView:
     examples: tuple
     authority: str = 'strict'
     promotion: object = None
+    source_scenes: tuple = ()
+    scene_sources: tuple = ()
 
     @property
     def source_ids(self):
-        return tuple(dict.fromkeys(self.support+tuple((self.promotion or {}).get('source_reference_ids',()))))
+        return tuple(dict.fromkeys(self.support+tuple(i for _,ids in self.scene_sources for i in ids)+
+            tuple((self.promotion or {}).get('source_reference_ids',()))))
 
 
 def catalogue(db, config, scope, namespace, *, usage, policy=None, excluded_scenes=(), scan_policy=None,
@@ -50,7 +53,7 @@ def catalogue(db, config, scope, namespace, *, usage, policy=None, excluded_scen
     if scan_policy is not None:
         parameters.append(scan_policy)
     rows = db.execute(
-        'SELECT m.person,o.id,o.scan,o.seconds,o.geometry,o.dimensions,o.embedding,o.quality '
+        'SELECT m.person,o.id,o.scan,o.seconds,o.geometry,o.dimensions,o.embedding,o.quality,s.scene '
         'FROM members m JOIN people p ON p.id=m.person JOIN observations o ON o.id=m.observation '
         'JOIN scans s ON s.id=o.scan ' + join +
         "WHERE p.scope=? AND p.namespace=? AND s.scene NOT IN (SELECT value FROM json_each(?)) "
@@ -61,6 +64,7 @@ def catalogue(db, config, scope, namespace, *, usage, policy=None, excluded_scen
         ' AND ' + strict_sql() + ' ' + condition + scan_condition +
         'ORDER BY m.person,CAST(s.scene AS INTEGER),s.scene,o.cue,o.seconds,o.geometry,o.embedding,o.id', parameters)
     result, owner, slots, cover, scratch = [], None, [], [], 0
+    scene_minimum=max(grouping['view_min_support'],config.data['recognition']['min_merge_support'])
 
     def emit():
         if owner is None:
@@ -70,16 +74,19 @@ def catalogue(db, config, scope, namespace, *, usage, policy=None, excluded_scen
             sample, medoid = slot.medoid()
             usage.add(slot.examples, kind='Global view evidence')
             result.append(IdentityView(Group(owner, (sample,), True, (medoid,)), slot.pose,
-                medoid, tuple(slot.observations), len(slot.cues), tuple(slot.examples)))
+                medoid, tuple(slot.observations), len(slot.cues), tuple(slot.examples),
+                source_scenes=tuple(sorted(slot.scene_witnesses)),
+                scene_sources=tuple((scene,tuple(ids)) for scene,ids in sorted(slot.scene_witnesses.items())
+                                    if len(ids)>=scene_minimum)[:2]))
     with tracking(rows, 'Build global strict identity views', unit='observation') as tracked:
         for row in tracked:
             if owner != row['person']:
                 emit()
                 owner, slots, cover, scratch = row['person'], [], [], 0
             sample=vector(row)
-            scratch+=add_cohort(slots,row,sample,grouping['view_cohesion_threshold'],complete=complete)
+            scratch+=add_cohort(slots,row,sample,grouping['view_cohesion_threshold'],complete=complete,scene_minimum=scene_minimum)
             if complete:
-                scratch+=add_cohort(cover,row,sample,coverage_threshold(grouping),complete=True)
+                scratch+=add_cohort(cover,row,sample,coverage_threshold(grouping),complete=True,scene_minimum=scene_minimum)
             if complete and usage.bytes+scratch>usage.limit:
                 raise ValueError('Global view evidence exceeds clustering.max_reference_bytes.')
     emit()

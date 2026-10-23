@@ -66,6 +66,11 @@ def test_late_representative_replaces_duplicate_early_look_but_keeps_seed(tmp_pa
         assert group.sample_ids[0]==rows[0]['id']
         assert rows[-1]['id'] in group.sample_ids
         assert len(group.samples)<=3 and usage.bytes==sum(v.nbytes for v in group.samples)
+        assert not group._appearance_pending
+        refresh_local(db.connection,group,rows[2],3,usage)
+        assert group._appearance_pending
+        refresh_local(db.connection,group,None,3,usage)
+        assert not group._appearance_pending and group.sample_ids[0]==rows[0]['id']
 
 
 def test_option_changes_matching_only_and_requires_appearance_bank(tmp_path):
