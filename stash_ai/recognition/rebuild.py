@@ -557,6 +557,9 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
         with stage('Validate final reference ownership'):
             invalid=invalidated_sources(history,replay,config,mapping)
         if invalid:raise InvalidatedSourceViews(invalid)
+        from .subcomponents import finalize as finalize_subcomponents
+        with stage('Finalize supported identity subcomponents'):
+            finalize_subcomponents(temporary,config,mapping,history)
         report_pages(replay)
         _apply(database, replay, selected, config, scope, namespace, mapping, fingerprint, progress, usage=usage,history=history)
     return _results(db, selected, config)

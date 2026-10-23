@@ -59,7 +59,7 @@ def resolve(db,history,config,usage,*,replay=None,groups=(),early=(),excluded_vi
         views+=catalogue(replay,config,*first,usage=usage,complete=True)
     summaries=summary_views(all_groups,usage)
     copresent=_copresence(db,replay)
-    decisions=consolidation_plan(db,views+summaries,config,mixed=True,cooccurs=copresent)
+    decisions=consolidation_plan(db,views+summaries,config,mixed=True,cooccurs=copresent,subcomponents=False)
     historical=set(history.people)
     selected={g.identifier for g in groups}
     aliases={}

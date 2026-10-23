@@ -144,7 +144,7 @@ def cohort_evidence(db, left, right, config, *, cooccurs=None):
 
 
 @scoped
-def consolidation_plan(db,views,config,*,neighbours=None,mixed=False,cooccurs=None,focus=None):
+def consolidation_plan(db,views,config,*,neighbours=None,mixed=False,cooccurs=None,focus=None,subcomponents=True):
     """Strong complete components with margin checks against frozen outsiders.
 
     Weak edges are competition evidence, not transitive component membership.
@@ -181,6 +181,13 @@ def consolidation_plan(db,views,config,*,neighbours=None,mixed=False,cooccurs=No
     parents={person:person for person in owned}
     degrees={person:0 for person in owned}
     floors={person:float('inf') for person in owned}
+    best={}
+    def nominate(person,other,score):
+        previous=best.get(person)
+        if previous is None or score>previous[0]:
+            best[person]=(score,other,False)
+        elif score==previous[0]:
+            best[person]=(score,previous[1],True)
     def root(person):
         while parents[person]!=person:
             parents[person]=parents[parents[person]]
@@ -220,47 +227,77 @@ def consolidation_plan(db,views,config,*,neighbours=None,mixed=False,cooccurs=No
                     degrees[person]+=1;degrees[other]+=1
                     floors[person]=min(floors[person],proof['match_score'])
                     floors[other]=min(floors[other],proof['match_score'])
+                    nominate(person,other,proof['match_score'])
+                    nominate(other,person,proof['match_score'])
     components={}
     for person in owned:
         components.setdefault(root(person),[]).append(person)
+    def decision(people,complete,*,parent=None):
+        members=set(people)
+        # A recovered pair has its own internal floor. Every other identity,
+        # including neighbours in the original component, remains a rival.
+        internal=({p:best[p][0] for p in people} if parent is not None else floors)
+        rival=None
+        if complete:
+            for person in people:
+                for view in owned[person]:
+                    strict=view.authority=='strict_core'
+                    effective=settings['match_threshold'] if strict else threshold
+                    for other,score,_ in comparisons(groups,view.group.samples[0],effective-margin):
+                        if other.identifier in members:
+                            continue
+                        if mixed and view.authority!=by_group[id(other)].authority:
+                            continue
+                        if view.authority==by_group[id(other)].authority=='strict_core':
+                            from .clustering import _similarities
+                            raw=Group(other.identifier,by_group[id(other)].examples,True)
+                            score=sum(_similarities(raw,q)[0] for q in view.examples)/len(view.examples)
+                            if score<effective-margin:
+                                continue
+                        entry=dict(identity=person,rival=other.identifier,score=score,
+                                   internal_score=internal[person],gap=internal[person]-score)
+                        if rival is None or (entry['gap'],person,other.identifier)<(rival['gap'],rival['identity'],rival['rival']):
+                            rival=entry
+        blocker=('no_supported_pair' if len(people)<2 else 'incomplete_strong_component' if not complete else
+                 'competing_view' if rival is not None and rival['gap']<margin else None)
+        return dict(people=tuple(sorted(people)),format=3,frozen=True,
+            component_context=digest(sorted(people)),component_size=len(people),
+            complete_component=complete,minimum_supported_degree=(1 if parent is not None else min(degrees[p] for p in people)),
+            required_degree=len(people)-1,nearest_rival=rival,ambiguity_margin=margin,
+            outcome='merge' if blocker is None else 'blocked',blocker=blocker,
+            partition_strategy='reciprocal_supported_pair' if parent is not None else 'complete_component',
+            parent_component=tuple(sorted(parent)) if parent is not None else None)
     result=[]
     with tracking(components.values(), 'Check frozen component competition', unit='component', position=1) as tracked:
         for people in tracked:
             if focus is not None and not focus.intersection(people):
                 continue
             complete=len(people)>1 and all(degrees[p]==len(people)-1 for p in people)
-            rival=None
-            if complete:
-                for person in people:
-                    for view in owned[person]:
-                        strict=view.authority=='strict_core'
-                        effective=settings['match_threshold'] if strict else threshold
-                        for other,score,_ in comparisons(groups,view.group.samples[0],effective-margin):
-                            if root(other.identifier)==root(person):
-                                continue
-                            if mixed and view.authority!=by_group[id(other)].authority:
-                                continue
-                            if view.authority==by_group[id(other)].authority=='strict_core':
-                                from .clustering import _similarities
-                                raw=Group(other.identifier,by_group[id(other)].examples,True)
-                                score=sum(_similarities(raw,q)[0] for q in view.examples)/len(view.examples)
-                                if score<effective-margin:
-                                    continue
-                            entry=dict(identity=person,rival=other.identifier,score=score,
-                                       internal_score=floors[person],gap=floors[person]-score)
-                            if rival is None or (entry['gap'],person,other.identifier)<(rival['gap'],rival['identity'],rival['rival']):
-                                rival=entry
-            blocker=('no_supported_pair' if len(people)<2 else 'incomplete_strong_component' if not complete else
-                     'competing_view' if rival is not None and rival['gap']<margin else None)
-            result.append(dict(people=tuple(sorted(people)),format=3,frozen=True,
-                component_context=digest(sorted(people)),component_size=len(people),
-                complete_component=complete,minimum_supported_degree=min(degrees[p] for p in people),
-                required_degree=len(people)-1,nearest_rival=rival,ambiguity_margin=margin,
-                outcome='merge' if blocker is None else 'blocked',blocker=blocker))
+            if complete or len(people)<3 or not subcomponents:
+                result.append(decision(people,complete))
+                continue
+            accepted=[]
+            used=set()
+            for person in sorted(people):
+                proposal=best.get(person)
+                if proposal is None or proposal[2]:continue
+                other=proposal[1]
+                opposite=best.get(other)
+                if (other<=person or opposite is None or opposite[2] or opposite[1]!=person):continue
+                pair=decision((person,other),True,parent=people)
+                if pair['outcome']=='merge':
+                    accepted.append(pair);used.update((person,other))
+            result.extend(accepted)
+            remaining=[p for p in people if p not in used]
+            if remaining:
+                blocked=decision(remaining,False)
+                blocked['parent_component']=tuple(sorted(people))
+                blocked['blocker']='incomplete_strong_component'
+                result.append(blocked)
     return tuple(result)
 
 
-def merge_views(database,views,config,policy,*,neighbours=None,evidence_field='global_view_merge',plan=None):
+def merge_views(database,views,config,policy,*,neighbours=None,evidence_field='global_view_merge',plan=None,subcomponents=True):
     """Apply a plan computed entirely from the original frozen catalogue."""
     db=database.connection
     owned={}
@@ -268,7 +305,7 @@ def merge_views(database,views,config,policy,*,neighbours=None,evidence_field='g
         owned.setdefault(view.group.identifier,[]).append(view)
     order={r['id']:(r['created'],r['id']) for r in db.execute('SELECT id,created FROM people')}
     related=neighbours if neighbours is not None else set()
-    decisions = consolidation_plan(db,views,config,neighbours=related) if plan is None else plan
+    decisions = consolidation_plan(db,views,config,neighbours=related,subcomponents=subcomponents) if plan is None else plan
     with tracking(decisions, 'Apply frozen identity components', unit='component', position=1) as tracked:
         for decision in tracked:
             people=decision['people']
@@ -370,7 +407,7 @@ def apply_global_views(database, selected, config, *, progress=None):
         return
     neighbours=set()
     # Freeze all merger nominations and competition before any attachment.
-    plan=consolidation_plan(db,views,config,neighbours=neighbours)
+    plan=consolidation_plan(db,views,config,neighbours=neighbours,subcomponents=False)
     from .cohort_resolution import whole_views
     attached=whole_views(db,config,anchors,views)
     views=tuple(v for v in views if v.group.identifier not in attached)

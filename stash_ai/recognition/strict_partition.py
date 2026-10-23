@@ -29,7 +29,7 @@ def resolve(database, selected, config, *, progress=None):
         view_cohesion_threshold=data['clustering']['cohesion_threshold'],
         view_ambiguity_margin=data['recognition']['ambiguity_margin'])
     merge_views(database,summaries,replace(config,data=data),matching_policy(config),
-                evidence_field='strict_partition')
+                evidence_field='strict_partition',subcomponents=False)
 
 
 def summary_views(groups,usage):
