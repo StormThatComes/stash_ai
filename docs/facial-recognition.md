@@ -2166,3 +2166,21 @@ before evaluation; this command cannot recover faces rejected during detection.
 Normal runs now record `identity_decisions` in run history, with counts by status
 and reason and three original evidence examples per group. Identity exports and
 evaluation share the same evidence projection; neither invents a missing blocker.
+
+
+### Supported pairs inside incomplete identity components
+
+A connected but incomplete component may contain an unambiguous supported pair.
+The frozen planner now proposes reciprocal unique best pairs and checks their
+internal score against **every** outside identity, including the rest of the
+original component. Equal alternatives and insufficient margins remain blocked.
+Pair proposals are disjoint; merged output never extends another proposal.
+Reports expose `partition_strategy`, `parent_component` and the closest rival.
+
+Production applies these repairs only after all assignment/enrichment phases.
+It freezes strict and confirmed-view proposals together and rejects incompatible
+overlapping proposals. This prevents an early pair merge from training a later
+recovery in the same replay. The first implementation finalizes selected strict
+cores only; identities tied to unselected historical owners or carrying non-strict
+members require their existing reconciliation paths. Current matching policy is
+versioned so old rebuild decisions are recomputed from retained embeddings.

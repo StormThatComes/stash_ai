@@ -31,6 +31,7 @@ REASONS = {
 # Retain numeric evidence and observation pointers, excluding arbitrary future
 # payloads, URLs, image data, vectors, installation tokens and run configuration.
 DECISION_FIELDS = (
+    'final_subcomponent_merge',
     'shared_reference', 'cohort_resolution', 'strict_partition', 'strict_confirmation', 'reference_registry', 'provisional_pool',
     'global_identity_decision', 'decision_conflict',
     'observation', 'reason', 'scores', 'policy', 'representative_limit', 'reference_role', 'reference_selected',
