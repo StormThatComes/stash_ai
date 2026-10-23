@@ -24,13 +24,16 @@ passes the same unrestricted anchor policy.
 `clustering.corroborated_view_enrichment` (default true) can extend the frozen
 historical query bank with a `corroborated_view`. Its accepted attachment cohort
 needs at least `max(view_min_support, min_merge_support)` independent cues from
-two distinct scenes. Every query must independently match two strict-rooted
-views whose support sets are disjoint, pass all mixed rivals/co-presence checks,
-and remain inside an immutable, non-transitive appearance radius. One parent
-with overlapping prototype aliases cannot supply two confirmations.
+two distinct scenes. Every query must independently match either two strict-rooted
+views whose support sets are disjoint, or one strict view with complete support
+in two other source scenes. The single-root route requires at least the same
+minimum number of distinct timestamps in **each** source scene and forbids using
+any source scene as a query scene. Both routes preserve mixed rivals/co-presence
+checks and the immutable, non-transitive appearance radius. Overlapping prototype
+aliases cannot manufacture independent confirmations.
 
 Promotion is derived from latest complete, currently eligible durable memberships.
-The proof records both parents, original strict witnesses, bounded query witnesses,
+The proof records its parent route, original strict and source-scene witnesses, bounded query witnesses,
 scene count and thresholds. Losing support, ownership, quality or a current scan
 revokes the next capture and invalidates its matching cache. Promoted views remain
 query-only and never parent another promotion or vote for strict identity merges.
@@ -2221,3 +2224,23 @@ replacement cannot walk away from its origin. Later accepted cues can replace
 duplicate early samples within `max_samples_per_person`; duplicate timestamps
 cannot fill that bank. The sampler reads at most the cap plus one observations.
 No VTT rescan or model inference is needed.
+
+
+### Promotion from one independently supported strict look
+
+The single-root alternative to two disjoint parent looks records
+`one_strict_view_in_two_source_scenes_and_two_disjoint_query_scenes` in the
+promotion proof. Its one parent must have strict authority; a verified auxiliary
+or previously promoted view cannot use this alternative. Each of two source
+scenes supplies `max(view_min_support, min_merge_support)` independent timestamps.
+The new appearance needs its own support across two additional scenes, disjoint
+from every scene contributing to the strict source cohort.
+
+Source-scene observation IDs remain part of `source_ids` even when bounded
+representative selection chooses identical embeddings from an earlier scene.
+Deleting/reassigning those observations, collapsing their timestamps or
+superseding a source scan revokes the next promotion. A full replay rebuilds this
+evidence from current VTT observations. Output remains generation one,
+attachment-only, and cannot supply another promotion root. The existing two-parent
+route remains available; a single-root negative birth hint also requires two
+query scenes. No schema change, additional input sampling or inference is needed.

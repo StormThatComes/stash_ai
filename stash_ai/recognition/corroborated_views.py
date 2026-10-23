@@ -1,4 +1,4 @@
-"""One generation of attachment views with two disjoint rooted confirmations.
+"""One generation of attachment views with independently rooted confirmations.
 
 Promotion is read-only and rebuilt from latest durable memberships. Neither a
 corroborated view nor this replay's output can supply a promotion root. Keeping
@@ -17,9 +17,14 @@ from .progress import tracking
 def _independent(roots):
     for i,left in enumerate(roots):
         for right in roots[i+1:]:
-            if not set(left.support).intersection(right.support):
+            if not set(left.source_ids).intersection(right.source_ids):
                 return left,right
     return None
+
+
+def _single_root(view):
+    """One strict look needs complete support in two independent source scenes."""
+    return view.authority=='strict' and len(view.scene_sources)>=2
 
 
 def enabled(config):
@@ -50,9 +55,9 @@ def previous_strict(db,selected,config,scope,namespace):
 def previous_hints(db,config,scope,namespace):
     """Fresh rooted prior looks can defer births, never authorize ownership.
 
-    One prior query scene is enough for a negative hint, provided independent
-    support and both current rooted parents still hold. Positive promotion
-    continues to require two scenes, including a freshly validated selected one.
+    One prior query scene is enough for a two-parent negative hint. Single-root
+    hints and positive promotion require two independent query scenes; source
+    evidence is freshly derived in both cases.
     """
     if not enabled(config):return ()
     from .historical_references import _source,parameters,capture
@@ -124,7 +129,7 @@ def _build(db,config,scope,namespace,selected,history,usage,*,eligible_ids=None,
            and v.support_count>=minimum}
     by_owner={}
     for v in roots.values():by_owner.setdefault(v.group.identifier,[]).append(v)
-    by_owner={p:vs for p,vs in by_owner.items() if _independent(vs) is not None}
+    by_owner={p:vs for p,vs in by_owner.items() if _independent(vs) is not None or any(_single_root(v) for v in vs)}
     if not by_owner:
         return ()
     # Promotion always uses the original rooted bank, even when called again.
@@ -159,9 +164,11 @@ def _build(db,config,scope,namespace,selected,history,usage,*,eligible_ids=None,
             proof=dict(format=2,frozen=True,generation=1,identity=owner,
                 query_support=appearance.support,required_support=minimum,scenes=appearance.scenes,
                 scene_count=appearance.scene_count,query_ids=queries,source_reference_ids=source_ids,
-                parents=[dict(medoid=v.medoid,authority=v.authority,support_ids=v.source_ids) for v in parents],
+                parents=[dict(medoid=v.medoid,authority=v.authority,support_ids=v.source_ids,
+                              source_scenes=v.source_scenes,source_scene_evidence=v.scene_sources) for v in parents],
                 threshold=threshold,cohesion_threshold=grouping['view_cohesion_threshold'],support_radius=radius,
-                validation='two_disjoint_rooted_views_and_two_query_scenes')
+                validation=('one_strict_view_in_two_source_scenes_and_two_disjoint_query_scenes' if len(parents)==1
+                            else 'two_disjoint_rooted_views_and_two_query_scenes'))
             output.append(IdentityView(Group(owner,(sample,),True,(medoid,)),appearance.pose,medoid,
                 queries,appearance.support,appearance.examples,'corroborated_view',proof))
 
@@ -188,7 +195,9 @@ def _build(db,config,scope,namespace,selected,history,usage,*,eligible_ids=None,
                 if _competing_anchor(bank.groups,owner,query,score,margin):continue
                 if not co_presence_allows(row.get('_database',db),row,parent.group,references,query,config):continue
                 qualified.append(medoid)
-            if _independent([roots[i] for i in qualified]) is None:continue
-            cohorts.add(row,query,qualified)
+            single=[i for i in qualified if _single_root(roots[i])
+                    and row['scene'] not in roots[i].source_scenes and row['id'] not in roots[i].source_ids]
+            if not single and _independent([roots[i] for i in qualified]) is None:continue
+            cohorts.add(row,query,qualified,single=single)
     emit()
     return tuple(output)
