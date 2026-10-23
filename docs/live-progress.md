@@ -50,6 +50,16 @@ and counters, and completed detail rows clear their own counters.
 shows face-observation hashing and assignment-evidence validation on the second,
 with per-batch observation totals, throughput and ETA. A scene batch completes
 only after both required passes succeed.
+Before assignment validation, `Index rebuild assignment candidates` scans the
+candidate table once and reports inspected candidates in bounded batches. It
+builds a temporary lookup for the selected observations, shared across all scene
+batches in this catalogue check. The newest candidate by rowid still wins across
+all matching policies. Assignment validation uses indexed lookups instead of
+rescanning candidate JSON for every observation before yielding its first result.
+The lookup is discarded on success, error or Ctrl+C without committing or rolling
+back the caller's pending writes. Its preparation counter measures candidates;
+the subsequent validation counter measures observations. Progress-off runs skip
+optional total queries and use the same lookup algorithm.
 The final recognition error summary retains at most six groups and two examples
 per group (350 characters each), with exact counts and overflow totals. Distinct
 reasons sharing an exception type remain available in auto/compact/off output.

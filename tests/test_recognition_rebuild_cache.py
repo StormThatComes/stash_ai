@@ -138,3 +138,103 @@ def test_completed_descriptor_catalog_is_bounded_and_corruption_recoverable(tmp_
         assert rebuild_cache.lookup(state.connection,'scope','ns','4')['fingerprint']=='4'
         state.connection.execute("UPDATE metadata SET value='corrupt' WHERE key LIKE 'identity-rebuild-cache:%'")
         assert rebuild_cache.lookup(state.connection,'scope','ns','4') is None
+
+
+def assignment_fixture(state, *, scenes=3, candidates=600):
+    from benchmarks.benchmark_recognition_replay import fixture
+    from stash_ai.recognition.database import encoded
+    selected = fixture(state, scenes, dimensions=4, people=4)
+    observations = list(state.connection.execute('SELECT id,scan FROM observations ORDER BY id'))
+    rows = []
+    for i in range(candidates):
+        row = observations[i % len(observations)]
+        # Include mismatched scan fields and different policies deliberately:
+        # the newest addressed candidate, rather than its scan/policy, decides.
+        payload = encoded(dict(observation=row['id'], reason=f'reason-{i}',
+                               strict_confirmation=dict(source=i, roots=[i % 7])))
+        if i % 47 == 0:
+            payload = 'invalid-json'
+        elif i % 43 == 0:
+            payload = encoded(dict(reason='no observation'))
+        rows.append((f'candidate-{i}', selected[-1]['scan'], f'policy-{i % 3}',
+                     f'person-{i % 5}', 'accepted' if i % 2 else 'withheld', payload))
+    state.connection.executemany('INSERT INTO candidates VALUES (?,?,?,?,?,?)', rows)
+    state.connection.commit()
+    return selected[:-1]
+
+
+def legacy_assignment_rows(db, scans):
+    from stash_ai.recognition.database import encoded
+    return db.execute('SELECT o.id,c.person,c.status,CASE WHEN json_valid(c.payload) THEN '
+        "json_extract(c.payload,'$.reason','$.strict_confirmation') END FROM observations o "
+        'LEFT JOIN candidates c ON c.rowid=(SELECT z.rowid FROM candidates z WHERE '
+        "CASE WHEN json_valid(z.payload) THEN json_extract(z.payload,'$.observation') END=o.id "
+        'ORDER BY z.rowid DESC LIMIT 1) WHERE o.scan IN (SELECT value FROM json_each(?)) ORDER BY o.id',
+        (encoded(scans),))
+
+
+@pytest.mark.parametrize('pending', [False, True])
+def test_assignment_index_preserves_latest_global_address_and_caller_transaction(tmp_path, pending):
+    from stash_ai.recognition.rebuild_cache import _assignment_index
+    from stash_ai.recognition.database import encoded
+    config = setup(tmp_path)
+    with FaceDatabase(config.database) as state:
+        selected = assignment_fixture(state)
+        db = state.connection
+        if pending:
+            db.execute("INSERT INTO metadata VALUES ('caller-pending','keep')")
+        before = list(db.iterdump())
+        scans = [s['scan'] for s in selected]
+        expected = [tuple(r) for r in legacy_assignment_rows(db, scans)]
+        with _assignment_index(db, selected) as name:
+            actual = [tuple(r) for r in db.execute(
+                'SELECT o.id,c.person,c.status,CASE WHEN json_valid(c.payload) THEN '
+                "json_extract(c.payload,'$.reason','$.strict_confirmation') END FROM observations o "
+                f'LEFT JOIN {name} a ON a.observation=o.id LEFT JOIN candidates c ON c.rowid=a.candidate '
+                'WHERE o.scan IN (SELECT value FROM json_each(?)) ORDER BY o.id', (encoded(scans),))]
+            assert db.execute(f'SELECT COUNT(*) FROM {name}').fetchone()[0] == 6
+        assert actual == expected and any(r[1] is not None for r in actual)
+        assert db.in_transaction == pending
+        assert list(db.iterdump()) == before
+        assert not db.execute("SELECT 1 FROM sqlite_temp_master WHERE name LIKE 'rebuild_assignments_%'").fetchone()
+        if pending:
+            db.rollback()
+            assert not db.execute("SELECT 1 FROM metadata WHERE key='caller-pending'").fetchone()
+
+
+def test_assignment_catalogue_keeps_frozen_digest_with_multiple_candidate_policies(tmp_path):
+    from stash_ai.recognition.rebuild_cache import input_context
+    config = changed(setup(tmp_path), anchor_view_matching=True)
+    with FaceDatabase(config.database) as state:
+        selected = assignment_fixture(state)
+        assert input_context(state.connection, selected, 'scope', 'ns', config) == '8ee67e346fb47998431c8cca2cc172f1079f51b72940cf2929dd9a4c90ebc271'
+
+
+def test_assignment_index_is_prepared_once_across_catalogue_batches(tmp_path):
+    from stash_ai.recognition.rebuild_cache import input_context
+    config = changed(setup(tmp_path), anchor_view_matching=True)
+    with FaceDatabase(config.database) as state:
+        selected = assignment_fixture(state, scenes=259, candidates=1800)
+        statements = []
+        state.connection.set_trace_callback(statements.append)
+        assert input_context(state.connection, selected, 'scope', 'ns', config)
+        scans = [sql for sql in statements if sql.startswith('SELECT c.rowid,o.id,o.scan')]
+        assert len(scans) == 1
+        assert not any('SELECT z.rowid' in sql for sql in statements)
+
+
+def test_assignment_index_bounds_sql_work_before_validation(tmp_path):
+    from stash_ai.recognition.rebuild_cache import input_context
+    config = changed(setup(tmp_path), anchor_view_matching=True)
+    with FaceDatabase(config.database) as state:
+        selected = assignment_fixture(state, scenes=251, candidates=6000)
+        calls = [0]
+        def budget():
+            calls[0] += 1
+            return calls[0] > 1000  # One million VM instructions, independent of wall time.
+        state.connection.set_progress_handler(budget, 1000)
+        try:
+            assert input_context(state.connection, selected, 'scope', 'ns', config)
+        finally:
+            state.connection.set_progress_handler(None, 0)
+        assert calls[0] < 1000

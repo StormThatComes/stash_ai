@@ -1,9 +1,12 @@
 """Completed-result descriptors and bounded, dependency-checked warm reads."""
 import hashlib
+import itertools
 import json
 import sqlite3
 import uuid
+from contextlib import contextmanager, ExitStack
 
+from stash_ai.runtime.cleanup import cleanup
 from .config import digest
 from .database import encoded
 from .profiling import count, measured
@@ -38,12 +41,45 @@ def _hash_row(hasher,row):
         hasher.update(blob)
 
 
+@contextmanager
+def _assignment_index(db, selected):
+    """Read candidate JSON once, retaining only selected observation addresses.
+
+    Rowid order preserves the latest candidate across all policies, including
+    candidates whose scan field disagrees with their observation's scan. The
+    temporary lookup and its writes belong to a private savepoint, so neither
+    success nor interruption commits or rolls back the caller's transaction.
+    """
+    name = 'rebuild_assignments_' + uuid.uuid4().hex
+    selected_scans = {item['scan'] for item in selected}
+    db.execute(f'SAVEPOINT {name}')
+    try:
+        db.execute(f'CREATE TEMP TABLE {name}(observation TEXT PRIMARY KEY, candidate INTEGER NOT NULL)')
+        with work('Index rebuild assignment candidates',
+                  lambda: db.execute('SELECT COUNT(*) FROM candidates').fetchone()[0],
+                  unit='candidate') as indexed:
+            # LEFT JOIN emits every candidate, including invalid/unselected
+            # addresses, so preparation has an honest inspected-candidate total.
+            rows = db.execute('SELECT c.rowid,o.id,o.scan FROM candidates c '
+                'LEFT JOIN observations o ON o.id=CASE WHEN json_valid(c.payload) THEN '
+                "json_extract(c.payload,'$.observation') END ORDER BY c.rowid")
+            while batch := list(itertools.islice(rows, 256)):
+                db.executemany(f'INSERT OR REPLACE INTO {name} VALUES (?,?)',
+                    ((row[1], row[0]) for row in batch if row[2] in selected_scans))
+                indexed.advance(len(batch))
+        yield name
+    finally:
+        cleanup([('discard assignment lookup', lambda: db.execute(f'ROLLBACK TO {name}')),
+                 ('release assignment lookup', lambda: db.execute(f'RELEASE {name}'))])
+
+
 @measured('input_dependencies')
 def input_context(db,selected,scope,namespace,config=None):
     hasher=hashlib.sha256()
     from .pose_policy import anchor_visibility
     visibility_fields=",'$.visible_face_fraction','$.visibility.contract'" if config is not None and anchor_visibility(config.data['clustering']) else ''
-    with work('Validate rebuild input catalogue',len(selected),unit='scene',position=0) as progress:
+    with ExitStack() as stack, work('Validate rebuild input catalogue',len(selected),unit='scene',position=0) as progress:
+        assignments_index = None
         for start in range(0,len(selected),256):
             batch=selected[start:start+256]
             scans=encoded([item['scan'] for item in batch])
@@ -72,13 +108,15 @@ def input_context(db,selected,scope,namespace,config=None):
             if config is not None:
                 from .corroborated_views import enabled
                 if enabled(config):
+                    if assignments_index is None:
+                        assignments_index = stack.enter_context(_assignment_index(db, selected))
                     with work('Validate rebuild assignment evidence',observations.total,
                             unit='observation') as assignments:
                         for row in db.execute('SELECT o.id,c.person,c.status,CASE WHEN json_valid(c.payload) THEN '
                                 "json_extract(c.payload,'$.reason','$.strict_confirmation') END FROM observations o "
-                                'LEFT JOIN candidates c ON c.rowid=(SELECT z.rowid FROM candidates z WHERE '
-                                "CASE WHEN json_valid(z.payload) THEN json_extract(z.payload,'$.observation') END=o.id "
-                                'ORDER BY z.rowid DESC LIMIT 1) WHERE o.scan IN (SELECT value FROM json_each(?)) ORDER BY o.id',
+                                f'LEFT JOIN {assignments_index} a ON a.observation=o.id '
+                                'LEFT JOIN candidates c ON c.rowid=a.candidate '
+                                'WHERE o.scan IN (SELECT value FROM json_each(?)) ORDER BY o.id',
                                 (scans,)):
                             _hash_row(hasher,row)
                             assignments.advance()
