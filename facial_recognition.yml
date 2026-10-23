@@ -37,6 +37,7 @@ clustering:
   view_prototypes_enabled: true # Opt in to multi-view identity reference prototypes.
   context_view_enrichment: true # Additional views only after strict-core revalidation of 2+ contextual cues.
   corroborated_view_enrichment: true # Historical attachments need 2 scenes and 2 disjoint rooted views; one generation only.
+  strict_appearance_matching: true # Match supported strict looks with ordinary thresholds; keep recovered queries attachment-only.
   anchor_view_matching: true    # Additional frozen subcluster matching for withheld anchor observations.
   view_min_support: 3          # Independent anchor-confirmed cues needed to promote a view.
   view_cohesion_threshold: 0.80 # All retained exemplars must agree; no single-link chaining.

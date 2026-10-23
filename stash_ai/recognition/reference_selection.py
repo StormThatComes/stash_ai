@@ -68,3 +68,28 @@ def select(rows, maximum):
             reduce()
     reduce()
     return [(row['id'], sample) for _, row, sample, _, _ in sorted(pool, key=lambda item: item[0])]
+
+
+def refresh_local(db, group, observation, maximum, usage):
+    """Refresh provisional representatives without forgetting the original seed.
+
+    Only already admitted strict observations are eligible. Keeping the seed
+    prevents a sequence of replacements from walking away from its origin.
+    SQLite supplies at most cap+1 rows; the sampler never loads a whole scene.
+    """
+    from .database import encoded
+    if maximum == 1:
+        return
+    ids = tuple(dict.fromkeys(group.sample_ids + (observation['id'],)))
+    seed = group.sample_ids[0]
+    rows = list(db.execute('SELECT o.id,o.scan,o.seconds,o.geometry,o.quality,o.dimensions,o.embedding,s.scene '
+        'FROM observations o JOIN scans s ON s.id=o.scan WHERE o.id IN '
+        '(SELECT value FROM json_each(?)) ORDER BY o.cue,o.seconds,o.geometry,o.embedding,o.id', (encoded(ids),)))
+    seed_row = next(r for r in rows if r['id'] == seed)
+    chosen = select((r for r in rows if r['id'] != seed and
+                     (r['scan'],r['seconds']) != (seed_row['scan'],seed_row['seconds'])), maximum-1)
+    samples = [group.samples[0]] + [v for _,v in chosen]
+    usage.add_counts(sum(v.nbytes for v in samples)-sum(v.nbytes for v in group.samples),
+                     len(samples)-len(group.samples),kind='Selected appearance representatives')
+    group.sample_ids = (seed,) + tuple(i for i,_ in chosen)
+    group.samples = samples

@@ -138,13 +138,23 @@ def refresh_verified(db,selected,config,scope,namespace,history,usage):
     history.views+=enrich(db,config,scope,namespace,selected,history,usage)
 
 
-def rank(rows,history,config,*,decisions=None,potential=None,relaxed_pose=False):
+def rank(rows,history,config,*,decisions=None,potential=None,relaxed_pose=False,strict_appearance=False):
     settings,grouping=config.data['recognition'],config.data['clustering']
     threshold=settings['match_threshold']
     view_threshold=max(threshold,grouping['view_match_threshold'])
     margin=max(settings['ambiguity_margin'],grouping['view_ambiguity_margin'])
-    views=[view.group for view in history.views]
-    by_group={id(view.group):view for view in history.views}
+    views=[];by_group={}
+    minimum=max(grouping['view_min_support'],settings['min_merge_support'])
+    for view in history.views:
+        if strict_appearance:
+            if view.authority!='strict' or view.support_count<minimum:
+                continue
+            group=Group(view.group.identifier,view.examples,True,view.support)
+        else:
+            group=view.group
+        views.append(group);by_group[id(group)]=view
+    effective_view_threshold=threshold if strict_appearance else view_threshold
+    effective_view_cohesion=grouping['cohesion_threshold'] if strict_appearance else grouping['view_cohesion_threshold']
     aggregate={};strict_rows=[];mixed_rows=[]
     for row in rows:
         query=vector(row)
@@ -154,17 +164,17 @@ def rank(rows,history,config,*,decisions=None,potential=None,relaxed_pose=False)
                 if group.identifier not in choices or score>choices[group.identifier][0]:
                     choices[group.identifier]=(score,'strict',None,score>=threshold)
         strict_rows.append(dict(choices))
-        for group,score,low in comparisons(views,query,view_threshold-margin,grouping['view_cohesion_threshold']):
+        for group,score,low in comparisons(views,query,effective_view_threshold-margin,effective_view_cohesion):
             view=by_group[id(group)]
-            if low<grouping['view_cohesion_threshold'] or not query_pose_matches(row['geometry'],view.pose,relaxed=relaxed_pose):
+            if low<effective_view_cohesion or not query_pose_matches(row['geometry'],view.pose,relaxed=relaxed_pose):
                 continue
             previous=choices.get(group.identifier)
-            if previous is not None and previous[3] and score<view_threshold:
+            if previous is not None and previous[3] and score<effective_view_threshold:
                 continue
             if previous is not None and previous[1]=='strict' and previous[3] and previous[0]>=score:
                 continue
             if previous is None or score>previous[0]:
-                choices[group.identifier]=(score,'view',view.medoid,score>=view_threshold)
+                choices[group.identifier]=(score,'view',view.medoid,score>=effective_view_threshold)
         mixed_rows.append(choices)
         if potential is not None and not potential and any(value[3] for value in choices.values()):
             potential.append(True)
@@ -220,6 +230,7 @@ def rank(rows,history,config,*,decisions=None,potential=None,relaxed_pose=False)
                            **({'promotion':v.promotion} if getattr(v,'promotion',None) else {}))
             for v in history.views if v.medoid in {value[2] for value in values}],
         mode='view' if any(v[1]=='view' for v in values) else 'strict',mean_score=score,ranking_score=ranking_score,
+        strict_appearance=strict_appearance,threshold=effective_view_threshold,cohesion_threshold=effective_view_cohesion,
         rival_score=ranked[1][0] if len(ranked)>1 else None,
         medoids=sorted({v[2] for v in values if v[2] is not None}),ambiguity_margin=decision_margin)
 

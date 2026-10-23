@@ -156,6 +156,11 @@ def selected(database,config,early,global_state):
     views,neighbours=global_state or ((),set())
     for view in views:
         usage.add(view.examples,kind='Selected strict cohort')
+    if config.data['clustering']['strict_appearance_matching']:
+        attached=whole_views(db,config,groups,views,strict_appearance=True)
+        if attached:
+            views=tuple(v for v in views if v.group.identifier not in attached)
+            groups=_groups(db,*first,config.data['clustering'],usage=usage)
     owned={v.group.identifier for v in views}
     # A supported local core may be too small to train a view of its own.
     # Resolve it before the partial-cohort rule requiring an unmatched remainder.
@@ -205,7 +210,7 @@ def selected(database,config,early,global_state):
             config,{},selected_only=True,source_ids=source_ids)
 
 
-def whole_views(db,config,groups,views):
+def whole_views(db,config,groups,views,*,strict_appearance=False):
     """A wholly contained query stays attachment-only in a joint replay too.
 
     Reciprocal proposals and competing/co-present sources stay unresolved here;
@@ -218,7 +223,7 @@ def whole_views(db,config,groups,views):
         frozen=History((),tuple(v for v in views if v.group.identifier!=group.identifier),{},'frozen-selected-whole-views')
         samples=db.execute('SELECT id,geometry,dimensions,embedding FROM observations WHERE id IN '
             '(SELECT value FROM json_each(?))',(encoded(group.sample_ids),)).fetchall()
-        match=rank(samples,frozen,config) if samples else None
+        match=rank(samples,frozen,config,strict_appearance=strict_appearance) if samples else None
         if match is None:continue
         target,proof=match
         if _cooccurs(db,group.identifier,target):continue
@@ -229,7 +234,7 @@ def whole_views(db,config,groups,views):
         valid=True
         for row in db.execute('SELECT o.* FROM members m JOIN observations o ON o.id=m.observation WHERE m.person=? ORDER BY o.id',
                               (group.identifier,)):
-            result=rank([row],frozen,config)
+            result=rank([row],frozen,config,strict_appearance=strict_appearance)
             if result is None or result[0]!=target or _competing_anchor(rivals,target,vector(row),
                 result[1]['mean_score'],result[1]['ambiguity_margin']):
                 valid=False;break
