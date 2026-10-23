@@ -19,7 +19,7 @@ from .scoring import comparisons, scoped
 from .evidence_cache import current as evidence, scoped as evidence_owned
 from .parallel_scores import scored_rows, contributions
 
-MATCHING_FORMAT = 37
+MATCHING_FORMAT = 38
 
 
 def vector(row):
@@ -317,9 +317,13 @@ def cluster_scene(database, scan, config, *, progress=None, _cold_replay=False):
                         person, status, reason = None, 'withheld', 'co_present_identity_conflict'
                     elif prior_person is not None and prior_person != person:
                         person, status, reason = None, 'withheld', 'policy_reassignment_requires_review'
-                    if person is not None and not group.known and len(group.samples) < grouping['max_samples_per_person']:
-                        usage.add([query], kind='Selected')
-                        group.samples.append(query)
+                    if person is not None and not group.known:
+                        if grouping['strict_appearance_matching']:
+                            from .reference_selection import refresh_local
+                            refresh_local(db,group,observation,grouping['max_samples_per_person'],usage)
+                        elif len(group.samples) < grouping['max_samples_per_person']:
+                            usage.add([query], kind='Selected')
+                            group.samples.append(query)
                 elif near:
                     person, status, reason = None, 'withheld', 'insufficient_match_or_cohesion'
                 elif prior_person is not None:
@@ -330,7 +334,7 @@ def cluster_scene(database, scan, config, *, progress=None, _cold_replay=False):
                     person = str(uuid.uuid5(uuid.UUID(database.installation),
                                            encoded([record['scope'], record['namespace'], observation['id']])))
                     usage.add([query], people=1, kind='Selected')
-                    group = Group(person, [query], False)
+                    group = Group(person, [query], False, (observation['id'],))
                     groups.append(group)
                     by_id[person] = group
                     status, reason = 'pending', 'candidate_group'

@@ -2196,3 +2196,28 @@ Recovered observations record `pose_recovery` evidence and
 `pose_uncertain_identity`; they remain attachments and cannot seed another look.
 The pass uses only retained VTT observations and invalidates matching caches,
 without invalidating scans or running inference.
+
+### Matching independently supported strict appearances
+
+`clustering.strict_appearance_matching` is enabled in the shipped YAML and
+requires `anchor_view_matching`. Omitted settings retain the previous behaviour
+so an existing configuration can opt in and compare both variants with
+`recognition evaluate`.
+
+A coherent strict appearance with at least `max(view_min_support,
+min_merge_support)` distinct timestamps can explain queries using the ordinary
+`match_threshold` and `cohesion_threshold`. Every retained appearance witness
+participates in mean/minimum scoring; a single best image cannot authorize a
+match. Raw competing anchors, ambiguity, pose, visibility and co-presence still
+apply. Complete selected fragments can attach to such an appearance only after
+every member passes; reciprocal proposals and chains stay unresolved. Remaining
+withheld queries need at least two independent timestamps. Both routes remain
+attachment-only and expose `strict_appearance` evidence (inside
+`shared_reference` for a whole-fragment repair).
+
+With this option, provisional local groups also refresh bounded representatives
+using quality and appearance diversity. Their original seed stays pinned, so
+replacement cannot walk away from its origin. Later accepted cues can replace
+duplicate early samples within `max_samples_per_person`; duplicate timestamps
+cannot fill that bank. The sampler reads at most the cap plus one observations.
+No VTT rescan or model inference is needed.
