@@ -17,7 +17,7 @@ from .reference_selection import select
 from .reference_usage import ReferenceUsage
 from .scanning import scan_identity
 from .scoring import comparisons
-from .view_prototypes import pose_view, pose_matches
+from .view_prototypes import pose_view, pose_matches, query_pose_matches
 from .rebuild_cache import _hash_row
 
 
@@ -138,7 +138,7 @@ def refresh_verified(db,selected,config,scope,namespace,history,usage):
     history.views+=enrich(db,config,scope,namespace,selected,history,usage)
 
 
-def rank(rows,history,config,*,decisions=None,potential=None):
+def rank(rows,history,config,*,decisions=None,potential=None,relaxed_pose=False):
     settings,grouping=config.data['recognition'],config.data['clustering']
     threshold=settings['match_threshold']
     view_threshold=max(threshold,grouping['view_match_threshold'])
@@ -156,7 +156,7 @@ def rank(rows,history,config,*,decisions=None,potential=None):
         strict_rows.append(dict(choices))
         for group,score,low in comparisons(views,query,view_threshold-margin,grouping['view_cohesion_threshold']):
             view=by_group[id(group)]
-            if low<grouping['view_cohesion_threshold'] or not pose_matches(row['geometry'],view.pose):
+            if low<grouping['view_cohesion_threshold'] or not query_pose_matches(row['geometry'],view.pose,relaxed=relaxed_pose):
                 continue
             previous=choices.get(group.identifier)
             if previous is not None and previous[3] and score<view_threshold:

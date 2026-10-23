@@ -2184,3 +2184,15 @@ recovery in the same replay. The first implementation finalizes selected strict
 cores only; identities tied to unselected historical owners or carrying non-strict
 members require their existing reconciliation paths. Current matching policy is
 versioned so old rebuild decisions are recomputed from retained embeddings.
+
+### Recovering uncertain pose from VTT geometry
+
+A final query-only pass may match a neutral/side landmark category mismatch to
+a frozen strict or independently verified view. Opposite side categories and
+invalid geometry do not receive this exception. It preserves embedding, raw
+rival, ownership, visibility and simultaneous-face checks and requires at least
+two distinct query timestamps (or the configured higher attachment support).
+Recovered observations record `pose_recovery` evidence and
+`pose_uncertain_identity`; they remain attachments and cannot seed another look.
+The pass uses only retained VTT observations and invalidates matching caches,
+without invalidating scans or running inference.

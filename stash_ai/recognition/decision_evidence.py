@@ -2,6 +2,7 @@
 # Categories describe the recorded assignment path, not whether the face was
 # actually used as a reference at the time. That historical sample set is absent.
 REASONS = {
+    'pose_uncertain_identity': ('anchor-view', 'Independent queries matched a frozen view across a neutral/side pose boundary; they remain attachment-only.'),
     'historical_potential_identity': ('anchor-deferred', 'A whole local cohort is close to an existing frozen appearance; publication of a new identity was deferred.'),
     'shared_view_source_invalidated': ('withheld', 'The final direct auxiliary assignment revoked the owner of the selected source view.'),
     'selected_cohort_identity': ('anchor-view', 'A supported majority cohort matched the frozen selected bank; unmatched outliers remain withheld.'),
@@ -31,6 +32,7 @@ REASONS = {
 # Retain numeric evidence and observation pointers, excluding arbitrary future
 # payloads, URLs, image data, vectors, installation tokens and run configuration.
 DECISION_FIELDS = (
+    'pose_recovery',
     'final_subcomponent_merge',
     'shared_reference', 'cohort_resolution', 'strict_partition', 'strict_confirmation', 'reference_registry', 'provisional_pool',
     'global_identity_decision', 'decision_conflict',
