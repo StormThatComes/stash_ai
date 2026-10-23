@@ -163,7 +163,7 @@ def test_input_catalogue_without_console_skips_progress_count_queries(tmp_path, 
     from benchmarks.benchmark_recognition_replay import fixture
     from stash_ai.recognition.rebuild_cache import input_context
     from tests.test_recognition_clustering import setup
-    config = setup(tmp_path)
+    config = changed(setup(tmp_path), clustering={'anchor_view_matching': True})
     with FaceDatabase(config.database) as db:
         selected = fixture(db, 2, dimensions=4)
         statements = []
@@ -432,3 +432,41 @@ def test_local_cohort_optional_total_is_not_queried_without_progress(tmp_path, s
         with present(RunReport(write=lambda _: None), style) if style else nullcontext():
             prepare(db.connection, selected, config)
         assert not any('COUNT(' in sql.upper() for sql in statements)
+
+
+@pytest.mark.parametrize('failure', [None, RuntimeError, KeyboardInterrupt])
+@pytest.mark.parametrize('pending', [False, True])
+def test_assignment_preparation_reports_candidate_batches_and_cleans_up_on_interruption(
+        tmp_path, monkeypatch, terminal, failure, pending):
+    from stash_ai.recognition import rebuild_cache
+    from tests.test_recognition_rebuild_cache import assignment_fixture, changed, setup
+    config = changed(setup(tmp_path), anchor_view_matching=True)
+    bars, _ = terminal
+    with FaceDatabase(config.database) as state:
+        selected = assignment_fixture(state)
+        db = state.connection
+        if pending:
+            db.execute("INSERT INTO metadata VALUES ('pending-caller','preserve')")
+        before = list(db.iterdump())
+        class Connection:
+            def execute(self, *args):
+                return db.execute(*args)
+            def executemany(self, sql, values):
+                if sql.startswith('INSERT OR REPLACE INTO rebuild_assignments_'):
+                    active = next(b for b in bars if b.desc == 'Index rebuild assignment candidates' and not b.disable)
+                    assert active.total == 600
+                    if active.n == 256 and failure:
+                        raise failure('assignment indexing stopped')
+                return db.executemany(sql, values)
+        with present(RunReport(write=lambda _: None), 'auto', status_position=2):
+            if failure:
+                with pytest.raises(failure, match='assignment indexing stopped'):
+                    rebuild_cache.input_context(Connection(), selected, 'scope', 'ns', config)
+            else:
+                assert rebuild_cache.input_context(Connection(), selected, 'scope', 'ns', config)
+        indexed = next(b for b in bars if b.desc == 'Index rebuild assignment candidates')
+        assert indexed.n == (256 if failure else 600)
+        assert next(b for b in bars if b.desc == 'Validate rebuild input catalogue').n == (0 if failure else 2)
+        assert db.in_transaction == pending and list(db.iterdump()) == before
+        assert not db.execute("SELECT 1 FROM sqlite_temp_master WHERE name LIKE 'rebuild_assignments_%'").fetchone()
+    assert all(b.disable for b in bars)
