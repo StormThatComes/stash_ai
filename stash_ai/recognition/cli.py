@@ -48,6 +48,21 @@ def parser():
     commands = root.add_subparsers(dest='command', required=True)
     run = commands.add_parser('run', allow_abbrev=False, help='Recognize selected scenes and publish eligible people.')
     _arguments(run)
+    evaluation = commands.add_parser('evaluate', allow_abbrev=False,
+        help='Evaluate labelled retained VTT embeddings offline in isolated RAM; never publish.')
+    selection = evaluation.add_mutually_exclusive_group(required=True)
+    selection.add_argument('--scene-id', action='append', type=stash_id)
+    selection.add_argument('--all-scenes', action='store_true')
+    evaluation.add_argument('--labels', type=Path, required=True,
+        help='JSON object mapping retained observation IDs to explicit human truth labels.')
+    evaluation.add_argument('--compare-config', action='append', type=Path,
+        help='Additional YAML with the same model/detection contract; repeatable.')
+    evaluation.add_argument('--batch-size', action='append', type=int,
+        help='Scenes per replay; 0 means joint. Repeatable; default compares 0 and 1.')
+    evaluation.add_argument('--face-config', type=Path)
+    evaluation.add_argument('--faces-db', type=Path)
+    evaluation.add_argument('--scope')
+    evaluation.add_argument('--output', type=Path, help='New JSON output file; stdout if omitted.')
     sync=commands.add_parser('sync-identities',allow_abbrev=False,
         help='Inspect queued recognition scene-link repairs; --apply publishes current retained assignments without inference.')
     sync.add_argument('--apply',action='store_true',help='Publish queued current assignments and acknowledge successful scenes.')
@@ -125,6 +140,9 @@ def main(argv=None, *, services=None):
     args = parser().parse_args(argv)
     config = load(args.face_config, database=getattr(args, 'faces_db', None),
                   device=getattr(args, 'device', None))
+    if args.command == 'evaluate':
+        from .offline_evaluation import execute
+        return execute(args, config)
     if args.command == 'audit-alignment':
         from .alignment_audit import execute as audit
         return audit(args, config, services=services)

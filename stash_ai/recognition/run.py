@@ -258,6 +258,9 @@ def execute(args, config, *, services=None):
                                     for item in publications:
                                         reconcile_unlinks(database, client, scope, item['scene'])
                                 rebuilt = rebuild_selected(database, selected, config, progress=reference_progress)
+                                from .decision_evidence import summary as decision_summary
+                                database.progress(run, 'identity_decisions', decision_summary(
+                                    database.connection, matching_policy(config), [s['scan'] for s in selected]))
                             database.progress(run, 'rebuild', {'mode': 'cold_selected_replay', 'selection': selected,
                                                              'matching_policy': matching_policy(config)})
                             with ui.phase('Recognition Stash publication', errors=lambda: counts['people_failed']), WorkProgress(report, 'Publish recognition', len(selected)) as publication:

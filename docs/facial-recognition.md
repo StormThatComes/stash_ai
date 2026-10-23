@@ -2130,3 +2130,39 @@ policy v23 invalidates older derived decisions without changing scan/model keys.
 Recovered membership-only or damaged legacy decisions receive explicit attachment
 authority, so the legacy strict fallback cannot silently promote their evidence.
 Strict-core summary vectors remain immutable for reuse by the packed score cache.
+
+
+### Offline identity evaluation on retained VTT observations
+
+`recognition evaluate` runs the production identity rebuild in disposable RAM.
+It does not load models, fetch VTT/video media, acquire the database writer lock,
+change retained assignments or publish to Stash. Supply explicit human labels
+using observation IDs from an identity/fragmentation report:
+
+```json
+{"observation-uuid-1": "person-A", "observation-uuid-2": "person-A", "observation-uuid-3": "person-B"}
+```
+
+```sh
+python stash_ai.py recognition evaluate --all-scenes --labels truth.json --face-config facial_recognition.yml --compare-config tuned.yml --batch-size 0 --batch-size 1 --batch-size 20 --output evaluation.json
+```
+
+Use repeated `--scene-id` instead of `--all-scenes` for a pilot. The latest
+selected scans must be complete and match the detection contract. Compared YAML
+files must use the same recognizer, detector, detection settings and cue limit;
+matching settings may differ. Each configuration starts from the same selected
+raw observations with no historical identity labels. A batched trial introduces
+only its current scenes and the previously processed batches, in numeric scene
+ID order. Checkpoints are disabled. Existing quality measurements are retained,
+but image crops are never read. Unlabelled selected observations remain rivals.
+
+The JSON includes fragmentation, incorrect merges, coverage and partition
+comparisons, plus the original production decisions for labelled observations.
+Metrics measure only the supplied truth labels, not library-wide accuracy.
+Default batch sizes compare joint replay (`0`) with individual scenes (`1`).
+Output files must be new. Changing the model or scan gates requires scanning
+before evaluation; this command cannot recover faces rejected during detection.
+
+Normal runs now record `identity_decisions` in run history, with counts by status
+and reason and three original evidence examples per group. Identity exports and
+evaluation share the same evidence projection; neither invents a missing blocker.
