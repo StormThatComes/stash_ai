@@ -49,6 +49,17 @@ def pose_matches(geometry, pose, *, neutral=.12, uncertainty=.02):
                 (hint=='other' or pose=='other'))
 
 
+def query_pose_matches(geometry, pose, *, relaxed=False):
+    """Neutral/side mismatch may be a query hint, never a training permission.
+
+    The relaxed caller must require independent query support and the unchanged
+    embedding, rival and co-presence gates. Unknown geometry and opposite side
+    categories do not qualify for this fallback.
+    """
+    return pose_matches(geometry, pose) or bool(relaxed and _signed_pose(geometry) is not None
+        and pose in ('left', 'right', 'other') and 'other' in (pose_view(geometry), pose))
+
+
 @dataclass
 class _Cluster:
     pose: str

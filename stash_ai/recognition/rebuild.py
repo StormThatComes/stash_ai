@@ -545,6 +545,9 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
         with stage('Revalidate corroborated identity views'):
             database._rebuild_corroboration_pending=restore_corroboration(
                 database,temporary,selected,config,history,previous,hints=hints)
+        from .pose_recovery import recover as recover_uncertain_pose
+        with stage('Recover uncertain face pose'):
+            recover_uncertain_pose(database,temporary,config,history)
         unvalidated=set(deferred_hints)-database._rebuild_revalidated_medoids
         if unvalidated and replay.execute("SELECT 1 FROM candidates c WHERE c.status='withheld' "
                 "AND json_extract(c.payload,'$.reason')='prior_appearance_pending' AND EXISTS "
