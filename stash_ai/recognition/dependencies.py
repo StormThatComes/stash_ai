@@ -1,10 +1,24 @@
 """Transactional dependency stamps and disposable scalar digest caches."""
 from contextlib import contextmanager, nullcontext
+from contextvars import ContextVar
 import re
 import sqlite3
 import uuid
 
 from .profiling import count
+
+
+_writable = ContextVar('recognition_dependency_cache_writes', default=True)
+
+
+@contextmanager
+def read_only():
+    """Validation may reuse cache entries; only a successful apply creates them."""
+    token = _writable.set(False)
+    try:
+        yield
+    finally:
+        _writable.reset(token)
 
 
 def supported(db):
@@ -51,7 +65,7 @@ def cached(db, kind, key, policy, compute, *, dependency='global', dependency_ke
 
 
 def store(db, kind, key, policy, generation, value):
-    if db.execute('PRAGMA query_only').fetchone()[0]:
+    if not _writable.get() or db.execute('PRAGMA query_only').fetchone()[0]:
         return
     try:
         db.execute('INSERT OR REPLACE INTO evidence_fingerprints VALUES (?,?,?,?,?)',
