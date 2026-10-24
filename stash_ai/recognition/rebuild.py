@@ -474,8 +474,14 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
             replay.executemany('INSERT INTO prior_attachment_queries VALUES (?)',((i,) for i in previous))
             replay.commit()
         checkpoints = Checkpoints(database, selected, config, scope, namespace)
+        late_context = digest([external_context, sorted(excluded_views), sorted(prior_strict),
+            sorted(previous), [(r['id'], r['geometry'], bytes(r['embedding']).hex()) for r in hints]])
+        late = Checkpoints(database, selected, config, scope, namespace,
+                           phase='selected', context=late_context)
         with stage('Restore rebuild checkpoint'):
-            cursor, next_clock = checkpoints.restore(replay)
+            cursor, next_clock = late.restore(replay)
+            if late.restored_payload is None:
+                cursor, next_clock = checkpoints.restore(replay)
         clock = ReplayClock(next_clock)
         from .local_cohorts import prepare as prepare_local_cohorts
         with stage('Prepare local face cohorts'):
@@ -484,59 +490,69 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
         temporary = SimpleNamespace(connection=replay,
             installation=str(uuid.uuid5(uuid.NAMESPACE_URL, encoded([scope, namespace, 'cold-replay']))),
             identity_clock=clock)
-        with addresses(replay), reference_scope(replay, scope, namespace, config), evidence_scope(replay, config):
-            with Lookahead(replay_uri, config) as lookahead:
-                # Prime the first remaining scene as well: with explicit
-                # prefetch enabled no selected scene may silently go serial.
-                if cursor < len(selected):
-                    lookahead.submit(selected[cursor]['scan'])
-                with tracking(
-                    selected[cursor:],
-                    'Rebuild selected identities',
-                    total=len(selected), initial=cursor,
-                    unit='scene',
-                    position=0,
-                ) as tracked:
-                    for index, item in enumerate(tracked, start=cursor):
-                        with stage('Match selected scene', scene=item['scene']):
-                            lookahead.take(item['scan'])
-                            lookahead.submit(selected[index+1]['scan'] if index+1<len(selected) else None)
-                            cluster_scene(temporary, item['scan'], config, progress=progress, _cold_replay=True)
-                            compute_current().scenes_applied += 1
-                            compute_current().publish()
-                            checkpoints.save(replay, index+1, clock.value)
-            # Freeze strict references after every selected scene has matched and
-            # merged. Contextual attachments cannot become another scene's anchors
-            # or bridge identities during the replay.
-            checkpoints.save(replay, len(selected), clock.value, final=True)
-            from .strict_partition import resolve as resolve_strict_partition
-            with stage('Consolidate strict identity cores'):
-                resolve_strict_partition(temporary, selected, config, progress=progress)
-            from .cross_scene import apply_cross_scene_support
-            with stage('Confirm cross-scene provisional identities'):
-                apply_cross_scene_support(temporary, selected, config, progress=progress)
-            with stage('Classify prior appearance hints'):
-                deferred_hints=defer_new_groups(replay,config,hints,prior_strict)
-            from .shared_references import retry_strict, early_views
-            with stage('Retry strict identity assignments'):
-                retry_strict(temporary, selected, config)
-            with stage('Build early verified appearance views'):
-                early = early_views(temporary, selected, config,excluded_views=excluded_views)
-            with stage('Resolve same-scene identity context'):
-                apply_scene_context(temporary, selected, config, progress=progress)
-            from .anchor_views import apply_anchor_views
-            with stage('Recover anchor appearance views'):
-                apply_anchor_views(temporary, selected, config, progress=progress)
-            from .global_views import apply_global_views
-            with stage('Consolidate global appearance views'):
-                global_state=apply_global_views(temporary, selected, config, progress=progress)
-            from .cohort_resolution import selected as resolve_selected_cohorts
-            from dataclasses import replace
-            from .identity_merges import canonical
-            early=tuple(replace(v,group=Group(canonical(replay,v.group.identifier),v.group.samples,True)) for v in early)
-            with stage('Resolve selected identity cohorts'):
-                resolve_selected_cohorts(temporary,config,early,global_state)
-            global_state=None  # Release frozen exemplars before the historical bank.
+        from .late_checkpoint import encode as encode_late, decode as decode_late
+        if late.restored_payload is not None:
+            early, deferred_hints = decode_late(replay, late.restored_payload)
+        else:
+            with addresses(replay), reference_scope(replay, scope, namespace, config), evidence_scope(replay, config):
+                with Lookahead(replay_uri, config) as lookahead:
+                    # Prime the first remaining scene as well: with explicit
+                    # prefetch enabled no selected scene may silently go serial.
+                    if cursor < len(selected):
+                        lookahead.submit(selected[cursor]['scan'])
+                    with tracking(
+                        selected[cursor:],
+                        'Rebuild selected identities',
+                        total=len(selected), initial=cursor,
+                        unit='scene',
+                        position=0,
+                    ) as tracked:
+                        for index, item in enumerate(tracked, start=cursor):
+                            with stage('Match selected scene', scene=item['scene']):
+                                lookahead.take(item['scan'])
+                                lookahead.submit(selected[index+1]['scan'] if index+1<len(selected) else None)
+                                cluster_scene(temporary, item['scan'], config, progress=progress, _cold_replay=True)
+                                compute_current().scenes_applied += 1
+                                compute_current().publish()
+                                checkpoints.save(replay, index+1, clock.value)
+                # Freeze strict references after every selected scene has matched and
+                # merged. Contextual attachments cannot become another scene's anchors
+                # or bridge identities during the replay.
+                checkpoints.save(replay, len(selected), clock.value, final=True)
+                from .strict_partition import resolve as resolve_strict_partition
+                with stage('Consolidate strict identity cores'):
+                    resolve_strict_partition(temporary, selected, config, progress=progress)
+                from .cross_scene import apply_cross_scene_support
+                with stage('Confirm cross-scene provisional identities'):
+                    apply_cross_scene_support(temporary, selected, config, progress=progress)
+                with stage('Classify prior appearance hints'):
+                    deferred_hints=defer_new_groups(replay,config,hints,prior_strict)
+                from .shared_references import retry_strict, early_views
+                with stage('Retry strict identity assignments'):
+                    retry_strict(temporary, selected, config)
+                with stage('Build early verified appearance views'):
+                    early = early_views(temporary, selected, config,excluded_views=excluded_views)
+                with stage('Resolve same-scene identity context'):
+                    apply_scene_context(temporary, selected, config, progress=progress)
+                from .anchor_views import apply_anchor_views
+                with stage('Recover anchor appearance views'):
+                    apply_anchor_views(temporary, selected, config, progress=progress)
+                from .global_views import apply_global_views
+                with stage('Consolidate global appearance views'):
+                    global_state=apply_global_views(temporary, selected, config, progress=progress)
+                from .cohort_resolution import selected as resolve_selected_cohorts
+                from dataclasses import replace
+                from .identity_merges import canonical
+                early=tuple(replace(v,group=Group(canonical(replay,v.group.identifier),v.group.samples,True)) for v in early)
+                with stage('Resolve selected identity cohorts'):
+                    resolve_selected_cohorts(temporary,config,early,global_state)
+                with stage('Retry changed strict evidence'):
+                    retry_strict(temporary, selected, config)
+                global_state=None  # Release frozen exemplars before the historical bank.
+            replay.commit()
+            late.phase_payload = encode_late(early, deferred_hints)
+            if checkpoints.enabled:
+                late.save(replay, len(selected), clock.value, final=True)
         with stage('Freeze historical identity references'):
             history = historical_references.capture(db,selected,config,scope,namespace,external_context,resolve_aliases=False)
         with stage('Reconcile historical identities'):
