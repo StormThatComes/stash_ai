@@ -118,7 +118,7 @@ def early_views(database, selected, config,*,excluded_views=()):
         from .anchor_views import _competing_anchor
         from .clustering import vector
         rivals=[g for g in groups if g.identifier!=group.identifier]
-        if (_cooccurs(db,group.identifier,target) or len(rows)<grouping['view_attach_min_support'] or
+        if (_cooccurs(db,group.identifier,target,config) or len(rows)<grouping['view_attach_min_support'] or
             any(_competing_anchor(rivals,target,vector(row),proof['mean_score'],proof['ambiguity_margin']) for row in rows)):
             continue
         proposals.append((group.identifier,target,proof))
@@ -126,7 +126,7 @@ def early_views(database, selected, config,*,excluded_views=()):
     blocked=set()
     for index,(left,target,_) in enumerate(proposals):
         for right,other,_ in proposals[index+1:]:
-            if target==other and _cooccurs(db,left,right):
+            if target==other and _cooccurs(db,left,right,config):
                 blocked.update((left,right))
     for source,target,proof in proposals:
         if source in blocked or target in sources:

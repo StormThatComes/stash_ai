@@ -17,7 +17,7 @@ from .reference_usage import ReferenceUsage
 from .replay_addresses import address
 from .progress import tracking
 from .scoring import comparisons,scoped
-from .view_prototypes import pose_matches,add_cohort,coverage_threshold,supported_cohorts
+from .view_prototypes import pose_matches,add_cohort,coverage_threshold,supported_cohorts,witness_limit
 
 
 @dataclass(frozen=True)
@@ -84,9 +84,9 @@ def catalogue(db, config, scope, namespace, *, usage, policy=None, excluded_scen
                 emit()
                 owner, slots, cover, scratch = row['person'], [], [], 0
             sample=vector(row)
-            scratch+=add_cohort(slots,row,sample,grouping['view_cohesion_threshold'],complete=complete,scene_minimum=scene_minimum)
+            scratch+=add_cohort(slots,row,sample,grouping['view_cohesion_threshold'],complete=complete,scene_minimum=scene_minimum,maximum=witness_limit(grouping))
             if complete:
-                scratch+=add_cohort(cover,row,sample,coverage_threshold(grouping),complete=True,scene_minimum=scene_minimum)
+                scratch+=add_cohort(cover,row,sample,coverage_threshold(grouping),complete=True,scene_minimum=scene_minimum,maximum=witness_limit(grouping))
             if complete and usage.bytes+scratch>usage.limit:
                 raise ValueError('Global view evidence exceeds clustering.max_reference_bytes.')
     emit()
@@ -109,12 +109,18 @@ def unambiguous(ranked, threshold, margin):
                 (len(ranked) == 1 or ranked[0][0]-ranked[1][0] >= margin))
 
 
-def _cooccurs(db, left, right):
-    return db.execute('SELECT 1 FROM members a JOIN observations x ON x.id=a.observation '
+def _cooccurs(db, left, right, config=None):
+    enabled=bool(config and config.data['clustering'].get('deduplicate_detections'))
+    fields='x.geometry,x.embedding,y.geometry,y.embedding' if enabled else '1'
+    rows=db.execute('SELECT '+fields+' FROM members a JOIN observations x ON x.id=a.observation '
         'JOIN observations y ON y.scan=x.scan AND y.cue=x.cue '
         'JOIN members b ON b.observation=y.id WHERE a.person=? AND b.person=? '
-        'AND x.id<>y.id AND x.rejected IS NULL AND y.rejected IS NULL LIMIT 1',
-        (left, right)).fetchone() is not None
+        'AND x.id<>y.id AND x.rejected IS NULL AND y.rejected IS NULL'+('' if enabled else ' LIMIT 1'),
+        (left, right))
+    if not enabled:
+        return rows.fetchone() is not None
+    from .physical_faces import distinct_pairs
+    return distinct_pairs(rows,True)
 
 
 def cohort_evidence(db, left, right, config, *, cooccurs=None):
@@ -131,7 +137,7 @@ def cohort_evidence(db, left, right, config, *, cooccurs=None):
         threshold=settings['match_threshold']
     cohesion=grouping['cohesion_threshold'] if strict else grouping['view_cohesion_threshold']
     minimum=1 if strict else settings['min_merge_support']
-    copresent=(cooccurs or (lambda a,b:_cooccurs(db,a,b)))(left.group.identifier,right.group.identifier)
+    copresent=(cooccurs or (lambda a,b:_cooccurs(db,a,b,config)))(left.group.identifier,right.group.identifier)
     blockers=[]
     if score<threshold:
         blockers.append('view_medoid_below_match_threshold')

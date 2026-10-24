@@ -4,7 +4,7 @@ from .database import encoded
 from .historical_references import History, capture, rank
 from .reference_roles import observation_sql
 from .reference_usage import ReferenceUsage
-from .pose_policy import visibility_allows, is_anchor
+from .pose_policy import query_allows, is_anchor
 from .view_prototypes import pose_matches, pose_view
 from .frozen_ownership import FrozenOwnership
 from .progress import tracking
@@ -15,12 +15,12 @@ def recover(durable, database, config, external):
 
 
 def recover_appearances(durable, database, config, external):
-    if config.data['clustering']['strict_appearance_matching']:
+    if config.data['clustering']['strict_appearance_matching'] or config.data['clustering'].get('anchor_outlier_quarantine'):
         return _recover(durable, database, config, external, appearance=True)
 
 
 def recover_joint(durable, database, config, external):
-    if config.data['clustering']['strict_appearance_matching']:
+    if config.data['clustering']['strict_appearance_matching'] or config.data['clustering'].get('anchor_outlier_quarantine'):
         return _recover(durable, database, config, external, appearance=True, relaxed=True)
 
 
@@ -29,7 +29,7 @@ def freeze(database, config, external):
     first=db.execute('SELECT scope,namespace FROM scans LIMIT 1').fetchone()
     selected=capture(db, [], config, *first, 'pre-final-merge', resolve_aliases=False)
     return History(selected.groups+external.groups,
-        tuple(v for v in selected.views+external.views if v.authority=='strict'), {}, 'pre-final-merge')
+        tuple(v for v in selected.views+external.views if v.authority in ('strict','quarantined_core')), {}, 'pre-final-merge')
 
 
 def recover_final(durable, database, config, external, bank):
@@ -40,7 +40,7 @@ def recover_final(durable, database, config, external, bank):
     alias=lambda p:canonical(database.connection,p)
     bank=replace(bank,groups=tuple(replace(g,identifier=alias(g.identifier)) for g in bank.groups),
         views=tuple(replace(v,group=replace(v.group,identifier=alias(v.group.identifier))) for v in bank.views))
-    return _recover(durable,database,config,external,appearance=config.data['clustering']['strict_appearance_matching'],
+    return _recover(durable,database,config,external,appearance=config.data['clustering']['strict_appearance_matching'] or config.data['clustering'].get('anchor_outlier_quarantine'),
                     relaxed=True,final_bank=bank)
 
 
@@ -63,7 +63,7 @@ def _recover(durable, database, config, external, *, appearance, relaxed=False, 
         from .verified_views import historical_views
         verified = (historical_views(db, config, *first, [], selected.groups, usage, selected.confirmations)
                     if grouping['view_prototypes_enabled'] and grouping['auxiliary_matching'] else ())
-        views = tuple(v for v in selected.views+verified+external.views if v.authority in ('strict', 'verified_view'))
+        views = tuple(v for v in selected.views+verified+external.views if v.authority in ('strict', 'verified_view', 'quarantined_core'))
         bank = History(selected.groups+external.groups, views, {}, 'frozen-'+field)
     else:
         bank=final_bank;views=bank.views
@@ -86,18 +86,20 @@ def _recover(durable, database, config, external, *, appearance, relaxed=False, 
             for row in tracked:
                 if not grouping['auxiliary_matching'] and not is_anchor(row['quality'], grouping):
                     continue
-                if not visibility_allows(row['quality'], grouping.get('min_auxiliary_visible_face_fraction')):
+                if not query_allows(row['quality'], grouping):
                     continue
                 # Only queries without an ordinary positive match enter a
                 # fallback; existing support/conflict decisions stay unchanged.
                 ordinary=rank([row], bank, config)
                 if ordinary is not None and final_bank is None:
                     continue
-                match = ordinary or rank([row], bank, config, relaxed_pose=relaxed or not appearance, strict_appearance=appearance)
+                match = ordinary or rank([row], bank, config, relaxed_pose=relaxed or not appearance, strict_appearance=appearance,
+                    quarantine_only=appearance and not grouping['strict_appearance_matching'])
                 if match is None:
                     continue
                 owner, proof = match
-                chosen = [v for v in views if v.group.identifier == owner and v.medoid in proof['medoids']]
+                chosen = [v for v in views if v.group.identifier == owner and any(
+                    p['medoid']==v.medoid and p['authority']==v.authority for p in proof['view_evidence'])]
                 crossed = [v for v in chosen if not pose_matches(row['geometry'], v.pose)]
                 if (final_bank is None and not appearance and not crossed) or not ownership.proof_allows(owner, proof, bank.groups):
                     continue

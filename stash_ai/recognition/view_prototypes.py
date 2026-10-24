@@ -99,6 +99,8 @@ class _Cluster:
         self.examples.append(query)
         self.observations.append(row['id'])
         self.qualities.append(quality(row['quality']) if 'quality' in row.keys() else 0.)
+        if maximum>8:
+            maximum=min(maximum,max(8,math.ceil(2*math.sqrt(len(self.cues)))))
         if len(self.examples)>maximum:
             centre=self.total/len(self.cues)
             first=max(range(len(self.examples)),key=lambda i:(float(np.dot(self.examples[i],centre))+.01*self.qualities[i],-i))
@@ -170,7 +172,11 @@ def best_cohort(slots, row, sample, threshold):
     return max(eligible)[-1] if eligible else None
 
 
-def add_cohort(slots,row,sample,threshold,*,complete,scene_minimum=0):
+def witness_limit(grouping):
+    return grouping.get('max_view_witnesses',32) if grouping.get('adaptive_view_witnesses',False) else 8
+
+
+def add_cohort(slots,row,sample,threshold,*,complete,scene_minimum=0,maximum=8):
     index=best_cohort(slots,row,sample,threshold)
     slot=slots[index] if index is not None else None
     if slot is None:
@@ -178,7 +184,7 @@ def add_cohort(slots,row,sample,threshold,*,complete,scene_minimum=0):
             return 0
         slot=_Cluster(pose_view(row['geometry']),row['id'],scene_minimum=scene_minimum);slots.append(slot)
     before=len(slot.examples)
-    slot.add(row,sample)
+    slot.add(row,sample,maximum=maximum)
     return (len(slot.examples)-before)*sample.nbytes
 
 
@@ -237,9 +243,9 @@ def confirmed_views(db, policy, grouping, *, remaining_bytes, rows=None, complet
                 emit(person)
                 person, slots, cover, scratch = row['person'], [], [], 0
             query = vector(row)
-            scratch+=add_cohort(slots,row,query,cohesion,complete=complete)
+            scratch+=add_cohort(slots,row,query,cohesion,complete=complete,maximum=witness_limit(grouping))
             if complete:
-                scratch+=add_cohort(cover,row,query,coverage_threshold(grouping),complete=True)
+                scratch+=add_cohort(cover,row,query,coverage_threshold(grouping),complete=True,maximum=witness_limit(grouping))
             if complete and used+scratch>remaining_bytes:
                 raise ValueError('Confirmed view evidence exceeds clustering.max_reference_bytes.')
     emit(person)

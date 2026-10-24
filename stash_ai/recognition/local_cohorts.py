@@ -5,10 +5,10 @@ the private RAM replay. Cue times still decide independent support and physical
 co-presence. This priority is an appearance ordering, never a new timeline.
 """
 from .clustering import vector
-from .pose_policy import is_anchor,visibility_sql
+from .pose_policy import is_anchor,query_sql
 from .reference_usage import ReferenceUsage
 from .progress import tracking
-from .view_prototypes import _Cluster,coverage_threshold,best_cohort
+from .view_prototypes import _Cluster,coverage_threshold,best_cohort,witness_limit
 
 
 def ordering(db,alias='o'):
@@ -29,7 +29,7 @@ def prepare(db,selected,config):
         for item in scenes:
             usage.begin('local_appearance_cohorts',reset=True);slots=[];anchors=[]
             condition = ('WHERE scan=? AND rejected IS NULL AND ' +
-                         visibility_sql('observations',grouping.get('min_auxiliary_visible_face_fraction')))
+                         query_sql('observations',grouping))
             rows=db.execute('SELECT id,scan,cue,seconds,geometry,quality,dimensions,embedding FROM observations ' +
                 condition + ' ORDER BY embedding,geometry,cue,id',(item['scan'],))
             with tracking(rows, 'Group local face observations', unit='observation',
@@ -42,7 +42,7 @@ def prepare(db,selected,config):
                         if len(slots)>=grouping['max_people_per_lookup']:
                             raise ValueError('Local appearance cohorts exceed configured person budget.')
                         slot=len(slots);slots.append(_Cluster('other',row['id']));anchors.append(set())
-                    cohort=slots[slot];before=len(cohort.examples);cohort.add(row,sample)
+                    cohort=slots[slot];before=len(cohort.examples);cohort.add(row,sample,maximum=witness_limit(grouping))
                     usage.add_counts((len(cohort.examples)-before)*sample.nbytes,len(cohort.examples)-before,
                                      kind='Local appearance witnesses')
                     if is_anchor(row['quality'],grouping):anchors[slot].add(row['seconds'])

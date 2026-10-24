@@ -19,7 +19,7 @@ from .scoring import comparisons, scoped
 from .evidence_cache import current as evidence, scoped as evidence_owned
 from .parallel_scores import scored_rows, contributions
 
-MATCHING_FORMAT = 41
+MATCHING_FORMAT = 42
 
 
 def vector(row):
@@ -144,7 +144,8 @@ def co_presence_allows(db, observation, group, groups, query, config, *, peer_th
     for peer in peers:
         if peer['id'] == observation['id']:
             continue
-        if peer['geometry'] == observation['geometry'] and peer['embedding'] == observation['embedding']:
+        from .physical_faces import duplicate
+        if duplicate(peer,observation,config.data['clustering'].get('deduplicate_detections',False)):
             continue
         other = cache.vector(peer) if cache is not None else vector(peer)
         mean, minimum = cache.scores(group, other, peer['id']) if cache is not None else _similarities(group, other)

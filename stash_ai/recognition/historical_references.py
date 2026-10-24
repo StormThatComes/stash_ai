@@ -10,7 +10,7 @@ import hashlib
 from .clustering import Group, _groups, matching_policy, vector
 from .database import encoded
 from .global_views import catalogue, rank_person, unambiguous, _cooccurs
-from .pose_policy import anchor_sql,visibility_sql,restricted
+from .pose_policy import anchor_sql,query_sql,restricted
 from .reference_roles import strict_sql, verified_sql, attachment_sql
 from .reference_compatibility import fallback_sql
 from .reference_selection import select
@@ -44,7 +44,7 @@ def _source(config,compatibility,*,verified=False,gaps=False,attachment=False):
         "AND s.scope=p.scope AND s.namespace=p.namespace AND s.status='complete' AND o.rejected IS NULL "
         'AND NOT EXISTS (SELECT 1 FROM identity_merges WHERE source=p.id) '
         'AND '+latest+' AND ' +
-        (visibility_sql('o',config.data['clustering'].get('min_auxiliary_visible_face_fraction')) if verified or attachment else anchor_sql('o',config.data['clustering'])) + ' AND ' +
+        (query_sql('o',config.data['clustering']) if verified or attachment else anchor_sql('o',config.data['clustering'])) + ' AND ' +
         (attachment_sql() if attachment else
          verified_sql() if verified else strict_sql()))
 
@@ -60,7 +60,7 @@ def context(db,selected,config,scope,namespace):
     compatibility=fallback_sql(db,config,namespace)
     rows=db.execute("SELECT p.id,p.created,o.id,o.scan,o.cue,o.seconds,o.geometry,o.dimensions,o.embedding,"
         "CASE WHEN json_valid(o.quality) THEN json_extract(o.quality,'$.pixels','$.sharpness',"
-        "'$.pose_deviation','$.roll_deviation'"+visibility_fields+") END " + _source(config,compatibility) +
+        "'$.pose_deviation','$.roll_deviation','$.alignment_valid'"+visibility_fields+") END " + _source(config,compatibility) +
         ' ORDER BY p.id,CAST(s.scene AS INTEGER),s.scene,o.cue,o.id',parameters(selected,config,scope,namespace))
     for row in rows:
         _hash_row(hasher,row)
@@ -84,7 +84,7 @@ def context(db,selected,config,scope,namespace):
     if config.data['clustering']['corroborated_view_enrichment']:
         for row in db.execute("SELECT p.id,o.id,o.scan,o.seconds,o.geometry,o.dimensions,o.embedding,"
                 "CASE WHEN json_valid(o.quality) THEN json_extract(o.quality,'$.pixels','$.sharpness',"
-                "'$.pose_deviation','$.roll_deviation'"+visibility_fields+") END "+
+                "'$.pose_deviation','$.roll_deviation','$.alignment_valid'"+visibility_fields+") END "+
                 _source(config,compatibility,attachment=True)+' ORDER BY p.id,o.id',
                 parameters(selected,config,scope,namespace)):
             _hash_row(hasher,row)
@@ -118,6 +118,8 @@ def capture(db,selected,config,scope,namespace,fingerprint,*,resolve_aliases=Tru
             excluded_scenes=[item['scene'] for item in selected],scan_policy=scan_identity(config,namespace))
         if grouping['anchor_view_matching']:
             views=tuple(v for v in confirmations if v.support_count>=grouping['view_min_support'])
+    from .anchor_quarantine import views as quarantined_views
+    views+=quarantined_views(db,groups,config,usage)
     from .reference_gaps import capture as gaps
     history=History(tuple(groups),views,people,fingerprint,confirmations,
         gaps(db,selected,config,scope,namespace,usage))
@@ -132,13 +134,13 @@ def refresh_verified(db,selected,config,scope,namespace,history,usage):
     history.views=tuple(v for v in history.views if v.authority!='corroborated_view')
     if config.data['clustering']['view_prototypes_enabled'] and config.data['clustering']['auxiliary_matching']:
         from .verified_views import historical_views
-        history.views=tuple(v for v in history.views if v.authority=='strict')+historical_views(
+        history.views=tuple(v for v in history.views if v.authority in ('strict','quarantined_core'))+historical_views(
             db,config,scope,namespace,selected,history.groups,usage,history.confirmations,history.aliases)
     from .corroborated_views import enrich
     history.views+=enrich(db,config,scope,namespace,selected,history,usage)
 
 
-def rank(rows,history,config,*,decisions=None,potential=None,relaxed_pose=False,strict_appearance=False):
+def rank(rows,history,config,*,decisions=None,potential=None,relaxed_pose=False,strict_appearance=False,quarantine_only=False):
     settings,grouping=config.data['recognition'],config.data['clustering']
     threshold=settings['match_threshold']
     view_threshold=max(threshold,grouping['view_match_threshold'])
@@ -146,8 +148,11 @@ def rank(rows,history,config,*,decisions=None,potential=None,relaxed_pose=False,
     views=[];by_group={}
     minimum=max(grouping['view_min_support'],settings['min_merge_support'])
     for view in history.views:
+        if view.authority=='quarantined_core' and not strict_appearance:
+            continue
         if strict_appearance:
-            if view.authority!='strict' or view.support_count<minimum:
+            if (view.authority not in ('strict','quarantined_core') or view.support_count<minimum or
+                    view.authority=='quarantined_core' and not grouping.get('anchor_outlier_quarantine')):
                 continue
             group=Group(view.group.identifier,view.examples,True,view.support)
         else:
@@ -173,8 +178,9 @@ def rank(rows,history,config,*,decisions=None,potential=None,relaxed_pose=False,
                 continue
             if previous is not None and previous[1]=='strict' and previous[3] and previous[0]>=score:
                 continue
-            if previous is None or score>previous[0]:
-                choices[group.identifier]=(score,'view',view.medoid,score>=effective_view_threshold)
+            admissible=score>=effective_view_threshold and (not quarantine_only or view.authority=='quarantined_core')
+            if previous is None or score>previous[0] or score==previous[0] and admissible and not previous[3]:
+                choices[group.identifier]=(score,'view',view.medoid,admissible,view)
         mixed_rows.append(choices)
         if potential is not None and not potential and any(value[3] for value in choices.values()):
             potential.append(True)
@@ -228,7 +234,7 @@ def rank(rows,history,config,*,decisions=None,potential=None,relaxed_pose=False,
         view_evidence=[dict(medoid=v.medoid,authority=v.authority,support=v.support_count,
                            support_ids=getattr(v,'source_ids',v.support),
                            **({'promotion':v.promotion} if getattr(v,'promotion',None) else {}))
-            for v in history.views if v.medoid in {value[2] for value in values}],
+            for v in {id(value[4]):value[4] for value in values if value[1]=='view'}.values()],
         mode='view' if any(v[1]=='view' for v in values) else 'strict',mean_score=score,ranking_score=ranking_score,
         strict_appearance=strict_appearance,threshold=effective_view_threshold,cohesion_threshold=effective_view_cohesion,
         rival_score=ranked[1][0] if len(ranked)>1 else None,
@@ -302,7 +308,7 @@ def reconcile(database,replay,selected,config,scope,namespace,fingerprint,*,prog
     for sources in by_target.values():
         for offset,left in enumerate(sources):
             for right in sources[offset+1:]:
-                if _cooccurs(replay,left,right):
+                if _cooccurs(replay,left,right,config):
                     blocked.update((left,right))
     bindings={}
     for source,(target,proof) in proposals.items():
@@ -350,13 +356,13 @@ def reconcile(database,replay,selected,config,scope,namespace,fingerprint,*,prog
     # Exact duplicate detections still represent a single face.
     cue_claims={}
     blocked_cues=set()
+    from .physical_faces import duplicate
     for row,target,_ in pending:
         key=(target,row['scan'],row['cue'])
-        signature=(row['geometry'],row['embedding'])
-        if key in cue_claims and cue_claims[key]!=signature:
+        previous=cue_claims.setdefault(key,[])
+        if any(not duplicate(row,other,grouping.get('deduplicate_detections',False)) for other in previous):
             blocked_cues.add(key)
-        else:
-            cue_claims[key]=signature
+        previous.append(row)
     pending=[(row,target,proof) for row,target,proof in pending
              if (target,row['scan'],row['cue']) not in blocked_cues]
     from .query_support import eligible

@@ -15,6 +15,8 @@ def compact_quality(raw):
             number=record.get(key)
             if type(number) in (int,float) and math.isfinite(number) and number>=0:
                 selected[key]=number
+        if type(record.get('alignment_valid')) is bool:
+            selected['alignment_valid']=record['alignment_valid']
         from .visibility import cached
         if cached(record):
             selected.update(visible_face_fraction=record['visible_face_fraction'],
@@ -42,7 +44,8 @@ def anchor_visibility(grouping):
 
 
 def restricted(grouping):
-    return grouping['max_anchor_pose_deviation'] is not None or anchor_visibility(grouping)>0
+    return (grouping['max_anchor_pose_deviation'] is not None or anchor_visibility(grouping)>0 or
+            any(grouping.get(k) is not None for k in ('min_anchor_face_pixels','min_anchor_sharpness')))
 
 
 def measurement_required(config):
@@ -50,7 +53,7 @@ def measurement_required(config):
 
 
 def is_anchor(quality, grouping):
-    if not visibility_allows(quality,anchor_visibility(grouping)):
+    if not quality_allows(quality,grouping,anchor=True) or not visibility_allows(quality,anchor_visibility(grouping)):
         return False
     maximum=grouping['max_anchor_pose_deviation']
     if maximum is None:
@@ -77,8 +80,43 @@ def anchor_sql(alias, grouping):
     pose=('1=1' if maximum is None else
           f"COALESCE(json_type({alias}.quality,'$.pose_deviation') IN ('integer','real') AND "
           f"json_extract({alias}.quality,'$.pose_deviation') BETWEEN 0 AND {maximum!r},0)")
-    return '('+pose+') AND ('+visibility_sql(alias,anchor_visibility(grouping))+')'
+    return '('+pose+') AND ('+visibility_sql(alias,anchor_visibility(grouping))+') AND ('+quality_sql(alias,grouping,anchor=True)+')'
 
 
 def auxiliary_sql(alias, grouping):
-    return '('+visibility_sql(alias,grouping.get('min_auxiliary_visible_face_fraction'))+') AND NOT ('+anchor_sql(alias,grouping)+')'
+    return '('+query_sql(alias,grouping)+') AND NOT ('+anchor_sql(alias,grouping)+')'
+
+
+def _floors(grouping,anchor):
+    return {field:max([grouping.get('min_auxiliary_'+suffix) or 0]+
+                     ([grouping.get('min_anchor_'+suffix) or 0] if anchor else []))
+            for field,suffix in (('pixels','face_pixels'),('sharpness','sharpness'))}
+
+
+def quality_allows(quality,grouping,*,anchor=False):
+    try:
+        quality=json.loads(quality) if isinstance(quality,str) else quality
+        if quality.get('alignment_valid') is False:
+            return False
+        return all(not floor or (type(quality.get(field)) in (int,float) and
+            math.isfinite(quality[field]) and quality[field]>=floor)
+            for field,floor in _floors(grouping,anchor).items())
+    except (ValueError,TypeError,AttributeError):
+        return False
+
+
+def quality_sql(alias,grouping,*,anchor=False):
+    conditions=[f"COALESCE(json_extract({alias}.quality,'$.alignment_valid'),1)<>0"]
+    for field,floor in _floors(grouping,anchor).items():
+        if floor:
+            conditions.append(f"COALESCE(json_type({alias}.quality,'$.{field}') IN ('integer','real') AND "
+                              f"json_extract({alias}.quality,'$.{field}')>={floor!r},0)")
+    return ' AND '.join(conditions)
+
+
+def query_allows(quality,grouping):
+    return quality_allows(quality,grouping) and visibility_allows(quality,grouping.get('min_auxiliary_visible_face_fraction'))
+
+
+def query_sql(alias,grouping):
+    return '('+quality_sql(alias,grouping)+') AND ('+visibility_sql(alias,grouping.get('min_auxiliary_visible_face_fraction'))+')'

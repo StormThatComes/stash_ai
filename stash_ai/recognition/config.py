@@ -31,6 +31,10 @@ def defaults():
                        'view_prototypes_enabled': False, 'anchor_view_matching': False,
                        'context_view_enrichment': False, 'strict_appearance_matching': False,
                        'corroborated_view_enrichment': True,
+                       'anchor_outlier_quarantine': False, 'adaptive_view_witnesses': False,
+                       'deduplicate_detections': False, 'max_view_witnesses': 32,
+                       'min_anchor_face_pixels': None, 'min_anchor_sharpness': None,
+                       'min_auxiliary_face_pixels': None, 'min_auxiliary_sharpness': None,
                        'view_min_support': 3,
                        'view_cohesion_threshold': .80, 'view_match_threshold': .82,
                        'view_ambiguity_margin': .12, 'view_attach_min_support': 2,
@@ -156,6 +160,19 @@ def validate(data):
     b=data['clustering']['min_auxiliary_visible_face_fraction']
     if a is not None and b is not None and b>a:
         raise ValueError('min_auxiliary_visible_face_fraction must not exceed min_anchor_visible_face_fraction.')
+    for key in ('anchor_outlier_quarantine','adaptive_view_witnesses','deduplicate_detections'):
+        if type(data['clustering'][key]) is not bool:
+            raise ValueError('clustering.'+key+' must be boolean.')
+    if data['clustering']['anchor_outlier_quarantine'] and not data['clustering']['anchor_view_matching']:
+        raise ValueError('anchor_outlier_quarantine requires anchor_view_matching.')
+    for suffix,hard,upper in (('face_pixels','min_face_pixels',4096),('sharpness','min_sharpness',100000)):
+        anchor=data['clustering']['min_anchor_'+suffix]
+        auxiliary=data['clustering']['min_auxiliary_'+suffix]
+        for role,value in (('anchor',anchor),('auxiliary',auxiliary)):
+            if value is not None:
+                _number(value,'clustering.min_'+role+'_'+suffix,data['detection'][hard],upper)
+        if anchor is not None and auxiliary is not None and anchor<auxiliary:
+            raise ValueError('Anchor quality floors must not be lower than auxiliary floors.')
     if type(data['recognition']['cross_scene_provisional']) is not bool:
         raise ValueError('recognition.cross_scene_provisional must be boolean.')
     if type(data['clustering']['context_view_enrichment']) is not bool:
@@ -196,7 +213,7 @@ def validate(data):
         'recognition': {'min_identity_support': (1, 1000), 'min_merge_support': (1, 1000)},
         'clustering': {'same_scene_min_support': (1, 1000), 'auxiliary_min_support': (1, 1000),
                        'view_min_support': (2, 1000), 'view_attach_min_support': (1, 1000),
-                       'max_view_prototypes_per_person': (1, 8),
+                       'max_view_prototypes_per_person': (1, 8), 'max_view_witnesses': (8,128),
                        'max_samples_per_person': (2, 128), 'max_people_per_lookup': (1, 100000),
                        'max_reference_bytes': (1048576, 1073741824)},
         'portraits': {'min_face_pixels': (0, 4096), 'max_candidates': (1, 64), 'jpeg_quality': (1, 100),

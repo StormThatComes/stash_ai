@@ -14,7 +14,7 @@ from .pose_policy import anchor_sql
 from .progress import tracking
 from .reference_usage import ReferenceUsage
 from .replay_addresses import address
-from .view_prototypes import pose_view, pose_matches, add_cohort, coverage_threshold, supported_cohorts
+from .view_prototypes import pose_view, pose_matches, add_cohort, coverage_threshold, supported_cohorts,witness_limit
 
 
 @dataclass(frozen=True)
@@ -66,8 +66,8 @@ def _confirmed(db, policy, grouping, usage):
                 emit()
                 key, slots, cover, scratch = rowkey, [], [], 0
             query = vector(row)
-            scratch+=add_cohort(slots,row,query,cohesion,complete=True)
-            scratch+=add_cohort(cover,row,query,coverage_threshold(grouping),complete=True)
+            scratch+=add_cohort(slots,row,query,cohesion,complete=True,maximum=witness_limit(grouping))
+            scratch+=add_cohort(cover,row,query,coverage_threshold(grouping),complete=True,maximum=witness_limit(grouping))
             if usage.bytes+scratch>usage.limit:
                 raise ValueError('Local anchor view evidence exceeds clustering.max_reference_bytes.')
     emit()

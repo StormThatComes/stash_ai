@@ -32,6 +32,14 @@ clustering:
   max_anchor_pose_deviation: 0.20 # Higher-pose faces may match anchors but never seed identities.
   min_anchor_visible_face_fraction: 0.80 # Pose AND visibility must pass to seed strict references.
   min_auxiliary_visible_face_fraction: 0.50 # Lower-visibility faces may query known identities; never seed a core.
+  min_anchor_face_pixels: null  # Optional stricter retained-sample floor; detection remains the hard scan floor.
+  min_anchor_sharpness: null
+  min_auxiliary_face_pixels: null
+  min_auxiliary_sharpness: null
+  anchor_outlier_quarantine: false # Experimental attachment-only clean core; original anchors remain rivals.
+  adaptive_view_witnesses: false # Grow witnesses with independent support, preserving diverse endpoints.
+  max_view_witnesses: 32       # Used only by adaptive_view_witnesses; jointly charged to reference budget.
+  deduplicate_detections: false # Experimental same-cue IoU + landmark + embedding duplicate proof.
   auxiliary_matching: true    # Attach profiles after strict groups are established.
   auxiliary_min_support: 1    # Distinct scene/time observations required to accept attachments.
   view_prototypes_enabled: true # Opt in to multi-view identity reference prototypes.

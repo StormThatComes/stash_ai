@@ -6,7 +6,7 @@ from .database import encoded
 from .replay_addresses import address
 
 
-def conflicting_claims(rows, threshold):
+def conflicting_claims(rows, threshold, *, deduplicate=False):
     """Stream claims sorted by (person, scan, cue); exact duplicates share a vote.
 
     All pairs must satisfy the stronger reflection threshold. Different views
@@ -17,13 +17,13 @@ def conflicting_claims(rows, threshold):
     for _, claims in groupby(rows, lambda r: (r['person'], r['scan'], r['cue'])):
         claims = list(claims)
         samples = []
-        signatures = set()
+        retained = []
         conflict = False
         for row in claims:
-            signature = (row['geometry'], row['embedding'])
-            if signature in signatures:
+            from .physical_faces import duplicate
+            if any(duplicate(row,other,deduplicate) for other in retained):
                 continue
-            signatures.add(signature)
+            retained.append(row)
             sample = vector(row)
             if any(float(np.dot(sample, other)) < threshold for other in samples):
                 conflict = True
@@ -43,7 +43,7 @@ def resolve_pending(db, policy, config, *, scans=None):
         'ORDER BY c.person,o.scan,o.cue,o.id', parameters)
     threshold = max(config.data['recognition']['match_threshold'],
                     config.data['recognition']['cooccurrence_merge_threshold'])
-    for row in conflicting_claims(rows, threshold):
+    for row in conflicting_claims(rows, threshold, deduplicate=config.data['clustering'].get('deduplicate_detections',False)):
         if row['status'] != 'pending':
             continue
         proof = dict(identity=row['person'], scan=row['scan'], cue=row['cue'],

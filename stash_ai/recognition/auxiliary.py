@@ -8,7 +8,7 @@ from .clustering import _groups, vector, co_presence_allows, matching_policy
 from .database import encoded
 from .evidence_cache import current as evidence_for
 from .parallel_scores import scored_rows, contributions
-from .pose_policy import anchor_sql,restricted,visibility_allows
+from .pose_policy import anchor_sql,restricted,query_allows
 from .progress import tracking
 from .ranking import best_two
 from .reference_usage import ReferenceUsage
@@ -56,7 +56,7 @@ def apply_auxiliary(database, selected, config, *, progress=None, reference_grou
             for row, frozen in tracked:
                 person, status, reason, scores = None, 'withheld', 'auxiliary_unmatched', []
                 confirmation=None
-                if not visibility_allows(row['quality'],grouping.get('min_auxiliary_visible_face_fraction')):
+                if not query_allows(row['quality'],grouping):
                     reason='auxiliary_visibility_insufficient'
                 elif grouping['auxiliary_matching'] and groups:
                     query = cache.vector(row) if cache is not None else vector(row)
