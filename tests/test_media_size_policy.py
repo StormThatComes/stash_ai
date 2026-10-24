@@ -107,8 +107,20 @@ def test_sprite_above_sixteen_mib_downloads_and_decodes(tmp_path):
     original = client.data['http://stash/sprite/1.jpg']
     client.data['http://stash/sprite/1.jpg'] = original + b'\0' * (16777217 - len(original))
     with SpriteInput(client, client.scene, load(root=tmp_path)) as source:
-        assert len(source.cache[source.cues[0].image]) == 16777217
-        assert len(list(source.frames())) == 3
+        # Source-local entries are digest markers; compressed bytes live in
+        # the shared sprite cache and remain available through cached_bytes.
+        assert [len(data) for data in source.cached_bytes] == [16777217]
+        with open_image(BytesIO(original)) as expected:
+            pixels = expected.convert('RGB')
+        try:
+            count = 0
+            for _, _, frame in source.frames():
+                assert frame.size == pixels.size
+                assert frame.tobytes() == pixels.tobytes()
+                count += 1
+            assert count == 3
+        finally:
+            pixels.close()
 
 
 def test_invalid_images_still_fail_without_suppressing_general_validation():
