@@ -51,7 +51,7 @@ def _usage(config, groups):
     return usage
 
 
-def build(config, left_id, right_id, *, scope=None, by_performer=False):
+def build(config, left_id, right_id, *, scope=None, by_performer=False, simulate=False):
     """Compare UUIDs or Stash IDs in one read-only snapshot without changing assignments."""
     model_namespace = namespace(config)
     with closing(_open_readonly(config.database)) as db:
@@ -85,6 +85,9 @@ def build(config, left_id, right_id, *, scope=None, by_performer=False):
             ])
         if left['id'] == right['id']:
             result.update(status='already_merged', message='Both IDs resolve to the same canonical identity; no YAML change is needed.')
+            if simulate:
+                from .replay_simulation import merge_impact
+                result['simulation'] = merge_impact(config, result, db)
             return result
         grouping = config.data['clustering']
         groups = _groups(db, left['scope'], model_namespace, grouping,
@@ -129,13 +132,17 @@ def build(config, left_id, right_id, *, scope=None, by_performer=False):
             result['evidence_actions'].append(dict(reason='consolidation_feature_disabled',
                 action='Both analysed consolidation routes require clustering.anchor_view_matching=true '
                        'and an existing anchor pose or visibility restriction. Ordinary nomination merges are not simulated.'))
+        if simulate:
+            from .replay_simulation import merge_impact
+            result['simulation'] = merge_impact(config, result, db)
         return result
 
 
 def execute(args, config):
     by_performer = args.performer_id is not None
     identifiers = args.performer_id if by_performer else args.identity_id
-    result = build(config, *identifiers, scope=args.scope, by_performer=by_performer)
+    result = build(config, *identifiers, scope=args.scope, by_performer=by_performer,
+                   simulate=getattr(args, 'simulate', False))
     output = json.dumps(result, indent=2, ensure_ascii=False, allow_nan=False) + '\n'
     if args.output is None:
         print(output, end='')

@@ -72,6 +72,23 @@ def parser():
     evaluation.add_argument('--faces-db', type=Path)
     evaluation.add_argument('--scope')
     evaluation.add_argument('--output', type=Path, help='New JSON output file; stdout if omitted.')
+    tuning = commands.add_parser('tune', allow_abbrev=False,
+        help='Search a bounded threshold grid using isolated retained-VTT replays; never publish.')
+    selection = tuning.add_mutually_exclusive_group(required=True)
+    selection.add_argument('--scene-id', action='append', type=stash_id)
+    selection.add_argument('--all-scenes', action='store_true')
+    tuning.add_argument('--grid', type=Path, required=True,
+        help='JSON object mapping dotted threshold names to arrays of trial values.')
+    tuning.add_argument('--labels', type=Path,
+        help='Optional observation-to-truth JSON; without labels only partition comparisons are reported.')
+    tuning.add_argument('--max-trials', type=int, default=64, help='Cartesian grid limit including baseline (1..1024).')
+    tuning.add_argument('--max-false-merge-pairs', type=int, default=0)
+    tuning.add_argument('--face-config', type=Path)
+    tuning.add_argument('--faces-db', type=Path)
+    tuning.add_argument('--scope')
+    tuning.add_argument('--output', type=Path)
+    tuning.add_argument('--yaml-output', type=Path,
+        help='New YAML patch file, written only for a proposal passing the independent truth holdout.')
     sync=commands.add_parser('sync-identities',allow_abbrev=False,
         help='Inspect queued recognition scene-link repairs; --apply publishes current retained assignments without inference.')
     sync.add_argument('--apply',action='store_true',help='Publish queued current assignments and acknowledge successful scenes.')
@@ -130,6 +147,8 @@ def parser():
     merge_report.add_argument('--faces-db', type=Path, help='Existing face SQLite database.')
     merge_report.add_argument('--scope', help='Restrict both identities to this Stash scope; required if a performer ID occurs in multiple scopes.')
     merge_report.add_argument('--output', type=Path, help='New JSON report path; stdout if omitted. Includes copyable YAML patches.')
+    merge_report.add_argument('--simulate', action='store_true',
+        help='Replay baseline and proposals on all latest compatible scenes in this scope, in private RAM.')
     report = commands.add_parser('report', allow_abbrev=False,
         help='Explain suspected identity fragmentation in one retained scene (offline, read-only).')
     report.add_argument('--scene-id', required=True, type=stash_id)
@@ -151,6 +170,9 @@ def main(argv=None, *, services=None):
                   device=getattr(args, 'device', None))
     if args.command == 'evaluate':
         from .offline_evaluation import execute
+        return execute(args, config)
+    if args.command == 'tune':
+        from .threshold_tuning import execute
         return execute(args, config)
     if args.command == 'audit-alignment':
         from .alignment_audit import execute as audit

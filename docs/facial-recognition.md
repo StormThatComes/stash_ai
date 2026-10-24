@@ -2137,6 +2137,61 @@ Strict-core summary vectors remain immutable for reuse by the packed score cache
 
 ### Offline identity evaluation on retained VTT observations
 
+`recognition tune` searches threshold combinations using production rebuilds in
+private RAM, starting every trial from the same read-only retained snapshot.
+It reads existing VTT embeddings; it does not open media, load inference models,
+publish performers, change assignments in the source database, or modify your
+configuration. Trials run sequentially and use the configured rebuild workers.
+
+Create a JSON grid such as:
+
+```json
+{
+  "recognition.match_threshold": [0.65, 0.70, 0.75],
+  "clustering.cohesion_threshold": [0.60, 0.65]
+}
+```
+
+```sh
+python stash_ai.py recognition tune --all-scenes --grid thresholds.json --output tuning.json
+python stash_ai.py recognition tune --all-scenes --grid thresholds.json --labels truth.json --yaml-output proposed.yml --output tuning-labelled.json
+```
+
+`--max-trials` defaults to 64 (including baseline, maximum 1024). Oversized grids
+are rejected before replay; invalid parameter combinations are reported and
+skipped. Supported parameters are numerical recognition and clustering match,
+cohesion, ambiguity and support gates; model, detection and input contracts cannot
+be tuned this way. Each trial reports assignment coverage, identity count and
+newly joined/split observation pairs relative to baseline and retained state.
+These are behavioral changes, not accuracy estimates.
+
+Labels are optional and use the same observation-to-human-truth JSON as
+`evaluate`. Without labels, tuning produces comparisons and candidate patches,
+with no winner or YAML export. With sufficient labels, whole people are split
+deterministically between training and holdout; both halves need at least two
+people and a same-person pair. The training winner maximizes pair recall then
+coverage, subject to `--max-false-merge-pairs` (default zero). Only that winner is
+checked on the holdout, including a final check for cross-partition false merges.
+A failed holdout does not trigger another candidate search. YAML is exported
+only if validation passes and the candidate improves training over baseline.
+Accuracy claims remain limited to the supplied labels; automatic assignments
+are never used as truth. Output files must be new; no YAML is silently applied.
+
+`recognition report-merge --simulate` additionally runs baseline and each unique
+recommended patch through a full joint rebuild of **all latest compatible scans
+in the identities' scope**. This checks competitors beyond the requested pair,
+identity births, attachments, reconciliation and publication bindings in RAM.
+It reports whether all retained members of the requested pair end in one
+identity, including withheld members and global split/join/coverage changes.
+The frozen catalogue analysis and replay use the same database snapshot.
+Missing, partial or incompatible latest scans stop the simulation instead of
+silently excluding them. Results describe this selection and snapshot; they do
+not guarantee future runs or prove that newly merged faces are the same person.
+
+```sh
+python stash_ai.py recognition report-merge --performer-id 123 --performer-id 456 --simulate --output merge-simulation.json
+```
+
 `recognition evaluate` runs the production identity rebuild in disposable RAM.
 It does not load models, fetch VTT/video media, acquire the database writer lock,
 change retained assignments or publish to Stash. Supply explicit human labels
