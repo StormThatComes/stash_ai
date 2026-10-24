@@ -51,10 +51,23 @@ def test_historical_reads_and_final_reference_context_are_batched(tmp_path):
         historical=[sql for sql in statements if 'm.person FROM members m' in sql]
         assert len(historical)==2
         statements.clear()
-        rebuild_selected(state,selected[:2],config)
+        # sqlite trace repeats the outer statement while executing its durable
+        # dependency triggers. Count coordinator calls, not trigger trace events.
+        from stash_ai.recognition.profiling import Connection
+        writes=[]
+        class Counted(Connection):
+            def execute(self,sql,*args):
+                if sql.startswith('UPDATE candidates'):writes.append(sql)
+                return super().execute(sql,*args)
+        raw=state.connection
+        state.connection=Counted(raw)
+        try:
+            rebuild_selected(state,selected[:2],config)
+        finally:
+            state.connection=raw
         # One set-based finalization after current roles have been inserted;
         # no per-observation or per-scene context rewrites.
-        assert sum(sql.startswith('UPDATE candidates') for sql in statements) == 1
+        assert len(writes) == 1
         assert all(json.loads(r[0])['reference_context'] for r in state.connection.execute('SELECT payload FROM candidates'))
         state.connection.set_trace_callback(None)
 
