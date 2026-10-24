@@ -25,8 +25,11 @@ def retry_strict(database, selected, config):
         "WHERE c.policy=? AND c.status='withheld' AND json_extract(c.payload,'$.reason') IN "
         "('candidate_group','insufficient_match_or_cohesion') AND o.rejected IS NULL AND "+
         anchor_sql('o',config.data['clustering'])+' ORDER BY o.scan,o.cue,o.id',(policy,))
-    for row,result in rank_many(rows,history,config):
+    from .deferred_retries import RetryQueue
+    queue=RetryQueue(db,groups,policy)
+    for row,result in rank_many(queue.pending(rows),history,config):
         if result is None:
+            queue.remember(row)
             continue
         person,proof=result
         group=next(g for g in groups if g.identifier==person)

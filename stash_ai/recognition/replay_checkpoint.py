@@ -189,7 +189,10 @@ def _single_signature_cues(db, added):
 
 
 class Checkpoints:
-    def __init__(self, database, selected, config, scope, namespace):
+    def __init__(self, database, selected, config, scope, namespace, *, phase=None, context=None):
+        self.phase, self.phase_context = phase, context
+        self.phase_payload = None
+        self.restored_payload = None
         self.database, self.selected, self.config = database, selected, config
         self.scope, self.namespace = scope, namespace
         self.interval = config.data['execution'].get('rebuild_checkpoint_scenes', 0)
@@ -221,7 +224,7 @@ class Checkpoints:
             raise ValueError('Checkpointing requires the current recognition writer owner.')
         self.owner = dict(format=FORMAT, installation=source.installation,
                           path=hashlib.sha256(str(source.path).encode()).hexdigest())
-        self.directory = source.path.with_name(source.path.name + '.rebuild')
+        self.directory = source.path.with_name(source.path.name + ('.rebuild-' + self.phase if self.phase else '.rebuild'))
         try:
             self.directory.mkdir(mode=0o700)
         except FileExistsError:
@@ -322,17 +325,24 @@ class Checkpoints:
                     for batch in _rows(checkpoint, table, order):
                         placeholders = ','.join('?' for _ in batch[0])
                         replay.executemany(f'INSERT INTO {table} VALUES ({placeholders})', batch)
-                self._validate(replay, cursor, clock)
+                if self.phase:
+                    self._validate_phase(replay, header)
+                else:
+                    self._validate(replay, cursor, clock)
                 replay.commit()
             except BaseException:
                 cleanup([('roll back checkpoint import', replay.rollback)])
                 raise
+        self.restored_payload = header.get('phase_payload')
         self.saved_cursor = cursor
         count('checkpoint_resumed_scenes', cursor)
         count('checkpoint_append_reused_scenes', cursor if header['selected'] != self.selected else 0)
         return cursor, clock
 
     def _compatible(self, header):
+        if self.phase and (header.get('phase') != self.phase or header.get('phase_context') != self.phase_context
+                           or header.get('selected') != self.selected):
+            raise ValueError('Late checkpoint dependencies changed.')
         previous = header.get('selected')
         cursor, clock = header.get('cursor'), header.get('next_clock')
         if (header.get('format') != FORMAT or header.get('engine') != ENGINE or header.get('owner') != self.owner
@@ -412,6 +422,26 @@ class Checkpoints:
         finally:
             cleanup([('drop checkpoint validation prefix', lambda: replay.execute('DROP TABLE checkpoint_prefix'))])
 
+    def _validate_phase(self, replay, header):
+        if header['cursor'] != len(self.selected) or not isinstance(header.get('phase_payload'),dict):
+            raise ValueError('Incomplete late checkpoint.')
+        if replay.execute('PRAGMA foreign_key_check').fetchone():
+            raise ValueError('Invalid late checkpoint relationships.')
+        policy=matching_policy(self.config)
+        for row in replay.execute('SELECT c.*,o.scan AS actual_scan,o.rejected,m.person AS member '
+                "FROM candidates c LEFT JOIN observations o ON o.id=json_extract(c.payload,'$.observation') "
+                "LEFT JOIN members m ON m.observation=o.id"):
+            if (row['scan']!=row['actual_scan'] or row['rejected'] is not None or row['policy']!=policy
+                    or row['status'] not in ('accepted','withheld')
+                    or row['status']=='accepted' and (row['person'] is None or row['member']!=row['person'])
+                    or row['status']=='withheld' and row['member'] is not None):
+                raise ValueError('Invalid late checkpoint candidate.')
+        if replay.execute('SELECT 1 FROM members m LEFT JOIN observations o ON o.id=m.observation '
+                          'WHERE o.id IS NULL OR o.rejected IS NOT NULL LIMIT 1').fetchone():
+            raise ValueError('Invalid late checkpoint membership.')
+        from .late_checkpoint import decode
+        decode(replay,header['phase_payload'])
+
     def save(self, replay, cursor, next_clock, *, final=False):
         if (not self.enabled or cursor == self.saved_cursor or
                 (not final and cursor % self.interval)):
@@ -429,6 +459,8 @@ class Checkpoints:
         header = dict(format=FORMAT,engine=ENGINE,owner=self.owner,generation=generation,
             scope=self.scope,namespace=self.namespace,selected=self.selected,policy=matching_policy(self.config),
             inputs=self.input_hash,limits=rebuild_cache.resource_limits(self.config),cursor=cursor,next_clock=next_clock)
+        if self.phase:
+            header.update(phase=self.phase,phase_context=self.phase_context,phase_payload=self.phase_payload)
         if len(encoded(header).encode()) > _MAX_META:
             raise ValueError('Oversized checkpoint input catalogue.')
         path = self.directory/f'replay-{generation}.sqlite3'
