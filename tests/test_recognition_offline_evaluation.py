@@ -98,3 +98,63 @@ def test_production_summary_projects_original_blocking_evidence(tmp_path):
         group = result['groups'][0]
         assert group['count'] == 5 and len(group['examples']) == 3
         assert all(e['decision_conflict']['rival'] == 'competitor' and 'embedding' not in e for e in group['examples'])
+
+
+def test_order_and_repeat_matrix_are_reproducible_and_read_only(tmp_path):
+    config, labels = fixture(tmp_path)
+    before = config.database.read_bytes()
+    result = evaluate(config, labels, batch_sizes=(1,), scene_orders=('numeric', 'reverse', 'shuffle'),
+                      shuffle_seed=27, repeat_runs=2)
+    assert len(result['trials']) == 6
+    assert result['trials']['baseline/batch-1/reverse/run-1']['selection'] == ['2', '1']
+    for order in ('numeric', 'reverse', 'shuffle'):
+        a = result['trials'][f'baseline/batch-1/{order}/run-1']
+        b = result['trials'][f'baseline/batch-1/{order}/run-2']
+        assert a['selection'] == b['selection']
+        assert a['elapsed_seconds'] >= 0
+    assert config.database.read_bytes() == before
+
+
+def test_retained_history_excludes_selected_scenes_and_images(tmp_path, monkeypatch):
+    from stash_ai.recognition.rebuild import rebuild_selected
+    from stash_ai.recognition import offline_evaluation as module
+    config, _ = fixture(tmp_path)
+    with FaceDatabase(config.database) as db:
+        selected = [dict(scene=r['scene'], scan=r['id']) for r in db.connection.execute('SELECT * FROM scans')]
+        rebuild_selected(db, selected, config)
+        labels = {r[0]: 'one' for r in db.connection.execute('SELECT o.id FROM observations o JOIN scans s ON s.id=o.scan WHERE s.scene=\'2\'')}
+    before = config.database.read_bytes()
+    original = module.rebuild_selected
+    observed = []
+    def inspect(state, selection, settings):
+        observed.append(state.connection.execute('SELECT COUNT(*) FROM members m JOIN observations o ON o.id=m.observation '
+            'JOIN scans s ON s.id=o.scan WHERE s.scene=\'1\'').fetchone()[0])
+        assert not state.connection.execute('SELECT 1 FROM observations WHERE crop IS NOT NULL').fetchone()
+        assert not state.connection.execute('SELECT 1 FROM members m JOIN observations o ON o.id=m.observation '
+            'JOIN scans s ON s.id=o.scan WHERE s.scene=\'2\'').fetchone()
+        return original(state, selection, settings)
+    monkeypatch.setattr(module, 'rebuild_selected', inspect)
+    result = evaluate(config, labels, scenes=['2'], history_modes=('retained',), batch_sizes=(0,))
+    assert observed == [6]
+    assert result['trials']['baseline/joint/retained']['history']['scenes'] == 1
+    assert config.database.read_bytes() == before
+
+
+def test_retune_reuses_baseline_state_but_runs_new_policy(tmp_path):
+    config, labels = fixture(tmp_path)
+    strict = changed(config, recognition={'match_threshold': .999})
+    result = evaluate(config, labels, variants={'strict': strict}, batch_sizes=(0,), retune_from_baseline=True,
+                      repeat_runs=2)
+    for run in (1, 2):
+        key = f'strict/joint/retuned/run-{run}'
+        assert result['trials'][key]['retuned_from_baseline']
+        assert result['trials'][key]['matching_policy'] == matching_policy(strict)
+        assert result['metrics']['runs'][key]['extra_fragments'] > 0
+
+
+@pytest.mark.parametrize('options', [dict(scene_orders=()), dict(scene_orders=('numeric','numeric')),
+    dict(history_modes=('future',)), dict(repeat_runs=0), dict(shuffle_seed=True)])
+def test_invalid_scenarios_fail_before_opening_database(tmp_path, options):
+    config, labels = fixture(tmp_path)
+    with pytest.raises(ValueError):
+        evaluate(config, labels, **options)
