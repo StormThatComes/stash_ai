@@ -16,6 +16,8 @@ class SpriteCache:
         self.limit, self.size, self.peak = limit, 0, 0
         self.entries, self.lock = OrderedDict(), threading.RLock()
         self.hits = self.misses = self.evictions = 0
+        self.decoders = {}
+        self.generation = 0
 
     def _get(self, key):
         row = self.entries.pop(key, None)
@@ -59,32 +61,49 @@ class SpriteCache:
             sheet = self._get(('pixels', digest))
             return crop(sheet, cue) if sheet is not None else None
 
-    def crop(self, digest, data, cue, crop, *, maximum=None):
-        # Crop under the lock: an evicted PIL sheet can never be closed while a
-        # worker borrows it. Only independently owned crops leave this method.
+    @contextmanager
+    def decoding(self, digest):
         with self.lock:
-            key = 'pixels', digest
-            sheet = self._get(key)
-            if sheet is not None:
-                return crop(sheet, cue)
+            lock, users = self.decoders.get(digest, (threading.Lock(), 0))
+            self.decoders[digest] = lock, users + 1
+        try:
+            with lock:
+                yield
+        finally:
+            with self.lock:
+                _, users = self.decoders[digest]
+                if users == 1:
+                    del self.decoders[digest]
+                else:
+                    self.decoders[digest] = lock, users - 1
+
+    def crop(self, digest, data, cue, crop, *, maximum=None):
+        with self.decoding(digest):
+            with self.lock:
+                generation = self.generation
+                sheet = self._get(('pixels', digest))
+                if sheet is not None:
+                    return crop(sheet, cue)
+            # Different sprites may decode concurrently. Only one decoder for
+            # a digest runs at once; decoded owners are published atomically.
             with open_image(BytesIO(data)) as raw:
                 size = raw.width * raw.height * 3
                 if size + 512 > self.limit or maximum is not None and size > maximum:
                     return crop(raw, cue)
                 sheet = raw.convert('RGB')
+            retained = False
             try:
-                retained = self._put(key, sheet, size)
-            except BaseException:
-                cleanup([sheet.close])
-                raise
-            try:
-                return crop(sheet, cue)
+                with self.lock:
+                    if self.generation == generation:
+                        retained = self._put(('pixels', digest), sheet, size)
+                    return crop(sheet, cue)
             finally:
                 if not retained:
-                    cleanup([sheet.close])
+                    sheet.close()
 
     def close(self):
         with self.lock:
+            self.generation += 1
             sheets = [v[0] for k,v in self.entries.items() if k[0] == 'pixels']
             self.entries.clear()
             self.size = 0

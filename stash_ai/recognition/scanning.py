@@ -95,21 +95,23 @@ def scan_scene(database, scope, scene, config, namespace, source, backend_factor
         with closing(CpuStage(config.data['execution']['scan_cpu_workers'], config.data['execution']['scan_queue_bytes']//2),
                      name='stop recognition pixel workers') as cpu, closing(frame_inputs(source, cursor, config.data['execution']['prefetch_frames']),
                      name='close recognition frame input') as frames:
-            for index, cue, image in frames:
-                with closing(image, name='close recognition cue image'):
-                    faces = sorted(backend.detect(image), key=lambda f: tuple(f.row))
-                    from .scan_pipeline import process
-                    with closing(process(image, faces, backend, visibility, config, cue, assess=assess,
-                            rejection=rejection, crop_bytes=crop_bytes, geometry_contract=geometry_contract, stage=cpu),
-                            name='close recognition cue pipeline') as records:
+            from .scan_pipeline import cue_batches, process_cues
+            # Batch size one retains the previous failure/checkpoint boundary.
+            maximum = config.data['execution']['recognizer_batch_size']
+            with closing(cue_batches(frames, maximum, config.data['execution']['scan_queue_bytes']//2),
+                         name='close cue microbatch') as batches:
+                for batch in batches:
+                    for index, cue, records in process_cues(batch, backend, visibility, config, stage=cpu,
+                            assess=assess,rejection=rejection,crop_bytes=crop_bytes,geometry_contract=geometry_contract):
                         for face_index, face, quality, reason, vector, crop in records:
                             observation = str(uuid.uuid5(uuid.UUID(identifier), encoded([index, face_index, face.row])))
                             pending.append((observation, identifier, index, cue.start, safe_url(cue.image), encoded(list(cue.rect)),
                                             encoded(list(face.row)), encoded(quality), reason, backend.dimensions, vector, crop))
-                cursor = index + 1
-                frame_progress(completed=cursor, total=record['total'])
-                if cursor % config.data['execution']['checkpoint_cues'] == 0:
-                    checkpoint()
+                        cursor = index + 1
+                        frame_progress(completed=cursor, total=record['total'])
+                        if cursor % config.data['execution']['checkpoint_cues'] == 0:
+                            checkpoint()
+
         checkpoint()
         with db:
             db.execute("UPDATE scans SET status='complete' WHERE id=?", (identifier,))

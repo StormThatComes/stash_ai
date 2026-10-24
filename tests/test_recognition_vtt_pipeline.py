@@ -40,9 +40,9 @@ def test_cpu_jobs_and_single_inference_owner_keep_complete_cue_checkpoints(tmp_p
         with pytest.raises(RuntimeError,match='second cue incomplete'):
             scan_scene(state,'scope',client.scene,settings,'ns',source,lambda:backend)
         assert set(gpu)=={owner} and cpu and owner not in cpu
-        assert batches==[2,1,2,1]
-        assert state.connection.execute('SELECT cursor,status FROM scans').fetchone()[:]==(1,'partial')
-        assert state.connection.execute('SELECT COUNT(*) FROM observations').fetchone()[0]==3
+        assert batches==[2,2,2,2]
+        assert state.connection.execute('SELECT cursor,status FROM scans').fetchone()[:]==(2,'partial')
+        assert state.connection.execute('SELECT COUNT(*) FROM observations').fetchone()[0]==6
         assert backend.closed
 
 
@@ -162,3 +162,31 @@ def test_frame_decode_uses_shared_budget_instead_of_portrait_sheet_cap(tmp_path,
         source.portrait_sheet_bytes=1
         for _,_,image in source.frames():assert image.size==(160,160)
         assert len(opened)==1
+
+
+def test_distinct_sprite_decodes_can_overlap_without_duplicate_decode(monkeypatch):
+    from stash_ai.recognition import sprite_cache
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier,Lock
+    from PIL import Image
+    gate=Barrier(2); calls=[]; lock=Lock()
+    original=sprite_cache.open_image
+    def opened(*args,**kwargs):
+        with lock:
+            calls.append(1)
+        gate.wait(timeout=5)
+        return original(*args,**kwargs)
+    monkeypatch.setattr(sprite_cache,'open_image',opened)
+    out=BytesIO()
+    with Image.new('RGB',(4,4),'red') as source:
+        source.save(out,format='PNG')
+    cache=sprite_cache.SpriteCache(10000)
+    def get(key):
+        return cache.crop(key,out.getvalue(),None,lambda image,cue:image.crop((0,0,2,2)))
+    with ThreadPoolExecutor(2) as workers:
+        first=workers.submit(get,'a');second=workers.submit(get,'b')
+        first.result().close();second.result().close()
+    assert len(calls)==2 and not cache.decoders
+    get('a').close()
+    assert len(calls)==2
+    cache.close()
