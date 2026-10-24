@@ -1,7 +1,7 @@
 """Final frozen query recovery; neither route may train another appearance."""
 from .clustering import matching_policy, vector, co_presence_allows
 from .database import encoded
-from .historical_references import History, capture, rank
+from .historical_references import History, capture, rank, rank_many
 from .reference_roles import observation_sql
 from .reference_usage import ReferenceUsage
 from .pose_policy import query_allows, is_anchor
@@ -82,19 +82,19 @@ def _recover(durable, database, config, external, *, appearance, relaxed=False, 
     try:
         rows = db.execute('SELECT o.*,c.id AS candidate FROM candidates c JOIN observations o ON o.id=' +
             observation_sql('c') + " WHERE c.policy=? AND c.status='withheld' AND o.rejected IS NULL ORDER BY o.id", (policy,))
-        with tracking(rows, 'Match supported strict appearances' if appearance else 'Check uncertain face pose', unit='observation') as tracked:
-            for row in tracked:
+        from .late_recovery import ranked_queries
+        ranked = ranked_queries(rows, bank, config, appearance=appearance, relaxed=relaxed)
+        with tracking(ranked, 'Match supported strict appearances' if appearance else 'Check uncertain face pose', unit='observation') as tracked:
+            for row, ordinary, fallback in tracked:
                 if not grouping['auxiliary_matching'] and not is_anchor(row['quality'], grouping):
                     continue
                 if not query_allows(row['quality'], grouping):
                     continue
                 # Only queries without an ordinary positive match enter a
                 # fallback; existing support/conflict decisions stay unchanged.
-                ordinary=rank([row], bank, config)
                 if ordinary is not None and final_bank is None:
                     continue
-                match = ordinary or rank([row], bank, config, relaxed_pose=relaxed or not appearance, strict_appearance=appearance,
-                    quarantine_only=appearance and not grouping['strict_appearance_matching'])
+                match = ordinary or fallback
                 if match is None:
                     continue
                 owner, proof = match

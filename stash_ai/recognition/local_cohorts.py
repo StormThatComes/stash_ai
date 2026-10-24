@@ -17,12 +17,30 @@ def ordering(db,alias='o'):
     return alias+'.cue'
 
 
+def _check_cancelled():
+    from stash_ai.runtime.cancellation import current
+    token = current()
+    if token is not None:
+        token.check()
+
+
 def prepare(db,selected,config):
+    from .compute import current
+    pool = current()
+    if not config.data['clustering']['anchor_view_matching']:
+        return
+    if pool is None or pool.workers == 1:
+        return _prepare_serial(db,selected,config)
+    from .cohort_jobs import prepare_parallel
+    return prepare_parallel(db,selected,config,pool)
+
+
+def _prepare_serial(db,selected,config):
     if not config.data['clustering']['anchor_view_matching']:
         return
     import numpy as np
     grouping=config.data['clustering'];minimum=config.data['recognition']['min_identity_support']
-    db.execute('CREATE TEMP TABLE local_core_order(observation TEXT PRIMARY KEY,position INTEGER)')
+    db.execute('CREATE TEMP TABLE IF NOT EXISTS local_core_order(observation TEXT PRIMARY KEY,position INTEGER)')
     db.execute('CREATE TEMP TABLE local_appearance_rows(observation TEXT PRIMARY KEY,cohort INTEGER)')
     usage=ReferenceUsage(grouping['max_reference_bytes'])
     with tracking(selected,'Freeze local appearance cohorts',unit='scene',position=0) as scenes:
@@ -36,6 +54,7 @@ def prepare(db,selected,config):
                           total=lambda: db.execute('SELECT COUNT(*) FROM observations ' + condition,
                                                    (item['scan'],)).fetchone()[0]) as tracked:
                 for row in tracked:
+                    _check_cancelled()
                     sample=vector(row)
                     slot=best_cohort(slots,row,sample,coverage_threshold(grouping))
                     if slot is None:
@@ -55,6 +74,7 @@ def prepare(db,selected,config):
                                       'ON a.observation=o.id ORDER BY o.id')
                 with tracking(reassessment,'Reassess local appearance priorities',unit='observation') as tracked:
                     for row in tracked:
+                        _check_cancelled()
                         slot=best_cohort(slots,row,vector(row),coverage_threshold(grouping))
                         slot=row['cohort'] if slot is None else slot
                         db.execute('UPDATE local_appearance_rows SET cohort=? WHERE observation=?',(slot,row['id']))
@@ -67,6 +87,7 @@ def prepare(db,selected,config):
                              -float(np.dot(c,centre)),tuple(float(x) for x in c),slots[i].pose)
                             for i,c in enumerate(centres)]
                 while remaining:
+                    _check_cancelled()
                     winner=max(remaining,key=lambda i:(connected[i],)+priorities[i])
                     db.execute('INSERT INTO local_core_order SELECT observation,? FROM local_appearance_rows WHERE cohort=?',
                                (len(placed),winner))
