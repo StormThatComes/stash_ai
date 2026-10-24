@@ -171,10 +171,13 @@ def _rank_bank(history, config, strict_appearance):
             group=Group(view.group.identifier,view.examples,True,view.support)
         else:
             # A supported mode is scored against its witnesses, not just its
-            # medoid. Raw strict rivals remain in the separate unchanged bank.
+            # medoid. A corroborated promotion is a specifically supported edge
+            # representative: averaging its broader parent/query cohort erases
+            # that edge. Raw strict rivals remain in their unchanged bank.
             examples = getattr(view, 'examples', ())
             group = (Group(view.group.identifier, tuple(examples), True, view.support)
-                     if examples and view.support_count >= minimum else view.group)
+                     if examples and view.support_count >= minimum and
+                     view.authority != 'corroborated_view' else view.group)
         views.append(group);by_group[id(group)]=view
     return views, by_group
 

@@ -121,8 +121,8 @@ def test_input_catalogue_advances_during_each_observation_pass(tmp_path, monkeyp
         with present(report, 'auto', status_position=2):
             digest = rebuild_cache.input_context(db.connection, selected, 'scope', 'ns', config)
     # Versioned per-scene descriptors retain deterministic source ordering.
-    assert digest == ('eb1f6a2dca8f2963989fbe9c78c53babf628090af2290f8a33764433356caf84' if assignments else
-                      '1e0980355d5f48468bf26acf9ca86859382a20f199cd0cfa63249047a755aafc')
+    assert digest == ('73ef1227bb43409479d61e8ea8ab93974a066d248371cab403b1d8df2ffc9510' if assignments else
+                      '10a2be05450155b185c060d461e4b5977b43f49b5179f1ada65dfe4670b4a8ad')
     for label in labels:
         assert seen[label] == list(range(3))*2
         rows = [bar for bar in bars if bar.desc == label]
