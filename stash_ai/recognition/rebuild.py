@@ -384,7 +384,7 @@ def _apply(database, replay, selected, config, scope, namespace, mapping, finger
             # evidence itself did not change, so the next run remains a warm read.
             from .historical_references import context as external_context
             state['fingerprint']=digest(dict(format=2,scans=selected,policy=policy,
-                external_references=external_context(db,selected,config,scope,namespace)))
+                external_references=external_context(db,selected,config,scope,namespace,cache=True)))
             rebuild_cache.save(db,scope,namespace,state)
         committed.advance()
 
@@ -423,8 +423,9 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
         raise ValueError('Identity rebuild requires a selected scan.')
     scope, namespace = first['scope'], first['namespace']
     from . import historical_references
-    with stage('Validate external identity dependencies'):
-        external_context = historical_references.context(db,selected,config,scope,namespace)
+    from .dependencies import read_only as read_only_dependencies
+    with stage('Validate external identity dependencies'), read_only_dependencies():
+        external_context = historical_references.context(db,selected,config,scope,namespace,cache=True)
     fingerprint = digest({'format': 2, 'scans': selected, 'policy': matching_policy(config),
                           'external_references': external_context})
     usage = ReferenceUsage(config.data['clustering']['max_reference_bytes'], progress)
@@ -439,9 +440,11 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
                            label_scenes=[item['scene'] for item in selected])
         context = reference_context(references)
         references.clear()
-        if (state.get('context')==context
+        with read_only_dependencies():
+            matches = (state.get('context')==context
                 and state.get('inputs')==rebuild_cache.input_context(db,selected,scope,namespace,config)
-                and state.get('bindings')==rebuild_cache.binding_context(db,scope,namespace)):
+                and state.get('bindings')==rebuild_cache.binding_context(db,scope,namespace))
+        if matches:
             with work('Validate cached identity rebuild',len(selected),unit='scene',position=0) as checked:
                 with stage('Validate cached identity decisions'):
                     complete=rebuild_cache.complete(db,selected,matching_policy(config),context)
