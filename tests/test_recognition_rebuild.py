@@ -41,6 +41,9 @@ def library(tmp_path, monkeypatch, vectors):
             super().__init__(client, scene, config)
         def frames(self, start=0):
             for index, cue, image in super().frames(start):
+                # Each cue is an independent synthetic observation; repeated JPEG
+                # pixels must not contradict its mocked embedding/timestamp.
+                image.paste(((index*37) % 256, (int(self.scene_id)*41) % 256, 255), (64, 64, 88, 88))
                 image.info['test_vector'] = vectors[self.scene_id][index]
                 yield index, cue, image
     def backend(*args):
