@@ -130,7 +130,7 @@ def _supporting_cues(db, selected, policy, source, target, components, config, m
     if reused is not MISSING:
         return reused
     votes = []
-    rows = latest_rows(db, f'''SELECT o.id,o.seconds,o.cue,o.dimensions,o.embedding,s.scene,s.id AS scan,s.rowid AS scan_order
+    rows = latest_rows(db, f'''SELECT o.id,o.seconds,o.cue,o.dimensions,o.embedding,o.quality,s.scene,s.id AS scan,s.rowid AS scan_order
       FROM merge_support m
       JOIN observations o ON o.id=m.observation
       JOIN scans s ON s.id=o.scan
@@ -142,7 +142,8 @@ def _supporting_cues(db, selected, policy, source, target, components, config, m
       (source, target, policy, selected['scope'], selected['namespace'],
        selected['policy_sha']), selected)
     for row, mask in matching_rows(rows, (components[target], components[source]), config):
-        key = (row['scene'], row['seconds'])
+        from .independent_evidence import unit
+        key = unit(row)
         if key in seen:
             continue
         if mask is None:

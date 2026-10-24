@@ -28,6 +28,10 @@ def scan(state, config, scene, vectors=None, count=3):
         backend.embed = lambda image, face: next(iterator)
     with SpriteInput(client, client.scene, config) as source:
         identifier, _ = scan_scene(state, 'scope', client.scene, config, 'ns', source, lambda: backend)
+    # These fixtures assign arbitrary vectors to repeated placeholder pixels.
+    # They model independent observations, not retained pixel-equality evidence.
+    state.connection.execute("UPDATE observations SET quality=json_remove(quality,'$.evidence_crop_sha256') WHERE scan=?", (identifier,))
+    state.connection.commit()
     return identifier, client
 
 

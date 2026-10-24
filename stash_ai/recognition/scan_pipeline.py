@@ -90,6 +90,8 @@ def process(image, faces, backend, visibility, config, cue, *, assess, rejection
             details = {}
             entry['crop'], bounds = crop_bytes(pixels, entry['face'], limit=config.data['storage']['max_crop_bytes'], details=details)
             entry['quality'].update(crop_bounds=bounds, crop_encoding=details)
+            import hashlib
+            entry['quality']['evidence_crop_sha256'] = hashlib.sha256(entry['crop']).hexdigest()
         return entry
 
     try:

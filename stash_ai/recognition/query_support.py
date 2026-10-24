@@ -10,6 +10,7 @@ import hashlib
 import math
 
 from .clustering import vector
+from .independent_evidence import unit
 
 
 @dataclass(frozen=True)
@@ -33,7 +34,7 @@ class _Votes:
             return
         self.seen.add(row['id'])
         self.ids.append(row['id'])
-        self.times.add((row['scan'], row['seconds']))
+        self.times.add(unit(row))
         self.prototypes.add(prototype)
 
 
@@ -66,6 +67,8 @@ def cohorts(rows, config, *, key, prototype, minimum=None):
         query = vector(row)
         if len(votes.times) < required(family):
             metadata = {k: row[k] for k in ('id', 'scan', 'seconds')}
+            if 'quality' in row.keys():
+                metadata['quality'] = row['quality']
             unfinished.setdefault(origin, []).append((metadata, origin, query))
             used += query.nbytes
             if used > grouping['max_reference_bytes']:
@@ -84,6 +87,21 @@ def cohorts(rows, config, *, key, prototype, minimum=None):
                 pending[family] = missing
     families.clear()
     seen = set()
+    # Index only unresolved families. Fall back to the original streaming path
+    # when the bounded index would exceed the reference budget.
+    indexed, index_bytes = {}, used
+    if pending:
+        for row in stream():
+            family = key(row)
+            if family not in pending:
+                continue
+            index_bytes += len(row['embedding']) + sum(len(str(v)) for v in row) + 1024
+            if index_bytes > grouping['max_reference_bytes']:
+                indexed = None
+                break
+            indexed.setdefault(family, []).append(dict(row))
+    def witnesses(family):
+        return iter(indexed.get(family, ())) if indexed is not None else stream()
     if pending:
         for row in stream():
             family = key(row)
@@ -103,7 +121,7 @@ def cohorts(rows, config, *, key, prototype, minimum=None):
             for record, p in targets:
                 votes.add(record, p)
             if len(votes.times) < required(family):
-                for witness in stream():
+                for witness in witnesses(family):
                     if key(witness) != family or witness['id'] in votes.seen:
                         continue
                     if float(np.dot(centre, vector(witness))) < boundary:
