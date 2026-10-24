@@ -2417,3 +2417,42 @@ reference catalogue per bounded batch. CPU jobs return original scalar scores fo
 all rivals; the existing coordinator ranking/screening supplies the same proofs,
 including weak rival scores and ties. Fallback appearance results still cannot
 train another match. Profiling adds `local_cohort_scenes` and `process_cohort_blocks`.
+
+
+### VTT CPU pipeline and shared sprites
+
+`execution.scan_cpu_workers` (default 4) prepares face quality, supported ONNX
+alignment tensors and JPEG crops on CPU workers. Detector, visibility and embedding
+inference remain on the calling model owner. Preparation and encoding use bounded
+queues (`scan_queue_bytes`, default 256 MiB); workers own their image copies and
+oversize jobs run synchronously. The queue allowance reserves estimated image
+scratch and results; it does not limit input image dimensions or source downloads.
+A cue advances its checkpoint only after every face finishes. Any error discards
+that cue's tentative observations and retains earlier complete cues.
+
+`recognizer_batch_size` defaults to 1. Values up to 32 enable AuraFace/LVFace/AdaFace
+microbatches only if both ONNX input and output batch dimensions are dynamic.
+Static-one graphs use exact single-image calls; unsupported backends keep `embed`.
+GPU batch sizes can change floating-point results slightly: benchmark/calibrate
+an opt-in batch on the actual model/provider before relying on boundary scores.
+
+`prefetch_scene_depth` defaults to 3 (1–16), with at most four separate input
+readers. Results are consumed in requested scene order, errors stay associated
+with their scene, and all speculative inputs are closed on cancellation.
+`prefetch_scenes: false` retains synchronous input loading.
+
+`execution.sprite_cache_bytes` defaults to 1 GiB. One thread-safe, content-addressed
+LRU shares compressed sprite bytes and decoded RGB sheets across scan and portrait
+input owners. Source manifests still verify their own sprite hashes. Cropping
+holds the cache lock so eviction cannot close borrowed pixels; only owned crops
+leave it. Zero disables retention and oversized sheets use crop-before-conversion.
+The cache ends with the invocation, including failures, and does not cache credentials
+or identity decisions. Active decoded crops and worker scratch are separate from
+this retained-sprite allowance.
+
+Portrait preparation now uses multiple CPU jobs for supported FaceOcc input
+preparation and frozen identity ranking. Candidate acceptance, SQLite updates and
+final selection remain on the coordinator; one model executor owns all portrait
+inference. `portrait_cpu_threads` bounds the CPU preparation workers (automatic
+when zero); the existing JPEG owner can overlap preparation for the next target.
+All original observations remain eligible for ranking, including after a crop fails.

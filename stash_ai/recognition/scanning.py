@@ -89,39 +89,21 @@ def scan_scene(database, scope, scene, config, namespace, source, backend_factor
         progress(scanned=cursor, total=record['total'], scene=str(scene['id']))
 
     try:
-        with closing(frame_inputs(source, cursor, config.data['execution']['prefetch_frames']),
+        from .scan_pipeline import CpuStage
+        with closing(CpuStage(config.data['execution']['scan_cpu_workers'], config.data['execution']['scan_queue_bytes']//2),
+                     name='stop recognition pixel workers') as cpu, closing(frame_inputs(source, cursor, config.data['execution']['prefetch_frames']),
                      name='close recognition frame input') as frames:
             for index, cue, image in frames:
                 with closing(image, name='close recognition cue image'):
                     faces = sorted(backend.detect(image), key=lambda f: tuple(f.row))
-                    for face_index, face in enumerate(faces):
-                        quality = assess(image, face)
-                        quality['geometry_contract'] = geometry_contract(face, cue)
-                        reason = ('face_detection_score' if face.score <= config.data['detection']['score_threshold']
-                                  else rejection(quality, config.data['detection']))
-                        if reason is None and measurement_required(config):
-                            if visibility is None:
-                                raise VisibilityError('Recognition visibility gate requires a visibility model.')
-                            try:
-                                quality.update(visibility.measure(image, face))
-                            except VisibilityGeometryError:
-                                reason = 'face_visibility_unmeasurable'
-                            else:
-                                if not visibility_cached(quality):
-                                    raise VisibilityError('Recognition visibility gate received an invalid measurement.')
-                                if quality['visible_face_fraction'] < config.data['detection']['min_visible_face_fraction']:
-                                    reason = 'face_occluded'
-                        vector = None
-                        crop = None
-                        if reason is None:
-                            vector = normalized_embedding(backend.embed(image, face), backend.dimensions).astype('<f4').tobytes()
-                            encoding = {}
-                            crop, bounds = crop_bytes(image, face, limit=config.data['storage']['max_crop_bytes'], details=encoding)
-                            quality['crop_bounds'] = bounds
-                            quality['crop_encoding'] = encoding
-                        observation = str(uuid.uuid5(uuid.UUID(identifier), encoded([index, face_index, face.row])))
-                        pending.append((observation, identifier, index, cue.start, safe_url(cue.image), encoded(list(cue.rect)),
-                                        encoded(list(face.row)), encoded(quality), reason, backend.dimensions, vector, crop))
+                    from .scan_pipeline import process
+                    with closing(process(image, faces, backend, visibility, config, cue, assess=assess,
+                            rejection=rejection, crop_bytes=crop_bytes, geometry_contract=geometry_contract, stage=cpu),
+                            name='close recognition cue pipeline') as records:
+                        for face_index, face, quality, reason, vector, crop in records:
+                            observation = str(uuid.uuid5(uuid.UUID(identifier), encoded([index, face_index, face.row])))
+                            pending.append((observation, identifier, index, cue.start, safe_url(cue.image), encoded(list(cue.rect)),
+                                            encoded(list(face.row)), encoded(quality), reason, backend.dimensions, vector, crop))
                 cursor = index + 1
                 frame_progress(completed=cursor, total=record['total'])
                 if cursor % config.data['execution']['checkpoint_cues'] == 0:

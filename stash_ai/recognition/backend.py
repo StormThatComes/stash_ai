@@ -75,6 +75,9 @@ class _BorrowedBackend:
     def embed(self, image, face):
         return self._infer('embed', image, face)
 
+    def embed_prepared_many(self, tensors):
+        return self._infer('embed_prepared_many', tensors)
+
     @contextmanager
     def prepared_frame(self, image):
         if not self.active:

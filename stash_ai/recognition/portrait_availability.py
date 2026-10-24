@@ -111,6 +111,7 @@ def candidate_observations(db, rows, scan, policy, *, prepare=False):
             return cache['candidates'].get(identifier)
         pairs=[(row,lambda row=row,proof=proof:proof(row)) for row in batch]
         if prepare and preparation is not None and batch:
+            preparation.rank_batch(batch)
             preparation.prepare_batch(scene,pairs)
         yield from pairs
 
@@ -135,7 +136,10 @@ def observation_identity(database, row, groups, target, config, context, *, cand
     from .identity_merges import canonical
     from .portraits import identity_reason
     person = target['person']
-    reason, similarity, runner = identity_reason(vector(row), groups, person, config)
+    from .portrait_pipeline import current
+    pipeline=current()
+    numerical=pipeline.identity_outcome(row,groups,target,context) if pipeline is not None else None
+    reason, similarity, runner = numerical if numerical is not None else identity_reason(vector(row), groups, person, config)
     basis = 'retained_embedding_comparison'
     if reason:
         if callable(candidate):
