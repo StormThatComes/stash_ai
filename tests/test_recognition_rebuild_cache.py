@@ -215,7 +215,7 @@ def test_assignment_catalogue_keeps_frozen_digest_with_multiple_candidate_polici
     config = changed(setup(tmp_path), anchor_view_matching=True)
     with FaceDatabase(config.database) as state:
         selected = assignment_fixture(state)
-        assert input_context(state.connection, selected, 'scope', 'ns', config) == '847294b98a82130d4a4009b8c3696046f51036ac195476d296d12dea496ea9d0'
+        assert input_context(state.connection, selected, 'scope', 'ns', config) == 'b870fd8dd4755791c6c768c44ed6d1f7b8c4e1ea857aab48244affc799ef24eb'
 
 
 def test_assignment_lookup_never_scans_the_global_candidate_table(tmp_path):

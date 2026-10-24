@@ -17,6 +17,9 @@ def compact_quality(raw):
             number=record.get(key)
             if type(number) in (int,float) and math.isfinite(number) and number>=0:
                 selected[key]=number
+        fingerprint = record.get('evidence_crop_sha256')
+        if isinstance(fingerprint,str) and len(fingerprint)==64 and all(c in '0123456789abcdef' for c in fingerprint):
+            selected['evidence_crop_sha256'] = fingerprint
         if type(record.get('alignment_valid')) is bool:
             selected['alignment_valid']=record['alignment_valid']
         from .visibility import cached

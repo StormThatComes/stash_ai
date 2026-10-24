@@ -82,7 +82,8 @@ class _Cluster:
         return all(float(np.dot(existing, query)) >= threshold for existing in self.examples)
 
     def add(self, row, query, maximum=8):
-        cue = (row['scan'], row['seconds'])
+        from .independent_evidence import unit
+        cue = unit(row)
         if cue in self.cues:
             return
         self.cues.add(cue)
