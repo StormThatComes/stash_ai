@@ -53,7 +53,9 @@ def parameters(selected,config,scope,namespace):
     return (scope,namespace,encoded([item['scene'] for item in selected]),scan_identity(config,namespace))
 
 
-def context(db,selected,config,scope,namespace):
+def context(db,selected,config,scope,namespace,*,cache=False):
+    if not cache:
+        return _context(db,selected,config,scope,namespace)
     from .dependencies import cached
     from .config import digest
     key=digest([scope,namespace,selected])
