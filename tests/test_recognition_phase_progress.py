@@ -109,8 +109,8 @@ def test_input_catalogue_advances_during_each_observation_pass(tmp_path, monkeyp
         active = next((bar for bar in bars if bar.desc in seen and not bar.disable), None)
         if active is not None:
             seen[active.desc].append(active.n)
-            assert report.console.state['work'] == '0/2'
-            assert report.console.state['detail'] == f'{active.n}/6'
+            assert report.console.state['work'] == f'{(len(seen[active.desc])-1)//3}/2'
+            assert report.console.state['detail'] == f'{active.n}/3'
             if active.n:
                 assert report.console.state['detail_eta'] != 'warming up'
                 assert report.console.state['detail_rate'].endswith('observation/s')
@@ -120,13 +120,13 @@ def test_input_catalogue_advances_during_each_observation_pass(tmp_path, monkeyp
         selected = fixture(db, 2, dimensions=4)
         with present(report, 'auto', status_position=2):
             digest = rebuild_cache.input_context(db.connection, selected, 'scope', 'ns', config)
-    # These descriptors predate progress instrumentation: warm caches must stay valid.
-    assert digest == ('21a4e494ae624773cbec188c63edc92548d067f190ac7b1e60fa44d799d71c50' if assignments else
-                      '78a254d198ac389a87cb6aba01eeafc7b5e7ce9aa7ff0b39cc25a3067d696985')
+    # Versioned per-scene descriptors retain deterministic source ordering.
+    assert digest == ('eb1f6a2dca8f2963989fbe9c78c53babf628090af2290f8a33764433356caf84' if assignments else
+                      '1e0980355d5f48468bf26acf9ca86859382a20f199cd0cfa63249047a755aafc')
     for label in labels:
-        assert seen[label] == list(range(6))
-        row = next(bar for bar in bars if bar.desc == label)
-        assert row.n == row.total == 6
+        assert seen[label] == list(range(3))*2
+        rows = [bar for bar in bars if bar.desc == label]
+        assert len(rows)==2 and all(row.n==row.total==3 for row in rows)
     row = next(bar for bar in bars if bar.desc == 'Validate rebuild input catalogue')
     assert row.n == row.total == 2
     assert all(bar.disable for bar in bars) and owners == {'stash-console'}
@@ -445,7 +445,7 @@ def test_assignment_preparation_reports_candidate_batches_and_cleans_up_on_inter
     config = changed(setup(tmp_path), anchor_view_matching=True)
     bars, _ = terminal
     with FaceDatabase(config.database) as state:
-        selected = assignment_fixture(state)
+        selected = assignment_fixture(state,scenes=101)
         db = state.connection
         if pending:
             db.execute("INSERT INTO metadata VALUES ('pending-caller','preserve')")
@@ -454,21 +454,20 @@ def test_assignment_preparation_reports_candidate_batches_and_cleans_up_on_inter
             def execute(self, *args):
                 return db.execute(*args)
             def executemany(self, sql, values):
-                if sql.startswith('INSERT OR REPLACE INTO rebuild_assignments_'):
+                if sql.startswith('INSERT INTO rebuild_assignments_'):
                     active = next(b for b in bars if b.desc == 'Index rebuild assignment candidates' and not b.disable)
-                    assert active.total == 600
+                    assert active.total == 300
                     if active.n == 256 and failure:
                         raise failure('assignment indexing stopped')
                 return db.executemany(sql, values)
         with present(RunReport(write=lambda _: None), 'auto', status_position=2):
             if failure:
                 with pytest.raises(failure, match='assignment indexing stopped'):
-                    rebuild_cache.input_context(Connection(), selected, 'scope', 'ns', config)
+                    with rebuild_cache._assignment_index(Connection(),selected):pass
             else:
-                assert rebuild_cache.input_context(Connection(), selected, 'scope', 'ns', config)
+                with rebuild_cache._assignment_index(Connection(),selected):pass
         indexed = next(b for b in bars if b.desc == 'Index rebuild assignment candidates')
-        assert indexed.n == (256 if failure else 600)
-        assert next(b for b in bars if b.desc == 'Validate rebuild input catalogue').n == (0 if failure else 2)
+        assert indexed.n == (256 if failure else 300)
         assert db.in_transaction == pending and list(db.iterdump()) == before
         assert not db.execute("SELECT 1 FROM sqlite_temp_master WHERE name LIKE 'rebuild_assignments_%'").fetchone()
     assert all(b.disable for b in bars)

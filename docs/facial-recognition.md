@@ -2334,3 +2334,37 @@ quality changes separately:
 Run each toggle separately with `recognition evaluate`, retained history, scene
 order variations and false-merge metrics before combining them. These changes
 claim no accuracy gain on unlabelled media and introduce no extra video inputs.
+
+
+### Indexed dependencies and certified warm rebuilds
+
+Schema version 5 adds durable per-scan/global evidence versions and bounded
+fingerprint records. Migration from versions 1–4 preserves observations,
+identities, installation IDs and publication history. Candidate observation
+addresses use a TEXT expression index: the cast matches the affinity of
+`observations.id`, allowing SQLite to seek the latest decision instead of
+scanning all candidate JSON for each observation. The actual observation address
+wins over a candidate's claimed scan or policy.
+
+Fixed application-owned triggers update dependency versions in the same
+transaction as evidence changes. Rollback restores both evidence and versions.
+Separate BEFORE INSERT guards handle SQLite REPLACE with recursive triggers off,
+invalidating both old and new observation addresses. Unknown, modified or missing
+required triggers fail schema validation; database-provided SQL is never executed
+to repair the schema. JPEG-only changes do not invalidate identity evidence.
+
+Selected-scene input digests are cached independently. Global history and label
+binding digests retain conservative dependency stamps. Completed rebuilds receive
+a certificate covering the full descriptor and current evidence version. An
+unchanged, admissible descriptor can reuse decisions without rereading all
+vectors; missing/altered certification takes the original bounded integrity path.
+Candidate, membership, identity, source geometry, quality, scan and model changes
+invalidate reuse. Arbitrary edits to a completed metadata descriptor cannot
+reuse its previous certificate.
+
+Caches preserve caller transactions and readonly evaluation remains readonly.
+Each scene/policy cache retains at most eight variants; historical selection
+contexts retain at most 128 records. Profiling exposes `dependency_digest_hits`,
+`dependency_digest_misses` and `certified_warm_rebuilds`. Cold validation still
+streams evidence and reports observation progress; warm validation reports the
+selected-scene work without pretending to reread embeddings.

@@ -380,10 +380,11 @@ def _apply(database, replay, selected, config, scope, namespace, mapping, finger
                 bindings=rebuild_cache.binding_context(db,scope,namespace),
                 limits=rebuild_cache.resource_limits(config),
                 resource_reuse=not getattr(database,'_rebuild_optional_budget_fallback',False))
-            if registry_changed or pooled:
-                from .historical_references import context as external_context
-                state['fingerprint']=digest(dict(format=2,scans=selected,policy=policy,
-                    external_references=external_context(db,selected,config,scope,namespace)))
+            # Refresh the post-commit dependency stamp even when the external
+            # evidence itself did not change, so the next run remains a warm read.
+            from .historical_references import context as external_context
+            state['fingerprint']=digest(dict(format=2,scans=selected,policy=policy,
+                external_references=external_context(db,selected,config,scope,namespace)))
             rebuild_cache.save(db,scope,namespace,state)
         committed.advance()
 
@@ -426,6 +427,11 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
     usage = ReferenceUsage(config.data['clustering']['max_reference_bytes'], progress)
     state = rebuild_cache.lookup(db,scope,namespace,fingerprint)
     if state and rebuild_cache.admissible(state,config):
+        from .dependencies import certified
+        if certified(db,scope,namespace,state):
+            from .profiling import count
+            count('certified_warm_rebuilds')
+            return _results(db,selected,config)
         references = _groups(db,scope,namespace,config.data['clustering'],usage=usage,scan_policy=scan_identity(config,namespace),compatibility=fallback_sql(db,config,namespace),
                            label_scenes=[item['scene'] for item in selected])
         context = reference_context(references)
@@ -439,6 +445,8 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
                 if complete:
                     checked.advance(len(selected))
             if complete:
+                from .dependencies import snapshot,certify
+                with snapshot(db):certify(db,scope,namespace,state)
                 usage.begin('cached')
                 return _results(db,selected,config)
     from .corroborated_views import previous_queries,previous_strict,previous_hints,defer_new_groups

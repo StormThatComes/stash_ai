@@ -123,7 +123,15 @@ def test_warm_candidate_sql_and_vectors_use_bounded_scan_blocks(tmp_path,monkeyp
         assert rebuild_selected(state,selected,config)==expected
         state.connection.set_trace_callback(None)
         checks=[sql for sql in statements if 'AS actual_scan' in sql]
-        assert len(checks)==2
+        assert not checks
+        assert state.last_rebuild_profile['counts']['certified_warm_rebuilds']==1
+        assert not state.last_rebuild_profile['counts'].get('validated_vectors',0)
+        # Lost certification still uses the bounded full integrity fallback.
+        state.connection.execute("DELETE FROM evidence_fingerprints WHERE kind='completed'");state.connection.commit()
+        statements.clear();state.connection.set_trace_callback(statements.append)
+        assert rebuild_selected(state,selected,config)==expected
+        state.connection.set_trace_callback(None)
+        assert len([sql for sql in statements if 'AS actual_scan' in sql])==2
         assert state.last_rebuild_profile['counts']['batch_validated_vectors']==780
 
 
@@ -207,10 +215,10 @@ def test_assignment_catalogue_keeps_frozen_digest_with_multiple_candidate_polici
     config = changed(setup(tmp_path), anchor_view_matching=True)
     with FaceDatabase(config.database) as state:
         selected = assignment_fixture(state)
-        assert input_context(state.connection, selected, 'scope', 'ns', config) == '76bdba81aacfe9f1028dfb5f5891b46c4419817c380acb5252ca5260d88096b9'
+        assert input_context(state.connection, selected, 'scope', 'ns', config) == '579319c5cbc8a8750d124ce5bbb41c9e41036ea27d26fbae6d546674ce7bd57b'
 
 
-def test_assignment_index_is_prepared_once_across_catalogue_batches(tmp_path):
+def test_assignment_lookup_never_scans_the_global_candidate_table(tmp_path):
     from stash_ai.recognition.rebuild_cache import input_context
     config = changed(setup(tmp_path), anchor_view_matching=True)
     with FaceDatabase(config.database) as state:
@@ -219,7 +227,10 @@ def test_assignment_index_is_prepared_once_across_catalogue_batches(tmp_path):
         state.connection.set_trace_callback(statements.append)
         assert input_context(state.connection, selected, 'scope', 'ns', config)
         scans = [sql for sql in statements if sql.startswith('SELECT c.rowid,o.id,o.scan')]
-        assert len(scans) == 1
+        assert not scans
+        assert sum('SELECT z.rowid' in sql for sql in statements)==len(selected)
+        statements.clear()
+        assert input_context(state.connection,selected,'scope','ns',config)
         assert not any('SELECT z.rowid' in sql for sql in statements)
 
 

@@ -22,7 +22,7 @@ def historical_views(db,config,scope,namespace,selected,groups,usage,cohorts=(),
         cohorts=catalogue(db,config,scope,namespace,usage=usage,minimum=1,complete=True,
             excluded_scenes=[item['scene'] for item in selected],scan_policy=scan_identity(config,namespace))
     rows=db.execute('SELECT m.person,o.id,o.scan,o.cue,o.seconds,o.geometry,o.dimensions,o.embedding,o.quality,'
-        '(SELECT c.payload FROM candidates c WHERE CASE WHEN json_valid(c.payload) THEN json_extract(c.payload,\'$.observation\') END=o.id '
+        '(SELECT c.payload FROM candidates c WHERE CAST(CASE WHEN json_valid(c.payload) THEN json_extract(c.payload,\'$.observation\') END AS TEXT)=o.id '
         'ORDER BY c.rowid DESC LIMIT 1) AS decision '+
         _source(config,fallback_sql(db,config,namespace),verified=True)+
         ' ORDER BY m.person,CAST(s.scene AS INTEGER),s.scene,o.cue,o.seconds,o.id',
