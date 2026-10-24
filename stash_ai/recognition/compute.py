@@ -1,6 +1,6 @@
 """Coordinator-owned, bounded CPU work; workers never inherit replay state."""
 from collections import Counter, deque
-from concurrent.futures import ThreadPoolExecutor, wait
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, wait
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -30,6 +30,7 @@ class Result:
     value: object
     seconds: float
     cpu_seconds: float
+    backend: str = 'threads'
 
 
 def available_cpus():
@@ -50,7 +51,8 @@ class Compute:
                          settings['rebuild_memory_bytes']//16)
         self.owner = threading.get_ident()
         self.cancel = Cancellation()
-        self.executor = self.native = None
+        self.executor = self.native = self.process_executor = self.process_event = None
+        self.process_blocks = 0
         self.pending = deque()
         self.closed = False
         self.bytes = self.peak_bytes = 0
@@ -104,6 +106,7 @@ class Compute:
         return dict(format=2, requested_workers=self.requested_workers,
                     effective_workers=self.workers, available_cpus=self.available,
                     native_threads=self.native_threads, backend='threads',
+                    process_cohort_blocks=self.process_blocks,
                     queue_limit_bytes=self.limit, peak_queued_bytes=self.peak_bytes,
                     submitted_blocks=self.submitted, applied_blocks=self.applied,
                     successful_worker_wall_seconds=self.worker_seconds,
@@ -136,6 +139,17 @@ class Compute:
             self.native = None
             raise
 
+    def _start_processes(self):
+        if self.process_executor is not None:
+            return
+        import multiprocessing
+        shutdown.require_idle()
+        context = multiprocessing.get_context('spawn')
+        self.process_event = context.Event()
+        self.cancel.subscribe(self.process_event.set)
+        self.process_executor = ProcessPoolExecutor(max_workers=self.workers, mp_context=context,
+            initializer=_initialize_process, initargs=(self.process_event, self.native_threads))
+
     def _invoke(self, function, job):
         with self.lock:
             self.running += 1
@@ -166,6 +180,10 @@ class Compute:
             self.wait_seconds += time.perf_counter()-start
         if (result.ordinal, result.generation) != (job.ordinal, job.generation):
             raise RuntimeError('Stale or out-of-order recognition CPU result.')
+        if result.backend == 'processes':
+            with self.lock:
+                self.completed += 1
+            self.process_blocks += 1
         self.pending.popleft()
         self.bytes -= job.size
         self.applied += 1
@@ -173,13 +191,15 @@ class Compute:
         self.worker_cpu_seconds += result.cpu_seconds
         return result
 
-    def ordered(self, function, jobs):
+    def ordered(self, function, jobs, *, backend='threads'):
         """Consume a bounded ordered stream, retiring results before advancing.
 
         Exhaust or close the iterator before scheduling another stream. Sizes
         reserve input owners, native scratch and results, not just arguments.
         """
         self._owned()
+        if backend not in ('threads', 'processes'):
+            raise ValueError('Unsupported recognition CPU backend.')
         if self.pending:
             raise RuntimeError('Recognition CPU result stream is still active.')
         previous = -1
@@ -196,8 +216,12 @@ class Compute:
                 while self.pending and (len(self.pending) >= self.workers*2
                                         or self.bytes + job.size > self.limit):
                     yield self._take()
-                self._start()
-                future = self.executor.submit(self._invoke, function, job)
+                if backend == 'processes':
+                    self._start_processes()
+                    future = self.process_executor.submit(_invoke_process, function, job)
+                else:
+                    self._start()
+                    future = self.executor.submit(self._invoke, function, job)
                 self.pending.append((future, job))
                 self.bytes += job.size
                 self.peak_bytes = max(self.peak_bytes, self.bytes)
@@ -224,8 +248,14 @@ class Compute:
             self.cancel.cancel()
             for future, _ in self.pending:
                 future.cancel()
-            if self.executor is not None:
-                shutdown.call(lambda: self.executor.shutdown(wait=True, cancel_futures=True), self)
+            actions = []
+            for executor in (self.executor, self.process_executor):
+                if executor is not None:
+                    actions.append(lambda executor=executor: shutdown.call(
+                        lambda: executor.shutdown(wait=True, cancel_futures=True),
+                        self if executor is self.executor else executor,
+                        timeout=None if executor is self.executor else 5.))
+            cleanup(actions)
         cleanup([('stop recognition CPU work', stop),
                  ('release recognition CPU owners', lambda: shutdown.release(self, self._release))])
 
@@ -249,3 +279,26 @@ def compute_scope(config):
         cleanup([('close recognition CPU owner', value.close),
                  ('record recognition CPU work', lambda: compute_summary(value.summary())),
                  ('clear recognition CPU status', lambda: value.publish(clear=True))])
+
+
+_process_cancellation = _process_native = None
+
+
+def _initialize_process(event, native_threads):
+    # Spawned workers receive no SQLite connection, CUDA model or coordinator
+    # ContextVars. Only an event, immutable scene input and plain config cross.
+    global _process_cancellation, _process_native
+    import numpy  # Load BLAS before applying this process-local thread limit.
+    from threadpoolctl import threadpool_limits
+    _process_native = threadpool_limits(limits=native_threads, user_api='blas')
+    _process_cancellation = Cancellation()
+    _process_cancellation.event = event
+
+
+def _invoke_process(function, job):
+    with use(_process_cancellation):
+        start, cpu = time.perf_counter(), time.process_time()
+        value = function(job.payload)
+        _process_cancellation.check()
+        return Result(job.ordinal, job.generation, value, time.perf_counter()-start,
+                      time.process_time()-cpu, 'processes')

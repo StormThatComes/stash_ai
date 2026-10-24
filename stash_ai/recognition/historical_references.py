@@ -150,11 +150,8 @@ def refresh_verified(db,selected,config,scope,namespace,history,usage):
     history.views+=enrich(db,config,scope,namespace,selected,history,usage)
 
 
-def rank(rows,history,config,*,decisions=None,potential=None,relaxed_pose=False,strict_appearance=False,quarantine_only=False):
-    settings,grouping=config.data['recognition'],config.data['clustering']
-    threshold=settings['match_threshold']
-    view_threshold=max(threshold,grouping['view_match_threshold'])
-    margin=max(settings['ambiguity_margin'],grouping['view_ambiguity_margin'])
+def _rank_bank(history, config, strict_appearance):
+    grouping, settings = config.data['clustering'], config.data['recognition']
     views=[];by_group={}
     minimum=max(grouping['view_min_support'],settings['min_merge_support'])
     for view in history.views:
@@ -168,18 +165,45 @@ def rank(rows,history,config,*,decisions=None,potential=None,relaxed_pose=False,
         else:
             group=view.group
         views.append(group);by_group[id(group)]=view
+    return views, by_group
+
+
+def rank_many(rows, history, config, **options):
+    """Batch numerical work; preserve the original scalar ranking and proof.
+
+    All exact scores are returned (no worker-side loss of weaker rivals).
+    The original coordinator screening still controls proof/rival visibility.
+    """
+    from .parallel_scores import scored_rows
+    from stash_ai.runtime.cleanup import closing
+    bank = _rank_bank(history, config, options.get('strict_appearance', False))
+    groups = tuple(history.groups) + tuple(bank[0])
+    with closing(scored_rows(rows, groups, float('-inf')), name='close late ranking scores') as stream:
+        for row, frozen in stream:
+            scores = ({id(groups[position]): (mean, low) for position, mean, low in frozen}
+                      if frozen is not None else None)
+            yield row, rank([row], history, config, _bank=bank, _scores=scores, **options)
+
+
+def rank(rows,history,config,*,decisions=None,potential=None,relaxed_pose=False,strict_appearance=False,quarantine_only=False,_bank=None,_scores=None):
+    settings,grouping=config.data['recognition'],config.data['clustering']
+    threshold=settings['match_threshold']
+    view_threshold=max(threshold,grouping['view_match_threshold'])
+    margin=max(settings['ambiguity_margin'],grouping['view_ambiguity_margin'])
+    views,by_group = _bank if _bank is not None else _rank_bank(history, config, strict_appearance)
     effective_view_threshold=threshold if strict_appearance else view_threshold
     effective_view_cohesion=grouping['cohesion_threshold'] if strict_appearance else grouping['view_cohesion_threshold']
+    exact = None if _scores is None else lambda group, query: _scores[id(group)]
     aggregate={};strict_rows=[];mixed_rows=[]
     for row in rows:
         query=vector(row)
         choices={}
-        for group,score,low in comparisons(history.groups,query,threshold-margin,grouping['cohesion_threshold']):
+        for group,score,low in comparisons(history.groups,query,threshold-margin,grouping['cohesion_threshold'],exact=exact):
             if low>=grouping['cohesion_threshold']:
                 if group.identifier not in choices or score>choices[group.identifier][0]:
                     choices[group.identifier]=(score,'strict',None,score>=threshold)
         strict_rows.append(dict(choices))
-        for group,score,low in comparisons(views,query,effective_view_threshold-margin,effective_view_cohesion):
+        for group,score,low in comparisons(views,query,effective_view_threshold-margin,effective_view_cohesion,exact=exact):
             view=by_group[id(group)]
             if low<effective_view_cohesion or not query_pose_matches(row['geometry'],view.pose,relaxed=relaxed_pose):
                 continue
@@ -344,8 +368,7 @@ def reconcile(database,replay,selected,config,scope,namespace,fingerprint,*,prog
             "ON o.id=json_extract(c.payload,'$.observation') WHERE c.scan=? AND c.policy=? "
             "AND c.status='withheld' AND o.rejected IS NULL AND " + anchor_sql('o',grouping) +
             ' ORDER BY o.cue,o.geometry,o.embedding,o.id',(item['scan'],policy)).fetchall()
-        for row in rows:
-            result=rank([row],history,config)
+        for row,result in rank_many(rows,history,config):
             if result is None:
                 continue
             target,proof=result

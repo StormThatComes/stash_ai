@@ -2393,3 +2393,27 @@ owners and decoded metadata are included in conservative reservations. Profiling
 reports `ram_<category>_hits`, `_misses`, `_oversize`, `ram_evictions` and
 `ram_cache_peak_bytes`/`ram_cache_limit_bytes`; this is a cache-retention budget, not
 a process RSS ceiling (SQLite, active reference banks and worker scratch are separate).
+
+
+### Independent scene cohorts and late ranking batches
+
+With `execution.rebuild_workers > 1`, independent scene-local appearance priorities
+are calculated concurrently. Each job receives only plain selected observation data
+and matching configuration, uses a private in-memory staging database and returns
+observation priorities. The coordinator applies those priorities in selected scene
+order. No worker assigns identities, writes the authoritative database or owns a GPU
+model. Cue times, independent support and frozen reassessment remain unchanged.
+
+`execution.rebuild_cohort_backend: threads` is the default; `processes` selects
+spawned processes for Python-heavy cohort loops and keeps native BLAS thread limits.
+This option affects cohort jobs only; existing numerical score jobs retain threads.
+Scene job reservations include serialization, staging SQLite, witness arrays and
+results under the existing CPU queue budget. A scene that cannot fit is streamed
+on the coordinator instead of being truncated. Cancellation propagates to workers
+and all workers are stopped before releasing their owners.
+
+Late strict, historical, appearance and uncertain-pose queries reuse one prepared
+reference catalogue per bounded batch. CPU jobs return original scalar scores for
+all rivals; the existing coordinator ranking/screening supplies the same proofs,
+including weak rival scores and ties. Fallback appearance results still cannot
+train another match. Profiling adds `local_cohort_scenes` and `process_cohort_blocks`.

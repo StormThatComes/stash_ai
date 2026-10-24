@@ -49,7 +49,7 @@ def defaults():
                      'max_video_bytes': 67108864, 'ffmpeg': 'ffmpeg',
                      'weights': {'frontal': 3., 'sharpness': 2., 'resolution': 1., 'exposure': 1., 'visibility': 3.,
                                  'neutral_expression': 0., 'closed_mouth': 0., 'open_mouth': 0., 'open_eyes': 0.}},
-        'execution': {'rebuild_workers': 1, 'rebuild_native_threads': 1,
+        'execution': {'rebuild_cohort_backend': 'threads', 'rebuild_workers': 1, 'rebuild_native_threads': 1,
                       'rebuild_queue_bytes': 67108864,
                       'rebuild_cache_bytes': 1073741824, 'rebuild_matrix_cache_bytes': 536870912,
                       'max_cues': 0, 'checkpoint_cues': 32, 'timeout_seconds': 120.,
@@ -209,6 +209,8 @@ def validate(data):
     if data['clustering']['cohesion_threshold'] > data['recognition']['match_threshold']:
         raise ValueError('clustering.cohesion_threshold must not exceed recognition.match_threshold.')
     _number(data['clustering']['same_scene_match_bonus'], 'clustering.same_scene_match_bonus', 0, .1)
+    if data['execution']['rebuild_cohort_backend'] not in ('threads','processes'):
+        raise ValueError('execution.rebuild_cohort_backend must be threads or processes.')
     integers = {
         'detection': {'min_face_pixels': (8, 4096), 'max_faces_per_frame': (1, 1000)},
         'recognition': {'min_identity_support': (1, 1000), 'min_merge_support': (1, 1000)},

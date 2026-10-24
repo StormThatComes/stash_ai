@@ -4,7 +4,7 @@ from dataclasses import replace
 from .clustering import Group, _groups, matching_policy, co_presence_allows
 from .database import encoded
 from .decision_resolution import resolve_pending
-from .historical_references import History, rank
+from .historical_references import History, rank, rank_many
 from .pose_policy import anchor_sql, auxiliary_sql
 from .reference_roles import strict_sql
 from .reference_usage import ReferenceUsage
@@ -25,8 +25,7 @@ def retry_strict(database, selected, config):
         "WHERE c.policy=? AND c.status='withheld' AND json_extract(c.payload,'$.reason') IN "
         "('candidate_group','insufficient_match_or_cohesion') AND o.rejected IS NULL AND "+
         anchor_sql('o',config.data['clustering'])+' ORDER BY o.scan,o.cue,o.id',(policy,))
-    for row in rows:
-        result=rank([row],history,config)
+    for row,result in rank_many(rows,history,config):
         if result is None:
             continue
         person,proof=result
