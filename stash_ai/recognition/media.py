@@ -69,6 +69,10 @@ class SpriteInput:
     def __init__(self, client, scene, config):
         self.client, self.config = client, config
         settings, paths = config.data['execution'], scene['paths']
+        from .sprite_cache import current, SpriteCache
+        shared = current()
+        self._owns_sprites = shared is None
+        self.sprites = shared or SpriteCache(settings['sprite_cache_bytes'])
         self.cache = OrderedDict()
         self._portrait_sheet = None
         if not paths.get('vtt'):
@@ -103,57 +107,48 @@ class SpriteInput:
         return bounded_media(self.client, url, None, self.config.data['execution']['timeout_seconds'])
 
     def _sheet(self, url):
-        if url not in self.cache:
-            self.cache[url] = self.read(url)
-            if len(self.cache) > 2:
-                self.cache.popitem(last=False)
-        self.cache.move_to_end(url)
-        return self.cache[url]
+        expected = getattr(self, 'hashes', {}).get(url)
+        override = self.cache.get(url)
+        data = override if isinstance(override, bytes) else self.sprites.compressed(expected) if expected is not None else None
+        if isinstance(override, bytes) and hashlib.sha256(override).hexdigest() != expected:
+            raise ValueError('Sprite changed during portrait selection.')
+        if data is None:
+            data = self.read(url)
+            actual = hashlib.sha256(data).hexdigest()
+            if expected is not None and actual != expected:
+                raise ValueError('Sprite changed during recognition; rerun with stable inputs.')
+            self.sprites.remember(actual, data)
+        self.cache[url] = expected or actual  # Only tiny source-local ownership markers.
+        if len(self.cache) > 2:
+            self.cache.popitem(last=False)
+        return data
 
     def frames(self, start=0):
-        sheets = OrderedDict()
         try:
             for index in range(start, len(self.cues)):
-                cue = self.cues[index]
-                if cue.image not in sheets:
-                    data = self._sheet(cue.image)
-                    if hashlib.sha256(data).hexdigest() != self.hashes[cue.image]:
-                        raise ValueError('Sprite changed during recognition; rerun with stable inputs.')
-                    with open_image(BytesIO(data)) as raw:
-                        sheets[cue.image] = raw.convert('RGB')
-                    if len(sheets) > 2:
-                        _, removed = sheets.popitem(last=False)
-                        removed.close()
-                sheets.move_to_end(cue.image)
-                sheet = sheets[cue.image]
-                x, y, width, height = cue.rect
-                if x + width > sheet.width or y + height > sheet.height:
-                    raise ValueError('Recognition VTT rectangle exceeds sprite bounds.')
-                with closing(sheet.crop((x, y, x + width, y + height)), name='close recognition source crop') as image:
-                    yield index, cue, image
+                with closing(self._cue_image(index), name='close recognition source crop') as image:
+                    yield index, self.cues[index], image
         finally:
-            cleanup([*(sheet.close for sheet in sheets.values()), self.cache.clear])
+            # Shared immutable sprites can serve portraits later in this run.
+            cleanup([self.cache.clear])
+
+    @property
+    def cached_bytes(self):
+        return [data for digest in self.cache.values() if isinstance(digest,str)
+                if (data := self.sprites.compressed(digest)) is not None]
 
     def thumbnail(self, index):
-        """Read one full cue image, sharing the bounded verified sheet cache."""
+        return self._cue_image(index, maximum=self.portrait_sheet_bytes)
+
+    def _cue_image(self, index, *, maximum=None):
         cue = self.cues[index]
+        if not isinstance(self.cache.get(cue.image), bytes):
+            cached = self.sprites.cached_crop(self.hashes[cue.image], cue, self._thumbnail_crop)
+            if cached is not None:
+                return cached
         data = self._sheet(cue.image)
-        cached = self._portrait_sheet
-        if (cached is None or cached[0] != cue.image or cached[1] is not data
-                or cached[3] != self.hashes[cue.image]):
-            if hashlib.sha256(data).hexdigest() != self.hashes[cue.image]:
-                raise ValueError('Sprite changed during portrait selection.')
-            self._close_portrait_sheet()
-            with open_image(BytesIO(data)) as raw:
-                pixels = raw.convert('RGB') if raw.width * raw.height * 3 <= self.portrait_sheet_bytes else None
-                self._portrait_sheet = cue.image, data, pixels, self.hashes[cue.image]
-                if pixels is None:
-                    return self._thumbnail_crop(raw, cue)
-        sheet = self._portrait_sheet[2]
-        if sheet is not None:
-            return self._thumbnail_crop(sheet, cue)
-        with open_image(BytesIO(data)) as raw:
-            return self._thumbnail_crop(raw, cue)
+        self._portrait_sheet = cue.image, None, None, self.hashes[cue.image]
+        return self.sprites.crop(self.hashes[cue.image], data, cue, self._thumbnail_crop, maximum=maximum)
 
     @staticmethod
     def _thumbnail_crop(sheet, cue):
@@ -170,7 +165,8 @@ class SpriteInput:
 
     def close(self):
         from stash_ai.runtime.shutdown import release
-        release(self, lambda: cleanup([self._close_portrait_sheet, self.cache.clear]))
+        release(self, lambda: cleanup([self._close_portrait_sheet, self.cache.clear,
+            self.sprites.close if self._owns_sprites else lambda: None]))
 
     def __enter__(self):
         return self

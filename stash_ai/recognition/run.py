@@ -128,7 +128,8 @@ def execute(args, config, *, services=None):
     report = RunReport(args.progress_style == 'verbose', tqdm.write)
     counts = Counter()
     references = {}
-    with policy_scope(), FaceDatabase(config.database) as database:
+    from .sprite_cache import scope as sprite_scope
+    with sprite_scope(config), policy_scope(), FaceDatabase(config.database) as database:
         client = services.client(url=url, api_key=key, timeout=config.data['execution']['timeout_seconds'])
         with closing(client, report=report, name='close recognition HTTP'), present(report, args.progress_style, status_position=2):
             client.report = report
@@ -198,7 +199,7 @@ def execute(args, config, *, services=None):
                     selected = []
                     ordered = sorted(identifiers, key=int)
                     inputs = ScenePrefetch(client, config, services.source, report=report)
-                    inputs.submit(ordered[0] if ordered else None)
+                    inputs.fill(ordered[:config.data['execution']['prefetch_scene_depth']])
                     with ui.phase('Recognition VTT', errors=lambda: counts['scenes_failed']), WorkProgress(report, 'Recognition scenes', len(ordered)) as scenes:
                         for position, identifier in enumerate(ordered):
                             following = ordered[position + 1] if position + 1 < len(ordered) else None
@@ -207,7 +208,7 @@ def execute(args, config, *, services=None):
                                     prepared = inputs.take(identifier)
                                 with prepared:
                                     scene, source = prepared.scene, prepared.source
-                                    inputs.submit(following)
+                                    inputs.fill(ordered[position+1:position+1+config.data['execution']['prefetch_scene_depth']])
                                     def progress(**values):
                                         database.progress(run, 'scan', values)
                                     with activity(report, 'detect and embed VTT faces', scene=identifier), frame_progress(report, identifier) as frames:
@@ -233,7 +234,7 @@ def execute(args, config, *, services=None):
                                 report.optional('recognition_error', report.issue, 'recognition', 'scan', identifier, error,
                                                 safe_error(error, key))
                             scenes.advance(scanned=counts['scenes_scanned'], reused=counts['scenes_reused'], failed=counts['scenes_failed'])
-                            inputs.submit(following)
+                            inputs.fill(ordered[position+1:position+1+config.data['execution']['prefetch_scene_depth']])
                             database.progress(run, 'run', dict(counts))
                     inputs.close()
                     if selected:

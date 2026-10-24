@@ -69,13 +69,17 @@ class AuraFaces(YuNetDetector):
         self.dimensions = ASSETS['auraface'].dimensions
         self.provenance.update({'onnxruntime': ort.__version__, 'providers': actual, 'preprocessing': CONTRACT})
 
-    def embed(self, image, detection):
+    def prepare_embedding(self, image, detection):
         transform = similarity_matrix(detection.landmarks)
         aligned = self.cv.warpAffine(self._bgr(image), transform, (112, 112), borderValue=0.)
-        result = self.session.run([self.output_name], {self.input_name: input_blob(aligned)})
-        if len(result) != 1 or result[0].shape != (1, 512):
-            raise ValueError('AuraFace returned an incompatible output batch.')
-        return normalized_embedding(result[0], 512)
+        return input_blob(aligned)
+
+    def embed_prepared_many(self, tensors):
+        from .embedding_batches import infer
+        return infer(self, tensors)
+
+    def embed(self, image, detection):
+        return self.embed_prepared_many([self.prepare_embedding(image, detection)])[0]
 
     def close(self):
         super().close()

@@ -1,4 +1,5 @@
 """Bounded CPU/media lookahead; inference and SQLite stay on the caller."""
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from queue import Empty, Full
@@ -105,11 +106,15 @@ class _SceneInput:
 
 
 class ScenePrefetch:
-    """Retain the active input plus at most one verified next-scene input."""
+    """Ordered bounded lookahead; prepared inputs share the run sprite budget."""
     def __init__(self, client, config, source_factory, *, report=None):
         self.client, self.config, self.source_factory, self.report = client, config, source_factory, report
+        from .sprite_cache import current
+        self.sprite_cache = current()
         self.enabled = config.data['execution']['prefetch_scenes']
-        self.executor = self.pending = self.active = self.token = self.identifier = None
+        self.executor = self.active = None
+        self.queued = OrderedDict()
+        self.depth = config.data['execution']['prefetch_scene_depth']
 
     def _prepare(self, identifier, token=None):
         stack = ExitStack()
@@ -128,19 +133,37 @@ class ScenePrefetch:
             raise
 
     def _background(self, identifier, token):
-        with use(token):
+        from .sprite_cache import use as use_sprites
+        with use(token), use_sprites(self.sprite_cache):
             return self._prepare(identifier, token)
 
+    @property
+    def identifier(self):
+        return next(iter(self.queued), None)
+
+    @property
+    def pending(self):
+        return self.queued[self.identifier][0] if self.queued else None
+
+    @property
+    def token(self):
+        return self.queued[self.identifier][1] if self.queued else None
+
+    def fill(self, identifiers):
+        for identifier in identifiers:
+            if len(self.queued) >= self.depth:
+                break
+            self.submit(identifier)
+
     def submit(self, identifier):
-        if not self.enabled or identifier is None or self.pending is not None:
+        if not self.enabled or identifier is None or identifier in self.queued or len(self.queued) >= self.depth:
             return
         if self.executor is None:
-            self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='recognition-scenes')
-        self.identifier, self.token = identifier, Cancellation()
-        token = self.token
+            self.executor = ThreadPoolExecutor(max_workers=min(4,self.depth), thread_name_prefix='recognition-scenes')
+        token = Cancellation()
         try:
             submit_owned(self.executor, lambda: self._background(identifier, token),
-                         lambda future: setattr(self, 'pending', future))
+                         lambda future: self.queued.__setitem__(identifier, (future, token)))
         except BaseException:
             self.close()
             raise
@@ -154,37 +177,40 @@ class ScenePrefetch:
         try:
             result = self.pending.result()
         except Exception:
-            self.pending = self.identifier = self.token = None
+            self.queued.pop(identifier)
             raise
-        # Register ownership before dropping the future, also if Ctrl+C lands
-        # between returning the prepared input and entering its context.
+        # KeyboardInterrupt keeps the future registered until cleanup owns it.
         self.active = result
-        self.pending = self.identifier = self.token = None
+        self.queued.pop(identifier)
         return result
 
-    def _close_pending(self):
+    def _close_future(self, future):
         from stash_ai.runtime.shutdown import join, release, ShutdownIncomplete
-        if self.pending is not None and not self.pending.cancelled():
-            try:
-                join(self.pending, self)
-                result = self.pending.result()
-            except ShutdownIncomplete:
-                release(self.pending, self._close_pending)
-                raise
-            except BaseException:
-                # Unconsumed speculative work cannot fail a completed scene.
-                return
-            result.close()
+        if future.cancelled():
+            return
+        try:
+            join(future, self)
+            result = future.result()
+        except ShutdownIncomplete:
+            release(future, lambda: self._close_future(future))
+            raise
+        except BaseException:
+            return  # Unconsumed speculative failure cannot fail a completed scene.
+        result.close()
+
+    def _close_pending(self):
+        cleanup([lambda future=future:self._close_future(future) for future,_ in self.queued.values()])
 
     def close(self):
         from stash_ai.runtime.shutdown import call, release
         def reset():
-            self.executor = self.pending = self.active = self.token = self.identifier = None
+            self.executor = self.active = None
+            self.queued.clear()
         cleanup([
-            ('cancel recognition next-scene input', lambda: self.token.cancel() if self.token is not None else None),
-            ('cancel recognition scene task', lambda: self.pending.cancel() if self.pending is not None else None),
-            ('close recognition pending input', self._close_pending),
-            ('stop recognition scene reader', lambda: call(lambda: self.executor.shutdown(wait=True, cancel_futures=True), self)
+            ('cancel recognition input tokens', lambda:cleanup([token.cancel for _,token in self.queued.values()])),
+            ('cancel recognition scene tasks', lambda:cleanup([future.cancel for future,_ in self.queued.values()])),
+            ('close recognition pending inputs', self._close_pending),
+            ('stop recognition scene readers', lambda: call(lambda: self.executor.shutdown(wait=True, cancel_futures=True), self)
              if self.executor is not None else None),
             ('close recognition active input', lambda: self.active.close() if self.active is not None else None),
             ('release recognition prefetch state', lambda: release(self, reset)),
