@@ -55,6 +55,8 @@ class LimitedReader:
 
 class SourceOwner:
     def __init__(self,client,config,factory,limit,cancel):
+        from .sprite_cache import current
+        self.sprite_cache = current()
         self.client,self.config,self.factory,self.limit,self.cancel=client,config,factory,limit,cancel
         self.executor=ThreadPoolExecutor(max_workers=1,thread_name_prefix='portrait-source')
         self.reader=None
@@ -67,7 +69,8 @@ class SourceOwner:
         return self.reader
 
     def _call(self,fn,*args):
-        with use(self.cancel):return fn(*args)
+        from .sprite_cache import use as use_sprites
+        with use(self.cancel), use_sprites(self.sprite_cache):return fn(*args)
 
     def submit(self,fn,*args):return self.executor.submit(self._call,fn,*args)
 
@@ -121,7 +124,7 @@ class SourceOwner:
                 source=self.factory(LimitedReader(self._reader(),max(1,self.limit//16)),self._scene(scene),self.config).__enter__()
                 if hasattr(source,'portrait_sheet_bytes'):
                     source.portrait_sheet_bytes=min(source.portrait_sheet_bytes,self.limit//8)
-                for data in getattr(source,'cache',{}).values():
+                for data in getattr(source,'cached_bytes',getattr(source,'cache',{}).values()):
                     with open_image(BytesIO(data)) as raw:
                         if raw.width*raw.height*4>self.limit//4:
                             raise Capacity('Decoded portrait sheet exceeds preparation allowance.')
@@ -133,7 +136,7 @@ class SourceOwner:
             image=source.thumbnail(row['cue'])
             if image.width*image.height*3>self.limit//4:
                 image.close();raise Capacity('Portrait thumbnail exceeds preparation allowance.')
-            cost=sum(len(data) for data in getattr(source,'cache',{}).values())
+            cost=sum(len(data) for data in getattr(source,'cached_bytes',getattr(source,'cache',{}).values()))
             cost+=len(getattr(source,'cues',()))*512
             sheet=getattr(source,'_portrait_sheet',None)
             if sheet is not None and sheet[2] is not None:cost+=sheet[2].width*sheet[2].height*3
@@ -187,7 +190,8 @@ class SourceOwner:
 
 
 class ModelProxy:
-    def __init__(self,model,executor):
+    def __init__(self,model,executor,cpu=None,cpu_limit=0):
+        self.cpu,self.cpu_limit=cpu,cpu_limit
         self.model,self.executor=model,executor
         self.owner=threading.get_ident();self.assets_ready=False
 
@@ -224,9 +228,25 @@ class ModelProxy:
         if len(items)>8:raise ValueError('Portrait model microbatch exceeds eight faces.')
         if isinstance(self.model,LazyVisibility) and self.model.factory is FaceVisibility:
             prepared=[]
-            for image,face in items:
-                try:prepared.append(prepare(image,face))
-                except VisibilityGeometryError as error:prepared.append(error)
+            size=sum(image.width*image.height*3*8 + 1048576 for image,_ in items)
+            if self.cpu is not None and len(items)>1 and size<=self.cpu_limit:
+                from .portrait_cpu import visibility_input
+                futures=[]
+                try:
+                    for image,face in items:
+                        owned=image.copy()
+                        try:future=self.cpu.submit(visibility_input,owned,face)
+                        except BaseException:
+                            owned.close();raise
+                        future.add_done_callback(lambda f,owned=owned:owned.close() if f.cancelled() else None)
+                        futures.append(future)
+                    prepared=[future.result() for future in futures]
+                finally:
+                    for future in futures:future.cancel()
+            else:
+                for image,face in items:
+                    try:prepared.append(prepare(image,face))
+                    except VisibilityGeometryError as error:prepared.append(error)
             return self.executor.submit(self.model.measure_prepared_many,prepared).result()
         owned=[(image.copy(),face) for image,face in items]
         def invoke():
@@ -261,7 +281,8 @@ class Pipeline:
         self.cancel=Cancellation()
         self.pending=None;self.upcoming=[];self.upcoming_target=None;self.prepared={};self.initial_reads={};self.index=-1
         self.preflight_future=None;self.prime_future=None;self.completed=self.pending_total=0
-        self.models=self.preparer=self.sources=None
+        self.models=self.preparer=self.sources=self.cpu=None
+        self.identity_scores={}
 
     def __enter__(self):
         self.context=_active.set(self if self.enabled else None)
@@ -271,13 +292,18 @@ class Pipeline:
                 self.descriptor_limit=limit//8
                 self.models=ThreadPoolExecutor(max_workers=1,thread_name_prefix='portrait-models')
                 self.preparer=ThreadPoolExecutor(max_workers=1,thread_name_prefix='portrait-quality')
-                self.visibility=ModelProxy(self.original_visibility,self.models)
+                from .portrait_threads import preparation_workers
+                self.cpu_workers=preparation_workers(self.config)
+                if self.cpu_workers:
+                    self.cpu=ThreadPoolExecutor(max_workers=self.cpu_workers,thread_name_prefix='portrait-cpu')
+                self.visibility=ModelProxy(self.original_visibility,self.models,self.cpu,limit//8)
                 self.expression=ModelProxy(self.original_expression,self.models)
                 self.sources=SourceOwner(self.client,self.config,self.source_factory,limit,self.cancel)
         except BaseException:
             _active.reset(self.context)
             cleanup([('close partial portrait sources',lambda:self.sources.close() if self.sources is not None else None),
                      ('close partial portrait preparation',lambda:self.preparer.shutdown(wait=True,cancel_futures=True) if self.preparer is not None else None),
+                     ('close partial portrait CPU',lambda:self.cpu.shutdown(wait=True,cancel_futures=True) if self.cpu is not None else None),
                      ('close partial portrait models',lambda:self.models.shutdown(wait=True,cancel_futures=True) if self.models is not None else None)])
             raise
         return self
@@ -350,7 +376,41 @@ class Pipeline:
         for item in result:item[1]['crop']=crops[item[1]['id']]
         return result
 
-    def begin_ranking(self,target,groups,context):self.ranking=target,groups,context
+    def begin_ranking(self,target,groups,context):
+        self.ranking=target,groups,context
+        self.identity_scores={}
+
+    def rank_batch(self,rows):
+        if not getattr(self,'ranking',None) or self.cpu_workers<=1:return
+        from .portrait_cpu import identity_batch
+        target,groups,context=self.ranking
+        self.identity_scores={}
+        futures=[]
+        try:
+            for start in range(0,len(rows),16):
+                batch=rows[start:start+16]
+                payload=[{k:r[k] for k in ('dimensions','embedding')} for r in batch]
+                futures.append((batch,self.cpu.submit(identity_batch,(payload,groups,target['person'],self.config,self.cancel))))
+            from .progress import stage
+            from stash_ai.runtime.console import current_report, status
+            completed=0
+            with stage('Compare portrait identity batches'):
+                for batch,future in futures:
+                    for row,value in zip(batch,future.result()):
+                        if value is not None:
+                            self.identity_scores[(row['id'],row['dimensions'],row['embedding'])]=value
+                    completed+=len(batch)
+                    status(current_report(),portrait_cpu=f'{completed}/{len(rows)} observations')
+        finally:
+            from stash_ai.runtime.console import current_report, status
+            status(current_report(),portrait_cpu=None)
+            for _,future in futures:future.cancel()
+
+    def identity_outcome(self,row,groups,target,context):
+        if not getattr(self,'ranking',None):return None
+        selected,bank,stamp=self.ranking
+        if groups is not bank or selected['person']!=target['person'] or stamp!=context:return None
+        return self.identity_scores.get((row['id'],row['dimensions'],row['embedding']))
 
     def ranking_finished(self):
         if self.config.data['execution'].get('portrait_cpu_threads',0) in (1,2):return
@@ -540,12 +600,15 @@ class Pipeline:
             raise
 
     def __exit__(self,*error):
+        from stash_ai.runtime.shutdown import call
         _active.reset(self.context)
         if self.enabled:
             cleanup([('cancel portrait preparation',self.cancel.cancel),
                      ('join portrait quality preparation',lambda:self.preparer.shutdown(wait=True,cancel_futures=True)),
                      ('close portrait source stage',self.sources.close),
+                     ('join portrait CPU preparation',lambda:call(lambda:self.cpu.shutdown(wait=True,cancel_futures=True),self.cpu) if self.cpu is not None else None),
                      ('join portrait model owner',lambda:self.models.shutdown(wait=True,cancel_futures=True))])
+        self.identity_scores.clear()
         self.prepared.clear();self.initial_reads.clear();self.upcoming.clear();self.pending=None
         self.preflight_future=None
 
