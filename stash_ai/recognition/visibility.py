@@ -29,8 +29,9 @@ def valid_fraction(value):
 
 
 def cached(quality):
+    from collections.abc import Mapping
     record = quality.get('visibility')
-    return (isinstance(record, dict) and record.get('contract') == CONTRACT_ID
+    return (isinstance(record, Mapping) and record.get('contract') == CONTRACT_ID
             and valid_fraction(quality.get('visible_face_fraction')))
 
 

@@ -389,8 +389,11 @@ def _apply(database, replay, selected, config, scope, namespace, mapping, finger
         committed.advance()
 
 
+from .run_cache import scope as run_cache_scope
+
+
 def rebuild_selected(database, selected, config, *, progress=None):
-    with profile(database, config.data['execution'].get('profile_rebuild', False)), compute_scope(config), score_scope(), physical_keys(database, config):
+    with profile(database, config.data['execution'].get('profile_rebuild', False)), run_cache_scope(config), compute_scope(config), score_scope(), physical_keys(database, config):
         from .reference_registry import InvalidatedSourceViews
         excluded=set()
         for attempt in range(2):

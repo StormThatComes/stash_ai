@@ -91,6 +91,8 @@ execution:
   rebuild_workers: 1           # 1 = serial; 0 = auto (up to 16); explicit values up to 256.
   rebuild_native_threads: 1    # BLAS threads per compute worker; effective workers respect available CPUs.
   rebuild_queue_bytes: 67108864 # Pending CPU work budget; capped at rebuild_memory_bytes / 16.
+  rebuild_cache_bytes: 1073741824 # Shared immutable evidence LRU; capped at memory / 4; 0 disables.
+  rebuild_matrix_cache_bytes: 536870912 # Packed matrices share the above budget (512 MiB).
   rebuild_memory_bytes: 8589934592  # Lazy working-cache budget (8 GiB); configurable for large-RAM hosts.
   portrait_cpu_threads: 0      # 0 = native defaults; 1 = serial; 2..16 = total CPU budget.
   portrait_faceocc_batch_size: 4 # Portrait-only visibility microbatch; 1 = scalar.

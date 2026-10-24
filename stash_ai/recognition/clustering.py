@@ -24,14 +24,22 @@ MATCHING_FORMAT = 42
 
 def vector(row):
     import numpy as np
-    count('validated_vectors')
+    from .run_cache import current, MISSING
     dimensions, blob = row['dimensions'], row['embedding']
     if (type(dimensions) is not int or not 1 <= dimensions <= 1024 or
             not isinstance(blob, bytes) or len(blob) != 4 * dimensions):
         raise ValueError('Invalid retained face embedding shape/length.')
+    cache = current()
+    key = 'vector', dimensions, blob
+    found = cache.get(key) if cache is not None else MISSING
+    if found is not MISSING:
+        return found
+    count('validated_vectors')
     result = np.frombuffer(blob, dtype='<f4')
     if not np.isfinite(result).all() or abs(float(np.linalg.norm(result)) - 1) > .001:
         raise ValueError('Invalid retained face embedding values/normalization.')
+    if cache is not None:
+        cache.put(key, result, len(blob) + 256)
     return result
 
 

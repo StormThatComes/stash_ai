@@ -8,7 +8,7 @@ import weakref
 
 from .profiling import count
 
-MISSING = object()
+from .run_cache import MISSING
 _active = ContextVar('recognition_evidence_cache', default=None)
 LATEST = '''AND s.rowid=(SELECT MAX(newer.rowid) FROM scans newer
              WHERE newer.scope=s.scope AND newer.namespace=s.namespace AND newer.scene=s.scene)'''
@@ -45,7 +45,10 @@ class MemoryCache:
 class Evidence:
     def __init__(self, db, config):
         self.db = db
-        self.cache = MemoryCache(config.data['execution']['rebuild_memory_bytes']//4)
+        from .run_cache import current, Partition
+        shared = current()
+        self.cache = (Partition(shared) if shared is not None else
+                      MemoryCache(config.data['execution']['rebuild_memory_bytes']//4))
 
     def heads(self, scope, namespace):
         key = 'heads', scope, namespace
@@ -92,6 +95,9 @@ class Evidence:
         return value
 
     def discard_vectors(self):
+        if hasattr(self.cache, 'discard_vectors'):
+            self.cache.discard_vectors()
+            return
         for key in list(self.cache.entries):
             if key[0] == 'vector':
                 _, size = self.cache.entries.pop(key)
@@ -191,7 +197,10 @@ def evidence_scope(db, config):
     try:
         yield value
     finally:
-        value.cache.entries.clear()
+        if hasattr(value.cache, 'clear'):
+            value.cache.clear()
+        else:
+            value.cache.entries.clear()
         _active.reset(token)
 
 

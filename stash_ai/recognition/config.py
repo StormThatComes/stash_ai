@@ -51,6 +51,7 @@ def defaults():
                                  'neutral_expression': 0., 'closed_mouth': 0., 'open_mouth': 0., 'open_eyes': 0.}},
         'execution': {'rebuild_workers': 1, 'rebuild_native_threads': 1,
                       'rebuild_queue_bytes': 67108864,
+                      'rebuild_cache_bytes': 1073741824, 'rebuild_matrix_cache_bytes': 536870912,
                       'max_cues': 0, 'checkpoint_cues': 32, 'timeout_seconds': 120.,
                       'prefetch_frames': 4, 'prefetch_scenes': True, 'profile_rebuild': False, 'rebuild_prefetch_scenes': False, 'rebuild_checkpoint_scenes': 0, 'rebuild_checkpoint_bytes': 536870912, 'prefetch_portraits': True, 'portrait_cpu_threads': 0, 'portrait_faceocc_batch_size': 4, 'rebuild_memory_bytes': 8589934592},
         'storage': {'database': 'faces_state.sqlite3', 'max_crop_bytes': 1048576},
@@ -220,6 +221,7 @@ def validate(data):
                       'max_video_bytes': (1048576, 1073741824)},
         'execution': {'rebuild_workers': (0,256), 'rebuild_native_threads': (1,16),
                       'rebuild_queue_bytes': (65536,1073741824),
+                      'rebuild_cache_bytes': (0,68719476736), 'rebuild_matrix_cache_bytes': (0,68719476736),
                       'rebuild_checkpoint_scenes': (0,1000000), 'rebuild_checkpoint_bytes': (1048576,8589934592), 'portrait_cpu_threads': (0,16), 'portrait_faceocc_batch_size': (1,8), 'rebuild_memory_bytes': (1048576, 1099511627776), 'max_cues': (0, 10000), 'checkpoint_cues': (1, 1000), 'prefetch_frames': (0, 128)},
         'storage': {'max_crop_bytes': (1024, 8388608)},
     }

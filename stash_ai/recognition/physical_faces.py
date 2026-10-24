@@ -1,5 +1,6 @@
 """Conservative same-cue duplicate evidence, never similarity alone."""
 import json
+from .run_cache import metadata
 import math
 
 
@@ -10,7 +11,7 @@ def duplicate(left, right, enabled=False):
         return False
     try:
         import numpy as np
-        a=json.loads(left['geometry']);b=json.loads(right['geometry'])
+        a=metadata(left['geometry']);b=metadata(right['geometry'])
         if len(a)!=15 or len(b)!=15 or not all(math.isfinite(v) for v in a+b):
             return False
         if min(a[2:4]+b[2:4])<=0:
