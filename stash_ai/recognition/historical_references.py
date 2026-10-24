@@ -53,7 +53,17 @@ def parameters(selected,config,scope,namespace):
     return (scope,namespace,encoded([item['scene'] for item in selected]),scan_identity(config,namespace))
 
 
-def context(db,selected,config,scope,namespace):
+def context(db,selected,config,scope,namespace,*,cache=False):
+    if not cache:
+        return _context(db,selected,config,scope,namespace)
+    from .dependencies import cached
+    from .config import digest
+    key=digest([scope,namespace,selected])
+    return cached(db,'historical-context',key,matching_policy(config),
+                  lambda:_context(db,selected,config,scope,namespace))
+
+
+def _context(db,selected,config,scope,namespace):
     hasher=hashlib.sha256(b'frozen-external-references-v5')
     from .pose_policy import anchor_visibility
     visibility_fields=",'$.visible_face_fraction','$.visibility.contract'" if anchor_visibility(config.data['clustering']) else ''
@@ -76,7 +86,7 @@ def context(db,selected,config,scope,namespace):
     if config.data['clustering']['view_prototypes_enabled']:
         for row in db.execute('SELECT p.id,o.id,o.scan,o.cue,o.seconds,o.geometry,o.quality,o.dimensions,o.embedding,'
                 '(SELECT json_extract(c.payload,\'$.strict_confirmation\') FROM candidates c '
-                'WHERE CASE WHEN json_valid(c.payload) THEN json_extract(c.payload,\'$.observation\') END=o.id ORDER BY c.rowid DESC LIMIT 1) '+
+                'WHERE CAST(CASE WHEN json_valid(c.payload) THEN json_extract(c.payload,\'$.observation\') END AS TEXT)=o.id ORDER BY c.rowid DESC LIMIT 1) '+
                 _source(config,compatibility,verified=True)+' ORDER BY p.id,s.scene,o.cue,o.id',
                 parameters(selected,config,scope,namespace)):
             _hash_row(hasher,row)

@@ -10,8 +10,8 @@ STRICT_REASONS = ('candidate_group', 'known_identity', 'cross_scene_identity',
 
 
 def observation_sql(alias):
-    return (f"CASE WHEN json_valid({alias}.payload) THEN "
-            f"json_extract({alias}.payload,'$.observation') END")
+    return (f"CAST(CASE WHEN json_valid({alias}.payload) THEN "
+            f"json_extract({alias}.payload,'$.observation') END AS TEXT)")
 
 
 def strict_sql(observation='o', member='m'):

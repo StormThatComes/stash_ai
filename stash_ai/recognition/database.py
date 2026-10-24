@@ -12,7 +12,7 @@ import time
 import uuid
 
 APPLICATION_ID = 0x46524347  # FRCG; never accept a tagger or arbitrary database.
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 SCHEMA = '''
 CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE runs (id TEXT PRIMARY KEY, scope TEXT NOT NULL, selection TEXT NOT NULL,
@@ -84,14 +84,19 @@ CREATE INDEX identity_origins_person ON identity_origins(person);
 SCHEMA += REBUILD_SCHEMA
 TABLES += ('identity_origins',)
 
+SCHEMA_V4, TABLES_V4 = SCHEMA, TABLES
+from .dependency_schema import SCHEMA as DEPENDENCY_SCHEMA
+SCHEMA += DEPENDENCY_SCHEMA
+TABLES += ('evidence_versions','evidence_fingerprints')
+
 
 def encoded(value):
     return json.dumps(value, sort_keys=True, separators=(',', ':'), allow_nan=False)
 
 
 def _reject_executable_schema(connection):
-    if connection.execute("SELECT 1 FROM sqlite_master WHERE type IN ('trigger','view') LIMIT 1").fetchone():
-        raise ValueError('Unsupported facial recognition schema triggers or views.')
+    from .dependency_schema import validate_triggers
+    validate_triggers(connection)
 
 
 def _checks(connection, table):
@@ -181,14 +186,15 @@ class FaceDatabase(AbstractContextManager):
             except BaseException:
                 cleanup([('roll back recognition schema', db.rollback)])
                 raise
-        elif version in (1, 2, 3) and db.execute('PRAGMA application_id').fetchone()[0] == APPLICATION_ID:
+        elif version in (1, 2, 3, 4) and db.execute('PRAGMA application_id').fetchone()[0] == APPLICATION_ID:
             previous_schema = {1: (SCHEMA_V1, TABLES_V1), 2: (SCHEMA_V2, TABLES_V2),
-                               3: (SCHEMA_V3, TABLES_V3)}[version]
+                               3: (SCHEMA_V3, TABLES_V3),4: (SCHEMA_V4,TABLES_V4)}[version]
             self._validate(*previous_schema, tables)
             self.installation
             try:
                 db.executescript('BEGIN IMMEDIATE;\n' + (MERGE_SCHEMA if version == 1 else '')
-                                 + (SUPPORT_SCHEMA if version <= 2 else '') + REBUILD_SCHEMA)
+                                 + (SUPPORT_SCHEMA if version <= 2 else '') + (REBUILD_SCHEMA if version<=3 else '')
+                                 + DEPENDENCY_SCHEMA)
                 db.execute(f'PRAGMA user_version={SCHEMA_VERSION}')
                 db.commit()
             except BaseException:
@@ -198,6 +204,8 @@ class FaceDatabase(AbstractContextManager):
             raise ValueError('Unsupported or incomplete facial recognition schema; restore a consistent backup.')
         tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         self._validate(SCHEMA, TABLES, tables)
+        from .dependency_schema import validate_triggers
+        validate_triggers(db,required=True)
         self.installation
         # Additive access paths: old valid state needs no evidence migration.
         with db:

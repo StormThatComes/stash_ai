@@ -55,17 +55,18 @@ def _assignment_index(db, selected):
     db.execute(f'SAVEPOINT {name}')
     try:
         db.execute(f'CREATE TEMP TABLE {name}(observation TEXT PRIMARY KEY, candidate INTEGER NOT NULL)')
+        scans=encoded(sorted(selected_scans))
         with work('Index rebuild assignment candidates',
-                  lambda: db.execute('SELECT COUNT(*) FROM candidates').fetchone()[0],
-                  unit='candidate') as indexed:
-            # LEFT JOIN emits every candidate, including invalid/unselected
-            # addresses, so preparation has an honest inspected-candidate total.
-            rows = db.execute('SELECT c.rowid,o.id,o.scan FROM candidates c '
-                'LEFT JOIN observations o ON o.id=CASE WHEN json_valid(c.payload) THEN '
-                "json_extract(c.payload,'$.observation') END ORDER BY c.rowid")
-            while batch := list(itertools.islice(rows, 256)):
-                db.executemany(f'INSERT OR REPLACE INTO {name} VALUES (?,?)',
-                    ((row[1], row[0]) for row in batch if row[2] in selected_scans))
+                  lambda: db.execute('SELECT COUNT(*) FROM observations WHERE scan IN '
+                      '(SELECT value FROM json_each(?))',(scans,)).fetchone()[0],unit='observation') as indexed:
+            # The durable expression index finds the latest decision by actual
+            # observation address, regardless of its policy or claimed scan.
+            from .reference_roles import observation_sql
+            rows=db.execute('SELECT o.id,(SELECT c.rowid FROM candidates c WHERE '+observation_sql('c')+
+                '=o.id ORDER BY c.rowid DESC LIMIT 1) FROM observations o WHERE o.scan IN '
+                '(SELECT value FROM json_each(?)) ORDER BY o.id',(scans,))
+            while batch := list(itertools.islice(rows,256)):
+                db.executemany(f'INSERT INTO {name} VALUES (?,?)',((r[0],r[1]) for r in batch if r[1] is not None))
                 indexed.advance(len(batch))
         yield name
     finally:
@@ -73,12 +74,13 @@ def _assignment_index(db, selected):
                  ('release assignment lookup', lambda: db.execute(f'RELEASE {name}'))])
 
 
-@measured('input_dependencies')
-def input_context(db,selected,scope,namespace,config=None):
+@measured('input_scene_dependencies')
+def _input_context(db,selected,scope,namespace,config=None,*,scene_progress=True):
     hasher=hashlib.sha256()
     from .pose_policy import anchor_visibility
     visibility_fields=",'$.visible_face_fraction','$.visibility.contract'" if config is not None and anchor_visibility(config.data['clustering']) else ''
-    with ExitStack() as stack, work('Validate rebuild input catalogue',len(selected),unit='scene',position=0) as progress:
+    with ExitStack() as stack:
+        progress=stack.enter_context(work('Validate rebuild input catalogue',len(selected),unit='scene',position=0)) if scene_progress else None
         assignments_index = None
         for start in range(0,len(selected),256):
             batch=selected[start:start+256]
@@ -108,23 +110,54 @@ def input_context(db,selected,scope,namespace,config=None):
             if config is not None:
                 from .corroborated_views import enabled
                 if enabled(config):
-                    if assignments_index is None:
-                        assignments_index = stack.enter_context(_assignment_index(db, selected))
+                    if not scene_progress:
+                        from .reference_roles import observation_sql
+                        join='LEFT JOIN candidates c ON c.rowid=(SELECT z.rowid FROM candidates z WHERE '+observation_sql('z')+'=o.id ORDER BY z.rowid DESC LIMIT 1) '
+                    else:
+                        if assignments_index is None:
+                            assignments_index = stack.enter_context(_assignment_index(db, selected))
+                        join=f'LEFT JOIN {assignments_index} a ON a.observation=o.id LEFT JOIN candidates c ON c.rowid=a.candidate '
                     with work('Validate rebuild assignment evidence',observations.total,
                             unit='observation') as assignments:
                         for row in db.execute('SELECT o.id,c.person,c.status,CASE WHEN json_valid(c.payload) THEN '
                                 "json_extract(c.payload,'$.reason','$.strict_confirmation') END FROM observations o "
-                                f'LEFT JOIN {assignments_index} a ON a.observation=o.id '
-                                'LEFT JOIN candidates c ON c.rowid=a.candidate '
+                                + join +
                                 'WHERE o.scan IN (SELECT value FROM json_each(?)) ORDER BY o.id',
                                 (scans,)):
                             _hash_row(hasher,row)
                             assignments.advance()
-            progress.advance(len(batch))
+            if progress is not None:progress.advance(len(batch))
+    return hasher.hexdigest()
+
+
+@measured('input_dependencies')
+def input_context(db,selected,scope,namespace,config=None):
+    from .dependencies import cached,supported,snapshot
+    from .dependency_schema import validate_triggers
+    if not supported(db):return _input_context(db,selected,scope,namespace,config)
+    from .clustering import matching_policy
+    validate_triggers(db,required=True)
+    policy=matching_policy(config) if config is not None else 'no-assignment-evidence'
+    hasher=hashlib.sha256(b'per-scene-rebuild-input-v1')
+    with snapshot(db), work('Validate rebuild input catalogue',len(selected),unit='scene',position=0) as progress:
+        for item in selected:
+            key=item['scan']
+            # Scope/scene are part of the key even for a cached input digest.
+            fingerprint=cached(db,'scene-input',key,digest([scope,namespace,item['scene'],policy]),
+                lambda:_input_context(db,[item],scope,namespace,config,scene_progress=False),
+                dependency='scan',dependency_key=key,checked=True)
+            _hash_row(hasher,(key,item['scene'],fingerprint))
+            progress.advance()
     return hasher.hexdigest()
 
 
 def binding_context(db,scope,namespace):
+    from .dependencies import cached
+    return cached(db,'bindings',digest([scope,namespace]),'binding-v1',
+                  lambda:_binding_context(db,scope,namespace),dependency='bindings')
+
+
+def _binding_context(db,scope,namespace):
     hasher=hashlib.sha256()
     for row in db.execute('SELECT id,created,token FROM people WHERE scope=? AND namespace=? ORDER BY id',
                           (scope,namespace)):
@@ -164,6 +197,8 @@ def save(db,scope,namespace,state):
     db.execute('INSERT OR REPLACE INTO metadata VALUES (?,?)',(cache_prefix+state['fingerprint'],payload))
     db.execute('DELETE FROM metadata WHERE key IN (SELECT key FROM metadata '
         'WHERE key LIKE ? ORDER BY rowid DESC LIMIT -1 OFFSET 8)',(cache_prefix+'%',))
+    from .dependencies import certify
+    certify(db,scope,namespace,state)
 
 
 def validate_vectors(rows):
