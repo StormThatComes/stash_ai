@@ -24,7 +24,7 @@ from .profiling import count, measured
 
 APPLICATION_ID = 0x52435054
 FORMAT = 1
-ENGINE = 'recognition-cold-replay-v8.2'
+ENGINE = 'recognition-cold-replay-v9.0'
 TABLES = ('people', 'members', 'candidates', 'identity_merges', 'merge_support')
 ORDER = ('id', 'observation', 'id', 'source', 'source,target,observation,policy')
 SCHEMA = '''

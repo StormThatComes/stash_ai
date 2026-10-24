@@ -17,15 +17,21 @@ ALIGNMENT_FACE_ROWS = slice(36, 105)
 ALIGNMENT_FACE_COLUMNS = slice(24, 88)
 
 
-def alignable(detection, image=None):
+def alignment_measurements(detection, image=None):
     """Basic recognizer alignment validity, independent of optional pose gates."""
     from .aura import similarity_matrix
     try:
         matrix = similarity_matrix(detection.landmarks)
     except ValueError:
-        return False
+        return dict(alignment_valid=False)
+    import numpy as np
+    target = np.asarray([[38.2946,51.6963],[73.5318,51.5014],[56.0252,71.7366],
+                         [41.5493,92.3655],[70.7299,92.2041]])
+    aligned = np.asarray(detection.landmarks) @ matrix[:,:2].T + matrix[:,2]
+    result = dict(alignment_valid=True, alignment_error=float(np.sqrt(((aligned-target)**2).sum(axis=1).mean())/112),
+                  alignment_scale=float(np.linalg.norm(matrix[0,:2])))
     if image is None:
-        return True
+        return result
     import cv2
     import numpy as np
     inverse = cv2.invertAffineTransform(matrix)
@@ -36,8 +42,15 @@ def alignable(detection, image=None):
     x = inverse[0, 0] * columns + inverse[0, 1] * rows + inverse[0, 2]
     y = inverse[1, 0] * columns + inverse[1, 1] * rows + inverse[1, 2]
     real = (x >= 0) & (x < image.width) & (y >= 0) & (y < image.height)
-    return bool(real.mean() >= MIN_ALIGNMENT_SOURCE_COVERAGE and
-                real[ALIGNMENT_FACE_ROWS, ALIGNMENT_FACE_COLUMNS].mean() >= MIN_ALIGNMENT_FACE_COVERAGE)
+    result.update(alignment_coverage=float(real.mean()),
+                  alignment_face_coverage=float(real[ALIGNMENT_FACE_ROWS, ALIGNMENT_FACE_COLUMNS].mean()))
+    result['alignment_valid'] = (result['alignment_coverage'] >= MIN_ALIGNMENT_SOURCE_COVERAGE and
+                                 result['alignment_face_coverage'] >= MIN_ALIGNMENT_FACE_COVERAGE)
+    return result
+
+
+def alignable(detection, image=None):
+    return alignment_measurements(detection, image)['alignment_valid']
 
 
 def pose_measurements(landmarks):
@@ -85,7 +98,7 @@ def assess(image, detection):
     ordered = bool(eye_distance > 1 and mouth_mid[1] > eye_mid[1] and
                    eye_mid[1] < points[2, 1] < mouth_mid[1])
     pose = pose_measurements(points)
-    return dict(complete=complete, landmarks_inside=inside and ordered, alignment_valid=alignable(detection, image),
+    return dict(complete=complete, landmarks_inside=inside and ordered, **alignment_measurements(detection, image),
                 pixels=float(min(width, height)), sharpness=sharpness, exposure=exposure,
                 clipped_fraction=clipped, **pose,
                 visibility_method='five-landmark-geometry-estimate-v1')

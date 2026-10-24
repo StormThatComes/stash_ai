@@ -16,9 +16,19 @@ def quality(raw):
         def number(key):
             value = record.get(key, 0.)
             return max(0., float(value)) if type(value) in (int, float) and math.isfinite(value) else 0.
-        return (min(1., math.log1p(number('pixels')) / math.log1p(512)) +
+        score = (min(1., math.log1p(number('pixels')) / math.log1p(512)) +
                 min(1., math.log1p(number('sharpness')) / math.log1p(1000)) +
                 1. / (1. + number('pose_deviation'))) / 3
+        if record.get('alignment_valid') is False:
+            return 0.
+        from .visibility import cached
+        if cached(record):
+            score *= min(1., number('visible_face_fraction'))
+        if 'alignment_error' in record:
+            score /= 1. + 8. * number('alignment_error')
+        if 'alignment_face_coverage' in record:
+            score *= min(1., number('alignment_face_coverage'))
+        return score
     except (ValueError, TypeError, AttributeError):
         return 0.
 
@@ -42,8 +52,8 @@ def select(rows, maximum):
             def priority(i):
                 order, row, _, score, pose = pool[i]
                 novelty = 0. if not chosen else max(0., 1. - float(nearest[i]))
-                return (novelty + .05 / (1 + scenes[row['scene']]) +
-                        .02 / (1 + poses[pose]) + .03 * score, -order)
+                return (novelty * (.25 + .75 * score) + .05 / (1 + scenes[row['scene']]) +
+                        .02 / (1 + poses[pose]) + .20 * score, -order)
             winner = max((i for i in range(len(pool)) if i not in chosen), key=priority)
             chosen.append(winner)
             scenes[pool[winner][1]['scene']] += 1
@@ -71,13 +81,13 @@ def select(rows, maximum):
     return [(row['id'], sample) for _, row, sample, _, _ in sorted(pool, key=lambda item: item[0])]
 
 
-def refresh_local(db, group, observation, maximum, usage):
+def refresh_local(db, group, observation, maximum, usage, *, policy=None):
     """Refresh provisional representatives without forgetting the original seed.
 
     Only already admitted strict observations are eligible. Keeping the seed
     prevents a sequence of replacements from walking away from its origin.
-    Full banks refresh in batches of at most eight accepted timestamps. SQLite
-    supplies at most cap+8 rows; the sampler never loads a whole scene.
+    Full banks refresh after at most eight accepted timestamps. SQLite streams
+    all admitted rows in canonical order; the sampler keeps at most twice the cap.
     """
     from .database import encoded
     if maximum == 1:
@@ -94,11 +104,17 @@ def refresh_local(db, group, observation, maximum, usage):
     ids = tuple(dict.fromkeys(group.sample_ids + tuple(pending.values())))
     pending.clear()
     seed = group.sample_ids[0]
-    rows = list(db.execute('SELECT o.id,o.scan,o.seconds,o.geometry,o.quality,o.dimensions,o.embedding,s.scene '
-        'FROM observations o JOIN scans s ON s.id=o.scan WHERE o.id IN '
-        '(SELECT value FROM json_each(?)) ORDER BY o.cue,o.seconds,o.geometry,o.embedding,o.id', (encoded(ids),)))
-    seed_row = next(r for r in rows if r['id'] == seed)
-    chosen = select((r for r in rows if r['id'] != seed and
+    from .replay_addresses import address
+    def rows():
+        return db.execute('SELECT o.id,o.scan,o.seconds,o.geometry,o.quality,o.dimensions,o.embedding,s.scene '
+            'FROM observations o JOIN scans s ON s.id=o.scan WHERE o.id IN '
+            '(SELECT value FROM json_each(?)) OR EXISTS (SELECT 1 FROM candidates c WHERE '
+            +address(db,'c')+"=o.id AND c.person=? AND c.policy=? AND c.status IN ('pending','accepted') "
+            "AND json_extract(c.payload,'$.reason')='candidate_group') "
+            'ORDER BY CAST(s.scene AS INTEGER),s.scene,o.cue,o.seconds,o.geometry,o.embedding,o.id',
+            (encoded(ids),group.identifier,policy))
+    seed_row = db.execute('SELECT scan,seconds FROM observations WHERE id=?',(seed,)).fetchone()
+    chosen = select((r for r in rows() if r['id'] != seed and
                      (r['scan'],r['seconds']) != (seed_row['scan'],seed_row['seconds'])), maximum-1)
     samples = [group.samples[0]] + [v for _,v in chosen]
     usage.add_counts(sum(v.nbytes for v in samples)-sum(v.nbytes for v in group.samples),

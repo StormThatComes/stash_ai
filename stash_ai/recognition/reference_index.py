@@ -159,11 +159,9 @@ class ReferenceIndex:
                 from .reference_selection import select
                 from .pose_policy import anchor_sql
                 from .reference_roles import strict_sql
-                added = self.incremental.get(person)
-                subset = previous is not None and same_cap and added is not None
-                selected_ids = list(previous[0]) + [self.order[rank] for rank in added] if subset else []
-                condition = 'o.id IN (SELECT value FROM json_each(?))' if subset else 'm.person=?'
-                argument = encoded(selected_ids) if subset else person
+                # Full canonical refresh of changed owners: previous bounded
+                # representatives are not a sufficient summary for resampling.
+                condition, argument = 'm.person=?', person
                 rows = self.db.execute('SELECT o.id,o.dimensions,o.embedding,o.quality,o.geometry,o.seconds,s.scene FROM observations o '
                     'JOIN members m ON m.observation=o.id JOIN scans s ON s.id=o.scan '
                     'WHERE ' + condition + ' AND ' + anchor_sql('o', policy) + ' AND ' + strict_sql() +
