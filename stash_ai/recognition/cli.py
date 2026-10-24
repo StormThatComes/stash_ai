@@ -59,6 +59,15 @@ def parser():
         help='Additional YAML with the same model/detection contract; repeatable.')
     evaluation.add_argument('--batch-size', action='append', type=int,
         help='Scenes per replay; 0 means joint. Repeatable; default compares 0 and 1.')
+    evaluation.add_argument('--scene-order', action='append', choices=('numeric', 'reverse', 'shuffle'),
+        help='Import order; repeatable. Default numeric. Joint rebuild remains canonical.')
+    evaluation.add_argument('--shuffle-seed', type=int, default=0)
+    evaluation.add_argument('--history', action='append', choices=('cold', 'retained'),
+        help='Retained copies external evidence to RAM, excluding all selected scenes. Default cold.')
+    evaluation.add_argument('--repeat-runs', type=int, default=1,
+        help='Repeat each trial on its own resulting state, reporting each pass.')
+    evaluation.add_argument('--retune-from-baseline', action='store_true',
+        help='Run baseline first inside each comparison trial, then apply its changed policy.')
     evaluation.add_argument('--face-config', type=Path)
     evaluation.add_argument('--faces-db', type=Path)
     evaluation.add_argument('--scope')

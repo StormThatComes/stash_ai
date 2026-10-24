@@ -1,21 +1,21 @@
 """Replay retained VTT observations in private RAM with explicit local truth.
 
 No model loading, media reads, writer lock, schema migration or Stash calls.
-Every configuration starts cold; batched runs see only previously admitted
-scenes. Unlabelled observations still participate as identity competitors.
+Trials explicitly choose cold or retained external history. Batched admission
+excludes future selected scenes. Unlabelled observations remain competitors.
 """
-from collections import Counter
 from contextlib import closing
 from dataclasses import replace
 import json
-from pathlib import Path
 import sqlite3
+import time
+from itertools import product
 from types import SimpleNamespace
 
 from .clustering import matching_policy
 from .config import digest, load, plain
 from .database import SCHEMA, TABLES, FaceDatabase, encoded
-from .decision_evidence import recorded, explanation
+from .evaluation_scenarios import ordered, copy_history, snapshot
 from .evaluation import compare_identity_runs
 from .fragmentation_report import _open_readonly
 from .models import namespace
@@ -26,6 +26,7 @@ from .scanning import scan_identity
 def _ram(config):
     db = sqlite3.connect(':memory:')
     db.row_factory = sqlite3.Row
+    db.execute('PRAGMA foreign_keys=ON')
     db.execute('PRAGMA temp_store=MEMORY')
     page = db.execute('PRAGMA page_size').fetchone()[0]
     db.execute(f"PRAGMA max_page_count={max(1, config.data['execution']['rebuild_memory_bytes']//page)}")
@@ -62,13 +63,25 @@ def _copy_scene(source, target, scan):
     target.commit()
 
 
-def evaluate(config, labels, *, scenes=None, scope=None, variants=None, batch_sizes=(0, 1)):
+def evaluate(config, labels, *, scenes=None, scope=None, variants=None, batch_sizes=(0, 1),
+             scene_orders=('numeric',), shuffle_seed=0, history_modes=('cold',), repeat_runs=1,
+             retune_from_baseline=False):
     """Labels map retained observation IDs to human person labels, not predictions."""
     if not isinstance(labels, dict) or not labels or any(not isinstance(k, str) or not k or
             not isinstance(v, str) or not v.strip() for k, v in labels.items()):
         raise ValueError('Evaluation requires a nonempty observation-ID to truth-label object.')
     if not batch_sizes or len(set(batch_sizes)) != len(batch_sizes) or any(type(n) is not int or n < 0 for n in batch_sizes):
         raise ValueError('Batch sizes must be distinct nonnegative integers; 0 means joint replay.')
+    if (not scene_orders or len(set(scene_orders)) != len(scene_orders) or
+            set(scene_orders) - {'numeric', 'reverse', 'shuffle'}):
+        raise ValueError('Evaluation scene orders must be distinct numeric/reverse/shuffle values.')
+    if (not history_modes or len(set(history_modes)) != len(history_modes) or
+            set(history_modes) - {'cold', 'retained'}):
+        raise ValueError('Evaluation history modes must be distinct cold/retained values.')
+    if type(repeat_runs) is not int or repeat_runs < 1 or type(shuffle_seed) is not int:
+        raise ValueError('Evaluation requires positive repeat_runs and an integer shuffle_seed.')
+    if type(retune_from_baseline) is not bool:
+        raise ValueError('retune_from_baseline must be boolean.')
     configurations = {'baseline': config}
     for name, variant in (variants or {}).items():
         if not isinstance(name, str) or not name or name in configurations:
@@ -93,43 +106,58 @@ def evaluate(config, labels, *, scenes=None, scope=None, variants=None, batch_si
             # Explicit evaluation never writes durable replay checkpoints.
             data['execution']['rebuild_checkpoint_scenes'] = 0
             trial_config = replace(variant, data=data)
-            for size in batch_sizes:
-                key = name + ('/joint' if size == 0 else f'/batch-{size}')
+            for size, order, history_mode in product(batch_sizes, scene_orders, history_modes):
+                trial_scans = ordered(scans, order, shuffle_seed)
+                base_key = name + ('/joint' if size == 0 else f'/batch-{size}')
+                if scene_orders != ('numeric',) or order != 'numeric':
+                    base_key += '/' + order
+                if history_modes != ('cold',) or history_mode != 'cold':
+                    base_key += '/' + history_mode
+                retuning = retune_from_baseline and name != 'baseline'
+                if retuning:
+                    base_key += '/retuned'
                 with closing(_ram(trial_config)) as target:
                     target.execute('INSERT INTO metadata VALUES (?,?)', ('installation', installation))
                     target.commit()
+                    history = (copy_history(source, target, scans, scope, namespace(config))
+                               if history_mode == 'retained' else dict(scenes=0, observations=0, people=0))
                     state = SimpleNamespace(connection=target, installation=installation)
                     width = size or len(scans)
-                    for offset in range(0, len(scans), width):
-                        batch = scans[offset:offset+width]
-                        for scan in batch:
-                            _copy_scene(source, target, scan)
-                        rebuild_selected(state, [dict(scene=s['scene'], scan=s['id']) for s in batch], trial_config)
-                    members = dict(target.execute('SELECT observation,person FROM members'))
-                    predictions[key] = {identifier: members.get(identifier) for identifier in labels}
-                    decisions, reasons = {}, Counter()
-                    for row in target.execute('SELECT c.* FROM candidates c WHERE c.policy=? ORDER BY c.rowid',
-                                              (matching_policy(trial_config),)):
-                        payload = json.loads(row['payload'])
-                        reasons[payload.get('reason', 'unknown')] += 1
-                        if payload.get('observation') in labels:
-                            decisions[payload['observation']] = dict(status=row['status'], identity=row['person'],
-                                evidence=recorded(payload), explanation=explanation(payload))
-                    for identifier in labels.keys() - decisions.keys():
-                        rejected = target.execute('SELECT rejected FROM observations WHERE id=?', (identifier,)).fetchone()[0]
-                        decisions[identifier] = dict(status='rejected' if rejected else 'withheld', identity=None,
-                            evidence=dict(observation=identifier, reason=rejected or 'no_assignment_decision'),
-                            explanation='No accepted production decision for this retained observation.')
-                    trials[key] = dict(matching_policy=matching_policy(trial_config),
-                        config=plain(trial_config.data['recognition']), clustering=plain(trial_config.data['clustering']),
-                        batch_size=size, reason_counts=dict(sorted(reasons.items())), decisions=decisions)
-    return dict(format=1, kind='recognition_evaluation', source_read_only=True, source='retained_vtt_embeddings',
-        starting_state='cold_selected_scenes_only', scope=scope, selection=[s['scene'] for s in scans],
+                    loaded = set()
+                    def replay(settings):
+                        for offset in range(0, len(trial_scans), width):
+                            batch = trial_scans[offset:offset+width]
+                            for scan in batch:
+                                if scan['id'] not in loaded:
+                                    _copy_scene(source, target, scan)
+                                    loaded.add(scan['id'])
+                            rebuild_selected(state, [dict(scene=s['scene'], scan=s['id']) for s in batch], settings)
+                    if retuning:
+                        baseline_data = plain(config.data)
+                        baseline_data['execution']['rebuild_checkpoint_scenes'] = 0
+                        replay(replace(config, data=baseline_data))
+                    for run in range(1, repeat_runs + 1):
+                        key = base_key + (f'/run-{run}' if repeat_runs != 1 else '')
+                        started = time.perf_counter()
+                        replay(trial_config)
+                        elapsed = time.perf_counter() - started
+                        predictions[key], decisions, reasons = snapshot(target, trial_config, labels)
+                        trials[key] = dict(matching_policy=matching_policy(trial_config),
+                            config=plain(trial_config.data['recognition']), clustering=plain(trial_config.data['clustering']),
+                            batch_size=size, scene_order=order, selection=[s['scene'] for s in trial_scans],
+                            shuffle_seed=shuffle_seed if order == 'shuffle' else None,
+                            history_mode=history_mode, history=history, run=run,
+                            retuned_from_baseline=retuning, elapsed_seconds=elapsed,
+                            reason_counts=reasons, decisions=decisions)
+    return dict(format=2, kind='recognition_evaluation', source_read_only=True, source='retained_vtt_embeddings',
+        starting_state='per_trial_history_mode', scope=scope, selection=[s['scene'] for s in scans],
         labels_sha256=digest(labels), labelled_observations=len(labels),
         metrics=compare_identity_runs(list(known.values()), predictions), trials=trials,
         limitations=['Quality metrics describe only the explicitly labelled observations.',
-                     'Unlabelled selected observations still compete; external historical identities are excluded.',
-                     'Batches admit scenes in numeric ID order; this is not a media timeline.'])
+                     'Unlabelled observations compete; retained trials include frozen external historical evidence.',
+                     'Import order is explicit per trial and is not a media timeline.',
+                     'History is a snapshot of existing automatic decisions, not human ground truth.',
+                     'Elapsed time measures replay only; it excludes model inference, media and history copying.'])
 
 
 def execute(args, config):
@@ -148,7 +176,10 @@ def execute(args, config):
             raise ValueError('Comparison YAML filenames must have distinct stems other than baseline.')
         variants[name] = load(path)
     result = evaluate(config, labels, scenes=args.scene_id, scope=args.scope, variants=variants,
-                      batch_sizes=tuple(args.batch_size if args.batch_size is not None else (0, 1)))
+                      batch_sizes=tuple(args.batch_size if args.batch_size is not None else (0, 1)),
+                      scene_orders=tuple(args.scene_order or ('numeric',)), shuffle_seed=args.shuffle_seed,
+                      history_modes=tuple(args.history or ('cold',)), repeat_runs=args.repeat_runs,
+                      retune_from_baseline=args.retune_from_baseline)
     output = json.dumps(result, indent=2, ensure_ascii=False, allow_nan=False) + '\n'
     if args.output is None:
         print(output, end='')

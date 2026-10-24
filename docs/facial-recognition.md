@@ -2246,3 +2246,31 @@ evidence from current VTT observations. Output remains generation one,
 attachment-only, and cannot supply another promotion root. The existing two-parent
 route remains available; a single-root negative birth hint also requires two
 query scenes. No schema change, additional input sampling or inference is needed.
+
+### Evaluation with history, import order and retuning
+
+`recognition evaluate` also accepts repeatable `--scene-order numeric|reverse|shuffle`
+and `--history cold|retained`, plus `--shuffle-seed`, `--repeat-runs` and
+`--retune-from-baseline`. The Cartesian product of configurations, batch sizes,
+orders and history modes runs in independent RAM databases. Each repeated pass
+keeps only its own preceding state. A retuned comparison first processes its
+selection with the baseline configuration, then applies the comparison policy.
+
+Retained history copies external scenes and their existing decisions, including
+supersession and source authority. Every version of a selected scene is excluded
+until its batch arrives. Crops, portraits, publication state and rebuild caches
+are not copied. The source stays read-only. History labels are prior automatic
+decisions, not evaluation truth. Labelled selected observations alone contribute
+to metrics and reason counts; unlabelled evidence remains a competitor.
+
+For example, compare import order, history and warm stability with:
+
+```sh
+python stash_ai.py recognition evaluate --scene-id 1 --scene-id 2 --labels truth.json --batch-size 1 --scene-order numeric --scene-order reverse --scene-order shuffle --shuffle-seed 27 --history cold --history retained --repeat-runs 2 --output scenarios.json
+```
+
+Report format 2 records the effective scene order, history counts, pass number,
+retuning mode, and elapsed replay time for every trial. Timing excludes source
+copying, media and inference. Joint replay canonicalizes its own input order;
+order sensitivity is tested through batched admission. Existing default trial
+names (`baseline/joint`, `baseline/batch-1`) remain unchanged.
