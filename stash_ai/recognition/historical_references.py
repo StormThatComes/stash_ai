@@ -109,18 +109,25 @@ def capture(db,selected,config,scope,namespace,fingerprint,*,resolve_aliases=Tru
     args=parameters(selected,config,scope,namespace)
     people={}
     groups=[]
-    for person in db.execute('SELECT DISTINCT p.* '+source+' ORDER BY p.created,p.id',args):
+    from itertools import groupby
+    # Keep the original person and per-person sample ordering in one SQL stream.
+    # groupby hands select() only the current person's bounded streaming rows.
+    rows = db.execute('SELECT p.id AS owner,p.created AS owner_created,p.scope AS owner_scope,'
+        'p.namespace AS owner_namespace,p.performer AS owner_performer,p.token AS owner_token,'
+        'o.id,o.scan,o.seconds,o.geometry,o.dimensions,o.embedding,o.quality,s.scene '+source+
+        ' ORDER BY p.created,p.id,CAST(s.scene AS INTEGER),s.scene,o.cue,o.seconds,o.geometry,o.embedding,o.id', args)
+    for identifier, records in groupby(rows, key=lambda row: row['owner']):
         if len(groups)>=config.data['clustering']['max_people_per_lookup']:
             raise ValueError('Historical identity lookup exceeds configured person budget.')
-        rows=db.execute('SELECT o.id,o.scan,o.seconds,o.geometry,o.dimensions,o.embedding,o.quality,s.scene '+
-            source+' AND p.id=? ORDER BY CAST(s.scene AS INTEGER),s.scene,o.cue,o.seconds,o.geometry,o.embedding,o.id',
-            args+(person['id'],))
-        selected_samples=select(rows,config.data['clustering']['max_samples_per_person'])
+        first = next(records)
+        from itertools import chain
+        selected_samples=select(chain((first,), records),config.data['clustering']['max_samples_per_person'])
         if selected_samples:
             ids,samples=zip(*selected_samples)
             usage.add(samples,people=1,kind='Historical strict')
-            groups.append(Group(person['id'],tuple(samples),True,tuple(ids)))
-            people[person['id']]=tuple(person)
+            groups.append(Group(identifier,tuple(samples),True,tuple(ids)))
+            people[identifier]=(identifier,first['owner_scope'],first['owner_namespace'],
+                first['owner_created'],first['owner_performer'],first['owner_token'])
     views=confirmations=()
     grouping=config.data['clustering']
     if grouping['anchor_view_matching'] or (restricted(grouping) and grouping['auxiliary_matching']):

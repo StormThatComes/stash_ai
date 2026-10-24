@@ -19,6 +19,7 @@ class Cache:
     def __init__(self, limit, matrix_limit):
         self.limit, self.matrix_limit = limit, min(limit, matrix_limit)
         self.entries, self.size, self.peak = OrderedDict(), 0, 0
+        self.matrices, self.matrix_bytes = OrderedDict(), 0
 
     def get(self, key):
         found = self.entries.pop(key, MISSING)
@@ -26,32 +27,35 @@ class Cache:
         if found is MISSING:
             return MISSING
         self.entries[key] = found
+        if key[0] == 'matrix':
+            self.matrices.move_to_end(key)
         return found[0]
+
+    def _remove(self, key):
+        _, size = self.entries.pop(key)
+        self.size -= size
+        if key[0] == 'matrix':
+            self.matrices.pop(key)
+            self.matrix_bytes -= size
 
     def put(self, key, value, size):
         # Callers include retained key owners as well as payload and scratch.
         size += 512
-        old = self.entries.pop(key, None)
-        if old is not None:
-            self.size -= old[1]
+        if key in self.entries:
+            self._remove(key)
         limit = self.matrix_limit if key[0] == 'matrix' else self.limit
         if size > limit:
             count('ram_' + key[0] + '_oversize')
             return value
         while self.entries and self.size + size > self.limit:
-            _, removed = self.entries.popitem(last=False)
-            self.size -= removed[1]
+            self._remove(next(iter(self.entries)))
             count('ram_evictions')
         if key[0] == 'matrix':
-            matrix_bytes = sum(n for k, (_, n) in self.entries.items() if k[0] == 'matrix')
-            for old_key in list(self.entries):
-                if matrix_bytes + size <= self.matrix_limit:
-                    break
-                if old_key[0] == 'matrix':
-                    _, removed_size = self.entries.pop(old_key)
-                    matrix_bytes -= removed_size
-                    self.size -= removed_size
-                    count('ram_evictions')
+            while self.matrices and self.matrix_bytes + size > self.matrix_limit:
+                self._remove(next(iter(self.matrices)))
+                count('ram_evictions')
+            self.matrices[key] = None
+            self.matrix_bytes += size
         self.entries[key] = value, size
         self.size += size
         self.peak = max(self.peak, self.size)
@@ -60,7 +64,12 @@ class Cache:
     def discard(self, predicate):
         for key in list(self.entries):
             if predicate(key):
-                self.size -= self.entries.pop(key)[1]
+                self._remove(key)
+
+    def clear(self):
+        self.entries.clear()
+        self.matrices.clear()
+        self.size = self.matrix_bytes = 0
 
 
 class Partition:
@@ -101,8 +110,7 @@ def scope(config):
     finally:
         count('ram_cache_peak_bytes', value.peak)
         count('ram_cache_limit_bytes', value.limit)
-        value.entries.clear()
-        value.size = 0
+        value.clear()
         _active.reset(token)
 
 

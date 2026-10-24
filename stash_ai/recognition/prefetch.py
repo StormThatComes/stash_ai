@@ -1,4 +1,5 @@
 """Bounded CPU/media lookahead; inference and SQLite stay on the caller."""
+from .profiling import pipeline_stage
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from queue import Empty, Full
@@ -58,6 +59,7 @@ class FramePrefetch:
     def __iter__(self):
         return self
 
+    @pipeline_stage('frame_input_wait')
     def __next__(self):
         value = self.channel.receive()
         if isinstance(value, StreamFailure):
@@ -145,6 +147,7 @@ class ScenePrefetch:
             self.close()
             raise
 
+    @pipeline_stage('scene_input_wait')
     def take(self, identifier):
         if not self.enabled:
             self.active = self._prepare(identifier)

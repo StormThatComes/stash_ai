@@ -1,4 +1,5 @@
 """Identity-first ranking of video frames or the original VTT observations."""
+from .profiling import pipeline_stage
 import base64
 import hashlib
 import heapq
@@ -420,6 +421,7 @@ def _current_prior(database, prior, client, config, scope, target, visibility, e
     return None if reason else prior
 
 
+@pipeline_stage('portrait')
 def fill_portrait(database, client, report, config, scope, target, paths, backend_factory, decoder_factory,
                  source_factory=SpriteInput, *, retry_unresolved_images=False, visibility=None, expression=None):
     from .portrait_removal import remove_owned, retry_precondition
