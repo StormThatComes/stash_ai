@@ -168,6 +168,8 @@ def apply_cross_scene_support(database, selected, config, *, progress=None):
     parents=list(range(n))
     sizes=[1]*n
     strong_counts=[0]*n
+    from .frozen_subgroups import Edges, nonoverlapping
+    edges=Edges(clustering['max_reference_bytes']//4)
     def find(i):
         while parents[i]!=i:
             parents[i]=parents[parents[i]]
@@ -219,6 +221,7 @@ def apply_cross_scene_support(database, selected, config, *, progress=None):
                         mean, low = _cross_score(pool[i].samples, pool[j].samples)
                         if low < cohesion or mean < match-margin:
                             continue
+                        edges.add(i,int(j),mean)
                         join(i,int(j))
                         if mean >= match:
                             strong_counts[i]+=1
@@ -236,6 +239,14 @@ def apply_cross_scene_support(database, selected, config, *, progress=None):
             # Every member must have strict evidence to every other member:
             # no transitive "A matches B, B matches C" membership.
             if any(strong_counts[i] != len(component)-1 for i in component):
+                proposed=[]
+                for members in edges.proposals(component,match,margin):
+                    floors=edges.floors(members)
+                    if any(floors[i]-edges.score(i,j)<margin for i in members for j in component if j not in members):
+                        continue
+                    proposed.append(members)
+                for members in nonoverlapping(proposed):
+                    clusters.append([pool[i] for i in members])
                 continue
             if len(set().union(*(pool[i].scenes for i in component))) != sum(
                     len(pool[i].scenes) for i in component):

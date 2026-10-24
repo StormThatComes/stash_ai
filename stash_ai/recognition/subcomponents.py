@@ -1,4 +1,4 @@
-"""Final frozen repairs cannot become inputs to another assignment phase."""
+"""Final frozen repairs can alias references, never train new appearances."""
 from dataclasses import replace
 
 from .clustering import _groups, matching_policy
@@ -42,7 +42,7 @@ def finalize(database, config, mapping, history):
     for bank, policy in ((summaries, strict), (views, config)):
         for decision in consolidation_plan(db, bank, policy):
             people = set(decision['people'])
-            if (decision['outcome'] == 'merge' and decision['partition_strategy'] == 'reciprocal_supported_pair'
+            if (decision['outcome'] == 'merge' and decision['partition_strategy'] in ('reciprocal_supported_pair','supported_complete_subgroup')
                     and people <= local and not people.intersection(protected)):
                 proposals.append((bank, policy, decision))
     # Different frozen routes must not claim overlapping incompatible repairs.
@@ -68,3 +68,4 @@ def finalize(database, config, mapping, history):
                 'SELECT created FROM people WHERE id=?', (person,)).fetchone()[0], mapping[person])
         survivor = min(pair, key=age)
         mapping[target] = mapping[survivor]
+    return bool(applied)

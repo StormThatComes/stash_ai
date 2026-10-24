@@ -2274,3 +2274,25 @@ retuning mode, and elapsed replay time for every trial. Timing excludes source
 copying, media and inference. Joint replay canonicalizes its own input order;
 order sensitivity is tested through batched admission. Existing default trial
 names (`baseline/joint`, `baseline/batch-1`) remain unchanged.
+
+
+### Frozen match completion
+
+Recognition now evaluates the best admissible appearance cohort instead of the
+first matching cohort. Local scene priorities receive one frozen reassessment;
+this does not promote any observation into a reference. Joint strict-appearance
+and neutral/side pose recovery requires independent queries and preserves all
+raw-anchor, ownership, opposite-side and co-presence vetoes.
+
+Incomplete identity components can recover complete subgroups larger than two.
+Every pair needs original frozen evidence, every outsider remains a competitor,
+and overlapping incompatible proposals veto each other. Subgroup search is
+bounded to 128 nodes and a quarter of `max_reference_bytes`; on exhaustion the
+previous conservative pair/component route remains. Provisional cross-scene
+confirmation uses the same bounded proposal logic.
+
+After a final subgroup repair, one retry uses the pre-merge witnesses with
+canonical labels. It does not construct a new merged centroid, relax thresholds,
+or use recovered queries as training evidence. Recovered memberships remain
+attachment-only and require at least two independent timestamps. Matching policy
+version changes invalidate previous derived decisions; VTT scans remain reusable.

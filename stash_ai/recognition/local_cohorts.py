@@ -8,7 +8,7 @@ from .clustering import vector
 from .pose_policy import is_anchor,visibility_sql
 from .reference_usage import ReferenceUsage
 from .progress import tracking
-from .view_prototypes import _Cluster,coverage_threshold
+from .view_prototypes import _Cluster,coverage_threshold,best_cohort
 
 
 def ordering(db,alias='o'):
@@ -37,8 +37,7 @@ def prepare(db,selected,config):
                                                    (item['scan'],)).fetchone()[0]) as tracked:
                 for row in tracked:
                     sample=vector(row)
-                    slot=next((i for i,s in enumerate(slots) if s.accepts_pose(row['geometry']) and
-                               s.accepts(sample,coverage_threshold(grouping))),None)
+                    slot=best_cohort(slots,row,sample,coverage_threshold(grouping))
                     if slot is None:
                         if len(slots)>=grouping['max_people_per_lookup']:
                             raise ValueError('Local appearance cohorts exceed configured person budget.')
@@ -49,6 +48,15 @@ def prepare(db,selected,config):
                     if is_anchor(row['quality'],grouping):anchors[slot].add(row['seconds'])
                     db.execute('INSERT INTO local_appearance_rows VALUES (?,?)',(row['id'],slot))
             if slots:
+                # Reassess only the appearance priority against frozen witnesses.
+                # Moving a priority cannot train a cohort or create new support.
+                anchors=[set() for _ in slots]
+                for row in db.execute('SELECT o.*,a.cohort FROM observations o JOIN local_appearance_rows a '
+                                      'ON a.observation=o.id ORDER BY o.id'):
+                    slot=best_cohort(slots,row,vector(row),coverage_threshold(grouping))
+                    slot=row['cohort'] if slot is None else slot
+                    db.execute('UPDATE local_appearance_rows SET cohort=? WHERE observation=?',(slot,row['id']))
+                    if is_anchor(row['quality'],grouping):anchors[slot].add(row['seconds'])
                 centres=[s.medoid()[0] for s in slots]
                 centre=np.mean(centres,axis=0,dtype='float64')
                 remaining=set(range(len(slots)));placed=[]

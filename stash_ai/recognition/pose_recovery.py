@@ -19,10 +19,36 @@ def recover_appearances(durable, database, config, external):
         return _recover(durable, database, config, external, appearance=True)
 
 
-def _recover(durable, database, config, external, *, appearance):
+def recover_joint(durable, database, config, external):
+    if config.data['clustering']['strict_appearance_matching']:
+        return _recover(durable, database, config, external, appearance=True, relaxed=True)
+
+
+def freeze(database, config, external):
+    db=database.connection
+    first=db.execute('SELECT scope,namespace FROM scans LIMIT 1').fetchone()
+    selected=capture(db, [], config, *first, 'pre-final-merge', resolve_aliases=False)
+    return History(selected.groups+external.groups,
+        tuple(v for v in selected.views+external.views if v.authority=='strict'), {}, 'pre-final-merge')
+
+
+def recover_final(durable, database, config, external, bank):
+    # Preserve each original set of witnesses; only labels may change. Never
+    # rebuild centroids/views from the newly merged or recovered membership.
+    from dataclasses import replace
+    from .identity_merges import canonical
+    alias=lambda p:canonical(database.connection,p)
+    bank=replace(bank,groups=tuple(replace(g,identifier=alias(g.identifier)) for g in bank.groups),
+        views=tuple(replace(v,group=replace(v.group,identifier=alias(v.group.identifier))) for v in bank.views))
+    return _recover(durable,database,config,external,appearance=config.data['clustering']['strict_appearance_matching'],
+                    relaxed=True,final_bank=bank)
+
+
+def _recover(durable, database, config, external, *, appearance, relaxed=False, final_bank=None):
     grouping = config.data['clustering']
     field = 'strict_appearance' if appearance else 'pose_recovery'
     prefix = 'strict_appearance' if appearance else 'pose_uncertain'
+    if final_bank is not None:field=prefix='final_recovery'
     if not grouping['anchor_view_matching']:
         return
     db = database.connection
@@ -31,20 +57,26 @@ def _recover(durable, database, config, external, *, appearance):
         return
     if not db.execute("SELECT 1 FROM candidates WHERE status='withheld' LIMIT 1").fetchone():
         return
-    selected = capture(db, [], config, *first, field+'-roots', resolve_aliases=False)
     usage = ReferenceUsage(grouping['max_reference_bytes'])
-    from .verified_views import historical_views
-    verified = (historical_views(db, config, *first, [], selected.groups, usage, selected.confirmations)
-                if grouping['view_prototypes_enabled'] and grouping['auxiliary_matching'] else ())
-    views = tuple(v for v in selected.views+verified+external.views if v.authority in ('strict', 'verified_view'))
-    bank = History(selected.groups+external.groups, views, {}, 'frozen-'+field)
-    if not views:
+    if final_bank is None:
+        selected = capture(db, [], config, *first, field+'-roots', resolve_aliases=False)
+        from .verified_views import historical_views
+        verified = (historical_views(db, config, *first, [], selected.groups, usage, selected.confirmations)
+                    if grouping['view_prototypes_enabled'] and grouping['auxiliary_matching'] else ())
+        views = tuple(v for v in selected.views+verified+external.views if v.authority in ('strict', 'verified_view'))
+        bank = History(selected.groups+external.groups, views, {}, 'frozen-'+field)
+    else:
+        bank=final_bank;views=bank.views
+    if not views and final_bank is None:
         return
     for group in bank.groups:
         usage.add(group.samples, kind='Pose recovery strict rivals')
     for view in views:
         usage.add(view.examples, kind='Pose recovery view witnesses')
-    ownership = FrozenOwnership(db, durable.connection, external.aliases)
+    from .identity_merges import canonical
+    aliases=dict(external.aliases)
+    aliases.update({r[0]:canonical(db,r[0]) for r in db.execute('SELECT id FROM people')})
+    ownership = FrozenOwnership(db, durable.connection, aliases)
     policy = matching_policy(config)
     db.execute('CREATE TEMP TABLE pose_recovery_claims(candidate TEXT PRIMARY KEY,observation TEXT,owner TEXT,proof TEXT)')
     try:
@@ -58,20 +90,24 @@ def _recover(durable, database, config, external, *, appearance):
                     continue
                 # Only queries without an ordinary positive match enter a
                 # fallback; existing support/conflict decisions stay unchanged.
-                if rank([row], bank, config) is not None:
+                ordinary=rank([row], bank, config)
+                if ordinary is not None and final_bank is None:
                     continue
-                match = rank([row], bank, config, relaxed_pose=not appearance, strict_appearance=appearance)
+                match = ordinary or rank([row], bank, config, relaxed_pose=relaxed or not appearance, strict_appearance=appearance)
                 if match is None:
                     continue
                 owner, proof = match
                 chosen = [v for v in views if v.group.identifier == owner and v.medoid in proof['medoids']]
                 crossed = [v for v in chosen if not pose_matches(row['geometry'], v.pose)]
-                if (not appearance and not crossed) or not ownership.proof_allows(owner, proof, bank.groups):
+                if (final_bank is None and not appearance and not crossed) or not ownership.proof_allows(owner, proof, bank.groups):
                     continue
                 references = bank.groups+tuple(v.group for v in views)
-                if not any(co_presence_allows(db, row, v.group, references, vector(row), config) for v in chosen):
+                candidates=([v.group for v in chosen] if proof['mode']=='view' else
+                            [g for g in bank.groups if g.identifier==owner])
+                if not any(co_presence_allows(db, row, g, references, vector(row), config) for g in candidates):
                     continue
-                proof = dict(proof, query_pose=pose_view(row['geometry']),
+                proof = dict(proof, joint_pose_appearance=appearance and relaxed, post_merge=final_bank is not None,
+                    query_pose=pose_view(row['geometry']),
                     crossed_poses=sorted({v.pose for v in crossed}), minimum_query_support=max(2, grouping['view_attach_min_support']))
                 db.execute('INSERT INTO pose_recovery_claims VALUES (?,?,?,?)', (row['candidate'], row['id'], owner, encoded(proof)))
         for row in db.execute('SELECT * FROM pose_recovery_claims'):

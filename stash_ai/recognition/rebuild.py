@@ -545,11 +545,13 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
         with stage('Revalidate corroborated identity views'):
             database._rebuild_corroboration_pending=restore_corroboration(
                 database,temporary,selected,config,history,previous,hints=hints)
-        from .pose_recovery import recover as recover_uncertain_pose, recover_appearances
+        from .pose_recovery import recover as recover_uncertain_pose, recover_appearances, recover_joint, freeze, recover_final
         with stage('Recover supported strict appearances'):
             recover_appearances(database,temporary,config,history)
         with stage('Recover uncertain face pose'):
             recover_uncertain_pose(database,temporary,config,history)
+        with stage('Recover joint appearance and pose queries'):
+            recover_joint(database,temporary,config,history)
         unvalidated=set(deferred_hints)-database._rebuild_revalidated_medoids
         if unvalidated and replay.execute("SELECT 1 FROM candidates c WHERE c.status='withheld' "
                 "AND json_extract(c.payload,'$.reason')='prior_appearance_pending' AND EXISTS "
@@ -564,7 +566,18 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
         if invalid:raise InvalidatedSourceViews(invalid)
         from .subcomponents import finalize as finalize_subcomponents
         with stage('Finalize supported identity subcomponents'):
-            finalize_subcomponents(temporary,config,mapping,history)
+            needs_repair=config.data['clustering']['anchor_view_matching'] and replay.execute(
+                "SELECT 1 FROM candidates WHERE json_extract(payload,'$.global_view_consolidation.blocker')="
+                "'incomplete_strong_component' LIMIT 1").fetchone()
+            frozen=freeze(temporary,config,history) if needs_repair else None
+            repaired=finalize_subcomponents(temporary,config,mapping,history)
+        if repaired:
+            with stage('Retry queries against final canonical identities'):
+                recover_final(database,temporary,config,history,frozen)
+            for row in replay.execute('SELECT DISTINCT person FROM members'):
+                mapping.setdefault(row[0],row[0])
+            invalid=invalidated_sources(history,replay,config,mapping)
+            if invalid:raise InvalidatedSourceViews(invalid)
         report_pages(replay)
         _apply(database, replay, selected, config, scope, namespace, mapping, fingerprint, progress, usage=usage,history=history)
     return _results(db, selected, config)

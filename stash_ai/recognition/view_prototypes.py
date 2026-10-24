@@ -157,8 +157,22 @@ def coverage_threshold(grouping):
                math.sqrt((1 + grouping['view_match_threshold']) / 2))
 
 
+def best_cohort(slots, row, sample, threshold):
+    """Rank every admissible frozen cohort; never admit a transitive edge."""
+    import numpy as np
+    eligible=[]
+    for i, slot in enumerate(slots):
+        if not slot.accepts_pose(row['geometry']):
+            continue
+        scores=[float(np.dot(v,sample)) for v in slot.examples]
+        if scores and min(scores)>=threshold:
+            eligible.append((min(scores),sum(scores)/len(scores),slot.first,i))
+    return max(eligible)[-1] if eligible else None
+
+
 def add_cohort(slots,row,sample,threshold,*,complete,scene_minimum=0):
-    slot=next((s for s in slots if s.accepts_pose(row['geometry']) and s.accepts(sample,threshold)),None)
+    index=best_cohort(slots,row,sample,threshold)
+    slot=slots[index] if index is not None else None
     if slot is None:
         if not complete and len(slots)>=32:
             return 0
