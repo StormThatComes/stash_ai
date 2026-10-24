@@ -86,8 +86,8 @@ def refresh_local(db, group, observation, maximum, usage, *, policy=None):
 
     Only already admitted strict observations are eligible. Keeping the seed
     prevents a sequence of replacements from walking away from its origin.
-    Full banks refresh in batches of at most eight accepted timestamps. SQLite
-    supplies at most cap+8 rows; the sampler never loads a whole scene.
+    Full banks refresh after at most eight accepted timestamps. SQLite streams
+    all admitted rows in canonical order; the sampler keeps at most twice the cap.
     """
     from .database import encoded
     if maximum == 1:
