@@ -12,7 +12,8 @@ def compact_quality(raw):
     try:
         record=metadata(raw)
         selected={}
-        for key in ('pixels','sharpness','pose_deviation','roll_deviation'):
+        for key in ('pixels','sharpness','pose_deviation','roll_deviation',
+                    'alignment_error','alignment_scale','alignment_coverage','alignment_face_coverage'):
             number=record.get(key)
             if type(number) in (int,float) and math.isfinite(number) and number>=0:
                 selected[key]=number

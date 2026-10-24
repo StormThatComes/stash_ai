@@ -70,7 +70,7 @@ def _context(db,selected,config,scope,namespace):
     compatibility=fallback_sql(db,config,namespace)
     rows=db.execute("SELECT p.id,p.created,o.id,o.scan,o.cue,o.seconds,o.geometry,o.dimensions,o.embedding,"
         "CASE WHEN json_valid(o.quality) THEN json_extract(o.quality,'$.pixels','$.sharpness',"
-        "'$.pose_deviation','$.roll_deviation','$.alignment_valid'"+visibility_fields+") END " + _source(config,compatibility) +
+        "'$.pose_deviation','$.roll_deviation','$.alignment_valid','$.alignment_error','$.alignment_face_coverage'"+visibility_fields+") END " + _source(config,compatibility) +
         ' ORDER BY p.id,CAST(s.scene AS INTEGER),s.scene,o.cue,o.id',parameters(selected,config,scope,namespace))
     for row in rows:
         _hash_row(hasher,row)
@@ -94,7 +94,7 @@ def _context(db,selected,config,scope,namespace):
     if config.data['clustering']['corroborated_view_enrichment']:
         for row in db.execute("SELECT p.id,o.id,o.scan,o.seconds,o.geometry,o.dimensions,o.embedding,"
                 "CASE WHEN json_valid(o.quality) THEN json_extract(o.quality,'$.pixels','$.sharpness',"
-                "'$.pose_deviation','$.roll_deviation','$.alignment_valid'"+visibility_fields+") END "+
+                "'$.pose_deviation','$.roll_deviation','$.alignment_valid','$.alignment_error','$.alignment_face_coverage'"+visibility_fields+") END "+
                 _source(config,compatibility,attachment=True)+' ORDER BY p.id,o.id',
                 parameters(selected,config,scope,namespace)):
             _hash_row(hasher,row)
