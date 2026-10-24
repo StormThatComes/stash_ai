@@ -47,12 +47,14 @@ class Compute:
         self.workers = max(1, min(requested or min(16, max(1, available-2)),
                                   max(1, available//native)))
         self.native_threads = native
-        self.limit = min(settings.get('rebuild_queue_bytes', 67108864),
-                         settings['rebuild_memory_bytes']//16)
+        from .resource_plan import plan
+        self.resources = plan(config)
+        self.limit = self.resources.queue
         self.owner = threading.get_ident()
         self.cancel = Cancellation()
         self.executor = self.native = self.process_executor = self.process_event = None
         self.process_blocks = 0
+        self.shared_inputs = {}
         self.pending = deque()
         self.closed = False
         self.bytes = self.peak_bytes = 0
@@ -108,6 +110,8 @@ class Compute:
                     native_threads=self.native_threads, backend='threads',
                     process_cohort_blocks=self.process_blocks,
                     queue_limit_bytes=self.limit, peak_queued_bytes=self.peak_bytes,
+                    shared_working_budget_bytes=self.resources.working,
+                    cache_budget_bytes=self.resources.cache,
                     submitted_blocks=self.submitted, applied_blocks=self.applied,
                     successful_worker_wall_seconds=self.worker_seconds,
                     successful_worker_thread_cpu_seconds=self.worker_cpu_seconds,
@@ -184,6 +188,7 @@ class Compute:
             with self.lock:
                 self.completed += 1
             self.process_blocks += 1
+        self.release_input(job.ordinal)
         self.pending.popleft()
         self.bytes -= job.size
         self.applied += 1
@@ -235,6 +240,16 @@ class Compute:
                     future.cancel()
             self.publish('stopping' if self.pending else 'coordinator')
 
+    def release_input(self, ordinal):
+        segment = self.shared_inputs.pop(ordinal, None)
+        if segment is not None:
+            from .shared_payload import release
+            release(segment)
+
+    def release_inputs(self):
+        for ordinal in tuple(self.shared_inputs):
+            self.release_input(ordinal)
+
     def _release(self):
         if self.native is not None:
             self.native.restore_original_limits()
@@ -257,7 +272,8 @@ class Compute:
                         timeout=None if executor is self.executor else 5.))
             cleanup(actions)
         cleanup([('stop recognition CPU work', stop),
-                 ('release recognition CPU owners', lambda: shutdown.release(self, self._release))])
+                 ('release recognition CPU owners', lambda: shutdown.release(self, self._release)),
+                 ('release process inputs', lambda: shutdown.release(self.process_executor or self, self.release_inputs))])
 
 
 def current():

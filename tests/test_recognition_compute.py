@@ -30,7 +30,7 @@ def test_budget_and_execution_options_do_not_change_semantic_policy(cpus):
     assert compute.Compute(parallel).workers == 12
     assert compute.Compute(configured(rebuild_workers=0)).workers == 16
     assert compute.Compute(configured(rebuild_workers=20)).workers == 20
-    assert compute.Compute(configured(rebuild_memory_bytes=1048576)).limit == 65536
+    assert compute.Compute(configured(rebuild_memory_bytes=1048576)).limit == 262144
 
 
 @pytest.mark.parametrize('field,value', [('rebuild_workers', True), ('rebuild_workers', -1),
