@@ -115,6 +115,12 @@ def _publish_selection(database, client, report, config, scope, namespace, selec
 
 
 def execute(args, config, *, services=None):
+    from .profiling import pipeline_scope
+    with pipeline_scope(config.data['execution']['profile_rebuild']):
+        return _execute(args, config, services=services)
+
+
+def _execute(args, config, *, services=None):
     services = services or Services()
     retry_images = bool(getattr(args, 'retry_unresolved_images', False))
     portraits_only = getattr(args, 'command', 'run') == 'portraits'
@@ -356,6 +362,10 @@ def execute(args, config, *, services=None):
                     report.optional('recognition_error_summary', render_errors, report, summary['errors'])
                 def finish_history():
                     summary.update(counts=dict(counts), mutations=dict(report.counts))
+                    from .profiling import pipeline_snapshot
+                    timings = pipeline_snapshot()
+                    if timings is not None:
+                        summary['pipeline_profile'] = timings
                     if getattr(report, 'recognition_rebuild_profile', None) is not None:
                         summary['rebuild_profile'] = report.recognition_rebuild_profile
                     if references:

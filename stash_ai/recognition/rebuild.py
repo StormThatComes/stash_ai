@@ -3,6 +3,7 @@
 Historical identities never seed the replay. Original sample ownership is kept
 separately so a later split can reactivate profiles retired by consolidation.
 """
+from .profiling import pipeline_stage
 from stash_ai.runtime.cleanup import closing
 import json
 import itertools
@@ -392,6 +393,7 @@ def _apply(database, replay, selected, config, scope, namespace, mapping, finger
 from .run_cache import scope as run_cache_scope
 
 
+@pipeline_stage('rebuild')
 def rebuild_selected(database, selected, config, *, progress=None):
     with profile(database, config.data['execution'].get('profile_rebuild', False)), run_cache_scope(config), compute_scope(config), score_scope(), physical_keys(database, config):
         from .reference_registry import InvalidatedSourceViews

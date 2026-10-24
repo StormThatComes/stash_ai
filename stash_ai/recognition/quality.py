@@ -1,4 +1,5 @@
 """Measured crop quality and geometric full-face/pose estimates, not attributes."""
+from .profiling import pipeline_stage
 from io import BytesIO
 import math
 
@@ -59,6 +60,7 @@ def pose_measurements(landmarks):
                 roll_deviation=abs(float(eye[1])) / distance, pose_contract='eye-frame-v2')
 
 
+@pipeline_stage('quality')
 def assess(image, detection):
     import numpy as np
     x, y, width, height = detection.box
@@ -107,6 +109,7 @@ def rejection(quality, policy):
     return None
 
 
+@pipeline_stage('crop_encoding')
 def crop_bytes(image, detection, *, margin=.15, limit=1048576, details=None):
     x, y, width, height = detection.box
     bounds = (max(0, int(x - width * margin)), max(0, int(y - height * margin)),

@@ -1,4 +1,5 @@
 """Checkpoint selected-scene detections without publishing anything to Stash."""
+from .profiling import pipeline_stage
 import json
 import uuid
 from types import SimpleNamespace
@@ -26,6 +27,7 @@ def geometry_contract(face, cue):
     return digest(['real-source-alignment-coverage-v3', list(face.row), list(cue.rect)])
 
 
+@pipeline_stage('scan')
 def scan_scene(database, scope, scene, config, namespace, source, backend_factory, *,
                visibility=None, progress=lambda **kw: None, frame_progress=lambda **kw: None):
     db = database.connection

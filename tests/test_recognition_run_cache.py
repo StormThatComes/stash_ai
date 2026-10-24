@@ -107,3 +107,27 @@ def test_pair_cache_keeps_original_reduction_and_bypasses_mutable_inputs(tmp_pat
         right = [right[0].copy()]
         right[0][:] = -right[0]
         assert run_cache.cross_scores(left, right)[0] < 0
+
+
+def test_matrix_accounting_survives_replacement_touch_discard_and_global_eviction():
+    cache = run_cache.Cache(4000, 1600)
+    def check():
+        actual = {k: v[1] for k, v in cache.entries.items() if k[0] == 'matrix'}
+        assert cache.matrix_bytes == sum(actual.values())
+        assert set(cache.matrices) == set(actual)
+        assert cache.size == sum(v[1] for v in cache.entries.values())
+    cache.put(('matrix', 1), 1, 200)
+    cache.put(('matrix', 2), 2, 200)
+    cache.get(('matrix', 1))
+    cache.put(('matrix', 3), 3, 200)
+    assert cache.get(('matrix', 2)) is run_cache.MISSING
+    check()
+    cache.put(('matrix', 1), 4, 100)
+    check()
+    cache.discard(lambda key: key == ('matrix', 3))
+    check()
+    cache.put(('vector', 1), 5, 3300)
+    check()
+    assert not cache.matrices
+    cache.clear()
+    check()

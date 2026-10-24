@@ -68,3 +68,44 @@ def test_existing_state_acquires_indexes_without_changing_evidence(tmp_path):
             'EXPLAIN QUERY PLAN SELECT person,status,COUNT(*) FROM candidates '
             'WHERE scan=? AND policy=? GROUP BY person,status', (identifier, 'p')))
         assert 'SEARCH candidates USING' in plan and 'candidates_scan_policy' in plan
+
+
+def test_profile_accounts_for_lazy_cursor_consumption_and_errors(tmp_path):
+    from stash_ai.recognition.profiling import profile
+    config = setup(tmp_path)
+    with FaceDatabase(config.database) as state:
+        with profile(state, True):
+            cursor = state.connection.execute('SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3')
+            cursor.arraysize = 2
+            assert [tuple(row) for row in cursor.fetchmany()] == [(1,), (2,)]
+            # The first two rows have been consumed regardless of row factory.
+            assert [tuple(row) for row in cursor] == [(3,)]
+            broken = state.connection.execute('SELECT 1')
+            broken.close()
+            import sqlite3
+            with pytest.raises(sqlite3.ProgrammingError):
+                broken.fetchone()
+        metrics = state.last_rebuild_profile
+        assert metrics['sql_fetch']['select:other']['rows'] == 3
+        assert metrics['sql_fetch']['select:other']['calls'] == 4
+        assert metrics['sql_fetch']['select:other']['seconds'] >= 0
+
+
+def test_pipeline_profile_is_optional_nested_and_failure_safe():
+    from stash_ai.recognition.profiling import pipeline_scope, pipeline_stage, pipeline_snapshot
+    @pipeline_stage('inner')
+    def inner():
+        raise ValueError('primary')
+    @pipeline_stage('outer')
+    def outer():
+        inner()
+    assert pipeline_snapshot() is None
+    with pipeline_scope(True):
+        with pytest.raises(ValueError, match='primary'):
+            outer()
+        snapshot = pipeline_snapshot()
+        assert snapshot['stages']['inner']['errors'] == 1
+        assert snapshot['stages']['outer']['errors'] == 1
+        snapshot['stages']['inner']['errors'] = 99
+        assert pipeline_snapshot()['stages']['inner']['errors'] == 1
+    assert pipeline_snapshot() is None
