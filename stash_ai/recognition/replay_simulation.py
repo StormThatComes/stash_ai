@@ -89,6 +89,7 @@ def replay(config, variants, *, scenes=None, scope=None, source=None, consume=No
 
 def merge_impact(config, report, source):
     from .merge_report_policy import patched
+    retained_totals = dict(source.execute('SELECT person,COUNT(*) FROM members GROUP BY person'))
     variants, names = {}, {}
     for index, item in enumerate(report['recommendations']):
         changes = {r['parameter']: r['proposed'] for r in item['changes']}
@@ -110,8 +111,10 @@ def merge_impact(config, report, source):
         wanted = report['identity_ids']
         all_peers = set().union(*(peers[p] for p in wanted))
         complete = all(counts[p] and not lost[p] for p in wanted)
-        return dict(requested_pair=dict(fully_merged=complete and len(all_peers)==1,
+        return dict(requested_pair=dict(observation_scope='selected_latest_scans',
+            fully_merged=complete and len(all_peers)==1,
             fully_assigned=complete, resulting_identities=sorted(all_peers),
             members=[dict(identity=p, observations=counts[p], withheld=lost[p],
+                          outside_latest_selection=retained_totals.get(p, 0)-counts[p],
                           resulting_identities=sorted(peers[p])) for p in wanted]))
     return replay(config, variants, scope=report['scope'], source=source, consume=pair_status)

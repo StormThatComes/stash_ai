@@ -2181,8 +2181,9 @@ are never used as truth. Output files must be new; no YAML is silently applied.
 recommended patch through a full joint rebuild of **all latest compatible scans
 in the identities' scope**. This checks competitors beyond the requested pair,
 identity births, attachments, reconciliation and publication bindings in RAM.
-It reports whether all retained members of the requested pair end in one
-identity, including withheld members and global split/join/coverage changes.
+It reports whether all members of the requested pair from the selected latest
+scans end in one identity, including withheld members and global split/join/coverage
+changes. Members outside that latest selection are counted separately.
 The frozen catalogue analysis and replay use the same database snapshot.
 Missing, partial or incompatible latest scans stop the simulation instead of
 silently excluding them. Results describe this selection and snapshot; they do

@@ -86,6 +86,8 @@ def test_full_report_simulation_checks_pair_and_additional_identity(tmp_path):
     trials = report['simulation']['trials']
     assert report['simulation']['selection'] == ['1', '2', '3']
     assert not trials['baseline']['requested_pair']['fully_merged']
+    assert trials['baseline']['requested_pair']['observation_scope'] == 'selected_latest_scans'
+    assert all(m['outside_latest_selection'] == 0 for m in trials['baseline']['requested_pair']['members'])
     assert any(trials[p['simulation_trial']]['requested_pair']['fully_merged'] for p in report['recommendations'])
     assert all(trials[p['simulation_trial']]['versus_baseline']['identities'] == 2 for p in report['recommendations'])
     assert config.database.read_bytes() == before
