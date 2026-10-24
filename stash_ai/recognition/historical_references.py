@@ -189,7 +189,11 @@ def rank_many(rows, history, config, **options):
     from stash_ai.runtime.cleanup import closing
     bank = _rank_bank(history, config, options.get('strict_appearance', False))
     groups = tuple(history.groups) + tuple(bank[0])
-    with closing(scored_rows(rows, groups, float('-inf')), name='close late ranking scores') as stream:
+    settings, grouping = config.data['recognition'], config.data['clustering']
+    margin = max(settings['ambiguity_margin'], grouping['view_ambiguity_margin'])
+    floor = settings['match_threshold'] - margin
+    cohesion = min(grouping['cohesion_threshold'], grouping['view_cohesion_threshold'])
+    with closing(scored_rows(rows, groups, floor, cohesion), name='close late ranking scores') as stream:
         for row, frozen in stream:
             scores = ({id(groups[position]): (mean, low) for position, mean, low in frozen}
                       if frozen is not None else None)
@@ -204,7 +208,9 @@ def rank(rows,history,config,*,decisions=None,potential=None,relaxed_pose=False,
     views,by_group = _bank if _bank is not None else _rank_bank(history, config, strict_appearance)
     effective_view_threshold=threshold if strict_appearance else view_threshold
     effective_view_cohesion=grouping['cohesion_threshold'] if strict_appearance else grouping['view_cohesion_threshold']
-    exact = None if _scores is None else lambda group, query: _scores[id(group)]
+    from .clustering import _similarities
+    exact = None if _scores is None else lambda group, query: (
+        _scores[id(group)] if id(group) in _scores else _similarities(group, query))
     aggregate={};strict_rows=[];mixed_rows=[]
     for row in rows:
         query=vector(row)

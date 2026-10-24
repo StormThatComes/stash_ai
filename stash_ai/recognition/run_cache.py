@@ -102,7 +102,8 @@ def scope(config):
         return
     settings = config.data['execution']
     # Reserve the remaining memory for replay SQLite, worker queues and banks.
-    limit = min(settings['rebuild_cache_bytes'], settings['rebuild_memory_bytes']//4)
+    from .resource_plan import plan
+    limit = plan(config).cache
     value = Cache(limit, settings['rebuild_matrix_cache_bytes'])
     token = _active.set(value)
     try:

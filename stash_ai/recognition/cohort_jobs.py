@@ -27,7 +27,9 @@ def _scene(payload):
         db.row_factory = sqlite3.Row
         db.execute('CREATE TABLE observations(id TEXT PRIMARY KEY,scan TEXT,cue INTEGER,seconds REAL,'
                    'geometry TEXT,quality TEXT,dimensions INTEGER,embedding BLOB,rejected TEXT)')
-        db.executemany('INSERT INTO observations('+FIELDS+') VALUES (?,?,?,?,?,?,?,?)', rows)
+        from .shared_payload import unpack
+        with unpack(rows) as values:
+            db.executemany('INSERT INTO observations('+FIELDS+') VALUES (?,?,?,?,?,?,?,?)', values)
         db.execute('CREATE INDEX scene_rows ON observations(scan)')
         _prepare_serial(db, [item], SimpleNamespace(data=settings))
         return tuple(tuple(r) for r in db.execute('SELECT observation,position FROM local_core_order ORDER BY observation'))
@@ -51,6 +53,12 @@ def prepare_parallel(db, selected, config, pool):
             if size <= pool.limit:
                 rows = tuple(tuple(r) for r in db.execute('SELECT '+FIELDS+' FROM observations '+condition,
                                                          (item['scan'],)))
+                if backend == 'processes' and pool.workers > 1:
+                    from .shared_payload import pack
+                    rows, segment = pack(rows)
+                    if segment is not None:
+                        pool.shared_inputs[ordinal] = segment
+                        pool.record('shared_input_bytes', computed=segment.size)
                 payload = (dict(item), rows, settings)
             else:
                 pool.fallback('cohort_scene_admission')
