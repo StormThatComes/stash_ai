@@ -6,12 +6,13 @@ The returned order is canonical so scalar score reductions remain reproducible.
 """
 from collections import Counter
 import json
+from .run_cache import metadata
 import math
 
 
 def quality(raw):
     try:
-        record = json.loads(raw)
+        record = metadata(raw)
         def number(key):
             value = record.get(key, 0.)
             return max(0., float(value)) if type(value) in (int, float) and math.isfinite(value) else 0.

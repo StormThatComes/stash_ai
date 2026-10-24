@@ -110,6 +110,20 @@ def unambiguous(ranked, threshold, margin):
 
 
 def _cooccurs(db, left, right, config=None):
+    from .run_cache import current, database_key, MISSING
+    cache = current()
+    generation = database_key(db)
+    key = ('copresence', generation, left, right,
+           bool(config and config.data['clustering'].get('deduplicate_detections')))
+    result = cache.get(key) if generation is not None else MISSING
+    if result is MISSING:
+        result = _cooccurs_sql(db, left, right, config)
+        if generation is not None:
+            cache.put(key, result, 512 + len(left) + len(right))
+    return result
+
+
+def _cooccurs_sql(db, left, right, config=None):
     enabled=bool(config and config.data['clustering'].get('deduplicate_detections'))
     fields='x.geometry,x.embedding,y.geometry,y.embedding' if enabled else '1'
     rows=db.execute('SELECT '+fields+' FROM members a JOIN observations x ON x.id=a.observation '
@@ -129,8 +143,8 @@ def cohort_evidence(db, left, right, config, *, cooccurs=None):
     grouping,settings=config.data['clustering'],config.data['recognition']
     threshold=max(settings['match_threshold'],grouping['view_match_threshold'])
     score=float(np.dot(left.group.samples[0],right.group.samples[0]))
-    cross=[float(np.dot(a,b)) for a in left.examples for b in right.examples]
-    low,mean=min(cross),sum(cross)/len(cross)
+    from .run_cache import cross_scores
+    low,mean=cross_scores(left.examples,right.examples)
     strict=left.authority==right.authority=='strict_core'
     if strict:
         score=mean # Normalized centroids only shortlist; original vectors decide.

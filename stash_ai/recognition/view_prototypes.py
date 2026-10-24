@@ -7,6 +7,7 @@ no physical head-angle interpretation, model inference or schema migration.
 """
 from dataclasses import dataclass, field
 import json
+from .run_cache import metadata
 import math
 
 from .clustering import Group, vector
@@ -17,7 +18,7 @@ from .replay_addresses import address
 def _signed_pose(geometry):
     """Coarse left/right/other hint; embed similarity determines subclusters."""
     try:
-        row = json.loads(geometry) if isinstance(geometry, str) else geometry
+        row = metadata(geometry) if isinstance(geometry, str) else geometry
         if len(row) != 15:
             return None
         values = [float(x) for x in row]

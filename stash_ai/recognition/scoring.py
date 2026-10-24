@@ -40,10 +40,18 @@ def score_scope():
 
 def _prepared(groups, query):
     import numpy as np
-    state = _blocks.get()
+    from .run_cache import current, immutable_samples, MISSING
+    shared = current()
+    state = None if shared is not None else _blocks.get()
     key = tuple(('tuple', id(group.samples)) if isinstance(group.samples, tuple)
                 else tuple(id(sample) for sample in group.samples) for group in groups)
     arrays = [sample for group in groups for sample in group.samples]
+    owners = immutable_samples(arrays) if shared is not None else None
+    stable = ('matrix', tuple(len(g.samples) for g in groups), owners, tuple(query.shape))
+    cached = shared.get(stable) if shared is not None and owners is not None else MISSING
+    if cached is not MISSING:
+        count('reused_packed_bytes', cached[0].nbytes)
+        return cached
     if state is not None and key in state['entries']:
         value = state['entries'].pop(key)
         if len(value[4]) == len(arrays) and all(ref() is sample for ref, sample in zip(value[4], arrays)):
@@ -63,6 +71,10 @@ def _prepared(groups, query):
     norms = np.linalg.norm(matrix.astype(np.float64), axis=1)
     size = (matrix.nbytes + norms.nbytes + starts.nbytes + lengths.nbytes
             + sum(sample.nbytes for sample in arrays) + 128*len(arrays))
+    if shared is not None and owners is not None:
+        for array in (matrix, lengths, starts, norms):
+            array.flags.writeable = False
+        shared.put(stable, (matrix, lengths, starts, norms), size)
     if (state is not None and size <= state['limit']
             and all(not sample.flags.writeable and isinstance(sample.base, bytes) for sample in arrays)):
         while state['entries'] and state['size'] + size > state['limit']:

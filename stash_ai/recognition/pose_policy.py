@@ -3,13 +3,14 @@
 When unset, the anchor restriction is disabled for compatibility.
 """
 import json
+from .run_cache import metadata
 import math
 
 
 def compact_quality(raw):
     """Keep validated admission measurements and their visibility contract."""
     try:
-        record=json.loads(raw)
+        record=metadata(raw)
         selected={}
         for key in ('pixels','sharpness','pose_deviation','roll_deviation'):
             number=record.get(key)
@@ -32,7 +33,7 @@ def visibility_allows(quality,minimum):
         return True
     from .visibility import cached
     try:
-        quality=json.loads(quality) if isinstance(quality,str) else quality
+        quality=metadata(quality) if isinstance(quality,str) else quality
         return cached(quality) and quality['visible_face_fraction']>=minimum
     except (ValueError,TypeError,AttributeError):
         return False
@@ -59,7 +60,7 @@ def is_anchor(quality, grouping):
     if maximum is None:
         return True
     try:
-        quality=json.loads(quality) if isinstance(quality,str) else quality
+        quality=metadata(quality) if isinstance(quality,str) else quality
         pose=quality.get('pose_deviation')
         return type(pose) in (int,float) and math.isfinite(pose) and 0<=pose<=maximum
     except (ValueError,TypeError,AttributeError):
@@ -95,7 +96,7 @@ def _floors(grouping,anchor):
 
 def quality_allows(quality,grouping,*,anchor=False):
     try:
-        quality=json.loads(quality) if isinstance(quality,str) else quality
+        quality=metadata(quality) if isinstance(quality,str) else quality
         if quality.get('alignment_valid') is False:
             return False
         return all(not floor or (type(quality.get(field)) in (int,float) and

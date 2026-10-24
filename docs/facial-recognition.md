@@ -2368,3 +2368,28 @@ contexts retain at most 128 records. Profiling exposes `dependency_digest_hits`,
 `dependency_digest_misses` and `certified_warm_rebuilds`. Cold validation still
 streams evidence and reports observation progress; warm validation reports the
 selected-scene work without pretending to reread embeddings.
+
+
+### Run-wide immutable evidence cache
+
+`execution.rebuild_cache_bytes` (default 1 GiB, effective maximum one quarter of
+`rebuild_memory_bytes`) shares one LRU budget across validated vectors, immutable
+JSON metadata, sealed replay cue evidence, packed matrices, numerical pair evidence
+and lazy co-presence lookups. `rebuild_matrix_cache_bytes` (default 512 MiB) caps
+all retained matrices within that same budget. Zero disables either cache. These
+execution settings do not change the matching policy or retained decisions.
+
+Vector/matrix/pair keys contain exact immutable float32 bytes. Reconstructed banks
+can reuse packed matrices; mutable or sliced arrays bypass this path. Pair cache
+entries contain only original scalar numerical reductions: current support,
+authority, thresholds, rivals and ownership still decide whether a merge is allowed.
+Co-presence entries include the live connection, dependency generation, local write
+counter and external data version; a membership edit or rollback cannot reuse a
+stale result. Unsupported legacy replay schemas use the original SQL path.
+
+The cache covers all rebuild phases and is discarded at run exit, including errors.
+Eviction/oversize entries use the exact uncached computation. Keys, source byte
+owners and decoded metadata are included in conservative reservations. Profiling
+reports `ram_<category>_hits`, `_misses`, `_oversize`, `ram_evictions` and
+`ram_cache_peak_bytes`/`ram_cache_limit_bytes`; this is a cache-retention budget, not
+a process RSS ceiling (SQLite, active reference banks and worker scratch are separate).
