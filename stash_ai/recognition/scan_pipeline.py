@@ -59,7 +59,7 @@ class CpuStage:
             shutdown.call(lambda: self.executor.shutdown(wait=True, cancel_futures=True), self)
 
 
-def process(image, faces, backend, visibility, config, cue, *, assess, rejection, crop_bytes, geometry_contract, stage=None):
+def process(image, faces, backend, visibility, config, cue, *, assess, rejection, crop_bytes, geometry_contract, stage=None, defer_embeddings=False):
     """Yield complete face records; caller checkpoints only after the whole cue."""
     from .models import normalized_embedding
     from .pose_policy import measurement_required
@@ -121,7 +121,10 @@ def process(image, faces, backend, visibility, config, cue, *, assess, rejection
                                  name='close face alignment preparation') as aligned:
                         accepted = list(aligned)
                     step = settings['recognizer_batch_size']
-                    for offset in range(0, len(accepted), step):
+                    if defer_embeddings:
+                        for entry in accepted:
+                            entry['vector'] = entry['tensor']
+                    for offset in range(0, 0 if defer_embeddings else len(accepted), step):
                         chunk = accepted[offset:offset+step]
                         vectors = embed_prepared([e['tensor'] for e in chunk])
                         if len(vectors) != len(chunk):
@@ -138,3 +141,71 @@ def process(image, faces, backend, visibility, config, cue, *, assess, rejection
     finally:
         if owned_stage:
             cleanup([('stop recognition pixel workers', stage.close)])
+
+
+def cue_batches(frames, maximum, limit):
+    """Own frame copies until an entire ordered microbatch has been consumed."""
+    pending, size = [], 0
+    try:
+        for index, cue, image in frames:
+            required = image.width*image.height*3*8 + 4096
+            if pending and (len(pending) >= maximum or size+required > limit):
+                yield pending
+                for _, _, owned in pending:
+                    owned.close()
+                pending, size = [], 0
+            try:
+                owned = image.copy()
+            finally:
+                image.close()
+            pending.append((index, cue, owned))
+            size += required
+            if required > limit:
+                yield pending
+                for _, _, owned in pending:
+                    owned.close()
+                pending, size = [], 0
+        if pending:
+            yield pending
+    finally:
+        for _, _, owned in pending:
+            owned.close()
+
+
+def process_cues(batch, backend, visibility, config, *, stage, **callbacks):
+    """Cross-cue embedding batches; the coordinator remains the inference owner."""
+    from .models import normalized_embedding
+    supported = (callable(getattr(backend,'prepare_embedding',None)) and
+                 callable(getattr(backend,'embed_prepared_many',None)))
+    records, positions, tensors = [], [], []
+    step=config.data['execution']['recognizer_batch_size']
+    def infer():
+        if not tensors:
+            return
+        vectors=backend.embed_prepared_many(tensors)
+        if len(vectors)!=len(tensors):
+            raise ValueError('Face recognizer returned an incompatible output batch.')
+        for row,value in zip(positions,vectors):
+            row[4]=normalized_embedding(value,backend.dimensions).astype('<f4').tobytes()
+        positions.clear();tensors.clear()
+    retained=0
+    for index, cue, image in batch:
+        faces = sorted(backend.detect(image),key=lambda face:tuple(face.row))
+        values=[]
+        from stash_ai.runtime.cleanup import closing
+        with closing(process(image,faces,backend,visibility,config,cue,
+                     stage=stage,defer_embeddings=supported,**callbacks),name='close deferred cue') as prepared:
+            for result in prepared:
+                row=list(result);values.append(row)
+                retained+=len(row[5] or b'')+4096
+                if supported and row[3] is None:
+                    positions.append(row);tensors.append(row[4])
+                    if len(tensors)>=step:
+                        infer()
+        records.append((index,cue,values))
+        if retained >= config.data['execution']['scan_queue_bytes']//2:
+            infer()
+            yield from records
+            records=[];retained=0
+    infer()
+    yield from records
