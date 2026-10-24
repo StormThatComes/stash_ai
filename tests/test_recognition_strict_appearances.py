@@ -82,3 +82,35 @@ def test_option_changes_matching_only_and_requires_appearance_bank(tmp_path):
     for value in ('maybe','true'):
         p=tmp_path/'bad.yml';p.write_text('version: 1\nclustering: {strict_appearance_matching: '+value+'}\n')
         with pytest.raises(ValueError,match='strict_appearance_matching'):load(p)
+
+
+def test_joint_appearance_pose_recovery_keeps_queries_out_of_reference_bank(tmp_path):
+    from stash_ai.recognition.historical_references import capture
+    config=config_for(tmp_path,strict_appearance_matching=True)
+    with FaceDatabase(config.database) as db:
+        first,_=scan(db,config,'1',[A]*3+[X]*3,count=6)
+        second,_=scan(db,config,'2',[Q]*2,count=2)
+        ids=[]
+        for row in db.connection.execute('SELECT id,geometry FROM observations WHERE scan=?',(second,)).fetchall():
+            geometry=json.loads(row['geometry']);geometry[8]=80+.16*62
+            db.connection.execute('UPDATE observations SET geometry=? WHERE id=?',(json.dumps(geometry),row['id']))
+            ids.append(row['id'])
+        db.connection.commit()
+        rebuild_selected(db,[dict(scene='1',scan=first),dict(scene='2',scan=second)],config)
+        rows=candidates(db,second,config)
+        assert all(r[0]=='accepted' and r[2]['strict_appearance']['joint_pose_appearance'] for r in rows)
+        scope,ns=db.connection.execute('SELECT scope,namespace FROM scans LIMIT 1').fetchone()
+        history=capture(db.connection,[],config,scope,ns,'test')
+        assert all(not set(ids).intersection(v.source_ids) for v in history.views)
+        assert all(not set(ids).intersection(g.sample_ids) for g in history.groups)
+
+
+def test_cohort_selection_prefers_best_frozen_fit_over_first_fit():
+    from stash_ai.recognition.view_prototypes import _Cluster,best_cohort
+    from tests.test_recognition_subcomponents import vector
+    slots=[]
+    for i,angle in enumerate((0,15)):
+        row=dict(id=str(i),scan='s',seconds=i,geometry='[]')
+        slot=_Cluster('other',str(i));slot.add(row,vector(angle));slots.append(slot)
+    assert best_cohort(slots,{'geometry':'[]'},vector(12),.9)==1
+    assert best_cohort(list(reversed(slots)),{'geometry':'[]'},vector(12),.9)==0

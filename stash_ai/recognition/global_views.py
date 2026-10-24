@@ -155,7 +155,8 @@ def consolidation_plan(db,views,config,*,neighbours=None,mixed=False,cooccurs=No
     """Strong complete components with margin checks against frozen outsiders.
 
     Weak edges are competition evidence, not transitive component membership.
-    O(people) state is retained. Only complete non-singleton components need the
+    Component counters are O(people); subgroup edges have a separate bounded budget.
+    Only complete non-singleton components need the
     second scoring pass; unrelated people do not incur another lookup.
     With focus, visit only components reachable from those IDs, while retaining
     every outsider for competition. Focus requires a uniform reference authority.
@@ -189,6 +190,8 @@ def consolidation_plan(db,views,config,*,neighbours=None,mixed=False,cooccurs=No
     degrees={person:0 for person in owned}
     floors={person:float('inf') for person in owned}
     best={}
+    from .frozen_subgroups import Edges, nonoverlapping
+    edges=Edges(grouping['max_reference_bytes']//4 if subcomponents else 0)
     def nominate(person,other,score):
         previous=best.get(person)
         if previous is None or score>previous[0]:
@@ -230,6 +233,7 @@ def consolidation_plan(db,views,config,*,neighbours=None,mixed=False,cooccurs=No
                         candidates[other.identifier]=proof
             for other,proof in candidates.items():
                 if proof is not None:
+                    edges.add(person,other,proof['match_score'])
                     join(person,other)
                     degrees[person]+=1;degrees[other]+=1
                     floors[person]=min(floors[person],proof['match_score'])
@@ -243,7 +247,8 @@ def consolidation_plan(db,views,config,*,neighbours=None,mixed=False,cooccurs=No
         members=set(people)
         # A recovered pair has its own internal floor. Every other identity,
         # including neighbours in the original component, remains a rival.
-        internal=({p:best[p][0] for p in people} if parent is not None else floors)
+        internal=(edges.floors(people) if parent is not None and edges.available else
+                  {p:best[p][0] for p in people} if parent is not None else floors)
         rival=None
         if complete:
             for person in people:
@@ -269,10 +274,10 @@ def consolidation_plan(db,views,config,*,neighbours=None,mixed=False,cooccurs=No
                  'competing_view' if rival is not None and rival['gap']<margin else None)
         return dict(people=tuple(sorted(people)),format=3,frozen=True,
             component_context=digest(sorted(people)),component_size=len(people),
-            complete_component=complete,minimum_supported_degree=(1 if parent is not None else min(degrees[p] for p in people)),
+            complete_component=complete,minimum_supported_degree=(len(people)-1 if parent is not None else min(degrees[p] for p in people)),
             required_degree=len(people)-1,nearest_rival=rival,ambiguity_margin=margin,
             outcome='merge' if blocker is None else 'blocked',blocker=blocker,
-            partition_strategy='reciprocal_supported_pair' if parent is not None else 'complete_component',
+            partition_strategy=('reciprocal_supported_pair' if len(people)==2 else 'supported_complete_subgroup') if parent is not None else 'complete_component',
             parent_component=tuple(sorted(parent)) if parent is not None else None)
     result=[]
     with tracking(components.values(), 'Check frozen component competition', unit='component', position=1) as tracked:
@@ -283,17 +288,18 @@ def consolidation_plan(db,views,config,*,neighbours=None,mixed=False,cooccurs=No
             if complete or len(people)<3 or not subcomponents:
                 result.append(decision(people,complete))
                 continue
-            accepted=[]
-            used=set()
+            candidates=set(edges.proposals(people, min(settings['match_threshold'],threshold), margin))
+            # Retain bounded reciprocal-pair fallback when the graph budget fills.
             for person in sorted(people):
                 proposal=best.get(person)
                 if proposal is None or proposal[2]:continue
-                other=proposal[1]
-                opposite=best.get(other)
-                if (other<=person or opposite is None or opposite[2] or opposite[1]!=person):continue
-                pair=decision((person,other),True,parent=people)
-                if pair['outcome']=='merge':
-                    accepted.append(pair);used.update((person,other))
+                other=proposal[1];opposite=best.get(other)
+                if other>person and opposite is not None and not opposite[2] and opposite[1]==person:
+                    candidates.add(tuple(sorted((person,other))))
+            plans=[decision(p,True,parent=people) for p in sorted(candidates)]
+            allowed=nonoverlapping([p['people'] for p in plans if p['outcome']=='merge'])
+            accepted=[p for p in plans if p['people'] in allowed]
+            used={person for p in accepted for person in p['people']}
             result.extend(accepted)
             remaining=[p for p in people if p not in used]
             if remaining:

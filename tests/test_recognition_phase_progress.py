@@ -395,8 +395,8 @@ def test_local_cohort_progress_advances_per_observation_and_preserves_incomplete
     bars, _ = terminal
     original, seen = local_cohorts.vector, []
     def vector(row):
-        active = next(b for b in bars if b.desc == 'Group local face observations' and not b.disable)
-        seen.append(active.n)
+        active = next(b for b in bars if b.desc in ('Group local face observations','Reassess local appearance priorities') and not b.disable)
+        if active.desc == 'Group local face observations':seen.append(active.n)
         if failure and active.n == 1:
             raise failure('stop local cohort preparation')
         return original(row)
@@ -411,6 +411,8 @@ def test_local_cohort_progress_advances_per_observation_and_preserves_incomplete
                 local_cohorts.prepare(db.connection, selected, config)
     detail = next(b for b in bars if b.desc == 'Group local face observations')
     scenes = next(b for b in bars if b.desc == 'Freeze local appearance cohorts')
+    if not failure:
+        assert next(b for b in bars if b.desc == 'Reassess local appearance priorities').n == 3
     assert detail.total == 3
     assert seen == ([0, 1] if failure else [0, 1, 2])
     assert detail.n == (1 if failure else 3)
