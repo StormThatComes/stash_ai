@@ -11,7 +11,7 @@ from .database import encoded
 from .corroborated_views import enrich,enabled
 from .historical_references import History,capture,rank
 from .reference_usage import ReferenceUsage
-from .pose_policy import visibility_allows
+from .pose_policy import query_allows
 from .reference_roles import observation_sql
 from .progress import work, tracking
 from .frozen_ownership import FrozenOwnership
@@ -92,7 +92,7 @@ def _resolve_queries(db,config,frozen,ownership,*,prior_only=False):
         " WHERE c.policy=? AND c.status='withheld' AND o.rejected IS NULL"+condition+" ORDER BY o.embedding,o.geometry,o.id",(policy,))
     with tracking(rows,'Match final frozen appearance bank',unit='observation') as tracked:
         for row in tracked:
-            if not visibility_allows(row['quality'],grouping.get('min_auxiliary_visible_face_fraction')):continue
+            if not query_allows(row['quality'],grouping):continue
             match=rank([row],frozen,config)
             if match is None:continue
             owner,proof=match

@@ -19,21 +19,27 @@ class InvalidatedSourceViews(RuntimeError):
         super().__init__('Source-view ownership is unstable; no rebuilt memberships were committed.')
 
 
-def _copresence(db,replay=None):
+def _copresence(db,replay=None,config=None):
     origins={}
     if replay is not None:
         for row in replay.execute('SELECT DISTINCT m.person,o.person FROM members m '
             'JOIN sample_keys k ON k.observation=m.observation JOIN origins o ON o.sample_key=k.sample_key'):
             origins.setdefault(row[0],set()).add(row[1])
     def check(left,right):
-        if replay is not None and _cooccurs(replay,left,right):
+        if replay is not None and _cooccurs(replay,left,right,config):
             return True
         a,b=origins.get(left,{left}),origins.get(right,{right})
-        return db.execute('SELECT 1 FROM members a JOIN observations x ON x.id=a.observation '
+        enabled=bool(config and config.data['clustering'].get('deduplicate_detections'))
+        fields='x.geometry,x.embedding,y.geometry,y.embedding' if enabled else '1'
+        rows=db.execute('SELECT '+fields+' FROM members a JOIN observations x ON x.id=a.observation '
             'JOIN observations y ON y.scan=x.scan AND y.cue=x.cue '
             'JOIN members b ON b.observation=y.id WHERE a.person IN (SELECT value FROM json_each(?)) '
             'AND b.person IN (SELECT value FROM json_each(?)) AND a.person<>b.person AND x.id<>y.id '
-            'AND x.rejected IS NULL AND y.rejected IS NULL LIMIT 1',(encoded(sorted(a)),encoded(sorted(b)))).fetchone() is not None
+            'AND x.rejected IS NULL AND y.rejected IS NULL'+('' if enabled else ' LIMIT 1'),
+            (encoded(sorted(a)),encoded(sorted(b))))
+        if not enabled:return rows.fetchone() is not None
+        from .physical_faces import distinct_pairs
+        return distinct_pairs(rows,True)
     return check
 
 
@@ -58,7 +64,7 @@ def resolve(db,history,config,usage,*,replay=None,groups=(),early=(),excluded_vi
         first=replay.execute('SELECT scope,namespace FROM scans LIMIT 1').fetchone()
         views+=catalogue(replay,config,*first,usage=usage,complete=True)
     summaries=summary_views(all_groups,usage)
-    copresent=_copresence(db,replay)
+    copresent=_copresence(db,replay,config)
     decisions=consolidation_plan(db,views+summaries,config,mixed=True,cooccurs=copresent,subcomponents=False)
     historical=set(history.people)
     selected={g.identifier for g in groups}

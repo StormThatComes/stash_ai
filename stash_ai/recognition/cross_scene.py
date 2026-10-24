@@ -69,12 +69,14 @@ def _has_other_scene(db, person, scenes):
         (person, encoded(sorted(scenes)))).fetchone() is not None
 
 
-def _same_cue_rival(db, row, person, policy):
-    return db.execute(
-        f'SELECT 1 FROM candidates c JOIN observations o ON o.id={address(db, "c")} '
+def _same_cue_rival(db, row, person, policy, config):
+    peers=db.execute(
+        f'SELECT o.geometry,o.embedding FROM candidates c JOIN observations o ON o.id={address(db, "c")} '
         "WHERE c.policy=? AND c.scan=? AND c.status='accepted' "
-        'AND c.person=? AND o.cue=? AND o.id<>? LIMIT 1',
-        (policy, row['scan'], person, row['cue'], row['id'])).fetchone() is not None
+        'AND c.person=? AND o.cue=? AND o.id<>?',
+        (policy, row['scan'], person, row['cue'], row['id']))
+    from .physical_faces import duplicate
+    return any(not duplicate(row,peer,config.data['clustering'].get('deduplicate_detections',False)) for peer in peers)
 
 
 def _commit(db, policy, sources, person, reason, proof, *, created):
@@ -138,7 +140,7 @@ def apply_cross_scene_support(database, selected, config, *, progress=None):
             target = ranked[0][2]
             if not _has_other_scene(db, target.identifier, group.scenes):
                 continue
-            if any(_same_cue_rival(db, row, target.identifier, policy)
+            if any(_same_cue_rival(db, row, target.identifier, policy, config)
                    or not co_presence_allows(db, row, target, references, query, config)
                    for row, query in group.rows):
                 continue
@@ -275,7 +277,7 @@ def apply_cross_scene_support(database, selected, config, *, progress=None):
             # people have no pre-existing members and cannot act as merge votes.
             for g in group:
                 for row,_ in g.rows:
-                    if _same_cue_rival(db,row,leader,policy):
+                    if _same_cue_rival(db,row,leader,policy,config):
                         break
                 else:
                     continue

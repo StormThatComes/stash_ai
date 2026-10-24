@@ -2296,3 +2296,41 @@ canonical labels. It does not construct a new merged centroid, relax thresholds,
 or use recovered queries as training evidence. Recovered memberships remain
 attachment-only and require at least two independent timestamps. Matching policy
 version changes invalidate previous derived decisions; VTT scans remain reusable.
+
+
+### Anchor evidence experiments
+
+Separate `clustering.min_anchor_face_pixels`, `min_anchor_sharpness`,
+`min_auxiliary_face_pixels` and `min_auxiliary_sharpness` apply to retained quality
+measurements. Null preserves the existing detection floor. Set the detection
+floors low enough to retain auxiliary faces; lowering a detection floor requires
+a VTT rescan because previously rejected observations have no embedding. Anchor
+floors must be at least the auxiliary floors, and both must be at least the scan
+floor. Invalid alignment remains rejected for both roles. SQL admission, Python
+admission and compact replay measurements use the same policy.
+
+Three independent switches default to false so labelled evaluation can measure
+quality changes separately:
+
+- `anchor_outlier_quarantine`: derive a frozen query core only when at least
+  `max(3, view_min_support, min_merge_support)` independent retained timestamps
+  support a coherent appearance. Isolated samples below cohesion with every
+  supported sample are excluded from that query core. The remaining original
+  samples must still pass complete-link cohesion. Original anchors stay in the
+  strict bank as rivals and merge witnesses; no membership is deleted and no
+  cleaner identity is asserted. Recovery is attachment-only, records excluded
+  IDs, and cannot seed a promoted appearance or an identity merge.
+- `adaptive_view_witnesses`: grow retained witnesses from eight with the square
+  root of independent support, up to `max_view_witnesses` (default 32). Existing
+  medoid/diversity selection preserves rare endpoints and supported reserve
+  looks. All additional vectors count against `max_reference_bytes`.
+- `deduplicate_detections`: same-cue detections need box IoU at least 0.90,
+  every landmark displacement at most 3% of the smaller box diagonal, and
+  embedding cosine at least 0.995 to share physical-face evidence. Similar
+  embeddings at different locations remain competitors. Matching, pending
+  claims and assigned/contextual co-presence use the same predicate. Repeated
+  timestamps still supply only one independent support vote.
+
+Run each toggle separately with `recognition evaluate`, retained history, scene
+order variations and false-merge metrics before combining them. These changes
+claim no accuracy gain on unlabelled media and introduce no extra video inputs.

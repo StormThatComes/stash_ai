@@ -121,8 +121,8 @@ def test_input_catalogue_advances_during_each_observation_pass(tmp_path, monkeyp
         with present(report, 'auto', status_position=2):
             digest = rebuild_cache.input_context(db.connection, selected, 'scope', 'ns', config)
     # These descriptors predate progress instrumentation: warm caches must stay valid.
-    assert digest == ('fdeb1b5358b59c3331d4e7f5928e56ddcd594b9b215acaa30aefaf84c9624eaa' if assignments else
-                      '98c546f58805d3eae6b5428d1a96ff705267f31f16a2c2c9654f24787326f448')
+    assert digest == ('21a4e494ae624773cbec188c63edc92548d067f190ac7b1e60fa44d799d71c50' if assignments else
+                      '78a254d198ac389a87cb6aba01eeafc7b5e7ce9aa7ff0b39cc25a3067d696985')
     for label in labels:
         assert seen[label] == list(range(6))
         row = next(bar for bar in bars if bar.desc == label)

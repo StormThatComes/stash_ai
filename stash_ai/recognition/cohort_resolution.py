@@ -54,7 +54,7 @@ def recover(db,groups,history,config,bindings,*,selected_only=False,source_ids=N
                     query=vector(row)
                     if _competing_anchor(rivals,target,query,proof['mean_score'],proof['ambiguity_margin']):
                         continue
-                    if any(other!=group.identifier and mapped==target and _cooccurs(db,group.identifier,other)
+                    if any(other!=group.identifier and mapped==target and _cooccurs(db,group.identifier,other,config)
                            for other,mapped in bindings.items()):
                         continue
                     target_refs=[v.group for v in frozen.views if v.medoid in proof['medoids']]
@@ -97,7 +97,7 @@ def recover(db,groups,history,config,bindings,*,selected_only=False,source_ids=N
             blocked=set()
             for i,left in enumerate(sources):
                 for right in sources[i+1:]:
-                    if _cooccurs(db,left,right):
+                    if _cooccurs(db,left,right,config):
                         blocked.update((left,right))
             for source in blocked:
                 db.execute('DELETE FROM cohort_claims WHERE source=? AND target=?',(source,target))
@@ -182,14 +182,14 @@ def selected(database,config,early,global_state):
             'JOIN observations o ON o.id=m.observation WHERE m.person=? GROUP BY o.scan,o.seconds)',
             (group.identifier,)).fetchone()[0]
         rivals=[g for g in groups if g.identifier!=group.identifier]
-        if (support<config.data['clustering']['view_attach_min_support'] or _cooccurs(db,group.identifier,target)
+        if (support<config.data['clustering']['view_attach_min_support'] or _cooccurs(db,group.identifier,target,config)
             or any(_competing_anchor(rivals,target,vector(row),proof['mean_score'],proof['ambiguity_margin']) for row in rows)):
             continue
         proposals.append((group.identifier,target,proof))
     blocked=set()
     for i,(left,target,_) in enumerate(proposals):
         for right,other,_ in proposals[i+1:]:
-            if target==other and _cooccurs(db,left,right):
+            if target==other and _cooccurs(db,left,right,config):
                 blocked.update((left,right))
     sources={source for source,_,_ in proposals}
     for source,target,proof in proposals:
@@ -226,7 +226,7 @@ def whole_views(db,config,groups,views,*,strict_appearance=False):
         match=rank(samples,frozen,config,strict_appearance=strict_appearance) if samples else None
         if match is None:continue
         target,proof=match
-        if _cooccurs(db,group.identifier,target):continue
+        if _cooccurs(db,group.identifier,target,config):continue
         support=db.execute('SELECT COUNT(*) FROM (SELECT o.scan,o.seconds FROM members m JOIN observations o ON o.id=m.observation '
             'WHERE m.person=? GROUP BY o.scan,o.seconds)',(group.identifier,)).fetchone()[0]
         if support<config.data['clustering']['view_attach_min_support']:continue
@@ -242,7 +242,7 @@ def whole_views(db,config,groups,views,*,strict_appearance=False):
     sources={s for s,_,_ in proposals};blocked=set()
     for i,(left,target,_) in enumerate(proposals):
         for right,other,_ in proposals[i+1:]:
-            if target==other and _cooccurs(db,left,right):blocked.update((left,right))
+            if target==other and _cooccurs(db,left,right,config):blocked.update((left,right))
     attached=set()
     for source,target,proof in proposals:
         if source in blocked or target in sources:continue

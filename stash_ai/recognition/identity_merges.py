@@ -55,10 +55,8 @@ def _matches(component, query, config, *, cache=None, observation=None):
 
 @measured('merge_copresence')
 def _cooccurs(db, first, second, components, selected, config):
-    if db.execute('''SELECT 1 FROM members a JOIN observations x ON x.id=a.observation
-      JOIN observations y ON y.scan=x.scan AND y.cue=x.cue
-      JOIN members b ON b.observation=y.id WHERE a.person=? AND b.person=?
-      AND x.id<>y.id AND x.rejected IS NULL AND y.rejected IS NULL LIMIT 1''', (first, second)).fetchone() is not None:
+    from .global_views import _cooccurs as assigned_copresence
+    if assigned_copresence(db,first,second,config):
         return True
     # Membership is not a prerequisite for contextual evidence: the most
     # ambiguous observations are precisely those withheld from members.
@@ -83,19 +81,19 @@ def _cooccurs(db, first, second, components, selected, config):
         if key != cue:
             cue, left, right = key, [], []
         query = (cache.vector(row) if cache is not None else vector(row)) if mask is None else None
-        signature = (cache.signature(row) if cache is not None else
-                     hashlib.sha256(row['geometry'].encode() + row['embedding']).digest())
         if mask is None:
             matches_left = _matches(components[first], query, config, cache=cache, observation=row['id'])
             matches_right = _matches(components[second], query, config, cache=cache, observation=row['id'])
         else:
             matches_left, matches_right = bool(mask & 1), bool(mask & 2)
-        if (matches_left and any(other != signature for other in right) or
-                matches_right and any(other != signature for other in left)):
+        from .physical_faces import duplicate
+        enabled=config.data['clustering'].get('deduplicate_detections',False)
+        if (matches_left and any(not duplicate(row,other,enabled) for other in right) or
+                matches_right and any(not duplicate(row,other,enabled) for other in left)):
             return True
         for matched, seen in ((matches_left, left), (matches_right, right)):
-            if matched and signature not in seen and len(seen) < 2:
-                seen.append(signature)
+            if matched and not any(duplicate(row,other,enabled) for other in seen) and len(seen)<2:
+                seen.append(dict(geometry=row['geometry'],embedding=row['embedding']))
     return False
 
 
