@@ -13,8 +13,8 @@ in scope; unlabeled trials cannot certify false-merge accuracy.
    indexed query witnesses. Preserve rival and co-presence vetoes.
 4. Compute: provably safe screening, shared immutable process payloads and a
    common resource budget; extend worker telemetry.
-5. VTT: cross-cue microbatches and per-sprite decode coordination. Incorporate
-   the existing VTT pipeline PR before changing these paths.
+5. VTT: cross-cue microbatches and per-sprite decode coordination. The existing VTT
+   pipeline PR #929 is included in the series base.
 6. Replay: dependency-driven retries on frozen generations and late checkpoints.
 7. Tuning: isolated replay search and report-merge impact simulation; optional
    labels, proposed YAML export, no automatic source configuration changes.

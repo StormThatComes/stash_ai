@@ -13,7 +13,7 @@ from tests.test_recognition_clustering import setup
 
 
 def test_thumbnail_reuses_decoded_pixels_but_rejects_replaced_bytes(tmp_path, monkeypatch):
-    import stash_ai.recognition.media as media
+    import stash_ai.recognition.sprite_cache as media
     config, client = setup(tmp_path), MediaClient(count=3)
     original, opened = media.open_image, []
     def image(*args, **kwargs):

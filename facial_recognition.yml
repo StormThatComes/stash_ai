@@ -89,6 +89,11 @@ portraits:
     open_eyes: 0.0             # Opt-in: e.g. 2.0 penalizes either eye blinking.
 execution:
   rebuild_cohort_backend: threads # threads or processes (spawn); only scene-local CPU cohorts.
+  scan_cpu_workers: 4 # CPU quality/alignment/JPEG; inference remains on one owner.
+  scan_queue_bytes: 268435456 # 256 MiB for in-flight scan CPU work; oversize work runs serially.
+  recognizer_batch_size: 1 # Opt-in microbatch (up to 32); static ONNX graphs always use one.
+  sprite_cache_bytes: 1073741824 # Shared compressed + decoded sprite LRU for this run.
+  prefetch_scene_depth: 3 # Prepared scenes ahead; at most four input workers.
   rebuild_workers: 1           # 1 = serial; 0 = auto (up to 16); explicit values up to 256.
   rebuild_native_threads: 1    # BLAS threads per compute worker; effective workers respect available CPUs.
   rebuild_queue_bytes: 67108864 # Pending CPU work budget; capped at rebuild_memory_bytes / 16.
