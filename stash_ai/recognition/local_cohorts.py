@@ -51,12 +51,14 @@ def prepare(db,selected,config):
                 # Reassess only the appearance priority against frozen witnesses.
                 # Moving a priority cannot train a cohort or create new support.
                 anchors=[set() for _ in slots]
-                for row in db.execute('SELECT o.*,a.cohort FROM observations o JOIN local_appearance_rows a '
-                                      'ON a.observation=o.id ORDER BY o.id'):
-                    slot=best_cohort(slots,row,vector(row),coverage_threshold(grouping))
-                    slot=row['cohort'] if slot is None else slot
-                    db.execute('UPDATE local_appearance_rows SET cohort=? WHERE observation=?',(slot,row['id']))
-                    if is_anchor(row['quality'],grouping):anchors[slot].add(row['seconds'])
+                reassessment=db.execute('SELECT o.*,a.cohort FROM observations o JOIN local_appearance_rows a '
+                                      'ON a.observation=o.id ORDER BY o.id')
+                with tracking(reassessment,'Reassess local appearance priorities',unit='observation') as tracked:
+                    for row in tracked:
+                        slot=best_cohort(slots,row,vector(row),coverage_threshold(grouping))
+                        slot=row['cohort'] if slot is None else slot
+                        db.execute('UPDATE local_appearance_rows SET cohort=? WHERE observation=?',(slot,row['id']))
+                        if is_anchor(row['quality'],grouping):anchors[slot].add(row['seconds'])
                 centres=[s.medoid()[0] for s in slots]
                 centre=np.mean(centres,axis=0,dtype='float64')
                 remaining=set(range(len(slots)));placed=[]
