@@ -123,10 +123,16 @@ class _Cluster:
             from .reference_selection import quality
             identifier, score = previous
             new_score = quality(row['quality']) if 'quality' in row.keys() else 0.
-            if identifier in self.observations and new_score > score:
-                index = self.observations.index(identifier)
-                self.total += query.astype('float64') - self.examples[index].astype('float64')
-                self.examples[index], self.observations[index], self.qualities[index] = query, row['id'], new_score
+            if new_score > score:
+                # The centroid keeps the original independent witnesses. A
+                # better duplicate changes exemplars, never support or weight.
+                if identifier in self.observations:
+                    index = self.observations.index(identifier)
+                    self.examples[index], self.observations[index], self.qualities[index] = query, row['id'], new_score
+                else:
+                    self.examples.append(query)
+                    self.observations.append(row['id'])
+                    self.qualities.append(new_score)
                 if self.first == identifier:
                     self.first = row['id']
                 for witnesses in self.scene_witnesses.values():
@@ -139,6 +145,7 @@ class _Cluster:
                 for key, value in list(self.cue_times.items()):
                     if value[0] == identifier:
                         self.cue_times[key] = replacement
+                self._reduce(maximum)
             return
         from .reference_selection import quality
         value = row['id'], quality(row['quality']) if 'quality' in row.keys() else 0.
@@ -158,6 +165,10 @@ class _Cluster:
         self.examples.append(query)
         self.observations.append(row['id'])
         self.qualities.append(quality(row['quality']) if 'quality' in row.keys() else 0.)
+        self._reduce(maximum)
+
+    def _reduce(self, maximum):
+        import numpy as np
         if maximum>8:
             maximum=min(maximum,max(8,math.ceil(2*math.sqrt(len(self.cues)))))
         if len(self.examples)>maximum:

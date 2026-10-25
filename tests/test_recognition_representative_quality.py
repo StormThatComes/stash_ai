@@ -61,3 +61,36 @@ def test_seed_replacement_keeps_label_origin_and_is_one_time(tmp_path):
         protected=group.sample_ids[0]
         refresh_local(state.connection,group,rows[-1],5,usage,config=config)
         assert group.sample_ids[0]==protected
+
+
+def test_late_supported_mode_displaces_unconfirmed_early_modes():
+    from stash_ai.recognition.reference_selection import select
+    def row(i, angle, pixels):
+        return dict(id=str(i),scan='s',scene='s',seconds=i,geometry='[]',dimensions=2,
+            embedding=np.array([np.cos(angle),np.sin(angle)],dtype='<f4').tobytes(),
+            quality=json.dumps(dict(pixels=pixels,sharpness=pixels)))
+    rows=[row(0,0,500),row(1,np.pi/3,500)]
+    rows += [row(i,np.pi/6,50) for i in range(2,5)]
+    assert any(i in ('2','3','4') for i,_ in select(rows,2))
+
+
+def test_repeated_pixels_across_scenes_take_one_reference_slot():
+    from stash_ai.recognition.reference_selection import select
+    rows=[dict(id=str(i),scan=str(i),scene=str(i),seconds=i,geometry='[]',dimensions=2,
+        embedding=np.array([1.,0.],dtype='<f4').tobytes(),
+        quality=json.dumps(dict(pixels=50+i,sharpness=50,evidence_pixel_sha256='a'*64))) for i in range(3)]
+    assert [i for i,_ in select(rows,3)] == ['2']
+
+
+def test_better_duplicate_returns_after_exemplar_eviction_without_new_vote():
+    from stash_ai.recognition.view_prototypes import _Cluster
+    def row(i,t,q):return dict(id=i,scan='s',seconds=t,quality=json.dumps(dict(pixels=q,sharpness=q)))
+    slot=_Cluster('other','old')
+    slot.add(row('old',0,1),np.array([1.,0.]),maximum=1)
+    slot.add(row('other',1,10),np.array([1.,0.]),maximum=1)
+    assert 'old' not in slot.observations
+    total=slot.total.copy()
+    slot.add(row('better',0,500),np.array([1.,0.]),maximum=1)
+    assert slot.observations == ['better']
+    assert len(slot.cues)==2 and slot.centre_count==2
+    assert np.array_equal(total,slot.total)

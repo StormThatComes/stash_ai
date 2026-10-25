@@ -37,10 +37,14 @@ def select(rows, maximum):
     import numpy as np
     from .clustering import vector
     from .view_prototypes import pose_view
+    if maximum <= 0:
+        return []
     pool, scene = [], None
     # Saturated support keeps only enough metadata to certify a rare look.
     # Frozen pivots prevent gradually changing observations from joining a mode.
-    from .independent_evidence import Votes
+    from .independent_evidence import Votes, unit
+    def evidence(row):
+        return unit(dict(row, scan=row['scan'] if 'scan' in row.keys() else row['scene']))
     reserves = []
 
     def reserve(entry):
@@ -50,8 +54,13 @@ def select(rows, maximum):
                     float(np.dot(slot['best'][2], sample)) >= .95]
         slot = max(matching, key=lambda v: float(np.dot(v['pivot'], sample))) if matching else None
         if slot is None:
-            if len(reserves) >= maximum:
-                return
+            # Confirmed modes keep their protection; probationary singletons
+            # cannot monopolize it. A bounded second bank discovers later modes.
+            if len(reserves) >= 2 * maximum:
+                probation = [v for v in reserves if len(v['votes']) < 3]
+                if not probation:
+                    return
+                reserves.remove(min(probation, key=lambda v: (len(v['votes']), v['best'][0])))
             slot = dict(pivot=sample, pose=pose, best=entry, votes=Votes())
             reserves.append(slot)
         if len(slot['votes']) < 3:
@@ -65,6 +74,13 @@ def select(rows, maximum):
         supported = [slot['best'] for slot in reserves if len(slot['votes']) >= 3]
         known = {item[1]['id'] for item in pool}
         pool += [item for item in supported if item[1]['id'] not in known]
+        unique = {}
+        for entry in pool:
+            key = evidence(entry[1])
+            previous = unique.get(key)
+            if previous is None or entry[3] > previous[3]:
+                unique[key] = entry
+        pool = sorted(unique.values(), key=lambda entry: entry[0])
         if len(pool) <= maximum:
             return
         if len({sample.shape for _, _, sample, _, _ in pool}) != 1:
@@ -95,7 +111,8 @@ def select(rows, maximum):
         reserve(entry)
         # A duplicated cue time cannot fill the bounded reference bank.
         duplicate = next((i for i, item in enumerate(pool)
-                          if (item[1]['scene'], item[1]['seconds']) == (row['scene'], row['seconds'])), None)
+                          if evidence(item[1]) == evidence(row) or
+                          (item[1]['scene'], item[1]['seconds']) == (row['scene'], row['seconds'])), None)
         if duplicate is not None:
             if entry[3] > pool[duplicate][3]:
                 pool[duplicate] = entry
