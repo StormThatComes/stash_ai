@@ -131,7 +131,31 @@ def test_scope_rejects_credentials_and_differs_between_instances():
         instance_scope('https://user:password@stash')
 
 
+def independent_media(monkeypatch):
+    """Give membership/rollback fixtures actual distinct pixels per cue/scene."""
+    from io import BytesIO
+    import numpy as np
+    from PIL import Image
+    import tests.helpers.recognition as helpers
+    original = helpers.MediaClient
+    def client(scene_id='1', count=3):
+        value = original(scene_id, count)
+        rng = np.random.default_rng(int(scene_id))
+        with Image.fromarray(rng.integers(20, 230, (160,160*count,3), dtype='uint8')) as image:
+            output = BytesIO(); image.save(output, format='PNG')
+        value.data[value.url + f'sprite/{scene_id}.jpg'] = output.getvalue()
+        key = value.url + f'vtt/{scene_id}.vtt'
+        text = value.data[key].decode()
+        import re
+        offsets = iter(range(count))
+        text = re.sub('xywh=0,0,160,160', lambda _: f'xywh={next(offsets)*160},0,160,160', text)
+        value.data[key] = text.encode()
+        return value
+    monkeypatch.setattr(helpers, 'MediaClient', client)
+
+
 def test_reference_metrics_reach_console_history_and_cached_run(tmp_path, monkeypatch, capsys):
+    independent_media(monkeypatch)
     import stash_ai.recognition.run as runner
     config, _, services, _ = setup(tmp_path, monkeypatch)
     statuses = []
@@ -160,6 +184,7 @@ def test_reference_metrics_reach_console_history_and_cached_run(tmp_path, monkey
 
 
 def test_reference_run_peak_is_maximum_across_scenes_not_sum(tmp_path, monkeypatch):
+    independent_media(monkeypatch)
     config, _, services, _ = setup(tmp_path, monkeypatch)
     assert run(config, services, '1', '2') == 0
     with FaceDatabase(config.database) as state:
@@ -170,6 +195,7 @@ def test_reference_run_peak_is_maximum_across_scenes_not_sum(tmp_path, monkeypat
 
 
 def test_reference_history_write_cannot_commit_failed_matching(tmp_path, monkeypatch, capsys):
+    independent_media(monkeypatch)
     config, client, services, _ = setup(tmp_path, monkeypatch)
     assert run(config, services, '1') == 0
     writes = list(client.writes)
@@ -223,6 +249,7 @@ def test_later_scene_merges_earlier_metadata_target_and_preserves_oldest_profile
 
 
 def test_cold_replay_withholds_near_rival_and_updates_only_selected_links(tmp_path, monkeypatch):
+    independent_media(monkeypatch)
     import math
     config, client, services, _ = setup(tmp_path, monkeypatch)
     strict = replace(config, data=plain(config.data))

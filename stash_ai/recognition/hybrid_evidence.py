@@ -36,14 +36,16 @@ def catalogue(db, config, scope, namespace):
     result=[];used=0;present=available(db);expected=contract(config)
     with tracking(groups,'Read hybrid references',unit='identity') as tracked:
         for group in tracked:
-            ids=tuple(group.sample_ids);vectors=[];keys=[];missing=[]
+            ids=tuple(group.sample_ids);vectors=[];missing=[]
+            from .independent_evidence import Votes
+            votes=Votes()
             if present:
-                query=('SELECT o.id,o.seconds,s.scene,e.status,e.embedding FROM observations o '
+                query=('SELECT o.id,o.scan,o.quality,o.seconds,s.scene,e.status,e.embedding FROM observations o '
                     'JOIN scans s ON s.id=o.scan LEFT JOIN person_evidence e ON e.observation=o.id AND e.contract=? '
                     'WHERE o.id IN (SELECT value FROM json_each(?))')
                 parameters=(expected,encoded(ids))
             else:
-                query=('SELECT o.id,o.seconds,s.scene,NULL AS status,NULL AS embedding FROM observations o '
+                query=('SELECT o.id,o.scan,o.quality,o.seconds,s.scene,NULL AS status,NULL AS embedding FROM observations o '
                     'JOIN scans s ON s.id=o.scan WHERE o.id IN (SELECT value FROM json_each(?))')
                 parameters=(encoded(ids),)
             rows={r['id']:r for r in db.execute(query,parameters)}
@@ -57,9 +59,9 @@ def catalogue(db, config, scope, namespace):
                 used+=value.nbytes
                 if used>config.data['sapiensid']['execution']['reference_bytes']:
                     raise ValueError('SapiensID reference_bytes budget exceeded.')
-                vectors.append(value);keys.append((rows[observation]['scene'],rows[observation]['seconds']))
+                vectors.append(value);votes.add(row)
             result.append(Identity(group.identifier,ids,np.asarray(group.samples),
-                np.asarray(vectors) if vectors else np.empty((0,4096)),tuple(sorted(set(keys))),tuple(missing)))
+                np.asarray(vectors) if vectors else np.empty((0,4096)),tuple(range(len(votes))),tuple(missing)))
     from .hybrid_guards import retain
     return retain(db,config,scope,namespace,tuple(result))
 
