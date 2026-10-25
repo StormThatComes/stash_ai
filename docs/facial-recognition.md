@@ -2512,3 +2512,5 @@ final selection remain on the coordinator; one model executor owns all portrait
 inference. `portrait_cpu_threads` bounds the CPU preparation workers (automatic
 when zero); the existing JPEG owner can overlap preparation for the next target.
 All original observations remain eligible for ranking, including after a crop fails.
+
+For the stacked recovery and throughput changes, see [recognition-sixth-series.md](recognition-sixth-series.md).

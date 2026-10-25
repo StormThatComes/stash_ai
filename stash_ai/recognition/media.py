@@ -26,9 +26,10 @@ def bounded_media(client, url, limit, timeout, *, cache=None):
     from stash_ai.runtime.cleanup import closing
     from stash_ai.stash_api.deadlines import call_with_deadline, abort_response
     deadline = time.monotonic() + timeout
-    retained=cache.get(url) if cache is not None else None
+    retained=cache.peek(url) if cache is not None else None
 
     def acquire():
+        nonlocal retained
         current = url
         for _ in range(6):
             parts = urlsplit(current)
@@ -54,8 +55,14 @@ def bounded_media(client, url, limit, timeout, *, cache=None):
                     if response.headers.get('ETag',retained[0])!=retained[0]:
                         cache.discard(url)
                         raise ValueError('Recognition media cache acknowledgement changed its validator.')
+                    body=cache.get(url)
+                    if body is None or body[0]!=retained[0]:
+                        # Corruption/eviction between metadata and 304: retry a
+                        # full read under the original request deadline.
+                        retained=None
+                        continue
+                    data=body[1]
                     if 'no-store' in response.headers.get('Cache-Control','').lower():cache.discard(url)
-                    data=retained[1]
                     if limit is not None and len(data)>limit:raise ValueError('Recognition media exceeds its byte budget.')
                     return data
                 response.raise_for_status()

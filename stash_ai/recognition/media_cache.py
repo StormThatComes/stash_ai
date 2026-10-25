@@ -21,6 +21,17 @@ class MediaCache:
     def key(self,url):
         return hashlib.sha256((self.owner+'\0'+url).encode()).hexdigest()
 
+    def peek(self,url):
+        """Read validators only; defer BLOB I/O and hashing until origin says 304."""
+        if not self.limit or not self.path.exists():return None
+        try:
+            with closing(sqlite3.connect(self.path,timeout=5)) as db:
+                row=db.execute('SELECT etag,sha,length(body) FROM media WHERE key=?',(self.key(url),)).fetchone()
+                if row and strong_etag(row[0]) and isinstance(row[1],str) and type(row[2]) is int and 0<=row[2]<=self.limit:
+                    return row
+        except (sqlite3.Error,OSError):pass
+        return None
+
     def get(self,url):
         if not self.limit or not self.path.exists():return None
         try:

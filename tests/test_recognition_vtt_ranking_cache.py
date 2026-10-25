@@ -95,3 +95,19 @@ def test_selected_discovery_drives_from_scenes_and_deduplicates_chunks(tmp_path,
         assert retained_targets(state,config,scope,[])=={}
         assert retained_targets(state,config,scope,['1'],performer_ids=['99999'])=={}
         state.connection.set_trace_callback(None)
+
+
+def test_ranking_cache_uses_bytes_instead_of_global_entry_cap(tmp_path):
+    from stash_ai.recognition.vtt_ranking_cache import Ranking
+    with FaceDatabase(tmp_path/'db') as state:
+        ranking=Ranking.__new__(Ranking)
+        ranking.db=state.connection;ranking.enabled=True;ranking.hit=False;ranking.limit=100000
+        ranking.inputs=lambda **kwargs:'f'*64
+        for index in range(100):
+            ranking.key='vtt-ranking-cache:'+str(index)
+            ranking.save([])
+        assert ranking.db.execute("SELECT COUNT(*) FROM metadata WHERE key LIKE 'vtt-ranking-cache:%'").fetchone()[0]==100
+        ranking.limit=2000;ranking.key='vtt-ranking-cache:newest';ranking.save([])
+        size=ranking.db.execute("SELECT SUM(length(CAST(value AS BLOB))+length(key)+256) FROM metadata WHERE key LIKE 'vtt-ranking-cache:%'").fetchone()[0]
+        assert size<=2000
+        assert ranking.db.execute('SELECT 1 FROM metadata WHERE key=?',(ranking.key,)).fetchone()

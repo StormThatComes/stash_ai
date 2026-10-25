@@ -37,7 +37,11 @@ class CpuStage:
     def _acquire_image(self, image):
         key=id(image)
         with self.lock:
-            if key not in self.images:self.images[key]=[image,image.copy(),0]
+            if key not in self.images:
+                size=image.width*image.height*3*8
+                self.images[key]=[image,image.copy(),0,size]
+                self.bytes+=size
+                self.peak_bytes=max(self.peak_bytes,self.bytes)
             entry=self.images[key];entry[2]+=1
             return key,entry[1]
 
@@ -45,7 +49,7 @@ class CpuStage:
         with self.lock:
             entry=self.images[key];entry[2]-=1
             if not entry[2]:
-                del self.images[key];entry[1].close()
+                del self.images[key];self.bytes-=entry[3];entry[1].close()
 
     def _call(self, function, image, value, key):
         try:
@@ -70,8 +74,8 @@ class CpuStage:
         key,owned = self._acquire_image(image)
         future=OwnedFuture(self)
         with self.lock:
-            self.pending[future]=size
-            self.bytes+=size
+            self.pending[future]=extra+4096
+            self.bytes+=extra+4096
             self.peak_bytes=max(self.peak_bytes,self.bytes)
         try:
             job = self.executor.submit(self._call,function,owned,value,key)
@@ -91,9 +95,9 @@ class CpuStage:
         return future
 
     def can_submit(self,image,*,extra=0):
-        size=image.width*image.height*3*8+extra+4096
         with self.lock:
-            return self.bytes+size<=self.limit and len(self.pending)<self.workers*2
+            image_size=0 if id(image) in self.images else image.width*image.height*3*8
+            return self.bytes+image_size+extra+4096<=self.limit
 
     def retire(self,future):
         with self.lock:self.bytes-=self.pending.pop(future,0)
