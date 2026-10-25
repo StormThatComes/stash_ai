@@ -18,6 +18,8 @@ class Lookup:
         # centroid bank before allocating it. Python/SQLite overhead is separate.
         required=2*sum(i.faces.nbytes+i.persons.nbytes for i in identities)
         required+=2*sum(g.nbytes for i in identities for g in (i.guard_faces,i.guard_persons) if g is not None)
+        required+=2*sum(mode.nbytes for i in identities for mode in i.body_modes)
+        required+=2*sum(f.nbytes+b.nbytes for i in identities for _,f,b in i.query_cores)
         required+=len(identities)*(face_dim+person_dim)*8
         required+=2*64*64*8
         if required>budget:

@@ -53,7 +53,9 @@ def _recover(database, selected, config, *, births=()):
             admissible=(not identity.guard_face_missing and f['minimum']>=config.data['clustering']['cohesion_threshold'] and f['mean']>=config.data['recognition']['match_threshold'])
             face_choices.append((f['mean'],identity.person,admissible,group))
             if body is None:continue
-            measures=[scores(body_batch,bodies)] if len(bodies) else []
+            from .hybrid_modes import query_score
+            modes=identity.body_modes if bodies is identity.persons else ()
+            measures=[query_score(body_batch,bodies,settings,modes)] if len(bodies) else []
             measures=[m for m in measures if m is not None]
             score=max((m['mean'] for m in measures),default=None)
             admissible=bool(measures and not identity.guard_missing and

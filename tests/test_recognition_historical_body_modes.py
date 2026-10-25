@@ -43,3 +43,17 @@ def test_query_can_match_original_core_after_merge(tmp_path):
         assert recover(state,selected,cfg)==3
         assert recover(state,selected,cfg)==0
         assert db.execute("SELECT COUNT(*) FROM candidates WHERE json_extract(payload,'$.hybrid_query.core_observations') IS NOT NULL").fetchone()[0]==3
+
+
+def test_supported_mode_votes_survive_representative_cap(tmp_path):
+    from tests.test_recognition_merge_report import seeded
+    from tests.test_recognition_hybrid_recovery import enable
+    from stash_ai.recognition.database import FaceDatabase
+    from stash_ai.recognition.hybrid_evidence import catalogue,report
+    cfg,_=seeded(tmp_path,clustering=dict(max_samples_per_person=2))
+    with FaceDatabase(cfg.database) as state:
+        db=state.connection;cfg=enable(cfg,db)
+        ns=db.execute('SELECT namespace FROM people LIMIT 1').fetchone()[0]
+        identities=catalogue(db,cfg,'scope',ns)
+        assert all(len(i.persons)==2 and len(i.independent)==3 and len(i.body_modes[0])==3 for i in identities)
+        assert report(db,cfg,'scope',ns)['decisions'][0]['outcome']=='merge'
