@@ -83,3 +83,17 @@ def test_pending_scope_is_revalidated_and_drained_automatically(tmp_path):
         apply(state,selected,config)
         assert db.execute("SELECT COUNT(*) FROM metadata WHERE key LIKE 'hybrid-pending:%'").fetchone()[0]==0
         assert db.execute('SELECT COUNT(*) FROM identity_merges').fetchone()[0]==1
+
+
+def test_strict_face_query_does_not_require_body_or_merge_support(tmp_path):
+    from stash_ai.recognition.hybrid_queries import recover
+    config,people=seeded(tmp_path,vectors=[[1.,0,0,0],[1.,0,0,0]],count=1)
+    with FaceDatabase(config.database) as state:
+        db=state.connection;config=enable(config,db)
+        db.execute('DELETE FROM person_evidence')
+        db.execute('DELETE FROM members WHERE person=?',(people[1],))
+        db.execute("UPDATE candidates SET person=NULL,status='withheld' WHERE person=?",(people[1],));db.commit()
+        selected=[dict(scan=r['id'],scene=r['scene']) for r in db.execute('SELECT * FROM scans')]
+        assert recover(state,selected,config)==1
+        row=db.execute("SELECT person,json_extract(payload,'$.hybrid_query.signal') FROM candidates WHERE json_extract(payload,'$.reason')='hybrid_query'").fetchone()
+        assert tuple(row)==(people[0],'face')

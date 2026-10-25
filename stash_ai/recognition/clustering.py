@@ -19,7 +19,7 @@ from .scoring import comparisons, scoped
 from .evidence_cache import current as evidence, scoped as evidence_owned
 from .parallel_scores import scored_rows, contributions
 
-MATCHING_FORMAT = 53
+MATCHING_FORMAT = 54
 
 
 def vector(row):
@@ -169,6 +169,7 @@ def co_presence_allows(db, observation, group, groups, query, config, *, peer_th
             continue
         best = mean
         for rival in groups:
+            if rival.identifier == group.identifier:continue
             rival_mean, rival_minimum = (cache.scores(rival, other, peer['id']) if cache is not None
                                           else _similarities(rival, other))
             if rival_minimum >= cohesion_threshold:

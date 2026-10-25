@@ -51,6 +51,10 @@ def recover(db,groups,history,config,bindings,*,selected_only=False,source_ids=N
                     if result is None:
                         continue
                     target,proof=result
+                    # A rejected co-present endpoint must not turn a complete
+                    # conflicting identity into an apparently safe majority.
+                    if selected_only and _cooccurs(db,group.identifier,target,config):
+                        continue
                     query=vector(row)
                     if _competing_anchor(rivals,target,query,proof['mean_score'],proof['ambiguity_margin']):
                         continue
