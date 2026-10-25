@@ -471,6 +471,7 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
                         retain_pose=config.data['clustering']['max_anchor_pose_deviation'] is not None)
         from .evidence_pixels import canonicalize
         canonicalize(replay)
+        replay.commit()
         if previous:
             replay.execute('CREATE TEMP TABLE prior_attachment_queries(id TEXT PRIMARY KEY)')
             replay.executemany('INSERT INTO prior_attachment_queries VALUES (?)',((i,) for i in previous))
@@ -480,14 +481,27 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
             sorted(previous), [(r['id'], r['geometry'], bytes(r['embedding']).hex()) for r in hints]])
         late = Checkpoints(database, selected, config, scope, namespace,
                            phase='selected', context=late_context)
+        with read_only_dependencies():
+            ready_context = digest([late_context, rebuild_cache.binding_context(db,scope,namespace)])
+        ready = Checkpoints(database, selected, config, scope, namespace,
+                            phase='ready', context=ready_context)
         with stage('Restore rebuild checkpoint'):
+            ready.restore(replay)
+            if ready.restored_payload is not None:
+                from .ready_checkpoint import restore
+                mapping, history = restore(database, replay, ready.restored_payload)
+                _apply(database, replay, selected, config, scope, namespace, mapping, fingerprint, progress, usage=usage,history=history)
+                return _results(db,selected,config)
             cursor, next_clock = late.restore(replay)
             if late.restored_payload is None:
                 cursor, next_clock = checkpoints.restore(replay)
+        if cursor < len(selected):
+            replay.execute('DROP TABLE IF EXISTS temp.local_core_order')
         clock = ReplayClock(next_clock)
         from .local_cohorts import prepare as prepare_local_cohorts
         with stage('Prepare local face cohorts'):
-            prepare_local_cohorts(replay,selected,config)
+            if not replay.execute("SELECT 1 FROM sqlite_temp_master WHERE name='local_core_order'").fetchone():
+                prepare_local_cohorts(replay,selected,config)
         # Stable replay identity removes installation-dependent UUID tie order.
         temporary = SimpleNamespace(connection=replay,
             installation=str(uuid.uuid5(uuid.NAMESPACE_URL, encoded([scope, namespace, 'cold-replay']))),
@@ -531,7 +545,8 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
                     deferred_hints=defer_new_groups(replay,config,hints,prior_strict)
                 from .shared_references import retry_strict, early_views
                 with stage('Retry strict identity assignments'):
-                    retry_strict(temporary, selected, config)
+                    from .recovery_convergence import converge
+                    converge(replay, lambda: retry_strict(temporary, selected, config))
                 with stage('Build early verified appearance views'):
                     early = early_views(temporary, selected, config,excluded_views=excluded_views)
                 with stage('Resolve same-scene identity context'):
@@ -549,7 +564,8 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
                 with stage('Resolve selected identity cohorts'):
                     resolve_selected_cohorts(temporary,config,early,global_state)
                 with stage('Retry changed strict evidence'):
-                    retry_strict(temporary, selected, config)
+                    from .recovery_convergence import converge
+                    converge(replay, lambda: retry_strict(temporary, selected, config))
                 global_state=None  # Release frozen exemplars before the historical bank.
             replay.commit()
             late.phase_payload = encode_late(early, deferred_hints)
@@ -612,6 +628,11 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
                 mapping.setdefault(row[0],row[0])
             invalid=invalidated_sources(history,replay,config,mapping)
             if invalid:raise InvalidatedSourceViews(invalid)
+        replay.commit()
+        from .ready_checkpoint import encode as encode_ready
+        ready.phase_payload = encode_ready(database, mapping, history)
+        if checkpoints.enabled:
+            ready.save(replay, len(selected), clock.value, final=True)
         report_pages(replay)
         _apply(database, replay, selected, config, scope, namespace, mapping, fingerprint, progress, usage=usage,history=history)
     return _results(db, selected, config)

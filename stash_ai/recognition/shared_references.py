@@ -35,6 +35,7 @@ def retry_strict(database, selected, config):
         group=next(g for g in groups if g.identifier==person)
         from .clustering import vector
         if not co_presence_allows(db,row,group,groups,vector(row),config):
+            queue.remember(row)
             continue
         db.execute("UPDATE candidates SET person=?,status='pending',payload=json_set(payload,"
             "'$.reason','late_strict_identity','$.shared_reference',json(?)) WHERE id=?",

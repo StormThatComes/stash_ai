@@ -46,3 +46,12 @@ and three supporting witnesses. Strict retries solve small cue assignment sets
 jointly with all strict alternatives, fixed accepted claims and raw rival vetoes.
 Equal or oversized assignment problems remain unresolved; attachments never train
 new cores. Validation: 52 matching/pose/conflict/rebuild tests passed.
+
+PR4: negative retries depend on the frozen witness/rival bank and the query's
+own co-presence cue, rather than all library memberships. Strict retry passes
+run to a deterministic fixed point with cancellation, cycle detection and a
+bounded pass budget. Checkpoints retain local appearance ordering and final
+commit plans (including unresolved-pool backfill). Final-plan reuse validates
+selected raw inputs, historical context, binding context, engine and limits.
+Validation: 58 checkpoint/rebuild tests passed, including interruption before
+commit and recovery without rerunning historical analysis.
