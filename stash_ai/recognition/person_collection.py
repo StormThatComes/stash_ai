@@ -32,7 +32,7 @@ class PersonCollector:
         if self.model is None:
             if self.factory is None:
                 from .sapiensid_backend import SapiensIDFaces
-                self.factory=SapiensIDFaces
+                self.factory=lambda config,paths: SapiensIDFaces(config,paths,load_detector=False)
             self.model=self.factory(self.config,self.paths)
         with closing(source.frames(min(missing)),name='close person source frames') as stream:
             with tracking(stream,'Collect SapiensID evidence',total=len(source.cues)-min(missing),unit='cue') as frames:
@@ -43,7 +43,7 @@ class PersonCollector:
                         rows=list(db.execute('SELECT * FROM observations WHERE scan=? AND cue=? ORDER BY id',(scan,index)))
                         faces=[checked_detection(json.loads(r['geometry'])) for r in rows]
                         self.model.detect(image,faces=faces)
-                        pending=[]
+                        pending=[];eligible=[]
                         for row,face in zip(rows,faces):
                             if row['rejected'] is not None:
                                 continue
@@ -53,11 +53,26 @@ class PersonCollector:
                             metadata=self.model.observation_quality(image,face)
                             vector=crop=None
                             if metadata['identity_rejection'] is None:
-                                vector=self.model.embed(image,face)
+                                eligible.append((len(pending),face))
                                 if self.config.data['sapiensid']['storage']['retain_person_crops']:
                                     with image.crop(metadata['person']['bounds']) as person:
-                                        output=BytesIO();person.save(output,format='PNG');crop=output.getvalue()
-                            pending.append((row['id'],metadata,vector,crop))
+                                        output=BytesIO();person.save(output,format='PNG')
+                                        if output.tell()<=self.config.data['storage']['max_crop_bytes']:
+                                            crop=output.getvalue()
+                                        else:
+                                            metadata=dict(metadata,crop_status='byte_budget_exceeded')
+                            pending.append([row['id'],metadata,vector,crop])
+                        size=self.config.data['sapiensid']['execution']['batch_size']
+                        for start in range(0,len(eligible),size):
+                            batch=eligible[start:start+size]
+                            batch_faces=[face for _,face in batch]
+                            embed_batch=getattr(self.model,'embed_faces',None)
+                            vectors=(embed_batch(image,batch_faces) if embed_batch else
+                                     [self.model.embed(image,face) for face in batch_faces])
+                            if len(vectors)!=len(batch):
+                                raise ValueError('SapiensID batch returned an invalid feature count.')
+                            for (index,_),vector in zip(batch,vectors):
+                                pending[index][2]=vector
                         # Nothing from a partially failed cue becomes durable.
                         with db:
                             for identifier,metadata,vector,crop in pending:
@@ -67,15 +82,16 @@ class PersonCollector:
 def audit_input(detector,image,face,path):
     """Export exact pre-normalization RGB input and measured model geometry."""
     from PIL import Image
+    from .alignment_audit import _png
     details=detector.observation_quality(image,face)
     if details['identity_rejection'] is not None:
         return details
     batch,points,mask=detector.audit_input(image,face)
     pixels=((batch[0].detach().cpu().permute(1,2,0).numpy()+1)*127.5).clip(0,255).round().astype('uint8')
     target=path.with_name(path.name+'-person-input.png')
-    with Image.fromarray(pixels) as png:png.save(target)
+    with Image.fromarray(pixels) as png:_png(png,target)
     mask_path=path.with_name(path.name+'-person-mask.png')
-    with Image.fromarray(mask[0].detach().cpu().numpy().astype('uint8')*255) as png:png.save(mask_path)
+    with Image.fromarray(mask[0].detach().cpu().numpy().astype('uint8')*255) as png:_png(png,mask_path)
     return dict(details,input_file=target.name,mask_file=mask_path.name,
                 normalized_keypoints=points[0].detach().cpu().tolist())
 

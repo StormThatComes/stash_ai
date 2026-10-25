@@ -25,7 +25,7 @@ def analyse(db, config, identities, scope, namespace):
                copresent=_cooccurs(db,*identities,config),
                reflection_threshold=config.data['recognition']['cooccurrence_merge_threshold'])
     # Missing or insufficient evidence needs collection, never a fabricated vote.
-    if any(b in proof['blockers'] for b in ('missing_person_evidence','insufficient_independent_support')):
+    if any(b in proof['blockers'] for b in ('missing_person_evidence','insufficient_independent_support','missing_original_core_evidence')):
         result['unresolved_reasons']=proof['blockers']
         return result
     changes={}

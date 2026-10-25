@@ -92,7 +92,8 @@ def load_encoder(config):
             cfg.update(start_from='', pretrained_path='', freeze=True)
             model = model_type.from_config(OmegaConf.create(cfg))
         load_verified_weights(model, directory / 'model.pth')
-        return SapiensIDV1Encoder(model, None, device=config.data['models']['device'])
+        return SapiensIDV1Encoder(model, None, device=config.data['models']['device'],
+            max_batch_size=config.data['sapiensid']['execution']['batch_size'])
     except ImportError as error:
         raise RuntimeError('Install requirements-sapiensid.txt in the existing CPU/GPU environment.') from error
 

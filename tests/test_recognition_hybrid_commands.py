@@ -79,3 +79,69 @@ def test_replay_refuses_changed_person_contract(tmp_path):
     data=plain(config.data);data['sapiensid']['pose']['sha256']='2'*64
     with pytest.raises(ValueError,match='contracts'):
         replay(config,{'bad':replace(config,data=data)})
+
+
+def test_real_run_collection_merge_publication_repeat_and_maintenance(tmp_path,monkeypatch):
+    from tests.test_recognition_rebuild import library,changed,two_people
+    from tests.test_recognition_run import run
+    from tests.test_recognition_person_collection import Person
+    from stash_ai.recognition.config import plain
+    from stash_ai.recognition.run import execute
+    from stash_ai.recognition.sync_publications import execute as sync
+    from stash_ai.recognition.cleanup_orphans import execute as cleanup
+    from tests.test_recognition_model_cleanup import inventory,cleanup_args
+    from tests.test_recognition_publication_sync import args as sync_args
+    from types import SimpleNamespace
+    config,client,services,backends=library(tmp_path,monkeypatch,two_people())
+    config=changed(config,recognition={'match_threshold':.95})
+    assert run(config,services,'1','2')==0
+    originals={s:client.links[s][-1] for s in ('1','2')}
+    assert originals['1']!=originals['2']
+    data=plain(config.data);data['sapiensid']['enabled']=True
+    config=replace(config,data=data)
+    models=[]
+    def factory(*args,**kwargs):
+        model=Person();models.append(model);return model
+    monkeypatch.setattr('stash_ai.recognition.sapiensid_backend.SapiensIDFaces',factory)
+    loaded=len(backends)
+    assert run(config,services,'1','2')==0
+    assert len(backends)==loaded  # Collection reused all face embeddings.
+    assert all(m.closed for m in models)
+    assert client.links['1']==['77',originals['1']] and client.links['2']==[originals['1']]
+    assert not any(w[0]=='merge' for w in client.writes)
+    assert originals['2'] in client.profiles
+    writes=list(client.writes);calls=sum(m.calls for m in models)
+    assert run(config,services,'1','2')==0
+    assert client.writes==writes and sum(m.calls for m in models)==calls
+    # Maintenance must neither initialize the supplemental encoder nor collect media.
+    monkeypatch.setattr('stash_ai.recognition.sapiensid_backend.SapiensIDFaces',lambda *a,**k:pytest.fail('maintenance loaded model'))
+    assert execute(SimpleNamespace(command='portraits',scene_id=['1','2'],all_scenes=False,
+                                  performer_id=None,progress_style='off'),config,services=services)==0
+    assert sync(sync_args(apply=True),config,services=services)==0
+    inventory(client)
+    assert cleanup(cleanup_args(apply=True),config,services=services)==0
+    assert not any(w[0]=='delete' for w in client.writes)
+
+
+def test_identity_export_preserves_body_pixels_and_attachment_role(tmp_path):
+    from io import BytesIO
+    from PIL import Image
+    from stash_ai.recognition.hybrid_merge import apply
+    from stash_ai.recognition.identity_report import export
+    config,people=prepared(tmp_path)
+    with Image.new('RGB',(40,80),(10,20,30)) as image:
+        buffer=BytesIO();image.save(buffer,format='PNG')
+    with FaceDatabase(config.database) as state:
+        db=state.connection
+        db.execute('UPDATE person_evidence SET crop=?',(buffer.getvalue(),));db.commit()
+        apply(state,[dict(scan=r['id'],scene=r['scene']) for r in db.execute('SELECT * FROM scans')],config)
+    before=config.database.read_bytes()
+    result=export(config,tmp_path/'export',identity_id=people[0])
+    assert result['summary']['roles']['attachment']==3
+    assert sum(s['current_reference_selected'] for s in result['samples'])==3
+    for sample in result['samples']:
+        body=sample['person_evidence']['image']
+        assert body['status']=='exported'
+        with Image.open(tmp_path/'export'/body['file']) as image:
+            assert image.size==(40,80) and image.getpixel((0,0))==(10,20,30)
+    assert config.database.read_bytes()==before

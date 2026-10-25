@@ -77,3 +77,34 @@ def test_production_rebuild_and_repeat_keep_hybrid_assignment(tmp_path):
         rebuild_selected(state,selected,config)
         assert list(map(tuple,db.execute('SELECT * FROM members ORDER BY observation')))==before
         assert db.execute('SELECT COUNT(*) FROM identity_merges').fetchone()[0]==1
+
+
+def test_later_merge_cannot_hide_an_original_source_contradiction(tmp_path):
+    import math
+    from stash_ai.recognition.hybrid_evidence import report
+    vectors=[[math.cos(a),math.sin(a),0,0] for a in (0,.8,-.8)]
+    config,people=seeded(tmp_path,vectors=vectors)
+    data=plain(config.data);data['sapiensid']['enabled']=True
+    config=replace(config,data=data)
+    with FaceDatabase(config.database) as state:
+        db=state.connection
+        db.execute('UPDATE candidates SET policy=?',(matching_policy(config),))
+        for row in db.execute('SELECT observation,person FROM members').fetchall():
+            if row['person']!=people[2]:save(db,row['observation'],contract(config),{},np.ones(4096))
+        db.commit()
+        selected=[dict(scan=r['id'],scene=r['scene']) for r in db.execute('SELECT * FROM scans')]
+        apply(state,selected,config)
+        assert db.execute('SELECT COUNT(*) FROM identity_merges').fetchone()[0]==1
+        for row in db.execute('SELECT observation FROM members WHERE person=?',(people[2],)).fetchall():
+            save(db,row['observation'],contract(config),{},np.ones(4096))
+        db.commit()
+        result=apply(state,selected,config)
+        assert db.execute('SELECT COUNT(DISTINCT person) FROM members').fetchone()[0]==2
+        assert 'face_contradiction' in result['pairs'][0]['blockers']
+        assert sum(map(len,result['pairs'][0]['guard_observations']))==3
+        assert min(result['pairs'][0]['support'])==3  # Former source supplies no new votes.
+        guard=result['pairs'][0]['guard_observations']
+        missing=next(ids[0] for ids in guard if ids)
+        db.execute('DELETE FROM person_evidence WHERE observation=?',(missing,));db.commit()
+        assert 'missing_original_core_evidence' in report(db,config,'scope',
+            db.execute('SELECT namespace FROM people LIMIT 1').fetchone()[0])['pairs'][0]['blockers']

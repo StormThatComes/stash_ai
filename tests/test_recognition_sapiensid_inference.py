@@ -160,3 +160,37 @@ def test_verified_checkpoint_rejects_nonweights_without_unsafe_pickle(tmp_path):
     kwargs = dict(expected_size=len(data), expected_sha256=hashlib.sha256(data).hexdigest())
     with pytest.raises(ValueError, match='only named tensors'):
         load_verified_weights(PersonModel(), path, **kwargs)
+
+
+def test_associated_cpu_batch_matches_scalar_inputs_and_features():
+    class Measured(PersonModel):
+        def forward(self, images, *, foreground_masks, ldmks):
+            result=super().forward(images,foreground_masks=foreground_masks,ldmks=ldmks)
+            result[:,1]=images.mean(dim=(1,2,3))
+            result[:,2]=ldmks[:,0,0]
+            return result
+    model=Measured();adapter=SapiensIDV1Encoder(model,None,device='cpu',max_batch_size=2)
+    with sample(size=(80,145)) as first,sample((160,30,60),(151,80)) as second:
+        people=[(first,[[20,20]]*22),(second,[[30,30]]*22)]
+        expected=[adapter.embed_person(image,points) for image,points in people]
+        actual=adapter.embed_person_batch(people)
+        np.testing.assert_allclose(actual,expected,rtol=1e-6,atol=1e-7)
+        assert model.call_record[-1]==(2,3,384,384)
+        with pytest.raises(ValueError,match='max_batch_size'):adapter.embed_person_batch(people*2)
+    adapter.close()
+
+
+def test_person_alignment_audit_exports_measured_inputs_and_private_pixels(tmp_path):
+    import os
+    from stash_ai.recognition.person_collection import audit_input
+    from stash_ai.recognition.sapiensid_v1 import prepare_person_input
+    class Detector:
+        def observation_quality(self,image,face):return dict(identity_rejection=None)
+        def audit_input(self,image,face):return prepare_person_input(image,[[20,20]]*22)
+    with sample() as image:
+        result=audit_input(Detector(),image,None,tmp_path/'face')
+    assert len(result['normalized_keypoints'])==22
+    for key in ('input_file','mask_file'):
+        path=tmp_path/result[key]
+        with Image.open(path) as image:assert image.size==(384,384)
+        if os.name=='posix':assert path.stat().st_mode & 0o777==0o600

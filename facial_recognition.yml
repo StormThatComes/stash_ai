@@ -117,3 +117,7 @@ storage:
   max_crop_bytes: 1048576      # JPEG byte budget (minimum 1024); adapts quality/size, including retained scan crops.
 names:
   file: null                  # Optional instance-scoped performer_names.yml.
+# Optional supplemental body identity evidence. Face recognizer stays unchanged.
+# See docs/sapiensid-hybrid.md for verified assets, calibration and all settings.
+sapiensid:
+  enabled: false
