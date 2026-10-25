@@ -42,10 +42,7 @@ def verified(left, right, a, b, aspect_a, aspect_b):
 
 def aliases(db):
     import sqlite3
-    scratch = sqlite3.connect(':memory:')
-    scratch.row_factory = sqlite3.Row
-    scratch.execute('CREATE TEMP TABLE pixel_witnesses(signature BLOB, fingerprint TEXT PRIMARY KEY, pixels BLOB, embedding BLOB, aspect REAL)')
-    scratch.execute('CREATE INDEX pixel_witness_signature ON pixel_witnesses(signature)')
+    scratch = None
     rows = candidates = None
     try:
         rows = db.execute("SELECT id,quality,embedding FROM observations WHERE rejected IS NULL "
@@ -61,6 +58,11 @@ def aliases(db):
                     continue
                 pixels = np.frombuffer(raw, dtype='uint8')
                 sample = np.frombuffer(row['embedding'], dtype='<f4')
+                if scratch is None:
+                    scratch = sqlite3.connect(':memory:')
+                    scratch.row_factory = sqlite3.Row
+                    scratch.execute('CREATE TABLE pixel_witnesses(signature BLOB, fingerprint TEXT PRIMARY KEY, pixels BLOB, embedding BLOB, aspect REAL)')
+                    scratch.execute('CREATE INDEX pixel_witness_signature ON pixel_witnesses(signature)')
                 bucket = signature(pixels)
                 alias = None
                 candidates = scratch.execute('SELECT * FROM pixel_witnesses WHERE signature=? ORDER BY fingerprint', (bucket,))
@@ -78,9 +80,9 @@ def aliases(db):
                 elif alias != fingerprint:
                     yield fingerprint, alias
     finally:
-        if rows is not None: rows.close()
-        if candidates is not None: candidates.close()
-        scratch.close()
+        from stash_ai.runtime.cleanup import cleanup
+        cleanup([('close pixel alias reader', resource.close)
+                 for resource in (rows, candidates, scratch) if resource is not None])
 
 
 # Increment when the pixel verification contract changes.
