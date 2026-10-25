@@ -199,6 +199,10 @@ def audit_scene(source, detector, config, scene_id, directory, *, maximum=None, 
                         coverages.append(measures['source_coverage'])
                     name = f'cue-{index:05d}-face-{face_index:03d}'
                     suffixes = _images(image, face, matrix, mask, subdir / name)
+                    person_input = None
+                    if hasattr(detector, 'audit_input'):
+                        from .person_collection import audit_input
+                        person_input = audit_input(detector,image,face,subdir/name)
                     samples.append({
                         'cue_index': index, 'seconds': float(cue.start),
                         'face_index': face_index, 'detection_score': float(face.score),
@@ -208,6 +212,7 @@ def audit_scene(source, detector, config, scene_id, directory, *, maximum=None, 
                                                'landmarks_inside', 'complete', 'alignment_valid')},
                         'detection_rejection': None,
                         'geometry': measures,
+                        'person_input': person_input,
                         'images': [f'scene-{scene_id}/{name}{suffix}' for suffix in suffixes],
                     })
     return {
@@ -247,6 +252,9 @@ def execute(args, config, *, services=None, detector_factory=YuNetDetector):
     directory = Path(args.output_dir).expanduser()
     if directory.exists():
         raise FileExistsError(f'Alignment audit output directory already exists: {directory}')
+    if config.data['sapiensid']['enabled'] and detector_factory is YuNetDetector:
+        from .sapiensid_backend import SapiensIDFaces
+        detector_factory = lambda config, paths: SapiensIDFaces(config,paths,load_identity=False)
     url = os.getenv('STASH_URL', 'http://localhost:9999')
     key = os.getenv('STASH_API_KEY', '')
     with closing(services.client(url=url, api_key=key,

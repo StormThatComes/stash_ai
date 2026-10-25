@@ -1,0 +1,8 @@
+# Install after requirements-cpu.txt or requirements-gpu.txt; reuse their torch wheels.
+# Inference-only extras, rather than the upstream training requirements.
+timm>=0.9.7,<2
+omegaconf>=2.3,<3
+easydict>=1.10,<2
+pandas>=2.2,<4
+matplotlib>=3.8,<4
+ultralytics>=8.3,<9
