@@ -42,13 +42,16 @@ def retain(db,config,scope,namespace,identities):
         faces=[];persons=[];missing=[];face_missing=[]
         face_map=dict(zip(identity.observations,identity.faces))
         body_map=dict(zip(identity.person_observations,identity.persons))
-        for identifier in sorted(set(ids)|set(body_ids)):
-            row=db.execute('SELECT o.*,e.status AS person_status,e.embedding AS person_embedding FROM observations o '
-                'JOIN scans s ON s.id=o.scan JOIN members m ON m.observation=o.id '
-                'LEFT JOIN person_evidence e ON e.observation=o.id AND e.contract=? '
-                "WHERE o.id=? AND m.person=? AND s.scope=? AND s.namespace=? AND s.status='complete' "
-                'AND o.rejected IS NULL AND '+admission,
-                (expected,identifier,identity.person,scope,namespace)).fetchone()
+        wanted=sorted(set(ids)|set(body_ids))
+        retained={row['id']:row for row in db.execute(
+            'SELECT o.id,o.dimensions,o.embedding,e.status AS person_status,e.embedding AS person_embedding FROM observations o '
+            'JOIN scans s ON s.id=o.scan JOIN members m ON m.observation=o.id '
+            'LEFT JOIN person_evidence e ON e.observation=o.id AND e.contract=? '
+            "WHERE o.id IN (SELECT value FROM json_each(?)) AND m.person=? AND s.scope=? AND s.namespace=? AND s.status='complete' "
+            'AND o.rejected IS NULL AND '+admission,
+            (expected,encoded(wanted),identity.person,scope,namespace))} if wanted else {}
+        for identifier in wanted:
+            row=retained.get(identifier)
             if row is None:
                 missing.append(identifier)
                 if identifier in ids:face_missing.append(identifier)

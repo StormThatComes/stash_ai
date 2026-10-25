@@ -16,22 +16,20 @@ def body_vector(row):
     return value
 
 
-def body_rows(db, config, scope, namespace, owner):
+def _rows(db, config, scope, namespace, owners):
     admission=reference_admission(config.data['clustering'],scan_policy=scan_identity(config,namespace),
                                   compatibility=fallback_sql(db,config,namespace))
-    sql=('SELECT o.id,o.scan,o.seconds,o.geometry,o.quality,s.scene,4096 AS dimensions,e.embedding,e.metadata AS person_metadata '
+    sql=('SELECT m.person AS owner,o.id,o.scan,o.seconds,o.geometry,o.quality,s.scene,4096 AS dimensions,e.embedding,e.metadata AS person_metadata '
         'FROM members m JOIN observations o ON o.id=m.observation JOIN scans s ON s.id=o.scan '
         'JOIN person_evidence e ON e.observation=o.id AND e.contract=? '
-        "WHERE m.person=? AND s.scope=? AND s.namespace=? AND s.status='complete' "
+        "WHERE m.person IN (SELECT value FROM json_each(?)) AND s.scope=? AND s.namespace=? AND s.status='complete' "
         "AND o.rejected IS NULL AND e.status='ready' AND "+strict_sql()+' AND '+admission+
-        ' ORDER BY CAST(s.scene AS INTEGER),s.scene,o.cue,o.seconds,o.id')
-    args=(contract(config),owner,scope,namespace)
-    records=[];used=0
-    for row in db.execute(sql,args):
-        used+=2*len(row['embedding'])+len(row['quality'])+len(row['person_metadata'])+1024
-        if used>config.data['sapiensid']['execution']['reference_bytes']:
-            raise ValueError('SapiensID reference_bytes budget exceeded by mode witnesses.')
-        records.append(row)
+        ' ORDER BY m.person,CAST(s.scene AS INTEGER),s.scene,o.cue,o.seconds,o.id')
+    args=(contract(config),encoded(list(owners)),scope,namespace)
+    return db.execute(sql,args)
+
+
+def _select(records,config):
     chosen=select(records,config.data['clustering']['max_samples_per_person'],vector_reader=body_vector,quality_reader=body_quality)
     wanted={i for i,_ in chosen}
     from .hybrid_modes import body_modes
@@ -42,6 +40,25 @@ def body_rows(db, config, scope, namespace, owner):
     for row in (records if result.modes else result):votes.add(row)
     result.support=len(votes)
     return result
+
+
+def catalogue_rows(db,config,scope,namespace,owners):
+    """One ordered SQL cursor for all owners; budget complete mode witnesses."""
+    from itertools import groupby
+    result={};used=0
+    for owner,rows in groupby(_rows(db,config,scope,namespace,owners),key=lambda r:r['owner']):
+        records=[]
+        for row in rows:
+            used+=2*len(row['embedding'])+len(row['quality'])+len(row['person_metadata'])+1024
+            if used>config.data['sapiensid']['execution']['reference_bytes']:
+                raise ValueError('SapiensID reference_bytes budget exceeded by mode witnesses.')
+            records.append(row)
+        result[owner]=_select(records,config)
+    return result
+
+
+def body_rows(db,config,scope,namespace,owner):
+    return catalogue_rows(db,config,scope,namespace,[owner]).get(owner,BodyRows())
 
 
 class BodyRows(list):
