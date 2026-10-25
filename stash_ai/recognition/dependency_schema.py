@@ -64,12 +64,26 @@ TRIGGERS=triggers()
 SCHEMA=TABLE_SCHEMA+'\n'+';\n'.join(TRIGGERS.values())+';\n'
 
 
+EXTRA_TRIGGERS={}
+for table in ('person_evidence','evidence_thumbnails'):
+    for event in ('INSERT','UPDATE','DELETE'):
+        sides=('new',) if event=='INSERT' else ('old',) if event=='DELETE' else ('old','new')
+        body=[_bump('global',"'*'")]
+        if table=='person_evidence':
+            for side in sides:body.append(_bump('scan',f'(SELECT scan FROM observations WHERE id={side}.observation)'))
+        name='recognition_version_'+table+'_'+event.lower()
+        EXTRA_TRIGGERS[name]=f'CREATE TRIGGER {name} AFTER {event} ON {table} BEGIN '+''.join(body)+' END'
+EXTRA_SCHEMA=';\n'.join(EXTRA_TRIGGERS.values())+';\n'
+
 def validate_triggers(db, *, required=False):
     """Reject unknown/mutated executable schema, including spoofed names."""
+    accepted={**TRIGGERS,**EXTRA_TRIGGERS}
     rows=list(db.execute("SELECT type,name,sql FROM sqlite_master WHERE type IN ('trigger','view')"))
     normalize=lambda value:' '.join(value.strip().rstrip(';').split())
     for kind,name,sql in rows:
-        if kind!='trigger' or name not in TRIGGERS or normalize(sql)!=normalize(TRIGGERS[name]):
+        if kind!='trigger' or name not in accepted or normalize(sql)!=normalize(accepted[name]):
             raise ValueError('Unsupported facial recognition schema triggers or views.')
-    if required and {row[1] for row in rows}!=set(TRIGGERS):
+    expected=set(TRIGGERS)
+    if db.execute("SELECT 1 FROM sqlite_master WHERE name='evidence_thumbnails'").fetchone():expected.update(EXTRA_TRIGGERS)
+    if required and not expected<={row[1] for row in rows}:
         raise ValueError('Incomplete facial recognition dependency triggers; restore a consistent backup.')

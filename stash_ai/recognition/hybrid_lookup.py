@@ -22,6 +22,9 @@ class Lookup:
         required+=2*64*64*8
         if required>budget:
             raise ValueError('SapiensID reference_bytes budget exceeded by lookup working set.')
+        from .memory_size import Reservation
+        self.reservation=Reservation(budget)
+        self.reservation.set(required)
         self.faces=np.empty((len(identities),face_dim),dtype='float64')
         self.persons=np.empty((len(identities),person_dim),dtype='float64')
         for index,item in enumerate(identities):

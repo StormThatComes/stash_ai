@@ -86,7 +86,8 @@ def save_votes(cache, identity, votes):
     if identity is not None and all(type(vote['order'][0]) is int and type(vote['order'][1]) is int
                                     and isinstance(vote['order'][2], str) for vote in votes):
         key, owners = identity
-        cache.cache.put(key, (votes, weak_owners(owners)), len(votes)*512 +
+        from .memory_size import size
+        cache.cache.put(key, (votes, weak_owners(owners)), size(votes) +
                         sum(sample.nbytes+128 for group in owners for sample in group))
 
 

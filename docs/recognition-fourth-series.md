@@ -10,7 +10,7 @@ work is implemented.
 | 1 | Representative selection and independent evidence | 1, 3, 8, 9 | Implemented; focused and recognition suite validated |
 | 2 | Supplemental evidence and preserved appearance banks | 2, 4, 5, 10 | Implemented; 47 focused tests passed |
 | 3 | Conflict resolution and automatic consolidation | 6, 7, 11 | Implemented; 34 focused tests passed |
-| 4 | Incremental dependencies, compact data and memory | 12, 19, 20 | Pending |
+| 4 | Incremental dependencies, compact data and memory | 12, 19, 20 | Implemented; 43 focused tests passed |
 | 5 | Parallel matching and change-driven recovery | 13, 17, 18 | Pending |
 | 6 | Shared VTT inputs and CPU/inference pipeline | 14, 15, 16 | Pending |
 
@@ -43,3 +43,10 @@ PR3 uses complete, outsider-separated nonoverlapping subgroups, retries ambiguou
 and co-present strict claims, and journals missing-scope consolidation requests.
 The journal never expands publication scope: a later run selecting all required
 scans automatically revalidates and drains it. No stale proof is executed.
+
+PR4 adds schema v7 with content-addressed thumbnail BLOBs for new scans, keeping
+legacy inline values readable. Replay and offline trials copy only referenced
+BLOBs. Audited person/thumbnail triggers protect cached per-scan hybrid hashes.
+Pixel comparisons share a content-keyed run cache; hybrid arrays reserve shared
+working memory and support prefixes account for retained metadata. Migration,
+read-only compatibility and direct SQL invalidation are covered by tests.

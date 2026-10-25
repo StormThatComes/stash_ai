@@ -57,6 +57,8 @@ def _inserted(db, sql, rows):
 
 def _copy_observations(db, replay, scan, *, retain_pose=False):
     for batch in _batches(_observations(db, scan)):
+        from .pixel_storage import copy_rows
+        copy_rows(db,replay,batch)
         # Source/rect are consumed by sample_key on the authoritative row.
         # Only the pose measurement is needed by opt-in pose-aware matching; never copy JPEGs.
         replay.executemany('INSERT INTO observations VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
