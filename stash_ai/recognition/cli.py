@@ -17,6 +17,8 @@ class RecognitionParser(argparse.ArgumentParser):
         if result.command == 'run' and not (result.scene_id or result.all_scenes):
             self.error('recognition run requires --scene-id or --all-scenes')
         if result.command == 'report-merge':
+            if result.yaml_output and not result.solve:
+                self.error('--yaml-output requires --solve')
             for selector in ('performer_id', 'identity_id'):
                 values = getattr(result, selector)
                 if values is not None and len(values) < 2:
@@ -153,6 +155,7 @@ def parser():
     merge_report.add_argument('--faces-db', type=Path, help='Existing face SQLite database.')
     merge_report.add_argument('--scope', help='Restrict both identities to this Stash scope; required if a performer ID occurs in multiple scopes.')
     merge_report.add_argument('--output', type=Path, help='New JSON report path; stdout if omitted. Includes copyable YAML patches.')
+    merge_report.add_argument('--yaml-output', type=Path, help='New complete configuration for a replay-verified solution; requires --solve.')
     merge_report.add_argument('--solve', action='store_true', help='Search configurations using full replay of merge goals.')
     merge_report.add_argument('--max-trials', type=int, default=64, help='Replay budget including baseline.')
     merge_report.add_argument('--simulate', action='store_true',
