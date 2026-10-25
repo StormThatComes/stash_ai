@@ -66,7 +66,7 @@ def recover(db,groups,history,config,bindings,*,selected_only=False,source_ids=N
         def insufficient(pending=False):
             state=" AND c.status='pending' AND c.person=q.target" if pending else ''
             from .query_support import eligible
-            query=('SELECT o.id,o.scan,o.seconds,o.dimensions,o.embedding,q.source,q.target,q.mode,q.medoids FROM cohort_claims q '
+            query=('SELECT o.id,o.scan,o.seconds,o.quality,o.dimensions,o.embedding,q.source,q.target,q.mode,q.medoids FROM cohort_claims q '
                 'JOIN observations o ON o.id=q.observation JOIN candidates c ON c.id=q.candidate WHERE 1=1'+state+
                 ' ORDER BY o.embedding,o.geometry,o.id')
             supported=eligible(lambda:db.execute(query),config,key=lambda r:(r['source'],r['target'],r['mode']),prototype=lambda r:r['medoids'],

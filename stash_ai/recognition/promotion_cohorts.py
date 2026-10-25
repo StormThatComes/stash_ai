@@ -63,7 +63,8 @@ class PromotionCohorts:
             if item is None:
                 item = _Cohort(_Cluster(pose_view(row['geometry']), row['id']), parents, query)
                 slots.append(item)
-            if (row['scan'], row['seconds']) in item.cluster.cues:
+            from .independent_evidence import unit
+            if unit(row) in item.cluster.cues or (row['scan'], row['seconds']) in item.cluster.cue_times:
                 continue
             before = len(item.cluster.examples)
             item.cluster.add(witness, query)

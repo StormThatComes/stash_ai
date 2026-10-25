@@ -10,6 +10,7 @@ import json
 from .run_cache import metadata
 import math
 
+from .independent_evidence import Votes
 from .clustering import Group, vector
 from .progress import tracking
 from .replay_addresses import address
@@ -67,7 +68,10 @@ class _Cluster:
     first: str
     examples: list = field(default_factory=list)
     observations: list = field(default_factory=list)
-    cues: set = field(default_factory=set)
+    cues: Votes = field(default_factory=Votes)
+    centre_count: int = 0
+    cue_times: dict = field(default_factory=dict)
+    cue_representatives: dict = field(default_factory=dict)
     qualities: list = field(default_factory=list)
     total: object = field(default=None,repr=False)
     pose_hints: set = field(default_factory=set)
@@ -84,9 +88,30 @@ class _Cluster:
     def add(self, row, query, maximum=8):
         from .independent_evidence import unit
         cue = unit(row)
-        if cue in self.cues:
+        stamp = row['scan'], row['seconds']
+        self.cues.add(row)
+        previous = self.cue_representatives.get(cue, self.cue_times.get(stamp))
+        if previous is not None:
+            from .reference_selection import quality
+            identifier, score = previous
+            new_score = quality(row['quality']) if 'quality' in row.keys() else 0.
+            if identifier in self.observations and new_score > score:
+                index = self.observations.index(identifier)
+                self.total += query.astype('float64') - self.examples[index].astype('float64')
+                self.examples[index], self.observations[index], self.qualities[index] = query, row['id'], new_score
+                replacement = row['id'], new_score
+                self.cue_representatives[cue] = self.cue_times[stamp] = replacement
+                for key, value in list(self.cue_representatives.items()):
+                    if value[0] == identifier:
+                        self.cue_representatives[key] = replacement
+                for key, value in list(self.cue_times.items()):
+                    if value[0] == identifier:
+                        self.cue_times[key] = replacement
             return
-        self.cues.add(cue)
+        from .reference_selection import quality
+        value = row['id'], quality(row['quality']) if 'quality' in row.keys() else 0.
+        self.cue_representatives[cue] = self.cue_times[stamp] = value
+        self.centre_count += 1
         if self.scene_minimum and 'scene' in row.keys():
             witnesses=self.scene_witnesses.setdefault(row['scene'],[])
             if len(witnesses)<self.scene_minimum:
@@ -104,7 +129,7 @@ class _Cluster:
         if maximum>8:
             maximum=min(maximum,max(8,math.ceil(2*math.sqrt(len(self.cues)))))
         if len(self.examples)>maximum:
-            centre=self.total/len(self.cues)
+            centre=self.total/self.centre_count
             first=max(range(len(self.examples)),key=lambda i:(float(np.dot(self.examples[i],centre))+.01*self.qualities[i],-i))
             chosen=[first]
             while len(chosen)<maximum:
@@ -118,7 +143,7 @@ class _Cluster:
     def medoid(self):
         import numpy as np
         # Every independent confirmed cue contributes, including later evidence.
-        scores=[float(np.dot(sample,self.total/len(self.cues)))+.01*self.qualities[i]
+        scores=[float(np.dot(sample,self.total/self.centre_count))+.01*self.qualities[i]
                 for i,sample in enumerate(self.examples)]
         index=max(range(len(scores)),key=lambda i:scores[i])
         return self.examples[index],self.observations[index]

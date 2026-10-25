@@ -19,7 +19,7 @@ from .scoring import comparisons, scoped
 from .evidence_cache import current as evidence, scoped as evidence_owned
 from .parallel_scores import scored_rows, contributions
 
-MATCHING_FORMAT = 44
+MATCHING_FORMAT = 45
 
 
 def vector(row):
@@ -363,9 +363,13 @@ def cluster_scene(database, scan, config, *, progress=None, _cold_replay=False):
         resolve_pending(db, policy, config, scans=(scan,))
         people = [row[0] for row in db.execute('SELECT DISTINCT person FROM candidates '
                                                 "WHERE scan=? AND policy=? AND status='pending'", (scan, policy))]
-        support_counts = dict(db.execute('SELECT c.person,COUNT(DISTINCT o.seconds) FROM candidates c '
+        from .independent_evidence import Votes
+        support_votes = {}
+        for row in db.execute('SELECT c.person,o.scan,o.seconds,o.quality FROM candidates c '
             f"JOIN observations o ON o.id={address(db, 'c')} "
-            'WHERE c.scan=? AND c.policy=? GROUP BY c.person', (scan, policy)))
+            'WHERE c.scan=? AND c.policy=? ORDER BY o.cue,o.id', (scan, policy)):
+            support_votes.setdefault(row['person'], Votes()).add(row)
+        support_counts = {person:len(votes) for person,votes in support_votes.items()}
         with tracking(
             people,
             'Resolve identity support',

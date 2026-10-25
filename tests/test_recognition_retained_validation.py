@@ -40,7 +40,9 @@ def test_retained_padding_is_rechecked_under_new_geometry_contract_without_infer
     from stash_ai.recognition.models import checked_detection
     from tests.helpers.recognition import FACE, Backend, MediaClient
 
-    config = cluster_config(tmp_path)
+    # This fixture repeats identical pixels; this test concerns geometry,
+    # not independent identity support.
+    config = changed(cluster_config(tmp_path), recognition={'min_identity_support': 1})
     client = MediaClient()
     with FaceDatabase(config.database) as db, SpriteInput(client, client.scene, config) as source:
         identifier, reused = scan_scene(db, 'scope', client.scene, config, 'ns', source, Backend)

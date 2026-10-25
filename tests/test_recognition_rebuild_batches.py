@@ -19,7 +19,7 @@ def test_support_uses_independent_times_and_avoids_per_observation_member_reads(
         result = cluster_scene(database, identifier, config)
         assert sorted(row['observations'] for row in result if row['status'] == 'accepted') == [3, 3]
         assert not any(sql.startswith('SELECT person FROM members WHERE observation=') for sql in statements)
-        assert sum('COUNT(DISTINCT o.seconds)' in sql for sql in statements) == 1
+        assert sum(sql.startswith('SELECT c.person,o.scan,o.seconds,o.quality FROM candidates c ') for sql in statements) == 1
 
 
 def test_bounded_result_collection_keeps_empty_scans_and_null_person_groups(tmp_path):

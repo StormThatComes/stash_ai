@@ -19,3 +19,24 @@ def test_repeated_pixels_cannot_supply_multiple_query_votes(tmp_path):
 def test_equal_vectors_without_pixel_proof_remain_independent():
     assert unit(dict(scan='s',seconds=1)) != unit(dict(scan='s',seconds=2))
     assert unit(dict(scan='s',seconds=1,quality='{}')) == unit(dict(scan='s',seconds=1))
+
+
+def test_votes_require_both_distinct_times_and_pixels_in_every_order():
+    from itertools import permutations
+    from stash_ai.recognition.independent_evidence import count
+    rows = [dict(scan='s',seconds=t,quality=json.dumps({'evidence_crop_sha256':p*64}))
+            for t,p in [(1,'a'),(2,'a'),(3,'b'),(3,'c')]]
+    assert {count(order) for order in permutations(rows)} == {2}
+    assert count([dict(scan='s',seconds=1),dict(scan='s',seconds=1)]) == 1
+
+
+def test_duplicate_can_improve_representative_without_extra_vote():
+    from stash_ai.recognition.view_prototypes import _Cluster
+    slot=_Cluster('other','first')
+    sample=np.asarray([1.,0.],dtype='<f4')
+    base=dict(scan='s',seconds=1,quality=json.dumps(dict(pixels=32,sharpness=1)))
+    slot.add(dict(base,id='first'),sample)
+    slot.add(dict(base,id='better',quality=json.dumps(dict(pixels=256,sharpness=100))),sample)
+    assert slot.observations == ['better']
+    assert len(slot.cues) == 1
+    assert np.array_equal(slot.total,sample)
