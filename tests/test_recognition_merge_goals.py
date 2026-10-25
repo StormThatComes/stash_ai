@@ -27,3 +27,12 @@ def test_final_assignments_reject_bridges_and_lost_members():
     assert not assess(goals, obs, {}, dict(a='x', b='x', c='x'))['admissible']
     assert not assess(goals, obs, {}, dict(a='x', b=None, c='y'))['admissible']
     assert not assess(goals, {'a':'1','c':'1'}, {}, dict(a='x', c='y'))['admissible']
+
+
+def test_objective_balances_sets_and_rejects_coverage_loss():
+    from stash_ai.recognition.merge_goals import objective
+    def status(a,b,admissible=True):
+        return dict(admissible=admissible, fully_solved=False, groups=[dict(complete_fraction=x,
+            largest_complete_performers=int(x*10), fragments=2) for x in (a,b)])
+    assert objective(status(.6,.6)) > objective(status(1.,.2))
+    assert objective(status(.6,.6)) > objective(status(1.,1.,False))
