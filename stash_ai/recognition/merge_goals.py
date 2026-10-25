@@ -45,12 +45,8 @@ def execute(args, config):
         elif args.simulate:
             result['simulation'] = evaluate(config, result, db)
             result['status'] = 'baseline_evaluated'
-    output = json.dumps(result, indent=2) + '\n'
-    if args.output:
-        with args.output.open('x', encoding='utf-8') as stream:
-            stream.write(output)
-    else:
-        print(output, end='')
+    from .merge_goal_output import export
+    export(config, result, args.output, args.yaml_output)
     return 0
 
 
