@@ -37,7 +37,7 @@ def canonicalize(db):
             "ORDER BY json_extract(quality,'$.evidence_pixel_sha256'),id")
         with tracking(rows, 'Verify duplicate VTT crops', unit='observation') as tracked:
             for row in tracked:
-                record = metadata(row['quality'])
+                record = dict(metadata(row['quality']))
                 raw = bytes.fromhex(record['evidence_thumbnail'])
                 fingerprint = record.get('evidence_pixel_sha256')
                 if len(raw) != 3072 or not fingerprint:

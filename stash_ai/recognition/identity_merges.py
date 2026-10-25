@@ -143,6 +143,9 @@ def _supporting_cues(db, selected, policy, source, target, components, config, m
       (source, target, policy, selected['scope'], selected['namespace'],
        selected['policy_sha']), selected)
     for row, mask in matching_rows(rows, (components[target], components[source]), config):
+        from .independent_evidence import unit
+        if unit(row) in evidence.edges.get((row['scan'],row['seconds']), ()):
+            continue
         if mask is None:
             query = cache.vector(row) if cache is not None else vector(row)
             matched = (_matches(components[target], query, config, cache=cache, observation=row['id'])

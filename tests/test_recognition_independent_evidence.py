@@ -75,3 +75,22 @@ def test_pixel_fingerprint_does_not_depend_on_jpeg_budget():
         assert first['evidence_pixel_sha256'] == second['evidence_pixel_sha256']
     finally:
         image.close()
+
+
+def test_compression_aliases_use_mutable_replay_metadata_with_run_cache(tmp_path):
+    import sqlite3
+    from stash_ai.recognition.evidence_pixels import canonicalize
+    from stash_ai.recognition.run_cache import scope
+    pixels=np.random.default_rng(4).integers(10,245,3072,dtype='uint8')
+    db=sqlite3.connect(':memory:');db.row_factory=sqlite3.Row
+    try:
+        db.execute('CREATE TABLE observations(id TEXT,quality TEXT,embedding BLOB,rejected TEXT)')
+        for identifier,values in [('a',pixels),('b',pixels+1)]:
+            db.execute('INSERT INTO observations VALUES (?,?,?,NULL)',(identifier,json.dumps(dict(
+                evidence_pixel_sha256=identifier*64,evidence_thumbnail=values.tobytes().hex(),evidence_aspect=1.)),
+                np.array([1.,0.],dtype='<f4').tobytes()))
+        with scope(setup(tmp_path)):
+            canonicalize(db)
+        assert {json.loads(row[0])['evidence_pixel_sha256'] for row in db.execute('SELECT quality FROM observations')}=={'a'*64}
+    finally:
+        db.close()
