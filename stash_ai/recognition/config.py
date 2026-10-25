@@ -12,7 +12,9 @@ from types import MappingProxyType
 def defaults():
     # Conservative starting policies; these are not calibrated probabilities or
     # claims about accuracy on an operator's VTT thumbnails.
+    from .person_signal import defaults as person_defaults
     return {
+        'sapiensid': person_defaults(),
         'version': 1,
         'models': {'detector': 'scrfd_10g', 'recognizer': 'sface', 'device': 'cuda',
                    'directory': 'recognition_models', 'download_missing': True},
@@ -128,6 +130,8 @@ def _number(value, name, low, high, *, integer=False):
 
 
 def validate(data):
+    from .person_signal import validate as validate_person
+    validate_person(data['sapiensid'])
     if type(data['version']) is not int or data['version'] != 1:
         raise ValueError('facial_recognition.yml version must be 1.')
     models = data['models']
