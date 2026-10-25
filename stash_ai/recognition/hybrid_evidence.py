@@ -26,6 +26,8 @@ class Identity:
     guard_persons: object = None
     person_observations: tuple = ()
     guard_person_observations: tuple = ()
+    query_cores: tuple = ()
+    body_modes: tuple = ()
 
 
 def _catalogue(db, config, scope, namespace):
@@ -40,6 +42,7 @@ def _catalogue(db, config, scope, namespace):
         for group in tracked:
             ids=tuple(group.sample_ids)
             from .hybrid_references import body_rows
+            from .hybrid_modes import body_modes
             records=body_rows(db,config,scope,namespace,group.identifier) if present else []
             from .independent_evidence import Votes
             votes=Votes(); vectors=[]; body_ids=[]
@@ -56,7 +59,8 @@ def _catalogue(db, config, scope, namespace):
             missing=tuple(i for i in ids if i not in ready)
             result.append(Identity(group.identifier,ids,np.asarray(group.samples),
                 np.asarray(vectors) if vectors else np.empty((0,4096)),tuple(range(len(votes))),
-                missing,person_observations=tuple(body_ids)))
+                missing,person_observations=tuple(body_ids),
+                body_modes=body_modes(records,config)))
     from .hybrid_guards import retain
     return retain(db,config,scope,namespace,tuple(result))
 
@@ -75,6 +79,9 @@ def scores(left,right):
 
 def pair(left,right,settings,*,copresent=False,reflection_threshold=1.):
     face=scores(left.faces,right.faces);person=scores(left.persons,right.persons)
+    from .hybrid_modes import covered_score
+    mode_score=covered_score(left.body_modes,right.body_modes,settings)
+    if mode_score is not None:person=mode_score
     blockers=[]
     # Former source cores are vetoes only: no extra votes or nominations.
     for kind,measurement in (('faces',face),('persons',person)):
@@ -179,7 +186,8 @@ def plan(db,config,identities,*,focus=None):
               for p,d in eligible.items()}
     with tracking(lookup.pairs(incident=set(eligible)),'Check hybrid competitors',unit='pair',total=len(owned)*(len(owned)-1)//2) as comparisons:
         for a,b,face_mean,person_mean in comparisons:
-            score=person_mean
+            from .hybrid_modes import competitor_score
+            score=competitor_score(owned[a],owned[b],person_mean)
             if score is None and face_mean is not None and face_mean>=face_threshold:score=1.
             if score is None:continue
             for person,rival in ((a,b),(b,a)):

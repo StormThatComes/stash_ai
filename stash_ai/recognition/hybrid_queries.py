@@ -21,11 +21,12 @@ def _recover(database, selected, config):
     scope,namespace=db.execute('SELECT scope,namespace FROM scans WHERE id=?',(selected[0]['scan'],)).fetchone()
     identities=catalogue(db,config,scope,namespace)
     settings=config.data['sapiensid']['matching']
-    groups=[]
+    banks=[]
     for identity in identities:
-        faces=list(identity.faces)
-        if identity.guard_faces is not None:faces+=list(identity.guard_faces)
-        groups.append(Group(identity.person,faces,True))
+        cores=[(identity.observations,identity.faces,identity.persons)]+list(identity.query_cores)
+        for ids,faces,bodies in cores:
+            banks.append((identity,Group(identity.person,list(faces),True,ids),bodies))
+    groups=[group for _,group,_ in banks]
     policy=matching_policy(config);claims=[];votes=defaultdict(Votes)
     rows=db.execute('SELECT o.*,e.embedding AS body,c.id AS candidate FROM candidates c '
         'JOIN observations o ON o.id='+observation_sql('c')+
@@ -39,26 +40,29 @@ def _recover(database, selected, config):
         if body.shape!=(4096,) or not np.isfinite(body).all() or abs(float(np.linalg.norm(body))-1)>.001:
             raise ValueError('Invalid retained SapiensID query feature.')
         choices=[]
-        for identity,group in zip(identities,groups):
+        for identity,group,bodies in banks:
             f=scores(np.asarray([face]),np.asarray(group.samples))
             if f is None or f['minimum']<settings['face_floor']:continue
-            banks=[identity.persons]
-            if identity.guard_persons is not None:banks.append(identity.guard_persons)
-            measures=[scores(np.asarray([body]),bank) for bank in banks if len(bank)]
+            measures=[scores(np.asarray([body]),bodies)] if len(bodies) else []
             measures=[m for m in measures if m is not None]
             score=max((m['mean'] for m in measures),default=1.)
             admissible=bool(measures and not identity.guard_missing and
                 len(identity.independent)>=settings['min_support'] and
                 any(m['minimum']>=settings['person_threshold'] for m in measures))
             choices.append((score,identity.person,admissible,group))
-        choices.sort(key=lambda x:(-x[0],x[1]))
+        # Distinct appearances of the same canonical identity are not rivals.
+        owners={}
+        for choice in choices:
+            prior=owners.get(choice[1])
+            if prior is None or (choice[0],choice[2])>(prior[0],prior[2]):owners[choice[1]]=choice
+        choices=sorted(owners.values(),key=lambda x:(-x[0],x[1]))
         if not choices or not choices[0][2]:continue
         score,owner,_,group=choices[0]
         if len(choices)>1 and score-choices[1][0]<settings['ambiguity_margin']:continue
         if not co_presence_allows(db,row,group,groups,face,config,
                 peer_threshold=settings['face_floor'],cohesion_threshold=settings['face_floor']):continue
         proof=dict(format=1,route='hybrid_query',frozen=True,contract=contract(config),
-                   score=score,rival_score=choices[1][0] if len(choices)>1 else None,
+                   core_observations=list(group.sample_ids),score=score,rival_score=choices[1][0] if len(choices)>1 else None,
                    reference_role='attachment',reference_selected=False)
         used+=len(encoded(proof))+len(row['quality'])+512
         if used>config.data['sapiensid']['execution']['plan_bytes']:

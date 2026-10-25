@@ -13,6 +13,7 @@ def retain(db,config,scope,namespace,identities):
     from .clustering import reference_admission,vector
     from .reference_compatibility import fallback_sql
     from .scanning import scan_identity
+    core_ids=defaultdict(set)
     owned={i.person:i for i in identities};guards=defaultdict(set);body_guards=defaultdict(set);proof_bytes=0
     for row in db.execute('SELECT a.target,a.evidence FROM identity_merges a JOIN people p ON p.id=a.target '
                           'WHERE p.scope=? AND p.namespace=?',(scope,namespace)):
@@ -27,6 +28,8 @@ def retain(db,config,scope,namespace,identities):
             for observations in pair['observations']+pair.get('guard_observations',[]):
                 guards[root].update(observations)
             body_groups=pair.get('person_observations') or pair['observations']
+            for face_ids,person_ids in zip(pair['observations'],body_groups):
+                core_ids[root].add((tuple(face_ids),tuple(person_ids)))
             for observations in body_groups+pair.get('guard_person_observations',pair.get('guard_observations',[])):
                 body_guards[root].update(observations)
     admission=reference_admission(config.data['clustering'],scan_policy=scan_identity(config,namespace),
@@ -37,6 +40,8 @@ def retain(db,config,scope,namespace,identities):
         ids=sorted(guards[identity.person]-set(identity.observations))
         body_ids=sorted(body_guards[identity.person]-set(identity.person_observations))
         faces=[];persons=[];missing=[]
+        face_map=dict(zip(identity.observations,identity.faces))
+        body_map=dict(zip(identity.person_observations,identity.persons))
         for identifier in sorted(set(ids)|set(body_ids)):
             row=db.execute('SELECT o.*,e.status AS person_status,e.embedding AS person_embedding FROM observations o '
                 'JOIN scans s ON s.id=o.scan JOIN members m ON m.observation=o.id '
@@ -47,15 +52,23 @@ def retain(db,config,scope,namespace,identities):
             if row is None or identifier in body_ids and row['person_status']!='ready':
                 missing.append(identifier);continue
             if identifier in ids:
-                face=vector(row);faces.append(face);used+=2*face.nbytes
+                face=vector(row);faces.append(face);face_map[identifier]=face;used+=2*face.nbytes
             if identifier in body_ids:
                 person=np.frombuffer(row['person_embedding'],dtype='<f4')
                 if person.shape!=(4096,) or not np.isfinite(person).all() or abs(float(np.linalg.norm(person))-1)>.001:
                     raise ValueError('Invalid original SapiensID core feature: '+identifier)
-                persons.append(person);used+=2*person.nbytes
+                persons.append(person);body_map[identifier]=person;used+=2*person.nbytes
             if used>config.data['sapiensid']['execution']['reference_bytes']:
                 raise ValueError('SapiensID reference_bytes budget exceeded by original cores.')
-        result.append(replace(identity,guard_observations=tuple(ids),guard_missing=tuple(missing),
+        cores=[]
+        for face_ids,person_ids in sorted(core_ids[identity.person]):
+            if not face_ids or not person_ids or any(i not in face_map for i in face_ids) or any(i not in body_map for i in person_ids):continue
+            # Keep original endpoint provenance; never pool unrelated cores.
+            cores.append((face_ids,np.asarray([face_map[i] for i in face_ids]),np.asarray([body_map[i] for i in person_ids])))
+        used+=sum(f.nbytes+b.nbytes for _,f,b in cores)
+        if used>config.data['sapiensid']['execution']['reference_bytes']:
+            raise ValueError('SapiensID reference_bytes budget exceeded by query cores.')
+        result.append(replace(identity,query_cores=tuple(cores),guard_observations=tuple(ids),guard_missing=tuple(missing),
             guard_faces=np.asarray(faces) if faces else None,guard_persons=np.asarray(persons) if persons else None,
             guard_person_observations=tuple(body_ids)))
     return tuple(result)
