@@ -131,7 +131,7 @@ def _similarities(group, query):
 
 
 @measured('cue_context')
-def co_presence_allows(db, observation, group, groups, query, config, *, peer_threshold=None, cohesion_threshold=None):
+def co_presence_allows(db, observation, group, groups, query, config, *, peer_threshold=None, cohesion_threshold=None, resolved_peers=()):
     """A distinct cue peer competing for this identity needs stronger evidence.
 
     Inspect the entire cue, including observations not assigned yet, so reader
@@ -150,7 +150,7 @@ def co_presence_allows(db, observation, group, groups, query, config, *, peer_th
         db.execute('SELECT id,geometry,dimensions,embedding FROM observations WHERE scan=? AND cue=? '
                    'AND rejected IS NULL ORDER BY id', (observation['scan'], observation['cue'])))
     for peer in peers:
-        if peer['id'] == observation['id']:
+        if peer['id'] == observation['id'] or peer['id'] in resolved_peers:
             continue
         from .physical_faces import duplicate
         if duplicate(peer,observation,config.data['clustering'].get('deduplicate_detections',False)):

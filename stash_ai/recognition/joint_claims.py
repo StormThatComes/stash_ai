@@ -68,7 +68,7 @@ def recover(db, policy, history, config):
             same = duplicate(cue[i],cue[j],grouping.get('deduplicate_detections',False))
             if same:
                 return a[0] == b[0]
-            return a[0] != b[0] or float(np.dot(samples[i],samples[j])) >= threshold
+            return a[0] != b[0] or min(a[2],b[2],float(np.dot(samples[i],samples[j]))) >= threshold
         solution = solve(domains, compatible, settings['ambiguity_margin'])
         if solution is None:
             continue
@@ -83,6 +83,15 @@ def recover(db, policy, history, config):
             if _competing_anchor(rivals,person,samples[i],score,settings['ambiguity_margin']):
                 valid = False
                 break
+        if valid:
+            from .clustering import co_presence_allows
+            for i,(person,_,_) in enumerate(solution):
+                group = next(g for g in history.groups if g.identifier == person)
+                explained = {cue[j]['id'] for j,other in enumerate(solution) if other[0] != person}
+                if not co_presence_allows(db,cue[i],group,history.groups,samples[i],config,
+                                          resolved_peers=explained):
+                    valid = False
+                    break
         if not valid:
             continue
         assignment = [dict(observation=r['id'],identity=s[0],score=s[1]) for r,s in zip(cue,solution)]
