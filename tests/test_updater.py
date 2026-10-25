@@ -34,12 +34,17 @@ class Remote(updater.GitHub):
             "requirements-cpu.txt": b"package==1\n",
             "requirements-gpu.txt": b"package==2\n",
             "requirements-dev.txt": b"pytest>=8\n",
+            "requirements-sapiensid.txt": b"timm>=0.9.7,<2\n",
             "constraints/cpu-py314.txt": b"package==1\n",
             "constraints/gpu-py314.txt": b"package==2\n",
             "constraints/README.md": b"Install requirements with the matching constraints.\n",
             "requirements-local.txt": b"DO NOT DOWNLOAD UNKNOWN PROFILES",
             "constraints/local.txt": b"DO NOT DOWNLOAD UNKNOWN CONSTRAINTS",
-            "README.md": b"DO NOT DOWNLOAD DOCS",
+            "README.md": b"Application documentation\n",
+            "docs/facial-recognition.md": b"Recognition documentation\n",
+            "docs/sapiensid-hybrid.md": b"SapiensID installation\n",
+            "docs/validation/validation_merge.txt": b"Validation results\n",
+            "docs/example.py": b"DO NOT DOWNLOAD DOCUMENTATION SCRIPTS",
         }
         self.commit = COMMIT
         self.calls = []
@@ -101,7 +106,7 @@ def test_dependency_profile_changes_are_planned_without_preview_downloads(tmp_pa
 
 DEPENDENCY_FILES = (
     'requirements.txt', 'requirements-cpu.txt', 'requirements-gpu.txt',
-    'requirements-dev.txt', 'constraints/cpu-py314.txt',
+    'requirements-dev.txt', 'requirements-sapiensid.txt', 'constraints/cpu-py314.txt',
     'constraints/gpu-py314.txt', 'constraints/README.md',
 )
 
@@ -296,7 +301,7 @@ def test_real_helper_selective_install_and_self_update(tmp_path):
     expected = {name for name in remote.files if updater.allowed(name)}
     assert expected.issubset(snapshot(tmp_path))
     assert set(DEPENDENCY_FILES).issubset(snapshot(tmp_path))
-    assert not {"test_updater.py", "README.md", "benchmark_merge.py",
+    assert not {"test_updater.py", "docs/example.py", "benchmark_merge.py",
                 "requirements-local.txt", "constraints/local.txt"} & snapshot(tmp_path).keys()
     assert not (tmp_path / ".github").exists()
     downloaded = {call.split("/")[-1] for call in remote.calls if call.startswith("git/blobs/")}
@@ -1337,3 +1342,40 @@ def test_flat_recovery_keeps_journal_and_backups_for_bridge(tmp_path):
         updater.recover(tmp_path)
     assert {p.relative_to(tmp_path).as_posix(): p.read_bytes()
             for p in tmp_path.rglob('*') if p.is_file() and p.name != updater.LOCK} == before
+
+
+@pytest.mark.parametrize('name', ['README.md', 'docs/facial-recognition.md',
+    'docs/sapiensid-hybrid.md', 'docs/validation/validation_merge.txt'])
+def test_documentation_installs_refreshes_and_protects_edits(tmp_path, name):
+    remote = Remote()
+    assert updater.update(tmp_path, remote) == 0
+    assert (tmp_path/name).read_bytes() == remote.files[name]
+    remote.files[name] += b'upstream revision\n'
+    remote.commit = 'c' * 40
+    assert updater.update(tmp_path, remote) == 0
+    assert (tmp_path/name).read_bytes() == remote.files[name]
+    (tmp_path/name).write_bytes(b'local notes\n')
+    remote.files[name] += b'another revision\n'
+    with pytest.raises(updater.UpdateError, match='force-code'):
+        updater.update(tmp_path, remote)
+    assert (tmp_path/name).read_bytes() == b'local notes\n'
+    assert updater.update(tmp_path, remote, force_code=True) == 0
+    assert (tmp_path/name).read_bytes() == remote.files[name]
+
+
+def test_existing_installation_gains_docs_and_sapiensid(tmp_path):
+    remote = Remote()
+    additions = {name: data for name, data in remote.files.items()
+                 if name == 'README.md' or name.startswith('docs/') or name == 'requirements-sapiensid.txt'}
+    for name in additions:del remote.files[name]
+    assert updater.update(tmp_path, remote) == 0
+    remote.files.update(additions)
+    assert updater.update(tmp_path, remote) == 0
+    for name, data in additions.items():
+        if updater.allowed(name):assert (tmp_path/name).read_bytes() == data
+
+
+@pytest.mark.parametrize('name', ['docs/../outside.md', 'docs/.hidden.md',
+    'docs/folder/../../outside.txt', 'docs/file.py', 'docs/link.exe', 'docs/a\\b.md'])
+def test_documentation_allowlist_rejects_unsafe_or_executable_paths(name):
+    assert not updater.allowed(name)
