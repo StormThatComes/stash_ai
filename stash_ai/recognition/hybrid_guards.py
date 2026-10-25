@@ -39,7 +39,7 @@ def retain(db,config,scope,namespace,identities):
     for identity in identities:
         ids=sorted(guards[identity.person]-set(identity.observations))
         body_ids=sorted(body_guards[identity.person]-set(identity.person_observations))
-        faces=[];persons=[];missing=[]
+        faces=[];persons=[];missing=[];face_missing=[]
         face_map=dict(zip(identity.observations,identity.faces))
         body_map=dict(zip(identity.person_observations,identity.persons))
         for identifier in sorted(set(ids)|set(body_ids)):
@@ -49,11 +49,15 @@ def retain(db,config,scope,namespace,identities):
                 "WHERE o.id=? AND m.person=? AND s.scope=? AND s.namespace=? AND s.status='complete' "
                 'AND o.rejected IS NULL AND '+admission,
                 (expected,identifier,identity.person,scope,namespace)).fetchone()
-            if row is None or identifier in body_ids and row['person_status']!='ready':
-                missing.append(identifier);continue
+            if row is None:
+                missing.append(identifier)
+                if identifier in ids:face_missing.append(identifier)
+                continue
             if identifier in ids:
                 face=vector(row);faces.append(face);face_map[identifier]=face;used+=2*face.nbytes
             if identifier in body_ids:
+                if row['person_status']!='ready':
+                    missing.append(identifier);continue
                 person=np.frombuffer(row['person_embedding'],dtype='<f4')
                 if person.shape!=(4096,) or not np.isfinite(person).all() or abs(float(np.linalg.norm(person))-1)>.001:
                     raise ValueError('Invalid original SapiensID core feature: '+identifier)
@@ -62,13 +66,13 @@ def retain(db,config,scope,namespace,identities):
                 raise ValueError('SapiensID reference_bytes budget exceeded by original cores.')
         cores=[]
         for face_ids,person_ids in sorted(core_ids[identity.person]):
-            if not face_ids or not person_ids or any(i not in face_map for i in face_ids) or any(i not in body_map for i in person_ids):continue
+            if not face_ids or any(i not in face_map for i in face_ids):continue
             # Keep original endpoint provenance; never pool unrelated cores.
-            cores.append((face_ids,np.asarray([face_map[i] for i in face_ids]),np.asarray([body_map[i] for i in person_ids])))
+            cores.append((face_ids,np.asarray([face_map[i] for i in face_ids]),np.asarray([body_map[i] for i in person_ids]) if person_ids and all(i in body_map for i in person_ids) else np.empty((0,4096))))
         used+=sum(f.nbytes+b.nbytes for _,f,b in cores)
         if used>config.data['sapiensid']['execution']['reference_bytes']:
             raise ValueError('SapiensID reference_bytes budget exceeded by query cores.')
-        result.append(replace(identity,query_cores=tuple(cores),guard_observations=tuple(ids),guard_missing=tuple(missing),
+        result.append(replace(identity,guard_face_missing=tuple(face_missing),query_cores=tuple(cores),guard_observations=tuple(ids),guard_missing=tuple(missing),
             guard_faces=np.asarray(faces) if faces else None,guard_persons=np.asarray(persons) if persons else None,
             guard_person_observations=tuple(body_ids)))
     return tuple(result)

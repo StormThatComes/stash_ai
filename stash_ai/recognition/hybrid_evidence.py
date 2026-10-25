@@ -26,6 +26,7 @@ class Identity:
     guard_persons: object = None
     person_observations: tuple = ()
     guard_person_observations: tuple = ()
+    guard_face_missing: tuple = ()
     query_cores: tuple = ()
     body_modes: tuple = ()
 

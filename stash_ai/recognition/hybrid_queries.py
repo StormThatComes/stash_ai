@@ -30,7 +30,7 @@ def _recover(database, selected, config, *, births=()):
     from .hybrid_query_index import QueryIndex
     index=QueryIndex(banks,config.data['sapiensid']['execution']['reference_bytes'])
     policy=matching_policy(config);claims=[];votes=defaultdict(Votes)
-    rows=db.execute('SELECT o.*,e.embedding AS body,c.id AS candidate,c.person AS prior_owner FROM candidates c '
+    rows=db.execute('SELECT o.id,o.scan,o.cue,o.seconds,o.geometry,o.quality,o.dimensions,o.embedding,e.embedding AS body,c.id AS candidate,c.person AS prior_owner FROM candidates c '
         'JOIN observations o ON o.id='+observation_sql('c')+
         " LEFT JOIN person_evidence e ON e.observation=o.id AND e.contract=? AND e.status='ready' "
         "WHERE c.policy=? AND (c.status='withheld' OR c.person IN (SELECT value FROM json_each(?))) AND o.rejected IS NULL "
@@ -43,42 +43,40 @@ def _recover(database, selected, config, *, births=()):
         face=vector(row);body=np.frombuffer(row['body'],dtype='<f4') if row['body'] is not None else None
         if body is not None and (body.shape!=(4096,) or not np.isfinite(body).all() or abs(float(np.linalg.norm(body))-1)>.001):
             raise ValueError('Invalid retained SapiensID query feature.')
-        choices=[]
+        choices=[];face_choices=[]
         face_batch=np.asarray([face],dtype='float64')
         body_batch=np.asarray([body],dtype='float64') if body is not None else None
         for identity,group,bodies,faces in index.candidates(face,settings['face_floor']):
             if identity.person in births:continue
             f=scores(face_batch,faces)
             if f is None or f['minimum']<settings['face_floor']:continue
-            if body is None:
-                admissible=(not identity.guard_missing and f['minimum']>=config.data['clustering']['cohesion_threshold'] and f['mean']>=config.data['recognition']['match_threshold'])
-                choices.append((f['mean'],identity.person,admissible,group))
-                continue
+            admissible=(not identity.guard_face_missing and f['minimum']>=config.data['clustering']['cohesion_threshold'] and f['mean']>=config.data['recognition']['match_threshold'])
+            face_choices.append((f['mean'],identity.person,admissible,group))
+            if body is None:continue
             measures=[scores(body_batch,bodies)] if len(bodies) else []
             measures=[m for m in measures if m is not None]
-            score=max((m['mean'] for m in measures),default=1.)
+            score=max((m['mean'] for m in measures),default=None)
             admissible=bool(measures and not identity.guard_missing and
                 len(identity.independent)>=settings['min_support'] and
                 any(m['minimum']>=settings['person_threshold'] for m in measures))
             choices.append((score,identity.person,admissible,group))
-        # Distinct appearances of the same canonical identity are not rivals.
-        owners={}
-        for choice in choices:
-            prior=owners.get(choice[1])
-            if prior is None or (choice[0],choice[2])>(prior[0],prior[2]):owners[choice[1]]=choice
-        choices=sorted(owners.values(),key=lambda x:(-x[0],x[1]))
-        if not choices or not choices[0][2]:continue
-        score,owner,_,group=choices[0]
-        if len(choices)>1 and score-choices[1][0]<settings['ambiguity_margin']:continue
+        # Prefer a strict face proof; body scores never compete with face scores.
+        winner=choose(face_choices,config.data['recognition']['ambiguity_margin'])
+        signal='face'
+        if winner is None:
+            winner=choose(choices,settings['ambiguity_margin']);signal='face_and_body'
+        if winner is None:continue
+        score,owner,_,group,rival_score=winner
         if not co_presence_allows(db,row,group,groups,face,config,
                 peer_threshold=settings['face_floor'],cohesion_threshold=settings['face_floor']):continue
         proof=dict(format=1,route='hybrid_query',frozen=True,contract=contract(config),
-                   core_observations=list(group.sample_ids),signal='face' if body is None else 'face_and_body',score=score,rival_score=choices[1][0] if len(choices)>1 else None,
+                   core_observations=list(group.sample_ids),signal=signal,score=score,rival_score=rival_score,
                    reference_role='attachment',reference_selected=False)
-        used+=len(encoded(proof))+len(row['quality'])+512
+        vote={k:row[k] for k in ('scan','seconds','quality')}
+        used+=2*(len(encoded(proof).encode())+len(encoded(vote).encode()))+2048
         if used>config.data['sapiensid']['execution']['plan_bytes']:
             raise ValueError('SapiensID query plan_bytes budget exceeded.')
-        claims.append((row['candidate'],row['id'],owner,proof,row['prior_owner'],row))
+        claims.append((row['candidate'],row['id'],owner,proof,row['prior_owner'],vote))
     accepted=0
     birth_claims=defaultdict(list)
     for claim in claims:
@@ -90,7 +88,7 @@ def _recover(database, selected, config, *, births=()):
     with db:
         for candidate,observation,owner,proof,prior,row in claims:
             if prior in births and prior not in admissible_births:continue
-            if len(votes[owner])<settings['min_support']:continue
+            if len(votes[owner])<(config.data['clustering']['auxiliary_min_support'] if proof['signal']=='face' else settings['min_support']):continue
             db.execute("UPDATE candidates SET person=?,status='accepted',payload=json_set(payload,"
                 "'$.prior_reason',json_extract(payload,'$.reason'),'$.reason','hybrid_query',"
                 "'$.hybrid_query',json(?),'$.reference_role','attachment','$.reference_selected',json('false')) WHERE id=?",
@@ -104,3 +102,20 @@ def recover(database, selected, config, *, births=()):
     from .evidence_pixels import alias_scope
     with alias_scope(database.connection):
         return _recover(database, selected, config, births=births)
+
+
+def choose(choices,margin):
+    """Keep unknown rivals explicit and never let a rejected own core hide a valid one."""
+    owners={}
+    for choice in choices:
+        owners.setdefault(choice[1],[]).append(choice)
+    valid=[max((c for c in values if c[2] and c[0] is not None),key=lambda c:c[0],default=None)
+           for values in owners.values()]
+    valid=[c for c in valid if c is not None]
+    if not valid:return None
+    best=max(valid,key=lambda c:(c[0],c[1]))
+    rivals=[c for owner,values in owners.items() if owner!=best[1] for c in values]
+    if any(c[0] is None for c in rivals):return None
+    rival=max((c[0] for c in rivals),default=None)
+    if rival is not None and best[0]-rival<margin:return None
+    return (*best,rival)
