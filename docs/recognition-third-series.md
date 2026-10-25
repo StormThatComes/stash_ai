@@ -29,3 +29,12 @@ scene/cross-scene, cohort assignment, views, promotion, rebuild, retained data).
 No measured real-library accuracy or GPU throughput claim.
 
 PR2–PR6: implementation follows on stacked branches.
+
+PR2: the strict sampler reserves slots for three-vote rare looks using frozen
+pivots and complete representative compatibility. Local identity origin stays
+stable while a demonstrably better complete core can replace its seed once;
+the validated replacement is protected against repeated drift. Canonical
+resampling uses membership ranks plus a disposable shared row cache; local
+refresh uses an indexed candidate union instead of correlated full-table probes.
+Validation: 42 representative/index/rebuild tests and 19 final focused tests,
+including rare-mode retention and one-time seed replacement, passed.
