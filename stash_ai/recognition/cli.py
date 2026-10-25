@@ -155,6 +155,7 @@ def parser():
     merge_report.add_argument('--faces-db', type=Path, help='Existing face SQLite database.')
     merge_report.add_argument('--scope', help='Restrict both identities to this Stash scope; required if a performer ID occurs in multiple scopes.')
     merge_report.add_argument('--output', type=Path, help='New JSON report path; stdout if omitted. Includes copyable YAML patches.')
+    merge_report.add_argument('--progress-style', choices=('auto','off'), default='auto')
     merge_report.add_argument('--yaml-output', type=Path, help='New complete configuration for a replay-verified solution; requires --solve.')
     merge_report.add_argument('--solve', action='store_true', help='Search configurations using full replay of merge goals.')
     merge_report.add_argument('--max-trials', type=int, default=64, help='Replay budget including baseline.')
