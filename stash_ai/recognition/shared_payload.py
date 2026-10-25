@@ -50,3 +50,24 @@ def release(segment):
             segment.unlink()
         except FileNotFoundError:
             pass
+
+
+@contextmanager
+def borrowed(rows):
+    """Read-only zero-copy embedding buffers, owned for the entire worker call."""
+    if not isinstance(rows, Rows):
+        yield rows
+        return
+    segment = SharedMemory(name=rows.name)
+    buffers = []
+    try:
+        values = []
+        for row in rows.metadata:
+            view = segment.buf[row[-2]:row[-2]+row[-1]].toreadonly()
+            buffers.append(view)
+            values.append(row[:-2]+(view,))
+        yield values
+    finally:
+        for view in buffers:
+            view.release()
+        segment.close()

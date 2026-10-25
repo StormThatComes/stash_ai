@@ -200,10 +200,12 @@ def rank_many(rows, history, config, **options):
         for row, frozen in stream:
             scores = ({id(groups[position]): (mean, low) for position, mean, low in frozen}
                       if frozen is not None else None)
-            yield row, rank([row], history, config, _bank=bank, _scores=scores, **options)
+            bounds = ({id(groups[position]): value for position,value in frozen.bounds.items()}
+                      if frozen is not None and hasattr(frozen,'bounds') else None)
+            yield row, rank([row], history, config, _bank=bank, _scores=scores, _bounds=bounds, **options)
 
 
-def rank(rows,history,config,*,decisions=None,potential=None,relaxed_pose=False,strict_appearance=False,quarantine_only=False,_bank=None,_scores=None):
+def rank(rows,history,config,*,decisions=None,potential=None,relaxed_pose=False,strict_appearance=False,quarantine_only=False,_bank=None,_scores=None,_bounds=None):
     settings,grouping=config.data['recognition'],config.data['clustering']
     threshold=settings['match_threshold']
     view_threshold=max(threshold,grouping['view_match_threshold'])
@@ -214,16 +216,28 @@ def rank(rows,history,config,*,decisions=None,potential=None,relaxed_pose=False,
     from .clustering import _similarities
     exact = None if _scores is None else lambda group, query: (
         _scores[id(group)] if id(group) in _scores else _similarities(group, query))
+    def compare(groups, query, floor, cohesion):
+        if _scores is None or _bounds is None:
+            yield from comparisons(groups,query,floor,cohesion,exact=exact)
+            return
+        import math
+        for group in groups:
+            bound = _bounds.get(id(group))
+            # Small banks deliberately retain their old scalar visibility.
+            if len(groups) >= 16 and bound is not None and all(math.isfinite(v) for v in bound) and (bound[0] < floor or bound[1] < cohesion):
+                continue
+            # A missing sparse value is uncomputed, never an invented score.
+            yield group, *exact(group,query)
     aggregate={};strict_rows=[];mixed_rows=[]
     for row in rows:
         query=vector(row)
         choices={}
-        for group,score,low in comparisons(history.groups,query,threshold-margin,grouping['cohesion_threshold'],exact=exact):
+        for group,score,low in compare(history.groups,query,threshold-margin,grouping['cohesion_threshold']):
             if low>=grouping['cohesion_threshold']:
                 if group.identifier not in choices or score>choices[group.identifier][0]:
                     choices[group.identifier]=(score,'strict',None,score>=threshold)
         strict_rows.append(dict(choices))
-        for group,score,low in comparisons(views,query,effective_view_threshold-margin,effective_view_cohesion,exact=exact):
+        for group,score,low in compare(views,query,effective_view_threshold-margin,effective_view_cohesion):
             view=by_group[id(group)]
             ordinary_pose = pose_matches(row['geometry'], view.pose)
             premium, required = 0., 2

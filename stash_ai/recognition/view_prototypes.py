@@ -95,6 +95,8 @@ class _Cluster:
     pose_hints: set = field(default_factory=set)
     scene_minimum: int = 0
     scene_witnesses: dict = field(default_factory=dict)
+    metadata_reservation: object = field(default=None, repr=False)
+    metadata_bytes: int = 0
 
     def accepts_pose(self,geometry):
         return all(pose_matches(geometry,hint) for hint in (self.pose_hints or {self.pose}))
@@ -107,6 +109,14 @@ class _Cluster:
         from .independent_evidence import unit
         cue = unit(row)
         stamp = row['scan'], row['seconds']
+        from .run_cache import current
+        shared = current()
+        if shared is not None and shared.working is not None:
+            if self.metadata_reservation is None:
+                from .memory_size import Reservation
+                self.metadata_reservation = Reservation(shared.working)
+            self.metadata_bytes += (1024 if cue not in self.cue_representatives else 0) + (1024 if stamp not in self.cue_times else 0)
+            self.metadata_reservation.set(self.metadata_bytes)
         self.cues.add(row)
         previous = self.cue_representatives.get(cue, self.cue_times.get(stamp))
         if previous is not None:

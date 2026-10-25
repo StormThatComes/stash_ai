@@ -47,7 +47,7 @@ class PromotionCohorts:
         import numpy as np
         raw = query.tobytes()
         if raw not in self.vectors:
-            self.scratch += query.nbytes
+            self.scratch += 2*query.nbytes + 256
             self._check()
             self.vectors[raw] = query
         query = self.vectors[raw]
@@ -66,6 +66,8 @@ class PromotionCohorts:
             before = len(item.cluster.examples)
             item.cluster.add(witness, query)
             item.witnesses.append((witness, query))
+            from .memory_size import size
+            self.usage.add_metadata(size(witness) + 512)
             self.scratch += (len(item.cluster.examples) - before) * query.nbytes
             self._check()
 

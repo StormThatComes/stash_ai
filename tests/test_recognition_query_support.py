@@ -103,3 +103,15 @@ def test_historical_queries_pool_across_two_confirmed_views(tmp_path,coherent,cu
                 payload=json.loads(rows[0]['payload'])
                 assert payload['reference_role']=='attachment'
                 assert len(payload['provisional_pool']['medoids'])==2
+
+
+def test_matrix_candidates_preserve_scalar_threshold_boundaries():
+    from stash_ai.recognition.query_matrix import QueryMatrix
+    samples=[appearance(angle).astype('float32') for angle in (0,10,20,45,80)]
+    index=QueryMatrix([(str(i),sample) for i,sample in enumerate(samples)])
+    query=samples[1]
+    for sample in samples:
+        exact=float(np.dot(query,sample))
+        for threshold in (exact,np.nextafter(exact,float('inf')),np.nextafter(exact,float('-inf'))):
+            expected=[str(i) for i,v in enumerate(samples) if float(np.dot(query,v))>=threshold]
+            assert [v[0] for v in index.matches(query,threshold)]==expected

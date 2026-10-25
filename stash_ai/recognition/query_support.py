@@ -58,9 +58,14 @@ def cohorts(rows, config, *, key, prototype, minimum=None):
         stream = lambda: iter(rows)
     else:
         raise ValueError('Frozen query support requires replayable rows or a row factory.')
-    families, used = {}, 0
+    from .memory_size import size, Reservation
+    from .query_matrix import QueryMatrix
+    families, used, metadata_used = {}, 0, 0
+    reservation=Reservation(config.data['execution']['rebuild_memory_bytes']//4)
     for row in stream():
         family, origin = key(row), prototype(row)
+        metadata_used += size((row['id'],row['scan'],row['seconds'],family,origin)) + 512
+        reservation.set(metadata_used+used)
         exact, unfinished = families.setdefault(family, ({}, {}))
         votes = exact.setdefault(origin, _Votes())
         votes.add(row, origin)
@@ -75,6 +80,7 @@ def cohorts(rows, config, *, key, prototype, minimum=None):
                 raise ValueError('Frozen query cohorts exceed clustering.max_reference_bytes.')
         else:
             used -= sum(q.nbytes for _, _, q in unfinished.pop(origin, ()))
+    reservation.set(metadata_used+used)
     output, pending = [], {}
     for family, (exact, unfinished) in families.items():
         for votes in exact.values():
@@ -98,13 +104,21 @@ def cohorts(rows, config, *, key, prototype, minimum=None):
             family = key(row)
             if family not in pending:
                 continue
-            index_bytes += len(row['embedding']) + sum(len(str(v)) for v in row) + 1024
+            index_bytes += size(dict(row)) + 3*len(row['embedding']) + 1024
             if index_bytes > grouping['max_reference_bytes']:
                 indexed = None
                 break
             indexed.setdefault(family, []).append(dict(row))
-    def witnesses(family):
-        return iter(indexed.get(family, ())) if indexed is not None else stream()
+    reservation.set(metadata_used+(index_bytes if indexed is not None else used))
+    matrices = ({family: QueryMatrix([(r,prototype(r),vector(r)) for r in records])
+                 for family,records in indexed.items()} if indexed is not None else {})
+    def witnesses(family, centre):
+        if family in matrices:
+            return (value[0] for value in matrices[family].matches(centre,boundary))
+        return stream()
+    # Targets use the same immutable index; removed IDs are filtered below.
+    targets_index = ({family: QueryMatrix(list(records.values())) for family,records in pending.items()}
+                     if index_bytes + 3*used <= grouping['max_reference_bytes'] else {})
     if pending:
         for row in stream():
             family = key(row)
@@ -116,7 +130,9 @@ def cohorts(rows, config, *, key, prototype, minimum=None):
                 continue
             seen.add(signature)
             centre = vector(row)
-            targets = [(r, p) for r, p, q in missing.values() if float(np.dot(centre, q)) >= boundary]
+            values = (targets_index[family].matches(centre,boundary) if family in targets_index else
+                      (v for v in missing.values() if float(np.dot(centre,v[-1])) >= boundary))
+            targets = [(r,p) for r,p,_ in values if r['id'] in missing]
             if not targets:
                 continue
             votes = _Votes()
@@ -124,10 +140,10 @@ def cohorts(rows, config, *, key, prototype, minimum=None):
             for record, p in targets:
                 votes.add(record, p)
             if len(votes.times) < required(family):
-                for witness in witnesses(family):
+                for witness in witnesses(family, centre):
                     if key(witness) != family or witness['id'] in votes.seen:
                         continue
-                    if float(np.dot(centre, vector(witness))) < boundary:
+                    if family not in matrices and float(np.dot(centre, vector(witness))) < boundary:
                         continue
                     votes.add(witness, prototype(witness))
                     if len(votes.times) >= required(family):

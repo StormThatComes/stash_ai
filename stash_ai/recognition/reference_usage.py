@@ -13,14 +13,21 @@ class ReferenceUsage:
     """Account at existing budget checks; throttle optional console snapshots."""
     def __init__(self, limit, progress=None):
         self.limit, self.progress = limit, progress
-        self.bytes = self.people = self.samples = self.peak = 0
+        self.bytes = self.people = self.samples = self.peak = self.metadata_bytes = 0
         self.stage, self.last_report = 'loading', None
         self.last_values = None
+        from .run_cache import current
+        self.cache = current()
+        if self.cache is not None:
+            import weakref
+            weakref.finalize(self,self.cache.reserve,('bank',id(self)),0)
 
     def begin(self, stage, *, reset=False, report=True):
         self.stage = stage
         if reset:
-            self.bytes = self.people = self.samples = 0
+            self.bytes = self.people = self.samples = self.metadata_bytes = 0
+            if self.cache is not None:
+                self.cache.reserve(('bank',id(self)),0)
         if report:
             self.emit(force=True)
 
@@ -39,7 +46,14 @@ class ReferenceUsage:
                 f'{kind} face references exceed the configured RAM budget: '
                 f'required={self.bytes} bytes, limit={self.limit} bytes '
                 f'(clustering.max_reference_bytes), people={self.people}, samples={self.samples}.')
+        if self.cache is not None:
+            self.cache.reserve(('bank',id(self)),self.bytes+self.samples*128+self.people*256+self.metadata_bytes)
         self.emit()
+
+    def add_metadata(self, size):
+        self.metadata_bytes += size
+        if self.cache is not None:
+            self.cache.reserve(('bank',id(self)),self.bytes+self.samples*128+self.people*256+self.metadata_bytes)
 
     def emit(self, *, force=False):
         if self.progress is None:
