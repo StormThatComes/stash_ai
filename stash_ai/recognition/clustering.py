@@ -227,7 +227,10 @@ def complete_candidates(db, scan, policy, context, count, *, exact_memberships=F
 
 def matching_policy(config):
     from .context import policy_digest
+    from .person_signal import contract
     return policy_digest(config, f'matching-v{MATCHING_FORMAT}', lambda: {
+        **({'hybrid': {'contract': contract(config),
+                      'matching': config.data['sapiensid']['matching']}} if config.data['sapiensid']['enabled'] else {}),
         'format': MATCHING_FORMAT, 'recognition': config.data['recognition'],
         'clustering': {key:value for key,value in config.data['clustering'].items()
                        if key not in ('max_reference_bytes','max_people_per_lookup')}})

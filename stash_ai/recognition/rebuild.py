@@ -400,7 +400,10 @@ def rebuild_selected(database, selected, config, *, progress=None):
         excluded=set()
         for attempt in range(2):
             try:
-                return _rebuild_selected(database,selected,config,progress=progress,excluded_views=excluded)
+                from .hybrid_merge import rebuild as hybrid_rebuild
+                return hybrid_rebuild(database,selected,config,
+                    lambda: _rebuild_selected(database,selected,config,progress=progress,excluded_views=excluded),
+                    lambda: _results(database.connection,selected,config))
             except InvalidatedSourceViews as error:
                 if attempt or not error.medoids-excluded:raise
                 excluded.update(error.medoids)
