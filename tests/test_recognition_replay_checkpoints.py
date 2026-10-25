@@ -86,7 +86,7 @@ def test_resume_exact_prefix_and_clock_matches_full_replay(tmp_path, monkeypatch
             # new person. max(created)+1 would silently change later evidence.
             assert header['next_clock'] == 4
             assert saved.execute('SELECT MAX(created) FROM people').fetchone()[0] == 3
-            assert set(r[0] for r in saved.execute("SELECT name FROM sqlite_master WHERE type='table'")) == set(checkpoint.TABLES)|{'metadata'}
+            assert set(r[0] for r in saved.execute("SELECT name FROM sqlite_master WHERE type='table'")) == set(checkpoint.SNAPSHOT_TABLES)|{'metadata'}
         calls = count_replay(monkeypatch)
         actual = rebuild.rebuild_selected(state,selected,config)
         assert calls == [i['scan'] for i in selected[3:]]

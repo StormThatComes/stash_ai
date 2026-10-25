@@ -24,9 +24,16 @@ from .profiling import count, measured
 
 APPLICATION_ID = 0x52435054
 FORMAT = 1
-ENGINE = 'recognition-cold-replay-v10.0'
+ENGINE = 'recognition-cold-replay-v11.0'
 TABLES = ('people', 'members', 'candidates', 'identity_merges', 'merge_support')
-ORDER = ('id', 'observation', 'id', 'source', 'source,target,observation,policy')
+EXTRA_SCHEMA = {
+    'local_core_order': 'observation TEXT PRIMARY KEY,position INTEGER',
+    'pool_claims': 'observation TEXT PRIMARY KEY,source TEXT,scan TEXT,cue INTEGER,seconds REAL',
+    'pool_promotions': 'source TEXT PRIMARY KEY,mode TEXT,selected_ids TEXT,proof TEXT',
+}
+SNAPSHOT_TABLES = TABLES + tuple(EXTRA_SCHEMA)
+ORDER = ('id', 'observation', 'id', 'source', 'source,target,observation,policy',
+         'observation', 'observation', 'source')
 SCHEMA = '''
 CREATE TABLE metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE people(id TEXT PRIMARY KEY, scope TEXT NOT NULL, namespace TEXT NOT NULL,
@@ -41,6 +48,7 @@ CREATE TABLE merge_support(source TEXT NOT NULL REFERENCES people(id),
  target TEXT NOT NULL REFERENCES people(id), observation TEXT NOT NULL, policy TEXT NOT NULL,
  PRIMARY KEY(source,target,observation,policy), CHECK(source<>target));
 '''
+SCHEMA += ''.join(f'CREATE TABLE {name}({columns});' for name,columns in EXTRA_SCHEMA.items())
 _NAME = re.compile(r'replay-([0-9a-f]{32})\.sqlite3\Z')
 _MAX_META = 4*1024*1024
 _BATCH_BYTES = 4*1024*1024
@@ -157,7 +165,7 @@ def _rows(db, table, order):
 
 def _checksum(db, header):
     hasher = hashlib.sha256(encoded(header).encode())
-    for table, order in zip(TABLES, ORDER):
+    for table, order in zip(SNAPSHOT_TABLES, ORDER):
         hasher.update(table.encode())
         for batch in _rows(db, table, order):
             for row in batch:
@@ -321,7 +329,11 @@ class Checkpoints:
             # rolls back grouping rows; freshly copied raw evidence stays intact.
             try:
                 replay.execute('BEGIN')
-                for table, order in zip(TABLES, ORDER):
+                for table, order in zip(SNAPSHOT_TABLES, ORDER):
+                    if table in EXTRA_SCHEMA:
+                        if not checkpoint.execute(f'SELECT 1 FROM {table} LIMIT 1').fetchone():
+                            continue
+                        replay.execute(f'CREATE TEMP TABLE {table}({EXTRA_SCHEMA[table]})')
                     for batch in _rows(checkpoint, table, order):
                         placeholders = ','.join('?' for _ in batch[0])
                         replay.executemany(f'INSERT INTO {table} VALUES ({placeholders})', batch)
@@ -439,8 +451,16 @@ class Checkpoints:
         if replay.execute('SELECT 1 FROM members m LEFT JOIN observations o ON o.id=m.observation '
                           'WHERE o.id IS NULL OR o.rejected IS NOT NULL LIMIT 1').fetchone():
             raise ValueError('Invalid late checkpoint membership.')
-        from .late_checkpoint import decode
-        decode(replay,header['phase_payload'])
+        if self.phase == 'ready':
+            from .ready_checkpoint import validate
+            validate(replay, header['phase_payload'])
+        else:
+            from .late_checkpoint import decode
+            decode(replay,header['phase_payload'])
+        if replay.execute("SELECT 1 FROM sqlite_temp_master WHERE name='local_core_order'").fetchone():
+            if replay.execute('SELECT 1 FROM local_core_order l LEFT JOIN observations o ON o.id=l.observation '
+                    "WHERE o.id IS NULL OR typeof(l.position)<>'integer' OR l.position<0 LIMIT 1").fetchone():
+                raise ValueError('Invalid checkpoint appearance order.')
 
     def save(self, replay, cursor, next_clock, *, final=False):
         if (not self.enabled or cursor == self.saved_cursor or
@@ -479,7 +499,10 @@ class Checkpoints:
                 target.execute(f'PRAGMA user_version={FORMAT}')
                 target.execute('INSERT INTO metadata VALUES (?,?)', ('state',encoded(header)))
                 target.commit()  # Establish ownership for crash orphan cleanup.
-                for table, order in zip(TABLES, ORDER):
+                for table, order in zip(SNAPSHOT_TABLES, ORDER):
+                    if table in EXTRA_SCHEMA and not replay.execute(
+                            "SELECT 1 FROM sqlite_temp_master WHERE name=?", (table,)).fetchone():
+                        continue
                     for batch in _rows(replay, table, order):
                         placeholders = ','.join('?' for _ in batch[0])
                         target.executemany(f'INSERT INTO {table} VALUES ({placeholders})', batch)
