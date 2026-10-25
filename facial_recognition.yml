@@ -1,6 +1,7 @@
 # Loaded only by explicit `recognition run` / `recognition portraits`; never enables a background task.
 # Similarities are cosine scores, not identity probabilities. These conservative
 # starting defaults have no claimed accuracy calibration for your VTT library.
+# Complete supported settings; optional features remain disabled where indicated.
 version: 1
 models:
   detector: scrfd_10g        # Default: SCRFD 10G KPS; options scrfd_2_5g, yunet.
@@ -94,6 +95,7 @@ execution:
   recognizer_batch_size: 1 # Opt-in microbatch (up to 32); static ONNX graphs always use one.
   # Persistent compressed VTT/sprite cache, revalidated by strong HTTP ETags. 0 disables.
   media_cache_bytes: 1073741824
+  portrait_ranking_cache_bytes: 16777216 # 16 MiB of completed VTT rankings; 0 disables.
   sprite_cache_bytes: 1073741824 # Shared compressed + decoded sprite LRU for this run.
   prefetch_scene_depth: 3 # Prepared scenes ahead; at most four input workers.
   rebuild_workers: 1           # 1 = serial; 0 = auto (up to 16); explicit values up to 256.
@@ -120,10 +122,34 @@ storage:
 names:
   file: null                  # Optional instance-scoped performer_names.yml.
 # Optional supplemental body identity evidence. Face recognizer stays unchanged.
-# See docs/sapiensid-hybrid.md for verified assets, calibration and all settings.
+# See docs/sapiensid-hybrid.md for verified assets and calibration.
+# Uses models.device and the shared scan CPU queues; local paths are relative to this YAML.
 sapiensid:
-  enabled: false
+  enabled: false              # Fill model/pose paths and the pose SHA256 before enabling.
+  model:
+    source_directory: ""     # Required when enabled: clean checkout of the pinned upstream source.
+    checkpoint_directory: "" # Required when enabled: directory containing model.pth and model.yaml.
+    model_yaml_sha256: 2aa66245bdf81631cf243aff26dc2bca30788ea77958981d1947bd750cbf93b9
+  pose:
+    path: ""                 # Required when enabled: trusted local YOLOv8n-pose checkpoint.
+    sha256: ""               # Required when enabled: verified lowercase SHA256 of that checkpoint.
+    score_threshold: 0.50    # Minimum body detection confidence.
+    keypoint_score_threshold: 0.50 # Minimum confidence for usable pose keypoints.
+    nms_threshold: 0.70      # Body detector NMS IoU threshold.
+    max_people_per_frame: 100 # Body detections per thumbnail; separate from detection.max_faces_per_frame.
+  matching:
+    face_floor: 0.40         # Required face compatibility for a hybrid match; not a standalone face match threshold.
+    person_threshold: 0.85   # Body cosine threshold; never averaged with face scores.
+    ambiguity_margin: 0.10  # Required separation from competing identities.
+    min_support: 3          # Independent body observations supporting an identity.
+  execution:
+    batch_size: 1           # 1..16 person inputs per inference batch, within CPU queue budgets.
+    reference_bytes: 134217728 # 128 MiB for hybrid reference banks and lookup working arrays.
+    plan_bytes: 16777216    # 16 MiB for retained hybrid decision proofs and plans.
+    max_candidate_pairs: 100000 # Stop explicitly if the hybrid candidate graph exceeds this budget.
   consolidation:
     scope: selected  # retained consumes queued merges across retained scenes.
     scene_ids: []    # Optional allowlist for retained scope; [] means this library/namespace.
     max_scenes: 1000 # Bound automatic replay expansion. HTTP publication stays selected.
+  storage:
+    retain_person_crops: true # Keep body crops for inspection; bounded by storage.max_crop_bytes.

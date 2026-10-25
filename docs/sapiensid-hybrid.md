@@ -13,6 +13,18 @@ wb4m checkpoint and model.yaml from the official SapiensID repository, and a
 trusted YOLOv8n-pose checkpoint. No weights are bundled or downloaded by this
 adapter. Relative paths resolve from the configuration file.
 
+The shipped [facial_recognition.yml](../facial_recognition.yml) lists every
+supported setting, including all SapiensID subsections, with comments and
+explicit default values for SapiensID. The example below only shows the settings
+needed to enable collection and its main matching/resource controls; omitted
+settings inherit their defaults. SapiensID uses `models.device` and the shared
+`execution.scan_cpu_workers` / `execution.scan_queue_bytes` controls.
+
+If the updater preserves your locally modified YAML, review
+`facial_recognition.yml.incoming` and copy the new settings you need. Partial
+local configurations remain supported; completing the shipped template does
+not change runtime defaults.
+
 ```yaml
 sapiensid:
   enabled: true
