@@ -404,7 +404,7 @@ def rebuild_selected(database, selected, config, *, progress=None):
         selected=expand(database.connection,selected,config)
         while True:
             excluded=set()
-            with alias_scope(database.connection):
+            with alias_scope(database.connection,budget=config.data['clustering']['max_reference_bytes'],persist=True):
                 for attempt in range(2):
                     try:
                         from .hybrid_merge import rebuild as hybrid_rebuild

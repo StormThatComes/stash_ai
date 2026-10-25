@@ -218,3 +218,17 @@ def packed(bank):
         result.flags.writeable=False
         cache.put(key,result,len(content)+result.nbytes+256)
     return result
+
+
+def products(left,right):
+    """Reuse unchanged graph tiles while all candidates/rivals stay live."""
+    cache=current()
+    if cache is None:return left @ right.T
+    a,b=left.tobytes(),right.tobytes()
+    key=('matrix','hybrid-products',left.dtype.str,right.dtype.str,left.shape,right.shape,a,b)
+    result=cache.get(key)
+    if result is MISSING:
+        result=left @ right.T
+        result.flags.writeable=False
+        cache.put(key,result,len(a)+len(b)+result.nbytes)
+    return result
