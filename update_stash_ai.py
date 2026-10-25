@@ -34,7 +34,8 @@ JOURNAL = META + "/journal.json"
 LOCK = ".stash-ai.install.lock"
 MAX_FILE_BYTES = 16 * 1024 * 1024
 SHA = re.compile(r"[0-9a-f]{40}\Z")
-REQUIREMENT_PROFILES = frozenset({'requirements.txt', 'requirements-cpu.txt', 'requirements-gpu.txt'})
+REQUIREMENT_PROFILES = frozenset({'requirements.txt', 'requirements-cpu.txt', 'requirements-gpu.txt',
+                                  'requirements-sapiensid.txt'})
 DEPENDENCY_FILES = REQUIREMENT_PROFILES | frozenset({
     'requirements-dev.txt', 'constraints/cpu-py314.txt', 'constraints/gpu-py314.txt',
     'constraints/README.md',
@@ -87,9 +88,10 @@ class Phase(StrEnum):
 
 
 def allowed(name):
-    """Install application code/configuration, dependency manifests and licenses."""
+    """Install application files, dependency manifests, documentation and licenses."""
     return name in DEPENDENCY_FILES or bool(re.fullmatch(
-        r"(?:LICENSE|THIRD_PARTY_NOTICES\.md|stash_ai\.py|update_stash_ai\.py|[A-Za-z0-9][A-Za-z0-9_.-]*\.yml|"
+        r"(?:LICENSE|README\.md|THIRD_PARTY_NOTICES\.md|stash_ai\.py|update_stash_ai\.py|[A-Za-z0-9][A-Za-z0-9_.-]*\.yml|"
+        r"docs/(?:[A-Za-z0-9][A-Za-z0-9_.-]*/)*[A-Za-z0-9][A-Za-z0-9_.-]*\.(?:md|txt)|"
         r"stash_ai/(?:[A-Za-z_][A-Za-z0-9_]*/)*[A-Za-z_][A-Za-z0-9_]*\.py)", name))
 
 

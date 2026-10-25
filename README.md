@@ -1137,10 +1137,11 @@ python .\update_stash_ai.py
 
 The updater:
 - downloads application files from a single `main` commit SHA;
-- installs launchers, the `stash_ai/` package, YAML files, all four
-  requirements files and CPU/GPU constraints (including their README);
+- installs launchers, the `stash_ai/` package, YAML files, all five
+  requirements files (including `requirements-sapiensid.txt`), CPU/GPU constraints,
+  the root README and Markdown/text documentation under `docs/`;
 - preserves locally modified YAML and writes `.incoming` proposals;
-- refuses to overwrite locally changed code or dependency files without `--force-code`;
+- refuses to overwrite locally changed code, documentation or dependency files without `--force-code`;
 - does not update models, `.env`, SQLite or Python dependencies;
 - uses an installation lock and recovery journal.
 
@@ -1157,8 +1158,18 @@ python -m pip install -r requirements-cpu.txt -c constraints/cpu-py314.txt
 for development and tests. The updater downloads these manifests but does not
 run `pip` or modify the installed Python packages.
 
-If the installed updater predates dependency-file downloads, run it once to
-update itself, then run it again to fetch requirements and constraints.
+For optional SapiensID support, after installing the CPU/GPU profile:
+
+```powershell
+python -m pip install -r requirements-sapiensid.txt
+```
+
+This installs the inference extras; model checkpoints and the upstream source
+checkout still require the setup in [the SapiensID guide](docs/sapiensid-hybrid.md).
+
+If the installed updater predates documentation or SapiensID dependency-file
+support, run it once to update itself, then run it again to fetch those files.
+The second run can add newly supported files even when `main` has not changed.
 
 After an interrupted update:
 
