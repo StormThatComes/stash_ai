@@ -26,7 +26,10 @@ def test_cold_replay_removes_members_withheld_by_final_decision(tmp_path):
         assert not rows
 
 
-def test_blocked_better_rival_prevents_weaker_assignment(tmp_path):
+@pytest.mark.parametrize('joint', [False, True])
+def test_blocked_better_rival_requires_unique_joint_assignment(tmp_path, monkeypatch, joint):
+    if not joint:
+        monkeypatch.setattr('stash_ai.recognition.joint_claims.recover', lambda *args: None)
     from tests.test_recognition_evidence_safety import pair_cues
     config = cluster_config(tmp_path)
     a = np.array([1., 0, 0, 0])
@@ -50,7 +53,25 @@ def test_blocked_better_rival_prevents_weaker_assignment(tmp_path):
         db.connection.commit()
         result = rebuild_selected(db, [{'scene':'1','scan':first},{'scene':'2','scan':second},{'scene':'3','scan':selected}], config)
         weaker = result[first][0]['person']
-        assert all(db.connection.execute('SELECT person FROM members WHERE observation=?', (identifier,)).fetchone() is None for identifier in query_ids)
+        for identifier in query_ids:
+            member = db.connection.execute('SELECT person FROM members WHERE observation=?', (identifier,)).fetchone()
+            if not joint:
+                assert member is None
+                continue
+            assert member['person'] == weaker
+            payload = json.loads(db.connection.execute(
+                "SELECT payload FROM candidates WHERE json_extract(payload,'$.observation')=?",
+                (identifier,)).fetchone()[0])
+            assert payload['reference_role'] == 'attachment'
+            proof = payload['shared_reference']['joint_assignment']
+            assert len(proof) == 2 and len({claim['identity'] for claim in proof}) == 2
+        if joint:
+            stronger = result[second][0]['person']
+            assert stronger != weaker
+            peers = db.connection.execute('SELECT m.observation,m.person FROM members m JOIN observations o '
+                'ON o.id=m.observation WHERE o.scan=?', (selected,)).fetchall()
+            assert len(peers) == 6
+            assert all(row['person'] == (weaker if row['observation'] in query_ids else stronger) for row in peers)
 
 
 def test_reference_selection_preserves_partition_for_identical_vectors(tmp_path):

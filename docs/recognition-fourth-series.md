@@ -9,7 +9,7 @@ work is implemented.
 |---|---|---|---|
 | 1 | Representative selection and independent evidence | 1, 3, 8, 9 | Implemented; focused and recognition suite validated |
 | 2 | Supplemental evidence and preserved appearance banks | 2, 4, 5, 10 | Implemented; 47 focused tests passed |
-| 3 | Conflict resolution and automatic consolidation | 6, 7, 11 | Pending |
+| 3 | Conflict resolution and automatic consolidation | 6, 7, 11 | Implemented; 34 focused tests passed |
 | 4 | Incremental dependencies, compact data and memory | 12, 19, 20 | Pending |
 | 5 | Parallel matching and change-driven recovery | 13, 17, 18 | Pending |
 | 6 | Shared VTT inputs and CPU/inference pipeline | 14, 15, 16 | Pending |
@@ -38,3 +38,8 @@ separate original face/body veto IDs, and recovers supported withheld queries
 against frozen current and original appearance banks as attachments only. Head
 association allows 5% detector disagreement while preserving reciprocal
 uniqueness. Person input contract v2 intentionally recollects prior associations.
+
+PR3 uses complete, outsider-separated nonoverlapping subgroups, retries ambiguous
+and co-present strict claims, and journals missing-scope consolidation requests.
+The journal never expands publication scope: a later run selecting all required
+scans automatically revalidates and drains it. No stale proof is executed.

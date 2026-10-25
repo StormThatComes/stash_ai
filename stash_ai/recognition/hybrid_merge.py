@@ -46,7 +46,8 @@ def apply(database,selected,config):
     scope,namespace=db.execute('SELECT scope,namespace FROM scans WHERE id=?',(selected[0]['scan'],)).fetchone()
     result=report(db,config,scope,namespace)
     selection={x['scan'] for x in selected}
-    stored_bytes=0
+    stored_bytes=0; pending=[]
+    queue_key="hybrid-pending:"+digest([scope,namespace])
     with db:
         with tracking(result['decisions'],'Apply hybrid identity merges',unit='component') as decisions:
             for decision in decisions:
@@ -55,6 +56,8 @@ def apply(database,selected,config):
                 scans={r[0] for r in db.execute('SELECT DISTINCT o.scan FROM members m JOIN observations o ON o.id=m.observation '
                     'WHERE m.person IN (SELECT value FROM json_each(?))',(encoded(people),))}
                 if not scans<=selection:
+                    pending.append(dict(people=people,required_scans=sorted(scans),
+                        missing_scans=sorted(scans-selection),contract=decision['contract']))
                     decision.update(outcome='blocked',blockers=['identity_outside_selected_scans'])
                     continue
                 rows=list(db.execute('SELECT id,created FROM people WHERE id IN (SELECT value FROM json_each(?)) ORDER BY created,id',
@@ -81,6 +84,15 @@ def apply(database,selected,config):
                         (encoded(recorded),target,source))
                 for row in db.execute('SELECT id,scene FROM scans WHERE id IN (SELECT value FROM json_each(?))',(encoded(sorted(scans)),)):
                     enqueue(db,scope,namespace,row['scene'],config,'hybrid_identity_merge')
+        # A journal entry is a request for revalidation, never an executable
+        # stale plan. Subsequent runs automatically recompute eligible decisions
+        # once their selected scope includes every required scan.
+        payload=encoded(dict(format=1,scope=scope,namespace=namespace,pending=pending))
+        if len(payload.encode())>config.data['sapiensid']['execution']['plan_bytes']:
+            raise ValueError('SapiensID pending consolidation plan_bytes budget exceeded.')
+        if pending:db.execute('INSERT OR REPLACE INTO metadata VALUES (?,?)',(queue_key,payload))
+        else:db.execute('DELETE FROM metadata WHERE key=?',(queue_key,))
+    result['pending_consolidations']=pending
     return result
 
 

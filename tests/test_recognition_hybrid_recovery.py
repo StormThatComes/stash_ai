@@ -55,3 +55,31 @@ def test_border_tolerance_does_not_resolve_overlapping_people_by_order():
     assert associate([face],[person,person])==[None]
     far=dict(person,bounds=[20,20,120,120])
     assert associate([face],[far])==[None]
+
+
+def test_incomplete_hybrid_component_can_repair_stronger_complete_pair(monkeypatch):
+    from stash_ai.recognition.hybrid_evidence import Identity, plan
+    from stash_ai.recognition.config import defaults
+    monkeypatch.setattr('stash_ai.recognition.global_views._cooccurs',lambda *a:False)
+    bank=[]
+    for name,angle in zip('abc',(0.,.1,.6)):
+        body=np.array([[np.cos(angle),np.sin(angle)]],dtype='float32')
+        bank.append(Identity(name,(name,),np.array([[1.,0.]]),body,tuple(range(3))))
+    result=plan(None,SimpleNamespace(data=defaults()),bank)
+    assert [d['people'] for d in result['decisions'] if d['outcome']=='merge']==[['a','b']]
+
+
+def test_pending_scope_is_revalidated_and_drained_automatically(tmp_path):
+    import json
+    from tests.test_recognition_hybrid_merge import prepared
+    from stash_ai.recognition.hybrid_merge import apply
+    config,people=prepared(tmp_path)
+    with FaceDatabase(config.database) as state:
+        db=state.connection
+        selected=[dict(scan=r['id'],scene=r['scene']) for r in db.execute('SELECT * FROM scans')]
+        assert apply(state,selected[:1],config)['pending_consolidations']
+        saved=json.loads(db.execute("SELECT value FROM metadata WHERE key LIKE 'hybrid-pending:%'").fetchone()[0])
+        assert len(saved['pending'][0]['required_scans'])==2
+        apply(state,selected,config)
+        assert db.execute("SELECT COUNT(*) FROM metadata WHERE key LIKE 'hybrid-pending:%'").fetchone()[0]==0
+        assert db.execute('SELECT COUNT(*) FROM identity_merges').fetchone()[0]==1

@@ -152,6 +152,22 @@ def plan(db,config,identities,*,focus=None):
         decisions.append(dict(people=people,outcome='blocked' if blockers else 'merge',blockers=blockers,
             nearest_rival=nearest,frozen=True,contract=contract(config),
             proofs=[proofs[a,b] for a,b in combinations(people,2) if (a,b) in proofs]))
+    # Reuse complete, outsider-separated prefixes from the immutable graph.
+    # Overlapping incompatible proposals veto each other, never win by order.
+    from .frozen_subgroups import Edges, nonoverlapping
+    graph=Edges(limits['plan_bytes'])
+    for (a,b),score in edges.items():graph.add(a,b,score)
+    repairs=[]
+    for decision in decisions:
+        if decision['blockers']==['incomplete_component']:
+            repairs.extend(graph.proposals(decision['people'],settings['person_threshold'],settings['ambiguity_margin']))
+    repairs=[people for people in repairs if all(
+        min(graph.score(p,q) for q in people if q!=p)-graph.score(p,r)>=settings['ambiguity_margin']
+        for p in people for r in owned if r not in people)]
+    for people in nonoverlapping(repairs):
+        decisions.append(dict(people=list(people),outcome='merge',blockers=[],nearest_rival=None,
+            frozen=True,contract=contract(config),partition_strategy='supported_complete_subgroup',
+            proofs=[proofs[a,b] for a,b in combinations(people,2)]))
     # Second bounded pass: weak/missing-evidence outsiders still compete, but
     # their N-squared scores are never retained in Python dictionaries.
     eligible={p:d for d in decisions if not d['blockers'] for p in d['people']}
