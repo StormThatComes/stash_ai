@@ -39,3 +39,23 @@ so CPU preparation can overlap the single owner's GPU inference. Queued CPU
 results retain reservations until consumed. Inline face/body evidence is written
 with the cursor in one grouped transaction; failure replays from the previous
 checkpoint. Fresh inline rows no longer need per-cue SQLite rereads.
+
+PR6: The pending consolidation queue now has a consumer. By default it stays
+within selected scenes. Set `sapiensid.consolidation.scope: retained` to allow
+automatic replay expansion within the current Stash library and model namespace;
+`scene_ids` optionally restricts it and `max_scenes` bounds the work. Both existing
+and newly queued requests are revalidated against complete current scans and a
+fresh frozen catalogue. Old queue scores never authorize a merge. Expanded scenes
+receive publication debt; HTTP publication still uses the caller's selection.
+
+Stored performer ownership is read in batches. Scene links are added in groups
+of at most 32 using ADD, with all per-relationship intents committed before the
+request and fresh post-write scene reads. Unknown batch outcomes are reconciled
+by observation and never blindly retried. Manual pre-existing links retain their
+unmanaged provenance. Matching format 53 invalidates earlier decision caches.
+
+The six PRs are an ordered stack: evidence banks (#961), historical/body banks
+(#962), decisions (#963), compute reuse (#964), input/checkpoints (#965), and
+consolidation/publication. Targeted tests cover migrations, exact-score parity,
+input corruption, CPU/GPU overlap, interrupted checkpoints, stale requests,
+ownership changes, manual relationships and lost HTTP acknowledgements.

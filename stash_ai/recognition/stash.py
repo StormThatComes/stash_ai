@@ -140,6 +140,21 @@ class RecognitionStash(StashTransport):
             raise RuntimeError('Stash did not confirm the requested performer association.')
         return rows[0]
 
+    def add_scene_people(self,scene,performers):
+        checked_id({'id':scene})
+        wanted=list(dict.fromkeys(performers))
+        for identifier in wanted:checked_id({'id':identifier})
+        if not wanted:return self.scene(scene)
+        rows=self.gql('mutation StashAIRecognitionLinks($input:BulkSceneUpdateInput!) {'
+            'bulkSceneUpdate(input:$input) { id performers { id } }}',
+            {'input':{'ids':[scene],'performer_ids':{'ids':wanted,'mode':'ADD'}}})['bulkSceneUpdate']
+        if not isinstance(rows,list) or len(rows)!=1:
+            raise RuntimeError('Stash additive associations were not acknowledged.')
+        checked_id(rows[0],scene)
+        if not set(wanted)<={checked_id(row)['id'] for row in rows[0].get('performers',[])}:
+            raise RuntimeError('Stash did not confirm every requested association.')
+        return rows[0]
+
     def update_person(self, performer, **fields):
         if set(fields) - {'name', 'image'}:
             raise ValueError('Recognition may update only selected performer name/image fields.')

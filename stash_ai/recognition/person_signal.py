@@ -28,11 +28,21 @@ def defaults():
                   nms_threshold=.7,max_people_per_frame=100),
         matching=dict(face_floor=.4,person_threshold=.85,ambiguity_margin=.1,min_support=3),
         execution=dict(batch_size=1,reference_bytes=134217728,plan_bytes=16777216,max_candidate_pairs=100000),
+        consolidation=dict(scope='selected',scene_ids=[],max_scenes=1000),
         storage=dict(retain_person_crops=True))
 
 
 def validate(settings):
     from .config import _number
+    consolidation=settings['consolidation']
+    if consolidation['scope'] not in ('selected','retained'):
+        raise ValueError('sapiensid.consolidation.scope must be selected or retained.')
+    scenes=consolidation['scene_ids']
+    if (not isinstance(scenes,(list,tuple)) or len(scenes)>100000 or
+            any(not isinstance(s,str) or not s.isascii() or not s.isdecimal() or int(s)<1 or str(int(s))!=s for s in scenes)):
+        raise ValueError('sapiensid.consolidation.scene_ids must contain canonical scene IDs.')
+    if type(consolidation['max_scenes']) is not int or not 1<=consolidation['max_scenes']<=100000:
+        raise ValueError('sapiensid.consolidation.max_scenes must be in [1,100000].')
     for key in ('enabled',):
         if type(settings[key]) is not bool:
             raise ValueError('sapiensid.'+key+' must be boolean.')

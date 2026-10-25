@@ -123,3 +123,7 @@ names:
 # See docs/sapiensid-hybrid.md for verified assets, calibration and all settings.
 sapiensid:
   enabled: false
+  consolidation:
+    scope: selected  # retained consumes queued merges across retained scenes.
+    scene_ids: []    # Optional allowlist for retained scope; [] means this library/namespace.
+    max_scenes: 1000 # Bound automatic replay expansion. HTTP publication stays selected.
