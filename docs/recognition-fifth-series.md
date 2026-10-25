@@ -29,3 +29,13 @@ transactional raw-feature stamps, with migration from schema 7, so assignment
 updates do not rehash unchanged face/body inputs. Pixel alias discovery is lazy
 on warm paths. Birth recovery now requires every original member, including
 members excluded by query eligibility, and excludes rejected cohorts from votes.
+
+PR5: Persist bounded compressed VTT/sprite responses next to the recognition DB.
+Reuse requires a strong HTTP ETag and successful conditional origin request;
+verify cached bytes, discard corrupt payloads, honour no-store, and fall back to
+full reads when validators are absent. `execution.media_cache_bytes: 0` disables
+this disposable transport cache. Prepared body inputs use two bounded batches
+so CPU preparation can overlap the single owner's GPU inference. Queued CPU
+results retain reservations until consumed. Inline face/body evidence is written
+with the cursor in one grouped transaction; failure replays from the previous
+checkpoint. Fresh inline rows no longer need per-cue SQLite rereads.

@@ -82,16 +82,26 @@ def scan_scene(database, scope, scene, config, namespace, source, backend_factor
     backend = backend_factory()
     frame_progress(completed=record['cursor'], total=record['total'])
     pending, cursor = [], record['cursor']
+    pending_bytes=0
+    collector=getattr(on_cue,'__self__',None)
+    grouped=callable(getattr(collector,'collect_records',None))
+    columns=('id','scan','cue','seconds','source','rect','geometry','quality','rejected','dimensions','embedding','crop')
 
     def checkpoint():
+        nonlocal pending_bytes
+        supplemental=collector.take_records() if grouped else []
         with db:
             from .pixel_storage import compact
             compacted=[]
             for row in pending:
                 row=list(row);row[7]=compact(db,row[7]);compacted.append(row)
             db.executemany('INSERT OR REPLACE INTO observations VALUES (?,?,?,?,?,?,?,?,?,?,?,?)', compacted)
+            if supplemental:
+                from .person_signal import save,contract
+                for observation,metadata,vector,crop in supplemental:
+                    save(db,observation,contract(config),metadata,vector,crop)
             db.execute('UPDATE scans SET cursor=? WHERE id=?', (cursor, identifier))
-        pending.clear()
+        pending.clear();pending_bytes=0
         progress(scanned=cursor, total=record['total'], scene=str(scene['id']))
 
     try:
@@ -107,15 +117,22 @@ def scan_scene(database, scope, scene, config, namespace, source, backend_factor
                 for batch in batches:
                     for index, cue, records in process_cues(batch, backend, visibility, config, stage=cpu,
                             assess=assess,rejection=rejection,crop_bytes=crop_bytes,geometry_contract=geometry_contract):
+                        start=len(pending)
                         for face_index, face, quality, reason, vector, crop in records:
                             observation = str(uuid.uuid5(uuid.UUID(identifier), encoded([index, face_index, face.row])))
                             pending.append((observation, identifier, index, cue.start, safe_url(cue.image), encoded(list(cue.rect)),
                                             encoded(list(face.row)), encoded(quality), reason, backend.dimensions, vector, crop))
                         cursor = index + 1
                         frame_progress(completed=cursor, total=record['total'])
-                        if on_cue is not None or cursor % config.data['execution']['checkpoint_cues'] == 0:
-                            checkpoint()
-                        if on_cue is not None:
+                        if grouped:
+                            image=next(image for i,_,image in batch if i==index)
+                            collector.collect_records(db,identifier,index,image,
+                                sorted((dict(zip(columns,row)) for row in pending[start:]),key=lambda r:r['id']))
+                        pending_bytes+=sum(sum(len(v) for v in row if isinstance(v,(str,bytes)))
+                            +(config.data['storage']['max_crop_bytes']+32768 if grouped else 0) for row in pending[start:])
+                        if (on_cue is not None and not grouped or cursor % config.data['execution']['checkpoint_cues'] == 0
+                                or pending_bytes>=config.data['execution']['scan_queue_bytes']//4):checkpoint()
+                        if on_cue is not None and not grouped:
                             image=next(image for i,_,image in batch if i==index)
                             on_cue(db,identifier,index,image)
 
@@ -128,7 +145,12 @@ def scan_scene(database, scope, scene, config, namespace, source, backend_factor
         # must not enter a checkpoint if inference fails halfway through it.
         pending[:] = [row for row in pending if row[2] < cursor]
         from stash_ai.runtime.cleanup import cleanup
-        cleanup([('save recognition checkpoint', checkpoint)])
+        if grouped:
+            # Face and body checkpoints are atomic. Incomplete grouped work is
+            # replayed from the last durable cursor, never half-published.
+            pending.clear()
+            cleanup([('abort person checkpoint',collector.abort)])
+        else:cleanup([('save recognition checkpoint', checkpoint)])
         raise
     finally:
         from stash_ai.runtime.cleanup import cleanup

@@ -9,6 +9,21 @@ from stash_ai.runtime.cleanup import cleanup
 from stash_ai.runtime import shutdown
 
 
+class OwnedFuture(Future):
+    """The reservation follows the result until its consumer takes it."""
+    def __init__(self,stage):
+        super().__init__();self.stage=stage
+
+    def result(self,timeout=None):
+        try:return super().result(timeout)
+        finally:
+            if self.done():self.stage.retire(self)
+
+    def cancel(self):
+        # The executor owns cancellation and the lifetime of copied images.
+        return False
+
+
 class CpuStage:
     def __init__(self, workers, limit):
         self.workers, self.limit = workers, limit
@@ -50,30 +65,38 @@ class CpuStage:
         if self.executor is None:
             shutdown.require_idle()
             self.executor = ThreadPoolExecutor(max_workers=self.workers, thread_name_prefix='recognition-pixels')
-        while True:
-            with self.lock:
-                if self.bytes + size <= self.limit and len(self.pending) < self.workers*2:
-                    break
-                oldest = next(iter(self.pending))
-            oldest.result()
-            self.cancel.check()
+        if not self.can_submit(image,extra=extra):
+            raise BufferError('Consume recognition CPU results before submitting another job.')
         key,owned = self._acquire_image(image)
+        future=OwnedFuture(self)
+        with self.lock:
+            self.pending[future]=size
+            self.bytes+=size
+            self.peak_bytes=max(self.peak_bytes,self.bytes)
         try:
-            future = self.executor.submit(self._call,function,owned,value,key)
+            job = self.executor.submit(self._call,function,owned,value,key)
         except BaseException:
             self._release_image(key)
+            self.retire(future)
             raise
-        with self.lock:
-            self.pending[future] = size
-            self.bytes += size
-            self.peak_bytes = max(self.peak_bytes,self.bytes)
         def completed(done):
             if done.cancelled():
                 self._release_image(key)
-            with self.lock:
-                self.bytes -= self.pending.pop(done,0)
-        future.add_done_callback(completed)
+                Future.cancel(future);self.retire(future)
+            else:
+                try:value=done.result()
+                except BaseException as error:future.set_exception(error)
+                else:future.set_result(value)
+        job.add_done_callback(completed)
         return future
+
+    def can_submit(self,image,*,extra=0):
+        size=image.width*image.height*3*8+extra+4096
+        with self.lock:
+            return self.bytes+size<=self.limit and len(self.pending)<self.workers*2
+
+    def retire(self,future):
+        with self.lock:self.bytes-=self.pending.pop(future,0)
 
     def ordered(self, function, image, values, *, extra=0):
         size = image.width*image.height*3*8 + extra + 4096
@@ -81,19 +104,26 @@ class CpuStage:
         pending = deque()
         try:
             for value in values:
-                if len(pending) >= capacity:
+                while pending and (len(pending)>=capacity or not self.can_submit(image,extra=extra)):
                     yield pending.popleft().result()
+                # Nested preparation may share a stage with an outer iterator.
+                # Its results stay reserved; use the existing scalar fallback.
+                if not self.can_submit(image,extra=extra):
+                    yield function(image,value)
+                    continue
                 pending.append(self.submit(function,image,value,extra=extra))
             while pending:
                 yield pending.popleft().result()
         finally:
             for future in pending:
-                future.cancel()
+                try:future.result()
+                except BaseException:pass
 
     def close(self):
         self.cancel.cancel()
         if self.executor is not None:
             shutdown.call(lambda: self.executor.shutdown(wait=True, cancel_futures=True), self)
+        with self.lock:self.pending.clear();self.bytes=0
 
 
 def process(image, faces, backend, visibility, config, cue, *, assess, rejection, crop_bytes, geometry_contract, stage=None, defer_embeddings=False, defer_encoding=False):
@@ -142,6 +172,21 @@ def process(image, faces, backend, visibility, config, cue, *, assess, rejection
             import hashlib
             entry['quality']['evidence_crop_sha256'] = hashlib.sha256(entry['crop']).hexdigest()
         return entry
+
+    def encode_jobs(entries):
+        pending=[];consumed=0
+        extra=config.data['storage']['max_crop_bytes']
+        for entry in entries:
+            while consumed<len(pending) and not stage.can_submit(image,extra=extra):
+                pending[consumed].result();consumed+=1
+            if stage.can_submit(image,extra=extra):
+                pending.append(stage.submit(encode,image,entry,extra=extra))
+            else:
+                # An outer preparation iterator owns the remaining reservations.
+                # This entry is consumed directly into the caller's cue batch.
+                future=Future();future.set_result(encode(image,entry));pending.append(future)
+                consumed=len(pending)
+        return pending
 
     try:
         with closing(stage.ordered(prepare, image, enumerate(faces), extra=4*256*256*4 if prepared_visibility else 0), name='close scan preparation') as stream:
@@ -193,7 +238,7 @@ def process(image, faces, backend, visibility, config, cue, *, assess, rejection
                     with closing(stage.ordered(align, image, accepted, extra=3*112*112*4),
                                  name='close face alignment preparation') as aligned:
                         accepted = list(aligned)
-                    encoded = [stage.submit(encode,image,entry,extra=config.data['storage']['max_crop_bytes']) for entry in batch]
+                    encoded = encode_jobs(batch)
                     step = settings['recognizer_batch_size']
                     if defer_embeddings:
                         for entry in accepted:
@@ -206,7 +251,7 @@ def process(image, faces, backend, visibility, config, cue, *, assess, rejection
                         for entry, value in zip(chunk, vectors):
                             entry['vector'] = normalized_embedding(value, backend.dimensions).astype('<f4').tobytes()
                 else:
-                    encoded = [stage.submit(encode,image,entry,extra=config.data['storage']['max_crop_bytes']) for entry in batch]
+                    encoded = encode_jobs(batch)
                     for entry in accepted:
                         entry['vector'] = normalized_embedding(backend.embed(image, entry['face']), backend.dimensions).astype('<f4').tobytes()
                 for entry, future in zip(batch,encoded):
