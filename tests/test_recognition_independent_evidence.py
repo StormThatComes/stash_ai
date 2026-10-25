@@ -40,3 +40,38 @@ def test_duplicate_can_improve_representative_without_extra_vote():
     assert slot.observations == ['better']
     assert len(slot.cues) == 1
     assert np.array_equal(slot.total,sample)
+
+
+def test_raw_fingerprint_deduplicates_copies_across_scenes():
+    from stash_ai.recognition.independent_evidence import count
+    rows = [dict(scan=s, seconds=t, quality=json.dumps(dict(evidence_pixel_sha256='a'*64)))
+            for s,t in [('first', 0), ('copy', 30)]]
+    assert count(rows) == 1
+
+
+def test_near_copy_requires_pixels_aspect_texture_and_embedding():
+    from stash_ai.recognition.evidence_pixels import verified
+    rng = np.random.default_rng(7)
+    pixels = rng.integers(10, 245, 3072, dtype='uint8')
+    a = np.array([1.,0.],dtype='<f4')
+    assert verified(pixels, pixels+1, a, a, 1., 1.)
+    assert not verified(pixels, pixels+10, a, a, 1., 1.)
+    assert not verified(pixels, pixels, a, a[::-1], 1., 1.)
+    assert not verified(pixels, pixels, a, a, 1., 0.)
+    assert not verified(np.zeros(3072), np.zeros(3072), a, a, 1., 1.)
+
+
+def test_pixel_fingerprint_does_not_depend_on_jpeg_budget():
+    from PIL import Image
+    from stash_ai.recognition.quality import crop_bytes
+    from types import SimpleNamespace
+    image = Image.fromarray(np.random.default_rng(3).integers(0,256,(128,128,3),dtype='uint8'))
+    first, second = {}, {}
+    face = SimpleNamespace(box=(10,10,100,100))
+    try:
+        a,_ = crop_bytes(image,face,limit=100000,details=first)
+        b,_ = crop_bytes(image,face,limit=1000,details=second)
+        assert a != b
+        assert first['evidence_pixel_sha256'] == second['evidence_pixel_sha256']
+    finally:
+        image.close()

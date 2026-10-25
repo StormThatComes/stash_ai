@@ -20,6 +20,7 @@ def recover(db,groups,history,config,bindings,*,selected_only=False,source_ids=N
     from .historical_references import rank
     from .anchor_views import _competing_anchor
     policy=matching_policy(config)
+    from .independent_evidence import count, grouped_counts
     minimum=config.data['clustering']['view_attach_min_support']
     db.execute('CREATE TEMP TABLE cohort_claims(observation TEXT PRIMARY KEY,candidate TEXT,source TEXT,target TEXT,mode TEXT,medoids TEXT,proof TEXT)')
     try:
@@ -38,9 +39,8 @@ def recover(db,groups,history,config,bindings,*,selected_only=False,source_ids=N
             rivals=[Group(bindings.get(g.identifier,g.identifier),g.samples,True) for g in groups
                     if g.identifier!=group.identifier]
             references=list(frozen.groups)+[v.group for v in frozen.views]+rivals
-            totals[group.identifier]=db.execute('SELECT COUNT(*) FROM (SELECT o.scan,o.seconds FROM members m '
-                'JOIN observations o ON o.id=m.observation WHERE m.person=? GROUP BY o.scan,o.seconds)',
-                (group.identifier,)).fetchone()[0]
+            totals[group.identifier]=count(db.execute('SELECT o.scan,o.seconds,o.quality FROM members m '
+                'JOIN observations o ON o.id=m.observation WHERE m.person=?', (group.identifier,)))
             rows=db.execute('SELECT o.*,c.id AS candidate FROM members m JOIN observations o ON o.id=m.observation '
                 "JOIN candidates c ON json_extract(c.payload,'$.observation')=o.id AND c.policy=? "
                 "WHERE m.person=? AND c.person=m.person AND c.status='accepted' ORDER BY o.scan,o.cue,o.id",
@@ -74,8 +74,8 @@ def recover(db,groups,history,config,bindings,*,selected_only=False,source_ids=N
             return [r['id'] for r in db.execute(query) if r['id'] not in supported]
         for observation in insufficient():
             db.execute('DELETE FROM cohort_claims WHERE observation=?',(observation,))
-        counts=dict(db.execute('SELECT source,COUNT(*) FROM (SELECT q.source,o.scan,o.seconds FROM cohort_claims q '
-            'JOIN observations o ON o.id=q.observation GROUP BY q.source,o.scan,o.seconds) GROUP BY source'))
+        counts=grouped_counts(db.execute('SELECT q.source,o.scan,o.seconds,o.quality FROM cohort_claims q '
+            'JOIN observations o ON o.id=q.observation'), 'source')
         coverage={source:count/totals[source] for source,count in counts.items() if totals[source]}
         if selected_only:
             candidates={source for source,ratio in coverage.items() if .5<ratio<1.}
@@ -103,13 +103,12 @@ def recover(db,groups,history,config,bindings,*,selected_only=False,source_ids=N
                 db.execute('DELETE FROM cohort_claims WHERE source=? AND target=?',(source,target))
         if selected_only:
             # Filtering a conflicting target cannot leave a minority repair.
-            for source,total in db.execute('SELECT source,COUNT(*) FROM (SELECT q.source,o.scan,o.seconds '
-                    'FROM cohort_claims q JOIN observations o ON o.id=q.observation '
-                    'GROUP BY q.source,o.scan,o.seconds) GROUP BY source').fetchall():
+            for source,total in grouped_counts(db.execute('SELECT q.source,o.scan,o.seconds,o.quality '
+                    'FROM cohort_claims q JOIN observations o ON o.id=q.observation'), 'source').items():
                 if total<=totals[source]/2:
                     db.execute('DELETE FROM cohort_claims WHERE source=?',(source,))
-        counts=dict(db.execute('SELECT source,COUNT(*) FROM (SELECT q.source,o.scan,o.seconds FROM cohort_claims q '
-            'JOIN observations o ON o.id=q.observation GROUP BY q.source,o.scan,o.seconds) GROUP BY source'))
+        counts=grouped_counts(db.execute('SELECT q.source,o.scan,o.seconds,o.quality FROM cohort_claims q '
+            'JOIN observations o ON o.id=q.observation'), 'source')
         sources=list(counts)
         proofs={source:dict(source=source,proposed_independent_support=counts[source],
             total_support=totals[source],frozen=True,selected_only=selected_only) for source in sources}

@@ -11,17 +11,21 @@ Tuner expansion and multi-scenario tuning (items 19–20) are deferred.
 5. CPU scoring, memory accounting and shared cohort inputs (11, 12, 16, 17).
 6. Overlapped VTT pipeline and visibility batches (18).
 
-## Current implementation
+## Implementation status
 
-PR1 foundation implements timestamp/pixel bipartite support for identity births
-and query votes, timestamp deduplication and representative improvement in view
-cohorts, propagation of quality into historical/cohort recovery, the promotion
-key compatibility fix and historical-pool duplicate configuration forwarding.
-The matching/checkpoint engine version changes invalidate prior decisions.
+PR1: independent timestamp/pixel matching now covers birth, merge proofs,
+same-scene support, cross-scene confirmation, cohort majority, local ordering,
+query support and promoted views. A new nomination revalidates cached prefixes
+when it can change the matching; unchanged prefixes remain reusable.
+Pre-JPEG RGB fingerprints deduplicate exact copies across scenes. Private replay
+verifies compression copies using textured RGB thumbnails, aspect and embedding;
+perceptual hashes only shortlist, and copies never form transitive chains.
+Legacy scans retain timestamp/JPEG fallback until their pixels are rescanned.
+Better duplicates can replace view representatives without gaining support.
+Physical duplicates are checked before anchor co-presence rejection.
 
-Still required within PR1: complete support-counter migration (merge proof
-caches, same-scene and cross-scene support), stable pre-JPEG fingerprints,
-verified near-duplicate matching, cross-scene copy handling and complete physical
-claim canonicalization. These are not claimed as implemented by the foundation.
-PR2–PR6 are not implemented yet. Publish the foundation as a draft until these
-remaining scopes and regression checks are complete.
+Validation: 129 focused recognition regressions passed (evidence, merge cache,
+scene/cross-scene, cohort assignment, views, promotion, rebuild, retained data).
+No measured real-library accuracy or GPU throughput claim.
+
+PR2–PR6: implementation follows on stacked branches.

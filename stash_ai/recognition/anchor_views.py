@@ -105,8 +105,6 @@ def _enrich_from_validated_context(db, policy, grouping, usage, confirmed):
             if float(np.dot(sample, core.group.samples[0])) < grouping['view_match_threshold']:
                 continue
             bucket = additions.setdefault((key, core.medoid), [])
-            if (row['scan'], row['seconds']) in {(r['scan'], r['seconds']) for r,_ in bucket}:
-                continue
             if all(float(np.dot(sample, other)) >= grouping['view_cohesion_threshold']
                    for _,other in bucket):
                 bucket.append((row, sample))
@@ -116,6 +114,9 @@ def _enrich_from_validated_context(db, policy, grouping, usage, confirmed):
     minimum = 2
     for (key, parent_medoid), bucket in sorted(additions.items(), key=lambda item: item[0]):
         scene, person, pose = key
+        from .independent_evidence import representatives
+        independent = {r['id'] for r in representatives(r for r,_ in bucket)}
+        bucket = [(r,v) for r,v in bucket if r['id'] in independent]
         if len(bucket) < minimum:
             continue
         # Context medoids require at least two independently accepted cues;
@@ -130,14 +131,16 @@ def _enrich_from_validated_context(db, policy, grouping, usage, confirmed):
                          origin.support_count + len(bucket)))
 
 
-def _different_accepted_face(db, row, person, policy):
+def _different_accepted_face(db, row, person, policy, deduplicate=False):
     """A second detection already assigned to the destination needs review."""
-    return db.execute(
-        'SELECT 1 FROM candidates c JOIN observations o '
+    peers = db.execute(
+        'SELECT o.geometry,o.embedding FROM candidates c JOIN observations o '
         f'ON o.id={address(db, "c")} '
         "WHERE c.scan=? AND c.policy=? AND c.status='accepted' "
-        'AND c.person=? AND o.cue=? AND o.id<>? LIMIT 1',
-        (row['scan'], policy, person, row['cue'], row['id'])).fetchone() is not None
+        'AND c.person=? AND o.cue=? AND o.id<>?',
+        (row['scan'], policy, person, row['cue'], row['id']))
+    from .physical_faces import duplicate
+    return any(not duplicate(row, peer, deduplicate) for peer in peers)
 
 
 def _competing_anchor(groups, person, query, score, margin):
@@ -262,7 +265,7 @@ def apply_anchor_views(database, selected, config, *, progress=None):
                 if _competing_anchor(rival_anchors, person, query, score, margin):
                     _probe(db, row['candidate'], 'competing_identity')
                     continue
-                if _different_accepted_face(db, row, person, policy):
+                if _different_accepted_face(db, row, person, policy, grouping.get('deduplicate_detections', False)):
                     _probe(db, row['candidate'], 'co_present_identity')
                     continue
                 if not co_presence_allows(

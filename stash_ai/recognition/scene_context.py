@@ -41,25 +41,28 @@ def _cores(db, scan, policy, groups, config):
     settings = config.data['recognition']
     anchor = anchor_sql('o', config.data['clustering'])
     minimum = config.data['clustering']['same_scene_min_support']
-    support = {}
+    from .independent_evidence import Votes, representatives, grouped_counts
+    support, evidence = {}, {}
     source = (f"FROM candidates c JOIN observations o ON o.id={address(db, 'c')} "
         "JOIN members m ON m.observation=o.id AND c.person=m.person "
         f"WHERE c.policy=? AND c.scan=o.scan AND o.scan=? AND o.rejected IS NULL AND c.status='accepted' AND {anchor}")
-    rows = db.execute("SELECT o.id,o.seconds,o.dimensions,o.embedding,m.person " + source +
+    rows = db.execute("SELECT o.id,o.scan,o.quality,o.seconds,o.dimensions,o.embedding,m.person " + source +
         " ORDER BY o.cue,o.geometry,o.embedding,o.id", (policy, scan))
     with tracking(scored_rows(rows, groups, float('-inf'), config.data['clustering']['cohesion_threshold']),
                   'Validate same-scene support', unit='observation',
                   total=lambda: db.execute('SELECT COUNT(*) ' + source, (policy, scan)).fetchone()[0]) as tracked:
         for row, frozen in tracked:
-            cues = support.setdefault(row['person'], {})
-            if len(cues) >= minimum or row['seconds'] in cues:
+            cues = evidence.setdefault(row['person'], Votes())
+            if len(cues) >= minimum:
                 continue
             query = cache.vector(row) if cache is not None else vector(row)
             ranked = _rank(groups, query, config, cache=cache, observation=row['id'], frozen=frozen)
             if (ranked and ranked[0][1] == row['person'] and ranked[0][0] >= settings['match_threshold']
                     and _unambiguous(ranked, settings['ambiguity_margin'])):
-                cues[row['seconds']] = row['id']
-    return {person: cues for person, cues in support.items() if len(cues) >= minimum}
+                cues.add(row)
+                support.setdefault(row['person'], []).append(row)
+    return {person: {r['seconds']: r['id'] for r in representatives(rows)}
+            for person, rows in support.items() if len(evidence[person]) >= minimum}
 
 
 def apply_scene_context(database, selected, config, *, progress=None):
@@ -144,20 +147,21 @@ def apply_scene_context(database, selected, config, *, progress=None):
     with tracking(selected, 'Merge same-scene identities', unit='scene', position=0) as tracked:
         for item in tracked:
             scan = item['scan']
-            strict = list(db.execute(
-                f"SELECT c.person,COUNT(DISTINCT o.seconds) AS cues FROM candidates c "
+            from .independent_evidence import grouped_counts
+            strict = grouped_counts(db.execute(
+                f"SELECT c.person,o.scan,o.seconds,o.quality FROM candidates c "
                 f"JOIN observations o ON o.id={address(db, 'c')} "
                 "WHERE c.scan=? AND c.policy=? AND c.status='accepted' "
                 "AND json_extract(c.payload,'$.reason')<>'same_scene_identity' "
-                f"AND {anchor} GROUP BY c.person ORDER BY c.person", (scan, policy)))
+                f"AND {anchor} ORDER BY c.person", (scan, policy)), 'person')
             if len(strict) < 2:
                 continue
-            cores = {row['person'] for row in strict if row['cues'] >= grouping['same_scene_min_support']}
+            cores = {person for person, count in strict.items() if count >= grouping['same_scene_min_support']}
             if not cores:
                 continue
             supported_merges(database, scan, local_config, groups, policy,
                              local_state=local_state,
-                             local_groups={row['person'] for row in strict},
+                             local_groups=set(strict),
                              local_cores=cores)
     groups.clear()
     usage.emit(force=True)

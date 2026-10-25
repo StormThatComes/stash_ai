@@ -99,6 +99,10 @@ class _Cluster:
                 index = self.observations.index(identifier)
                 self.total += query.astype('float64') - self.examples[index].astype('float64')
                 self.examples[index], self.observations[index], self.qualities[index] = query, row['id'], new_score
+                if self.first == identifier:
+                    self.first = row['id']
+                for witnesses in self.scene_witnesses.values():
+                    witnesses[:] = [row['id'] if old == identifier else old for old in witnesses]
                 replacement = row['id'], new_score
                 self.cue_representatives[cue] = self.cue_times[stamp] = replacement
                 for key, value in list(self.cue_representatives.items()):

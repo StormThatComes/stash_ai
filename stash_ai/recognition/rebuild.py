@@ -469,6 +469,8 @@ def _rebuild_selected(database, selected, config, *, progress=None,excluded_view
         replay = connection(replay)
         _copy_selection(database, replay, selected, scope, namespace,
                         retain_pose=config.data['clustering']['max_anchor_pose_deviation'] is not None)
+        from .evidence_pixels import canonicalize
+        canonicalize(replay)
         if previous:
             replay.execute('CREATE TEMP TABLE prior_attachment_queries(id TEXT PRIMARY KEY)')
             replay.executemany('INSERT INTO prior_attachment_queries VALUES (?)',((i,) for i in previous))

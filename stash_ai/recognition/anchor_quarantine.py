@@ -44,7 +44,8 @@ def views(db, groups, config, usage):
         # Complete original-witness proof, including small non-isolated looks.
         if any(float(np.dot(a,b))<grouping['cohesion_threshold'] for a in samples for b in samples):
             continue
-        cues={(records[i]['scan'],records[i]['seconds']) for i in ids}
+        from .independent_evidence import representatives
+        cues=representatives(records[i] for i in ids)
         if len(cues)<minimum:
             continue
         centre=np.mean(samples,axis=0)

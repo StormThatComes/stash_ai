@@ -4,6 +4,7 @@ Only bounded raw exemplars live in Python; membership/order metadata lives in
 the private RAM replay. Cue times still decide independent support and physical
 co-presence. This priority is an appearance ordering, never a new timeline.
 """
+from .independent_evidence import Votes
 from .clustering import vector
 from .pose_policy import is_anchor,query_sql
 from .reference_usage import ReferenceUsage
@@ -60,16 +61,16 @@ def _prepare_serial(db,selected,config):
                     if slot is None:
                         if len(slots)>=grouping['max_people_per_lookup']:
                             raise ValueError('Local appearance cohorts exceed configured person budget.')
-                        slot=len(slots);slots.append(_Cluster('other',row['id']));anchors.append(set())
+                        slot=len(slots);slots.append(_Cluster('other',row['id']));anchors.append(Votes())
                     cohort=slots[slot];before=len(cohort.examples);cohort.add(row,sample,maximum=witness_limit(grouping))
                     usage.add_counts((len(cohort.examples)-before)*sample.nbytes,len(cohort.examples)-before,
                                      kind='Local appearance witnesses')
-                    if is_anchor(row['quality'],grouping):anchors[slot].add(row['seconds'])
+                    if is_anchor(row['quality'],grouping):anchors[slot].add(row)
                     db.execute('INSERT INTO local_appearance_rows VALUES (?,?)',(row['id'],slot))
             if slots:
                 # Reassess only the appearance priority against frozen witnesses.
                 # Moving a priority cannot train a cohort or create new support.
-                anchors=[set() for _ in slots]
+                anchors=[Votes() for _ in slots]
                 reassessment=db.execute('SELECT o.*,a.cohort FROM observations o JOIN local_appearance_rows a '
                                       'ON a.observation=o.id ORDER BY o.id')
                 with tracking(reassessment,'Reassess local appearance priorities',unit='observation') as tracked:
@@ -78,7 +79,7 @@ def _prepare_serial(db,selected,config):
                         slot=best_cohort(slots,row,vector(row),coverage_threshold(grouping))
                         slot=row['cohort'] if slot is None else slot
                         db.execute('UPDATE local_appearance_rows SET cohort=? WHERE observation=?',(slot,row['id']))
-                        if is_anchor(row['quality'],grouping):anchors[slot].add(row['seconds'])
+                        if is_anchor(row['quality'],grouping):anchors[slot].add(row)
                 centres=[s.medoid()[0] for s in slots]
                 centre=np.mean(centres,axis=0,dtype='float64')
                 remaining=set(range(len(slots)));placed=[]

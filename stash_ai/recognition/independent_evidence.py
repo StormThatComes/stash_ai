@@ -9,7 +9,11 @@ from .run_cache import metadata
 def unit(row):
     if 'quality' in row.keys():
         try:
-            value = metadata(row['quality']).get('evidence_crop_sha256')
+            record = metadata(row['quality'])
+            value = record.get('evidence_pixel_sha256')
+            if isinstance(value, str) and len(value) == 64 and all(c in '0123456789abcdef' for c in value):
+                return 'pixels', value
+            value = record.get('evidence_crop_sha256')
             if isinstance(value, str) and len(value) == 64 and all(c in '0123456789abcdef' for c in value):
                 return row['scan'], 'pixels', value
         except (ValueError, TypeError, AttributeError):
@@ -89,3 +93,25 @@ def count(rows):
     for row in rows:
         votes.add(row)
     return len(votes)
+
+
+def representatives(rows):
+    """Return canonical proofs for a maximum independent matching."""
+    rows = list(rows)
+    votes = Votes()
+    for row in rows:
+        votes.add(row)
+    len(votes)
+    chosen = {}
+    for row in rows:
+        pixel = unit(row)
+        if votes.owners.get(pixel) == (row['scan'], row['seconds']):
+            chosen.setdefault(pixel, row)
+    return list(chosen.values())
+
+
+def grouped_counts(rows, key):
+    groups = {}
+    for row in rows:
+        groups.setdefault(row[key], Votes()).add(row)
+    return {name: len(votes) for name, votes in groups.items()}

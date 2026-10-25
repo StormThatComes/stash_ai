@@ -101,7 +101,7 @@ def _input_context(db,selected,scope,namespace,config=None,*,scene_progress=True
                     unit='observation') as observations:
                 for row in db.execute('SELECT o.id,o.scan,o.cue,o.seconds,o.source,o.rect,o.geometry,'
                     "o.rejected,o.dimensions,o.embedding,CASE WHEN json_valid(o.quality) THEN "
-                    "json_extract(o.quality,'$.pixels','$.sharpness','$.pose_deviation','$.roll_deviation','$.alignment_valid','$.alignment_error','$.alignment_face_coverage','$.evidence_crop_sha256'"+visibility_fields+") END "
+                    "json_extract(o.quality,'$.pixels','$.sharpness','$.pose_deviation','$.roll_deviation','$.alignment_valid','$.alignment_error','$.alignment_face_coverage','$.evidence_crop_sha256','$.evidence_pixel_sha256','$.evidence_thumbnail','$.evidence_aspect'"+visibility_fields+") END "
                     'FROM observations o JOIN scans s ON s.id=o.scan '
                     'WHERE o.scan IN (SELECT value FROM json_each(?)) '
                     'ORDER BY CAST(s.scene AS INTEGER),s.scene,o.cue,o.id',(scans,)):
