@@ -398,18 +398,26 @@ from .run_cache import scope as run_cache_scope
 
 @pipeline_stage('rebuild')
 def rebuild_selected(database, selected, config, *, progress=None):
-    with profile(database, config.data['execution'].get('profile_rebuild', False)), run_cache_scope(config), compute_scope(config), score_scope(), physical_keys(database, config), alias_scope(database.connection):
+    with profile(database, config.data['execution'].get('profile_rebuild', False)), run_cache_scope(config), compute_scope(config), score_scope(), physical_keys(database, config):
         from .reference_registry import InvalidatedSourceViews
-        excluded=set()
-        for attempt in range(2):
-            try:
-                from .hybrid_merge import rebuild as hybrid_rebuild
-                return hybrid_rebuild(database,selected,config,
-                    lambda: _rebuild_selected(database,selected,config,progress=progress,excluded_views=excluded),
-                    lambda: _results(database.connection,selected,config))
-            except InvalidatedSourceViews as error:
-                if attempt or not error.medoids-excluded:raise
-                excluded.update(error.medoids)
+        from .consolidation_queue import expand
+        selected=expand(database.connection,selected,config)
+        while True:
+            excluded=set()
+            with alias_scope(database.connection):
+                for attempt in range(2):
+                    try:
+                        from .hybrid_merge import rebuild as hybrid_rebuild
+                        result=hybrid_rebuild(database,selected,config,
+                            lambda: _rebuild_selected(database,selected,config,progress=progress,excluded_views=excluded),
+                            lambda: _results(database.connection,selected,config))
+                        break
+                    except InvalidatedSourceViews as error:
+                        if attempt or not error.medoids-excluded:raise
+                        excluded.update(error.medoids)
+            expanded=expand(database.connection,selected,config)
+            if len(expanded)==len(selected):return result
+            selected=expanded
 
 
 @measured('rebuild')

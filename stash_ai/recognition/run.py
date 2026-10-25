@@ -71,23 +71,18 @@ def _publish_selection(database, client, report, config, scope, namespace, selec
             revision=queued['revision'] if queued and queued['scan']==scan else None
             check=(lambda:guard(item)) if guard is not None else None
             if check:check()
-            targets = {}
+            from .publication_batch import ensure_people,publish_people
             # Resolve all desired identities before unlinking old model profiles.
-            with tracking(
-                accepted,
-                'Prepare scene identities',
-                unit='person',
-            ) as tracked:
-                for person in tracked:
-                    targets[person] = ensure_person(database, client, report, scope, scene, person,guard=check)
+            with work('Prepare scene identities',len(accepted),unit='person') as prepared:
+                targets=ensure_people(database,client,report,scope,scene,accepted,guard=check,progress=prepared.advance)
+            with activity(report,'publish scene identities',scene=scene):
+                publish_people(database,client,report,scope,scene,targets,guard=check)
             with tracking(
                 targets.items(),
                 'Link scene identities',
                 unit='person',
             ) as tracked:
                 for person, performer in tracked:
-                    with activity(report, 'publish identity', scene=scene, person=performer):
-                        publish_person(database, client, report, scope, scene, person, reconcile_merges=False,guard=check)
                     counts['people_linked_or_observed'] += 1
                     target = ready.setdefault(person, {'person': person, 'performer': performer, 'scans': []})
                     target['scans'].append(item)
