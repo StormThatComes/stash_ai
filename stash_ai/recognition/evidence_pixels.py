@@ -17,7 +17,7 @@ def signature(pixels):
     return np.packbits(coarse[:, 1:] > coarse[:, :-1]).tobytes()
 
 
-def verified(left, right, a, b, aspect_a, aspect_b):
+def _verified(left, right, a, b, aspect_a, aspect_b):
     if not (isinstance(aspect_a, (int, float)) and isinstance(aspect_b, (int, float))):
         return False
     if not (0 < aspect_a and 0 < aspect_b) or abs(aspect_a / aspect_b - 1) > .005:
@@ -28,17 +28,31 @@ def verified(left, right, a, b, aspect_a, aspect_b):
             a.shape == b.shape and a.size > 0 and float(np.dot(a, b)) >= .999)
 
 
+def verified(left, right, a, b, aspect_a, aspect_b):
+    from .run_cache import current, MISSING
+    cache=current()
+    if cache is None:return _verified(left,right,a,b,aspect_a,aspect_b)
+    key=('pixel-proof',left.tobytes(),right.tobytes(),a.tobytes(),b.tobytes(),aspect_a,aspect_b)
+    value=cache.get(key)
+    if value is MISSING:
+        value=_verified(left,right,a,b,aspect_a,aspect_b)
+        cache.put(key,value,sum(len(v) for v in key[1:5])+512)
+    return value
+
+
 def canonicalize(db):
     db.execute('CREATE TEMP TABLE pixel_witnesses(signature BLOB, fingerprint TEXT PRIMARY KEY, pixels BLOB, embedding BLOB, aspect REAL)')
     db.execute('CREATE INDEX pixel_witness_signature ON pixel_witnesses(signature)')
+    rows = candidates = None
     try:
         rows = db.execute("SELECT id,quality,embedding FROM observations WHERE rejected IS NULL "
-            "AND json_extract(quality,'$.evidence_thumbnail') IS NOT NULL "
+            "AND (json_extract(quality,'$.evidence_thumbnail') IS NOT NULL OR json_extract(quality,'$.evidence_thumbnail_id') IS NOT NULL) "
             "ORDER BY json_extract(quality,'$.evidence_pixel_sha256'),id")
         with tracking(rows, 'Verify duplicate VTT crops', unit='observation') as tracked:
             for row in tracked:
                 record = dict(metadata(row['quality']))
-                raw = bytes.fromhex(record['evidence_thumbnail'])
+                from .pixel_storage import read
+                raw = read(db,record)
                 fingerprint = record.get('evidence_pixel_sha256')
                 if len(raw) != 3072 or not fingerprint:
                     continue
@@ -46,13 +60,15 @@ def canonicalize(db):
                 sample = np.frombuffer(row['embedding'], dtype='<f4')
                 bucket = signature(pixels)
                 alias = None
-                for candidate in db.execute('SELECT * FROM pixel_witnesses WHERE signature=? ORDER BY fingerprint', (bucket,)):
+                candidates = db.execute('SELECT * FROM pixel_witnesses WHERE signature=? ORDER BY fingerprint', (bucket,))
+                for candidate in candidates:
                     if fingerprint == candidate['fingerprint'] or verified(pixels,
                             np.frombuffer(candidate['pixels'], dtype='uint8'), sample,
                             np.frombuffer(candidate['embedding'], dtype='<f4'),
                             record.get('evidence_aspect'), candidate['aspect']):
                         alias = candidate['fingerprint']
                         break
+                candidates.close()
                 if alias is None:
                     db.execute('INSERT OR IGNORE INTO pixel_witnesses VALUES (?,?,?,?,?)',
                         (bucket, fingerprint, raw, row['embedding'], record.get('evidence_aspect')))
@@ -61,4 +77,6 @@ def canonicalize(db):
                     db.execute('UPDATE observations SET quality=? WHERE id=?',
                         (json.dumps(record, separators=(',', ':')), row['id']))
     finally:
+        if rows is not None: rows.close()
+        if candidates is not None: candidates.close()
         db.execute('DROP TABLE pixel_witnesses')

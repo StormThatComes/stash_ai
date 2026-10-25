@@ -12,7 +12,7 @@ import time
 import uuid
 
 APPLICATION_ID = 0x46524347  # FRCG; never accept a tagger or arbitrary database.
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 SCHEMA = '''
 CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE runs (id TEXT PRIMARY KEY, scope TEXT NOT NULL, selection TEXT NOT NULL,
@@ -92,6 +92,12 @@ SCHEMA_V5, TABLES_V5 = SCHEMA, TABLES
 from .person_signal import SCHEMA as PERSON_SCHEMA
 SCHEMA += PERSON_SCHEMA
 TABLES += ('person_evidence',)
+
+SCHEMA_V6, TABLES_V6 = SCHEMA, TABLES
+from .pixel_storage import SCHEMA as PIXEL_SCHEMA
+from .dependency_schema import EXTRA_SCHEMA
+SCHEMA += PIXEL_SCHEMA + EXTRA_SCHEMA
+TABLES += ('evidence_thumbnails',)
 
 
 def encoded(value):
@@ -190,15 +196,15 @@ class FaceDatabase(AbstractContextManager):
             except BaseException:
                 cleanup([('roll back recognition schema', db.rollback)])
                 raise
-        elif version in (1, 2, 3, 4, 5) and db.execute('PRAGMA application_id').fetchone()[0] == APPLICATION_ID:
+        elif version in (1, 2, 3, 4, 5, 6) and db.execute('PRAGMA application_id').fetchone()[0] == APPLICATION_ID:
             previous_schema = {1: (SCHEMA_V1, TABLES_V1), 2: (SCHEMA_V2, TABLES_V2),
-                               3: (SCHEMA_V3, TABLES_V3),4: (SCHEMA_V4,TABLES_V4),5: (SCHEMA_V5,TABLES_V5)}[version]
+                               3: (SCHEMA_V3, TABLES_V3),4: (SCHEMA_V4,TABLES_V4),5: (SCHEMA_V5,TABLES_V5),6: (SCHEMA_V6,TABLES_V6)}[version]
             self._validate(*previous_schema, tables)
             self.installation
             try:
                 db.executescript('BEGIN IMMEDIATE;\n' + (MERGE_SCHEMA if version == 1 else '')
                                  + (SUPPORT_SCHEMA if version <= 2 else '') + (REBUILD_SCHEMA if version<=3 else '')
-                                 + (DEPENDENCY_SCHEMA if version<=4 else '') + PERSON_SCHEMA)
+                                 + (DEPENDENCY_SCHEMA if version<=4 else '') + (PERSON_SCHEMA if version<=5 else '') + PIXEL_SCHEMA + EXTRA_SCHEMA)
                 db.execute(f'PRAGMA user_version={SCHEMA_VERSION}')
                 db.commit()
             except BaseException:

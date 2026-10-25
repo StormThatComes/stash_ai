@@ -85,7 +85,11 @@ def scan_scene(database, scope, scene, config, namespace, source, backend_factor
 
     def checkpoint():
         with db:
-            db.executemany('INSERT OR REPLACE INTO observations VALUES (?,?,?,?,?,?,?,?,?,?,?,?)', pending)
+            from .pixel_storage import compact
+            compacted=[]
+            for row in pending:
+                row=list(row);row[7]=compact(db,row[7]);compacted.append(row)
+            db.executemany('INSERT OR REPLACE INTO observations VALUES (?,?,?,?,?,?,?,?,?,?,?,?)', compacted)
             db.execute('UPDATE scans SET cursor=? WHERE id=?', (cursor, identifier))
         pending.clear()
         progress(scanned=cursor, total=record['total'], scene=str(scene['id']))

@@ -63,6 +63,8 @@ def _copy_scene(source, target, scan):
     target.executemany('INSERT INTO observations VALUES (?,?,?,?,?,?,?,?,?,?,?,?)', rows)
     from .person_signal import copy_evidence
     copy_evidence(source,target,scan['id'])
+    from .pixel_storage import copy_rows
+    copy_rows(source,target,source.execute('SELECT quality FROM observations WHERE scan=?',(scan['id'],)))
     target.commit()
 
 
@@ -95,8 +97,8 @@ def evaluate(config, labels, *, scenes=None, scope=None, variants=None, batch_si
     predictions, trials = {}, {}
     with closing(_open_readonly(config.database)) as source:
         tables = {r[0] for r in source.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        from .database import SCHEMA_V5, TABLES_V5
-        schema, expected = (SCHEMA, TABLES) if 'person_evidence' in tables else (SCHEMA_V5, TABLES_V5)
+        from .database import SCHEMA_V5, TABLES_V5, SCHEMA_V6, TABLES_V6
+        schema, expected = (SCHEMA, TABLES) if 'evidence_thumbnails' in tables else (SCHEMA_V6,TABLES_V6) if 'person_evidence' in tables else (SCHEMA_V5,TABLES_V5)
         FaceDatabase._validate(SimpleNamespace(connection=source), schema, expected, tables)
         scope, scans = _selection(source, config, scenes, scope)
         installation = FaceDatabase.installation.fget(SimpleNamespace(connection=source))

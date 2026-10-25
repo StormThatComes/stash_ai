@@ -84,6 +84,8 @@ def evaluate_observations(database, run, configurations, labels, *, assets=ensur
                     temporary.execute('INSERT INTO observations VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
                         (row['id'], scan, row['cue'], row['seconds'], row['source'], row['rect'], row['geometry'], row['quality'], None,
                          len(vector), vector.astype('<f4').tobytes(), None))
+                from .pixel_storage import copy_rows
+                copy_rows(database.connection, temporary, rows)
                 temporary.commit()
                 selected.append({'scene': scene, 'scan': scan})
             rebuild_selected(pilot, selected, config)

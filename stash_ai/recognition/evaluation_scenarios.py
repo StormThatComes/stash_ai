@@ -32,6 +32,8 @@ def copy_history(source, target, selected, scope, namespace):
                            'dimensions,embedding,NULL FROM observations WHERE scan=? ORDER BY rowid', (row['id'],)))
         from .person_signal import copy_evidence
         copy_evidence(source,target,row['id'])
+        from .pixel_storage import copy_rows
+        copy_rows(source,target,source.execute('SELECT quality FROM observations WHERE scan=?',(row['id'],)))
     target.executemany('INSERT INTO people VALUES (?,?,?,?,?,?)',
         source.execute('SELECT * FROM people WHERE scope=? AND namespace=? ORDER BY rowid', (scope, namespace)))
     scans = {r[0] for r in target.execute('SELECT id FROM scans')}

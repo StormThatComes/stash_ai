@@ -29,12 +29,33 @@ def signature(db,selected,config):
         ('aliases','SELECT m.source,m.target,m.evidence FROM identity_merges m JOIN people p ON p.id=m.source WHERE p.scope=? AND p.namespace=? ORDER BY m.source'),
         ('origins','SELECT i.sample_key,i.person,i.observation FROM identity_origins i JOIN people p ON p.id=i.person WHERE p.scope=? AND p.namespace=? ORDER BY i.sample_key')]
     if available(db):queries.append(('person','SELECT e.observation,e.contract,e.status,e.metadata,e.embedding FROM person_evidence e JOIN observations o ON o.id=e.observation JOIN scans s ON s.id=o.scan WHERE s.scope=? AND s.namespace=? ORDER BY e.observation,e.contract'))
-    for name,query in queries:
-        h.update(name.encode())
-        for row in db.execute(query,(scope,namespace)):
+    from .dependencies import cached, supported
+    from .dependency_schema import validate_triggers, EXTRA_TRIGGERS
+    installed={r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='trigger'")}
+    cacheable=supported(db) and set(EXTRA_TRIGGERS)<=installed
+    if cacheable:validate_triggers(db,required=True)
+    def rows_digest(query,args):
+        out=hashlib.sha256()
+        for row in db.execute(query,args):
             for value in row:
                 data=value if isinstance(value,bytes) else encoded(value).encode()
-                h.update(len(data).to_bytes(8,'big'));h.update(data)
+                out.update(len(data).to_bytes(8,'big'));out.update(data)
+        return out.hexdigest()
+    scans=[r[0] for r in db.execute('SELECT id FROM scans WHERE scope=? AND namespace=? ORDER BY id',(scope,namespace))]
+    for name,query in queries:
+        h.update(name.encode())
+        if name in ('observations','person'):
+            before,order=query.rsplit(' ORDER BY ',1)
+            for scan in scans:
+                compute=lambda:rows_digest(before+' AND o.scan=? ORDER BY '+order,(scope,namespace,scan))
+                value=(cached(db,'hybrid-'+name,scan,'v2',compute,dependency='scan',dependency_key=scan,checked=True)
+                       if cacheable else compute())
+                h.update(encoded([scan,value]).encode())
+        else:
+            compute=lambda:rows_digest(query,(scope,namespace))
+            value=(cached(db,'hybrid-'+name,digest([scope,namespace]),'v2',compute,checked=True)
+                   if cacheable else compute())
+            h.update(value.encode())
     return digest([scope,namespace,selected]),h.hexdigest()
 
 
@@ -100,7 +121,8 @@ def rebuild(database,selected,config,ordinary,results):
     if not selected or not config.data['sapiensid']['enabled']:
         return ordinary()
     db=database.connection
-    with stage('Validate hybrid rebuild evidence'):
+    from .dependencies import read_only
+    with stage('Validate hybrid rebuild evidence'), read_only():
         key,before=signature(db,selected,config)
     record=db.execute('SELECT value FROM metadata WHERE key=?',('hybrid-rebuild:'+key,)).fetchone()
     if record is not None and record[0]==before:
