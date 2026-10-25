@@ -78,7 +78,8 @@ def scores(left,right):
     right64=packed(right)
     left64=packed(left)
     for start in range(0,len(left),16):
-        values=left64[start:start+16] @ right64.T
+        from .run_cache import products
+        values=products(left64[start:start+16],right64)
         low=min(low,float(values.min()));total+=float(np.sum(values,dtype='float64'));count+=values.size
     return dict(minimum=low,mean=total/count)
 
@@ -239,7 +240,7 @@ def catalogue(db, config, scope, namespace):
     key=('hybrid-catalogue',generation,scope,namespace,digest(plain(config.data)))
     found=cache.get(key) if generation is not None else MISSING
     if found is not MISSING:return found
-    with alias_scope(db):
+    with alias_scope(db,scope,namespace,budget=config.data['sapiensid']['execution']['reference_bytes']):
         found=_catalogue(db, config, scope, namespace)
     size=0
     for item in found:

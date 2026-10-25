@@ -39,8 +39,9 @@ class Lookup:
         for start in range(0,count,64):
             for other in range(start,count,64):
                 if active is not None and not (active[start:start+64].any() or active[other:other+64].any()):continue
-                faces=self.faces[start:start+64] @ self.faces[other:other+64].T
-                persons=self.persons[start:start+64] @ self.persons[other:other+64].T
+                from .run_cache import products
+                faces=products(self.faces[start:start+64],self.faces[other:other+64])
+                persons=products(self.persons[start:start+64],self.persons[other:other+64])
                 rows=np.arange(start,start+len(faces))[:,None]
                 columns=np.arange(other,other+faces.shape[1])[None,:]
                 mask=rows<columns

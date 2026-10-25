@@ -25,3 +25,21 @@ def test_parallel_proofs_match_serial_complete_plan(monkeypatch):
     config.data['execution']['rebuild_workers']=3
     with cache_scope(config),scope(config):parallel=plan(None,config,bank)
     assert parallel==serial
+
+
+def test_only_changed_endpoint_proofs_recompute_but_rivals_remain_live(monkeypatch):
+    from dataclasses import replace
+    from stash_ai.recognition import hybrid_jobs
+    from stash_ai.recognition.run_cache import scope
+    monkeypatch.setattr('stash_ai.recognition.global_views._cooccurs',lambda *a:False)
+    calls=[];original=hybrid_jobs.exact
+    def counted(payload):calls.append(1);return original(payload)
+    monkeypatch.setattr(hybrid_jobs,'exact',counted)
+    config=SimpleNamespace(data=defaults());bank=[identity(str(i),0.) for i in range(4)]
+    with scope(config):
+        first=plan(None,config,bank);count=len(calls)
+        assert count==6
+        assert plan(None,config,bank)==first and len(calls)==count
+        bank[0]=replace(bank[0],guard_missing=('lost-original',))
+        changed=plan(None,config,bank)
+        assert len(calls)==count+3 and changed!=first
