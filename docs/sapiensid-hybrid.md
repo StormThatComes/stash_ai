@@ -62,7 +62,8 @@ The planner uses the production quality/diversity-selected strict face reference
 It compares face and person cosines separately; it never averages different
 encoders into one score. Every original cross-identity witness must satisfy its
 respective floor, and both identities need independent scene/timestamp support.
-All selected references need current person evidence. Copresent faces must also
+Body references are selected independently from admitted strict members. Missing
+body data on a face reference does not veto a sufficiently supported body bank. Copresent faces must also
 pass the existing stronger reflection/cooccurrence face threshold.
 
 Every compatible strict identity remains a possible competitor, including weak
@@ -78,8 +79,9 @@ an eligible pair while correctly leaving it unapplied. The oldest identity wins.
 Source samples become attachment-only and do not become new strict face anchors.
 Original cores and numeric proof remain in alias evidence; candidate records
 point to that proof without duplicating it per observation. On later passes,
-original cores can still veto contradictory merges but cannot nominate candidates
-or add support votes. Missing or superseded original evidence blocks further
+original cores can still veto contradictory merges but cannot nominate merge
+candidates or add support votes. Their frozen appearances can support query-only
+recovery; recovered observations remain attachments. Missing or superseded original evidence blocks further
 hybrid merges instead of hiding a contradictory endpoint.
 
 Aliases are local SQLite aliases, following the current publication design.

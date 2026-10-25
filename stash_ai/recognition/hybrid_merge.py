@@ -96,6 +96,8 @@ def rebuild(database,selected,config,ordinary,results):
     ordinary()
     with stage('Consolidate hybrid identities'):
         apply(database,selected,config)
+        from .hybrid_queries import recover
+        recover(database,selected,config)
     with stage('Checkpoint hybrid identity decisions'):
         _,after=signature(db,selected,config)
         with db:db.execute('INSERT OR REPLACE INTO metadata VALUES (?,?)',('hybrid-rebuild:'+key,after))

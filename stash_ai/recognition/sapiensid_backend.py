@@ -7,7 +7,7 @@ from .models import YuNetDetector
 from .sapiensid_v1 import EMBEDDING_DIMENSIONS, PREPROCESSING, WB4M_SHA256
 from .sapiensid_loading import UPSTREAM_COMMIT, load_encoder, load_pose
 
-CONTRACT = 'sapiensid-v1-yolov8-pose-face-anchor-square384-v1'
+CONTRACT = 'sapiensid-v1-yolov8-pose-face-anchor-square384-v2'
 
 
 def identity_contract(config):
@@ -34,7 +34,11 @@ def associate(faces, people):
         indices = []
         for index, person in enumerate(people):
             left, top, right, bottom = person['bounds']
-            if not (left <= x and top <= y and right >= x+w and bottom >= y+h):
+            # Small detector disagreement is allowed only with measured head
+            # points; reciprocal uniqueness below still includes rejected faces.
+            tolerance = .05 * min(w, h)
+            if not (left-tolerance <= x and top-tolerance <= y and
+                    right+tolerance >= x+w and bottom+tolerance >= y+h):
                 continue
             head = person['keypoints'][:3]
             if any(x <= px <= x+w and y <= py <= y+h for px, py in head):

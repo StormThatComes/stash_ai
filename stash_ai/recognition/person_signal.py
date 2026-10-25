@@ -5,7 +5,7 @@ This module must remain usable without torch, CUDA or model assets.
 from .config import digest
 
 DIMENSIONS = 4096
-CONTRACT = 'sapiensid-wb4m-person-v1'
+CONTRACT = 'sapiensid-wb4m-person-v2'
 SCHEMA = '''
 CREATE TABLE person_evidence (
  observation TEXT NOT NULL REFERENCES observations(id),
