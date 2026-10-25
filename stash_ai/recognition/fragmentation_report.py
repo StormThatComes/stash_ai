@@ -466,6 +466,7 @@ def build(config, scene_id, *, limit=20, min_mean=None, scope=None, compare_scen
         comparisons = (compare(db, scan, compare_scene_ids, policy, config, limit=limit)
                        if compare_scene_ids else [])
         multiview = _view_attempt_summary(db, scan['id'], policy, scan['scope'], scan['namespace'])
+        from .hybrid_evidence import report as hybrid_report
         from .publication_queue import inventory,plan
         publication_state=dict(inventory(db,scan['scope'],scan['namespace']),
                                queued_scenes=plan(db,scan['scope'],scan['namespace'],config))
@@ -477,7 +478,7 @@ def build(config, scene_id, *, limit=20, min_mean=None, scope=None, compare_scen
             'cross_scene_comparisons':comparisons,
             'multi_view_diagnostics':multiview,
             'format': 1, 'kind': 'recognition_fragmentation',
-            'hybrid': __import__('stash_ai.recognition.hybrid_evidence',fromlist=['report']).report(
+            'hybrid': hybrid_report(
                 db,config,scan['scope'],scan['namespace']),
             'scene_id': str(scene_id), 'scope': scan['scope'], 'scan_id': scan['id'],
             'namespace': scan['namespace'], 'matching_policy': policy,

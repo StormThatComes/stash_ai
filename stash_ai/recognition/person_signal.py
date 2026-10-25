@@ -89,3 +89,11 @@ def save(db, observation, expected, metadata, vector=None, crop=None):
     # Reuse the existing audited observation dependency triggers. Persisted
     # rebuild certificates cannot survive changes to supplemental evidence.
     db.execute('UPDATE observations SET quality=quality WHERE id=?',(observation,))
+
+
+def copy_evidence(source,target,scan):
+    """Copy only admitted observations into offline trials; never copy pixels."""
+    if not available(source):return
+    target.executemany('INSERT OR REPLACE INTO person_evidence VALUES (?,?,?,?,?,NULL)',source.execute(
+        'SELECT e.observation,e.contract,e.status,e.metadata,e.embedding FROM person_evidence e '
+        'JOIN observations o ON o.id=e.observation WHERE o.scan=?',(scan,)))

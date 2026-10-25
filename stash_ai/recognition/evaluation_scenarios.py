@@ -30,6 +30,8 @@ def copy_history(source, target, selected, scope, namespace):
         target.executemany('INSERT INTO observations VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
             source.execute('SELECT id,scan,cue,seconds,source,rect,geometry,quality,rejected,'
                            'dimensions,embedding,NULL FROM observations WHERE scan=? ORDER BY rowid', (row['id'],)))
+        from .person_signal import copy_evidence
+        copy_evidence(source,target,row['id'])
     target.executemany('INSERT INTO people VALUES (?,?,?,?,?,?)',
         source.execute('SELECT * FROM people WHERE scope=? AND namespace=? ORDER BY rowid', (scope, namespace)))
     scans = {r[0] for r in target.execute('SELECT id FROM scans')}

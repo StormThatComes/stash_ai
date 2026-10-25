@@ -2,6 +2,7 @@
 # Categories describe the recorded assignment path, not whether the face was
 # actually used as a reference at the time. That historical sample set is absent.
 REASONS = {
+    'hybrid_identity': ('hybrid-attachment', 'Merged using frozen face and SapiensID evidence; source observations remain attachment-only.'),
     'final_recovery_identity': ('anchor-recovered', 'Independent queries matched original frozen references after canonical label consolidation; attachment-only.'),
     'strict_appearance_identity': ('anchor-view', 'Independent queries matched all retained witnesses of a supported strict appearance at ordinary thresholds; they remain attachment-only.'),
     'pose_uncertain_identity': ('anchor-view', 'Independent queries matched a frozen view across a neutral/side pose boundary; they remain attachment-only.'),
@@ -34,6 +35,7 @@ REASONS = {
 # Retain numeric evidence and observation pointers, excluding arbitrary future
 # payloads, URLs, image data, vectors, installation tokens and run configuration.
 DECISION_FIELDS = (
+    'hybrid_merge',
     'final_recovery',
     'strict_appearance',
     'pose_recovery',

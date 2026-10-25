@@ -60,6 +60,8 @@ def _copy_scene(source, target, scan):
     rows = source.execute('SELECT id,scan,cue,seconds,source,rect,geometry,quality,rejected,dimensions,embedding,NULL '
                           'FROM observations WHERE scan=? ORDER BY cue,id', (scan['id'],))
     target.executemany('INSERT INTO observations VALUES (?,?,?,?,?,?,?,?,?,?,?,?)', rows)
+    from .person_signal import copy_evidence
+    copy_evidence(source,target,scan['id'])
     target.commit()
 
 
