@@ -92,7 +92,9 @@ def evaluate(config, labels, *, scenes=None, scope=None, variants=None, batch_si
     predictions, trials = {}, {}
     with closing(_open_readonly(config.database)) as source:
         tables = {r[0] for r in source.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        FaceDatabase._validate(SimpleNamespace(connection=source), SCHEMA, TABLES, tables)
+        from .database import SCHEMA_V5, TABLES_V5
+        schema, expected = (SCHEMA, TABLES) if 'person_evidence' in tables else (SCHEMA_V5, TABLES_V5)
+        FaceDatabase._validate(SimpleNamespace(connection=source), schema, expected, tables)
         scope, scans = _selection(source, config, scenes, scope)
         installation = FaceDatabase.installation.fget(SimpleNamespace(connection=source))
         wanted = encoded([s['id'] for s in scans])

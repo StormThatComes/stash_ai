@@ -33,7 +33,7 @@ def _open_readonly(path):
         db.row_factory = sqlite3.Row
         db.execute('PRAGMA query_only=ON')
         if (db.execute('PRAGMA application_id').fetchone()[0] != APPLICATION_ID
-                or db.execute('PRAGMA user_version').fetchone()[0] != SCHEMA_VERSION):
+                or db.execute('PRAGMA user_version').fetchone()[0] not in (5, SCHEMA_VERSION)):
             raise ValueError('Unsupported facial recognition database/version.')
         _reject_executable_schema(db)
         db.execute('BEGIN')  # One consistent snapshot, including during another recognition run.
