@@ -94,3 +94,50 @@ def test_compression_aliases_use_mutable_replay_metadata_with_run_cache(tmp_path
         assert {json.loads(row[0])['evidence_pixel_sha256'] for row in db.execute('SELECT quality FROM observations')}=={'a'*64}
     finally:
         db.close()
+
+
+def test_alias_scope_matches_replay_without_writing_source(tmp_path):
+    import sqlite3
+    from stash_ai.recognition.evidence_pixels import alias_scope,canonicalize
+    from stash_ai.recognition.independent_evidence import count
+    db=sqlite3.connect(':memory:');db.row_factory=sqlite3.Row
+    pixels=np.random.default_rng(4).integers(10,245,3072,dtype='uint8')
+    try:
+        db.execute('CREATE TABLE observations(id TEXT,scan TEXT,seconds REAL,quality TEXT,embedding BLOB,rejected TEXT)')
+        for i in range(3):
+            db.execute('INSERT INTO observations VALUES (?,?,?,?,?,NULL)',(str(i),'s',i,json.dumps(dict(
+                evidence_pixel_sha256=str(i)*64,evidence_thumbnail=(pixels+i).tobytes().hex(),evidence_aspect=1.)),
+                np.array([1.,0.],dtype='<f4').tobytes()))
+        db.commit();before=db.total_changes
+        rows=lambda:list(db.execute('SELECT * FROM observations'))
+        assert count(rows())==3
+        db.execute('PRAGMA query_only=ON')
+        with alias_scope(db):
+            assert count(rows())==1
+            with alias_scope(db):assert count(rows())==1
+        assert db.total_changes==before and count(rows())==3
+        db.execute('PRAGMA query_only=OFF')
+        canonicalize(db)
+        assert count(rows())==1
+    finally:db.close()
+
+
+def test_hybrid_body_votes_use_verified_compression_aliases(tmp_path):
+    from tests.test_recognition_merge_report import seeded
+    from tests.test_recognition_hybrid_recovery import enable
+    from stash_ai.recognition.database import FaceDatabase
+    from stash_ai.recognition.hybrid_evidence import catalogue
+    config,_=seeded(tmp_path)
+    with FaceDatabase(config.database) as state:
+        db=state.connection;config=enable(config,db)
+        pixels=np.random.default_rng(4).integers(10,245,3072,dtype='uint8')
+        rows=list(db.execute('SELECT id,quality FROM observations ORDER BY id'))
+        for i,row in enumerate(rows):
+            quality=json.loads(row['quality']);quality.update(evidence_pixel_sha256=f'{i:064x}',
+                evidence_thumbnail=(pixels+i%2).tobytes().hex(),evidence_aspect=1.)
+            db.execute('UPDATE observations SET quality=? WHERE id=?',(json.dumps(quality),row['id']))
+        db.commit();before=db.total_changes
+        ns=db.execute('SELECT namespace FROM people LIMIT 1').fetchone()[0]
+        identities=catalogue(db,config,'scope',ns)
+        assert all(len(i.independent)==1 for i in identities)
+        assert db.total_changes==before

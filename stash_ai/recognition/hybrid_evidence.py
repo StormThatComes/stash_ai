@@ -28,7 +28,7 @@ class Identity:
     guard_person_observations: tuple = ()
 
 
-def catalogue(db, config, scope, namespace):
+def _catalogue(db, config, scope, namespace):
     import numpy as np
     from .clustering import _groups
     from .scanning import scan_identity
@@ -204,3 +204,9 @@ def report(db,config,scope,namespace,*,focus=None):
     if not config.data['sapiensid']['enabled']:
         return dict(enabled=False)
     return plan(db,config,catalogue(db,config,scope,namespace),focus=focus)
+
+
+def catalogue(db, config, scope, namespace):
+    from .evidence_pixels import alias_scope
+    with alias_scope(db):
+        return _catalogue(db, config, scope, namespace)

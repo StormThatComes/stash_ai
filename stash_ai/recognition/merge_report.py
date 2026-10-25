@@ -3,6 +3,7 @@ from contextlib import closing
 import json
 from pathlib import Path
 
+from .evidence_pixels import alias_scope
 from .clustering import _groups, matching_policy
 from .config import plain
 from .database import encoded
@@ -54,7 +55,7 @@ def _usage(config, groups):
 def build(config, left_id, right_id, *, scope=None, by_performer=False, simulate=False):
     """Compare UUIDs or Stash IDs in one read-only snapshot without changing assignments."""
     model_namespace = namespace(config)
-    with closing(_open_readonly(config.database)) as db:
+    with closing(_open_readonly(config.database)) as db, alias_scope(db):
         requested_left, left = _select(db, model_namespace,
             None if by_performer else left_id, left_id if by_performer else None, scope)
         requested_right, right = _select(db, model_namespace,

@@ -40,9 +40,12 @@ def verified(left, right, a, b, aspect_a, aspect_b):
     return value
 
 
-def canonicalize(db):
-    db.execute('CREATE TEMP TABLE pixel_witnesses(signature BLOB, fingerprint TEXT PRIMARY KEY, pixels BLOB, embedding BLOB, aspect REAL)')
-    db.execute('CREATE INDEX pixel_witness_signature ON pixel_witnesses(signature)')
+def aliases(db):
+    import sqlite3
+    scratch = sqlite3.connect(':memory:')
+    scratch.row_factory = sqlite3.Row
+    scratch.execute('CREATE TEMP TABLE pixel_witnesses(signature BLOB, fingerprint TEXT PRIMARY KEY, pixels BLOB, embedding BLOB, aspect REAL)')
+    scratch.execute('CREATE INDEX pixel_witness_signature ON pixel_witnesses(signature)')
     rows = candidates = None
     try:
         rows = db.execute("SELECT id,quality,embedding FROM observations WHERE rejected IS NULL "
@@ -60,7 +63,7 @@ def canonicalize(db):
                 sample = np.frombuffer(row['embedding'], dtype='<f4')
                 bucket = signature(pixels)
                 alias = None
-                candidates = db.execute('SELECT * FROM pixel_witnesses WHERE signature=? ORDER BY fingerprint', (bucket,))
+                candidates = scratch.execute('SELECT * FROM pixel_witnesses WHERE signature=? ORDER BY fingerprint', (bucket,))
                 for candidate in candidates:
                     if fingerprint == candidate['fingerprint'] or verified(pixels,
                             np.frombuffer(candidate['pixels'], dtype='uint8'), sample,
@@ -70,13 +73,56 @@ def canonicalize(db):
                         break
                 candidates.close()
                 if alias is None:
-                    db.execute('INSERT OR IGNORE INTO pixel_witnesses VALUES (?,?,?,?,?)',
+                    scratch.execute('INSERT OR IGNORE INTO pixel_witnesses VALUES (?,?,?,?,?)',
                         (bucket, fingerprint, raw, row['embedding'], record.get('evidence_aspect')))
                 elif alias != fingerprint:
-                    record['evidence_pixel_sha256'] = alias
-                    db.execute('UPDATE observations SET quality=? WHERE id=?',
-                        (json.dumps(record, separators=(',', ':')), row['id']))
+                    yield fingerprint, alias
     finally:
         if rows is not None: rows.close()
         if candidates is not None: candidates.close()
-        db.execute('DROP TABLE pixel_witnesses')
+        scratch.close()
+
+
+# Increment when the pixel verification contract changes.
+ALIAS_FORMAT = 1
+
+
+def canonicalize(db):
+    """Materialize the same verified aliases in a disposable replay."""
+    mapping = dict(aliases(db))
+    if not mapping:
+        return
+    for row in db.execute('SELECT id,quality FROM observations WHERE rejected IS NULL'):
+        record = dict(metadata(row['quality']))
+        alias = mapping.get(record.get('evidence_pixel_sha256'))
+        if alias is not None:
+            record['evidence_pixel_sha256'] = alias
+            db.execute('UPDATE observations SET quality=? WHERE id=?',
+                       (json.dumps(record, separators=(',', ':')), row['id']))
+
+
+from contextlib import contextmanager
+from contextvars import ContextVar
+_active_aliases = ContextVar('recognition_pixel_aliases', default=None)
+
+
+def canonical_pixel(value):
+    mapping = _active_aliases.get()
+    return mapping.get(value, value) if mapping is not None else value
+
+
+@contextmanager
+def alias_scope(db):
+    """Read-only input snapshot shared by face, body, and report votes.
+
+    The map is derived afresh for each outer operation; it never certifies
+    changed vectors or thumbnails using a stale persistent alias.
+    """
+    if _active_aliases.get() is not None:
+        yield
+        return
+    token = _active_aliases.set(dict(aliases(db)))
+    try:
+        yield
+    finally:
+        _active_aliases.reset(token)
