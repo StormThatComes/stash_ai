@@ -126,4 +126,10 @@ def fingerprint(db, config, scope):
         'SELECT id,created,performer FROM people WHERE scope=? AND namespace=? ORDER BY id'):
         for row in db.execute(sql, (scope, namespace(config))):
             value.update(digest([v.hex() if isinstance(v, bytes) else v for v in row]).encode())
+    from .person_signal import available
+    if available(db):
+        for row in db.execute('SELECT e.observation,e.contract,e.status,e.metadata,e.embedding FROM person_evidence e '
+                'JOIN observations o ON o.id=e.observation JOIN scans s ON s.id=o.scan '
+                'WHERE s.scope=? AND s.namespace=? ORDER BY e.observation,e.contract',(scope,namespace(config))):
+            value.update(digest([v.hex() if isinstance(v,bytes) else v for v in row]).encode())
     return value.hexdigest()

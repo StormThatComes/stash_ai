@@ -4,7 +4,7 @@ from itertools import combinations
 import math
 
 from .config import digest
-from .merge_report_policy import patched, proposal
+from .merge_report_policy import patched, proposal, parameter
 from .merge_goals import assess, objective
 from .replay_simulation import replay, impact
 
@@ -54,6 +54,16 @@ def measured_options(db, config, goals, proofs=None):
         current = config.data['clustering'][key]
         if current is not None:
             options['clustering.'+key] = [current/2, current] if 'pose' not in key else [current, min(1.,current+.1)]
+    if config.data['sapiensid']['enabled']:
+        from .hybrid_evidence import catalogue, scores
+        bank=[i for i in catalogue(db,config,goals['scope'],ns) if i.person in wanted]
+        for field, attribute in (('face_floor','faces'),('person_threshold','persons')):
+            values=set()
+            for a,b in combinations(bank,2):
+                measured=scores(getattr(a,attribute),getattr(b,attribute))
+                if measured and 0<=measured['minimum']<=1:
+                    values.add(math.floor(measured['minimum']*1e6)/1e6)
+            options['sapiensid.matching.'+field]=sorted(values,reverse=True)
     return options
 
 
@@ -67,8 +77,7 @@ def neighbours(config, changes, options):
             'clustering.view_cohesion_threshold': min(value, config.data['clustering']['view_cohesion_threshold'])})
         yield candidate
     for key, values in options.items():
-        section, field = key.split('.')
-        current = changes.get(key, config.data[section][field])
+        current = changes.get(key, parameter(config.data,key))
         values = sorted(values, key=lambda v: (abs(v-current), v))[:3]
         for value in values:
             if value == current:
@@ -112,7 +121,7 @@ def solve(config, goals, db, *, maximum=64, progress=None):
             payload = json.loads(row['payload'])
             if payload.get('observation') in ids:
                 result.append(dict(observation=payload['observation'], scan=row['scan'], status=row['status'],
-                    reason=payload.get('reason'), measurements={k:v for k,v in payload.items()
+                    reason=payload.get('reason'), hybrid_merge=payload.get('hybrid_merge'), measurements={k:v for k,v in payload.items()
                         if type(v) in (int,float,bool) and any(t in k for t in ('score','similarity','threshold','support','margin'))}))
         current_ids = {r[0] for r in target.execute('SELECT person FROM members WHERE observation IN (SELECT value FROM json_each(?))', (json.dumps(sorted(ids)),))}
         current_goals = dict(goals, groups=[dict(members=[dict(identity_id=p) for p in sorted(current_ids)])])

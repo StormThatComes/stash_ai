@@ -13,6 +13,7 @@ from .models import namespace
 from .offline_evaluation import _ram, _selection
 from .rebuild import rebuild_selected
 from .scanning import scan_identity
+from .person_signal import coverage, same_contract
 
 
 def impact(before, after):
@@ -47,8 +48,8 @@ def replay(config, variants, *, scenes=None, scope=None, source=None, consume=No
     for name, variant in variants.items():
         if not isinstance(name, str) or not name or name == 'baseline':
             raise ValueError('Simulation names must be nonempty and distinct from baseline.')
-        if namespace(variant) != ns or scan_identity(variant, ns) != scan_identity(config, ns):
-            raise ValueError('Simulation variants must preserve model and VTT scan contracts.')
+        if namespace(variant) != ns or scan_identity(variant, ns) != scan_identity(config, ns) or not same_contract(config,variant):
+            raise ValueError('Simulation variants must preserve model, person and VTT scan contracts.')
     with (closing(_open_readonly(config.database)) if source is None else nullcontext(source)) as db:
         scope, scans = _selection(db, config, scenes, scope)
         installation = FaceDatabase.installation.fget(SimpleNamespace(connection=db))
@@ -73,8 +74,8 @@ def replay(config, variants, *, scenes=None, scope=None, source=None, consume=No
                     if name in seen_names:
                         raise ValueError('Duplicate simulation name.')
                     seen_names.add(name)
-                if namespace(settings) != ns or scan_identity(settings, ns) != scan_identity(config, ns):
-                    raise ValueError('Simulation variants must preserve model and VTT scan contracts.')
+                if namespace(settings) != ns or scan_identity(settings, ns) != scan_identity(config, ns) or not same_contract(config,settings):
+                    raise ValueError('Simulation variants must preserve model, person and VTT scan contracts.')
                 data = plain(settings.data)
                 data['execution'].update(rebuild_checkpoint_scenes=0, profile_rebuild=False)
                 settings = replace(settings, data=data)
@@ -97,10 +98,11 @@ def replay(config, variants, *, scenes=None, scope=None, source=None, consume=No
                     predictions = dict.fromkeys(observations)
                     predictions.update((r[0], r[1]) for r in target.execute('SELECT observation,person FROM members')
                                        if r[0] in observations)
+                    hybrid=coverage(target,settings,[s['id'] for s in scans])
                     evidence = inspect_trial(target, settings) if inspect_trial else None
                 if baseline is None:
                     baseline = predictions
-                item = dict(elapsed_seconds=time.perf_counter()-started,
+                item = dict(hybrid=hybrid,elapsed_seconds=time.perf_counter()-started,
                     versus_retained=impact(retained, predictions), versus_baseline=impact(baseline, predictions))
                 if consume is not None:
                     item.update(consume(name, observations, retained, predictions))

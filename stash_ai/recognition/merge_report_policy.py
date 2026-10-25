@@ -12,11 +12,24 @@ def _floor(value):
     return math.floor(min(1., value) * 1_000_000) / 1_000_000
 
 
+def parameter(data, path):
+    for key in path.split('.'):
+        data = data[key]
+    return data
+
+
+def assign(data, path, value):
+    keys = path.split('.')
+    for key in keys[:-1]:
+        data = data.setdefault(key, {})
+    data[keys[-1]] = value
+
+
 def patched(config, changes):
     data = plain(config.data)
     for path, value in changes.items():
-        section, key = path.split('.')
-        data[section][key] = value
+        parameter(data, path)  # Refuse unknown paths before assigning.
+        assign(data, path, value)
     validate(data)
     return replace(config, data=data)
 
@@ -25,11 +38,10 @@ def proposal(config, changes):
     import yaml
     patch, details = {}, []
     for path, value in sorted(changes.items()):
-        section, key = path.split('.')
-        current = config.data[section][key]
+        current = parameter(config.data, path)
         if current == value:
             continue
-        patch.setdefault(section, {})[key] = value
+        assign(patch, path, value)
         details.append(dict(parameter=path, current=current, proposed=value,
                             direction='enable' if type(value) is bool else
                             'decrease' if value < current else 'increase'))

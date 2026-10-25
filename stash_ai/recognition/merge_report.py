@@ -108,6 +108,9 @@ def build(config, left_id, right_id, *, scope=None, by_performer=False, simulate
             return catalogue(db, candidate, left['scope'], model_namespace,
                 usage=_usage(candidate, groups), scan_policy=scan_identity(candidate, model_namespace), complete=True)
         result['paths'].append(analyse(db, config, identities, 'confirmed_views', views))
+        if config.data['sapiensid']['enabled']:
+            from .hybrid_report import analyse as hybrid_analyse
+            result['paths'].append(hybrid_analyse(db,config,identities,left['scope'],model_namespace))
         for path in result['paths']:
             for item in path['recommendations']:
                 component = item['verification']['shared_component']
@@ -132,7 +135,7 @@ def build(config, left_id, right_id, *, scope=None, by_performer=False, simulate
                            'Re-run recognition if measurements are missing; auxiliary attachments cannot train strict references.'))
         if not grouping['anchor_view_matching']:
             result['evidence_actions'].append(dict(reason='consolidation_feature_disabled',
-                action='Both analysed consolidation routes require clustering.anchor_view_matching=true '
+                action='Both face consolidation routes require clustering.anchor_view_matching=true '
                        'and an existing anchor pose or visibility restriction. Ordinary nomination merges are not simulated.'))
         if simulate:
             from .replay_simulation import merge_impact
