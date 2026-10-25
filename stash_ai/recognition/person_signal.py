@@ -89,9 +89,10 @@ def save(db, observation, expected, metadata, vector=None, crop=None):
                'ON CONFLICT(observation,contract) DO UPDATE SET status=excluded.status,'
                'metadata=excluded.metadata,embedding=excluded.embedding,crop=excluded.crop',
                (observation,expected,'ready' if vector is not None else 'unavailable',encoded(metadata),vector,crop))
-    # Reuse the existing audited observation dependency triggers. Persisted
-    # rebuild certificates cannot survive changes to supplemental evidence.
-    db.execute('UPDATE observations SET quality=quality WHERE id=?',(observation,))
+    # Older replay schemas need the observation trigger fallback. Current
+    # schemas stamp person evidence directly without invalidating face vectors.
+    if not db.execute("SELECT 1 FROM sqlite_master WHERE type='trigger' AND name='recognition_version_person_evidence_insert'").fetchone():
+        db.execute('UPDATE observations SET quality=quality WHERE id=?',(observation,))
 
 
 def copy_evidence(source,target,scan):

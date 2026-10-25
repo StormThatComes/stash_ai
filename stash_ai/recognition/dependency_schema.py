@@ -75,9 +75,34 @@ for table in ('person_evidence','evidence_thumbnails'):
         EXTRA_TRIGGERS[name]=f'CREATE TRIGGER {name} AFTER {event} ON {table} BEGIN '+''.join(body)+' END'
 EXTRA_SCHEMA=';\n'.join(EXTRA_TRIGGERS.values())+';\n'
 
+# Raw feature digests survive assignment/publication churn. Keep the old
+# audited triggers intact so historical databases can be validated first.
+RAW_TRIGGERS={}
+for table in ('scans','observations','person_evidence'):
+    for event in ('INSERT','UPDATE','DELETE'):
+        sides=('new',) if event=='INSERT' else ('old',) if event=='DELETE' else ('old','new')
+        body=[]
+        for side in sides:
+            address=(side+'.id' if table=='scans' else side+'.scan' if table=='observations'
+                     else f'(SELECT scan FROM observations WHERE id={side}.observation)')
+            for kind in (('raw-person',) if table=='person_evidence' else ('raw-observations','raw-person')):
+                body.append(_bump(kind,address))
+        operation=('UPDATE OF id,scan,cue,seconds,source,rect,geometry,quality,rejected,dimensions,embedding'
+                   if table=='observations' and event=='UPDATE' else event)
+        name='recognition_raw_'+table+'_'+event.lower()
+        RAW_TRIGGERS[name]=f'CREATE TRIGGER {name} AFTER {operation} ON {table} BEGIN '+''.join(body)+' END'
+    if table in ('scans','observations'):
+        addresses=(["(SELECT id FROM scans WHERE id=new.id)",
+                    "(SELECT id FROM scans WHERE scope=new.scope AND namespace=new.namespace AND scene=new.scene AND input_sha=new.input_sha AND policy_sha=new.policy_sha)"]
+                   if table=='scans' else ['(SELECT scan FROM observations WHERE id=new.id)'])
+        name='recognition_raw_'+table+'_replace'
+        body=''.join(_bump(kind,address) for address in addresses for kind in ('raw-observations','raw-person'))
+        RAW_TRIGGERS[name]=f'CREATE TRIGGER {name} BEFORE INSERT ON {table} BEGIN '+body+' END'
+RAW_SCHEMA=';\n'.join(RAW_TRIGGERS.values())+';\n'
+
 def validate_triggers(db, *, required=False):
     """Reject unknown/mutated executable schema, including spoofed names."""
-    accepted={**TRIGGERS,**EXTRA_TRIGGERS}
+    accepted={**TRIGGERS,**EXTRA_TRIGGERS,**RAW_TRIGGERS}
     rows=list(db.execute("SELECT type,name,sql FROM sqlite_master WHERE type IN ('trigger','view')"))
     normalize=lambda value:' '.join(value.strip().rstrip(';').split())
     for kind,name,sql in rows:
@@ -85,5 +110,6 @@ def validate_triggers(db, *, required=False):
             raise ValueError('Unsupported facial recognition schema triggers or views.')
     expected=set(TRIGGERS)
     if db.execute("SELECT 1 FROM sqlite_master WHERE name='evidence_thumbnails'").fetchone():expected.update(EXTRA_TRIGGERS)
+    if db.execute('PRAGMA user_version').fetchone()[0]>=8:expected.update(RAW_TRIGGERS)
     if required and not expected<={row[1] for row in rows}:
         raise ValueError('Incomplete facial recognition dependency triggers; restore a consistent backup.')

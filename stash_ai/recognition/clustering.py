@@ -126,8 +126,16 @@ def _similarities(group, query):
         raise ValueError('Face namespace contains mixed embedding dimensions.')
     count('group_comparisons')
     count('sample_comparisons', len(group.samples))
-    scores = np.asarray([float(np.dot(sample, query)) for sample in group.samples])
-    return float(scores.mean()), float(scores.min())
+    from .run_cache import current, immutable_samples, MISSING
+    cache=current();samples=immutable_samples(group.samples) if cache is not None else None
+    query_key=immutable_samples((query,)) if samples is not None else None
+    key=('scalar-query',samples,query_key)
+    result=cache.get(key) if query_key is not None else MISSING
+    if result is MISSING:
+        scores = np.asarray([float(np.dot(sample, query)) for sample in group.samples])
+        result=float(scores.mean()), float(scores.min())
+        if query_key is not None:cache.put(key,result,sum(len(v)+128 for v in samples+query_key))
+    return result
 
 
 @measured('cue_context')
