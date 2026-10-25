@@ -27,7 +27,7 @@ def defaults():
         pose=dict(path='',sha256='',score_threshold=.5,keypoint_score_threshold=.5,
                   nms_threshold=.7,max_people_per_frame=100),
         matching=dict(face_floor=.4,person_threshold=.85,ambiguity_margin=.1,min_support=3),
-        execution=dict(batch_size=1,reference_bytes=134217728),
+        execution=dict(batch_size=1,reference_bytes=134217728,plan_bytes=16777216,max_candidate_pairs=100000),
         storage=dict(retain_person_crops=True))
 
 
@@ -43,10 +43,13 @@ def validate(settings):
         for key in keys:
             _number(settings[section][key],f'sapiensid.{section}.{key}',0,1)
     for section,key in (('pose','max_people_per_frame'),('matching','min_support'),
-                        ('execution','batch_size'),('execution','reference_bytes')):
+                        ('execution','batch_size'),('execution','reference_bytes'),
+                        ('execution','plan_bytes'),('execution','max_candidate_pairs')):
         value=settings[section][key]
         if type(value) is not int or value<1:
             raise ValueError(f'sapiensid.{section}.{key} must be a positive integer.')
+    if settings['execution']['batch_size']>16:
+        raise ValueError('sapiensid.execution.batch_size must be in [1,16].')
     for section,key in (('model','source_directory'),('model','checkpoint_directory'),('pose','path')):
         value=settings[section][key]
         if not isinstance(value,str) or '\x00' in value or settings['enabled'] and not value.strip():

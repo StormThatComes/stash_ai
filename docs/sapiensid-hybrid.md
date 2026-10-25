@@ -1,36 +1,17 @@
 # Supplemental SapiensID evidence
 
-The hybrid integration preserves the configured face recognizer and its namespace.
-SapiensID features belong to individual observations, not mutable performer IDs.
+Hybrid recognition keeps the configured face recognizer and its namespace.
+SapiensID is an additional identity signal, stored against observations rather
+than mutable performer IDs. It is opt-in (`sapiensid.enabled: false` by default).
+Defaults are uncalibrated starting values, not accuracy claims.
 
-The first increment introduces schema version 6 and the `sapiensid` configuration
-section. Collection, fusion and command integration follow in the stacked PRs;
-this increment alone does not enable hybrid recognition. `enabled` defaults to
-false. Matching defaults are uncalibrated starting values, not accuracy claims.
+## Enable collection
 
-Writer initialization migrates schema versions 1–5 transactionally. Offline
-reports can still read version 5 without migrating it. Supplemental data records
-an input contract, availability status, metadata, a normalized 4096D float32
-embedding and optionally a person crop. An unavailable input is not a negative
-similarity score. Inference failures must propagate rather than being stored as
-unavailable evidence.
-
-Changing matching thresholds or local model paths preserves the vector contract.
-Changing person detection/preparation semantics changes that contract. Supplemental
-writes invalidate existing scan dependency certificates through the established
-observation triggers. Face namespaces and face scan identities remain unchanged.
-
-## Collection increment
-
-The second increment collects supplemental embeddings during `recognition run`,
-including when the face scan is reused. It does not yet merge identities using
-those embeddings. Matching and execution budgets are reserved for the remaining
-increments; collection currently uses scalar inference.
-
-Install `requirements-sapiensid.txt` alongside the normal runtime. Obtain the
-upstream wb4m checkpoint and model.yaml from the official SapiensID repository,
-and a trusted YOLOv8n-pose checkpoint. The adapter verifies the pinned source
-revision and checkpoint hashes, sharing the existing PyTorch installation.
+Install `requirements-sapiensid.txt` alongside the normal runtime, preserving the
+CPU/CUDA PyTorch build appropriate for your installation. Obtain the upstream
+wb4m checkpoint and model.yaml from the official SapiensID repository, and a
+trusted YOLOv8n-pose checkpoint. No weights are bundled or downloaded by this
+adapter. Relative paths resolve from the configuration file.
 
 ```yaml
 sapiensid:
@@ -42,26 +23,148 @@ sapiensid:
   pose:
     path: recognition_models/sapiensid_v1/yolov8n-pose.pt
     sha256: REPLACE_WITH_VERIFIED_LOWERCASE_SHA256
+  matching:
+    face_floor: 0.4
+    person_threshold: 0.85
+    ambiguity_margin: 0.1
+    min_support: 3
+  execution:
+    batch_size: 1
+    reference_bytes: 134217728
+    plan_bytes: 16777216
+    max_candidate_pairs: 100000
+  storage:
+    retain_person_crops: true
 ```
 
 Keep `models.recognizer` set to your face recognizer. Source must be a clean
 checkout of `mk-minchul/sapiensid` at
 `a8d8011117db23f20c7ade3bc38e8075810ac886`. The required model.pth hash is
 `8df1e2d7a64fbc87969326862aeafccc83eb5ee0462a4f007d7f09603782cf02`.
-Relative paths resolve from the configuration file.
+The adapter verifies source revision and asset hashes before loading weights.
 
-Association checks include rejected face detections to avoid hiding competing
-faces. Embeddings are collected for eligible retained face observations only;
-body-only recognition and rescuing faces rejected by the scan gate are not
-implemented. Missing/ambiguous associations are explicit unavailable records.
-Inference failures fail the scene, preserving only previously completed cues.
+`run` collects missing current-contract features even when its face scan is
+reused. It reopens the VTT source and associates retained face boxes with body
+pose; it does not rerun the face encoder. All retained detections, including
+rejected faces, participate in association ambiguity checks. Only faces already
+accepted by scanning receive supplemental features. Body-only recognition and
+rescuing rejected faces are outside this implementation.
 
-`audit-alignment` exports the exact normalized-input reconstruction, whitespace
-mask (not semantic segmentation), and 22 measured points. It loads person pose
-weights but not identity weights. `report-identity` exports retained person PNGs
-and metadata offline. Missing person images are recorded, never reconstructed
-from a face crop. This adapter uses SCRFD/YuNet face landmarks with YOLO pose;
-its accuracy equivalence to the upstream DFA pipeline has not been established.
+Missing/ambiguous associations become explicit unavailable records. They are
+cached for the same input contract. Inference failures propagate, preserve
+previously completed cues and never become false negative identity evidence.
+Each cue commits atomically. Changing pose settings creates a new contract and
+allows unavailable associations to be measured again.
 
-Upstream SapiensID source/weights use CC BY-NC 4.0. Ultralytics dependencies have
-separate licensing. No model weights are included in this repository.
+## Merge rules and publication
+
+The planner uses the production quality/diversity-selected strict face references.
+It compares face and person cosines separately; it never averages different
+encoders into one score. Every original cross-identity witness must satisfy its
+respective floor, and both identities need independent scene/timestamp support.
+All selected references need current person evidence. Copresent faces must also
+pass the existing stronger reflection/cooccurrence face threshold.
+
+Every compatible strict identity remains a possible competitor, including weak
+identities and face-compatible rivals without body evidence. Components must be
+complete: A–B and B–C do not prove A–C. The ambiguity margin is checked against
+all outsiders before a component can merge. References remain frozen for the
+entire pass. Missing strict references are not reconstructed from attachments.
+
+Automatic application runs after ordinary face rebuilding. It only applies
+components whose entire retained membership is inside the selected scans; select
+all involved scenes together to consolidate them. Partial selections can report
+an eligible pair while correctly leaving it unapplied. The oldest identity wins.
+Source samples become attachment-only and do not become new strict face anchors.
+Original cores and numeric proof remain in alias evidence; candidate records
+point to that proof without duplicating it per observation. On later passes,
+original cores can still veto contradictory merges but cannot nominate candidates
+or add support votes. Missing or superseded original evidence blocks further
+hybrid merges instead of hiding a contradictory endpoint.
+
+Aliases are local SQLite aliases, following the current publication design.
+Selected scene links are reconciled through the normal ownership-checked journal
+and publication queue; old Stash profiles, names, images and manual links survive.
+No new destructive performer-merge operation is introduced. `sync-identities`
+handles publication debt; `cleanup` still protects known historical profiles.
+Turning this feature off prevents new supplemental inference/merges, but does not
+undo existing local aliases or restore earlier scene links.
+
+A semantic warm stamp covers scoped scans, vectors, memberships, candidates,
+aliases, origins, the model contract and matching policy. Changed evidence or
+competitors invalidate it; publication-only status/binding changes do not force
+another face rebuild. No checkpoint is treated as ground truth.
+
+## Recognition command compatibility
+
+| Action | Hybrid behavior |
+|---|---|
+| `run` | Collect missing evidence, rebuild faces, apply guarded hybrid plan, reconcile selected scene links. |
+| `report` | Read-only frozen plan with pair gates, competing identities and missing evidence. |
+| `report-identity` | Recorded hybrid explanations, attachment roles, retained body PNGs and association metadata. No models/media needed. |
+| `report-merge` | Add measured hybrid proposals; `--simulate` verifies final membership through production replay. Merge goals and the solver retain all competing identities and set-separation constraints. |
+| `audit-alignment` | Export the exact reconstructed model input, whitespace mask and 22 normalized points. Loads pose and face detection, not SapiensID identity weights. |
+| `evaluate` | Copy only admitted retained evidence into isolated trials; report coverage, matching settings and recorded decisions. Future selected scenes cannot supply body votes. |
+| `tune` | Support the four `sapiensid.matching.*` parameters. Labelled holdout validation remains required for a recommendation. |
+| `portraits` | Use canonical face memberships and existing face portrait scoring; no person encoder, no body portraits. |
+| `sync-identities` | Reconcile the normal publication queue without models/media; preserve historical profiles. |
+| `cleanup` | Keep existing ownership/orphan protections; supplemental evidence cannot authorize profile deletion. |
+
+Reports and replay work without torch, CUDA or model files. They never create
+missing embeddings. Their coverage distinguishes ready, unavailable and missing
+current-contract evidence. Frozen-report recommendations do not guarantee a full
+rebuild; use replay verification before applying a configuration. Offline replay
+refuses changed person-input contracts. Full configuration exports resolve local
+model paths so moving the YAML does not silently change their meaning.
+
+## Storage and resource limits
+
+Writer initialization migrates SQLite versions 1–5 to version 6 transactionally.
+Read-only reports can still open version 5 without migrating it. Supplemental rows
+contain an input contract, availability status, metadata, a normalized 4096D
+float32 feature and an optional body crop. Matching thresholds, execution budgets
+and local paths do not change the vector contract. Pose/preparation semantics do.
+Writes invalidate existing observation dependency certificates. Face namespaces
+and face scan identities remain unchanged.
+
+Batch size is 1–16. CPU preparation builds bounded tensors; one owning thread
+transfers and executes a batch. Batches stay within a frame, avoiding additional
+frame queues. Collection does not construct another face detector. Retained PNGs
+exceeding `storage.max_crop_bytes` are omitted with an explicit metadata reason;
+features remain usable. Disabling person-crop retention saves space without
+changing embeddings or face portraits.
+
+Candidate nomination uses unnormalized centroids: their dot product equals the
+mean of all cross-sample cosines. Products are computed in 64×64 blocks, without
+an N×N matrix or approximate/top-k pruning. Only nominated pairs receive exact
+original-witness gates. A second bounded pass checks every outsider, without an
+N² Python rival list. Arithmetic remains quadratic in identity count.
+
+`reference_bytes` bounds numerical reference/centroid working storage, including
+conservative copy allowances; it is not a total process-RSS limit. `plan_bytes`
+bounds serialized pair proofs, retained core history and alias evidence per
+transaction; `max_candidate_pairs` bounds graph candidates.
+Python object and SQLite overhead are additional. Exceeding a budget stops the
+hybrid pass explicitly, without partially applying its plan or silently dropping
+competitors. Collection, nomination, competitor checks and application expose
+progress stages.
+
+Run `python -m benchmarks.benchmark_hybrid_lookup --identities 256 --samples 8`
+for a deterministic CPU nomination comparison. The checked-in result compares
+32,640 pairs with identical candidate sets. It measures nomination only, excluding
+exact candidate gates, SQLite, inference and media; it is not end-to-end speed or
+accuracy evidence.
+
+## Validation limits
+
+Tests cover CPU tensor preparation/batch parity, association and malformed inputs,
+cue failure/resume, missing evidence, contradictory faces, cooccurrence, ambiguous
+rivals, incomplete components, budget failure, cold/warm rebuild, offline replay,
+reports, tuning, merge goals and mocked Stash publication/maintenance.
+
+No real checkpoint inference, CUDA throughput or labelled-corpus accuracy has
+been validated in this implementation session. This adapter combines SCRFD/YuNet
+face landmarks with YOLO pose; equivalence to upstream DFA alignment is not
+established. Audit real inputs and calibrate against independent labels before
+broad use. Upstream SapiensID source/weights use CC BY-NC 4.0; Ultralytics has
+separate licensing.

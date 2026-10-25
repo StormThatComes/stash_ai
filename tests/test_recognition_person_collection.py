@@ -42,3 +42,34 @@ def test_collection_resumes_without_reembedding_faces(tmp_path):
         assert before==list(state.connection.execute('SELECT id,embedding FROM observations'))
         assert all(r[0] for r in state.connection.execute('SELECT crop FROM person_evidence'))
     collector.close();assert model.closed
+
+
+def test_multi_face_batches_are_bounded_and_failed_cue_is_atomic(tmp_path):
+    import uuid
+    settings=config(tmp_path);data=plain(settings.data)
+    data['sapiensid']['enabled']=True;data['sapiensid']['execution']['batch_size']=2
+    settings=replace(settings,data=data)
+    class Batched(Person):
+        def __init__(self):super().__init__();self.sizes=[];self.fail=True
+        def embed_faces(self,image,faces):
+            self.sizes.append(len(faces))
+            if self.fail and len(self.sizes)==2:return []
+            return [np.ones(4096) for face in faces]
+        def embed(self,*a):pytest.fail('batch adapter fell back to scalar')
+    client=MediaClient();model=Batched();collector=PersonCollector(settings,{},factory=lambda *a:model)
+    with FaceDatabase(settings.database) as state,SpriteInput(client,client.scene,settings) as source:
+        scan,_=scan_scene(state,'scope',client.scene,settings,'ns',source,Backend)
+        db=state.connection
+        first=list(db.execute('SELECT * FROM observations WHERE cue=0').fetchone())
+        for _ in range(2):
+            first[0]=str(uuid.uuid4())
+            db.execute('INSERT INTO observations VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',first)
+        db.commit()
+        with pytest.raises(ValueError,match='feature count'):collector.enrich(db,scan,source)
+        assert model.sizes==[2,1]
+        assert db.execute('SELECT COUNT(*) FROM person_evidence').fetchone()[0]==0
+        model.fail=False
+        collector.enrich(db,scan,source)
+        assert max(model.sizes)==2
+        assert db.execute('SELECT COUNT(*) FROM person_evidence').fetchone()[0]==5
+    collector.close()

@@ -250,3 +250,9 @@ vectors, and `--queue-bytes` to compare admission overhead.
 This orthogonal-identity fixture is a correctness/scaling probe, not a realistic
 merge or face-accuracy benchmark. It does not choose a new application default.
 Representative 24-core measurements remain necessary for that decision.
+
+Hybrid SapiensID nomination: `python -m benchmarks.benchmark_hybrid_lookup
+--identities 256 --samples 8`. It checks candidate-set parity between exhaustive
+witness means and blocked centroid means at 4096 dimensions, with one BLAS
+thread. See `results/hybrid_lookup_2026-10-25.json`; this excludes exact merge
+gates, model inference, media and SQLite and is not an accuracy benchmark.

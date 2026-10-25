@@ -107,7 +107,8 @@ def _assignment(decisions):
     return {
         'category': category,
         'role': ('anchor' if category.startswith('anchor') else
-                 'auxiliary' if category.startswith('auxiliary') else 'unknown'),
+                 'auxiliary' if category.startswith('auxiliary') else
+                 'attachment' if category == 'hybrid-attachment' else 'unknown'),
         'evidence_status': ('recorded_current_policy' if current else
                             'recorded_other_policy' if supporting else 'membership_only'),
         'reason_codes': sorted({item['recorded']['reason'] for item in selected if item['recorded'].get('reason')}),
@@ -196,7 +197,7 @@ def export(config, output_dir, *, identity_id=None, performer_id=None, scope=Non
             assignment = _assignment(recorded)
             name = f'scene-{int(scene)}_cue-{cue:06d}_{assignment["category"]}_face-{index:06d}.png'
             image = _image(row['crop'], directory / name)
-            eligible = row['rejected'] is None and row['scan_status'] == 'complete' and is_anchor(quality, config.data['clustering'])
+            eligible = assignment['category'] != 'hybrid-attachment' and row['rejected'] is None and row['scan_status'] == 'complete' and is_anchor(quality, config.data['clustering'])
             reference_count += int(eligible)
             sample = {
                 'observation_id': row['id'], 'scene_id': scene, 'scan_id': row['scan_id'],
@@ -220,7 +221,8 @@ def export(config, output_dir, *, identity_id=None, performer_id=None, scope=Non
         report['summary'] = {
             'members': len(report['samples']), 'pngs_exported': counts['exported'],
             'missing_crops': counts['missing_crop'], 'invalid_crops': counts['invalid_crop'],
-            'roles': {role: counts[role] for role in ('anchor', 'auxiliary', 'unknown')},
+            'roles': {role: counts[role] for role in ('anchor', 'auxiliary', 'unknown')+
+                      (('attachment',) if counts['attachment'] else ())},
             'complete': counts['exported'] == len(report['samples']),
         }
         _write_json(directory / 'manifest.json', report)

@@ -1,0 +1,17 @@
+{
+  "identities": 256,
+  "samples_per_identity": 8,
+  "person_dimensions": 4096,
+  "face_dimensions": 512,
+  "native_threads": 1,
+  "compared_pairs": 32640,
+  "nominated_pairs": 128,
+  "nomination_parity": true,
+  "nominations_sha256": "653941ce8a974a304d0a169245157b823c264118d922c5d8f66826096a95512d",
+  "seconds": {
+    "exhaustive_witness_nomination": 1.6860257409989572,
+    "blocked_centroid_nomination": 0.03669080400140956
+  },
+  "speedup": 45.952270245541214,
+  "limitations": "Synthetic CPU nomination only; excludes exact candidate gates, DB I/O, inference and media. Not an accuracy or end-to-end speed claim."
+}

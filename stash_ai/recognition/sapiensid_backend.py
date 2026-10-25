@@ -64,12 +64,17 @@ def adjust_pose(points):
 class SapiensIDFaces(YuNetDetector):
     dimensions = EMBEDDING_DIMENSIONS
 
-    def __init__(self, config, paths, *, load_identity=True):
+    def __init__(self, config, paths, *, load_identity=True, load_detector=True):
         self.encoder = self.pose = None
         self._person_frame = None
         self.owner = get_ident()
         try:
-            super().__init__(config, paths)
+            self.config=config
+            self.provenance={}
+            self.detector=self.ort_detector=None
+            self.has_detector=load_detector
+            if load_detector:
+                super().__init__(config, paths)
             from .sapiensid_inference import resolve_device
             if load_identity:
                 self.encoder = load_encoder(config)
@@ -86,6 +91,8 @@ class SapiensIDFaces(YuNetDetector):
 
     def detect(self, image, faces=None):
         self._owner()
+        if faces is None and not self.has_detector:
+            raise ValueError('Supplemental collection requires retained face detections.')
         faces = super().detect(image) if faces is None else faces
         people = []
         if faces:
@@ -152,12 +159,21 @@ class SapiensIDFaces(YuNetDetector):
         return person['bounds'], points
 
     def embed(self, image, face):
+        return self.embed_faces(image,[face])[0]
+
+    def embed_faces(self, image, faces):
+        from contextlib import ExitStack
         self._owner()
         if self.encoder is None:
             raise RuntimeError('The alignment audit does not load a recognition encoder.')
-        bounds, points = self._person_geometry(image, face)
-        with image.crop(bounds) as crop:
-            return self.encoder.embed_person(crop, points)
+        if not 1<=len(faces)<=self.encoder.max_batch_size:
+            raise ValueError('SapiensID face batch exceeds the configured limit.')
+        with ExitStack() as stack:
+            persons=[]
+            for face in faces:
+                bounds,points=self._person_geometry(image,face)
+                persons.append((stack.enter_context(image.crop(bounds)),points))
+            return self.encoder.embed_person_batch(persons)
 
     def audit_input(self, image, face):
         from .sapiensid_v1 import prepare_person_input

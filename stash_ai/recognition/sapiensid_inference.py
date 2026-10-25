@@ -118,9 +118,17 @@ class SapiensIDV1Encoder:
         Geometry follows the same square padding as the image. Missing body
         points stay (-1,-1); the model performs its own 22 -> 19 selection.
         """
+        return self.embed_person_batch([(image,points)])[0]
+
+    def embed_person_batch(self, persons):
+        """Prepare bounded CPU inputs, then transfer one batch on the model owner."""
         from .sapiensid_v1 import prepare_person_input
         self._check_owner()
-        return self._encode(*prepare_person_input(image, points, device=self.device))[0]
+        if not isinstance(persons,(list,tuple)) or not 1<=len(persons)<=self.max_batch_size:
+            raise ValueError('SapiensID expects 1..max_batch_size associated persons.')
+        prepared=[prepare_person_input(image,points) for image,points in persons]
+        tensors=[self.torch.cat(parts,dim=0).to(self.device) for parts in zip(*prepared)]
+        return self._encode(*tensors)
 
     def _check_owner(self):
         if get_ident() != self.owner:

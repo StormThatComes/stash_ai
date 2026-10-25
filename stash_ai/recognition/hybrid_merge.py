@@ -1,6 +1,5 @@
 """Apply frozen hybrid plans to fully selected identities, preserving face authority."""
 import hashlib
-import json
 import time
 
 from .config import digest, plain
@@ -19,13 +18,14 @@ def signature(db,selected,config):
     first=db.execute('SELECT scope,namespace FROM scans WHERE id=?',(selected[0]['scan'],)).fetchone()
     if first is None:raise ValueError('Hybrid rebuild requires an existing scan.')
     scope,namespace=first
-    h=hashlib.sha256(encoded(plain([selected,matching_policy(config),config.data['sapiensid']['execution']])).encode())
+    h=hashlib.sha256(encoded(plain([selected,matching_policy(config),config.data['sapiensid']['execution'],
+        config.data['clustering'],config.data['execution']])).encode())
     queries=[
-        ('scans', 'SELECT id,scene,input_sha,policy_sha,status,cursor,total FROM scans WHERE scope=? AND namespace=? ORDER BY id'),
-        ('observations','SELECT o.id,o.cue,o.seconds,o.geometry,o.quality,o.rejected,o.dimensions,o.embedding FROM observations o JOIN scans s ON s.id=o.scan WHERE s.scope=? AND s.namespace=? ORDER BY o.id'),
+        ('scans', 'SELECT rowid,id,scene,input_sha,policy_sha,status,cursor,total FROM scans WHERE scope=? AND namespace=? ORDER BY id'),
+        ('observations','SELECT o.rowid,o.id,o.scan,o.cue,o.seconds,o.source,o.rect,o.geometry,o.quality,o.rejected,o.dimensions,o.embedding FROM observations o JOIN scans s ON s.id=o.scan WHERE s.scope=? AND s.namespace=? ORDER BY o.id'),
         ('people','SELECT id,created,token FROM people WHERE scope=? AND namespace=? ORDER BY id'),
         ('members','SELECT m.observation,m.person FROM members m JOIN people p ON p.id=m.person WHERE p.scope=? AND p.namespace=? ORDER BY m.observation'),
-        ('candidates','SELECT c.id,c.policy,c.person,c.status,c.payload FROM candidates c JOIN scans s ON s.id=c.scan WHERE s.scope=? AND s.namespace=? ORDER BY c.id'),
+        ('candidates','SELECT c.rowid,c.id,c.scan,c.policy,c.person,c.status,c.payload FROM candidates c JOIN scans s ON s.id=c.scan WHERE s.scope=? AND s.namespace=? ORDER BY c.id'),
         ('aliases','SELECT m.source,m.target,m.evidence FROM identity_merges m JOIN people p ON p.id=m.source WHERE p.scope=? AND p.namespace=? ORDER BY m.source'),
         ('origins','SELECT i.sample_key,i.person,i.observation FROM identity_origins i JOIN people p ON p.id=i.person WHERE p.scope=? AND p.namespace=? ORDER BY i.sample_key')]
     if available(db):queries.append(('person','SELECT e.observation,e.contract,e.status,e.metadata,e.embedding FROM person_evidence e JOIN observations o ON o.id=e.observation JOIN scans s ON s.id=o.scan WHERE s.scope=? AND s.namespace=? ORDER BY e.observation,e.contract'))
@@ -46,6 +46,7 @@ def apply(database,selected,config):
     scope,namespace=db.execute('SELECT scope,namespace FROM scans WHERE id=?',(selected[0]['scan'],)).fetchone()
     result=report(db,config,scope,namespace)
     selection={x['scan'] for x in selected}
+    stored_bytes=0
     with db:
         with tracking(result['decisions'],'Apply hybrid identity merges',unit='component') as decisions:
             for decision in decisions:
@@ -61,6 +62,9 @@ def apply(database,selected,config):
                 target=rows[0]['id']
                 proof=dict(decision,policy=policy,scan=next(iter(sorted(scans))),route='sapiensid_hybrid',
                            reference_policy='source_attachment_only',original_cores=people)
+                stored_bytes+=len(encoded(proof).encode())*(len(rows)-1)
+                if stored_bytes>config.data['sapiensid']['execution']['plan_bytes']:
+                    raise ValueError('SapiensID plan_bytes budget exceeded by alias evidence; transaction rolled back.')
                 # Current publication reconciles scene links, preserving former
                 # profiles. This is a local alias, never a pending destructive merge.
                 for source in (r['id'] for r in rows[1:]):
@@ -68,10 +72,13 @@ def apply(database,selected,config):
                     db.execute('UPDATE members SET person=? WHERE person=?',(target,source))
                     # Every accepted historical decision for this source is
                     # downgraded. No latest-row lookup may promote it silently.
+                    recorded=dict(route='sapiensid_hybrid',source=source,target=target,
+                        contract=proof['contract'],reference_policy=proof['reference_policy'],
+                        proof_location='identity_merges',nearest_rival=proof['nearest_rival'])
                     db.execute("UPDATE candidates SET payload=json_set(payload,'$.prior_reason',json_extract(payload,'$.reason'),"
                         "'$.reason','hybrid_identity','$.hybrid_merge',json(?),'$.merged_from',person,"
                         "'$.reference_role','attachment','$.reference_selected',json('false')),person=? WHERE person=?",
-                        (encoded(proof),target,source))
+                        (encoded(recorded),target,source))
                 for row in db.execute('SELECT id,scene FROM scans WHERE id IN (SELECT value FROM json_each(?))',(encoded(sorted(scans)),)):
                     enqueue(db,scope,namespace,row['scene'],config,'hybrid_identity_merge')
     return result
