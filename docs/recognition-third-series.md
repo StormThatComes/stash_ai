@@ -55,3 +55,15 @@ commit plans (including unresolved-pool backfill). Final-plan reuse validates
 selected raw inputs, historical context, binding context, engine and limits.
 Validation: 58 checkpoint/rebuild tests passed, including interruption before
 commit and recovery without rerunning historical analysis.
+
+PR5: parallel scoring carries exact results and conservative rejection bounds
+into ranking, avoiding a second matrix screen while distinguishing uncomputed
+scores. Query support uses immutable matrix retrieval with exact scalar boundary
+checks. Shared cohort workers consume read-only shared buffers without worker
+SQLite insertion, preserving canonical priorities and coordinator-only writes.
+The working cache lends idle space to queues, banks and Python metadata; active
+reservations evict disposable cache entries before admission. Cohort/promotion
+metadata and indexed rows are included. This is working-memory accounting, not
+an OS RSS guarantee (allocator, libraries, SQLite and configured prefetch remain
+separate). Validation: 71 scoring/cohort/query/cache tests and 35 final focused
+tests passed, including shared-buffer ownership and exact matrix boundaries.

@@ -66,6 +66,12 @@ class Compute:
         self.scenes_applied = 0
         self.last_status = 0.
 
+    def _account_queue(self, size):
+        from .run_cache import current
+        cache = current()
+        if cache is not None:
+            cache.reserve(('compute',id(self)),size)
+
     def fallback(self, reason):
         self.fallbacks[reason] += 1
         self.publish('serial: ' + reason.replace('_', ' '))
@@ -191,6 +197,7 @@ class Compute:
         self.release_input(job.ordinal)
         self.pending.popleft()
         self.bytes -= job.size
+        self._account_queue(self.bytes)
         self.applied += 1
         self.worker_seconds += result.seconds
         self.worker_cpu_seconds += result.cpu_seconds
@@ -221,6 +228,7 @@ class Compute:
                 while self.pending and (len(self.pending) >= self.workers*2
                                         or self.bytes + job.size > self.limit):
                     yield self._take()
+                self._account_queue(self.bytes+job.size)
                 if backend == 'processes':
                     self._start_processes()
                     future = self.process_executor.submit(_invoke_process, function, job)
@@ -256,6 +264,7 @@ class Compute:
             self.native = None
         self.pending.clear()
         self.bytes = 0
+        self._account_queue(0)
 
     def close(self):
         self.closed = True

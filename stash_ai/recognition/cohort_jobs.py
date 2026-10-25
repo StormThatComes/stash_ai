@@ -1,11 +1,9 @@
 """Scene-local appearance priorities on isolated CPU jobs, applied in order.
 
-A worker uses a private in-memory staging table to run exactly the streaming
+A worker reads immutable shared arrays directly for the same streaming
 cohort algorithm. It receives only selected observation values, never a durable
 connection or person labels. Oversize scenes retain the bounded serial path.
 """
-import sqlite3
-from types import SimpleNamespace
 
 from .compute import Work
 from .config import plain
@@ -20,21 +18,17 @@ def _scene(payload):
     if payload is None:
         return None
     item, rows, settings = payload
-    from .local_cohorts import _prepare_serial, _check_cancelled
-    _check_cancelled()
-    db = sqlite3.connect(':memory:')
-    try:
-        db.row_factory = sqlite3.Row
-        db.execute('CREATE TABLE observations(id TEXT PRIMARY KEY,scan TEXT,cue INTEGER,seconds REAL,'
-                   'geometry TEXT,quality TEXT,dimensions INTEGER,embedding BLOB,rejected TEXT)')
-        from .shared_payload import unpack
-        with unpack(rows) as values:
-            db.executemany('INSERT INTO observations('+FIELDS+') VALUES (?,?,?,?,?,?,?,?)', values)
-        db.execute('CREATE INDEX scene_rows ON observations(scan)')
-        _prepare_serial(db, [item], SimpleNamespace(data=settings))
-        return tuple(tuple(r) for r in db.execute('SELECT observation,position FROM local_core_order ORDER BY observation'))
-    finally:
-        db.close()
+    from .shared_payload import borrowed
+    from .cohort_arrays import priorities
+    with borrowed(rows) as values:
+        try:
+            return priorities(values,settings)
+        except BaseException as error:
+            # Drop NumPy buffer views held by completed error frames before
+            # closing the shared segment, preserving the original exception.
+            import traceback
+            traceback.clear_frames(error.__traceback__)
+            raise
 
 
 def prepare_parallel(db, selected, config, pool):
@@ -51,7 +45,7 @@ def prepare_parallel(db, selected, config, pool):
             size = 4096 + 12*(raw + count*2048)
             payload = None
             if size <= pool.limit:
-                rows = tuple(tuple(r) for r in db.execute('SELECT '+FIELDS+' FROM observations '+condition,
+                rows = tuple(tuple(r) for r in db.execute('SELECT '+FIELDS+' FROM observations '+condition+' ORDER BY embedding,geometry,cue,id',
                                                          (item['scan'],)))
                 if backend == 'processes' and pool.workers > 1:
                     from .shared_payload import pack

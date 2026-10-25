@@ -27,6 +27,13 @@ class Shard:
     norms: object
 
 
+class ExactScores(list):
+    """Sparse exact scores plus conservative bounds for every screened group."""
+    def __init__(self, values=()):
+        super().__init__(values)
+        self.bounds = {}
+
+
 def _score(payload):
     """No coordinator contexts are copied into this pure numerical kernel."""
     import numpy as np
@@ -49,8 +56,10 @@ def _score(payload):
     for index, query in enumerate(queries):
         if token is not None:
             token.check()
-        values = []
+        values = ExactScores()
         for position, group in enumerate(shard.groups):
+            values.bounds[position] = (float(means[position,index]+mean_errors[position,index]),
+                                       float(minimum_upper[position,index]))
             if (np.isfinite(means[position, index]) and np.isfinite(mean_errors[position, index])
                     and (means[position, index]+mean_errors[position, index] < threshold
                          or minimum_upper[position, index] < cohesion)):
@@ -59,7 +68,7 @@ def _score(payload):
             # Preserve the original float32 dot and float64 mean/min order.
             values.append((position, *_similarities(group, query)))
             samples += len(group.samples)
-        rows.append(tuple(values))
+        rows.append(values)
     return tuple(rows), screened, samples
 
 
@@ -99,7 +108,7 @@ class FrozenScores:
             raise RuntimeError('Recognition reference generation changed during scoring.')
         # Aggregated sparse Python results are bounded even when every group is
         # a finalist. The caller also caps query count before preparing inputs.
-        if len(queries)*len(self.groups)*192 > pool.limit//4:
+        if len(queries)*len(self.groups)*320 > pool.limit//2:
             pool.fallback('result_admission')
             return None
         target = max(1024, min(524288, pool.limit//(max(2, pool.workers)*12)))
@@ -123,7 +132,7 @@ class FrozenScores:
             sample_count = sum(len(g.samples) for g in block)
             raw = sum(a.nbytes for g in block for a in g.samples)
             if (any(not g.samples or any(a.shape != dimension for a in g.samples) for g in block)
-                    or 6*raw + sample_count*len(queries)*32 + len(block)*len(queries)*192 + 4096 > pool.limit):
+                    or 6*raw + sample_count*len(queries)*32 + len(block)*len(queries)*320 + 4096 > pool.limit):
                 pool.fallback('layout_or_admission')
                 return None
         def jobs():
@@ -136,9 +145,9 @@ class FrozenScores:
                 for array in prepared:
                     array.flags.writeable = False
                 shard = Shard(block, matrix, lengths, starts, norms)
-                size = 6*matrix.nbytes + len(matrix)*len(queries)*32 + len(block)*len(queries)*192 + 4096
+                size = 6*matrix.nbytes + len(matrix)*len(queries)*32 + len(block)*len(queries)*320 + 4096
                 yield Work(ordinal, self.generation, (shard, queries, threshold, cohesion), size)
-        result = [[] for _ in queries]
+        result = [ExactScores() for _ in queries]
         offset = 0
         with closing(pool.ordered(_score, jobs()), name='close parallel score results') as stream:
             for completed in stream:
@@ -147,6 +156,7 @@ class FrozenScores:
                 rows, screened, samples = completed.value
                 for index, values in enumerate(rows):
                     result[index].extend((offset+position, mean, low) for position, mean, low in values)
+                    result[index].bounds.update((offset+p,b) for p,b in values.bounds.items())
                 count('parallel_score_blocks')
                 count('screened_groups', screened)
                 count('group_comparisons', sum(len(row) for row in rows))
@@ -177,7 +187,7 @@ def scored_rows(rows, groups, threshold, cohesion=float('-inf')):
         for row in rows:
             yield row, None
         return
-    batch_size = max(1, min(16, pool.limit//max(1, len(groups)*192*8)))
+    batch_size = max(1, min(16, pool.limit//max(1, len(groups)*320*8)))
     iterator = iter(rows)
     while batch := list(islice(iterator, batch_size)):
         queries, indices = [], []

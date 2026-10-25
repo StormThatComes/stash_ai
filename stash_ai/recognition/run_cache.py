@@ -20,6 +20,39 @@ class Cache:
         self.limit, self.matrix_limit = limit, min(limit, matrix_limit)
         self.entries, self.size, self.peak = OrderedDict(), 0, 0
         self.matrices, self.matrix_bytes = OrderedDict(), 0
+        self.working = None
+        self.reservations = {}
+        self.reserved_size = 0
+        self.ceiling, self.matrix_ceiling = limit, matrix_limit
+
+    def configure_working(self, working, ceiling):
+        self.working, self.ceiling = working, ceiling
+        self._resize()
+
+    def reserve(self, owner, size):
+        if self.working is None:
+            return
+        total = self.reserved_size - self.reservations.get(owner, 0) + size
+        if total > self.working:
+            raise ValueError('Recognition working allocations exceed execution.rebuild_memory_bytes.')
+        self.reserved_size = total
+        if size:
+            self.reservations[owner] = size
+        else:
+            self.reservations.pop(owner, None)
+        self._resize()
+
+    def _resize(self):
+        if self.working is None:
+            return
+        self.limit = max(0, min(self.ceiling, self.working-self.reserved_size))
+        self.matrix_limit = min(self.matrix_ceiling, self.limit)
+        while self.entries and self.size > self.limit:
+            self._remove(next(iter(self.entries)))
+            count('ram_evictions')
+        while self.matrices and self.matrix_bytes > self.matrix_limit:
+            self._remove(next(iter(self.matrices)))
+            count('ram_evictions')
 
     def get(self, key):
         found = self.entries.pop(key, MISSING)
@@ -105,6 +138,7 @@ def scope(config):
     from .resource_plan import plan
     limit = plan(config).cache
     value = Cache(limit, settings['rebuild_matrix_cache_bytes'])
+    value.configure_working(plan(config).working, settings.get('rebuild_cache_bytes',0))
     token = _active.set(value)
     try:
         yield value

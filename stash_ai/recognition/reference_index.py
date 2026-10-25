@@ -29,7 +29,13 @@ class ReferenceIndex:
         total = db.execute('SELECT COUNT(*) FROM observations').fetchone()[0]
         # Conservative allowance for IDs, Python dictionaries, ranks and owners;
         # embeddings remain owned by SQLite and the bounded representatives.
-        self.enabled = total * 512 <= config.data['execution']['rebuild_memory_bytes']
+        from .run_cache import current
+        cache=current()
+        available=(cache.working-sum(cache.reservations.values()) if cache is not None and cache.working is not None
+                   else config.data['execution']['rebuild_memory_bytes'])
+        self.enabled = total * 512 <= available
+        if self.enabled and cache is not None:
+            cache.reserve(('reference-index',id(self)), total*512)
         if not self.enabled:
             count('reference_index_budget_fallbacks')
             return
@@ -240,6 +246,7 @@ class ReferenceIndex:
         cache = current()
         if cache is not None:
             cache.discard(lambda key: key[0] == 'reference-row' and key[1] == id(self))
+            cache.reserve(('reference-index',id(self)),0)
         self.db.create_function('recognition_reference_member', 3, None)
         self.db.create_function('recognition_reference_roots', 0, None)
         self.db.create_function('recognition_reference_role', 1, None)
