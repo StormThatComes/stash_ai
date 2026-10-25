@@ -15,15 +15,29 @@ class CpuStage:
         self.executor = None
         self.cancel = Cancellation()
         self.pending = {}
+        self.images = {}
         self.bytes = self.peak_bytes = 0
         self.lock = threading.Lock()
 
-    def _call(self, function, image, value):
+    def _acquire_image(self, image):
+        key=id(image)
+        with self.lock:
+            if key not in self.images:self.images[key]=[image,image.copy(),0]
+            entry=self.images[key];entry[2]+=1
+            return key,entry[1]
+
+    def _release_image(self, key):
+        with self.lock:
+            entry=self.images[key];entry[2]-=1
+            if not entry[2]:
+                del self.images[key];entry[1].close()
+
+    def _call(self, function, image, value, key):
         try:
             with use(self.cancel):
                 return function(image, value)
         finally:
-            image.close()
+            self._release_image(key)
 
     def submit(self, function, image, value, *, extra=0):
         """Submit owned CPU pixels; inference and database work stay on caller."""
@@ -43,11 +57,11 @@ class CpuStage:
                 oldest = next(iter(self.pending))
             oldest.result()
             self.cancel.check()
-        owned = image.copy()
+        key,owned = self._acquire_image(image)
         try:
-            future = self.executor.submit(self._call,function,owned,value)
+            future = self.executor.submit(self._call,function,owned,value,key)
         except BaseException:
-            owned.close()
+            self._release_image(key)
             raise
         with self.lock:
             self.pending[future] = size
@@ -55,7 +69,7 @@ class CpuStage:
             self.peak_bytes = max(self.peak_bytes,self.bytes)
         def completed(done):
             if done.cancelled():
-                owned.close()
+                self._release_image(key)
             with self.lock:
                 self.bytes -= self.pending.pop(done,0)
         future.add_done_callback(completed)

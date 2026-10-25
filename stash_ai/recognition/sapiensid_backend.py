@@ -162,6 +162,13 @@ class SapiensIDFaces(YuNetDetector):
         points.extend([[x-left, y-top] for x,y in face.landmarks])
         return person['bounds'], points
 
+    def person_input(self, image, face):
+        return self._person_geometry(image,face)
+
+    def embed_inputs(self, prepared):
+        self._owner()
+        return self.encoder.embed_prepared(prepared)
+
     def embed(self, image, face):
         return self.embed_faces(image,[face])[0]
 
