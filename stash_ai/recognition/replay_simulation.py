@@ -36,7 +36,7 @@ def impact(before, after):
         identities=len(set(after.values())-{None}))
 
 
-def replay(config, variants, *, scenes=None, scope=None, source=None, consume=None):
+def replay(config, variants, *, scenes=None, scope=None, source=None, consume=None, variant_stream=None):
     """Stream one trial at a time; retain only baseline and compact summaries.
 
     Existing bindings/history seed each independent trial. Production rebuild
@@ -64,7 +64,16 @@ def replay(config, variants, *, scenes=None, scope=None, source=None, consume=No
                 'Results apply to this retained snapshot and joint selection, not future media or other import orders.',
                 'Runtime excludes model inference and media loading; each trial uses fresh RAM databases.'])
         baseline = None
-        for name, settings in {'baseline': config, **variants}.items():
+        from itertools import chain
+        stream = variant_stream() if variant_stream is not None else variants.items()
+        seen_names = {'baseline'}
+        for name, settings in chain([('baseline', config)], stream):
+            if name != 'baseline':
+                if name in seen_names:
+                    raise ValueError('Duplicate simulation name.')
+                seen_names.add(name)
+            if namespace(settings) != ns or scan_identity(settings, ns) != scan_identity(config, ns):
+                raise ValueError('Simulation variants must preserve model and VTT scan contracts.')
             data = plain(settings.data)
             data['execution'].update(rebuild_checkpoint_scenes=0, profile_rebuild=False)
             settings = replace(settings, data=data)
