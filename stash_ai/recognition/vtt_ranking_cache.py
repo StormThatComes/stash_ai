@@ -18,10 +18,28 @@ class Ranking:
     def __init__(self,db,config,scope,target,namespace,context,policy_sha,enabled=True):
         self.db,self.config,self.scope,self.target=db,config,scope,target
         self.namespace,self.context,self.policy=namespace,context,policy_sha
-        self.enabled=enabled
+        self.limit=config.data['execution']['portrait_ranking_cache_bytes']
+        self.enabled=enabled and self.limit>0
         self.key='vtt-ranking-cache:'+digest([scope,target['person'],policy_sha,
             sorted(target['scans'],key=lambda s:(s['scene'],s['scan'])),target.get('matching',{})])
         self.hit=False
+
+    def scan_inputs(self,scan):
+        from .dependencies import cached
+        from .rebuild_cache import _hash_row
+        policy=matching_policy(self.config)
+        def compute():
+            h=hashlib.sha256()
+            for row in self.db.execute('SELECT o.id,o.scan,o.cue,o.seconds,o.source,o.rect,o.geometry,o.quality,'
+                'o.dimensions,o.embedding,s.input_sha,s.policy_sha,s.status FROM observations o '
+                'JOIN scans s ON s.id=o.scan JOIN members m ON m.observation=o.id '
+                'WHERE m.person=? AND o.scan=? AND o.rejected IS NULL ORDER BY o.id',(self.target['person'],scan)):
+                _hash_row(h,row)
+            for row in self.db.execute('SELECT id,scan,person,status,payload FROM candidates '
+                'WHERE policy=? AND scan=? ORDER BY id',(policy,scan)):_hash_row(h,row)
+            return h.hexdigest()
+        return cached(self.db,'portrait-inputs',digest([self.scope,self.namespace,self.target['person'],scan]),
+                      policy,compute,dependency='scan',dependency_key=scan)
 
     def inputs(self,*,check_retry=False):
         from .rebuild_cache import _hash_row
@@ -31,16 +49,8 @@ class Ranking:
         selected=sorted(self.target['scans'],key=lambda s:(s['scene'],s['scan']))
         for start in range(0,len(selected),256):
             ids=encoded([s['scan'] for s in selected[start:start+256]])
-            for row in self.db.execute('SELECT o.id,o.scan,o.cue,o.seconds,o.source,o.rect,o.geometry,o.quality,'
-                'o.dimensions,o.embedding,s.input_sha,s.policy_sha,s.status FROM observations o '
-                'JOIN scans s ON s.id=o.scan JOIN members m ON m.observation=o.id '
-                'WHERE m.person=? AND o.scan IN (SELECT value FROM json_each(?)) AND o.rejected IS NULL '
-                'ORDER BY o.id',(self.target['person'],ids)):
-                _hash_row(h,row)
-            for row in self.db.execute('SELECT id,scan,person,status,payload FROM candidates '
-                'WHERE policy=? AND scan IN (SELECT value FROM json_each(?)) ORDER BY id',
-                (matching_policy(self.config),ids)):
-                _hash_row(h,row)
+            for item in selected[start:start+256]:
+                _hash_row(h,[item['scan'],self.scan_inputs(item['scan'])])
             for row in self.db.execute('SELECT id,metadata FROM portraits WHERE scope=? AND person=? '
                 "AND json_valid(metadata) AND json_extract(metadata,'$.policy_sha')=? "
                 "AND json_extract(metadata,'$.scan') IN (SELECT value FROM json_each(?)) ORDER BY id",
@@ -69,7 +79,7 @@ class Ranking:
         if not self.enabled:
             return None
         row=self.db.execute('SELECT value FROM metadata WHERE key=?',(self.key,)).fetchone()
-        if row is None or len(row[0])>1048576:
+        if row is None or len(row[0])>min(1048576,self.limit):
             return None
         try:
             document=json.loads(row[0]);checksum=document.pop('checksum')
@@ -99,9 +109,12 @@ class Ranking:
         document=dict(format=1,inputs=inputs,ranks=ranks)
         document['checksum']=digest(document)
         payload=encoded(document)
-        if len(payload.encode())>1048576:
+        if len(payload.encode())+len(self.key)+256>min(1048576,self.limit):
             return  # Never truncate ranking or spill a working set.
         with self.db:
             self.db.execute('INSERT OR REPLACE INTO metadata VALUES (?,?)',(self.key,payload))
-            self.db.execute("DELETE FROM metadata WHERE key IN (SELECT key FROM metadata WHERE key LIKE 'vtt-ranking-cache:%' "
-                            'ORDER BY rowid DESC LIMIT -1 OFFSET 64)')
+            total=0
+            for key,size in self.db.execute("SELECT key,length(CAST(value AS BLOB)) FROM metadata "
+                "WHERE key LIKE 'vtt-ranking-cache:%' ORDER BY rowid DESC"):
+                total+=size+len(key)+256
+                if total>self.limit:self.db.execute('DELETE FROM metadata WHERE key=?',(key,))

@@ -98,3 +98,52 @@ def test_next_person_batch_prepares_while_gpu_owner_infers(tmp_path,monkeypatch)
             scan_scene(state,'scope',client.scene,settings,'ns',source,Backend,on_cue=collector.collect_frame)
             assert model.batches==[2,2]
     finally:started.set();collector.close()
+
+
+def test_cpu_queue_accounts_shared_frame_once_and_keeps_outputs_reserved():
+    from threading import Event
+    release=Event();stage=CpuStage(2,8*1024*1024)
+    with Image.new('RGB',(512,512)) as image:
+        try:
+            def work(owned,value):
+                assert release.wait(5)
+                return id(owned)
+            jobs=[stage.submit(work,image,i,extra=10000) for i in range(12)]
+            assert stage.bytes==512*512*3*8+12*(10000+4096)
+            assert stage.peak_bytes<=stage.limit
+            release.set()
+            assert len({f.result() for f in jobs})==1
+            assert stage.bytes==0
+        finally:release.set();stage.close()
+
+
+def test_gpu_batch_size_is_independent_of_cpu_worker_count(tmp_path,monkeypatch):
+    from stash_ai.recognition.person_pipeline import PreparedCollector
+    settings=config(tmp_path);data=plain(settings.data)
+    data['execution']['scan_cpu_workers']=2
+    data['sapiensid']['execution']['batch_size']=16
+    settings=replace(settings,data=data)
+    class Model:
+        def observation_quality(self,*a):return dict(identity_rejection=None)
+        def person_input(self,*a):return (),()
+        def embed_inputs(self,inputs):
+            batches.append(len(inputs));return [np.ones(4096) for _ in inputs]
+    batches=[];written=[]
+    collector=PreparedCollector(settings,Model(),writer=lambda db,rows:written.extend(rows))
+    monkeypatch.setattr(collector,'prepare',lambda *a:(None,None,False))
+    with Image.new('RGB',(8,8)) as image:
+        try:
+            rows=[dict(id=str(i),rejected=None) for i in range(32)]
+            collector.collect(object(),image,rows,[None]*32,fresh=True)
+            collector.flush()
+            assert batches==[16,16] and len(written)==32
+        finally:collector.close()
+
+
+def test_http_new_version_does_not_read_cached_blob(tmp_path,monkeypatch):
+    client=MediaClient();cache=MediaCache(tmp_path/'faces.sqlite',100,client)
+    url=client.url+'sprite.png';cache.put(url,'"old"',b'old')
+    response=Response(b'new');response.headers={'ETag':'"new"'}
+    client.media.get=lambda *a,**k:response
+    monkeypatch.setattr(cache,'get',lambda *a:pytest.fail('read obsolete cache body'))
+    assert bounded_media(client,url,None,5,cache=cache)==b'new'
