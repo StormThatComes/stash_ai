@@ -61,8 +61,10 @@ def apply(database,selected,config):
                 target=rows[0]['id']
                 proof=dict(decision,policy=policy,scan=next(iter(sorted(scans))),route='sapiensid_hybrid',
                            reference_policy='source_attachment_only',original_cores=people)
+                # Current publication reconciles scene links, preserving former
+                # profiles. This is a local alias, never a pending destructive merge.
                 for source in (r['id'] for r in rows[1:]):
-                    db.execute('INSERT INTO identity_merges VALUES (?,?,?,?,?)',(source,target,time.time(),encoded(proof),'pending'))
+                    db.execute('INSERT INTO identity_merges VALUES (?,?,?,?,?)',(source,target,time.time(),encoded(proof),'local'))
                     db.execute('UPDATE members SET person=? WHERE person=?',(target,source))
                     # Every accepted historical decision for this source is
                     # downgraded. No latest-row lookup may promote it silently.

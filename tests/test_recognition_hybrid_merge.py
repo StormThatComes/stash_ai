@@ -31,7 +31,7 @@ def test_apply_preserves_oldest_and_downgrades_source(tmp_path):
         result=apply(state,selected,config)
         assert result['decisions'][0]['outcome']=='merge'
         assert set(r[0] for r in db.execute('SELECT person FROM members'))=={people[0]}
-        assert db.execute('SELECT source,target,status FROM identity_merges').fetchone()[:]==(people[1],people[0],'pending')
+        assert db.execute('SELECT source,target,status FROM identity_merges').fetchone()[:]==(people[1],people[0],'local')
         assert db.execute('SELECT COUNT(*) FROM observations o JOIN members m ON m.observation=o.id WHERE '+strict_sql()).fetchone()[0]==3
         assert len(apply(state,selected,config)['decisions'])==1
         assert db.execute('SELECT COUNT(*) FROM identity_merges').fetchone()[0]==1
