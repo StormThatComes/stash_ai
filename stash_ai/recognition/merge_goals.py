@@ -39,6 +39,9 @@ def execute(args, config):
     sets = args.performer_set or [args.performer_id or args.identity_id]
     with closing(_open_readonly(config.database)) as db:
         result = resolve(db, config, sets, scope=args.scope, by_performer=args.identity_id is None)
+        if args.simulate:
+            result['simulation'] = evaluate(config, result, db)
+            result['status'] = 'baseline_evaluated'
     output = json.dumps(result, indent=2) + '\n'
     if args.output:
         with args.output.open('x', encoding='utf-8') as stream:
@@ -46,3 +49,48 @@ def execute(args, config):
     else:
         print(output, end='')
     return 0
+
+
+def assess(goals, observations, retained, predicted):
+    """Evaluate final memberships, including partial losses and outsider bridges."""
+    from collections import Counter
+    groups, owners = [], {}
+    for group in goals['groups']:
+        members, counts, complete_owners = [], Counter(), Counter()
+        missing = lost = 0
+        for member in group['members']:
+            ids = {r['id'] for r in member['observations']}
+            selected = ids & observations.keys()
+            absent = len(ids - selected)
+            withheld = sum(predicted.get(k) is None for k in selected)
+            destinations = Counter(predicted[k] for k in selected if predicted.get(k) is not None)
+            counts.update(destinations)
+            complete = bool(ids) and not absent and not withheld and len(destinations) == 1
+            if complete:
+                complete_owners.update(destinations.keys())
+            missing += absent
+            lost += withheld
+            members.append(dict(identity_id=member['identity_id'], performer_id=member['performer_id'],
+                observations=len(ids), missing=absent, withheld=withheld,
+                resulting_identities=dict(destinations), fully_assigned_to_one=complete))
+        for destination in counts:
+            owners.setdefault(destination, []).append(group['index'])
+        largest = max(complete_owners.values(), default=0)
+        groups.append(dict(index=group['index'], members=members, missing=missing, withheld=lost,
+            resulting_identities=dict(counts), fragments=len(counts),
+            largest_complete_performers=largest, total_performers=len(members),
+            complete_fraction=largest/len(members),
+            fully_merged=largest == len(members) and not missing and not lost))
+    conflicts = [dict(identity=k, sets=v) for k, v in sorted(owners.items()) if len(v)>1]
+    covered = all(g['members'] and all(m['observations'] for m in g['members']) and
+                  not g['missing'] and not g['withheld'] for g in groups)
+    return dict(groups=groups, conflicts=conflicts, disjoint=not conflicts, coverage_preserved=covered,
+                admissible=covered and not conflicts,
+                fully_solved=covered and not conflicts and all(g['fully_merged'] for g in groups))
+
+
+def evaluate(config, goals, db, variants=None):
+    from .replay_simulation import replay
+    return replay(config, variants or {}, scope=goals['scope'], source=db,
+        consume=lambda name, observations, retained, predicted:
+            dict(goal_result=assess(goals, observations, retained, predicted)))
