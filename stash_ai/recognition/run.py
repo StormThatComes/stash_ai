@@ -172,6 +172,7 @@ def _execute(args, config, *, services=None):
             visibility = None
             expression = None
             backend = None
+            person_collector = None
             inputs = None
             try:
                 with ui.phase('Recognition assets'):
@@ -199,6 +200,8 @@ def _execute(args, config, *, services=None):
                             paths.prepare_identity()
                             return services.backend(config, paths)
                     backend = LazyBackend(config, paths, load_models, loaded=loaded)
+                    from .person_collection import PersonCollector
+                    person_collector = PersonCollector(config, paths)
                     runtime_services = replace(services, backend=backend.borrow)
                 rejected_totals = Counter()
                 if not portraits_only:
@@ -220,6 +223,7 @@ def _execute(args, config, *, services=None):
                                     with activity(report, 'detect and embed VTT faces', scene=identifier), frame_progress(report, identifier) as frames:
                                         scan, reused = scan_scene(database, scope, scene, config, model_namespace, source,
                                             backend.borrow, visibility=visibility, progress=progress, frame_progress=frames)
+                                    person_collector.enrich(database.connection, scan, source)
                                 counts['scenes_reused' if reused else 'scenes_scanned'] += 1
                                 rejected = {row['rejected']: row['total'] for row in database.connection.execute(
                                     'SELECT rejected,COUNT(*) AS total FROM observations WHERE scan=? AND rejected IS NOT NULL '
@@ -378,6 +382,8 @@ def _execute(args, config, *, services=None):
                     actions.append(('close portrait expression model', expression.close))
                 if backend is not None:
                     actions.append(('close recognition identity models', backend.close))
+                if person_collector is not None:
+                    actions.append(('close person identity models', person_collector.close))
                 resource_error = None
                 before_cleanup = report.counts['cleanup_failures']
                 try:

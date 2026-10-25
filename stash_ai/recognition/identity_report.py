@@ -212,6 +212,8 @@ def export(config, output_dir, *, identity_id=None, performer_id=None, scope=Non
                 'current_reference_selected': eligible and reference_count <= config.data['clustering']['max_samples_per_person'],
                 'image': image,
             }
+            from .person_collection import retained_report
+            sample['person_evidence'] = retained_report(db,row['id'],config,directory,name)
             report['samples'].append(sample)
             counts[image['status']] += 1
             counts[assignment['role']] += 1
