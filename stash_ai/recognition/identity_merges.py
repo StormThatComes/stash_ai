@@ -122,7 +122,8 @@ def _supporting_cues(db, selected, policy, source, target, components, config, m
     """
     from .clustering import vector
 
-    cues, seen = [], set()
+    from .independent_evidence import Votes, representatives
+    evidence = Votes()
     cache = evidence_for(db)
     anchor = anchor_sql('o', config.data['clustering'])
     identity = support_identity(cache, selected, policy, source, target, components, config, minimum) if nomination is not None else None
@@ -143,8 +144,7 @@ def _supporting_cues(db, selected, policy, source, target, components, config, m
        selected['policy_sha']), selected)
     for row, mask in matching_rows(rows, (components[target], components[source]), config):
         from .independent_evidence import unit
-        key = unit(row)
-        if key in seen:
+        if unit(row) in evidence.edges.get((row['scan'],row['seconds']), ()):
             continue
         if mask is None:
             query = cache.vector(row) if cache is not None else vector(row)
@@ -153,13 +153,14 @@ def _supporting_cues(db, selected, policy, source, target, components, config, m
         else:
             matched = mask == 3
         if matched:
-            seen.add(key)
-            cues.append({'scene': row['scene'], 'seconds': row['seconds'], 'observation': row['id']})
-            votes.append(dict(cues[-1], order=(row['scan_order'],row['cue'],row['id'])))
-            if len(cues) >= minimum:
+            evidence.add(row)
+            votes.append(dict(scene=row['scene'], scan=row['scan'], seconds=row['seconds'],
+                quality=row['quality'], observation=row['id'], order=(row['scan_order'],row['cue'],row['id'])))
+            if len(evidence) >= minimum:
                 break
     save_votes(cache, identity, votes)
-    return cues
+    from .merge_cache import public_votes
+    return public_votes(votes)
 
 
 @measured('merging')
@@ -216,13 +217,13 @@ def supported_merges(database, scan, config, groups, policy, *, usage=None,
     anchor = anchor_sql('o', config.data['clustering'])
     if local_state is None:
         observations = db.execute(
-            f'SELECT o.id,o.cue,o.seconds,o.dimensions,o.embedding FROM observations o '
+            f'SELECT o.id,o.scan,o.quality,o.cue,o.seconds,o.dimensions,o.embedding FROM observations o '
             f'WHERE o.scan=? AND o.rejected IS NULL AND {anchor} ORDER BY o.cue,o.id', (scan,))
     else:
         # Contextual attachments cannot cast merger votes or seed local proof.
         from .replay_addresses import address
         observations = db.execute(
-            f'SELECT o.id,o.cue,o.seconds,o.dimensions,o.embedding FROM candidates c '
+            f'SELECT o.id,o.scan,o.quality,o.cue,o.seconds,o.dimensions,o.embedding FROM candidates c '
             f'JOIN observations o ON o.id={address(db, "c")} '
             "WHERE c.scan=? AND c.policy=? AND c.status='accepted' "
             "AND json_extract(c.payload,'$.reason')<>'same_scene_identity' "

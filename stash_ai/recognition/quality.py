@@ -129,6 +129,13 @@ def crop_bytes(image, detection, *, margin=.15, limit=1048576, details=None):
               min(image.width, math.ceil(x + width * (1 + margin))),
               min(image.height, math.ceil(y + height * (1 + margin))))
     with image.crop(bounds) as crop, crop.convert('RGB') as rgb:
+        if details is not None:
+            import hashlib
+            details['evidence_pixel_sha256'] = hashlib.sha256(
+                str(rgb.size).encode('ascii') + rgb.tobytes()).hexdigest()
+            with rgb.resize((32, 32)) as thumbnail:
+                details['evidence_thumbnail'] = thumbnail.tobytes().hex()
+            details['evidence_aspect'] = rgb.width / rgb.height
         data = encode_portrait(rgb, {'jpeg_quality': 90}, limit=limit, details=details)
     return data, list(bounds)
 

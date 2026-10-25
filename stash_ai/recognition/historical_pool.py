@@ -46,12 +46,12 @@ def resolve(database,replay,selected,config,history,bindings,confirmed):
             row=dict(database.connection.execute('SELECT id,scan,cue,geometry,dimensions,embedding FROM observations WHERE id=?',
                 (claim['observation'],)).fetchone());row['person']=claim['owner'];yield row
     stronger=max(config.data['recognition']['match_threshold'],config.data['recognition']['cooccurrence_merge_threshold'])
-    for row in conflicting_claims(claims(),stronger):
+    for row in conflicting_claims(claims(),stronger,deduplicate=config.data['clustering'].get('deduplicate_detections',False)):
         replay.execute('DELETE FROM historical_pool_claims WHERE observation=?',(row['id'],))
     from .query_support import cohorts
     from .config import digest
     claims_by_id={r['observation']:r for r in replay.execute('SELECT * FROM historical_pool_claims')}
-    raw=lambda:database.connection.execute('SELECT o.id,o.scan,o.seconds,o.dimensions,o.embedding FROM observations o WHERE id IN (SELECT value FROM json_each(?)) '
+    raw=lambda:database.connection.execute('SELECT o.id,o.scan,o.seconds,o.quality,o.dimensions,o.embedding FROM observations o WHERE id IN (SELECT value FROM json_each(?)) '
         'ORDER BY embedding,geometry,id',(encoded(list(claims_by_id)),))
     eligible=cohorts(raw,config,key=lambda r:(claims_by_id[r['id']]['owner'],claims_by_id[r['id']]['mode']),
         prototype=lambda r:claims_by_id[r['id']]['medoids'],

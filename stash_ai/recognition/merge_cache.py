@@ -77,7 +77,9 @@ def support_identity(cache, selected, policy, source, target, components, config
 
 
 def public_votes(votes):
-    return [{key: value for key, value in vote.items() if key != 'order'} for vote in votes]
+    from .independent_evidence import representatives
+    return [{key: vote[key] for key in ('scene', 'seconds', 'observation')}
+            for vote in representatives(votes)]
 
 
 def save_votes(cache, identity, votes):
@@ -101,28 +103,11 @@ def incremental_votes(cache, identity, selected, nomination, components, config,
         return public_votes(votes)
     if type(row['cue']) is not int or not isinstance(row['id'], str):
         return MISSING
-    order = selected['scan_order'], row['cue'], row['id']
-    stamp = selected['scene'], row['seconds']
-    duplicate = next((vote for vote in votes if (vote['scene'],vote['seconds']) == stamp), None)
-    if ((len(votes) >= minimum and order >= votes[-1]['order'])
-            or duplicate is not None and duplicate['order'] < order):
+    if (votes and len(public_votes(votes)) >= minimum and
+            (selected['scan_order'], row['cue'], row['id']) >= votes[-1]['order']):
         count('reused_support_prefixes')
         return public_votes(votes)
-    heads = cache.heads(selected['scope'], selected['namespace'])
-    if heads is None:
-        latest = cache.db.execute('SELECT id FROM scans WHERE scope=? AND namespace=? AND scene=? '
-            'ORDER BY rowid DESC LIMIT 1', (selected['scope'],selected['namespace'],selected['scene'])).fetchone()[0]
-    else:
-        latest = heads.get(selected['scene'])
-    if latest == selected['id']:
-        query = cache.vector(row)
-        source, target = identity[0][1:3]
-        if (matches(components[target], query, config, cache=cache, observation=row['id'])
-                and matches(components[source], query, config, cache=cache, observation=row['id'])):
-            if duplicate is not None:
-                votes.remove(duplicate)
-            votes.append(dict(scene=stamp[0], seconds=stamp[1], observation=row['id'], order=order))
-            votes.sort(key=lambda vote: vote['order'])
-            votes = votes[:minimum]
-    save_votes(cache, identity, votes)
-    return public_votes(votes)
+    # A newly inserted edge may change the maximum matching, including which
+    # earlier duplicate supplies a timestamp. Revalidate the ordered prefix;
+    # unchanged nominations still reuse it without issuing any SQL.
+    return MISSING

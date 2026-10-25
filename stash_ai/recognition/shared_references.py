@@ -69,12 +69,13 @@ def early_views(database, selected, config,*,excluded_views=()):
     seen={}
     from .local_cohorts import ordering
     position=ordering(db)
-    rows=db.execute('SELECT m.person,s.scene,o.cue,o.seconds,'+position+' AS appearance_order FROM members m JOIN observations o ON o.id=m.observation '
+    rows=db.execute('SELECT m.person,s.scene,o.scan,o.quality,o.cue,o.seconds,'+position+' AS appearance_order FROM members m JOIN observations o ON o.id=m.observation '
         'JOIN scans s ON s.id=o.scan WHERE '+strict_sql()+' AND '+anchor_sql('o',grouping)+
         ' ORDER BY CAST(s.scene AS INTEGER),s.scene,appearance_order,o.cue,o.id')
     for row in rows:
         key=(row['person'],row['scene'])
-        cues=seen.setdefault(key,set());cues.add(row['seconds'])
+        from .independent_evidence import Votes
+        cues=seen.setdefault(key,Votes());cues.add(row)
         if len(cues)>=minimum:
             horizons.setdefault(key,row['appearance_order'])
     db.execute('CREATE TEMP TABLE early_view_support(observation TEXT PRIMARY KEY,person TEXT)')

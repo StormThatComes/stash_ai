@@ -29,7 +29,8 @@ class Provisional:
 
     @property
     def independent(self):
-        return {(row['scan'], row['seconds']) for row, _ in self.rows}
+        from .independent_evidence import representatives
+        return representatives(row for row, _ in self.rows)
 
 
 def _cross_score(left, right):
@@ -259,7 +260,8 @@ def apply_cross_scene_support(database, selected, config, *, progress=None):
         for group in tracked:
             if len(set().union(*(g.scenes for g in group))) < 2:
                 continue
-            independent = {(row['scan'], row['seconds']) for g in group for row,_ in g.rows}
+            from .independent_evidence import representatives
+            independent = representatives(row for g in group for row,_ in g.rows)
             if len(independent) < settings['min_identity_support']:
                 continue
             # Check no competition with accepted people and no co-presence

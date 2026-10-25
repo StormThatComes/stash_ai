@@ -10,7 +10,7 @@ import hashlib
 import math
 
 from .clustering import vector
-from .independent_evidence import unit
+from .independent_evidence import Votes
 
 
 @dataclass(frozen=True)
@@ -25,7 +25,7 @@ class QuerySupport:
 @dataclass
 class _Votes:
     ids: list = field(default_factory=list)
-    times: set = field(default_factory=set)
+    times: Votes = field(default_factory=Votes)
     prototypes: set = field(default_factory=set)
     seen: set = field(default_factory=set)
 
@@ -34,7 +34,7 @@ class _Votes:
             return
         self.seen.add(row['id'])
         self.ids.append(row['id'])
-        self.times.add(unit(row))
+        self.times.add(row)
         self.prototypes.add(prototype)
 
 
@@ -81,7 +81,10 @@ def cohorts(rows, config, *, key, prototype, minimum=None):
             if len(votes.times) >= required(family):
                 output.append(QuerySupport(family, tuple(votes.ids), tuple(votes.ids),
                                            tuple(sorted(votes.prototypes)), len(votes.times)))
-        if len(set().union(*(v.times for v in exact.values()))) >= required(family):
+        combined = Votes()
+        for votes in exact.values():
+            combined.update(votes.times)
+        if len(combined) >= required(family):
             missing = {r['id']: (r, p, q) for values in unfinished.values() for r, p, q in values}
             if missing:
                 pending[family] = missing
