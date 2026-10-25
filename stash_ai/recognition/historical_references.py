@@ -157,7 +157,7 @@ def refresh_verified(db,selected,config,scope,namespace,history,usage):
     history.views+=enrich(db,config,scope,namespace,selected,history,usage)
 
 
-def _rank_bank(history, config, strict_appearance):
+def _build_rank_bank(history, config, strict_appearance):
     grouping, settings = config.data['clustering'], config.data['recognition']
     views=[];by_group={}
     minimum=max(grouping['view_min_support'],settings['min_merge_support'])
@@ -180,6 +180,21 @@ def _rank_bank(history, config, strict_appearance):
                      view.authority != 'corroborated_view' else view.group)
         views.append(group);by_group[id(group)]=view
     return views, by_group
+
+
+def _rank_bank(history, config, strict_appearance):
+    from .run_cache import current, MISSING
+    cache=current()
+    if cache is None:return _build_rank_bank(history,config,strict_appearance)
+    views=tuple(history.views)
+    g=config.data['clustering'];r=config.data['recognition']
+    key=('rank-bank',tuple(id(v) for v in views),strict_appearance,g['view_min_support'],
+         r['min_merge_support'],bool(g.get('anchor_outlier_quarantine')))
+    found=cache.get(key)
+    if found is not MISSING and all(a is b for a,b in zip(found[1],views)):return found[0]
+    result=_build_rank_bank(history,config,strict_appearance)
+    cache.put(key,(result,views),4096+sum(512+sum(s.nbytes for s in group.samples) for group in result[0]))
+    return result
 
 
 def rank_many(rows, history, config, **options):
@@ -214,8 +229,17 @@ def rank(rows,history,config,*,decisions=None,potential=None,relaxed_pose=False,
     effective_view_threshold=threshold if strict_appearance else view_threshold
     effective_view_cohesion=grouping['cohesion_threshold'] if strict_appearance else grouping['view_cohesion_threshold']
     from .clustering import _similarities
-    exact = None if _scores is None else lambda group, query: (
-        _scores[id(group)] if id(group) in _scores else _similarities(group, query))
+    from .run_cache import current, immutable_samples, MISSING
+    def exact(group, query):
+        if _scores is not None and id(group) in _scores:return _scores[id(group)]
+        cache=current();samples=immutable_samples(group.samples) if cache is not None else None
+        if samples is None:return _similarities(group,query)
+        key=('query-score',samples,query.tobytes())
+        value=cache.get(key)
+        if value is MISSING:
+            value=_similarities(group,query)
+            cache.put(key,value,sum(len(s)+128 for s in samples)+query.nbytes+512)
+        return value
     def compare(groups, query, floor, cohesion):
         if _scores is None or _bounds is None:
             yield from comparisons(groups,query,floor,cohesion,exact=exact)

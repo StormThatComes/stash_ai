@@ -66,8 +66,9 @@ def scores(left,right):
     import numpy as np
     if not len(left) or not len(right):return None
     low=1.;total=0.;count=0
+    right64=right.astype('float64')
     for start in range(0,len(left),16):
-        values=left[start:start+16].astype('float64') @ right.astype('float64').T
+        values=left[start:start+16].astype('float64') @ right64.T
         low=min(low,float(values.min()));total+=float(np.sum(values,dtype='float64'));count+=values.size
     return dict(minimum=low,mean=total/count)
 
@@ -115,8 +116,8 @@ def plan(db,config,identities,*,focus=None):
     owned={x.person:x for x in identities};edges={};proofs={}
     limits=config.data['sapiensid']['execution']
     lookup=Lookup([owned[p] for p in sorted(owned)],limits['reference_bytes'])
-    candidates=used=0
-    with tracking(lookup.pairs(),'Nominate hybrid pairs',unit='pair',total=len(owned)*(len(owned)-1)//2) as pairs:
+    candidates=used=0; nominations=[]
+    with tracking(lookup.pairs(face_floor=settings['face_floor'],person_floor=settings['person_threshold']-settings['ambiguity_margin']),'Nominate hybrid pairs',unit='pair',total=len(owned)*(len(owned)-1)//2) as pairs:
         for a,b,face_mean,person_mean in pairs:
             # A tiny overnomination tolerance protects threshold-edge witnesses
             # from centroid reduction rounding. Exact witness gates decide.
@@ -126,13 +127,16 @@ def plan(db,config,identities,*,focus=None):
             candidates+=1
             if candidates>limits['max_candidate_pairs']:
                 raise ValueError('SapiensID max_candidate_pairs budget exceeded; no hybrid plan applied.')
-            proof=pair(owned[a],owned[b],settings,copresent=_cooccurs(db,a,b,config),
-                       reflection_threshold=config.data['recognition']['cooccurrence_merge_threshold'])
-            used+=len(encoded(proof).encode())
-            if used>limits['plan_bytes']:
-                raise ValueError('SapiensID plan_bytes budget exceeded; no hybrid plan applied.')
-            proofs[a,b]=proof
-            if not proof['blockers']:edges[a,b]=proof['person']['mean']
+            nominations.append((a,b))
+            if len(nominations)*256>limits['plan_bytes']:
+                raise ValueError('SapiensID plan_bytes budget exceeded by nominations.')
+    from .hybrid_jobs import proofs as exact_proofs
+    for a,b,proof in exact_proofs(db,owned,nominations,config):
+        used+=len(encoded(proof).encode())
+        if used+len(nominations)*256>limits['plan_bytes']:
+            raise ValueError('SapiensID plan_bytes budget exceeded; no hybrid plan applied.')
+        proofs[a,b]=proof
+        if not proof['blockers']:edges[a,b]=proof['person']['mean']
     adjacency={p:set() for p in owned}
     for a,b in edges:adjacency[a].add(b);adjacency[b].add(a)
     visited=set();decisions=[]
@@ -173,7 +177,7 @@ def plan(db,config,identities,*,focus=None):
     eligible={p:d for d in decisions if not d['blockers'] for p in d['people']}
     internal={p:min(edges[tuple(sorted((p,q)))] for q in d['people'] if q!=p)
               for p,d in eligible.items()}
-    with tracking(lookup.pairs(),'Check hybrid competitors',unit='pair',total=len(owned)*(len(owned)-1)//2) as comparisons:
+    with tracking(lookup.pairs(incident=set(eligible)),'Check hybrid competitors',unit='pair',total=len(owned)*(len(owned)-1)//2) as comparisons:
         for a,b,face_mean,person_mean in comparisons:
             score=person_mean
             if score is None and face_mean is not None and face_mean>=face_threshold:score=1.

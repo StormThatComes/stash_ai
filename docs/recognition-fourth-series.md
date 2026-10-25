@@ -11,7 +11,7 @@ work is implemented.
 | 2 | Supplemental evidence and preserved appearance banks | 2, 4, 5, 10 | Implemented; 47 focused tests passed |
 | 3 | Conflict resolution and automatic consolidation | 6, 7, 11 | Implemented; 34 focused tests passed |
 | 4 | Incremental dependencies, compact data and memory | 12, 19, 20 | Implemented; 43 focused tests passed |
-| 5 | Parallel matching and change-driven recovery | 13, 17, 18 | Pending |
+| 5 | Parallel matching and change-driven recovery | 13, 17, 18 | Implemented; 27 focused tests and 28 hybrid tests passed |
 | 6 | Shared VTT inputs and CPU/inference pipeline | 14, 15, 16 | Pending |
 
 ## PR1
@@ -50,3 +50,9 @@ BLOBs. Audited person/thumbnail triggers protect cached per-scan hybrid hashes.
 Pixel comparisons share a content-keyed run cache; hybrid arrays reserve shared
 working memory and support prefixes account for retained metadata. Migration,
 read-only compatibility and direct SQL invalidation are covered by tests.
+
+PR5 filters hybrid blocks in NumPy before Python enumeration, checks competitors
+only on eligible incident identities, and schedules exact proofs on bounded CPU
+workers. Frozen rank banks/exact query scores share the run cache. Private
+change triggers restrict convergence retries to affected cues; a changed bank
+invalidates the restriction. Full-state cycle detection remains a safety check.

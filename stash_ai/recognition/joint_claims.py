@@ -35,11 +35,12 @@ def recover(db, policy, history, config):
     import numpy as np
     settings, grouping = config.data['recognition'], config.data['clustering']
     threshold = max(settings['match_threshold'], settings['cooccurrence_merge_threshold'])
+    from .recovery_worklist import condition
     rows = db.execute('SELECT o.*,c.id AS candidate FROM candidates c JOIN observations o '
         "ON o.id=json_extract(c.payload,'$.observation') WHERE c.policy=? "
         "AND c.status IN ('pending','withheld') AND json_extract(c.payload,'$.reason') IN "
         "('candidate_group','insufficient_match_or_cohesion','late_strict_identity','ambiguous_identity','co_present_identity_conflict') "
-        'AND o.rejected IS NULL ORDER BY o.scan,o.cue,o.id', (policy,))
+        'AND o.rejected IS NULL AND '+condition(db)+' ORDER BY o.scan,o.cue,o.id', (policy,))
     for _, cue in groupby(rows, lambda row:(row['scan'],row['cue'])):
         cue = list(cue)
         if not 2 <= len(cue) <= 6:

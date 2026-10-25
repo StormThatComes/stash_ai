@@ -13,7 +13,7 @@ def state(db):
     return digest.hexdigest()
 
 
-def converge(db, step, *, maximum=8):
+def _converge(db, step, *, maximum=8, worklist=False):
     previous = state(db)
     seen = {previous}
     for _ in range(maximum):
@@ -30,4 +30,13 @@ def converge(db, step, *, maximum=8):
             raise ValueError('Recognition recovery entered a decision cycle.')
         seen.add(current_state)
         previous = current_state
+        if worklist:
+            from .recovery_worklist import advance
+            advance(db)
     raise ValueError('Recognition recovery did not converge within its bounded pass budget.')
+
+
+def converge(db, step, *, maximum=8):
+    from .recovery_worklist import scope
+    with scope(db) as enabled:
+        return _converge(db,step,maximum=maximum,worklist=enabled)

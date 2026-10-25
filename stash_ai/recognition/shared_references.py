@@ -18,13 +18,15 @@ def retry_strict(database, selected, config):
     db=database.connection
     scope=db.execute('SELECT scope,namespace FROM scans WHERE id=?',(selected[0]['scan'],)).fetchone()
     groups=_groups(db,*scope,config.data['clustering'])
+    from .recovery_worklist import bank, condition
+    bank(db,groups)
     history=History(tuple(groups),(),{},'final-selected-strict')
     policy=matching_policy(config)
     rows=db.execute('SELECT o.id,o.scan,o.cue,o.seconds,o.geometry,o.dimensions,o.embedding,c.id AS candidate '
         "FROM candidates c JOIN observations o ON o.id=json_extract(c.payload,'$.observation') "
         "WHERE c.policy=? AND c.status='withheld' AND json_extract(c.payload,'$.reason') IN "
         "('candidate_group','insufficient_match_or_cohesion','ambiguous_identity','co_present_identity_conflict') AND o.rejected IS NULL AND "+
-        anchor_sql('o',config.data['clustering'])+' ORDER BY o.scan,o.cue,o.id',(policy,))
+        anchor_sql('o',config.data['clustering'])+' AND '+condition(db)+' ORDER BY o.scan,o.cue,o.id',(policy,))
     from .deferred_retries import RetryQueue
     queue=RetryQueue(db,groups,policy)
     for row,result in rank_many(queue.pending(rows),history,config):
