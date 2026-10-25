@@ -15,7 +15,7 @@ from .pose_policy import query_sql
 from .reference_roles import observation_sql
 
 
-def _recover(database, selected, config):
+def _recover(database, selected, config, *, births=()):
     if not selected:return 0
     db=database.connection
     scope,namespace=db.execute('SELECT scope,namespace FROM scans WHERE id=?',(selected[0]['scan'],)).fetchone()
@@ -28,21 +28,27 @@ def _recover(database, selected, config):
             banks.append((identity,Group(identity.person,list(faces),True,ids),bodies))
     groups=[group for _,group,_ in banks]
     policy=matching_policy(config);claims=[];votes=defaultdict(Votes)
-    rows=db.execute('SELECT o.*,e.embedding AS body,c.id AS candidate FROM candidates c '
+    rows=db.execute('SELECT o.*,e.embedding AS body,c.id AS candidate,c.person AS prior_owner FROM candidates c '
         'JOIN observations o ON o.id='+observation_sql('c')+
-        ' JOIN person_evidence e ON e.observation=o.id AND e.contract=? '
-        "WHERE c.policy=? AND c.status='withheld' AND o.rejected IS NULL AND e.status='ready' "
+        " LEFT JOIN person_evidence e ON e.observation=o.id AND e.contract=? AND e.status='ready' "
+        "WHERE c.policy=? AND (c.status='withheld' OR c.person IN (SELECT value FROM json_each(?))) AND o.rejected IS NULL "
         'AND o.scan IN (SELECT value FROM json_each(?)) AND '+query_sql('o',config.data['clustering'])+
-        ' ORDER BY o.scan,o.cue,o.id',(contract(config),policy,encoded([s['scan'] for s in selected])))
-    used=0
+        ' ORDER BY o.scan,o.cue,o.id',(contract(config),policy,encoded(list(births)),encoded([s['scan'] for s in selected])))
+    used=0;source_counts=defaultdict(int)
     for row in rows:
-        face=vector(row);body=np.frombuffer(row['body'],dtype='<f4')
-        if body.shape!=(4096,) or not np.isfinite(body).all() or abs(float(np.linalg.norm(body))-1)>.001:
+        if row['prior_owner'] in births:source_counts[row['prior_owner']]+=1
+        face=vector(row);body=np.frombuffer(row['body'],dtype='<f4') if row['body'] is not None else None
+        if body is not None and (body.shape!=(4096,) or not np.isfinite(body).all() or abs(float(np.linalg.norm(body))-1)>.001):
             raise ValueError('Invalid retained SapiensID query feature.')
         choices=[]
         for identity,group,bodies in banks:
+            if identity.person in births:continue
             f=scores(np.asarray([face]),np.asarray(group.samples))
             if f is None or f['minimum']<settings['face_floor']:continue
+            if body is None:
+                admissible=(not identity.guard_missing and f['minimum']>=config.data['clustering']['cohesion_threshold'] and f['mean']>=config.data['recognition']['match_threshold'])
+                choices.append((f['mean'],identity.person,admissible,group))
+                continue
             measures=[scores(np.asarray([body]),bodies)] if len(bodies) else []
             measures=[m for m in measures if m is not None]
             score=max((m['mean'] for m in measures),default=1.)
@@ -62,25 +68,32 @@ def _recover(database, selected, config):
         if not co_presence_allows(db,row,group,groups,face,config,
                 peer_threshold=settings['face_floor'],cohesion_threshold=settings['face_floor']):continue
         proof=dict(format=1,route='hybrid_query',frozen=True,contract=contract(config),
-                   core_observations=list(group.sample_ids),score=score,rival_score=choices[1][0] if len(choices)>1 else None,
+                   core_observations=list(group.sample_ids),signal='face' if body is None else 'face_and_body',score=score,rival_score=choices[1][0] if len(choices)>1 else None,
                    reference_role='attachment',reference_selected=False)
         used+=len(encoded(proof))+len(row['quality'])+512
         if used>config.data['sapiensid']['execution']['plan_bytes']:
             raise ValueError('SapiensID query plan_bytes budget exceeded.')
-        claims.append((row['candidate'],row['id'],owner,proof));votes[owner].add(row)
+        claims.append((row['candidate'],row['id'],owner,proof,row['prior_owner']));votes[owner].add(row)
     accepted=0
+    birth_claims=defaultdict(list)
+    for claim in claims:
+        if claim[4] in births:birth_claims[claim[4]].append(claim)
+    admissible_births={source for source,items in birth_claims.items()
+        if len(items)==source_counts[source] and len({c[2] for c in items})==1}
     with db:
-        for candidate,observation,owner,proof in claims:
+        for candidate,observation,owner,proof,prior in claims:
+            if prior in births and prior not in admissible_births:continue
             if len(votes[owner])<settings['min_support']:continue
             db.execute("UPDATE candidates SET person=?,status='accepted',payload=json_set(payload,"
                 "'$.prior_reason',json_extract(payload,'$.reason'),'$.reason','hybrid_query',"
                 "'$.hybrid_query',json(?),'$.reference_role','attachment','$.reference_selected',json('false')) WHERE id=?",
                 (owner,encoded(proof),candidate))
+            if prior in births:db.execute('DELETE FROM members WHERE observation=?',(observation,))
             db.execute('INSERT OR IGNORE INTO members VALUES (?,?)',(observation,owner));accepted+=1
     return accepted
 
 
-def recover(database, selected, config):
+def recover(database, selected, config, *, births=()):
     from .evidence_pixels import alias_scope
     with alias_scope(database.connection):
-        return _recover(database, selected, config)
+        return _recover(database, selected, config, births=births)
