@@ -97,3 +97,12 @@ def evaluate(config, goals, db, variants=None):
     return replay(config, variants or {}, scope=goals['scope'], source=db,
         consume=lambda name, observations, retained, predicted:
             dict(goal_result=assess(goals, observations, retained, predicted)))
+
+
+def objective(status):
+    """Fair lexicographic objective; larger sets cannot hide an untouched smaller set."""
+    groups = status['groups']
+    return (status['admissible'], status['fully_solved'],
+            min(g['complete_fraction'] for g in groups),
+            sum(g['largest_complete_performers'] for g in groups),
+            -sum(g['fragments'] for g in groups))
