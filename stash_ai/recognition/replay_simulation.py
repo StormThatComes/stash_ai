@@ -117,4 +117,12 @@ def merge_impact(config, report, source):
             members=[dict(identity=p, observations=counts[p], withheld=lost[p],
                           outside_latest_selection=retained_totals.get(p, 0)-counts[p],
                           resulting_identities=sorted(peers[p])) for p in wanted]))
-    return replay(config, variants, scope=report['scope'], source=source, consume=pair_status)
+    result = replay(config, variants, scope=report['scope'], source=source, consume=pair_status)
+    report['next_action'] = dict(scene_ids=result['selection'], requires_identity_rebuild=True,
+                                 portraits_only_is_sufficient=False)
+    for item in report['recommendations']:
+        item['replay_verified'] = result['trials'][item['simulation_trial']]['requested_pair']['fully_merged']
+    report['rejected_recommendations'] = [i for i in report['recommendations'] if not i['replay_verified']]
+    report['recommendations'] = [i for i in report['recommendations'] if i['replay_verified']]
+    report['status'] = 'replay_verified' if report['recommendations'] else 'no_replay_verified_proposal'
+    return result

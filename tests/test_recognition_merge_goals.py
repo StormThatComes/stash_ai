@@ -16,3 +16,14 @@ def test_sets_and_alias_overlap(tmp_path):
     args = parser().parse_args(['report-merge', '--performer-set', '900,901', '--performer-set', '902'])
     assert args.performer_set == [['900', '901'], ['902']]
     assert len(parser().parse_args(['report-merge', '--identity-id', 'a', '--identity-id', 'b', '--identity-id', 'c']).identity_id) == 3
+
+
+def test_final_assignments_reject_bridges_and_lost_members():
+    from stash_ai.recognition.merge_goals import assess
+    goals = {'groups': [dict(index=i, members=[dict(identity_id=str(i), performer_id=str(i),
+        observations=[dict(id=k) for k in keys])]) for i, keys in enumerate([['a','b'], ['c']])]}
+    obs = dict.fromkeys('abc', '1')
+    assert assess(goals, obs, {}, dict(a='x', b='x', c='y'))['fully_solved']
+    assert not assess(goals, obs, {}, dict(a='x', b='x', c='x'))['admissible']
+    assert not assess(goals, obs, {}, dict(a='x', b=None, c='y'))['admissible']
+    assert not assess(goals, {'a':'1','c':'1'}, {}, dict(a='x', c='y'))['admissible']
