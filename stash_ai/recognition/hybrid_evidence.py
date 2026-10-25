@@ -59,9 +59,9 @@ def _catalogue(db, config, scope, namespace):
                 'AND observation IN (SELECT value FROM json_each(?))',(expected,encoded(ids)))} if present else set()
             missing=tuple(i for i in ids if i not in ready)
             result.append(Identity(group.identifier,ids,np.asarray(group.samples),
-                np.asarray(vectors) if vectors else np.empty((0,4096)),tuple(range(len(votes))),
+                np.asarray(vectors) if vectors else np.empty((0,4096)),tuple(range(getattr(records,'support',len(votes)))),
                 missing,person_observations=tuple(body_ids),
-                body_modes=body_modes(records,config)))
+                body_modes=getattr(records,'modes',None) or body_modes(records,config)))
     from .hybrid_guards import retain
     return retain(db,config,scope,namespace,tuple(result))
 
@@ -87,6 +87,14 @@ def pair(left,right,settings,*,copresent=False,reflection_threshold=1.):
     # Former source cores are vetoes only: no extra votes or nominations.
     for kind,measurement in (('faces',face),('persons',person)):
         a,b=getattr(left,'guard_'+kind),getattr(right,'guard_'+kind)
+        if kind=='persons' and mode_score is not None:
+            from .hybrid_modes import guard_modes,query_score
+            for bank,modes in ((a,right.body_modes),(b,left.body_modes)):
+                if bank is None:continue
+                for mode in guard_modes(bank,settings['person_threshold']):
+                    guard=query_score(mode,bank,settings,modes)
+                    measurement['minimum']=min(measurement['minimum'],guard['minimum'])
+            continue
         for first,second in ((a,getattr(right,kind)),(getattr(left,kind),b),(a,b)):
             if first is None or second is None:continue
             guard=scores(first,second)

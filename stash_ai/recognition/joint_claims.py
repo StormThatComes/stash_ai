@@ -91,7 +91,8 @@ def recover(db, policy, history, config):
                 for person,_,low in options:
                     identity=body_catalogue.get(person)
                     if identity is None or not len(identity.persons):complete=False;break
-                    measure=scores(query[None,:],identity.persons)
+                    from .hybrid_modes import query_score
+                    measure=query_score(query[None,:],identity.persons,config.data['sapiensid']['matching'],identity.body_modes)
                     choices.append((person,measure['mean'],low,measure['minimum']))
                 if not complete:break
                 body_domains.append(choices)

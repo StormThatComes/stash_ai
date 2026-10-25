@@ -26,9 +26,26 @@ def body_rows(db, config, scope, namespace, owner):
         "AND o.rejected IS NULL AND e.status='ready' AND "+strict_sql()+' AND '+admission+
         ' ORDER BY CAST(s.scene AS INTEGER),s.scene,o.cue,o.seconds,o.id')
     args=(contract(config),owner,scope,namespace)
-    chosen=select(db.execute(sql,args),config.data['clustering']['max_samples_per_person'],vector_reader=body_vector,quality_reader=body_quality)
+    records=[];used=0
+    for row in db.execute(sql,args):
+        used+=2*len(row['embedding'])+len(row['quality'])+len(row['person_metadata'])+1024
+        if used>config.data['sapiensid']['execution']['reference_bytes']:
+            raise ValueError('SapiensID reference_bytes budget exceeded by mode witnesses.')
+        records.append(row)
+    chosen=select(records,config.data['clustering']['max_samples_per_person'],vector_reader=body_vector,quality_reader=body_quality)
     wanted={i for i,_ in chosen}
-    return [r for r in db.execute(sql,args) if r['id'] in wanted]
+    from .hybrid_modes import body_modes
+    result=BodyRows(r for r in records if r['id'] in wanted)
+    result.modes=body_modes(records,config)
+    from .independent_evidence import Votes
+    votes=Votes()
+    for row in (records if result.modes else result):votes.add(row)
+    result.support=len(votes)
+    return result
+
+
+class BodyRows(list):
+    modes=()
 
 
 def body_quality(row):

@@ -8,7 +8,8 @@ def analyse(db, config, identities, scope, namespace):
     bank=catalogue(db,config,scope,namespace)
     by_id={x.person:x for x in bank}
     def check(settings):
-        result=plan(db,settings,bank,focus=set(identities))
+        trial_bank=bank if settings is config else catalogue(db,settings,scope,namespace)
+        result=plan(db,settings,trial_bank,focus=set(identities))
         shared=next((d for d in result['decisions'] if set(identities)<=set(d['people'])),None)
         blockers=shared['blockers'] if shared else ['no_shared_supported_component']
         return dict(can_merge_in_frozen_catalogue=not blockers,blockers=blockers,

@@ -42,3 +42,20 @@ def competitor_score(left,right,fallback):
     if left.body_modes and right.body_modes:
         return max(scores(a,b)['mean'] for a in left.body_modes for b in right.body_modes)
     return fallback
+
+
+def query_score(query,bank,settings,modes=()):
+    from .hybrid_evidence import scores
+    measurements=[scores(query,mode) for mode in (modes or (bank,)) if len(mode)]
+    admitted=[m for m in measurements if m['minimum']>=settings['person_threshold']]
+    return max(admitted or measurements,key=lambda m:m['mean'],default=None)
+
+
+def guard_modes(bank,threshold):
+    """Partition veto witnesses without inventing support or dropping outliers."""
+    groups=[]
+    for value in bank:
+        target=next((g for g in groups if all(float(np.dot(value,v))>=threshold for v in g)),None)
+        if target is None:groups.append([value])
+        else:target.append(value)
+    return tuple(np.asarray(g) for g in groups)
