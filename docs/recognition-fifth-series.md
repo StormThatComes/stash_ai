@@ -59,3 +59,12 @@ The six PRs are an ordered stack: evidence banks (#961), historical/body banks
 consolidation/publication. Targeted tests cover migrations, exact-score parity,
 input corruption, CPU/GPU overlap, interrupted checkpoints, stale requests,
 ownership changes, manual relationships and lost HTTP acknowledgements.
+
+| PR | Analysis items | Review |
+| --- | --- | --- |
+| 1 — evidence | 3, 9 | #961 |
+| 2 — historical/body banks | 2, 5, 6 | #962 |
+| 3 — identity decisions | 1, 4, 7, 8 | #963 |
+| 4 — compute reuse | 11, 12, 13, 14, 15 | #964 |
+| 5 — input pipeline | 16, 17, 18, 19 | #965 |
+| 6 — consolidation/publication | 10, 20 | #966 |

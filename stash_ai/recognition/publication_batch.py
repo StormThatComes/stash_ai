@@ -29,7 +29,7 @@ def _owned(row,live):
     return checked_id(live,row['performer'])['id']
 
 
-def ensure_people(database,client,report,scope,scene,people,*,guard=None):
+def ensure_people(database,client,report,scope,scene,people,*,guard=None,progress=None):
     if guard:guard()
     rows=_rows(database,scope,people)
     existing=_read(client,[r['performer'] for r in rows.values() if r['performer']])
@@ -37,6 +37,7 @@ def ensure_people(database,client,report,scope,scene,people,*,guard=None):
     for person,row in rows.items():
         targets[person]=(_owned(row,existing.get(row['performer'])) if row['performer'] else
             ensure_person(database,client,report,scope,scene,person,guard=guard))
+        if progress:progress()
     return targets
 
 

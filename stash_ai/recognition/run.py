@@ -73,8 +73,8 @@ def _publish_selection(database, client, report, config, scope, namespace, selec
             if check:check()
             from .publication_batch import ensure_people,publish_people
             # Resolve all desired identities before unlinking old model profiles.
-            with activity(report,'prepare scene identities',scene=scene):
-                targets=ensure_people(database,client,report,scope,scene,accepted,guard=check)
+            with work('Prepare scene identities',len(accepted),unit='person') as prepared:
+                targets=ensure_people(database,client,report,scope,scene,accepted,guard=check,progress=prepared.advance)
             with activity(report,'publish scene identities',scene=scene):
                 publish_people(database,client,report,scope,scene,targets,guard=check)
             with tracking(
