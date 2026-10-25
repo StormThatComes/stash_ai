@@ -186,6 +186,9 @@ def plan(db,config,identities,*,focus=None):
               for p,d in eligible.items()}
     with tracking(lookup.pairs(incident=set(eligible)),'Check hybrid competitors',unit='pair',total=len(owned)*(len(owned)-1)//2) as comparisons:
         for a,b,face_mean,person_mean in comparisons:
+            # Known face contradiction is distinct from unknown body evidence.
+            witness=proofs.get(tuple(sorted((a,b))))
+            if witness is not None and 'face_contradiction' in witness['blockers']:continue
             from .hybrid_modes import competitor_score
             score=competitor_score(owned[a],owned[b],person_mean)
             if score is None and face_mean is not None and face_mean>=face_threshold:score=1.

@@ -127,10 +127,13 @@ def rebuild(database,selected,config,ordinary,results):
     record=db.execute('SELECT value FROM metadata WHERE key=?',('hybrid-rebuild:'+key,)).fetchone()
     if record is not None and record[0]==before:
         return results()
+    existing={row[0] for row in db.execute('SELECT id FROM people')}
     ordinary()
+    births={row[0] for row in db.execute('SELECT id FROM people')}-existing
     with stage('Consolidate hybrid identities'):
-        apply(database,selected,config)
         from .hybrid_queries import recover
+        if births:recover(database,selected,config,births=births)
+        apply(database,selected,config)
         recover(database,selected,config)
     with stage('Checkpoint hybrid identity decisions'):
         _,after=signature(db,selected,config)

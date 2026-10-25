@@ -11,23 +11,27 @@ from .database import encoded
 
 
 def solve(domains, compatible, margin, *, maximum=4096):
-    size = 1
-    for domain in domains:
-        size *= len(domain)
-    if not domains or not size or size > maximum:
-        return None
-    best = second = None
-    for assignment in product(*domains):
-        if any(not compatible(i, a, j, b) for i,a in enumerate(assignment)
-               for j,b in enumerate(assignment[:i])):
-            continue
-        score = sum(item[1] for item in assignment)
-        if best is None or score > best[0]:
-            second, best = best, (score, assignment)
-        elif second is None or score > second[0]:
-            second = score, assignment
-    if best is None or second is not None and best[0] - second[0] < margin:
-        return None
+    if not domains or any(not domain for domain in domains):return None
+    best=second=None;visited=0;exhausted=False
+    order=sorted(range(len(domains)),key=lambda i:(len(domains[i]),i))
+    assigned={}
+    def visit(position,score):
+        nonlocal best,second,visited,exhausted
+        visited+=1
+        if visited>maximum:exhausted=True;return
+        if position==len(order):
+            assignment=tuple(assigned[i] for i in range(len(domains)))
+            if best is None or score>best[0]:second,best=best,(score,assignment)
+            elif second is None or score>second[0]:second=(score,assignment)
+            return
+        i=order[position]
+        for choice in domains[i]:
+            if all(compatible(i,choice,j,other) if j<i else compatible(j,other,i,choice)
+                   for j,other in assigned.items()):
+                assigned[i]=choice;visit(position+1,score+choice[1]);del assigned[i]
+                if exhausted:return
+    visit(0,0.)
+    if exhausted or best is None or second is not None and best[0]-second[0]<margin:return None
     return best[1]
 
 
@@ -41,9 +45,10 @@ def recover(db, policy, history, config):
         "AND c.status IN ('pending','withheld') AND json_extract(c.payload,'$.reason') IN "
         "('candidate_group','insufficient_match_or_cohesion','late_strict_identity','ambiguous_identity','co_present_identity_conflict') "
         'AND o.rejected IS NULL AND '+condition(db)+' ORDER BY o.scan,o.cue,o.id', (policy,))
+    body_catalogue=None
     for _, cue in groupby(rows, lambda row:(row['scan'],row['cue'])):
         cue = list(cue)
-        if not 2 <= len(cue) <= 6:
+        if not 2 <= len(cue) <= 64:
             continue
         samples = [vector(row) for row in cue]
         fixed = list(db.execute('SELECT o.*,c.person FROM candidates c JOIN observations o '
@@ -63,14 +68,41 @@ def recover(db, policy, history, config):
                 options.append((group.identifier,score,low))
             domains.append(sorted(options))
         # Never truncate alternatives: an omitted rival could create certainty.
-        if any(len(domain)>3 for domain in domains):
-            continue
         def compatible(i, a, j, b):
             same = duplicate(cue[i],cue[j],grouping.get('deduplicate_detections',False))
             if same:
                 return a[0] == b[0]
             return a[0] != b[0] or min(a[2],b[2],float(np.dot(samples[i],samples[j]))) >= threshold
         solution = solve(domains, compatible, settings['ambiguity_margin'])
+        signal='face'
+        if solution is None and config.data['sapiensid']['enabled']:
+            from .person_signal import contract
+            from .hybrid_evidence import catalogue,scores
+            if body_catalogue is None:
+                scope,namespace=db.execute('SELECT scope,namespace FROM scans WHERE id=?',(cue[0]['scan'],)).fetchone()
+                body_catalogue={i.person:i for i in catalogue(db,config,scope,namespace)}
+            body_domains=[]
+            complete=True
+            for row,options in zip(cue,domains):
+                stored=db.execute("SELECT embedding FROM person_evidence WHERE observation=? AND contract=? AND status='ready'",
+                                  (row['id'],contract(config))).fetchone()
+                if stored is None:complete=False;break
+                query=np.frombuffer(stored[0],dtype='<f4');choices=[]
+                for person,_,low in options:
+                    identity=body_catalogue.get(person)
+                    if identity is None or not len(identity.persons):complete=False;break
+                    measure=scores(query[None,:],identity.persons)
+                    choices.append((person,measure['mean'],low,measure['minimum']))
+                if not complete:break
+                body_domains.append(choices)
+            if complete:
+                threshold_body=config.data['sapiensid']['matching']['person_threshold']
+                def body_compatible(i,a,j,b):return compatible(i,a,j,b)
+                candidate=solve(body_domains,body_compatible,config.data['sapiensid']['matching']['ambiguity_margin'])
+                if candidate is not None and all(c[3]>=threshold_body for c in candidate):
+                    # Preserve face scores for all existing final face/rival gates.
+                    solution=tuple(next(o for o in options if o[0]==chosen[0]) for options,chosen in zip(domains,candidate))
+                    signal='face_and_body'
         if solution is None:
             continue
         # Raw rivals are exempt only when another distinct query independently
@@ -99,7 +131,7 @@ def recover(db, policy, history, config):
         for row,(person,score,low) in zip(cue,solution):
             proof = dict(format=1,frozen=True,context=history.context,identity=person,mode='strict',
                 medoids=[],view_evidence=[],mean_score=score,minimum_score=low,
-                ambiguity_margin=settings['ambiguity_margin'],joint_assignment=assignment)
+                ambiguity_margin=settings['ambiguity_margin'],joint_assignment=assignment,joint_signal=signal)
             db.execute("UPDATE candidates SET person=?,status='pending',payload=json_set(payload,"
                 "'$.reason','late_strict_identity','$.shared_reference',json(?)) WHERE id=?",
                 (person,encoded(proof),row['candidate']))
