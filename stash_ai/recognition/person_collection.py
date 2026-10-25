@@ -5,18 +5,19 @@ import json
 from .models import checked_detection
 from .person_signal import contract, save
 from .progress import tracking
-from stash_ai.runtime.cleanup import closing
+from stash_ai.runtime.cleanup import closing, cleanup
 
 
 class PersonCollector:
     def __init__(self, config, paths, factory=None):
         self.config, self.paths, self.factory = config, paths, factory
         self.model = None
+        self.pipeline = None
 
     def close(self):
-        if self.model is not None:
-            model,self.model=self.model,None
-            model.close()
+        resources = [('stop person preparation', self.pipeline), ('close person model', self.model)]
+        self.pipeline = self.model = None
+        cleanup([(name, resource.close) for name, resource in resources if resource is not None])
 
     def enrich(self, db, scan, source):
         if not self.config.data['sapiensid']['enabled']:
@@ -29,54 +30,84 @@ class PersonCollector:
             'WHERE o.scan=? AND o.rejected IS NULL AND p.observation IS NULL',(expected,scan))}
         if not missing:
             return
+        self._load()
+        frames=(source.frames_indices(sorted(missing)) if hasattr(source,'frames_indices') else source.frames(min(missing)))
+        with closing(frames,name='close person source frames') as stream:
+            with tracking(stream,'Collect SapiensID evidence',total=len(missing),unit='cue') as frames:
+                for index,cue,image in frames:
+                    with image:
+                        if index in missing:self.collect_frame(db,scan,index,image)
+        self.flush()
+
+    def _load(self):
         if self.model is None:
             if self.factory is None:
                 from .sapiensid_backend import SapiensIDFaces
                 self.factory=lambda config,paths: SapiensIDFaces(config,paths,load_detector=False)
             self.model=self.factory(self.config,self.paths)
-        with closing(source.frames(min(missing)),name='close person source frames') as stream:
-            with tracking(stream,'Collect SapiensID evidence',total=len(source.cues)-min(missing),unit='cue') as frames:
-                for index,cue,image in frames:
-                    with image:
-                        if index not in missing:
-                            continue
-                        rows=list(db.execute('SELECT * FROM observations WHERE scan=? AND cue=? ORDER BY id',(scan,index)))
-                        faces=[checked_detection(json.loads(r['geometry'])) for r in rows]
-                        self.model.detect(image,faces=faces)
-                        pending=[];eligible=[]
-                        for row,face in zip(rows,faces):
-                            if row['rejected'] is not None:
-                                continue
-                            if db.execute('SELECT 1 FROM person_evidence WHERE observation=? AND contract=?',
-                                          (row['id'],expected)).fetchone():
-                                continue
-                            metadata=self.model.observation_quality(image,face)
-                            vector=crop=None
-                            if metadata['identity_rejection'] is None:
-                                eligible.append((len(pending),face))
-                                if self.config.data['sapiensid']['storage']['retain_person_crops']:
-                                    with image.crop(metadata['person']['bounds']) as person:
-                                        output=BytesIO();person.save(output,format='PNG')
-                                        if output.tell()<=self.config.data['storage']['max_crop_bytes']:
-                                            crop=output.getvalue()
-                                        else:
-                                            metadata=dict(metadata,crop_status='byte_budget_exceeded')
-                            pending.append([row['id'],metadata,vector,crop])
-                        size=self.config.data['sapiensid']['execution']['batch_size']
-                        for start in range(0,len(eligible),size):
-                            batch=eligible[start:start+size]
-                            batch_faces=[face for _,face in batch]
-                            embed_batch=getattr(self.model,'embed_faces',None)
-                            vectors=(embed_batch(image,batch_faces) if embed_batch else
-                                     [self.model.embed(image,face) for face in batch_faces])
-                            if len(vectors)!=len(batch):
-                                raise ValueError('SapiensID batch returned an invalid feature count.')
-                            for (index,_),vector in zip(batch,vectors):
-                                pending[index][2]=vector
-                        # Nothing from a partially failed cue becomes durable.
-                        with db:
-                            for identifier,metadata,vector,crop in pending:
-                                save(db,identifier,expected,metadata,vector,crop)
+
+    def abort(self):
+        if self.pipeline is not None:
+            pipeline,self.pipeline=self.pipeline,None
+            cleanup([("abort person preparation", pipeline.close)])
+
+    def flush(self):
+        try:
+            if self.pipeline is not None:self.pipeline.flush()
+        except BaseException:
+            self.abort();raise
+
+    def collect_frame(self,db,scan,index,image):
+        try:return self._collect_frame(db,scan,index,image)
+        except BaseException:
+            self.abort();raise
+
+    def _collect_frame(self,db,scan,index,image):
+        if not self.config.data['sapiensid']['enabled']:return
+        self._load();expected=contract(self.config)
+        rows=list(db.execute('SELECT * FROM observations WHERE scan=? AND cue=? ORDER BY id',(scan,index)))
+        faces=[checked_detection(json.loads(r['geometry'])) for r in rows]
+        self.model.detect(image,faces=faces)
+        if callable(getattr(self.model,'person_input',None)) and callable(getattr(self.model,'embed_inputs',None)):
+            if self.pipeline is None:
+                from .person_pipeline import PreparedCollector
+                self.pipeline=PreparedCollector(self.config,self.model)
+            self.pipeline.collect(db,image,rows,faces)
+            return
+        pending=[];eligible=[]
+        for row,face in zip(rows,faces):
+            if row['rejected'] is not None:
+                continue
+            if db.execute('SELECT 1 FROM person_evidence WHERE observation=? AND contract=?',
+                          (row['id'],expected)).fetchone():
+                continue
+            metadata=self.model.observation_quality(image,face)
+            vector=crop=None
+            if metadata['identity_rejection'] is None:
+                eligible.append((len(pending),face))
+                if self.config.data['sapiensid']['storage']['retain_person_crops']:
+                    with image.crop(metadata['person']['bounds']) as person:
+                        output=BytesIO();person.save(output,format='PNG')
+                        if output.tell()<=self.config.data['storage']['max_crop_bytes']:
+                            crop=output.getvalue()
+                        else:
+                            metadata=dict(metadata,crop_status='byte_budget_exceeded')
+            pending.append([row['id'],metadata,vector,crop])
+        size=self.config.data['sapiensid']['execution']['batch_size']
+        for start in range(0,len(eligible),size):
+            batch=eligible[start:start+size]
+            batch_faces=[face for _,face in batch]
+            embed_batch=getattr(self.model,'embed_faces',None)
+            vectors=(embed_batch(image,batch_faces) if embed_batch else
+                     [self.model.embed(image,face) for face in batch_faces])
+            if len(vectors)!=len(batch):
+                raise ValueError('SapiensID batch returned an invalid feature count.')
+            for (index,_),vector in zip(batch,vectors):
+                pending[index][2]=vector
+        # Nothing from a partially failed cue becomes durable.
+        with db:
+            for identifier,metadata,vector,crop in pending:
+                save(db,identifier,expected,metadata,vector,crop)
 
 
 def audit_input(detector,image,face,path):

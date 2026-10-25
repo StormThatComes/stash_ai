@@ -12,7 +12,7 @@ work is implemented.
 | 3 | Conflict resolution and automatic consolidation | 6, 7, 11 | Implemented; 34 focused tests passed |
 | 4 | Incremental dependencies, compact data and memory | 12, 19, 20 | Implemented; 43 focused tests passed |
 | 5 | Parallel matching and change-driven recovery | 13, 17, 18 | Implemented; 27 focused tests and 28 hybrid tests passed |
-| 6 | Shared VTT inputs and CPU/inference pipeline | 14, 15, 16 | Pending |
+| 6 | Shared VTT inputs and CPU/inference pipeline | 14, 15, 16 | Implemented; full stack validation below |
 
 ## PR1
 
@@ -56,3 +56,22 @@ only on eligible incident identities, and schedules exact proofs on bounded CPU
 workers. Frozen rank banks/exact query scores share the run cache. Private
 change triggers restrict convergence retries to affected cues; a changed bank
 invalidates the restriction. Full-state cycle detection remains a safety check.
+
+PR6 passes the current VTT cue directly from face scanning to person collection.
+Only missing cue indices are decoded on resume. Measured person geometry stays on
+the inference owner; crop preparation and encoding use bounded CPU workers, with
+prepared tensors batched across cues. A complete cue is published atomically,
+and failed partial cues are recomputed on resume. Concurrent CPU jobs share an
+owned read-only frame copy. Queue budgets remain conservative per job.
+
+Integration regressions cover compact thumbnail copies for pilot/retained-history
+replays, preservation of the primary missing-evidence error, and both outcomes
+of the joint ambiguity gate: withheld without a complete joint explanation,
+attachment-only with a unique explanation. Input digest fixtures changed because
+thumbnail IDs now participate in dependency hashing.
+
+Final recognition regression run: 1595 passed, 7 skipped across four shards.
+The final cleanup adjustment was additionally checked with 49 focused pipeline,
+SapiensID inference, scan, and prepared-pixel tests. Optional model smoke coverage
+is run separately in GitHub Actions; no real-corpus accuracy or throughput gain
+is claimed from the synthetic regressions.

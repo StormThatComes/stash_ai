@@ -230,3 +230,24 @@ def test_scan_batches_visibility_on_the_inference_owner(tmp_path):
         scan_scene(state,'scope',client.scene,settings,'ns',source,lambda:backend,visibility=Visibility())
         assert calls==[8,1]
         assert state.connection.execute('SELECT COUNT(*) FROM observations WHERE rejected IS NULL').fetchone()[0]==9
+
+
+def test_cpu_jobs_share_one_owned_read_only_frame():
+    from stash_ai.recognition.scan_pipeline import CpuStage
+    from PIL import Image
+    from threading import Event
+    entered=Event();release=Event();ids=[]
+    stage=CpuStage(2,10**7)
+    def work(image,value):
+        ids.append(id(image));entered.set()
+        assert release.wait(5)
+        return image.getpixel((0,0))
+    with Image.new('RGB',(40,40),'red') as image:
+        try:
+            first=stage.submit(work,image,None);assert entered.wait(5)
+            second=stage.submit(work,image,None)
+            release.set()
+            assert first.result()==second.result()==(255,0,0)
+            assert len(set(ids))==1 and id(image) not in ids
+        finally:release.set();stage.close()
+    assert not stage.images

@@ -222,7 +222,9 @@ def _execute(args, config, *, services=None):
                                         database.progress(run, 'scan', values)
                                     with activity(report, 'detect and embed VTT faces', scene=identifier), frame_progress(report, identifier) as frames:
                                         scan, reused = scan_scene(database, scope, scene, config, model_namespace, source,
-                                            backend.borrow, visibility=visibility, progress=progress, frame_progress=frames)
+                                            backend.borrow, visibility=visibility, progress=progress, frame_progress=frames,
+                                            on_cue=person_collector.collect_frame if config.data['sapiensid']['enabled'] else None)
+                                    person_collector.flush()
                                     person_collector.enrich(database.connection, scan, source)
                                 counts['scenes_reused' if reused else 'scenes_scanned'] += 1
                                 rejected = {row['rejected']: row['total'] for row in database.connection.execute(

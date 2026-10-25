@@ -132,6 +132,13 @@ class SpriteInput:
             # Shared immutable sprites can serve portraits later in this run.
             cleanup([self.cache.clear])
 
+    def frames_indices(self, indices):
+        try:
+            for index in indices:
+                with closing(self._cue_image(index),name='close selected recognition source crop') as image:
+                    yield index,self.cues[index],image
+        finally:self.cache.clear()
+
     @property
     def cached_bytes(self):
         return [data for digest in self.cache.values() if isinstance(digest,str)

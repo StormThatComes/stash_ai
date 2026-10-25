@@ -29,7 +29,7 @@ def geometry_contract(face, cue):
 
 @pipeline_stage('scan')
 def scan_scene(database, scope, scene, config, namespace, source, backend_factory, *,
-               visibility=None, progress=lambda **kw: None, frame_progress=lambda **kw: None):
+               visibility=None, progress=lambda **kw: None, frame_progress=lambda **kw: None, on_cue=None):
     db = database.connection
     policy = scan_identity(config, namespace)
     identifier = str(uuid.uuid5(uuid.NAMESPACE_URL, encoded([scope, str(scene['id']), namespace,
@@ -113,8 +113,11 @@ def scan_scene(database, scope, scene, config, namespace, source, backend_factor
                                             encoded(list(face.row)), encoded(quality), reason, backend.dimensions, vector, crop))
                         cursor = index + 1
                         frame_progress(completed=cursor, total=record['total'])
-                        if cursor % config.data['execution']['checkpoint_cues'] == 0:
+                        if on_cue is not None or cursor % config.data['execution']['checkpoint_cues'] == 0:
                             checkpoint()
+                        if on_cue is not None:
+                            image=next(image for i,_,image in batch if i==index)
+                            on_cue(db,identifier,index,image)
 
         checkpoint()
         with db:

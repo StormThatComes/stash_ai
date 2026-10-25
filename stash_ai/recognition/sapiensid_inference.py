@@ -127,6 +127,12 @@ class SapiensIDV1Encoder:
         if not isinstance(persons,(list,tuple)) or not 1<=len(persons)<=self.max_batch_size:
             raise ValueError('SapiensID expects 1..max_batch_size associated persons.')
         prepared=[prepare_person_input(image,points) for image,points in persons]
+        return self.embed_prepared(prepared)
+
+    def embed_prepared(self, prepared):
+        self._check_owner()
+        if not 1<=len(prepared)<=self.max_batch_size:
+            raise ValueError('SapiensID prepared batch exceeds configured limit.')
         tensors=[self.torch.cat(parts,dim=0).to(self.device) for parts in zip(*prepared)]
         return self._encode(*tensors)
 
