@@ -39,7 +39,10 @@ def execute(args, config):
     sets = args.performer_set or [args.performer_id or args.identity_id]
     with closing(_open_readonly(config.database)) as db:
         result = resolve(db, config, sets, scope=args.scope, by_performer=args.identity_id is None)
-        if args.simulate:
+        if args.solve:
+            from .merge_solver import solve
+            result.update(solve(config, result, db, maximum=args.max_trials))
+        elif args.simulate:
             result['simulation'] = evaluate(config, result, db)
             result['status'] = 'baseline_evaluated'
     output = json.dumps(result, indent=2) + '\n'

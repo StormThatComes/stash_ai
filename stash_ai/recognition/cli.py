@@ -153,6 +153,8 @@ def parser():
     merge_report.add_argument('--faces-db', type=Path, help='Existing face SQLite database.')
     merge_report.add_argument('--scope', help='Restrict both identities to this Stash scope; required if a performer ID occurs in multiple scopes.')
     merge_report.add_argument('--output', type=Path, help='New JSON report path; stdout if omitted. Includes copyable YAML patches.')
+    merge_report.add_argument('--solve', action='store_true', help='Search configurations using full replay of merge goals.')
+    merge_report.add_argument('--max-trials', type=int, default=64, help='Replay budget including baseline.')
     merge_report.add_argument('--simulate', action='store_true',
         help='Replay baseline and proposals on all latest compatible scenes in this scope, in private RAM.')
     report = commands.add_parser('report', allow_abbrev=False,
@@ -190,7 +192,7 @@ def main(argv=None, *, services=None):
         from .identity_report import execute
         return execute(args, config)
     if args.command == 'report-merge':
-        if args.performer_set or len(args.performer_id or args.identity_id) > 2:
+        if args.solve or args.performer_set or len(args.performer_id or args.identity_id) > 2:
             from .merge_goals import execute
             return execute(args, config)
         from .merge_report import execute
