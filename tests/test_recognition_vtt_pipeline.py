@@ -190,3 +190,43 @@ def test_distinct_sprite_decodes_can_overlap_without_duplicate_decode(monkeypatc
     get('a').close()
     assert len(calls)==2
     cache.close()
+
+
+def test_jpeg_work_overlaps_owner_inference(tmp_path,monkeypatch):
+    from stash_ai.recognition import scanning
+    from threading import Event
+    encoding, inference = Event(), Event()
+    original=scanning.crop_bytes
+    def crop(*args,**kwargs):
+        encoding.set()
+        assert inference.wait(5), 'JPEG work blocked owner inference'
+        return original(*args,**kwargs)
+    monkeypatch.setattr(scanning,'crop_bytes',crop)
+    class Prepared(Backend):
+        def prepare_embedding(self,image,face):
+            return np.ones((1,3,112,112),dtype='float32')
+        def embed_prepared_many(self,tensors):
+            assert encoding.wait(5)
+            inference.set()
+            return [np.array([1.,0,0,0],dtype='float32') for _ in tensors]
+    settings=config(tmp_path);client=MediaClient(count=1);backend=Prepared()
+    with FaceDatabase(settings.database) as state, SpriteInput(client,client.scene,settings) as source:
+        scan_scene(state,'scope',client.scene,settings,'ns',source,lambda:backend)
+        assert state.connection.execute('SELECT status FROM scans').fetchone()[0]=='complete'
+
+
+def test_scan_batches_visibility_on_the_inference_owner(tmp_path):
+    from stash_ai.recognition.visibility import CONTRACT_ID
+    owner=get_ident();calls=[]
+    class Visibility:
+        def measure_prepared_many(self,items):
+            assert get_ident()==owner and all(isinstance(item,tuple) for item in items)
+            calls.append(len(items))
+            return [dict(visible_face_fraction=.9,visibility=dict(contract=CONTRACT_ID)) for _ in items]
+    settings=config(tmp_path);data=plain(settings.data);data['detection']['min_visible_face_fraction']=.5
+    settings=replace(settings,data=data);client=MediaClient(count=1);backend=Backend()
+    backend.detect=lambda image:[FACE]*9
+    with FaceDatabase(settings.database) as state, SpriteInput(client,client.scene,settings) as source:
+        scan_scene(state,'scope',client.scene,settings,'ns',source,lambda:backend,visibility=Visibility())
+        assert calls==[8,1]
+        assert state.connection.execute('SELECT COUNT(*) FROM observations WHERE rejected IS NULL').fetchone()[0]==9

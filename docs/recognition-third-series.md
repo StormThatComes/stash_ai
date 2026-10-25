@@ -28,7 +28,7 @@ Validation: 129 focused recognition regressions passed (evidence, merge cache,
 scene/cross-scene, cohort assignment, views, promotion, rebuild, retained data).
 No measured real-library accuracy or GPU throughput claim.
 
-PR2–PR6: implementation follows on stacked branches.
+All six scopes are implemented on the stacked branches described below.
 
 PR2: the strict sampler reserves slots for three-vote rare looks using frozen
 pivots and complete representative compatibility. Local identity origin stays
@@ -67,3 +67,22 @@ metadata and indexed rows are included. This is working-memory accounting, not
 an OS RSS guarantee (allocator, libraries, SQLite and configured prefetch remain
 separate). Validation: 71 scoring/cohort/query/cache tests and 35 final focused
 tests passed, including shared-buffer ownership and exact matrix boundaries.
+
+PR6: bounded owned CPU jobs overlap JPEG encoding with caller-owned GPU
+inference. Visibility preparation runs on CPU and inference uses batches of up
+to eight, with explicit capability fallback for scalar-only backends. Deferred
+JPEG results are joined in cue order before committing a complete cue. Failure
+and cancellation retain existing checkpoint boundaries and release owned images.
+Validation: 54 pipeline/visibility/scanning tests passed, including a synchronized
+CPU/GPU overlap test. A broader 172-test regression pass also passed after fixing
+scalar visibility compatibility, duplicate proof short-circuiting, immutable
+metadata handling and transaction-safe checkpoint dependency reads.
+
+## Final validation
+
+All six branches passed the complete recognition suite in isolated checkouts
+(four shards each): PR1 1516, PR2 1518, PR3 1519, PR4 1521, PR5 1524,
+PR6 1527 passed; seven environment/model skips per branch. The final raw-peer
+guard added to PR3 and carried forward also passed its five focused conflict
+tests and the complete PR6 suite. No real-library fragmentation or GPU timing
+benchmark was performed. Merge in order, starting at main.

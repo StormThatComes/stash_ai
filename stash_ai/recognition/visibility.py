@@ -60,6 +60,9 @@ class LazyVisibility:
             raise VisibilityError('Face visibility measurement failed: ' + str(error)) from error
         return self.model
 
+    def supports_prepared(self):
+        return callable(getattr(self._ensure(),'measure_prepared_many',None))
+
     def measure(self, image, face):
         self._ensure()
         try:
