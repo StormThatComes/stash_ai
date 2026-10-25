@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from stash_ai.recognition.config import load, parse_yaml
+from stash_ai.recognition.config import defaults, load, parse_yaml, validate
 
 
 def test_default_config_and_immutable_snapshot(tmp_path):
@@ -55,7 +55,25 @@ def test_semantic_cache_identity_ignores_filename_and_names(tmp_path):
 
 
 def test_shipped_template_matches_default_schema():
-    config = load(Path(__file__).resolve().parents[1] / 'facial_recognition.yml')
+    path = Path(__file__).resolve().parents[1] / 'facial_recognition.yml'
+    # Check the file before load() fills missing fields with defaults.
+    supplied = parse_yaml(path.read_bytes())
+    def paths(mapping, prefix=''):
+        found = set()
+        for key, value in mapping.items():
+            name = prefix + key
+            found.add(name)
+            if isinstance(value, dict):
+                found.update(paths(value, name + '.'))
+        return found
+    expected = defaults()
+    actual_paths, expected_paths = paths(supplied), paths(expected)
+    assert actual_paths == expected_paths, dict(
+        missing=sorted(expected_paths-actual_paths), unknown=sorted(actual_paths-expected_paths))
+    validate(supplied)
+    assert supplied['sapiensid'] == expected['sapiensid']
+    assert supplied['execution']['portrait_ranking_cache_bytes'] == expected['execution']['portrait_ranking_cache_bytes']
+    config = load(path)
     assert config.data['models']['detector'] == 'scrfd_10g'
     assert config.data['recognition']['min_identity_support'] == 2
     assert config.data['recognition']['cross_scene_provisional'] is True
