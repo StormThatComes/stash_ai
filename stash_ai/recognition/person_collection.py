@@ -13,6 +13,7 @@ class PersonCollector:
         self.config, self.paths, self.factory = config, paths, factory
         self.model = None
         self.pipeline = None
+        self.deferred = None
 
     def close(self):
         resources = [('stop person preparation', self.pipeline), ('close person model', self.model)]
@@ -47,6 +48,7 @@ class PersonCollector:
             self.model=self.factory(self.config,self.paths)
 
     def abort(self):
+        self.deferred=None
         if self.pipeline is not None:
             pipeline,self.pipeline=self.pipeline,None
             cleanup([("abort person preparation", pipeline.close)])
@@ -62,23 +64,43 @@ class PersonCollector:
         except BaseException:
             self.abort();raise
 
-    def _collect_frame(self,db,scan,index,image):
+    def collect_records(self,db,scan,index,image,rows):
+        """Prepare fresh faces without rereading or committing them per cue."""
+        if self.deferred is None:self.deferred=[]
+        try:return self._collect_frame(db,scan,index,image,rows=rows)
+        except BaseException:
+            self.abort();raise
+
+    def take_records(self):
+        self.flush()
+        records,self.deferred=self.deferred or [],None
+        return records
+
+    def _write(self,db,rows):
+        if self.deferred is not None:self.deferred.extend(rows)
+        else:
+            with db:
+                for identifier,metadata,vector,crop in rows:
+                    save(db,identifier,contract(self.config),metadata,vector,crop)
+
+    def _collect_frame(self,db,scan,index,image,*,rows=None):
         if not self.config.data['sapiensid']['enabled']:return
         self._load();expected=contract(self.config)
-        rows=list(db.execute('SELECT * FROM observations WHERE scan=? AND cue=? ORDER BY id',(scan,index)))
+        fresh=rows is not None
+        if rows is None:rows=list(db.execute('SELECT * FROM observations WHERE scan=? AND cue=? ORDER BY id',(scan,index)))
         faces=[checked_detection(json.loads(r['geometry'])) for r in rows]
         self.model.detect(image,faces=faces)
         if callable(getattr(self.model,'person_input',None)) and callable(getattr(self.model,'embed_inputs',None)):
             if self.pipeline is None:
                 from .person_pipeline import PreparedCollector
-                self.pipeline=PreparedCollector(self.config,self.model)
-            self.pipeline.collect(db,image,rows,faces)
+                self.pipeline=PreparedCollector(self.config,self.model,writer=self._write)
+            self.pipeline.collect(db,image,rows,faces,fresh=fresh)
             return
         pending=[];eligible=[]
         for row,face in zip(rows,faces):
             if row['rejected'] is not None:
                 continue
-            if db.execute('SELECT 1 FROM person_evidence WHERE observation=? AND contract=?',
+            if not fresh and db.execute('SELECT 1 FROM person_evidence WHERE observation=? AND contract=?',
                           (row['id'],expected)).fetchone():
                 continue
             metadata=self.model.observation_quality(image,face)
@@ -105,9 +127,7 @@ class PersonCollector:
             for (index,_),vector in zip(batch,vectors):
                 pending[index][2]=vector
         # Nothing from a partially failed cue becomes durable.
-        with db:
-            for identifier,metadata,vector,crop in pending:
-                save(db,identifier,expected,metadata,vector,crop)
+        self._write(db,pending)
 
 
 def audit_input(detector,image,face,path):

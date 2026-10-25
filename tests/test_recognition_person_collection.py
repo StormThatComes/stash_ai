@@ -92,6 +92,7 @@ def test_prepared_pipeline_batches_across_cues_on_one_inference_owner(tmp_path,m
         def embed_inputs(self,inputs):
             assert threading.get_ident()==owner
             self.batches.append(len(inputs));return [np.ones(4096) for _ in inputs]
+    settings.data['execution']['checkpoint_cues']=3
     model=Prepared();collector=PersonCollector(settings,{},factory=lambda *a:model)
     client=MediaClient()
     try:

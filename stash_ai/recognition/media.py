@@ -22,10 +22,11 @@ def safe_url(url):
     return urlunsplit((parts.scheme, parts.netloc.rsplit('@', 1)[-1], parts.path, '', ''))
 
 
-def bounded_media(client, url, limit, timeout):
+def bounded_media(client, url, limit, timeout, *, cache=None):
     from stash_ai.runtime.cleanup import closing
     from stash_ai.stash_api.deadlines import call_with_deadline, abort_response
     deadline = time.monotonic() + timeout
+    retained=cache.get(url) if cache is not None else None
 
     def acquire():
         current = url
@@ -36,8 +37,10 @@ def bounded_media(client, url, limit, timeout):
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise TimeoutError('Recognition media deadline exceeded.')
+            headers={'If-None-Match':retained[0]} if retained is not None and current==url else {}
+            options=dict(headers=headers) if headers else {}
             response = call_with_deadline(lambda: client.media.get(current, stream=True, allow_redirects=False,
-                                         timeout=(min(5., remaining), remaining)), deadline)
+                                         timeout=(min(5., remaining), remaining),**options), deadline)
             with closing(response, name='close recognition media response'):
                 if response.status_code in (301, 302, 303, 307, 308):
                     location = response.headers.get('Location')
@@ -45,6 +48,16 @@ def bounded_media(client, url, limit, timeout):
                         raise ValueError('Recognition media redirect has no destination.')
                     current = urljoin(current, location)
                     continue
+                if response.status_code==304:
+                    if retained is None or current!=url:
+                        raise ValueError('Recognition media returned an unsolicited cache acknowledgement.')
+                    if response.headers.get('ETag',retained[0])!=retained[0]:
+                        cache.discard(url)
+                        raise ValueError('Recognition media cache acknowledgement changed its validator.')
+                    if 'no-store' in response.headers.get('Cache-Control','').lower():cache.discard(url)
+                    data=retained[1]
+                    if limit is not None and len(data)>limit:raise ValueError('Recognition media exceeds its byte budget.')
+                    return data
                 response.raise_for_status()
 
                 def body():
@@ -55,7 +68,11 @@ def bounded_media(client, url, limit, timeout):
                             raise ValueError('Recognition media exceeds its byte budget.')
                         chunks.append(chunk)
                     return b''.join(chunks)
-                return call_with_deadline(body, deadline, cancel=lambda: abort_response(response))
+                data=call_with_deadline(body, deadline, cancel=lambda: abort_response(response))
+                if cache is not None and current==url:
+                    etag=None if 'no-store' in response.headers.get('Cache-Control','').lower() else response.headers.get('ETag')
+                    cache.put(url,etag,data)
+                return data
         raise ValueError('Too many recognition media redirects.')
 
     return call_with_deadline(acquire, deadline)
@@ -68,6 +85,8 @@ class SpriteInput:
 
     def __init__(self, client, scene, config):
         self.client, self.config = client, config
+        from .media_cache import MediaCache
+        self.media_cache=MediaCache(config.database,config.data['execution']['media_cache_bytes'],client)
         settings, paths = config.data['execution'], scene['paths']
         from .sprite_cache import current, SpriteCache
         shared = current()
@@ -104,7 +123,7 @@ class SpriteInput:
         self.fingerprint = digest(self.manifest)
 
     def read(self, url):
-        return bounded_media(self.client, url, None, self.config.data['execution']['timeout_seconds'])
+        return bounded_media(self.client, url, None, self.config.data['execution']['timeout_seconds'],cache=self.media_cache)
 
     def _sheet(self, url):
         expected = getattr(self, 'hashes', {}).get(url)

@@ -92,6 +92,8 @@ execution:
   scan_cpu_workers: 4 # CPU quality/alignment/JPEG; inference remains on one owner.
   scan_queue_bytes: 268435456 # 256 MiB for in-flight scan CPU work; oversize work runs serially.
   recognizer_batch_size: 1 # Opt-in microbatch (up to 32); static ONNX graphs always use one.
+  # Persistent compressed VTT/sprite cache, revalidated by strong HTTP ETags. 0 disables.
+  media_cache_bytes: 1073741824
   sprite_cache_bytes: 1073741824 # Shared compressed + decoded sprite LRU for this run.
   prefetch_scene_depth: 3 # Prepared scenes ahead; at most four input workers.
   rebuild_workers: 1           # 1 = serial; 0 = auto (up to 16); explicit values up to 256.
