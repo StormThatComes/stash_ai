@@ -8,6 +8,7 @@ import math
 from pathlib import Path
 import sqlite3
 
+from .evidence_pixels import alias_scope
 from .clustering import Group, _similarities, matching_policy, vector, _groups, reference_admission, reference_context
 from .config import plain
 from .database import APPLICATION_ID, SCHEMA_VERSION, _reject_executable_schema
@@ -327,7 +328,7 @@ def build(config, scene_id, *, limit=20, min_mean=None, scope=None, compare_scen
     if not -1 <= min_mean <= 1 or not math.isfinite(min_mean):
         raise ValueError('Report min-mean must be between -1 and 1.')
     policy = matching_policy(config)
-    with closing(_open_readonly(config.database)) as db:
+    with closing(_open_readonly(config.database)) as db, alias_scope(db):
         scan = _selected_scan(db, str(scene_id), namespace(config), policy, scope=scope)
         identities = _scene_identities(db, scan['id'], policy)
         bank=_groups(db,scan['scope'],scan['namespace'],clustering,

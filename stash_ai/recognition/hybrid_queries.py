@@ -15,7 +15,7 @@ from .pose_policy import query_sql
 from .reference_roles import observation_sql
 
 
-def recover(database, selected, config):
+def _recover(database, selected, config):
     if not selected:return 0
     db=database.connection
     scope,namespace=db.execute('SELECT scope,namespace FROM scans WHERE id=?',(selected[0]['scan'],)).fetchone()
@@ -74,3 +74,9 @@ def recover(database, selected, config):
                 (owner,encoded(proof),candidate))
             db.execute('INSERT OR IGNORE INTO members VALUES (?,?)',(observation,owner));accepted+=1
     return accepted
+
+
+def recover(database, selected, config):
+    from .evidence_pixels import alias_scope
+    with alias_scope(database.connection):
+        return _recover(database, selected, config)

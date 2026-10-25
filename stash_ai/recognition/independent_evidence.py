@@ -12,7 +12,8 @@ def unit(row):
             record = metadata(row['quality'])
             value = record.get('evidence_pixel_sha256')
             if isinstance(value, str) and len(value) == 64 and all(c in '0123456789abcdef' for c in value):
-                return 'pixels', value
+                from .evidence_pixels import canonical_pixel
+                return 'pixels', canonical_pixel(value)
             value = record.get('evidence_crop_sha256')
             if isinstance(value, str) and len(value) == 64 and all(c in '0123456789abcdef' for c in value):
                 return row['scan'], 'pixels', value

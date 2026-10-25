@@ -1,6 +1,6 @@
 """Bounded, deterministic quality/diversity sampling of strict members.
 
-At most twice the reference cap is materialized. Repeated reductions retain
+The candidate pool and mode reserves are bounded multiples of the reference cap. Repeated reductions retain
 appearance and scene coverage rather than permanently freezing the first N cues.
 The returned order is canonical so scalar score reductions remain reproducible.
 """
@@ -57,17 +57,30 @@ def select(rows, maximum, *, vector_reader=None):
         if slot is None:
             # Confirmed modes keep their protection; probationary singletons
             # cannot monopolize it. A bounded second bank discovers later modes.
-            if len(reserves) >= 2 * maximum:
+            if len(reserves) >= 3 * maximum:
                 probation = [v for v in reserves if len(v['votes']) < 3]
                 if not probation:
                     return
-                reserves.remove(min(probation, key=lambda v: (len(v['votes']), v['best'][0])))
+                victim = min(probation, key=lambda v: (len(v['votes']), v['best'][0]))
+                reserves[:] = [v for v in reserves if v is not victim]
             slot = dict(pivot=sample, pose=pose, best=entry, votes=Votes())
             reserves.append(slot)
         if len(slot['votes']) < 3:
             slot['votes'].add(dict(row, scan=row['scan'] if 'scan' in row.keys() else row['scene']))
         if score > slot['best'][3]:
             slot['best'] = entry
+        confirmed = [v for v in reserves if len(v['votes']) >= 3]
+        if len(confirmed) > 2 * maximum:
+            # A separate probation bank allows a late mode to earn protection
+            # before competing with established modes. Remove the weakest,
+            # most redundant mode; support is never transferred to the winner.
+            def retention(v):
+                novelty = 1. - max(float(np.dot(v['pivot'], other['pivot']))
+                                  for other in confirmed if other is not v)
+                return (novelty * (.25 + .75 * v['best'][3]) + .20 * v['best'][3],
+                        -v['best'][0])
+            victim = min(confirmed, key=retention)
+            reserves[:] = [v for v in reserves if v is not victim]
 
 
     def reduce():

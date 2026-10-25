@@ -94,3 +94,18 @@ def test_better_duplicate_returns_after_exemplar_eviction_without_new_vote():
     assert slot.observations == ['better']
     assert len(slot.cues)==2 and slot.centre_count==2
     assert np.array_equal(total,slot.total)
+
+
+def test_late_high_quality_mode_can_replace_saturated_confirmed_reserves():
+    from stash_ai.recognition.reference_selection import select
+    rows=[]
+    for mode in range(5):
+        sample=np.zeros(6,dtype='<f4');sample[0]=np.sqrt(.7);sample[mode+1]=np.sqrt(.3)
+        for j in range(3 if mode<4 else 20):
+            rows.append(dict(id=f'{mode}:{j}',scan='s',scene='1',seconds=len(rows),geometry='[]',
+                dimensions=6,embedding=sample.tobytes(),quality=json.dumps(dict(
+                    pixels=80 if mode<4 else 500,sharpness=30 if mode<4 else 900,pose_deviation=.1))))
+    chosen=select(rows,2)
+    assert len(chosen)==2
+    assert any(identifier.startswith('4:') for identifier,_ in chosen)
+    assert [i for i,_ in chosen]==[i for i,_ in select(rows,2)]
