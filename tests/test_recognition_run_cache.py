@@ -131,3 +131,26 @@ def test_matrix_accounting_survives_replacement_touch_discard_and_global_evictio
     assert not cache.matrices
     cache.clear()
     check()
+
+
+def test_hybrid_packed_content_is_shared_and_mutation_invalidates(tmp_path):
+    a=np.eye(4,dtype='float32')
+    with run_cache.scope(setup(tmp_path)):
+        first=run_cache.packed(a)
+        assert run_cache.packed(a.copy()) is first
+        assert not first.flags.writeable
+        a[0,0]=-1
+        assert run_cache.packed(a) is not first
+        assert first[0,0]==1
+
+
+def test_committed_cache_metadata_does_not_invalidate_evidence(tmp_path):
+    config=setup(tmp_path)
+    with FaceDatabase(config.database) as state,run_cache.scope(config):
+        db=state.connection
+        db.commit()
+        first=run_cache.database_key(db)
+        db.execute("INSERT INTO metadata VALUES ('disposable-cache','value')")
+        assert run_cache.database_key(db)!=first
+        db.commit()
+        assert run_cache.database_key(db)==first

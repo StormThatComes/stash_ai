@@ -202,4 +202,19 @@ def database_key(db):
     if current() is None or not supported(db):
         return None
     raw = getattr(db, 'raw', db)
-    return raw, raw.total_changes, raw.execute('PRAGMA data_version').fetchone()[0], version(db)
+    return raw, (raw.total_changes if raw.in_transaction else None), raw.execute('PRAGMA data_version').fetchone()[0], version(db)
+
+
+def packed(bank):
+    """Immutable content-keyed float64 banks shared across independent trials."""
+    import numpy as np
+    cache=current()
+    if cache is None:return np.asarray(bank,dtype='float64')
+    content=bank.tobytes()
+    key=('packed',bank.dtype.str,bank.shape,content)
+    result=cache.get(key)
+    if result is MISSING:
+        result=np.array(bank,dtype='float64',copy=True,order='C')
+        result.flags.writeable=False
+        cache.put(key,result,len(content)+result.nbytes+256)
+    return result

@@ -38,13 +38,18 @@ def _catalogue(db, config, scope, namespace):
     from .reference_compatibility import fallback_sql
     groups=_groups(db,scope,namespace,config.data['clustering'],
                    scan_policy=scan_identity(config,namespace),compatibility=fallback_sql(db,config,namespace))
+    groups=list(groups)
     result=[];used=0;present=available(db);expected=contract(config)
+    from .hybrid_references import catalogue_rows
+    body_catalogue=catalogue_rows(db,config,scope,namespace,[g.identifier for g in groups]) if present else {}
+    ready={r[0] for r in db.execute("SELECT e.observation FROM person_evidence e JOIN observations o ON o.id=e.observation "
+        "JOIN scans s ON s.id=o.scan WHERE e.contract=? AND e.status='ready' AND s.scope=? AND s.namespace=?",
+        (expected,scope,namespace))} if present else set()
     with tracking(groups,'Read hybrid references',unit='identity') as tracked:
         for group in tracked:
             ids=tuple(group.sample_ids)
-            from .hybrid_references import body_rows
             from .hybrid_modes import body_modes
-            records=body_rows(db,config,scope,namespace,group.identifier) if present else []
+            records=body_catalogue.get(group.identifier,[])
             from .independent_evidence import Votes
             votes=Votes(); vectors=[]; body_ids=[]
             for row in records:
@@ -55,8 +60,6 @@ def _catalogue(db, config, scope, namespace):
                 if used>config.data['sapiensid']['execution']['reference_bytes']:
                     raise ValueError('SapiensID reference_bytes budget exceeded.')
                 vectors.append(value);votes.add(row);body_ids.append(row['id'])
-            ready={r[0] for r in db.execute("SELECT observation FROM person_evidence WHERE contract=? AND status='ready' "
-                'AND observation IN (SELECT value FROM json_each(?))',(expected,encoded(ids)))} if present else set()
             missing=tuple(i for i in ids if i not in ready)
             result.append(Identity(group.identifier,ids,np.asarray(group.samples),
                 np.asarray(vectors) if vectors else np.empty((0,4096)),tuple(range(getattr(records,'support',len(votes)))),
@@ -71,9 +74,11 @@ def scores(left,right):
     import numpy as np
     if not len(left) or not len(right):return None
     low=1.;total=0.;count=0
-    right64=right.astype('float64',copy=False)
+    from .run_cache import packed
+    right64=packed(right)
+    left64=packed(left)
     for start in range(0,len(left),16):
-        values=left[start:start+16].astype('float64',copy=False) @ right64.T
+        values=left64[start:start+16] @ right64.T
         low=min(low,float(values.min()));total+=float(np.sum(values,dtype='float64'));count+=values.size
     return dict(minimum=low,mean=total/count)
 

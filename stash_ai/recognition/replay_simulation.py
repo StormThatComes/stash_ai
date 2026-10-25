@@ -37,7 +37,13 @@ def impact(before, after):
         identities=len(set(after.values())-{None}))
 
 
-def replay(config, variants, *, scenes=None, scope=None, source=None, consume=None, variant_stream=None, inspect_trial=None, progress=None):
+def replay(config, variants, **kwargs):
+    from .run_cache import scope
+    with scope(config):
+        return _replay(config,variants,**kwargs)
+
+
+def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=None, variant_stream=None, inspect_trial=None, progress=None):
     """Stream one trial at a time; retain only baseline and compact summaries.
 
     Existing bindings/history seed each independent trial. Production rebuild
