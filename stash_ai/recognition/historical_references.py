@@ -225,14 +225,23 @@ def rank(rows,history,config,*,decisions=None,potential=None,relaxed_pose=False,
         strict_rows.append(dict(choices))
         for group,score,low in comparisons(views,query,effective_view_threshold-margin,effective_view_cohesion,exact=exact):
             view=by_group[id(group)]
-            if low<effective_view_cohesion or not query_pose_matches(row['geometry'],view.pose,relaxed=relaxed_pose):
+            ordinary_pose = pose_matches(row['geometry'], view.pose)
+            premium, required = 0., 2
+            if not ordinary_pose:
+                if not relaxed_pose:
+                    continue
+                from .view_prototypes import pose_fallback
+                premium, required = pose_fallback(row['geometry'], view.pose)
+                if view.support_count < required:
+                    continue
+            if low < effective_view_cohesion:
                 continue
             previous=choices.get(group.identifier)
             if previous is not None and previous[3] and score<effective_view_threshold:
                 continue
             if previous is not None and previous[1]=='strict' and previous[3] and previous[0]>=score:
                 continue
-            admissible=score>=effective_view_threshold and (not quarantine_only or view.authority=='quarantined_core')
+            admissible=score>=effective_view_threshold+premium and (not quarantine_only or view.authority=='quarantined_core')
             if previous is None or score>previous[0] or score==previous[0] and admissible and not previous[3]:
                 choices[group.identifier]=(score,'view',view.medoid,admissible,view)
         mixed_rows.append(choices)
@@ -284,12 +293,15 @@ def rank(rows,history,config,*,decisions=None,potential=None,relaxed_pose=False,
                 rivals=[dict(identity=r[1],score=r[0]) for r in ranked],
                 ambiguity_margin=decision_margin))
         return None
+    from .view_prototypes import pose_fallback
     return person,dict(format=2,frozen=True,context=history.context,identity=person,
         view_evidence=[dict(medoid=v.medoid,authority=v.authority,support=v.support_count,
                            support_ids=getattr(v,'source_ids',v.support),
                            **({'promotion':v.promotion} if getattr(v,'promotion',None) else {}))
             for v in {id(value[4]):value[4] for value in values if value[1]=='view'}.values()],
         mode='view' if any(v[1]=='view' for v in values) else 'strict',mean_score=score,ranking_score=ranking_score,
+        pose_query_support=max([2]+[pose_fallback(row['geometry'],value[4].pose)[1]
+            for row,value in zip(rows,values) if value[1]=='view' and relaxed_pose]),
         strict_appearance=strict_appearance,threshold=effective_view_threshold,cohesion_threshold=effective_view_cohesion,
         rival_score=ranked[1][0] if len(ranked)>1 else None,
         medoids=sorted({v[2] for v in values if v[2] is not None}),ambiguity_margin=decision_margin)

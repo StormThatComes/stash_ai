@@ -53,3 +53,34 @@ def test_exact_duplicate_and_strong_reflection_claims_are_not_conflicts():
     left=row(1,v(0));right=dict(left,id='2')
     assert not list(conflicting_claims([left,right],.9))
     assert len(list(conflicting_claims([row(1,v(0)),row(2,v(50))],.9)))==2
+
+
+def test_joint_solver_uses_alternatives_and_abstains_on_equal_solutions():
+    from stash_ai.recognition.joint_claims import solve
+    unique=lambda i,a,j,b:a[0]!=b[0]
+    assert solve([[('a',.95),('b',.8)],[('a',.9)]],unique,.02)==(('b',.8),('a',.9))
+    assert solve([[('a',.9),('b',.9)],[('a',.9),('b',.9)]],unique,.02) is None
+    assert solve([[('a',.9)],[('a',.9)]],unique,.02) is None
+    assert solve([[('a',.9),('b',.9)]]*6,unique,.02,maximum=10) is None
+
+
+def test_joint_alternatives_preserve_unresolved_raw_peer_protection(tmp_path):
+    from stash_ai.recognition.joint_claims import recover
+    from stash_ai.recognition.clustering import Group, matching_policy
+    from stash_ai.recognition.historical_references import History
+    from stash_ai.recognition.database import encoded
+    config=config_for(tmp_path)
+    with FaceDatabase(config.database) as state:
+        sid,_=scan(state,config,'1',[v(0),v(40),v(80)],count=3)
+        state.connection.execute('UPDATE observations SET cue=0,seconds=0 WHERE scan=?',(sid,))
+        rows=list(state.connection.execute('SELECT id FROM observations WHERE scan=? ORDER BY rowid',(sid,)))
+        policy=matching_policy(config)
+        for i,row in enumerate(rows[:2]):
+            state.connection.execute('INSERT INTO candidates VALUES (?,?,?,?,?,?)',
+                (str(i),sid,policy,None,'withheld',encoded(dict(observation=row['id'],reason='insufficient_match_or_cohesion'))))
+        bank=History((Group('a',(v(10),),True),Group('b',(v(80),),True)),(),{},'frozen')
+        recover(state.connection,policy,bank,config)
+        assert {r[0] for r in state.connection.execute('SELECT status FROM candidates')}=={'withheld'}
+        state.connection.execute('UPDATE observations SET rejected=? WHERE id=?',('test-unavailable',rows[2]['id']))
+        recover(state.connection,policy,bank,config)
+        assert [tuple(r) for r in state.connection.execute('SELECT person,status FROM candidates ORDER BY id')] == [('a','pending'),('b','pending')]
