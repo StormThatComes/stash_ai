@@ -12,6 +12,8 @@ from .replay_simulation import replay
 
 
 PARAMETERS = frozenset({
+    'sapiensid.matching.face_floor', 'sapiensid.matching.person_threshold',
+    'sapiensid.matching.ambiguity_margin', 'sapiensid.matching.min_support',
     'recognition.match_threshold', 'recognition.ambiguity_margin',
     'recognition.min_identity_support', 'recognition.min_merge_support',
     'recognition.cooccurrence_merge_threshold',
@@ -26,7 +28,7 @@ def configurations(config, grid, maximum):
     if type(maximum) is not int or not 1 <= maximum <= 1024:
         raise ValueError('max_trials must be an integer from 1 to 1024, including baseline.')
     if not isinstance(grid, dict) or not grid or set(grid)-PARAMETERS:
-        raise ValueError('Grid must contain supported recognition/clustering threshold parameters.')
+        raise ValueError('Grid must contain supported recognition/clustering/sapiensid threshold parameters.')
     if any(not isinstance(v, list) or not v or any(type(x) not in (int, float) or not math.isfinite(x)
             for x in v) for v in grid.values()):
         raise ValueError('Each grid parameter requires a nonempty array of finite numbers.')

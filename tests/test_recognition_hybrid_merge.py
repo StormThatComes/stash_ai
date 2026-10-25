@@ -12,6 +12,8 @@ from stash_ai.recognition.clustering import matching_policy
 def prepared(tmp_path):
     config,people=seeded(tmp_path)
     data=plain(config.data);data['sapiensid']['enabled']=True
+    data['sapiensid']['model'].update(source_directory='source',checkpoint_directory='weights')
+    data['sapiensid']['pose'].update(path='pose.pt',sha256='1'*64)
     config=replace(config,data=data)
     with FaceDatabase(config.database) as state:
         db=state.connection

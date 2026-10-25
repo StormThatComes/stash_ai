@@ -97,3 +97,26 @@ def copy_evidence(source,target,scan):
     target.executemany('INSERT OR REPLACE INTO person_evidence VALUES (?,?,?,?,?,NULL)',source.execute(
         'SELECT e.observation,e.contract,e.status,e.metadata,e.embedding FROM person_evidence e '
         'JOIN observations o ON o.id=e.observation WHERE o.scan=?',(scan,)))
+
+
+def coverage(db,config,scans):
+    """Offline availability for selected observations; no inference or image reads."""
+    from .database import encoded
+    from .config import plain
+    wanted=encoded(list(scans));expected=contract(config)
+    eligible=db.execute('SELECT COUNT(*) FROM observations WHERE rejected IS NULL '
+                        'AND scan IN (SELECT value FROM json_each(?))',(wanted,)).fetchone()[0]
+    counts={}
+    if available(db):
+        counts=dict(db.execute('SELECT e.status,COUNT(*) FROM person_evidence e JOIN observations o '
+            'ON o.id=e.observation WHERE o.rejected IS NULL AND e.contract=? '
+            'AND o.scan IN (SELECT value FROM json_each(?)) GROUP BY e.status',(expected,wanted)))
+    return dict(enabled=config.data['sapiensid']['enabled'],contract=expected,
+        matching=plain(config.data['sapiensid']['matching']),eligible=eligible,
+        ready=counts.get('ready',0),unavailable=counts.get('unavailable',0),
+        missing=eligible-sum(counts.values()))
+
+
+def same_contract(left,right):
+    return (not (left.data['sapiensid']['enabled'] or right.data['sapiensid']['enabled'])
+            or contract(left)==contract(right))

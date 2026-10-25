@@ -16,6 +16,7 @@ from .clustering import matching_policy
 from .config import digest, load, plain
 from .database import SCHEMA, TABLES, FaceDatabase, encoded
 from .evaluation_scenarios import ordered, copy_history, snapshot
+from .person_signal import coverage, same_contract
 from .evaluation import compare_identity_runs
 from .fragmentation_report import _open_readonly
 from .models import namespace
@@ -88,8 +89,8 @@ def evaluate(config, labels, *, scenes=None, scope=None, variants=None, batch_si
     for name, variant in (variants or {}).items():
         if not isinstance(name, str) or not name or name in configurations:
             raise ValueError('Evaluation configuration names must be unique and nonempty.')
-        if namespace(variant) != namespace(config) or scan_identity(variant, namespace(config)) != scan_identity(config, namespace(config)):
-            raise ValueError('Evaluation variants must preserve the model, detection and VTT scan contracts.')
+        if namespace(variant) != namespace(config) or scan_identity(variant, namespace(config)) != scan_identity(config, namespace(config)) or not same_contract(config,variant):
+            raise ValueError('Evaluation variants must preserve the model, person, detection and VTT scan contracts.')
         configurations[name] = variant
     predictions, trials = {}, {}
     with closing(_open_readonly(config.database)) as source:
@@ -146,7 +147,7 @@ def evaluate(config, labels, *, scenes=None, scope=None, variants=None, batch_si
                         replay(trial_config)
                         elapsed = time.perf_counter() - started
                         predictions[key], decisions, reasons = snapshot(target, trial_config, labels)
-                        trials[key] = dict(matching_policy=matching_policy(trial_config),
+                        trials[key] = dict(hybrid=coverage(target,trial_config,loaded),matching_policy=matching_policy(trial_config),
                             config=plain(trial_config.data['recognition']), clustering=plain(trial_config.data['clustering']),
                             batch_size=size, scene_order=order, selection=[s['scene'] for s in trial_scans],
                             shuffle_seed=shuffle_seed if order == 'shuffle' else None,

@@ -41,6 +41,11 @@ def export(config, result, output, yaml_output):
         data['storage']['database'] = str(config.database)
         data['models']['directory'] = str(config.model_dir)
         data['names']['file'] = str(config.names_path) if config.names_path else None
+        for section,key in (('model','source_directory'),('model','checkpoint_directory'),('pose','path')):
+            raw=data['sapiensid'][section][key]
+            if raw:
+                path=Path(raw).expanduser()
+                data['sapiensid'][section][key]=str((config.source_path.parent/path).resolve())
         serialized = yaml.safe_dump(data, sort_keys=False)
         # Validate the serialized full document before exposing it as a runnable config.
         from .config import parse_yaml, validate
