@@ -19,8 +19,8 @@ class RecognitionParser(argparse.ArgumentParser):
         if result.command == 'report-merge':
             for selector in ('performer_id', 'identity_id'):
                 values = getattr(result, selector)
-                if values is not None and len(values) != 2:
-                    self.error(f'recognition report-merge requires exactly two --{selector.replace("_", "-")} values')
+                if values is not None and len(values) < 2:
+                    self.error(f'recognition report-merge requires at least two --{selector.replace("_", "-")} values')
         return result
 
 
@@ -40,6 +40,10 @@ def _arguments(command, *, retained=False):
     command.add_argument('--progress-style', choices=('auto', 'compact', 'verbose', 'off'), default='auto',
                          help='Performer/candidate progress and ETA; verbose includes quality details; off keeps errors and summary.' if retained else
                               'Scene/frame progress and ETA; verbose includes quality details and the names YAML starter; off keeps errors and summary.')
+
+
+def performer_set(value):
+    return [stash_id(part.strip()) for part in value.split(',')]
 
 
 def parser():
@@ -140,9 +144,11 @@ def parser():
         help='Compare two Stash performers or internal identities and propose verified YAML changes for frozen-catalogue consolidation (offline, read-only).')
     selector = merge_report.add_mutually_exclusive_group(required=True)
     selector.add_argument('--performer-id', action='append', type=stash_id,
-        help='Stash performer ID linked to an identity; provide exactly twice. Merged predecessor IDs are resolved automatically.')
+        help='Stash performer ID linked to an identity; provide at least twice. Merged predecessor IDs are resolved automatically.')
+    selector.add_argument('--performer-set', action='append', type=performer_set,
+        help='Comma-separated Stash IDs to merge; repeat for mutually disjoint sets.')
     selector.add_argument('--identity-id', action='append',
-        help='Internal face identity ID; provide exactly twice. Merged predecessor IDs are resolved automatically.')
+        help='Internal face identity ID; provide at least twice. Merged predecessor IDs are resolved automatically.')
     merge_report.add_argument('--face-config', type=Path, help='Recognition YAML selecting the recognizer and current thresholds.')
     merge_report.add_argument('--faces-db', type=Path, help='Existing face SQLite database.')
     merge_report.add_argument('--scope', help='Restrict both identities to this Stash scope; required if a performer ID occurs in multiple scopes.')
@@ -184,6 +190,9 @@ def main(argv=None, *, services=None):
         from .identity_report import execute
         return execute(args, config)
     if args.command == 'report-merge':
+        if args.performer_set or len(args.performer_id or args.identity_id) > 2:
+            from .merge_goals import execute
+            return execute(args, config)
         from .merge_report import execute
         return execute(args, config)
     if args.command == 'cleanup':

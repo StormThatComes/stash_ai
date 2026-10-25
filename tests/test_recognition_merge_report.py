@@ -281,7 +281,7 @@ def test_performer_ids_never_fall_back_to_another_model_or_scope(tmp_path):
 
 
 @pytest.mark.parametrize('selector', ['--performer-id', '--identity-id'])
-@pytest.mark.parametrize('count', [0, 1, 3])
+@pytest.mark.parametrize('count', [0, 1])
 def test_merge_cli_requires_exactly_two_ids_of_one_kind(selector, count):
     with pytest.raises(SystemExit):
         parser().parse_args(['report-merge'] + [part for _ in range(count) for part in (selector, '900')])
