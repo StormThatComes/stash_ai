@@ -477,6 +477,8 @@ def build(config, scene_id, *, limit=20, min_mean=None, scope=None, compare_scen
             'cross_scene_comparisons':comparisons,
             'multi_view_diagnostics':multiview,
             'format': 1, 'kind': 'recognition_fragmentation',
+            'hybrid': __import__('stash_ai.recognition.hybrid_evidence',fromlist=['report']).report(
+                db,config,scan['scope'],scan['namespace']),
             'scene_id': str(scene_id), 'scope': scan['scope'], 'scan_id': scan['id'],
             'namespace': scan['namespace'], 'matching_policy': policy,
             'thresholds': {

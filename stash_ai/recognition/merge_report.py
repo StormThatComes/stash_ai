@@ -62,13 +62,15 @@ def build(config, left_id, right_id, *, scope=None, by_performer=False, simulate
         if left['scope'] != right['scope']:
             raise ValueError('Identity comparison requires the same Stash scope.')
         identities = (left['id'], right['id'])
+        from .hybrid_evidence import report as hybrid_report
+        hybrid = hybrid_report(db,config,left['scope'],model_namespace,focus=set(identities))
         result = dict(format=1, kind='recognition_identity_merge', scope=left['scope'],
             namespace=model_namespace, matching_policy=matching_policy(config),
             requested_identity_ids=[requested_left['id'], requested_right['id']], identity_ids=list(identities),
             requested_performer_ids=[requested_left['performer'], requested_right['performer']],
             performer_ids=[left['performer'], right['performer']],
             current_configuration={key: plain(config.data[key]) for key in ('detection', 'recognition', 'clustering')},
-            paths=[], recommendations=[],
+            paths=[], recommendations=[], hybrid=hybrid,
             analysis_basis='production_frozen_catalogue_counterfactual',
             guarantees_full_rebuild_merge=False,
             limitations=[
