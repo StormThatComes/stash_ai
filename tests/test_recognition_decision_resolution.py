@@ -53,3 +53,12 @@ def test_exact_duplicate_and_strong_reflection_claims_are_not_conflicts():
     left=row(1,v(0));right=dict(left,id='2')
     assert not list(conflicting_claims([left,right],.9))
     assert len(list(conflicting_claims([row(1,v(0)),row(2,v(50))],.9)))==2
+
+
+def test_joint_solver_uses_alternatives_and_abstains_on_equal_solutions():
+    from stash_ai.recognition.joint_claims import solve
+    unique=lambda i,a,j,b:a[0]!=b[0]
+    assert solve([[('a',.95),('b',.8)],[('a',.9)]],unique,.02)==(('b',.8),('a',.9))
+    assert solve([[('a',.9),('b',.9)],[('a',.9),('b',.9)]],unique,.02) is None
+    assert solve([[('a',.9)],[('a',.9)]],unique,.02) is None
+    assert solve([[('a',.9),('b',.9)]]*6,unique,.02,maximum=10) is None

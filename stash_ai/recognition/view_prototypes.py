@@ -62,6 +62,24 @@ def query_pose_matches(geometry, pose, *, relaxed=False):
         and pose in ('left', 'right', 'other') and 'other' in (pose_view(geometry), pose))
 
 
+def pose_fallback(geometry, pose):
+    """Continuous extra score required for a query-only pose mismatch.
+
+    Five-point geometry is a noisy proxy, not a hard identity boundary. Missing
+    geometry and opposing sides need stronger support than adjacent categories.
+    The return value is (score premium, independent support required).
+    """
+    value = _signed_pose(geometry)
+    if value is None:
+        return .08, 3
+    if pose_matches(geometry, pose):
+        return 0., 2
+    distance = (max(0., value + .12) if pose == 'left' else
+                max(0., .12 - value) if pose == 'right' else max(0., abs(value) - .12))
+    opposing = pose != 'other' and pose_view(geometry) not in ('other', pose)
+    return min(.08, .1 * distance), 3 if opposing else 2
+
+
 @dataclass
 class _Cluster:
     pose: str

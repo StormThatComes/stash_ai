@@ -38,3 +38,11 @@ resampling uses membership ranks plus a disposable shared row cache; local
 refresh uses an indexed candidate union instead of correlated full-table probes.
 Validation: 42 representative/index/rebuild tests and 19 final focused tests,
 including rare-mode retention and one-time seed replacement, passed.
+
+PR3: identity-birth plausibility shares the assignment bank (including supported
+witnesses and corroborated edge semantics). Query-only pose fallback uses a
+continuous score premium; unknown/opposite pose needs three independent queries
+and three supporting witnesses. Strict retries solve small cue assignment sets
+jointly with all strict alternatives, fixed accepted claims and raw rival vetoes.
+Equal or oversized assignment problems remain unresolved; attachments never train
+new cores. Validation: 52 matching/pose/conflict/rebuild tests passed.

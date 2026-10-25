@@ -110,7 +110,7 @@ def _recover(durable, database, config, external, *, appearance, relaxed=False, 
                     continue
                 proof = dict(proof, joint_pose_appearance=appearance and relaxed, post_merge=final_bank is not None,
                     query_pose=pose_view(row['geometry']),
-                    crossed_poses=sorted({v.pose for v in crossed}), minimum_query_support=max(2, grouping['view_attach_min_support']))
+                    crossed_poses=sorted({v.pose for v in crossed}), minimum_query_support=max(proof.get('pose_query_support',2), grouping['view_attach_min_support']))
                 db.execute('INSERT INTO pose_recovery_claims VALUES (?,?,?,?)', (row['candidate'], row['id'], owner, encoded(proof)))
         for row in db.execute('SELECT * FROM pose_recovery_claims'):
             if row['owner'] in external.people:
@@ -121,13 +121,15 @@ def _recover(durable, database, config, external, *, appearance, relaxed=False, 
         from .decision_resolution import resolve_pending
         resolve_pending(db, policy, config)
         from .query_support import eligible
-        stream = lambda: db.execute('SELECT o.id,o.scan,o.seconds,o.dimensions,o.embedding,c.person,'
+        stream = lambda: db.execute('SELECT o.id,o.scan,o.seconds,o.quality,o.dimensions,o.embedding,c.person,'
             f"json_extract(c.payload,'$.{field}.medoids') AS medoids FROM candidates c "
             'JOIN observations o ON o.id=' + observation_sql('c') +
             f" WHERE c.policy=? AND c.status='pending' AND json_extract(c.payload,'$.reason')='{prefix}_pending' "
             'ORDER BY o.embedding,o.geometry,o.id', (policy,))
+        required = {r[0]:r[1] for r in db.execute(
+            f"SELECT owner,MAX(json_extract(proof,'$.minimum_query_support')) FROM pose_recovery_claims GROUP BY owner")}
         supported = eligible(stream, config, key=lambda r:r['person'], prototype=lambda r:r['medoids'],
-                             minimum=lambda _:max(2, grouping['view_attach_min_support']))
+                             minimum=lambda owner:max(required.get(owner,2), grouping['view_attach_min_support']))
         db.execute(f"UPDATE candidates SET status='accepted',payload=json_set(payload,'$.reason','{prefix}_identity') "
             f"WHERE policy=? AND status='pending' AND json_extract(payload,'$.reason')='{prefix}_pending' "
             'AND ' + observation_sql('candidates') + ' IN (SELECT value FROM json_each(?))', (policy, encoded(sorted(supported))))

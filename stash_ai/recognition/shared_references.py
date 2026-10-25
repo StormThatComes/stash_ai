@@ -39,6 +39,8 @@ def retry_strict(database, selected, config):
         db.execute("UPDATE candidates SET person=?,status='pending',payload=json_set(payload,"
             "'$.reason','late_strict_identity','$.shared_reference',json(?)) WHERE id=?",
             (person,encoded(proof),row['candidate']))
+    from .joint_claims import recover as recover_joint_claims
+    recover_joint_claims(db,policy,history,config)
     resolve_pending(db,policy,config)
     db.execute("UPDATE candidates SET status='accepted' WHERE policy=? AND status='pending' "
                "AND json_extract(payload,'$.reason')='late_strict_identity'",(policy,))

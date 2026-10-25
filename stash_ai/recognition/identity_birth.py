@@ -9,7 +9,8 @@ def potential(rows,history,config):
     settings,grouping=config.data['recognition'],config.data['clustering']
     threshold=max(settings['match_threshold'],grouping['view_match_threshold'])
     margin=max(settings['ambiguity_margin'],grouping['view_ambiguity_margin'])
-    groups=[v.group for v in history.views];views={id(v.group):v for v in history.views}
+    from .historical_references import _rank_bank
+    groups, views = _rank_bank(history, config, False)
     candidates={}
     for row in rows:
         choices={};query=vector(row)
