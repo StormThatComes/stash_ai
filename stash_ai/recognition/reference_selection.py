@@ -33,7 +33,7 @@ def quality(raw):
         return 0.
 
 
-def select(rows, maximum, *, vector_reader=None):
+def select(rows, maximum, *, vector_reader=None, quality_reader=None):
     import numpy as np
     from .clustering import vector
     from .view_prototypes import pose_view
@@ -121,7 +121,7 @@ def select(rows, maximum, *, vector_reader=None):
             reduce()
         scene = row['scene']
         sample = vector(row)
-        entry = (order, row, sample, quality(row['quality']), pose_view(row['geometry']))
+        entry = (order, row, sample, (quality_reader(row) if quality_reader else quality(row['quality'])), pose_view(row['geometry']))
         reserve(entry)
         # A duplicated cue time cannot fill the bounded reference bank.
         duplicate = next((i for i, item in enumerate(pool)
