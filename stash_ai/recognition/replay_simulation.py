@@ -36,7 +36,7 @@ def impact(before, after):
         identities=len(set(after.values())-{None}))
 
 
-def replay(config, variants, *, scenes=None, scope=None, source=None, consume=None, variant_stream=None):
+def replay(config, variants, *, scenes=None, scope=None, source=None, consume=None, variant_stream=None, inspect_trial=None, progress=None):
     """Stream one trial at a time; retain only baseline and compact summaries.
 
     Existing bindings/history seed each independent trial. Production rebuild
@@ -67,32 +67,52 @@ def replay(config, variants, *, scenes=None, scope=None, source=None, consume=No
         from itertools import chain
         stream = variant_stream() if variant_stream is not None else variants.items()
         seen_names = {'baseline'}
-        for name, settings in chain([('baseline', config)], stream):
-            if name != 'baseline':
-                if name in seen_names:
-                    raise ValueError('Duplicate simulation name.')
-                seen_names.add(name)
-            if namespace(settings) != ns or scan_identity(settings, ns) != scan_identity(config, ns):
-                raise ValueError('Simulation variants must preserve model and VTT scan contracts.')
-            data = plain(settings.data)
-            data['execution'].update(rebuild_checkpoint_scenes=0, profile_rebuild=False)
-            settings = replace(settings, data=data)
-            started = time.perf_counter()
-            with closing(_ram(settings)) as target:
-                target.execute('INSERT INTO metadata VALUES (?,?)', ('installation', installation))
-                copy_history(db, target, [], scope, ns)
-                state = SimpleNamespace(connection=target, installation=installation)
-                rebuild_selected(state, [dict(scene=s['scene'], scan=s['id']) for s in scans], settings)
-                predictions = dict.fromkeys(observations)
-                predictions.update((r[0], r[1]) for r in target.execute('SELECT observation,person FROM members')
-                                   if r[0] in observations)
-            if baseline is None:
-                baseline = predictions
-            item = dict(elapsed_seconds=time.perf_counter()-started,
-                versus_retained=impact(retained, predictions), versus_baseline=impact(baseline, predictions))
-            if consume is not None:
-                item.update(consume(name, observations, retained, predictions))
-            result['trials'][name] = item
+        try:
+            for name, settings in chain([('baseline', config)], stream):
+                if name != 'baseline':
+                    if name in seen_names:
+                        raise ValueError('Duplicate simulation name.')
+                    seen_names.add(name)
+                if namespace(settings) != ns or scan_identity(settings, ns) != scan_identity(config, ns):
+                    raise ValueError('Simulation variants must preserve model and VTT scan contracts.')
+                data = plain(settings.data)
+                data['execution'].update(rebuild_checkpoint_scenes=0, profile_rebuild=False)
+                settings = replace(settings, data=data)
+                if progress:
+                    progress(name, 'start', None)
+                started = time.perf_counter()
+                with closing(_ram(settings)) as target:
+                    target.execute('INSERT INTO metadata VALUES (?,?)', ('installation', installation))
+                    copy_history(db, target, [], scope, ns)
+                    state = SimpleNamespace(connection=target, installation=installation)
+                    from .progress import observe_stages
+                    last_stage = [0.]
+                    def stage_update(label):
+                        now = time.monotonic()
+                        if progress and now-last_stage[0] >= 1.:
+                            last_stage[0] = now
+                            progress(name, 'stage: '+label, None)
+                    with observe_stages(stage_update if progress else None):
+                        rebuild_selected(state, [dict(scene=s['scene'], scan=s['id']) for s in scans], settings)
+                    predictions = dict.fromkeys(observations)
+                    predictions.update((r[0], r[1]) for r in target.execute('SELECT observation,person FROM members')
+                                       if r[0] in observations)
+                    evidence = inspect_trial(target, settings) if inspect_trial else None
+                if baseline is None:
+                    baseline = predictions
+                item = dict(elapsed_seconds=time.perf_counter()-started,
+                    versus_retained=impact(retained, predictions), versus_baseline=impact(baseline, predictions))
+                if consume is not None:
+                    item.update(consume(name, observations, retained, predictions))
+                if evidence is not None:
+                    item['decision_evidence'] = evidence
+                result['trials'][name] = item
+                if progress:
+                    progress(name, 'complete', item)
+        except KeyboardInterrupt:
+            if variant_stream is None:
+                raise
+            result['interrupted'] = True
         return result
 
 

@@ -9,6 +9,17 @@ from tqdm import tqdm
 from stash_ai.runtime.console import status, activity, current_report, phase, skipped
 
 _work_rows = ContextVar('recognition_work_rows', default=())
+_stage_observer = ContextVar('recognition_stage_observer', default=None)
+
+
+@contextmanager
+def observe_stages(callback):
+    token = _stage_observer.set(callback)
+    try:
+        yield
+    finally:
+        _stage_observer.reset(token)
+
 
 
 class RunProgress:
@@ -107,6 +118,9 @@ def heartbeat_line(row, fields, *, verbose=False):
 @contextmanager
 def stage(label, **values):
     """Name a rebuild substage even while SQL/native work has no measurable total."""
+    observer = _stage_observer.get()
+    if observer is not None:
+        observer(label)
     report = current_report()
     console = getattr(report, 'console', None)
     if console is None or console.style == 'off':

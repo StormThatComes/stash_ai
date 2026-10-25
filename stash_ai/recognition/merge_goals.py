@@ -34,26 +34,35 @@ def resolve(db, config, sets, *, scope=None, by_performer=True):
 
 def execute(args, config):
     from contextlib import closing
-    import json
     from .fragmentation_report import _open_readonly
+    targets = [p.expanduser().resolve() for p in (args.output, args.yaml_output) if p]
+    if len(set(targets)) != len(targets) or any(p.exists() for p in targets):
+        raise FileExistsError('Outputs must be distinct new files.')
     sets = args.performer_set or [args.performer_id or args.identity_id]
     with closing(_open_readonly(config.database)) as db:
         result = resolve(db, config, sets, scope=args.scope, by_performer=args.identity_id is None)
+        result['snapshot_sha256'] = fingerprint(db, config, result['scope'])
         if args.solve:
             from .merge_solver import solve
-            result.update(solve(config, result, db, maximum=args.max_trials))
+            import sys
+            def progress(name, stage, item):
+                if args.progress_style != 'off':
+                    detail = '' if item is None else ' ' + str([(g['largest_complete_performers'], g['total_performers']) for g in item['goal_result']['groups']]) + ' disjoint=' + str(item['goal_result']['disjoint'])
+                    print(f'Merge solver {name}: {stage}{detail}', file=sys.stderr, flush=True)
+            result.update(solve(config, result, db, maximum=args.max_trials, progress=progress))
         elif args.simulate:
             result['simulation'] = evaluate(config, result, db)
             result['status'] = 'baseline_evaluated'
     from .merge_goal_output import export
     export(config, result, args.output, args.yaml_output)
-    return 0
+    return 130 if result.get('interrupted') else 0
 
 
 def assess(goals, observations, retained, predicted):
     """Evaluate final memberships, including partial losses and outsider bridges."""
     from collections import Counter
     groups, owners = [], {}
+    goal_ids = {r['id'] for g in goals['groups'] for m in g['members'] for r in m['observations']}
     for group in goals['groups']:
         members, counts, complete_owners = [], Counter(), Counter()
         missing = lost = 0
@@ -74,8 +83,10 @@ def assess(goals, observations, retained, predicted):
                 resulting_identities=dict(destinations), fully_assigned_to_one=complete))
         for destination in counts:
             owners.setdefault(destination, []).append(group['index'])
+        outsiders = {k for k,v in predicted.items() if v is not None and v in counts and k not in goal_ids}
         largest = max(complete_owners.values(), default=0)
         groups.append(dict(index=group['index'], members=members, missing=missing, withheld=lost,
+            outsider_observations=len(outsiders), additional_retained_identities=sorted({retained[k] for k in outsiders if retained.get(k) is not None}),
             resulting_identities=dict(counts), fragments=len(counts),
             largest_complete_performers=largest, total_performers=len(members),
             complete_fraction=largest/len(members),
@@ -102,3 +113,17 @@ def objective(status):
             min(g['complete_fraction'] for g in groups),
             sum(g['largest_complete_performers'] for g in groups),
             -sum(g['fragments'] for g in groups))
+
+
+def fingerprint(db, config, scope):
+    """Hash retained numerical inputs and bindings without materializing a second corpus."""
+    import hashlib
+    from .config import digest
+    value = hashlib.sha256()
+    for sql in (
+        'SELECT s.* FROM scans s WHERE s.scope=? AND s.namespace=? ORDER BY s.id',
+        'SELECT o.id,o.scan,o.quality,o.rejected,o.embedding,m.person FROM observations o JOIN scans s ON s.id=o.scan LEFT JOIN members m ON m.observation=o.id WHERE s.scope=? AND s.namespace=? ORDER BY o.id',
+        'SELECT id,created,performer FROM people WHERE scope=? AND namespace=? ORDER BY id'):
+        for row in db.execute(sql, (scope, namespace(config))):
+            value.update(digest([v.hex() if isinstance(v, bytes) else v for v in row]).encode())
+    return value.hexdigest()

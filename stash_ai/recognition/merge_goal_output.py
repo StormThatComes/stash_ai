@@ -52,7 +52,11 @@ def export(config, result, output, yaml_output):
         result['run_argv'] = ['python','stash_ai.py','recognition','run','--face-config',str(destination)]
         for scene in result['simulation']['selection']:
             result['run_argv'].extend(['--scene-id', scene])
-    result['provenance'] = dict(configuration_sha256=digest(plain(config.data)),
+    code_hash = hashlib.sha256()
+    for path in sorted(Path(__file__).parent.glob('*.py')):
+        code_hash.update(path.name.encode())
+        code_hash.update(path.read_bytes())
+    result['provenance'] = dict(code_sha256=code_hash.hexdigest(), snapshot_sha256=result.get('snapshot_sha256'), configuration_sha256=digest(plain(config.data)),
         source_sha256=hashlib.sha256(config.source).hexdigest(), namespace=result['namespace'],
         goals_sha256=digest(result['groups']),
         validity='Same retained evidence, scope, model, code and joint scene selection; changed media requires revalidation.')
