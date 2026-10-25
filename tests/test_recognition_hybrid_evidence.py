@@ -13,7 +13,7 @@ def test_separate_encoders_and_unknown_evidence():
     settings=defaults()['sapiensid']['matching']
     assert not pair(identity('a'),identity('b',.8),settings)['blockers']
     assert 'face_contradiction' in pair(identity('a'),identity('b',2),settings)['blockers']
-    assert 'missing_person_evidence' in pair(identity('a'),identity('b',missing=('b',)),settings)['blockers']
+    assert 'missing_person_evidence' not in pair(identity('a'),identity('b',missing=('b',)),settings)['blockers']
     assert 'copresence_conflict' in pair(identity('a'),identity('b',.8),settings,copresent=True,reflection_threshold=.9)['blockers']
 
 

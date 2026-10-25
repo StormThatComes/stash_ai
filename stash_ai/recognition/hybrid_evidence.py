@@ -24,6 +24,8 @@ class Identity:
     guard_missing: tuple = ()
     guard_faces: object = None
     guard_persons: object = None
+    person_observations: tuple = ()
+    guard_person_observations: tuple = ()
 
 
 def catalogue(db, config, scope, namespace):
@@ -36,32 +38,25 @@ def catalogue(db, config, scope, namespace):
     result=[];used=0;present=available(db);expected=contract(config)
     with tracking(groups,'Read hybrid references',unit='identity') as tracked:
         for group in tracked:
-            ids=tuple(group.sample_ids);vectors=[];missing=[]
+            ids=tuple(group.sample_ids)
+            from .hybrid_references import body_rows
+            records=body_rows(db,config,scope,namespace,group.identifier) if present else []
             from .independent_evidence import Votes
-            votes=Votes()
-            if present:
-                query=('SELECT o.id,o.scan,o.quality,o.seconds,s.scene,e.status,e.embedding FROM observations o '
-                    'JOIN scans s ON s.id=o.scan LEFT JOIN person_evidence e ON e.observation=o.id AND e.contract=? '
-                    'WHERE o.id IN (SELECT value FROM json_each(?))')
-                parameters=(expected,encoded(ids))
-            else:
-                query=('SELECT o.id,o.scan,o.quality,o.seconds,s.scene,NULL AS status,NULL AS embedding FROM observations o '
-                    'JOIN scans s ON s.id=o.scan WHERE o.id IN (SELECT value FROM json_each(?))')
-                parameters=(encoded(ids),)
-            rows={r['id']:r for r in db.execute(query,parameters)}
-            for observation in ids:
-                row=rows.get(observation)
-                if row is None or row['status']!='ready':
-                    missing.append(observation);continue
+            votes=Votes(); vectors=[]; body_ids=[]
+            for row in records:
                 value=np.frombuffer(row['embedding'],dtype='<f4')
                 if value.shape!=(4096,) or not np.isfinite(value).all() or abs(float(np.linalg.norm(value))-1)>.001:
-                    raise ValueError('Invalid retained SapiensID feature: '+observation)
+                    raise ValueError('Invalid retained SapiensID feature: '+row['id'])
                 used+=value.nbytes
                 if used>config.data['sapiensid']['execution']['reference_bytes']:
                     raise ValueError('SapiensID reference_bytes budget exceeded.')
-                vectors.append(value);votes.add(row)
+                vectors.append(value);votes.add(row);body_ids.append(row['id'])
+            ready={r[0] for r in db.execute("SELECT observation FROM person_evidence WHERE contract=? AND status='ready' "
+                'AND observation IN (SELECT value FROM json_each(?))',(expected,encoded(ids)))} if present else set()
+            missing=tuple(i for i in ids if i not in ready)
             result.append(Identity(group.identifier,ids,np.asarray(group.samples),
-                np.asarray(vectors) if vectors else np.empty((0,4096)),tuple(range(len(votes))),tuple(missing)))
+                np.asarray(vectors) if vectors else np.empty((0,4096)),tuple(range(len(votes))),
+                missing,person_observations=tuple(body_ids)))
     from .hybrid_guards import retain
     return retain(db,config,scope,namespace,tuple(result))
 
@@ -89,7 +84,8 @@ def pair(left,right,settings,*,copresent=False,reflection_threshold=1.):
             if guard is not None and measurement is not None:
                 measurement['minimum']=min(measurement['minimum'],guard['minimum'])
     if left.guard_missing or right.guard_missing:blockers.append('missing_original_core_evidence')
-    if left.missing or right.missing or person is None:blockers.append('missing_person_evidence')
+    if person is None or any(i.missing and len(i.independent)<settings['min_support'] for i in (left,right)):
+        blockers.append('missing_person_evidence')
     if min(len(left.independent),len(right.independent))<settings['min_support']:
         blockers.append('insufficient_independent_support')
     if face is None or face['minimum']<settings['face_floor']:blockers.append('face_contradiction')
@@ -97,7 +93,9 @@ def pair(left,right,settings,*,copresent=False,reflection_threshold=1.):
     if copresent and (face is None or face['minimum']<reflection_threshold):blockers.append('copresence_conflict')
     return dict(format=1,left=left.person,right=right.person,face=face,person=person,
         observations=[list(left.observations),list(right.observations)],
+        person_observations=[list(left.person_observations),list(right.person_observations)],
         guard_observations=[list(left.guard_observations),list(right.guard_observations)],
+        guard_person_observations=[list(left.guard_person_observations),list(right.guard_person_observations)],
         missing_original_cores=[list(left.guard_missing),list(right.guard_missing)],
         support=[len(left.independent),len(right.independent)],
         missing=[list(left.missing),list(right.missing)],blockers=blockers,

@@ -33,12 +33,13 @@ def quality(raw):
         return 0.
 
 
-def select(rows, maximum):
+def select(rows, maximum, *, vector_reader=None):
     import numpy as np
     from .clustering import vector
     from .view_prototypes import pose_view
     if maximum <= 0:
         return []
+    vector = vector_reader or vector
     pool, scene = [], None
     # Saturated support keeps only enough metadata to certify a rare look.
     # Frozen pivots prevent gradually changing observations from joining a mode.
