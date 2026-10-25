@@ -30,7 +30,7 @@ def signature(db,selected,config):
         ('origins','SELECT i.sample_key,i.person,i.observation FROM identity_origins i JOIN people p ON p.id=i.person WHERE p.scope=? AND p.namespace=? ORDER BY i.sample_key')]
     if available(db):queries.append(('person','SELECT e.observation,e.contract,e.status,e.metadata,e.embedding FROM person_evidence e JOIN observations o ON o.id=e.observation JOIN scans s ON s.id=o.scan WHERE s.scope=? AND s.namespace=? ORDER BY e.observation,e.contract'))
     from .dependencies import cached, supported
-    from .dependency_schema import validate_triggers, EXTRA_TRIGGERS
+    from .dependency_schema import validate_triggers, EXTRA_TRIGGERS, RAW_TRIGGERS
     installed={r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='trigger'")}
     cacheable=supported(db) and set(EXTRA_TRIGGERS)<=installed
     if cacheable:validate_triggers(db,required=True)
@@ -48,7 +48,8 @@ def signature(db,selected,config):
             before,order=query.rsplit(' ORDER BY ',1)
             for scan in scans:
                 compute=lambda:rows_digest(before+' AND o.scan=? ORDER BY '+order,(scope,namespace,scan))
-                value=(cached(db,'hybrid-'+name,scan,'v2',compute,dependency='scan',dependency_key=scan,checked=True)
+                dependency='raw-'+name if set(RAW_TRIGGERS)<=installed else 'scan'
+                value=(cached(db,'hybrid-'+name,scan,'v3-'+dependency,compute,dependency=dependency,dependency_key=scan,checked=True)
                        if cacheable else compute())
                 h.update(encoded([scan,value]).encode())
         else:

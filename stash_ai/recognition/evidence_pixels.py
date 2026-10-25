@@ -108,6 +108,16 @@ from contextvars import ContextVar
 _active_aliases = ContextVar('recognition_pixel_aliases', default=None)
 
 
+class _LazyAliases:
+    def __init__(self,db):
+        self.db,self.mapping=db,None
+
+    def get(self,value,default):
+        if value is None:return default
+        if self.mapping is None:self.mapping=dict(aliases(self.db))
+        return self.mapping.get(value,default)
+
+
 def canonical_pixel(value):
     mapping = _active_aliases.get()
     return mapping.get(value, value) if mapping is not None else value
@@ -123,7 +133,9 @@ def alias_scope(db):
     if _active_aliases.get() is not None:
         yield
         return
-    token = _active_aliases.set(dict(aliases(db)))
+    # Warm certificate validation may never count a vote. Do not read every
+    # retained thumbnail until the first physical evidence key is requested.
+    token = _active_aliases.set(_LazyAliases(db))
     try:
         yield
     finally:

@@ -19,3 +19,13 @@ must agree, and new identities cannot train one another through this route.
 Joint cue assignment uses bounded constraint search without truncating domains.
 With complete body coverage, an ambiguous face solution may be resolved using a
 separate body ranking while retaining final face/co-presence rival guards.
+
+PR4: Reuse immutable hybrid catalogues under the run cache budget. Query recovery
+uses blocked centroid nomination with conservative tolerance and exact witness
+finalists. Scalar face-query results retain the original NumPy reduction and are
+cached by immutable input bytes. Copresence joins run in blocks of 64 pairs;
+oversized proofs alone fall back to serial computation. Schema 8 adds audited,
+transactional raw-feature stamps, with migration from schema 7, so assignment
+updates do not rehash unchanged face/body inputs. Pixel alias discovery is lazy
+on warm paths. Birth recovery now requires every original member, including
+members excluded by query eligibility, and excludes rejected cohorts from votes.

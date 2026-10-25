@@ -25,8 +25,10 @@ def _recover(database, selected, config, *, births=()):
     for identity in identities:
         cores=[(identity.observations,identity.faces,identity.persons)]+list(identity.query_cores)
         for ids,faces,bodies in cores:
-            banks.append((identity,Group(identity.person,list(faces),True,ids),bodies))
-    groups=[group for _,group,_ in banks]
+            if len(faces):banks.append((identity,Group(identity.person,list(faces),True,ids),bodies,faces))
+    groups=[group for _,group,_,_ in banks]
+    from .hybrid_query_index import QueryIndex
+    index=QueryIndex(banks,config.data['sapiensid']['execution']['reference_bytes'])
     policy=matching_policy(config);claims=[];votes=defaultdict(Votes)
     rows=db.execute('SELECT o.*,e.embedding AS body,c.id AS candidate,c.person AS prior_owner FROM candidates c '
         'JOIN observations o ON o.id='+observation_sql('c')+
@@ -34,22 +36,25 @@ def _recover(database, selected, config, *, births=()):
         "WHERE c.policy=? AND (c.status='withheld' OR c.person IN (SELECT value FROM json_each(?))) AND o.rejected IS NULL "
         'AND o.scan IN (SELECT value FROM json_each(?)) AND '+query_sql('o',config.data['clustering'])+
         ' ORDER BY o.scan,o.cue,o.id',(contract(config),policy,encoded(list(births)),encoded([s['scan'] for s in selected])))
-    used=0;source_counts=defaultdict(int)
+    used=0
+    source_counts=dict(db.execute('SELECT person,COUNT(*) FROM members WHERE person IN '
+        '(SELECT value FROM json_each(?)) GROUP BY person',(encoded(list(births)),)))
     for row in rows:
-        if row['prior_owner'] in births:source_counts[row['prior_owner']]+=1
         face=vector(row);body=np.frombuffer(row['body'],dtype='<f4') if row['body'] is not None else None
         if body is not None and (body.shape!=(4096,) or not np.isfinite(body).all() or abs(float(np.linalg.norm(body))-1)>.001):
             raise ValueError('Invalid retained SapiensID query feature.')
         choices=[]
-        for identity,group,bodies in banks:
+        face_batch=np.asarray([face],dtype='float64')
+        body_batch=np.asarray([body],dtype='float64') if body is not None else None
+        for identity,group,bodies,faces in index.candidates(face,settings['face_floor']):
             if identity.person in births:continue
-            f=scores(np.asarray([face]),np.asarray(group.samples))
+            f=scores(face_batch,faces)
             if f is None or f['minimum']<settings['face_floor']:continue
             if body is None:
                 admissible=(not identity.guard_missing and f['minimum']>=config.data['clustering']['cohesion_threshold'] and f['mean']>=config.data['recognition']['match_threshold'])
                 choices.append((f['mean'],identity.person,admissible,group))
                 continue
-            measures=[scores(np.asarray([body]),bodies)] if len(bodies) else []
+            measures=[scores(body_batch,bodies)] if len(bodies) else []
             measures=[m for m in measures if m is not None]
             score=max((m['mean'] for m in measures),default=1.)
             admissible=bool(measures and not identity.guard_missing and
@@ -73,15 +78,17 @@ def _recover(database, selected, config, *, births=()):
         used+=len(encoded(proof))+len(row['quality'])+512
         if used>config.data['sapiensid']['execution']['plan_bytes']:
             raise ValueError('SapiensID query plan_bytes budget exceeded.')
-        claims.append((row['candidate'],row['id'],owner,proof,row['prior_owner']));votes[owner].add(row)
+        claims.append((row['candidate'],row['id'],owner,proof,row['prior_owner'],row))
     accepted=0
     birth_claims=defaultdict(list)
     for claim in claims:
         if claim[4] in births:birth_claims[claim[4]].append(claim)
     admissible_births={source for source,items in birth_claims.items()
-        if len(items)==source_counts[source] and len({c[2] for c in items})==1}
+        if len(items)==source_counts.get(source,0) and len({c[2] for c in items})==1}
+    for candidate,observation,owner,proof,prior,row in claims:
+        if prior not in births or prior in admissible_births:votes[owner].add(row)
     with db:
-        for candidate,observation,owner,proof,prior in claims:
+        for candidate,observation,owner,proof,prior,row in claims:
             if prior in births and prior not in admissible_births:continue
             if len(votes[owner])<settings['min_support']:continue
             db.execute("UPDATE candidates SET person=?,status='accepted',payload=json_set(payload,"

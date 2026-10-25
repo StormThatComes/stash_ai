@@ -70,9 +70,9 @@ def scores(left,right):
     import numpy as np
     if not len(left) or not len(right):return None
     low=1.;total=0.;count=0
-    right64=right.astype('float64')
+    right64=right.astype('float64',copy=False)
     for start in range(0,len(left),16):
-        values=left[start:start+16].astype('float64') @ right64.T
+        values=left[start:start+16].astype('float64',copy=False) @ right64.T
         low=min(low,float(values.min()));total+=float(np.sum(values,dtype='float64'));count+=values.size
     return dict(minimum=low,mean=total/count)
 
@@ -219,5 +219,22 @@ def report(db,config,scope,namespace,*,focus=None):
 
 def catalogue(db, config, scope, namespace):
     from .evidence_pixels import alias_scope
+    from .run_cache import current, database_key, MISSING
+    from .config import digest, plain
+    cache=current();generation=database_key(db)
+    key=('hybrid-catalogue',generation,scope,namespace,digest(plain(config.data)))
+    found=cache.get(key) if generation is not None else MISSING
+    if found is not MISSING:return found
     with alias_scope(db):
-        return _catalogue(db, config, scope, namespace)
+        found=_catalogue(db, config, scope, namespace)
+    size=0
+    for item in found:
+        arrays=[item.faces,item.persons,item.guard_faces,item.guard_persons,*item.body_modes]
+        arrays.extend(v for _,faces,bodies in item.query_cores for v in (faces,bodies))
+        for array in arrays:
+            if array is not None:
+                array.flags.writeable=False
+                size+=array.nbytes*2+256
+        size+=1024+sum(len(v)+128 for v in item.observations+item.person_observations+item.guard_observations)
+    if generation is not None:cache.put(key,found,size)
+    return found

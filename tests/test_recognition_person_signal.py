@@ -43,7 +43,7 @@ def test_v5_readonly_then_writer_migration(tmp_path):
     assert path.read_bytes()==before
     with FaceDatabase(path) as state:
         db=state.connection
-        assert db.execute('PRAGMA user_version').fetchone()[0]==7
+        assert db.execute('PRAGMA user_version').fetchone()[0]==8
         db.execute("INSERT INTO scans(id,scope,scene,namespace,input_sha,policy_sha,manifest,coverage,total) VALUES ('s','x','1','n','i','p','{}','{}',1)")
         db.execute("INSERT INTO observations VALUES ('o','s',0,0,'url','[]','[]','{}',NULL,512,NULL,NULL)")
         version=db.execute("SELECT version FROM evidence_versions WHERE kind='scan' AND key='s'").fetchone()[0]
