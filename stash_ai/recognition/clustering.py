@@ -19,7 +19,7 @@ from .scoring import comparisons, scoped
 from .evidence_cache import current as evidence, scoped as evidence_owned
 from .parallel_scores import scored_rows, contributions
 
-MATCHING_FORMAT = 45
+MATCHING_FORMAT = 46
 
 
 def vector(row):
@@ -329,7 +329,7 @@ def cluster_scene(database, scan, config, *, progress=None, _cold_replay=False):
                     if person is not None and not group.known:
                         if grouping['strict_appearance_matching']:
                             from .reference_selection import refresh_local
-                            refresh_local(db,group,observation,grouping['max_samples_per_person'],usage,policy=policy)
+                            refresh_local(db,group,observation,grouping['max_samples_per_person'],usage,policy=policy,config=config)
                         elif len(group.samples) < grouping['max_samples_per_person']:
                             usage.add([query], kind='Selected')
                             group.samples.append(query)
@@ -357,7 +357,7 @@ def cluster_scene(database, scan, config, *, progress=None, _cold_replay=False):
         if grouping['strict_appearance_matching']:
             from .reference_selection import refresh_local
             for group in groups[fixed_count:]:
-                refresh_local(db,group,None,grouping['max_samples_per_person'],usage,policy=policy)
+                refresh_local(db,group,None,grouping['max_samples_per_person'],usage,policy=policy,config=config)
         usage.emit(force=True)
         from .decision_resolution import resolve_pending
         resolve_pending(db, policy, config, scans=(scan,))

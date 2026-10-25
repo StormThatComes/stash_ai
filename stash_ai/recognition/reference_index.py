@@ -161,12 +161,7 @@ class ReferenceIndex:
                 from .reference_roles import strict_sql
                 # Full canonical refresh of changed owners: previous bounded
                 # representatives are not a sufficient summary for resampling.
-                condition, argument = 'm.person=?', person
-                rows = self.db.execute('SELECT o.id,o.dimensions,o.embedding,o.quality,o.geometry,o.seconds,s.scene FROM observations o '
-                    'JOIN members m ON m.observation=o.id JOIN scans s ON s.id=o.scan '
-                    'WHERE ' + condition + ' AND ' + anchor_sql('o', policy) + ' AND ' + strict_sql() +
-                    ' ORDER BY CAST(s.scene AS INTEGER),s.scene,o.cue,o.seconds,o.geometry,o.embedding,o.id',
-                    (argument,))
+                rows = self.canonical_rows(person)
                 ids = tuple(identifier for identifier, _ in select(rows, policy['max_samples_per_person']))
             previous = self.groups.get(person)
             if previous is None or previous[0] != ids:
@@ -205,12 +200,46 @@ class ReferenceIndex:
         self.cached = identity, tuple(result), usage.bytes, usage.samples
         return result
 
+    def canonical_rows(self, person):
+        """Use indexed membership ranks and the shared immutable row cache.
+
+        Recompute selection from every member, without an SQL sort or correlated
+        membership predicate. Cache eviction only changes the number of reads.
+        """
+        from .run_cache import current, MISSING
+        cache = current()
+        ranks = self.members[person]
+        for offset in range(0, len(ranks), 256):
+            ids = [self.order[rank] for rank in ranks[offset:offset+256]]
+            values, missing = {}, []
+            for identifier in ids:
+                key = ('reference-row', id(self), identifier)
+                found = cache.get(key) if cache is not None else MISSING
+                if found is MISSING:
+                    missing.append(identifier)
+                else:
+                    values[identifier] = found
+            if missing:
+                for row in self.db.execute('SELECT o.id,o.scan,o.dimensions,o.embedding,o.quality,o.geometry,o.seconds,s.scene '
+                        'FROM observations o JOIN scans s ON s.id=o.scan WHERE o.id IN '
+                        '(SELECT value FROM json_each(?))', (encoded(missing),)):
+                    value = dict(row)
+                    values[row['id']] = value
+                    if cache is not None:
+                        cache.put(('reference-row', id(self), row['id']), value,
+                                  len(row['embedding']) + len(row['quality']) + len(row['geometry']) + 1024)
+            yield from (values[identifier] for identifier in ids)
+
     def close(self):
         if not self.enabled:
             return
         for name in ('insert', 'delete', 'update', 'people', 'alias',
                      'candidate_insert', 'candidate_update', 'candidate_delete'):
             self.db.execute('DROP TRIGGER IF EXISTS temp.recognition_reference_' + name)
+        from .run_cache import current
+        cache = current()
+        if cache is not None:
+            cache.discard(lambda key: key[0] == 'reference-row' and key[1] == id(self))
         self.db.create_function('recognition_reference_member', 3, None)
         self.db.create_function('recognition_reference_roots', 0, None)
         self.db.create_function('recognition_reference_role', 1, None)

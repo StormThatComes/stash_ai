@@ -38,9 +38,33 @@ def select(rows, maximum):
     from .clustering import vector
     from .view_prototypes import pose_view
     pool, scene = [], None
+    # Saturated support keeps only enough metadata to certify a rare look.
+    # Frozen pivots prevent gradually changing observations from joining a mode.
+    from .independent_evidence import Votes
+    reserves = []
+
+    def reserve(entry):
+        order, row, sample, score, pose = entry
+        matching = [slot for slot in reserves if slot['pose'] == pose and
+                    float(np.dot(slot['pivot'], sample)) >= .95 and
+                    float(np.dot(slot['best'][2], sample)) >= .95]
+        slot = max(matching, key=lambda v: float(np.dot(v['pivot'], sample))) if matching else None
+        if slot is None:
+            if len(reserves) >= maximum:
+                return
+            slot = dict(pivot=sample, pose=pose, best=entry, votes=Votes())
+            reserves.append(slot)
+        if len(slot['votes']) < 3:
+            slot['votes'].add(dict(row, scan=row['scan'] if 'scan' in row.keys() else row['scene']))
+        if score > slot['best'][3]:
+            slot['best'] = entry
+
 
     def reduce():
         nonlocal pool
+        supported = [slot['best'] for slot in reserves if len(slot['votes']) >= 3]
+        known = {item[1]['id'] for item in pool}
+        pool += [item for item in supported if item[1]['id'] not in known]
         if len(pool) <= maximum:
             return
         if len({sample.shape for _, _, sample, _, _ in pool}) != 1:
@@ -48,11 +72,12 @@ def select(rows, maximum):
         matrix = np.stack([item[2] for item in pool])
         chosen, scenes, poses = [], Counter(), Counter()
         nearest = np.full(len(pool), -1., dtype=np.float64)
+        reserved = {item[1]['id'] for item in supported}
         for _ in range(maximum):
             def priority(i):
                 order, row, _, score, pose = pool[i]
                 novelty = 0. if not chosen else max(0., 1. - float(nearest[i]))
-                return (novelty * (.25 + .75 * score) + .05 / (1 + scenes[row['scene']]) +
+                return (row['id'] in reserved, novelty * (.25 + .75 * score) + .05 / (1 + scenes[row['scene']]) +
                         .02 / (1 + poses[pose]) + .20 * score, -order)
             winner = max((i for i in range(len(pool)) if i not in chosen), key=priority)
             chosen.append(winner)
@@ -67,6 +92,7 @@ def select(rows, maximum):
         scene = row['scene']
         sample = vector(row)
         entry = (order, row, sample, quality(row['quality']), pose_view(row['geometry']))
+        reserve(entry)
         # A duplicated cue time cannot fill the bounded reference bank.
         duplicate = next((i for i, item in enumerate(pool)
                           if (item[1]['scene'], item[1]['seconds']) == (row['scene'], row['seconds'])), None)
@@ -81,17 +107,15 @@ def select(rows, maximum):
     return [(row['id'], sample) for _, row, sample, _, _ in sorted(pool, key=lambda item: item[0])]
 
 
-def refresh_local(db, group, observation, maximum, usage, *, policy=None):
-    """Refresh provisional representatives without forgetting the original seed.
+def refresh_local(db, group, observation, maximum, usage, *, policy=None, config=None):
+    """Refresh provisional representatives while keeping a validated fixed core.
 
-    Only already admitted strict observations are eligible. Keeping the seed
-    prevents a sequence of replacements from walking away from its origin.
+    Only already admitted strict observations are eligible. The original seed
+    may be replaced once by a strictly validated core; its medoid stays fixed.
     Full banks refresh after at most eight accepted timestamps. SQLite streams
     all admitted rows in canonical order; the sampler keeps at most twice the cap.
     """
     from .database import encoded
-    if maximum == 1:
-        return
     pending=getattr(group,'_appearance_pending',None)
     if pending is None:
         pending={};group._appearance_pending=pending
@@ -103,19 +127,50 @@ def refresh_local(db, group, observation, maximum, usage, *, policy=None):
         return
     ids = tuple(dict.fromkeys(group.sample_ids + tuple(pending.values())))
     pending.clear()
+    if not hasattr(group, '_identity_origin'):
+        group._identity_origin = group.sample_ids[0]
     seed = group.sample_ids[0]
     from .replay_addresses import address
     def rows():
         return db.execute('SELECT o.id,o.scan,o.seconds,o.geometry,o.quality,o.dimensions,o.embedding,s.scene '
-            'FROM observations o JOIN scans s ON s.id=o.scan WHERE o.id IN '
-            '(SELECT value FROM json_each(?)) OR EXISTS (SELECT 1 FROM candidates c WHERE '
-            +address(db,'c')+"=o.id AND c.person=? AND c.policy=? AND c.status IN ('pending','accepted') "
+            'FROM observations o JOIN scans s ON s.id=o.scan WHERE o.id IN ('
+            'SELECT value FROM json_each(?) UNION SELECT '+address(db,'c')+
+            " FROM candidates c WHERE c.person=? AND c.policy=? AND c.status IN ('pending','accepted') "
             "AND json_extract(c.payload,'$.reason')='candidate_group') "
             'ORDER BY CAST(s.scene AS INTEGER),s.scene,o.cue,o.seconds,o.geometry,o.embedding,o.id',
             (encoded(ids),group.identifier,policy))
+    # The stable label origin is separate from the first scoring vector. Replace
+    # a weak seed once, using an independently supported complete-link core.
+    # Its validated medoid then stays protected for the rest of this local run.
+    if config is not None and not getattr(group, '_seed_validated', False):
+        from .independent_evidence import Votes
+        from .clustering import vector
+        import numpy as np
+        support = Votes()
+        core = []
+        minimum = max(3, config.data['recognition']['min_identity_support'])
+        cohesion = config.data['clustering']['cohesion_threshold']
+        seed_quality = quality(db.execute('SELECT quality FROM observations WHERE id=?', (seed,)).fetchone()[0])
+        for row in rows():
+            sample = vector(row)
+            if quality(row['quality']) <= seed_quality or any(float(np.dot(sample,v)) < cohesion for _,v in core):
+                continue
+            before = len(support)
+            support.add(row)
+            if len(support) > before and len(core) < minimum:
+                core.append((row, sample))
+            if len(support) >= minimum:
+                winner = max(core, key=lambda pair: (sum(float(np.dot(pair[1],v)) for _,v in core),
+                                                      quality(pair[0]['quality']), pair[0]['id']))
+                seed = winner[0]['id']
+                group.samples[0] = winner[1]
+                group.sample_ids = (seed,) + group.sample_ids[1:]
+                group._seed_validated = True
+                break
     seed_row = db.execute('SELECT scan,seconds FROM observations WHERE id=?',(seed,)).fetchone()
-    chosen = select((r for r in rows() if r['id'] != seed and
+    chosen = (select((r for r in rows() if r['id'] != seed and
                      (r['scan'],r['seconds']) != (seed_row['scan'],seed_row['seconds'])), maximum-1)
+              if maximum > 1 else [])
     samples = [group.samples[0]] + [v for _,v in chosen]
     usage.add_counts(sum(v.nbytes for v in samples)-sum(v.nbytes for v in group.samples),
                      len(samples)-len(group.samples),kind='Selected appearance representatives')

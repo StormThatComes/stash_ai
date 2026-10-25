@@ -25,3 +25,39 @@ def test_alignment_residual_is_invariant_to_source_scale_and_translation():
     assert abs(second['alignment_scale']-.5) < 1e-6
     landmarks[2,0]+=12
     assert alignment_measurements(SimpleNamespace(landmarks=landmarks))['alignment_error'] > .01
+
+
+def test_supported_rare_mode_has_reserved_slot():
+    from stash_ai.recognition.reference_selection import select
+    def row(i, vector, pixels):
+        return dict(id=str(i),scan='s',scene='s',seconds=i,geometry='[]',dimensions=2,
+                    embedding=np.array(vector,dtype='<f4').tobytes(),
+                    quality=json.dumps(dict(pixels=pixels,sharpness=pixels)))
+    rows=[row(i,[1.,0.],500) for i in range(30)]
+    rows += [row(i,[.8,.6],50) for i in range(30,33)]
+    chosen=select(rows,2)
+    assert len(chosen)==2 and any(float(v[1])>.5 for _,v in chosen)
+
+
+def test_seed_replacement_keeps_label_origin_and_is_one_time(tmp_path):
+    from tests.test_recognition_clustering import setup, scan
+    from stash_ai.recognition.clustering import Group, vector
+    from stash_ai.recognition.database import FaceDatabase
+    from stash_ai.recognition.reference_selection import refresh_local
+    from stash_ai.recognition.reference_usage import ReferenceUsage
+    config=setup(tmp_path)
+    with FaceDatabase(config.database) as state:
+        sid,_=scan(state,config,'1',count=5)
+        rows=list(state.connection.execute('SELECT * FROM observations WHERE scan=? ORDER BY cue',(sid,)))
+        state.connection.execute('UPDATE observations SET quality=? WHERE id=?',
+                                 (json.dumps(dict(pixels=1,sharpness=0)),rows[0]['id']))
+        group=Group('stable-label',[vector(rows[0])],False,(rows[0]['id'],))
+        usage=ReferenceUsage(10000);usage.add(group.samples,kind='seed')
+        for row in rows[1:]:
+            refresh_local(state.connection,group,row,5,usage,config=config)
+        assert group.identifier=='stable-label'
+        assert group._identity_origin==rows[0]['id']
+        assert group._seed_validated and group.sample_ids[0]!=rows[0]['id']
+        protected=group.sample_ids[0]
+        refresh_local(state.connection,group,rows[-1],5,usage,config=config)
+        assert group.sample_ids[0]==protected
