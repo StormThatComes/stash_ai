@@ -134,17 +134,21 @@ def audit_input(detector,image,face,path):
     """Export exact pre-normalization RGB input and measured model geometry."""
     from PIL import Image
     from .alignment_audit import _png
+    from .person_audit import export as export_annotations
     details=detector.observation_quality(image,face)
     if details['identity_rejection'] is not None:
         return details
     batch,points,mask=detector.audit_input(image,face)
     pixels=((batch[0].detach().cpu().permute(1,2,0).numpy()+1)*127.5).clip(0,255).round().astype('uint8')
     target=path.with_name(path.name+'-person-input.png')
-    with Image.fromarray(pixels) as png:_png(png,target)
+    normalized_points=points[0].detach().cpu().tolist()
+    with Image.fromarray(pixels) as png:
+        _png(png,target)
+        annotations=export_annotations(image,png,face,details['person'],normalized_points,path)
     mask_path=path.with_name(path.name+'-person-mask.png')
     with Image.fromarray(mask[0].detach().cpu().numpy().astype('uint8')*255) as png:_png(png,mask_path)
     return dict(details,input_file=target.name,mask_file=mask_path.name,
-                normalized_keypoints=points[0].detach().cpu().tolist())
+                normalized_keypoints=normalized_points,**annotations)
 
 
 def retained_report(db,observation,config,directory,name):

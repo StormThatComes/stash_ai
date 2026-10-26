@@ -182,15 +182,23 @@ def test_associated_cpu_batch_matches_scalar_inputs_and_features():
 
 def test_person_alignment_audit_exports_measured_inputs_and_private_pixels(tmp_path):
     import os
+    from types import SimpleNamespace
     from stash_ai.recognition.person_collection import audit_input
     from stash_ai.recognition.sapiensid_v1 import prepare_person_input
     class Detector:
-        def observation_quality(self,image,face):return dict(identity_rejection=None)
+        def observation_quality(self,image,face):
+            return dict(identity_rejection=None,person=dict(
+                bounds=[0,0,image.width,image.height],keypoints=[[20,20]]*17))
         def audit_input(self,image,face):return prepare_person_input(image,[[20,20]]*22)
     with sample() as image:
-        result=audit_input(Detector(),image,None,tmp_path/'face')
+        result=audit_input(Detector(),image,SimpleNamespace(landmarks=[[20,20]]*5),tmp_path/'face')
+        batch,_,_=prepare_person_input(image,[[20,20]]*22)
+        expected=((batch[0].permute(1,2,0).numpy()+1)*127.5).clip(0,255).round().astype('uint8')
     assert len(result['normalized_keypoints'])==22
-    for key in ('input_file','mask_file'):
+    for key in ('input_file','mask_file','source_file','annotated_input_file'):
         path=tmp_path/result[key]
-        with Image.open(path) as image:assert image.size==(384,384)
+        with Image.open(path) as image:
+            assert image.size==((80,145) if key=='source_file' else (384,384))
+            if key=='input_file':np.testing.assert_array_equal(np.asarray(image),expected)
+            if key=='annotated_input_file':assert not np.array_equal(np.asarray(image),expected)
         if os.name=='posix':assert path.stat().st_mode & 0o777==0o600

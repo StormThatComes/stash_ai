@@ -203,6 +203,11 @@ def audit_scene(source, detector, config, scene_id, directory, *, maximum=None, 
                     if hasattr(detector, 'audit_input'):
                         from .person_collection import audit_input
                         person_input = audit_input(detector,image,face,subdir/name)
+                    images = [f'scene-{scene_id}/{name}{suffix}' for suffix in suffixes]
+                    if person_input:
+                        images.extend(f'scene-{scene_id}/{person_input[key]}' for key in
+                                      ('input_file', 'mask_file', 'source_file', 'annotated_input_file')
+                                      if person_input.get(key))
                     samples.append({
                         'cue_index': index, 'seconds': float(cue.start),
                         'face_index': face_index, 'detection_score': float(face.score),
@@ -213,7 +218,7 @@ def audit_scene(source, detector, config, scene_id, directory, *, maximum=None, 
                         'detection_rejection': None,
                         'geometry': measures,
                         'person_input': person_input,
-                        'images': [f'scene-{scene_id}/{name}{suffix}' for suffix in suffixes],
+                        'images': images,
                     })
     return {
         'scene_id': scene_id, 'total_selected_vtt_cues': total,
