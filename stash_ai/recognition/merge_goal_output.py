@@ -16,6 +16,11 @@ def explain(result):
         conflicting_trials=[dict(trial=name, conflicts=item['goal_result']['conflicts'])
             for name, item in simulation.get('trials', {}).items() if not item['goal_result']['disjoint']],
         conclusion='Best among completed trials, including baseline; neither global optimality nor impossibility is proved.')
+    if simulation.get('input_selection', {}).get('excluded_scans'):
+        result['explanation']['input_blockers'] = simulation['input_selection']['excluded_scans']
+        result['explanation']['validation_scope'] = 'compatible_complete_latest_scenes_only'
+        if simulation.get('stop_reason') == 'no_compatible_scans':
+            result['explanation']['conclusion'] = 'No compatible complete latest scan is available; no trial was run.'
     hybrid = trial.get('hybrid_solver_evidence', {})
     if hybrid.get('enabled'):
         result['explanation']['hybrid'] = dict(
@@ -55,6 +60,10 @@ def export(config, result, output, yaml_output):
             if not recommendation['fully_solved']:
                 reasons = sorted({r['reason'] for r in recommendation['unmet_conditions']})
                 header += '# Unmet conditions: ' + ', '.join(reasons) + '. See the JSON report for details.\n'
+            inputs = result['simulation'].get('input_selection', {})
+            if inputs.get('excluded_scans'):
+                header += (f"# Partial input scope: verified on {inputs['selected_scene_count']}/{inputs['latest_scene_count']} scenes.\n"
+                           '# Use run_argv from the JSON report; excluded or recollected scenes require revalidation.\n')
             serialized = header + serialized
         # Validate the serialized full document before exposing it as a runnable config.
         from .config import parse_yaml, validate
@@ -87,8 +96,15 @@ def export(config, result, output, yaml_output):
 def summary(result):
     """Final stderr summary; JSON stdout and report files remain machine-readable."""
     selected = result.get('best_result')
+    inputs = result.get('simulation', {}).get('input_selection', {})
+    input_lines = []
+    if inputs.get('excluded_scans'):
+        from .replay_inputs import describe
+        input_lines = ['Merge solver input scope is partial. ' + describe(inputs)]
+        if selected is not None:
+            input_lines.append('Recommendations apply only to replayed scenes; use run_argv from the JSON report.')
     if selected is None:
-        return 'Merge solver: no completed trial; no configuration selected.'
+        return '\n'.join(['Merge solver: no completed trial; no configuration selected.'] + input_lines)
     name = selected['trial']
     goal = result['simulation']['trials'][name]['goal_result']
     lines = [f"Merge solver best completed trial: {name} ({selected['quality']}); "
@@ -109,4 +125,5 @@ def summary(result):
             detail.append(f'{key}={value}')
         lines.append('  Unmet: ' + violation['reason'] + ' (' + ', '.join(detail) + ').')
     lines.append('Best among tested configurations; global optimality is not proved.')
+    lines.extend(input_lines)
     return '\n'.join(lines)

@@ -16,10 +16,30 @@ Without `--solve`, set input resolves retained goals; `--simulate` evaluates the
 baseline. No Stash writes, model loading, media access or source YAML writes occur.
 
 Each trial starts from the same read-only retained history in an independent RAM
-database and calls the ordinary production rebuild. All latest complete scans in
-the scope participate, including competitors. Incompatible latest scan contracts
-require rescanning. Old members absent from the latest selection prevent complete
-coverage certification. Empty performers cannot satisfy a goal vacuously.
+database and calls the ordinary production rebuild. All compatible complete latest
+scans in the scope participate, including competitors. `--solve` excludes scenes
+whose latest scan is incomplete or incompatible with the current scan policy,
+instead of aborting all trials because of one unavailable scene. An older scan
+never substitutes for an excluded latest scan. Excluded scenes remain in frozen
+history and go through the ordinary production reference admission rules.
+
+`simulation.input_selection` lists every excluded scene and scan, its reason,
+completion counters, and stored/expected policy hashes. The console announces a
+partial input scope before baseline and lists blockers at the end. Missing goal
+observations prevent complete coverage certification and are included in the
+best-effort result's unmet conditions. Empty performers cannot satisfy a goal
+vacuously. Goals may be fully solved on the available selection while unrelated
+scenes are excluded; this does not certify a run including those excluded scenes.
+
+The scan policy covers detection settings, `execution.max_cues`, and whether
+visibility measurements are required. Changes to `sapiensid.matching.*` alone do
+not invalidate a scan. When inputs are incompatible, use their original scan
+settings or run recognition on the reported scenes with the current configuration.
+Incomplete scans require finishing collection. If no compatible complete latest
+scan is available, the solver writes a `no_compatible_scans` diagnostic report,
+runs no trials, exports no YAML, and exits 2. Plain `--simulate`, evaluation and
+threshold tuning retain their requirement that the whole requested selection be
+compatible; their error now identifies the affected scenes and reasons.
 
 A candidate is admissible only when every goal member has retained observations,
 all are present and assigned, and no final identity contains observations from
@@ -128,6 +148,9 @@ counts. `explanation.unresolved` repeats this list. For compatibility,
 `--yaml-output` requires `--solve` and writes the selected complete configuration,
 including best-effort and unchanged-baseline results. YAML comments identify the
 trial, quality and unmet condition types; the JSON report contains the details.
+For a partial input scope, YAML comments also identify the reduced validation
+scope. Use the report's `run_argv` to replay exactly the validated scenes;
+including excluded or recollected scenes requires revalidation.
 Relative model/database/names paths become absolute so the exported file can be
 relocated. Outputs must be distinct new files.
 `run_argv` gives the exact scene selection as an argument array, avoiding shell

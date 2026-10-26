@@ -58,7 +58,7 @@ def execute(args, config):
     if args.solve and args.progress_style != 'off':
         from .merge_goal_output import summary
         print(summary(result), file=sys.stderr, flush=True)
-    return 130 if result.get('interrupted') else 0
+    return 130 if result.get('interrupted') else 2 if result.get('status') == 'no_compatible_scans' else 0
 
 
 def assess(goals, observations, retained, predicted):
