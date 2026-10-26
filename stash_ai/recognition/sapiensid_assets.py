@@ -104,11 +104,14 @@ def encoder_assets(config):
 
 def pose_asset(config):
     settings = config.data['sapiensid']['pose']
-    path = _path(config, settings['path'], 'yolov8n-pose.pt')
     checksum = settings['sha256'] or registry.POSE_SHA256
+    known = {registry.POSE_SHA256: (registry.POSE_NAME, registry.POSE_URL, registry.POSE_BYTES),
+             registry.LEGACY_POSE_SHA256: (registry.LEGACY_POSE_NAME, registry.LEGACY_POSE_URL, registry.LEGACY_POSE_BYTES)}
+    name, url, size = known.get(checksum, (registry.POSE_NAME, None, None))
+    path = _path(config, settings['path'], name)
     if not path.is_file():
         _require_download(config, path)
-        if checksum != registry.POSE_SHA256:
+        if url is None:
             raise FileNotFoundError('Custom SapiensID pose hash requires an existing matching local checkpoint.')
-        install(registry.POSE_URL, path, registry.POSE_BYTES, checksum)
+        install(url, path, size, checksum)
     return path, checksum

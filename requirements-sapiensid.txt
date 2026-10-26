@@ -5,4 +5,6 @@ omegaconf>=2.3,<3
 easydict>=1.10,<2
 pandas>=2.2,<4
 matplotlib>=3.8,<4
-ultralytics>=8.3,<9
+# Explicit NMS-head selection for YOLO26; older releases may ignore predict(nms=True).
+ultralytics>=8.4.189,<9
+packaging>=23.0

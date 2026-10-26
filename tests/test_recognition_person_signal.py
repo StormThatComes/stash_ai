@@ -49,16 +49,40 @@ def test_variant_validation_rejects_unsupported_values(variant):
 def test_wb12m_default_and_wb4m_preserves_original_evidence_contract():
     from stash_ai.recognition.config import digest
     from stash_ai.recognition.sapiensid_backend import identity_contract
-    from stash_ai.recognition.sapiensid_registry import MODELS
+    from stash_ai.recognition.sapiensid_registry import MODELS, LEGACY_POSE_SHA256
     data=defaults();config=SimpleNamespace(data=data)
     assert data['sapiensid']['model']['variant']=='wb12m'
     wb12m=contract(config);s=data['sapiensid']
     assert identity_contract(config)['model_sha256']==MODELS['wb12m']['sha256']
     s['model']['variant']='wb4m'
+    s['pose']['sha256']=LEGACY_POSE_SHA256
     legacy=digest(dict(format='sapiensid-wb4m-person-v2',model_yaml=s['model']['model_yaml_sha256'],
                        pose={k:v for k,v in s['pose'].items() if k!='path'}))
     assert contract(config)==legacy and contract(config)!=wb12m
     assert identity_contract(config)['model_sha256']==MODELS['wb4m']['sha256']
+
+
+@pytest.mark.parametrize('variant', ['wb12m', 'wb4m'])
+def test_yolo26_default_separates_evidence_from_explicit_legacy_pose(variant):
+    from stash_ai.recognition.config import digest
+    from stash_ai.recognition.sapiensid_backend import identity_contract
+    from stash_ai.recognition.sapiensid_registry import LEGACY_POSE_SHA256, POSE_SHA256, MODELS, UPSTREAM_COMMIT
+    data=defaults();settings=data['sapiensid'];settings['model']['variant']=variant
+    config=SimpleNamespace(data=data)
+    assert settings['pose']['path'].endswith('/yolo26m-pose.pt')
+    assert settings['pose']['sha256']==POSE_SHA256
+    current=contract(config)
+    settings['pose'].update(path='old/yolov8n-pose.pt',sha256=LEGACY_POSE_SHA256)
+    previous=dict(format='sapiensid-person-v3',model_yaml=settings['model']['model_yaml_sha256'],
+                  pose={k:v for k,v in settings['pose'].items() if k!='path'})
+    if variant=='wb4m':previous['format']='sapiensid-wb4m-person-v2'
+    else:previous.update(variant=variant,model_sha256=MODELS[variant]['sha256'],source_revision=UPSTREAM_COMMIT)
+    assert contract(config)==digest(previous)!=current
+    assert identity_contract(config)['contract']=='sapiensid-v1-yolov8-pose-face-anchor-square384-v2'
+    settings['pose'].update(path='',sha256='')
+    assert contract(config)==current
+    assert identity_contract(config)['pose_sha256']==POSE_SHA256
+    assert 'coco17' in identity_contract(config)['contract']
 
 
 @pytest.mark.parametrize('variant', ['wb12m', 'wb4m'])

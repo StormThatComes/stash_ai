@@ -6,18 +6,26 @@ from threading import get_ident
 from .models import YuNetDetector
 from .sapiensid_v1 import EMBEDDING_DIMENSIONS, PREPROCESSING
 from .sapiensid_loading import UPSTREAM_COMMIT, load_encoder, load_pose
-from .sapiensid_registry import POSE_SHA256, MODELS
+from .sapiensid_registry import POSE_SHA256, LEGACY_POSE_SHA256, POSE_INFERENCE, MODELS
 
-CONTRACT = 'sapiensid-v1-yolov8-pose-face-anchor-square384-v2'
+CONTRACT = 'sapiensid-v1-coco17-pose-face-anchor-square384-v3'
+
+
+def input_contract(config):
+    checksum = config.data['sapiensid']['pose']['sha256'] or POSE_SHA256
+    if checksum == LEGACY_POSE_SHA256:
+        return 'sapiensid-v1-yolov8-pose-face-anchor-square384-v2'
+    return CONTRACT
 
 
 def identity_contract(config):
     settings = config.data['sapiensid']
-    return {'contract': CONTRACT, 'source_revision': UPSTREAM_COMMIT,
+    return {'contract': input_contract(config), 'source_revision': UPSTREAM_COMMIT,
             'model_variant': settings['model']['variant'],
             'model_sha256': MODELS[settings['model']['variant']]['sha256'],
             'model_yaml_sha256': settings['model']['model_yaml_sha256'],
-            'pose_sha256': settings['pose']['sha256'] or POSE_SHA256, 'preprocessing': PREPROCESSING,
+            'pose_sha256': settings['pose']['sha256'] or POSE_SHA256,
+            'pose_inference': POSE_INFERENCE, 'preprocessing': PREPROCESSING,
             'person_score_threshold': settings['pose']['score_threshold'],
             'keypoint_score_threshold': settings['pose']['keypoint_score_threshold'],
             'person_nms_threshold': settings['pose']['nms_threshold'],
@@ -104,7 +112,9 @@ class SapiensIDFaces(YuNetDetector):
         people = []
         if faces:
             settings = self.config.data['sapiensid']
-            results = self.pose.predict(source=image, device=self.device, verbose=False,
+            # Explicitly select the one-to-many head: iou remains effective on
+            # YOLO26 instead of being silently ignored by NMS-free inference.
+            results = self.pose.predict(source=image, device=self.device, verbose=False, nms=True,
                                         conf=settings['pose']['score_threshold'],
                                         iou=settings['pose']['nms_threshold'],
                                         max_det=settings['pose']['max_people_per_frame'])
@@ -146,7 +156,7 @@ class SapiensIDFaces(YuNetDetector):
     def observation_quality(self, image, face):
         self._owner()
         person = self._person(image, face)
-        return {'identity_input': CONTRACT, 'person': person,
+        return {'identity_input': input_contract(self.config), 'person': person,
                 'identity_rejection': None if person else 'person_face_association_unavailable'}
 
     def _person_geometry(self, image, face):

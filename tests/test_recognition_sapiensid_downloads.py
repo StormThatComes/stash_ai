@@ -197,8 +197,40 @@ def test_old_empty_paths_use_model_directory(upstream):
     source, checkpoints = assets.encoder_assets(upstream.config)
     pose, checksum = assets.pose_asset(upstream.config)
     root = upstream.config.model_dir/'sapiensid_v1'
-    assert (source, checkpoints, pose) == (root/'source', root/upstream.variant, root/'yolov8n-pose.pt')
+    assert (source, checkpoints, pose) == (root/'source', root/upstream.variant, root/'yolo26m-pose.pt')
     assert checksum == registry.POSE_SHA256
+
+
+@pytest.mark.parametrize('custom_path', [False, True])
+def test_legacy_pose_download_and_new_default_keep_separate_files(upstream, monkeypatch, custom_path):
+    legacy=b'legacy pose weights'
+    monkeypatch.setattr(registry,'LEGACY_POSE_SHA256',sha(legacy))
+    monkeypatch.setattr(registry,'LEGACY_POSE_BYTES',len(legacy))
+    upstream.payloads[registry.LEGACY_POSE_URL]=legacy
+    settings=upstream.config.data['sapiensid']['pose']
+    settings.update(path='old/yolov8n-pose.pt' if custom_path else '',sha256=sha(legacy))
+    old,checksum=assets.pose_asset(upstream.config)
+    assert old.name=='yolov8n-pose.pt' and old.read_bytes()==legacy
+    assert checksum==sha(legacy)
+    settings.update(path='',sha256='')
+    new,checksum=assets.pose_asset(upstream.config)
+    assert new.name=='yolo26m-pose.pt' and new.read_bytes()==upstream.pose
+    assert checksum==registry.POSE_SHA256 and new!=old
+    assert old.read_bytes()==legacy
+    assert [url for url,_ in upstream.calls]==[registry.LEGACY_POSE_URL,registry.POSE_URL]
+    upstream.calls.clear()
+    settings.update(path=str(old),sha256=sha(legacy))
+    assert assets.pose_asset(upstream.config)==(old,sha(legacy))
+    assert not upstream.calls
+
+
+def test_switching_only_pose_hash_never_overwrites_existing_weights(upstream):
+    path,_=assets.pose_asset(upstream.config)
+    upstream.calls.clear()
+    upstream.config.data['sapiensid']['pose']['sha256']=registry.LEGACY_POSE_SHA256
+    with pytest.raises(ValueError,match='SHA256 mismatch'):
+        load_pose(upstream.config)
+    assert path.read_bytes()==upstream.pose and not upstream.calls
 
 
 def test_switching_variant_uses_separate_default_directories(upstream, monkeypatch):
@@ -274,10 +306,19 @@ def test_pose_only_path_does_not_download_source_or_identity_weights(upstream, m
         assert loaded[-1].read_bytes() == upstream.pose
         return 'pose model'
 
-    monkeypatch.setitem(sys.modules, 'ultralytics', SimpleNamespace(YOLO=yolo))
+    monkeypatch.setitem(sys.modules, 'ultralytics', SimpleNamespace(YOLO=yolo, __version__='8.4.189'))
     assert load_pose(upstream.config) == 'pose model'
     assert [url for url, _ in upstream.calls] == [registry.POSE_URL]
     assert not loaded[0].exists()  # Library receives verified bytes in a temporary file.
+
+
+@pytest.mark.parametrize('version',['8.3.0','8.4.0','8.4.188'])
+def test_pose_requires_runtime_with_explicit_nms_head_selection(upstream,monkeypatch,version):
+    import sys
+    def unexpected(*args,**kwargs):pytest.fail('incompatible runtime loaded weights')
+    monkeypatch.setitem(sys.modules,'ultralytics',SimpleNamespace(YOLO=unexpected,__version__=version))
+    with pytest.raises(RuntimeError,match='install requirements-sapiensid.txt'):
+        load_pose(upstream.config)
 
 
 def test_corrupt_existing_pose_is_not_overwritten_or_loaded(upstream, tmp_path, monkeypatch):

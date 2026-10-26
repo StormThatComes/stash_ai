@@ -3,7 +3,8 @@
 This module must remain usable without torch, CUDA or model assets.
 """
 from .config import digest
-from .sapiensid_registry import POSE_SHA256, MODEL_YAML_SHA256, MODELS, WB4M_SHA256, UPSTREAM_COMMIT
+from .sapiensid_registry import (POSE_NAME, POSE_SHA256, LEGACY_POSE_SHA256, POSE_INFERENCE,
+                                MODEL_YAML_SHA256, MODELS, WB4M_SHA256, UPSTREAM_COMMIT)
 
 DIMENSIONS = 4096
 CONTRACT = 'sapiensid-person-v3'
@@ -25,7 +26,7 @@ def defaults():
     return dict(enabled=False,
         model=dict(variant='wb12m',source_directory='recognition_models/sapiensid_v1/source',
             checkpoint_directory='', model_yaml_sha256=MODEL_YAML_SHA256),
-        pose=dict(path='recognition_models/sapiensid_v1/yolov8n-pose.pt',sha256=POSE_SHA256,score_threshold=.5,keypoint_score_threshold=.5,
+        pose=dict(path='recognition_models/sapiensid_v1/'+POSE_NAME,sha256=POSE_SHA256,score_threshold=.5,keypoint_score_threshold=.5,
                   nms_threshold=.7,max_people_per_frame=100),
         matching=dict(face_floor=.4,person_threshold=.85,ambiguity_margin=.1,min_support=3),
         execution=dict(batch_size=1,reference_bytes=134217728,plan_bytes=16777216,max_candidate_pairs=100000),
@@ -81,6 +82,8 @@ def contract(config):
     variant=s['model']['variant'];model=MODELS[variant]
     evidence=dict(format=CONTRACT,model_yaml=s['model']['model_yaml_sha256'],
         pose={k:(v or POSE_SHA256) if k=='sha256' else v for k,v in s['pose'].items() if k!='path'})
+    if evidence['pose']['sha256'] != LEGACY_POSE_SHA256:
+        evidence['pose_inference'] = POSE_INFERENCE
     if variant=='wb4m' and model['sha256']==WB4M_SHA256:
         # Preserve existing evidence for the exact originally supported weights.
         evidence['format']='sapiensid-wb4m-person-v2'
