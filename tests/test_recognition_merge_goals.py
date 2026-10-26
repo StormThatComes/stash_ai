@@ -32,7 +32,8 @@ def test_final_assignments_reject_bridges_and_lost_members():
 def test_objective_balances_sets_and_rejects_coverage_loss():
     from stash_ai.recognition.merge_goals import objective
     def status(a,b,admissible=True):
-        return dict(admissible=admissible, fully_solved=False, groups=[dict(complete_fraction=x,
+        return dict(admissible=admissible, fully_solved=False, disjoint=True, cross_set_observation_pairs=0,
+            groups=[dict(complete_fraction=x, assigned_fraction=1., consolidation_fraction=x,
             largest_complete_performers=int(x*10), fragments=2) for x in (a,b)])
     assert objective(status(.6,.6)) > objective(status(1.,.2))
     assert objective(status(.6,.6)) > objective(status(1.,1.,False))
