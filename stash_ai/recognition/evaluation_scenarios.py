@@ -34,6 +34,8 @@ def copy_history(source, target, selected, scope, namespace):
         copy_evidence(source,target,row['id'])
         from .pixel_storage import copy_rows
         copy_rows(source,target,source.execute('SELECT quality FROM observations WHERE scan=?',(row['id'],)))
+    from .scan_heads import copy_heads
+    copy_heads(source, target)
     target.executemany('INSERT INTO people VALUES (?,?,?,?,?,?)',
         source.execute('SELECT * FROM people WHERE scope=? AND namespace=? ORDER BY rowid', (scope, namespace)))
     scans = {r[0] for r in target.execute('SELECT id FROM scans')}

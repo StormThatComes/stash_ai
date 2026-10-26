@@ -9,6 +9,12 @@ forced assignments inside recognition.
 python stash_ai.py recognition report-merge --performer-set 123,456,789 --performer-set 234,567 --solve --max-trials 64 --yaml-output merged.yml --output merge-goals.json
 ```
 
+Use the same input YAML for scanning and solving. `--face-config input.yml`
+selects the input configuration; omitting it loads `facial_recognition.yml` from
+the current directory (or built-in defaults if absent). `--yaml-output merged.yml`
+only names the result file and never selects an input configuration. Incompatible
+input diagnostics include the resolved configuration and database paths.
+
 Repeated `--performer-id` or `--identity-id` selects one set. The original
 exactly-two-ID diagnostic remains available without `--solve`. Set syntax is
 mutually exclusive with those selectors. Alias overlap across sets is rejected.
@@ -19,9 +25,17 @@ Each trial starts from the same read-only retained history in an independent RAM
 database and calls the ordinary production rebuild. All compatible complete latest
 scans in the scope participate, including competitors. `--solve` excludes scenes
 whose latest scan is incomplete or incompatible with the current scan policy,
-instead of aborting all trials because of one unavailable scene. An older scan
-never substitutes for an excluded latest scan. Excluded scenes remain in frozen
+instead of aborting all trials because of one unavailable scene. Replay never
+substitutes an older compatible scan for an excluded current scan. Excluded scenes remain in frozen
 history and go through the ordinary production reference admission rules.
+
+Latest means the scan selected by the most recent `run` that checked that scene's
+current media and scan settings, including cache reuse. For example, running
+configuration A, then B, then A again makes the cached A scan current without
+recomputing its embeddings. Historical insertion order and identity origins remain
+unchanged. A newly created scan supersedes that selection even when incomplete.
+Existing databases need one run with the intended configuration to record a
+previously reused scan as current; no evidence deletion or schema migration is needed.
 
 `simulation.input_selection` lists every excluded scene and scan, its reason,
 completion counters, and stored/expected policy hashes. The console announces a

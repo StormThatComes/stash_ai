@@ -41,6 +41,7 @@ class IdentityView:
 
 def catalogue(db, config, scope, namespace, *, usage, policy=None, excluded_scenes=(), scan_policy=None,
               complete=False, minimum=None):
+    from .scan_heads import predicate as current_scan
     grouping = config.data['clustering']
     condition = '' if policy is None else 'AND c.policy=? AND c.status=\'accepted\' AND c.person=m.person '
     from .reference_compatibility import fallback_sql
@@ -59,8 +60,7 @@ def catalogue(db, config, scope, namespace, *, usage, policy=None, excluded_scen
         "WHERE p.scope=? AND p.namespace=? AND s.scene NOT IN (SELECT value FROM json_each(?)) "
         "AND s.scope=p.scope AND s.namespace=p.namespace AND s.status='complete' AND o.rejected IS NULL "
         'AND NOT EXISTS (SELECT 1 FROM identity_merges WHERE source=p.id) '
-        'AND NOT EXISTS (SELECT 1 FROM scans newer WHERE newer.scope=s.scope AND newer.namespace=s.namespace '
-        'AND newer.scene=s.scene AND newer.rowid>s.rowid) AND ' + anchor_sql('o', grouping) +
+        'AND '+current_scan()+' AND ' + anchor_sql('o', grouping) +
         ' AND ' + strict_sql() + ' ' + condition + scan_condition +
         'ORDER BY m.person,CAST(s.scene AS INTEGER),s.scene,o.cue,o.seconds,o.geometry,o.embedding,o.id', parameters)
     result, owner, slots, cover, scratch = [], None, [], [], 0

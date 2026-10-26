@@ -166,9 +166,11 @@ def fingerprint(db, config, scope):
     """Hash retained numerical inputs and bindings without materializing a second corpus."""
     import hashlib
     from .config import digest
+    from .scan_heads import predicate as current_scan
     value = hashlib.sha256()
     for sql in (
         'SELECT s.* FROM scans s WHERE s.scope=? AND s.namespace=? ORDER BY s.id',
+        'SELECT s.id FROM scans s WHERE s.scope=? AND s.namespace=? AND '+current_scan()+' ORDER BY s.id',
         'SELECT o.id,o.scan,o.quality,o.rejected,o.embedding,m.person FROM observations o JOIN scans s ON s.id=o.scan LEFT JOIN members m ON m.observation=o.id WHERE s.scope=? AND s.namespace=? ORDER BY o.id',
         'SELECT id,created,performer FROM people WHERE scope=? AND namespace=? ORDER BY id'):
         for row in db.execute(sql, (scope, namespace(config))):

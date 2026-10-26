@@ -45,6 +45,8 @@ def scan_scene(database, scope, scene, config, namespace, source, backend_factor
     # Validate retained geometry even when an old alignment flag says true.
     # Reuse valid vectors; retire only evidence invalid under this same policy.
     with db:
+        from .scan_heads import activate
+        activate(db, record)
         for row in db.execute('SELECT id,cue,geometry,quality FROM observations WHERE scan=? AND rejected IS NULL', (identifier,)):
             quality = json.loads(row['quality'])
             face = checked_detection(json.loads(row['geometry']))

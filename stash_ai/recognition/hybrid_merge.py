@@ -15,6 +15,7 @@ def signature(db,selected,config):
     changed membership, candidates, input contracts or rivals invalidate it too.
     """
     from .clustering import matching_policy
+    from .scan_heads import predicate as current_scan
     first=db.execute('SELECT scope,namespace FROM scans WHERE id=?',(selected[0]['scan'],)).fetchone()
     if first is None:raise ValueError('Hybrid rebuild requires an existing scan.')
     scope,namespace=first
@@ -22,6 +23,7 @@ def signature(db,selected,config):
         config.data['clustering'],config.data['execution']])).encode())
     queries=[
         ('scans', 'SELECT rowid,id,scene,input_sha,policy_sha,status,cursor,total FROM scans WHERE scope=? AND namespace=? ORDER BY id'),
+        ('scan-heads', 'SELECT s.id FROM scans s WHERE s.scope=? AND s.namespace=? AND '+current_scan()+' ORDER BY s.id'),
         ('observations','SELECT o.rowid,o.id,o.scan,o.cue,o.seconds,o.source,o.rect,o.geometry,o.quality,o.rejected,o.dimensions,o.embedding FROM observations o JOIN scans s ON s.id=o.scan WHERE s.scope=? AND s.namespace=? ORDER BY o.id'),
         ('people','SELECT id,created,token FROM people WHERE scope=? AND namespace=? ORDER BY id'),
         ('members','SELECT m.observation,m.person FROM members m JOIN people p ON p.id=m.person WHERE p.scope=? AND p.namespace=? ORDER BY m.observation'),

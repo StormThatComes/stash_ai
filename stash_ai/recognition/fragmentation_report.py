@@ -45,9 +45,10 @@ def _open_readonly(path):
 
 
 def _selected_scan(db, scene, model_namespace, policy, scope=None):
+    from .scan_heads import predicate as current_scan
     scans = db.execute(
-        "SELECT id,scope,scene,namespace,policy_sha FROM scans "
-        "WHERE scene=? AND namespace=? AND status='complete' ORDER BY rowid DESC",
+        "SELECT s.id,s.scope,s.scene,s.namespace,s.policy_sha FROM scans s "
+        "WHERE s.scene=? AND s.namespace=? AND s.status='complete' AND "+current_scan(),
         (scene, model_namespace)).fetchall()
     if scope is not None:
         scans = [row for row in scans if row['scope'] == scope]
@@ -245,6 +246,7 @@ def _co_present(db, left, right):
 
 def _recorded_support(db, scan, left, right, references, config, *, local=False):
     """Recheck stored nominations; absence is not evidence of failed proposals."""
+    from .scan_heads import predicate as current_scan
     if local:
         local_data = plain(config.data)
         bonus = local_data['clustering']['same_scene_match_bonus']
@@ -258,10 +260,8 @@ def _recorded_support(db, scan, left, right, references, config, *, local=False)
         'JOIN observations o ON o.id=v.observation JOIN scans s ON s.id=o.scan '
         'WHERE v.policy=? AND ((v.source=? AND v.target=?) OR (v.source=? AND v.target=?)) '
         'AND s.scope=? AND s.namespace=? AND s.policy_sha=? AND s.status=\'complete\' '
-        'AND o.rejected IS NULL AND NOT EXISTS ('
-        ' SELECT 1 FROM scans newer WHERE newer.scope=s.scope AND newer.namespace=s.namespace '
-        ' AND newer.scene=s.scene AND newer.status=\'complete\' AND newer.rowid>s.rowid) '
-        'ORDER BY CAST(s.scene AS INTEGER),s.scene,o.seconds,o.id',
+        'AND o.rejected IS NULL AND '+current_scan()+
+        ' ORDER BY CAST(s.scene AS INTEGER),s.scene,o.seconds,o.id',
         (policy, left, right, right, left, scan['scope'], scan['namespace'], scan['policy_sha']))
     groups = [Group(person, [sample for _, sample in references[person]], True)
               for person in (left, right)]

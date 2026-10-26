@@ -4,9 +4,9 @@ from .database import encoded
 
 
 def latest_clause():
+    from .scan_heads import predicate as current_scan
     return ("EXISTS (SELECT 1 FROM scans latest WHERE latest.scope=s.scope AND latest.namespace=s.namespace "
-        "AND latest.scene=s.scene AND latest.rowid>s.rowid AND NOT EXISTS (SELECT 1 FROM scans n "
-        "WHERE n.scope=latest.scope AND n.namespace=latest.namespace AND n.scene=latest.scene AND n.rowid>latest.rowid) "
+        "AND latest.scene=s.scene AND latest.id<>s.id AND "+current_scan('latest')+' '+
         "AND (latest.status<>'complete' OR NOT EXISTS (SELECT 1 FROM observations x JOIN members y ON y.observation=x.id "
         "WHERE x.scan=latest.id))) AND NOT EXISTS (SELECT 1 FROM scans newer JOIN observations x ON x.scan=newer.id "
         "JOIN members y ON y.observation=x.id WHERE newer.scope=s.scope AND newer.namespace=s.namespace "
