@@ -44,6 +44,32 @@ def test_collection_resumes_without_reembedding_faces(tmp_path):
     collector.close();assert model.closed
 
 
+def test_variant_change_collects_separate_evidence_and_switch_back_reuses_cache(tmp_path):
+    from stash_ai.recognition.person_signal import contract, coverage
+    settings=config(tmp_path);data=plain(settings.data);data['sapiensid']['enabled']=True
+    settings=replace(settings,data=data)
+    client=MediaClient();models=[];contracts={}
+    with FaceDatabase(settings.database) as state,SpriteInput(client,client.scene,settings) as source:
+        db=state.connection
+        scan,_=scan_scene(state,'scope',client.scene,settings,'ns',source,Backend)
+        faces=list(db.execute('SELECT id,embedding FROM observations'))
+        for variant in ('wb4m','wb12m','wb4m'):
+            settings.data['sapiensid']['model']['variant']=variant
+            if variant not in contracts:
+                assert coverage(db,settings,[scan])['ready']==0
+            model=Person();models.append(model)
+            collector=PersonCollector(settings,{},factory=lambda *args:model)
+            try:collector.enrich(db,scan,source)
+            finally:collector.close()
+            contracts[variant]=contract(settings)
+            assert db.execute('SELECT COUNT(*) FROM person_evidence WHERE contract=?',
+                              (contract(settings),)).fetchone()[0]==3
+        assert contracts['wb4m']!=contracts['wb12m']
+        assert [m.calls for m in models]==[3,3,0]
+        assert db.execute('SELECT COUNT(*) FROM person_evidence').fetchone()[0]==6
+        assert faces==list(db.execute('SELECT id,embedding FROM observations'))
+
+
 def test_multi_face_batches_are_bounded_and_failed_cue_is_atomic(tmp_path):
     import uuid
     settings=config(tmp_path);data=plain(settings.data)

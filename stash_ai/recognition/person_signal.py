@@ -3,9 +3,10 @@
 This module must remain usable without torch, CUDA or model assets.
 """
 from .config import digest
+from .sapiensid_registry import POSE_SHA256, MODEL_YAML_SHA256, MODELS, WB4M_SHA256, UPSTREAM_COMMIT
 
 DIMENSIONS = 4096
-CONTRACT = 'sapiensid-wb4m-person-v2'
+CONTRACT = 'sapiensid-person-v3'
 SCHEMA = '''
 CREATE TABLE person_evidence (
  observation TEXT NOT NULL REFERENCES observations(id),
@@ -22,9 +23,9 @@ CREATE TABLE person_evidence (
 
 def defaults():
     return dict(enabled=False,
-        model=dict(source_directory='', checkpoint_directory='',
-            model_yaml_sha256='2aa66245bdf81631cf243aff26dc2bca30788ea77958981d1947bd750cbf93b9'),
-        pose=dict(path='',sha256='',score_threshold=.5,keypoint_score_threshold=.5,
+        model=dict(variant='wb12m',source_directory='recognition_models/sapiensid_v1/source',
+            checkpoint_directory='', model_yaml_sha256=MODEL_YAML_SHA256),
+        pose=dict(path='recognition_models/sapiensid_v1/yolov8n-pose.pt',sha256=POSE_SHA256,score_threshold=.5,keypoint_score_threshold=.5,
                   nms_threshold=.7,max_people_per_frame=100),
         matching=dict(face_floor=.4,person_threshold=.85,ambiguity_margin=.1,min_support=3),
         execution=dict(batch_size=1,reference_bytes=134217728,plan_bytes=16777216,max_candidate_pairs=100000),
@@ -34,6 +35,9 @@ def defaults():
 
 def validate(settings):
     from .config import _number
+    variant=settings['model']['variant']
+    if not isinstance(variant,str) or variant not in MODELS:
+        raise ValueError('sapiensid.model.variant must be wb12m or wb4m.')
     consolidation=settings['consolidation']
     if consolidation['scope'] not in ('selected','retained'):
         raise ValueError('sapiensid.consolidation.scope must be selected or retained.')
@@ -62,11 +66,11 @@ def validate(settings):
         raise ValueError('sapiensid.execution.batch_size must be in [1,16].')
     for section,key in (('model','source_directory'),('model','checkpoint_directory'),('pose','path')):
         value=settings[section][key]
-        if not isinstance(value,str) or '\x00' in value or settings['enabled'] and not value.strip():
+        if not isinstance(value,str) or '\x00' in value or value and not value.strip():
             raise ValueError(f'sapiensid.{section}.{key} requires a local path.')
     for section,key in (('model','model_yaml_sha256'),('pose','sha256')):
         value=settings[section][key]
-        if not isinstance(value,str) or (value or settings['enabled']) and (
+        if not isinstance(value,str) or (value or settings['enabled'] and section=='model') and (
                 len(value)!=64 or any(c not in '0123456789abcdef' for c in value)):
             raise ValueError(f'sapiensid.{section}.{key} requires a lowercase SHA256.')
 
@@ -74,8 +78,15 @@ def validate(settings):
 def contract(config):
     """Paths, matching thresholds and resource budgets do not change vectors."""
     s=config.data['sapiensid']
-    return digest(dict(format=CONTRACT,model_yaml=s['model']['model_yaml_sha256'],
-        pose={k:v for k,v in s['pose'].items() if k!='path'}))
+    variant=s['model']['variant'];model=MODELS[variant]
+    evidence=dict(format=CONTRACT,model_yaml=s['model']['model_yaml_sha256'],
+        pose={k:(v or POSE_SHA256) if k=='sha256' else v for k,v in s['pose'].items() if k!='path'})
+    if variant=='wb4m' and model['sha256']==WB4M_SHA256:
+        # Preserve existing evidence for the exact originally supported weights.
+        evidence['format']='sapiensid-wb4m-person-v2'
+    else:
+        evidence.update(variant=variant,model_sha256=model['sha256'],source_revision=UPSTREAM_COMMIT)
+    return digest(evidence)
 
 
 def available(db):

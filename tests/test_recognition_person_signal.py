@@ -21,12 +21,53 @@ def test_contract_ignores_policy_paths_and_budgets():
     assert contract(config)!=original
 
 
-def test_enabled_requires_assets_but_does_not_load_them(tmp_path):
+def test_enabled_accepts_download_destinations_without_loading_assets(tmp_path,monkeypatch):
+    monkeypatch.chdir(tmp_path)
     data=defaults();data['sapiensid']['enabled']=True
-    with pytest.raises(ValueError,match='local path'):validate(data)
+    validate(data)
+    assert not (tmp_path/'recognition_models').exists()
     data['sapiensid']['model'].update(source_directory='missing',checkpoint_directory='missing')
     data['sapiensid']['pose'].update(path='missing',sha256='a'*64)
     validate(data)
+
+
+def test_empty_pose_hash_and_explicit_pinned_hash_share_evidence_contract():
+    from stash_ai.recognition.sapiensid_backend import identity_contract
+    data=defaults(); config=SimpleNamespace(data=data)
+    original=contract(config), identity_contract(config)
+    data['sapiensid']['pose']['sha256']=''
+    assert (contract(config), identity_contract(config))==original
+
+
+@pytest.mark.parametrize('variant', ['', 'wb8m', 'WB12M', None, [], 12])
+def test_variant_validation_rejects_unsupported_values(variant):
+    data=defaults();data['sapiensid']['model']['variant']=variant
+    with pytest.raises(ValueError,match='model.variant'):
+        validate(data)
+
+
+def test_wb12m_default_and_wb4m_preserves_original_evidence_contract():
+    from stash_ai.recognition.config import digest
+    from stash_ai.recognition.sapiensid_backend import identity_contract
+    from stash_ai.recognition.sapiensid_registry import MODELS
+    data=defaults();config=SimpleNamespace(data=data)
+    assert data['sapiensid']['model']['variant']=='wb12m'
+    wb12m=contract(config);s=data['sapiensid']
+    assert identity_contract(config)['model_sha256']==MODELS['wb12m']['sha256']
+    s['model']['variant']='wb4m'
+    legacy=digest(dict(format='sapiensid-wb4m-person-v2',model_yaml=s['model']['model_yaml_sha256'],
+                       pose={k:v for k,v in s['pose'].items() if k!='path'}))
+    assert contract(config)==legacy and contract(config)!=wb12m
+    assert identity_contract(config)['model_sha256']==MODELS['wb4m']['sha256']
+
+
+@pytest.mark.parametrize('variant', ['wb12m', 'wb4m'])
+def test_changed_weights_invalidate_evidence_even_with_identical_yaml(monkeypatch,variant):
+    from stash_ai.recognition.sapiensid_registry import MODELS
+    data=defaults();data['sapiensid']['model']['variant']=variant
+    config=SimpleNamespace(data=data);original=contract(config)
+    monkeypatch.setitem(MODELS,variant,{**MODELS[variant],'sha256':'f'*64})
+    assert contract(config)!=original
 
 
 def test_v5_readonly_then_writer_migration(tmp_path):

@@ -8,10 +8,13 @@ Defaults are uncalibrated starting values, not accuracy claims.
 ## Enable collection
 
 Install `requirements-sapiensid.txt` alongside the normal runtime, preserving the
-CPU/CUDA PyTorch build appropriate for your installation. Obtain the upstream
-wb4m checkpoint and model.yaml from the official SapiensID repository, and a
-trusted YOLOv8n-pose checkpoint. No weights are bundled or downloaded by this
-adapter. Relative paths resolve from the configuration file.
+CPU/CUDA PyTorch build appropriate for your installation. With
+`models.download_missing: true` (the default), the first inference that needs
+SapiensID automatically downloads its pinned upstream source, wb12m checkpoint,
+`model.yaml` and YOLOv8n-pose checkpoint into the configured destinations.
+You do not need to create those folders, clone the upstream repository, install
+Git, or manually download weights. Relative paths resolve from the configuration
+file. Python packages remain managed through the requirements file.
 
 The shipped [facial_recognition.yml](../facial_recognition.yml) lists every
 supported setting, including all SapiensID subsections, with comments and
@@ -22,19 +25,21 @@ settings inherit their defaults. SapiensID uses `models.device` and the shared
 
 If the updater preserves your locally modified YAML, review
 `facial_recognition.yml.incoming` and copy the new settings you need. Partial
-local configurations remain supported; completing the shipped template does
-not change runtime defaults.
+local configurations remain supported; omitted settings inherit their defaults.
 
 ```yaml
+models:
+  download_missing: true
 sapiensid:
   enabled: true
   model:
-    source_directory: ../sapiensid
-    checkpoint_directory: recognition_models/sapiensid_v1/wb4m
+    variant: wb12m
+    source_directory: recognition_models/sapiensid_v1/source
+    checkpoint_directory: "" # models.directory/sapiensid_v1/<variant>
     model_yaml_sha256: 2aa66245bdf81631cf243aff26dc2bca30788ea77958981d1947bd750cbf93b9
   pose:
     path: recognition_models/sapiensid_v1/yolov8n-pose.pt
-    sha256: REPLACE_WITH_VERIFIED_LOWERCASE_SHA256
+    sha256: c6fa93dd1ee4a2c18c900a45c1d864a1c6f7aba75d84f91648a30b7fb641d212
   matching:
     face_floor: 0.4
     person_threshold: 0.85
@@ -49,11 +54,59 @@ sapiensid:
     retain_person_crops: true
 ```
 
-Keep `models.recognizer` set to your face recognizer. Source must be a clean
-checkout of `mk-minchul/sapiensid` at
-`a8d8011117db23f20c7ade3bc38e8075810ac886`. The required model.pth hash is
-`8df1e2d7a64fbc87969326862aeafccc83eb5ee0462a4f007d7f09603782cf02`.
-The adapter verifies source revision and asset hashes before loading weights.
+Keep `models.recognizer` set to your face recognizer. Downloads use the source
+archive of `mk-minchul/sapiensid` at
+`a8d8011117db23f20c7ade3bc38e8075810ac886`; an existing clean Git checkout at
+that revision is also accepted. The required wb12m model.pth hash is
+`b91db9d4ea13542b1bff76deaa0d678b9586c73506c7ae0116ab907f688a1a60`;
+wb4m uses `8df1e2d7a64fbc87969326862aeafccc83eb5ee0462a4f007d7f09603782cf02`.
+The adapter verifies source contents and asset hashes before loading weights.
+
+`sapiensid.model.variant` selects `wb12m` (default) or `wb4m`. Both use the same
+ViT-Base architecture, 384x384 input and 4096-dimensional output. The 4M/12M
+labels describe the training datasets. The authors report better wb12m results
+on all five benchmarks in
+[Table 12 of the paper](https://arxiv.org/html/2504.04708v1#A2.SS7), which motivates
+the accuracy-oriented default. This does not establish the gain on your own scenes.
+
+The paths above are download destinations, not prerequisites. Override them to
+use another disk or reuse an existing installation. Empty paths in older YAMLs
+use `sapiensid_v1/source`, `sapiensid_v1/<variant>` and
+`sapiensid_v1/yolov8n-pose.pt` beneath `models.directory`; an empty pose SHA256
+selects the pinned default checkpoint. A custom pose/model.yaml hash requires
+an existing matching local file and is never silently replaced with a default.
+
+For an existing wb4m installation, set `variant: wb12m` and
+`checkpoint_directory: ""` to download wb12m into its separate default folder.
+To retain wb4m instead, explicitly set `variant: wb4m`; an omitted variant now
+means wb12m. Explicit checkpoint paths are always respected: pointing wb12m
+at existing wb4m weights fails verification with an actionable error, without
+overwriting those files. With an empty checkpoint path, changing only the variant
+automatically selects the corresponding folder.
+
+The two variants have identical model.yaml files, so their weight hashes are
+part of evidence selection. Changing variant collects separate person embeddings
+on the next `run`; it reuses the face scan and does not mix embeddings across
+variants. Existing wb4m evidence remains valid when wb4m is explicitly selected.
+Reports, merge planning and replay only use the selected variant's evidence;
+without it they report missing evidence. Changing models does not undo historical
+identity merges. Matching thresholds remain uncalibrated defaults and should be
+checked against labelled examples after switching variants.
+
+The first full setup transfers about 52 MB of source, 1.53 GB of compressed model
+weights and 6.8 MB of pose weights. Either variant expands to about 1.65 GB.
+HTTP range requests select only the configured variant from the official
+upstream Google Drive archive. If a proxy ignores ranges, the downloader streams
+past the preceding archive bytes instead. Downloads show byte progress, use
+temporary files and publish only after size/SHA256 verification. Interrupted or
+invalid downloads are removed; a retry starts that missing file again.
+Completed files are reused. Existing invalid files or modified source produce
+an error rather than being overwritten.
+
+For an offline installation, prepare those assets once, then set
+`models.download_missing: false`. Missing assets then fail with their path and
+the disabled setting. Reading configuration, reports and replay do not download
+SapiensID assets; `audit-alignment` needs pose only, without identity weights.
 
 `run` collects missing current-contract features even when its face scan is
 reused. It reopens the VTT source and associates retained face boxes with body

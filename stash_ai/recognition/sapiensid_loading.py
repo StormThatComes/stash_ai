@@ -1,4 +1,4 @@
-"""Local, revision-pinned SapiensID model construction; no training dependencies."""
+"""Revision-pinned SapiensID construction with lazy missing-asset downloads."""
 from contextlib import contextmanager
 import hashlib
 import importlib
@@ -10,7 +10,7 @@ import tempfile
 from .config import parse_yaml
 from .sapiensid_inference import SapiensIDV1Encoder, load_verified_weights
 
-UPSTREAM_COMMIT = 'a8d8011117db23f20c7ade3bc38e8075810ac886'
+from .sapiensid_registry import UPSTREAM_COMMIT, MODELS
 
 
 def local_path(config, value):
@@ -29,6 +29,9 @@ def checked_bytes(path, checksum, *, limit):
 
 def trusted_checkout(path):
     root = Path(path).resolve(strict=True)
+    from .sapiensid_assets import MARKER, verify_source
+    if (root / MARKER).exists():
+        return verify_source(root)
     required = ('tasks/sapiensID/src/models/sapiens_id/__init__.py', 'general_utils/img_utils.py')
     try:
         def git(*args):
@@ -73,8 +76,10 @@ def source_imports(root):
 
 def load_encoder(config):
     settings = config.data['sapiensid']['model']
-    root = trusted_checkout(local_path(config, settings['source_directory']))
-    directory = local_path(config, settings['checkpoint_directory'])
+    selected = MODELS[settings['variant']]
+    integrity = dict(expected_size=selected['size'], expected_sha256=selected['sha256'])
+    from .sapiensid_assets import encoder_assets
+    root, directory = encoder_assets(config)
     raw = checked_bytes(directory / 'model.yaml', settings['model_yaml_sha256'], limit=131072)
     cfg = parse_yaml(raw, context='SapiensID model')
     if (not isinstance(cfg, dict) or cfg.get('name') != 'mrm' or
@@ -82,16 +87,20 @@ def load_encoder(config):
             cfg.get('color_space') != 'RGB' or not cfg.get('square_pad') or
             cfg.get('rgb_mean') != [.5, .5, .5] or cfg.get('rgb_std') != [.5, .5, .5] or
             cfg.get('kp_preprocessor', {}).get('name') != 'kp19'):
-        raise ValueError('Unsupported SapiensID v1 wb4m model.yaml architecture/preprocessing.')
-    from .sapiensid_v1 import verify_wb4m_checkpoint
-    verify_wb4m_checkpoint(directory / 'model.pth')
+        raise ValueError('Unsupported SapiensID v1 model.yaml architecture/preprocessing.')
+    from .sapiensid_v1 import verify_checkpoint
+    try:
+        verify_checkpoint(directory / 'model.pth', **integrity)
+    except ValueError as error:
+        raise ValueError(f"SapiensID {settings['variant']} checkpoint at {directory / 'model.pth'}: {error} "
+                         'Check sapiensid.model.variant and checkpoint_directory; existing files are not replaced.') from error
     try:
         with source_imports(root):
             from omegaconf import OmegaConf
             model_type = importlib.import_module('src.models.sapiens_id').SapiensModel
             cfg.update(start_from='', pretrained_path='', freeze=True)
             model = model_type.from_config(OmegaConf.create(cfg))
-        load_verified_weights(model, directory / 'model.pth')
+        load_verified_weights(model, directory / 'model.pth', **integrity)
         return SapiensIDV1Encoder(model, None, device=config.data['models']['device'],
             max_batch_size=config.data['sapiensid']['execution']['batch_size'])
     except ImportError as error:
@@ -99,10 +108,11 @@ def load_encoder(config):
 
 
 def load_pose(config):
-    settings = config.data['sapiensid']['pose']
-    data = checked_bytes(local_path(config, settings['path']), settings['sha256'], limit=134217728)
+    from .sapiensid_assets import pose_asset
+    path, checksum = pose_asset(config)
+    data = checked_bytes(path, checksum, limit=134217728)
     # Ultralytics accepts a filename and may unpickle it. Load only the exact
-    # operator-verified local bytes, with no path-to-download fallback.
+    # hash-verified local bytes, with no Ultralytics path-to-download fallback.
     from ultralytics import YOLO
     with tempfile.TemporaryDirectory(prefix='stash-sapiensid-pose-') as temp:
         path = Path(temp) / 'yolov8n-pose.pt'

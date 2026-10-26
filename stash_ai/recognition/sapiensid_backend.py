@@ -4,8 +4,9 @@ import math
 from threading import get_ident
 
 from .models import YuNetDetector
-from .sapiensid_v1 import EMBEDDING_DIMENSIONS, PREPROCESSING, WB4M_SHA256
+from .sapiensid_v1 import EMBEDDING_DIMENSIONS, PREPROCESSING
 from .sapiensid_loading import UPSTREAM_COMMIT, load_encoder, load_pose
+from .sapiensid_registry import POSE_SHA256, MODELS
 
 CONTRACT = 'sapiensid-v1-yolov8-pose-face-anchor-square384-v2'
 
@@ -13,8 +14,10 @@ CONTRACT = 'sapiensid-v1-yolov8-pose-face-anchor-square384-v2'
 def identity_contract(config):
     settings = config.data['sapiensid']
     return {'contract': CONTRACT, 'source_revision': UPSTREAM_COMMIT,
-            'model_sha256': WB4M_SHA256, 'model_yaml_sha256': settings['model']['model_yaml_sha256'],
-            'pose_sha256': settings['pose']['sha256'], 'preprocessing': PREPROCESSING,
+            'model_variant': settings['model']['variant'],
+            'model_sha256': MODELS[settings['model']['variant']]['sha256'],
+            'model_yaml_sha256': settings['model']['model_yaml_sha256'],
+            'pose_sha256': settings['pose']['sha256'] or POSE_SHA256, 'preprocessing': PREPROCESSING,
             'person_score_threshold': settings['pose']['score_threshold'],
             'keypoint_score_threshold': settings['pose']['keypoint_score_threshold'],
             'person_nms_threshold': settings['pose']['nms_threshold'],
