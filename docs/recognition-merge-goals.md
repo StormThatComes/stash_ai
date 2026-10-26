@@ -50,11 +50,34 @@ beats baseline, the current configuration is explicitly selected as unchanged.
 With `sapiensid.enabled: true`, the search tunes all four matching gates:
 `sapiensid.matching.face_floor`, `person_threshold`, `ambiguity_margin`, and
 `min_support`. It starts with a joint measured hybrid proposal, when available,
-then alternates hybrid and face trials. Each family has its own adaptive queue;
-a large face threshold grid cannot consume the budget before hybrid trials run.
+then prioritizes independent single-gate probes before continuing the joint-pair
+list. Face/body thresholds are tested below their current value by `.02`, `.05`,
+`.1`, `.2`, and `.01`, interleaved with measured boundaries; corresponding increases
+are explored as well. Values stay within `[0, 1]`. Margin and support have their
+own decrease/increase probes. Every measured value remains eligible: dense nearby
+boundaries are spread out in the search order instead of retaining only the three
+nearest values.
+
+These probes also run when no within-set pair proposal exists. In particular,
+auxiliary/query samples may have usable body features while being absent from the
+strict reference catalogue. Lowering `face_floor` can recover those observations;
+absence of a reference-pair proposal must not disable hybrid search. Missing body
+features themselves are never manufactured by probing thresholds.
+
+Hybrid and face trials alternate. Each family starts with up to 13 unique baseline
+explorations (subject to the total budget and available candidates), then alternates
+baseline exploration with adaptive descendants. Improving descendants cannot
+starve the independent baseline sweep, and a long joint-pair list cannot delay the
+first three rounds of single-gate probes. All candidates still require full replay
+and use the same coverage, separation and outside-impact ranking.
+
 The baseline still counts toward `--max-trials`, so a budget of one only evaluates
 the current configuration. `search.executed_by_family` and each trial's
-`search_family` show which configurations were actually tested.
+`search_family` show which configurations were actually tested. `search_phase`
+(`baseline_exploration` or `adaptive`) and `search_parent` explain how each trial
+was generated. `search.executed_by_phase` summarizes this allocation, and
+`search.tested_hybrid_values` lists the actual values used by completed trials,
+including baseline. It excludes proposed but untested or interrupted candidates.
 
 Hybrid proposals use qualified retained face/body banks, independent cue support,
 confirmed body appearance modes, original merged-core guards, co-presence, and
