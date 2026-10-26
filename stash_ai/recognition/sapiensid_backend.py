@@ -160,6 +160,7 @@ class SapiensIDFaces(YuNetDetector):
                 'identity_rejection': None if person else 'person_face_association_unavailable'}
 
     def _person_geometry(self, image, face):
+        import numpy as np
         self._owner()
         person = self._person(image, face)
         if person is None:
@@ -173,7 +174,17 @@ class SapiensIDFaces(YuNetDetector):
         body = adjust_pose(normalized)
         points = [[x*side-padx, y*side-pady] if x >= 0 else [-1.,-1.] for x,y in body]
         points.extend([[x-left, y-top] for x,y in face.landmarks])
-        return person['bounds'], points
+        # Face/person detectors can disagree at the crop boundary even after a
+        # unique association. Omit out-of-crop measurements, never clamp them
+        # into fabricated border landmarks. Check in the same float32 domain
+        # as prepare_person_input: rounding can put a point on the excluded
+        # right/bottom edge. All inference and audit paths share this geometry.
+        points = np.asarray(points, dtype=np.float32)
+        if points.shape != (22, 2) or not np.isfinite(points).all():
+            raise ValueError('SapiensID requires 22 finite pixel landmark pairs.')
+        outside = ((points < 0) | (points >= [right-left, bottom-top])).any(axis=1)
+        points[outside] = -1
+        return person['bounds'], points.tolist()
 
     def person_input(self, image, face):
         return self._person_geometry(image,face)

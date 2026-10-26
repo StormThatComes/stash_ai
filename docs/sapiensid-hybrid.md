@@ -85,6 +85,13 @@ selects the one-to-many head with NMS, so `pose.nms_threshold` remains effective
 Both models supply COCO17 points; SapiensID still receives 17 pose points plus
 the five face landmarks, with the same 384x384 preparation and audit overlays.
 
+After a unique face/person association, landmarks outside the actual person
+crop are marked missing (`-1,-1`), including face-detector points and coordinates
+that round onto the excluded right/bottom edge in float32. They are not clamped
+to the border. This applies to scan preparation, batched inference and alignment
+audits, so a crop-boundary disagreement does not abort the scene. Malformed or
+non-finite geometry still fails validation; ambiguous associations remain withheld.
+
 To switch an existing installation, update **both** `pose.path` and `pose.sha256`
 to the values above, or set both to empty strings to use the default model folder.
 An explicit old path/hash remains YOLOv8n; it is not silently migrated. Its pinned
