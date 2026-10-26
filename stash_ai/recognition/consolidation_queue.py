@@ -6,6 +6,7 @@ Publication outside the caller's selection remains durable publication debt.
 """
 import json
 from .config import digest
+from .scan_heads import predicate as current_scan
 
 
 def expand(db,selected,config):
@@ -40,7 +41,7 @@ def expand(db,selected,config):
             if scene in chosen:continue
             if allowed and scene not in allowed:eligible=False;break
             current=db.execute("SELECT s.id,s.status,s.policy_sha FROM scans s WHERE s.scope=? AND s.namespace=? AND s.scene=? "
-                'ORDER BY s.rowid DESC LIMIT 1',(scope,namespace,scene)).fetchone()
+                'AND '+current_scan(),(scope,namespace,scene)).fetchone()
             if current is None or current['status']!='complete':eligible=False;break
             compatible=db.execute('SELECT 1 FROM scans s WHERE s.id=? AND (s.policy_sha=? OR NOT EXISTS (SELECT 1 FROM observations o '
                 'WHERE o.scan=s.id AND o.rejected IS NULL AND NOT '+fallback_sql(db,config,namespace)+'))',

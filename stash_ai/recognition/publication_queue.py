@@ -12,6 +12,7 @@ from .config import digest
 from .database import encoded
 from .reference_roles import observation_sql
 from .rebuild_cache import _hash_row
+from .scan_heads import predicate as current_scan
 
 PREFIX='identity-publication:'
 
@@ -31,7 +32,7 @@ def current(db,scope,namespace,scene):
 
 
 def latest(db,scope,namespace,scene):
-    return db.execute('SELECT * FROM scans WHERE scope=? AND namespace=? AND scene=? ORDER BY rowid DESC LIMIT 1',
+    return db.execute('SELECT s.* FROM scans s WHERE s.scope=? AND s.namespace=? AND s.scene=? AND '+current_scan(),
                       (scope,namespace,scene)).fetchone()
 
 
@@ -114,8 +115,7 @@ def discover(db,scope,namespace):
     desired={}
     for row in db.execute('SELECT DISTINCT s.scene,m.person,p.performer FROM members m JOIN people p ON p.id=m.person '
         'JOIN observations o ON o.id=m.observation JOIN scans s ON s.id=o.scan WHERE s.scope=? AND s.namespace=? '
-        "AND s.status='complete' AND o.rejected IS NULL AND NOT EXISTS (SELECT 1 FROM scans n WHERE n.scope=s.scope "
-        'AND n.namespace=s.namespace AND n.scene=s.scene AND n.rowid>s.rowid)',(scope,namespace)):
+        "AND s.status='complete' AND o.rejected IS NULL AND "+current_scan(),(scope,namespace)):
         desired.setdefault(row['scene'],{})[row['person']]=row['performer']
     complete=set();debt={}
     for row in db.execute("SELECT w.* FROM publications w JOIN people p ON p.id=w.person WHERE w.scope=? "
@@ -162,8 +162,7 @@ def validate(db,scope,namespace,entry):
 def inventory(db,scope,namespace):
     active='''FROM members m JOIN observations o ON o.id=m.observation JOIN scans s ON s.id=o.scan
         WHERE s.scope=? AND s.namespace=? AND s.status='complete' AND o.rejected IS NULL
-        AND NOT EXISTS (SELECT 1 FROM scans n WHERE n.scope=s.scope AND n.namespace=s.namespace
-            AND n.scene=s.scene AND n.rowid>s.rowid)'''
+        AND '''+current_scan()
     count=db.execute('SELECT COUNT(DISTINCT m.person) '+active,(scope,namespace)).fetchone()[0]
     unused=db.execute('SELECT p.id,p.performer FROM people p WHERE p.scope=? AND p.namespace=? AND p.performer IS NOT NULL '
         'AND NOT EXISTS (SELECT 1 '+active+' AND m.person=p.id) ORDER BY p.created,p.id',

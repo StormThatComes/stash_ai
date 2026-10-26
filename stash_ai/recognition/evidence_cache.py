@@ -9,9 +9,9 @@ import weakref
 from .profiling import count
 
 from .run_cache import MISSING
+from .scan_heads import predicate as current_scan
 _active = ContextVar('recognition_evidence_cache', default=None)
-LATEST = '''AND s.rowid=(SELECT MAX(newer.rowid) FROM scans newer
-             WHERE newer.scope=s.scope AND newer.namespace=s.namespace AND newer.scene=s.scene)'''
+LATEST = 'AND ' + current_scan()
 
 
 class MemoryCache:
@@ -60,9 +60,8 @@ class Evidence:
         if total*512 > self.cache.limit//2:
             return self.cache.put(key, None, 0)
         heads = {}
-        for row in self.db.execute('SELECT id,scene FROM scans WHERE scope=? AND namespace=? ORDER BY rowid',
+        for row in self.db.execute('SELECT s.id,s.scene FROM scans s WHERE s.scope=? AND s.namespace=? AND '+current_scan(),
                                    (scope, namespace)):
-            # A newer partial/incompatible-policy scan also supersedes an old one.
             heads[row['scene']] = row['id']
         count('latest_scan_catalogues')
         return self.cache.put(key, heads, len(heads)*512)

@@ -53,12 +53,12 @@ class Group:
 
 def reference_admission(policy, *, scan_policy=None, label_scenes=(), compatibility=None):
     from .pose_policy import anchor_sql
+    from .scan_heads import predicate as current_scan
     anchor = anchor_sql('o', policy)
     if scan_policy is not None:
         compatible = ('o.scan IN (SELECT current.id FROM scans current WHERE (current.policy_sha=' + repr(scan_policy) +
             (' OR '+compatibility if compatibility else '') + ')' +
-            ' AND NOT EXISTS (SELECT 1 FROM scans newer WHERE newer.scope=current.scope AND newer.namespace=current.namespace '
-            'AND newer.scene=current.scene AND newer.rowid>current.rowid))')
+            ' AND '+current_scan('current')+')')
         if label_scenes:
             literal = "'" + encoded(list(label_scenes)).replace("'", "''") + "'"
             compatible += ' OR o.scan IN (SELECT id FROM scans WHERE scene IN (SELECT value FROM json_each(' + literal + ')))'

@@ -115,6 +115,9 @@ def test_no_compatible_scans_writes_diagnostics_without_yaml_or_trials(tmp_path,
     assert 'no completed trial' in captured.err
     assert 'scan_policy_mismatch: scenes=1,2' in captured.err
     assert 'sapiensid.matching.* changes alone do not require a rescan' in captured.err
+    assert 'Input configuration: '+str(config.source_path) in captured.err
+    assert 'Input database: '+str(config.database) in captured.err
+    assert '--yaml-output is only an output path' in captured.err
     assert 'run_argv' not in captured.err
     assert config.database.read_bytes() == before
 

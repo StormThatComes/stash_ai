@@ -35,9 +35,8 @@ class History:
 
 def _source(config,compatibility,*,verified=False,gaps=False,attachment=False):
     from .reference_gaps import latest_clause
-    latest=(latest_clause() if gaps else
-        'NOT EXISTS (SELECT 1 FROM scans newer WHERE newer.scope=s.scope AND newer.namespace=s.namespace '
-        'AND newer.scene=s.scene AND newer.rowid>s.rowid)')
+    from .scan_heads import predicate as current_scan
+    latest=latest_clause() if gaps else current_scan()
     return ('FROM members m JOIN people p ON p.id=m.person JOIN observations o ON o.id=m.observation '
         'JOIN scans s ON s.id=o.scan WHERE p.scope=? AND p.namespace=? '
         'AND s.scene NOT IN (SELECT value FROM json_each(?)) AND (s.policy_sha=? OR '+compatibility+') '
@@ -64,6 +63,7 @@ def context(db,selected,config,scope,namespace,*,cache=False):
 
 
 def _context(db,selected,config,scope,namespace):
+    from .scan_heads import predicate as current_scan
     hasher=hashlib.sha256(b'frozen-external-references-v5')
     from .pose_policy import anchor_visibility
     visibility_fields=",'$.visible_face_fraction','$.visibility.contract'" if anchor_visibility(config.data['clustering']) else ''
@@ -76,8 +76,7 @@ def _context(db,selected,config,scope,namespace):
         _hash_row(hasher,row)
     for row in db.execute('SELECT s.id,s.scene,s.input_sha,s.policy_sha,s.cursor,s.status FROM scans s '
             'WHERE s.scope=? AND s.namespace=? AND s.scene NOT IN (SELECT value FROM json_each(?)) '
-            'AND NOT EXISTS (SELECT 1 FROM scans n WHERE n.scope=s.scope AND n.namespace=s.namespace '
-            'AND n.scene=s.scene AND n.rowid>s.rowid) ORDER BY s.scene',
+            'AND '+current_scan()+' ORDER BY s.scene',
             (scope,namespace,encoded([item['scene'] for item in selected]))):
         _hash_row(hasher,row)
     for row in db.execute('SELECT p.id,o.id,o.geometry,o.quality,o.dimensions,o.embedding '+

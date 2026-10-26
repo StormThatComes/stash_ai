@@ -22,6 +22,7 @@ from .fragmentation_report import _open_readonly
 from .models import namespace
 from .rebuild import rebuild_selected
 from .scanning import scan_identity
+from .scan_heads import predicate as current_scan
 
 
 def _ram(config):
@@ -45,14 +46,15 @@ def _selection(db, config, scenes, scope, *, allow_partial=False, diagnostics=No
     wanted = set(scenes or ())
     if any(not isinstance(s, str) or not s.isascii() or not s.isdecimal() or int(s) < 1 for s in wanted):
         raise ValueError('Evaluation scene IDs must be positive decimal strings.')
-    scans = [dict(r) for r in db.execute('SELECT s.* FROM scans s WHERE scope=? AND namespace=? '
-        'AND NOT EXISTS (SELECT 1 FROM scans n WHERE n.scope=s.scope AND n.namespace=s.namespace '
-        'AND n.scene=s.scene AND n.rowid>s.rowid) ORDER BY CAST(s.scene AS INTEGER),s.scene', (scope, ns))
+    scans = [dict(r) for r in db.execute('SELECT s.* FROM scans s WHERE scope=? AND namespace=? AND '
+        + current_scan() + ' ORDER BY CAST(s.scene AS INTEGER),s.scene', (scope, ns))
         if not wanted or r['scene'] in wanted]
     if not scans or wanted and {s['scene'] for s in scans} != wanted:
         raise ValueError('Evaluation scenes are missing from the selected scope/namespace.')
     from .replay_inputs import classify, ReplayInputError
     scans, detail = classify(scans, scan_identity(config, ns))
+    detail['configuration_path'] = str(config.source_path) if config.source_path else None
+    detail['database_path'] = str(config.database)
     if diagnostics is not None:
         diagnostics.update(detail)
     if not allow_partial and not detail['complete_scope']:

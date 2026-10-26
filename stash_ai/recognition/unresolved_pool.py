@@ -24,6 +24,7 @@ def query_reasons_sql():
 
 
 def rows(db,selected,config,scope,namespace):
+    from .scan_heads import predicate as current_scan
     from .pose_policy import anchor_sql
     from .reference_compatibility import fallback_sql
     from .scanning import scan_identity
@@ -32,8 +33,7 @@ def rows(db,selected,config,scope,namespace):
         'JOIN observations o ON o.id='+observation_sql('c')+' JOIN scans s ON s.id=o.scan '
         "WHERE s.scope=? AND s.namespace=? AND s.status='complete' AND o.rejected IS NULL "
         'AND s.scene NOT IN (SELECT value FROM json_each(?)) AND (s.policy_sha=? OR '+fallback_sql(db,config,namespace)+') '
-        'AND NOT EXISTS (SELECT 1 FROM scans n WHERE n.scope=s.scope AND n.namespace=s.namespace '
-        'AND n.scene=s.scene AND n.rowid>s.rowid) AND '+anchor_sql('o',config.data['clustering'])+
+        'AND '+current_scan()+' AND '+anchor_sql('o',config.data['clustering'])+
         " AND c.scan=o.scan AND c.status='withheld' AND CASE WHEN json_valid(c.payload) THEN "
         "json_extract(c.payload,'$.reason') END IN ("+query_reasons_sql()+') '
         'AND NOT EXISTS (SELECT 1 FROM candidates n WHERE '+observation_sql('n')+'=o.id AND n.rowid>c.rowid) '
