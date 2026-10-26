@@ -1,4 +1,4 @@
-"""Local, revision-pinned SapiensID model construction; no training dependencies."""
+"""Revision-pinned SapiensID construction with lazy missing-asset downloads."""
 from contextlib import contextmanager
 import hashlib
 import importlib
@@ -10,7 +10,7 @@ import tempfile
 from .config import parse_yaml
 from .sapiensid_inference import SapiensIDV1Encoder, load_verified_weights
 
-UPSTREAM_COMMIT = 'a8d8011117db23f20c7ade3bc38e8075810ac886'
+from .sapiensid_registry import UPSTREAM_COMMIT
 
 
 def local_path(config, value):
@@ -29,6 +29,9 @@ def checked_bytes(path, checksum, *, limit):
 
 def trusted_checkout(path):
     root = Path(path).resolve(strict=True)
+    from .sapiensid_assets import MARKER, verify_source
+    if (root / MARKER).exists():
+        return verify_source(root)
     required = ('tasks/sapiensID/src/models/sapiens_id/__init__.py', 'general_utils/img_utils.py')
     try:
         def git(*args):
@@ -73,8 +76,8 @@ def source_imports(root):
 
 def load_encoder(config):
     settings = config.data['sapiensid']['model']
-    root = trusted_checkout(local_path(config, settings['source_directory']))
-    directory = local_path(config, settings['checkpoint_directory'])
+    from .sapiensid_assets import encoder_assets
+    root, directory = encoder_assets(config)
     raw = checked_bytes(directory / 'model.yaml', settings['model_yaml_sha256'], limit=131072)
     cfg = parse_yaml(raw, context='SapiensID model')
     if (not isinstance(cfg, dict) or cfg.get('name') != 'mrm' or
@@ -99,10 +102,11 @@ def load_encoder(config):
 
 
 def load_pose(config):
-    settings = config.data['sapiensid']['pose']
-    data = checked_bytes(local_path(config, settings['path']), settings['sha256'], limit=134217728)
+    from .sapiensid_assets import pose_asset
+    path, checksum = pose_asset(config)
+    data = checked_bytes(path, checksum, limit=134217728)
     # Ultralytics accepts a filename and may unpickle it. Load only the exact
-    # operator-verified local bytes, with no path-to-download fallback.
+    # hash-verified local bytes, with no Ultralytics path-to-download fallback.
     from ultralytics import YOLO
     with tempfile.TemporaryDirectory(prefix='stash-sapiensid-pose-') as temp:
         path = Path(temp) / 'yolov8n-pose.pt'

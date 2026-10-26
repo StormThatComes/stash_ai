@@ -1164,8 +1164,11 @@ For optional SapiensID support, after installing the CPU/GPU profile:
 python -m pip install -r requirements-sapiensid.txt
 ```
 
-This installs the inference extras; model checkpoints and the upstream source
-checkout still require the setup in [the SapiensID guide](docs/sapiensid-hybrid.md).
+This installs the inference extras. With `sapiensid.enabled: true` and
+`models.download_missing: true`, the application downloads missing upstream
+source and model checkpoints into the SapiensID paths configured in
+`facial_recognition.yml` when inference first needs them. See
+[the SapiensID guide](docs/sapiensid-hybrid.md) for custom destinations and offline use.
 
 If the installed updater predates documentation or SapiensID dependency-file
 support, run it once to update itself, then run it again to fetch those files.

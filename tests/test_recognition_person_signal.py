@@ -21,12 +21,22 @@ def test_contract_ignores_policy_paths_and_budgets():
     assert contract(config)!=original
 
 
-def test_enabled_requires_assets_but_does_not_load_them(tmp_path):
+def test_enabled_accepts_download_destinations_without_loading_assets(tmp_path,monkeypatch):
+    monkeypatch.chdir(tmp_path)
     data=defaults();data['sapiensid']['enabled']=True
-    with pytest.raises(ValueError,match='local path'):validate(data)
+    validate(data)
+    assert not (tmp_path/'recognition_models').exists()
     data['sapiensid']['model'].update(source_directory='missing',checkpoint_directory='missing')
     data['sapiensid']['pose'].update(path='missing',sha256='a'*64)
     validate(data)
+
+
+def test_empty_pose_hash_and_explicit_pinned_hash_share_evidence_contract():
+    from stash_ai.recognition.sapiensid_backend import identity_contract
+    data=defaults(); config=SimpleNamespace(data=data)
+    original=contract(config), identity_contract(config)
+    data['sapiensid']['pose']['sha256']=''
+    assert (contract(config), identity_contract(config))==original
 
 
 def test_v5_readonly_then_writer_migration(tmp_path):

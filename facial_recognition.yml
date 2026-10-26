@@ -125,14 +125,14 @@ names:
 # See docs/sapiensid-hybrid.md for verified assets and calibration.
 # Uses models.device and the shared scan CPU queues; local paths are relative to this YAML.
 sapiensid:
-  enabled: false              # Fill model/pose paths and the pose SHA256 before enabling.
+  enabled: false              # true lazily prepares missing assets when models.download_missing is true.
   model:
-    source_directory: ""     # Required when enabled: clean checkout of the pinned upstream source.
-    checkpoint_directory: "" # Required when enabled: directory containing model.pth and model.yaml.
+    source_directory: recognition_models/sapiensid_v1/source # Destination for verified upstream source; Git is not required.
+    checkpoint_directory: recognition_models/sapiensid_v1/wb4m # Destination for model.pth and model.yaml.
     model_yaml_sha256: 2aa66245bdf81631cf243aff26dc2bca30788ea77958981d1947bd750cbf93b9
   pose:
-    path: ""                 # Required when enabled: trusted local YOLOv8n-pose checkpoint.
-    sha256: ""               # Required when enabled: verified lowercase SHA256 of that checkpoint.
+    path: recognition_models/sapiensid_v1/yolov8n-pose.pt # Destination for the pinned pose checkpoint.
+    sha256: c6fa93dd1ee4a2c18c900a45c1d864a1c6f7aba75d84f91648a30b7fb641d212 # Custom hashes require a matching local file.
     score_threshold: 0.50    # Minimum body detection confidence.
     keypoint_score_threshold: 0.50 # Minimum confidence for usable pose keypoints.
     nms_threshold: 0.70      # Body detector NMS IoU threshold.

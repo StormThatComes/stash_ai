@@ -52,8 +52,9 @@ def preprocess(image):
 def verify_wb4m_checkpoint(path, *, expected_size=WB4M_BYTES, expected_sha256=WB4M_SHA256):
     """Verify a local upstream PyTorch wb4m checkpoint before any torch.load.
 
-    Never download the 1.65 GB asset automatically; caller must obtain it
-    legally. Hash source is the separately published Equinox conversion card.
+    Asset acquisition belongs to sapiensid_assets; this verifier is offline.
+    Hash source is the separately published Equinox conversion card, also
+    checked against the original upstream archive by the download smoke test.
     This verifies bytes, not their suitability for the current face pipeline.
     """
     if (type(expected_size) is not int or expected_size <= 0
