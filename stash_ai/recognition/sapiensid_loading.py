@@ -113,9 +113,13 @@ def load_pose(config):
     data = checked_bytes(path, checksum, limit=134217728)
     # Ultralytics accepts a filename and may unpickle it. Load only the exact
     # hash-verified local bytes, with no Ultralytics path-to-download fallback.
-    from ultralytics import YOLO
+    from ultralytics import YOLO, __version__
+    from packaging.version import Version
+    # Require the runtime validated for explicit YOLO26 NMS-head selection.
+    if Version(__version__) < Version('8.4.189'):
+        raise RuntimeError('YOLO26 pose requires ultralytics>=8.4.189; install requirements-sapiensid.txt.')
     with tempfile.TemporaryDirectory(prefix='stash-sapiensid-pose-') as temp:
-        path = Path(temp) / 'yolov8n-pose.pt'
+        path = Path(temp) / 'pose.pt'
         path.write_bytes(data)
         model = YOLO(str(path), task='pose')
     return model

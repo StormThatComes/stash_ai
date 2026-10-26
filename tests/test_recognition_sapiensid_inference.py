@@ -202,3 +202,32 @@ def test_person_alignment_audit_exports_measured_inputs_and_private_pixels(tmp_p
             if key=='input_file':np.testing.assert_array_equal(np.asarray(image),expected)
             if key=='annotated_input_file':assert not np.array_equal(np.asarray(image),expected)
         if os.name=='posix':assert path.stat().st_mode & 0o777==0o600
+
+
+def test_pose_backend_selects_nms_and_preserves_coco17_to_22_point_input(monkeypatch):
+    from types import SimpleNamespace
+    from stash_ai.recognition import sapiensid_backend as backend
+    from stash_ai.recognition.config import defaults
+    from stash_ai.recognition.models import checked_detection
+    calls=[]
+    confidence=torch.ones((1,17));confidence[0,-1]=.1
+    result=SimpleNamespace(boxes=SimpleNamespace(xyxy=torch.tensor([[0.,0.,100.,100.]]),conf=torch.tensor([.99])),
+                           keypoints=SimpleNamespace(xy=torch.full((1,17,2),20.),conf=confidence))
+    def predict(**kwargs):calls.append(kwargs);return [result]
+    monkeypatch.setattr(backend,'load_pose',lambda config:SimpleNamespace(predict=predict))
+    data=defaults();data['models']['device']='cpu';data['sapiensid']['pose']['nms_threshold']=.42
+    detector=backend.SapiensIDFaces(SimpleNamespace(data=data),{},load_identity=False,load_detector=False)
+    face=checked_detection([10,10,30,30,18,20,32,20,25,27,19,33,31,33,.99])
+    try:
+        with Image.new('RGB',(100,100),(80,90,100)) as image:
+            assert detector.detect(image,faces=[face])==[face]
+            quality=detector.observation_quality(image,face)
+            assert quality['identity_rejection'] is None
+            assert len(quality['person']['keypoints'])==17
+            assert quality['person']['keypoints'][-1]==[-1.,-1.]
+            batch,points,mask=detector.audit_input(image,face)
+            assert batch.shape==(1,3,384,384) and points.shape==(1,22,2) and mask.shape==(1,384,384)
+            assert (points[0,:17]==-1).all(dim=1).sum().item()==1  # Canonicalization can swap paired indices.
+            np.testing.assert_allclose(points[0,17:],np.asarray(face.landmarks)/100,atol=1e-7)
+        assert calls[0]['nms'] is True and calls[0]['iou']==.42
+    finally:detector.close()

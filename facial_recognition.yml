@@ -132,11 +132,11 @@ sapiensid:
     checkpoint_directory: "" # Empty: models.directory/sapiensid_v1/<variant>. Or set an explicit destination for model.pth/model.yaml.
     model_yaml_sha256: 2aa66245bdf81631cf243aff26dc2bca30788ea77958981d1947bd750cbf93b9
   pose:
-    path: recognition_models/sapiensid_v1/yolov8n-pose.pt # Destination for the pinned pose checkpoint.
-    sha256: c6fa93dd1ee4a2c18c900a45c1d864a1c6f7aba75d84f91648a30b7fb641d212 # Custom hashes require a matching local file.
+    path: recognition_models/sapiensid_v1/yolo26m-pose.pt # Destination for the pinned YOLO26m-pose checkpoint.
+    sha256: 2fbf16367022256a226035695c5c389384c6706e8bb8ab8fcd0e7976f05443c4 # Custom hashes require a matching local file.
     score_threshold: 0.50    # Minimum body detection confidence.
     keypoint_score_threshold: 0.50 # Minimum confidence for usable pose keypoints.
-    nms_threshold: 0.70      # Body detector NMS IoU threshold.
+    nms_threshold: 0.70      # Body detector NMS IoU threshold; also applied to YOLO26's one-to-many head.
     max_people_per_frame: 100 # Body detections per thumbnail; separate from detection.max_faces_per_frame.
   matching:
     face_floor: 0.40         # Required face compatibility for a hybrid match; not a standalone face match threshold.

@@ -11,7 +11,7 @@ Install `requirements-sapiensid.txt` alongside the normal runtime, preserving th
 CPU/CUDA PyTorch build appropriate for your installation. With
 `models.download_missing: true` (the default), the first inference that needs
 SapiensID automatically downloads its pinned upstream source, wb12m checkpoint,
-`model.yaml` and YOLOv8n-pose checkpoint into the configured destinations.
+`model.yaml` and YOLO26m-pose checkpoint into the configured destinations.
 You do not need to create those folders, clone the upstream repository, install
 Git, or manually download weights. Relative paths resolve from the configuration
 file. Python packages remain managed through the requirements file.
@@ -38,8 +38,8 @@ sapiensid:
     checkpoint_directory: "" # models.directory/sapiensid_v1/<variant>
     model_yaml_sha256: 2aa66245bdf81631cf243aff26dc2bca30788ea77958981d1947bd750cbf93b9
   pose:
-    path: recognition_models/sapiensid_v1/yolov8n-pose.pt
-    sha256: c6fa93dd1ee4a2c18c900a45c1d864a1c6f7aba75d84f91648a30b7fb641d212
+    path: recognition_models/sapiensid_v1/yolo26m-pose.pt
+    sha256: 2fbf16367022256a226035695c5c389384c6706e8bb8ab8fcd0e7976f05443c4
   matching:
     face_floor: 0.4
     person_threshold: 0.85
@@ -72,9 +72,35 @@ the accuracy-oriented default. This does not establish the gain on your own scen
 The paths above are download destinations, not prerequisites. Override them to
 use another disk or reuse an existing installation. Empty paths in older YAMLs
 use `sapiensid_v1/source`, `sapiensid_v1/<variant>` and
-`sapiensid_v1/yolov8n-pose.pt` beneath `models.directory`; an empty pose SHA256
-selects the pinned default checkpoint. A custom pose/model.yaml hash requires
+`sapiensid_v1/yolo26m-pose.pt` beneath `models.directory`; an empty pose SHA256
+selects the pinned default checkpoint. The legacy YOLOv8n hash with an empty path
+selects its own `yolov8n-pose.pt` filename. A custom pose/model.yaml hash requires
 an existing matching local file and is never silently replaced with a default.
+
+YOLO26m-pose comes from the official
+[Ultralytics v8.4.0 release](https://github.com/ultralytics/assets/releases/tag/v8.4.0).
+Its 49,036,866-byte checkpoint is pinned by the SHA256 shown above. Install the
+updated `requirements-sapiensid.txt` (`ultralytics>=8.4.189,<9`): inference explicitly
+selects the one-to-many head with NMS, so `pose.nms_threshold` remains effective.
+Both models supply COCO17 points; SapiensID still receives 17 pose points plus
+the five face landmarks, with the same 384x384 preparation and audit overlays.
+
+To switch an existing installation, update **both** `pose.path` and `pose.sha256`
+to the values above, or set both to empty strings to use the default model folder.
+An explicit old path/hash remains YOLOv8n; it is not silently migrated. Its pinned
+checkpoint is still downloaded when missing. Existing files are never overwritten
+to switch models. Configurations that omit pose settings now select YOLO26m.
+
+Changing the pose checkpoint selects a separate evidence contract. The next
+`run` collects new person embeddings while reusing retained face detections.
+Reports, merge planning, tune and replay select that same contract and do not mix
+YOLOv8n and YOLO26m evidence. Explicitly selecting the old pinned YOLOv8n preserves
+its existing evidence contract. This change does not undo historical merges or
+establish accuracy on your scenes; recalibrate hybrid matching on labelled examples.
+
+An optional real-weight CPU smoke checks download integrity, NMS selection,
+COCO17 association and the exact 22-point audit input without fetching identity
+weights: `STASH_AI_POSE_SMOKE=1 python -m pytest -q tests/test_recognition_pose_smoke.py`.
 
 For an existing wb4m installation, set `variant: wb12m` and
 `checkpoint_directory: ""` to download wb12m into its separate default folder.
@@ -94,7 +120,7 @@ identity merges. Matching thresholds remain uncalibrated defaults and should be
 checked against labelled examples after switching variants.
 
 The first full setup transfers about 52 MB of source, 1.53 GB of compressed model
-weights and 6.8 MB of pose weights. Either variant expands to about 1.65 GB.
+weights and 49 MB of pose weights. Either identity variant expands to about 1.65 GB.
 HTTP range requests select only the configured variant from the official
 upstream Google Drive archive. If a proxy ignores ranges, the downloader streams
 past the preceding archive bytes instead. Downloads show byte progress, use
