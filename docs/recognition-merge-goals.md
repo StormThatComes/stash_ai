@@ -37,6 +37,44 @@ non-exhaustive. Neither budget exhaustion nor an unsuccessful search proves
 that no possible configuration works. A best partial solution is explicitly
 reported; the source configuration is retained if no admissible improvement wins.
 
+With `sapiensid.enabled: true`, the search tunes all four matching gates:
+`sapiensid.matching.face_floor`, `person_threshold`, `ambiguity_margin`, and
+`min_support`. It starts with a joint measured hybrid proposal, when available,
+then alternates hybrid and face trials. Each family has its own adaptive queue;
+a large face threshold grid cannot consume the budget before hybrid trials run.
+The baseline still counts toward `--max-trials`, so a budget of one only evaluates
+the current configuration. `search.executed_by_family` and each trial's
+`search_family` show which configurations were actually tested.
+
+Hybrid proposals use qualified retained face/body banks, independent cue support,
+confirmed body appearance modes, original merged-core guards, co-presence, and
+competitors both in other requested sets and outside the goals. Joint proposals
+clear multiple measured gates together, including a measured competitor margin;
+they do not average face and body scores. Supported body modes contribute a
+threshold that covers every mode on both sides, avoiding an unnecessarily low
+minimum across unrelated clothing looks. All these hints remain subject to full
+replay, including mode reconstruction under the new thresholds. Tightening as
+well as loosening gates is explored around measured score/support boundaries.
+
+After each trial, observation IDs map the original sets to their rebuilt
+identities, including split members and cross-set conflicts. The sets remain
+separate when collecting feedback. New hybrid measurements and proposals feed
+the next trials. No goals are passed to the production matching rules. Missing
+body features or original-core evidence are reported; reducing `min_support`
+never invents independent observations. Model, pose/association, collection,
+consolidation scope, execution and storage settings are not tuned. Existing
+compatible person embeddings are required; the solver never loads SapiensID or
+downloads weights to fill gaps.
+
+`measured_hybrid_evidence` describes the initial retained state. Each trial's
+`hybrid_solver_evidence` contains the rebuilt measurements, independent support,
+body-mode boundaries, missing references, pair blockers and nearest competitors.
+These diagnostics are hints, not impossibility proofs. Hybrid diagnostics inspect
+only pairs touching the goals, retaining target-pair proofs and the nearest
+competitor per target instead of an all-library pair matrix. The configured
+SapiensID `reference_bytes`, `plan_bytes` and `max_candidate_pairs` budgets also
+bound this work; exceeding them fails explicitly.
+
 Reports include final destinations, missing/withheld counts, conflicting trials,
 recorded decision reasons and available numeric decision measurements. Measured
 reference pairs include their weakest observation IDs; these are diagnostic

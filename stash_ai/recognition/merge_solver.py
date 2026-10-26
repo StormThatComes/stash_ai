@@ -9,7 +9,7 @@ from .merge_goals import assess, objective
 from .replay_simulation import replay, impact
 
 
-def measured_options(db, config, goals, proofs=None):
+def measured_options(db, config, goals, proofs=None, *, hybrid=None):
     from .clustering import _groups
     from .scanning import scan_identity
     from .reference_compatibility import fallback_sql
@@ -54,20 +54,15 @@ def measured_options(db, config, goals, proofs=None):
         current = config.data['clustering'][key]
         if current is not None:
             options['clustering.'+key] = [current/2, current] if 'pose' not in key else [current, min(1.,current+.1)]
-    if config.data['sapiensid']['enabled']:
-        from .hybrid_evidence import catalogue, scores
-        bank=[i for i in catalogue(db,config,goals['scope'],ns) if i.person in wanted]
-        for field, attribute in (('face_floor','faces'),('person_threshold','persons')):
-            values=set()
-            for a,b in combinations(bank,2):
-                measured=scores(getattr(a,attribute),getattr(b,attribute))
-                if measured and 0<=measured['minimum']<=1:
-                    values.add(math.floor(measured['minimum']*1e6)/1e6)
-            options['sapiensid.matching.'+field]=sorted(values,reverse=True)
+    from .merge_solver_hybrid import analyse
+    analysis = analyse(db, config, goals)
+    options.update(analysis['options'])
+    if hybrid is not None:
+        hybrid.update(analysis)
     return options
 
 
-def neighbours(config, changes, options):
+def _face_neighbours(config, changes, options):
     # Joint candidates avoid spending the entire budget on isolated threshold changes.
     for value in options['recognition.match_threshold']:
         candidate = dict(changes)
@@ -77,6 +72,8 @@ def neighbours(config, changes, options):
             'clustering.view_cohesion_threshold': min(value, config.data['clustering']['view_cohesion_threshold'])})
         yield candidate
     for key, values in options.items():
+        if key.startswith('sapiensid.'):
+            continue
         current = changes.get(key, parameter(config.data,key))
         values = sorted(values, key=lambda v: (abs(v-current), v))[:3]
         for value in values:
@@ -89,13 +86,64 @@ def neighbours(config, changes, options):
             yield candidate
 
 
+def _hybrid_neighbours(config, changes, options, measured):
+    for patch in tuple(measured):
+        yield dict(changes, **patch)
+    # Round-robin parameters as well as search families: a long threshold list
+    # must not starve the independent-support and competitor-margin gates.
+    streams = []
+    for key, values in options.items():
+        if not key.startswith('sapiensid.'):
+            continue
+        current = changes.get(key, parameter(config.data, key))
+        values = sorted((v for v in values if v != current), key=lambda v: (abs(v-current), v))[:3]
+        streams.append(iter([dict(changes, **{key: value}) for value in values]))
+    yield from _interleave(streams)
+
+
+def _interleave(streams):
+    pending = deque(streams)
+    while pending:
+        stream = pending.popleft()
+        try:
+            yield next(stream)
+        except StopIteration:
+            continue
+        pending.append(stream)
+
+
+def neighbours(config, changes, options, *, hybrid_changes=()):
+    yield from _interleave([_hybrid_neighbours(config, changes, options, hybrid_changes),
+                            _face_neighbours(config, changes, options)])
+
+
+def rebuilt_goals(db, goals):
+    """Follow observations through merges/splits without collapsing goal sets."""
+    import json
+    ids = {r['id'] for g in goals['groups'] for m in g['members'] for r in m['observations']}
+    owners = dict(db.execute('SELECT observation,person FROM members WHERE observation IN '
+                            '(SELECT value FROM json_each(?))', (json.dumps(sorted(ids)),)))
+    groups = []
+    for index, group in enumerate(goals['groups']):
+        people = {owners[r['id']] for m in group['members'] for r in m['observations'] if r['id'] in owners}
+        groups.append(dict(index=group.get('index', index), members=[dict(identity_id=p) for p in sorted(people)]))
+    return dict(goals, groups=groups)
+
+
 def solve(config, goals, db, *, maximum=64, progress=None):
     if type(maximum) is not int or maximum < 1:
         raise ValueError('max_trials must be a positive integer.')
     from .scanning import scan_identity
+    from .person_signal import same_contract
+    from .merge_solver_hybrid import public
     proofs = []
-    options = measured_options(db, config, goals, proofs)
+    hybrid = {}
+    options = measured_options(db, config, goals, proofs, hybrid=hybrid)
+    initial_hybrid = public(hybrid)
+    hybrid_changes = list(hybrid['proposals'])
+    initial_changes = tuple(hybrid_changes)
     seen, patches, summaries = set(), {}, {}
+    families = {}
     best, best_rank, baseline = None, None, None
     def consume(name, observations, retained, predicted):
         nonlocal best, best_rank, baseline
@@ -112,7 +160,7 @@ def solve(config, goals, db, *, maximum=64, progress=None):
             -outside['newly_joined_pairs'], -len(patch['changes']), -magnitude)
         if status['admissible'] and (best_rank is None or rank > best_rank):
             best, best_rank = name, rank
-        return dict(goal_result=status, outside_impact=outside)
+        return dict(goal_result=status, outside_impact=outside, hybrid_solver_evidence=public(hybrid))
     def inspect(target, settings):
         import json
         ids = {r['id'] for g in goals['groups'] for m in g['members'] for r in m['observations']}
@@ -121,24 +169,37 @@ def solve(config, goals, db, *, maximum=64, progress=None):
             payload = json.loads(row['payload'])
             if payload.get('observation') in ids:
                 result.append(dict(observation=payload['observation'], scan=row['scan'], status=row['status'],
-                    reason=payload.get('reason'), hybrid_merge=payload.get('hybrid_merge'), measurements={k:v for k,v in payload.items()
+                    reason=payload.get('reason'), hybrid_merge=payload.get('hybrid_merge'),
+                    hybrid_query=payload.get('hybrid_query'), measurements={k:v for k,v in payload.items()
                         if type(v) in (int,float,bool) and any(t in k for t in ('score','similarity','threshold','support','margin'))}))
-        current_ids = {r[0] for r in target.execute('SELECT person FROM members WHERE observation IN (SELECT value FROM json_each(?))', (json.dumps(sorted(ids)),))}
-        current_goals = dict(goals, groups=[dict(members=[dict(identity_id=p) for p in sorted(current_ids)])])
-        updated = measured_options(target, settings, current_goals)
+        current_goals = rebuilt_goals(target, goals)
+        hybrid.clear()
+        updated = measured_options(target, settings, current_goals, hybrid=hybrid)
+        hybrid_changes[:] = list({digest(p): p for p in hybrid['proposals'] + list(initial_changes)}.values())
         for key, values in updated.items():
             options[key] = sorted(set(options.get(key, ())) | set(values), reverse=True)
         return result
     def stream():
         trials, attempts = 1, 0
-        pending = deque([iter(neighbours(config, {}, options))])
+        factories = {'hybrid': lambda changes: _hybrid_neighbours(config, changes, options, hybrid_changes),
+                     'face': lambda changes: _face_neighbours(config, changes, options)}
+        if not config.data['sapiensid']['enabled']:
+            del factories['hybrid']
+        pending = {family: deque([factory({})]) for family, factory in factories.items()}
+        rotation = deque(pending)
         while pending and trials < maximum and attempts < maximum * 100:
-            iterator = pending.popleft()
+            family = rotation[0]
+            queue = pending[family]
+            if not queue:
+                del pending[family]
+                rotation.popleft()
+                continue
+            iterator = queue.popleft()
             try:
                 changes = next(iterator)
             except StopIteration:
                 continue
-            pending.append(iterator)
+            queue.append(iterator)
             attempts += 1
             patch = proposal(config, changes)
             fingerprint = digest(patch['yaml_patch'])
@@ -149,25 +210,37 @@ def solve(config, goals, db, *, maximum=64, progress=None):
                 variant = patched(config, changes)
             except ValueError:
                 continue
-            if scan_identity(variant, goals['namespace']) != scan_identity(config, goals['namespace']):
+            if (scan_identity(variant, goals['namespace']) != scan_identity(config, goals['namespace']) or
+                    not same_contract(config, variant)):
                 continue
             name = f'trial-{trials}'
             patches[name] = patch
+            families[name] = family
             yield name, variant
             trials += 1
-            child = iter(neighbours(config, changes, options))
-            if best == name:
-                pending.appendleft(child)
-            else:
-                pending.append(child)
+            rotation.rotate(-1)
+            for next_family, factory in factories.items():
+                if next_family not in pending:
+                    pending[next_family] = deque()
+                    rotation.append(next_family)
+                child = factory(changes)
+                if best == name:
+                    pending[next_family].appendleft(child)
+                else:
+                    pending[next_family].append(child)
     result = replay(config, {}, source=db, scope=goals['scope'], consume=consume, variant_stream=stream, inspect_trial=inspect, progress=progress)
     for name, patch in patches.items():
         if name in result['trials']:
             result['trials'][name].update(patch)
-    return dict(measured_reference_pairs=proofs, simulation=result, status=('fully_solved' if best and summaries[best]['fully_solved'] else
+            result['trials'][name]['search_family'] = families[name]
+    return dict(measured_reference_pairs=proofs, measured_hybrid_evidence=initial_hybrid,
+        simulation=result, status=('fully_solved' if best and summaries[best]['fully_solved'] else
                 'baseline_retained' if best == 'baseline' else 'partial_solution' if best else 'no_admissible_solution'),
         selected_trial=best,
         recommendation=dict(trial=best, **patches[best]) if best and best != 'baseline' else None,
         interrupted=result.get('interrupted', False),
         search=dict(max_trials=maximum, executed=len(result['trials']),
+                    scheduling='round_robin_hybrid_face' if config.data['sapiensid']['enabled'] else 'face',
+                    executed_by_family={family: sum(families.get(name) == family for name in result['trials'])
+                                        for family in ('hybrid', 'face')},
                     budget_exhausted=len(result['trials']) >= maximum, proves_infeasibility=False))
