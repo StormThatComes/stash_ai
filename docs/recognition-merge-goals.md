@@ -23,19 +23,29 @@ coverage certification. Empty performers cannot satisfy a goal vacuously.
 
 A candidate is admissible only when every goal member has retained observations,
 all are present and assigned, and no final identity contains observations from
-multiple sets. The score prioritizes full success, the worst set's fraction of
-fully consolidated performers, the total consolidated performers, and fewer
-fragments. Ties prefer fewer external coverage losses, splits and joins, then
-fewer/smaller parameter changes. External partition changes are not accuracy
-estimates; labels of other people are unknown.
+multiple sets. Admissible candidates always outrank inadmissible ones, and full
+success outranks partial success. If none are admissible, the solver still selects
+the best completed trial, including baseline, as `best_effort`.
+
+The score next prioritizes disjoint sets, the worst set's assigned fraction, the
+average assigned fraction, and fewer observation pairs joined across sets. Then
+it prefers the worst set's fraction of fully consolidated performers, the total
+consolidated performers, common-destination coverage (worst set, then average),
+and fewer fragments. Assignment and common-destination coverage average fractions
+per performer, so a performer with many samples cannot dominate. These continuous
+metrics distinguish progress even when all complete-performer counts are zero.
+Ties prefer fewer goal-to-outsider attachments, external coverage losses, splits
+and joins, then fewer/smaller parameter changes. External partition changes are
+not accuracy estimates; labels of other people are unknown.
 
 Search measures strict representative similarities, explores joint thresholds,
 margin/support gates and retained role-quality gates, then refreshes candidate
 thresholds from rebuilt representatives. Each trial is verified by full replay.
 Budgets bound attempted replays, including baseline. Search is heuristic and
 non-exhaustive. Neither budget exhaustion nor an unsuccessful search proves
-that no possible configuration works. A best partial solution is explicitly
-reported; the source configuration is retained if no admissible improvement wins.
+that no possible configuration works. The selected result is the best among
+completed trials, not a guarantee of the global optimum. If no changed candidate
+beats baseline, the current configuration is explicitly selected as unchanged.
 
 With `sapiensid.enabled: true`, the search tunes all four matching gates:
 `sapiensid.matching.face_floor`, `person_threshold`, `ambiguity_margin`, and
@@ -80,16 +90,34 @@ recorded decision reasons and available numeric decision measurements. Measured
 reference pairs include their weakest observation IDs; these are diagnostic
 witnesses, not standalone proofs that a whole replay must merge.
 
-`--yaml-output` requires `--solve` and writes a complete configuration only for a
-selected changed solution. Relative model/database/names paths become absolute
-so the exported file can be relocated. Outputs must be distinct new files.
+`best_result` contains the selected trial, its YAML patch, `changed`, `admissible`,
+`fully_solved`, and `unmet_conditions`. Its `quality` is `fully_solved`,
+`partial_solution` (coverage and separation preserved, incomplete internal merges),
+or `best_effort` (coverage or separation also fails). Unmet conditions identify
+empty performers, observations missing from latest scans, withheld observations,
+split performers, incomplete sets, and cross-set merges, with identities and
+counts. `explanation.unresolved` repeats this list. For compatibility,
+`recommendation` is populated only when a changed configuration wins;
+`best_result` also represents an unchanged baseline. The top-level status remains
+`baseline_retained` for an admissible partial baseline, while its quality is
+`partial_solution`.
+
+`--yaml-output` requires `--solve` and writes the selected complete configuration,
+including best-effort and unchanged-baseline results. YAML comments identify the
+trial, quality and unmet condition types; the JSON report contains the details.
+Relative model/database/names paths become absolute so the exported file can be
+relocated. Outputs must be distinct new files.
 `run_argv` gives the exact scene selection as an argument array, avoiding shell
 quoting differences. Code/configuration/evidence hashes record the tested state;
 changed inputs require revalidation. Stash publication itself is not simulated.
 
-Progress goes to stderr, leaving JSON stdout parseable. `--progress-style off`
-suppresses solver messages. Ctrl-C during replay search preserves completed
-trials, marks the result interrupted, and exits 130. Incomplete trials are never
-eligible for selection. Interrupting initial goal preparation may stop before a
-report exists. Runtime uses configured rebuild workers and RAM budgets; GPU
+Progress and the final best-result summary go to stderr, leaving JSON stdout
+parseable. The summary includes per-set complete counts, assigned observations,
+common-destination coverage, missing/withheld counts and unmet conditions.
+`--progress-style off` suppresses solver messages. Ctrl-C during replay search
+preserves completed trials and their best result, marks the result interrupted,
+and exits 130. Incomplete trials are never eligible for selection. If no trial
+completed, status is `no_completed_trials`, `best_result` is null and no YAML is
+exported. Interrupting initial goal preparation may stop before a report exists.
+Runtime uses configured rebuild workers and RAM budgets; GPU
 inference is not repeated. Performance on a large library must be measured locally.

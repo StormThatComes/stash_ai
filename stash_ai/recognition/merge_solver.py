@@ -5,7 +5,7 @@ import math
 
 from .config import digest
 from .merge_report_policy import patched, proposal, parameter
-from .merge_goals import assess, objective
+from .merge_goals import assess, objective, unmet_conditions
 from .replay_simulation import replay, impact
 
 
@@ -142,7 +142,7 @@ def solve(config, goals, db, *, maximum=64, progress=None):
     initial_hybrid = public(hybrid)
     hybrid_changes = list(hybrid['proposals'])
     initial_changes = tuple(hybrid_changes)
-    seen, patches, summaries = set(), {}, {}
+    seen, patches, summaries, ranks = set(), {}, {}, {}
     families = {}
     best, best_rank, baseline = None, None, None
     def consume(name, observations, retained, predicted):
@@ -158,7 +158,8 @@ def solve(config, goals, db, *, maximum=64, progress=None):
         magnitude = sum(abs(float(c['proposed'])-float(c['current'])) for c in patch['changes'])
         rank = objective(status) + (-sum(g['outsider_observations'] for g in status['groups']), -outside['coverage_lost'], -outside['split_pairs'],
             -outside['newly_joined_pairs'], -len(patch['changes']), -magnitude)
-        if status['admissible'] and (best_rank is None or rank > best_rank):
+        ranks[name] = rank
+        if best_rank is None or rank > best_rank:
             best, best_rank = name, rank
         return dict(goal_result=status, outside_impact=outside, hybrid_solver_evidence=public(hybrid))
     def inspect(target, settings):
@@ -229,18 +230,31 @@ def solve(config, goals, db, *, maximum=64, progress=None):
                 else:
                     pending[next_family].append(child)
     result = replay(config, {}, source=db, scope=goals['scope'], consume=consume, variant_stream=stream, inspect_trial=inspect, progress=progress)
+    # Ctrl-C can land after consume ranks a trial but before replay records it.
+    best = max(result['trials'], key=ranks.__getitem__, default=None)
     for name, patch in patches.items():
         if name in result['trials']:
             result['trials'][name].update(patch)
             result['trials'][name]['search_family'] = families[name]
+    selection = None
+    if best is not None:
+        status = summaries[best]
+        quality = ('fully_solved' if status['fully_solved'] else
+                   'partial_solution' if status['admissible'] else 'best_effort')
+        selection = dict(trial=best, quality=quality, changed=best != 'baseline',
+            admissible=status['admissible'], fully_solved=status['fully_solved'],
+            unmet_conditions=unmet_conditions(status),
+            **patches.get(best, proposal(config, {})))
     return dict(measured_reference_pairs=proofs, measured_hybrid_evidence=initial_hybrid,
-        simulation=result, status=('fully_solved' if best and summaries[best]['fully_solved'] else
-                'baseline_retained' if best == 'baseline' else 'partial_solution' if best else 'no_admissible_solution'),
-        selected_trial=best,
-        recommendation=dict(trial=best, **patches[best]) if best and best != 'baseline' else None,
+        simulation=result, status=('no_completed_trials' if selection is None else
+            'baseline_retained' if best == 'baseline' and selection['quality'] == 'partial_solution' else selection['quality']),
+        selected_trial=best, best_result=selection,
+        recommendation=selection if selection is not None and selection['changed'] else None,
         interrupted=result.get('interrupted', False),
         search=dict(max_trials=maximum, executed=len(result['trials']),
                     scheduling='round_robin_hybrid_face' if config.data['sapiensid']['enabled'] else 'face',
                     executed_by_family={family: sum(families.get(name) == family for name in result['trials'])
                                         for family in ('hybrid', 'face')},
-                    budget_exhausted=len(result['trials']) >= maximum, proves_infeasibility=False))
+                    budget_exhausted=len(result['trials']) >= maximum,
+                    selection_scope='completed_trials_including_baseline',
+                    proves_optimality=False, proves_infeasibility=False))

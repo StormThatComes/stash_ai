@@ -4,27 +4,18 @@ import json
 from pathlib import Path
 from .config import digest, plain
 from .merge_report_policy import patched
+from .merge_goals import unmet_conditions
 
 
 def explain(result):
-    chosen = result.get('selected_trial') or 'baseline'
     simulation = result.get('simulation', {})
+    chosen = result.get('selected_trial', 'baseline' if 'baseline' in simulation.get('trials', {}) else None)
     trial = simulation.get('trials', {}).get(chosen, {})
     status = trial.get('goal_result', {})
-    reasons = []
-    for group in status.get('groups', []):
-        for member in group['members']:
-            for condition, reason in ((member['missing'], 'missing_latest_observations'),
-                (member['withheld'], 'withheld_observations'),
-                (len(member['resulting_identities']) > 1, 'performer_split')):
-                if condition:
-                    reasons.append(dict(set=group['index'], identity=member['identity_id'], reason=reason))
-        if not group['fully_merged']:
-            reasons.append(dict(set=group['index'], reason='remaining_fragments', fragments=group['fragments']))
-    result['explanation'] = dict(selected_trial=chosen, unresolved=reasons,
+    result['explanation'] = dict(selected_trial=chosen, unresolved=unmet_conditions(status),
         conflicting_trials=[dict(trial=name, conflicts=item['goal_result']['conflicts'])
             for name, item in simulation.get('trials', {}).items() if not item['goal_result']['disjoint']],
-        conclusion='Results describe tested configurations; search exhaustion is not proof of impossibility.')
+        conclusion='Best among completed trials, including baseline; neither global optimality nor impossibility is proved.')
     hybrid = trial.get('hybrid_solver_evidence', {})
     if hybrid.get('enabled'):
         result['explanation']['hybrid'] = dict(
@@ -45,7 +36,7 @@ def export(config, result, output, yaml_output):
     protected = {config.database.resolve(), config.source_path}
     if len(set(targets)) != len(targets) or any(p.exists() or p in protected for p in targets):
         raise FileExistsError('Outputs must be distinct new files, separate from source configuration and database.')
-    recommendation = result.get('recommendation')
+    recommendation = result.get('best_result') or result.get('recommendation')
     result['yaml_exported'] = False
     if yaml_output and recommendation:
         settings = patched(config, {x['parameter']:x['proposed'] for x in recommendation['changes']})
@@ -59,6 +50,12 @@ def export(config, result, output, yaml_output):
                 path=Path(raw).expanduser()
                 data['sapiensid'][section][key]=str((config.source_path.parent/path).resolve())
         serialized = yaml.safe_dump(data, sort_keys=False)
+        if 'best_result' in result:
+            header = f"# Merge solver: best completed trial {recommendation['trial']} ({recommendation['quality']}).\n"
+            if not recommendation['fully_solved']:
+                reasons = sorted({r['reason'] for r in recommendation['unmet_conditions']})
+                header += '# Unmet conditions: ' + ', '.join(reasons) + '. See the JSON report for details.\n'
+            serialized = header + serialized
         # Validate the serialized full document before exposing it as a runnable config.
         from .config import parse_yaml, validate
         validate(parse_yaml(serialized.encode()))
@@ -66,6 +63,7 @@ def export(config, result, output, yaml_output):
         with destination.open('x', encoding='utf-8') as stream:
             stream.write(serialized)
         result['yaml_exported'] = True
+        result['yaml_export_quality'] = recommendation.get('quality')
         result['run_argv'] = ['python','stash_ai.py','recognition','run','--face-config',str(destination)]
         for scene in result['simulation']['selection']:
             result['run_argv'].extend(['--scene-id', scene])
@@ -84,3 +82,31 @@ def export(config, result, output, yaml_output):
             stream.write(text)
     else:
         print(text, end='')
+
+
+def summary(result):
+    """Final stderr summary; JSON stdout and report files remain machine-readable."""
+    selected = result.get('best_result')
+    if selected is None:
+        return 'Merge solver: no completed trial; no configuration selected.'
+    name = selected['trial']
+    goal = result['simulation']['trials'][name]['goal_result']
+    lines = [f"Merge solver best completed trial: {name} ({selected['quality']}); "
+             f"configuration={'changed' if selected['changed'] else 'unchanged'}; disjoint={goal['disjoint']}."]
+    for group in goal['groups']:
+        lines.append(f"  Set {group['index']+1}: complete={group['largest_complete_performers']}/{group['total_performers']}, "
+            f"assigned={group['assigned']}/{group['observations']}, shared_coverage={group['consolidation_fraction']:.1%}, "
+            f"missing={group['missing']}, withheld={group['withheld']}, fragments={group['fragments']}.")
+    for violation in selected['unmet_conditions']:
+        detail = []
+        for key, value in violation.items():
+            if key == 'reason':
+                continue
+            if key == 'set':
+                value += 1
+            if key == 'sets':
+                value = [v+1 for v in value]
+            detail.append(f'{key}={value}')
+        lines.append('  Unmet: ' + violation['reason'] + ' (' + ', '.join(detail) + ').')
+    lines.append('Best among tested configurations; global optimality is not proved.')
+    return '\n'.join(lines)
