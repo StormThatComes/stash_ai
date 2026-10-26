@@ -7,6 +7,8 @@ from .config import digest
 from .merge_report_policy import patched, proposal, parameter
 from .merge_goals import assess, objective, unmet_conditions
 from .replay_simulation import replay, impact
+from .merge_solver_search import (hybrid_neighbours as _hybrid_neighbours,
+    interleave as _interleave, spread, Frontier, BASELINE_WARMUP, PREFIX, GATES)
 
 
 def measured_options(db, config, goals, proofs=None, *, hybrid=None):
@@ -75,7 +77,7 @@ def _face_neighbours(config, changes, options):
         if key.startswith('sapiensid.'):
             continue
         current = changes.get(key, parameter(config.data,key))
-        values = sorted(values, key=lambda v: (abs(v-current), v))[:3]
+        values = spread(values, current)
         for value in values:
             if value == current:
                 continue
@@ -84,32 +86,6 @@ def _face_neighbours(config, changes, options):
                 candidate['clustering.cohesion_threshold'] = min(value,
                     changes.get('clustering.cohesion_threshold', config.data['clustering']['cohesion_threshold']))
             yield candidate
-
-
-def _hybrid_neighbours(config, changes, options, measured):
-    for patch in tuple(measured):
-        yield dict(changes, **patch)
-    # Round-robin parameters as well as search families: a long threshold list
-    # must not starve the independent-support and competitor-margin gates.
-    streams = []
-    for key, values in options.items():
-        if not key.startswith('sapiensid.'):
-            continue
-        current = changes.get(key, parameter(config.data, key))
-        values = sorted((v for v in values if v != current), key=lambda v: (abs(v-current), v))[:3]
-        streams.append(iter([dict(changes, **{key: value}) for value in values]))
-    yield from _interleave(streams)
-
-
-def _interleave(streams):
-    pending = deque(streams)
-    while pending:
-        stream = pending.popleft()
-        try:
-            yield next(stream)
-        except StopIteration:
-            continue
-        pending.append(stream)
 
 
 def neighbours(config, changes, options, *, hybrid_changes=()):
@@ -143,7 +119,7 @@ def solve(config, goals, db, *, maximum=64, progress=None):
     hybrid_changes = list(hybrid['proposals'])
     initial_changes = tuple(hybrid_changes)
     seen, patches, summaries, ranks = set(), {}, {}, {}
-    families = {}
+    families, origins = {}, {}
     best, best_rank, baseline = None, None, None
     def consume(name, observations, retained, predicted):
         nonlocal best, best_rank, baseline
@@ -186,21 +162,17 @@ def solve(config, goals, db, *, maximum=64, progress=None):
                      'face': lambda changes: _face_neighbours(config, changes, options)}
         if not config.data['sapiensid']['enabled']:
             del factories['hybrid']
-        pending = {family: deque([factory({})]) for family, factory in factories.items()}
+        pending = {family: Frontier(factory) for family, factory in factories.items()}
         rotation = deque(pending)
         while pending and trials < maximum and attempts < maximum * 100:
             family = rotation[0]
-            queue = pending[family]
-            if not queue:
+            frontier = pending[family]
+            try:
+                phase, parent, changes = frontier.next()
+            except StopIteration:
                 del pending[family]
                 rotation.popleft()
                 continue
-            iterator = queue.popleft()
-            try:
-                changes = next(iterator)
-            except StopIteration:
-                continue
-            queue.append(iterator)
             attempts += 1
             patch = proposal(config, changes)
             fingerprint = digest(patch['yaml_patch'])
@@ -217,18 +189,16 @@ def solve(config, goals, db, *, maximum=64, progress=None):
             name = f'trial-{trials}'
             patches[name] = patch
             families[name] = family
+            origins[name] = dict(search_phase=phase, search_parent=parent)
             yield name, variant
             trials += 1
+            frontier.completed(phase)
             rotation.rotate(-1)
             for next_family, factory in factories.items():
                 if next_family not in pending:
-                    pending[next_family] = deque()
+                    pending[next_family] = Frontier(factory)
                     rotation.append(next_family)
-                child = factory(changes)
-                if best == name:
-                    pending[next_family].appendleft(child)
-                else:
-                    pending[next_family].append(child)
+                pending[next_family].add(name, factory(changes), preferred=best == name)
     result = replay(config, {}, source=db, scope=goals['scope'], consume=consume, variant_stream=stream, inspect_trial=inspect, progress=progress)
     # Ctrl-C can land after consume ranks a trial but before replay records it.
     best = max(result['trials'], key=ranks.__getitem__, default=None)
@@ -236,6 +206,7 @@ def solve(config, goals, db, *, maximum=64, progress=None):
         if name in result['trials']:
             result['trials'][name].update(patch)
             result['trials'][name]['search_family'] = families[name]
+            result['trials'][name].update(origins[name])
     selection = None
     if best is not None:
         status = summaries[best]
@@ -245,6 +216,13 @@ def solve(config, goals, db, *, maximum=64, progress=None):
             admissible=status['admissible'], fully_solved=status['fully_solved'],
             unmet_conditions=unmet_conditions(status),
             **patches.get(best, proposal(config, {})))
+    tested_hybrid = {}
+    if config.data['sapiensid']['enabled'] and result['trials']:
+        for gate in GATES:
+            values = {config.data['sapiensid']['matching'][gate]}
+            values.update(change['proposed'] for name in result['trials']
+                for change in patches.get(name, {}).get('changes', []) if change['parameter'] == PREFIX + gate)
+            tested_hybrid[gate] = sorted(values)
     return dict(measured_reference_pairs=proofs, measured_hybrid_evidence=initial_hybrid,
         simulation=result, status=('no_completed_trials' if selection is None else
             'baseline_retained' if best == 'baseline' and selection['quality'] == 'partial_solution' else selection['quality']),
@@ -255,6 +233,10 @@ def solve(config, goals, db, *, maximum=64, progress=None):
                     scheduling='round_robin_hybrid_face' if config.data['sapiensid']['enabled'] else 'face',
                     executed_by_family={family: sum(families.get(name) == family for name in result['trials'])
                                         for family in ('hybrid', 'face')},
+                    baseline_exploration_per_family=BASELINE_WARMUP,
+                    executed_by_phase={phase: sum(origins.get(name, {}).get('search_phase') == phase
+                        for name in result['trials']) for phase in ('baseline_exploration', 'adaptive')},
+                    tested_hybrid_values=tested_hybrid,
                     budget_exhausted=len(result['trials']) >= maximum,
                     selection_scope='completed_trials_including_baseline',
                     proves_optimality=False, proves_infeasibility=False))
