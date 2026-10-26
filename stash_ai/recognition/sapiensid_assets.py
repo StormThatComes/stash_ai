@@ -85,20 +85,20 @@ def ensure_source(config, path):
 
 
 def encoder_assets(config):
-    from .sapiensid_v1 import WB4M_BYTES, WB4M_SHA256
     settings = config.data['sapiensid']['model']
+    model = registry.MODELS[settings['variant']]
     source = _path(config, settings['source_directory'], 'source')
-    directory = _path(config, settings['checkpoint_directory'], 'wb4m')
+    directory = _path(config, settings['checkpoint_directory'], settings['variant'])
     source = ensure_source(config, source)
     for name, size, checksum in (('model.yaml', 1198, settings['model_yaml_sha256']),
-                                  ('model.pth', WB4M_BYTES, WB4M_SHA256)):
+                                  ('model.pth', model['size'], model['sha256'])):
         path = directory / name
         if not path.is_file():
             _require_download(config, path)
             if name == 'model.yaml' and checksum != registry.MODEL_YAML_SHA256:
                 raise FileNotFoundError('Custom SapiensID model.yaml hash requires an existing matching local file.')
             install(registry.CHECKPOINT_URL, path, size, checksum,
-                    byte_range=registry.CHECKPOINT_RANGES[name], archive_size=registry.CHECKPOINT_BYTES)
+                    byte_range=model['ranges'][name], archive_size=registry.CHECKPOINT_BYTES)
     return source, directory
 
 

@@ -73,12 +73,30 @@ def test_evaluation_and_merge_goals_use_retained_body_features(tmp_path):
     assert all(t['reason_counts']['hybrid_identity']==3 for t in result['trials'].values())
 
 
-def test_replay_refuses_changed_person_contract(tmp_path):
+@pytest.mark.parametrize('change', ['pose', 'variant'])
+def test_replay_refuses_changed_person_contract(tmp_path,change):
     from stash_ai.recognition.config import plain
     config,_=prepared(tmp_path)
-    data=plain(config.data);data['sapiensid']['pose']['sha256']='2'*64
+    data=plain(config.data)
+    if change=='pose':data['sapiensid']['pose']['sha256']='2'*64
+    else:data['sapiensid']['model']['variant']='wb4m'
     with pytest.raises(ValueError,match='contracts'):
         replay(config,{'bad':replace(config,data=data)})
+
+
+def test_report_and_replay_do_not_reuse_other_variant_evidence(tmp_path,monkeypatch):
+    from stash_ai.recognition.config import plain
+    config,people=prepared(tmp_path)
+    data=plain(config.data);data['sapiensid']['model']['variant']='wb4m'
+    selected=replace(config,data=data);before=config.database.read_bytes()
+    monkeypatch.setattr('stash_ai.recognition.sapiensid_assets.install',lambda *a,**k:pytest.fail('offline command downloaded assets'))
+    report=build(selected,*people)
+    route=next(r for r in report['paths'] if r['route']=='sapiensid_hybrid')
+    assert not route['recommendations'] and 'missing_person_evidence' in route['unresolved_reasons']
+    result=replay(selected,{})
+    assert result['trials']['baseline']['hybrid']['ready']==0
+    assert result['trials']['baseline']['hybrid']['missing']==6
+    assert config.database.read_bytes()==before
 
 
 def test_real_run_collection_merge_publication_repeat_and_maintenance(tmp_path,monkeypatch):

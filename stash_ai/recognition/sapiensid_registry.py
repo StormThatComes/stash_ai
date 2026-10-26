@@ -14,6 +14,15 @@ MODEL_YAML_SHA256 = '2aa66245bdf81631cf243aff26dc2bca30788ea77958981d1947bd750cb
 CHECKPOINT_URL = ('https://drive.usercontent.google.com/download?'
                   'id=18d8Ogw60zxnaIIjSb99Y8oLvzCEn_L-Z&export=download&confirm=t')
 CHECKPOINT_BYTES = 3053586112
+WB4M_BYTES = 1646175550
+WB4M_SHA256 = '8df1e2d7a64fbc87969326862aeafccc83eb5ee0462a4f007d7f09603782cf02'
 # Raw DEFLATE entry offsets/lengths, verified from the pinned ZIP central/local headers.
-# Download wb4m only; never fetch or deserialize wb12m. Expanded bytes are SHA256-checked.
-CHECKPOINT_RANGES = {'model.pth': (249, 1526109158), 'model.yaml': (1526109502, 549)}
+# Expanded checkpoint hashes were verified against the original upstream archive.
+# Both variants share the exact model.yaml bytes, but their weights differ.
+MODELS = {
+    'wb4m': dict(size=WB4M_BYTES, sha256=WB4M_SHA256,
+                 ranges={'model.pth': (249, 1526109158), 'model.yaml': (1526109502, 549)}),
+    'wb12m': dict(size=1646175550,
+                  sha256='b91db9d4ea13542b1bff76deaa0d678b9586c73506c7ae0116ab907f688a1a60',
+                  ranges={'model.pth': (1526110232, 1527474508), 'model.yaml': (3053584836, 549)}),
+}

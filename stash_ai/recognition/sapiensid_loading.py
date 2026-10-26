@@ -10,7 +10,7 @@ import tempfile
 from .config import parse_yaml
 from .sapiensid_inference import SapiensIDV1Encoder, load_verified_weights
 
-from .sapiensid_registry import UPSTREAM_COMMIT
+from .sapiensid_registry import UPSTREAM_COMMIT, MODELS
 
 
 def local_path(config, value):
@@ -76,6 +76,8 @@ def source_imports(root):
 
 def load_encoder(config):
     settings = config.data['sapiensid']['model']
+    selected = MODELS[settings['variant']]
+    integrity = dict(expected_size=selected['size'], expected_sha256=selected['sha256'])
     from .sapiensid_assets import encoder_assets
     root, directory = encoder_assets(config)
     raw = checked_bytes(directory / 'model.yaml', settings['model_yaml_sha256'], limit=131072)
@@ -85,16 +87,20 @@ def load_encoder(config):
             cfg.get('color_space') != 'RGB' or not cfg.get('square_pad') or
             cfg.get('rgb_mean') != [.5, .5, .5] or cfg.get('rgb_std') != [.5, .5, .5] or
             cfg.get('kp_preprocessor', {}).get('name') != 'kp19'):
-        raise ValueError('Unsupported SapiensID v1 wb4m model.yaml architecture/preprocessing.')
-    from .sapiensid_v1 import verify_wb4m_checkpoint
-    verify_wb4m_checkpoint(directory / 'model.pth')
+        raise ValueError('Unsupported SapiensID v1 model.yaml architecture/preprocessing.')
+    from .sapiensid_v1 import verify_checkpoint
+    try:
+        verify_checkpoint(directory / 'model.pth', **integrity)
+    except ValueError as error:
+        raise ValueError(f"SapiensID {settings['variant']} checkpoint at {directory / 'model.pth'}: {error} "
+                         'Check sapiensid.model.variant and checkpoint_directory; existing files are not replaced.') from error
     try:
         with source_imports(root):
             from omegaconf import OmegaConf
             model_type = importlib.import_module('src.models.sapiens_id').SapiensModel
             cfg.update(start_from='', pretrained_path='', freeze=True)
             model = model_type.from_config(OmegaConf.create(cfg))
-        load_verified_weights(model, directory / 'model.pth')
+        load_verified_weights(model, directory / 'model.pth', **integrity)
         return SapiensIDV1Encoder(model, None, device=config.data['models']['device'],
             max_batch_size=config.data['sapiensid']['execution']['batch_size'])
     except ImportError as error:

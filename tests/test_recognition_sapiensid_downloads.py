@@ -52,7 +52,7 @@ class Response:
 def test_download_streams_verifies_and_atomically_installs(tmp_path, monkeypatch, ranged, ignore_range):
     data = b'model weights' * 200000  # Exercise bounded decompression across output chunks.
     packed = deflate(data)
-    archive = b'prefix' + packed + b'wb12m must not be written'
+    archive = b'prefix' + packed + b'unselected weights must not be written'
     headers = {'Content-Range': f'bytes 6-{6+len(packed)-1}/{len(archive)}'}
     response = Response(archive if ignore_range else packed if ranged else data,
                         206 if ranged and not ignore_range else 200, headers)
@@ -110,8 +110,8 @@ def test_failed_download_preserves_existing_file_and_removes_partial(tmp_path, m
     assert response.closed
 
 
-@pytest.fixture
-def upstream(tmp_path, monkeypatch):
+@pytest.fixture(params=['wb12m', 'wb4m'])
+def upstream(tmp_path, monkeypatch, request):
     root = tmp_path / 'upstream'
     root.mkdir()
     files = {'tasks/sapiensID/src/models/sapiens_id/__init__.py': b'# model source\n',
@@ -123,20 +123,24 @@ def upstream(tmp_path, monkeypatch):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(content)
             zipped.writestr('sapiensid-'+registry.UPSTREAM_COMMIT+'/'+name, content)
-    source, pose, weights, yaml = archive.getvalue(), b'pose weights', b'wb4m weights', b'y' * 1198
-    compressed_weights, compressed_yaml = deflate(weights), deflate(yaml)
-    checkpoint = b'zip header' + compressed_weights + compressed_yaml + b'wb12m data'
-    ranges = {'model.pth': (10, len(compressed_weights)),
-              'model.yaml': (10+len(compressed_weights), len(compressed_yaml))}
+    source, pose = archive.getvalue(), b'pose weights'
+    yaml = (b'name: mrm\ninput_size: [384, 384]\noutput_dim: 4096\ncolor_space: RGB\n'
+            b'square_pad: true\nrgb_mean: [0.5, 0.5, 0.5]\nrgb_std: [0.5, 0.5, 0.5]\n'
+            b'kp_preprocessor: {name: kp19}\n').ljust(1198, b' ')
+    weights_by_variant = {'wb4m': b'wb4m weights!', 'wb12m': b'wb12m weights'}
+    checkpoint = b'zip header'
+    for variant, weights in weights_by_variant.items():
+        ranges = {}
+        for name, content in (('model.pth', weights), ('model.yaml', yaml)):
+            packed = deflate(content)
+            ranges[name] = (len(checkpoint), len(packed))
+            checkpoint += packed
+        monkeypatch.setitem(registry.MODELS, variant, dict(size=len(weights), sha256=sha(weights), ranges=ranges))
     for name, value in dict(SOURCE_BYTES=len(source), SOURCE_SHA256=sha(source),
                             SOURCE_TREE_SHA256=assets.source_digest(root),
                             POSE_BYTES=len(pose), POSE_SHA256=sha(pose),
-                            MODEL_YAML_SHA256=sha(yaml), CHECKPOINT_BYTES=len(checkpoint),
-                            CHECKPOINT_RANGES=ranges).items():
+                            MODEL_YAML_SHA256=sha(yaml), CHECKPOINT_BYTES=len(checkpoint)).items():
         monkeypatch.setattr(registry, name, value)
-    from stash_ai.recognition import sapiensid_v1
-    monkeypatch.setattr(sapiensid_v1, 'WB4M_BYTES', len(weights))
-    monkeypatch.setattr(sapiensid_v1, 'WB4M_SHA256', sha(weights))
     payloads = {registry.SOURCE_URL: source, registry.POSE_URL: pose,
                 registry.CHECKPOINT_URL: checkpoint}
     calls = []
@@ -153,12 +157,14 @@ def upstream(tmp_path, monkeypatch):
     monkeypatch.setattr(requests, 'get', get)
     data = defaults()
     data['sapiensid']['enabled'] = True
-    data['sapiensid']['model'].update(source_directory='custom/source',
+    data['sapiensid']['model'].update(variant=request.param, source_directory='custom/source',
                                      checkpoint_directory='custom/checkpoints', model_yaml_sha256=sha(yaml))
     data['sapiensid']['pose'].update(path='custom/pose/model.pt', sha256=sha(pose))
     config = SimpleNamespace(data=data, source_path=tmp_path/'recognition.yml', model_dir=tmp_path/'models')
     validate(data)
-    return SimpleNamespace(config=config, calls=calls, payloads=payloads, pose=pose, weights=weights, yaml=yaml)
+    return SimpleNamespace(config=config, calls=calls, payloads=payloads, pose=pose,
+                           weights=weights_by_variant[request.param], yaml=yaml,
+                           weights_by_variant=weights_by_variant, variant=request.param)
 
 
 def test_missing_assets_follow_configured_paths_and_reuse_offline(upstream, tmp_path, monkeypatch):
@@ -173,6 +179,9 @@ def test_missing_assets_follow_configured_paths_and_reuse_offline(upstream, tmp_
     assert checksum == sha(upstream.pose)
     assert trusted_checkout(source) == source
     assert len(upstream.calls) == 4
+    ranges = registry.MODELS[upstream.variant]['ranges']
+    requested = [kwargs['headers']['Range'] for url, kwargs in upstream.calls if url == registry.CHECKPOINT_URL]
+    assert requested == [f'bytes={start}-{start+length-1}' for start, length in (ranges['model.yaml'], ranges['model.pth'])]
     assert not list(tmp_path.rglob('*.part'))
     upstream.config.data['models']['download_missing'] = False
     monkeypatch.setattr(requests, 'get', lambda *a, **k: pytest.fail('warm/offline setup attempted network'))
@@ -188,8 +197,58 @@ def test_old_empty_paths_use_model_directory(upstream):
     source, checkpoints = assets.encoder_assets(upstream.config)
     pose, checksum = assets.pose_asset(upstream.config)
     root = upstream.config.model_dir/'sapiensid_v1'
-    assert (source, checkpoints, pose) == (root/'source', root/'wb4m', root/'yolov8n-pose.pt')
+    assert (source, checkpoints, pose) == (root/'source', root/upstream.variant, root/'yolov8n-pose.pt')
     assert checksum == registry.POSE_SHA256
+
+
+def test_switching_variant_uses_separate_default_directories(upstream, monkeypatch):
+    settings = upstream.config.data['sapiensid']['model']
+    settings['checkpoint_directory'] = ''
+    installed = {}
+    for variant in ('wb4m', 'wb12m'):
+        settings['variant'] = variant
+        _, path = assets.encoder_assets(upstream.config)
+        assert path.name == variant
+        assert (path/'model.pth').read_bytes() == upstream.weights_by_variant[variant]
+        installed[variant] = path
+    assert installed['wb4m'] != installed['wb12m']
+    upstream.config.data['models']['download_missing'] = False
+    monkeypatch.setattr(requests, 'get', lambda *a, **k: pytest.fail('switching to cached variant fetched assets'))
+    for variant in ('wb4m', 'wb12m'):
+        settings['variant'] = variant
+        assert assets.encoder_assets(upstream.config)[1] == installed[variant]
+
+
+def test_encoder_passes_selected_integrity_to_weight_loader(upstream, monkeypatch):
+    import sys
+    from stash_ai.recognition import sapiensid_loading as loading
+    model = object()
+    calls = []
+    monkeypatch.setitem(sys.modules, 'omegaconf', SimpleNamespace(OmegaConf=SimpleNamespace(create=lambda cfg: cfg)))
+    model_type = SimpleNamespace(from_config=lambda cfg: model)
+    monkeypatch.setattr(loading.importlib, 'import_module', lambda name: SimpleNamespace(SapiensModel=model_type))
+    monkeypatch.setattr(loading, 'load_verified_weights', lambda obj, path, **kwargs: calls.append((obj, path, kwargs)))
+    monkeypatch.setattr(loading, 'SapiensIDV1Encoder', lambda obj, *a, **k: obj)
+    assert loading.load_encoder(upstream.config) is model
+    assert len(calls) == 1
+    obj, path, integrity = calls[0]
+    assert obj is model and path.read_bytes() == upstream.weights
+    assert integrity == dict(expected_size=len(upstream.weights), expected_sha256=sha(upstream.weights))
+
+
+def test_other_variants_weights_in_custom_directory_fail_before_loading(upstream, monkeypatch):
+    from stash_ai.recognition import sapiensid_loading as loading
+    _, directory = assets.encoder_assets(upstream.config)
+    other = 'wb4m' if upstream.variant == 'wb12m' else 'wb12m'
+    path = directory/'model.pth'
+    assert len(upstream.weights_by_variant[other]) == len(upstream.weights)
+    path.write_bytes(upstream.weights_by_variant[other])
+    upstream.calls.clear()
+    monkeypatch.setattr(loading, 'load_verified_weights', lambda *a, **k: pytest.fail('wrong variant was loaded'))
+    with pytest.raises(ValueError, match=f'SapiensID {upstream.variant} checkpoint.*SHA256'):
+        loading.load_encoder(upstream.config)
+    assert path.read_bytes() == upstream.weights_by_variant[other]
+    assert not upstream.calls
 
 
 @pytest.mark.parametrize('kind', ['source', 'weights', 'pose'])

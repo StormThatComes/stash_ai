@@ -4,12 +4,10 @@ import os
 from pathlib import Path
 import stat
 
+from .sapiensid_registry import WB4M_BYTES, WB4M_SHA256
+
 INPUT_SIZE = (384, 384)
 EMBEDDING_DIMENSIONS = 4096
-# Independent checkpoint conversion metadata (peabody124/sapiensid-eqx).
-# Upstream distributes its PyTorch checkpoint via Google Drive, not HF.
-WB4M_BYTES = 1646175550
-WB4M_SHA256 = '8df1e2d7a64fbc87969326862aeafccc83eb5ee0462a4f007d7f09603782cf02'
 
 PREPROCESSING = {
     'source': 'https://github.com/mk-minchul/sapiensid',
@@ -50,13 +48,12 @@ def preprocess(image):
 
 
 def verify_wb4m_checkpoint(path, *, expected_size=WB4M_BYTES, expected_sha256=WB4M_SHA256):
-    """Verify a local upstream PyTorch wb4m checkpoint before any torch.load.
+    """Compatibility entry point for the originally supported wb4m checkpoint."""
+    return verify_checkpoint(path, expected_size=expected_size, expected_sha256=expected_sha256)
 
-    Asset acquisition belongs to sapiensid_assets; this verifier is offline.
-    Hash source is the separately published Equinox conversion card, also
-    checked against the original upstream archive by the download smoke test.
-    This verifies bytes, not their suitability for the current face pipeline.
-    """
+
+def verify_checkpoint(path, *, expected_size, expected_sha256):
+    """Verify the selected upstream checkpoint before model construction/loading."""
     if (type(expected_size) is not int or expected_size <= 0
             or not isinstance(expected_sha256, str) or len(expected_sha256) != 64
             or any(c not in '0123456789abcdef' for c in expected_sha256)):

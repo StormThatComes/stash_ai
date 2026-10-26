@@ -9,12 +9,11 @@ from threading import get_ident
 
 from .models import normalized_embedding
 from .sapiensid_v1 import (
-    EMBEDDING_DIMENSIONS, INPUT_SIZE, WB4M_BYTES, WB4M_SHA256, preprocess,
+    EMBEDDING_DIMENSIONS, INPUT_SIZE, preprocess,
 )
 
 
-def load_verified_weights(model, path, *, expected_size=WB4M_BYTES,
-                          expected_sha256=WB4M_SHA256):
+def load_verified_weights(model, path, *, expected_size, expected_sha256):
     """Load a locally supplied SapiensID state dict into an existing module.
 
     Hash and deserialize the SAME open file descriptor, to avoid TOCTOU

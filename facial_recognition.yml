@@ -127,8 +127,9 @@ names:
 sapiensid:
   enabled: false              # true lazily prepares missing assets when models.download_missing is true.
   model:
+    variant: wb12m             # wb12m (default, trained on more data) or wb4m. Changing variant separates cached embeddings.
     source_directory: recognition_models/sapiensid_v1/source # Destination for verified upstream source; Git is not required.
-    checkpoint_directory: recognition_models/sapiensid_v1/wb4m # Destination for model.pth and model.yaml.
+    checkpoint_directory: "" # Empty: models.directory/sapiensid_v1/<variant>. Or set an explicit destination for model.pth/model.yaml.
     model_yaml_sha256: 2aa66245bdf81631cf243aff26dc2bca30788ea77958981d1947bd750cbf93b9
   pose:
     path: recognition_models/sapiensid_v1/yolov8n-pose.pt # Destination for the pinned pose checkpoint.

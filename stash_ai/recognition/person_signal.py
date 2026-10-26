@@ -3,10 +3,10 @@
 This module must remain usable without torch, CUDA or model assets.
 """
 from .config import digest
-from .sapiensid_registry import POSE_SHA256, MODEL_YAML_SHA256
+from .sapiensid_registry import POSE_SHA256, MODEL_YAML_SHA256, MODELS, WB4M_SHA256, UPSTREAM_COMMIT
 
 DIMENSIONS = 4096
-CONTRACT = 'sapiensid-wb4m-person-v2'
+CONTRACT = 'sapiensid-person-v3'
 SCHEMA = '''
 CREATE TABLE person_evidence (
  observation TEXT NOT NULL REFERENCES observations(id),
@@ -23,8 +23,8 @@ CREATE TABLE person_evidence (
 
 def defaults():
     return dict(enabled=False,
-        model=dict(source_directory='recognition_models/sapiensid_v1/source',
-            checkpoint_directory='recognition_models/sapiensid_v1/wb4m', model_yaml_sha256=MODEL_YAML_SHA256),
+        model=dict(variant='wb12m',source_directory='recognition_models/sapiensid_v1/source',
+            checkpoint_directory='', model_yaml_sha256=MODEL_YAML_SHA256),
         pose=dict(path='recognition_models/sapiensid_v1/yolov8n-pose.pt',sha256=POSE_SHA256,score_threshold=.5,keypoint_score_threshold=.5,
                   nms_threshold=.7,max_people_per_frame=100),
         matching=dict(face_floor=.4,person_threshold=.85,ambiguity_margin=.1,min_support=3),
@@ -35,6 +35,9 @@ def defaults():
 
 def validate(settings):
     from .config import _number
+    variant=settings['model']['variant']
+    if not isinstance(variant,str) or variant not in MODELS:
+        raise ValueError('sapiensid.model.variant must be wb12m or wb4m.')
     consolidation=settings['consolidation']
     if consolidation['scope'] not in ('selected','retained'):
         raise ValueError('sapiensid.consolidation.scope must be selected or retained.')
@@ -75,8 +78,15 @@ def validate(settings):
 def contract(config):
     """Paths, matching thresholds and resource budgets do not change vectors."""
     s=config.data['sapiensid']
-    return digest(dict(format=CONTRACT,model_yaml=s['model']['model_yaml_sha256'],
-        pose={k:(v or POSE_SHA256) if k=='sha256' else v for k,v in s['pose'].items() if k!='path'}))
+    variant=s['model']['variant'];model=MODELS[variant]
+    evidence=dict(format=CONTRACT,model_yaml=s['model']['model_yaml_sha256'],
+        pose={k:(v or POSE_SHA256) if k=='sha256' else v for k,v in s['pose'].items() if k!='path'})
+    if variant=='wb4m' and model['sha256']==WB4M_SHA256:
+        # Preserve existing evidence for the exact originally supported weights.
+        evidence['format']='sapiensid-wb4m-person-v2'
+    else:
+        evidence.update(variant=variant,model_sha256=model['sha256'],source_revision=UPSTREAM_COMMIT)
+    return digest(evidence)
 
 
 def available(db):

@@ -1167,7 +1167,9 @@ python -m pip install -r requirements-sapiensid.txt
 This installs the inference extras. With `sapiensid.enabled: true` and
 `models.download_missing: true`, the application downloads missing upstream
 source and model checkpoints into the SapiensID paths configured in
-`facial_recognition.yml` when inference first needs them. See
+`facial_recognition.yml` when inference first needs them. The default
+`sapiensid.model.variant: wb12m` selects the model trained on more data;
+`wb4m` remains available. See
 [the SapiensID guide](docs/sapiensid-hybrid.md) for custom destinations and offline use.
 
 If the installed updater predates documentation or SapiensID dependency-file
