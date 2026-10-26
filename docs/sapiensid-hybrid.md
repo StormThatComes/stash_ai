@@ -170,7 +170,7 @@ another face rebuild. No checkpoint is treated as ground truth.
 | `report` | Read-only frozen plan with pair gates, competing identities and missing evidence. |
 | `report-identity` | Recorded hybrid explanations, attachment roles, retained body PNGs and association metadata. No models/media needed. |
 | `report-merge` | Add measured hybrid proposals; `--simulate` verifies final membership through production replay. Merge goals and the solver retain all competing identities and set-separation constraints. |
-| `audit-alignment` | Export the exact reconstructed model input, whitespace mask and 22 normalized points. Loads pose and face detection, not SapiensID identity weights. |
+| `audit-alignment` | Export the exact reconstructed model input, whitespace mask, 22 normalized points and annotated source/input PNGs. Loads pose and face detection, not SapiensID identity weights. |
 | `evaluate` | Copy only admitted retained evidence into isolated trials; report coverage, matching settings and recorded decisions. Future selected scenes cannot supply body votes. |
 | `tune` | Support the four `sapiensid.matching.*` parameters. Labelled holdout validation remains required for a recommendation. |
 | `portraits` | Use canonical face memberships and existing face portrait scoring; no person encoder, no body portraits. |
@@ -183,6 +183,19 @@ current-contract evidence. Frozen-report recommendations do not guarantee a full
 rebuild; use replay verification before applying a configuration. Offline replay
 refuses changed person-input contracts. Full configuration exports resolve local
 model paths so moving the YAML does not silently change their meaning.
+
+Person alignment exports include `-person-source.png` with the measured person
+rectangle and keypoints, and `-person-input-annotated.png` with the rectangle and
+points transformed into the actual model input. Yellow marks the person bounds;
+magenta points 0–16 are pose landmarks. Points 17–21 are the five face-detector
+landmarks (cyan eyes, red nose, green mouth corners, matching the face audit).
+Numbers index the 22-point array in the JSON. Source pose points use COCO order;
+input points use the SapiensID left/right canonicalization. Missing or rejected
+points are omitted, and ambiguous face/person associations produce no overlay.
+The existing `-person-input.png` and `-person-mask.png` remain unannotated.
+The manifest lists all four images and records the colors, drawn indices and
+input rectangle in `person_input.annotations`. Drawing does not change model
+inputs, embeddings or the person evidence contract.
 
 ## Storage and resource limits
 
