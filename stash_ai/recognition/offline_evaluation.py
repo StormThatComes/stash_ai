@@ -35,7 +35,7 @@ def _ram(config):
     return db
 
 
-def _selection(db, config, scenes, scope):
+def _selection(db, config, scenes, scope, *, allow_partial=False, diagnostics=None):
     ns = namespace(config)
     scopes = [r[0] for r in db.execute('SELECT DISTINCT scope FROM scans WHERE namespace=?', (ns,))]
     if scope is None:
@@ -51,8 +51,12 @@ def _selection(db, config, scenes, scope):
         if not wanted or r['scene'] in wanted]
     if not scans or wanted and {s['scene'] for s in scans} != wanted:
         raise ValueError('Evaluation scenes are missing from the selected scope/namespace.')
-    if any(s['status'] != 'complete' or s['policy_sha'] != scan_identity(config, ns) for s in scans):
-        raise ValueError('Evaluation requires latest complete VTT scans matching the detection policy; rescan first.')
+    from .replay_inputs import classify, ReplayInputError
+    scans, detail = classify(scans, scan_identity(config, ns))
+    if diagnostics is not None:
+        diagnostics.update(detail)
+    if not allow_partial and not detail['complete_scope']:
+        raise ReplayInputError(detail)
     return scope, scans
 
 

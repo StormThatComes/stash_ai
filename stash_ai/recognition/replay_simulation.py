@@ -43,7 +43,8 @@ def replay(config, variants, **kwargs):
         return _replay(config,variants,**kwargs)
 
 
-def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=None, variant_stream=None, inspect_trial=None, progress=None):
+def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=None, variant_stream=None, inspect_trial=None,
+            progress=None, allow_partial_selection=False):
     """Stream one trial at a time; retain only baseline and compact summaries.
 
     Existing bindings/history seed each independent trial. Production rebuild
@@ -57,7 +58,8 @@ def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=N
         if namespace(variant) != ns or scan_identity(variant, ns) != scan_identity(config, ns) or not same_contract(config,variant):
             raise ValueError('Simulation variants must preserve model, person and VTT scan contracts.')
     with (closing(_open_readonly(config.database)) if source is None else nullcontext(source)) as db:
-        scope, scans = _selection(db, config, scenes, scope)
+        inputs = {}
+        scope, scans = _selection(db, config, scenes, scope, allow_partial=allow_partial_selection, diagnostics=inputs)
         installation = FaceDatabase.installation.fget(SimpleNamespace(connection=db))
         observations = {r['id']: r['scene'] for r in db.execute(
             'SELECT o.id,s.scene FROM observations o JOIN scans s ON s.id=o.scan '
@@ -66,15 +68,24 @@ def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=N
         retained.update((r[0], r[1]) for r in db.execute('SELECT observation,person FROM members') if r[0] in observations)
         result = dict(format=1, kind='recognition_replay_simulation', source_read_only=True,
             source='retained_vtt_embeddings', scope=scope, selection=[s['scene'] for s in scans],
-            starting_state='frozen_retained_history_and_bindings', trials={},
+            starting_state='frozen_retained_history_and_bindings', input_selection=inputs, trials={},
             limitations=['Partition changes are not false-merge or accuracy estimates without explicit truth.',
                 'Results apply to this retained snapshot and joint selection, not future media or other import orders.',
                 'Runtime excludes model inference and media loading; each trial uses fresh RAM databases.'])
+        if not inputs['complete_scope']:
+            result['limitations'].append('Excluded scenes were not replayed. Recommendations cover only selection; '
+                'a run including excluded or recollected scenes requires revalidation.')
+        if not scans:
+            result['stop_reason'] = 'no_compatible_scans'
+            return result
         baseline = None
         from itertools import chain
         stream = variant_stream() if variant_stream is not None else variants.items()
         seen_names = {'baseline'}
         try:
+            if progress and not inputs['complete_scope']:
+                progress('inputs', f"partial scope: {inputs['selected_scene_count']}/{inputs['latest_scene_count']} "
+                         'compatible complete scenes; excluded scenes will be listed in the report', None)
             for name, settings in chain([('baseline', config)], stream):
                 if name != 'baseline':
                     if name in seen_names:

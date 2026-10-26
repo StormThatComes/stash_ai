@@ -199,7 +199,8 @@ def solve(config, goals, db, *, maximum=64, progress=None):
                     pending[next_family] = Frontier(factory)
                     rotation.append(next_family)
                 pending[next_family].add(name, factory(changes), preferred=best == name)
-    result = replay(config, {}, source=db, scope=goals['scope'], consume=consume, variant_stream=stream, inspect_trial=inspect, progress=progress)
+    result = replay(config, {}, source=db, scope=goals['scope'], consume=consume, variant_stream=stream,
+        inspect_trial=inspect, progress=progress, allow_partial_selection=True)
     # Ctrl-C can land after consume ranks a trial but before replay records it.
     best = max(result['trials'], key=ranks.__getitem__, default=None)
     for name, patch in patches.items():
@@ -224,7 +225,7 @@ def solve(config, goals, db, *, maximum=64, progress=None):
                 for change in patches.get(name, {}).get('changes', []) if change['parameter'] == PREFIX + gate)
             tested_hybrid[gate] = sorted(values)
     return dict(measured_reference_pairs=proofs, measured_hybrid_evidence=initial_hybrid,
-        simulation=result, status=('no_completed_trials' if selection is None else
+        simulation=result, status=(result.get('stop_reason', 'no_completed_trials') if selection is None else
             'baseline_retained' if best == 'baseline' and selection['quality'] == 'partial_solution' else selection['quality']),
         selected_trial=best, best_result=selection,
         recommendation=selection if selection is not None and selection['changed'] else None,
