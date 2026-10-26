@@ -25,6 +25,18 @@ def explain(result):
         conflicting_trials=[dict(trial=name, conflicts=item['goal_result']['conflicts'])
             for name, item in simulation.get('trials', {}).items() if not item['goal_result']['disjoint']],
         conclusion='Results describe tested configurations; search exhaustion is not proof of impossibility.')
+    hybrid = trial.get('hybrid_solver_evidence', {})
+    if hybrid.get('enabled'):
+        result['explanation']['hybrid'] = dict(
+            coverage=trial.get('hybrid'), missing_identities=hybrid['missing_identities'],
+            missing_evidence=[i for i in hybrid['identities'] if not i['person_references'] or
+                i['missing_person_observations'] or i['missing_original_core_observations']],
+            pair_blockers=[dict(left=p['left'], right=p['right'], blockers=p['blockers'],
+                support=p['support'], face=p['face'], person=p['person']) for p in hybrid['pairs']
+                if p['relation']=='within_set' and p['blockers']],
+            nearest_competitors=hybrid['nearest_competitors'],
+            interpretation='Frozen diagnostics for the selected replay; missing features require collection, '
+                           'and guards/competitors are still checked by production matching.')
 
 
 def export(config, result, output, yaml_output):
