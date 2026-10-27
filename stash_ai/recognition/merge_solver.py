@@ -114,6 +114,7 @@ def solve(config, goals, db, *, maximum=500, progress=None):
     from .merge_solver_diagnostics import diagnostic_record
     from .merge_solver_metrics import magnitude as mutation_magnitude
     from .merge_solver_constraints import component_proposals, crossovers, coupled_refinement
+    from .merge_solver_preflight import boundary_probes, ordered
     from .hybrid_query_observer import observe_queries
     proofs = []
     hybrid = {}
@@ -218,7 +219,8 @@ def solve(config, goals, db, *, maximum=500, progress=None):
                     yield family, 'local_refinement', candidate
                 return
             hints = feedback[parent]['proposals'][family]
-            directed = (('measured_blockers', dict(changes, **patch)) for patch in hints)
+            directed = (('measured_blockers', p) for p in ordered(config,
+                (dict(changes, **patch) for patch in hints), feedback[parent]))
             source = feedback[parent]
             scoped_options = dict(options, **source['options'])
             active = source['provenance']['active_parameters']
@@ -228,7 +230,10 @@ def solve(config, goals, db, *, maximum=500, progress=None):
             probes = (('coordinate_probe', p) for p in candidates)
             mixing = (('crossover',p) for p in crossovers(changes,
                 [c['changes'] for n,c in search.beam.items() if n!=parent])) if parent!='baseline' else iter(())
-            yield from search.operations({'measured_blockers':directed,'coordinate_probe':probes,'crossover':mixing})
+            boundaries = (('boundary_probe',p) for p in ordered(config,
+                boundary_probes(changes,scoped_options),source))
+            yield from search.operations({'measured_blockers':directed,'coordinate_probe':probes,
+                                          'crossover':mixing,'boundary_probe':boundaries})
         search = BeamSearch(factories, factory, maximum, config)
         search.observe('baseline', {}, ranks['baseline'], outcomes['baseline'])
         while trials < maximum and attempts < maximum * 100:

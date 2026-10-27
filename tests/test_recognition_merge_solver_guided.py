@@ -250,7 +250,7 @@ def test_interrupt_in_refinement_keeps_best_completed_yaml(tmp_path):
         if stage == 'complete':
             completed.append((name,item['best_trial']))
             # The default patience is 64; this lands in the refinement window.
-            if len(completed) == 75:
+            if len(completed) >= 75 and name != item['best_trial']:
                 raise KeyboardInterrupt
     with _open_readonly(config.database) as db:
         goals = resolve(db, config, [people], by_performer=False)

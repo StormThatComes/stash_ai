@@ -1,9 +1,11 @@
 """Full production retuning on a consistent, read-only retained VTT snapshot."""
 from collections import Counter, defaultdict
-from contextlib import closing, nullcontext
+from contextlib import closing, nullcontext, contextmanager
 from dataclasses import replace
 from types import SimpleNamespace
 import time
+import sqlite3
+import tempfile
 
 from .config import plain
 from .database import FaceDatabase, encoded
@@ -37,6 +39,24 @@ def impact(before, after):
         identities=len(set(after.values())-{None}))
 
 
+@contextmanager
+def prepared_history(db, config, scope, ns, installation):
+    """One disk-backed immutable seed; each experiment still gets fresh RAM."""
+    from .database import SCHEMA
+    with tempfile.TemporaryDirectory(prefix='recognition-replay-') as directory:
+        with closing(sqlite3.connect(directory+'/seed.sqlite3')) as seed:
+            seed.execute('PRAGMA cache_size=-2048')
+            seed.executescript(SCHEMA)
+            seed.execute('INSERT INTO metadata VALUES (?,?)', ('installation', installation))
+            copy_history(db, seed, [], scope, ns)
+            seed.commit()
+            size = seed.execute('PRAGMA page_count').fetchone()[0]*seed.execute('PRAGMA page_size').fetchone()[0]
+            if size > config.data['execution']['rebuild_memory_bytes']:
+                raise ValueError('Retained replay snapshot exceeds execution.rebuild_memory_bytes.')
+            seed.execute('PRAGMA query_only=ON')
+            yield seed
+
+
 def replay(config, variants, **kwargs):
     from .run_cache import scope
     with scope(config):
@@ -44,7 +64,7 @@ def replay(config, variants, **kwargs):
 
 
 def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=None, variant_stream=None, inspect_trial=None,
-            progress=None, allow_partial_selection=False):
+            progress=None, allow_partial_selection=False, reuse_history=True):
     """Stream one trial at a time; retain only baseline and compact summaries.
 
     Existing bindings/history seed each independent trial. Production rebuild
@@ -82,56 +102,63 @@ def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=N
         from itertools import chain
         stream = variant_stream() if variant_stream is not None else variants.items()
         seen_names = {'baseline'}
-        try:
-            if progress and not inputs['complete_scope']:
-                progress('inputs', f"partial scope: {inputs['selected_scene_count']}/{inputs['latest_scene_count']} "
-                         'compatible complete scenes; excluded scenes will be listed in the report', None)
-            for name, settings in chain([('baseline', config)], stream):
-                if name != 'baseline':
-                    if name in seen_names:
-                        raise ValueError('Duplicate simulation name.')
-                    seen_names.add(name)
-                if namespace(settings) != ns or scan_identity(settings, ns) != scan_identity(config, ns) or not same_contract(config,settings):
-                    raise ValueError('Simulation variants must preserve model, person and VTT scan contracts.')
-                data = plain(settings.data)
-                data['execution'].update(rebuild_checkpoint_scenes=0, profile_rebuild=False)
-                settings = replace(settings, data=data)
-                if progress:
-                    progress(name, 'start', None)
-                started = time.perf_counter()
-                with closing(_ram(settings)) as target:
-                    target.execute('INSERT INTO metadata VALUES (?,?)', ('installation', installation))
-                    copy_history(db, target, [], scope, ns)
-                    state = SimpleNamespace(connection=target, installation=installation)
-                    from .progress import observe_stages
-                    last_stage = [0.]
-                    def stage_update(label):
-                        now = time.monotonic()
-                        if progress and now-last_stage[0] >= 1.:
-                            last_stage[0] = now
-                            progress(name, 'stage: '+label, None)
-                    with observe_stages(stage_update if progress else None):
-                        rebuild_selected(state, [dict(scene=s['scene'], scan=s['id']) for s in scans], settings)
-                    predictions = dict.fromkeys(observations)
-                    predictions.update((r[0], r[1]) for r in target.execute('SELECT observation,person FROM members')
-                                       if r[0] in observations)
-                    hybrid=coverage(target,settings,[s['id'] for s in scans])
-                    evidence = inspect_trial(target, settings) if inspect_trial else None
-                if baseline is None:
-                    baseline = predictions
-                item = dict(hybrid=hybrid,elapsed_seconds=time.perf_counter()-started,
-                    versus_retained=impact(retained, predictions), versus_baseline=impact(baseline, predictions))
-                if consume is not None:
-                    item.update(consume(name, observations, retained, predictions))
-                if evidence is not None:
-                    item['decision_evidence'] = evidence
-                result['trials'][name] = item
-                if progress:
-                    progress(name, 'complete', item)
-        except KeyboardInterrupt:
-            if variant_stream is None:
-                raise
-            result['interrupted'] = True
+        with (prepared_history(db, config, scope, ns, installation) if reuse_history else nullcontext(None)) as seed:
+            try:
+                if progress and not inputs['complete_scope']:
+                    progress('inputs', f"partial scope: {inputs['selected_scene_count']}/{inputs['latest_scene_count']} "
+                             'compatible complete scenes; excluded scenes will be listed in the report', None)
+                for name, settings in chain([('baseline', config)], stream):
+                    if name != 'baseline':
+                        if name in seen_names:
+                            raise ValueError('Duplicate simulation name.')
+                        seen_names.add(name)
+                    if namespace(settings) != ns or scan_identity(settings, ns) != scan_identity(config, ns) or not same_contract(config,settings):
+                        raise ValueError('Simulation variants must preserve model, person and VTT scan contracts.')
+                    data = plain(settings.data)
+                    data['execution'].update(rebuild_checkpoint_scenes=0, profile_rebuild=False)
+                    settings = replace(settings, data=data)
+                    if progress:
+                        progress(name, 'start', None)
+                    started = time.perf_counter()
+                    with closing(_ram(settings)) as target:
+                        if seed is None:
+                            target.execute('INSERT INTO metadata VALUES (?,?)', ('installation', installation))
+                            copy_history(db, target, [], scope, ns)
+                        else:
+                            seed.backup(target)
+                            pages = settings.data['execution']['rebuild_memory_bytes']//target.execute('PRAGMA page_size').fetchone()[0]
+                            target.execute(f'PRAGMA max_page_count={pages}')
+                        state = SimpleNamespace(connection=target, installation=installation)
+                        from .progress import observe_stages
+                        last_stage = [0.]
+                        def stage_update(label):
+                            now = time.monotonic()
+                            if progress and now-last_stage[0] >= 1.:
+                                last_stage[0] = now
+                                progress(name, 'stage: '+label, None)
+                        with observe_stages(stage_update if progress else None):
+                            rebuild_selected(state, [dict(scene=s['scene'], scan=s['id']) for s in scans], settings)
+                        predictions = dict.fromkeys(observations)
+                        predictions.update((r[0], r[1]) for r in target.execute('SELECT observation,person FROM members')
+                                           if r[0] in observations)
+                        hybrid=coverage(target,settings,[s['id'] for s in scans])
+                        evidence = inspect_trial(target, settings) if inspect_trial else None
+                    if baseline is None:
+                        baseline = predictions
+                    item = dict(hybrid=hybrid,elapsed_seconds=time.perf_counter()-started,
+                        versus_retained=impact(retained, predictions), versus_baseline=impact(baseline, predictions))
+                    if consume is not None:
+                        item.update(consume(name, observations, retained, predictions))
+                    if evidence is not None:
+                        item['decision_evidence'] = evidence
+                    result['trials'][name] = item
+                    if progress:
+                        progress(name, 'complete', item)
+            except KeyboardInterrupt:
+                if variant_stream is None:
+                    raise
+                result['interrupted'] = True
+        result['history_preparations'] = 1 if reuse_history else len(result['trials'])
         return result
 
 
