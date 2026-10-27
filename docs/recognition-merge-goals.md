@@ -351,6 +351,45 @@ values before final stagnation; it never discards the best completed result or
 extends `--max-trials`. Search metadata includes operator statistics and restart
 counts. Every trial still logs its changes against the previous executed trial.
 
+With multiple sets and at least one set containing multiple performers, search
+also approaches the problem from a permissive configuration. Starting with
+`trial-2`, every other exploration slot is offered to this alternate lane while
+the goal is unsolved. The first normal trial and the existing baseline probes
+remain available. The lane alternates broad joint relaxations with attempts to
+repair their results; it does not wait for stagnation or the late restart.
+
+The initial profiles relax SapiensID matching together (`face_floor` at most
+0.2, `person_threshold` at most 0.35, zero ambiguity margin, support 1), face
+matching together (match thresholds at most 0.35, cohesion thresholds at most
+0.25, zero ambiguity margins and minimum support), and both routes together.
+They also include available measured admission-gate relaxations. Existing
+lower thresholds are preserved. Detection, feature extraction and model
+contracts are unchanged; missing features remain missing. These profiles are
+experiments, not recommended settings until production replay evaluates them.
+
+An independent frontier retains up to three completed states ranked by
+continuous within-set consolidation and coverage. A state mixing two sets can
+remain a parent even when the normal beam rejects it. Repairs use positive and
+negative witnesses, joint/per-family interpolations towards a completed disjoint
+state, and individual gate reversions. Interpolation only proposes experiments:
+matching is not assumed monotonic, and every candidate receives a full replay.
+This can cross a plateau where changing one gate leaves `largest_complete=1/N`.
+
+The console identifies these trials with `Search: phase=bidirectional` and
+`strategy=relaxed_seed`, `separation_repair` or `boundary_bridge`, in addition
+to the exact mutations. JSON includes `search.bidirectional` and the
+`bidirectional` phase count. The lane has its own bounded allowance (at most
+64 completed replays, approximately one third of smaller budgets, with a minimum
+allowance of four when the total budget permits). All trials still share the
+global limit, default 500, and the final robustness allowance. It is disabled
+for a single set and stops offering candidates once a full solution is found.
+
+The separate parent-selection rank does not change the exported winner rank.
+A cross-set merge cannot displace a completed disjoint result, and Ctrl-C keeps
+the best completed winner rather than the last permissive experiment. Checkpoint
+resume reconstructs both frontiers and skips completed replays. As with other
+solver code changes, a checkpoint from an older version requires a fresh solve.
+
 Replay preparation now copies scoped retained history once into a temporary,
 immutable disk SQLite seed. Each trial receives an independent RAM backup, checks
 the same memory limit and runs production rebuild. No assignments or decisions

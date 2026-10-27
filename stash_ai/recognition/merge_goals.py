@@ -71,6 +71,9 @@ def execute(args, config):
                         for change in item['changes_from_previous']:
                             print(f"  {change['parameter']}: {json.dumps(change['previous'])} -> "
                                   f"{json.dumps(change['current'])}", file=sys.stderr, flush=True)
+                        if item.get('search_phase') == 'bidirectional':
+                            print(f"  Search: phase=bidirectional strategy={item['search_strategy']}",
+                                  file=sys.stderr, flush=True)
                     elif stage == 'complete':
                         for group in item['goal_result']['groups']:
                             print(group_summary(group), file=sys.stderr, flush=True)
