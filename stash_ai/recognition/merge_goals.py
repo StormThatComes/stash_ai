@@ -37,6 +37,7 @@ def execute(args, config):
     from .fragmentation_report import _open_readonly
     checkpoint=getattr(args,'checkpoint',None)
     resume=getattr(args,'resume',False)
+    yaml_mode=getattr(args,'yaml_mode','full')
     if checkpoint and args.yaml_output is None:
         args.yaml_output=checkpoint.with_name(checkpoint.name+'.best.yml')
     targets = [p.expanduser().resolve() for p in (args.output, args.yaml_output) if p]
@@ -73,12 +74,13 @@ def execute(args, config):
                                   f"{json.dumps(change['current'])}", file=sys.stderr, flush=True)
             result.update(solve(config, result, db, maximum=args.max_trials, progress=progress,
                                 checkpoint=checkpoint,resume=resume,winner_writer=writer,
-                                sampler=getattr(args,'solver_sampler','heuristic'),seed=getattr(args,'solver_seed',0)))
+                                sampler=getattr(args,'solver_sampler','heuristic'),seed=getattr(args,'solver_seed',0),
+                                yaml_mode=yaml_mode))
         elif args.simulate:
             result['simulation'] = evaluate(config, result, db)
             result['status'] = 'baseline_evaluated'
     from .merge_goal_output import export
-    export(config, result, args.output, args.yaml_output,yaml_owner=writer)
+    export(config, result, args.output, args.yaml_output,yaml_owner=writer,yaml_mode=yaml_mode)
     if args.solve and args.progress_style != 'off':
         from .merge_goal_output import summary
         print(summary(result), file=sys.stderr, flush=True)

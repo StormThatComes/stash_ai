@@ -104,9 +104,11 @@ def rebuilt_goals(db, goals):
     return dict(goals, groups=groups)
 
 
-def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, resume=False, winner_writer=None, sampler="heuristic", seed=0):
+def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, resume=False, winner_writer=None, sampler="heuristic", seed=0, yaml_mode='full'):
     if type(maximum) is not int or maximum < 1:
         raise ValueError('max_trials must be a positive integer.')
+    if yaml_mode not in ('full', 'diff'):
+        raise ValueError('YAML mode must be full or diff.')
     from .scanning import scan_identity
     from .person_signal import same_contract
     from .merge_solver_sampler import create
@@ -117,7 +119,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
     from .merge_goal_output import configuration_document
     from copy import deepcopy
     if resume and checkpoint is None:raise ValueError('Resume requires a solver checkpoint.')
-    journal = Journal(checkpoint, fingerprint(config,goals,db,dict(maximum=maximum,sampler=sampler_metadata)),
+    journal = Journal(checkpoint, fingerprint(config,goals,db,dict(maximum=maximum,sampler=sampler_metadata,yaml_mode=yaml_mode)),
                       resume=resume,winner=winner_writer) if checkpoint else None
     from .merge_solver_hybrid import public
     from .merge_solver_feedback import QueryFeedback, pair_separation, quality_feedback
@@ -351,7 +353,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
         return deepcopy(record['item']),baseline
     def record(name,settings,item,inputs):
         nonlocal written_winner
-        winner_text=(configuration_document(config,selected(best),inputs)
+        winner_text=(configuration_document(config,selected(best),inputs,mode=yaml_mode)
                      if winner_writer and written_winner!=best else None)
         if journal is not None:
             state=deepcopy(dict(status=summaries[name],rank=ranks[name],outcome=outcomes[name],

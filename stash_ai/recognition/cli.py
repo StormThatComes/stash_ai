@@ -19,6 +19,8 @@ class RecognitionParser(argparse.ArgumentParser):
         if result.command == 'report-merge':
             if result.yaml_output and not result.solve:
                 self.error('--yaml-output requires --solve')
+            if result.yaml_mode == 'diff' and (not result.solve or not (result.yaml_output or result.checkpoint)):
+                self.error('--yaml-mode diff requires --solve and --yaml-output or --checkpoint')
             if result.solver_sampler!='heuristic' and not result.solve:
                 self.error('--solver-sampler requires --solve')
             if (result.checkpoint or result.resume) and not result.solve:
@@ -163,6 +165,8 @@ def parser():
     merge_report.add_argument('--output', type=Path, help='New JSON report path; stdout if omitted. Includes copyable YAML patches.')
     merge_report.add_argument('--progress-style', choices=('auto','off'), default='auto')
     merge_report.add_argument('--yaml-output', type=Path, help='Export the best tested configuration, including best-effort or unchanged results; requires --solve.')
+    merge_report.add_argument('--yaml-mode', choices=('full', 'diff'), default='full',
+        help='YAML export: full configuration (default) or only changed keys relative to the input baseline; diff must be merged into that baseline before use.')
     merge_report.add_argument('--solve', action='store_true', help='Search configurations using full replay of merge goals.')
     merge_report.add_argument('--max-trials', type=int, default=500, help='Maximum replay budget including baseline (default: 500; may stop on stagnation).')
     merge_report.add_argument('--solver-sampler', choices=('heuristic','tpe'), default='heuristic', help='Optional learned proposal lane alongside heuristics; TPE requires requirements-solver.txt.')
