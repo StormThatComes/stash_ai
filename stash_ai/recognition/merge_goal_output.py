@@ -3,7 +3,7 @@ import hashlib
 import json
 from pathlib import Path
 from .config import digest, plain
-from .merge_report_policy import patched
+from .merge_report_policy import patched, proposal
 from .merge_goals import unmet_conditions
 
 
@@ -39,19 +39,29 @@ def explain(result):
                            'and guards/competitors are still checked by production matching.')
 
 
-def configuration_document(config, recommendation, inputs):
+def configuration_document(config, recommendation, inputs, *, mode='full'):
     import yaml
-    settings = patched(config, {x['parameter']:x['proposed'] for x in recommendation['changes']})
-    data = plain(settings.data)
-    data['storage']['database'] = str(config.database)
-    data['models']['directory'] = str(config.model_dir)
-    data['names']['file'] = str(config.names_path) if config.names_path else None
-    for section,key in (('model','source_directory'),('model','checkpoint_directory'),('pose','path')):
-        raw=data['sapiensid'][section][key]
-        if raw:
-            path=Path(raw).expanduser()
-            data['sapiensid'][section][key]=str((config.source_path.parent/path).resolve())
+    if mode not in ('full', 'diff'):
+        raise ValueError('YAML mode must be full or diff.')
+    changes = {x['parameter']:x['proposed'] for x in recommendation['changes']}
+    settings = patched(config, changes)  # Validate changes against the effective input baseline.
+    if mode == 'diff':
+        data = proposal(config, changes)['yaml_patch']
+    else:
+        data = plain(settings.data)
+        data['storage']['database'] = str(config.database)
+        data['models']['directory'] = str(config.model_dir)
+        data['names']['file'] = str(config.names_path) if config.names_path else None
+        for section,key in (('model','source_directory'),('model','checkpoint_directory'),('pose','path')):
+            raw=data['sapiensid'][section][key]
+            if raw:
+                path=Path(raw).expanduser()
+                data['sapiensid'][section][key]=str((config.source_path.parent/path).resolve())
     serialized = yaml.safe_dump(data, sort_keys=False)
+    if mode == 'diff':
+        serialized = ('# YAML diff: merge these keys into the input baseline configuration.\n'
+                      '# This is not a standalone --face-config document.\n'
+                      f'# Baseline configuration SHA256: {digest(plain(config.data))}\n' + serialized)
     if 'quality' in recommendation:
         header = f"# Merge solver: best completed trial {recommendation['trial']} ({recommendation['quality']}).\n"
         if not recommendation['fully_solved']:
@@ -59,15 +69,21 @@ def configuration_document(config, recommendation, inputs):
             header += '# Unmet conditions: ' + ', '.join(reasons) + '. See the JSON report for details.\n'
         if inputs.get('excluded_scans'):
             header += (f"# Partial input scope: verified on {inputs['selected_scene_count']}/{inputs['latest_scene_count']} scenes.\n"
-                       '# Use run_argv from the JSON report; excluded or recollected scenes require revalidation.\n')
+                       + ('# See simulation.selection in the JSON report; excluded or recollected scenes require revalidation.\n'
+                          if mode == 'diff' else
+                          '# Use run_argv from the JSON report; excluded or recollected scenes require revalidation.\n'))
         serialized = header + serialized
     # Validate the serialized full document before exposing it as a runnable config.
     from .config import parse_yaml, validate
-    validate(parse_yaml(serialized.encode()))
+    document = parse_yaml(serialized.encode())
+    if mode == 'full':
+        validate(document)
     return serialized
 
 
-def export(config, result, output, yaml_output, *, yaml_owner=None):
+def export(config, result, output, yaml_output, *, yaml_owner=None, yaml_mode='full'):
+    if yaml_mode not in ('full', 'diff'):
+        raise ValueError('YAML mode must be full or diff.')
     targets = [p.expanduser().resolve() for p in (output, yaml_output) if p]
     protected = {config.database.resolve(), config.source_path}
     if len(set(targets)) != len(targets) or any((p.exists() and (yaml_owner is None or p != yaml_owner.path)) or p in protected for p in targets):
@@ -75,7 +91,8 @@ def export(config, result, output, yaml_output, *, yaml_owner=None):
     recommendation = result.get('best_result') or result.get('recommendation')
     result['yaml_exported'] = False
     if yaml_output and recommendation:
-        serialized = configuration_document(config, recommendation, result['simulation'].get('input_selection', {}))
+        serialized = configuration_document(config, recommendation, result['simulation'].get('input_selection', {}),
+                                            mode=yaml_mode)
         destination = yaml_output.expanduser().resolve()
         if yaml_owner is not None:
             yaml_owner.write(serialized)
@@ -84,9 +101,17 @@ def export(config, result, output, yaml_output, *, yaml_owner=None):
                 stream.write(serialized)
         result['yaml_exported'] = True
         result['yaml_export_quality'] = recommendation.get('quality')
-        result['run_argv'] = ['python','stash_ai.py','recognition','run','--face-config',str(destination)]
-        for scene in result['simulation']['selection']:
-            result['run_argv'].extend(['--scene-id', scene])
+        result['yaml_export_mode'] = yaml_mode
+        if yaml_mode == 'diff':
+            result.pop('run_argv', None)
+            result['yaml_diff_baseline'] = dict(configuration_path=str(config.source_path),
+                configuration_sha256=digest(plain(config.data)),
+                application='Merge changed leaf values into the input baseline, preserving other settings and input overrides.')
+        else:
+            result.pop('yaml_diff_baseline', None)
+            result['run_argv'] = ['python','stash_ai.py','recognition','run','--face-config',str(destination)]
+            for scene in result['simulation']['selection']:
+                result['run_argv'].extend(['--scene-id', scene])
     code_hash = hashlib.sha256()
     for path in sorted(Path(__file__).parent.glob('*.py')):
         code_hash.update(path.name.encode())
@@ -113,7 +138,8 @@ def summary(result):
         from .replay_inputs import describe
         input_lines = ['Merge solver input scope is partial. ' + describe(inputs)]
         if selected is not None:
-            input_lines.append('Recommendations apply only to replayed scenes; use run_argv from the JSON report.')
+            scope_hint = 'simulation.selection' if result.get('yaml_export_mode') == 'diff' else 'run_argv'
+            input_lines.append(f'Recommendations apply only to replayed scenes; use {scope_hint} from the JSON report.')
     if selected is None:
         return '\n'.join(['Merge solver: no completed trial; no configuration selected.'] + input_lines)
     name = selected['trial']
@@ -144,4 +170,6 @@ def summary(result):
         lines.append('Query feedback is partial: ' + ', '.join(queries['truncation_reasons']) +
                      '; independent probes remain available.')
     lines.extend(input_lines)
+    if result.get('yaml_export_mode') == 'diff':
+        lines.append('YAML diff saved: merge changed keys into the input baseline before running recognition.')
     return '\n'.join(lines)

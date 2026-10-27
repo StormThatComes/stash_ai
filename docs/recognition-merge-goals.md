@@ -204,7 +204,7 @@ counts. `explanation.unresolved` repeats this list. For compatibility,
 `baseline_retained` for an admissible partial baseline, while its quality is
 `partial_solution`.
 
-`--yaml-output` requires `--solve` and writes the selected complete configuration,
+`--yaml-output` requires `--solve` and by default writes the selected complete configuration,
 including best-effort and unchanged-baseline results. YAML comments identify the
 trial, quality and unmet condition types; the JSON report contains the details.
 For a partial input scope, YAML comments also identify the reduced validation
@@ -212,9 +212,41 @@ scope. Use the report's `run_argv` to replay exactly the validated scenes;
 including excluded or recollected scenes requires revalidation.
 Relative model/database/names paths become absolute so the exported file can be
 relocated. Outputs must be distinct new files.
-`run_argv` gives the exact scene selection as an argument array, avoiding shell
+For a full export, `run_argv` gives the exact scene selection as an argument array, avoiding shell
 quoting differences. Code/configuration/evidence hashes record the tested state;
 changed inputs require revalidation. Stash publication itself is not simulated.
+
+Use `--yaml-mode diff` to save only changed keys relative to the solver's **input
+baseline**, including its defaults and command-line overrides. This is independent
+of the mutation relative to the previous trial shown in console logs:
+
+```powershell
+python stash_ai.py recognition report-merge --face-config facial_recognition.yml --performer-set 123,456,789 --performer-set 234,567 --solve --yaml-output merge-diff.yml --yaml-mode diff --output merge-goals.json
+```
+
+For example, a winner changing only one SapiensID gate produces this YAML body:
+
+```yaml
+sapiensid:
+  matching:
+    face_floor: 0.76
+```
+
+The diff omits unchanged keys, path rewrites and schema metadata. An unchanged
+baseline produces `{}`. Comments retain the winning trial, unmet conditions,
+partial input scope and baseline configuration hash. Merge the changed leaf values
+into the original configuration, keeping other keys and input overrides; the diff
+is **not a standalone `--face-config` file**. The JSON report records
+`yaml_export_mode: diff` and `yaml_diff_baseline` with the baseline path and hash.
+It omits `run_argv` for a diff; use `simulation.selection` for the validated scenes
+when running with the merged configuration. `--yaml-mode full` retains the default
+complete, relocatable output.
+
+Both formats support atomic winner updates, Ctrl-C, partial results and checkpoints.
+With `--checkpoint` and no `--yaml-output`, the automatically named `.best.yml`
+also uses the selected format. Repeat the same `--yaml-mode` on `--resume`; a
+format change is rejected before updating the winner file. No YAML is written
+until a baseline trial has completed.
 
 Progress and the final best-result summary go to stderr, leaving JSON stdout
 parseable. At the start of each trial, the solver prints every configuration
