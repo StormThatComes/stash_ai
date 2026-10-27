@@ -7,11 +7,15 @@ def resolve(db, config, sets, *, scope=None, by_performer=True, policy='identity
     from .merge_goal_identity import POLICY, freeze
     from .reference_roles import strict_sql
     from .pose_policy import is_anchor
+    from .merge_goal_samples import freeze as freeze_samples
+    from .person_signal import contract
     if policy not in ('identity', 'strict'):
         raise ValueError('Goal policy must be identity or strict.')
     if not sets or any(not group for group in sets):
         raise ValueError('Merge goals require nonempty sets.')
     groups, owners = [], {}
+    diagnostics = dict(format=1, roles='input_reference_eligibility',
+                       sapiensid_enabled=config.data['sapiensid']['enabled'], sapiensid_contract=contract(config))
     for index, identifiers in enumerate(sets):
         members = {}
         for identifier in identifiers:
@@ -36,11 +40,13 @@ def resolve(db, config, sets, *, scope=None, by_performer=True, policy='identity
             for row in rows:
                 row['goal_role'] = ('reference' if row['reference_authority'] and row['status'] == 'complete'
                     and row['rejected'] is None and is_anchor(row['quality'], config.data['clustering']) else 'uncertain')
-            item['observations'] = [{k: r[k] for k in ('id','scan','scene','cue','goal_role')} for r in rows]
+            freeze_samples(db, config, rows, diagnostics)
+            item['observations'] = [{k: r[k] for k in ('id','scan','scene','cue','goal_role','sample_role','body_state')} for r in rows]
             if policy == 'identity':
                 item['identity_evidence'] = freeze(rows)
         groups.append(dict(index=index, members=list(members.values())))
     return dict(format=3, kind='recognition_merge_goals', scope=scope, namespace=namespace(config),
+                selector='performer' if by_performer else 'identity', sample_diagnostics=diagnostics,
                 goal_policy=dict(POLICY) if policy == 'identity' else dict(name='strict', version=1),
                 groups=groups, status='goals_resolved', recommendations=[])
 
@@ -68,7 +74,7 @@ def execute(args, config):
         result['snapshot_sha256'] = fingerprint(db, config, result['scope'])
         if args.solve:
             from .merge_solver import solve
-            from .merge_goal_output import group_summary
+            from .merge_goal_output import group_summary_lines
             import json
             import sys
             def progress(name, stage, item):
@@ -92,7 +98,7 @@ def execute(args, config):
                                   file=sys.stderr, flush=True)
                     elif stage == 'complete':
                         for group in item['goal_result']['groups']:
-                            print(group_summary(group), file=sys.stderr, flush=True)
+                            print('\n'.join(group_summary_lines(group)), file=sys.stderr, flush=True)
             result.update(solve(config, result, db, maximum=args.max_trials, progress=progress,
                                 checkpoint=checkpoint,resume=resume,winner_writer=writer,
                                 sampler=getattr(args,'solver_sampler','heuristic'),seed=getattr(args,'solver_seed',0),
@@ -173,8 +179,9 @@ def assess(goals, observations, retained, predicted):
                 fully_solved=covered and not conflicts and all(g['fully_merged'] for g in groups))
     if goals.get('goal_policy', {}).get('name') == 'identity':
         from .merge_goal_identity import apply
-        return apply(goals, result, observations, predicted)
-    return result
+        apply(goals, result, observations, predicted)
+    from .merge_goal_samples import attach
+    return attach(goals, result, observations, predicted)
 
 
 def evaluate(config, goals, db, variants=None):

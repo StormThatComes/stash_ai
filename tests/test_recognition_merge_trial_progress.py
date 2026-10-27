@@ -73,8 +73,10 @@ def test_cli_logs_previous_executed_config_and_keeps_export_relative_to_input(tm
             heading = f"Merge solver {name}: complete disjoint={item['goal_result']['disjoint']} best={item['best_trial']} best_number={item['best_trial_number']}"
             heading += f" goal_policy=identity strict_disjoint={item['goal_result']['strict_disjoint']}"
             position = lines.index(heading)
-            for offset, group in enumerate(item['goal_result']['groups'], 1):
-                line = lines[position+offset]
+            stop = next((i for i in range(position+1, len(lines)) if lines[i].startswith('Merge solver ')), len(lines))
+            details = lines[position+1:stop]
+            headers = [line for line in details if line.startswith('  Set ')]
+            for line, group in zip(headers, item['goal_result']['groups'], strict=True):
                 assert line.startswith(f"  Set {group['index']+1}: consolidated={group['consolidated_performers']}/{group['total_performers']}")
                 assert f"largest_complete={group['largest_complete_performers']}/{group['total_performers']}" in line
                 assert f"represented={group['represented_performers']}/{group['total_performers']}" in line
@@ -82,10 +84,16 @@ def test_cli_logs_previous_executed_config_and_keeps_export_relative_to_input(tm
                 assert f"assigned={group['assigned']}/{group['observations']}" in line
                 assert f"missing_obs={group['missing']} withheld_obs={group['withheld']}" in line
                 assert 'split_performers=' in line
+            assert sum('Face anchor:' in line for line in details) == 2
+            assert sum('SapiensID auxiliary:' in line for line in details) == 2
+            assert any('performer_ids=["900","901"]' in line for line in details)
+            assert any('performer_ids=["902","903"]' in line for line in details)
         # The final summary uses the winner's set details, including after a losing last trial.
         summary_position = next(i for i, line in enumerate(lines) if line.startswith('Merge solver best completed trial:'))
         winner_position = next(i for i, line in enumerate(lines) if line.startswith('Merge solver trial-1: complete '))
-        assert lines[summary_position+2:summary_position+4] == lines[winner_position+1:winner_position+3]
+        winner_stop = next(i for i in range(winner_position+1, len(lines)) if lines[i].startswith('Merge solver '))
+        winner_details = lines[winner_position+1:winner_stop]
+        assert lines[summary_position+2:summary_position+2+len(winner_details)] == winner_details
     with _open_readonly(config.database) as db:
         repeated = evaluate(load(tmp_path/'winner.yml'), goals, db)['trials']['baseline']['goal_result']
     assert repeated['fully_solved'] and repeated['disjoint']

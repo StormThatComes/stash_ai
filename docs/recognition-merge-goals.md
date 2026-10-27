@@ -330,8 +330,8 @@ Completed JSON trial records contain the same `previous_trial` and
 `changes` and `yaml_patch` remain relative to the input configuration for export.
 Every completed trial logs `best=trial-N best_number=N` (baseline is
 number 0), using the same ranking as YAML export. JSON trial records carry
-`best_trial` and `best_trial_number`. Each completion header is followed by one
-line per set describing **that trial's result**, even if a previous trial remains
+`best_trial` and `best_trial_number`. Each completion header is followed by a
+summary and sample-detail lines per set describing **that trial's result**, even if a previous trial remains
 the winner. The final summary uses the same fields for the selected winner and
 also states the stop reason, replay count and unmet conditions. For example:
 
@@ -378,6 +378,57 @@ pass, it can also show `consolidated=4/4 identity_components=[4] represented=4/4
 `largest_complete` remains strict in both modes. `disjoint` is checked across sets
 under the selected policy; internal consolidation alone does not certify separation.
 `strict_disjoint` in identity-mode headers shows the original all-sample check.
+
+Each set also lists the requested performer/identity IDs and resolved Stash
+performer IDs, followed by face and SapiensID sample counters. For example:
+
+```text
+    Members: performer_ids=["900","901"] resolved_performer_ids=["900","901"] roles=input_config target=<output-identity-UUID> target_ties=1
+    Face anchor: assigned=3/3 (100.0%) target=3/3 other=0 withheld=0 missing_obs=0 cross_set=0 fragments=1
+    Face auxiliary: assigned=2/3 (66.7%) target=1/3 other=1 withheld=1 missing_obs=0 cross_set=1 fragments=2
+    SapiensID anchor: ready=2/3 assigned=2/2 (100.0%) target=2/2 other=0 withheld=0 missing_obs=0 cross_set=0 fragments=1 unavailable=1 no_evidence=0 incompatible=0
+    SapiensID auxiliary: ready=2/3 assigned=1/2 (50.0%) target=0/2 other=1 withheld=1 missing_obs=0 cross_set=1 fragments=1 unavailable=0 no_evidence=1 incompatible=0
+```
+
+`roles=input_config` means cohorts are fixed before search: anchors have strict
+reference authority and satisfy the input configuration's anchor quality gates;
+auxiliary samples satisfy query gates but not anchor gates. Both require complete,
+non-rejected source observations. Other samples, including contextual attachments
+with anchor-quality faces, rejected samples and samples below query gates, appear
+in an `other` line when present. These are eligibility cohorts, not a claim that
+every anchor was selected into a capped reference bank or kept that role in a
+trial. Changing trial quality thresholds does not change their denominators.
+
+- `assigned` counts final memberships, including assignments to other fragments.
+  `withheld` means present in replay but unassigned; `missing_obs` means absent
+  from the replay selection. Assigned + withheld + missing equals the denominator.
+- All face/body role lines use the same `target`: the destination representing
+  the most input performers (complete performers in strict mode), then highest
+  normalized evidence coverage, then most samples. Exact ties use a stable UUID
+  order; `target_ties` reports their count. This is a display choice and never
+  forces recognition to use that identity. `target` counts samples there;
+  `other` counts assigned samples in all other destinations. Their sum is assigned.
+- `cross_set` counts samples whose destination also contains original samples
+  from another requested set. It is a raw overlap diagnostic, can overlap
+  `target`/`other`, and can be nonzero for tolerated noise in identity mode.
+- SapiensID rows describe the **body evidence attached to the same observations**,
+  using the same frozen roles and final identity assignments. `ready=n/total`
+  counts retained features with the expected input contract. SapiensID assignment
+  fractions use only these ready observations as their denominator. `unavailable`
+  means collection recorded no usable body feature; `no_evidence` means no record;
+  `incompatible` means only other contracts exist. A ready feature can still be
+  absent from replay, reported as `missing_obs`. When disabled, the log explicitly
+  prints `SapiensID: disabled`.
+
+SapiensID does not have an independent identity assignment in the current hybrid
+pipeline. A ready body's assigned status does **not** prove SapiensID caused that
+match; the production decision evidence describes the route. Counts are raw
+observations, not independent support votes or correctness estimates. These
+diagnostics do not affect the solver objective or selection of the winner.
+The same data is stored in each group's `sample_assignment` in JSON and restored
+from checkpoints. The final summary, including Ctrl-C, uses the selected winner's
+counts, even when a later trial performed worse. Metadata is read once during
+goal resolution without loading body vectors, crops, models or additional media.
 
 `--progress-style off` suppresses solver messages. Ctrl-C during replay search
 preserves completed trials and their best result, writes that winner to
