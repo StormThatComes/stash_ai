@@ -176,7 +176,7 @@ def test_rebuilt_goals_preserve_splits_and_cross_set_conflicts(tmp_path):
     config, people = seeded(tmp_path)
     with FaceDatabase(config.database) as state:
         db = state.connection
-        goals = resolve(db, config, [[people[0]], [people[1]]], by_performer=False)
+        goals = resolve(db, config, [[people[0]], [people[1]]], by_performer=False, policy='strict')
         observation = goals['groups'][1]['members'][0]['observations'][0]['id']
         db.execute('UPDATE members SET person=? WHERE observation=?', (people[0], observation))
         mapped = rebuilt_goals(db, goals)

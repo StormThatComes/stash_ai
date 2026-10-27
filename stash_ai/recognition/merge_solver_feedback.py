@@ -84,6 +84,8 @@ class QueryFeedback:
     Budget counters include comparisons that are subsequently discarded.
     """
     def __init__(self, goals):
+        from .merge_goal_identity import diagnostic_goals
+        goals = diagnostic_goals(goals)
         self.goals = goals
         self.selected = ()
         self.sets = {r['id']: g['index'] for g in goals['groups'] for m in g['members'] for r in m['observations']}
@@ -116,10 +118,10 @@ class QueryFeedback:
         self.sampling.append(dict(pass_id=pass_id, eligible=eligible, selected=len(selected)))
         if len(selected) < eligible:
             self.truncation_reasons.add('max_candidate_pairs')
-        owners = defaultdict(set)
-        for observation, owner in db.execute('SELECT observation,person FROM members WHERE observation IN '
-                '(SELECT value FROM json_each(?))', (encoded(sorted(self.sets)),)):
-            owners[owner].add(self.sets[observation])
+        from .merge_goal_identity import destination_owners
+        membership = dict(db.execute('SELECT observation,person FROM members WHERE observation IN '
+                '(SELECT value FROM json_each(?))', (encoded(sorted(self.sets)),)))
+        owners = destination_owners(self.goals, membership)
 
         def measure(row, face, body):
             if row['id'] not in self.sets:

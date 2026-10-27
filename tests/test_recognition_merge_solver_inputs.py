@@ -74,17 +74,20 @@ def test_unrelated_incompatible_scene_does_not_block_all_trials(tmp_path, monkey
 
 
 @pytest.mark.parametrize('reason', ['policy', 'partial', 'cursor'])
-def test_unavailable_goal_observations_make_result_best_effort(tmp_path, reason):
+@pytest.mark.parametrize('policy', ['identity', 'strict'])
+def test_unavailable_goal_observations_make_result_best_effort(tmp_path, reason, policy):
     config, people = seeded(tmp_path)
     old, newest = supersede(config, '2', reason=reason)
     before = config.database.read_bytes()
     with _open_readonly(config.database) as db:
-        goals = resolve(db, config, [people], by_performer=False)
+        goals = resolve(db, config, [people], by_performer=False, policy=policy)
         result = dict(goals, **solve(config, goals, db, maximum=1))
     assert result['status'] == 'best_effort'
     assert result['simulation']['selection'] == ['1']
-    missing = next(v for v in result['best_result']['unmet_conditions'] if v['reason'] == 'missing_latest_observations')
-    assert missing['identity'] == people[1] and missing['count'] == 3
+    expected = 'missing_latest_observations' if policy == 'strict' else 'identity_not_preserved'
+    missing = next(v for v in result['best_result']['unmet_conditions'] if v['reason'] == expected)
+    assert missing['identity'] == people[1]
+    assert result['simulation']['trials']['baseline']['goal_result']['groups'][0]['missing'] == 3
     assert not result['best_result']['fully_solved']
     blocker = result['simulation']['input_selection']['excluded_scans'][0]
     assert blocker['scan'] == newest['id'] and blocker['scan'] != old['id']

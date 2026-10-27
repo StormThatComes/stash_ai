@@ -4,7 +4,7 @@ import math
 
 from .config import digest
 from .merge_report_policy import patched, proposal, parameter
-from .merge_goals import assess, objective, unmet_conditions
+from .merge_goals import assess, objective, unmet_conditions, goal_diagnostics
 from .replay_simulation import replay, impact
 from .merge_solver_search import (hybrid_neighbours as _hybrid_neighbours,
     interleave as _interleave, spread, BeamSearch, refinement, restart_probes, BASELINE_WARMUP, PREFIX, GATES)
@@ -94,12 +94,14 @@ def neighbours(config, changes, options, *, hybrid_changes=()):
 def rebuilt_goals(db, goals):
     """Follow observations through merges/splits without collapsing goal sets."""
     import json
+    from .merge_goal_identity import destination_owners
     ids = {r['id'] for g in goals['groups'] for m in g['members'] for r in m['observations']}
     owners = dict(db.execute('SELECT observation,person FROM members WHERE observation IN '
                             '(SELECT value FROM json_each(?))', (json.dumps(sorted(ids)),)))
+    destinations = destination_owners(goals, owners)
     groups = []
     for index, group in enumerate(goals['groups']):
-        people = {owners[r['id']] for m in group['members'] for r in m['observations'] if r['id'] in owners}
+        people = {p for p, sets in destinations.items() if group.get('index', index) in sets}
         groups.append(dict(index=group.get('index', index), members=[dict(identity_id=p) for p in sorted(people)]))
     return dict(goals, groups=groups)
 
@@ -155,6 +157,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
         return dict(trial=name,quality=('fully_solved' if status['fully_solved'] else
             'partial_solution' if status['admissible'] else 'best_effort'),
             fully_solved=status['fully_solved'],unmet_conditions=unmet_conditions(status),
+            goal_diagnostics=goal_diagnostics(status),
             **patches.get(name,proposal(config,{})))
     def consume(name, observations, retained, predicted):
         nonlocal best, best_rank, baseline
@@ -411,6 +414,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
         selection = dict(trial=best, quality=quality, changed=best != 'baseline',
             admissible=status['admissible'], fully_solved=status['fully_solved'],
             unmet_conditions=unmet_conditions(status),
+            goal_diagnostics=goal_diagnostics(status),
             **patches.get(best, proposal(config, {})))
     tested_hybrid = {}
     if config.data['sapiensid']['enabled'] and result['trials']:

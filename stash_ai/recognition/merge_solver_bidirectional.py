@@ -38,12 +38,12 @@ def relaxed_seeds(config, feedback):
 def progress_rank(status):
     """Continuous within-set progress, including when complete stays at 1/N."""
     groups = status['groups']
-    pairs = [g['pair_consolidation_fraction'] for g in groups if g['total_performers'] > 1]
-    shared = [g['consolidation_fraction'] for g in groups]
-    assigned = [g['assigned_fraction'] for g in groups]
+    pairs = [g.get('core_pair_fraction', g['pair_consolidation_fraction']) for g in groups if g['total_performers'] > 1]
+    shared = [g.get('core_shared_coverage', g['consolidation_fraction']) for g in groups]
+    assigned = [g.get('representation_fraction', g['assigned_fraction']) for g in groups]
     return (min(pairs, default=0.), sum(pairs)/max(1, len(pairs)),
             min(shared), sum(shared)/len(shared), min(assigned),
-            sum(assigned)/len(assigned), -status['cross_set_observation_pairs'])
+            sum(assigned)/len(assigned), -status.get('cross_set_evidence_pairs', status['cross_set_observation_pairs']))
 
 
 def expansion_candidates(config, changes, feedback):

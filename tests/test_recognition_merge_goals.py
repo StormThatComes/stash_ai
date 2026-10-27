@@ -15,6 +15,8 @@ def test_sets_and_alias_overlap(tmp_path):
             resolve(db, config, [['900'], ['900']])
     args = parser().parse_args(['report-merge', '--performer-set', '900,901', '--performer-set', '902'])
     assert args.performer_set == [['900', '901'], ['902']]
+    assert args.goal_policy == 'identity'
+    assert parser().parse_args(['report-merge', '--performer-set', '900,901', '--goal-policy', 'strict']).goal_policy == 'strict'
     assert len(parser().parse_args(['report-merge', '--identity-id', 'a', '--identity-id', 'b', '--identity-id', 'c']).identity_id) == 3
 
 

@@ -71,10 +71,13 @@ def test_cli_logs_previous_executed_config_and_keeps_export_relative_to_input(tm
         lines = captured.err.splitlines()
         for name, item in trials.items():
             heading = f"Merge solver {name}: complete disjoint={item['goal_result']['disjoint']} best={item['best_trial']} best_number={item['best_trial_number']}"
+            heading += f" goal_policy=identity strict_disjoint={item['goal_result']['strict_disjoint']}"
             position = lines.index(heading)
             for offset, group in enumerate(item['goal_result']['groups'], 1):
                 line = lines[position+offset]
-                assert line.startswith(f"  Set {group['index']+1}: largest_complete={group['largest_complete_performers']}/{group['total_performers']}")
+                assert line.startswith(f"  Set {group['index']+1}: consolidated={group['consolidated_performers']}/{group['total_performers']}")
+                assert f"largest_complete={group['largest_complete_performers']}/{group['total_performers']}" in line
+                assert f"represented={group['represented_performers']}/{group['total_performers']}" in line
                 assert f"complete_components={json.dumps(group['complete_components'], separators=(',', ':'))}" in line
                 assert f"assigned={group['assigned']}/{group['observations']}" in line
                 assert f"missing_obs={group['missing']} withheld_obs={group['withheld']}" in line
@@ -82,7 +85,7 @@ def test_cli_logs_previous_executed_config_and_keeps_export_relative_to_input(tm
         # The final summary uses the winner's set details, including after a losing last trial.
         summary_position = next(i for i, line in enumerate(lines) if line.startswith('Merge solver best completed trial:'))
         winner_position = next(i for i, line in enumerate(lines) if line.startswith('Merge solver trial-1: complete '))
-        assert lines[summary_position+1:summary_position+3] == lines[winner_position+1:winner_position+3]
+        assert lines[summary_position+2:summary_position+4] == lines[winner_position+1:winner_position+3]
     with _open_readonly(config.database) as db:
         repeated = evaluate(load(tmp_path/'winner.yml'), goals, db)['trials']['baseline']['goal_result']
     assert repeated['fully_solved'] and repeated['disjoint']

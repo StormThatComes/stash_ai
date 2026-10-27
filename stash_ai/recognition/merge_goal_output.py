@@ -64,6 +64,13 @@ def configuration_document(config, recommendation, inputs, *, mode='full'):
                       f'# Baseline configuration SHA256: {digest(plain(config.data))}\n' + serialized)
     if 'quality' in recommendation:
         header = f"# Merge solver: best completed trial {recommendation['trial']} ({recommendation['quality']}).\n"
+        diagnostics = recommendation.get('goal_diagnostics', {})
+        if diagnostics:
+            header += f"# Goal policy: {diagnostics['policy']['name']} v{diagnostics['policy']['version']}.\n"
+            if diagnostics['policy']['name'] == 'identity':
+                header += (f"# Strict all-sample success: {diagnostics['strict_fully_solved']}; "
+                           f"strict disjoint: {diagnostics['strict_disjoint']}; "
+                           f"soft units lost/reassigned: {diagnostics['soft_lost_units']}. See JSON evidence details.\n")
         if not recommendation['fully_solved']:
             reasons = sorted({r['reason'] for r in recommendation['unmet_conditions']})
             header += '# Unmet conditions: ' + ', '.join(reasons) + '. See the JSON report for details.\n'
@@ -118,7 +125,7 @@ def export(config, result, output, yaml_output, *, yaml_owner=None, yaml_mode='f
         code_hash.update(path.read_bytes())
     result['provenance'] = dict(code_sha256=code_hash.hexdigest(), snapshot_sha256=result.get('snapshot_sha256'), configuration_sha256=digest(plain(config.data)),
         source_sha256=hashlib.sha256(config.source).hexdigest(), namespace=result['namespace'],
-        goals_sha256=digest(result['groups']),
+        goals_sha256=digest(dict(groups=result['groups'], goal_policy=result.get('goal_policy'))),
         validity='Same retained evidence, scope, model, code and joint scene selection; changed media requires revalidation.')
     explain(result)
     text = json.dumps(result, indent=2, allow_nan=False) + '\n'
@@ -134,7 +141,14 @@ def group_summary(group):
     assigned = group['assigned'] / group['observations'] if group['observations'] else 0.
     members = group['members']
     components = json.dumps(group['complete_components'], separators=(',', ':'))
-    return (f"  Set {group['index']+1}: largest_complete={group['largest_complete_performers']}/{group['total_performers']} "
+    identity = ''
+    if 'consolidated_performers' in group:
+        identity = (f"consolidated={group['consolidated_performers']}/{group['total_performers']} "
+                    f"identity_components={json.dumps(group['identity_components'], separators=(',', ':'))} "
+                    f"represented={group['represented_performers']}/{group['total_performers']} "
+                    f"core_shared_coverage={group['core_shared_coverage']:.1%} "
+                    f"soft_lost_or_reassigned={group['soft_lost_units']} soft_budget_excess={group['soft_budget_excess']} ")
+    return (f"  Set {group['index']+1}: {identity}largest_complete={group['largest_complete_performers']}/{group['total_performers']} "
             f"complete_components={components} assigned={group['assigned']}/{group['observations']} ({assigned:.1%}) "
             f"shared_coverage={group['consolidation_fraction']:.1%} fragments={group['fragments']} "
             f"missing_obs={group['missing']} withheld_obs={group['withheld']} "
@@ -161,6 +175,9 @@ def summary(result):
     goal = result['simulation']['trials'][name]['goal_result']
     lines = [f"Merge solver best completed trial: {name} ({selected['quality']}); "
              f"configuration={'changed' if selected['changed'] else 'unchanged'}; disjoint={goal['disjoint']}."]
+    if goal.get('goal_policy', {}).get('name') == 'identity':
+        lines.append(f"  Goal policy: identity; strict_disjoint={goal['strict_disjoint']}; "
+                     f"strict_fully_solved={goal['strict_fully_solved']}; largest_complete counts all original samples.")
     lines.extend(group_summary(group) for group in goal['groups'])
     for violation in selected['unmet_conditions']:
         detail = []
