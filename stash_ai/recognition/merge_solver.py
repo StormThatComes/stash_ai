@@ -112,6 +112,7 @@ def solve(config, goals, db, *, maximum=500, progress=None):
     from .merge_solver_hybrid import public
     from .merge_solver_feedback import QueryFeedback, pair_separation, quality_feedback
     from .merge_solver_diagnostics import diagnostic_record
+    from .merge_solver_constraints import component_proposals, crossovers, coupled_refinement
     from .hybrid_query_observer import observe_queries
     proofs = []
     hybrid = {}
@@ -173,7 +174,7 @@ def solve(config, goals, db, *, maximum=500, progress=None):
         separation = pair_separation(settings, hybrid)
         quality = quality_feedback(target, settings, goals)
         separated = [dict(hybrid_changes[0] if hybrid_changes else {}, **p) for p in separation['proposals']]
-        directed = list(queries['proposals']) + separated + hybrid_changes
+        directed = list(queries['proposals']) + separated + component_proposals(settings, hybrid) + hybrid_changes
         # Clear simultaneous query and reference blockers under one configuration.
         if queries['proposals'] and hybrid_changes and any(p['relation'] == 'within_set' for p in hybrid.get('pairs', ())):
             joint = dict(hybrid_changes[0])
@@ -204,7 +205,8 @@ def solve(config, goals, db, *, maximum=500, progress=None):
             del factories['hybrid']
         def factory(parent, changes, family, refine):
             if refine:
-                for candidate in refinement(config, changes, options):
+                for candidate in _interleave((refinement(config, changes, options),
+                                              coupled_refinement(config, changes, options))):
                     family = 'hybrid' if any(k.startswith(PREFIX) and v != changes.get(k)
                         for k,v in candidate.items()) else 'face'
                     yield family, 'local_refinement', candidate
@@ -218,7 +220,9 @@ def solve(config, goals, db, *, maximum=500, progress=None):
             candidates = (_hybrid_neighbours(config, changes, scoped_options, source['hybrid_proposals'])
                           if family == 'hybrid' else _face_neighbours(config, changes, scoped_options))
             probes = (('coordinate_probe', p) for p in candidates)
-            yield from _interleave((directed, probes))
+            mixing = (('crossover',p) for p in crossovers(changes,
+                [c['changes'] for n,c in search.beam.items() if n!=parent])) if parent!='baseline' else iter(())
+            yield from _interleave((directed, probes, mixing))
         search = BeamSearch(factories, factory, maximum)
         search.observe('baseline', {}, ranks['baseline'], outcomes['baseline'])
         while trials < maximum and attempts < maximum * 100:

@@ -42,7 +42,9 @@ def separating_proposals(config, positives, negatives):
             reason='separating_interval' if feasible else 'overlapping_within_and_between_scores'))
         if support or 0 <= first <= 1:
             options[key].add(first)
-    proposals = []
+    from .merge_solver_constraints import joint_separation
+    combined = joint_separation(config, positives, negatives)
+    proposals = list(combined['proposals'])
     # Prefer separating settings over a blanket relaxation, but test both.
     for interval in intervals:
         if interval['feasible']:
@@ -55,7 +57,8 @@ def separating_proposals(config, positives, negatives):
         proposals.append(joint)
     proposals.extend(positives)
     return dict(proposals=list({digest(p): p for p in proposals}.values()),
-                intervals=intervals, options={k: sorted(v) for k,v in options.items()})
+                intervals=intervals, joint_constraints={k:v for k,v in combined.items() if k!='proposals'},
+                options={k: sorted(v) for k,v in options.items()})
 
 
 def pair_separation(config, analysis):
@@ -89,6 +92,7 @@ class QueryFeedback:
     def reset(self):
         self.entries, self.negatives, self.votes = [], [], {}
         self.decisions = []
+        self.negative_keys = set()
         self.sampled = set()
         self.sampling = []
         self.comparisons = self.used = self.passes = 0
@@ -163,22 +167,21 @@ class QueryFeedback:
                     routes[c['identity']] = rank, c
             # Reserve retained proofs and vote bookkeeping before publishing this
             # query. An incomplete competitor scan must never imply a safe gap.
-            retained_cost = (4096*max(1, len(routes)) +
+            retained_cost = (scratch_bytes + 4096*max(1, len(routes)) +
                              sum(len(encoded(c).encode())*2 for _,c in routes.values()))
             if self.used + scratch_bytes + retained_cost > limits['plan_bytes']:
                 limited('plan_bytes')
                 return
-            negative = {}
+            # Keep real per-core rival vectors; mixed coordinate maxima can
+            # incorrectly make multidimensional separation look impossible.
             for c in choices:
-                if c['relation'] == 'within_set':
-                    continue
-                for gate, value in (('face_floor', c['face']['minimum']),
-                                    ('person_threshold', c['person']['minimum'] if c['person'] else None),
-                                    ('min_support', c['support'])):
-                    if value is not None:
-                        negative[PREFIX+gate] = max(negative.get(PREFIX+gate, value), value)
-            if negative:
-                self.negatives.append(negative)
+                if c['relation'] == 'within_set':continue
+                negative = {PREFIX+'face_floor': c['face']['minimum'], PREFIX+'min_support':c['support']}
+                if c['person'] is not None:negative[PREFIX+'person_threshold']=c['person']['minimum']
+                key=digest(negative)
+                if key not in self.negative_keys:
+                    self.negative_keys.add(key)
+                    self.negatives.append(negative)
             if not routes:
                 self.entries.append(dict(observation=row['id'], set=group, pass_id=pass_id,
                     blockers=['no_within_set_query_reference'], proposals=[]))
@@ -236,7 +239,9 @@ class QueryFeedback:
         result = dict(queries=self.entries, decisions=self.decisions, sampling=self.sampling, comparisons=self.comparisons, passes=self.passes,
             truncated=bool(self.truncation_reasons), truncation_reasons=sorted(self.truncation_reasons),
             skipped_query_visits=self.skipped_query_visits,
-            separation_intervals=hints['intervals'], proposals=hints['proposals'], options=hints['options'],
+            separation_intervals=hints['intervals'], joint_constraints=hints['joint_constraints'],
+            positive_witnesses=positives, negative_witnesses=self.negatives,
+            proposals=hints['proposals'], options=hints['options'],
             interpretation='Frozen query-stage hints before face-floor pruning; full replay decides acceptance.')
         self.reset()
         return result
