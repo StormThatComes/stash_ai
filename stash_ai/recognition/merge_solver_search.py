@@ -122,6 +122,11 @@ class BeamSearch:
         self.peak_beam = 0
         self.admitted = self.pruned = 0
         self.parent_turn = 0
+        self.normal_completed = self.adaptive_completed = 0
+        self.last_root = 0
+        self.incumbent = 'baseline'
+        self.focus_due = False
+        self.last_parent = None
         self.operators = {}
         self.restarts = 0
         self.restart_pending = None
@@ -150,6 +155,9 @@ class BeamSearch:
         candidate = dict(changes=changes, rank=rank, outcome=outcome, blockers=tuple(blockers))
         pool = dict(self.beam, **{name: candidate})
         ordered = sorted(pool, key=lambda n: pool[n]['rank'], reverse=True)
+        self.incumbent = ordered[0]
+        if improved and self.incumbent != 'baseline':
+            self.focus_due = True
         selected, signatures = [], set()
         # Prefer distinct partitions; reserve two places for distinct parameter
         # routes on a plateau (e.g. face vs body), without retaining every trial.
@@ -243,7 +251,10 @@ class BeamSearch:
             if self._restart():return self.next()
             self.stop_reason = 'refinement_exhausted'
             raise StopIteration
-        baseline_first = self.explored < BASELINE_WARMUP or self.executed % 4 == 0
+        # Count only this lane's completed trials: interleaved even/odd lanes
+        # otherwise alias with the modulo schedule and can starve the winner.
+        baseline_first = (self.normal_completed - self.last_root >= 3 or
+            not self.focus_due and self.explored < BASELINE_WARMUP and self.incumbent == 'baseline')
         for root in (baseline_first, not baseline_first):
             for family in self._family_order():
                 if root:
@@ -256,29 +267,41 @@ class BeamSearch:
                         del self.root[family]
                 else:
                     parents = [n for n in self.beam if n != 'baseline']
-                    if parents:
-                        offset = self.parent_turn % len(parents)
-                        parents = parents[offset:] + parents[:offset]
+                    winner = [self.incumbent] if self.incumbent in parents else []
+                    others = [n for n in parents if n != self.incumbent]
+                    if others:
+                        offset = self.parent_turn % len(others)
+                        others = others[offset:] + others[:offset]
+                    parents = (winner + others if self.focus_due or self.adaptive_completed % 2 == 0
+                               else others + winner)
                     for n in parents:
                         key = n, family
                         if key not in self.streams:
                             self.streams[key] = iter(self.factory(n, self.beam[n]['changes'], family, False))
                         try:
                             strategy, changes = next(self.streams[key])
+                            self.last_parent = n
                             return family, 'adaptive', n, strategy, changes
                         except StopIteration:
                             continue
         self.stop_reason = 'frontier_exhausted'
         raise StopIteration
 
-    def completed(self, phase):
+    def completed(self, phase, *, parent=None):
+        if phase in ('baseline_exploration', 'adaptive'):
+            self.normal_completed += 1
+        if phase == 'adaptive':
+            self.adaptive_completed += 1
+            self.focus_due = False
+            if (parent if parent is not None else self.last_parent) != self.incumbent:
+                self.parent_turn += 1
         if phase == 'baseline_exploration':
             self.explored += 1
+            self.last_root = self.normal_completed
         if phase == 'refinement':
             self.refined += 1
         if phase == 'restart':
             self.restart_executed += 1
-        self.parent_turn += 1
 
 
 def restart_probes(config, changes, options):

@@ -123,8 +123,14 @@ Only a beam of **at most five diverse completed configurations** gets adaptive
 descendants. The beam keeps the highest-ranked result, prefers different final
 partitions, and reserves room for different parameter routes on a plateau. A
 repeated inferior configuration does not create another unbounded search branch.
-The first 13 baseline explorations are reserved across the active families; later,
-one in four scheduling slots continues baseline exploration. Family allocation
+Up to 13 baseline explorations warm up the active families while baseline is
+still the best result. An improvement ends the initial baseline-only priority:
+the new winner is expanded in the next available normal slot, subject to the
+reserved baseline slot. Baseline exploration continues once per four completed
+normal trials, and at least every other adaptive parent preference goes to the
+current winner when its streams have candidates. Other parents have a separate
+rotation. Bidirectional and robustness trials do not advance these scheduling
+counters; alternating lanes cannot repeatedly skip the winning parent. Family allocation
 favours observed improvements, with exploration and a starvation guard, instead
 of alternating hybrid and face trials regardless of usefulness. Duplicate or
 invalid proposals do not consume a replay budget slot.
@@ -371,12 +377,18 @@ An independent frontier retains up to three completed states ranked by
 continuous within-set consolidation and coverage. A state mixing two sets can
 remain a parent even when the normal beam rejects it. Repairs use positive and
 negative witnesses, joint/per-family interpolations towards a completed disjoint
-state, and individual gate reversions. Interpolation only proposes experiments:
+state, and individual gate reversions. A disjoint but incomplete state instead
+gets `frontier_expansion` proposals: matching gates are relaxed jointly and
+individually beyond the fixed seed values, using measured thresholds and
+proportional steps. These proposals retain the parent's useful changes;
+baseline hints cannot silently tighten them again. The strongest alternate
+frontier state gets every other parent preference, with separate rotation for
+the other states. Interpolation only proposes experiments:
 matching is not assumed monotonic, and every candidate receives a full replay.
 This can cross a plateau where changing one gate leaves `largest_complete=1/N`.
 
 The console identifies these trials with `Search: phase=bidirectional` and
-`strategy=relaxed_seed`, `separation_repair` or `boundary_bridge`, in addition
+`strategy=relaxed_seed`, `frontier_expansion`, `separation_repair` or `boundary_bridge`, in addition
 to the exact mutations. JSON includes `search.bidirectional` and the
 `bidirectional` phase count. The lane has its own bounded allowance (at most
 64 completed replays, approximately one third of smaller budgets, with a minimum
