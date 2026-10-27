@@ -39,42 +39,49 @@ def explain(result):
                            'and guards/competitors are still checked by production matching.')
 
 
-def export(config, result, output, yaml_output):
+def configuration_document(config, recommendation, inputs):
     import yaml
+    settings = patched(config, {x['parameter']:x['proposed'] for x in recommendation['changes']})
+    data = plain(settings.data)
+    data['storage']['database'] = str(config.database)
+    data['models']['directory'] = str(config.model_dir)
+    data['names']['file'] = str(config.names_path) if config.names_path else None
+    for section,key in (('model','source_directory'),('model','checkpoint_directory'),('pose','path')):
+        raw=data['sapiensid'][section][key]
+        if raw:
+            path=Path(raw).expanduser()
+            data['sapiensid'][section][key]=str((config.source_path.parent/path).resolve())
+    serialized = yaml.safe_dump(data, sort_keys=False)
+    if 'quality' in recommendation:
+        header = f"# Merge solver: best completed trial {recommendation['trial']} ({recommendation['quality']}).\n"
+        if not recommendation['fully_solved']:
+            reasons = sorted({r['reason'] for r in recommendation['unmet_conditions']})
+            header += '# Unmet conditions: ' + ', '.join(reasons) + '. See the JSON report for details.\n'
+        if inputs.get('excluded_scans'):
+            header += (f"# Partial input scope: verified on {inputs['selected_scene_count']}/{inputs['latest_scene_count']} scenes.\n"
+                       '# Use run_argv from the JSON report; excluded or recollected scenes require revalidation.\n')
+        serialized = header + serialized
+    # Validate the serialized full document before exposing it as a runnable config.
+    from .config import parse_yaml, validate
+    validate(parse_yaml(serialized.encode()))
+    return serialized
+
+
+def export(config, result, output, yaml_output, *, yaml_owner=None):
     targets = [p.expanduser().resolve() for p in (output, yaml_output) if p]
     protected = {config.database.resolve(), config.source_path}
-    if len(set(targets)) != len(targets) or any(p.exists() or p in protected for p in targets):
+    if len(set(targets)) != len(targets) or any((p.exists() and (yaml_owner is None or p != yaml_owner.path)) or p in protected for p in targets):
         raise FileExistsError('Outputs must be distinct new files, separate from source configuration and database.')
     recommendation = result.get('best_result') or result.get('recommendation')
     result['yaml_exported'] = False
     if yaml_output and recommendation:
-        settings = patched(config, {x['parameter']:x['proposed'] for x in recommendation['changes']})
-        data = plain(settings.data)
-        data['storage']['database'] = str(config.database)
-        data['models']['directory'] = str(config.model_dir)
-        data['names']['file'] = str(config.names_path) if config.names_path else None
-        for section,key in (('model','source_directory'),('model','checkpoint_directory'),('pose','path')):
-            raw=data['sapiensid'][section][key]
-            if raw:
-                path=Path(raw).expanduser()
-                data['sapiensid'][section][key]=str((config.source_path.parent/path).resolve())
-        serialized = yaml.safe_dump(data, sort_keys=False)
-        if 'best_result' in result:
-            header = f"# Merge solver: best completed trial {recommendation['trial']} ({recommendation['quality']}).\n"
-            if not recommendation['fully_solved']:
-                reasons = sorted({r['reason'] for r in recommendation['unmet_conditions']})
-                header += '# Unmet conditions: ' + ', '.join(reasons) + '. See the JSON report for details.\n'
-            inputs = result['simulation'].get('input_selection', {})
-            if inputs.get('excluded_scans'):
-                header += (f"# Partial input scope: verified on {inputs['selected_scene_count']}/{inputs['latest_scene_count']} scenes.\n"
-                           '# Use run_argv from the JSON report; excluded or recollected scenes require revalidation.\n')
-            serialized = header + serialized
-        # Validate the serialized full document before exposing it as a runnable config.
-        from .config import parse_yaml, validate
-        validate(parse_yaml(serialized.encode()))
+        serialized = configuration_document(config, recommendation, result['simulation'].get('input_selection', {}))
         destination = yaml_output.expanduser().resolve()
-        with destination.open('x', encoding='utf-8') as stream:
-            stream.write(serialized)
+        if yaml_owner is not None:
+            yaml_owner.write(serialized)
+        else:
+            with destination.open('x', encoding='utf-8') as stream:
+                stream.write(serialized)
         result['yaml_exported'] = True
         result['yaml_export_quality'] = recommendation.get('quality')
         result['run_argv'] = ['python','stash_ai.py','recognition','run','--face-config',str(destination)]

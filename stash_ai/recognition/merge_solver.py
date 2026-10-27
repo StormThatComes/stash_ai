@@ -104,11 +104,18 @@ def rebuilt_goals(db, goals):
     return dict(goals, groups=groups)
 
 
-def solve(config, goals, db, *, maximum=500, progress=None):
+def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, resume=False, winner_writer=None):
     if type(maximum) is not int or maximum < 1:
         raise ValueError('max_trials must be a positive integer.')
     from .scanning import scan_identity
     from .person_signal import same_contract
+    from .merge_solver_checkpoint import Journal, fingerprint
+    from .merge_solver_robustness import probes as robustness_probes, confidence
+    from .merge_goal_output import configuration_document
+    from copy import deepcopy
+    if resume and checkpoint is None:raise ValueError('Resume requires a solver checkpoint.')
+    journal = Journal(checkpoint, fingerprint(config,goals,db,dict(maximum=maximum)),
+                      resume=resume,winner=winner_writer) if checkpoint else None
     from .merge_solver_hybrid import public
     from .merge_solver_feedback import QueryFeedback, pair_separation, quality_feedback
     from .merge_solver_diagnostics import diagnostic_record
@@ -131,6 +138,16 @@ def solve(config, goals, db, *, maximum=500, progress=None):
     search = None
     stop_reason = None
     best, best_rank, baseline = None, None, None
+    robustness = {}
+    restored_count = 0
+    def ranking(name):
+        return ranks[name][:-2]+(confidence(robustness.get(name,[])),)+ranks[name][-2:]
+    def selected(name):
+        status=summaries[name]
+        return dict(trial=name,quality=('fully_solved' if status['fully_solved'] else
+            'partial_solution' if status['admissible'] else 'best_effort'),
+            fully_solved=status['fully_solved'],unmet_conditions=unmet_conditions(status),
+            **patches.get(name,proposal(config,{})))
     def consume(name, observations, retained, predicted):
         nonlocal best, best_rank, baseline
         status = assess(goals, observations, retained, predicted)
@@ -145,8 +162,11 @@ def solve(config, goals, db, *, maximum=500, progress=None):
         rank = objective(status) + (-sum(g['outsider_observations'] for g in status['groups']), -outside['coverage_lost'], -outside['split_pairs'],
             -outside['newly_joined_pairs'], -len(patch['changes']), -magnitude)
         ranks[name] = rank
-        if best_rank is None or rank > best_rank:
-            best, best_rank = name, rank
+        if origins.get(name,{}).get('search_strategy')=='robustness_probe':
+            parent=origins[name]['search_parent']
+            robustness.setdefault(parent,[]).append(rank[:-2]>=ranks[parent][:-2])
+        best=max(ranks,key=ranking)
+        best_rank=ranking(best)
         # Canonicalize destination UUIDs so identical partitions share a beam slot.
         labels = {}
         outcomes[name] = digest([(oid, None if predicted.get(oid) is None else
@@ -235,13 +255,30 @@ def solve(config, goals, db, *, maximum=500, progress=None):
             yield from search.operations({'measured_blockers':directed,'coordinate_probe':probes,
                                           'crossover':mixing,'boundary_probe':boundaries})
         search = BeamSearch(factories, factory, maximum, config)
-        search.observe('baseline', {}, ranks['baseline'], outcomes['baseline'])
+        search.observe('baseline', {}, ranking('baseline'), outcomes['baseline'])
+        robustness_budget=min(8,maximum//10) if maximum>=20 else 0
+        validation=None
         while trials < maximum and attempts < maximum * 100:
-            try:
-                family, phase, parent, strategy, changes = search.next()
-            except StopIteration:
-                stop_reason = search.stop_reason
-                break
+            if validation is None and trials<maximum-robustness_budget:
+                try:
+                    family, phase, parent, strategy, changes = search.next()
+                except StopIteration:
+                    stop_reason=search.stop_reason
+                    validation=iter(())
+            else:
+                if validation is None:validation=iter(())
+            if validation is not None:
+                if robustness_budget:
+                    candidates=[]
+                    for parent in sorted(ranks,key=ranking,reverse=True)[:2]:
+                        changes={c['parameter']:c['proposed'] for c in patches.get(parent,{}).get('changes',())}
+                        active=feedback.get(parent,{}).get('provenance',{}).get('active_parameters',{})
+                        candidates.extend((parent,p) for p in robustness_probes(config,changes,active,limit=4))
+                    validation=iter(candidates[:robustness_budget]);robustness_budget=0
+                try:parent,changes=next(validation)
+                except StopIteration:break
+                phase,strategy='robustness','robustness_probe'
+                family='hybrid' if any(k.startswith(PREFIX) for k in changes) else 'face'
             attempts += 1
             patch = proposal(config, changes)
             fingerprint = digest(patch['yaml_patch'])
@@ -274,13 +311,36 @@ def solve(config, goals, db, *, maximum=500, progress=None):
             previous_name, previous_changes = name, normalized
             trials += 1
             search.completed(phase)
-            search.observe(name, normalized, ranks[name], outcomes[name], family=family, operator=strategy,
+            search.observe(name, normalized, ranking(name), outcomes[name], family=family, operator=strategy,
                 elapsed=durations.get(name,0.), blockers=sorted({r['reason'] for r in feedback[name]['provenance']['blocker_trace']}))
             # Keep detailed hints only for parents that can still be expanded.
-            for old in set(feedback) - search.beam.keys() - {'baseline'}:
+            for old in set(feedback) - search.beam.keys() - {'baseline'} - set(sorted(ranks,key=ranking,reverse=True)[:2]):
                 del feedback[old]
         if stop_reason is None:
             stop_reason = 'max_trials' if trials >= maximum else 'proposal_limit'
+    def restore(name,settings):
+        nonlocal baseline,best,best_rank,restored_count
+        if journal is None or name not in journal.records:return None
+        record=journal.get(name)
+        if record['configuration']!=digest(settings.data):
+            raise ValueError('Checkpoint search reconstruction diverged; completed trials were not reused.')
+        state=deepcopy(record['state'])
+        summaries[name]=state['status'];ranks[name]=tuple(state['rank']);outcomes[name]=state['outcome']
+        latest_feedback.clear();latest_feedback.update(state['feedback']);feedback[name]=latest_feedback.copy()
+        options.clear();options.update(state['options'])
+        hybrid.clear();hybrid.update(state['hybrid']);hybrid_changes[:]=state['hybrid_changes']
+        robustness.clear();robustness.update(state['robustness'])
+        if name=='baseline':baseline=state['baseline']
+        best=max(ranks,key=ranking);best_rank=ranking(best);restored_count+=1
+        return deepcopy(record['item']),baseline
+    def record(name,settings,item,inputs):
+        winner_text=configuration_document(config,selected(best),inputs) if winner_writer else None
+        if journal is not None:
+            state=deepcopy(dict(status=summaries[name],rank=ranks[name],outcome=outcomes[name],
+                feedback=latest_feedback,options=options,hybrid=hybrid,hybrid_changes=hybrid_changes,
+                robustness=robustness,**({'baseline':baseline} if name=='baseline' else {})))
+            journal.record(name,settings,item,state,winner_text)
+        elif winner_writer:winner_writer.write(winner_text)
     def trial_progress(name, stage, item):
         if stage == 'complete':durations[name]=item['elapsed_seconds']
         if stage == 'start':
@@ -288,9 +348,15 @@ def solve(config, goals, db, *, maximum=500, progress=None):
         if progress:progress(name, stage, item)
     with observe_queries(query_feedback):
         result = replay(config, {}, source=db, scope=goals['scope'], consume=consume, variant_stream=stream,
-            inspect_trial=inspect, progress=trial_progress, allow_partial_selection=True)
+            inspect_trial=inspect, progress=trial_progress, allow_partial_selection=True,
+            restore_trial=restore,record_trial=record)
     # Ctrl-C can land after consume ranks a trial but before replay records it.
-    best = max(result['trials'], key=ranks.__getitem__, default=None)
+    robustness.clear()
+    for name in result['trials']:
+        if origins.get(name,{}).get('search_strategy')=='robustness_probe':
+            parent=origins[name]['search_parent']
+            robustness.setdefault(parent,[]).append(ranks[name][:-2]>=ranks[parent][:-2])
+    best = max(result['trials'], key=ranking, default=None)
     for name, patch in patches.items():
         if name in result['trials']:
             result['trials'][name].update(patch)
@@ -318,7 +384,10 @@ def solve(config, goals, db, *, maximum=500, progress=None):
         selected_trial=best, best_result=selection,
         recommendation=selection if selection is not None and selection['changed'] else None,
         interrupted=result.get('interrupted', False),
-        search=dict(max_trials=maximum, executed=len(result['trials']),
+        robustness=dict(selected=best,checks=robustness.get(best,[]),
+            validated=bool(confidence(robustness.get(best,[]))),
+            candidates=robustness,interpretation='Local completed replays only; no global stability guarantee.'),
+        search=dict(max_trials=maximum, executed=len(result['trials']),restored_trials=restored_count,
                     scheduling='blocker_guided_diverse_beam',
                     stop_reason='interrupted' if result.get('interrupted') else result.get('stop_reason', stop_reason),
                     beam_width=BeamSearch.width, peak_beam=search.peak_beam if search else 0,
@@ -331,7 +400,7 @@ def solve(config, goals, db, *, maximum=500, progress=None):
                                         for family in ('hybrid', 'face')},
                     baseline_exploration_warmup=BASELINE_WARMUP,
                     executed_by_phase={phase: sum(origins.get(name, {}).get('search_phase') == phase
-                        for name in result['trials']) for phase in ('baseline_exploration', 'adaptive', 'refinement', 'restart')},
+                        for name in result['trials']) for phase in ('baseline_exploration', 'adaptive', 'refinement', 'restart', 'robustness')},
                     tested_hybrid_values=tested_hybrid,
                     budget_exhausted=len(result['trials']) >= maximum,
                     selection_scope='completed_trials_including_baseline',

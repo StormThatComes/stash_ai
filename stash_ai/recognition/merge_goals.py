@@ -35,9 +35,18 @@ def resolve(db, config, sets, *, scope=None, by_performer=True):
 def execute(args, config):
     from contextlib import closing
     from .fragmentation_report import _open_readonly
+    checkpoint=getattr(args,'checkpoint',None)
+    resume=getattr(args,'resume',False)
+    if checkpoint and args.yaml_output is None:
+        args.yaml_output=checkpoint.with_name(checkpoint.name+'.best.yml')
     targets = [p.expanduser().resolve() for p in (args.output, args.yaml_output) if p]
-    if len(set(targets)) != len(targets) or any(p.exists() for p in targets):
+    protected={config.source_path.resolve(),config.database.resolve()}
+    if checkpoint:targets.append(checkpoint.expanduser().resolve())
+    allowed={p.expanduser().resolve() for p in (args.yaml_output,checkpoint) if p} if resume else set()
+    if len(set(targets)) != len(targets) or any(p in protected or (p.exists() and p not in allowed) for p in targets):
         raise FileExistsError('Outputs must be distinct new files.')
+    from .merge_solver_checkpoint import winner_file
+    writer=winner_file(args.yaml_output,resume=resume) if args.solve else None
     sets = args.performer_set or [args.performer_id or args.identity_id]
     with closing(_open_readonly(config.database)) as db:
         result = resolve(db, config, sets, scope=args.scope, by_performer=args.identity_id is None)
@@ -62,12 +71,13 @@ def execute(args, config):
                         for change in item['changes_from_previous']:
                             print(f"  {change['parameter']}: {json.dumps(change['previous'])} -> "
                                   f"{json.dumps(change['current'])}", file=sys.stderr, flush=True)
-            result.update(solve(config, result, db, maximum=args.max_trials, progress=progress))
+            result.update(solve(config, result, db, maximum=args.max_trials, progress=progress,
+                                checkpoint=checkpoint,resume=resume,winner_writer=writer))
         elif args.simulate:
             result['simulation'] = evaluate(config, result, db)
             result['status'] = 'baseline_evaluated'
     from .merge_goal_output import export
-    export(config, result, args.output, args.yaml_output)
+    export(config, result, args.output, args.yaml_output,yaml_owner=writer)
     if args.solve and args.progress_style != 'off':
         from .merge_goal_output import summary
         print(summary(result), file=sys.stderr, flush=True)
