@@ -72,7 +72,8 @@ def execute(args, config):
                             print(f"  {change['parameter']}: {json.dumps(change['previous'])} -> "
                                   f"{json.dumps(change['current'])}", file=sys.stderr, flush=True)
             result.update(solve(config, result, db, maximum=args.max_trials, progress=progress,
-                                checkpoint=checkpoint,resume=resume,winner_writer=writer))
+                                checkpoint=checkpoint,resume=resume,winner_writer=writer,
+                                sampler=getattr(args,'solver_sampler','heuristic'),seed=getattr(args,'solver_seed',0)))
         elif args.simulate:
             result['simulation'] = evaluate(config, result, db)
             result['status'] = 'baseline_evaluated'

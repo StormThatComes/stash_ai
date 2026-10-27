@@ -1,0 +1,1262 @@
+{
+  "format": 1,
+  "scope": "deterministic_synthetic_retained_replay",
+  "python": "3.12.14",
+  "seed": 0,
+  "python_hash_seed": 0,
+  "max_trials": 100,
+  "code_sha256": "d3f6dbe3f1cdcd944bcc73df3504fd3fa97b3c9fe2274a532cf79d521f398b2b",
+  "limitation": "Synthetic retained embeddings only; timings include concurrent test load and are not a production speedup claim.",
+  "results": {
+    "heuristic": {
+      "face": {
+        "quality": "fully_solved",
+        "selected": "trial-42",
+        "seconds": 4.272947490999286,
+        "first_solution": {
+          "trial": "trial-5",
+          "completed": 6,
+          "seconds": 0.2801288790014951,
+          "best_objective": [
+            true,
+            true,
+            true,
+            1.0,
+            1.0,
+            0,
+            1.0,
+            2,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            -1
+          ],
+          "admissible": true,
+          "fully_solved": true,
+          "disjoint": true
+        },
+        "milestones": {
+          "10": {
+            "trial": "trial-9",
+            "completed": 10,
+            "seconds": 0.4709004830001504,
+            "best_objective": [
+              true,
+              true,
+              true,
+              1.0,
+              1.0,
+              0,
+              1.0,
+              2,
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              -1
+            ],
+            "admissible": true,
+            "fully_solved": false,
+            "disjoint": true
+          },
+          "50": {
+            "trial": "trial-49",
+            "completed": 50,
+            "seconds": 2.2070447940013764,
+            "best_objective": [
+              true,
+              true,
+              true,
+              1.0,
+              1.0,
+              0,
+              1.0,
+              2,
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              -1
+            ],
+            "admissible": true,
+            "fully_solved": false,
+            "disjoint": true
+          },
+          "100": {
+            "trial": "trial-90",
+            "completed": 91,
+            "seconds": 4.0124068990016895,
+            "best_objective": [
+              true,
+              true,
+              true,
+              1.0,
+              1.0,
+              0,
+              1.0,
+              2,
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              -1
+            ],
+            "admissible": true,
+            "fully_solved": false,
+            "disjoint": true
+          }
+        },
+        "executed": 91,
+        "stop_reason": "stagnation_after_refinement",
+        "sampler": {
+          "name": "heuristic",
+          "seed": 0
+        },
+        "tpe_trials": 0
+      },
+      "query": {
+        "quality": "fully_solved",
+        "selected": "trial-58",
+        "seconds": 4.55507026199939,
+        "first_solution": {
+          "trial": "trial-1",
+          "completed": 2,
+          "seconds": 0.10534837800059904,
+          "best_objective": [
+            true,
+            true,
+            true,
+            1.0,
+            1.0,
+            0,
+            1.0,
+            2,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            -1
+          ],
+          "admissible": true,
+          "fully_solved": true,
+          "disjoint": true
+        },
+        "milestones": {
+          "10": {
+            "trial": "trial-9",
+            "completed": 10,
+            "seconds": 0.5079983970017565,
+            "best_objective": [
+              true,
+              true,
+              true,
+              1.0,
+              1.0,
+              0,
+              1.0,
+              2,
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              -1
+            ],
+            "admissible": false,
+            "fully_solved": false,
+            "disjoint": true
+          },
+          "50": {
+            "trial": "trial-49",
+            "completed": 50,
+            "seconds": 2.5712079850027294,
+            "best_objective": [
+              true,
+              true,
+              true,
+              1.0,
+              1.0,
+              0,
+              1.0,
+              2,
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              -1
+            ],
+            "admissible": true,
+            "fully_solved": true,
+            "disjoint": true
+          },
+          "100": {
+            "trial": "trial-86",
+            "completed": 87,
+            "seconds": 4.349493477002397,
+            "best_objective": [
+              true,
+              true,
+              true,
+              1.0,
+              1.0,
+              0,
+              1.0,
+              2,
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              -1
+            ],
+            "admissible": false,
+            "fully_solved": false,
+            "disjoint": true
+          }
+        },
+        "executed": 87,
+        "stop_reason": "stagnation_after_refinement",
+        "sampler": {
+          "name": "heuristic",
+          "seed": 0
+        },
+        "tpe_trials": 0
+      },
+      "disjoint": {
+        "quality": "fully_solved",
+        "selected": "trial-74",
+        "seconds": 6.075669120999919,
+        "first_solution": {
+          "trial": "trial-1",
+          "completed": 2,
+          "seconds": 0.12388725999971939,
+          "best_objective": [
+            true,
+            true,
+            true,
+            1.0,
+            1.0,
+            0,
+            1.0,
+            4,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            -2
+          ],
+          "admissible": true,
+          "fully_solved": true,
+          "disjoint": true
+        },
+        "milestones": {
+          "10": {
+            "trial": "trial-9",
+            "completed": 10,
+            "seconds": 0.657310429998688,
+            "best_objective": [
+              true,
+              true,
+              true,
+              1.0,
+              1.0,
+              0,
+              1.0,
+              4,
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              -2
+            ],
+            "admissible": false,
+            "fully_solved": false,
+            "disjoint": true
+          },
+          "50": {
+            "trial": "trial-49",
+            "completed": 50,
+            "seconds": 3.2492976449975686,
+            "best_objective": [
+              true,
+              true,
+              true,
+              1.0,
+              1.0,
+              0,
+              1.0,
+              4,
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              -2
+            ],
+            "admissible": false,
+            "fully_solved": false,
+            "disjoint": true
+          },
+          "100": {
+            "trial": "trial-89",
+            "completed": 90,
+            "seconds": 5.8547474929982855,
+            "best_objective": [
+              true,
+              true,
+              true,
+              1.0,
+              1.0,
+              0,
+              1.0,
+              4,
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              -2
+            ],
+            "admissible": true,
+            "fully_solved": true,
+            "disjoint": true
+          }
+        },
+        "executed": 90,
+        "stop_reason": "stagnation_after_refinement",
+        "sampler": {
+          "name": "heuristic",
+          "seed": 0
+        },
+        "tpe_trials": 0
+      },
+      "missing_body": {
+        "quality": "partial_solution",
+        "selected": "trial-2",
+        "seconds": 4.93132635999973,
+        "first_solution": null,
+        "milestones": {
+          "10": {
+            "trial": "trial-9",
+            "completed": 10,
+            "seconds": 0.5571098980008173,
+            "best_objective": [
+              true,
+              false,
+              true,
+              1.0,
+              1.0,
+              0,
+              0.5,
+              1,
+              0.0,
+              0.0,
+              0.5,
+              0.5,
+              -2
+            ],
+            "admissible": false,
+            "fully_solved": false,
+            "disjoint": true
+          },
+          "50": {
+            "trial": "trial-49",
+            "completed": 50,
+            "seconds": 2.6974721030064757,
+            "best_objective": [
+              true,
+              false,
+              true,
+              1.0,
+              1.0,
+              0,
+              0.5,
+              1,
+              0.0,
+              0.0,
+              0.5,
+              0.5,
+              -2
+            ],
+            "admissible": true,
+            "fully_solved": false,
+            "disjoint": true
+          },
+          "100": {
+            "trial": "trial-90",
+            "completed": 91,
+            "seconds": 4.719590646008328,
+            "best_objective": [
+              true,
+              false,
+              true,
+              1.0,
+              1.0,
+              0,
+              0.5,
+              1,
+              0.0,
+              0.0,
+              0.5,
+              0.5,
+              -2
+            ],
+            "admissible": true,
+            "fully_solved": false,
+            "disjoint": true
+          }
+        },
+        "executed": 91,
+        "stop_reason": "stagnation_after_refinement",
+        "sampler": {
+          "name": "heuristic",
+          "seed": 0
+        },
+        "tpe_trials": 0
+      },
+      "quality": {
+        "quality": "fully_solved",
+        "selected": "trial-1",
+        "seconds": 3.2760352799996326,
+        "first_solution": {
+          "trial": "trial-1",
+          "completed": 2,
+          "seconds": 0.07407992699972965,
+          "best_objective": [
+            true,
+            true,
+            true,
+            1.0,
+            1.0,
+            0,
+            1.0,
+            2,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            -1
+          ],
+          "admissible": true,
+          "fully_solved": true,
+          "disjoint": true
+        },
+        "milestones": {
+          "10": {
+            "trial": "trial-9",
+            "completed": 10,
+            "seconds": 0.301430590999189,
+            "best_objective": [
+              true,
+              true,
+              true,
+              1.0,
+              1.0,
+              0,
+              1.0,
+              2,
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              -1
+            ],
+            "admissible": false,
+            "fully_solved": false,
+            "disjoint": true
+          },
+          "50": {
+            "trial": "trial-49",
+            "completed": 50,
+            "seconds": 1.7696188489962879,
+            "best_objective": [
+              true,
+              true,
+              true,
+              1.0,
+              1.0,
+              0,
+              1.0,
+              2,
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              -1
+            ],
+            "admissible": true,
+            "fully_solved": true,
+            "disjoint": true
+          },
+          "100": {
+            "trial": "trial-86",
+            "completed": 87,
+            "seconds": 3.077528229998279,
+            "best_objective": [
+              true,
+              true,
+              true,
+              1.0,
+              1.0,
+              0,
+              1.0,
+              2,
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              -1
+            ],
+            "admissible": true,
+            "fully_solved": true,
+            "disjoint": true
+          }
+        },
+        "executed": 87,
+        "stop_reason": "stagnation_after_refinement",
+        "sampler": {
+          "name": "heuristic",
+          "seed": 0
+        },
+        "tpe_trials": 0
+      },
+      "body_modes": {
+        "quality": "fully_solved",
+        "selected": "trial-57",
+        "seconds": 5.5888205900000685,
+        "first_solution": {
+          "trial": "trial-1",
+          "completed": 2,
+          "seconds": 0.14654799900108628,
+          "best_objective": [
+            true,
+            true,
+            true,
+            1.0,
+            1.0,
+            0,
+            1.0,
+            2,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            -1
+          ],
+          "admissible": true,
+          "fully_solved": true,
+          "disjoint": true
+        },
+        "milestones": {
+          "10": {
+            "trial": "trial-9",
+            "completed": 10,
+            "seconds": 0.5989754610018281,
+            "best_objective": [
+              true,
+              true,
+              true,
+              1.0,
+              1.0,
+              0,
+              1.0,
+              2,
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              -1
+            ],
+            "admissible": true,
+            "fully_solved": false,
+            "disjoint": true
+          },
+          "50": {
+            "trial": "trial-49",
+            "completed": 50,
+            "seconds": 3.0704727420052222,
+            "best_objective": [
+              true,
+              true,
+              true,
+              1.0,
+              1.0,
+              0,
+              1.0,
+              2,
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              -1
+            ],
+            "admissible": true,
+            "fully_solved": false,
+            "disjoint": true
+          },
+          "100": {
+            "trial": "trial-88",
+            "completed": 89,
+            "seconds": 5.379982982004549,
+            "best_objective": [
+              true,
+              true,
+              true,
+              1.0,
+              1.0,
+              0,
+              1.0,
+              2,
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              -1
+            ],
+            "admissible": true,
+            "fully_solved": false,
+            "disjoint": true
+          }
+        },
+        "executed": 89,
+        "stop_reason": "stagnation_after_refinement",
+        "sampler": {
+          "name": "heuristic",
+          "seed": 0
+        },
+        "tpe_trials": 0
+      }
+    },
+    "tpe": {
+      "face": {
+        "quality": "fully_solved",
+        "selected": "trial-45",
+        "seconds": 4.302540472999681,
+        "first_solution": {
+          "trial": "trial-5",
+          "completed": 6,
+          "seconds": 0.2247686620003151,
+          "best_objective": [
+            true,
+            true,
+            true,
+            1.0,
+            1.0,
+            0,
+            1.0,
+            2,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            -1
+          ],
+          "admissible": true,
+          "fully_solved": true,
+          "disjoint": true
+        },
+        "milestones": {
+          "10": {
+            "trial": "trial-9",
+            "completed": 10,
+            "seconds": 0.37504599100157066,
+            "best_objective": [
+              true,
+              true,
+              true,
+              1.0,
+              1.0,
+              0,
+              1.0,
+              2,
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              -1
+            ],
+            "admissible": true,
+            "fully_solved": false,
+            "disjoint": true
+          },
+          "50": {
+            "trial": "trial-49",
+            "completed": 50,
+            "seconds": 1.9998041450025994,
+            "best_objective": [
+              true,
+              true,
+              true,
+              1.0,
+              1.0,
+              0,
+              1.0,
+              2,
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              -1
+            ],
+            "admissible": true,
+            "fully_solved": false,
+            "disjoint": true
+          },
+          "100": {
+            "trial": "trial-95",
+            "completed": 96,
+            "seconds": 3.8592337750042134,
+            "best_objective": [
+              true,
+              true,
+              true,
+              1.0,
+              1.0,
+              0,
+              1.0,
+              2,
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              -1
+            ],
+            "admissible": true,
+            "fully_solved": false,
+            "disjoint": true
+          }
+        },
+        "executed": 96,
+        "stop_reason": "robustness_complete",
+        "sampler": {
+          "name": "tpe",
+          "seed": 0,
+          "version": "5.0.0",
+          "warmup": 13,
+          "every": 5
+        },
+        "tpe_trials": 7
+      },
+      "query": {
+        "quality": "fully_solved",
+        "selected": "trial-28",
+        "seconds": 5.634990396999456,
+        "first_solution": {
+          "trial": "trial-1",
+          "completed": 2,
+          "seconds": 0.12600376800037338,
+          "best_objective": [
+            true,
+            true,
+            true,
+            1.0,
+            1.0,
+            0,
+            1.0,
+            2,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            -1
+          ],
+          "admissible": true,
+          "fully_solved": true,
+          "disjoint": true
+        },
+        "milestones": {
+          "10": {
+            "trial": "trial-9",
+            "completed": 10,
+            "seconds": 0.5763758110006165,
+            "best_objective": [
+              true,
+              true,
+              true,
+              1.0,
+              1.0,
+              0,
+              1.0,
+              2,
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              -1
+            ],
+            "admissible": false,
+            "fully_solved": false,
+            "disjoint": true
+          },
+          "50": {
+            "trial": "trial-49",
+            "completed": 50,
+            "seconds": 2.7947013050006717,
+            "best_objective": [
+              true,
+              true,
+              true,
+              1.0,
+              1.0,
+              0,
+              1.0,
+              2,
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              -1
+            ],
+            "admissible": false,
+            "fully_solved": false,
+            "disjoint": true
+          },
+          "100": {
+            "trial": "trial-95",
+            "completed": 96,
+            "seconds": 5.212883018007233,
+            "best_objective": [
+              true,
+              true,
+              true,
+              1.0,
+              1.0,
+              0,
+              1.0,
+              2,
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              -1
+            ],
+            "admissible": false,
+            "fully_solved": false,
+            "disjoint": true
+          }
+        },
+        "executed": 96,
+        "stop_reason": "robustness_complete",
+        "sampler": {
+          "name": "tpe",
+          "seed": 0,
+          "version": "5.0.0",
+          "warmup": 13,
+          "every": 5
+        },
+        "tpe_trials": 15
+      },
+      "disjoint": {
+        "quality": "fully_solved",
+        "selected": "trial-28",
+        "seconds": 7.096098257999984,
+        "first_solution": {
+          "trial": "trial-1",
+          "completed": 2,
+          "seconds": 0.17972717299926444,
+          "best_objective": [
+            true,
+            true,
+            true,
+            1.0,
+            1.0,
+            0,
+            1.0,
+            4,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            -2
+          ],
+          "admissible": true,
+          "fully_solved": true,
+          "disjoint": true
+        },
+        "milestones": {
+          "10": {
+            "trial": "trial-9",
+            "completed": 10,
+            "seconds": 0.7300226729985297,
+            "best_objective": [
+              true,
+              true,
+              true,
+              1.0,
+              1.0,
+              0,
+              1.0,
+              4,
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              -2
+            ],
+            "admissible": false,
+            "fully_solved": false,
+            "disjoint": true
+          },
+          "50": {
+            "trial": "trial-49",
+            "completed": 50,
+            "seconds": 3.56686271399667,
+            "best_objective": [
+              true,
+              true,
+              true,
+              1.0,
+              1.0,
+              0,
+              1.0,
+              4,
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              -2
+            ],
+            "admissible": false,
+            "fully_solved": false,
+            "disjoint": true
+          },
+          "100": {
+            "trial": "trial-96",
+            "completed": 97,
+            "seconds": 6.6257601509960296,
+            "best_objective": [
+              true,
+              true,
+              true,
+              1.0,
+              1.0,
+              0,
+              1.0,
+              4,
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              -2
+            ],
+            "admissible": false,
+            "fully_solved": false,
+            "disjoint": true
+          }
+        },
+        "executed": 97,
+        "stop_reason": "stagnation_after_refinement",
+        "sampler": {
+          "name": "tpe",
+          "seed": 0,
+          "version": "5.0.0",
+          "warmup": 13,
+          "every": 5
+        },
+        "tpe_trials": 9
+      },
+      "missing_body": {
+        "quality": "partial_solution",
+        "selected": "trial-2",
+        "seconds": 5.491925749999609,
+        "first_solution": null,
+        "milestones": {
+          "10": {
+            "trial": "trial-9",
+            "completed": 10,
+            "seconds": 0.47494457400080137,
+            "best_objective": [
+              true,
+              false,
+              true,
+              1.0,
+              1.0,
+              0,
+              0.5,
+              1,
+              0.0,
+              0.0,
+              0.5,
+              0.5,
+              -2
+            ],
+            "admissible": false,
+            "fully_solved": false,
+            "disjoint": true
+          },
+          "50": {
+            "trial": "trial-49",
+            "completed": 50,
+            "seconds": 2.5841900629984593,
+            "best_objective": [
+              true,
+              false,
+              true,
+              1.0,
+              1.0,
+              0,
+              0.5,
+              1,
+              0.0,
+              0.0,
+              0.5,
+              0.5,
+              -2
+            ],
+            "admissible": false,
+            "fully_solved": false,
+            "disjoint": true
+          },
+          "100": {
+            "trial": "trial-98",
+            "completed": 99,
+            "seconds": 5.09868161799659,
+            "best_objective": [
+              true,
+              false,
+              true,
+              1.0,
+              1.0,
+              0,
+              0.5,
+              1,
+              0.0,
+              0.0,
+              0.5,
+              0.5,
+              -2
+            ],
+            "admissible": true,
+            "fully_solved": false,
+            "disjoint": true
+          }
+        },
+        "executed": 99,
+        "stop_reason": "robustness_complete",
+        "sampler": {
+          "name": "tpe",
+          "seed": 0,
+          "version": "5.0.0",
+          "warmup": 13,
+          "every": 5
+        },
+        "tpe_trials": 11
+      },
+      "quality": {
+        "quality": "fully_solved",
+        "selected": "trial-1",
+        "seconds": 3.44610490299965,
+        "first_solution": {
+          "trial": "trial-1",
+          "completed": 2,
+          "seconds": 0.0781473110009756,
+          "best_objective": [
+            true,
+            true,
+            true,
+            1.0,
+            1.0,
+            0,
+            1.0,
+            2,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            -1
+          ],
+          "admissible": true,
+          "fully_solved": true,
+          "disjoint": true
+        },
+        "milestones": {
+          "10": {
+            "trial": "trial-9",
+            "completed": 10,
+            "seconds": 0.3153541989995574,
+            "best_objective": [
+              true,
+              true,
+              true,
+              1.0,
+              1.0,
+              0,
+              1.0,
+              2,
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              -1
+            ],
+            "admissible": false,
+            "fully_solved": false,
+            "disjoint": true
+          },
+          "50": {
+            "trial": "trial-49",
+            "completed": 50,
+            "seconds": 1.7232818840011532,
+            "best_objective": [
+              true,
+              true,
+              true,
+              1.0,
+              1.0,
+              0,
+              1.0,
+              2,
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              -1
+            ],
+            "admissible": true,
+            "fully_solved": true,
+            "disjoint": true
+          },
+          "100": {
+            "trial": "trial-89",
+            "completed": 90,
+            "seconds": 3.1264519869982905,
+            "best_objective": [
+              true,
+              true,
+              true,
+              1.0,
+              1.0,
+              0,
+              1.0,
+              2,
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              -1
+            ],
+            "admissible": true,
+            "fully_solved": true,
+            "disjoint": true
+          }
+        },
+        "executed": 90,
+        "stop_reason": "stagnation_after_refinement",
+        "sampler": {
+          "name": "tpe",
+          "seed": 0,
+          "version": "5.0.0",
+          "warmup": 13,
+          "every": 5
+        },
+        "tpe_trials": 3
+      },
+      "body_modes": {
+        "quality": "fully_solved",
+        "selected": "trial-64",
+        "seconds": 5.33315160300026,
+        "first_solution": {
+          "trial": "trial-1",
+          "completed": 2,
+          "seconds": 0.10334434499964118,
+          "best_objective": [
+            true,
+            true,
+            true,
+            1.0,
+            1.0,
+            0,
+            1.0,
+            2,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            -1
+          ],
+          "admissible": true,
+          "fully_solved": true,
+          "disjoint": true
+        },
+        "milestones": {
+          "10": {
+            "trial": "trial-9",
+            "completed": 10,
+            "seconds": 0.5285848609983077,
+            "best_objective": [
+              true,
+              true,
+              true,
+              1.0,
+              1.0,
+              0,
+              1.0,
+              2,
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              -1
+            ],
+            "admissible": true,
+            "fully_solved": false,
+            "disjoint": true
+          },
+          "50": {
+            "trial": "trial-49",
+            "completed": 50,
+            "seconds": 2.564983950993337,
+            "best_objective": [
+              true,
+              true,
+              true,
+              1.0,
+              1.0,
+              0,
+              1.0,
+              2,
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              -1
+            ],
+            "admissible": true,
+            "fully_solved": false,
+            "disjoint": true
+          },
+          "100": {
+            "trial": "trial-95",
+            "completed": 96,
+            "seconds": 4.940851726990331,
+            "best_objective": [
+              true,
+              true,
+              true,
+              1.0,
+              1.0,
+              0,
+              1.0,
+              2,
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              -1
+            ],
+            "admissible": true,
+            "fully_solved": false,
+            "disjoint": true
+          }
+        },
+        "executed": 96,
+        "stop_reason": "robustness_complete",
+        "sampler": {
+          "name": "tpe",
+          "seed": 0,
+          "version": "5.0.0",
+          "warmup": 13,
+          "every": 5
+        },
+        "tpe_trials": 15
+      }
+    }
+  }
+}

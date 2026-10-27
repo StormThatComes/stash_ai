@@ -1,0 +1,2 @@
+# Optional learned merge-solver proposal generator; default heuristics do not import it.
+optuna==5.0.0

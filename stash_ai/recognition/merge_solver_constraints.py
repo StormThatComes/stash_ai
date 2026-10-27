@@ -79,7 +79,7 @@ def crossovers(changes, parents, limit=12):
     """Keep both resolutions of conflicting values, with bounded combinations."""
     emitted=set()
     for other in parents:
-        conflicts=[k for k in changes.keys() & other.keys() if changes[k]!=other[k]]
+        conflicts=[k for k in sorted(changes.keys() & other.keys()) if changes[k]!=other[k]]
         patches=[dict(changes,**other),dict(other,**changes)]
         if len(conflicts)>1:
             for key in conflicts[:4]:patches.append({**changes,**other,key:changes[key]})

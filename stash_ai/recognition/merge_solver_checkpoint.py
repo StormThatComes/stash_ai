@@ -79,6 +79,8 @@ class Journal:
                 raise ValueError('Solver checkpoint is incompatible with retained inputs, config, goals, code or search settings.')
             self.file=AtomicFile(self.path,sha(raw))
             saved=self.document.get('winner')
+            if saved is None and winner is not None and winner.expected is not None:
+                raise FileExistsError('Winner YAML is not owned by this checkpoint.')
             if saved:
                 if winner is None or str(winner.path)!=saved['path']:
                     raise ValueError('Resume requires the original winner YAML path.')

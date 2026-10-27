@@ -104,17 +104,20 @@ def rebuilt_goals(db, goals):
     return dict(goals, groups=groups)
 
 
-def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, resume=False, winner_writer=None):
+def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, resume=False, winner_writer=None, sampler="heuristic", seed=0):
     if type(maximum) is not int or maximum < 1:
         raise ValueError('max_trials must be a positive integer.')
     from .scanning import scan_identity
     from .person_signal import same_contract
+    from .merge_solver_sampler import create
+    learned=create(sampler,seed)
+    sampler_metadata=learned.metadata if learned else dict(name='heuristic',seed=seed)
     from .merge_solver_checkpoint import Journal, fingerprint
     from .merge_solver_robustness import probes as robustness_probes, confidence
     from .merge_goal_output import configuration_document
     from copy import deepcopy
     if resume and checkpoint is None:raise ValueError('Resume requires a solver checkpoint.')
-    journal = Journal(checkpoint, fingerprint(config,goals,db,dict(maximum=maximum)),
+    journal = Journal(checkpoint, fingerprint(config,goals,db,dict(maximum=maximum,sampler=sampler_metadata)),
                       resume=resume,winner=winner_writer) if checkpoint else None
     from .merge_solver_hybrid import public
     from .merge_solver_feedback import QueryFeedback, pair_separation, quality_feedback
@@ -140,6 +143,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
     best, best_rank, baseline = None, None, None
     robustness = {}
     restored_count = 0
+    written_winner = None
     def ranking(name):
         return ranks[name][:-2]+(confidence(robustness.get(name,[])),)+ranks[name][-2:]
     def selected(name):
@@ -258,10 +262,20 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
         search.observe('baseline', {}, ranking('baseline'), outcomes['baseline'])
         robustness_budget=min(8,maximum//10) if maximum>=20 else 0
         validation=None
+        sampled_for=None
         while trials < maximum and attempts < maximum * 100:
             if validation is None and trials<maximum-robustness_budget:
                 try:
-                    family, phase, parent, strategy, changes = search.next()
+                    if learned and trials>=BASELINE_WARMUP and trials%5==0 and sampled_for!=trials:
+                        sampled_for=trials
+                        history=[({c['parameter']:c['proposed'] for c in patches.get(n,{}).get('changes',())},
+                                  ranking(n)) for n in ranks]
+                        active=feedback[best]['provenance']['active_parameters']
+                        changes=learned.suggest(config,history,options,active,trials)
+                        family='hybrid' if any(k.startswith(PREFIX) for k in changes) else 'face'
+                        phase,parent,strategy='adaptive',best,'tpe'
+                    else:
+                        family, phase, parent, strategy, changes = search.next()
                 except StopIteration:
                     stop_reason=search.stop_reason
                     validation=iter(())
@@ -276,7 +290,9 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
                         candidates.extend((parent,p) for p in robustness_probes(config,changes,active,limit=4))
                     validation=iter(candidates[:robustness_budget]);robustness_budget=0
                 try:parent,changes=next(validation)
-                except StopIteration:break
+                except StopIteration:
+                    stop_reason=stop_reason or 'robustness_complete'
+                    break
                 phase,strategy='robustness','robustness_probe'
                 family='hybrid' if any(k.startswith(PREFIX) for k in changes) else 'face'
             attempts += 1
@@ -334,13 +350,16 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
         best=max(ranks,key=ranking);best_rank=ranking(best);restored_count+=1
         return deepcopy(record['item']),baseline
     def record(name,settings,item,inputs):
-        winner_text=configuration_document(config,selected(best),inputs) if winner_writer else None
+        nonlocal written_winner
+        winner_text=(configuration_document(config,selected(best),inputs)
+                     if winner_writer and written_winner!=best else None)
         if journal is not None:
             state=deepcopy(dict(status=summaries[name],rank=ranks[name],outcome=outcomes[name],
                 feedback=latest_feedback,options=options,hybrid=hybrid,hybrid_changes=hybrid_changes,
                 robustness=robustness,**({'baseline':baseline} if name=='baseline' else {})))
             journal.record(name,settings,item,state,winner_text)
-        elif winner_writer:winner_writer.write(winner_text)
+        elif winner_text is not None:winner_writer.write(winner_text)
+        if winner_text is not None:written_winner=best
     def trial_progress(name, stage, item):
         if stage == 'complete':durations[name]=item['elapsed_seconds']
         if stage == 'start':
@@ -387,7 +406,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
         robustness=dict(selected=best,checks=robustness.get(best,[]),
             validated=bool(confidence(robustness.get(best,[]))),
             candidates=robustness,interpretation='Local completed replays only; no global stability guarantee.'),
-        search=dict(max_trials=maximum, executed=len(result['trials']),restored_trials=restored_count,
+        search=dict(max_trials=maximum,sampler=sampler_metadata, executed=len(result['trials']),restored_trials=restored_count,
                     scheduling='blocker_guided_diverse_beam',
                     stop_reason='interrupted' if result.get('interrupted') else result.get('stop_reason', stop_reason),
                     beam_width=BeamSearch.width, peak_beam=search.peak_beam if search else 0,
