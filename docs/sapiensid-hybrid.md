@@ -201,7 +201,7 @@ another face rebuild. No checkpoint is treated as ground truth.
 |---|---|
 | `run` | Collect missing evidence, rebuild faces, apply guarded hybrid plan, reconcile selected scene links. |
 | `report` | Read-only frozen plan with pair gates, competing identities and missing evidence. |
-| `report-identity` | Recorded hybrid explanations, attachment roles, retained body PNGs and association metadata. No models/media needed. |
+| `report-identity` | Recorded hybrid explanations, attachment roles, retained body PNGs and association metadata. Annotated copies show face points and COCO17 pose points on retained crops, using audit colors. No models/media needed. |
 | `report-merge` | Add measured hybrid proposals; `--simulate` verifies final membership through production replay. Merge goals and the solver retain all competing identities and set-separation constraints. |
 | `audit-alignment` | Export the exact reconstructed model input, whitespace mask, 22 normalized points and annotated source/input PNGs. Loads pose and face detection, not SapiensID identity weights. |
 | `evaluate` | Copy only admitted retained evidence into isolated trials; report coverage, matching settings and recorded decisions. Future selected scenes cannot supply body votes. |
