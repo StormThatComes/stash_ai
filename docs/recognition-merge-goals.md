@@ -261,3 +261,11 @@ Run `python -m benchmarks.benchmark_merge_solver --max-trials 100` for determini
 face, auxiliary, disjoint-set, missing-body, quality and body-mode cases. Its JSON
 records best-objective trajectories, first solution, elapsed time and 10/50/100
 trial milestones. Synthetic timings do not predict a user's library runtime.
+
+Joint separation retains each unwanted witness's face/body/support vector and
+searches bounded combinations where every desired route passes all gates and
+each unwanted route fails at least one gate. Scalar overlap no longer suppresses
+multi-gate proposals. `joint_constraints` records unresolved witnesses and pruning;
+these are frozen diagnostics, not global infeasibility proofs. Strong fragment
+bridges, bounded crossovers between beam states and coupled refinement complement
+the full-set proposal. Production complete-core guards always remain authoritative.
