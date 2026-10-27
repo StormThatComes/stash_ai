@@ -158,6 +158,11 @@ def group_summary(group):
             f"empty_performers={sum(m['observations'] == 0 for m in members)}")
 
 
+def group_summary_lines(group):
+    from .merge_goal_samples import lines
+    return [group_summary(group)] + lines(group)
+
+
 def summary(result):
     """Final stderr summary; JSON stdout and report files remain machine-readable."""
     selected = result.get('best_result')
@@ -178,7 +183,7 @@ def summary(result):
     if goal.get('goal_policy', {}).get('name') == 'identity':
         lines.append(f"  Goal policy: identity; strict_disjoint={goal['strict_disjoint']}; "
                      f"strict_fully_solved={goal['strict_fully_solved']}; largest_complete counts all original samples.")
-    lines.extend(group_summary(group) for group in goal['groups'])
+    lines.extend(line for group in goal['groups'] for line in group_summary_lines(group))
     for violation in selected['unmet_conditions']:
         detail = []
         for key, value in violation.items():
