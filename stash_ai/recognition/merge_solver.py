@@ -342,7 +342,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             yield name, variant
             previous_name, previous_changes = name, normalized
             trials += 1
-            search.completed(phase)
+            search.completed(phase, parent=parent)
             improved = search.observe(name, normalized, ranking(name), outcomes[name], family=family, operator=strategy,
                 elapsed=durations.get(name,0.), blockers=sorted({r['reason'] for r in feedback[name]['provenance']['blocker_trace']}))
             if improved:

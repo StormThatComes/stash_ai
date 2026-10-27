@@ -107,7 +107,7 @@ def test_root_probes_continue_even_when_every_adaptive_child_improves():
         frontier.completed(phase)
         frontier.observe(f'trial-{trial}', changes, (trial+1, 0, 0), str(trial), family=family)
         assert len(frontier.beam) <= 5
-    assert baseline_values == list(range(16))
+    assert baseline_values == list(range(7))  # One reserved baseline slot per four normal trials.
     assert parents and all(p != 'baseline' for p in parents)
 
 
