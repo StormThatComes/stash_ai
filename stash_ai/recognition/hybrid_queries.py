@@ -29,8 +29,8 @@ def _recover(database, selected, config, *, births=()):
     groups=[group for _,group,_,_ in banks]
     from .hybrid_query_index import QueryIndex
     index=QueryIndex(banks,config.data['sapiensid']['execution']['reference_bytes'])
-    from .hybrid_query_observer import query_observer
-    observe=query_observer(db,banks,config,births)
+    from .hybrid_query_observer import query_observer, query_decision
+    observe=query_observer(db,banks,config,births,selected)
     policy=matching_policy(config);claims=[];votes=defaultdict(Votes)
     rows=db.execute('SELECT o.id,o.scan,o.cue,o.seconds,o.geometry,o.quality,o.dimensions,o.embedding,e.embedding AS body,c.id AS candidate,c.person AS prior_owner FROM candidates c '
         'JOIN observations o ON o.id='+observation_sql('c')+
@@ -71,10 +71,15 @@ def _recover(database, selected, config, *, births=()):
         signal='face'
         if winner is None:
             winner=choose(choices,settings['ambiguity_margin']);signal='face_and_body'
-        if winner is None:continue
+        if winner is None:
+            if observe is not None:query_decision(row['id'],'choice','no_unambiguous_query_winner',
+                face_choices=len(face_choices),body_choices=len(choices))
+            continue
         score,owner,_,group,rival_score=winner
         if not co_presence_allows(db,row,group,groups,face,config,
-                peer_threshold=settings['face_floor'],cohesion_threshold=settings['face_floor']):continue
+                peer_threshold=settings['face_floor'],cohesion_threshold=settings['face_floor']):
+            if observe is not None:query_decision(row['id'],'copresence','copresence_conflict',owner=owner)
+            continue
         proof=dict(format=1,route='hybrid_query',frozen=True,contract=contract(config),
                    core_observations=list(group.sample_ids),signal=signal,score=score,rival_score=rival_score,
                    reference_role='attachment',reference_selected=False)
@@ -93,8 +98,14 @@ def _recover(database, selected, config, *, births=()):
         if prior not in births or prior in admissible_births:votes[owner].add(row)
     with db:
         for candidate,observation,owner,proof,prior,row in claims:
-            if prior in births and prior not in admissible_births:continue
-            if len(votes[owner])<(config.data['clustering']['auxiliary_min_support'] if proof['signal']=='face' else settings['min_support']):continue
+            if prior in births and prior not in admissible_births:
+                if observe is not None:query_decision(observation,'birth','incomplete_birth_claim',owner=owner)
+                continue
+            if len(votes[owner])<(config.data['clustering']['auxiliary_min_support'] if proof['signal']=='face' else settings['min_support']):
+                if observe is not None:query_decision(observation,'support',
+                    'auxiliary_insufficient_support' if proof['signal']=='face' else 'query_support',
+                    owner=owner,support=len(votes[owner]))
+                continue
             db.execute("UPDATE candidates SET person=?,status='accepted',payload=json_set(payload,"
                 "'$.prior_reason',json_extract(payload,'$.reason'),'$.reason','hybrid_query',"
                 "'$.hybrid_query',json(?),'$.reference_role','attachment','$.reference_selected',json('false')) WHERE id=?",

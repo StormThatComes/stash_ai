@@ -14,6 +14,15 @@ def observe_queries(observer):
         _observer.reset(token)
 
 
-def query_observer(db, banks, config, births):
+def query_observer(db, banks, config, births, selected=()):
     observer = _observer.get()
-    return observer.begin(db, banks, config, births) if observer is not None else None
+    if observer is None:
+        return None
+    observer.selected = selected
+    return observer.begin(db, banks, config, births)
+
+
+def query_decision(observation, stage, reason, **details):
+    observer = _observer.get()
+    if observer is not None:
+        observer.decision(observation, stage, reason, details)

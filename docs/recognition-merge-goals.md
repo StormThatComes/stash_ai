@@ -250,3 +250,14 @@ completed, status is `no_completed_trials`, `best_result` is null and no YAML is
 exported. Interrupting initial goal preparation may stop before a report exists.
 Runtime uses configured rebuild workers and RAM budgets; GPU
 inference is not repeated. Performance on a large library must be measured locally.
+
+Solver diagnostics retain a configuration/evidence fingerprint, producing trial,
+active parameters, and a trace combining terminal assignments, actual hybrid
+query choice/co-presence/support decisions, and measured reference blockers.
+Descendants use their parent's proposal and option snapshots. Diagnostic query
+slots rotate across sets, performers and scenes before replay-order traversal;
+partial comparison budgets never certify an unmeasured competitor gap.
+Run `python -m benchmarks.benchmark_merge_solver --max-trials 100` for deterministic
+face, auxiliary, disjoint-set, missing-body, quality and body-mode cases. Its JSON
+records best-objective trajectories, first solution, elapsed time and 10/50/100
+trial milestones. Synthetic timings do not predict a user's library runtime.

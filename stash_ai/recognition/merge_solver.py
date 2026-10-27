@@ -111,6 +111,7 @@ def solve(config, goals, db, *, maximum=500, progress=None):
     from .person_signal import same_contract
     from .merge_solver_hybrid import public
     from .merge_solver_feedback import QueryFeedback, pair_separation, quality_feedback
+    from .merge_solver_diagnostics import diagnostic_record
     from .hybrid_query_observer import observe_queries
     proofs = []
     hybrid = {}
@@ -148,8 +149,9 @@ def solve(config, goals, db, *, maximum=500, progress=None):
         outcomes[name] = digest([(oid, None if predicted.get(oid) is None else
             labels.setdefault(predicted[oid], len(labels))) for oid in sorted(target_ids)])
         feedback[name] = latest_feedback.copy()
+        latest_feedback['provenance']['trial'] = name
         return dict(goal_result=status, outside_impact=outside, hybrid_solver_evidence=public(hybrid),
-            solver_feedback={k:v for k,v in latest_feedback.items() if k != 'proposals'},
+            solver_feedback={k:v for k,v in latest_feedback.items() if k not in ('proposals','options','hybrid_proposals')},
             best_trial=best, best_trial_number=0 if best == 'baseline' else int(best.split('-')[1]),
             **transitions[name])
     def inspect(target, settings):
@@ -183,7 +185,9 @@ def solve(config, goals, db, *, maximum=500, progress=None):
         latest_feedback.clear()
         latest_feedback.update(query={k:v for k,v in queries.items() if k not in ('proposals','options')},
             separation_intervals=separation['intervals'], quality=quality['observations'],
-            proposals=dict(hybrid=directed, face=quality['proposals']))
+            proposals=dict(hybrid=directed, face=quality['proposals']),
+            options=updated, hybrid_proposals=list(hybrid['proposals']),
+            provenance=diagnostic_record(settings, result, queries, public(hybrid), quality['observations']))
         for extra in (queries['options'], separation['options']):
             for key, values in extra.items():
                 updated[key] = list(updated.get(key, ())) + list(values)
@@ -207,7 +211,13 @@ def solve(config, goals, db, *, maximum=500, progress=None):
                 return
             hints = feedback[parent]['proposals'][family]
             directed = (('measured_blockers', dict(changes, **patch)) for patch in hints)
-            probes = (('coordinate_probe', p) for p in factories[family](changes))
+            source = feedback[parent]
+            scoped_options = dict(options, **source['options'])
+            active = source['provenance']['active_parameters']
+            scoped_options = dict(sorted(scoped_options.items(), key=lambda kv: (-active.get(kv[0],0),kv[0])))
+            candidates = (_hybrid_neighbours(config, changes, scoped_options, source['hybrid_proposals'])
+                          if family == 'hybrid' else _face_neighbours(config, changes, scoped_options))
+            probes = (('coordinate_probe', p) for p in candidates)
             yield from _interleave((directed, probes))
         search = BeamSearch(factories, factory, maximum)
         search.observe('baseline', {}, ranks['baseline'], outcomes['baseline'])
