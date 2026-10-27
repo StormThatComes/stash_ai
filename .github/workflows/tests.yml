@@ -54,7 +54,7 @@ jobs:
 
       - name: Install test dependencies
         run: |
-          uv pip install --system -r requirements-cpu.txt -r requirements-dev.txt -c constraints/cpu-py314.txt --index-strategy unsafe-best-match
+          uv pip install --system -r requirements-cpu.txt -r requirements-dev.txt -r requirements-solver.txt -c constraints/cpu-py314.txt --index-strategy unsafe-best-match
 
       - name: Offline benchmark smoke
         run: python -m pytest -q tests/test_benchmarks.py --tb=short

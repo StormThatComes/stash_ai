@@ -69,7 +69,7 @@ and fewer fragments. Assignment and common-destination coverage average fraction
 per performer, so a performer with many samples cannot dominate. These continuous
 metrics distinguish progress even when all complete-performer counts are zero.
 Ties prefer fewer goal-to-outsider attachments, external coverage losses, splits
-and joins, then fewer/smaller parameter changes. External partition changes are
+and joins, then confirmed local stability and fewer/smaller normalized parameter changes. External partition changes are
 not accuracy estimates; labels of other people are unknown.
 
 Search measures strict representative similarities, explores joint thresholds,
@@ -133,17 +133,18 @@ After 64 completed trials without an improvement in goal/outside-impact metrics
 (with a smaller patience for smaller budgets, at least 24), the solver refines
 around the retained beam. Refinement tries measured brackets, smaller steps and
 reverting unnecessary changes. Up to 24 completed refinement trials run; material
-improvement resumes exploration. Otherwise the solver stops for stagnation or
-exhausted refinement candidates. Patch-size tie-breaks alone do not reset patience.
+improvement resumes exploration. Otherwise it tries at most eight distant restart trials once, refines again,
+and performs the reserved local stability checks before stopping. Patch-size tie-breaks alone do not reset patience.
 The configured replay limit and proposal-attempt guard always remain in force.
 
 `search.stop_reason` explains budget exhaustion, stagnation, exhausted candidates
 or interruption. `beam_width`, `peak_beam`, `beam_trials`, `pruned_trials`,
 `stagnation_patience` and `refinement_budget` expose the search limits.
 `search.executed_by_family` and each trial's `search_family` show actual allocation.
-`search_phase` is `baseline_exploration`, `adaptive`, or `refinement`;
-`search_parent` and `search_strategy` (`measured_blockers`, `coordinate_probe`, or
-`local_refinement`) explain the origin. `search.tested_hybrid_values` includes
+`search_phase` is `baseline_exploration`, `adaptive`, `refinement`, `restart`, or
+`robustness`. `search_parent` and `search_strategy` explain the origin, including
+`measured_blockers`, `coordinate_probe`, `boundary_probe`, `crossover`,
+`local_refinement`, `restart_probe`, `robustness_probe`, and optional `tpe`. `search.tested_hybrid_values` includes
 only completed trials, including baseline, never interrupted proposals.
 
 Each trial's `solver_feedback` contains query-stage blockers, separation intervals
@@ -319,3 +320,30 @@ Two or more successful nearby replays give a stability preference only after
 goal and outside-impact scores tie. The `robustness` report lists actual checks;
 missing checks mean unknown stability, never an assurance. These probes share
 the global trial limit and do not prove robustness on future media.
+
+
+### Optional learned proposals
+
+Install `pip install -r requirements-solver.txt` and add
+`--solver-sampler tpe --solver-seed 42`. Default `heuristic` mode has no Optuna
+dependency. TPE proposes at most one candidate per five completed trials after
+13 warmup trials; other candidates continue to come from the guided search.
+Rejected or duplicate TPE proposals do not consume a replay slot or replace
+heuristic proposals indefinitely. The usual default total limit remains 500.
+
+The sampler uses up to eight active tunable dimensions, mixes integer support,
+boolean and numeric thresholds, and learns from completed production trials.
+Its training target is the ordinal order of the solver's full lexicographic
+ranking, not a weighted sum that exchanges a hard constraint for consolidation.
+Every proposal still passes configuration/contract validation and full production
+replay. Seeds, dependency version and mode are part of checkpoint compatibility.
+The journal reproduces the same proposals when reconstructing a completed prefix.
+
+`python -m benchmarks.benchmark_merge_solver --max-trials 100 --sampler compare`
+compares both modes on six deterministic retained-evidence fixtures, reports
+objective trajectories, first-solution time and outcomes at 10/50/100 trials.
+These synthetic cases test mechanisms; they do not establish accuracy or a
+speedup on a real library. In the recorded comparison both modes fully solved
+five cases; the missing-body case remained partial. TPE did not improve the first
+solution count on these fixtures, so it remains opt-in. See
+`benchmarks/results/merge_solver_comparison.json` for measured counts and timing.

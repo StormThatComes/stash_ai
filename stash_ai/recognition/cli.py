@@ -19,6 +19,8 @@ class RecognitionParser(argparse.ArgumentParser):
         if result.command == 'report-merge':
             if result.yaml_output and not result.solve:
                 self.error('--yaml-output requires --solve')
+            if result.solver_sampler!='heuristic' and not result.solve:
+                self.error('--solver-sampler requires --solve')
             if (result.checkpoint or result.resume) and not result.solve:
                 self.error('--checkpoint/--resume require --solve')
             if result.resume and not result.checkpoint:
@@ -163,6 +165,8 @@ def parser():
     merge_report.add_argument('--yaml-output', type=Path, help='Export the best tested configuration, including best-effort or unchanged results; requires --solve.')
     merge_report.add_argument('--solve', action='store_true', help='Search configurations using full replay of merge goals.')
     merge_report.add_argument('--max-trials', type=int, default=500, help='Maximum replay budget including baseline (default: 500; may stop on stagnation).')
+    merge_report.add_argument('--solver-sampler', choices=('heuristic','tpe'), default='heuristic', help='Optional learned proposal lane alongside heuristics; TPE requires requirements-solver.txt.')
+    merge_report.add_argument('--solver-seed', type=int, default=0, help='Reproducible optional sampler seed (default: 0).')
     merge_report.add_argument('--checkpoint', type=Path, help='Durable solver journal; writes best YAML alongside it if --yaml-output is omitted.')
     merge_report.add_argument('--resume', action='store_true', help='Resume --checkpoint with identical inputs, code and search settings.')
     merge_report.add_argument('--simulate', action='store_true',

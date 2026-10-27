@@ -90,3 +90,13 @@ def test_robustness_is_replayed_within_budget(tmp_path):
     checks=[t for t in result['simulation']['trials'].values() if t.get('search_phase')=='robustness']
     assert checks and len(result['simulation']['trials'])<=30
     assert sum(map(len,result['robustness']['candidates'].values()))==len(checks)
+
+
+def test_resume_before_baseline_cannot_adopt_unowned_yaml(tmp_path):
+    from stash_ai.recognition.merge_solver_checkpoint import Journal
+    path=tmp_path/'checkpoint.json';destination=tmp_path/'winner.yml'
+    Journal(path,{'format':1},winner=winner_file(destination))
+    destination.write_text('user document')
+    with pytest.raises(FileExistsError,match='not owned'):
+        Journal(path,{'format':1},resume=True,winner=winner_file(destination,resume=True))
+    assert destination.read_text()=='user document'
