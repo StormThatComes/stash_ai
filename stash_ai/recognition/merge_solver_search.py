@@ -4,6 +4,7 @@ from itertools import islice
 import math
 
 from .merge_report_policy import parameter
+from .merge_solver_metrics import signature as parameter_signature
 
 PREFIX = 'sapiensid.matching.'
 GATES = ('face_floor', 'person_threshold', 'ambiguity_margin', 'min_support')
@@ -106,10 +107,11 @@ class BeamSearch:
     width = 5
     refinement_budget = 24
 
-    def __init__(self, families, factory, maximum):
+    def __init__(self, families, factory, maximum, config=None):
+        self.config = config
         self.families, self.factory, self.maximum = tuple(families), factory, maximum
         self.beam, self.streams, self.root = {}, {}, {}
-        self.stats = {f: dict(executed=0, improvements=0, last=0) for f in families}
+        self.stats = {f: dict(executed=0, improvements=0, last=0, seconds=0., rejected=0) for f in families}
         self.executed = self.stale = self.explored = 0
         self.best_quality = None
         self.patience = max(24, min(64, maximum//4))
@@ -120,14 +122,19 @@ class BeamSearch:
         self.peak_beam = 0
         self.admitted = self.pruned = 0
         self.parent_turn = 0
+        self.operators = {}
+        self.restarts = 0
+        self.restart_pending = None
+        self.restart_executed = 0
 
-    def observe(self, name, changes, rank, outcome, *, family=None):
+    def observe(self, name, changes, rank, outcome, *, family=None, operator=None, elapsed=0., blockers=()):
         # Patch-size tie-breaks must not turn a plateau into endless "progress".
         improved = self.best_quality is None or rank[:-2] > self.best_quality
         if improved:
             self.best_quality, self.stale = rank[:-2], 0
             self.refining = False
             self.refinements.clear()
+            self.restart_pending = None
         elif name != 'baseline':
             self.stale += 1
         if family is not None:
@@ -136,14 +143,18 @@ class BeamSearch:
             stat['executed'] += 1
             stat['improvements'] += int(improved)
             stat['last'] = self.executed
-        candidate = dict(changes=changes, rank=rank, outcome=outcome)
+            stat['seconds'] += elapsed
+            if operator:
+                op=self.operators.setdefault(operator,dict(executed=0,improvements=0,seconds=0.,rejected=0))
+                op['executed']+=1;op['improvements']+=int(improved);op['seconds']+=elapsed
+        candidate = dict(changes=changes, rank=rank, outcome=outcome, blockers=tuple(blockers))
         pool = dict(self.beam, **{name: candidate})
         ordered = sorted(pool, key=lambda n: pool[n]['rank'], reverse=True)
         selected, signatures = [], set()
         # Prefer distinct partitions; reserve two places for distinct parameter
         # routes on a plateau (e.g. face vs body), without retaining every trial.
         for key, limit in ((lambda c: c['outcome'], 3),
-                           (lambda c: (c['outcome'], tuple(sorted(c['changes']))), self.width)):
+                           (lambda c: (c['outcome'], c['blockers'], parameter_signature(c['changes'],self.config)), self.width)):
             signatures = {key(pool[n]) for n in selected}
             for n in ordered:
                 signature = key(pool[n])
@@ -174,11 +185,46 @@ class BeamSearch:
             overdue = self.executed-stat['last'] >= 4
             score = (stat['improvements']/(stat['executed']+1) +
                      math.sqrt(2*math.log(self.executed+2)/(stat['executed']+1)))
-            return stat['executed'] == 0, overdue, score
+            cost=max(1.,stat['seconds']/max(1,stat['executed']))
+            return stat['executed'] == 0 and stat['rejected']<8, overdue, score/(cost**.25)/(1+stat['rejected']*.02)
         return sorted(self.families, key=priority, reverse=True)
 
+    def rejected(self, family, operator):
+        self.stats[family]['rejected'] += 1
+        op=self.operators.setdefault(operator,dict(executed=0,improvements=0,seconds=0.,rejected=0))
+        op['rejected']+=1
+
+    def operations(self, streams):
+        pending={k:iter(v) for k,v in streams.items()}
+        while pending:
+            def priority(k):
+                stat=self.operators.get(k,{})
+                count=stat.get('executed',0)
+                return (stat.get('improvements',0)+1)/(count+1)**.5 / max(1.,stat.get('seconds',0)/max(1,count))**.25 / (1+stat.get('rejected',0)*.1)
+            key=max(pending,key=priority)
+            try:yield next(pending[key])
+            except StopIteration:del pending[key]
+
+    def _restart(self):
+        if self.restarts>=1:return False
+        self.restarts+=1;self.restart_executed=0;self.refining=False
+        def tagged(n,c):
+            for item in self.factory(n,c['changes'],None,'restart'):yield (n,*item)
+        self.restart_pending=interleave(tagged(n,c) for n,c in self.beam.items())
+        return True
+
     def next(self):
+        if self.restart_pending is not None:
+            if self.restart_executed<8:
+                try:
+                    parent,family,strategy,changes=next(self.restart_pending)
+                    return family,'restart',parent,strategy,changes
+                except StopIteration:pass
+            self.restart_pending=None
+            self.refining=True;self.refined=0
+            self.refinements={n:iter(self.factory(n,c['changes'],None,True)) for n,c in self.beam.items()}
         if self.refining and self.refined >= self.refinement_budget:
+            if self._restart():return self.next()
             self.stop_reason = 'stagnation_after_refinement'
             raise StopIteration
         if not self.refining and self.stale >= self.patience:
@@ -194,6 +240,7 @@ class BeamSearch:
                     continue
                 self.refinements[n] = stream
                 return family, 'refinement', n, strategy, changes
+            if self._restart():return self.next()
             self.stop_reason = 'refinement_exhausted'
             raise StopIteration
         baseline_first = self.explored < BASELINE_WARMUP or self.executed % 4 == 0
@@ -229,4 +276,25 @@ class BeamSearch:
             self.explored += 1
         if phase == 'refinement':
             self.refined += 1
+        if phase == 'restart':
+            self.restart_executed += 1
         self.parent_turn += 1
+
+
+def restart_probes(config, changes, options):
+    """Deterministic coverage of distant measured values; global replay cap wins."""
+    choices=[]
+    for key,values in sorted(options.items()):
+        values=sorted(set(values))
+        if not values:continue
+        current=changes.get(key,parameter(config.data,key))
+        selected=[values[0],values[len(values)//2],values[-1]]
+        if key.startswith(PREFIX) and not key.endswith('min_support'):selected.extend((.1,.5,.9))
+        for value in dict.fromkeys(selected):
+            if value!=current:choices.append((key,value))
+    for index,(key,value) in enumerate(choices):
+        patch=dict(changes,**{key:value})
+        if index+len(choices)//2<len(choices):
+            other,v=choices[index+len(choices)//2]
+            if other!=key:patch[other]=v
+        yield patch

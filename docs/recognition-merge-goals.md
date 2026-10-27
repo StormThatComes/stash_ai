@@ -269,3 +269,13 @@ multi-gate proposals. `joint_constraints` records unresolved witnesses and pruni
 these are frozen diagnostics, not global infeasibility proofs. Strong fragment
 bridges, bounded crossovers between beam states and coupled refinement complement
 the full-set proposal. Production complete-core guards always remain authoritative.
+
+Search now distinguishes parameter values and blocker signatures within the beam.
+All performer-pair consolidation fractions break ties after complete-performer
+metrics; coverage and set separation retain priority. Mutation magnitudes use
+parameter scales (fractional thresholds, support, pixels and sharpness). Operator
+and family allocation account for improvements, replay time and rejected proposals.
+One restart of at most eight completed experiments explores distant measured
+values before final stagnation; it never discards the best completed result or
+extends `--max-trials`. Search metadata includes operator statistics and restart
+counts. Every trial still logs its changes against the previous executed trial.

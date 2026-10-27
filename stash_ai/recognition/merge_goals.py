@@ -82,6 +82,7 @@ def assess(goals, observations, retained, predicted):
     for group in goals['groups']:
         members, counts, complete_owners = [], Counter(), Counter()
         destination_fractions = Counter()
+        destination_squares = Counter()
         missing = lost = 0
         for member in group['members']:
             ids = {r['id'] for r in member['observations']}
@@ -93,7 +94,9 @@ def assess(goals, observations, retained, predicted):
             assigned = sum(destinations.values())
             if ids:
                 for destination, count in destinations.items():
-                    destination_fractions[destination] += count / len(ids)
+                    fraction = count / len(ids)
+                    destination_fractions[destination] += fraction
+                    destination_squares[destination] += fraction*fraction
             complete = bool(ids) and not absent and not withheld and len(destinations) == 1
             if complete:
                 complete_owners.update(destinations.keys())
@@ -115,6 +118,9 @@ def assess(goals, observations, retained, predicted):
             observations=sum(m['observations'] for m in members), assigned=sum(m['assigned'] for m in members),
             assigned_fraction=sum(m['assigned_fraction'] for m in members)/len(members),
             consolidation_fraction=max(destination_fractions.values(), default=0.)/len(members),
+            pair_consolidation_fraction=(sum(v*v-destination_squares[k] for k,v in destination_fractions.items())
+                /(len(members)*(len(members)-1)) if len(members)>1 else (1. if largest else 0.)),
+            complete_components=sorted(complete_owners.values(),reverse=True),
             fully_merged=largest == len(members) and not missing and not lost))
     by_index = {g['index']: g for g in groups}
     conflicts = []
@@ -150,6 +156,8 @@ def objective(status):
             -status['cross_set_observation_pairs'],
             min(g['complete_fraction'] for g in groups),
             sum(g['largest_complete_performers'] for g in groups),
+            min(g.get('pair_consolidation_fraction',0.) for g in groups),
+            sum(g.get('pair_consolidation_fraction',0.) for g in groups)/len(groups),
             min(g['consolidation_fraction'] for g in groups),
             sum(g['consolidation_fraction'] for g in groups)/len(groups),
             -sum(g['fragments'] for g in groups))
