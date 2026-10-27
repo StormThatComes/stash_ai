@@ -44,7 +44,8 @@ def test_real_solver_and_export_reproduce_disjoint_partition(tmp_path):
     from stash_ai.recognition.merge_solver import solve
     from stash_ai.recognition.merge_goal_output import export
     from stash_ai.recognition.config import load
-    from stash_ai.recognition.merge_goals import evaluate
+    from stash_ai.recognition.merge_goals import evaluate, objective
+    from stash_ai.recognition.merge_report_policy import patched
     config, people = seeded(tmp_path, vectors=[[1.,0,0,0], [.7,.71414284285,0,0], [0,0,1.,0]])
     before = config.database.read_bytes()
     with _open_readonly(config.database) as db:
@@ -53,7 +54,14 @@ def test_real_solver_and_export_reproduce_disjoint_partition(tmp_path):
         assert result['status'] == 'fully_solved'
         assert result['recommendation']
         assert result['simulation']['trials'][result['selected_trial']]['goal_result']['disjoint']
-        assert any(not i['goal_result']['disjoint'] for i in result['simulation']['trials'].values())
+        # Check a known cross-set merge explicitly, without depending on the
+        # scheduler spending a short search budget on this particular loser.
+        mixed = evaluate(patched(config, {'recognition.match_threshold': 0.,
+            'clustering.cohesion_threshold': 0., 'clustering.view_match_threshold': 0.,
+            'clustering.view_cohesion_threshold': 0., 'recognition.ambiguity_margin': 0.,
+            'clustering.view_ambiguity_margin': 0.}), goals, db)['trials']['baseline']['goal_result']
+        assert not mixed['disjoint']
+        assert objective(result['simulation']['trials'][result['selected_trial']]['goal_result']) > objective(mixed)
     output, yaml = tmp_path/'result.json', tmp_path/'result.yml'
     export(config, result, output, yaml)
     new = load(yaml)

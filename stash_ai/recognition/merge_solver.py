@@ -127,6 +127,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
     from .merge_solver_metrics import magnitude as mutation_magnitude
     from .merge_solver_constraints import component_proposals, crossovers, coupled_refinement
     from .merge_solver_preflight import boundary_probes, ordered
+    from .merge_solver_bidirectional import BidirectionalSearch
     from .hybrid_query_observer import observe_queries
     proofs = []
     hybrid = {}
@@ -141,6 +142,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
     query_feedback = QueryFeedback(goals)
     latest_feedback = {}
     search = None
+    bidirectional = None
     stop_reason = None
     best, best_rank, baseline = None, None, None
     robustness = {}
@@ -224,7 +226,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             options[key] = sorted(set(options.get(key, ())) | set(values), reverse=True)
         return result
     def stream():
-        nonlocal search, stop_reason
+        nonlocal search, bidirectional, stop_reason
         trials, attempts = 1, 0
         previous_name, previous_changes = 'baseline', {}
         factories = {'hybrid': lambda changes: _hybrid_neighbours(config, changes, options, hybrid_changes),
@@ -262,13 +264,22 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
                                           'crossover':mixing,'boundary_probe':boundaries})
         search = BeamSearch(factories, factory, maximum, config)
         search.observe('baseline', {}, ranking('baseline'), outcomes['baseline'])
+        bidirectional = BidirectionalSearch(config, goals, maximum, feedback['baseline'])
+        bidirectional.observe('baseline', {}, summaries['baseline'], ranking('baseline'), outcomes['baseline'])
         robustness_budget=min(8,maximum//10) if maximum>=20 else 0
         validation=None
         sampled_for=None
+        normal_exhausted = False
         while trials < maximum and attempts < maximum * 100:
             if validation is None and trials<maximum-robustness_budget:
+                alternate = bidirectional.next(trials, feedback, solved=summaries[best]['fully_solved'],
+                                               force=normal_exhausted)
                 try:
-                    if learned and trials>=BASELINE_WARMUP and trials%5==0 and sampled_for!=trials:
+                    if alternate is not None:
+                        family, phase, parent, strategy, changes = alternate
+                    elif normal_exhausted:
+                        raise StopIteration
+                    elif learned and trials>=BASELINE_WARMUP and trials%5==0 and sampled_for!=trials:
                         sampled_for=trials
                         history=[({c['parameter']:c['proposed'] for c in patches.get(n,{}).get('changes',())},
                                   ranking(n)) for n in ranks]
@@ -279,6 +290,9 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
                     else:
                         family, phase, parent, strategy, changes = search.next()
                 except StopIteration:
+                    if not normal_exhausted:
+                        normal_exhausted = True
+                        continue  # Finish the bounded alternate frontier before stopping.
                     stop_reason=search.stop_reason
                     validation=iter(())
             else:
@@ -329,10 +343,15 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             previous_name, previous_changes = name, normalized
             trials += 1
             search.completed(phase)
-            search.observe(name, normalized, ranking(name), outcomes[name], family=family, operator=strategy,
+            improved = search.observe(name, normalized, ranking(name), outcomes[name], family=family, operator=strategy,
                 elapsed=durations.get(name,0.), blockers=sorted({r['reason'] for r in feedback[name]['provenance']['blocker_trace']}))
+            if improved:
+                normal_exhausted = False
+                search.stop_reason = None
+            bidirectional.observe(name, normalized, summaries[name], ranking(name), outcomes[name], phase=phase)
             # Keep detailed hints only for parents that can still be expanded.
-            for old in set(feedback) - search.beam.keys() - {'baseline'} - set(sorted(ranks,key=ranking,reverse=True)[:2]):
+            for old in (set(feedback) - search.beam.keys() - bidirectional.frontier.keys() -
+                        {'baseline'} - set(sorted(ranks,key=ranking,reverse=True)[:2])):
                 del feedback[old]
         if stop_reason is None:
             stop_reason = 'max_trials' if trials >= maximum else 'proposal_limit'
@@ -365,7 +384,8 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
     def trial_progress(name, stage, item):
         if stage == 'complete':durations[name]=item['elapsed_seconds']
         if stage == 'start':
-            item = dict(transitions[name], search_parent=origins.get(name, {}).get('search_parent'))
+            item = dict(transitions[name], search_parent=origins.get(name, {}).get('search_parent'),
+                        **{k:v for k,v in origins.get(name, {}).items() if k != 'search_parent'})
         if progress:progress(name, stage, item)
     with observe_queries(query_feedback):
         result = replay(config, {}, source=db, scope=goals['scope'], consume=consume, variant_stream=stream,
@@ -409,7 +429,11 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             validated=bool(confidence(robustness.get(best,[]))),
             candidates=robustness,interpretation='Local completed replays only; no global stability guarantee.'),
         search=dict(max_trials=maximum,sampler=sampler_metadata, executed=len(result['trials']),restored_trials=restored_count,
-                    scheduling='blocker_guided_diverse_beam',
+                    scheduling='bidirectional_blocker_guided_beam',
+                    bidirectional=dict(enabled=bidirectional.enabled if bidirectional else False,
+                        budget=bidirectional.budget if bidirectional else 0,
+                        frontier=list(bidirectional.frontier) if bidirectional else [],
+                        executed=sum(origins.get(n,{}).get('search_phase')=='bidirectional' for n in result['trials'])),
                     stop_reason='interrupted' if result.get('interrupted') else result.get('stop_reason', stop_reason),
                     beam_width=BeamSearch.width, peak_beam=search.peak_beam if search else 0,
                     beam_trials=list(search.beam) if search else [],
@@ -421,7 +445,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
                                         for family in ('hybrid', 'face')},
                     baseline_exploration_warmup=BASELINE_WARMUP,
                     executed_by_phase={phase: sum(origins.get(name, {}).get('search_phase') == phase
-                        for name in result['trials']) for phase in ('baseline_exploration', 'adaptive', 'refinement', 'restart', 'robustness')},
+                        for name in result['trials']) for phase in ('baseline_exploration', 'adaptive', 'bidirectional', 'refinement', 'restart', 'robustness')},
                     tested_hybrid_values=tested_hybrid,
                     budget_exhausted=len(result['trials']) >= maximum,
                     selection_scope='completed_trials_including_baseline',
