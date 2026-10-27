@@ -7,7 +7,7 @@ from .merge_report_policy import patched, proposal, parameter
 from .merge_goals import assess, objective, unmet_conditions
 from .replay_simulation import replay, impact
 from .merge_solver_search import (hybrid_neighbours as _hybrid_neighbours,
-    interleave as _interleave, spread, BeamSearch, refinement, BASELINE_WARMUP, PREFIX, GATES)
+    interleave as _interleave, spread, BeamSearch, refinement, restart_probes, BASELINE_WARMUP, PREFIX, GATES)
 
 
 def measured_options(db, config, goals, proofs=None, *, hybrid=None):
@@ -112,6 +112,7 @@ def solve(config, goals, db, *, maximum=500, progress=None):
     from .merge_solver_hybrid import public
     from .merge_solver_feedback import QueryFeedback, pair_separation, quality_feedback
     from .merge_solver_diagnostics import diagnostic_record
+    from .merge_solver_metrics import magnitude as mutation_magnitude
     from .merge_solver_constraints import component_proposals, crossovers, coupled_refinement
     from .hybrid_query_observer import observe_queries
     proofs = []
@@ -121,7 +122,7 @@ def solve(config, goals, db, *, maximum=500, progress=None):
     hybrid_changes = list(hybrid['proposals'])
     initial_changes = tuple(hybrid_changes)
     seen, patches, summaries, ranks = set(), {}, {}, {}
-    families, origins = {}, {}
+    families, origins, durations = {}, {}, {}
     transitions = {'baseline': dict(previous_trial=None, changes_from_previous=[])}
     feedback, outcomes = {}, {}
     query_feedback = QueryFeedback(goals)
@@ -139,7 +140,7 @@ def solve(config, goals, db, *, maximum=500, progress=None):
         outside = impact({k:v for k,v in baseline.items() if k not in target_ids},
                          {k:v for k,v in predicted.items() if k not in target_ids})
         patch = patches.get(name, {'changes': []})
-        magnitude = sum(abs(float(c['proposed'])-float(c['current'])) for c in patch['changes'])
+        magnitude = mutation_magnitude(patch['changes'])
         rank = objective(status) + (-sum(g['outsider_observations'] for g in status['groups']), -outside['coverage_lost'], -outside['split_pairs'],
             -outside['newly_joined_pairs'], -len(patch['changes']), -magnitude)
         ranks[name] = rank
@@ -204,6 +205,11 @@ def solve(config, goals, db, *, maximum=500, progress=None):
         if not config.data['sapiensid']['enabled']:
             del factories['hybrid']
         def factory(parent, changes, family, refine):
+            if refine == 'restart':
+                for candidate in restart_probes(config, changes, options):
+                    family='hybrid' if any(k.startswith(PREFIX) for k in candidate) else 'face'
+                    yield family,'restart_probe',candidate
+                return
             if refine:
                 for candidate in _interleave((refinement(config, changes, options),
                                               coupled_refinement(config, changes, options))):
@@ -222,8 +228,8 @@ def solve(config, goals, db, *, maximum=500, progress=None):
             probes = (('coordinate_probe', p) for p in candidates)
             mixing = (('crossover',p) for p in crossovers(changes,
                 [c['changes'] for n,c in search.beam.items() if n!=parent])) if parent!='baseline' else iter(())
-            yield from _interleave((directed, probes, mixing))
-        search = BeamSearch(factories, factory, maximum)
+            yield from search.operations({'measured_blockers':directed,'coordinate_probe':probes,'crossover':mixing})
+        search = BeamSearch(factories, factory, maximum, config)
         search.observe('baseline', {}, ranks['baseline'], outcomes['baseline'])
         while trials < maximum and attempts < maximum * 100:
             try:
@@ -235,14 +241,17 @@ def solve(config, goals, db, *, maximum=500, progress=None):
             patch = proposal(config, changes)
             fingerprint = digest(patch['yaml_patch'])
             if not patch['changes'] or fingerprint in seen:
+                search.rejected(family,strategy)
                 continue
             seen.add(fingerprint)
             try:
                 variant = patched(config, changes)
             except ValueError:
+                search.rejected(family,strategy)
                 continue
             if (scan_identity(variant, goals['namespace']) != scan_identity(config, goals['namespace']) or
                     not same_contract(config, variant)):
+                search.rejected(family,strategy)
                 continue
             name = f'trial-{trials}'
             normalized = {c['parameter']:c['proposed'] for c in patch['changes']}
@@ -260,19 +269,21 @@ def solve(config, goals, db, *, maximum=500, progress=None):
             previous_name, previous_changes = name, normalized
             trials += 1
             search.completed(phase)
-            search.observe(name, normalized, ranks[name], outcomes[name], family=family)
+            search.observe(name, normalized, ranks[name], outcomes[name], family=family, operator=strategy,
+                elapsed=durations.get(name,0.), blockers=sorted({r['reason'] for r in feedback[name]['provenance']['blocker_trace']}))
             # Keep detailed hints only for parents that can still be expanded.
             for old in set(feedback) - search.beam.keys() - {'baseline'}:
                 del feedback[old]
         if stop_reason is None:
             stop_reason = 'max_trials' if trials >= maximum else 'proposal_limit'
     def trial_progress(name, stage, item):
+        if stage == 'complete':durations[name]=item['elapsed_seconds']
         if stage == 'start':
             item = dict(transitions[name], search_parent=origins.get(name, {}).get('search_parent'))
-        progress(name, stage, item)
+        if progress:progress(name, stage, item)
     with observe_queries(query_feedback):
         result = replay(config, {}, source=db, scope=goals['scope'], consume=consume, variant_stream=stream,
-            inspect_trial=inspect, progress=trial_progress if progress else None, allow_partial_selection=True)
+            inspect_trial=inspect, progress=trial_progress, allow_partial_selection=True)
     # Ctrl-C can land after consume ranks a trial but before replay records it.
     best = max(result['trials'], key=ranks.__getitem__, default=None)
     for name, patch in patches.items():
@@ -308,13 +319,14 @@ def solve(config, goals, db, *, maximum=500, progress=None):
                     beam_width=BeamSearch.width, peak_beam=search.peak_beam if search else 0,
                     beam_trials=list(search.beam) if search else [],
                     pruned_trials=search.pruned if search else 0,
+                    operators=search.operators if search else {}, restarts=search.restarts if search else 0,
                     stagnation_patience=search.patience if search else None,
                     refinement_budget=BeamSearch.refinement_budget,
                     executed_by_family={family: sum(families.get(name) == family for name in result['trials'])
                                         for family in ('hybrid', 'face')},
                     baseline_exploration_warmup=BASELINE_WARMUP,
                     executed_by_phase={phase: sum(origins.get(name, {}).get('search_phase') == phase
-                        for name in result['trials']) for phase in ('baseline_exploration', 'adaptive', 'refinement')},
+                        for name in result['trials']) for phase in ('baseline_exploration', 'adaptive', 'refinement', 'restart')},
                     tested_hybrid_values=tested_hybrid,
                     budget_exhausted=len(result['trials']) >= maximum,
                     selection_scope='completed_trials_including_baseline',
