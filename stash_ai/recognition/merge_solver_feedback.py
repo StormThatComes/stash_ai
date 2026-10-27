@@ -81,20 +81,37 @@ class QueryFeedback:
     Budget counters include comparisons that are subsequently discarded.
     """
     def __init__(self, goals):
+        self.goals = goals
+        self.selected = ()
         self.sets = {r['id']: g['index'] for g in goals['groups'] for m in g['members'] for r in m['observations']}
         self.reset()
 
     def reset(self):
         self.entries, self.negatives, self.votes = [], [], {}
+        self.decisions = []
+        self.sampled = set()
+        self.sampling = []
         self.comparisons = self.used = self.passes = 0
         self.truncation_reasons = set()
         self.skipped_query_visits = 0
+
+    def decision(self, observation, stage, reason, details):
+        if observation in self.sampled:
+            self.decisions.append(dict(observation=observation, stage=stage, reason=reason, details=details))
 
     def begin(self, db, banks, config, births):
         self.passes += 1
         pass_id = self.passes
         settings = config.data['sapiensid']['matching']
         limits = config.data['sapiensid']['execution']
+        from .merge_solver_diagnostics import fair_queries
+        bank_count = max(1, sum(i.person not in births for i,_,_,_ in banks))
+        quota = max(0, (limits['max_candidate_pairs']-self.comparisons)//bank_count)
+        selected, eligible = fair_queries(db, config, self.goals, self.selected, births, quota)
+        self.sampled.update(selected)
+        self.sampling.append(dict(pass_id=pass_id, eligible=eligible, selected=len(selected)))
+        if len(selected) < eligible:
+            self.truncation_reasons.add('max_candidate_pairs')
         owners = defaultdict(set)
         for observation, owner in db.execute('SELECT observation,person FROM members WHERE observation IN '
                 '(SELECT value FROM json_each(?))', (encoded(sorted(self.sets)),)):
@@ -103,7 +120,7 @@ class QueryFeedback:
         def measure(row, face, body):
             if row['id'] not in self.sets:
                 return
-            if self.truncation_reasons:
+            if row['id'] not in selected:
                 self.skipped_query_visits += 1
                 return
             def limited(reason):
@@ -138,16 +155,16 @@ class QueryFeedback:
             desired = [c for c in choices if c['relation'] == 'within_set']
             # One strongest route per owner; alternative original cores are not
             # simultaneous obligations of a query attachment.
-            selected = {}
+            routes = {}
             for c in desired:
                 rank = (not c['missing_original_core'], c['person'] is not None,
                         c['person']['minimum'] if c['person'] else -1, c['face']['minimum'])
-                if c['identity'] not in selected or rank > selected[c['identity']][0]:
-                    selected[c['identity']] = rank, c
+                if c['identity'] not in routes or rank > routes[c['identity']][0]:
+                    routes[c['identity']] = rank, c
             # Reserve retained proofs and vote bookkeeping before publishing this
             # query. An incomplete competitor scan must never imply a safe gap.
-            retained_cost = (4096*max(1, len(selected)) +
-                             sum(len(encoded(c).encode())*2 for _,c in selected.values()))
+            retained_cost = (4096*max(1, len(routes)) +
+                             sum(len(encoded(c).encode())*2 for _,c in routes.values()))
             if self.used + scratch_bytes + retained_cost > limits['plan_bytes']:
                 limited('plan_bytes')
                 return
@@ -162,10 +179,10 @@ class QueryFeedback:
                         negative[PREFIX+gate] = max(negative.get(PREFIX+gate, value), value)
             if negative:
                 self.negatives.append(negative)
-            if not selected:
+            if not routes:
                 self.entries.append(dict(observation=row['id'], set=group, pass_id=pass_id,
                     blockers=['no_within_set_query_reference'], proposals=[]))
-            for _, c in selected.values():
+            for _, c in routes.values():
                 floor = min(settings['face_floor'], c['face']['minimum'])
                 rivals = [v for v in choices if v['identity'] != c['identity'] and v['face']['minimum'] >= floor]
                 unknown = any(v['score'] is None for v in rivals)
@@ -216,7 +233,7 @@ class QueryFeedback:
                 patch[PREFIX+'ambiguity_margin'] = _floor(entry['gap'])
             positives.append(patch)
         hints = separating_proposals(config, positives, self.negatives)
-        result = dict(queries=self.entries, comparisons=self.comparisons, passes=self.passes,
+        result = dict(queries=self.entries, decisions=self.decisions, sampling=self.sampling, comparisons=self.comparisons, passes=self.passes,
             truncated=bool(self.truncation_reasons), truncation_reasons=sorted(self.truncation_reasons),
             skipped_query_visits=self.skipped_query_visits,
             separation_intervals=hints['intervals'], proposals=hints['proposals'], options=hints['options'],
