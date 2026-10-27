@@ -16,6 +16,10 @@ def explain(result):
         conflicting_trials=[dict(trial=name, conflicts=item['goal_result']['conflicts'])
             for name, item in simulation.get('trials', {}).items() if not item['goal_result']['disjoint']],
         conclusion='Best among completed trials, including baseline; neither global optimality nor impossibility is proved.')
+    feedback = trial.get('solver_feedback', {})
+    if feedback:
+        result['explanation']['solver_feedback'] = feedback
+    result['explanation']['search_stop_reason'] = result.get('search', {}).get('stop_reason')
     if simulation.get('input_selection', {}).get('excluded_scans'):
         result['explanation']['input_blockers'] = simulation['input_selection']['excluded_scans']
         result['explanation']['validation_scope'] = 'compatible_complete_latest_scenes_only'
@@ -125,5 +129,12 @@ def summary(result):
             detail.append(f'{key}={value}')
         lines.append('  Unmet: ' + violation['reason'] + ' (' + ', '.join(detail) + ').')
     lines.append('Best among tested configurations; global optimality is not proved.')
+    if result.get('search', {}).get('stop_reason'):
+        lines.append(f"Search stopped: {result['search']['stop_reason']}; completed "
+                     f"{result['search']['executed']}/{result['search']['max_trials']} trials.")
+    queries = result['simulation']['trials'][name].get('solver_feedback', {}).get('query', {})
+    if queries.get('truncated'):
+        lines.append('Query feedback is partial: ' + ', '.join(queries['truncation_reasons']) +
+                     '; independent probes remain available.')
     lines.extend(input_lines)
     return '\n'.join(lines)

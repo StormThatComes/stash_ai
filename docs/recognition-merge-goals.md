@@ -6,7 +6,7 @@ different sets must remain separate. These are evaluation constraints, never
 forced assignments inside recognition.
 
 ```powershell
-python stash_ai.py recognition report-merge --performer-set 123,456,789 --performer-set 234,567 --solve --max-trials 64 --yaml-output merged.yml --output merge-goals.json
+python stash_ai.py recognition report-merge --performer-set 123,456,789 --performer-set 234,567 --solve --max-trials 500 --yaml-output merged.yml --output merge-goals.json
 ```
 
 Use the same input YAML for scanning and solving. `--face-config input.yml`
@@ -81,37 +81,81 @@ that no possible configuration works. The selected result is the best among
 completed trials, not a guarantee of the global optimum. If no changed candidate
 beats baseline, the current configuration is explicitly selected as unchanged.
 
+The default budget is **500 completed replays, including baseline**. It is a
+ceiling, not a target or an exhaustive Cartesian grid. `--max-trials 1` evaluates
+only baseline. The separate `recognition tune` Cartesian-grid command retains its
+own default and limit.
+
 With `sapiensid.enabled: true`, the search tunes all four matching gates:
 `sapiensid.matching.face_floor`, `person_threshold`, `ambiguity_margin`, and
-`min_support`. It starts with a joint measured hybrid proposal, when available,
-then prioritizes independent single-gate probes before continuing the joint-pair
-list. Face/body thresholds are tested below their current value by `.02`, `.05`,
-`.1`, `.2`, and `.01`, interleaved with measured boundaries; corresponding increases
-are explored as well. Values stay within `[0, 1]`. Margin and support have their
-own decrease/increase probes. Every measured value remains eligible: dense nearby
-boundaries are spread out in the search order instead of retaining only the three
-nearest values.
+`min_support`. At the production frozen query stage, a read-only observer measures
+goal observations against all reference cores **before face-floor nomination**.
+This includes rejected auxiliary queries that have no strict catalogue identity.
+It records face/body boundaries, reference and independent query support, missing
+features/core guards, and competitor scores. No observer is installed in ordinary
+runs, and enabling diagnostics does not change production decisions.
 
-These probes also run when no within-set pair proposal exists. In particular,
-auxiliary/query samples may have usable body features while being absent from the
-strict reference catalogue. Lowering `face_floor` can recover those observations;
-absence of a reference-pair proposal must not disable hybrid search. Missing body
-features themselves are never manufactured by probing thresholds.
+Measured proposals clear multiple blockers together: for example a query can need
+a lower face floor, lower body threshold, and lower independent support in the
+same replay. Body modes and original query cores are measured independently;
+alternative cores are not treated as simultaneous obligations. Quality proposals
+use retained pose, visibility, size and sharpness measurements. Missing measurements
+and invalid alignment remain explicit; no embeddings or quality values are invented.
 
-Hybrid and face trials alternate. Each family starts with up to 13 unique baseline
-explorations (subject to the total budget and available candidates), then alternates
-baseline exploration with adaptive descendants. Improving descendants cannot
-starve the independent baseline sweep, and a long joint-pair list cannot delay the
-first three rounds of single-gate probes. All candidates still require full replay
-and use the same coverage, separation and outside-impact ranking.
+Within-set acceptance bounds are compared with between-set/outsider rejection
+bounds. The report lists `separation_intervals`: a threshold must be at most the
+weakest desired score and strictly above the strongest unwanted score to separate
+those frozen witnesses through that gate. Support uses integer boundaries, scores
+use six decimal places. Feasible intervals produce joint proposals that preserve
+other blocking gates. Overlapping intervals explain why that single scalar gate
+cannot separate these witnesses at the search resolution. They **do not prove**
+that no shared YAML configuration works: competitors, reference reconstruction,
+other routes and combined gates still require full replay.
 
-The baseline still counts toward `--max-trials`, so a budget of one only evaluates
-the current configuration. `search.executed_by_family` and each trial's
-`search_family` show which configurations were actually tested. `search_phase`
-(`baseline_exploration` or `adaptive`) and `search_parent` explain how each trial
-was generated. `search.executed_by_phase` summarizes this allocation, and
-`search.tested_hybrid_values` lists the actual values used by completed trials,
-including baseline. It excludes proposed but untested or interrupted candidates.
+Independent probes remain available when diagnostics are incomplete. Face/body
+thresholds are tested below and above their current value by `.02`, `.05`, `.1`,
+`.2`, and `.01`, interleaved with measured boundaries. Margin and support have
+separate probes. Coordinates and joint proposals are interleaved, including face
+parameters, so a large pair list cannot consume all early probes. Dense measured
+boundaries are spread through the search order.
+
+Only a beam of **at most five diverse completed configurations** gets adaptive
+descendants. The beam keeps the highest-ranked result, prefers different final
+partitions, and reserves room for different parameter routes on a plateau. A
+repeated inferior configuration does not create another unbounded search branch.
+The first 13 baseline explorations are reserved across the active families; later,
+one in four scheduling slots continues baseline exploration. Family allocation
+favours observed improvements, with exploration and a starvation guard, instead
+of alternating hybrid and face trials regardless of usefulness. Duplicate or
+invalid proposals do not consume a replay budget slot.
+
+After 64 completed trials without an improvement in goal/outside-impact metrics
+(with a smaller patience for smaller budgets, at least 24), the solver refines
+around the retained beam. Refinement tries measured brackets, smaller steps and
+reverting unnecessary changes. Up to 24 completed refinement trials run; material
+improvement resumes exploration. Otherwise the solver stops for stagnation or
+exhausted refinement candidates. Patch-size tie-breaks alone do not reset patience.
+The configured replay limit and proposal-attempt guard always remain in force.
+
+`search.stop_reason` explains budget exhaustion, stagnation, exhausted candidates
+or interruption. `beam_width`, `peak_beam`, `beam_trials`, `pruned_trials`,
+`stagnation_patience` and `refinement_budget` expose the search limits.
+`search.executed_by_family` and each trial's `search_family` show actual allocation.
+`search_phase` is `baseline_exploration`, `adaptive`, or `refinement`;
+`search_parent` and `search_strategy` (`measured_blockers`, `coordinate_probe`, or
+`local_refinement`) explain the origin. `search.tested_hybrid_values` includes
+only completed trials, including baseline, never interrupted proposals.
+
+Each trial's `solver_feedback` contains query-stage blockers, separation intervals
+and retained quality measurements. The selected trial's feedback is also available
+in `explanation.solver_feedback`. Query comparisons include all competing cores,
+but the report retains desired routes and compact unwanted witnesses rather than
+a full corpus matrix. Configured SapiensID candidate-pair and plan-memory limits
+also bound the query observer. If that diagnostic budget runs out, it discards the
+partly measured query, reports `truncated`, `truncation_reasons` and
+`skipped_query_visits`, and continues with complete hints and independent probes.
+An incomplete competitor scan never supplies a supposedly safe gap. Production
+replay and reference-pair evidence retain their existing explicit budget errors.
 
 Hybrid proposals use qualified retained face/body banks, independent cue support,
 confirmed body appearance modes, original merged-core guards, co-presence, and
@@ -172,11 +216,16 @@ quoting differences. Code/configuration/evidence hashes record the tested state;
 changed inputs require revalidation. Stash publication itself is not simulated.
 
 Progress and the final best-result summary go to stderr, leaving JSON stdout
-parseable. The summary includes per-set complete counts, assigned observations,
+parseable. Every completed trial logs `best=trial-N best_number=N` (baseline is
+number 0), using the same ranking as YAML export. JSON trial records carry
+`best_trial` and `best_trial_number`. The final summary also states the stop reason
+and completed/maximum replay counts. The summary includes per-set complete counts, assigned observations,
 common-destination coverage, missing/withheld counts and unmet conditions.
 `--progress-style off` suppresses solver messages. Ctrl-C during replay search
-preserves completed trials and their best result, marks the result interrupted,
-and exits 130. Incomplete trials are never eligible for selection. If no trial
+preserves completed trials and their best result, writes that winner to
+`--yaml-output` when supplied, marks the result interrupted, and exits 130. This
+also applies during local refinement or after a losing trial; the last trial is
+not automatically the winner. Incomplete trials are never eligible for selection. If no trial
 completed, status is `no_completed_trials`, `best_result` is null and no YAML is
 exported. Interrupting initial goal preparation may stop before a report exists.
 Runtime uses configured rebuild workers and RAM budgets; GPU

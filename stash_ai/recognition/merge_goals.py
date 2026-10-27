@@ -47,7 +47,12 @@ def execute(args, config):
             import sys
             def progress(name, stage, item):
                 if args.progress_style != 'off':
-                    detail = '' if item is None else ' ' + str([(g['largest_complete_performers'], g['total_performers']) for g in item['goal_result']['groups']]) + ' disjoint=' + str(item['goal_result']['disjoint'])
+                    detail = ''
+                    if item is not None:
+                        counts = [(g['largest_complete_performers'], g['total_performers'])
+                                  for g in item['goal_result']['groups']]
+                        detail = (f" {counts} disjoint={item['goal_result']['disjoint']} "
+                                  f"best={item['best_trial']} best_number={item['best_trial_number']}")
                     print(f'Merge solver {name}: {stage}{detail}', file=sys.stderr, flush=True)
             result.update(solve(config, result, db, maximum=args.max_trials, progress=progress))
         elif args.simulate:

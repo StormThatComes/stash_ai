@@ -158,7 +158,7 @@ def parser():
     merge_report.add_argument('--progress-style', choices=('auto','off'), default='auto')
     merge_report.add_argument('--yaml-output', type=Path, help='Export the best tested configuration, including best-effort or unchanged results; requires --solve.')
     merge_report.add_argument('--solve', action='store_true', help='Search configurations using full replay of merge goals.')
-    merge_report.add_argument('--max-trials', type=int, default=64, help='Replay budget including baseline.')
+    merge_report.add_argument('--max-trials', type=int, default=500, help='Maximum replay budget including baseline (default: 500; may stop on stagnation).')
     merge_report.add_argument('--simulate', action='store_true',
         help='Replay baseline and proposals on all latest compatible scenes in this scope, in private RAM.')
     report = commands.add_parser('report', allow_abbrev=False,

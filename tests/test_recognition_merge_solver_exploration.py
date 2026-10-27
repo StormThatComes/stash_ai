@@ -12,7 +12,7 @@ from stash_ai.recognition.merge_goal_output import export
 from stash_ai.recognition.merge_report_policy import patched
 from stash_ai.recognition.merge_solver import solve
 from stash_ai.recognition.merge_solver_hybrid import analyse
-from stash_ai.recognition.merge_solver_search import hybrid_neighbours, gate_values, spread, Frontier, PREFIX
+from stash_ai.recognition.merge_solver_search import hybrid_neighbours, gate_values, spread, BeamSearch, PREFIX
 
 
 def auxiliary_goals(tmp_path, sets=1):
@@ -47,8 +47,8 @@ def test_face_floor_alone_recovers_auxiliary_members_without_pair_proposals(tmp_
         result = dict(goals, **solve(config, goals, db, maximum=2))
     assert result['status'] == 'fully_solved'
     assert result['selected_trial'] == 'trial-1'
-    assert {c['parameter']: c['proposed'] for c in result['best_result']['changes']} == {PREFIX+'face_floor': .78}
-    assert result['search']['tested_hybrid_values']['face_floor'] == [.78, .8]
+    assert {c['parameter']: c['proposed'] for c in result['best_result']['changes']} == {PREFIX+'face_floor': .785}
+    assert result['search']['tested_hybrid_values']['face_floor'] == [.785, .8]
     trial = result['simulation']['trials']['trial-1']
     assert trial['search_parent'] == 'baseline' and trial['search_phase'] == 'baseline_exploration'
     assert trial['goal_result']['disjoint'] and trial['goal_result']['coverage_preserved']
@@ -72,8 +72,8 @@ def test_large_joint_list_cannot_delay_independent_gate_probes(tmp_path, monkeyp
     with _open_readonly(config.database) as db:
         result = solve(config, goals, db, maximum=4)
     assert result['status'] == 'fully_solved'
-    assert result['selected_trial'] == 'trial-3'
-    assert {c['parameter']: c['proposed'] for c in result['best_result']['changes']} == {PREFIX+'face_floor': .78}
+    assert result['selected_trial'] == 'trial-1'
+    assert {c['parameter']: c['proposed'] for c in result['best_result']['changes']} == {PREFIX+'face_floor': .785}
 
 
 def test_gate_search_keeps_distant_boundaries_and_explores_both_directions(tmp_path):
@@ -92,27 +92,23 @@ def test_gate_search_keeps_distant_boundaries_and_explores_both_directions(tmp_p
 
 
 def test_root_probes_continue_even_when_every_adaptive_child_improves():
-    # An adversarial search landscape continuously favours the newest child.
-    # The independent baseline sweep still has to reach more distant settings.
-    def factory(changes):
-        if not changes:
-            for value in range(100):
-                yield {'probe': value}
-        else:
-            for depth in range(changes.get('depth', 0)+1, 100):
-                yield dict(changes, depth=depth)
-    frontier = Frontier(factory)
+    def factory(parent, changes, family, refine):
+        for value in range(100):
+            yield 'probe', {'value': value, 'depth': changes.get('depth', 0)+1}
+    frontier = BeamSearch(['face'], factory, 500)
+    frontier.observe('baseline', {}, (0, 0, 0), 'baseline')
     baseline_values, parents = [], []
     for trial in range(25):
-        phase, parent, changes = frontier.next()
+        family, phase, parent, strategy, changes = frontier.next()
         if phase == 'baseline_exploration':
-            baseline_values.append(changes['probe'])
+            baseline_values.append(changes['value'])
         else:
             parents.append(parent)
         frontier.completed(phase)
-        frontier.add(f'trial-{trial}', factory(changes), preferred=True)
-    assert baseline_values == list(range(19))
-    assert len(parents) == 6 and all(p != 'baseline' for p in parents)
+        frontier.observe(f'trial-{trial}', changes, (trial+1, 0, 0), str(trial), family=family)
+        assert len(frontier.beam) <= 5
+    assert baseline_values == list(range(16))
+    assert parents and all(p != 'baseline' for p in parents)
 
 
 def test_local_probes_do_not_invent_missing_body_evidence(tmp_path):
@@ -138,7 +134,7 @@ def test_tested_values_exclude_unfinished_probes(tmp_path, interrupted_trial):
     with _open_readonly(config.database) as db:
         result = solve(config, goals, db, maximum=4, progress=progress)
     assert result['interrupted']
-    assert result['search']['executed_by_phase'] == dict(baseline_exploration=0, adaptive=0)
+    assert result['search']['executed_by_phase'] == dict(baseline_exploration=0, adaptive=0, refinement=0)
     if interrupted_trial == 'baseline':
         assert result['search']['tested_hybrid_values'] == {}
     else:

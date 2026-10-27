@@ -29,6 +29,8 @@ def _recover(database, selected, config, *, births=()):
     groups=[group for _,group,_,_ in banks]
     from .hybrid_query_index import QueryIndex
     index=QueryIndex(banks,config.data['sapiensid']['execution']['reference_bytes'])
+    from .hybrid_query_observer import query_observer
+    observe=query_observer(db,banks,config,births)
     policy=matching_policy(config);claims=[];votes=defaultdict(Votes)
     rows=db.execute('SELECT o.id,o.scan,o.cue,o.seconds,o.geometry,o.quality,o.dimensions,o.embedding,e.embedding AS body,c.id AS candidate,c.person AS prior_owner FROM candidates c '
         'JOIN observations o ON o.id='+observation_sql('c')+
@@ -46,6 +48,8 @@ def _recover(database, selected, config, *, births=()):
         choices=[];face_choices=[]
         face_batch=np.asarray([face],dtype='float64')
         body_batch=np.asarray([body],dtype='float64') if body is not None else None
+        if observe is not None:
+            observe(row,face_batch,body_batch)
         for identity,group,bodies,faces in index.candidates(face,settings['face_floor']):
             if identity.person in births:continue
             f=scores(face_batch,faces)
