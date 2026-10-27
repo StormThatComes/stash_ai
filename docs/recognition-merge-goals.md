@@ -279,3 +279,14 @@ One restart of at most eight completed experiments explores distant measured
 values before final stagnation; it never discards the best completed result or
 extends `--max-trials`. Search metadata includes operator statistics and restart
 counts. Every trial still logs its changes against the previous executed trial.
+
+Replay preparation now copies scoped retained history once into a temporary,
+immutable disk SQLite seed. Each trial receives an independent RAM backup, checks
+the same memory limit and runs production rebuild. No assignments or decisions
+from another trial are reused. The seed is deleted when replay exits.
+
+Measured boundaries supply interval representatives in a separate search lane.
+A frozen-witness preview orders small batches of directed proposals by measured
+separation and acceptance. It never drops a candidate or certifies a merge;
+independent coordinate probes and full replay remain authoritative, including
+when diagnostic sampling is incomplete.
