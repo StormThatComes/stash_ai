@@ -86,17 +86,13 @@ def _images(image, detection, matrix, mask, path):
     """Save one annotated source and an exact black-padded 112px model crop."""
     import cv2
     import numpy as np
-    from PIL import Image, ImageDraw
+    from PIL import Image
+    from .person_audit import _draw
 
     source = image.convert('RGB')
     try:
-        painter = ImageDraw.Draw(source)
         x, y, width, height = detection.box
-        painter.rectangle((x, y, x + width, y + height), outline=(255, 220, 0), width=2)
-        for number, (px, py) in enumerate(detection.landmarks):
-            color = [(0, 240, 255), (0, 240, 255), (255, 80, 80),
-                     (150, 255, 80), (150, 255, 80)][number]
-            painter.ellipse((px - 2, py - 2, px + 2, py + 2), fill=color)
+        _draw(source, (x, y, x + width, y + height), detection.landmarks, face_only=True, labels=False)
         _png(source, path.with_name(path.name + '-source.png'))
     finally:
         source.close()

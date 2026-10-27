@@ -120,7 +120,7 @@ def _assignment(decisions):
     }
 
 
-def _image(blob, path):
+def _image(blob, path, *, annotate=None):
     from PIL import Image, UnidentifiedImageError
     if blob is None:
         return {'status': 'missing_crop', 'file': None}
@@ -134,8 +134,10 @@ def _image(blob, path):
     with rgb:
         pixels = list(rgb.size)
         _png(rgb, path)
+        annotations = annotate(rgb, path) if annotate is not None else None
     return {'status': 'exported', 'file': path.name, 'pixels': pixels,
-            'source': 'retained_recognition_crop'}
+            'source': 'retained_recognition_crop',
+            **({'annotations': annotations} if annotations is not None else {})}
 
 
 def export(config, output_dir, *, identity_id=None, performer_id=None, scope=None):
@@ -169,6 +171,7 @@ def export(config, output_dir, *, identity_id=None, performer_id=None, scope=Non
             'limitations': [
                 'All current members are included without detection filtering or a sample cap; this is not a rescan.',
                 'PNGs decode retained recognition crops (normally JPEG), not original thumbnails or aligned model inputs.',
+                'Annotated copies show retained source landmarks mapped to crop pixels; missing geometry is not inferred.',
                 'Missing or unreadable crops cannot be recovered offline and remain explicit entries.',
                 'Recorded decisions may be absent, from other policies, or overwritten by later rechecks/rebuilds.',
                 'Scores are cosine similarities, not probabilities. Historical reference members, individual cohesion '
@@ -196,7 +199,10 @@ def export(config, output_dir, *, identity_id=None, performer_id=None, scope=Non
             recorded = decisions.get(row['id'], [])
             assignment = _assignment(recorded)
             name = f'scene-{int(scene)}_cue-{cue:06d}_{assignment["category"]}_face-{index:06d}.png'
-            image = _image(row['crop'], directory / name)
+            geometry = json.loads(row['geometry'])
+            from .retained_annotations import export as annotate
+            image = _image(row['crop'], directory / name,
+                           annotate=lambda rgb, path: annotate(rgb, path, geometry, quality.get('crop_bounds')))
             eligible = assignment['category'] != 'hybrid-attachment' and row['rejected'] is None and row['scan_status'] == 'complete' and is_anchor(quality, config.data['clustering'])
             reference_count += int(eligible)
             sample = {
@@ -206,7 +212,7 @@ def export(config, output_dir, *, identity_id=None, performer_id=None, scope=Non
                 'detection_policy_matches_current': row['detection_policy'] == detection_policy,
                 'retained_rejection': row['rejected'],
                 'quality': {key: quality[key] for key in QUALITY_FIELDS if key in quality},
-                'geometry': json.loads(row['geometry']), 'source_rect': json.loads(row['rect']),
+                'geometry': geometry, 'source_rect': json.loads(row['rect']),
                 'assignment': assignment, 'decisions': recorded,
                 'original_identity_ids': origins.get(row['id'], []),
                 'current_anchor_eligible': eligible,
@@ -214,7 +220,7 @@ def export(config, output_dir, *, identity_id=None, performer_id=None, scope=Non
                 'image': image,
             }
             from .person_collection import retained_report
-            sample['person_evidence'] = retained_report(db,row['id'],config,directory,name)
+            sample['person_evidence'] = retained_report(db,row['id'],config,directory,name,geometry=geometry)
             report['samples'].append(sample)
             counts[image['status']] += 1
             counts[assignment['role']] += 1

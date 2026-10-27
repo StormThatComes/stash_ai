@@ -7,12 +7,13 @@ FACE_COLORS = ((0, 240, 255), (0, 240, 255), (255, 80, 80),
                (150, 255, 80), (150, 255, 80))
 
 
-def _draw(image, bounds, points):
+def _draw(image, bounds, points, *, face_only=False, labels=True):
     from PIL import ImageDraw
     painter = ImageDraw.Draw(image)
     left, top, right, bottom = bounds
-    painter.rectangle((max(0, left), max(0, top), min(image.width-1, right),
-                       min(image.height-1, bottom)), outline=BOX_COLOR, width=2)
+    clipped = (max(0, left), max(0, top), min(image.width-1, right), min(image.height-1, bottom))
+    if clipped[0] <= clipped[2] and clipped[1] <= clipped[3]:
+        painter.rectangle(clipped, outline=BOX_COLOR, width=2)
     drawn = []
     for index, (x, y) in enumerate(points):
         # The adapter replaces rejected/missing measurements with (-1,-1).
@@ -20,13 +21,14 @@ def _draw(image, bounds, points):
         if not (math.isfinite(x) and math.isfinite(y) and
                 0 <= x < image.width and 0 <= y < image.height):
             continue
-        color = POSE_COLOR if index < 17 else FACE_COLORS[index-17]
+        color = FACE_COLORS[index] if face_only else POSE_COLOR if index < 17 else FACE_COLORS[index-17]
         painter.ellipse((x-2, y-2, x+2, y+2), fill=color)
-        label = str(index)
-        box = painter.textbbox((0, 0), label)
-        position = (max(0, min(x+4, image.width-(box[2]-box[0])-2)),
-                    max(0, min(y-8, image.height-(box[3]-box[1])-2)))
-        painter.text(position, label, fill=color, stroke_width=1, stroke_fill=(0, 0, 0))
+        if labels:
+            label = str(index)
+            box = painter.textbbox((0, 0), label)
+            position = (max(0, min(x+4, image.width-(box[2]-box[0])-2)),
+                        max(0, min(y-8, image.height-(box[3]-box[1])-2)))
+            painter.text(position, label, fill=color, stroke_width=1, stroke_fill=(0, 0, 0))
         drawn.append(index)
     return drawn
 

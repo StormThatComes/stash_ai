@@ -721,6 +721,22 @@ explicit manifest entries. The summary counts them and the command returns exit
 code **1** for an incomplete image export (**0** when all members were exported).
 Filesystem write failures abort instead of being reported as missing crops.
 
+The report also writes `*-annotated.png` copies using the same colors and drawing
+code as `audit-alignment`: yellow boxes, cyan eyes, red nose and green mouth
+corners. Face copies show the five retained face-detector landmarks. When a
+retained person crop and compatible SapiensID evidence are available, its
+`person-*-annotated.png` copy shows 17 magenta COCO pose points (indices 0–16)
+and the five face points (17–21). Coordinates account for the crop's source
+offset and any face JPEG downscaling. Points outside the crop and missing pose
+measurements are omitted, never clamped to the border.
+
+Each image's `annotations` entry links the copy, lists the drawn indices and
+records its status. Older evidence without crop bounds or pose geometry keeps
+its clean PNG with an explicit unavailable annotation status. The clean PNGs
+and summary's face-export counts retain their existing meaning. Overlays show
+recorded source measurements; they do not recreate SapiensID's canonicalized,
+square-padded model input or trigger another scan.
+
 Images and JSON are sensitive local biometric artifacts. On POSIX the new output
 directory has mode `0700` and its files `0600`; raw embeddings, installation
 tokens, source URLs and complete run configurations are not exported.

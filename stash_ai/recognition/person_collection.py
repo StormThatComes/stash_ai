@@ -151,12 +151,19 @@ def audit_input(detector,image,face,path):
                 normalized_keypoints=normalized_points,**annotations)
 
 
-def retained_report(db,observation,config,directory,name):
+def retained_report(db,observation,config,directory,name,*,geometry):
     from .person_signal import read
     from .identity_report import _image
+    from .retained_annotations import export as annotate
     expected=contract(config)
     row=read(db,observation,expected)
     if row is None:
         return dict(status='missing_current_evidence',contract=expected)
-    return dict(status=row['status'],contract=expected,metadata=json.loads(row['metadata']),
-                image=_image(row['crop'],directory/('person-'+name)))
+    metadata=json.loads(row['metadata'])
+    def annotations(rgb,path):
+        person=metadata.get('person')
+        if not isinstance(person,dict):
+            return dict(status='missing_person_geometry',file=None)
+        return annotate(rgb,path,geometry,person.get('bounds'),pose=True,keypoints=person.get('keypoints'))
+    return dict(status=row['status'],contract=expected,metadata=metadata,
+                image=_image(row['crop'],directory/('person-'+name),annotate=annotations))

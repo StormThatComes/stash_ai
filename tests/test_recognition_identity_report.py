@@ -63,7 +63,7 @@ def test_all_faces_export_beyond_reference_and_128_limits_with_exact_pixels(tmp_
     assert result['summary'] == {'members': 137, 'pngs_exported': 137, 'missing_crops': 0,
                                  'invalid_crops': 0, 'roles': {'anchor': 69, 'auxiliary': 68, 'unknown': 0},
                                  'complete': True}
-    assert len(list(target.glob('*.png'))) == 137
+    assert len(list(target.glob('*.png'))) == 274  # Clean crops plus annotated copies.
     assert sum(item['current_reference_selected'] for item in result['samples']) == 2
     assert result['cue_index_base'] == 0
     assert result['samples'][0]['scene_id'] == '2' and result['samples'][-1]['scene_id'] == '10'

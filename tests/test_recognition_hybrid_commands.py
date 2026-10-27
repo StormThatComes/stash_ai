@@ -160,6 +160,7 @@ def test_identity_export_preserves_body_pixels_and_attachment_role(tmp_path):
     for sample in result['samples']:
         body=sample['person_evidence']['image']
         assert body['status']=='exported'
+        assert body['annotations']==dict(status='missing_person_geometry',file=None)
         with Image.open(tmp_path/'export'/body['file']) as image:
             assert image.size==(40,80) and image.getpixel((0,0))==(10,20,30)
     assert config.database.read_bytes()==before
