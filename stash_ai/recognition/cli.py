@@ -168,6 +168,8 @@ def parser():
     merge_report.add_argument('--yaml-mode', choices=('full', 'diff'), default='full',
         help='YAML export: full configuration (default) or only changed keys relative to the input baseline; diff must be merged into that baseline before use.')
     merge_report.add_argument('--solve', action='store_true', help='Search configurations using full replay of merge goals.')
+    merge_report.add_argument('--goal-policy', choices=('identity','strict'), default='identity',
+        help='Goal evaluation: identity (default) tolerates bounded noisy membership losses; strict requires every original observation. Applies to solver and set evaluation.')
     merge_report.add_argument('--max-trials', type=int, default=500, help='Maximum replay budget including baseline (default: 500; may stop on stagnation).')
     merge_report.add_argument('--solver-sampler', choices=('heuristic','tpe'), default='heuristic', help='Optional learned proposal lane alongside heuristics; TPE requires requirements-solver.txt.')
     merge_report.add_argument('--solver-seed', type=int, default=0, help='Reproducible optional sampler seed (default: 0).')

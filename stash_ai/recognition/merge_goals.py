@@ -3,7 +3,12 @@ from .identity_report import _select
 from .models import namespace
 
 
-def resolve(db, config, sets, *, scope=None, by_performer=True):
+def resolve(db, config, sets, *, scope=None, by_performer=True, policy='identity'):
+    from .merge_goal_identity import POLICY, freeze
+    from .reference_roles import strict_sql
+    from .pose_policy import is_anchor
+    if policy not in ('identity', 'strict'):
+        raise ValueError('Goal policy must be identity or strict.')
     if not sets or any(not group for group in sets):
         raise ValueError('Merge goals require nonempty sets.')
     groups, owners = [], {}
@@ -24,11 +29,19 @@ def resolve(db, config, sets, *, scope=None, by_performer=True):
                 requested_ids=[], observations=[]))
             item['requested_ids'].append(identifier)
         for identity, item in members.items():
-            item['observations'] = [dict(r) for r in db.execute(
-                'SELECT o.id,s.id AS scan,s.scene,o.cue FROM members m JOIN observations o ON o.id=m.observation '
+            rows = [dict(r) for r in db.execute(
+                'SELECT o.id,s.id AS scan,s.scene,o.cue,o.seconds,o.quality,o.rejected,s.status, '
+                +strict_sql()+' AS reference_authority FROM members m JOIN observations o ON o.id=m.observation '
                 'JOIN scans s ON s.id=o.scan WHERE m.person=? ORDER BY o.id', (identity,))]
+            for row in rows:
+                row['goal_role'] = ('reference' if row['reference_authority'] and row['status'] == 'complete'
+                    and row['rejected'] is None and is_anchor(row['quality'], config.data['clustering']) else 'uncertain')
+            item['observations'] = [{k: r[k] for k in ('id','scan','scene','cue','goal_role')} for r in rows]
+            if policy == 'identity':
+                item['identity_evidence'] = freeze(rows)
         groups.append(dict(index=index, members=list(members.values())))
-    return dict(format=2, kind='recognition_merge_goals', scope=scope, namespace=namespace(config),
+    return dict(format=3, kind='recognition_merge_goals', scope=scope, namespace=namespace(config),
+                goal_policy=dict(POLICY) if policy == 'identity' else dict(name='strict', version=1),
                 groups=groups, status='goals_resolved', recommendations=[])
 
 
@@ -50,7 +63,8 @@ def execute(args, config):
     writer=winner_file(args.yaml_output,resume=resume) if args.solve else None
     sets = args.performer_set or [args.performer_id or args.identity_id]
     with closing(_open_readonly(config.database)) as db:
-        result = resolve(db, config, sets, scope=args.scope, by_performer=args.identity_id is None)
+        result = resolve(db, config, sets, scope=args.scope, by_performer=args.identity_id is None,
+                         policy=getattr(args, 'goal_policy', 'identity'))
         result['snapshot_sha256'] = fingerprint(db, config, result['scope'])
         if args.solve:
             from .merge_solver import solve
@@ -66,6 +80,8 @@ def execute(args, config):
                     elif stage == 'complete':
                         detail = (f" disjoint={item['goal_result']['disjoint']} "
                                   f"best={item['best_trial']} best_number={item['best_trial_number']}")
+                        if item['goal_result'].get('goal_policy', {}).get('name') == 'identity':
+                            detail += f" goal_policy=identity strict_disjoint={item['goal_result']['strict_disjoint']}"
                     print(f'Merge solver {name}: {stage}{detail}', file=sys.stderr, flush=True)
                     if stage == 'start':
                         for change in item['changes_from_previous']:
@@ -150,11 +166,15 @@ def assess(goals, observations, retained, predicted):
         conflicts.append(dict(identity=identity, sets=sets, observation_pairs=pairs))
     covered = all(g['members'] and all(m['observations'] for m in g['members']) and
                   not g['missing'] and not g['withheld'] for g in groups)
-    return dict(groups=groups, conflicts=conflicts,
+    result = dict(groups=groups, conflicts=conflicts,
                 cross_set_observation_pairs=sum(c['observation_pairs'] for c in conflicts),
                 disjoint=not conflicts, coverage_preserved=covered,
                 admissible=covered and not conflicts,
                 fully_solved=covered and not conflicts and all(g['fully_merged'] for g in groups))
+    if goals.get('goal_policy', {}).get('name') == 'identity':
+        from .merge_goal_identity import apply
+        return apply(goals, result, observations, predicted)
+    return result
 
 
 def evaluate(config, goals, db, variants=None):
@@ -166,6 +186,9 @@ def evaluate(config, goals, db, variants=None):
 
 def objective(status):
     """Fair lexicographic objective; larger sets cannot hide an untouched smaller set."""
+    if status.get('goal_policy', {}).get('name') == 'identity':
+        from .merge_goal_identity import objective as identity_objective
+        return identity_objective(status)
     groups = status['groups']
     return (status['admissible'], status['fully_solved'],
             status['disjoint'],
@@ -183,6 +206,9 @@ def objective(status):
 
 def unmet_conditions(status):
     """Every unsatisfied goal, including empty members and cross-set merges."""
+    if status.get('goal_policy', {}).get('name') == 'identity':
+        from .merge_goal_identity import unmet
+        return unmet(status)
     reasons = []
     for group in status.get('groups', []):
         for member in group['members']:
@@ -221,3 +247,12 @@ def fingerprint(db, config, scope):
                 'WHERE s.scope=? AND s.namespace=? ORDER BY e.observation,e.contract',(scope,namespace(config))):
             value.update(digest([v.hex() if isinstance(v,bytes) else v for v in row]).encode())
     return value.hexdigest()
+
+
+def goal_diagnostics(status):
+    """Small provenance summary shared by live winner YAML and final export."""
+    return dict(policy=status.get('goal_policy', dict(name='strict', version=1)),
+                strict_fully_solved=status.get('strict_fully_solved', status['fully_solved']),
+                strict_disjoint=status.get('strict_disjoint', status['disjoint']),
+                soft_lost_units=sum(g.get('soft_lost_units', 0) for g in status['groups']),
+                soft_budget_excess=sum(g.get('soft_budget_excess', 0) for g in status['groups']))

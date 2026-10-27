@@ -182,7 +182,7 @@ def test_refinement_improvement_resumes_coarse_search():
 def test_stagnation_refines_and_stops_without_consuming_500_replays(tmp_path):
     config, people = incomplete_source(tmp_path)
     with _open_readonly(config.database) as db:
-        goals = resolve(db, config, [people], by_performer=False)
+        goals = resolve(db, config, [people], by_performer=False, policy='strict')
         result = solve(config, goals, db)
     assert result['search']['max_trials'] == 500
     assert result['search']['executed'] < 150

@@ -79,7 +79,7 @@ def test_real_solver_selects_and_exports_best_effort_with_missing_history(tmp_pa
     config, people = incomplete_source(tmp_path)
     before = config.database.read_bytes()
     with _open_readonly(config.database) as db:
-        goals = resolve(db, config, [people], by_performer=False)
+        goals = resolve(db, config, [people], by_performer=False, policy='strict')
         result = dict(goals, **solve(config, goals, db, maximum=12))
     assert result['status'] == 'best_effort'
     assert not any(t['goal_result']['admissible'] for t in result['simulation']['trials'].values())
@@ -111,7 +111,7 @@ def test_cli_reports_and_exports_unchanged_best_effort_baseline(tmp_path, capsys
     config, people = incomplete_source(tmp_path)
     output, yaml = tmp_path/'result.json', tmp_path/'result.yml'
     args = ['report-merge', '--face-config', str(config.source_path), '--faces-db', str(config.database),
-            '--solve', '--max-trials', '1', '--output', str(output), '--yaml-output', str(yaml), '--progress-style', style]
+            '--solve', '--goal-policy', 'strict', '--max-trials', '1', '--output', str(output), '--yaml-output', str(yaml), '--progress-style', style]
     for person in people:
         args.extend(['--identity-id', person])
     assert main(args) == 0
@@ -133,7 +133,7 @@ def test_cli_reports_and_exports_unchanged_best_effort_baseline(tmp_path, capsys
 def test_only_cross_set_merge_is_returned_with_explicit_violation(tmp_path):
     config, people = seeded(tmp_path, vectors=[[1., 0, 0, 0], [1., 0, 0, 0]])
     with _open_readonly(config.database) as db:
-        goals = resolve(db, config, [[p] for p in people], by_performer=False)
+        goals = resolve(db, config, [[p] for p in people], by_performer=False, policy='strict')
         result = dict(goals, **solve(config, goals, db, maximum=1))
     assert result['status'] == 'best_effort'
     assert result['selected_trial'] == 'baseline'
@@ -149,7 +149,7 @@ def test_interrupt_before_baseline_does_not_invent_a_result(tmp_path):
     def progress(*args):
         raise KeyboardInterrupt
     with _open_readonly(config.database) as db:
-        goals = resolve(db, config, [people], by_performer=False)
+        goals = resolve(db, config, [people], by_performer=False, policy='strict')
         result = dict(goals, **solve(config, goals, db, maximum=4, progress=progress))
     assert result['interrupted'] and result['status'] == 'no_completed_trials'
     assert result['best_result'] is None and result['selected_trial'] is None
@@ -165,7 +165,7 @@ def test_interrupt_keeps_completed_best_effort_and_excludes_unfinished_trial(tmp
         if name == 'trial-2' and stage == 'start':
             raise KeyboardInterrupt
     with _open_readonly(config.database) as db:
-        goals = resolve(db, config, [people], by_performer=False)
+        goals = resolve(db, config, [people], by_performer=False, policy='strict')
         result = solve(config, goals, db, maximum=8, progress=progress)
     assert result['interrupted'] and result['status'] == 'best_effort'
     assert set(result['simulation']['trials']) == {'baseline', 'trial-1'}
@@ -187,7 +187,7 @@ def test_interrupt_after_ranking_does_not_select_unrecorded_trial(tmp_path, monk
     monkeypatch.setattr(merge_solver, 'replay', interrupted_replay)
     config, people = incomplete_source(tmp_path)
     with _open_readonly(config.database) as db:
-        goals = resolve(db, config, [people], by_performer=False)
+        goals = resolve(db, config, [people], by_performer=False, policy='strict')
         result = solve(config, goals, db, maximum=8)
     assert result['interrupted']
     assert set(result['simulation']['trials']) == {'baseline'}
