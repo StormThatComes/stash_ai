@@ -19,6 +19,10 @@ class RecognitionParser(argparse.ArgumentParser):
         if result.command == 'report-merge':
             if result.yaml_output and not result.solve:
                 self.error('--yaml-output requires --solve')
+            if (result.checkpoint or result.resume) and not result.solve:
+                self.error('--checkpoint/--resume require --solve')
+            if result.resume and not result.checkpoint:
+                self.error('--resume requires --checkpoint')
             for selector in ('performer_id', 'identity_id'):
                 values = getattr(result, selector)
                 if values is not None and len(values) < 2:
@@ -159,6 +163,8 @@ def parser():
     merge_report.add_argument('--yaml-output', type=Path, help='Export the best tested configuration, including best-effort or unchanged results; requires --solve.')
     merge_report.add_argument('--solve', action='store_true', help='Search configurations using full replay of merge goals.')
     merge_report.add_argument('--max-trials', type=int, default=500, help='Maximum replay budget including baseline (default: 500; may stop on stagnation).')
+    merge_report.add_argument('--checkpoint', type=Path, help='Durable solver journal; writes best YAML alongside it if --yaml-output is omitted.')
+    merge_report.add_argument('--resume', action='store_true', help='Resume --checkpoint with identical inputs, code and search settings.')
     merge_report.add_argument('--simulate', action='store_true',
         help='Replay baseline and proposals on all latest compatible scenes in this scope, in private RAM.')
     report = commands.add_parser('report', allow_abbrev=False,

@@ -290,3 +290,32 @@ A frozen-witness preview orders small batches of directed proposals by measured
 separation and acceptance. It never drops a candidate or certifies a merge;
 independent coordinate probes and full replay remain authoritative, including
 when diagnostic sampling is incomplete.
+
+### Checkpoints and local stability
+
+`--yaml-output` is atomically refreshed after every completed improvement,
+including an unchanged baseline and partial solutions. The file must initially
+be new; external edits are detected before subsequent replacement.
+
+Add `--checkpoint solve.json` to persist a small manifest and a sibling
+`solve.json.trials/` directory of completed results and parent diagnostics. If
+no YAML path is supplied, the winner is saved as `solve.json.best.yml`.
+Resume with the same command plus `--resume`. Keep both the manifest and trial
+directory. The solver reconstructs its frontier, seen proposals and operator
+statistics from the journal; completed production replays are not repeated.
+It verifies all retained database tables, goals, input configuration, code and
+search settings first. Changed evidence, parameters or budgets require a new
+checkpoint. JSON report `--output` still requires a new path; omit it during
+resumable work or choose a new report filename on each invocation.
+
+The manifest is committed before the winner file, so resume can finish an
+interrupted winner update. Checkpoints retain diagnostics and observation IDs,
+not crop images. They use incremental per-trial files instead of rewriting the
+entire history after every trial. `search.restored_trials` reports reused trials.
+
+For budgets of at least 20, up to eight trials are reserved for full production
+replays near two leading configurations (at most ten percent of the budget).
+Two or more successful nearby replays give a stability preference only after
+goal and outside-impact scores tie. The `robustness` report lists actual checks;
+missing checks mean unknown stability, never an assurance. These probes share
+the global trial limit and do not prove robustness on future media.

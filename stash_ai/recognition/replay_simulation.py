@@ -64,7 +64,7 @@ def replay(config, variants, **kwargs):
 
 
 def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=None, variant_stream=None, inspect_trial=None,
-            progress=None, allow_partial_selection=False, reuse_history=True):
+            progress=None, allow_partial_selection=False, reuse_history=True, restore_trial=None, record_trial=None):
     """Stream one trial at a time; retain only baseline and compact summaries.
 
     Existing bindings/history seed each independent trial. Production rebuild
@@ -119,6 +119,13 @@ def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=N
                     settings = replace(settings, data=data)
                     if progress:
                         progress(name, 'start', None)
+                    restored = restore_trial(name,settings) if restore_trial else None
+                    if restored is not None:
+                        item,restored_baseline = restored
+                        if baseline is None:baseline=restored_baseline
+                        result['trials'][name]=item
+                        if progress:progress(name,'complete',item)
+                        continue
                     started = time.perf_counter()
                     with closing(_ram(settings)) as target:
                         if seed is None:
@@ -152,6 +159,7 @@ def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=N
                     if evidence is not None:
                         item['decision_evidence'] = evidence
                     result['trials'][name] = item
+                    if record_trial:record_trial(name,settings,item,inputs)
                     if progress:
                         progress(name, 'complete', item)
             except KeyboardInterrupt:
