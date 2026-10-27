@@ -1,5 +1,4 @@
 """Bounded adaptive counterfactual search; goals never alter recognition rules."""
-from collections import deque
 from itertools import combinations
 import math
 
@@ -8,7 +7,7 @@ from .merge_report_policy import patched, proposal, parameter
 from .merge_goals import assess, objective, unmet_conditions
 from .replay_simulation import replay, impact
 from .merge_solver_search import (hybrid_neighbours as _hybrid_neighbours,
-    interleave as _interleave, spread, Frontier, BASELINE_WARMUP, PREFIX, GATES)
+    interleave as _interleave, spread, BeamSearch, refinement, BASELINE_WARMUP, PREFIX, GATES)
 
 
 def measured_options(db, config, goals, proofs=None, *, hybrid=None):
@@ -66,26 +65,25 @@ def measured_options(db, config, goals, proofs=None, *, hybrid=None):
 
 def _face_neighbours(config, changes, options):
     # Joint candidates avoid spending the entire budget on isolated threshold changes.
-    for value in options['recognition.match_threshold']:
-        candidate = dict(changes)
-        candidate.update({'recognition.match_threshold': value,
-            'clustering.cohesion_threshold': min(value, config.data['clustering']['cohesion_threshold']),
-            'clustering.view_match_threshold': value,
-            'clustering.view_cohesion_threshold': min(value, config.data['clustering']['view_cohesion_threshold'])})
-        yield candidate
-    for key, values in options.items():
-        if key.startswith('sapiensid.'):
-            continue
+    def joint():
+        for value in spread(options['recognition.match_threshold'],
+                            changes.get('recognition.match_threshold', config.data['recognition']['match_threshold'])):
+            candidate = dict(changes)
+            candidate.update({'recognition.match_threshold': value,
+                'clustering.cohesion_threshold': min(value, config.data['clustering']['cohesion_threshold']),
+                'clustering.view_match_threshold': value,
+                'clustering.view_cohesion_threshold': min(value, config.data['clustering']['view_cohesion_threshold'])})
+            yield candidate
+    def coordinate(key, values):
         current = changes.get(key, parameter(config.data,key))
-        values = spread(values, current)
-        for value in values:
-            if value == current:
-                continue
+        for value in spread(values, current):
             candidate = dict(changes, **{key:value})
             if key == 'recognition.match_threshold':
                 candidate['clustering.cohesion_threshold'] = min(value,
                     changes.get('clustering.cohesion_threshold', config.data['clustering']['cohesion_threshold']))
             yield candidate
+    yield from _interleave([joint(), _interleave(coordinate(k,v) for k,v in options.items()
+                                                if not k.startswith('sapiensid.'))])
 
 
 def neighbours(config, changes, options, *, hybrid_changes=()):
@@ -106,12 +104,14 @@ def rebuilt_goals(db, goals):
     return dict(goals, groups=groups)
 
 
-def solve(config, goals, db, *, maximum=64, progress=None):
+def solve(config, goals, db, *, maximum=500, progress=None):
     if type(maximum) is not int or maximum < 1:
         raise ValueError('max_trials must be a positive integer.')
     from .scanning import scan_identity
     from .person_signal import same_contract
     from .merge_solver_hybrid import public
+    from .merge_solver_feedback import QueryFeedback, pair_separation, quality_feedback
+    from .hybrid_query_observer import observe_queries
     proofs = []
     hybrid = {}
     options = measured_options(db, config, goals, proofs, hybrid=hybrid)
@@ -120,6 +120,11 @@ def solve(config, goals, db, *, maximum=64, progress=None):
     initial_changes = tuple(hybrid_changes)
     seen, patches, summaries, ranks = set(), {}, {}, {}
     families, origins = {}, {}
+    feedback, outcomes = {}, {}
+    query_feedback = QueryFeedback(goals)
+    latest_feedback = {}
+    search = None
+    stop_reason = None
     best, best_rank, baseline = None, None, None
     def consume(name, observations, retained, predicted):
         nonlocal best, best_rank, baseline
@@ -137,7 +142,14 @@ def solve(config, goals, db, *, maximum=64, progress=None):
         ranks[name] = rank
         if best_rank is None or rank > best_rank:
             best, best_rank = name, rank
-        return dict(goal_result=status, outside_impact=outside, hybrid_solver_evidence=public(hybrid))
+        # Canonicalize destination UUIDs so identical partitions share a beam slot.
+        labels = {}
+        outcomes[name] = digest([(oid, None if predicted.get(oid) is None else
+            labels.setdefault(predicted[oid], len(labels))) for oid in sorted(target_ids)])
+        feedback[name] = latest_feedback.copy()
+        return dict(goal_result=status, outside_impact=outside, hybrid_solver_evidence=public(hybrid),
+            solver_feedback={k:v for k,v in latest_feedback.items() if k != 'proposals'},
+            best_trial=best, best_trial_number=0 if best == 'baseline' else int(best.split('-')[1]))
     def inspect(target, settings):
         import json
         ids = {r['id'] for g in goals['groups'] for m in g['members'] for r in m['observations']}
@@ -153,26 +165,55 @@ def solve(config, goals, db, *, maximum=64, progress=None):
         hybrid.clear()
         updated = measured_options(target, settings, current_goals, hybrid=hybrid)
         hybrid_changes[:] = list({digest(p): p for p in hybrid['proposals'] + list(initial_changes)}.values())
+        queries = query_feedback.finish(settings)
+        separation = pair_separation(settings, hybrid)
+        quality = quality_feedback(target, settings, goals)
+        separated = [dict(hybrid_changes[0] if hybrid_changes else {}, **p) for p in separation['proposals']]
+        directed = list(queries['proposals']) + separated + hybrid_changes
+        # Clear simultaneous query and reference blockers under one configuration.
+        if queries['proposals'] and hybrid_changes and any(p['relation'] == 'within_set' for p in hybrid.get('pairs', ())):
+            joint = dict(hybrid_changes[0])
+            for key,value in queries['proposals'][0].items():
+                joint[key] = min(joint.get(key,value), value)
+            directed.insert(0, joint)
+        if directed and quality['proposals']:
+            directed.append(dict(directed[0], **quality['proposals'][0]))
+        latest_feedback.clear()
+        latest_feedback.update(query={k:v for k,v in queries.items() if k not in ('proposals','options')},
+            separation_intervals=separation['intervals'], quality=quality['observations'],
+            proposals=dict(hybrid=directed, face=quality['proposals']))
+        for extra in (queries['options'], separation['options']):
+            for key, values in extra.items():
+                updated[key] = list(updated.get(key, ())) + list(values)
         for key, values in updated.items():
             options[key] = sorted(set(options.get(key, ())) | set(values), reverse=True)
         return result
     def stream():
+        nonlocal search, stop_reason
         trials, attempts = 1, 0
         factories = {'hybrid': lambda changes: _hybrid_neighbours(config, changes, options, hybrid_changes),
                      'face': lambda changes: _face_neighbours(config, changes, options)}
         if not config.data['sapiensid']['enabled']:
             del factories['hybrid']
-        pending = {family: Frontier(factory) for family, factory in factories.items()}
-        rotation = deque(pending)
-        while pending and trials < maximum and attempts < maximum * 100:
-            family = rotation[0]
-            frontier = pending[family]
+        def factory(parent, changes, family, refine):
+            if refine:
+                for candidate in refinement(config, changes, options):
+                    family = 'hybrid' if any(k.startswith(PREFIX) and v != changes.get(k)
+                        for k,v in candidate.items()) else 'face'
+                    yield family, 'local_refinement', candidate
+                return
+            hints = feedback[parent]['proposals'][family]
+            directed = (('measured_blockers', dict(changes, **patch)) for patch in hints)
+            probes = (('coordinate_probe', p) for p in factories[family](changes))
+            yield from _interleave((directed, probes))
+        search = BeamSearch(factories, factory, maximum)
+        search.observe('baseline', {}, ranks['baseline'], outcomes['baseline'])
+        while trials < maximum and attempts < maximum * 100:
             try:
-                phase, parent, changes = frontier.next()
+                family, phase, parent, strategy, changes = search.next()
             except StopIteration:
-                del pending[family]
-                rotation.popleft()
-                continue
+                stop_reason = search.stop_reason
+                break
             attempts += 1
             patch = proposal(config, changes)
             fingerprint = digest(patch['yaml_patch'])
@@ -189,18 +230,20 @@ def solve(config, goals, db, *, maximum=64, progress=None):
             name = f'trial-{trials}'
             patches[name] = patch
             families[name] = family
-            origins[name] = dict(search_phase=phase, search_parent=parent)
+            origins[name] = dict(search_phase=phase, search_parent=parent, search_strategy=strategy)
             yield name, variant
             trials += 1
-            frontier.completed(phase)
-            rotation.rotate(-1)
-            for next_family, factory in factories.items():
-                if next_family not in pending:
-                    pending[next_family] = Frontier(factory)
-                    rotation.append(next_family)
-                pending[next_family].add(name, factory(changes), preferred=best == name)
-    result = replay(config, {}, source=db, scope=goals['scope'], consume=consume, variant_stream=stream,
-        inspect_trial=inspect, progress=progress, allow_partial_selection=True)
+            search.completed(phase)
+            normalized = {c['parameter']:c['proposed'] for c in patch['changes']}
+            search.observe(name, normalized, ranks[name], outcomes[name], family=family)
+            # Keep detailed hints only for parents that can still be expanded.
+            for old in set(feedback) - search.beam.keys() - {'baseline'}:
+                del feedback[old]
+        if stop_reason is None:
+            stop_reason = 'max_trials' if trials >= maximum else 'proposal_limit'
+    with observe_queries(query_feedback):
+        result = replay(config, {}, source=db, scope=goals['scope'], consume=consume, variant_stream=stream,
+            inspect_trial=inspect, progress=progress, allow_partial_selection=True)
     # Ctrl-C can land after consume ranks a trial but before replay records it.
     best = max(result['trials'], key=ranks.__getitem__, default=None)
     for name, patch in patches.items():
@@ -231,12 +274,18 @@ def solve(config, goals, db, *, maximum=64, progress=None):
         recommendation=selection if selection is not None and selection['changed'] else None,
         interrupted=result.get('interrupted', False),
         search=dict(max_trials=maximum, executed=len(result['trials']),
-                    scheduling='round_robin_hybrid_face' if config.data['sapiensid']['enabled'] else 'face',
+                    scheduling='blocker_guided_diverse_beam',
+                    stop_reason='interrupted' if result.get('interrupted') else result.get('stop_reason', stop_reason),
+                    beam_width=BeamSearch.width, peak_beam=search.peak_beam if search else 0,
+                    beam_trials=list(search.beam) if search else [],
+                    pruned_trials=search.pruned if search else 0,
+                    stagnation_patience=search.patience if search else None,
+                    refinement_budget=BeamSearch.refinement_budget,
                     executed_by_family={family: sum(families.get(name) == family for name in result['trials'])
                                         for family in ('hybrid', 'face')},
-                    baseline_exploration_per_family=BASELINE_WARMUP,
+                    baseline_exploration_warmup=BASELINE_WARMUP,
                     executed_by_phase={phase: sum(origins.get(name, {}).get('search_phase') == phase
-                        for name in result['trials']) for phase in ('baseline_exploration', 'adaptive')},
+                        for name in result['trials']) for phase in ('baseline_exploration', 'adaptive', 'refinement')},
                     tested_hybrid_values=tested_hybrid,
                     budget_exhausted=len(result['trials']) >= maximum,
                     selection_scope='completed_trials_including_baseline',
