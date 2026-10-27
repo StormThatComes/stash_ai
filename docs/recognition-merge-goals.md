@@ -271,9 +271,47 @@ Completed JSON trial records contain the same `previous_trial` and
 `changes` and `yaml_patch` remain relative to the input configuration for export.
 Every completed trial logs `best=trial-N best_number=N` (baseline is
 number 0), using the same ranking as YAML export. JSON trial records carry
-`best_trial` and `best_trial_number`. The final summary also states the stop reason
-and completed/maximum replay counts. The summary includes per-set complete counts, assigned observations,
-common-destination coverage, missing/withheld counts and unmet conditions.
+`best_trial` and `best_trial_number`. Each completion header is followed by one
+line per set describing **that trial's result**, even if a previous trial remains
+the winner. The final summary uses the same fields for the selected winner and
+also states the stop reason, replay count and unmet conditions. For example:
+
+```text
+Merge solver trial-12: complete disjoint=True best=trial-7 best_number=7
+  Set 1: largest_complete=2/4 complete_components=[2,2] assigned=8/8 (100.0%) shared_coverage=50.0% fragments=2 missing_obs=0 withheld_obs=0 missing_performers=0 withheld_performers=0 split_performers=0 empty_performers=0
+```
+
+`complete` in the header means that the trial finished. The old unnamed `(k,n)`
+pairs are replaced by these explicit metrics:
+
+- `largest_complete=k/n`: the largest number of whole input performers sharing
+  one output identity. A performer counts only if every original observation is
+  present, assigned and in that identity. Four separate intact performers give
+  `1/4`; two merged pairs give `2/4`; all four together give `4/4`. Destination ID
+  and input order do not matter. The denominator counts unique identities after
+  alias resolution.
+- `complete_components`: counts of whole performers per output identity, sorted
+  descending and including singletons. `[2,2]` exposes progress in both pairs;
+  partially assigned or split performers are absent from this list.
+- `assigned`: assigned/total original observations and their percentage, including
+  missing observations in the denominator. `shared_coverage` instead averages each
+  performer's share in the strongest common destination, weighting performers
+  equally. These measures show partial progress when `largest_complete` is zero.
+- `fragments`: the number of output identities containing any of the set's
+  observations, including fragments of incomplete performers.
+- `missing_obs` and `withheld_obs`: original observations absent from replay and
+  present observations left unassigned, respectively. `missing_performers` and
+  `withheld_performers` count affected performers; `split_performers` counts those
+  assigned to multiple identities; `empty_performers` counts those with no original
+  observations. These performer categories can overlap.
+
+If four performers each have 99 of 100 observations in a shared identity and one
+withheld observation, the log shows `largest_complete=0/4 complete_components=[]`
+alongside `assigned=396/400 (99.0%) shared_coverage=99.0% withheld_obs=4
+withheld_performers=4`. Completeness stays strict while progress remains visible.
+`disjoint` is a separate check across sets; complete internal merging alone does
+not certify separation. Search ranking and JSON goal metrics are unchanged.
+
 `--progress-style off` suppresses solver messages. Ctrl-C during replay search
 preserves completed trials and their best result, writes that winner to
 `--yaml-output` when supplied, marks the result interrupted, and exits 130. This

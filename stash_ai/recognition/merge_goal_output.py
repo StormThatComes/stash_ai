@@ -129,6 +129,21 @@ def export(config, result, output, yaml_output, *, yaml_owner=None, yaml_mode='f
         print(text, end='')
 
 
+def group_summary(group):
+    """One set's actual trial outcome; completeness and partial progress are distinct."""
+    assigned = group['assigned'] / group['observations'] if group['observations'] else 0.
+    members = group['members']
+    components = json.dumps(group['complete_components'], separators=(',', ':'))
+    return (f"  Set {group['index']+1}: largest_complete={group['largest_complete_performers']}/{group['total_performers']} "
+            f"complete_components={components} assigned={group['assigned']}/{group['observations']} ({assigned:.1%}) "
+            f"shared_coverage={group['consolidation_fraction']:.1%} fragments={group['fragments']} "
+            f"missing_obs={group['missing']} withheld_obs={group['withheld']} "
+            f"missing_performers={sum(m['missing'] > 0 for m in members)} "
+            f"withheld_performers={sum(m['withheld'] > 0 for m in members)} "
+            f"split_performers={sum(len(m['resulting_identities']) > 1 for m in members)} "
+            f"empty_performers={sum(m['observations'] == 0 for m in members)}")
+
+
 def summary(result):
     """Final stderr summary; JSON stdout and report files remain machine-readable."""
     selected = result.get('best_result')
@@ -146,10 +161,7 @@ def summary(result):
     goal = result['simulation']['trials'][name]['goal_result']
     lines = [f"Merge solver best completed trial: {name} ({selected['quality']}); "
              f"configuration={'changed' if selected['changed'] else 'unchanged'}; disjoint={goal['disjoint']}."]
-    for group in goal['groups']:
-        lines.append(f"  Set {group['index']+1}: complete={group['largest_complete_performers']}/{group['total_performers']}, "
-            f"assigned={group['assigned']}/{group['observations']}, shared_coverage={group['consolidation_fraction']:.1%}, "
-            f"missing={group['missing']}, withheld={group['withheld']}, fragments={group['fragments']}.")
+    lines.extend(group_summary(group) for group in goal['groups'])
     for violation in selected['unmet_conditions']:
         detail = []
         for key, value in violation.items():
