@@ -44,16 +44,24 @@ def execute(args, config):
         result['snapshot_sha256'] = fingerprint(db, config, result['scope'])
         if args.solve:
             from .merge_solver import solve
+            import json
             import sys
             def progress(name, stage, item):
                 if args.progress_style != 'off':
                     detail = ''
-                    if item is not None:
+                    if stage == 'start':
+                        detail = (' (input configuration)' if item['previous_trial'] is None else
+                                  f" changes_vs={item['previous_trial']} parent={item['search_parent']}")
+                    elif item is not None:
                         counts = [(g['largest_complete_performers'], g['total_performers'])
                                   for g in item['goal_result']['groups']]
                         detail = (f" {counts} disjoint={item['goal_result']['disjoint']} "
                                   f"best={item['best_trial']} best_number={item['best_trial_number']}")
                     print(f'Merge solver {name}: {stage}{detail}', file=sys.stderr, flush=True)
+                    if stage == 'start':
+                        for change in item['changes_from_previous']:
+                            print(f"  {change['parameter']}: {json.dumps(change['previous'])} -> "
+                                  f"{json.dumps(change['current'])}", file=sys.stderr, flush=True)
             result.update(solve(config, result, db, maximum=args.max_trials, progress=progress))
         elif args.simulate:
             result['simulation'] = evaluate(config, result, db)

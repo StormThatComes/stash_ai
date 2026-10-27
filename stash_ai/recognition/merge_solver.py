@@ -120,6 +120,7 @@ def solve(config, goals, db, *, maximum=500, progress=None):
     initial_changes = tuple(hybrid_changes)
     seen, patches, summaries, ranks = set(), {}, {}, {}
     families, origins = {}, {}
+    transitions = {'baseline': dict(previous_trial=None, changes_from_previous=[])}
     feedback, outcomes = {}, {}
     query_feedback = QueryFeedback(goals)
     latest_feedback = {}
@@ -149,7 +150,8 @@ def solve(config, goals, db, *, maximum=500, progress=None):
         feedback[name] = latest_feedback.copy()
         return dict(goal_result=status, outside_impact=outside, hybrid_solver_evidence=public(hybrid),
             solver_feedback={k:v for k,v in latest_feedback.items() if k != 'proposals'},
-            best_trial=best, best_trial_number=0 if best == 'baseline' else int(best.split('-')[1]))
+            best_trial=best, best_trial_number=0 if best == 'baseline' else int(best.split('-')[1]),
+            **transitions[name])
     def inspect(target, settings):
         import json
         ids = {r['id'] for g in goals['groups'] for m in g['members'] for r in m['observations']}
@@ -191,6 +193,7 @@ def solve(config, goals, db, *, maximum=500, progress=None):
     def stream():
         nonlocal search, stop_reason
         trials, attempts = 1, 0
+        previous_name, previous_changes = 'baseline', {}
         factories = {'hybrid': lambda changes: _hybrid_neighbours(config, changes, options, hybrid_changes),
                      'face': lambda changes: _face_neighbours(config, changes, options)}
         if not config.data['sapiensid']['enabled']:
@@ -228,22 +231,34 @@ def solve(config, goals, db, *, maximum=500, progress=None):
                     not same_contract(config, variant)):
                 continue
             name = f'trial-{trials}'
+            normalized = {c['parameter']:c['proposed'] for c in patch['changes']}
+            delta = []
+            for key in sorted(previous_changes.keys() | normalized.keys()):
+                before = previous_changes.get(key, parameter(config.data, key))
+                after = normalized.get(key, parameter(config.data, key))
+                if before != after:
+                    delta.append(dict(parameter=key, previous=before, current=after))
+            transitions[name] = dict(previous_trial=previous_name, changes_from_previous=delta)
             patches[name] = patch
             families[name] = family
             origins[name] = dict(search_phase=phase, search_parent=parent, search_strategy=strategy)
             yield name, variant
+            previous_name, previous_changes = name, normalized
             trials += 1
             search.completed(phase)
-            normalized = {c['parameter']:c['proposed'] for c in patch['changes']}
             search.observe(name, normalized, ranks[name], outcomes[name], family=family)
             # Keep detailed hints only for parents that can still be expanded.
             for old in set(feedback) - search.beam.keys() - {'baseline'}:
                 del feedback[old]
         if stop_reason is None:
             stop_reason = 'max_trials' if trials >= maximum else 'proposal_limit'
+    def trial_progress(name, stage, item):
+        if stage == 'start':
+            item = dict(transitions[name], search_parent=origins.get(name, {}).get('search_parent'))
+        progress(name, stage, item)
     with observe_queries(query_feedback):
         result = replay(config, {}, source=db, scope=goals['scope'], consume=consume, variant_stream=stream,
-            inspect_trial=inspect, progress=progress, allow_partial_selection=True)
+            inspect_trial=inspect, progress=trial_progress if progress else None, allow_partial_selection=True)
     # Ctrl-C can land after consume ranks a trial but before replay records it.
     best = max(result['trials'], key=ranks.__getitem__, default=None)
     for name, patch in patches.items():

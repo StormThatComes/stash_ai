@@ -216,7 +216,27 @@ quoting differences. Code/configuration/evidence hashes record the tested state;
 changed inputs require revalidation. Stash publication itself is not simulated.
 
 Progress and the final best-result summary go to stderr, leaving JSON stdout
-parseable. Every completed trial logs `best=trial-N best_number=N` (baseline is
+parseable. At the start of each trial, the solver prints every configuration
+change relative to the **previously executed trial**, with the full YAML key and
+old/new values. This includes restoring a parameter to the input configuration
+when switching search branches. Skipped duplicate or invalid proposals do not
+become the comparison point. `changes_vs` names that previous trial; `parent`
+separately names the search ancestor, which may be an older trial or baseline.
+For example:
+
+```text
+Merge solver baseline: start (input configuration)
+Merge solver trial-1: start changes_vs=baseline parent=baseline
+  sapiensid.matching.face_floor: 0.8 -> 0.785
+Merge solver trial-2: start changes_vs=trial-1 parent=baseline
+  clustering.max_anchor_pose_deviation: 0.2 -> 0.4
+  sapiensid.matching.face_floor: 0.785 -> 0.8
+```
+
+Completed JSON trial records contain the same `previous_trial` and
+`changes_from_previous` data (`parameter`, `previous`, `current`). The existing
+`changes` and `yaml_patch` remain relative to the input configuration for export.
+Every completed trial logs `best=trial-N best_number=N` (baseline is
 number 0), using the same ranking as YAML export. JSON trial records carry
 `best_trial` and `best_trial_number`. The final summary also states the stop reason
 and completed/maximum replay counts. The summary includes per-set complete counts, assigned observations,

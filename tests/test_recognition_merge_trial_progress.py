@@ -1,0 +1,100 @@
+"""Trial mutations follow executed configurations, including branch reversions."""
+import json
+
+import pytest
+import yaml
+
+from tests.test_recognition_merge_solver_exploration import auxiliary_goals
+from stash_ai.recognition.config import load, plain
+from stash_ai.recognition.fragmentation_report import _open_readonly
+from stash_ai.recognition.merge_goals import evaluate
+from stash_ai.recognition.merge_solver_search import BeamSearch, PREFIX
+
+
+def scripted_search(monkeypatch):
+    # Both executed candidates come from baseline. Intermediate proposals must
+    # not advance the comparison point, including a failed validation.
+    changes = [{PREFIX+'face_floor':.785}, {PREFIX+'face_floor':.785},
+               {PREFIX+'face_floor':1.1}, {}, {'clustering.max_anchor_pose_deviation':.4}]
+    pending = iter(changes)
+    def next_trial(self):
+        patch = next(pending)
+        family = 'hybrid' if any(k.startswith(PREFIX) for k in patch) else 'face'
+        return family, 'baseline_exploration', 'baseline', 'coordinate_probe', patch
+    monkeypatch.setattr(BeamSearch, 'next', next_trial)
+
+
+def arguments(config, goals, tmp_path, style='auto'):
+    config.source_path.write_text(yaml.safe_dump(plain(config.data)))
+    argv = ['report-merge','--face-config',str(config.source_path),'--faces-db',str(config.database),
+            '--solve','--max-trials','3','--yaml-output',str(tmp_path/'winner.yml'),'--progress-style',style]
+    for group in goals['groups']:
+        argv.extend(['--performer-set',','.join(m['performer_id'] for m in group['members'])])
+    return argv
+
+
+@pytest.mark.parametrize('style', ['auto', 'off'])
+def test_cli_logs_previous_executed_config_and_keeps_export_relative_to_input(tmp_path, monkeypatch, capsys, style):
+    from stash_ai.recognition.cli import main
+    config, goals = auxiliary_goals(tmp_path, sets=2)
+    scripted_search(monkeypatch)
+    assert main(arguments(config, goals, tmp_path, style)) == 0
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)  # Progress never contaminates JSON stdout.
+    trials = result['simulation']['trials']
+    assert list(trials) == ['baseline','trial-1','trial-2']
+    assert trials['baseline']['previous_trial'] is None
+    assert trials['baseline']['changes_from_previous'] == []
+    assert trials['trial-1']['previous_trial'] == 'baseline'
+    assert trials['trial-1']['changes_from_previous'] == [
+        dict(parameter=PREFIX+'face_floor', previous=.8, current=.785)]
+    assert trials['trial-2']['previous_trial'] == 'trial-1'
+    assert trials['trial-2']['search_parent'] == 'baseline'
+    assert trials['trial-2']['changes_from_previous'] == [
+        dict(parameter='clustering.max_anchor_pose_deviation', previous=.2, current=.4),
+        dict(parameter=PREFIX+'face_floor', previous=.785, current=.8)]
+    # Export patches still describe the input YAML, not the last search trial.
+    assert trials['trial-2']['yaml_patch'] == {'clustering': {'max_anchor_pose_deviation':.4}}
+    assert result['selected_trial'] == 'trial-1'
+    assert result['best_result']['yaml_patch'] == {'sapiensid': {'matching': {'face_floor':.785}}}
+    if style == 'off':
+        assert captured.err == ''
+    else:
+        assert 'baseline: start (input configuration)' in captured.err
+        assert ('trial-1: start changes_vs=baseline parent=baseline\n'
+                '  sapiensid.matching.face_floor: 0.8 -> 0.785\n') in captured.err
+        assert ('trial-2: start changes_vs=trial-1 parent=baseline\n'
+                '  clustering.max_anchor_pose_deviation: 0.2 -> 0.4\n'
+                '  sapiensid.matching.face_floor: 0.785 -> 0.8\n') in captured.err
+        assert '1.1' not in captured.err
+        assert 'best=trial-1 best_number=1' in captured.err
+    with _open_readonly(config.database) as db:
+        repeated = evaluate(load(tmp_path/'winner.yml'), goals, db)['trials']['baseline']['goal_result']
+    assert repeated['fully_solved'] and repeated['disjoint']
+
+
+def test_mutation_is_printed_before_rebuild_and_interrupt_keeps_prior_winner(tmp_path, monkeypatch, capsys):
+    from stash_ai.recognition.cli import main
+    from stash_ai.recognition import replay_simulation
+    config, goals = auxiliary_goals(tmp_path)
+    scripted_search(monkeypatch)
+    original = replay_simulation.rebuild_selected
+    calls = 0
+    def interrupted(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 3:
+            # Inspect the console at entry into the expensive replay, not after
+            # the command finishes: even an interrupted trial explains its YAML.
+            output = capsys.readouterr()
+            assert 'trial-2: start changes_vs=trial-1 parent=baseline' in output.err
+            assert 'sapiensid.matching.face_floor: 0.785 -> 0.8' in output.err
+            assert output.out == ''
+            raise KeyboardInterrupt
+        return original(*args, **kwargs)
+    monkeypatch.setattr(replay_simulation, 'rebuild_selected', interrupted)
+    assert main(arguments(config, goals, tmp_path)) == 130
+    result = json.loads(capsys.readouterr().out)
+    assert result['interrupted'] and result['selected_trial'] == 'trial-1'
+    assert set(result['simulation']['trials']) == {'baseline','trial-1'}
+    assert load(tmp_path/'winner.yml').data['sapiensid']['matching']['face_floor'] == .785
