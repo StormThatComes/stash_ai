@@ -12,27 +12,35 @@ from .merge_solver_search import PREFIX, interleave
 
 
 def relaxed_seeds(config, feedback):
-    """Joint jumps across matching gates; acquisition/model contracts stay fixed."""
-    hybrid = {PREFIX + key: min(parameter(config.data, PREFIX + key), value)
-              for key, value in dict(face_floor=.2, person_threshold=.35,
-                                     ambiguity_margin=0., min_support=1).items()}
-    face = {key: min(parameter(config.data, key), value) for key, value in {
-        'recognition.match_threshold': .35, 'clustering.cohesion_threshold': .25,
-        'clustering.view_match_threshold': .35, 'clustering.view_cohesion_threshold': .25,
-        'recognition.cooccurrence_merge_threshold': .35,
-        'recognition.ambiguity_margin': 0., 'clustering.view_ambiguity_margin': 0.,
-        'recognition.min_identity_support': 1, 'recognition.min_merge_support': 1,
-        'clustering.view_min_support': 2, 'clustering.view_attach_min_support': 1,
-        'clustering.same_scene_min_support': 1, 'clustering.auxiliary_min_support': 1,
-    }.items()}
-    # The first quality proposal is the joint relaxation of measured retained
-    # admission gates. Missing measurements never become fabricated evidence.
+    """Broad/median/quartile starts from measured boundaries, with domain fallback."""
+    from .merge_solver_domains import registry, normalize, UNIT, SUPPORT
+    domains = registry(config)
+    keys = [k for k in UNIT+SUPPORT if k in domains]
+    options = {k: list(v) for k, v in feedback.get('options', {}).items()}
+    for patches in feedback.get('proposals', {}).values():
+        for patch in patches:
+            for key, value in patch.items():
+                if key in keys and type(value) in (int, float):
+                    options.setdefault(key, []).append(value)
     quality = next(iter(feedback.get('proposals', {}).get('face', ())), {})
-    if config.data['sapiensid']['enabled']:
-        yield dict(hybrid, **quality)
-    yield dict(face, **quality)
-    if config.data['sapiensid']['enabled']:
-        yield dict(face, **hybrid, **quality)
+    seen = set()
+    for fraction in (0., .5, .25):
+        selected = {}
+        for key in keys:
+            current = parameter(config.data, key)
+            values = sorted({domains[key].project(v) for v in options.get(key, ())
+                             if type(v) in (int, float) and domains[key].low <= v <= current})
+            selected[key] = values[int(fraction*(len(values)-1))] if values else domains[key].low
+            if domains[key].kind is int:
+                selected[key] = int(selected[key])
+        face = {k: v for k, v in selected.items() if not k.startswith(PREFIX)}
+        hybrid = {k: v for k, v in selected.items() if k.startswith(PREFIX)}
+        for patch in ([hybrid, face, dict(face, **hybrid)] if hybrid else [face]):
+            patch = normalize(config, dict(patch, **quality))
+            signature = digest(patch)
+            if patch and signature not in seen:
+                seen.add(signature)
+                yield patch
 
 
 def progress_rank(status):
@@ -164,8 +172,10 @@ class BidirectionalSearch:
 
     def __init__(self, config, goals, maximum, baseline_feedback):
         self.config = config
-        self.enabled = len(goals['groups']) > 1 and any(len(g['members']) > 1 for g in goals['groups'])
-        self.budget = min(64, max(0, maximum-2), max(4, maximum//3)) if self.enabled else 0
+        self.enabled = any(len(g['members']) > 1 or len(g.get('identity_evidence', {}).get('scenes', {})) > 1
+                           for g in goals['groups'])
+        complexity = sum(max(1, len(g['members'])-1) for g in goals['groups'])
+        self.budget = min(64, 8+4*complexity, max(0, maximum-2), max(4, maximum//3)) if self.enabled else 0
         self.executed = self.offered = self.turn = 0
         self.last_trial = None
         self.frontier, self.streams = {}, {}

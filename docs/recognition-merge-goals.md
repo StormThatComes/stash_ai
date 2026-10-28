@@ -512,18 +512,17 @@ values before final stagnation; it never discards the best completed result or
 extends `--max-trials`. Search metadata includes operator statistics and restart
 counts. Every trial still logs its changes against the previous executed trial.
 
-With multiple sets and at least one set containing multiple performers, search
+With at least one fragmented or multi-scene set, including a single set, search
 also approaches the problem from a permissive configuration. Starting with
 `trial-2`, every other exploration slot is offered to this alternate lane while
 the goal is unsolved. The first normal trial and the existing baseline probes
 remain available. The lane alternates broad joint relaxations with attempts to
 repair their results; it does not wait for stagnation or the late restart.
 
-The initial profiles relax SapiensID matching together (`face_floor` at most
-0.2, `person_threshold` at most 0.35, zero ambiguity margin, support 1), face
-matching together (match thresholds at most 0.35, cohesion thresholds at most
-0.25, zero ambiguity margins and minimum support), and both routes together.
-They also include available measured admission-gate relaxations. Existing
+The initial profiles use broad, median and quartile boundaries from the current
+measurements and proposals, separately for SapiensID, face matching and both
+routes together. Without measured values they use legal domain extremes, not
+fixed similarity constants. They include measured admission-gate relaxations. Existing
 lower thresholds are preserved. Detection, feature extraction and model
 contracts are unchanged; missing features remain missing. These profiles are
 experiments, not recommended settings until production replay evaluates them.
@@ -535,7 +534,7 @@ remain a parent even when the normal beam rejects it. Repairs use positive and
 negative witnesses, joint/per-family interpolations towards a completed disjoint
 state, and individual gate reversions. A disjoint but incomplete state instead
 gets `frontier_expansion` proposals: matching gates are relaxed jointly and
-individually beyond the fixed seed values, using measured thresholds and
+individually beyond the starting values, using measured thresholds and
 proportional steps. These proposals retain the parent's useful changes;
 baseline hints cannot silently tighten them again. The strongest alternate
 frontier state gets every other parent preference, with separate rotation for
@@ -548,9 +547,12 @@ The console identifies these trials with `Search: phase=bidirectional` and
 to the exact mutations. JSON includes `search.bidirectional` and the
 `bidirectional` phase count. The lane has its own bounded allowance (at most
 64 completed replays, approximately one third of smaller budgets, with a minimum
-allowance of four when the total budget permits). All trials still share the
+allowance of four when the total budget permits), additionally bounded by goal
+complexity so a small single-set problem does not consume 64 alternate trials.
+All trials still share the
 global limit, default 500, and the final robustness allowance. It is disabled
-for a single set and stops offering candidates once a full solution is found.
+only when there is no fragmented or multi-scene goal, and stops offering
+candidates once a full solution is found.
 
 The separate parent-selection rank does not change the exported winner rank.
 A cross-set merge under the selected policy cannot displace a completed disjoint result, and Ctrl-C keeps
@@ -568,6 +570,14 @@ A frozen-witness preview orders small batches of directed proposals by measured
 separation and acceptance. It never drops a candidate or certifies a merge;
 independent coordinate probes and full replay remain authoritative, including
 when diagnostic sampling is incomplete.
+
+All generated candidates pass a shared retained-parameter domain projection
+before deduplication and production validation. This preserves detection floors,
+integer support limits and anchor/auxiliary and cohesion/match dependencies.
+Six-decimal boundary proposals use the inclusive final matching comparisons;
+nomination tolerances do not establish acceptance. Co-occurring blockers on an
+actual query or pair supply additional cross-family interaction proposals and
+refinement groups, alongside the existing fixed groups.
 
 Search guidance prioritizes missing target scenes and pooled-core deficits.
 Complementary component bridges precede redundant dense-scene connections;
@@ -635,7 +645,9 @@ dependency. TPE proposes at most one candidate per five completed trials after
 Rejected or duplicate TPE proposals do not consume a replay slot or replace
 heuristic proposals indefinitely. The usual default total limit remains 500.
 
-The sampler uses up to eight active tunable dimensions, mixes integer support,
+The sampler uses up to eight tunable dimensions: four prioritized dimensions and
+four deterministically rotating dimensions when more than eight are available.
+It respects the shared domains, mixes integer support,
 boolean and numeric thresholds, and learns from completed production trials.
 Its training target is the ordinal order of the solver's full lexicographic
 ranking, not a weighted sum that exchanges a hard constraint for consolidation.

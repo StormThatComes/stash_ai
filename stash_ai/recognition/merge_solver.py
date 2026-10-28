@@ -1,6 +1,5 @@
 """Bounded adaptive counterfactual search; goals never alter recognition rules."""
 from itertools import combinations
-import math
 
 from .config import digest
 from .merge_report_policy import patched, proposal, parameter
@@ -31,9 +30,8 @@ def measured_options(db, config, goals, proofs=None, *, hybrid=None):
                 minimum=minimum, mean=mean, maximum=maximum,
                 weakest_observations=[a.sample_ids[i], b.sample_ids[j]]))
         for value in (minimum, mean, maximum):
-            if 0 <= value <= 1:
-                floor = math.floor(float(value)*1e6)/1e6
-                scores.update((floor, min(1., floor+0.000002)))
+            from .threshold_boundaries import sides
+            scores.update(sides(value))
     options = {key: sorted(scores, reverse=True) for key in (
         'recognition.match_threshold', 'clustering.cohesion_threshold',
         'clustering.view_match_threshold', 'clustering.view_cohesion_threshold',
@@ -133,12 +131,13 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
     from .merge_solver_diagnostics import diagnostic_record, latest_decisions
     from .merge_solver_targets import deficits
     from .merge_solver_metrics import magnitude as mutation_magnitude
-    from .merge_solver_constraints import component_proposals, crossovers, coupled_refinement
+    from .merge_solver_constraints import component_proposals, crossovers, coupled_refinement, interaction_proposals
     from .merge_solver_preflight import boundary_probes, ordered
     from .merge_solver_bidirectional import BidirectionalSearch
     from .hybrid_query_observer import observe_queries
     from .offline_evaluation import _selection
     from .merge_solver_options import compact
+    from .merge_solver_domains import normalize
     from .merge_goal_index import current as goal_index
     inputs = {}
     replay_scope, scans = _selection(db, config, None, goals['scope'], allow_partial=True, diagnostics=inputs)
@@ -273,7 +272,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
                 return
             if refine:
                 for candidate in _interleave((refinement(config, changes, options),
-                                              coupled_refinement(config, changes, options))):
+                                              coupled_refinement(config, changes, options, feedback[parent]))):
                     family = 'hybrid' if any(k.startswith(PREFIX) and v != changes.get(k)
                         for k,v in candidate.items()) else 'face'
                     yield family, 'local_refinement', candidate
@@ -292,8 +291,9 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
                 [c['changes'] for n,c in search.beam.items() if n!=parent])) if parent!='baseline' else iter(())
             boundaries = (('boundary_probe',p) for p in ordered(config,
                 boundary_probes(changes,scoped_options),source))
+            interactions = (('learned_interaction', p) for p in interaction_proposals(config, changes, scoped_options, source))
             yield from search.operations({'measured_blockers':directed,'coordinate_probe':probes,
-                                          'crossover':mixing,'boundary_probe':boundaries})
+                                          'crossover':mixing,'boundary_probe':boundaries,'learned_interaction':interactions})
         search = BeamSearch(factories, factory, maximum, config)
         search.observe('baseline', {}, ranking('baseline'), outcomes['baseline'])
         bidirectional = BidirectionalSearch(config, goals, maximum, feedback['baseline'])
@@ -344,6 +344,11 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
                 phase,strategy='robustness','robustness_probe'
                 family='hybrid' if any(k.startswith(PREFIX) for k in changes) else 'face'
             attempts += 1
+            try:
+                changes = normalize(config, changes)
+            except ValueError:
+                search.rejected(family,strategy)
+                continue
             patch = proposal(config, changes)
             fingerprint = digest(patch['yaml_patch'])
             if not patch['changes'] or fingerprint in seen:

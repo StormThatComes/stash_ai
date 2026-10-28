@@ -15,21 +15,24 @@ class TPESuggestions:
 
     def suggest(self,config,history,options,active,sequence):
         optuna=self.optuna
-        keys=sorted(options,key=lambda k:(-active.get(k,0),not k.startswith('sapiensid.matching.'),k))
+        from .merge_solver_domains import registry, dimensions, normalize
+        domains = registry(config)
+        keys = dimensions(config, options, active, sequence)
         distributions={}
         for key in keys:
             if key.startswith('sapiensid.') and not config.data['sapiensid']['enabled']:continue
             current=parameter(config.data,key)
             if current is None:continue
             values=[current]+list(options[key])+[p.get(key,current) for p,_ in history]
-            if type(current) is bool:
+            domain = domains[key]
+            if domain.kind is bool:
                 distribution=optuna.distributions.CategoricalDistribution([False,True])
-            elif key.endswith('support'):
-                distribution=optuna.distributions.IntDistribution(1,max(2,int(max(values))+1))
+            elif domain.kind is int:
+                distribution=optuna.distributions.IntDistribution(int(domain.low),min(int(domain.high),max(int(domain.low),int(max(values))+1)))
             else:
                 # Threshold/quality admission parameters only, never feature collection contracts.
-                high=max(values) if key.endswith(('pixels','sharpness')) else 1.
-                distribution=optuna.distributions.FloatDistribution(0.,max(high,1e-6))
+                high=min(domain.high, max(values)) if key.endswith(('pixels','sharpness')) else domain.high
+                distribution=optuna.distributions.FloatDistribution(domain.low,max(domain.low,high))
             distributions[key]=distribution
             if len(distributions)==8:break
         if not distributions:return {}
@@ -47,7 +50,8 @@ class TPESuggestions:
             trial=study.ask(fixed_distributions=distributions)
             # This short-lived study supplies one proposal; its eventual result
             # enters the next study only after the authoritative replay completes.
-            return {k:round(v,6) if type(v) is float else v for k,v in trial.params.items()}
+            normalized = normalize(config, trial.params)
+            return {**{k: normalized.get(k, parameter(config.data, k)) for k in trial.params}, **normalized}
         finally:
             logger.setLevel(previous)
 
