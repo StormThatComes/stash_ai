@@ -22,7 +22,8 @@ def test_v6_writer_migration_keeps_old_inline_evidence(tmp_path):
         db.executescript(SCHEMA_V6);db.execute(f'PRAGMA application_id={APPLICATION_ID}');db.execute('PRAGMA user_version=6')
         db.execute("INSERT INTO metadata VALUES ('installation','00000000-0000-0000-0000-000000000001')")
     with FaceDatabase(path) as state:
-        assert state.connection.execute('PRAGMA user_version').fetchone()[0]==8
+        from stash_ai.recognition.database import SCHEMA_VERSION
+        assert state.connection.execute('PRAGMA user_version').fetchone()[0]==SCHEMA_VERSION
         assert read(state.connection,dict(evidence_thumbnail=(b'0'*3072).hex()))==b'0'*3072
 
 
