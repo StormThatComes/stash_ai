@@ -67,7 +67,7 @@ def test_check_validation_accepts_sql_formatting_and_quoted_identifiers(tmp_path
 @pytest.mark.parametrize('version,schema', [
     (1, module.SCHEMA_V1), (2, module.SCHEMA_V2),
     (3, module.SCHEMA_V3), (module.SCHEMA_VERSION, module.SCHEMA),
-])
+], ids=['v1','v2','v3','current'])
 @pytest.mark.parametrize('installation', [None, 'invalid-identity'])
 def test_invalid_installation_is_refused_before_recovery_or_migration(tmp_path, version, schema, installation):
     path = tmp_path / 'state.sqlite3'

@@ -24,7 +24,8 @@ CREATE TABLE person_evidence (
 
 def defaults():
     from .body_observations import defaults as collection_defaults
-    return dict(enabled=False,collection=collection_defaults(),
+    from .body_identity import defaults as identity_defaults
+    return dict(enabled=False,collection=collection_defaults(),identities=identity_defaults(),
         model=dict(variant='wb12m',source_directory='recognition_models/sapiensid_v1/source',
             checkpoint_directory='', model_yaml_sha256=MODEL_YAML_SHA256),
         pose=dict(path='recognition_models/sapiensid_v1/'+POSE_NAME,sha256=POSE_SHA256,score_threshold=.5,keypoint_score_threshold=.5,
@@ -47,6 +48,17 @@ def validate(settings):
             raise ValueError('Invalid sapiensid.collection.'+key)
     _number(collection['min_sharpness'],'sapiensid.collection.min_sharpness',0,1000000)
     _number(collection['max_overlap'],'sapiensid.collection.max_overlap',0,1)
+    identity=settings['identities']
+    if type(identity['enabled']) is not bool or identity['enabled'] and not collection['enabled']:
+        raise ValueError('sapiensid.identities.enabled requires independent collection.')
+    for key in ('match_threshold','cohesion_threshold','ambiguity_margin'):
+        _number(identity[key],'sapiensid.identities.'+key,0,1)
+    for key,low,high in (('min_support',2,100000),('attach_min_support',1,100000),
+                         ('anchor_min_keypoints',1,17),('min_appearance_distance',0,64)):
+        if type(identity[key]) is not int or not low<=identity[key]<=high:
+            raise ValueError('Invalid sapiensid.identities.'+key)
+    _number(identity['min_seconds'],'sapiensid.identities.min_seconds',0.001,3600)
+    _number(identity['anchor_min_sharpness'],'sapiensid.identities.anchor_min_sharpness',0,1000000)
     variant=settings['model']['variant']
     if not isinstance(variant,str) or variant not in MODELS:
         raise ValueError('sapiensid.model.variant must be wb12m or wb4m.')
@@ -132,6 +144,8 @@ def save(db, observation, expected, metadata, vector=None, crop=None):
 
 def copy_evidence(source,target,scan):
     """Copy only admitted observations into offline trials; never copy pixels."""
+    from .body_observations import copy_evidence as copy_bodies
+    copy_bodies(source,target,scan)
     if not available(source):return
     target.executemany('INSERT OR REPLACE INTO person_evidence VALUES (?,?,?,?,?,NULL)',source.execute(
         'SELECT e.observation,e.contract,e.status,e.metadata,e.embedding FROM person_evidence e '

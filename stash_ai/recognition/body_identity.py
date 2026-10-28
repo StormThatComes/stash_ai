@@ -1,0 +1,209 @@
+"""Scene-local person identities, with frozen face seeds and independent body anchors."""
+import json
+import time
+import uuid
+import numpy as np
+
+from .body_observations import contract,enabled as collection_enabled
+from .config import digest,plain
+from .database import encoded
+from .identity_merges import canonical
+from .progress import tracking
+
+
+
+
+def defaults():
+    return dict(enabled=False,match_threshold=.85,cohesion_threshold=.80,ambiguity_margin=.1,
+                min_support=3,attach_min_support=2,min_seconds=1.,min_appearance_distance=4,
+                anchor_min_keypoints=6,anchor_min_sharpness=25.)
+
+
+def enabled(config):
+    return collection_enabled(config) and config.data['sapiensid']['identities']['enabled']
+
+
+def available(db):
+    return db.execute("SELECT 1 FROM sqlite_master WHERE name='body_members' AND type='table'").fetchone() is not None
+
+
+def policy(config):
+    from .clustering import matching_policy
+    return digest(['body-local-v1',contract(config),matching_policy(config),config.data['sapiensid']['identities']])
+
+
+def vector(row):
+    from .models import normalized_embedding
+    data=row['embedding']
+    if data is None or len(data)!=4096*4:raise ValueError('Invalid retained person embedding.')
+    return normalized_embedding(np.frombuffer(data,dtype='<f4'),4096)
+
+
+def quality(row):
+    return json.loads(row['quality']).get('quality',{})
+
+
+def anchor(row,settings):
+    q=quality(row)
+    return q.get('keypoints',0)>=settings['anchor_min_keypoints'] and q.get('sharpness',0)>=settings['anchor_min_sharpness']
+
+
+def independent(rows,settings):
+    """Nearby times and repeated/near-identical pixels cannot multiply support."""
+    chosen=[]
+    for row in sorted(rows,key=lambda r:(r['scan'],r['seconds'],r['id'])):
+        q=quality(row)
+        if any(row['scan']==r['scan'] and abs(row['seconds']-r['seconds'])<settings['min_seconds'] for r in chosen):continue
+        if q.get('pixel_digest') and any(q['pixel_digest']==quality(r).get('pixel_digest') for r in chosen):continue
+        hashed=q.get('appearance_hash')
+        if hashed and any(quality(r).get('appearance_hash') and
+                (int(hashed,16)^int(quality(r)['appearance_hash'],16)).bit_count()<settings['min_appearance_distance'] for r in chosen):continue
+        chosen.append(row)
+    return chosen
+
+
+def copresent(first,second):
+    return any(a['scan']==b['scan'] and a['cue']==b['cue'] and a['id']!=b['id'] for a in first for b in second)
+
+
+class Scores:
+    def __init__(self,config):self.count=0;self.limit=config.data['sapiensid']['execution']['max_candidate_pairs']
+    def compare(self,first,second):
+        self.count+=len(first)*len(second)
+        if self.count>self.limit:raise ValueError('Person matching exceeds sapiensid.execution.max_candidate_pairs.')
+        values=[float(np.dot(a['_vector'],b['_vector'])) for a in first for b in second]
+        return (sum(values)/len(values),min(values)) if values else (-1.,-1.)
+
+
+def scene_plan(db,scan,config):
+    settings=config.data['sapiensid']['identities'];expected=contract(config)
+    record=db.execute('SELECT * FROM scans WHERE id=?',(scan,)).fetchone()
+    completed=db.execute('SELECT COUNT(*) FROM body_cues WHERE scan=? AND contract=?',(scan,expected)).fetchone()[0]
+    if record is None or record['status']!='complete' or completed!=record['total']:
+        raise ValueError('Independent person input is incomplete; run recognition to collect all selected cues.')
+    from .reference_roles import strict_sql
+    from .pose_policy import anchor_sql
+    rows=[];cost=0
+    for raw in db.execute('SELECT b.id,b.scan,b.cue,b.seconds,b.contract,b.face,b.geometry,b.quality,b.rejected,b.embedding,'
+            'm.person AS face_person,CASE WHEN o.id IS NOT NULL THEN '+
+            strict_sql()+' AND '+anchor_sql('o',config.data['clustering'])+' ELSE 0 END AS face_anchor FROM body_observations b '
+            'LEFT JOIN observations o ON o.id=b.face LEFT JOIN members m ON m.observation=o.id '
+            'WHERE b.scan=? AND b.contract=? AND b.rejected IS NULL AND b.embedding IS NOT NULL ORDER BY b.seconds,b.id',
+            (scan,expected)):
+        row=dict(raw);cost+=len(row['embedding'])*3+len(row['quality'])+len(row['geometry'])+4096
+        if cost>config.data['sapiensid']['execution']['reference_bytes']:
+            raise ValueError('Person scene references exceed sapiensid.execution.reference_bytes.')
+        row['_vector']=vector(row);rows.append(row)
+    scores=Scores(config);seeds={};decisions={}
+    for row in rows:
+        if row['face_person'] is None:continue
+        person=canonical(db,row['face_person'])
+        strong=bool(row['face_anchor']) and anchor(row,settings)
+        decisions[row['id']]=dict(person=person,status='accepted',role='anchor' if strong else 'auxiliary',
+                                  reason='measured_face_association')
+        if strong:seeds.setdefault(person,[]).append(row)
+    # Face-linked bodies are frozen before processing faceless queries.
+    queries=[r for r in rows if r['id'] not in decisions]
+    remaining=[]
+    for row in queries:
+        ranked=[]
+        for person,bank in seeds.items():
+            mean,minimum=scores.compare([row],bank)
+            ranked.append((mean,minimum,person,bank))
+        ranked.sort(key=lambda x:(-x[0],x[2]))
+        if ranked and ranked[0][0]>=settings['match_threshold']-settings['ambiguity_margin']:
+            mean,minimum,person,bank=ranked[0];runner=ranked[1][0] if len(ranked)>1 else -1.
+            good=(mean>=settings['match_threshold'] and minimum>=settings['cohesion_threshold']
+                  and mean-runner>=settings['ambiguity_margin'] and not copresent([row],bank)
+                  and len(independent(bank,settings))>=settings['attach_min_support'])
+            decisions[row['id']]=dict(person=person if good else None,status='accepted' if good else 'withheld',
+                role='auxiliary',reason='frozen_face_body_bank' if good else 'ambiguous_or_insufficient_face_body_bank',
+                score=mean,minimum=minimum,runner=runner)
+        else:remaining.append(row)
+    groups=[];weak=[]
+    for row in remaining:
+        if not anchor(row,settings):weak.append(row);continue
+        ranked=[]
+        for index,group in enumerate(groups):
+            mean,minimum=scores.compare([row],group)
+            if not copresent([row],group):ranked.append((mean,minimum,index))
+        ranked.sort(key=lambda x:(-x[0],x[2]))
+        if ranked and ranked[0][0]>=settings['match_threshold']:
+            mean,minimum,index=ranked[0];runner=ranked[1][0] if len(ranked)>1 else -1.
+            if minimum>=settings['cohesion_threshold'] and mean-runner>=settings['ambiguity_margin']:
+                groups[index].append(row)
+            else:decisions[row['id']]=dict(person=None,status='withheld',role='auxiliary',reason='body_group_ambiguous')
+        else:groups.append([row])
+    used=set()
+    for group in groups:
+        # Exact source observation origins, not previous assignments, preserve
+        # IDs across reruns while allowing changed evidence to split a group.
+        origins=[r[0] for row in group for r in db.execute('SELECT person FROM body_origins WHERE observation=?',(row['id'],))]
+        person=next((p for p in sorted(set(origins)) if p not in used),None)
+        if person is None:
+            person=str(uuid.uuid5(uuid.NAMESPACE_URL,digest(['body-person',record['scope'],record['namespace'],expected,group[0]['id']])))
+        used.add(person)
+        support=len(independent(group,settings));status='accepted' if support>=settings['min_support'] else 'provisional'
+        for row in group:
+            decisions[row['id']]=dict(person=person,status=status,role='anchor',reason='body_scene_core',independent_support=support)
+    # Weak observations may attach to frozen accepted cores but never train them.
+    banks=[(decisions[g[0]['id']]['person'],g) for g in groups if decisions[g[0]['id']]['status']=='accepted']
+    for row in weak:
+        ranked=sorted([(scores.compare([row],g),p,g) for p,g in banks],key=lambda x:(-x[0][0],x[1]))
+        best=ranked[0] if ranked else None;runner=ranked[1][0][0] if len(ranked)>1 else -1.
+        good=best and best[0][0]>=settings['match_threshold'] and best[0][1]>=settings['cohesion_threshold'] and best[0][0]-runner>=settings['ambiguity_margin'] and not copresent([row],best[2])
+        decisions[row['id']]=dict(person=best[1] if good else None,status='accepted' if good else 'withheld',role='auxiliary',reason='body_core_attachment' if good else 'body_anchor_quality')
+    return record,rows,decisions
+
+
+def rebuild(database,selected,config,result):
+    if not selected or not available(database.connection):return result
+    db=database.connection
+    # Plan every selected scene before replacing any derived state.
+    plans=[]
+    if enabled(config):
+        with tracking(selected,'Build scene person identities',unit='scene') as items:
+            plan_bytes=0
+            for item in items:
+                scan,rows,decisions=scene_plan(db,item['scan'],config)
+                plan_bytes+=len(encoded(decisions))+len(rows)*128
+                if plan_bytes>config.data['sapiensid']['execution']['plan_bytes']:
+                    raise ValueError('Person scene plan exceeds sapiensid.execution.plan_bytes.')
+                plans.append((scan,[dict(id=r['id']) for r in rows],decisions))
+    from .publication_queue import enqueue
+    with db:
+        for item in selected:
+            scan=db.execute('SELECT * FROM scans WHERE id=?',(item['scan'],)).fetchone()
+            db.execute('DELETE FROM body_members WHERE observation IN (SELECT b.id FROM body_observations b '
+                'JOIN scans s ON s.id=b.scan WHERE s.scope=? AND s.namespace=? AND s.scene=?)',
+                (scan['scope'],scan['namespace'],scan['scene']))
+        stamp=policy(config)
+        for scan,rows,decisions in plans:
+            for row in rows:
+                decision=decisions[row['id']];person=decision['person']
+                if person is not None:
+                    db.execute('INSERT OR IGNORE INTO people VALUES (?,?,?,?,?,?)',
+                        (person,scan['scope'],scan['namespace'],time.time(),None,
+                         f'stash-ai-recognition:{database.installation}:{person}'))
+                    if decision['reason']=='body_scene_core':
+                        db.execute('INSERT OR IGNORE INTO body_origins VALUES (?,?)',(row['id'],person))
+                db.execute('INSERT INTO body_members VALUES (?,?,?,?,?,?)',
+                    (row['id'],person,decision['role'],decision['status'],stamp,encoded(decision)))
+            enqueue(db,scan['scope'],scan['namespace'],scan['scene'],config,'body_scene_rebuild')
+    return results(db,selected,result)
+
+
+def results(db,selected,result):
+    for item in selected:
+        rows=db.execute('SELECT m.person,m.status,COUNT(*) AS observations FROM body_members m '
+            'JOIN body_observations b ON b.id=m.observation WHERE b.scan=? GROUP BY m.person,m.status',(item['scan'],))
+        result.setdefault(item['scan'],[]).extend(dict(person=r['person'],status='accepted' if r['status']=='accepted' else 'withheld',
+            observations=r['observations'],evidence='person') for r in rows)
+    return result
+
+
+def publication_rows(db,scan):
+    if not available(db):return []
+    return db.execute('SELECT b.id,b.scan,b.cue,b.contract,b.rejected,b.embedding,m.person,m.status,m.role,m.policy,m.proof,'
+        'p.scope,p.namespace,p.token FROM body_observations b JOIN body_members m ON m.observation=b.id '
+        'LEFT JOIN people p ON p.id=m.person WHERE b.scan=? ORDER BY b.id',(scan,))

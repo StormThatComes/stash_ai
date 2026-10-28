@@ -304,3 +304,25 @@ including empty cues, are checkpointed with the face scan. Existing scans can
 be enriched by reopening their source frames without rerunning face inference.
 Changing person-input or body-quality settings selects a new body contract.
 Retained face vectors and their scan contracts remain unchanged.
+
+## Scene person identities
+
+With independent collection enabled, opt in to `sapiensid.identities.enabled`.
+Scene rebuilding creates body-only identities without requiring a visible face.
+High-quality body anchors form complete-link cores; weak observations may attach
+to a frozen accepted bank, but never become new anchors through assignment.
+Direct face/person associations keep the existing face identity. Missing face
+observations can query its independently supported, frozen body bank.
+
+New cores require `min_support` independent observations. `min_seconds`, exact
+pixel digests and `min_appearance_distance` (64-bit perceptual hash distance)
+prevent adjacent/repeated thumbnails from multiplying support. Provisional
+cores remain local and are not published. `anchor_min_keypoints` and
+`anchor_min_sharpness` are separate from collection gates. The matching,
+cohesion and ambiguity thresholds are uncalibrated starting values.
+
+No temporal track is inferred from sparse VTT cues. Distinct simultaneous person
+boxes cannot support one another. Memory and comparison budgets fail explicitly
+before replacing any selected assignments. Confirmed body identities use the
+normal owned Stash profile and scene-publication journal; they need no portrait
+in order to publish. SQLite v10 adds derived body decisions and stable origins.

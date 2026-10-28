@@ -48,6 +48,11 @@ def copy_history(source, target, selected, scope, namespace):
         'identity_merges': lambda r: r['source'] in people and r['target'] in people,
         'merge_support': lambda r: r['observation'] in observations and r['source'] in people and r['target'] in people,
     }
+    from .body_identity import available as body_available
+    if body_available(source):
+        bodies={r[0] for r in target.execute('SELECT id FROM body_observations')}
+        rules.update(body_members=lambda r:r['observation'] in bodies and (r['person'] is None or r['person'] in people),
+                     body_origins=lambda r:r['observation'] in bodies and r['person'] in people)
     for table, allowed in rules.items():
         columns = len(target.execute(f'PRAGMA table_info({table})').fetchall())
         target.executemany(f'INSERT INTO {table} VALUES (' + ','.join('?' for _ in range(columns)) + ')',

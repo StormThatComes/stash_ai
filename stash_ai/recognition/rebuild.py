@@ -416,7 +416,9 @@ def rebuild_selected(database, selected, config, *, progress=None):
                         if attempt or not error.medoids-excluded:raise
                         excluded.update(error.medoids)
             expanded=expand(database.connection,selected,config)
-            if len(expanded)==len(selected):return result
+            if len(expanded)==len(selected):
+                from .body_identity import rebuild as rebuild_bodies
+                return rebuild_bodies(database,selected,config,result)
             selected=expanded
 
 

@@ -111,9 +111,19 @@ for table in ('body_observations','body_cues'):
         BODY_TRIGGERS[name]=f'CREATE TRIGGER {name} AFTER {event} ON {table} BEGIN '+''.join(body)+' END'
 BODY_TRIGGER_SCHEMA=';\n'.join(BODY_TRIGGERS.values())+';\n'
 
+BODY_MEMBER_TRIGGERS={}
+for table in ('body_members','body_origins'):
+    for event in ('INSERT','UPDATE','DELETE'):
+        sides=('new',) if event=='INSERT' else ('old',) if event=='DELETE' else ('old','new')
+        body=[_bump('global',"'*'")]
+        for side in sides:body.append(_bump('scan',f'(SELECT scan FROM body_observations WHERE id={side}.observation)'))
+        name='recognition_body_'+table+'_'+event.lower()
+        BODY_MEMBER_TRIGGERS[name]=f'CREATE TRIGGER {name} AFTER {event} ON {table} BEGIN '+''.join(body)+' END'
+BODY_MEMBER_SCHEMA=';\n'.join(BODY_MEMBER_TRIGGERS.values())+';\n'
+
 def validate_triggers(db, *, required=False):
     """Reject unknown/mutated executable schema, including spoofed names."""
-    accepted={**TRIGGERS,**EXTRA_TRIGGERS,**RAW_TRIGGERS,**BODY_TRIGGERS}
+    accepted={**TRIGGERS,**EXTRA_TRIGGERS,**RAW_TRIGGERS,**BODY_TRIGGERS,**BODY_MEMBER_TRIGGERS}
     rows=list(db.execute("SELECT type,name,sql FROM sqlite_master WHERE type IN ('trigger','view')"))
     normalize=lambda value:' '.join(value.strip().rstrip(';').split())
     for kind,name,sql in rows:
@@ -123,5 +133,6 @@ def validate_triggers(db, *, required=False):
     if db.execute("SELECT 1 FROM sqlite_master WHERE name='evidence_thumbnails'").fetchone():expected.update(EXTRA_TRIGGERS)
     if db.execute('PRAGMA user_version').fetchone()[0]>=8:expected.update(RAW_TRIGGERS)
     if db.execute('PRAGMA user_version').fetchone()[0]>=9:expected.update(BODY_TRIGGERS)
+    if db.execute('PRAGMA user_version').fetchone()[0]>=10:expected.update(BODY_MEMBER_TRIGGERS)
     if required and not expected<={row[1] for row in rows}:
         raise ValueError('Incomplete facial recognition dependency triggers; restore a consistent backup.')
