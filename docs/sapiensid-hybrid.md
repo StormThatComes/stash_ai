@@ -281,3 +281,26 @@ face landmarks with YOLO pose; equivalence to upstream DFA alignment is not
 established. Audit real inputs and calibrate against independent labels before
 broad use. Upstream SapiensID source/weights use CC BY-NC 4.0; Ultralytics has
 separate licensing.
+
+## Independent person collection
+
+Set `sapiensid.enabled: true` and `sapiensid.collection.enabled: true` to
+collect every detected person in each sampled VTT frame, including frames
+without faces. This replaces face-driven collection with a shared pass: one
+pose prediction per frame and one embedding per eligible detected person.
+A linked face receives the same feature through a compatibility projection.
+Rejected faces never supply facial landmarks to an independent body query.
+Ambiguous face/person ownership is withheld instead of guessed.
+
+The independent records retain person bounds, pose points, optional face ID,
+quality measurements, rejection reasons and optional PNGs. The quality controls
+are `min_person_pixels`, `min_sharpness`, `min_keypoints`, `max_overlap`.
+Overlap is measured bounding-box overlap, not a semantic occlusion estimate.
+Crop-border contact is recorded for later portrait ranking. Body evidence does
+not create identities in this first stage.
+
+SQLite version 9 migrates versions 1–8 transactionally. Completed person cues,
+including empty cues, are checkpointed with the face scan. Existing scans can
+be enriched by reopening their source frames without rerunning face inference.
+Changing person-input or body-quality settings selects a new body contract.
+Retained face vectors and their scan contracts remain unchanged.

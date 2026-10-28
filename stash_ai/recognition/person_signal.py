@@ -23,7 +23,8 @@ CREATE TABLE person_evidence (
 
 
 def defaults():
-    return dict(enabled=False,
+    from .body_observations import defaults as collection_defaults
+    return dict(enabled=False,collection=collection_defaults(),
         model=dict(variant='wb12m',source_directory='recognition_models/sapiensid_v1/source',
             checkpoint_directory='', model_yaml_sha256=MODEL_YAML_SHA256),
         pose=dict(path='recognition_models/sapiensid_v1/'+POSE_NAME,sha256=POSE_SHA256,score_threshold=.5,keypoint_score_threshold=.5,
@@ -36,6 +37,16 @@ def defaults():
 
 def validate(settings):
     from .config import _number
+    collection=settings['collection']
+    if type(collection['enabled']) is not bool:
+        raise ValueError('sapiensid.collection.enabled must be boolean.')
+    if collection['enabled'] and not settings['enabled']:
+        raise ValueError('sapiensid.collection.enabled requires sapiensid.enabled.')
+    for key,low,high in (('min_person_pixels',1,8192),('min_keypoints',1,17)):
+        if type(collection[key]) is not int or not low<=collection[key]<=high:
+            raise ValueError('Invalid sapiensid.collection.'+key)
+    _number(collection['min_sharpness'],'sapiensid.collection.min_sharpness',0,1000000)
+    _number(collection['max_overlap'],'sapiensid.collection.max_overlap',0,1)
     variant=settings['model']['variant']
     if not isinstance(variant,str) or variant not in MODELS:
         raise ValueError('sapiensid.model.variant must be wb12m or wb4m.')
@@ -146,5 +157,7 @@ def coverage(db,config,scans):
 
 
 def same_contract(left,right):
+    from .body_observations import enabled,contract as body_contract
+    if (enabled(left) or enabled(right)) and body_contract(left)!=body_contract(right):return False
     return (not (left.data['sapiensid']['enabled'] or right.data['sapiensid']['enabled'])
             or contract(left)==contract(right))

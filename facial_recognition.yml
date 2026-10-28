@@ -126,6 +126,14 @@ names:
 # Uses models.device and the shared scan CPU queues; local paths are relative to this YAML.
 sapiensid:
   enabled: false              # true lazily prepares missing assets when models.download_missing is true.
+  # Independent persons share pose/inference with face-associated evidence.
+  collection:
+    enabled: false
+    min_person_pixels: 64
+    min_sharpness: 10.0
+    min_keypoints: 4
+    max_overlap: 0.65
+
   model:
     variant: wb12m             # wb12m (default, trained on more data) or wb4m. Changing variant separates cached embeddings.
     source_directory: recognition_models/sapiensid_v1/source # Destination for verified upstream source; Git is not required.

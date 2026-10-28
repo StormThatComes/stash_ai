@@ -46,6 +46,21 @@ class PreparedCollector:
         if len(self.cues)>=2*self.step:self.infer()
         self.commit()
 
+    def collect_items(self,db,image,items):
+        if self.db is not None and self.db is not db:raise RuntimeError('Person pipeline database owner changed.')
+        self.db=db;cue=dict(rows=[],remaining=0,sealed=False);self.cues.append(cue)
+        for record,value in items:
+            cue['rows'].append(record)
+            if value is not None:
+                extra=3*384*384*4+384*384+self.config.data['storage']['max_crop_bytes']
+                while self.jobs and not self.stage.can_submit(image,extra=extra):self.infer()
+                future=self.stage.submit(self.prepare,image,value,extra=extra)
+                cue['remaining']+=1;self.jobs.append((cue,record,future))
+                if len(self.jobs)>=2*self.step:self.infer()
+        cue['sealed']=True
+        if len(self.cues)>=2*self.step:self.infer()
+        self.commit()
+
     def infer(self):
         if not self.jobs:return
         jobs=self.jobs[:self.step]
