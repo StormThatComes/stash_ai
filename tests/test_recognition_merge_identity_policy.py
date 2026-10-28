@@ -5,6 +5,7 @@ import json
 import pytest
 
 from stash_ai.recognition.merge_goal_identity import POLICY, freeze
+from stash_ai.recognition.merge_goal_sets import freeze_set
 from stash_ai.recognition.merge_goals import assess, objective, resolve, evaluate, unmet_conditions
 from stash_ai.recognition.fragmentation_report import _open_readonly
 from stash_ai.recognition.database import FaceDatabase
@@ -20,7 +21,8 @@ def member(name, core=3, soft=0, *, scenes=None, pixels=None):
 
 
 def goals(*groups):
-    return dict(goal_policy=dict(POLICY), groups=[dict(index=i, members=g) for i,g in enumerate(groups)])
+    return dict(goal_policy=dict(POLICY), groups=[dict(index=i, members=g,
+        identity_evidence=freeze_set([r for m in g for r in m['observations']])) for i,g in enumerate(groups)])
 
 
 def assignments(goal):
@@ -65,20 +67,22 @@ def test_confirmed_cross_set_merge_remains_a_conflict():
     assert any(v['reason'] == 'cross_set_merge' for v in unmet_conditions(result))
 
 
-def test_losing_a_performer_or_most_auxiliary_cannot_improve_admissible_baseline():
+def test_soft_budget_excess_is_a_tiebreaker_after_set_consolidation():
     goal = goals([member('a', core=3, soft=100), member('b')])
     before = assignments(goal)
     after = dict.fromkeys(before, 'merged')
     for i in range(3,93):
         after[f'a-{i}'] = None
     result = status(goal, after)
-    assert not result['admissible']
+    assert result['admissible'] and result['fully_solved']
     assert result['groups'][0]['soft_budget_excess'] == 70
-    assert objective(status(goal, before)) > objective(result)
-    assert any(v['reason'] == 'soft_loss_budget_exceeded' for v in unmet_conditions(result))
+    assert objective(result) > objective(status(goal, before))
+    assert objective(status(goal, dict.fromkeys(before, 'merged'))) > objective(result)
+    assert not unmet_conditions(result)
     for i in range(3):
         after[f'b-{i}'] = None
     assert status(goal, after)['groups'][0]['represented_performers'] == 1
+    assert not status(goal, after)['admissible']  # b's unique scene really disappeared.
 
 
 def test_confirmed_scene_cannot_disappear_within_global_outlier_budget():
@@ -89,7 +93,7 @@ def test_confirmed_scene_cannot_disappear_within_global_outlier_budget():
     evidence = result['groups'][0]['members'][0]['identity_evidence']
     assert evidence['core_assigned'] == evidence['core_required'] == 8
     assert not evidence['represented'] and not result['fully_solved']
-    assert unmet_conditions(result)[0]['protected_scenes']['second'] == 2
+    assert unmet_conditions(result)[0] == dict(set=0, reason='set_scene_not_preserved', scenes=['second'])
 
 
 def test_reference_eligibility_is_not_a_perfect_label():
@@ -105,7 +109,7 @@ def test_reference_eligibility_is_not_a_perfect_label():
     assert destination_owners(goal, predicted)['b'] == {0, 1}
 
 
-def test_auxiliary_only_performer_has_fallback_quorum_and_cannot_vanish():
+def test_auxiliary_only_set_has_fallback_quorum_for_full_merge_and_cannot_vanish():
     goal = goals([member('a', core=0, soft=5)])
     predicted = assignments(goal)
     predicted['a-4'] = None
@@ -114,14 +118,14 @@ def test_auxiliary_only_performer_has_fallback_quorum_and_cannot_vanish():
     assert evidence['basis'] == 'fallback_membership'
     assert result['fully_solved']
     predicted['a-3'] = None
-    assert not status(goal, predicted)['admissible']
+    assert status(goal, predicted)['admissible'] and not status(goal, predicted)['fully_solved']
     assert not status(goal, dict.fromkeys(predicted))['fully_solved']
 
 
 def test_empty_performer_cannot_satisfy_identity_goal():
     goal = goals([member('empty', core=0)])
     assert not status(goal, {})['admissible']
-    assert unmet_conditions(status(goal, {}))[0]['reason'] == 'identity_not_preserved'
+    assert unmet_conditions(status(goal, {}))[0]['reason'] == 'empty_identity_set'
 
 
 def test_duplicate_crops_do_not_inflate_votes_and_conflicting_copies_do_not_vote_twice():
@@ -132,7 +136,7 @@ def test_duplicate_crops_do_not_inflate_votes_and_conflicting_copies_do_not_vote
     predicted = assignments(goal)
     assert status(goal, predicted)['fully_solved']
     predicted['a-4'] = None
-    assert not status(goal, predicted)['admissible']  # Four copies cannot outvote the second sample.
+    assert not status(goal, predicted)['fully_solved']  # Four copies cannot outvote the second sample.
     predicted['a-4'], predicted['a-0'] = 'a', 'other'
     evidence = status(goal, predicted)['groups'][0]['members'][0]['identity_evidence']
     assert evidence['core_assigned'] == 1
@@ -179,6 +183,7 @@ def test_soft_correction_does_not_relabel_feedback_ownership(tmp_path):
 
 @pytest.mark.parametrize('mode', ['full', 'diff'])
 def test_real_replay_selects_merge_despite_missing_auxiliary_and_keeps_winner_on_interrupt(tmp_path, mode):
+    import uuid
     import yaml
     from stash_ai.recognition.config import load
     from stash_ai.recognition.merge_solver import solve
@@ -187,9 +192,21 @@ def test_real_replay_selects_merge_despite_missing_auxiliary_and_keeps_winner_on
     from stash_ai.recognition.merge_goal_output import export, summary
     config, people = incomplete_source(tmp_path)
     with FaceDatabase(config.database) as state:
-        state.connection.execute("UPDATE observations SET quality=json_set(quality,'$.pose_deviation',.4) "
+        db = state.connection
+        db.execute("UPDATE observations SET quality=json_set(quality,'$.pose_deviation',.4) "
                                  "WHERE scan IN (SELECT id FROM scans WHERE scene='99')")
-        state.connection.commit()
+        # The missing historical auxiliary's scene is still represented by
+        # another fragment of the same set in its new complete scan.
+        scan = db.execute("SELECT id FROM scans WHERE scene='99' ORDER BY rowid DESC LIMIT 1").fetchone()[0]
+        rows = db.execute('SELECT o.* FROM observations o JOIN members m ON m.observation=o.id '
+                          'WHERE m.person=?', (people[1],)).fetchall()
+        for row in rows:
+            copied = list(row)
+            copied[0], copied[1] = str(uuid.uuid4()), scan
+            db.execute('INSERT INTO observations VALUES (?,?,?,?,?,?,?,?,?,?,?,?)', copied)
+            db.execute('INSERT INTO members VALUES (?,?)', (copied[0], people[1]))
+        db.execute("UPDATE scans SET status='complete',cursor=?,total=? WHERE id=?", (len(rows), len(rows), scan))
+        db.commit()
     before = config.database.read_bytes()
     checkpoint, output = tmp_path/'checkpoint.json', tmp_path/'winner.yml'
     def stop(name, stage, item):
@@ -205,7 +222,8 @@ def test_real_replay_selects_merge_despite_missing_auxiliary_and_keeps_winner_on
         selected = result['simulation']['trials'][result['selected_trial']]['goal_result']
         assert selected['groups'][0]['soft_lost_units'] == 1 and not selected['strict_fully_solved']
         text = output.read_text()
-        assert 'Goal policy: identity v1' in text and 'soft units lost/reassigned: 1' in text
+        assert 'Goal policy: identity v2' in text and 'soft units lost/reassigned: 1' in text
+        assert selected['groups'][0]['covered_scenes'] == selected['groups'][0]['required_scenes'] == 3
         if mode == 'full':
             restored = load(output)
         else:
@@ -217,6 +235,11 @@ def test_real_replay_selects_merge_despite_missing_auxiliary_and_keeps_winner_on
                         winner_writer=winner_file(output, resume=True), yaml_mode=mode)
         assert resumed['search']['restored_trials'] == len(result['simulation']['trials'])
         assert resumed['best_result']['fully_solved']
+        previous_policy = copy.deepcopy(goal)
+        previous_policy['goal_policy']['version'] = 1
+        with pytest.raises(ValueError, match='incompatible'):
+            solve(config, previous_policy, db, maximum=12, checkpoint=checkpoint, resume=True,
+                  winner_writer=winner_file(output, resume=True), yaml_mode=mode)
         strict = resolve(db, config, [people], by_performer=False, policy='strict')
         with pytest.raises(ValueError, match='incompatible'):
             solve(config, strict, db, maximum=12, checkpoint=checkpoint, resume=True, yaml_mode=mode,
