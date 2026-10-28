@@ -70,10 +70,10 @@ def copresent(first,second):
 
 
 class Scores:
-    def __init__(self,config):self.count=0;self.limit=config.data['sapiensid']['execution']['max_candidate_pairs']
+    def __init__(self,config):self.count=0;self.limit=config.data['sapiensid']['execution']['max_witness_comparisons']
     def compare(self,first,second):
         self.count+=len(first)*len(second)
-        if self.count>self.limit:raise ValueError('Person matching exceeds sapiensid.execution.max_candidate_pairs.')
+        if self.count>self.limit:raise ValueError('Person matching exceeds sapiensid.execution.max_witness_comparisons.')
         values=[float(np.dot(a['_vector'],b['_vector'])) for a in first for b in second]
         return (sum(values)/len(values),min(values)) if values else (-1.,-1.)
 

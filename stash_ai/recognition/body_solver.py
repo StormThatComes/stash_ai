@@ -45,7 +45,7 @@ def analyse(db,config,goals):
     output=dict(options={},proposals=[],evidence=dict(enabled=False,pairs=[]))
     if not enabled(config) or not available(db):return output
     owners={m['identity_id']:g.get('index',i) for i,g in enumerate(goals['groups']) for m in g['members']}
-    evidence=report(db,config,goals['scope'],goals['namespace'])
+    evidence=report(db,config,goals['scope'],goals['namespace'],focus=owners)
     output['evidence']=evidence
     output['options'],quality_proposals=options_and_quality(db,config,goals)
     proposals=[]
@@ -64,6 +64,7 @@ def analyse(db,config,goals):
                prefix+'min_support':min(settings['min_support'],min(pair['support']))}
         rivals=[p['score'] for p in evidence['pairs'] if set(p['people']) & {a,b} and
                 any(x not in owners or owners.get(x)!=owners[a] for x in p['people'])]
+        rivals.extend(p['score'] for p in evidence.get('nearest_competitors',()) if p['identity'] in (a,b))
         if rivals and pair['score']>=max(rivals):
             patch[prefix+'ambiguity_margin']=min(settings['ambiguity_margin'],_floor(pair['score']-max(rivals)))
         proposals.append(patch)

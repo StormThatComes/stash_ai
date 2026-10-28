@@ -1,14 +1,14 @@
 """Frozen, complete-component person consolidation; missing faces are not contradictions."""
 import json
 import time
-import numpy as np
 
-from .body_identity import Scores,anchor,independent,vector,policy,available
+from .body_identity import independent,policy,available
 from .body_observations import contract
 from .database import encoded
 from .identity_merges import canonical
 from .scan_heads import predicate as current_scan
 from .progress import tracking
+from .body_global_banks import banks
 
 ROUTES=('body_global','body_scene')
 
@@ -18,136 +18,79 @@ def defaults():
                 ambiguity_margin=.10,min_support=3,max_references=32)
 
 
-def _select(rows,maximum,settings):
-    ranked=sorted(rows,key=lambda r:(-json.loads(r['quality']).get('quality',{}).get('sharpness',0),r['id']))
-    # Independent views in a deterministic order within the reference budget.
-    chosen=independent(ranked,settings)[:maximum]
-    if not chosen and ranked:chosen=[ranked[0]]
-    return chosen
-
-
-def banks(db,config,scope,namespace):
-    expected=contract(config);grouped={};cost=0;settings=config.data['sapiensid']['identities']
-    sql=('SELECT b.id,b.scan,b.cue,b.seconds,b.face,b.quality,b.embedding,m.person,s.scene '
-         'FROM body_observations b JOIN body_members m ON m.observation=b.id JOIN scans s ON s.id=b.scan '
-         "WHERE s.scope=? AND s.namespace=? AND s.status='complete' AND b.contract=? AND b.rejected IS NULL "
-         "AND m.status='accepted' AND m.role='anchor' AND m.policy=? AND "+current_scan()+' ORDER BY b.id')
-    for raw in db.execute(sql,(scope,namespace,expected,policy(config))):
-        row=dict(raw);person=canonical(db,row['person'])
-        cost+=len(row['embedding'])*3+len(row['quality'])+2048
-        if cost>config.data['sapiensid']['execution']['reference_bytes']:
-            raise ValueError('Global body references exceed sapiensid.execution.reference_bytes.')
-        row['_vector']=vector(row);grouped.setdefault(person,[]).append(row)
-    output={}
-    for person,rows in grouped.items():
-        refs=_select(rows,config.data['sapiensid']['global_matching']['max_references'],settings)
-        output[person]=dict(rows=rows,refs=refs,cores=[refs],missing_original=False,
-                            support=len(independent(rows,settings)),faces=[],face_ids=[])
-    # Aliased source witnesses retain veto power, but do not nominate candidates
-    # or add new support votes. Never silently drop an unavailable endpoint.
-    for alias in db.execute('SELECT source,target,evidence FROM identity_merges'):
-        proof=json.loads(alias['evidence']);target=canonical(db,alias['target'])
-        if proof.get('route') not in ROUTES or target not in output:continue
-        for ids in proof.get('cores',{}).values():
-            core=[]
-            for identifier in ids:
-                raw=db.execute('SELECT b.id,b.scan,b.cue,b.seconds,b.face,b.quality,b.embedding,s.scene '
-                    'FROM body_observations b JOIN scans s ON s.id=b.scan WHERE b.id=? AND b.contract=? '
-                    'AND b.rejected IS NULL AND '+current_scan(),(identifier,expected)).fetchone()
-                if raw is None or raw['embedding'] is None:output[target]['missing_original']=True;continue
-                cost+=len(raw['embedding'])*3+2048
-                if cost>config.data['sapiensid']['execution']['reference_bytes']:
-                    raise ValueError('Original body witnesses exceed sapiensid.execution.reference_bytes.')
-                row=dict(raw);row['_vector']=vector(row);core.append(row)
-            if core:output[target]['cores'].append(core)
-    from .reference_roles import strict_sql
-    from .pose_policy import anchor_sql
-    for person,bank in output.items():
-        # Face vectors are only compared to face vectors; never to SapiensID.
-        for raw in db.execute('SELECT o.id,o.dimensions,o.embedding FROM observations o JOIN members m ON m.observation=o.id '
-            'JOIN scans s ON s.id=o.scan WHERE m.person=? AND o.rejected IS NULL AND '+strict_sql()+' AND '+
-            anchor_sql('o',config.data['clustering'])+' AND '+current_scan(),(person,)):
-            from .clustering import vector as face_vector
-            feature=face_vector(raw);cost+=feature.nbytes*3
-            if cost>config.data['sapiensid']['execution']['reference_bytes']:
-                raise ValueError('Face contradiction witnesses exceed sapiensid.execution.reference_bytes.')
-            bank['faces'].append(feature);bank['face_ids'].append(raw['id'])
-        bank['cues']={(r['scan'],r['cue']) for core in bank['cores'] for r in core}
-        bank['cues'].update((r['scan'],r['cue']) for r in db.execute('SELECT b.scan,b.cue FROM body_observations b '
-            'JOIN body_members m ON m.observation=b.id JOIN scans s ON s.id=b.scan '
-            "WHERE m.person=? AND m.status='accepted' AND "+current_scan(),(person,)))
-    for alias in db.execute('SELECT target,evidence FROM identity_merges'):
-        proof=json.loads(alias['evidence']);target=canonical(db,alias['target'])
-        if proof.get('route') not in ROUTES or target not in output:continue
-        for ids in proof.get('face_witnesses',{}).values():
-            for identifier in ids:
-                raw=db.execute('SELECT o.dimensions,o.embedding FROM observations o JOIN scans s ON s.id=o.scan '
-                    'WHERE o.id=? AND o.rejected IS NULL AND '+current_scan(),(identifier,)).fetchone()
-                if raw is None or raw['embedding'] is None:output[target]['missing_original']=True;continue
-                from .clustering import vector as face_vector
-                feature=face_vector(raw);cost+=feature.nbytes*3
-                if cost>config.data['sapiensid']['execution']['reference_bytes']:raise ValueError('Original face witnesses exceed reference_bytes.')
-                output[target]['faces'].append(feature);output[target]['face_ids'].append(identifier)
-    return output
-
-
-def report(db,config,scope,namespace):
-    result=dict(enabled=config.data['sapiensid']['global_matching']['enabled'],contract=contract(config),pairs=[],decisions=[])
+def report(db,config,scope,namespace,*,focus=None):
+    """Retain candidate proofs and requested diagnostic pairs, not an N² graph."""
+    result=dict(enabled=config.data['sapiensid']['global_matching']['enabled'],contract=contract(config),
+                pairs=[],decisions=[],nearest_competitors=[],pair_coverage='candidates_and_requested')
     if not result['enabled'] or not available(db):return result
-    bank=banks(db,config,scope,namespace);settings=config.data['sapiensid']['global_matching']
-    scores=Scores(config);identities=sorted(bank);pairs={};edges={p:set() for p in identities};plan_bytes=0
-    with tracking(identities,'Compare global person identities',unit='identity') as people:
-        for i,a in enumerate(people):
-            for b in identities[i+1:]:
-                first,second=bank[a],bank[b]
-                mean,minimum=scores.compare(first['refs'],second['refs']);blockers=[]
-                if mean<settings['match_threshold']:blockers.append('body_similarity')
-                for left in first['cores']:
-                    for right in second['cores']:
-                        m,n=scores.compare(left,right);minimum=min(minimum,n)
-                        if m<settings['match_threshold'] or n<settings['cohesion_threshold']:
-                            if 'body_cohesion' not in blockers:blockers.append('body_cohesion')
-                if min(first['support'],second['support'])<settings['min_support']:blockers.append('independent_support')
-                if first['cues']&second['cues']:blockers.append('person_copresence')
-                if first['missing_original'] or second['missing_original']:blockers.append('missing_original_body_witness')
-                face_min=None
-                for left in first['faces']:
-                    for right in second['faces']:
-                        if len(left)!=len(right):raise ValueError('Incompatible face namespaces in body consolidation.')
-                        scores.count+=1
-                        if scores.count>scores.limit:raise ValueError('Face contradiction checks exceed max_candidate_pairs.')
-                        score=float(np.dot(left,right));face_min=score if face_min is None else min(face_min,score)
-                if face_min is not None and face_min<config.data['sapiensid']['matching']['face_floor']:blockers.append('face_contradiction')
-                pair=dict(people=[a,b],score=mean,minimum=minimum,face_minimum=face_min,
-                    support=[first['support'],second['support']],
-                    face_evidence='compared' if face_min is not None else 'unavailable',blockers=blockers)
+    return plan(db,config,banks(db,config,scope,namespace),focus=focus)
+
+
+def plan(db,config,bank,*,focus=None):
+    """Plan on a frozen metadata catalogue; source evidence is only read."""
+    from .body_global_search import Search,exact_pair
+    from .memory_size import Reservation,size
+    settings=config.data['sapiensid']['global_matching']
+    result=dict(enabled=settings['enabled'],contract=contract(config),pairs=[],decisions=[],
+                nearest_competitors=[],pair_coverage='candidates_and_requested')
+    focus={} if focus is None else dict(focus) if isinstance(focus,dict) else {p:0 for p in focus}
+    # Solver group labels can be arbitrary; the tiled lookup uses dense integers.
+    labels={label:i for i,label in enumerate(dict.fromkeys(focus.values()))}
+    focus={p:labels[g] for p,g in focus.items() if p in bank}
+    pairs={};edges={p:set() for p in bank};plan_bytes=size(edges)+size(focus)
+    limit=config.data['sapiensid']['execution']['plan_bytes'];reservation=Reservation(limit)
+    def reserve(extra=0):
+        nonlocal plan_bytes
+        plan_bytes+=extra
+        if plan_bytes>limit:raise ValueError('Global body plan exceeds sapiensid.execution.plan_bytes.')
+        reservation.set(plan_bytes)
+    reserve()
+    try:
+        with Search(db,config,bank) as search:
+            for a,b in search.nominations(focus):
+                pair=exact_pair(a,b,bank,config,search.evidence)
+                reserve(size(pair)+512)
                 pairs[a,b]=pair;result['pairs'].append(pair)
-                if not blockers:edges[a].add(b);edges[b].add(a)
-                plan_bytes+=len(encoded(pair))+256
-                if plan_bytes>config.data['sapiensid']['execution']['plan_bytes']:
-                    raise ValueError('Global body plan exceeds sapiensid.execution.plan_bytes.')
-    seen=set()
-    for start in identities:
-        if start in seen or not edges[start]:continue
-        pending=[start];component=set()
-        while pending:
-            current=pending.pop()
-            if current in component:continue
-            component.add(current);pending.extend(edges[current]-component)
-        seen.update(component);blockers=[];nearest=-1.
-        if any(b not in edges[a] for a in component for b in component if a!=b):blockers.append('incomplete_body_component')
-        for a in component:
-            outsiders=[pairs[tuple(sorted((a,b)))]['score'] for b in identities if b not in component]
-            runner=max(outsiders,default=-1.);nearest=max(nearest,runner)
-            inside=min(pairs[tuple(sorted((a,b)))]['score'] for b in component if b!=a)
-            if inside-runner<settings['ambiguity_margin'] and 'body_ambiguity' not in blockers:blockers.append('body_ambiguity')
-        result['decisions'].append(dict(people=sorted(component),outcome='blocked' if blockers else 'merge',
-            blockers=blockers,nearest_rival=nearest,
-            cores={p:[r['id'] for core in bank[p]['cores'] for r in core] for p in sorted(component)},
-            face_witnesses={p:bank[p]['face_ids'] for p in sorted(component)}))
-    if len(encoded(result))>config.data['sapiensid']['execution']['plan_bytes']:
-        raise ValueError('Global body proof exceeds sapiensid.execution.plan_bytes.')
-    return result
+                if not pair['blockers']:edges[a].add(b);edges[b].add(a)
+            components=[];seen=set();membership={}
+            for start in sorted(bank):
+                if start in seen or not edges[start]:continue
+                pending=[start];component=set()
+                while pending:
+                    current=pending.pop()
+                    if current in component:continue
+                    component.add(current);pending.extend(edges[current]-component)
+                seen.update(component)
+                membership.update((p,len(components)) for p in component)
+                components.append(sorted(component))
+            reserve(size(components)+size(membership))
+            rivals,goal_rivals=search.nearest([membership,focus],pairs)
+            result['nearest_competitors']=list(goal_rivals.values())
+            for people in components:
+                blockers=[];nearest=-1.
+                if any(b not in edges[a] for a in people for b in people if a!=b):
+                    blockers.append('incomplete_body_component')
+                for a in people:
+                    runner=rivals.get(a,{}).get('score',-1.);nearest=max(nearest,runner)
+                    inside=float('inf')
+                    for b in people:
+                        if a==b:continue
+                        key=tuple(sorted((a,b)));known=pairs.get(key)
+                        score=(known['score'] if known is not None else
+                            search.evidence.compare(bank[key[0]]['refs'],bank[key[1]]['refs'])[0])
+                        inside=min(inside,score)
+                    if inside-runner<settings['ambiguity_margin'] and 'body_ambiguity' not in blockers:
+                        blockers.append('body_ambiguity')
+                decision=dict(people=people,outcome='blocked' if blockers else 'merge',blockers=blockers,
+                    nearest_rival=nearest,cores={p:[r['id'] for core in bank[p]['cores'] for r in core] for p in people},
+                    face_witnesses={p:bank[p]['face_ids'] for p in people})
+                reserve(size(decision));result['decisions'].append(decision)
+            result['search']=dict(search.stats)
+        reserve(size(result['nearest_competitors'])+size(result['search']))
+        if len(encoded(result))>limit:raise ValueError('Global body proof exceeds sapiensid.execution.plan_bytes.')
+        return result
+    finally:
+        reservation.set(0)
 
 
 def _scenes(db,people):

@@ -108,12 +108,12 @@ def test_solver_repairs_body_gate_with_production_replay(tmp_path,monkeypatch,ga
 def test_body_goals_and_global_banks_count_same_timestamp_distinct_cues(tmp_path):
     from stash_ai.recognition.body_identity import rebuild
     from stash_ai.recognition.body_global import report
-    c,selected,_,_=seeded(tmp_path)
+    c,selected,_,people=seeded(tmp_path)
     with FaceDatabase(c.database) as state:
         db=state.connection
         db.execute('UPDATE body_observations SET seconds=0');db.commit()
         rebuild(state,selected,c,{s['scan']:[] for s in selected})
-        pairs=report(db,c,'scope',namespace(c))['pairs']
+        pairs=report(db,c,'scope',namespace(c),focus=set(people))['pairs']
         assert pairs and all(pair['support']==[3,3] for pair in pairs)
         goals=resolve(db,c,[['900']])
         assert len(goals['groups'][0]['members'][0]['identity_evidence']['core_units'])==3

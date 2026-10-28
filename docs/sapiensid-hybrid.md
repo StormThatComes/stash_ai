@@ -50,6 +50,7 @@ sapiensid:
     reference_bytes: 134217728
     plan_bytes: 16777216
     max_candidate_pairs: 100000
+    max_witness_comparisons: 1000000
   storage:
     retain_person_crops: true
 ```
@@ -353,6 +354,44 @@ Turning global consolidation off and rerunning the full involved scope restores
 the current scene partition for body-owned aliases only. Face-owned aliases are
 not removed. A body core wholly confirmed by an existing face bank records a
 local promotion alias even when global body consolidation is disabled.
+
+Global body matching first compares unnormalized mean vectors in bounded tiles.
+Only nominated identity pairs and explicitly requested diagnostic pairs receive
+full witness checks. A conservative rounding envelope preserves threshold-edge
+candidates; exact retained-vector scores still decide every acceptance gate.
+All identities remain eligible competitors, including under-supported and rejected
+merge candidates. Outsider maxima are found in tiled passes and near ties are
+checked exactly. Original-core, co-presence and face-contradiction vetoes remain.
+
+Reference selection happens before embedding loading. The planner keeps bank
+metadata and a bounded vector cache in RAM; float64 means are stored in a disposable
+SQLite index in the system temporary directory. Allow roughly 33 KiB of temporary
+disk space per identity (about 318 MiB for 10,000 identities). The index is removed
+on success, failure or interruption. No source database writes or inference are
+needed for reports. Repeated core checks reuse scores within the frozen pass.
+
+`sapiensid.execution.max_candidate_pairs` counts nominated identity pairs in the
+hybrid/global planners. `max_witness_comparisons` (default 1,000,000) separately
+limits exact vector comparisons per body scene or global pass, including original
+core and face checks. `reference_bytes` and `plan_bytes` still bound working
+references and retained proofs. Budget exhaustion raises an error before applying
+a global merge plan; no rivals or original witnesses are silently dropped.
+
+Global reports declare `pair_coverage: candidates_and_requested`: `pairs` is a
+sparse list, not an exhaustive list of every rejected pair. Pair reports and the
+solver explicitly request their target pairs even below the current threshold;
+`nearest_competitors` supplies their exact strongest external competitors.
+The `search` block separates identity-pair, centroid, candidate, exact-witness,
+embedding-read and cache-hit counts, with reserved reference bytes and index size.
+
+`python -m benchmarks.benchmark_body_global --identities 10000 --samples 16
+--matches 16 --threads 2` exercises the frozen planner without inference, source
+catalogue SQL or publication. Recorded synthetic results in `benchmarks/results/`
+verify the intended partition. Mean-vector nomination remains quadratic in the
+identity count, but no all-pairs witness expansion or retained N-by-N score graph
+is built. This benchmark does not certify end-to-end scanning time or recognition
+accuracy on a real 10,000-scene library; dense candidate graphs and large inherited
+witness banks can still reach their explicit budgets.
 
 
 ### Body portraits and offline tools

@@ -1,0 +1,27 @@
+{
+  "samples_per_identity": 16,
+  "dimensions": 4096,
+  "native_threads": 2,
+  "seconds": 24.82499988500058,
+  "expected_merges": 16,
+  "actual_merges": 16,
+  "identities": 10000,
+  "identity_pairs": 49995000,
+  "candidate_pairs": 16,
+  "body_witness_comparisons": 15360,
+  "face_witness_comparisons": 0,
+  "score_cache_hits": 16,
+  "embedding_reads": 160864,
+  "centroid_pairs": 51270840,
+  "reference_working_bytes": 95651652,
+  "centroid_disk_bytes": 332820480,
+  "previous_body_cross_products": 25597440000,
+  "limits": {
+    "batch_size": 1,
+    "reference_bytes": 134217728,
+    "plan_bytes": 16777216,
+    "max_candidate_pairs": 100000,
+    "max_witness_comparisons": 1000000
+  },
+  "limitations": "Synthetic full body planner: disk centroids, exact candidates, outsider guards.\n\nExcludes model inference, media, source catalogue SQL and Stash publication.\nSynthetic embeddings are generated on demand to avoid an N*references*4096 bank."
+}
