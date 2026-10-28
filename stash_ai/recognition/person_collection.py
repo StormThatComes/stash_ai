@@ -150,13 +150,23 @@ class PersonCollector:
 
 def audit_input(detector,image,face,path):
     """Export exact pre-normalization RGB input and measured model geometry."""
+    details=detector.observation_quality(image,face)
+    if details['identity_rejection'] is not None:return details
+    return _audit_prepared(image,face,details,detector.audit_input(image,face),path)
+
+
+def audit_person(detector,image,person,path,*,face=None,details=None):
+    from .sapiensid_v1 import prepare_person_input
+    bounds,points=detector.person_geometry(image,person,face)
+    with image.crop(bounds) as crop:prepared=prepare_person_input(crop,points)
+    return _audit_prepared(image,face,dict(details or {},person=person),prepared,path)
+
+
+def _audit_prepared(image,face,details,prepared,path):
     from PIL import Image
     from .alignment_audit import _png
     from .person_audit import export as export_annotations
-    details=detector.observation_quality(image,face)
-    if details['identity_rejection'] is not None:
-        return details
-    batch,points,mask=detector.audit_input(image,face)
+    batch,points,mask=prepared
     pixels=((batch[0].detach().cpu().permute(1,2,0).numpy()+1)*127.5).clip(0,255).round().astype('uint8')
     target=path.with_name(path.name+'-person-input.png')
     normalized_points=points[0].detach().cpu().tolist()

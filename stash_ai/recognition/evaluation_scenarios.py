@@ -68,6 +68,8 @@ def snapshot(target, config, labels):
     from .clustering import matching_policy
     from .decision_evidence import recorded, explanation
     members = dict(target.execute('SELECT observation,person FROM members'))
+    from .body_reports import members as body_members
+    members.update(body_members(target,config))
     predictions = {identifier: members.get(identifier) for identifier in labels}
     decisions, reasons = {}, Counter()
     for row in target.execute('SELECT * FROM candidates WHERE policy=? ORDER BY rowid', (matching_policy(config),)):
@@ -78,8 +80,17 @@ def snapshot(target, config, labels):
         reasons[payload.get('reason', 'unknown')] += 1
         decisions[identifier] = dict(status=row['status'], identity=row['person'],
             evidence=recorded(payload), explanation=explanation(payload))
+    from .body_identity import available,policy
+    if available(target):
+        for row in target.execute('SELECT * FROM body_members WHERE policy=?',(policy(config),)):
+            if row['observation'] not in labels:continue
+            proof=json.loads(row['proof']);reasons[proof.get('reason','unknown')]+=1
+            decisions[row['observation']]=dict(status=row['status'],identity=row['person'],evidence=proof,
+                evidence_kind='person',explanation='Recorded independent person decision.')
     for identifier in labels.keys() - decisions.keys():
-        rejected = target.execute('SELECT rejected FROM observations WHERE id=?', (identifier,)).fetchone()[0]
+        row=target.execute('SELECT rejected FROM observations WHERE id=?',(identifier,)).fetchone()
+        if row is None and available(target):row=target.execute('SELECT rejected FROM body_observations WHERE id=?',(identifier,)).fetchone()
+        rejected=row[0] if row is not None else 'missing_observation'
         decisions[identifier] = dict(status='rejected' if rejected else 'withheld', identity=None,
             evidence=dict(observation=identifier, reason=rejected or 'no_assignment_decision'),
             explanation='No accepted production decision for this retained observation.')

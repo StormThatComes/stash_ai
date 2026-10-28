@@ -58,8 +58,9 @@ clustering:
   max_people_per_lookup: 20000
   max_reference_bytes: 134217728 # 128 MiB of float32 references; run reports usage/peak. Not total RAM/VRAM.
 portraits:
+  kind: auto                  # auto: prefer a good face, otherwise an accepted person crop; face or person forces one kind.
   enabled: true               # false removes app-owned portraits for selected accepted people.
-  anchor_only: false          # true requires the actual portrait face to pass clustering anchor pose/visibility rules.
+  anchor_only: false          # true requires face anchor quality or an accepted person anchor.
   source: vtt                  # Default: recognition thumbnail. Optional video uses FFmpeg.
   # Quality targets are ranking preferences: imperfect faces still supply a portrait.
   # detection.* remains the separate hard gate for recognition observations.

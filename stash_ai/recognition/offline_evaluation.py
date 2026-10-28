@@ -112,6 +112,9 @@ def evaluate(config, labels, *, scenes=None, scope=None, variants=None, batch_si
         known = {r['id']: dict(observation=r['id'], scene=r['scene'], truth=labels[r['id']])
                  for r in source.execute('SELECT o.id,s.scene FROM observations o JOIN scans s ON s.id=o.scan '
                     'WHERE o.scan IN (SELECT value FROM json_each(?))', (wanted,)) if r['id'] in labels}
+        from .body_reports import observations as body_observations
+        known.update((oid,dict(observation=oid,scene=scene,truth=labels[oid]))
+            for oid,scene in body_observations(source,config,[s['id'] for s in scans]).items() if oid in labels)
         if set(known) != set(labels):
             raise ValueError('Every truth label must address an observation in the selected latest scans.')
         for name, variant in configurations.items():

@@ -32,6 +32,11 @@ def _identity(db, requested, person, group, config):
     scenes = [r[0] for r in db.execute('SELECT DISTINCT s.scene FROM members m '
         'JOIN observations o ON o.id=m.observation JOIN scans s ON s.id=o.scan '
         'WHERE m.person=? ORDER BY CAST(s.scene AS INTEGER),s.scene', (person['id'],))]
+    from .body_reports import goal_rows
+    bodies=goal_rows(db,config,person['id'])
+    counts['person_members']=len(bodies)
+    counts['person_anchors']=sum(r['sample_role']=='anchor' for r in bodies)
+    scenes=sorted(set(scenes)|{r['scene'] for r in bodies},key=int)
     samples = []
     if group is not None:
         rows = {r['id']: r for r in db.execute('SELECT o.id,s.scene,o.cue,o.seconds,o.quality FROM observations o '
@@ -65,13 +70,15 @@ def build(config, left_id, right_id, *, scope=None, by_performer=False, simulate
         identities = (left['id'], right['id'])
         from .hybrid_evidence import report as hybrid_report
         hybrid = hybrid_report(db,config,left['scope'],model_namespace,focus=set(identities))
+        from .body_global import report as person_report
+        independent_person=person_report(db,config,left['scope'],model_namespace)
         result = dict(format=1, kind='recognition_identity_merge', scope=left['scope'],
             namespace=model_namespace, matching_policy=matching_policy(config),
             requested_identity_ids=[requested_left['id'], requested_right['id']], identity_ids=list(identities),
             requested_performer_ids=[requested_left['performer'], requested_right['performer']],
             performer_ids=[left['performer'], right['performer']],
             current_configuration={key: plain(config.data[key]) for key in ('detection', 'recognition', 'clustering')},
-            paths=[], recommendations=[], hybrid=hybrid,
+            paths=[], recommendations=[], hybrid=hybrid, independent_person=independent_person,
             analysis_basis='production_frozen_catalogue_counterfactual',
             guarantees_full_rebuild_merge=False,
             limitations=[
@@ -112,6 +119,10 @@ def build(config, left_id, right_id, *, scope=None, by_performer=False, simulate
         if config.data['sapiensid']['enabled']:
             from .hybrid_report import analyse as hybrid_analyse
             result['paths'].append(hybrid_analyse(db,config,identities,left['scope'],model_namespace))
+        from .body_identity import enabled as body_enabled
+        if body_enabled(config):
+            from .body_merge_report import analyse as body_analyse
+            result['paths'].append(body_analyse(db,config,identities,left['scope'],model_namespace))
         for path in result['paths']:
             for item in path['recommendations']:
                 component = item['verification']['shared_component']
@@ -129,7 +140,7 @@ def build(config, left_id, right_id, *, scope=None, by_performer=False, simulate
             requires_identity_rebuild=True, portraits_only_is_sufficient=False)
         result['evidence_actions'] = []
         for person in result['identities']:
-            if not person['selected_strict_references']:
+            if not person['selected_strict_references'] and not person['person_anchors']:
                 result['evidence_actions'].append(dict(identity_id=person['identity_id'],
                     reason='no_current_strict_references',
                     action='Inspect anchor quality, latest scan compatibility and recorded assignment roles. '

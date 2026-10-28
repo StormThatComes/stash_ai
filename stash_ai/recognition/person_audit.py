@@ -37,7 +37,7 @@ def export(image, model_image, face, person, normalized_points, path):
     from .alignment_audit import _png
     source_path = path.with_name(path.name+'-person-source.png')
     input_path = path.with_name(path.name+'-person-input-annotated.png')
-    source_points = list(person['keypoints']) + list(face.landmarks)
+    source_points = list(person['keypoints']) + (list(face.landmarks) if face is not None else [(-1,-1)]*5)
     with image.convert('RGB') as source:
         source_drawn = _draw(source, person['bounds'], source_points)
         _png(source, source_path)

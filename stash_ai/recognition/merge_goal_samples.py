@@ -84,7 +84,7 @@ def attach(goals, result, observations, predicted):
         face, body = {}, {}
         for role in ROLES:
             selected = [r for r in rows if r['sample_role'] == role]
-            face[role] = assignment(selected, observations, predicted, destination, owners)
+            face[role] = assignment([r for r in selected if r.get('evidence_kind','face')=='face'], observations, predicted, destination, owners)
             states = Counter(r['body_state'] for r in selected)
             ready = [r for r in selected if r['body_state'] == 'ready']
             body[role] = dict(availability={s: states[s] for s in BODY_STATES},
@@ -119,7 +119,8 @@ def lines(group):
         result.append('    SapiensID: disabled')
         return result
     for role in ROLES:
-        item, total = data['sapiensid'][role], data['face'][role]['total']
+        item = data['sapiensid'][role]
+        total = sum(item['availability'].values())
         if role == 'other' and not total:
             continue
         states = item['availability']

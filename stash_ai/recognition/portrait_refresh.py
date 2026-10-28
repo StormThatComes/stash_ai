@@ -89,6 +89,23 @@ def retained_targets(database, config, scope, scene_ids=None, *, performer_ids=N
                 target=ready.setdefault(row['id'],dict(person=row['id'],performer=row['performer'],scans=[]))
                 item=dict(scene=row['scene'],scan=row['scan'])
                 target['scans'].append(item)
+    from .body_identity import enabled,available,policy
+    from .body_observations import contract
+    if enabled(config) and available(database.connection):
+        from .scan_heads import predicate as current_scan
+        rows=database.connection.execute("SELECT DISTINCT p.id,p.performer,s.scene,s.id AS scan FROM people p "
+            "JOIN body_members m ON m.person=p.id JOIN body_observations b ON b.id=m.observation "
+            "JOIN scans s ON s.id=b.scan WHERE p.scope=? AND p.namespace=? AND p.performer IS NOT NULL "
+            "AND s.scope=p.scope AND s.namespace=p.namespace AND s.status='complete' AND b.rejected IS NULL "
+            "AND m.status='accepted' AND m.policy=? AND b.contract=? "
+            "AND NOT EXISTS (SELECT 1 FROM identity_merges a WHERE a.source=p.id) AND "+current_scan(),
+            (scope,namespace(config),policy(config),contract(config)))
+        for row in rows:
+            if scene_ids is not None and row['scene'] not in scene_ids:continue
+            if performer_ids is not None and row['performer'] not in performer_ids:continue
+            target=ready.setdefault(row['id'],dict(person=row['id'],performer=row['performer'],scans=[]))
+            item=dict(scene=row['scene'],scan=row['scan'])
+            if item not in target['scans']:target['scans'].append(item)
     for target in ready.values():
         target['scans'].sort(key=lambda item:(item['scene'],item['scan']))
     ready=dict(sorted(ready.items()))

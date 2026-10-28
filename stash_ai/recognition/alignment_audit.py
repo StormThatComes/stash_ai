@@ -158,6 +158,7 @@ def audit_scene(source, detector, config, scene_id, directory, *, maximum=None, 
     if measurement_required(config) and visibility is None:
         raise VisibilityError('Alignment audit requires FaceOcc for detection.min_visible_face_fraction.')
     stats, reasons, samples, sizes, coverages = Counter(), Counter(), [], [], []
+    body_samples=[]
     subdir = directory / ('scene-' + scene_id)
     subdir.mkdir(mode=0o700, exist_ok=False)
     with closing(source.frames(), name='close alignment audit frames') as frames:
@@ -216,6 +217,26 @@ def audit_scene(source, detector, config, scene_id, directory, *, maximum=None, 
                         'person_input': person_input,
                         'images': images,
                     })
+                from .body_observations import enabled as body_enabled
+                if body_enabled(config) and hasattr(detector,'frame_people'):
+                    from .body_collection import quality as body_quality
+                    from .sapiensid_backend import associate,association_choices
+                    from .person_collection import audit_person
+                    people=detector.frame_people
+                    matches=associate(faces,people);choices=association_choices(faces,people)
+                    for person_index,person in enumerate(people):
+                        stats['persons_detected']+=1
+                        # Associated passing faces already have an exact person input.
+                        face_index=next((i for i,m in enumerate(matches) if m==person_index),None)
+                        if face_index is not None and any(s['cue_index']==index and s['face_index']==face_index for s in samples):continue
+                        measured,rejected=body_quality(image,person,people,config.data['sapiensid']['collection'])
+                        if face_index is None and any(person_index in c for c in choices):rejected='person_face_association_ambiguous'
+                        if (selected is not None and index not in selected) or (maximum is not None and len(body_samples)>=maximum):continue
+                        name=f'cue-{index:05d}-body-{person_index:03d}'
+                        details=dict(person=person,quality=measured,identity_rejection=rejected,face_status='absent_or_rejected')
+                        if rejected is None:details=audit_person(detector,image,person,subdir/name,details=details)
+                        body_samples.append(dict(cue_index=index,seconds=float(cue.start),person_index=person_index,
+                            evidence_kind='person',person_input=details))
     return {
         'scene_id': scene_id, 'total_selected_vtt_cues': total,
         'sampling': ('explicit_indices' if cue_indices is not None else
@@ -226,7 +247,7 @@ def audit_scene(source, detector, config, scene_id, directory, *, maximum=None, 
         'sampled_faces': len(samples),
         'median_source_face_pixels_all_detections': statistics.median(sizes) if sizes else None,
         'median_alignment_source_coverage_saved': statistics.median(coverages) if coverages else None,
-        'samples': samples,
+        'samples': samples, 'person_samples':body_samples,
     }
 
 
