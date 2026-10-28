@@ -138,13 +138,26 @@ def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=N
                         state = SimpleNamespace(connection=target, installation=installation)
                         from .progress import observe_stages
                         last_stage = [0.]
+                        active_stage = 'Rebuild selected identities'
                         def stage_update(label):
+                            nonlocal active_stage
+                            active_stage = label
                             now = time.monotonic()
                             if progress and now-last_stage[0] >= 1.:
                                 last_stage[0] = now
                                 progress(name, 'stage: '+label, None)
-                        with observe_stages(stage_update if progress else None):
-                            rebuild_selected(state, [dict(scene=s['scene'], scan=s['id']) for s in scans], settings)
+                        try:
+                            with observe_stages(stage_update):
+                                rebuild_selected(state, [dict(scene=s['scene'], scan=s['id']) for s in scans], settings)
+                        except Exception as exc:
+                            # The last printed stage can lag behind. Preserve the
+                            # original exception and expose locations, never locals.
+                            from pathlib import Path
+                            from traceback import extract_tb
+                            frames = extract_tb(exc.__traceback__, limit=-5)
+                            location = ' -> '.join(f'{Path(f.filename).name}:{f.lineno} ({f.name})' for f in frames)
+                            exc.add_note(f'Recognition replay {name}; stage: {active_stage}; location: {location}')
+                            raise
                         predictions = dict.fromkeys(observations)
                         predictions.update((r[0], r[1]) for r in target.execute('SELECT observation,person FROM members')
                                            if r[0] in observations)
