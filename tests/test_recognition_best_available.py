@@ -297,7 +297,7 @@ def test_cold_replay_portrait_uses_the_face_assigned_to_current_cluster(tmp_path
         assert db.connection.execute("SELECT COUNT(*) FROM candidates c JOIN scans s ON s.id=c.scan WHERE s.scene='3' AND c.status='withheld'").fetchone()[0] == 3
 
 
-def test_impossible_ratio_and_byte_budget_adapt_framing_without_upscaling():
+def test_extreme_ratio_and_byte_budget_keep_ratio_without_upscaling():
     policy = defaults()['portraits']
     policy.update(aspect_ratio=.1, jpeg_quality=100)
     pixels = np.random.default_rng(23).integers(0, 256, (500, 500, 3), dtype='uint8')
@@ -305,7 +305,8 @@ def test_impossible_ratio_and_byte_budget_adapt_framing_without_upscaling():
     details = {}
     with Image.fromarray(pixels) as image:
         data, bounds = portrait_bytes(image, face, policy, limit=1024, details=details)
-    assert len(data) <= 1024 and details['aspect_ratio_adjusted'] and details['downscaled']
+    assert len(data) <= 1024 and details['downscaled']
+    assert image_size(data)[0] / image_size(data)[1] == .1
     assert image_size(data) == tuple(details['pixels'])
     assert image_size(data)[0] <= bounds[2]-bounds[0] and image_size(data)[1] <= bounds[3]-bounds[1]
 

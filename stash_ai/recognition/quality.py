@@ -142,6 +142,7 @@ def crop_bytes(image, detection, *, margin=.15, limit=1048576, details=None):
 
 def portrait_bytes(image, detection, policy, *, limit, details=None):
     """Frame from the full source; padding may shrink at its edges, never upscale."""
+    from .portrait_framing import aspect_size
     x, y, width, height = detection.box
     if min(image.width, x + width) <= max(0., x) or min(image.height, y + height) <= max(0., y):
         raise PortraitFramingError('Portrait has no real face pixels.')
@@ -151,17 +152,15 @@ def portrait_bytes(image, detection, policy, *, limit, details=None):
         wanted_width, wanted_height = max(wanted_width, wanted_height * ratio), max(wanted_height, wanted_width / ratio)
         scale = min(1., image.width / wanted_width, image.height / wanted_height)
         wanted_width, wanted_height = wanted_width * scale, wanted_height * scale
-        if wanted_width < width or wanted_height < height:
-            # Preserve the visible face instead of discarding it to enforce an
-            # impossible ratio. The requested ratio remains in policy metadata.
-            wanted_width, wanted_height = width * (1 + 2 * policy['margin']), height * (1 + 2 * policy['margin'])
-            if details is not None:
-                details['aspect_ratio_adjusted'] = True
+        wanted_width, wanted_height = aspect_size(wanted_width, wanted_height, ratio)
     wanted_width, wanted_height = min(image.width, wanted_width), min(image.height, wanted_height)
     left = max(0., min(x + width / 2 - wanted_width / 2, image.width - wanted_width))
     top = max(0., min(y + height / 2 - wanted_height / 2, image.height - wanted_height))
     bounds = (int(left), int(top), min(image.width, math.ceil(left + wanted_width)),
               min(image.height, math.ceil(top + wanted_height)))
+    if ratio is not None:
+        # Round the origin, not both edges independently: dimensions stay fixed.
+        bounds = (round(left), round(top), round(left)+wanted_width, round(top)+wanted_height)
     if bounds[2] <= bounds[0] or bounds[3] <= bounds[1]:
         raise PortraitFramingError('Portrait has no real source pixels.')
     if details is not None:
@@ -188,7 +187,11 @@ def encode_portrait(image, policy, *, limit, details=None):
     try:
         while len(data) > limit and resized.size != (1, 1):
             factor = min(.9, math.sqrt(limit / len(data)) * .9)
-            smaller = resized.resize((max(1, int(resized.width * factor)), max(1, int(resized.height * factor))))
+            size = max(1, int(resized.width * factor)), max(1, int(resized.height * factor))
+            if policy.get('aspect_ratio') is not None:
+                from .portrait_framing import aspect_size
+                size = aspect_size(*size, policy['aspect_ratio'])
+            smaller = resized.resize(size)
             if resized is not rgb:
                 resized.close()
             resized = smaller

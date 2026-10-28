@@ -1298,7 +1298,7 @@ portraits:
   enabled: true
   source: vtt             # Default; use video for FFmpeg frame extraction.
   margin: 0.35            # Add 35% of face width/height on each side.
-  aspect_ratio: null     # Keep padded face shape; 0.8 requests a 4:5 portrait.
+  aspect_ratio: null     # Keep natural crop; 0.8 enforces 4:5 for faces and bodies.
   jpeg_quality: 90       # Integer 1..100.
   min_visible_face_fraction: 0.80
   weights:
@@ -1308,10 +1308,18 @@ portraits:
 The default requested VTT portrait is 1.7 times the detected face width/height,
 compared with the recognition cache crop's 1.3 times. Padding is limited by the
 full thumbnail boundaries. An optional width/height aspect ratio expands the
-crop, shifts it inside the source, and reduces padding if necessary. If the
-requested ratio would cut the face, the crop uses the available padded face
-shape instead. `jpeg_quality` is preferred: encoding lowers JPEG quality and,
-if needed, image dimensions to fit `storage.max_crop_bytes`, without upscaling.
+crop, shifts it inside the source, and reduces padding if necessary. The ratio
+remains an output constraint even when the available source cannot contain the
+entire face at that ratio: the crop stays centered on the face within the source.
+Body portraits apply the same ratio to the retained person crop, using measured
+nose/eye/ear points with clearance to keep the head when possible. Without usable
+head points, a shorter crop keeps the top of the person. Cropping cannot restore
+a head already outside the retained source. `null` keeps natural framing.
+`jpeg_quality` is preferred: encoding lowers JPEG quality and, if needed, image
+dimensions to fit `storage.max_crop_bytes`, without upscaling. Common ratios use
+exact integer multiples; arbitrary ratios or very small images are limited by
+whole-pixel rounding. Cached JPEGs with incompatible dimensions are regenerated
+from available source pixels rather than reused.
 Changing that budget invalidates only the portrait encoding policy. Compatible,
 digest-verified cached JPEG pixels can be re-encoded without another face-model
 call or video decode; the historical JPEG and source coordinates are preserved.
@@ -1540,8 +1548,9 @@ is confirmed. Lost removal responses are reconciled by observing absence; if the
 old image remains, `--retry-unresolved-images` explicitly permits another attempt.
 
 Source/decoder failures try the fallback chain before preserving the current
-image. Impossible configured aspect ratios adapt to the available face shape;
-oversized JPEGs lower quality or dimensions while respecting the byte budget.
+image. Configured aspect ratios constrain the crop even when some subject pixels
+must be omitted; oversized JPEGs lower quality or dimensions while respecting
+the ratio and byte budget.
 There is no quality-rejection removal path.
 
 If output says `Earlier image write is unresolved`, the previous attempt may

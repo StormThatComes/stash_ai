@@ -94,7 +94,7 @@ def test_quality_goals_keep_a_photo_and_only_disabling_removes_it(tmp_path, monk
     config.source_path.write_text(original_config)
     assert run(load(config.source_path), services, '1') == 0
     assert stash.images[performer] == original_image
-    assert len(image_writes(stash)) == (3 if restriction == 'disabled' or restriction == 'visibility' and source == 'vtt' else 1)
+    assert len(image_writes(stash)) == (3 if restriction in ('disabled', 'framing') or restriction == 'visibility' and source == 'vtt' else 1)
 
 
 @pytest.mark.parametrize('disabled', [False, True])
