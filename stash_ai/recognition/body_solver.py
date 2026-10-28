@@ -16,38 +16,53 @@ def options_and_quality(db,config,goals):
     from .merge_solver_search import gate_values
     from .merge_solver_options import compact
     from .scan_heads import predicate as current_scan
+    from .person_anchor import pixels,PIXEL_PARAMETER
+    from .person_signal import contract as person_contract,available as persons_available
+    from itertools import chain
     domains=registry(config)
     options={key:list(gate_values(key,parameter(config.data,key),(),domain=domains[key])) for key in active(config)}
     # dHash distances are small integers. Every valid boundary is cheap to
     # explore, without building a quadratic matrix of all retained crops.
-    options['sapiensid.identities.min_appearance_distance']=list(range(65))
+    if 'sapiensid.identities.min_appearance_distance' in options:
+        options['sapiensid.identities.min_appearance_distance']=list(range(65))
     people=sorted({m['identity_id'] for g in goals['groups'] for m in g['members']})
-    rows=db.execute('SELECT b.quality FROM body_observations b JOIN body_members m ON m.observation=b.id '
+    body_rows=db.execute('SELECT b.quality FROM body_observations b JOIN body_members m ON m.observation=b.id '
         'JOIN scans s ON s.id=b.scan WHERE m.person IN (SELECT value FROM json_each(?)) '
         "AND s.scope=? AND s.namespace=? AND s.status='complete' AND b.contract=? "
         'AND b.rejected IS NULL AND b.embedding IS NOT NULL AND '+current_scan()+' ORDER BY b.id',
-        (encoded(people),goals['scope'],goals['namespace'],contract(config)))
+        (encoded(people),goals['scope'],goals['namespace'],contract(config))) if enabled(config) and available(db) else ()
+    face_rows=db.execute('SELECT e.metadata AS quality FROM person_evidence e JOIN observations o ON o.id=e.observation '
+        'JOIN members m ON m.observation=o.id JOIN scans s ON s.id=o.scan '
+        'WHERE m.person IN (SELECT value FROM json_each(?)) AND s.scope=? AND s.namespace=? '
+        "AND s.status='complete' AND o.rejected IS NULL AND e.contract=? AND e.status='ready' AND "+current_scan(),
+        (encoded(people),goals['scope'],goals['namespace'],person_contract(config))) if PIXEL_PARAMETER in options and persons_available(db) else ()
     joint={}
-    for row in rows:
+    for row in chain(body_rows,face_rows):
         quality=json.loads(row['quality']).get('quality',{})
         for field,key in (('keypoints','sapiensid.identities.anchor_min_keypoints'),
-                          ('sharpness','sapiensid.identities.anchor_min_sharpness')):
-            value=quality.get(field);domain=domains[key]
+                          ('sharpness','sapiensid.identities.anchor_min_sharpness'),('pixels',PIXEL_PARAMETER)):
+            if key not in options:continue
+            value=pixels(row['quality']) if field=='pixels' else quality.get(field);domain=domains[key]
             if type(value) not in (int,float) or not domain.low<=value<=domain.high:continue
             values=([int(value),int(value)+1] if domain.kind is int else sides(value,upper=domain.high))
             options[key].extend(domain.project(v) for v in values)
-            if value<parameter(config.data,key):joint[key]=min(joint.get(key,value),value)
+            if value<parameter(config.data,key):
+                admitted=domain.project(int(value) if domain.kind is int else value)
+                joint[key]=min(joint.get(key,admitted),admitted)
         if any(len(values)>256 for values in options.values()):options=compact(config,{},options)
     return compact(config,{},options),([joint] if joint else [])
 
 
 def analyse(db,config,goals):
     output=dict(options={},proposals=[],evidence=dict(enabled=False,pairs=[]))
+    if not active(config):return output
+    output['options'],quality_proposals=options_and_quality(db,config,goals)
+    output['proposals']=quality_proposals
     if not enabled(config) or not available(db):return output
     owners={m['identity_id']:g.get('index',i) for i,g in enumerate(goals['groups']) for m in g['members']}
     evidence=report(db,config,goals['scope'],goals['namespace'],focus=owners)
     output['evidence']=evidence
-    output['options'],quality_proposals=options_and_quality(db,config,goals)
+    output['proposals']=[]
     proposals=[]
     for pair in evidence['pairs']:
         a,b=pair['people']

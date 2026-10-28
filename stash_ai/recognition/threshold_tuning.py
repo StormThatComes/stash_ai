@@ -31,9 +31,12 @@ def configurations(config, grid, maximum):
         raise ValueError('max_trials must be an integer from 1 to 1024, including baseline.')
     if not isinstance(grid, dict) or not grid or set(grid)-PARAMETERS:
         raise ValueError('Grid must contain supported recognition/clustering/sapiensid threshold parameters.')
-    if any(not isinstance(v, list) or not v or any(type(x) not in (int, float) or not math.isfinite(x)
-            for x in v) for v in grid.values()):
-        raise ValueError('Each grid parameter requires a nonempty array of finite numbers.')
+    from .person_anchor import PIXEL_PARAMETER
+    if any(not isinstance(v, list) or not v or any(
+            not (x is None and k==PIXEL_PARAMETER) and (type(x) not in (int, float) or not math.isfinite(x))
+            for x in v) for k,v in grid.items()):
+        raise ValueError('Each grid parameter requires a nonempty array of finite numbers; '
+                         'null is also allowed for '+PIXEL_PARAMETER+'.')
     # Refuse oversized Cartesian products before materializing or running trials.
     if math.prod(len(v) for v in grid.values()) + 1 > maximum:
         raise ValueError('Grid exceeds max_trials (including baseline).')

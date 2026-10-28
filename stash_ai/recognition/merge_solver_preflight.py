@@ -14,7 +14,7 @@ def cells(values, *, integer=False):
 
 def boundary_probes(changes, options):
     for key,values in options.items():
-        for value in cells(values,integer=key.endswith(('support','keypoints','appearance_distance'))):
+        for value in cells(values,integer=key.endswith(('support','keypoints','appearance_distance','person_pixels'))):
             yield dict(changes,**{key:value})
 
 

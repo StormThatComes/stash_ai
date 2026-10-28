@@ -17,6 +17,8 @@ GATES = {'face_floor': (PREFIX+'face_floor',), 'person_threshold': (PREFIX+'pers
 GATES.update({
     'body_scene_core':('sapiensid.identities.min_support','sapiensid.identities.min_appearance_distance'),
     'body_anchor_quality':('sapiensid.identities.anchor_min_keypoints','sapiensid.identities.anchor_min_sharpness'),
+    'body_anchor_pixels':('sapiensid.identities.anchor_min_person_pixels',),
+    'body_anchor_pixels_missing':(),
     'body_group_ambiguous':('sapiensid.identities.cohesion_threshold','sapiensid.identities.ambiguity_margin'),
     'ambiguous_or_insufficient_face_body_bank':tuple('sapiensid.identities.'+k for k in
         ('match_threshold','cohesion_threshold','ambiguity_margin','attach_min_support','min_appearance_distance')),
@@ -26,7 +28,7 @@ GATES.update({
     'body_ambiguity':('sapiensid.global_matching.ambiguity_margin',),
 })
 HARD = {'missing_person_evidence','missing_original_core_evidence','invalid_alignment',
-        'unknown_competitor','no_within_set_query_reference','person_copresence','missing_original_body_witness'}
+        'unknown_competitor','no_within_set_query_reference','person_copresence','missing_original_body_witness','body_anchor_pixels_missing'}
 
 
 def round_robin(groups):

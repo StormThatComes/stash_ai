@@ -68,7 +68,7 @@ def spread(values, current):
 
 
 def gate_values(key, current, measured, *, domain=None):
-    if key.endswith(('min_support','min_keypoints','min_appearance_distance')):
+    if key.endswith(('min_support','min_keypoints','min_appearance_distance','min_person_pixels')):
         low=0 if key.endswith('min_appearance_distance') else 1
         local = (max(low, current-1), max(low, current//2), low, current+1)
     elif key.endswith('sharpness'):

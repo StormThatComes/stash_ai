@@ -240,6 +240,8 @@ def matching_policy(config):
     return policy_digest(config, f'matching-v{MATCHING_FORMAT}', lambda: {
         **({'hybrid': {'contract': contract(config),
                       'matching': config.data['sapiensid']['matching']}} if config.data['sapiensid']['enabled'] else {}),
+        **({'body_anchor_pixels':config.data['sapiensid']['identities']['anchor_min_person_pixels']}
+           if config.data['sapiensid']['enabled'] and config.data['sapiensid']['identities']['anchor_min_person_pixels'] is not None else {}),
         **({'body': {'local':config.data['sapiensid']['identities'],'global':config.data['sapiensid']['global_matching']}} if config.data['sapiensid']['identities']['enabled'] else {}),
         'format': MATCHING_FORMAT, 'recognition': config.data['recognition'],
         'clustering': {key:value for key,value in config.data['clustering'].items()

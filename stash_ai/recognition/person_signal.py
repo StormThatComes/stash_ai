@@ -60,6 +60,9 @@ def validate(settings):
         if type(identity[key]) is not int or not low<=identity[key]<=high:
             raise ValueError('Invalid sapiensid.identities.'+key)
     _number(identity['anchor_min_sharpness'],'sapiensid.identities.anchor_min_sharpness',0,1000000)
+    minimum=identity['anchor_min_person_pixels']
+    if minimum is not None and (type(minimum) is not int or not 1<=minimum<=8192):
+        raise ValueError('sapiensid.identities.anchor_min_person_pixels must be null or an integer in [1,8192].')
     global_matching=settings['global_matching']
     if type(global_matching['enabled']) is not bool or global_matching['enabled'] and not identity['enabled']:
         raise ValueError('sapiensid.global_matching.enabled requires body identities.')

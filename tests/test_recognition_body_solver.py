@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 
 from stash_ai.recognition.body_parameters import LOCAL,GLOBAL,PARAMETERS
+from stash_ai.recognition.person_anchor import PIXEL_PARAMETER
 from stash_ai.recognition.body_solver import analyse
 from stash_ai.recognition.database import FaceDatabase,encoded
 from stash_ai.recognition.fragmentation_report import _open_readonly
@@ -19,6 +20,7 @@ from tests.test_recognition_body_integration import seeded
 def test_all_retained_body_parameters_reach_search_and_tpe_dimensions(tmp_path):
     c,_,_,_=seeded(tmp_path)
     c.data['sapiensid']['identities']['min_appearance_distance']=4
+    c.data['sapiensid']['identities']['anchor_min_person_pixels']=96
     with _open_readonly(c.database) as db:
         goals=resolve(db,c,[['900','901'],['902']])
         hints=analyse(db,c,goals)
@@ -46,7 +48,7 @@ def test_disabled_routes_and_input_portrait_settings_are_not_solver_dimensions(t
     c.data['sapiensid']['global_matching']['enabled']=False
     with _open_readonly(c.database) as db:
         hints=analyse(db,c,resolve(db,c,[['900']]))
-    assert hints['options'].keys()==set(LOCAL)
+    assert hints['options'].keys()==set(LOCAL)-{PIXEL_PARAMETER}
     assert not set(GLOBAL)&registry(c).keys()
     assert not any('.collection.' in k or k.startswith('portraits.') for k in registry(c))
     c.data['sapiensid']['identities']['enabled']=False
@@ -57,9 +59,11 @@ def test_tpe_samples_body_quality_and_deduplication_in_their_native_domains(tmp_
     pytest.importorskip('optuna')
     from stash_ai.recognition.merge_solver_sampler import create
     c,_,_,_=seeded(tmp_path)
+    c.data['sapiensid']['identities']['anchor_min_person_pixels']=96
     options={'sapiensid.identities.'+key:values for key,values in {
         'attach_min_support':[1,2,5], 'min_appearance_distance':[0,4,64],
         'anchor_min_keypoints':[1,10,17], 'anchor_min_sharpness':[0.,100.,200.],
+        'anchor_min_person_pixels':[64,96,128],
     }.items()}
     history=[({},(0,))]
     patch=create('tpe',42).suggest(c,history,options,{},15)

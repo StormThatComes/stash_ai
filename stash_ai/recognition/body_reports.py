@@ -5,6 +5,7 @@ from collections import Counter
 from .body_identity import available, enabled, policy, anchor
 from .body_observations import contract, coverage
 from .database import encoded
+from .person_anchor import pixel_gate
 
 
 def observations(db,config,scans):
@@ -87,6 +88,7 @@ def export_members(db,config,person,directory):
             contract=row['contract'],contract_matches_current=row['contract']==contract(config),
             quality=quality,geometry=geometry,retained_rejection=row['rejected'],image=image,
             assignment=dict(role=row['role'],status=row['assignment_status']),decision=json.loads(row['proof']),
+            anchor_pixel_gate=pixel_gate(row['quality'],config.data['sapiensid']['identities']),
             policy_matches_current=row['policy']==policy(config),
             current_anchor_eligible=(row['assignment_status']=='accepted' and row['role']=='anchor' and
                 row['policy']==policy(config) and row['contract']==contract(config) and row['rejected'] is None)))

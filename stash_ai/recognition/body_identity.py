@@ -9,6 +9,7 @@ from .config import digest,plain
 from .database import encoded
 from .identity_merges import canonical
 from .progress import tracking
+from .person_anchor import pixel_gate
 
 
 
@@ -16,7 +17,7 @@ from .progress import tracking
 def defaults():
     return dict(enabled=False,match_threshold=.85,cohesion_threshold=.80,ambiguity_margin=.1,
                 min_support=3,attach_min_support=2,min_appearance_distance=4,
-                anchor_min_keypoints=6,anchor_min_sharpness=25.)
+                anchor_min_keypoints=6,anchor_min_sharpness=25.,anchor_min_person_pixels=None)
 
 
 def enabled(config):
@@ -45,7 +46,8 @@ def quality(row):
 
 def anchor(row,settings):
     q=quality(row)
-    return q.get('keypoints',0)>=settings['anchor_min_keypoints'] and q.get('sharpness',0)>=settings['anchor_min_sharpness']
+    return (q.get('keypoints',0)>=settings['anchor_min_keypoints'] and q.get('sharpness',0)>=settings['anchor_min_sharpness']
+            and (settings['anchor_min_person_pixels'] is None or pixel_gate(row['quality'],settings)['eligible']))
 
 
 def independent(rows,settings):
@@ -155,7 +157,10 @@ def scene_plan(db,scan,config):
         ranked=sorted([(scores.compare([row],g),p,g) for p,g in banks],key=lambda x:(-x[0][0],x[1]))
         best=ranked[0] if ranked else None;runner=ranked[1][0][0] if len(ranked)>1 else -1.
         good=best and best[0][0]>=settings['match_threshold'] and best[0][1]>=settings['cohesion_threshold'] and best[0][0]-runner>=settings['ambiguity_margin'] and not copresent([row],best[2])
-        decisions[row['id']]=dict(person=best[1] if good else None,status='accepted' if good else 'withheld',role='auxiliary',reason='body_core_attachment' if good else 'body_anchor_quality')
+        decisions[row['id']]=dict(person=best[1] if good else None,status='accepted' if good else 'withheld',role='auxiliary',
+            reason='body_core_attachment' if good else pixel_gate(row['quality'],settings)['reason'] or 'body_anchor_quality')
+    if settings['anchor_min_person_pixels'] is not None:
+        for row in rows:decisions[row['id']]['anchor_pixel_gate']=pixel_gate(row['quality'],settings)
     return record,rows,decisions
 
 
