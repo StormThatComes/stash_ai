@@ -363,7 +363,11 @@ selection to faces; `person` uses only retained person crops without loading fac
 pose, visibility or identity models. `portraits.anchor_only: true` requires a body
 anchor for person crops, including after global aliases downgrade source samples.
 Body ranking uses overlap, clipped borders, sharpness, visible keypoints and source
-resolution. It preserves the actual crop aspect ratio and never invents a face.
+resolution. It applies `portraits.aspect_ratio` to the retained crop, keeping
+measured head landmarks with clearance where possible and preferring the top
+when head points are unavailable. `null` preserves the original crop shape.
+The source evidence remains unchanged; portrait metadata records the applied
+crop in retained-person coordinates. It never invents a face.
 `retain_person_crops: false` leaves no offline body portrait candidate.
 
 Person portraits use the same ownership tokens, intent-before-write, digest checks,

@@ -21,7 +21,7 @@ def eligible(db, config, person, observation):
 
 
 def score(quality):
-    # Prefer a complete, unobstructed, sharp view. Keep the real crop's framing.
+    # Prefer a complete, unobstructed, sharp view before applying portrait framing.
     return (1-quality.get('overlap',0),-quality.get('border_edges',0),
             min(quality.get('sharpness',0),1000),quality.get('keypoints',0),
             min(quality.get('width',0),quality.get('height',0)))
@@ -31,11 +31,12 @@ def choose(database, config, scope, target):
     from PIL import Image
     from .portraits import policy_identity
     from .quality import encode_portrait
+    from .portrait_framing import person_bounds
     db=database.connection
     if not enabled(config) or not available(db):return None
     stamp=policy_identity(config);winner=None;best=None
     for item in sorted(target['scans'],key=lambda s:(s['scene'],s['scan'])):
-        rows=db.execute("SELECT b.id,b.quality,b.seconds,m.role FROM body_observations b "
+        rows=db.execute("SELECT b.id,b.quality,b.geometry,b.seconds,m.role FROM body_observations b "
             "JOIN body_members m ON m.observation=b.id WHERE b.scan=? AND m.person=? "
             "AND b.crop IS NOT NULL ORDER BY b.seconds,b.id",(item['scan'],target['person']))
         for row in rows:
@@ -47,11 +48,14 @@ def choose(database, config, scope, target):
             details={}
             try:
                 with Image.open(BytesIO(blob)) as source,source.convert('RGB') as rgb:
-                    data=encode_portrait(rgb,config.data['portraits'],limit=config.data['storage']['max_crop_bytes'],details=details)
+                    bounds=person_bounds(rgb.size,json.loads(row['geometry']),config.data['portraits']['aspect_ratio'])
+                    with rgb.crop(bounds) as crop:
+                        data=encode_portrait(crop,config.data['portraits'],limit=config.data['storage']['max_crop_bytes'],details=details)
             except (OSError,ValueError,Image.DecompressionBombError):continue
             identifier=str(uuid.uuid5(uuid.NAMESPACE_URL,encoded(['body-portrait',scope,target['person'],row['id'],stamp])))
             metadata=dict(portrait_kind='person',source_type='person_crop',observation=row['id'],
                 person=target['person'],policy_sha=stamp,quality=quality,encoding=details,
+                crop=bounds,crop_coordinate_system='retained_person_crop',pixels=details['pixels'],
                 identity_policy=identity_policy(config),role=row['role'],score=list(score(quality)))
             with db:
                 db.execute('INSERT OR REPLACE INTO portraits VALUES (?,?,?,?,?,?,?,?)',

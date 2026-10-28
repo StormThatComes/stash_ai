@@ -26,7 +26,7 @@ from .backend import prepared_frame
 
 def policy_identity(config):
     from .context import policy_digest
-    return policy_digest(config, ('portraits-v5', CONTRACT_ID, EXPRESSION_CONTRACT_ID),
+    return policy_digest(config, ('portraits-v6', CONTRACT_ID, EXPRESSION_CONTRACT_ID),
                          lambda: _policy_value(config))
 
 
@@ -39,7 +39,7 @@ def _policy_value(config):
     from .expression import required as expression_required
     from .portrait_admission import extra_measurements
     from .body_identity import enabled as bodies_enabled, policy as body_policy
-    return {'version': 5, 'portraits': policy,
+    return {'version': 6, 'portraits': policy,
                    'body_policy': body_policy(config) if bodies_enabled(config) else None,
                    'max_crop_bytes': config.data['storage']['max_crop_bytes'],
                    'recognition': plain(config.data['recognition']), 'clustering': plain(config.data['clustering']),

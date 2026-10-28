@@ -217,6 +217,10 @@ def fit_cached_bytes(data, sha, config, metadata):
     with open_image(BytesIO(data)) as raw:
         if raw.format != 'JPEG' or raw.width * raw.height > 32 * 1048576:
             raise ValueError('Cached portrait is not a bounded JPEG image.')
+        from .portrait_framing import matches_aspect
+        ratio = config.data['portraits']['aspect_ratio']
+        if ratio is not None and not matches_aspect(raw.size, ratio):
+            raise ValueError('Cached portrait does not match the configured aspect ratio.')
         raw.load()
     if len(data) <= config.data['storage']['max_crop_bytes']:
         return data, sha
