@@ -3,6 +3,42 @@ from .body_identity import enabled,available
 from .body_global import report
 from .merge_report_policy import _floor
 from .threshold_boundaries import sides
+from .body_parameters import active
+
+
+def options_and_quality(db,config,goals):
+    """Numerical proposals use retained measurements, never new model inputs."""
+    import json
+    from .body_observations import contract
+    from .database import encoded
+    from .merge_report_policy import parameter
+    from .merge_solver_domains import registry
+    from .merge_solver_search import gate_values
+    from .merge_solver_options import compact
+    from .scan_heads import predicate as current_scan
+    domains=registry(config)
+    options={key:list(gate_values(key,parameter(config.data,key),(),domain=domains[key])) for key in active(config)}
+    # dHash distances are small integers. Every valid boundary is cheap to
+    # explore, without building a quadratic matrix of all retained crops.
+    options['sapiensid.identities.min_appearance_distance']=list(range(65))
+    people=sorted({m['identity_id'] for g in goals['groups'] for m in g['members']})
+    rows=db.execute('SELECT b.quality FROM body_observations b JOIN body_members m ON m.observation=b.id '
+        'JOIN scans s ON s.id=b.scan WHERE m.person IN (SELECT value FROM json_each(?)) '
+        "AND s.scope=? AND s.namespace=? AND s.status='complete' AND b.contract=? "
+        'AND b.rejected IS NULL AND b.embedding IS NOT NULL AND '+current_scan()+' ORDER BY b.id',
+        (encoded(people),goals['scope'],goals['namespace'],contract(config)))
+    joint={}
+    for row in rows:
+        quality=json.loads(row['quality']).get('quality',{})
+        for field,key in (('keypoints','sapiensid.identities.anchor_min_keypoints'),
+                          ('sharpness','sapiensid.identities.anchor_min_sharpness')):
+            value=quality.get(field);domain=domains[key]
+            if type(value) not in (int,float) or not domain.low<=value<=domain.high:continue
+            values=([int(value),int(value)+1] if domain.kind is int else sides(value,upper=domain.high))
+            options[key].extend(domain.project(v) for v in values)
+            if value<parameter(config.data,key):joint[key]=min(joint.get(key,value),value)
+        if any(len(values)>256 for values in options.values()):options=compact(config,{},options)
+    return compact(config,{},options),([joint] if joint else [])
 
 
 def analyse(db,config,goals):
@@ -11,12 +47,7 @@ def analyse(db,config,goals):
     owners={m['identity_id']:g.get('index',i) for i,g in enumerate(goals['groups']) for m in g['members']}
     evidence=report(db,config,goals['scope'],goals['namespace'])
     output['evidence']=evidence
-    for section in ('identities','global_matching'):
-        if section=='global_matching' and not config.data['sapiensid'][section]['enabled']:continue
-        for key in ('match_threshold','cohesion_threshold','ambiguity_margin','min_support'):
-            value=config.data['sapiensid'][section][key]
-            output['options']['sapiensid.'+section+'.'+key]=([max(1,value-1),value+1] if key=='min_support'
-                else [max(0,value-.02),max(0,value-.05),min(1,value+.02)])
+    output['options'],quality_proposals=options_and_quality(db,config,goals)
     proposals=[]
     for pair in evidence['pairs']:
         a,b=pair['people']
@@ -41,4 +72,5 @@ def analyse(db,config,goals):
         for patch in proposals:
             for key,value in patch.items():joint[key]=min(joint.get(key,value),value)
         output['proposals']=[joint,*proposals]
+    output['proposals'].extend(quality_proposals)
     return output

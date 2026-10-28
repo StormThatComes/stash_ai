@@ -58,7 +58,6 @@ def validate(settings):
                          ('anchor_min_keypoints',1,17),('min_appearance_distance',0,64)):
         if type(identity[key]) is not int or not low<=identity[key]<=high:
             raise ValueError('Invalid sapiensid.identities.'+key)
-    _number(identity['min_seconds'],'sapiensid.identities.min_seconds',0.001,3600)
     _number(identity['anchor_min_sharpness'],'sapiensid.identities.anchor_min_sharpness',0,1000000)
     global_matching=settings['global_matching']
     if type(global_matching['enabled']) is not bool or global_matching['enabled'] and not identity['enabled']:

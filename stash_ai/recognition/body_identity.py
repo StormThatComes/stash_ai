@@ -15,7 +15,7 @@ from .progress import tracking
 
 def defaults():
     return dict(enabled=False,match_threshold=.85,cohesion_threshold=.80,ambiguity_margin=.1,
-                min_support=3,attach_min_support=2,min_seconds=1.,min_appearance_distance=4,
+                min_support=3,attach_min_support=2,min_appearance_distance=4,
                 anchor_min_keypoints=6,anchor_min_sharpness=25.)
 
 
@@ -29,7 +29,7 @@ def available(db):
 
 def policy(config):
     from .clustering import matching_policy
-    return digest(['body-local-v1',contract(config),matching_policy(config),config.data['sapiensid']['identities']])
+    return digest(['body-local-v2-cues',contract(config),matching_policy(config),config.data['sapiensid']['identities']])
 
 
 def vector(row):
@@ -49,16 +49,19 @@ def anchor(row,settings):
 
 
 def independent(rows,settings):
-    """Nearby times and repeated/near-identical pixels cannot multiply support."""
-    chosen=[]
-    for row in sorted(rows,key=lambda r:(r['scan'],r['seconds'],r['id'])):
+    """At most one witness per scan/cue; repeated pixels cannot add support."""
+    chosen=[];cues=set();pixels=set();hashes=[]
+    for row in sorted(rows,key=lambda r:(r['scan'],r['cue'],r['id'])):
         q=quality(row)
-        if any(row['scan']==r['scan'] and abs(row['seconds']-r['seconds'])<settings['min_seconds'] for r in chosen):continue
-        if q.get('pixel_digest') and any(q['pixel_digest']==quality(r).get('pixel_digest') for r in chosen):continue
+        cue=row['scan'],row['cue']
+        if cue in cues:continue
+        if q.get('pixel_digest') in pixels:continue
         hashed=q.get('appearance_hash')
-        if hashed and any(quality(r).get('appearance_hash') and
-                (int(hashed,16)^int(quality(r)['appearance_hash'],16)).bit_count()<settings['min_appearance_distance'] for r in chosen):continue
-        chosen.append(row)
+        hashed=int(hashed,16) if hashed else None
+        if hashed is not None and any((hashed^other).bit_count()<settings['min_appearance_distance'] for other in hashes):continue
+        chosen.append(row);cues.add(cue)
+        if q.get('pixel_digest'):pixels.add(q['pixel_digest'])
+        if hashed is not None:hashes.append(hashed)
     return chosen
 
 

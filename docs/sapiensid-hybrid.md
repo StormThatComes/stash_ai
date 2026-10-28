@@ -314,9 +314,14 @@ to a frozen accepted bank, but never become new anchors through assignment.
 Direct face/person associations keep the existing face identity. Missing face
 observations can query its independently supported, frozen body bank.
 
-New cores require `min_support` independent observations. `min_seconds`, exact
-pixel digests and `min_appearance_distance` (64-bit perceptual hash distance)
-prevent adjacent/repeated thumbnails from multiplying support. Provisional
+New cores require `min_support` independent cues, with at most one vote per
+`(scan, cue)`, regardless of the time between cues. Exact pixel digests and
+`min_appearance_distance` (64-bit perceptual hash distance) still prevent repeated
+images from multiplying support, including across scans. `attach_min_support`
+counts independent cues in the frozen body bank of a face identity. Remove the
+obsolete `sapiensid.identities.min_seconds` key from existing configuration files;
+loading it reports an explicit migration error. Rebuilding matching reuses retained
+body vectors and does not require recollection. Provisional
 cores remain local and are not published. `anchor_min_keypoints` and
 `anchor_min_sharpness` are separate from collection gates. The matching,
 cohesion and ambiguity thresholds are uncalibrated starting values.
@@ -379,8 +384,14 @@ Replay, labelled offline evaluation, `tune` and merge-goal solving accept indepe
 body observation IDs. Face-associated evidence already represented by an accepted
 face is not counted again as another merge-goal sample. Body anchors contribute
 core support; auxiliary bodies remain soft evidence. Solver trials can vary the
-local and global similarity, cohesion, margin and support gates, with full production
-replay of every candidate and no inference or source database writes. Input/collection
+local and global similarity, cohesion, margin and support gates, as well as
+`attach_min_support`, `min_appearance_distance`, `anchor_min_keypoints` and
+`anchor_min_sharpness`. These parameters participate in heuristic proposals,
+bidirectional search, refinement and TPE sampling with their integer or numeric
+domains. Quality proposals use retained keypoint and sharpness measurements;
+each candidate is validated by full production replay without inference or source
+database writes. Body goal support also uses cues, without a minimum time gap.
+Input/collection and portrait settings remain outside the solver; input/collection
 changes still require recollection. Automatic memberships are not truth labels.
 
 The opt-in defaults are starting values, not calibrated accuracy guarantees. Test

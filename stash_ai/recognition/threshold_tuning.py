@@ -11,11 +11,7 @@ from .merge_report_policy import patched, proposal
 from .replay_simulation import replay
 
 
-BODY_PARAMETERS = frozenset('sapiensid.'+section+'.'+key
-    for section,keys in {
-        'identities':('match_threshold','cohesion_threshold','ambiguity_margin','min_support','attach_min_support',
-                      'min_seconds','min_appearance_distance','anchor_min_keypoints','anchor_min_sharpness'),
-        'global_matching':('match_threshold','cohesion_threshold','ambiguity_margin','min_support')}.items() for key in keys)
+from .body_parameters import PARAMETERS as BODY_PARAMETERS
 
 PARAMETERS = BODY_PARAMETERS | frozenset({
     'sapiensid.matching.face_floor', 'sapiensid.matching.person_threshold',

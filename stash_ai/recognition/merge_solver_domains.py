@@ -51,14 +51,16 @@ def registry(config):
             result[f'clustering.min_{role}_{suffix}'] = Domain(low=detection[source], high=high)
     if not config.data['sapiensid']['enabled']:
         result = {k: v for k, v in result.items() if not k.startswith('sapiensid.')}
-    from .body_identity import enabled
-    if enabled(config):
-        for section in ('identities','global_matching'):
-            for key in ('match_threshold','cohesion_threshold','ambiguity_margin'):
-                result['sapiensid.'+section+'.'+key]=Domain()
-            result['sapiensid.'+section+'.min_support']=Domain(int,2 if section=='identities' else 1,
-                1000 if section=='identities' else config.data['sapiensid']['global_matching']['max_references'])
-        result['sapiensid.identities.attach_min_support']=Domain(int,1,1000)
+    from .body_parameters import active
+    special={
+        'sapiensid.identities.min_support':Domain(int,2,100000),
+        'sapiensid.identities.attach_min_support':Domain(int,1,100000),
+        'sapiensid.identities.min_appearance_distance':Domain(int,0,64),
+        'sapiensid.identities.anchor_min_keypoints':Domain(int,1,17),
+        'sapiensid.identities.anchor_min_sharpness':Domain(high=1000000),
+        'sapiensid.global_matching.min_support':Domain(int,1,config.data['sapiensid']['global_matching']['max_references']),
+    }
+    result.update((key,special.get(key,Domain())) for key in active(config))
     return result
 
 
@@ -77,9 +79,8 @@ def normalize(config, changes):
             else:
                 patch[lower] = b
     ordered('clustering.cohesion_threshold', 'recognition.match_threshold')
-    from .body_identity import enabled
-    if enabled(config):
-        for section in ('identities','global_matching'):
+    for section in ('identities','global_matching'):
+        if 'sapiensid.'+section+'.match_threshold' in domains:
             ordered('sapiensid.'+section+'.cohesion_threshold','sapiensid.'+section+'.match_threshold')
     for suffix in ('face_pixels', 'sharpness', 'visible_face_fraction'):
         ordered('clustering.min_auxiliary_'+suffix, 'clustering.min_anchor_'+suffix)
@@ -98,7 +99,7 @@ def normalize(config, changes):
 def dimensions(config, options, active, sequence, width=8):
     domains = registry(config)
     keys = sorted((k for k in options if k in domains and parameter(config.data, k) is not None),
-                  key=lambda k: (-active.get(k, 0), not k.startswith('sapiensid.matching.'), k))
+                  key=lambda k: (-active.get(k, 0), not k.startswith('sapiensid.'), k))
     if len(keys) <= width:
         return keys
     fixed = width//2

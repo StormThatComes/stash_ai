@@ -113,6 +113,9 @@ def parse_yaml(raw, *, context='Facial recognition', max_bytes=131072):
 
 
 def _merge(base, supplied, path=''):
+    if path=='sapiensid.identities' and isinstance(supplied,dict) and 'min_seconds' in supplied:
+        raise ValueError('sapiensid.identities.min_seconds was removed; delete this key. '
+                         'Independent body support now counts distinct cues, without a time-gap threshold.')
     if not isinstance(supplied, dict) or set(supplied) - set(base):
         raise ValueError(f'{path or "configuration"}: unknown keys or expected mapping.')
     for key, value in supplied.items():
