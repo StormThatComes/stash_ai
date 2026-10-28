@@ -175,7 +175,8 @@ sapiensid:
     batch_size: 1           # 1..16 person inputs per inference batch, within CPU queue budgets.
     reference_bytes: 134217728 # 128 MiB for hybrid reference banks and lookup working arrays.
     plan_bytes: 16777216    # 16 MiB for retained hybrid decision proofs and plans.
-    max_candidate_pairs: 100000 # Stop explicitly if the hybrid candidate graph exceeds this budget.
+    max_candidate_pairs: 100000 # Nominated identity pairs per hybrid/global body plan, not embedding pairs.
+    max_witness_comparisons: 1000000 # Exact body/face vector comparisons per body scene/global pass.
   consolidation:
     scope: selected  # retained consumes queued merges across retained scenes.
     scene_ids: []    # Optional allowlist for retained scope; [] means this library/namespace.

@@ -32,7 +32,8 @@ def defaults():
         pose=dict(path='recognition_models/sapiensid_v1/'+POSE_NAME,sha256=POSE_SHA256,score_threshold=.5,keypoint_score_threshold=.5,
                   nms_threshold=.7,max_people_per_frame=100),
         matching=dict(face_floor=.4,person_threshold=.85,ambiguity_margin=.1,min_support=3),
-        execution=dict(batch_size=1,reference_bytes=134217728,plan_bytes=16777216,max_candidate_pairs=100000),
+        execution=dict(batch_size=1,reference_bytes=134217728,plan_bytes=16777216,
+                       max_candidate_pairs=100000,max_witness_comparisons=1000000),
         consolidation=dict(scope='selected',scene_ids=[],max_scenes=1000),
         storage=dict(retain_person_crops=True))
 
@@ -92,7 +93,7 @@ def validate(settings):
             _number(settings[section][key],f'sapiensid.{section}.{key}',0,1)
     for section,key in (('pose','max_people_per_frame'),('matching','min_support'),
                         ('execution','batch_size'),('execution','reference_bytes'),
-                        ('execution','plan_bytes'),('execution','max_candidate_pairs')):
+                        ('execution','plan_bytes'),('execution','max_candidate_pairs'),('execution','max_witness_comparisons')):
         value=settings[section][key]
         if type(value) is not int or value<1:
             raise ValueError(f'sapiensid.{section}.{key} must be a positive integer.')

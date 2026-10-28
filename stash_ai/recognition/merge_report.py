@@ -71,7 +71,7 @@ def build(config, left_id, right_id, *, scope=None, by_performer=False, simulate
         from .hybrid_evidence import report as hybrid_report
         hybrid = hybrid_report(db,config,left['scope'],model_namespace,focus=set(identities))
         from .body_global import report as person_report
-        independent_person=person_report(db,config,left['scope'],model_namespace)
+        independent_person=person_report(db,config,left['scope'],model_namespace,focus=set(identities))
         result = dict(format=1, kind='recognition_identity_merge', scope=left['scope'],
             namespace=model_namespace, matching_policy=matching_policy(config),
             requested_identity_ids=[requested_left['id'], requested_right['id']], identity_ids=list(identities),
