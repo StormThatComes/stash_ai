@@ -55,7 +55,7 @@ runs no trials, exports no YAML, and exits 2. Plain `--simulate`, evaluation and
 threshold tuning retain their requirement that the whole requested selection be
 compatible; their error now identifies the affected scenes and reasons.
 
-The default **`--goal-policy identity`** (version 2) treats each set as one declared
+The default **`--goal-policy identity`** (version 3) treats each set as one declared
 person and previous memberships as noisy fragments. It preserves that person's
 appearances in the set's original scenes and rewards consolidation, without
 joining different sets' substantial core evidence. A weak fragment may disappear
@@ -96,12 +96,13 @@ Goals freeze evidence roles, independent units and thresholds **before any trial
   is diagnostic: both soft loss and excess are late tie-breakers after consolidation,
   never preservation gates. Dropping soft evidence cannot improve the frozen
   common-destination score; ties prefer retaining it.
-- A destination conflicts across sets when, for a performer in each set, its core
-  support there **exceeds that performer's allowed outlier count**. Small noisy
+- A destination conflicts across sets when, for a scene in each set, its core
+  support there **exceeds that scene's allowed outlier count**. Small noisy
   core minorities and soft corrections do not alone prove an identity collision.
   Auxiliary-only fragments supply conflict fallback only when the whole set lacks
-  core. Per-fragment core guards prevent a large set from diluting a smaller
-  fragment's substantial cross-set collision. `strict_disjoint` and
+  core. Pooled independent scene cohorts prevent a large scene from diluting a
+  smaller scene's substantial collision; repartitioning historical performers
+  cannot change ownership. `strict_disjoint` and
   `strict_conflicts` still expose every raw cross-set overlap.
 
 These are explicit heuristics, versioned in `goal_policy`, not verified truth
@@ -119,12 +120,21 @@ inadmissible candidates; full success outranks partial success. If none qualify,
 the solver still selects the best completed trial, including baseline, as
 `best_effort`. Identity-mode ranking then prioritizes separation, worst/mean
 scene coverage and fewer cross-set core pairs. Next come worst/mean set shared
-coverage and pooled core pair consolidation. Shared coverage weights original
+coverage and scene-balanced pair consolidation. Shared coverage weights original
 scenes equally, using their frozen reference units (membership fallback in a
 scene without references); removing samples never shrinks the denominator.
+Pair consolidation weights each ordered pair of different scenes equally; a
+single scene uses its independent-unit pair fraction.
 Soft losses, budget excess and pooled core retention break remaining ties.
 Member-level `represented`, `consolidated`, `identity_components` and
 `core_shared_coverage` remain diagnostics and do not veto a better set result.
+
+Optional solver-only bounds `--max-outside-coverage-loss`,
+`--max-outside-split-pairs`, `--max-outside-joined-pairs` and
+`--max-new-outsider-observations` accept nonnegative counts relative to the
+baseline replay. A candidate exceeding a bound cannot outrank one satisfying
+the bounds, even when it improves consolidation. Unspecified bounds are disabled.
+These measure collateral partition changes, not verified recognition errors.
 
 Use **`--goal-policy strict`** for the previous objective: every original observation
 must remain present and assigned; any cross-set sample overlap is a conflict.

@@ -108,7 +108,12 @@ def execute(args, config):
             result.update(solve(config, result, db, maximum=args.max_trials, progress=progress,
                                 checkpoint=checkpoint,resume=resume,winner_writer=writer,
                                 sampler=getattr(args,'solver_sampler','heuristic'),seed=getattr(args,'solver_seed',0),
-                                yaml_mode=yaml_mode))
+                                yaml_mode=yaml_mode, outside_limits={
+                                    key: getattr(args, attr, None) for key, attr in (
+                                        ('coverage_lost', 'max_outside_coverage_loss'),
+                                        ('split_pairs', 'max_outside_split_pairs'),
+                                        ('newly_joined_pairs', 'max_outside_joined_pairs'),
+                                        ('new_outsider_observations', 'max_new_outsider_observations'))}))
         elif args.simulate:
             result['simulation'] = evaluate(config, result, db)
             result['status'] = 'baseline_evaluated'
@@ -199,6 +204,9 @@ def evaluate(config, goals, db, variants=None):
 
 def objective(status):
     """Fair lexicographic objective; larger sets cannot hide an untouched smaller set."""
+    if 'outside_preserved' in status:
+        unguarded = {k: v for k, v in status.items() if k != 'outside_preserved'}
+        return (status['outside_preserved'],) + objective(unguarded)
     if status.get('goal_policy', {}).get('name') == 'identity':
         from .merge_goal_identity import objective as identity_objective
         return identity_objective(status)
@@ -221,8 +229,8 @@ def unmet_conditions(status):
     """Every unsatisfied goal, including empty members and cross-set merges."""
     if status.get('goal_policy', {}).get('name') == 'identity':
         from .merge_goal_identity import unmet
-        return unmet(status)
-    reasons = []
+        return unmet(status) + status.get('outside_violations', [])
+    reasons = list(status.get('outside_violations', []))
     for group in status.get('groups', []):
         for member in group['members']:
             base = dict(set=group['index'], identity=member['identity_id'])

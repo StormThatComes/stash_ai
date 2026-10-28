@@ -106,7 +106,9 @@ def rebuilt_goals(db, goals):
     return dict(goals, groups=groups)
 
 
-def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, resume=False, winner_writer=None, sampler="heuristic", seed=0, yaml_mode='full'):
+def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, resume=False, winner_writer=None, sampler="heuristic", seed=0, yaml_mode='full', outside_limits=None):
+    from .merge_solver_outside import validate as validate_outside, apply as apply_outside
+    outside_limits = validate_outside(outside_limits)
     if type(maximum) is not int or maximum < 1:
         raise ValueError('max_trials must be a positive integer.')
     if yaml_mode not in ('full', 'diff'):
@@ -121,7 +123,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
     from .merge_goal_output import configuration_document
     from copy import deepcopy
     if resume and checkpoint is None:raise ValueError('Resume requires a solver checkpoint.')
-    journal = Journal(checkpoint, fingerprint(config,goals,db,dict(maximum=maximum,sampler=sampler_metadata,yaml_mode=yaml_mode)),
+    journal = Journal(checkpoint, fingerprint(config,goals,db,dict(maximum=maximum,sampler=sampler_metadata,yaml_mode=yaml_mode,outside_limits=outside_limits)),
                       resume=resume,winner=winner_writer) if checkpoint else None
     from .merge_solver_hybrid import public
     from .merge_solver_feedback import QueryFeedback, pair_separation, quality_feedback
@@ -168,6 +170,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
         target_ids = {r['id'] for g in goals['groups'] for m in g['members'] for r in m['observations']}
         outside = impact({k:v for k,v in baseline.items() if k not in target_ids},
                          {k:v for k,v in predicted.items() if k not in target_ids})
+        apply_outside(status, outside, summaries['baseline'], outside_limits)
         patch = patches.get(name, {'changes': []})
         magnitude = mutation_magnitude(patch['changes'])
         rank = objective(status) + (-sum(g['outsider_observations'] for g in status['groups']), -outside['coverage_lost'], -outside['split_pairs'],

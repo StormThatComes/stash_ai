@@ -17,6 +17,12 @@ class RecognitionParser(argparse.ArgumentParser):
         if result.command == 'run' and not (result.scene_id or result.all_scenes):
             self.error('recognition run requires --scene-id or --all-scenes')
         if result.command == 'report-merge':
+            outside = [getattr(result, name) for name in ('max_outside_coverage_loss',
+                       'max_outside_split_pairs', 'max_outside_joined_pairs', 'max_new_outsider_observations')]
+            if any(v is not None and v < 0 for v in outside):
+                self.error('Outside impact limits must be nonnegative.')
+            if any(v is not None for v in outside) and not result.solve:
+                self.error('Outside impact limits require --solve.')
             if result.yaml_output and not result.solve:
                 self.error('--yaml-output requires --solve')
             if result.yaml_mode == 'diff' and (not result.solve or not (result.yaml_output or result.checkpoint)):
@@ -171,6 +177,13 @@ def parser():
     merge_report.add_argument('--goal-policy', choices=('identity','strict'), default='identity',
         help='Goal evaluation: identity (default) tolerates bounded noisy membership losses; strict requires every original observation. Applies to solver and set evaluation.')
     merge_report.add_argument('--max-trials', type=int, default=500, help='Maximum replay budget including baseline (default: 500; may stop on stagnation).')
+    for flag, meaning in (
+            ('coverage-loss', 'lost assignments'), ('split-pairs', 'split observation pairs'),
+            ('joined-pairs', 'newly joined observation pairs')):
+        merge_report.add_argument('--max-outside-'+flag, type=int,
+            help='Optional maximum '+meaning+' outside goal observations, relative to baseline replay.')
+    merge_report.add_argument('--max-new-outsider-observations', type=int,
+        help='Optional maximum additional non-goal observations attached to goal identities versus baseline.')
     merge_report.add_argument('--solver-sampler', choices=('heuristic','tpe'), default='heuristic', help='Optional learned proposal lane alongside heuristics; TPE requires requirements-solver.txt.')
     merge_report.add_argument('--solver-seed', type=int, default=0, help='Reproducible optional sampler seed (default: 0).')
     merge_report.add_argument('--checkpoint', type=Path, help='Durable solver journal; writes best YAML alongside it if --yaml-output is omitted.')

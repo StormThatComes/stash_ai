@@ -222,7 +222,7 @@ def test_real_replay_selects_merge_despite_missing_auxiliary_and_keeps_winner_on
         selected = result['simulation']['trials'][result['selected_trial']]['goal_result']
         assert selected['groups'][0]['soft_lost_units'] == 1 and not selected['strict_fully_solved']
         text = output.read_text()
-        assert 'Goal policy: identity v2' in text and 'soft units lost/reassigned: 1' in text
+        assert 'Goal policy: identity v3' in text and 'soft units lost/reassigned: 1' in text
         assert selected['groups'][0]['covered_scenes'] == selected['groups'][0]['required_scenes'] == 3
         if mode == 'full':
             restored = load(output)
