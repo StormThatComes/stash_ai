@@ -6,7 +6,7 @@ receives these goals; only the offline evaluator and proposal diagnostics do.
 from collections import Counter, defaultdict
 from math import floor
 
-POLICY = dict(name='identity', version=2, preservation='set_scene_coverage', core_outlier_fraction=.2,
+POLICY = dict(name='identity', version=3, preservation='set_scene_coverage', core_outlier_fraction=.2,
               minimum_core_outlier_allowance=1, minimum_core_support=2,
               soft_loss_fraction=.2, minimum_soft_loss_allowance=3,
               protected_scene_support=2)
@@ -86,11 +86,11 @@ def member_result(member, observations, predicted):
 
 def apply(goals, status, observations, predicted):
     """Keep member/strict diagnostics; preserve the declared person as a set."""
-    from .merge_goal_sets import assess_set, set_destinations
+    from .merge_goal_sets import assess_set, set_destinations, ownership
     status.update(goal_policy=dict(POLICY), strict_disjoint=status['disjoint'],
                   strict_conflicts=status['conflicts'], strict_admissible=status['admissible'],
                   strict_fully_solved=status['fully_solved'])
-    owners, raw_owners = defaultdict(dict), defaultdict(set)
+    owners, raw_owners = ownership(goals, observations, predicted)
     for source, group in zip(goals['groups'], status['groups']):
         for destination in group['resulting_identities']:
             raw_owners[destination].add(group['index'])
@@ -108,11 +108,6 @@ def apply(goals, status, observations, predicted):
                 fraction = count/total
                 fractions[destination] += fraction
                 squares[destination] += fraction*fraction
-            if (evidence['basis'] != 'fallback_membership' or
-                    source['identity_evidence']['basis'] == 'fallback_membership'):
-                for destination, count in evidence['significant_destinations'].items():
-                    sets = owners[destination]
-                    sets[group['index']] = sets.get(group['index'], 0)+count
         n = group['total_performers']
         consolidated = max(components.values(), default=0)
         group.update(represented_performers=represented, representation_fraction=represented/n,
@@ -185,25 +180,18 @@ def diagnostic_goals(goals):
 
 def destination_owners(goals, predicted):
     """Label rebuilt destinations consistently for pair and query proposals."""
+    if goals.get('goal_policy', {}).get('name') == 'identity':
+        from .merge_goal_sets import ownership
+        core, raw = ownership(goals, predicted, predicted)
+        return defaultdict(set, {d: set(core[d]) if core.get(d) else sets for d, sets in raw.items()
+                                 if core.get(d) or len(sets) == 1})
     owners, raw = defaultdict(set), defaultdict(set)
     for group in goals['groups']:
         for member in group['members']:
             for row in member['observations']:
                 if predicted.get(row['id']) is not None:
                     raw[predicted[row['id']]].add(group['index'])
-            if goals.get('goal_policy', {}).get('name') == 'identity':
-                evidence = member_result(member, predicted, predicted)
-                destinations = (evidence['significant_destinations']
-                    if evidence['basis'] != 'fallback_membership' or
-                    group['identity_evidence']['basis'] == 'fallback_membership' else {})
-            else:
-                destinations = {predicted[r['id']] for r in member['observations'] if predicted.get(r['id']) is not None}
+            destinations = {predicted[r['id']] for r in member['observations'] if predicted.get(r['id']) is not None}
             for destination in destinations:
                 owners[destination].add(group['index'])
-    if goals.get('goal_policy', {}).get('name') == 'identity':
-        # Match the evaluator: substantial core owns a destination; otherwise
-        # an exclusive soft fragment can still guide recovery of its set.
-        for destination, sets in raw.items():
-            if not owners.get(destination) and len(sets) == 1:
-                owners[destination] = sets
     return owners

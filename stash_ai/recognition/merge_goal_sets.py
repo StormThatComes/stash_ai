@@ -1,7 +1,7 @@
 """Preservation and consolidation of one declared person across a whole set."""
 from collections import Counter, defaultdict
 
-from .merge_goal_identity import freeze, units, votes
+from .merge_goal_identity import freeze, units, votes, required
 
 
 def freeze_set(rows):
@@ -31,19 +31,60 @@ def set_destinations(index, raw_owners, core_owners):
             if (set(core_owners[d]) if core_owners.get(d) else owners) == {index}}
 
 
+def ownership(goals, observations, predicted):
+    """Substantial scene-local core owns a destination, independent of members.
+
+    Pool/deduplicate before counting. A small scene cannot be diluted by a large
+    scene of the same person. Soft-only scenes cannot manufacture core ownership.
+    """
+    core_owners, raw_owners = defaultdict(dict), defaultdict(set)
+    for group in goals['groups']:
+        index = group['index']
+        for member in group['members']:
+            for row in member['observations']:
+                destination = predicted.get(row['id'])
+                if row['id'] in observations and destination is not None:
+                    raw_owners[destination].add(index)
+        evidence = group['identity_evidence']
+        core = evidence['core_units']
+        total_counts, _ = votes(core, observations, predicted)
+        cohorts = defaultdict(list)
+        for unit in core:
+            for scene in {r['scene'] for r in unit['observations']}:
+                cohorts[scene].append(dict(unit, observations=[r for r in unit['observations'] if r['scene'] == scene]))
+        significant = set()
+        for cohort in cohorts.values():
+            counts, _ = votes(cohort, observations, predicted)
+            allowance = len(cohort)-required(len(cohort))
+            significant.update(d for d, count in counts.items() if count > allowance and total_counts[d])
+        for destination in significant:
+            core_owners[destination][index] = total_counts[destination]
+    return core_owners, raw_owners
+
+
 def assess_set(evidence, observations, predicted, destinations):
     """Separate scene preservation, common-destination progress and soft loss."""
     raw_core, _ = votes(evidence['core_units'], observations, predicted)
     core = Counter({d: n for d, n in raw_core.items() if d in destinations})
     scene_support, shared, raw_shared = {}, Counter(), Counter()
+    squared, raw_squared = Counter(), Counter()
+    within, raw_within = [], []
     for scene, frozen in evidence['scenes'].items():
         counts, _ = votes(frozen['membership_units'], observations, predicted)
         scene_support[scene] = {d: n for d, n in counts.items() if d in destinations}
         scores, _ = votes(frozen['scoring_units'], observations, predicted)
+        total_scores = len(frozen['scoring_units'])
+        raw_within.append(sum(n*(n-1) for n in scores.values())/(total_scores*(total_scores-1))
+                          if total_scores > 1 else float(bool(scores)))
+        within.append(sum(n*(n-1) for d, n in scores.items() if d in destinations)/(total_scores*(total_scores-1))
+                      if total_scores > 1 else float(any(d in destinations for d in scores)))
         for destination, count in scores.items():
-            raw_shared[destination] += count/len(frozen['scoring_units'])
+            fraction = count/total_scores
+            raw_shared[destination] += fraction
+            raw_squared[destination] += fraction*fraction
             if destination in destinations:
-                shared[destination] += count/len(frozen['scoring_units'])
+                shared[destination] += fraction
+                squared[destination] += fraction*fraction
     missing = [s for s, support in scene_support.items() if not support]
     preserved = bool(scene_support) and not missing
     # Coverage across several destinations is admissible progress, not a full
@@ -58,8 +99,11 @@ def assess_set(evidence, observations, predicted, destinations):
     soft_total = len(evidence['soft_units'])
     lost = soft_total-sum(n for d, n in soft.items() if d in destinations)
     total, scenes = len(evidence['core_units']), len(scene_support)
-    def pairs(counts):
-        return sum(n*(n-1) for n in counts.values())/(total*(total-1)) if total > 1 else float(bool(counts))
+    def pairs(fractions, squares, local):
+        # Every ordered pair of distinct scenes has equal weight. For a single
+        # scene retain the independent-unit pair score (no self-pair inflation).
+        return (max(0., sum(v*v-squares[d] for d, v in fractions.items()))/(scenes*(scenes-1))
+                if scenes > 1 else (local[0] if local else 0.))
     return dict(set_evidence_preserved=preserved, identity_fully_merged=bool(complete),
                 required_scenes=scenes, covered_scenes=scenes-len(missing), missing_scenes=missing,
                 scene_coverage_fraction=(scenes-len(missing))/scenes if scenes else 0.,
@@ -68,10 +112,10 @@ def assess_set(evidence, observations, predicted, destinations):
                 set_core_units=total, set_core_required=evidence['core_required'],
                 set_core_destinations=dict(core), set_core_retention=sum(core.values())/total if total else 0.,
                 set_shared_coverage=max(shared.values(), default=0.)/scenes if scenes else 0.,
-                set_pair_fraction=pairs(core),
+                set_pair_fraction=pairs(shared, squared, within),
                 # The exploratory frontier deliberately keeps overmerges for
                 # later repair. These raw scores never select the winner.
-                raw_set_pair_fraction=pairs(raw_core),
+                raw_set_pair_fraction=pairs(raw_shared, raw_squared, raw_within),
                 raw_set_shared_coverage=max(raw_shared.values(), default=0.)/scenes if scenes else 0.,
                 soft_lost_units=lost, soft_loss_fraction=lost/soft_total if soft_total else 0.,
                 soft_loss_allowance=evidence['soft_loss_allowance'],
