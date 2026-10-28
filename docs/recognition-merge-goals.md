@@ -584,6 +584,18 @@ that the goal is impossible: measured face-only query/reference boundaries can
 still propose face and retained-quality changes. Production replay remains the
 only authority for accepting any proposed configuration.
 
+The solver selects compatible latest scans before measuring initial proposals.
+Face-bank statistics use bounded float64 tiles and cache immutable vector
+content, including initial measurements before baseline replay. Goal addresses
+and scene cohorts are compiled once; vote memoization is local to a single
+evaluation and cannot reuse assignments from a previous trial.
+
+Historical threshold pools retain at most 128 values per parameter, except when
+protecting live parent settings and their immediate boundary neighbours requires
+more. Fresh measurements take precedence over stale options; extrema and spread
+across the range remain represented. Direct witness proposals remain available
+independently of this bounded historical pool.
+
 ### Checkpoints and local stability
 
 `--yaml-output` is atomically refreshed after every completed improvement,

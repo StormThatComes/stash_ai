@@ -8,13 +8,15 @@ from .merge_goals import assess, objective, unmet_conditions, goal_diagnostics
 from .replay_simulation import replay, impact
 from .merge_solver_search import (hybrid_neighbours as _hybrid_neighbours,
     interleave as _interleave, spread, BeamSearch, refinement, restart_probes, BASELINE_WARMUP, PREFIX, GATES)
+from .merge_goal_index import solver_scope
 
 
 def measured_options(db, config, goals, proofs=None, *, hybrid=None):
     from .clustering import _groups
     from .scanning import scan_identity
     from .reference_compatibility import fallback_sql
-    import numpy as np
+    from .merge_solver_measurements import reference_stats
+    from .resource_plan import plan
     ns = goals['namespace']
     groups = _groups(db, goals['scope'], ns, config.data['clustering'],
         scan_policy=scan_identity(config, ns), compatibility=fallback_sql(db, config, ns))
@@ -22,13 +24,13 @@ def measured_options(db, config, goals, proofs=None, *, hybrid=None):
     selected = [g for g in groups if g.identifier in wanted]
     scores = set()
     for a, b in combinations(selected, 2):
-        matrix = np.asarray(a.samples, dtype='float64') @ np.asarray(b.samples, dtype='float64').T
+        minimum, mean, maximum, (i, j) = reference_stats(a.samples, b.samples,
+            max_bytes=min(4194304, plan(config).working))
         if proofs is not None:
-            i,j = np.unravel_index(matrix.argmin(), matrix.shape)
             proofs.append(dict(left=a.identifier, right=b.identifier,
-                minimum=float(matrix.min()), mean=float(matrix.mean()), maximum=float(matrix.max()),
+                minimum=minimum, mean=mean, maximum=maximum,
                 weakest_observations=[a.sample_ids[i], b.sample_ids[j]]))
-        for value in (matrix.min(), matrix.mean(), matrix.max()):
+        for value in (minimum, mean, maximum):
             if 0 <= value <= 1:
                 floor = math.floor(float(value)*1e6)/1e6
                 scores.update((floor, min(1., floor+0.000002)))
@@ -106,6 +108,7 @@ def rebuilt_goals(db, goals):
     return dict(goals, groups=groups)
 
 
+@solver_scope
 def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, resume=False, winner_writer=None, sampler="heuristic", seed=0, yaml_mode='full', outside_limits=None):
     from .merge_solver_outside import validate as validate_outside, apply as apply_outside
     outside_limits = validate_outside(outside_limits)
@@ -134,9 +137,23 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
     from .merge_solver_preflight import boundary_probes, ordered
     from .merge_solver_bidirectional import BidirectionalSearch
     from .hybrid_query_observer import observe_queries
+    from .offline_evaluation import _selection
+    from .merge_solver_options import compact
+    from .merge_goal_index import current as goal_index
+    inputs = {}
+    replay_scope, scans = _selection(db, config, None, goals['scope'], allow_partial=True, diagnostics=inputs)
+    replay_selection = replay_scope, scans, inputs
+    selected_scans = {s['id'] for s in scans}
+    measurement_goals = dict(goals, groups=[dict(g, members=[m for m in g['members']
+        if any(r['scan'] in selected_scans for r in m['observations'])]) for g in goals['groups']])
+    target_ids = goal_index().observation_ids
     proofs = []
     hybrid = {}
-    options = measured_options(db, config, goals, proofs, hybrid=hybrid)
+    options = (measured_options(db, config, measurement_goals, proofs, hybrid=hybrid)
+               if scans else {})
+    if not scans:
+        hybrid.update(enabled=False, options={}, proposals=[])
+    options = compact(config, {}, options)
     initial_hybrid = public(hybrid)
     hybrid_changes = list(hybrid['proposals'])
     initial_changes = tuple(hybrid_changes)
@@ -168,7 +185,6 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
         summaries[name] = status
         if baseline is None:
             baseline = dict(predicted)
-        target_ids = {r['id'] for g in goals['groups'] for m in g['members'] for r in m['observations']}
         outside = impact({k:v for k,v in baseline.items() if k not in target_ids},
                          {k:v for k,v in predicted.items() if k not in target_ids})
         apply_outside(status, outside, summaries['baseline'], outside_limits)
@@ -194,7 +210,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             **transitions[name])
     def inspect(target, settings):
         from .database import encoded
-        ids = {r['id'] for g in goals['groups'] for m in g['members'] for r in m['observations']}
+        ids = target_ids
         result = latest_decisions(target, ids)
         membership = dict(target.execute('SELECT o.id,m.person FROM observations o LEFT JOIN members m '
             'ON m.observation=o.id WHERE o.id IN (SELECT value FROM json_each(?))', (encoded(sorted(ids)),)))
@@ -232,8 +248,14 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
         for extra in (queries['options'], separation['options']):
             for key, values in extra.items():
                 updated[key] = list(updated.get(key, ())) + list(values)
-        for key, values in updated.items():
-            options[key] = sorted(set(options.get(key, ())) | set(values), reverse=True)
+        parents = [{k: parameter(settings.data, k) for k in updated if parameter(settings.data, k) is not None}]
+        if search:
+            parents.extend(c['changes'] for c in search.beam.values())
+        if bidirectional:
+            parents.extend(c['changes'] for c in bidirectional.frontier.values())
+        bounded = compact(config, options, updated, parents=parents)
+        options.clear(); options.update(bounded)
+        latest_feedback['options'] = compact(settings, {}, updated, parents=parents)
         return result
     def stream():
         nonlocal search, bidirectional, stop_reason
@@ -403,7 +425,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
     with observe_queries(query_feedback):
         result = replay(config, {}, source=db, scope=goals['scope'], consume=consume, variant_stream=stream,
             inspect_trial=inspect, progress=trial_progress, allow_partial_selection=True,
-            restore_trial=restore,record_trial=record)
+            restore_trial=restore,record_trial=record,prepared_selection=replay_selection)
     # Ctrl-C can land after consume ranks a trial but before replay records it.
     robustness.clear()
     for name in result['trials']:

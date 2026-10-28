@@ -64,7 +64,8 @@ def replay(config, variants, **kwargs):
 
 
 def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=None, variant_stream=None, inspect_trial=None,
-            progress=None, allow_partial_selection=False, reuse_history=True, restore_trial=None, record_trial=None):
+            progress=None, allow_partial_selection=False, reuse_history=True, restore_trial=None, record_trial=None,
+            prepared_selection=None):
     """Stream one trial at a time; retain only baseline and compact summaries.
 
     Existing bindings/history seed each independent trial. Production rebuild
@@ -79,7 +80,10 @@ def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=N
             raise ValueError('Simulation variants must preserve model, person and VTT scan contracts.')
     with (closing(_open_readonly(config.database)) if source is None else nullcontext(source)) as db:
         inputs = {}
-        scope, scans = _selection(db, config, scenes, scope, allow_partial=allow_partial_selection, diagnostics=inputs)
+        if prepared_selection is None:
+            scope, scans = _selection(db, config, scenes, scope, allow_partial=allow_partial_selection, diagnostics=inputs)
+        else:
+            scope, scans, inputs = prepared_selection
         installation = FaceDatabase.installation.fget(SimpleNamespace(connection=db))
         observations = {r['id']: r['scene'] for r in db.execute(
             'SELECT o.id,s.scene FROM observations o JOIN scans s ON s.id=o.scan '
