@@ -101,4 +101,6 @@ def run() -> int:
         import os
         key = runtime.STASH_API_KEY if runtime is not None else os.getenv('STASH_API_KEY', '')
         print(f"ERROR: {safe_error(exc, api_key=key)}", file=sys.stderr)
+        for note in getattr(exc, '__notes__', ()):
+            print(f"  {safe_error(note, api_key=key)}", file=sys.stderr)
         return 1

@@ -19,6 +19,29 @@ LATER = np.array([.55, math.sqrt(1-.55**2), 0., 0.])
 OTHER = np.array([0., 1., 0., 0.])
 
 
+@pytest.mark.parametrize('maximum', [1, 2, 4, 8])
+def test_overlapping_broad_and_narrow_cohorts_never_compare_vector_contents(tmp_path, maximum):
+    config = multiview(tmp_path, view_cohesion_threshold=.55,
+                       view_match_threshold=.62, max_view_prototypes_per_person=maximum)
+    rows = []
+    # Both radii start at observations 00/03, but later admit different samples.
+    # Selecting a diverse cohort used to call dataclass equality via list.remove.
+    for i, angle in enumerate([-14.5, 8.5, 24.2, -51.9, -16.4, -53.3, -31.2]):
+        radians = math.radians(angle)
+        sample = np.array([math.cos(radians), math.sin(radians), 0., 0.], dtype='<f4')
+        rows.append(dict(person='person', id=f'{i:02}', scan='scan', seconds=i,
+                         geometry='[]', quality='{}', dimensions=4, embedding=sample.tobytes()))
+    views = confirmed_views(None, 'policy', config.data['clustering'],
+                            remaining_bytes=1024*1024, rows=rows, complete=True)
+    # Complete catalogues retain unprioritized cohorts after the bounded prefix.
+    expected = {1: ['06', '00', '01', '03'], 2: ['06', '01', '00', '03']}.get(
+        maximum, ['06', '01', '03', '00'])
+    assert [view.medoid for view in views] == expected
+    assert {view.medoid: view.support for view in views} == {
+        '06': ('03', '04', '05', '06'), '01': ('00', '01', '02'),
+        '03': ('03', '05', '06'), '00': ('00', '01', '04')}
+
+
 def multiview(tmp_path, **changes):
     return configured(tmp_path, view_prototypes_enabled=True, **changes)
 

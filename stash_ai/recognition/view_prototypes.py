@@ -217,9 +217,13 @@ def prioritized(slots,maximum):
     remaining=sorted(slots,key=lambda s:(-len(s.cues),s.pose,s.first))
     chosen=[]
     while remaining and len(chosen)<maximum:
-        winner=(remaining[0] if not chosen else max(remaining,key=lambda s:
-            (1.-max(float(np.dot(s.medoid()[0],c.medoid()[0])) for c in chosen),len(s.cues),s.first)))
-        chosen.append(winner);remaining.remove(winner)
+        # Remove by position: broad/narrow cohorts may share pose/first while
+        # containing different NumPy vectors, which cannot be compared by ==.
+        def priority(index):
+            slot=remaining[index]
+            return (1.-max(float(np.dot(slot.medoid()[0],c.medoid()[0])) for c in chosen),len(slot.cues),slot.first)
+        winner=0 if not chosen else max(range(len(remaining)),key=priority)
+        chosen.append(remaining.pop(winner))
     return chosen+remaining
 
 

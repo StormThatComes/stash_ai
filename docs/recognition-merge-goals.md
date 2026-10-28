@@ -325,6 +325,13 @@ Merge solver trial-2: start changes_vs=trial-1 parent=baseline
   sapiensid.matching.face_floor: 0.785 -> 0.8
 ```
 
+Stage messages are throttled, so the last printed stage may precede a failure.
+On a rebuild exception, the CLI also prints `Recognition replay trial-N; stage:`
+with the last entered stage and up to five file/line/function locations. This
+diagnostic is available with progress disabled and contains no frame locals or
+embedding contents. The failed trial is not completed or exported; the last
+completed winner remains in the YAML file.
+
 Completed JSON trial records contain the same `previous_trial` and
 `changes_from_previous` data (`parameter`, `previous`, `current`). The existing
 `changes` and `yaml_patch` remain relative to the input configuration for export.
@@ -539,7 +546,7 @@ Resume with the same command plus `--resume`. Keep both the manifest and trial
 directory. The solver reconstructs its frontier, seen proposals and operator
 statistics from the journal; completed production replays are not repeated.
 It verifies all retained database tables, goals, input configuration, code and
-search settings first. Changed evidence, parameters or budgets require a new
+search settings first. Changed code, evidence, parameters or budgets require a new
 checkpoint. JSON report `--output` still requires a new path; omit it during
 resumable work or choose a new report filename on each invocation.
 
