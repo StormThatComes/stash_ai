@@ -15,7 +15,7 @@ def scripted_search(monkeypatch):
     # Both executed candidates come from baseline. Intermediate proposals must
     # not advance the comparison point, including a failed validation.
     changes = [{PREFIX+'face_floor':.785}, {PREFIX+'face_floor':.785},
-               {PREFIX+'face_floor':1.1}, {}, {'clustering.max_anchor_pose_deviation':.4}]
+               {PREFIX+'face_floor':float('nan')}, {}, {'clustering.max_anchor_pose_deviation':.4}]
     pending = iter(changes)
     def next_trial(self):
         patch = next(pending)
@@ -66,7 +66,7 @@ def test_cli_logs_previous_executed_config_and_keeps_export_relative_to_input(tm
         assert ('trial-2: start changes_vs=trial-1 parent=baseline\n'
                 '  clustering.max_anchor_pose_deviation: 0.2 -> 0.4\n'
                 '  sapiensid.matching.face_floor: 0.785 -> 0.8\n') in captured.err
-        assert '1.1' not in captured.err
+        assert 'nan' not in captured.err
         assert 'best=trial-1 best_number=1' in captured.err
         lines = captured.err.splitlines()
         for name, item in trials.items():

@@ -196,8 +196,9 @@ separate probes. Coordinates and joint proposals are interleaved, including face
 parameters, so a large pair list cannot consume all early probes. Dense measured
 boundaries are spread through the search order.
 
-Only a beam of **at most five diverse completed configurations** gets adaptive
-descendants. The beam keeps the highest-ranked result, prefers different final
+A beam of **three to eight diverse completed configurations** gets adaptive
+descendants. Its width follows partition and blocker diversity over the last
+16 completed trials; repeated plateaus shrink it, diverse outcomes expand it. The beam keeps the highest-ranked result, prefers different final
 partitions, and reserves room for different parameter routes on a plateau. A
 repeated inferior configuration does not create another unbounded search branch.
 Up to 13 baseline explorations warm up the active families while baseline is
@@ -206,10 +207,11 @@ the new winner is expanded in the next available normal slot, subject to the
 reserved baseline slot. Baseline exploration continues once per four completed
 normal trials, and at least every other adaptive parent preference goes to the
 current winner when its streams have candidates. Other parents have a separate
-rotation. Bidirectional and robustness trials do not advance these scheduling
+rotation. Bidirectional, minimization and robustness trials do not advance these scheduling
 counters; alternating lanes cannot repeatedly skip the winning parent. Family allocation
-favours observed improvements, with exploration and a starvation guard, instead
-of alternating hybrid and face trials regardless of usefulness. Duplicate or
+favours normalized improvement at the first changed objective and new partition/
+blocker information per replay second, with exploration and a starvation guard.
+This scheduling reward never changes the lexicographic winner ranking. Duplicate or
 invalid proposals do not consume a replay budget slot.
 
 After 64 completed trials without an improvement in goal/outside-impact metrics
@@ -224,10 +226,10 @@ The configured replay limit and proposal-attempt guard always remain in force.
 or interruption. `beam_width`, `peak_beam`, `beam_trials`, `pruned_trials`,
 `stagnation_patience` and `refinement_budget` expose the search limits.
 `search.executed_by_family` and each trial's `search_family` show actual allocation.
-`search_phase` is `baseline_exploration`, `adaptive`, `refinement`, `restart`, or
-`robustness`. `search_parent` and `search_strategy` explain the origin, including
+`search_phase` is `baseline_exploration`, `adaptive`, `bidirectional`, `refinement`,
+`restart`, `minimization`, or `robustness`. `search_parent` and `search_strategy` explain the origin, including
 `measured_blockers`, `coordinate_probe`, `boundary_probe`, `crossover`,
-`local_refinement`, `restart_probe`, `robustness_probe`, and optional `tpe`. `search.tested_hybrid_values` includes
+`local_refinement`, `restart_probe`, `parameter_ablation`, `robustness_probe`, and optional `tpe`. `search.tested_hybrid_values` includes
 only completed trials, including baseline, never interrupted proposals.
 
 Each trial's `solver_feedback` contains query-stage blockers, separation intervals
@@ -514,8 +516,10 @@ counts. Every trial still logs its changes against the previous executed trial.
 
 With at least one fragmented or multi-scene set, including a single set, search
 also approaches the problem from a permissive configuration. Starting with
-`trial-2`, every other exploration slot is offered to this alternate lane while
-the goal is unsolved. The first normal trial and the existing baseline probes
+`trial-2`, initially every other exploration slot is offered to this alternate
+lane while the goal is unsolved. Recent improvements increase its frequency;
+four unsuccessful experiments reduce it. At most two consecutive alternate
+trials run while normal exploration remains available. The first normal trial and the existing baseline probes
 remain available. The lane alternates broad joint relaxations with attempts to
 repair their results; it does not wait for stagnation or the late restart.
 
@@ -628,8 +632,15 @@ interrupted winner update. Checkpoints retain diagnostics and observation IDs,
 not crop images. They use incremental per-trial files instead of rewriting the
 entire history after every trial. `search.restored_trials` reports reused trials.
 
-For budgets of at least 20, up to eight trials are reserved for full production
-replays near two leading configurations (at most ten percent of the budget).
+For budgets of at least 20, four to 24 trials (at most one quarter of the budget)
+are reserved for final polishing, scaled to changed and active parameters. First,
+up to half this allowance tests reverting individual parameters and related
+groups to baseline. Every ablation is a full production replay; a simpler patch
+is accepted only through the ordinary winner ranking. The next ablations use
+the current winner. Remaining slots validate two leading configurations, covering
+different coordinates before their second side, boolean flips, nearby measured
+boundaries and simultaneous perturbations of related gates. Domain projection
+and dependency validation also apply to these probes.
 Two or more successful nearby replays give a stability preference only after
 goal and outside-impact scores tie. The `robustness` report lists actual checks;
 missing checks mean unknown stability, never an assurance. These probes share
@@ -640,8 +651,10 @@ the global trial limit and do not prove robustness on future media.
 
 Install `pip install -r requirements-solver.txt` and add
 `--solver-sampler tpe --solver-seed 42`. Default `heuristic` mode has no Optuna
-dependency. TPE proposes at most one candidate per five completed trials after
-13 warmup trials; other candidates continue to come from the guided search.
+dependency. After 13 warmup trials, TPE initially proposes one candidate per
+five completed trials. Recent improvements shorten the interval to two; four
+unsuccessful proposals extend it to eight. Other candidates continue to come
+from the guided search; a due TPE slot takes precedence over the alternate lane.
 Rejected or duplicate TPE proposals do not consume a replay slot or replace
 heuristic proposals indefinitely. The usual default total limit remains 500.
 

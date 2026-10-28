@@ -12,6 +12,30 @@ GATES = ('face_floor', 'person_threshold', 'ambiguity_margin', 'min_support')
 BASELINE_WARMUP = 1 + 3 * len(GATES)
 
 
+def quality_gain(previous, current):
+    """Scheduling reward only: the first changed objective keeps its precedence."""
+    if previous is None or current <= previous:
+        return 0.
+    for index, (before, after) in enumerate(zip(previous, current)):
+        if before != after:
+            return min(1., (after-before)/max(1., abs(before), abs(after)))/(index+1)
+    return 0.
+
+
+def statistics():
+    return dict(executed=0, improvements=0, last=0, seconds=0., rejected=0,
+                gain=0., information=0., recent=[])
+
+
+def cadence(stat, default):
+    recent = stat.get('recent', ())[-4:]
+    if len(recent) >= 2 and sum(g > 0 for g in recent)*2 >= len(recent):
+        return max(1, default//2)
+    if len(recent) == 4 and not any(recent):
+        return min(8, default*2)
+    return default
+
+
 def interleave(streams):
     pending = deque(iter(s) for s in streams)
     while pending:
@@ -99,7 +123,7 @@ def refinement(config, changes, options):
 
 
 class BeamSearch:
-    """Five diverse completed states, adaptive family budgets, bounded patience.
+    """Three to eight diverse states, adaptive family budgets, bounded patience.
 
     Baseline exploration has its own reserved lane. Losing trials can supply
     measured thresholds, but only admitted beam states acquire descendants.
@@ -111,7 +135,9 @@ class BeamSearch:
         self.config = config
         self.families, self.factory, self.maximum = tuple(families), factory, maximum
         self.beam, self.streams, self.root = {}, {}, {}
-        self.stats = {f: dict(executed=0, improvements=0, last=0, seconds=0., rejected=0) for f in families}
+        self.stats = {f: statistics() for f in families}
+        self.lanes = {}
+        self.recent_states = deque(maxlen=16)
         self.executed = self.stale = self.explored = 0
         self.best_quality = None
         self.patience = max(24, min(64, maximum//4))
@@ -132,9 +158,16 @@ class BeamSearch:
         self.restart_pending = None
         self.restart_executed = 0
 
-    def observe(self, name, changes, rank, outcome, *, family=None, operator=None, elapsed=0., blockers=()):
+    def observe(self, name, changes, rank, outcome, *, family=None, operator=None, elapsed=0., blockers=(), phase=None):
         # Patch-size tie-breaks must not turn a plateau into endless "progress".
         improved = self.best_quality is None or rank[:-2] > self.best_quality
+        gain = quality_gain(self.best_quality, rank[:-2])
+        state = outcome, tuple(blockers)
+        information = float(state not in self.recent_states)
+        self.recent_states.append(state)
+        if self.config is not None and len(self.recent_states) >= 4:
+            diversity = len(set(self.recent_states))
+            self.width = max(3, min(8, 2+(diversity+1)//2))
         if improved:
             self.best_quality, self.stale = rank[:-2], 0
             self.refining = False
@@ -144,14 +177,19 @@ class BeamSearch:
             self.stale += 1
         if family is not None:
             self.executed += 1
-            stat = self.stats[family]
-            stat['executed'] += 1
-            stat['improvements'] += int(improved)
-            stat['last'] = self.executed
-            stat['seconds'] += elapsed
+            records = [self.stats[family]]
             if operator:
-                op=self.operators.setdefault(operator,dict(executed=0,improvements=0,seconds=0.,rejected=0))
-                op['executed']+=1;op['improvements']+=int(improved);op['seconds']+=elapsed
+                records.append(self.operators.setdefault(operator, statistics()))
+            if phase:
+                records.append(self.lanes.setdefault(phase, statistics()))
+            for stat in records:
+                stat['executed'] += 1
+                stat['improvements'] += int(improved)
+                stat['last'] = self.executed
+                stat['seconds'] += elapsed
+                stat['gain'] += gain
+                stat['information'] += information
+                stat['recent'] = (stat['recent']+[gain])[-4:]
         candidate = dict(changes=changes, rank=rank, outcome=outcome, blockers=tuple(blockers))
         pool = dict(self.beam, **{name: candidate})
         ordered = sorted(pool, key=lambda n: pool[n]['rank'], reverse=True)
@@ -161,7 +199,7 @@ class BeamSearch:
         selected, signatures = [], set()
         # Prefer distinct partitions; reserve two places for distinct parameter
         # routes on a plateau (e.g. face vs body), without retaining every trial.
-        for key, limit in ((lambda c: c['outcome'], 3),
+        for key, limit in ((lambda c: c['outcome'], max(1, self.width-2)),
                            (lambda c: (c['outcome'], c['blockers'], parameter_signature(c['changes'],self.config)), self.width)):
             signatures = {key(pool[n]) for n in selected}
             for n in ordered:
@@ -191,15 +229,15 @@ class BeamSearch:
             stat = self.stats[family]
             # A useful family gets more trials; starvation is capped at four.
             overdue = self.executed-stat['last'] >= 4
-            score = (stat['improvements']/(stat['executed']+1) +
+            score = ((stat['gain']+.05*stat['information'])/(stat['executed']+1) +
                      math.sqrt(2*math.log(self.executed+2)/(stat['executed']+1)))
             cost=max(1.,stat['seconds']/max(1,stat['executed']))
-            return stat['executed'] == 0 and stat['rejected']<8, overdue, score/(cost**.25)/(1+stat['rejected']*.02)
+            return stat['executed'] == 0 and stat['rejected']<8, overdue, score/cost/(1+stat['rejected']*.02)
         return sorted(self.families, key=priority, reverse=True)
 
     def rejected(self, family, operator):
         self.stats[family]['rejected'] += 1
-        op=self.operators.setdefault(operator,dict(executed=0,improvements=0,seconds=0.,rejected=0))
+        op=self.operators.setdefault(operator,statistics())
         op['rejected']+=1
 
     def operations(self, streams):
@@ -208,7 +246,8 @@ class BeamSearch:
             def priority(k):
                 stat=self.operators.get(k,{})
                 count=stat.get('executed',0)
-                return (stat.get('improvements',0)+1)/(count+1)**.5 / max(1.,stat.get('seconds',0)/max(1,count))**.25 / (1+stat.get('rejected',0)*.1)
+                reward = stat.get('gain',0)+.05*stat.get('information',0)
+                return (reward+1)/(count+1)**.5 / max(1.,stat.get('seconds',0)/max(1,count)) / (1+stat.get('rejected',0)*.1)
             key=max(pending,key=priority)
             try:yield next(pending[key])
             except StopIteration:del pending[key]

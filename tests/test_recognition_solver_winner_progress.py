@@ -10,7 +10,7 @@ from stash_ai.recognition.fragmentation_report import _open_readonly
 from stash_ai.recognition.merge_goals import assess, evaluate, objective, resolve
 from stash_ai.recognition.merge_report_policy import patched, proposal
 from stash_ai.recognition.merge_solver_bidirectional import (
-    BidirectionalSearch, expansion_candidates, relaxed_seeds, repair_candidates)
+    BidirectionalSearch, expansion_candidates, repair_candidates)
 from stash_ai.recognition.merge_solver_search import BeamSearch, PREFIX
 
 
@@ -65,7 +65,10 @@ def test_disjoint_frontier_expands_beyond_its_own_safe_endpoint(tmp_path):
     observations = dict.fromkeys('abcd', 'scene')
     status = assess(goals, observations, {}, dict(zip('abcd', 'aabd')))
     source = dict(proposals={}, options={})
-    current = dict(next(relaxed_seeds(config, {})), **{'clustering.max_anchor_pose_deviation': .4})
+    # A known partial parent, independent of the seed generator's measurements.
+    current = {PREFIX+'face_floor': .2, PREFIX+'person_threshold': .35,
+               PREFIX+'ambiguity_margin': 0., PREFIX+'min_support': 1,
+               'clustering.max_anchor_pose_deviation': .4}
     lane = BidirectionalSearch(config, goals, 500, source)
     lane.observe('trial-4', current, status, objective(status), 'partial')
     lane.seeds.clear()
@@ -104,7 +107,8 @@ def test_outward_joint_move_improves_real_partial_replay_without_mixing_sets(tmp
         return np.linalg.cholesky(gram).tolist()
 
     config, people = prepared(tmp_path, vectors(.16), vectors(.25))
-    current = next(relaxed_seeds(config, {}))
+    current = {PREFIX+'face_floor': .2, PREFIX+'person_threshold': .35,
+               PREFIX+'ambiguity_margin': 0., PREFIX+'min_support': 1}
     before = config.database.read_bytes()
     variants = {'partial': patched(config, current)}
     variants.update({f'outward-{i}': patched(config, p)
