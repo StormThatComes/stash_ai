@@ -29,6 +29,10 @@ class PersonCollector:
         missing={r[0] for r in db.execute('SELECT DISTINCT o.cue FROM observations o '
             'LEFT JOIN person_evidence p ON p.observation=o.id AND p.contract=? '
             'WHERE o.scan=? AND o.rejected IS NULL AND p.observation IS NULL',(expected,scan))}
+        from .body_observations import enabled,contract as body_contract
+        if enabled(self.config):
+            complete={r[0] for r in db.execute('SELECT cue FROM body_cues WHERE scan=? AND contract=?',(scan,body_contract(self.config)))}
+            missing.update(set(range(len(source.cues)))-complete)
         if not missing:
             return
         self._load()
@@ -37,7 +41,7 @@ class PersonCollector:
             with tracking(stream,'Collect SapiensID evidence',total=len(missing),unit='cue') as frames:
                 for index,cue,image in frames:
                     with image:
-                        if index in missing:self.collect_frame(db,scan,index,image)
+                        if index in missing:self.collect_frame(db,scan,index,image,seconds=cue.start)
         self.flush()
 
     def _load(self):
@@ -59,15 +63,15 @@ class PersonCollector:
         except BaseException:
             self.abort();raise
 
-    def collect_frame(self,db,scan,index,image):
-        try:return self._collect_frame(db,scan,index,image)
+    def collect_frame(self,db,scan,index,image,*,seconds=0.):
+        try:return self._collect_frame(db,scan,index,image,seconds=seconds)
         except BaseException:
             self.abort();raise
 
-    def collect_records(self,db,scan,index,image,rows):
+    def collect_records(self,db,scan,index,image,rows,*,seconds=0.):
         """Prepare fresh faces without rereading or committing them per cue."""
         if self.deferred is None:self.deferred=[]
-        try:return self._collect_frame(db,scan,index,image,rows=rows)
+        try:return self._collect_frame(db,scan,index,image,rows=rows,seconds=seconds)
         except BaseException:
             self.abort();raise
 
@@ -80,15 +84,29 @@ class PersonCollector:
         if self.deferred is not None:self.deferred.extend(rows)
         else:
             with db:
-                for identifier,metadata,vector,crop in rows:
-                    save(db,identifier,contract(self.config),metadata,vector,crop)
+                self.write_records(db,rows)
 
-    def _collect_frame(self,db,scan,index,image,*,rows=None):
+    def write_records(self,db,rows):
+        from .body_observations import save_records
+        save_records(db,self.config,rows)
+
+    def _collect_frame(self,db,scan,index,image,*,rows=None,seconds=0.):
         if not self.config.data['sapiensid']['enabled']:return
         self._load();expected=contract(self.config)
         fresh=rows is not None
         if rows is None:rows=list(db.execute('SELECT * FROM observations WHERE scan=? AND cue=? ORDER BY id',(scan,index)))
         faces=[checked_detection(json.loads(r['geometry'])) for r in rows]
+        from .body_observations import enabled,contract as body_contract
+        if enabled(self.config):
+            if not fresh and db.execute('SELECT 1 FROM body_cues WHERE scan=? AND contract=? AND cue=?',
+                    (scan,body_contract(self.config),index)).fetchone():return
+            self.model.detect(image,faces=faces)
+            from .body_collection import collect
+            if self.pipeline is None:
+                from .person_pipeline import PreparedCollector
+                self.pipeline=PreparedCollector(self.config,self.model,writer=self._write)
+            collect(self.pipeline,db,self.model,self.config,scan,index,seconds,image,rows,faces)
+            return
         self.model.detect(image,faces=faces)
         if callable(getattr(self.model,'person_input',None)) and callable(getattr(self.model,'embed_inputs',None)):
             if self.pipeline is None:

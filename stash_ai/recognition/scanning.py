@@ -99,9 +99,7 @@ def scan_scene(database, scope, scene, config, namespace, source, backend_factor
                 row=list(row);row[7]=compact(db,row[7]);compacted.append(row)
             db.executemany('INSERT OR REPLACE INTO observations VALUES (?,?,?,?,?,?,?,?,?,?,?,?)', compacted)
             if supplemental:
-                from .person_signal import save,contract
-                for observation,metadata,vector,crop in supplemental:
-                    save(db,observation,contract(config),metadata,vector,crop)
+                collector.write_records(db,supplemental)
             db.execute('UPDATE scans SET cursor=? WHERE id=?', (cursor, identifier))
         pending.clear();pending_bytes=0
         progress(scanned=cursor, total=record['total'], scene=str(scene['id']))
@@ -129,11 +127,12 @@ def scan_scene(database, scope, scene, config, namespace, source, backend_factor
                         if grouped:
                             image=next(image for i,_,image in batch if i==index)
                             collector.collect_records(db,identifier,index,image,
-                                sorted((dict(zip(columns,row)) for row in pending[start:]),key=lambda r:r['id']))
+                                sorted((dict(zip(columns,row)) for row in pending[start:]),key=lambda r:r['id']),seconds=cue.start)
                         pending_bytes+=sum(sum(len(v) for v in row if isinstance(v,(str,bytes)))
                             +(config.data['storage']['max_crop_bytes']+32768 if grouped else 0) for row in pending[start:])
                         if (on_cue is not None and not grouped or cursor % config.data['execution']['checkpoint_cues'] == 0
-                                or pending_bytes>=config.data['execution']['scan_queue_bytes']//4):checkpoint()
+                                or pending_bytes>=config.data['execution']['scan_queue_bytes']//4
+                                or grouped and config.data['sapiensid']['collection']['enabled']):checkpoint()
                         if on_cue is not None and not grouped:
                             image=next(image for i,_,image in batch if i==index)
                             on_cue(db,identifier,index,image)

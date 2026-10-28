@@ -32,7 +32,7 @@ def identity_contract(config):
             'max_people_per_frame': settings['pose']['max_people_per_frame']}
 
 
-def associate(faces, people):
+def association_choices(faces, people):
     """Require unique face -> person and person -> face head-region membership.
 
     Person boxes alone overlap too often to establish ownership. At least one
@@ -55,6 +55,11 @@ def associate(faces, people):
             if any(x <= px <= x+w and y <= py <= y+h for px, py in head):
                 indices.append(index)
         choices.append(indices)
+    return choices
+
+
+def associate(faces, people):
+    choices = association_choices(faces, people)
     usage = Counter(index for indices in choices for index in indices)
     return [indices[0] if len(indices) == 1 and usage[indices[0]] == 1 else None for indices in choices]
 
@@ -110,7 +115,7 @@ class SapiensIDFaces(YuNetDetector):
             raise ValueError('Supplemental collection requires retained face detections.')
         faces = super().detect(image) if faces is None else faces
         people = []
-        if faces:
+        if faces or self.config.data['sapiensid']['collection']['enabled']:
             settings = self.config.data['sapiensid']
             # Explicitly select the one-to-many head: iou remains effective on
             # YOLO26 instead of being silently ignored by NMS-free inference.
@@ -144,6 +149,7 @@ class SapiensIDFaces(YuNetDetector):
                 kps[~usable] = -1
                 people.append({'bounds': [left,top,right,bottom], 'keypoints': kps.tolist(), 'score': float(score)})
         matches = associate(faces, people)
+        self.frame_people, self.face_matches = people, matches
         self._person_frame = image, {tuple(face.row): people[index] if index is not None else None
                                      for face, index in zip(faces, matches)}
         return faces
@@ -165,6 +171,11 @@ class SapiensIDFaces(YuNetDetector):
         person = self._person(image, face)
         if person is None:
             raise ValueError('SapiensID requires an unambiguous measured face/person association.')
+        return self.person_geometry(image, person, face)
+
+    def person_geometry(self, image, person, face=None):
+        import numpy as np
+        self._owner()
         left, top, right, bottom = person['bounds']
         side = max(right-left, bottom-top)
         padx, pady = (side-(right-left))//2, (side-(bottom-top))//2
@@ -173,7 +184,7 @@ class SapiensIDFaces(YuNetDetector):
                       for x,y in person['keypoints']]
         body = adjust_pose(normalized)
         points = [[x*side-padx, y*side-pady] if x >= 0 else [-1.,-1.] for x,y in body]
-        points.extend([[x-left, y-top] for x,y in face.landmarks])
+        points.extend([[x-left, y-top] for x,y in face.landmarks] if face is not None else [[-1.,-1.]]*5)
         # Face/person detectors can disagree at the crop boundary even after a
         # unique association. Omit out-of-crop measurements, never clamp them
         # into fabricated border landmarks. Check in the same float32 domain
