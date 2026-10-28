@@ -326,3 +326,25 @@ boxes cannot support one another. Memory and comparison budgets fail explicitly
 before replacing any selected assignments. Confirmed body identities use the
 normal owned Stash profile and scene-publication journal; they need no portrait
 in order to publish. SQLite v10 adds derived body decisions and stable origins.
+
+## Global body consolidation
+
+Enable `sapiensid.global_matching.enabled` after calibrating scene identities.
+The global match, cohesion, ambiguity and support thresholds are separate from
+local assignment. Candidate banks contain accepted body anchors only. Every
+original core must agree; connected A–B–C edges do not establish A–C. Weak or
+under-supported identities remain competitors. Missing face evidence does not
+veto a match; contradictory admitted face evidence does. Face and SapiensID
+vectors are never averaged or compared across encoder spaces.
+
+Application requires all scenes of every participating identity in the selected
+scope. Source anchors become attachments, while frozen original body and face
+witnesses retain veto power. Missing original evidence blocks further merges.
+Local aliases preserve old Stash profiles and manual metadata. Face-bearing
+identities take precedence as the target, then creation order and ID break ties.
+Body-owned aliases are revalidated when all involved scenes are selected; a
+partial selection cannot reactivate or blindly publish a retired source core.
+Turning global consolidation off and rerunning the full involved scope restores
+the current scene partition for body-owned aliases only. Face-owned aliases are
+not removed. A body core wholly confirmed by an existing face bank records a
+local promotion alias even when global body consolidation is disabled.

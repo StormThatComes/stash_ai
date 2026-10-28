@@ -190,10 +190,16 @@ def rebuild(database,selected,config,result):
                 db.execute('INSERT INTO body_members VALUES (?,?,?,?,?,?)',
                     (row['id'],person,decision['role'],decision['status'],stamp,encoded(decision)))
             enqueue(db,scan['scope'],scan['namespace'],scan['scene'],config,'body_scene_rebuild')
+        if plans:
+            from .body_global import reconcile
+            reconcile(database,selected,config)
     return results(db,selected,result)
 
 
 def results(db,selected,result):
+    for groups in result.values():
+        for group in groups:
+            if group['person'] is not None:group['person']=canonical(db,group['person'])
     for item in selected:
         rows=db.execute('SELECT m.person,m.status,COUNT(*) AS observations FROM body_members m '
             'JOIN body_observations b ON b.id=m.observation WHERE b.scan=? GROUP BY m.person,m.status',(item['scan'],))
