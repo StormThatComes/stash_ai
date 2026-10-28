@@ -29,7 +29,7 @@ def round_robin(groups):
             pass
 
 
-def fair_queries(db, config, goals, selected, births, limit):
+def fair_queries(db, config, goals, selected, births, limit, *, visits=None, priorities=None):
     """Reserve diagnostic queries across sets, performers, then scenes."""
     from .clustering import matching_policy
     from .reference_roles import observation_sql
@@ -47,10 +47,51 @@ def fair_queries(db, config, goals, selected, births, limit):
         group,person = membership[oid]
         buckets[group][person][scan].append(oid)
         eligible += 1
-    ordered = round_robin({g:round_robin({p:round_robin(scenes) for p,scenes in members.items()})
-                          for g,members in buckets.items()})
+    visits, priorities = visits or {}, priorities or {}
+    def order(ids):
+        return min((visits.get(oid, 0), -priorities.get(oid, 0), oid) for oid in ids)
+    # Rotate at every level, including sets when the quota is smaller than the
+    # number of sets. Least-visited evidence wins before priority to avoid starvation.
+    def weave(items):
+        return round_robin({i: values for i, (_, values) in enumerate(sorted(items, key=lambda x: x[0]))})
+    group_streams = []
+    for group, members in buckets.items():
+        member_streams, group_ids = [], []
+        for person, scenes in members.items():
+            scene_streams, member_ids = [], []
+            for scene, ids in scenes.items():
+                ids.sort(key=lambda oid: (visits.get(oid, 0), -priorities.get(oid, 0), oid))
+                scene_streams.append((order(ids), ids))
+                member_ids.extend(ids)
+            member_streams.append((order(member_ids), weave(scene_streams)))
+            group_ids.extend(member_ids)
+        group_streams.append((order(group_ids), weave(member_streams)))
+    ordered = weave(group_streams)
     from itertools import islice
     return set(islice(ordered,max(0,limit))), eligible
+
+
+def latest_decisions(db, observation_ids):
+    """Use the production observation index and explicit rowid ordering.
+
+    Latest means across all policies, just like reference authority. A stale
+    policy or a candidate's claimed scan must not hide its terminal decision.
+    """
+    import json
+    from .reference_roles import observation_sql, index
+    index(db)  # The solver calls this only on its disposable replay database.
+    rows = db.execute('SELECT o.id,c.scan,c.status,c.payload FROM observations o '
+        'JOIN candidates c ON c.rowid=(SELECT c2.rowid FROM candidates c2 WHERE '+
+        observation_sql('c2')+'=o.id ORDER BY c2.rowid DESC LIMIT 1) '
+        'WHERE o.id IN (SELECT value FROM json_each(?)) ORDER BY o.id', (encoded(sorted(observation_ids)),))
+    result = []
+    for row in rows:
+        payload = json.loads(row['payload'])
+        result.append(dict(observation=row['id'], scan=row['scan'], status=row['status'],
+            reason=payload.get('reason'), hybrid_merge=payload.get('hybrid_merge'),
+            hybrid_query=payload.get('hybrid_query'), measurements={k: v for k, v in payload.items()
+                if type(v) in (int, float, bool) and any(t in k for t in ('score','similarity','threshold','support','margin'))}))
+    return result
 
 
 def diagnostic_record(settings, decisions, queries, hybrid, quality):

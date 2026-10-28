@@ -48,7 +48,35 @@ def joint_separation(config, positives, negatives, limit=32):
     return dict(proposals=states,unresolved=unresolved,truncated=truncated)
 
 
-def component_proposals(config, hybrid, limit=16):
+def alternative_separation(config, obligations, negatives, limit=32):
+    """AND of obligations, OR of routes within each obligation.
+
+    The bounded states are acceptance upper bounds, not accepted identities.
+    A fresh production replay remains necessary for support and competition.
+    """
+    states = [{}]
+    def cost(p):
+        return sum(abs(v-parameter(config.data,k))/max(1.,abs(parameter(config.data,k))) for k,v in p.items())
+    for routes in obligations:
+        if not routes:
+            continue
+        expanded = {}
+        for state in states:
+            for route in routes:
+                combined = dict(state)
+                for key, value in route.items():
+                    combined[key] = min(combined.get(key, value), value)
+                expanded[digest(combined)] = combined
+        states = sorted(expanded.values(), key=lambda p: (cost(p), digest(p)))[:limit]
+    proposals = []
+    for state in states:
+        proposals.extend(joint_separation(config, [state], negatives, limit=limit)['proposals'])
+    unique = {digest(p): p for p in proposals}
+    return sorted(unique.values(), key=lambda p: (
+        -sum(any(p.get(k, -math.inf) > v for k, v in n.items()) for n in negatives), cost(p), digest(p)))[:limit]
+
+
+def component_proposals(config, hybrid, limit=16, *, targets=None):
     """Strongest fragment bridges first; complete-core production checks still apply."""
     edges = []
     for entry in hybrid.get('pairs', ()):
@@ -59,12 +87,22 @@ def component_proposals(config, hybrid, limit=16):
         patch = {PREFIX+'face_floor':min(config.data['sapiensid']['matching']['face_floor'],_floor(proof['face']['minimum'])),
                  PREFIX+'person_threshold':min(config.data['sapiensid']['matching']['person_threshold'],_floor(proof['person']['minimum'])),
                  PREFIX+'min_support':min(config.data['sapiensid']['matching']['min_support'],min(proof['support']))}
-        edges.append((-(proof['face']['minimum']+proof['person']['minimum']),proof['left'],proof['right'],patch))
+        from .merge_solver_targets import bridge_gain
+        gain = bridge_gain(proof['left'], proof['right'], targets or {})
+        rivals = [r['score'] for r in hybrid.get('nearest_competitors', ())
+                  if r['identity'] in (proof['left'], proof['right'])]
+        margin = proof['person'].get('mean', proof['person']['minimum'])-max(rivals, default=0.)
+        if rivals and margin >= 0:
+            patch[PREFIX+'ambiguity_margin'] = min(config.data['sapiensid']['matching']['ambiguity_margin'], _floor(margin))
+        if proof.get('cooccurring'):
+            patch['recognition.cooccurrence_merge_threshold'] = min(
+                config.data['recognition']['cooccurrence_merge_threshold'], _floor(proof['face']['minimum']))
+        edges.append((-gain, -margin, -(proof['face']['minimum']+proof['person']['minimum']),proof['left'],proof['right'],patch))
     roots, combined, result = {}, {}, []
     def root(v):
         while roots.get(v,v)!=v:v=roots[v]
         return v
-    for _,a,b,patch in sorted(edges):
+    for _,_,_,a,b,patch in sorted(edges):
         a,b = root(a),root(b)
         if a==b:continue
         roots[b]=a

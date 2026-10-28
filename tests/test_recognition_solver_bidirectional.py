@@ -45,6 +45,9 @@ def plateau(tmp_path, monkeypatch, size=4):
         return result
 
     monkeypatch.setattr(merge_solver, 'measured_options', sparse)
+    # The independent face fallback is another ready-made measured route; this
+    # fixture intentionally suppresses such routes to exercise frontier repair.
+    monkeypatch.setattr('stash_ai.recognition.merge_solver_feedback.face_fallbacks', lambda *a, **k: [])
     monkeypatch.setattr(QueryFeedback, 'finish', sparse_queries)
     return config, goals
 

@@ -226,7 +226,7 @@ class BidirectionalSearch:
                 if key not in self.streams:
                     candidates = (expansion_candidates(self.config, state['changes'], feedback[parent])
                                   if state['disjoint'] else repair_candidates(self.config,
-                                      state['changes'], [feedback[parent], self.baseline_feedback],
+                                      state['changes'], [feedback[parent], feedback.get(safe_name, self.baseline_feedback)],
                                       self.safe['changes'] if self.safe else {}))
                     self.streams[key] = iter(candidates)
                 for strategy, patch in self.streams[key]:
