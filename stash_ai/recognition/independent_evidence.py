@@ -1,9 +1,16 @@
-"""One timestamp or repeated retained crop is one witness within a scan.
+"""One cue/time slot or repeated retained crop is one independent witness.
 
 Only an explicit pixel fingerprint is deduplicated. Equal embeddings alone do
-not imply equal pixels. Legacy evidence retains its timestamp-based semantics.
+not imply equal pixels. Typed body evidence uses cues; legacy face evidence
+retains its timestamp-based semantics.
 """
 from .run_cache import metadata
+
+
+def stamp(row):
+    if 'evidence_kind' in row.keys() and row['evidence_kind']=='person':
+        return row['scan'],('cue',row['cue'])
+    return row['scan'],row['seconds']
 
 
 def unit(row):
@@ -19,6 +26,7 @@ def unit(row):
                 return row['scan'], 'pixels', value
         except (ValueError, TypeError, AttributeError):
             pass
+    if 'evidence_kind' in row.keys() and row['evidence_kind']=='person':return row['scan'],'cue',row['cue']
     return row['scan'], 'time', row['seconds']
 
 
@@ -37,12 +45,12 @@ class Votes:
         self.unmatched = set()
 
     def add(self, row):
-        stamp = row['scan'], row['seconds']
+        timestamp = stamp(row)
         fingerprint = unit(row)
         self.units.add(fingerprint)
-        if stamp not in self.edges:
-            self.unmatched.add(stamp)
-        choices = self.edges.setdefault(stamp, set())
+        if timestamp not in self.edges:
+            self.unmatched.add(timestamp)
+        choices = self.edges.setdefault(timestamp, set())
         if fingerprint not in choices:
             choices.add(fingerprint)
             self._count = None
@@ -106,7 +114,7 @@ def representatives(rows):
     chosen = {}
     for row in rows:
         pixel = unit(row)
-        if votes.owners.get(pixel) == (row['scan'], row['seconds']):
+        if votes.owners.get(pixel) == stamp(row):
             chosen.setdefault(pixel, row)
     return list(chosen.values())
 

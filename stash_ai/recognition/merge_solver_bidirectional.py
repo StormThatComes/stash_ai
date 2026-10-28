@@ -8,14 +8,15 @@ from collections import deque
 from .config import digest
 from .merge_report_policy import parameter, patched, proposal
 from .merge_solver_constraints import joint_separation
-from .merge_solver_search import PREFIX, interleave
+from .merge_solver_search import PERSON_PREFIX, interleave
 
 
 def relaxed_seeds(config, feedback):
     """Broad/median/quartile starts from measured boundaries, with domain fallback."""
     from .merge_solver_domains import registry, normalize, UNIT, SUPPORT
     domains = registry(config)
-    keys = [k for k in UNIT+SUPPORT if k in domains]
+    from .body_parameters import active
+    keys = [k for k in UNIT+SUPPORT+active(config) if k in domains]
     options = {k: list(v) for k, v in feedback.get('options', {}).items()}
     for patches in feedback.get('proposals', {}).values():
         for patch in patches:
@@ -33,8 +34,8 @@ def relaxed_seeds(config, feedback):
             selected[key] = values[int(fraction*(len(values)-1))] if values else domains[key].low
             if domains[key].kind is int:
                 selected[key] = int(selected[key])
-        face = {k: v for k, v in selected.items() if not k.startswith(PREFIX)}
-        hybrid = {k: v for k, v in selected.items() if k.startswith(PREFIX)}
+        face = {k: v for k, v in selected.items() if not k.startswith(PERSON_PREFIX)}
+        hybrid = {k: v for k, v in selected.items() if k.startswith(PERSON_PREFIX)}
         for patch in ([hybrid, face, dict(face, **hybrid)] if hybrid else [face]):
             patch = normalize(config, dict(patch, **quality))
             signature = digest(patch)
@@ -61,11 +62,13 @@ def expansion_candidates(config, changes, feedback):
     values. Current measurements also supply larger jumps. Production replay
     decides whether any of these moves helps; no monotonicity is assumed.
     """
+    from .merge_solver_domains import registry
+    domains=registry(config)
     profiles = list(relaxed_seeds(config, {}))
     keys = set().union(*(p.keys() for p in profiles))
     active = feedback.get('provenance', {}).get('active_parameters', {})
     keys = sorted(keys, key=lambda k: (-active.get(k, 0), k))
-    groups = [[k for k in keys if k.startswith(PREFIX) == hybrid] for hybrid in (True, False)]
+    groups = [[k for k in keys if k.startswith(PERSON_PREFIX) == hybrid] for hybrid in (True, False)]
     groups = sorted((g for g in groups if g), key=lambda g: -sum(active.get(k, 0) for k in g))
 
     def directed():
@@ -91,9 +94,8 @@ def expansion_candidates(config, changes, feedback):
             for key in keys:
                 current = changes.get(key, parameter(config.data, key))
                 value = round(current*fraction, 6)
-                if key.endswith('support'):
-                    value = max(2 if key == 'clustering.view_min_support' else 1, int(value))
-                patch[key] = value
+                if domains[key].kind is int:value=int(value)
+                patch[key] = domains[key].project(value)
             for group in groups:
                 yield dict(changes, **{k: patch[k] for k in group})
             if len(groups) > 1:
@@ -152,7 +154,7 @@ def repair_candidates(config, changes, sources, safe):
             yield 'boundary_bridge', dict(changes, **joint)
             for hybrid in (True, False):
                 yield 'boundary_bridge', dict(changes, **{
-                    k: v for k, v in joint.items() if k.startswith(PREFIX) == hybrid})
+                    k: v for k, v in joint.items() if k.startswith(PERSON_PREFIX) == hybrid})
         # Restore a single gate while keeping the other permissive gates open.
         for key in keys:
             patch = dict(changes, **{key: safe.get(key, parameter(config.data, key))})
@@ -253,6 +255,6 @@ class BidirectionalSearch:
                     continue
                 self.seen.add(key)
                 self.offered += 1
-                family = 'hybrid' if any(k.startswith(PREFIX) for k in changes) else 'face'
+                family = 'hybrid' if any(k.startswith(PERSON_PREFIX) for k in changes) else 'face'
                 return family, 'bidirectional', parent, strategy, changes
         return None

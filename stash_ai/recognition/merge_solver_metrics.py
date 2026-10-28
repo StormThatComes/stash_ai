@@ -6,6 +6,7 @@ def scale(key, current):
     if key.endswith('face_pixels'):return max(32.,float(current or 0))
     if key.endswith('sharpness'):return max(10.,float(current or 0))
     if key.endswith('support'):return max(1.,float(current or 0))
+    if key.endswith(('keypoints','appearance_distance')):return max(1.,float(current or 0))
     return 1.
 
 

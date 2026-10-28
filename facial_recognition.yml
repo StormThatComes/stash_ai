@@ -142,7 +142,6 @@ sapiensid:
     ambiguity_margin: 0.10
     min_support: 3
     attach_min_support: 2
-    min_seconds: 1.0
     min_appearance_distance: 4
     anchor_min_keypoints: 6
     anchor_min_sharpness: 25.0

@@ -6,7 +6,7 @@ from .merge_report_policy import patched, proposal, parameter
 from .merge_goals import assess, objective, unmet_conditions, goal_diagnostics
 from .replay_simulation import replay, impact
 from .merge_solver_search import (hybrid_neighbours as _hybrid_neighbours,
-    interleave as _interleave, spread, BeamSearch, refinement, restart_probes, cadence, BASELINE_WARMUP, PREFIX, GATES)
+    interleave as _interleave, spread, BeamSearch, refinement, restart_probes, cadence, BASELINE_WARMUP, PREFIX, PERSON_PREFIX, GATES)
 from .merge_goal_index import solver_scope
 
 
@@ -277,13 +277,13 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
         def factory(parent, changes, family, refine):
             if refine == 'restart':
                 for candidate in restart_probes(config, changes, options):
-                    family='hybrid' if any(k.startswith(PREFIX) for k in candidate) else 'face'
+                    family='hybrid' if any(k.startswith(PERSON_PREFIX) for k in candidate) else 'face'
                     yield family,'restart_probe',candidate
                 return
             if refine:
                 for candidate in _interleave((refinement(config, changes, options),
                                               coupled_refinement(config, changes, options, feedback[parent]))):
-                    family = 'hybrid' if any(k.startswith(PREFIX) and v != changes.get(k)
+                    family = 'hybrid' if any(k.startswith(PERSON_PREFIX) and v != changes.get(k)
                         for k,v in candidate.items()) else 'face'
                     yield family, 'local_refinement', candidate
                 return
@@ -331,7 +331,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
                                   ranking(n)) for n in ranks]
                         active=feedback[best]['provenance']['active_parameters']
                         changes=learned.suggest(config,history,options,active,trials)
-                        family='hybrid' if any(k.startswith(PREFIX) for k in changes) else 'face'
+                        family='hybrid' if any(k.startswith(PERSON_PREFIX) for k in changes) else 'face'
                         phase,parent,strategy='adaptive',best,'tpe'
                     elif alternate is not None:
                         family, phase, parent, strategy, changes = alternate
@@ -355,7 +355,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
                 except StopIteration:
                     stop_reason=stop_reason or 'polishing_complete'
                     break
-                family='hybrid' if any(k.startswith(PREFIX) for k in changes) else 'face'
+                family='hybrid' if any(k.startswith(PERSON_PREFIX) for k in changes) else 'face'
             attempts += 1
             try:
                 changes = normalize(config, changes)

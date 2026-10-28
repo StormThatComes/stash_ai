@@ -64,11 +64,37 @@ def test_auxiliary_cannot_confirm_new_identity(tmp_path):
         assert not any(r['status']=='accepted' for r in result[item['scan']])
 
 
-def test_repeated_pixels_and_nearby_frames_are_one_witness(tmp_path):
+def test_support_counts_cues_and_deduplicates_pixels_regardless_of_seconds(tmp_path):
     c=configuration(tmp_path);p=c.data['sapiensid']['identities']
-    rows=[dict(id=str(i),scan='s',seconds=t,quality=encoded({'quality':{'pixel_digest':pixels}}))
-          for i,(t,pixels) in enumerate([(0,'a'),(.1,'b'),(2,'a'),(3,'c')])]
-    assert len(independent(rows,p))==2
+    rows=[dict(id=str(i),scan=s,cue=cue,seconds=0,quality=encoded({'quality':{'pixel_digest':pixels}}))
+          for i,(s,cue,pixels) in enumerate([('s',0,'a'),('s',0,'b'),('s',1,'c'),
+                                            ('s',2,'a'),('t',0,'d')])]
+    assert [r['id'] for r in independent(rows,p)]==['0','2','4']
+    for i,row in enumerate(rows):row['seconds']=100-i*10
+    assert [r['id'] for r in independent(reversed(rows),p)]==['0','2','4']
+
+
+def test_perceptual_deduplication_remains_separate_from_cue_support(tmp_path):
+    c=configuration(tmp_path);p=c.data['sapiensid']['identities']
+    rows=[dict(id=str(i),scan='s',cue=i,seconds=0,quality=encoded({'quality':{
+        'pixel_digest':pixels,'appearance_hash':hashed}}))
+        for i,(pixels,hashed) in enumerate([('a','0'),('b','1'),('c','f'),('a','ffff')])]
+    p['min_appearance_distance']=4
+    assert [r['id'] for r in independent(rows,p)]==['0','2']
+    p['min_appearance_distance']=0
+    assert [r['id'] for r in independent(rows,p)]==['0','1','2']
+
+
+@pytest.mark.parametrize('spacing',[0,.01,30])
+def test_production_support_does_not_depend_on_cue_timing(tmp_path,spacing):
+    c=configuration(tmp_path)
+    with FaceDatabase(c.database) as state:
+        item,ids=scene(state.connection,c)
+        state.connection.execute('UPDATE body_observations SET seconds=cue*?',(spacing,))
+        state.connection.commit()
+        result=rebuild(state,[item],c,{item['scan']:[]})
+        assert result[item['scan']][0]['status']=='accepted'
+        assert state.connection.execute("SELECT COUNT(*) FROM body_members WHERE role='anchor'").fetchone()[0]==3
 
 
 def test_incomplete_body_input_aborts_without_replacing_members(tmp_path):

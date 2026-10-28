@@ -7,6 +7,7 @@ from .merge_report_policy import parameter
 from .merge_solver_metrics import signature as parameter_signature
 
 PREFIX = 'sapiensid.matching.'
+PERSON_PREFIX = 'sapiensid.'
 GATES = ('face_floor', 'person_threshold', 'ambiguity_margin', 'min_support')
 # One joint proposal plus three rounds over the four independent gates.
 BASELINE_WARMUP = 1 + 3 * len(GATES)
@@ -66,9 +67,12 @@ def spread(values, current):
                            side(sorted(v for v in values if v > current))))
 
 
-def gate_values(key, current, measured):
-    if key.endswith('min_support'):
-        local = (max(1, current-1), max(1, current//2), 1, current+1)
+def gate_values(key, current, measured, *, domain=None):
+    if key.endswith(('min_support','min_keypoints','min_appearance_distance')):
+        low=0 if key.endswith('min_appearance_distance') else 1
+        local = (max(low, current-1), max(low, current//2), low, current+1)
+    elif key.endswith('sharpness'):
+        local = (current*.8,current*.5,0.,current+max(1.,current*.2),current*2)
     elif key.endswith('ambiguity_margin'):
         local = (current/2, 0., current/4, min(1., current+.02), min(1., current*2))
     else:
@@ -78,23 +82,27 @@ def gate_values(key, current, measured):
         local += [round(min(1., current+step), 6) for step in (.02, .05, .1, .2, .01)]
     seen = {current}
     for value in interleave((local, spread(measured, current))):
+        if domain is not None:value=domain.project(value)
         if value not in seen:
             seen.add(value)
             yield value
 
 
 def hybrid_neighbours(config, changes, options, measured):
+    from .merge_solver_domains import registry
+    domains=registry(config)
     def joints():
         for patch in tuple(measured):
             if any(value != changes.get(key, parameter(config.data, key)) for key, value in patch.items()):
                 yield dict(changes, **patch)
     def coordinate(key):
         current = changes.get(key, parameter(config.data, key))
-        for value in gate_values(key, current, options.get(key, ())):
+        for value in gate_values(key, current, options.get(key, ()),domain=domains.get(key)):
             yield dict(changes, **{key: value})
     joint = joints()
     yield from islice(joint, 1)
-    body_keys=[k for k in options if k.startswith(('sapiensid.identities.','sapiensid.global_matching.'))]
+    from .body_parameters import active
+    body_keys=[k for k in options if k in active(config)]
     coordinates = interleave(coordinate(k) for k in body_keys+[PREFIX+gate for gate in GATES])
     # Long pair-proposal lists cannot defer the initial single-gate probes.
     yield from islice(coordinates, BASELINE_WARMUP - 1)
@@ -103,13 +111,15 @@ def hybrid_neighbours(config, changes, options, measured):
 
 def refinement(config, changes, options):
     """Small local probes and reversions after useful coarse progress stops."""
+    from .merge_solver_domains import registry
+    domains=registry(config)
     streams = []
     for key, current in sorted(changes.items()):
         original = parameter(config.data, key)
         values = [original]
         if type(current) is not bool:
-            if key.endswith('support'):
-                values += [max(1, current-1), current+1]
+            if key in domains and domains[key].kind is int:
+                values += [domains[key].project(current-1),domains[key].project(current+1)]
             else:
                 lower = max((v for v in options.get(key, ()) if v < current), default=None)
                 upper = min((v for v in options.get(key, ()) if v > current), default=None)

@@ -5,6 +5,14 @@ import pytest
 from stash_ai.recognition.config import defaults, load, parse_yaml, validate
 
 
+def test_removed_body_time_gate_requires_explicit_config_cleanup(tmp_path):
+    p=tmp_path/'old.yml'
+    p.write_text('version: 1\nsapiensid:\n  identities:\n    min_seconds: 1\n')
+    with pytest.raises(ValueError,match='min_seconds was removed; delete this key'):
+        load(p)
+    assert 'min_seconds' not in defaults()['sapiensid']['identities']
+
+
 def test_default_config_and_immutable_snapshot(tmp_path):
     p = tmp_path / 'facial_recognition.yml'
     p.write_text('version: 1\nrecognition: {match_threshold: 0.75}\n')

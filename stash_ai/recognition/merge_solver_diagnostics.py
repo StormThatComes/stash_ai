@@ -14,8 +14,19 @@ GATES = {'face_floor': (PREFIX+'face_floor',), 'person_threshold': (PREFIX+'pers
     'auxiliary_ambiguous': ('recognition.ambiguity_margin',),
     'view_insufficient_support': ('clustering.view_min_support','clustering.view_attach_min_support'),
     'insufficient_match_or_cohesion': ('recognition.match_threshold','clustering.cohesion_threshold')}
+GATES.update({
+    'body_scene_core':('sapiensid.identities.min_support','sapiensid.identities.min_appearance_distance'),
+    'body_anchor_quality':('sapiensid.identities.anchor_min_keypoints','sapiensid.identities.anchor_min_sharpness'),
+    'body_group_ambiguous':('sapiensid.identities.cohesion_threshold','sapiensid.identities.ambiguity_margin'),
+    'ambiguous_or_insufficient_face_body_bank':tuple('sapiensid.identities.'+k for k in
+        ('match_threshold','cohesion_threshold','ambiguity_margin','attach_min_support','min_appearance_distance')),
+    'body_similarity':('sapiensid.global_matching.match_threshold',),
+    'body_cohesion':('sapiensid.global_matching.match_threshold','sapiensid.global_matching.cohesion_threshold'),
+    'independent_support':('sapiensid.global_matching.min_support','sapiensid.identities.min_appearance_distance'),
+    'body_ambiguity':('sapiensid.global_matching.ambiguity_margin',),
+})
 HARD = {'missing_person_evidence','missing_original_core_evidence','invalid_alignment',
-        'unknown_competitor','no_within_set_query_reference'}
+        'unknown_competitor','no_within_set_query_reference','person_copresence','missing_original_body_witness'}
 
 
 def round_robin(groups):
@@ -91,6 +102,15 @@ def latest_decisions(db, observation_ids):
             reason=payload.get('reason'), hybrid_merge=payload.get('hybrid_merge'),
             hybrid_query=payload.get('hybrid_query'), measurements={k: v for k, v in payload.items()
                 if type(v) in (int, float, bool) and any(t in k for t in ('score','similarity','threshold','support','margin'))}))
+    from .body_identity import available
+    if available(db):
+        for row in db.execute('SELECT b.id,b.scan,m.status,m.proof FROM body_members m '
+            'JOIN body_observations b ON b.id=m.observation WHERE b.id IN (SELECT value FROM json_each(?)) ORDER BY b.id',
+            (encoded(sorted(observation_ids)),)):
+            proof=json.loads(row['proof'])
+            result.append(dict(observation=row['id'],scan=row['scan'],status=row['status'],
+                reason=proof.get('reason'),evidence_kind='person',measurements={k:v for k,v in proof.items()
+                    if type(v) in (int,float,bool)}))
     return result
 
 
@@ -115,6 +135,10 @@ def diagnostic_record(settings, decisions, queries, hybrid, quality):
         if p['relation'] == 'within_set':
             for reason in p['blockers']:
                 add('hybrid_merge',reason,left=p['left'],right=p['right'])
+    for p in hybrid.get('independent_person',{}).get('pairs',()):
+        if p.get('relation')=='within_set':
+            for reason in p['blockers']:
+                add('body_global',reason,left=p['people'][0],right=p['people'][1])
     for q in quality:
         active.update(q.get('patch', {}).keys())
         for reason in q.get('blockers', ()):

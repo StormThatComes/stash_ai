@@ -21,6 +21,20 @@ def test_equal_vectors_without_pixel_proof_remain_independent():
     assert unit(dict(scan='s',seconds=1,quality='{}')) == unit(dict(scan='s',seconds=1))
 
 
+def test_body_goal_votes_use_cues_and_still_deduplicate_pixel_copies():
+    from stash_ai.recognition.independent_evidence import count,representatives
+    from stash_ai.recognition.merge_goal_identity import units
+    rows=[dict(id=str(i),scan=s,scene=s,cue=cue,seconds=0,evidence_kind='person',
+               quality=json.dumps({'evidence_pixel_sha256':pixel*64}))
+          for i,(s,cue,pixel) in enumerate([('s',0,'a'),('s',0,'b'),('s',1,'c'),
+                                            ('s',2,'a'),('t',0,'d'),('u',0,'c')])]
+    assert count(rows)==4
+    assert len(representatives(rows))==len(units(rows))==4
+    for i,row in enumerate(rows):row['seconds']=i*30
+    assert count(rows)==4
+    assert count([dict(scan='s',cue=i,seconds=0,evidence_kind='person') for i in range(3)])==3
+
+
 def test_votes_require_both_distinct_times_and_pixels_in_every_order():
     from itertools import permutations
     from stash_ai.recognition.independent_evidence import count
