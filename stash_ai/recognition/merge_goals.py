@@ -5,6 +5,7 @@ from .models import namespace
 
 def resolve(db, config, sets, *, scope=None, by_performer=True, policy='identity'):
     from .merge_goal_identity import POLICY, freeze
+    from .merge_goal_sets import freeze_set
     from .reference_roles import strict_sql
     from .pose_policy import is_anchor
     from .merge_goal_samples import freeze as freeze_samples
@@ -32,6 +33,7 @@ def resolve(db, config, sets, *, scope=None, by_performer=True, policy='identity
             item = members.setdefault(identity, dict(identity_id=identity, performer_id=person['performer'],
                 requested_ids=[], observations=[]))
             item['requested_ids'].append(identifier)
+        set_rows = []
         for identity, item in members.items():
             rows = [dict(r) for r in db.execute(
                 'SELECT o.id,s.id AS scan,s.scene,o.cue,o.seconds,o.quality,o.rejected,s.status, '
@@ -44,7 +46,11 @@ def resolve(db, config, sets, *, scope=None, by_performer=True, policy='identity
             item['observations'] = [{k: r[k] for k in ('id','scan','scene','cue','goal_role','sample_role','body_state')} for r in rows]
             if policy == 'identity':
                 item['identity_evidence'] = freeze(rows)
-        groups.append(dict(index=index, members=list(members.values())))
+                set_rows.extend(rows)
+        group = dict(index=index, members=list(members.values()))
+        if policy == 'identity':
+            group['identity_evidence'] = freeze_set(set_rows)
+        groups.append(group)
     return dict(format=3, kind='recognition_merge_goals', scope=scope, namespace=namespace(config),
                 selector='performer' if by_performer else 'identity', sample_diagnostics=diagnostics,
                 goal_policy=dict(POLICY) if policy == 'identity' else dict(name='strict', version=1),

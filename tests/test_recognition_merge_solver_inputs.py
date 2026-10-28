@@ -84,9 +84,12 @@ def test_unavailable_goal_observations_make_result_best_effort(tmp_path, reason,
         result = dict(goals, **solve(config, goals, db, maximum=1))
     assert result['status'] == 'best_effort'
     assert result['simulation']['selection'] == ['1']
-    expected = 'missing_latest_observations' if policy == 'strict' else 'identity_not_preserved'
+    expected = 'missing_latest_observations' if policy == 'strict' else 'set_scene_not_preserved'
     missing = next(v for v in result['best_result']['unmet_conditions'] if v['reason'] == expected)
-    assert missing['identity'] == people[1]
+    if policy == 'strict':
+        assert missing['identity'] == people[1]
+    else:
+        assert missing['scenes'] == ['2']
     assert result['simulation']['trials']['baseline']['goal_result']['groups'][0]['missing'] == 3
     assert not result['best_result']['fully_solved']
     blocker = result['simulation']['input_selection']['excluded_scans'][0]

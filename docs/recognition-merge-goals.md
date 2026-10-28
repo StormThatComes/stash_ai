@@ -55,13 +55,13 @@ runs no trials, exports no YAML, and exits 2. Plain `--simulate`, evaluation and
 threshold tuning retain their requirement that the whole requested selection be
 compatible; their error now identifies the affected scenes and reasons.
 
-The default **`--goal-policy identity`** treats previous memberships as noisy
-evidence. It aims to retain each input performer and consolidate performers within
-each set, without joining the sets' substantial identity evidence. Losing or
-correcting a few old auxiliary assignments can improve the result. For example,
-preserving A's reference evidence while dropping one A auxiliary and consolidating
-B's 18 performers beats perfectly retaining samples with B still fragmented.
-Destination IDs and the order of input performers do not matter.
+The default **`--goal-policy identity`** (version 2) treats each set as one declared
+person and previous memberships as noisy fragments. It preserves that person's
+appearances in the set's original scenes and rewards consolidation, without
+joining different sets' substantial core evidence. A weak fragment may disappear
+or split if other fragments of the same set still cover its scenes. Consequently,
+`represented=19/20` can beat a fragmented `20/20` baseline and can even accompany a
+full solution. Destination IDs and input performer order do not matter.
 
 Goals freeze evidence roles, independent units and thresholds **before any trial**:
 
@@ -72,42 +72,59 @@ Goals freeze evidence roles, independent units and thresholds **before any trial
 - Evidence uses the existing independent timestamp/crop matching. Repeated pixels
   do not gain votes; duplicate copies assigned to different destinations vote for
   neither. Retained raw sample diagnostics remain separate.
-- For `n` core units, one destination must retain
-  `max(min(2,n), n-max(1,floor(0.2*n)))` units. Thus 1/1, 2/2, 2/3, 4/5 or 8/10
-  can represent a performer. Each original scene with at least two independent
-  core units must separately meet that quorum in the **same** destination.
-- A performer with no eligible core uses all its independent membership evidence
-  as a conservative fallback, with the same quorum and scene protection. An empty
-  performer never passes. Raising admission thresholds in a trial cannot remove
-  evidence from the frozen goal or change these obligations.
-- Per performer, the budget for soft units lost or reassigned away from its
-  representative destination is `min(n, max(3, floor(0.2*n)))`. Within that budget,
-  soft loss is a late tie-breaker, after identity consolidation. Exceeding the
-  budget makes a result inadmissible; dropping most of a large auxiliary corpus
-  cannot manufacture success.
+- Core units are pooled across the set before independent counting. Only a set
+  with no eligible core falls back to all its membership evidence. An auxiliary-only
+  fragment cannot impose an additional core quorum on a set that has references.
+- Every original scene needs at least one independent membership unit retained in
+  a destination owned by this set. Another input fragment can supply that unit;
+  another person merely appearing in the same scene cannot. Different destinations
+  may cover different scenes in a partial solution. This includes soft-only scenes
+  and historical scenes missing from the replay selection: losing the only link to
+  one is an unmet condition. An entirely empty set cannot pass; an empty historical
+  fragment within a nonempty, covered set does not independently veto progress.
+- A destination belongs to its sole substantial core owner, or, when there is no
+  such owner, to the sole set contributing original memberships there. An ambiguous
+  soft overlap cannot establish scene coverage for either set.
+- Full consolidation requires **one destination** covering every original scene
+  and retaining `max(min(2,n), n-max(1,floor(0.2*n)))` of the **set's** `n` frozen
+  core units. Thus 1/1, 2/2, 2/3, 4/5 or 8/10 suffice. Scene coverage alone cannot
+  certify two substantial core fragments as merged. Raising trial admission
+  thresholds cannot remove evidence from the frozen goal.
+- Soft units retained in any destination of the same set are not lost. Missing,
+  withheld, ambiguous or foreign-set units contribute to set-level soft loss.
+  The allowance `min(n, max(3, floor(0.2*n)))` now applies to pooled soft units and
+  is diagnostic: both soft loss and excess are late tie-breakers after consolidation,
+  never preservation gates. Dropping soft evidence cannot improve the frozen
+  common-destination score; ties prefer retaining it.
 - A destination conflicts across sets when, for a performer in each set, its core
   support there **exceeds that performer's allowed outlier count**. Small noisy
   core minorities and soft corrections do not alone prove an identity collision.
-  `strict_disjoint` and `strict_conflicts` still expose every raw cross-set overlap.
+  Auxiliary-only fragments supply conflict fallback only when the whole set lacks
+  core. Per-fragment core guards prevent a large set from diluting a smaller
+  fragment's substantial cross-set collision. `strict_disjoint` and
+  `strict_conflicts` still expose every raw cross-set overlap.
 
 These are explicit heuristics, versioned in `goal_policy`, not verified truth
 labels or a guarantee that minority assignments are errors. Fully solved under
 this policy means preserved, consolidated identity evidence within these limits;
 it does not mean perfect assignment of every sample. Feedback query labels use
-frozen core evidence (including fallback evidence), and rebuilt set ownership
-uses substantial core support, so an auxiliary correction does not itself create
-a hard negative witness. Production matching continues to process all samples.
+frozen per-scene scoring evidence, including membership fallback for a soft-only
+scene, so the search can still propose recovery of such a scene. Rebuilt set
+ownership follows substantial core support or exclusive memberships without a
+core owner. Production matching continues to process all samples.
 
-Admissible candidates preserve every performer, stay within soft-loss budgets,
-and keep the sets disjoint under the chosen policy. They always outrank
+Admissible candidates preserve every set's scene coverage and keep the sets
+disjoint under the chosen policy. They always outrank
 inadmissible candidates; full success outranks partial success. If none qualify,
 the solver still selects the best completed trial, including baseline, as
 `best_effort`. Identity-mode ranking then prioritizes separation, worst/mean
-performer representation, fewer cross-set core pairs, and smaller budget excess.
-It next maximizes the worst set's consolidated fraction, total consolidated
-performers, core pair consolidation, and core shared coverage. Soft losses and
-core retention break remaining ties. Per-performer normalization prevents a
-sample-heavy identity from dominating continuous progress measures.
+scene coverage and fewer cross-set core pairs. Next come worst/mean set shared
+coverage and pooled core pair consolidation. Shared coverage weights original
+scenes equally, using their frozen reference units (membership fallback in a
+scene without references); removing samples never shrinks the denominator.
+Soft losses, budget excess and pooled core retention break remaining ties.
+Member-level `represented`, `consolidated`, `identity_components` and
+`core_shared_coverage` remain diagnostics and do not veto a better set result.
 
 Use **`--goal-policy strict`** for the previous objective: every original observation
 must remain present and assigned; any cross-set sample overlap is a conflict.
@@ -252,9 +269,10 @@ witnesses, not standalone proofs that a whole replay must merge.
 `fully_solved`, and `unmet_conditions`. Its `quality` is `fully_solved`,
 `partial_solution` (policy requirements preserved, incomplete internal merges),
 or `best_effort` (preservation or separation also fails). Identity-mode unmet
-conditions identify `identity_not_preserved`, `soft_loss_budget_exceeded`,
-`incomplete_identity_set` and `cross_set_merge`, with support counts and scene
-requirements. Strict mode retains missing/withheld/split/empty sample conditions.
+conditions identify `empty_identity_set`, `set_scene_not_preserved`,
+`incomplete_identity_set` and `cross_set_merge`, with pooled core support and
+per-scene destinations. Member representation and soft-budget excess are diagnostic
+fields, not unmet conditions. Strict mode retains missing/withheld/split/empty sample conditions.
 `explanation.unresolved` repeats this list. `goal_diagnostics` identifies the
 policy, strict success/separation and soft losses; YAML comments include this
 distinction even when identity-mode `fully_solved` is true. For compatibility,
@@ -344,18 +362,24 @@ also states the stop reason, replay count and unmet conditions. For example:
 
 ```text
 Merge solver trial-12: complete disjoint=True best=trial-7 best_number=7 goal_policy=identity strict_disjoint=True
-  Set 1: consolidated=2/4 identity_components=[2,2] represented=4/4 core_shared_coverage=50.0% soft_lost_or_reassigned=0 soft_budget_excess=0 largest_complete=2/4 complete_components=[2,2] assigned=8/8 (100.0%) shared_coverage=50.0% fragments=2 missing_obs=0 withheld_obs=0 missing_performers=0 withheld_performers=0 split_performers=0 empty_performers=0
+  Set 1: scenes_preserved=4/4 set_shared_coverage=50.0% set_fully_merged=False consolidated=2/4 identity_components=[2,2] represented=4/4 core_shared_coverage=50.0% soft_lost_or_reassigned=0 soft_budget_excess=0 largest_complete=2/4 complete_components=[2,2] assigned=8/8 (100.0%) shared_coverage=50.0% fragments=2 missing_obs=0 withheld_obs=0 missing_performers=0 withheld_performers=0 split_performers=0 empty_performers=0
 ```
 
 `complete` in the header means that the trial finished. The old unnamed `(k,n)`
 pairs are replaced by these explicit metrics:
 
-- In identity mode, `consolidated=k/n` counts represented performers in the largest
+- In identity mode, `scenes_preserved=k/n` exposes set preservation,
+  `set_shared_coverage` is the strongest scene-normalized common destination, and
+  `set_fully_merged` checks one destination's scene links and pooled core quorum.
+  The JSON adds `missing_scenes`, `scene_support`, `set_core_destinations` and
+  `set_core_required` for diagnosis.
+- `consolidated=k/n` counts represented performers in the largest
   shared destination; `identity_components` shows these counts for every destination.
   `represented=k/n` counts performers meeting core and scene requirements, even if
   still separate. `core_shared_coverage` is equally weighted core support in the
   strongest common destination. `soft_lost_or_reassigned` and `soft_budget_excess`
-  expose the cost and whether its per-performer budget was exceeded.
+  expose losses outside the set and excess over its pooled allowance. The member
+  diagnostics and soft allowance do not determine admissibility or full success.
 - `largest_complete=k/n`: the largest number of whole input performers sharing
   one output identity. A performer counts only if every original observation is
   present, assigned and in that identity. Four separate intact performers give
@@ -380,8 +404,9 @@ pairs are replaced by these explicit metrics:
 If four performers each have 99 of 100 observations in a shared identity and one
 withheld observation, the log shows `largest_complete=0/4 complete_components=[]`
 alongside `assigned=396/400 (99.0%) shared_coverage=99.0% withheld_obs=4
-withheld_performers=4`. If the frozen identity and scene quorums and soft budgets
-pass, it can also show `consolidated=4/4 identity_components=[4] represented=4/4`.
+withheld_performers=4`. It can also show `consolidated=4/4 identity_components=[4]
+represented=4/4`. Full identity-mode success depends on preserved set scenes and
+the common destination's pooled core quorum, even when `represented` is lower.
 `largest_complete` remains strict in both modes. `disjoint` is checked across sets
 under the selected policy; internal consolidation alone does not certify separation.
 `strict_disjoint` in identity-mode headers shows the original all-sample check.
@@ -409,9 +434,10 @@ trial. Changing trial quality thresholds does not change their denominators.
 - `assigned` counts final memberships, including assignments to other fragments.
   `withheld` means present in replay but unassigned; `missing_obs` means absent
   from the replay selection. Assigned + withheld + missing equals the denominator.
-- All face/body role lines use the same `target`: the destination representing
-  the most input performers (complete performers in strict mode), then highest
-  normalized evidence coverage, then most samples. Exact ties use a stable UUID
+- All face/body role lines use the same `target`: in identity mode, a destination
+  satisfying the full set goal if one exists, then highest scene-normalized evidence
+  coverage and pooled core support. Strict mode prefers complete performers, then
+  normalized evidence coverage and sample count. Exact ties use a stable UUID
   order; `target_ties` reports their count. This is a display choice and never
   forces recognition to use that identity. `target` counts samples there;
   `other` counts assigned samples in all other destinations. Their sum is assigned.
@@ -467,8 +493,8 @@ bridges, bounded crossovers between beam states and coupled refinement complemen
 the full-set proposal. Production complete-core guards always remain authoritative.
 
 Search now distinguishes parameter values and blocker signatures within the beam.
-Performer-pair consolidation fractions break ties after the selected policy's
-consolidated-performer metrics; preservation and set separation retain priority. Mutation magnitudes use
+Pair consolidation fractions break ties after the selected policy's
+common-destination metrics; preservation and set separation retain priority. Mutation magnitudes use
 parameter scales (fractional thresholds, support, pixels and sharpness). Operator
 and family allocation account for improvements, replay time and rejected proposals.
 One restart of at most eight completed experiments explores distant measured
@@ -493,8 +519,8 @@ contracts are unchanged; missing features remain missing. These profiles are
 experiments, not recommended settings until production replay evaluates them.
 
 An independent frontier retains up to three completed states ranked by
-continuous within-set consolidation and coverage (frozen core evidence and
-performer representation in identity mode). A state mixing two sets can
+continuous within-set consolidation and coverage (pooled core evidence and
+set scene coverage in identity mode). A state mixing two sets can
 remain a parent even when the normal beam rejects it. Repairs use positive and
 negative witnesses, joint/per-family interpolations towards a completed disjoint
 state, and individual gate reversions. A disjoint but incomplete state instead

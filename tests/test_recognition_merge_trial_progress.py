@@ -77,7 +77,8 @@ def test_cli_logs_previous_executed_config_and_keeps_export_relative_to_input(tm
             details = lines[position+1:stop]
             headers = [line for line in details if line.startswith('  Set ')]
             for line, group in zip(headers, item['goal_result']['groups'], strict=True):
-                assert line.startswith(f"  Set {group['index']+1}: consolidated={group['consolidated_performers']}/{group['total_performers']}")
+                assert line.startswith(f"  Set {group['index']+1}: scenes_preserved={group['covered_scenes']}/{group['required_scenes']}")
+                assert f"consolidated={group['consolidated_performers']}/{group['total_performers']}" in line
                 assert f"largest_complete={group['largest_complete_performers']}/{group['total_performers']}" in line
                 assert f"represented={group['represented_performers']}/{group['total_performers']}" in line
                 assert f"complete_components={json.dumps(group['complete_components'], separators=(',', ':'))}" in line

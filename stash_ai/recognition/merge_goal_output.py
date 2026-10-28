@@ -71,6 +71,7 @@ def configuration_document(config, recommendation, inputs, *, mode='full'):
                 header += (f"# Strict all-sample success: {diagnostics['strict_fully_solved']}; "
                            f"strict disjoint: {diagnostics['strict_disjoint']}; "
                            f"soft units lost/reassigned: {diagnostics['soft_lost_units']}. See JSON evidence details.\n")
+                header += ('# Preservation uses set scene coverage; member representation and soft budgets are diagnostics.\n')
         if not recommendation['fully_solved']:
             reasons = sorted({r['reason'] for r in recommendation['unmet_conditions']})
             header += '# Unmet conditions: ' + ', '.join(reasons) + '. See the JSON report for details.\n'
@@ -142,8 +143,12 @@ def group_summary(group):
     members = group['members']
     components = json.dumps(group['complete_components'], separators=(',', ':'))
     identity = ''
+    if 'required_scenes' in group:
+        identity = (f"scenes_preserved={group['covered_scenes']}/{group['required_scenes']} "
+                    f"set_shared_coverage={group['set_shared_coverage']:.1%} "
+                    f"set_fully_merged={group['identity_fully_merged']} ")
     if 'consolidated_performers' in group:
-        identity = (f"consolidated={group['consolidated_performers']}/{group['total_performers']} "
+        identity += (f"consolidated={group['consolidated_performers']}/{group['total_performers']} "
                     f"identity_components={json.dumps(group['identity_components'], separators=(',', ':'))} "
                     f"represented={group['represented_performers']}/{group['total_performers']} "
                     f"core_shared_coverage={group['core_shared_coverage']:.1%} "

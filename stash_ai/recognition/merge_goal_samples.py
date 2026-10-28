@@ -37,6 +37,8 @@ def freeze(db, config, rows, diagnostics):
 
 def target(group):
     """One common destination for all role counters, preferring identity support."""
+    if 'set_target' in group:
+        return group['set_target'], group['set_target_ties']
     represented, coverage = Counter(), Counter()
     for member in group['members']:
         evidence = member.get('identity_evidence')
