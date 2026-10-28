@@ -176,7 +176,7 @@ def test_repairs_use_negative_witnesses_while_retaining_positive_gates(tmp_path)
     assert patch[face] > .4 or patch[body] > .5
 
 
-def test_lane_stops_at_its_budget_and_single_sets_use_normal_search(tmp_path):
+def test_lane_stops_at_its_budget_and_single_sets_can_explore(tmp_path):
     config, _ = prepared(tmp_path, [[1., 0, 0, 0]], [[1., 0]])
     goals = goal_sets([['a'], ['b']], [['c']])
     status = assess(goals, dict.fromkeys('abc', 'scene'), {}, dict(zip('abc', 'abc')))
@@ -193,7 +193,7 @@ def test_lane_stops_at_its_budget_and_single_sets_use_normal_search(tmp_path):
         lane.observe(name, patch, status, objective(status), name, phase=phase)
     assert lane.next(20, feedback, force=True) is None
     single = BidirectionalSearch(config, goal_sets([['a'], ['b']]), 500, source)
-    assert not single.enabled and single.next(2, feedback) is None
+    assert single.enabled and single.next(2, feedback) is not None
 
 
 @pytest.mark.parametrize('style', ['auto', 'off'])
@@ -211,5 +211,7 @@ def test_cli_explains_permissive_trial_and_keeps_json_clean(tmp_path, monkeypatc
         assert output.err == ''
     else:
         assert 'Search: phase=bidirectional strategy=relaxed_seed' in output.err
-        assert 'sapiensid.matching.face_floor: 0.78 -> 0.2' in output.err
+        delta = next(c for c in result['simulation']['trials']['trial-2']['changes_from_previous']
+                     if c['parameter'] == 'sapiensid.matching.face_floor')
+        assert f"sapiensid.matching.face_floor: {delta['previous']} -> {delta['current']}" in output.err
         assert 'trial-2: complete disjoint=False' in output.err

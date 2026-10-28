@@ -1,6 +1,5 @@
 """Measured parameter proposals, verified by the production frozen planner."""
 from dataclasses import replace
-import math
 
 from .config import plain, validate
 from .global_views import cohort_evidence, consolidation_plan
@@ -9,7 +8,8 @@ from .pose_policy import restricted
 
 def _floor(value):
     # A rounded-up threshold could reject the very sample used to propose it.
-    return math.floor(min(1., value) * 1_000_000) / 1_000_000
+    from .threshold_boundaries import at_or_below
+    return at_or_below(min(1., value))
 
 
 def parameter(data, path):

@@ -7,7 +7,8 @@ from .merge_solver_search import PREFIX
 
 
 def above(key, value):
-    return int(value)+1 if key.endswith('support') else round(math.floor(value*1e6)/1e6+.000001,6)
+    from .threshold_boundaries import strictly_above
+    return strictly_above(value, integer=key.endswith('support'))
 
 
 def joint_separation(config, positives, negatives, limit=32):
@@ -128,14 +129,56 @@ def crossovers(changes, parents, limit=12):
             if len(emitted)>=limit:return
 
 
-def coupled_refinement(config, changes, options):
+def learned_groups(feedback):
+    """Discover interacting gates on the same actual blocked query or pair."""
+    from collections import defaultdict, Counter
+    witnesses = defaultdict(set)
+    for row in feedback.get('provenance', {}).get('blocker_trace', ()):
+        key = ('query', row['observation']) if row.get('observation') else ('pair', row.get('left'), row.get('right'))
+        if key == ('pair', None, None):
+            continue
+        witnesses[key].update(row.get('parameters', ()))
+    for row in feedback.get('quality', ()):
+        witnesses['query', row['observation']].update(row.get('patch', {}))
+    counts = Counter(tuple(sorted(keys)) for keys in witnesses.values() if len(keys) >= 2)
+    return [keys for keys, _ in sorted(counts.items(), key=lambda item: (-item[1], item[0]))]
+
+
+def interaction_proposals(config, changes, options, feedback, limit=24):
+    from itertools import product
+    from .merge_solver_domains import registry, normalize
+    domains, seen = registry(config), set()
+    for group in learned_groups(feedback):
+        keys = [k for k in group if k in domains and parameter(config.data, k) is not None]
+        if len(keys) < 2:
+            continue
+        # Keep up to three simultaneous blockers, including cross-family gates.
+        for selected in combinations(keys, min(3, len(keys))):
+            alternatives = []
+            for key in selected:
+                current = changes.get(key, parameter(config.data, key))
+                measured = [domains[key].project(v) for v in options.get(key, ()) if v != current]
+                values = sorted(set(measured), key=lambda v: (
+                    (float(v)-float(current))*domains[key].relax <= 0, abs(float(v)-float(current)), float(v)))
+                alternatives.append(values[:2])
+            for values in product(*alternatives):
+                patch = normalize(config, dict(changes, **dict(zip(selected, values))))
+                signature = digest(patch)
+                if patch and signature not in seen:
+                    seen.add(signature)
+                    yield patch
+                if len(seen) >= limit:
+                    return
+
+
+def coupled_refinement(config, changes, options, feedback=None):
     from .merge_solver_search import refinement
     singles=list(refinement(config,changes,options))
     by_key={}
     for patch in singles:
         key=next(k for k in patch if patch[k]!=changes[k])
         by_key.setdefault(key,[]).append(patch[key])
-    groups=((PREFIX+'face_floor',PREFIX+'person_threshold',PREFIX+'ambiguity_margin',PREFIX+'min_support'),
+    groups=tuple(learned_groups(feedback or {}))+((PREFIX+'face_floor',PREFIX+'person_threshold',PREFIX+'ambiguity_margin',PREFIX+'min_support'),
             ('recognition.match_threshold','clustering.cohesion_threshold'),
             ('clustering.view_match_threshold','clustering.view_cohesion_threshold'),
             tuple(k for k in changes if k.startswith('clustering.min_')))

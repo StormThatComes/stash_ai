@@ -34,8 +34,8 @@ def separating_proposals(config, positives, negatives, *, routes=()):
         if not unwanted:
             continue
         lower = max(unwanted)
-        first = int(lower)+1 if support else math.floor(lower*1e6)/1e6+.000001
-        first = round(first, 6) if not support else first
+        from .threshold_boundaries import strictly_above
+        first = strictly_above(lower, integer=support)
         feasible = first <= upper
         intervals.append(dict(parameter=key, lower_exclusive=lower, upper_inclusive=upper,
             feasible=feasible, resolution=1 if support else .000001, interpretation='frozen_witnesses_only',
@@ -51,7 +51,7 @@ def separating_proposals(config, positives, negatives, *, routes=()):
         if interval['feasible']:
             key = interval['parameter']
             lower = interval['lower_exclusive']
-            first = int(lower)+1 if key.endswith('min_support') else round(math.floor(lower*1e6)/1e6+.000001, 6)
+            first = strictly_above(lower, integer=key.endswith('min_support'))
             value = min(interval['upper_inclusive'], max(first, parameter(config.data, key)))
             proposals.append(dict(joint, **{key: value}))
     if joint:

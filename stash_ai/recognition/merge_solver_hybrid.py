@@ -1,5 +1,4 @@
 """Measured hybrid search hints; only a full production replay certifies them."""
-import math
 
 from .database import encoded
 from .hybrid_evidence import catalogue, pair, scores
@@ -10,11 +9,8 @@ PREFIX = 'sapiensid.matching.'
 
 
 def boundaries(value):
-    if value is None or not math.isfinite(value) or not 0 <= value <= 1:
-        return ()
-    # Acceptance and rejection sides of a measured boundary, including ties.
-    low = _floor(value)
-    return tuple(sorted({low, min(1., low + .000001)}))
+    from .threshold_boundaries import sides
+    return sides(value)
 
 
 def mode_boundary(left, right):
