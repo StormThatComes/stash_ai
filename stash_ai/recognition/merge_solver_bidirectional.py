@@ -167,7 +167,7 @@ def repair_candidates(config, changes, sources, safe):
 
 
 class BidirectionalSearch:
-    """Bounded lane, independent of the export rank and the normal five-state beam."""
+    """Bounded lane, independent of the export rank and the adaptive beam."""
     width = 3
 
     def __init__(self, config, goals, maximum, baseline_feedback):
@@ -209,9 +209,9 @@ class BidirectionalSearch:
         self.streams = {k: v for k, v in self.streams.items() if k[0] in chosen and
                         k[1] == (None if chosen[k[0]]['disjoint'] else safe_name)}
 
-    def next(self, trial, feedback, *, solved=False, force=False):
+    def next(self, trial, feedback, *, solved=False, force=False, interval=2):
         if (not self.enabled or solved or self.executed >= self.budget or
-                (not force and (trial < 2 or trial % 2 or self.last_trial == trial))):
+                (not force and (trial < 2 or trial % interval or self.last_trial == trial))):
             return None
         self.last_trial = trial
 

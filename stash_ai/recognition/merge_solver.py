@@ -6,7 +6,7 @@ from .merge_report_policy import patched, proposal, parameter
 from .merge_goals import assess, objective, unmet_conditions, goal_diagnostics
 from .replay_simulation import replay, impact
 from .merge_solver_search import (hybrid_neighbours as _hybrid_neighbours,
-    interleave as _interleave, spread, BeamSearch, refinement, restart_probes, BASELINE_WARMUP, PREFIX, GATES)
+    interleave as _interleave, spread, BeamSearch, refinement, restart_probes, cadence, BASELINE_WARMUP, PREFIX, GATES)
 from .merge_goal_index import solver_scope
 
 
@@ -120,7 +120,8 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
     learned=create(sampler,seed)
     sampler_metadata=learned.metadata if learned else dict(name='heuristic',seed=seed)
     from .merge_solver_checkpoint import Journal, fingerprint
-    from .merge_solver_robustness import probes as robustness_probes, confidence
+    from .merge_solver_robustness import confidence
+    from .merge_solver_polish import Polisher, allowance
     from .merge_goal_output import configuration_document
     from copy import deepcopy
     if resume and checkpoint is None:raise ValueError('Resume requires a solver checkpoint.')
@@ -298,20 +299,24 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
         search.observe('baseline', {}, ranking('baseline'), outcomes['baseline'])
         bidirectional = BidirectionalSearch(config, goals, maximum, feedback['baseline'])
         bidirectional.observe('baseline', {}, summaries['baseline'], ranking('baseline'), outcomes['baseline'])
-        robustness_budget=min(8,maximum//10) if maximum>=20 else 0
-        validation=None
+        polishing = None
         sampled_for=None
         normal_exhausted = False
+        alternate_streak = 0
+        def changes_for(name):
+            return {c['parameter']:c['proposed'] for c in patches.get(name,{}).get('changes',())}
         while trials < maximum and attempts < maximum * 100:
-            if validation is None and trials<maximum-robustness_budget:
-                alternate = bidirectional.next(trials, feedback, solved=summaries[best]['fully_solved'],
-                                               force=normal_exhausted)
+            reserve = allowance(maximum, changes_for(best),
+                feedback[best]['provenance']['active_parameters'])
+            if polishing is None and trials < maximum-reserve:
+                period = cadence(search.operators.get('tpe', {}), 5)
+                tpe_due = (learned and not normal_exhausted and trials >= BASELINE_WARMUP and
+                    (trials % period == 0 if sampled_for is None else trials-sampled_for >= period))
+                alternate = (bidirectional.next(trials, feedback, solved=summaries[best]['fully_solved'],
+                    force=normal_exhausted, interval=cadence(search.lanes.get('bidirectional', {}), 2))
+                    if not tpe_due and (alternate_streak < 2 or normal_exhausted) else None)
                 try:
-                    if alternate is not None:
-                        family, phase, parent, strategy, changes = alternate
-                    elif normal_exhausted:
-                        raise StopIteration
-                    elif learned and trials>=BASELINE_WARMUP and trials%5==0 and sampled_for!=trials:
+                    if tpe_due:
                         sampled_for=trials
                         history=[({c['parameter']:c['proposed'] for c in patches.get(n,{}).get('changes',())},
                                   ranking(n)) for n in ranks]
@@ -319,6 +324,10 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
                         changes=learned.suggest(config,history,options,active,trials)
                         family='hybrid' if any(k.startswith(PREFIX) for k in changes) else 'face'
                         phase,parent,strategy='adaptive',best,'tpe'
+                    elif alternate is not None:
+                        family, phase, parent, strategy, changes = alternate
+                    elif normal_exhausted:
+                        raise StopIteration
                     else:
                         family, phase, parent, strategy, changes = search.next()
                 except StopIteration:
@@ -326,22 +335,17 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
                         normal_exhausted = True
                         continue  # Finish the bounded alternate frontier before stopping.
                     stop_reason=search.stop_reason
-                    validation=iter(())
+                    polishing = Polisher(config, min(reserve, maximum-trials))
             else:
-                if validation is None:validation=iter(())
-            if validation is not None:
-                if robustness_budget:
-                    candidates=[]
-                    for parent in sorted(ranks,key=ranking,reverse=True)[:2]:
-                        changes={c['parameter']:c['proposed'] for c in patches.get(parent,{}).get('changes',())}
-                        active=feedback.get(parent,{}).get('provenance',{}).get('active_parameters',{})
-                        candidates.extend((parent,p) for p in robustness_probes(config,changes,active,limit=4))
-                    validation=iter(candidates[:robustness_budget]);robustness_budget=0
-                try:parent,changes=next(validation)
+                if polishing is None:
+                    polishing = Polisher(config, min(reserve, maximum-trials))
+            if polishing is not None:
+                try:
+                    phase, parent, strategy, changes = polishing.next(best,
+                        sorted(ranks,key=ranking,reverse=True), changes_for, feedback)
                 except StopIteration:
-                    stop_reason=stop_reason or 'robustness_complete'
+                    stop_reason=stop_reason or 'polishing_complete'
                     break
-                phase,strategy='robustness','robustness_probe'
                 family='hybrid' if any(k.startswith(PREFIX) for k in changes) else 'face'
             attempts += 1
             try:
@@ -379,9 +383,12 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             yield name, variant
             previous_name, previous_changes = name, normalized
             trials += 1
+            alternate_streak = alternate_streak+1 if phase == 'bidirectional' else 0
+            if polishing is not None:
+                polishing.completed(phase)
             search.completed(phase, parent=parent)
             improved = search.observe(name, normalized, ranking(name), outcomes[name], family=family, operator=strategy,
-                elapsed=durations.get(name,0.), blockers=sorted({r['reason'] for r in feedback[name]['provenance']['blocker_trace']}))
+                elapsed=durations.get(name,0.), blockers=sorted({r['reason'] for r in feedback[name]['provenance']['blocker_trace']}), phase=phase)
             if improved:
                 normal_exhausted = False
                 search.stop_reason = None
@@ -476,7 +483,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
                         frontier=list(bidirectional.frontier) if bidirectional else [],
                         executed=sum(origins.get(n,{}).get('search_phase')=='bidirectional' for n in result['trials'])),
                     stop_reason='interrupted' if result.get('interrupted') else result.get('stop_reason', stop_reason),
-                    beam_width=BeamSearch.width, peak_beam=search.peak_beam if search else 0,
+                    beam_width=search.width if search else BeamSearch.width, peak_beam=search.peak_beam if search else 0,
                     beam_trials=list(search.beam) if search else [],
                     pruned_trials=search.pruned if search else 0,
                     operators=search.operators if search else {}, restarts=search.restarts if search else 0,
@@ -486,7 +493,7 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
                                         for family in ('hybrid', 'face')},
                     baseline_exploration_warmup=BASELINE_WARMUP,
                     executed_by_phase={phase: sum(origins.get(name, {}).get('search_phase') == phase
-                        for name in result['trials']) for phase in ('baseline_exploration', 'adaptive', 'bidirectional', 'refinement', 'restart', 'robustness')},
+                        for name in result['trials']) for phase in ('baseline_exploration', 'adaptive', 'bidirectional', 'refinement', 'restart', 'minimization', 'robustness')},
                     tested_hybrid_values=tested_hybrid,
                     budget_exhausted=len(result['trials']) >= maximum,
                     selection_scope='completed_trials_including_baseline',

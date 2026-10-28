@@ -134,7 +134,7 @@ def test_tested_values_exclude_unfinished_probes(tmp_path, interrupted_trial):
     with _open_readonly(config.database) as db:
         result = solve(config, goals, db, maximum=4, progress=progress)
     assert result['interrupted']
-    assert result['search']['executed_by_phase'] == dict(baseline_exploration=0, adaptive=0, bidirectional=0, refinement=0, restart=0, robustness=0)
+    assert result['search']['executed_by_phase'] == dict(baseline_exploration=0, adaptive=0, bidirectional=0, refinement=0, restart=0, minimization=0, robustness=0)
     if interrupted_trial == 'baseline':
         assert result['search']['tested_hybrid_values'] == {}
     else:

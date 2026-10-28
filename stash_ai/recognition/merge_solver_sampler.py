@@ -11,7 +11,7 @@ class TPESuggestions:
             raise ValueError('TPE requires optional dependencies: pip install -r requirements-solver.txt') from exc
         self.optuna=optuna
         self.seed=seed
-        self.metadata=dict(name='tpe',seed=seed,version=optuna.__version__,warmup=13,every=5)
+        self.metadata=dict(name='tpe',seed=seed,version=optuna.__version__,warmup=13,every=5,adaptive_cadence=True)
 
     def suggest(self,config,history,options,active,sequence):
         optuna=self.optuna
