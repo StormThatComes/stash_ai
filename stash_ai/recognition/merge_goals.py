@@ -1,6 +1,7 @@
 """Explicit merge goals resolved against one retained read-only snapshot."""
 from .identity_report import _select
 from .models import namespace
+from .merge_goal_index import evaluation_scope
 
 
 def resolve(db, config, sets, *, scope=None, by_performer=True, policy='identity'):
@@ -125,6 +126,7 @@ def execute(args, config):
     return 130 if result.get('interrupted') else 2 if result.get('status') == 'no_compatible_scans' else 0
 
 
+@evaluation_scope
 def assess(goals, observations, retained, predicted):
     """Evaluate final memberships, including partial losses and outsider bridges."""
     from collections import Counter

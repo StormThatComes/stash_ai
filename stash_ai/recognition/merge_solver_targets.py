@@ -1,7 +1,9 @@
 """Frozen goal deficits used to order experiments, never to assign identities."""
 from .merge_goal_sets import assess_set, ownership, set_destinations
+from .merge_goal_index import evaluation_scope
 
 
+@evaluation_scope
 def deficits(goals, observations, predicted):
     if goals.get('goal_policy', {}).get('name') != 'identity':
         return dict(priorities={}, destinations={}, sets=[])

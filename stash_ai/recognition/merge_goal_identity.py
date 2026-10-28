@@ -47,6 +47,10 @@ def freeze(rows):
 
 
 def votes(units, observations, predicted):
+    from .merge_goal_index import indexed_votes
+    indexed = indexed_votes(units, observations, predicted)
+    if indexed is not None:
+        return indexed
     counts, scenes = Counter(), defaultdict(Counter)
     for unit in units:
         rows = [r for r in unit['observations'] if r['id'] in observations and predicted.get(r['id']) is not None]

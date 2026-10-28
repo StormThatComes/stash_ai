@@ -48,10 +48,15 @@ def ownership(goals, observations, predicted):
         evidence = group['identity_evidence']
         core = evidence['core_units']
         total_counts, _ = votes(core, observations, predicted)
-        cohorts = defaultdict(list)
-        for unit in core:
-            for scene in {r['scene'] for r in unit['observations']}:
-                cohorts[scene].append(dict(unit, observations=[r for r in unit['observations'] if r['scene'] == scene]))
+        from .merge_goal_index import current
+        index_cache = current()
+        if index_cache is not None:
+            cohorts = index_cache.cohorts(evidence)
+        else:
+            cohorts = defaultdict(list)
+            for unit in core:
+                for scene in {r['scene'] for r in unit['observations']}:
+                    cohorts[scene].append(dict(unit, observations=[r for r in unit['observations'] if r['scene'] == scene]))
         significant = set()
         for cohort in cohorts.values():
             counts, _ = votes(cohort, observations, predicted)
