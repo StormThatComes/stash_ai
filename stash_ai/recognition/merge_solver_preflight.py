@@ -25,8 +25,10 @@ def estimate(config, changes, feedback):
     def accepts(witness):
         return all(changes.get(k,parameter(config.data,k))<=v for k,v in witness.items())
     # Incomplete witnesses are useful for ordering, never for declaring safety.
-    return (sum(not accepts(w) for w in negative)/max(1,len(negative)),
-            sum(accepts(w) for w in positive)/max(1,len(positive)))
+    routes = query.get('positive_routes', ())
+    gain = (sum((1+r['priority'])*any(accepts(w) for w in r['routes']) for r in routes)/
+            max(1, sum(1+r['priority'] for r in routes))) if routes else sum(accepts(w) for w in positive)/max(1,len(positive))
+    return (sum(not accepts(w) for w in negative)/max(1,len(negative)), gain)
 
 
 def ordered(config, candidates, feedback, window=8):

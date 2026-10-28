@@ -126,8 +126,9 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
     journal = Journal(checkpoint, fingerprint(config,goals,db,dict(maximum=maximum,sampler=sampler_metadata,yaml_mode=yaml_mode,outside_limits=outside_limits)),
                       resume=resume,winner=winner_writer) if checkpoint else None
     from .merge_solver_hybrid import public
-    from .merge_solver_feedback import QueryFeedback, pair_separation, quality_feedback
-    from .merge_solver_diagnostics import diagnostic_record
+    from .merge_solver_feedback import QueryFeedback, pair_separation, quality_feedback, face_fallbacks
+    from .merge_solver_diagnostics import diagnostic_record, latest_decisions
+    from .merge_solver_targets import deficits
     from .merge_solver_metrics import magnitude as mutation_magnitude
     from .merge_solver_constraints import component_proposals, crossovers, coupled_refinement
     from .merge_solver_preflight import boundary_probes, ordered
@@ -192,25 +193,25 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             best_trial=best, best_trial_number=0 if best == 'baseline' else int(best.split('-')[1]),
             **transitions[name])
     def inspect(target, settings):
-        import json
+        from .database import encoded
         ids = {r['id'] for g in goals['groups'] for m in g['members'] for r in m['observations']}
-        result = []
-        for row in target.execute('SELECT scan,status,payload FROM candidates'):
-            payload = json.loads(row['payload'])
-            if payload.get('observation') in ids:
-                result.append(dict(observation=payload['observation'], scan=row['scan'], status=row['status'],
-                    reason=payload.get('reason'), hybrid_merge=payload.get('hybrid_merge'),
-                    hybrid_query=payload.get('hybrid_query'), measurements={k:v for k,v in payload.items()
-                        if type(v) in (int,float,bool) and any(t in k for t in ('score','similarity','threshold','support','margin'))}))
+        result = latest_decisions(target, ids)
+        membership = dict(target.execute('SELECT o.id,m.person FROM observations o LEFT JOIN members m '
+            'ON m.observation=o.id WHERE o.id IN (SELECT value FROM json_each(?))', (encoded(sorted(ids)),)))
+        targets = deficits(goals, membership, membership)
+        query_feedback.priorities = targets['priorities']
         current_goals = rebuilt_goals(target, goals)
         hybrid.clear()
         updated = measured_options(target, settings, current_goals, hybrid=hybrid)
         hybrid_changes[:] = list({digest(p): p for p in hybrid['proposals'] + list(initial_changes)}.values())
         queries = query_feedback.finish(settings)
         separation = pair_separation(settings, hybrid)
-        quality = quality_feedback(target, settings, goals)
+        quality = quality_feedback(target, settings, goals,
+            priorities=targets['priorities'] if goals.get('goal_policy', {}).get('name') == 'identity' else None)
+        if not queries['positive_witnesses']:
+            queries['face_proposals'].extend(face_fallbacks(target, settings, goals, targets))
         separated = [dict(hybrid_changes[0] if hybrid_changes else {}, **p) for p in separation['proposals']]
-        directed = list(queries['proposals']) + separated + component_proposals(settings, hybrid) + hybrid_changes
+        directed = list(queries['proposals']) + component_proposals(settings, hybrid, targets=targets) + separated + hybrid_changes
         # Clear simultaneous query and reference blockers under one configuration.
         if queries['proposals'] and hybrid_changes and any(p['relation'] == 'within_set' for p in hybrid.get('pairs', ())):
             joint = dict(hybrid_changes[0])
@@ -222,7 +223,10 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
         latest_feedback.clear()
         latest_feedback.update(query={k:v for k,v in queries.items() if k not in ('proposals','options')},
             separation_intervals=separation['intervals'], quality=quality['observations'],
-            proposals=dict(hybrid=directed, face=quality['proposals']),
+            proposals=dict(hybrid=directed, face=
+                [dict(p, **q) for p in queries['face_proposals'][:2] for q in quality['proposals'][:1]] +
+                queries['face_proposals'] + quality['proposals']),
+            targets=targets,
             options=updated, hybrid_proposals=list(hybrid['proposals']),
             provenance=diagnostic_record(settings, result, queries, public(hybrid), quality['observations']))
         for extra in (queries['options'], separation['options']):
@@ -357,7 +361,8 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
             bidirectional.observe(name, normalized, summaries[name], ranking(name), outcomes[name], phase=phase)
             # Keep detailed hints only for parents that can still be expanded.
             for old in (set(feedback) - search.beam.keys() - bidirectional.frontier.keys() -
-                        {'baseline'} - set(sorted(ranks,key=ranking,reverse=True)[:2])):
+                        {'baseline'} - {bidirectional.safe['name'] if bidirectional.safe else 'baseline'} -
+                        set(sorted(ranks,key=ranking,reverse=True)[:2])):
                 del feedback[old]
         if stop_reason is None:
             stop_reason = 'max_trials' if trials >= maximum else 'proposal_limit'
@@ -370,6 +375,8 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
         state=deepcopy(record['state'])
         summaries[name]=state['status'];ranks[name]=tuple(state['rank']);outcomes[name]=state['outcome']
         latest_feedback.clear();latest_feedback.update(state['feedback']);feedback[name]=latest_feedback.copy()
+        query_feedback.visits = dict(latest_feedback['query'].get('sampling_visits', {}))
+        query_feedback.priorities = dict(latest_feedback.get('targets', {}).get('priorities', {}))
         options.clear();options.update(state['options'])
         hybrid.clear();hybrid.update(state['hybrid']);hybrid_changes[:]=state['hybrid_changes']
         robustness.clear();robustness.update(state['robustness'])

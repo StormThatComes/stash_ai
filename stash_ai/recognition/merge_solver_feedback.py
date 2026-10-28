@@ -14,7 +14,7 @@ from .merge_report_policy import parameter, _floor
 from .merge_solver_hybrid import boundaries, PREFIX
 
 
-def separating_proposals(config, positives, negatives):
+def separating_proposals(config, positives, negatives, *, routes=()):
     """Try common acceptance bounds and single-gate separation intervals.
 
     A gate accepts <= the weakest desired score/support; rejecting every measured
@@ -42,9 +42,10 @@ def separating_proposals(config, positives, negatives):
             reason='separating_interval' if feasible else 'overlapping_within_and_between_scores'))
         if support or 0 <= first <= 1:
             options[key].add(first)
-    from .merge_solver_constraints import joint_separation
+    from .merge_solver_constraints import joint_separation, alternative_separation
     combined = joint_separation(config, positives, negatives)
-    proposals = list(combined['proposals'])
+    proposals = alternative_separation(config, routes, negatives) if routes else []
+    proposals.extend(combined['proposals'])
     # Prefer separating settings over a blanket relaxation, but test both.
     for interval in intervals:
         if interval['feasible']:
@@ -89,10 +90,12 @@ class QueryFeedback:
         self.goals = goals
         self.selected = ()
         self.sets = {r['id']: g['index'] for g in goals['groups'] for m in g['members'] for r in m['observations']}
+        self.visits, self.priorities = {}, {}
         self.reset()
 
     def reset(self):
         self.entries, self.negatives, self.votes = [], [], {}
+        self.face_votes = {}
         self.decisions = []
         self.negative_keys = set()
         self.sampled = set()
@@ -113,7 +116,10 @@ class QueryFeedback:
         from .merge_solver_diagnostics import fair_queries
         bank_count = max(1, sum(i.person not in births for i,_,_,_ in banks))
         quota = max(0, (limits['max_candidate_pairs']-self.comparisons)//bank_count)
-        selected, eligible = fair_queries(db, config, self.goals, self.selected, births, quota)
+        selected, eligible = fair_queries(db, config, self.goals, self.selected, births, quota,
+                                         visits=self.visits, priorities=self.priorities)
+        for oid in selected:
+            self.visits[oid] = self.visits.get(oid, 0)+1
         self.sampled.update(selected)
         self.sampling.append(dict(pass_id=pass_id, eligible=eligible, selected=len(selected)))
         if len(selected) < eligible:
@@ -214,17 +220,30 @@ class QueryFeedback:
                         for v in rivals if v['score'] is not None), key=lambda v:v['score'], default=None),
                     unknown_competitor_identity=next((v['identity'] for v in rivals if v['score'] is None), None))
                 self.entries.append(entry)
+                self.face_votes.setdefault((pass_id, c['identity']), Votes()).add(row)
                 if c['person'] is not None and not c['missing_original_core']:
                     self.votes.setdefault((pass_id, c['identity']), Votes()).add(row)
             self.used += retained_cost
         return measure
 
     def finish(self, config):
-        positives = []
+        positives, face_proposals = [], []
+        alternatives = defaultdict(list)
         for entry in self.entries:
             if 'identity' not in entry:
                 continue
             entry['query_support'] = len(self.votes.get((entry['pass_id'], entry['identity']), ()))
+            # Missing body evidence blocks the hybrid route, not face matching.
+            # Only measured faces are proposed; production still checks pose,
+            # independent support, original cores and competing identities.
+            if entry['person'] is None and entry['face']['minimum'] >= 0:
+                face_support = min(entry['support'], len(self.face_votes.get((entry['pass_id'], entry['identity']), ())))
+                if face_support:
+                    value = _floor(entry['face']['minimum'])
+                    face_proposals.append({
+                        'recognition.match_threshold': min(parameter(config.data, 'recognition.match_threshold'), value),
+                        'clustering.cohesion_threshold': min(parameter(config.data, 'clustering.cohesion_threshold'), value),
+                        'recognition.min_identity_support': min(parameter(config.data, 'recognition.min_identity_support'), face_support)})
             support = min(entry['support'], entry['query_support'])
             if support < config.data['sapiensid']['matching']['min_support']:
                 entry['blockers'].append('query_support')
@@ -237,23 +256,30 @@ class QueryFeedback:
             if entry['gap'] is not None and entry['gap'] >= 0:
                 patch[PREFIX+'ambiguity_margin'] = _floor(entry['gap'])
             positives.append(patch)
-        hints = separating_proposals(config, positives, self.negatives)
+            alternatives[entry['observation']].append(patch)
+        positive_routes = [dict(observation=oid, routes=list({digest(p):p for p in routes}.values()),
+                                priority=self.priorities.get(oid, 0)) for oid, routes in sorted(alternatives.items())]
+        focused = [r for r in positive_routes if r['priority'] > 0] or positive_routes
+        hints = separating_proposals(config, positives, self.negatives, routes=[r['routes'] for r in focused])
         result = dict(queries=self.entries, decisions=self.decisions, sampling=self.sampling, comparisons=self.comparisons, passes=self.passes,
             truncated=bool(self.truncation_reasons), truncation_reasons=sorted(self.truncation_reasons),
             skipped_query_visits=self.skipped_query_visits,
             separation_intervals=hints['intervals'], joint_constraints=hints['joint_constraints'],
             positive_witnesses=positives, negative_witnesses=self.negatives,
+            positive_routes=positive_routes, sampling_visits=dict(self.visits),
+            face_proposals=list({digest(p):p for p in face_proposals}.values()),
             proposals=hints['proposals'], options=hints['options'],
             interpretation='Frozen query-stage hints before face-floor pruning; full replay decides acceptance.')
         self.reset()
         return result
 
 
-def quality_feedback(db, config, goals):
+def quality_feedback(db, config, goals, *, priorities=None):
     """Retained admission boundaries for target observations, never new measurements."""
     import json
     from .visibility import cached
-    ids = [r['id'] for g in goals['groups'] for m in g['members'] for r in m['observations']]
+    ids = [r['id'] for g in goals['groups'] for m in g['members'] for r in m['observations']
+           if priorities is None or priorities.get(r['id'], 0) > 0]
     entries, joint = [], {}
     for row in db.execute('SELECT id,quality FROM observations WHERE id IN '
                           '(SELECT value FROM json_each(?))', (encoded(ids),)):
@@ -287,3 +313,51 @@ def quality_feedback(db, config, goals):
             choose = max if key.endswith('pose_deviation') else min
             joint[key] = choose(joint.get(key,value), value)
     return dict(observations=entries, proposals=([joint] if joint else []) + [e['patch'] for e in entries if e['patch']])
+
+
+def face_fallbacks(db, config, goals, targets, limit=32):
+    """Measure retained goal queries even when the body matcher cannot run.
+
+    Query observers may never be invoked when every body bank is unavailable.
+    These independent face hints cannot create person features or bypass guards.
+    """
+    import numpy as np
+    from .clustering import _groups, vector
+    from .reference_compatibility import fallback_sql
+    from .scanning import scan_identity
+    from .merge_solver_diagnostics import round_robin
+    profiles = targets.get('destinations', {})
+    priorities = targets.get('priorities', {})
+    if not profiles or not priorities:
+        return []
+    membership = {r['id']: g['index'] for g in goals['groups'] for m in g['members'] for r in m['observations']}
+    banks = [g for g in _groups(db, goals['scope'], goals['namespace'], config.data['clustering'],
+        scan_policy=scan_identity(config, goals['namespace']), compatibility=fallback_sql(db, config, goals['namespace']))
+        if g.identifier in profiles]
+    buckets = defaultdict(list)
+    for row in db.execute('SELECT o.*,s.scene FROM observations o JOIN scans s ON s.id=o.scan '
+            'WHERE o.rejected IS NULL AND o.id IN (SELECT value FROM json_each(?)) ORDER BY o.id',
+            (encoded(sorted(priorities)),)):
+        buckets[membership[row['id']], row['scene']].append(row)
+    for rows in buckets.values():
+        rows.sort(key=lambda r: (-priorities[r['id']], r['id']))
+    proposals, comparisons = {}, 0
+    budget = config.data['sapiensid']['execution']['max_candidate_pairs']
+    for row in round_robin(buckets):
+        query = vector(row).astype('float64')
+        for bank in banks:
+            if profiles[bank.identifier]['set'] != membership[row['id']] or row['id'] in bank.sample_ids:
+                continue
+            if comparisons >= budget:
+                return list(proposals.values())
+            comparisons += 1
+            value = float((np.asarray(bank.samples, dtype='float64') @ query).min())
+            if not 0 <= value <= 1:
+                continue
+            patch = {k: min(parameter(config.data, k), _floor(value)) for k in (
+                'recognition.match_threshold', 'clustering.cohesion_threshold',
+                'clustering.view_match_threshold', 'clustering.view_cohesion_threshold')}
+            proposals[digest(patch)] = patch
+            if len(proposals) >= limit:
+                return list(proposals.values())
+    return list(proposals.values())

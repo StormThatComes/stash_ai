@@ -569,6 +569,21 @@ separation and acceptance. It never drops a candidate or certifies a merge;
 independent coordinate probes and full replay remain authoritative, including
 when diagnostic sampling is incomplete.
 
+Search guidance prioritizes missing target scenes and pooled-core deficits.
+Complementary component bridges precede redundant dense-scene connections;
+repair proposals use the current best disjoint parent's measurements. Query
+sampling rotates least-visited evidence across sets, members and scenes, even
+when a pass cannot afford one query per set. The rotation state is restored with
+the existing journal. Terminal decisions are read by the indexed observation
+address and explicit latest-row order, across matching policies.
+
+Alternative reference routes for a query are OR choices, not simultaneous
+acceptance obligations. A bounded constraint frontier combines useful routes
+while retaining real competing witnesses. Missing body evidence does not imply
+that the goal is impossible: measured face-only query/reference boundaries can
+still propose face and retained-quality changes. Production replay remains the
+only authority for accepting any proposed configuration.
+
 ### Checkpoints and local stability
 
 `--yaml-output` is atomically refreshed after every completed improvement,
