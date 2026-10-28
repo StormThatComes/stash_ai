@@ -44,7 +44,10 @@ def resolve(db, config, sets, *, scope=None, by_performer=True, policy='identity
                 row['goal_role'] = ('reference' if row['reference_authority'] and row['status'] == 'complete'
                     and row['rejected'] is None and is_anchor(row['quality'], config.data['clustering']) else 'uncertain')
             freeze_samples(db, config, rows, diagnostics)
-            item['observations'] = [{k: r[k] for k in ('id','scan','scene','cue','goal_role','sample_role','body_state')} for r in rows]
+            for row in rows:row['evidence_kind']='face'
+            from .body_reports import goal_rows
+            rows.extend(goal_rows(db,config,identity))
+            item['observations'] = [{k:r[k] for k in ('id','scan','scene','cue','goal_role','sample_role','body_state','evidence_kind')} for r in rows]
             if policy == 'identity':
                 item['identity_evidence'] = freeze(rows)
                 set_rows.extend(rows)
@@ -269,6 +272,13 @@ def fingerprint(db, config, scope):
                 'JOIN observations o ON o.id=e.observation JOIN scans s ON s.id=o.scan '
                 'WHERE s.scope=? AND s.namespace=? ORDER BY e.observation,e.contract',(scope,namespace(config))):
             value.update(digest([v.hex() if isinstance(v,bytes) else v for v in row]).encode())
+    from .body_identity import available as bodies_available
+    if bodies_available(db):
+        for sql in (
+            'SELECT b.id,b.scan,b.cue,b.seconds,b.contract,b.face,b.quality,b.rejected,b.embedding,m.person,m.role,m.status,m.policy,m.proof FROM body_observations b JOIN scans s ON s.id=b.scan LEFT JOIN body_members m ON m.observation=b.id WHERE s.scope=? AND s.namespace=? ORDER BY b.id',
+            'SELECT c.* FROM body_cues c JOIN scans s ON s.id=c.scan WHERE s.scope=? AND s.namespace=? ORDER BY c.scan,c.contract,c.cue'):
+            for row in db.execute(sql,(scope,namespace(config))):
+                value.update(digest([v.hex() if isinstance(v,bytes) else v for v in row]).encode())
     return value.hexdigest()
 
 

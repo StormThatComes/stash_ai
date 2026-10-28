@@ -119,6 +119,7 @@ def report(db,config,scope,namespace):
                         score=float(np.dot(left,right));face_min=score if face_min is None else min(face_min,score)
                 if face_min is not None and face_min<config.data['sapiensid']['matching']['face_floor']:blockers.append('face_contradiction')
                 pair=dict(people=[a,b],score=mean,minimum=minimum,face_minimum=face_min,
+                    support=[first['support'],second['support']],
                     face_evidence='compared' if face_min is not None else 'unavailable',blockers=blockers)
                 pairs[a,b]=pair;result['pairs'].append(pair)
                 if not blockers:edges[a].add(b);edges[b].add(a)

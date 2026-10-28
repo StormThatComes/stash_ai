@@ -88,8 +88,11 @@ def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=N
         observations = {r['id']: r['scene'] for r in db.execute(
             'SELECT o.id,s.scene FROM observations o JOIN scans s ON s.id=o.scan '
             'WHERE o.scan IN (SELECT value FROM json_each(?))', (encoded([s['id'] for s in scans]),))}
+        from .body_reports import observations as body_observations, members as body_members, report as body_report
+        observations.update(body_observations(db,config,[s['id'] for s in scans]))
         retained = dict.fromkeys(observations)
         retained.update((r[0], r[1]) for r in db.execute('SELECT observation,person FROM members') if r[0] in observations)
+        retained.update((k,v) for k,v in body_members(db,config).items() if k in observations)
         result = dict(format=1, kind='recognition_replay_simulation', source_read_only=True,
             source='retained_vtt_embeddings', scope=scope, selection=[s['scene'] for s in scans],
             starting_state='frozen_retained_history_and_bindings', input_selection=inputs, trials={},
@@ -165,11 +168,13 @@ def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=N
                         predictions = dict.fromkeys(observations)
                         predictions.update((r[0], r[1]) for r in target.execute('SELECT observation,person FROM members')
                                            if r[0] in observations)
+                        predictions.update((k,v) for k,v in body_members(target,settings).items() if k in observations)
+                        bodies=body_report(target,settings,[s['id'] for s in scans])
                         hybrid=coverage(target,settings,[s['id'] for s in scans])
                         evidence = inspect_trial(target, settings) if inspect_trial else None
                     if baseline is None:
                         baseline = predictions
-                    item = dict(hybrid=hybrid,elapsed_seconds=time.perf_counter()-started,
+                    item = dict(hybrid=hybrid,independent_person=bodies,elapsed_seconds=time.perf_counter()-started,
                         versus_retained=impact(retained, predictions), versus_baseline=impact(baseline, predictions))
                     if consume is not None:
                         item.update(consume(name, observations, retained, predictions))
@@ -190,6 +195,8 @@ def _replay(config, variants, *, scenes=None, scope=None, source=None, consume=N
 def merge_impact(config, report, source):
     from .merge_report_policy import patched
     retained_totals = dict(source.execute('SELECT person,COUNT(*) FROM members GROUP BY person'))
+    from .body_reports import members as body_members
+    for person,count in Counter(body_members(source,config).values()).items():retained_totals[person]=retained_totals.get(person,0)+count
     variants, names = {}, {}
     for index, item in enumerate(report['recommendations']):
         changes = {r['parameter']: r['proposed'] for r in item['changes']}

@@ -51,6 +51,14 @@ def registry(config):
             result[f'clustering.min_{role}_{suffix}'] = Domain(low=detection[source], high=high)
     if not config.data['sapiensid']['enabled']:
         result = {k: v for k, v in result.items() if not k.startswith('sapiensid.')}
+    from .body_identity import enabled
+    if enabled(config):
+        for section in ('identities','global_matching'):
+            for key in ('match_threshold','cohesion_threshold','ambiguity_margin'):
+                result['sapiensid.'+section+'.'+key]=Domain()
+            result['sapiensid.'+section+'.min_support']=Domain(int,2 if section=='identities' else 1,
+                1000 if section=='identities' else config.data['sapiensid']['global_matching']['max_references'])
+        result['sapiensid.identities.attach_min_support']=Domain(int,1,1000)
     return result
 
 
@@ -69,6 +77,10 @@ def normalize(config, changes):
             else:
                 patch[lower] = b
     ordered('clustering.cohesion_threshold', 'recognition.match_threshold')
+    from .body_identity import enabled
+    if enabled(config):
+        for section in ('identities','global_matching'):
+            ordered('sapiensid.'+section+'.cohesion_threshold','sapiensid.'+section+'.match_threshold')
     for suffix in ('face_pixels', 'sharpness', 'visible_face_fraction'):
         ordered('clustering.min_auxiliary_'+suffix, 'clustering.min_anchor_'+suffix)
     key = 'clustering.anchor_view_matching'

@@ -94,7 +94,8 @@ def hybrid_neighbours(config, changes, options, measured):
             yield dict(changes, **{key: value})
     joint = joints()
     yield from islice(joint, 1)
-    coordinates = interleave(coordinate(PREFIX + gate) for gate in GATES)
+    body_keys=[k for k in options if k.startswith(('sapiensid.identities.','sapiensid.global_matching.'))]
+    coordinates = interleave(coordinate(k) for k in body_keys+[PREFIX+gate for gate in GATES])
     # Long pair-proposal lists cannot defer the initial single-gate probes.
     yield from islice(coordinates, BASELINE_WARMUP - 1)
     yield from interleave((coordinates, joint))

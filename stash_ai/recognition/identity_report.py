@@ -224,6 +224,11 @@ def export(config, output_dir, *, identity_id=None, performer_id=None, scope=Non
             report['samples'].append(sample)
             counts[image['status']] += 1
             counts[assignment['role']] += 1
+        from .body_reports import export_members
+        for sample in export_members(db,config,person,directory):
+            report['samples'].append(sample)
+            counts[sample['image']['status']]+=1
+            counts[sample['assignment']['role']]+=1
         report['summary'] = {
             'members': len(report['samples']), 'pngs_exported': counts['exported'],
             'missing_crops': counts['missing_crop'], 'invalid_crops': counts['invalid_crop'],
@@ -240,5 +245,5 @@ def execute(args, config):
                     performer_id=args.performer_id, scope=args.scope)
     summary = result['summary']
     print(f'Identity report written: {Path(args.output_dir).expanduser() / "manifest.json"} '
-          f'({summary["pngs_exported"]}/{summary["members"]} face PNGs)')
+          f'({summary["pngs_exported"]}/{summary["members"]} sample PNGs)')
     return 0 if summary['complete'] else 1

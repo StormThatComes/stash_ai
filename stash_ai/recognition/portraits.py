@@ -38,7 +38,9 @@ def _policy_value(config):
     from .visibility import required as visibility_required
     from .expression import required as expression_required
     from .portrait_admission import extra_measurements
+    from .body_identity import enabled as bodies_enabled, policy as body_policy
     return {'version': 5, 'portraits': policy,
+                   'body_policy': body_policy(config) if bodies_enabled(config) else None,
                    'max_crop_bytes': config.data['storage']['max_crop_bytes'],
                    'recognition': plain(config.data['recognition']), 'clustering': plain(config.data['clustering']),
                    'visibility_contract': CONTRACT_ID if visibility_required(policy) or extra_measurements(config) else None,
@@ -398,6 +400,10 @@ def _current_prior(database, prior, client, config, scope, target, visibility, e
     if prior is None:
         return None
     metadata = json.loads(prior['metadata'])
+    if metadata.get('portrait_kind') == 'person':
+        from .body_portraits import current_prior
+        return current_prior(database, prior, config, target)
+    if config.data['portraits']['kind'] == 'person':return None
     namespace = database.connection.execute('SELECT namespace FROM people WHERE id=? AND scope=?',
                                            (target['person'], scope)).fetchone()[0]
     from .context import portrait_references
@@ -464,9 +470,13 @@ def fill_portrait(database, client, report, config, scope, target, paths, backen
             still_member = database.connection.execute('SELECT 1 FROM members m JOIN observations o '
                 'ON o.id=m.observation WHERE m.person=? AND m.observation=? AND o.rejected IS NULL',
                 (target['person'], observation)).fetchone()
+            if metadata.get('portrait_kind') == 'person':
+                from .body_portraits import eligible
+                still_member = eligible(database.connection,config,target['person'],observation)
             if metadata['policy_sha'] == policy_sha and still_member:
                 prior = portrait
-    winner = choose(database, client, config, scope, target, paths, backend_factory, decoder_factory, source_factory,
+    from .body_portraits import choose_kind
+    winner = choose_kind(database, client, config, scope, target, paths, backend_factory, decoder_factory, source_factory,
                     visibility=visibility, expression=expression)
     if winner is None:
         if baseline is not None:
@@ -479,12 +489,8 @@ def fill_portrait(database, client, report, config, scope, target, paths, backen
                  _current_prior(database, prior, client, config, scope, target, visibility, expression))
     if prior is not None:
         old, new = json.loads(prior['metadata']), json.loads(winner['metadata'])
-        ranks = {'video': 0, 'vtt': 1, 'recognition_crop': 2}
-        def key(metadata):
-            quality = metadata.get('quality', {})
-            return (-portrait_score(quality, config.data['portraits']),
-                    -portrait_tiebreak(quality, config.data['portraits']), ranks.get(metadata.get('source_type'), 3))
-        if key(old) < key(new):
+        from .body_portraits import rank
+        if rank(old,config) < rank(new,config):
             return {'portraits_preserved': 1, **quality_counts(prior, config)}
     if pipeline is not None:pipeline.promote()
     # Protect manual replacements/removals while extraction was in progress.
@@ -536,8 +542,9 @@ def fill_portrait(database, client, report, config, scope, target, paths, backen
 def quality_counts(winner, config):
     metadata = json.loads(winner['metadata'])
     encoding = metadata.get('encoding', {})
-    limited = (portrait_shortfalls(metadata.get('quality', {}), config.data['portraits'])
+    person = metadata.get('portrait_kind') == 'person'
+    limited = ((not person and portrait_shortfalls(metadata.get('quality', {}), config.data['portraits']))
                or any(encoding.get(name) for name in ('aspect_ratio_adjusted', 'padding_adjusted', 'downscaled'))
                or encoding.get('jpeg_quality', config.data['portraits']['jpeg_quality']) < config.data['portraits']['jpeg_quality'])
-    return {**({'portraits_quality_limited': 1} if limited else {}),
+    return {**({'portraits_person': 1} if person else {}), **({'portraits_quality_limited': 1} if limited else {}),
             **({'portraits_fallback': 1} if metadata.get('fallback') else {})}

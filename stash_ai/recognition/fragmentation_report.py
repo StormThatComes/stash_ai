@@ -468,6 +468,8 @@ def build(config, scene_id, *, limit=20, min_mean=None, scope=None, compare_scen
                        if compare_scene_ids else [])
         multiview = _view_attempt_summary(db, scan['id'], policy, scan['scope'], scan['namespace'])
         from .hybrid_evidence import report as hybrid_report
+        from .body_reports import report as body_report
+        from .body_global import report as body_global_report
         from .publication_queue import inventory,plan
         publication_state=dict(inventory(db,scan['scope'],scan['namespace']),
                                queued_scenes=plan(db,scan['scope'],scan['namespace'],config))
@@ -479,6 +481,8 @@ def build(config, scene_id, *, limit=20, min_mean=None, scope=None, compare_scen
             'cross_scene_comparisons':comparisons,
             'multi_view_diagnostics':multiview,
             'format': 1, 'kind': 'recognition_fragmentation',
+            'independent_person': body_report(db,config,[scan['id']]),
+            'person_consolidation': body_global_report(db,config,scan['scope'],scan['namespace']),
             'hybrid': hybrid_report(
                 db,config,scan['scope'],scan['namespace']),
             'scene_id': str(scene_id), 'scope': scan['scope'], 'scan_id': scan['id'],

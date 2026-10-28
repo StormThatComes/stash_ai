@@ -348,3 +348,43 @@ Turning global consolidation off and rerunning the full involved scope restores
 the current scene partition for body-owned aliases only. Face-owned aliases are
 not removed. A body core wholly confirmed by an existing face bank records a
 local promotion alias even when global body consolidation is disabled.
+
+
+### Body portraits and offline tools
+
+`portraits.kind: auto` prefers an eligible face without portrait quality shortfalls,
+then an accepted person crop, then the existing face fallback. `face` restricts
+selection to faces; `person` uses only retained person crops without loading face,
+pose, visibility or identity models. `portraits.anchor_only: true` requires a body
+anchor for person crops, including after global aliases downgrade source samples.
+Body ranking uses overlap, clipped borders, sharpness, visible keypoints and source
+resolution. It preserves the actual crop aspect ratio and never invents a face.
+`retain_person_crops: false` leaves no offline body portrait candidate.
+
+Person portraits use the same ownership tokens, intent-before-write, digest checks,
+retry reconciliation and manual-image preservation as face portraits. Auto mode
+can replace an acknowledged generated body image when a good face becomes available.
+`recognition portraits` includes body-only performers and respects scene/performer
+filters without rebuilding identities.
+
+`report-identity` exports retained body crops, measured pose annotations, optional
+face links, current roles and recorded decisions alongside face samples.
+`audit-alignment` exports faceless model inputs and masks with all five unavailable
+face landmarks left at `(-1,-1)`; it shares the frame's pose pass and loads no
+identity encoder. Fragmentation and pair reports include body coverage and global
+blockers. Pair recommendations from the independent-person route require production
+replay, rather than accepting a frozen pair score alone.
+
+Replay, labelled offline evaluation, `tune` and merge-goal solving accept independent
+body observation IDs. Face-associated evidence already represented by an accepted
+face is not counted again as another merge-goal sample. Body anchors contribute
+core support; auxiliary bodies remain soft evidence. Solver trials can vary the
+local and global similarity, cohesion, margin and support gates, with full production
+replay of every candidate and no inference or source database writes. Input/collection
+changes still require recollection. Automatic memberships are not truth labels.
+
+The opt-in defaults are starting values, not calibrated accuracy guarantees. Test
+with representative masked, out-of-frame, similar-clothing and changing-clothing
+examples before enabling global matching for a library. Synthetic lifecycle tests
+verify inference reuse, missing-face handling, replay and publication; they do not
+measure SapiensID recognition accuracy.

@@ -57,6 +57,11 @@ def measured_options(db, config, goals, proofs=None, *, hybrid=None):
             options['clustering.'+key] = [current/2, current] if 'pose' not in key else [current, min(1.,current+.1)]
     from .merge_solver_hybrid import analyse
     analysis = analyse(db, config, goals)
+    from .body_solver import analyse as body_analyse
+    bodies=body_analyse(db,config,goals)
+    analysis['independent_person']=bodies['evidence']
+    analysis['options'].update(bodies['options'])
+    analysis['proposals']=bodies['proposals']+analysis['proposals']
     options.update(analysis['options'])
     if hybrid is not None:
         hybrid.update(analysis)
@@ -98,6 +103,8 @@ def rebuilt_goals(db, goals):
     ids = {r['id'] for g in goals['groups'] for m in g['members'] for r in m['observations']}
     owners = dict(db.execute('SELECT observation,person FROM members WHERE observation IN '
                             '(SELECT value FROM json_each(?))', (json.dumps(sorted(ids)),)))
+    from .body_reports import members as body_members
+    owners.update((k,v) for k,v in body_members(db).items() if k in ids)
     destinations = destination_owners(goals, owners)
     groups = []
     for index, group in enumerate(goals['groups']):
@@ -214,6 +221,8 @@ def solve(config, goals, db, *, maximum=500, progress=None, checkpoint=None, res
         result = latest_decisions(target, ids)
         membership = dict(target.execute('SELECT o.id,m.person FROM observations o LEFT JOIN members m '
             'ON m.observation=o.id WHERE o.id IN (SELECT value FROM json_each(?))', (encoded(sorted(ids)),)))
+        from .body_reports import members as body_members
+        membership.update((k,v) for k,v in body_members(target,settings).items() if k in ids)
         targets = deficits(goals, membership, membership)
         query_feedback.priorities = targets['priorities']
         current_goals = rebuilt_goals(target, goals)

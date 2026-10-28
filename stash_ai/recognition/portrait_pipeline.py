@@ -274,7 +274,7 @@ class Pipeline:
         self.source_factory=source
         self.enabled=(enabled and config.data['execution'].get('prefetch_portraits',True)
                       and config.data['execution'].get('portrait_cpu_threads',0)!=1
-                      and config.data['portraits']['enabled'] and config.data['portraits']['source']=='vtt'
+                      and config.data['portraits']['enabled'] and config.data['portraits']['kind']!='person' and config.data['portraits']['source']=='vtt'
                       and callable(getattr(client,'new_media_reader',None)))
         self.original_visibility,self.original_expression=visibility,expression
         self.visibility,self.expression=visibility,expression
