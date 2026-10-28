@@ -134,6 +134,18 @@ sapiensid:
     min_keypoints: 4
     max_overlap: 0.65
 
+  identities:
+    enabled: false
+    match_threshold: 0.85
+    cohesion_threshold: 0.80
+    ambiguity_margin: 0.10
+    min_support: 3
+    attach_min_support: 2
+    min_seconds: 1.0
+    min_appearance_distance: 4
+    anchor_min_keypoints: 6
+    anchor_min_sharpness: 25.0
+
   model:
     variant: wb12m             # wb12m (default, trained on more data) or wb4m. Changing variant separates cached embeddings.
     source_directory: recognition_models/sapiensid_v1/source # Destination for verified upstream source; Git is not required.

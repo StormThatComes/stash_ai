@@ -103,8 +103,8 @@ def evaluate(config, labels, *, scenes=None, scope=None, variants=None, batch_si
     predictions, trials = {}, {}
     with closing(_open_readonly(config.database)) as source:
         tables = {r[0] for r in source.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        from .database import SCHEMA_V5, TABLES_V5, SCHEMA_V6, TABLES_V6, SCHEMA_V8, TABLES_V8
-        schema, expected = (SCHEMA, TABLES) if 'body_observations' in tables else (SCHEMA_V8,TABLES_V8) if 'evidence_thumbnails' in tables else (SCHEMA_V6,TABLES_V6) if 'person_evidence' in tables else (SCHEMA_V5,TABLES_V5)
+        from .database import SCHEMA_V5, TABLES_V5, SCHEMA_V6, TABLES_V6, SCHEMA_V8, TABLES_V8, SCHEMA_V9, TABLES_V9
+        schema, expected = (SCHEMA, TABLES) if 'body_members' in tables else (SCHEMA_V9,TABLES_V9) if 'body_observations' in tables else (SCHEMA_V8,TABLES_V8) if 'evidence_thumbnails' in tables else (SCHEMA_V6,TABLES_V6) if 'person_evidence' in tables else (SCHEMA_V5,TABLES_V5)
         FaceDatabase._validate(SimpleNamespace(connection=source), schema, expected, tables)
         scope, scans = _selection(source, config, scenes, scope)
         installation = FaceDatabase.installation.fget(SimpleNamespace(connection=source))

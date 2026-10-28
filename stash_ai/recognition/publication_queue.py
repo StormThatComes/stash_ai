@@ -76,6 +76,13 @@ def snapshot(db,scope,namespace,scene):
             vector(row);people.add(row['person'])
         elif row['payload'] is None or row['status']!='withheld':
             raise ValueError('Latest scene scan has no complete identity decisions; run recognition first.')
+    from .body_identity import publication_rows,vector as body_vector
+    for row in publication_rows(db,scan['id']):
+        _hash_row(h,row)
+        if row['status']=='accepted':
+            if row['rejected'] is not None or row['person'] is None or row['scope']!=scope or row['namespace']!=namespace:
+                raise ValueError('Invalid independent person membership; run recognition first.')
+            body_vector(row);people.add(row['person'])
     return dict(scene=scene,scan=scan['id']),sorted(people),h.hexdigest()
 
 
@@ -117,6 +124,12 @@ def discover(db,scope,namespace):
         'JOIN observations o ON o.id=m.observation JOIN scans s ON s.id=o.scan WHERE s.scope=? AND s.namespace=? '
         "AND s.status='complete' AND o.rejected IS NULL AND "+current_scan(),(scope,namespace)):
         desired.setdefault(row['scene'],{})[row['person']]=row['performer']
+    from .body_identity import available as body_available
+    if body_available(db):
+        for row in db.execute('SELECT DISTINCT s.scene,m.person,p.performer FROM body_members m '
+            'JOIN body_observations b ON b.id=m.observation JOIN scans s ON s.id=b.scan JOIN people p ON p.id=m.person '
+            "WHERE s.scope=? AND s.namespace=? AND m.status='accepted' AND b.rejected IS NULL AND "+current_scan(),(scope,namespace)):
+            desired.setdefault(row['scene'],{})[row['person']]=row['performer']
     complete=set();debt={}
     for row in db.execute("SELECT w.* FROM publications w JOIN people p ON p.id=w.person WHERE w.scope=? "
         "AND p.namespace=? AND w.kind IN ('link','unlink') AND w.scene<>''",(scope,namespace)):
