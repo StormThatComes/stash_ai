@@ -25,7 +25,8 @@ CREATE TABLE person_evidence (
 def defaults():
     from .body_observations import defaults as collection_defaults
     from .body_identity import defaults as identity_defaults
-    return dict(enabled=False,collection=collection_defaults(),identities=identity_defaults(),
+    from .body_global import defaults as global_defaults
+    return dict(enabled=False,collection=collection_defaults(),identities=identity_defaults(),global_matching=global_defaults(),
         model=dict(variant='wb12m',source_directory='recognition_models/sapiensid_v1/source',
             checkpoint_directory='', model_yaml_sha256=MODEL_YAML_SHA256),
         pose=dict(path='recognition_models/sapiensid_v1/'+POSE_NAME,sha256=POSE_SHA256,score_threshold=.5,keypoint_score_threshold=.5,
@@ -59,6 +60,16 @@ def validate(settings):
             raise ValueError('Invalid sapiensid.identities.'+key)
     _number(identity['min_seconds'],'sapiensid.identities.min_seconds',0.001,3600)
     _number(identity['anchor_min_sharpness'],'sapiensid.identities.anchor_min_sharpness',0,1000000)
+    global_matching=settings['global_matching']
+    if type(global_matching['enabled']) is not bool or global_matching['enabled'] and not identity['enabled']:
+        raise ValueError('sapiensid.global_matching.enabled requires body identities.')
+    for key in ('match_threshold','cohesion_threshold','ambiguity_margin'):
+        _number(global_matching[key],'sapiensid.global_matching.'+key,0,1)
+    for key in ('min_support','max_references'):
+        if type(global_matching[key]) is not int or not 1<=global_matching[key]<=100000:
+            raise ValueError('Invalid sapiensid.global_matching.'+key)
+    if global_matching['max_references']<global_matching['min_support']:
+        raise ValueError('Global max_references must cover min_support.')
     variant=settings['model']['variant']
     if not isinstance(variant,str) or variant not in MODELS:
         raise ValueError('sapiensid.model.variant must be wb12m or wb4m.')
