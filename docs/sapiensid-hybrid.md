@@ -323,9 +323,28 @@ counts independent cues in the frozen body bank of a face identity. Remove the
 obsolete `sapiensid.identities.min_seconds` key from existing configuration files;
 loading it reports an explicit migration error. Rebuilding matching reuses retained
 body vectors and does not require recollection. Provisional
-cores remain local and are not published. `anchor_min_keypoints` and
-`anchor_min_sharpness` are separate from collection gates. The matching,
-cohesion and ambiguity thresholds are uncalibrated starting values.
+cores remain local and are not published. `anchor_min_keypoints`,
+`anchor_min_sharpness` and `anchor_min_person_pixels` are separate from collection
+gates. The matching, cohesion and ambiguity thresholds are uncalibrated starting values.
+
+`sapiensid.identities.anchor_min_person_pixels` defaults to `null` (disabled).
+Set an integer from 1 to 8192 to require a minimum shorter side of the original
+person crop for body anchors. For example, collection at 64 px with anchors at
+96 px retains 64–95 px bodies as queries/auxiliary evidence; they cannot create
+an identity, add anchor support or train a reference bank. A crop exactly 96 px
+wide qualifies if its height is at least 96 px and the other anchor gates pass.
+This also filters the body reference bank of face identities, including the
+legacy face-driven SapiensID route when independent identities are disabled.
+The associated face can still be a face anchor. Original merged body witnesses
+retain veto power even if the new size gate removes their reference authority.
+
+The gate uses retained source `quality.width`/`height`, falling back to legacy
+`person.bounds` when dimensions are absent. Model input resolution and portrait
+resizing never count. Missing or invalid source dimensions cannot qualify when
+the gate is enabled. Reports include `anchor_pixel_gate` with the measurement,
+threshold and exclusion reason. Changing this threshold rebuilds matching from
+retained evidence without inference or recollection; it cannot recover bodies
+previously rejected by collection. `null` preserves the prior admission behavior.
 
 No temporal track is inferred from sparse VTT cues. Distinct simultaneous person
 boxes cannot support one another. Memory and comparison budgets fail explicitly
@@ -428,12 +447,17 @@ body observation IDs. Face-associated evidence already represented by an accepte
 face is not counted again as another merge-goal sample. Body anchors contribute
 core support; auxiliary bodies remain soft evidence. Solver trials can vary the
 local and global similarity, cohesion, margin and support gates, as well as
-`attach_min_support`, `min_appearance_distance`, `anchor_min_keypoints` and
-`anchor_min_sharpness`. These parameters participate in heuristic proposals,
-bidirectional search, refinement and TPE sampling with their integer or numeric
-domains. Quality proposals use retained keypoint and sharpness measurements;
+`attach_min_support`, `min_appearance_distance`, `anchor_min_keypoints`,
+`anchor_min_sharpness` and a numeric `anchor_min_person_pixels`. These parameters
+participate in heuristic proposals, bidirectional search, refinement and TPE
+sampling with their integer or numeric domains. Quality proposals use retained
+keypoint, sharpness and source-size measurements;
 each candidate is validated by full production replay without inference or source
 database writes. Body goal support also uses cues, without a minimum time gap.
+The automatic solver leaves a `null` size gate disabled; set a number to enable
+its search dimension, including for legacy face-associated body references.
+An explicit `tune` grid can compare both numeric thresholds and `null`, for example
+`{"sapiensid.identities.anchor_min_person_pixels": [null, 64, 96, 128]}`.
 Input/collection and portrait settings remain outside the solver; input/collection
 changes still require recollection. Automatic memberships are not truth labels.
 

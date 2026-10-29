@@ -145,6 +145,7 @@ sapiensid:
     min_appearance_distance: 4
     anchor_min_keypoints: 6
     anchor_min_sharpness: 25.0
+    anchor_min_person_pixels: null # Optional shorter source crop side for body anchors (also face+body references).
 
   global_matching:
     enabled: false

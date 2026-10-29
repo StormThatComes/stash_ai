@@ -13,6 +13,7 @@ def retain(db,config,scope,namespace,identities):
     from .clustering import reference_admission,vector
     from .reference_compatibility import fallback_sql
     from .scanning import scan_identity
+    from .person_anchor import pixel_gate
     core_ids=defaultdict(set)
     owned={i.person:i for i in identities};guards=defaultdict(set);body_guards=defaultdict(set);proof_bytes=0
     for row in db.execute('SELECT a.target,a.evidence FROM identity_merges a JOIN people p ON p.id=a.target '
@@ -44,7 +45,7 @@ def retain(db,config,scope,namespace,identities):
         body_map=dict(zip(identity.person_observations,identity.persons))
         wanted=sorted(set(ids)|set(body_ids))
         retained={row['id']:row for row in db.execute(
-            'SELECT o.id,o.dimensions,o.embedding,e.status AS person_status,e.embedding AS person_embedding FROM observations o '
+            'SELECT o.id,o.dimensions,o.embedding,e.status AS person_status,e.embedding AS person_embedding,e.metadata AS person_metadata FROM observations o '
             'JOIN scans s ON s.id=o.scan JOIN members m ON m.observation=o.id '
             'LEFT JOIN person_evidence e ON e.observation=o.id AND e.contract=? '
             "WHERE o.id IN (SELECT value FROM json_each(?)) AND m.person=? AND s.scope=? AND s.namespace=? AND s.status='complete' "
@@ -64,14 +65,20 @@ def retain(db,config,scope,namespace,identities):
                 person=np.frombuffer(row['person_embedding'],dtype='<f4')
                 if person.shape!=(4096,) or not np.isfinite(person).all() or abs(float(np.linalg.norm(person))-1)>.001:
                     raise ValueError('Invalid original SapiensID core feature: '+identifier)
-                persons.append(person);body_map[identifier]=person;used+=2*person.nbytes
+                persons.append(person);used+=2*person.nbytes
+                # Original evidence keeps veto power even below today's size
+                # floor, but cannot become an anchor for query recovery.
+                if pixel_gate(row['person_metadata'],config.data['sapiensid']['identities'])['eligible']:
+                    body_map[identifier]=person
             if used>config.data['sapiensid']['execution']['reference_bytes']:
                 raise ValueError('SapiensID reference_bytes budget exceeded by original cores.')
         cores=[]
         for face_ids,person_ids in sorted(core_ids[identity.person]):
             if not face_ids or any(i not in face_map for i in face_ids):continue
             # Keep original endpoint provenance; never pool unrelated cores.
-            cores.append((face_ids,np.asarray([face_map[i] for i in face_ids]),np.asarray([body_map[i] for i in person_ids]) if person_ids and all(i in body_map for i in person_ids) else np.empty((0,4096))))
+            admitted=[body_map[i] for i in person_ids if i in body_map]
+            cores.append((face_ids,np.asarray([face_map[i] for i in face_ids]),
+                          np.asarray(admitted) if admitted and not any(i in missing for i in person_ids) else np.empty((0,4096))))
         used+=sum(f.nbytes+b.nbytes for _,f,b in cores)
         if used>config.data['sapiensid']['execution']['reference_bytes']:
             raise ValueError('SapiensID reference_bytes budget exceeded by query cores.')

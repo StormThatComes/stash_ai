@@ -43,7 +43,7 @@ def proposal(config, changes):
             continue
         assign(patch, path, value)
         details.append(dict(parameter=path, current=current, proposed=value,
-                            direction='enable' if type(value) is bool else
+                            direction='disable' if value is None else 'enable' if type(value) is bool or current is None else
                             'decrease' if value < current else 'increase'))
     return dict(changes=details, yaml_patch=patch,
                 yaml=yaml.safe_dump(patch, sort_keys=False) if patch else '')

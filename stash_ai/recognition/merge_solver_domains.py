@@ -58,6 +58,7 @@ def registry(config):
         'sapiensid.identities.min_appearance_distance':Domain(int,0,64),
         'sapiensid.identities.anchor_min_keypoints':Domain(int,1,17),
         'sapiensid.identities.anchor_min_sharpness':Domain(high=1000000),
+        'sapiensid.identities.anchor_min_person_pixels':Domain(int,1,8192),
         'sapiensid.global_matching.min_support':Domain(int,1,config.data['sapiensid']['global_matching']['max_references']),
     }
     result.update((key,special.get(key,Domain())) for key in active(config))

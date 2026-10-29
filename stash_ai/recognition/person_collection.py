@@ -188,10 +188,12 @@ def retained_report(db,observation,config,directory,name,*,geometry):
     if row is None:
         return dict(status='missing_current_evidence',contract=expected)
     metadata=json.loads(row['metadata'])
+    from .person_anchor import pixel_gate
     def annotations(rgb,path):
         person=metadata.get('person')
         if not isinstance(person,dict):
             return dict(status='missing_person_geometry',file=None)
         return annotate(rgb,path,geometry,person.get('bounds'),pose=True,keypoints=person.get('keypoints'))
     return dict(status=row['status'],contract=expected,metadata=metadata,
+                anchor_pixel_gate=pixel_gate(metadata,config.data['sapiensid']['identities']),
                 image=_image(row['crop'],directory/('person-'+name),annotate=annotations))
